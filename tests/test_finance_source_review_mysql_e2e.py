@@ -91,6 +91,128 @@ def _seed_deposit(case_no, token):
         connection.close()
 
 
+def test_sinopac_receipt_posts_only_a_unique_installment_and_replay_is_safe(tmp_path):
+    bootstrap(_arguments())
+    from api.dependencies.finance_import import build_finance_import_application
+    from api.routes.finance_import import _materialize, _row_payload
+    from api.schemas.finance_import import FinanceBankTransactionPageView, FinanceImportRowView
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    cases = (
+        ('115000041', None, True),
+        ('115000042', '2026-11-20', True),
+        ('115000043', '2026-10-27', False),
+    )
+    actor = ActorContext('isolated-finance-test')
+    connection = get_connection()
+    try:
+        application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+        query = FinanceImportQueryService(connection)
+        for sequence, (case_no, second_due, should_post) in enumerate(cases, start=1):
+            installments = [('deposit', 6000, '2026-06-26'), ('first', 12000, '2026-10-19')]
+            if second_due:
+                installments.append(('second', 12000, second_due))
+            with connection.cursor() as cursor:
+                cursor.execute('INSERT INTO clients(case_no,name) VALUES (%s,%s)', (case_no, 'Synthetic receipt client'))
+                cursor.execute("INSERT INTO orders(case_no,client_id,status) VALUES (%s,%s,'服務中')", (case_no, cursor.lastrowid))
+                for stage, amount, due_date in installments:
+                    identity = f'client-obligation:{case_no}:{stage}'
+                    cursor.execute(
+                        "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,"
+                        "event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,"
+                        "expected_account_version,idempotency_key,actor,reason) "
+                        "VALUES (%s,%s,%s,'receivable_from_client','established',0,%s,%s,%s,0,%s,%s,'Synthetic original installment')",
+                        (identity, case_no, stage, amount, due_date, identity, identity, actor.actor_id),
+                    )
+                    cursor.execute(
+                        "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,"
+                        "amount_due_ntd,due_date,status,current_event_id,projection_version) "
+                        "VALUES (%s,%s,%s,'receivable_from_client',%s,%s,'open',%s,0)",
+                        (identity, case_no, stage, amount, due_date, cursor.lastrowid),
+                    )
+            connection.commit()
+
+            workbook = tmp_path / f'{case_no}.xlsx'
+            virtual_account = f'99781699{case_no[:3]}{case_no[-3:]}'
+            pd.DataFrame([[
+                '123456789012', f'2026/10/20 09:0{sequence}:00', '2026/10/20', '2026/10/20',
+                '轉帳', 'TWD', None, 12000, 12000 * sequence, None, virtual_account, case_no, None, None, None,
+            ]], columns=SINOPAC_HEADERS).to_excel(workbook, index=False)
+            first = ingest_finance_workbook(str(workbook), IdempotencyKey(f'{case_no}:ingest'), actor,
+                                            connection_factory=get_connection, normalizer=normalize_workbook)
+            assert first.canonical_created_count == 1
+            correlation = CorrelationId(case_no)
+            plan = application.preview_batch(first.batch_identity, correlation)
+            assert plan.apply_allowed
+            assert plan.counts.ready_dispatch == int(should_post)
+            assert len(plan.rows) == 1
+            row_id = plan.rows[0].row_identity.split(':')[1]
+            first_identity = f'client-obligation:{case_no}:first'
+            if should_post:
+                assert plan.rows[0].target_identities == (first_identity,)
+            else:
+                assert set(plan.rows[0].target_identities) == {first_identity, f'client-obligation:{case_no}:second'}
+                preview_row = FinanceImportRowView.model_validate(_row_payload(plan.rows[0]))
+                assert preview_row.client_receipt_review.reason == 'sinopac_client_receipt_multiple_same_month_exact'
+                page = query.bank_transactions(bank='sinopac', direction='incoming', status='all', start=None,
+                                               end=None, search=f'bank:{row_id}', limit=10, before_row_id=None)
+                assert page['items'][0]['recorded_client_receipt_review'] is None
+
+            request = FinanceImportApplyRequest(
+                first.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+                IdempotencyKey(f'{case_no}:apply'), actor, 'Synthetic receipt', correlation,
+            )
+            receipt = application.apply_batch(request)
+            assert receipt.reconciled_count == int(should_post)
+            assert application.apply_batch(request) == receipt
+
+            repeat = ingest_finance_workbook(str(workbook), IdempotencyKey(f'{case_no}:reimport'), actor,
+                                             connection_factory=get_connection, normalizer=normalize_workbook)
+            assert repeat.batch_identity != first.batch_identity
+            assert repeat.canonical_created_count == 0 and repeat.duplicate_occurrence_count == 1
+            assert application.preview_batch(repeat.batch_identity, correlation).counts.ready_dispatch == 0
+
+            page = query.bank_transactions(bank='sinopac', direction='incoming', status='all', start=None,
+                                           end=None, search=f'bank:{row_id}', limit=10, before_row_id=None)
+            FinanceBankTransactionPageView.model_validate(_materialize(page))
+            assert [(row['status'], row['cases']) for row in page['items']] == [
+                ('posted' if should_post else 'pending', [case_no]),
+            ]
+            assert page['items'][0]['reconciliation_target'] is None
+            recorded = page['items'][0]['recorded_client_receipt_review']
+            if should_post:
+                assert recorded is None
+            else:
+                assert recorded['reason'] == 'sinopac_client_receipt_multiple_same_month_exact'
+                assert [(item['obligation_type'], item['due_date']) for item in recorded['candidates']] == [
+                    ('first', '2026-10-19'), ('second', '2026-10-27'),
+                ]
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'SELECT obligation_type, amount_due_ntd, status FROM client_obligations '
+                    'WHERE case_no=%s ORDER BY obligation_type', (case_no,),
+                )
+                assert [(row['obligation_type'], row['amount_due_ntd'], row['status']) for row in cursor.fetchall()] == [
+                    (stage, 0, 'settled') if stage == 'first' and should_post else (stage, amount, 'open')
+                    for stage, amount, _ in installments
+                ]
+                cursor.execute(
+                    'SELECT entry.amount_ntd, allocation.obligation_identity, allocation.amount_ntd AS allocated '
+                    'FROM client_ledger_entries entry LEFT JOIN client_ledger_obligation_allocations allocation '
+                    'ON allocation.ledger_entry_id=entry.id WHERE entry.case_no=%s', (case_no,),
+                )
+                assert list(cursor.fetchall()) == (
+                    [{'amount_ntd': 12000, 'obligation_identity': first_identity, 'allocated': 12000}] if should_post else []
+                )
+    finally:
+        connection.close()
+
+
 def test_both_banks_first_import_and_new_key_reimport(tmp_path):
     bootstrap(_arguments())
     from fastapi import FastAPI
@@ -156,20 +278,22 @@ def test_both_banks_first_import_and_new_key_reimport(tmp_path):
             first_pending = query.list_review_rows(first.batch_identity, limit=50)
             repeat_pending = query.list_review_rows(repeat.batch_identity, limit=50)
             assert sorted(row.amount_ntd for row in first_pending) == pending_amounts
-            assert [row.row_id for row in repeat_pending] == [row.row_id for row in first_pending]
+            assert not repeat_pending
             manifest = query.get_manifest(repeat.batch_identity)
             assert manifest.format_id == workbook.stem
-            assert manifest.review_count == len(pending_amounts)
+            assert manifest.review_count == 0
+            assert manifest.occurrence_count == 0
             application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
             plan = application.preview_batch(repeat.batch_identity, correlation)
-            assert (plan.counts.ready_dispatch, plan.counts.existing) == (0, posted_count)
+            assert (plan.counts.ready_dispatch, plan.counts.existing, plan.counts.duplicate_occurrences) == (0, 0, source_count)
+            assert plan.apply_allowed
             cash = MySqlMonthlyAccountingSource(connection).bank_facts(date(2026, 9, 1), date(2026, 9, 1))
             assert [(row.bank, row.amount_ntd) for row in cash] == [('sinopac', 300)]
         finally:
             connection.close()
         after = _counts()
         assert after['finance_import_rows'] - before['finance_import_rows'] == source_count
-        assert after['finance_import_occurrences'] - before['finance_import_occurrences'] == source_count * 2
+        assert after['finance_import_occurrences'] - before['finance_import_occurrences'] == source_count
         assert after['client_ledger_entries'] - before['client_ledger_entries'] == posted_count
 
     app = FastAPI()
@@ -213,8 +337,8 @@ def test_both_banks_first_import_and_new_key_reimport(tmp_path):
             (row['bank'], row['new_count'], row['duplicate_count'], row['reconciled_count'], row['pending_count'])
             for row in history['items']
         ] == [
-            ('taishin', 0, 1, 0, 1), ('taishin', 1, 0, 0, 1),
-            ('sinopac', 0, 3, 0, 2), ('sinopac', 3, 0, 1, 2),
+            ('taishin', 0, 1, 0, 0), ('taishin', 1, 0, 0, 1),
+            ('sinopac', 0, 3, 0, 0), ('sinopac', 3, 0, 1, 2),
         ]
         history_first = read('/import-history', params={'limit': 2})
         history_second = read('/import-history', params={'limit': 2, 'before': history_first['next_before']})

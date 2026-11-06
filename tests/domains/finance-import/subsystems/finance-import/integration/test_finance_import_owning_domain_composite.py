@@ -175,7 +175,10 @@ def test_virtual_account_keeps_underpayment_pending() -> None:
         )
     )
 
-    assert _resolve_client_receipt(connection, candidate) == candidate
+    resolved = _resolve_client_receipt(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.target_identities == ()
+    assert resolved.client_receipt_review.reason == "sinopac_client_receipt_transaction_date_missing"
 
 
 def test_normal_client_receipt_selection_never_inherits_correction_overage() -> None:
@@ -373,6 +376,32 @@ def test_sinopac_receipt_month_mismatch_remains_unpaired_pending() -> None:
     assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert resolved.target_identities == ()
     assert "month-matched-client-obligation" not in resolved.evidence
+
+
+@pytest.mark.parametrize(("second_due", "expected"), [
+    ("2026-02-12", FinanceImportDisposition.CREATE),
+    ("2026-01-18", FinanceImportDisposition.BUSINESS_PENDING),
+])
+def test_sinopac_equal_installments_require_unique_same_month_exact_match(second_due, expected):
+    first = {"obligation_identity": "client-obligation:115000003:first", "obligation_type": "first", "due_date": "2026-01-12", "amount_due_ntd": 12000}
+    second = {**first, "obligation_identity": "client-obligation:115000003:second", "obligation_type": "second", "due_date": second_due}
+    connection = _VirtualAccountConnection((
+        {"format_id": "sinopac", "cancellation_code": None, "bank_references": {"銷帳編號": "99781699115003"},
+         "transaction_date": "2026-01-14"},
+        ({"case_no": "115000003"},),
+        (first, second),
+        (first, second),
+    ))
+    resolved = _resolve_client_receipt(connection, _pending_receipt())
+    assert resolved.disposition is expected
+    if expected is FinanceImportDisposition.CREATE:
+        assert resolved.target_identities == (first["obligation_identity"],)
+        assert resolved.client_receipt_review is None
+    else:
+        assert resolved.client_receipt_review.reason == "sinopac_client_receipt_multiple_same_month_exact"
+        assert [(item.obligation_type, item.due_date) for item in resolved.client_receipt_review.candidates] == [
+            ("first", "2026-01-12"), ("second", second_due),
+        ]
 
 
 def test_resolve_staff_payout_with_transfer_fee_within_100() -> None:

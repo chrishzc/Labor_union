@@ -12,12 +12,112 @@ def _today():
 
 
 def _digest(command):
-    return sha256(json.dumps({k:getattr(command,k) for k in command.__dataclass_fields__},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return sha256(json.dumps({k:getattr(command,k) for k in command.__dataclass_fields__},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
 
 
 class MySqlPayrollAmountRepository:
     def __init__(self,connection):
         self.connection=connection
+
+    def record_historical_unpaid(self, command):
+        from infrastructure.mysql.order_terms_read_model import select_current_assignments, select_scheduling_aggregate
+        from infrastructure.mysql.payroll_rebuild_repository import _EVENT_INSERT_SQL, _PROJECTION_INSERT_SQL
+
+        if command.amount_ntd <= 0 or not command.evidence.strip():
+            raise PayrollAmountConflict("historical_payable_evidence_required")
+        event_key = "historical-original-payable:" + sha256(command.key.encode()).hexdigest()
+        digest = _digest(command)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM orders WHERE case_no=%s FOR UPDATE", (command.case_no,))
+            order = cursor.fetchone()
+            if not order:
+                raise PayrollAmountConflict("historical_payable_case_missing")
+            cursor.execute(
+                "SELECT obligation_identity,payroll_fingerprint FROM staff_obligation_events WHERE idempotency_key=%s",
+                (event_key,),
+            )
+            previous = cursor.fetchone()
+            if previous:
+                if previous["payroll_fingerprint"] != digest:
+                    raise PayrollAmountConflict("payroll_amount_command_changed")
+                return str(previous["obligation_identity"])
+            if order["status"] != "歷史訂單－服務完成":
+                raise PayrollAmountConflict("historical_payable_case_not_open")
+            cursor.execute("SELECT 1 FROM finance_case_accounting_markers WHERE case_no=%s", (command.case_no,))
+            if cursor.fetchone():
+                raise PayrollAmountConflict("historical_case_already_settled")
+            aggregate = select_scheduling_aggregate(cursor, command.case_no, lock=True)
+            assignments = [
+                row for row in select_current_assignments(cursor, command.case_no, aggregate["effective_generation_id"])
+                if int(row["staff_id"]) == command.staff_id
+            ]
+            if len(assignments) != 1:
+                raise PayrollAmountConflict("historical_payable_assignment_not_unique")
+            owner = (int(assignments[0]["id"]), command.case_no, command.staff_id, "service_pay", "payable_to_staff")
+
+            cursor.execute("INSERT IGNORE INTO payroll_case_accounts(case_no) VALUES(%s)", (command.case_no,))
+            cursor.execute("SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE", (command.case_no,))
+            version = int(cursor.fetchone()["aggregate_version"])
+            cursor.execute("INSERT IGNORE INTO staff_payable_accounts(staff_id) VALUES(%s)", (command.staff_id,))
+            cursor.execute("SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s FOR UPDATE", (command.staff_id,))
+            cursor.fetchone()
+            cursor.execute(
+                "SELECT 1 FROM historical_staff_payout_events WHERE case_no=%s AND staff_id=%s LIMIT 1",
+                (command.case_no, command.staff_id),
+            )
+            if cursor.fetchone():
+                raise PayrollAmountConflict("historical_payable_payment_evidence_exists")
+            cursor.execute(
+                "SELECT o.*, p.obligation_identity AS payout_projection, c.obligation_identity AS amount_control, "
+                "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=o.obligation_identity) AS split, "
+                "EXISTS(SELECT 1 FROM staff_payout_obligation_links p WHERE p.obligation_identity=o.obligation_identity) AS linked "
+                "FROM staff_obligations o "
+                "LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity "
+                "LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity "
+                "WHERE o.case_no=%s AND o.staff_id=%s AND o.status<>'cancelled' FOR UPDATE",
+                (command.case_no, command.staff_id),
+            )
+            obligations = cursor.fetchall()
+            if command.obligation_identity is None:
+                if obligations or command.expected_event_id is not None:
+                    raise PayrollAmountConflict("historical_payable_already_exists")
+            else:
+                if len(obligations) != 1 or obligations[0]["obligation_identity"] != command.obligation_identity:
+                    raise PayrollAmountConflict("historical_payable_target_changed")
+                old = obligations[0]
+                if (old["current_event_id"] != command.expected_event_id or old["assignment_id"] != owner[0]
+                    or old["status"] != "open" or old["obligation_kind"] != "service_pay"
+                    or old["direction"] != "payable_to_staff" or old["payout_history_exists"]
+                    or old["payout_projection"] or old["amount_control"] or old["split"] or old["linked"]):
+                    raise PayrollAmountConflict("historical_payable_requires_owner_review")
+                if old["amount_due_ntd"] == command.amount_ntd and old["due_date"] == command.due_date:
+                    raise PayrollAmountConflict("historical_payable_unchanged")
+                cursor.execute(_EVENT_INSERT_SQL, (
+                    command.obligation_identity, *owner, old["source_obligation_identity"], "rebuilt",
+                    old["amount_due_ntd"], 0, old["due_date"], digest, version, version + 1,
+                    event_key + ":close", command.actor, command.evidence,
+                ))
+                cursor.execute(
+                    "UPDATE staff_obligations SET amount_due_ntd=0,status='cancelled',current_event_id=%s,payroll_version=%s "
+                    "WHERE obligation_identity=%s",
+                    (cursor.lastrowid, version + 1, command.obligation_identity),
+                )
+            cursor.execute(_EVENT_INSERT_SQL, (
+                event_key, *owner, command.obligation_identity, "established", 0, command.amount_ntd,
+                command.due_date, digest, version, version + 1, event_key, command.actor, command.evidence,
+            ))
+            cursor.execute(_PROJECTION_INSERT_SQL, (
+                event_key, *owner, command.obligation_identity, command.amount_ntd, command.due_date,
+                cursor.lastrowid, version + 1,
+            ))
+            cursor.execute("UPDATE payroll_case_accounts SET aggregate_version=%s WHERE case_no=%s", (version + 1, command.case_no))
+            cursor.execute("UPDATE staff_payable_accounts SET aggregate_version=aggregate_version+1 WHERE staff_id=%s", (command.staff_id,))
+            cursor.execute(
+                "INSERT INTO payroll_outbox(case_no,intent_key,intent_type,payload_snapshot) "
+                "VALUES(%s,%s,'staff_obligation_changed',%s)",
+                (command.case_no, event_key, json.dumps({"case_no": command.case_no, "payroll_version": version + 1})),
+            )
+        return event_key
 
     def query(self,case_no):
         with self.connection.cursor() as cursor:

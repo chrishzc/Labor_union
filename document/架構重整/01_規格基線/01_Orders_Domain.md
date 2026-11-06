@@ -651,14 +651,7 @@ Orders `actual_end_date`，不得再以訂單預設 `service_days` 延展或取�
 `actual_start_date..actual_end_date` 閉區間之外產生；歷史月嫂 assignment 也不得超出其來源區間。
 來源期間與既有條款不一致時，以這次歷史期間建立實際根事實，不得把預設契約天數偽造成已服務天數。
 
-2026-09-01 最新人工覆決：歷史起訖只證明實際期間，不能證明逐日服務／排假日曆。Historical Orders
-Apply 必須直接保存可採納的來源 `actual_start_date`、`actual_end_date` 與歷史 lifecycle branch，但不得因
-匯入本身呼叫 Actual Start 精算或依 `service_days`、服務模式、假日曆建立正式服務日。後續帳務不再強制
-要求逐日服務日期；工會可在「歷史訂單服務與帳務」介面逐位月嫂確認 `actual_service_days`，依歷史單薪
-規則建立 Client Finance／Payroll obligations。未服務及服務中的歷史訂單亦可重啟天數精算回正常
-lifecycle。狀態、日期、樓層費、雙邊結清、回歸精算、API／UI 與驗收的完整最新契約由
-`27_歷史訂單生命週期與服務天數帳務正式規格.md` 擁有；本節較早「只有逐日服務日才可建帳務」及
-`historical_accounting_service_calendar_unconfirmed` 一律阻擋至精算的語意由第 27 份規格 supersede。
+歷史起訖證明可採納的實際期間。Historical Orders Apply 直接保存來源 `actual_start_date`、`actual_end_date` 與歷史 lifecycle branch；正式逐日服務日仍依原 Scheduling 流程確認，匯入不得用 Actual Start、合約天數、服務模式或假日曆補造逐日資料。歷史案件採納與服務到期推進均沿[規格 27 §6](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-accounting-carry-forward)承接可證實的原帳務，缺項列待確認，服務量本身不得觸發預設建帳。人員可另行更正已確認的實際天數，差異沿原帳務流程處理。未服務及服務中的歷史訂單仍可依規格 27 §8 重啟天數精算回正常 lifecycle。
 欄位不可解析或違反 Orders invariant 時仍以 typed validation／conflict fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存正式 Orders root、event、outbox 及來源配對關聯。

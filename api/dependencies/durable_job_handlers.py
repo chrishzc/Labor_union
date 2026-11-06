@@ -500,9 +500,6 @@ def historical_service_completion_handler(
     from infrastructure.mysql.historical_completion_writer import (
         MySqlHistoricalServiceCompletionWriter,
     )
-    from infrastructure.mysql.historical_service_accounting_repository import (
-        MySqlHistoricalServiceAccountingRepository,
-    )
     from infrastructure.mysql.mysql_adapter import get_connection
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from pymysql.err import OperationalError
@@ -511,9 +508,6 @@ def historical_service_completion_handler(
         HistoricalServiceCompletionApplyError,
         HistoricalServiceCompletionApplyWorkflow,
     )
-    from subsystems.orders.historical_service_accounting_workflow import (
-        HistoricalServiceAccountingWorkflow,
-    )
 
     request = _historical_service_completion_request(payload)
     connection = get_connection()
@@ -521,10 +515,6 @@ def historical_service_completion_handler(
         workflow = HistoricalServiceCompletionApplyWorkflow(
             MySqlHistoricalServiceCompletionWriter(connection),
             lambda: MySqlUnitOfWork(connection),
-            HistoricalServiceAccountingWorkflow(
-                MySqlHistoricalServiceAccountingRepository(connection),
-                lambda: MySqlUnitOfWork(connection),
-            ),
         )
         receipt = _materialize(workflow.apply(request))
         return receipt, "historical_service_completion:" + receipt["case_no"]

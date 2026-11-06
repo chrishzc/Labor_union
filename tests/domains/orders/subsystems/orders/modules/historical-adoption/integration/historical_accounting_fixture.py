@@ -1,15 +1,5 @@
 """Shared real-accounting setup for historical-adoption native regressions."""
 
-from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from subsystems.orders.historical_service_accounting_workflow import HistoricalServiceAccountingWorkflow
-
-
-def default_accounting(connection):
-    return HistoricalServiceAccountingWorkflow(
-        MySqlHistoricalServiceAccountingRepository(connection), lambda: MySqlUnitOfWork(connection),
-    )
-
 def seed_accounting_basis(cursor, case_no):
     cursor.execute("UPDATE clients SET identity_status='一般市民' WHERE case_no=%s", (case_no,))
     cursor.execute("UPDATE orders SET service_days=30,service_hours_per_day=8,floor_fee=0,"

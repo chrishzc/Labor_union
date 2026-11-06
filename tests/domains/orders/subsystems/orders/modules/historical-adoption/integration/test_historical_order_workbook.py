@@ -17,19 +17,20 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 import pytest
 from api.dependencies import historical_order_adoption as historical_dependencies
+from api.dependencies.durable_job_handlers import historical_service_completion_handler
 from api.routes import historical_order_adoption as historical_routes
+from api.routes import historical_service_accounting as historical_accounting_routes
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
-from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import FixedBusinessClock
 from subsystems.access.authentication_session import AdminPrincipal
-from .historical_accounting_fixture import default_accounting, seed_accounting_basis
+from .historical_accounting_fixture import seed_accounting_basis
 from infrastructure.mysql.historical_pending_deposit_matching_repository import MySqlHistoricalPendingDepositMatchingRepository
 from subsystems.orders.historical_order_adoption_outbox_consumer import (
     consume_historical_order_adoption_review_events,
@@ -65,6 +66,12 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
     try:
         morning_case, staff_name = _seed_case(connection, token, "am")
         afternoon_case, _ = _seed_case(connection, token, "pm")
+        for case_no in (morning_case, afternoon_case):
+            _seed_original_partial_payment(connection, case_no)
+        original_accounting = {
+            case_no: _accounting_snapshot(connection, case_no)
+            for case_no in (morning_case, afternoon_case)
+        }
     finally:
         connection.close()
 
@@ -192,9 +199,6 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         assert [(shift["case_no"], shift["starts_at"][11:16], shift["ends_at"][11:16]) for shift in shifts] == [
             (morning_case, "09:00", "13:00"), (afternoon_case, "13:30", "17:30"),
         ]
-        accounting = MySqlHistoricalServiceAccountingRepository(connection).load(morning_case, for_update=False)
-        assert accounting.historical_day_revision == 1
-        assert [assignment.staff_id for assignment in accounting.assignments] == [rows[0]["staff_id"]]
         by_case = {row["case_no"]: row for row in rows}
         for case, status, start_date, end_date, start_time, end_time in (
             (morning_case, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, date(2026, 9, 15), date(2026, 10, 30), "09:00:00", "13:00:00"),
@@ -205,6 +209,110 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
             assert json.loads(row["result_snapshot"])["historical_service_time"] == {
                 "start_time": start_time, "end_time": end_time, "end_day_offset": 0,
             }
+        assert _accounting_snapshot(connection, morning_case) == original_accounting[morning_case]
+        assert _accounting_snapshot(connection, afternoon_case) == original_accounting[afternoon_case]
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT lifecycle_version FROM orders WHERE case_no=%s", (afternoon_case,))
+            version = cursor.fetchone()["lifecycle_version"]
+        connection.rollback()
+
+        job = {
+            "case_no": afternoon_case,
+            "expected_order_version": version,
+            "evaluation_at": "2026-11-10T00:00:00+08:00",
+            "idempotency_key": f"historical-rollover:{token}",
+            "actor": "system:historical-service-completion",
+            "reason": "historical service end date passed",
+            "correlation_id": f"historical-rollover:{token}",
+        }
+        receipt, _ = historical_service_completion_handler(job)
+        replay, _ = historical_service_completion_handler(job)
+        assert receipt["after_status"] == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
+        assert replay["replayed"] is True
+        assert _order_status(connection, afternoon_case) == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
+        assert _accounting_snapshot(connection, afternoon_case) == original_accounting[afternoon_case]
+    finally:
+        connection.close()
+
+
+def test_manual_service_days_apply_and_replay_preserve_original_finance(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        case_no, staff_name = _seed_case(connection, token, "days")
+        _seed_original_partial_payment(connection, case_no)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET service_start_time='09:00:00',service_end_time='17:00:00',service_end_day_offset=0 "
+                "WHERE case_no=%s", (case_no,),
+            )
+        connection.commit()
+        workbook = _write_single_workbook(tmp_path / "historical-days.xlsx", case_no, staff_name, 1)
+        row = load_historical_order_workbook(workbook).rows[0]
+        adoption = HistoricalOrderAdoptionWorkflow(
+            MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
+        )
+        adoption_preview = adoption.preview(row)
+        adoption.apply(HistoricalOrderAdoptionRequest(
+            row, adoption_preview.fingerprint, f"adopt:{token}", "synthetic", "原歷史訂單", token,
+        ))
+        original = _accounting_snapshot(connection, case_no)
+        connection.rollback()
+        app = FastAPI()
+        app.include_router(historical_accounting_routes.router)
+        app.dependency_overrides[historical_accounting_routes.require_system_admin] = lambda: AdminPrincipal(
+            1, "synthetic", "測試工會人員", "system_admin",
+        )
+        path = f"/api/v1/orders/{case_no}/historical-service-accounting"
+        headers = {"Idempotency-Key": f"historical-days:{token}", "X-Correlation-ID": token}
+        with TestClient(app) as client:
+            queried = client.get(path)
+            assert queried.status_code == 200, queried.text
+            facts = queried.json()["data"]
+            assert facts["historical_day_revision"] == 0
+            assignment = facts["assignments"][0]
+            caregivers = [{
+                "assignment_identity": assignment["assignment_identity"],
+                "staff_id": assignment["staff_id"],
+                "actual_service_days": 26,
+            }]
+            response = client.post(f"{path}/preview", json={"caregivers": caregivers})
+            assert response.status_code == 200, response.text
+            preview = response.json()["data"]
+            assert preview["client_obligation_amount_ntd"] > 0
+            assert _accounting_snapshot(connection, case_no) == original
+            connection.rollback()
+            body = {
+                "caregivers": caregivers, "reason": "合成原服務紀錄",
+                "expected_lifecycle_version": facts["lifecycle_version"],
+                "expected_historical_day_revision": facts["historical_day_revision"],
+                "expected_client_finance_version": facts["client_finance_version"],
+                "expected_payroll_version": facts["payroll_version"],
+                "preview_fingerprint": preview["preview_fingerprint"],
+            }
+            first = client.post(f"{path}/apply", json=body, headers=headers)
+            assert first.status_code == 200, first.text
+            receipt = first.json()["data"]
+            assert receipt["resulting_historical_day_revision"] == 1
+            assert receipt["resulting_client_finance_version"] == facts["client_finance_version"]
+            assert receipt["resulting_payroll_version"] == facts["payroll_version"] == 0
+            assert receipt["client_obligation_amount_ntd"] == preview["client_obligation_amount_ntd"]
+            assert receipt["replayed"] is False
+            saved = _accounting_snapshot(connection, case_no, expected_revisions=1)
+            assert saved[:4] == original[:4]
+            connection.rollback()
+            replay = client.post(f"{path}/apply", json=body, headers=headers)
+            assert replay.status_code == 200, replay.text
+            assert replay.json()["data"] == {**receipt, "replayed": True}
+            stale = client.post(f"{path}/apply", json=body, headers={**headers, "Idempotency-Key": f"stale:{token}"})
+            assert stale.status_code == 409, stale.text
+            assert _accounting_snapshot(connection, case_no, expected_revisions=1) == saved
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT staff_payment_due_date FROM orders WHERE case_no=%s", (case_no,))
+                assert cursor.fetchone()["staff_payment_due_date"] is None
+                cursor.execute("SELECT COUNT(*) AS n FROM payroll_outbox WHERE case_no=%s", (case_no,))
+                assert cursor.fetchone()["n"] == 0
     finally:
         connection.close()
 
@@ -456,7 +564,6 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         repository = MySqlHistoricalOrderAdoptionRepository(connection)
         workflow = HistoricalOrderAdoptionWorkflow(
             repository, lambda: MySqlUnitOfWork(connection), MySqlHistoricalAssignmentWriter(connection),
-            default_accounting=default_accounting(connection),
         )
         preview = workflow.preview(row)
         monkeypatch.setattr(repository, "_append_outbox", _raise_after_domain_writes)
@@ -484,7 +591,6 @@ def test_workbook_apply_rolls_back_every_prior_row_when_a_later_row_fails(
             repository,
             lambda: MySqlUnitOfWork(connection),
             MySqlHistoricalAssignmentWriter(connection),
-            default_accounting=default_accounting(connection),
             matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(connection),
         )
         service = HistoricalOrderWorkbookImportService(
@@ -663,11 +769,62 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_reimports(tmp_
         connection.close()
 
 
+def _seed_original_partial_payment(connection, case_no):
+    obligation = f"client-obligation:{case_no}:first"
+    with connection.cursor() as cursor:
+        cursor.execute("INSERT INTO client_finance_accounts (case_no,aggregate_version) VALUES (%s,1)", (case_no,))
+        cursor.execute(
+            "INSERT INTO client_obligation_events "
+            "(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,"
+            "after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
+            "VALUES (%s,%s,'first','receivable_from_client','established',0,12000,'2026-10-20',%s,0,%s,'test','original installment')",
+            (obligation, case_no, f"{case_no}:original-terms", f"{case_no}:original-obligation"),
+        )
+        event_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO client_obligations "
+            "(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) "
+            "VALUES (%s,%s,'first','receivable_from_client',4000,'2026-10-20','open',%s,1)",
+            (obligation, case_no, event_id),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_entries "
+            "(case_no,entry_type,amount_ntd,occurred_on,reconciliation_reference,idempotency_key,actor,reason) "
+            "VALUES (%s,'receipt',8000,'2026-10-20',%s,%s,'test','original receipt')",
+            (case_no, f"{case_no}:original-receipt", f"{case_no}:receipt-key"),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_obligation_allocations "
+            "(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) VALUES (%s,%s,8000,1)",
+            (cursor.lastrowid, obligation),
+        )
+    connection.commit()
+
+
+def _accounting_snapshot(connection, case_no, *, expected_revisions=0):
+    with connection.cursor() as cursor:
+        snapshot = []
+        for statement in (
+            "SELECT obligation_identity,amount_due_ntd,due_date,current_event_id FROM client_obligations WHERE case_no=%s ORDER BY obligation_identity",
+            "SELECT id,after_amount_ntd FROM client_obligation_events WHERE case_no=%s ORDER BY id",
+            "SELECT e.id,e.amount_ntd,a.obligation_identity,a.amount_ntd AS allocated FROM client_ledger_entries e "
+            "JOIN client_ledger_obligation_allocations a ON a.ledger_entry_id=e.id WHERE e.case_no=%s ORDER BY e.id,a.allocation_ordinal",
+            "SELECT obligation_identity,amount_due_ntd,due_date,current_event_id FROM staff_obligations WHERE case_no=%s ORDER BY obligation_identity",
+            "SELECT id FROM historical_service_day_events WHERE case_no=%s ORDER BY id",
+        ):
+            cursor.execute(statement, (case_no,))
+            snapshot.append(cursor.fetchall())
+    assert [row["amount_due_ntd"] for row in snapshot[0]] == [4000]
+    assert [row["allocated"] for row in snapshot[2]] == [8000]
+    assert not snapshot[3]
+    assert len(snapshot[4]) == expected_revisions
+    return snapshot
+
+
 def _service(connection):
     workflow = HistoricalOrderAdoptionWorkflow(
         MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
         MySqlHistoricalAssignmentWriter(connection),
-        default_accounting=default_accounting(connection),
         matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(connection),
     )
     return HistoricalOrderWorkbookImportService(

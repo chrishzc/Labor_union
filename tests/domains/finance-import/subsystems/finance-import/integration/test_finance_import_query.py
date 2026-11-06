@@ -404,7 +404,10 @@ def _review_row_source() -> dict[str, object]:
 
 
 class _EnrichCursor:
-    def __init__(self) -> None:
+    def __init__(self, receipt_rows=None) -> None:
+        self.receipt_rows = receipt_rows if receipt_rows is not None else [
+            {"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6200},
+        ]
         self._rows: list[dict[str, object]] = []
         self._one: dict[str, object] | None = None
 
@@ -419,7 +422,7 @@ class _EnrichCursor:
         elif "SELECT case_no FROM orders WHERE case_no = %s" in sql:
             self._rows = [{"case_no": "115000001"}] if params == ("115000001",) else []
         elif "SELECT obligation_identity, due_date, amount_due_ntd FROM client_obligations" in sql:
-            self._rows = [{"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6200}]
+            self._rows = self.receipt_rows
         elif "FROM staff_obligations" in sql:
             self._rows = [{"case_no": "115000009", "obligation_identity": "staff:payout", "due_date": "2026-10-19", "amount_due_ntd": 12000}] if params == (19,) else []
         else:
@@ -516,6 +519,14 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
     )
     assert cross_month["review_reason"] == "sinopac_client_receipt_month_no_match"
     assert cross_month["reconciliation_target"] is None
+    [same_month_exact] = _enrich_bank_transactions(_EnrichCursor([
+        {"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6000},
+        {"obligation_identity": "receipt:second", "due_date": "2026-11-19", "amount_due_ntd": 6000},
+    ]), [page[1]], {})
+    assert same_month_exact["reconciliation_target"] == {
+        "case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None,
+    }
+
     assert [item["reconciliation_target"] for item in items] == [
         None,
         {"case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None},

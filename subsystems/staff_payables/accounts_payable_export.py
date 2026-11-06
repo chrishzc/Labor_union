@@ -80,6 +80,7 @@ class CaseStaffPayableAuditItem:
     reason: str
     payment_status: Literal["pending", "partially_paid", "paid", "settled"] = "pending"
     funding_kind: Literal["client", "subsidy"] | None = None
+    current_event_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +157,9 @@ class StaffPayableExportSource(Protocol):
     def load_case(
         self, case_no: str, target_payment_date: date
     ) -> tuple[CaseStaffPayableAuditItem, ...]: ...
+    def find_historical_cases(
+        self, keyword: str, target_payment_date: date
+    ) -> tuple[CaseStaffPayableAuditItem, ...]: ...
 
 
 class ClientRefundExportSource(Protocol):
@@ -201,6 +205,11 @@ class AccountsPayableExportWorkflow:
         require_canonical_text(case_no, "case number", 50)
         with self._read_snapshot_factory():
             return self._staff_source.load_case(case_no, target_payment_date)
+
+    def query_historical_cases(self, keyword: str, target_payment_date: date):
+        require_canonical_text(keyword, "historical payable lookup", 50)
+        with self._read_snapshot_factory():
+            return self._staff_source.find_historical_cases(keyword, target_payment_date)
 
     def query_archive(self, year: int) -> tuple[ArchivedWorkbookRecord, ...]:
         return self._archive.list(year)

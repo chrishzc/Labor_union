@@ -222,16 +222,8 @@ class MySqlHistoricalOrderAdoptionRepository:
             "result": preview.result.value,
             "issue_codes": preview.issue_codes,
             "service_calendar_status": "not_reconstructed_for_historical_order",
-            "historical_service_days_status": (
-                "defaulted_from_order_service_days"
-                if preview.result.value == "historical_service_completed"
-                else "not_yet_eligible"
-            ),
-            "payroll_rebuild_status": (
-                "established_in_adoption_transaction"
-                if preview.result.value == "historical_service_completed"
-                else "not_started"
-            ),
+            "historical_service_days_status": "not_changed_by_adoption",
+            "payroll_rebuild_status": "not_run_by_adoption",
             **_operational_baseline_snapshot(request, preview),
         }
         if request.row.service_time is not None:

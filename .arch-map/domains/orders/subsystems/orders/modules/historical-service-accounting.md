@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-歷史完成訂單採納時，以唯一月嫂 assignment 與 Orders 原 `service_days` 自動編排 Client Finance／Payroll 單薪基準；不要求逐筆人工輸入、不建立逐日排班。少數實際天數不同的完成訂單仍由本模組建立較新 immutable revision，並自動 rebuild 未付款月嫂應付或新增保留付款 lineage 的差額／沖正。
+接受人員確認的實際服務天數，保存 immutable revision 及帳務比較快照。正式帳務差異由原帳務流程處理。
 
 ## Implementation
 - primary:
@@ -22,13 +22,13 @@
 - schema:
   - `db/schema_parts/215_historical_service_accounting.sql`
   - `db/schema_parts/1028_historical_service_accounting.sql`
-  - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — zero customer baseline obligation retains settled lineage without weakening unchanged later-event guards.
+  - `db/schema_parts/1046_client_zero_obligation_establishment.sql` — legacy schema history for zero baseline obligations.
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.json`
 
 ## Dependencies
-- outbound: `client-finance/historical-service-accounting` — count-based customer obligation impact.
-- outbound: `payroll/historical-service-accounting` — per-assignment single-pay obligation impact.
-- inbound: `orders/historical-adoption`（預設基準）及 authenticated historical-order administration（查詢／例外處理）。
+- outbound: `client-finance/historical-service-accounting` — 計算客戶端比較金額。
+- outbound: `payroll/historical-service-accounting` — 計算逐指派比較金額。
+- inbound: authenticated historical-order administration（查詢／人工處理）。
 
 ## Contracts
 - `document/架構重整/01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md`
@@ -37,4 +37,4 @@
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-service-accounting/`
 
 ## Change triggers
-Reconcile when historical day-count revisions, completed-order eligibility, cross-owner versions, obligation difference semantics, API/UI resource or schema changes.
+Reconcile when historical day-count revisions, completed-order eligibility, comparison inputs, API/UI resource or schema changes.

@@ -14,9 +14,6 @@ from infrastructure.mysql.historical_actual_start_date_planner import (
     MySqlHistoricalActualStartDatePlanner,
 )
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
-from infrastructure.mysql.historical_service_accounting_repository import (
-    MySqlHistoricalServiceAccountingRepository,
-)
 from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -27,9 +24,6 @@ from subsystems.orders.historical_actual_start_rebuild import (
 )
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook_import import HistoricalOrderWorkbookImportService
-from subsystems.orders.historical_service_accounting_workflow import (
-    HistoricalServiceAccountingWorkflow,
-)
 import pymysql
 from fastapi import Request
 from api.exception_handlers.historical_order_database import historical_database_http_error
@@ -56,10 +50,6 @@ def get_historical_order_workbook_import_service(request: Request):
             ),
             matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
                 connection
-            ),
-            default_accounting=HistoricalServiceAccountingWorkflow(
-                MySqlHistoricalServiceAccountingRepository(connection),
-                lambda: MySqlUnitOfWork(connection),
             ),
         )
         yield HistoricalOrderWorkbookImportService(

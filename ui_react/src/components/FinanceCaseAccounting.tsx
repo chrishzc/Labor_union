@@ -17,6 +17,8 @@ import {ApiHttpError} from '../api/shared/typed_errors';
 import {FinanceSubsidyPlanForm,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
 import {FinanceCaseNotice,lastNotification,notificationTime,notificationStatus} from './FinanceCaseNotice';
 import {CaseManualSupplementWorkbench} from './CaseManualSupplementWorkbench';
+import { HistoricalPayableLookup } from './HistoricalPayableReview';
+import type { HistoricalPayableAuditItem } from '../api/accounts_payable/accounts_payable_query_schemas';
 import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
 import { ClientReceiptReconciliationPanel } from './ClientReceiptReconciliationPanel';
 import { StaffPayoutRemediationWorkbench } from './StaffPayoutRemediationWorkbench';
@@ -124,7 +126,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
   </section>;
 }
 
-export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void}}){
+export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation,onPayableReview,reviewObligation}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void};onPayableReview?:(item:HistoricalPayableAuditItem)=>void;reviewObligation?:string}){
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
@@ -254,6 +256,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      caseNo={initialCase}
      clientItems={data.client_items}
      staffItems={data.staff_items}
+     initialStaffObligation={reviewObligation}
      subsidyNtd={data.subsidy_ntd ?? 0}
      onSuccess={updated => {
        setState(old => ({ ...old, data: updated }));
@@ -273,6 +276,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 </div></details>
  <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'由人員設定補助款歸屬，不從歷史金流自動代選。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><p>可提前設定，不改各期應繳。案件結束後再處理補助與應付清單。</p>{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
  <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
+  {onPayableReview && state.order?.order_status.startsWith('歷史訂單－') &&
+    <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
   <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
     <div className="finance-staff-summary-card">
       <small>應付月嫂總額</small>
@@ -284,8 +289,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     </div>
     <div className="finance-staff-summary-card">
       <small>尚待出款</small>
-      <strong className={staffRemainingTotal === 0 ? 'finance-paid' : ''}>
-        {staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
+      <strong className={staffItems.length > 0 && staffRemainingTotal === 0 ? 'finance-paid' : ''}>
+        {staffItems.length === 0 ? '待確認' : staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
       </strong>
     </div>
   </div>
@@ -408,7 +413,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
       <thead>
         <tr>
           <th>項目</th>
-          <th>原到期日</th>
+          <th>預計退款日</th>
           <th>應退／應收</th>
           <th>已退(收)／待退(收)</th>
           <th>出款／入帳資訊</th>

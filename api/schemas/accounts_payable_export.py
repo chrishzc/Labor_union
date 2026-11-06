@@ -81,6 +81,10 @@ class CaseStaffPayableAuditItemView(BaseModel):
     reason: str
 
 
+class HistoricalStaffPayableAuditItemView(CaseStaffPayableAuditItemView):
+    current_event_id: int | None = None
+
+
 class CaseStaffPayableAuditView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

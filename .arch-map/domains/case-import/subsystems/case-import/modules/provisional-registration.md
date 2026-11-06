@@ -15,7 +15,7 @@
 - primary:
   - `domains/case_import/non_citizen_registration.py` — 非市民 HCM＋BeClass 合併欄位與必填驗證；原補助規則保持。
   - `infrastructure/mysql/non_citizen_case_number_repository.py` — 核准 outer UoW 內的年度列鎖配號，無 hidden commit。
-  - `subsystems/case_import/non_citizen_registration_application.py` — 合併欄位轉成既有 Case Import typed intent，重用付款／薪資／排班 bootstrap。
+  - `subsystems/case_import/non_citizen_registration_application.py` — 合併欄位轉成既有 Case Import typed intent，重用付款／薪資／排班 bootstrap，並支援歷史非市民案件手動補齊、案號防重與虛擬帳號衝突覆蓋檢查。
   - `db/schema_parts/237_non_citizen_case_sequences.sql`、`db/schema_parts/1059_non_citizen_case_sequences.sql` — byte-identical fresh／preserve 年度計數表。
   - `domains/case_import/provisional_registration.py`
   - `subsystems/case_import/provisional_registration_application.py`
@@ -24,11 +24,11 @@
   - `db/schema_parts/1052_nas_registration_approval.sql`
 - entrypoints:
   - `api/routes/line_identity.py`
-  - `api/routes/registration_applications.py`
+  - `api/routes/registration_applications.py` — 支援非市民申請查詢／核准及手動新增非市民案件與衝突檢驗端點。
   - `ui_react/src/api/registration_applications/client.ts`
-  - `ui_react/src/components/RegistrationApplications.tsx`
-  - `ui_react/src/components/RegistrationApplications.css` — 待核准清單、申請明細及核准狀態，沿用專案色彩與響應式版面。
-  - `ui_react/src/pages/ClientRegistryPage.tsx`（待核准需求分頁，保留名冊／虛擬帳號匯入）
+  - `ui_react/src/components/RegistrationApplications.tsx` — 非市民申請清單、明細核准、手動新增歷史案件彈窗與衝突覆蓋決定確認。
+  - `ui_react/src/components/RegistrationApplications.css` — 申請清單、明細、手動補齊表單與衝突覆蓋彈窗樣式。
+  - `ui_react/src/pages/ClientRegistryPage.tsx`（非市民申請分頁，支援手動新增歷史非市民案件與原名冊／虛擬帳號匯入）
   - `line/line_bot.py`（舊SQL問卷入口固定410，不因legacy開關復活）
 
 ## Dependencies
@@ -48,7 +48,9 @@
 - integration_root: `tests/domains/case-import/subsystems/case-import/integration/test_registration_staged_approval_mysql.py` — 新核准最小 SQL parent、正式欄位及 receipt 同交易。
 - layout_status: `custom_current`
 - focused: `tests/subsystems/case_import/test_provisional_registration.py`
+- focused: `tests/subsystems/case_import/test_manual_non_citizen_case.py`
 - test_root: `tests/subsystems/case_import/test_provisional_registration.py`
+- test_root: `tests/subsystems/case_import/test_manual_non_citizen_case.py`
 - test_root: `tests/test_provisional_line_registration.py`
 - layout_basis: 既有兩個 Case Import provisional registration 回歸入口為本次核准流程的直接 consumer；保留既有 discovery 與檔案位置，不新增平坦 root 或搬動未授權成果。
 - integration_root: `ui_react/src/tests/registration_applications.test.tsx`

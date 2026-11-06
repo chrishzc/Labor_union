@@ -7,6 +7,7 @@ import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
 import { FinanceImportQueryError, mapFinanceImportQueryError } from './finance_import_query_errors';
+import { FinanceClientReceiptReviewSchema } from './finance_import_query_schemas';
 
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const ingestionReceiptSchema = z.strictObject({
@@ -19,7 +20,13 @@ const ingestionOutcomeSchema = z.strictObject({
   source_content_digest: sha256.nullable(), error_code: z.string().nullable(), phase: z.string().nullable(),
 });
 const countsSchema = z.strictObject({ source_rows: z.number().int().nonnegative(), canonical_created: z.number().int().nonnegative(), duplicate_occurrences: z.number().int().nonnegative(), ready_dispatch: z.number().int().nonnegative(), existing: z.number().int().nonnegative(), manual_review: z.number().int().nonnegative(), business_pending: z.number().int().nonnegative(), blocked: z.number().int().nonnegative() });
-const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_version: z.number().int().nonnegative(), source_content_digest: sha256, classifier_version: z.string(), fingerprint_version: z.string(), counts: countsSchema, dispatch_summaries: z.array(z.strictObject({ classification_type: z.string(), candidate_count: z.number().int().nonnegative(), total_amount_ntd: z.number().int().nonnegative() })), rows: z.array(z.strictObject({ row_identity: z.string(), canonical_fact_version: z.number().int().nonnegative(), amount_ntd: z.number().int().positive(), classification_type: z.string(), disposition: z.string(), target_identities: z.array(z.string()), evidence: z.array(z.string()), available_actions: z.array(z.string()), integrity_violations: z.array(z.string()), fingerprint_collision: z.boolean(), formal_reference_conflict: z.boolean() })), blocking_codes: z.array(z.string()), apply_allowed: z.boolean(), preview_fingerprint: sha256 });
+const previewRowSchema = z.strictObject({
+  row_identity: z.string(), canonical_fact_version: z.number().int().nonnegative(), amount_ntd: z.number().int().positive(),
+  classification_type: z.string(), disposition: z.string(), target_identities: z.array(z.string()), evidence: z.array(z.string()),
+  available_actions: z.array(z.string()), integrity_violations: z.array(z.string()), fingerprint_collision: z.boolean(),
+  formal_reference_conflict: z.boolean(), client_receipt_review: FinanceClientReceiptReviewSchema.nullish(),
+});
+const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_version: z.number().int().nonnegative(), source_content_digest: sha256, classifier_version: z.string(), fingerprint_version: z.string(), counts: countsSchema, dispatch_summaries: z.array(z.strictObject({ classification_type: z.string(), candidate_count: z.number().int().nonnegative(), total_amount_ntd: z.number().int().nonnegative() })), rows: z.array(previewRowSchema), blocking_codes: z.array(z.string()), apply_allowed: z.boolean(), preview_fingerprint: sha256 });
 const jobAcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), status_url: z.string().min(1), replayed: z.boolean() });
 const batchReceiptSchema = z.strictObject({ batch_identity: z.string().min(1), resulting_batch_version: z.number().int().positive(), preview_fingerprint: sha256, reconciled_count: z.number().int().nonnegative(), existing_count: z.number().int().nonnegative(), pending_count: z.number().int().nonnegative() });
 const batchOutcomeSchema = z.strictObject({ job_id: z.string().min(1).max(191), status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']), attempt_count: z.number().int().nonnegative(), max_attempts: z.number().int().nonnegative(), result_reference: z.string().min(1).max(191).nullable(), receipt: batchReceiptSchema.nullable() });

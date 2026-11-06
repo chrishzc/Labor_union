@@ -2,13 +2,16 @@
  * File: finance_import_query_adapter.ts
  * Description: 將Finance Import query映射為loaded-scope唯讀view且保留server status字串。
  */
-import type { FinanceImportBatchSummary, FinanceImportManifest, FinanceImportReviewPage, FinanceImportRunPage } from '../../api/finance_import/finance_import_query_schemas';
+import type { FinanceBankTransaction, FinanceImportBatchSummary, FinanceImportManifest, FinanceImportReviewPage, FinanceImportRunPage } from '../../api/finance_import/finance_import_query_schemas';
 import type { FinanceImportBatchPreview } from '../../api/finance_import/finance_import_mutation_client';
 
 const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   suspected_duplicate_business_match: '多筆銀行交易對應到同一筆待收款，需確認是否重複入款。',
-  sinopac_valid_virtual_account: '已由虛擬帳號定位案件。待收款項尚未唯一確認，沒有留存更詳細的核銷結果。',
+  sinopac_valid_virtual_account: '已由虛擬帳號定位案件，未留存當次阻擋原因。',
   sinopac_client_receipt_month_no_match: '日期比對未通過。交易日的年月找不到原到期日同月的待收款項。',
+  sinopac_client_receipt_transaction_date_missing: '日期比對無法執行。銀行流水缺少交易日。',
+  sinopac_client_receipt_multiple_same_month_exact: '期款比對未通過。同月有多筆等額待收期款，無法唯一選定。',
+  sinopac_client_receipt_multiple_month_candidates: '期款比對未通過。同月有多筆待收期款，無法唯一選定。',
   sinopac_client_receipt_no_open_obligation: '案件目前沒有未清的待收款項。',
   sinopac_client_receipt_shortfall: '入款金額低於同月待收款項，請核對差額。',
   sinopac_client_receipt_overage: '入款金額高於同月待收款項，請核對差額。',
@@ -31,6 +34,7 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   outgoing_staff_payout_amount_mismatch: '出款金額與同月待付款項不符，請核對差額。',
   taishin_client_refund_amount_mismatch: '出款金額與同月待退款項不符，請核對差額。',
   outgoing_staff_payout_target_ambiguous: '同月有多筆待付款項，無法用出款金額唯一確認。',
+  outgoing_staff_payout_multiple_fee_matches: '金額比對未通過。同月有多個待付配對符合手續費條件。',
   outgoing_client_refund_target_ambiguous: '同月有多筆待退款項，無法用出款金額唯一確認。',
   outgoing_staff_payout_no_open_obligation: '姓名已辨識，目前沒有待付款項。',
   taishin_client_refund_no_open_obligation: '姓名已辨識，目前沒有待退款項。',
@@ -56,6 +60,15 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   stale_preview: '核銷前資料已變更，當次自動核銷未完成。',
 };
 
+const CLIENT_INSTALLMENT_LABELS: Readonly<Record<string, string>> = {
+  deposit: '訂金', first: '第一期', second: '第二期',
+};
+const MISSING_REVIEW_REASON = '未留存當次阻擋原因。';
+const CURRENT_RECEIPT_REASONS = new Set([
+  'sinopac_client_receipt_month_no_match', 'sinopac_client_receipt_no_open_obligation',
+  'sinopac_client_receipt_shortfall', 'sinopac_client_receipt_overage',
+]);
+
 type ReviewDisposition = Pick<FinanceImportReviewPage['items'][number], 'classification_type' | 'direction' | 'available_actions' | 'disposition'>;
 
 export function financeImportSkipsUnidentifiedOutgoing(
@@ -68,29 +81,42 @@ export function financeImportSkipsUnidentifiedOutgoing(
 }
 
 export function financeImportReviewReason(
-  row: ReviewDisposition & { review_reason?: string | null; dispatch_reason?: string | null; transaction_date?: string | null },
+  row: ReviewDisposition & Partial<Pick<FinanceBankTransaction,
+    'review_reason' | 'dispatch_reason' | 'transaction_date' | 'recorded_client_receipt_review'>>,
   preview?: FinanceImportBatchPreview['rows'][number],
   postingStopped?: 'preview_blocked' | 'apply_failed',
 ): string {
-  if (row.dispatch_reason) return REVIEW_REASON_LABELS[row.dispatch_reason] ?? '正式核銷檢查未通過。';
+  if (row.dispatch_reason) return REVIEW_REASON_LABELS[row.dispatch_reason] ?? `正式核銷檢查未通過。${MISSING_REVIEW_REASON}`;
+  const review = row.recorded_client_receipt_review ?? (preview?.disposition === 'business_pending' ? preview.client_receipt_review : null);
+  if (review) {
+    const { reason, candidates } = review;
+    const message = REVIEW_REASON_LABELS[reason] ?? MISSING_REVIEW_REASON;
+    if (!candidates.length) return message;
+    const installments = candidates.map(({ obligation_type, due_date }) =>
+      `${CLIENT_INSTALLMENT_LABELS[obligation_type] ?? '其他應收款'}（到期日 ${due_date}）`);
+    return `${message} 候選期款：${installments.join('、')}。`;
+  }
   if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
   if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
   if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
-  if (row.transaction_date === null) return '日期比對無法執行。銀行流水缺少交易日。';
   if (financeImportSkipsUnidentifiedOutgoing(row, preview)) return '無法辨識收款對象，已略過銷帳；只保留原始銀行紀錄，不指定案件或月嫂。';
   if (postingStopped && preview?.disposition === 'create') {
     return postingStopped === 'preview_blocked'
       ? '流水已保存。批次預覽有阻擋，尚未執行自動核銷。'
-      : '流水已保存。當次核銷工作未完成，這筆交易沒有留存逐筆拒絕原因。';
+      : `流水已保存。當次批次核銷未完成。${MISSING_REVIEW_REASON}`;
   }
   if (row.available_actions.includes('review_suspected_duplicate_business_match')) return REVIEW_REASON_LABELS.suspected_duplicate_business_match;
-  const reasons = [...(preview?.evidence ?? []), row.review_reason ?? ''].flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);
+  const reviewReason = row.review_reason ?? '';
+  if (CURRENT_RECEIPT_REASONS.has(reviewReason)) {
+    return `${MISSING_REVIEW_REASON} 依目前期款檢查，${REVIEW_REASON_LABELS[reviewReason]}`;
+  }
+  const reasons = [...(preview?.evidence ?? []), reviewReason].flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);
   if (reasons.length) return [...new Set(reasons)].join(' ');
   if (row.disposition === 'business_pending' && row.classification_type === 'government_subsidy') {
     return '已辨識為新竹市政府補助款，請選擇核銷期間完成整期核銷。';
   }
-  if (row.disposition === 'blocked') return '這筆交易未通過銷帳檢查，沒有留存更詳細的原因。';
-  return '這筆交易尚未核銷，沒有留存更詳細的原因。';
+  if (row.transaction_date === null) return `${MISSING_REVIEW_REASON} 原銀行流水缺少交易日。`;
+  return MISSING_REVIEW_REASON;
 }
 
 export function financeImportDispositionLabel(disposition: string): string {

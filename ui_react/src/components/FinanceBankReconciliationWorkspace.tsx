@@ -507,7 +507,7 @@ export function FinanceBankReconciliationWorkspace({
                             'taishin_client_refund_amount_mismatch',
                             'sinopac_client_receipt_shortfall',
                             'sinopac_client_receipt_overage',
-                          ].some(reason => reason === row.review_reason) ? '差額待核對' : '待核對'}
+                          ].some(reason => reason === (row.recorded_client_receipt_review?.reason ?? row.review_reason)) ? '差額待核對' : '待核對'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>

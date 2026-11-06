@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceBankReconciliationWorkspace } from '../../../../../../../components/FinanceBankReconciliationWorkspace';
+import { financeImportReviewReason } from '../../../../../../../adapters/finance/finance_import_query_adapter';
 import { financeImportQueryClient } from '../../../../../../../api/finance_import/finance_import_query_client';
 import type { FinanceBankTransaction } from '../../../../../../../api/finance_import/finance_import_query_schemas';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
@@ -137,7 +138,8 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     ['sinopac_client_receipt_month_no_match', null, /原到期日同月/],
     ['taishin_client_refund_amount_mismatch', 'client_refund_recipient_account_mismatch', /與待退款項的收款帳戶不符/],
     ['staff_account_matched', 'staff_bank_account_ambiguous', /唯一有效的月嫂主要帳戶/],
-    [null, null, /沒有留存更詳細的原因/],
+    ['sinopac_valid_virtual_account', null, /已由虛擬帳號定位案件，未留存當次阻擋原因/],
+    [null, null, /未留存當次阻擋原因/],
   ] as const)('shows the concrete reason in transaction details (%s, %s)', async (review_reason, dispatch_reason, message) => {
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
       items: [{ ...sinopac, review_reason, dispatch_reason }],
@@ -151,6 +153,36 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(within(dialog).getByRole('heading', { name: '未自動核銷原因' })).toBeVisible();
     expect(within(dialog).getByText(message)).toBeVisible();
     expect(onReconcile).not.toHaveBeenCalled();
+  });
+
+  it('shows recorded same-month candidates and their due dates in the existing reason field', async () => {
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...sinopac, reconciliation_target: null, recorded_client_receipt_review: {
+        reason: 'sinopac_client_receipt_multiple_same_month_exact',
+        candidates: [
+          { obligation_identity: 'test:first', obligation_type: 'first', due_date: '2026-10-19' },
+          { obligation_identity: 'test:second', obligation_type: 'second', due_date: '2026-10-27' },
+        ],
+      } }], pending_count: 1, next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+
+    const reason = /同月有多筆等額待收期款.*第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/;
+    expect(within(await screen.findByRole('row', { name: /Sheet1#2/ })).getByText(reason)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '查看交易 finance-import-row:101' }));
+    expect(within(screen.getByRole('dialog', { name: '待核對交易明細' })).getByText(reason)).toBeVisible();
+    expect(onReconcile).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed batch without assigning its failure to an otherwise eligible row', () => {
+    const preview = {
+      row_identity: sinopac.row_identity, canonical_fact_version: 0, amount_ntd: sinopac.amount_ntd,
+      classification_type: 'client_receipt', disposition: 'create', target_identities: ['test:first'],
+      evidence: [], available_actions: [], integrity_violations: [], fingerprint_collision: false,
+      formal_reference_conflict: false,
+    };
+    expect(financeImportReviewReason(sinopac, preview, 'apply_failed'))
+      .toBe('流水已保存。當次批次核銷未完成。未留存當次阻擋原因。');
   });
 
   it('posts a government outflow to the selected period refund balance', async () => {

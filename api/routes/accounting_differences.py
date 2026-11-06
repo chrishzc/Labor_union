@@ -1,4 +1,5 @@
 """Typed owner commands for noncash processing and system amount corrections."""
+from datetime import date
 from typing import Literal
 from fastapi import APIRouter,Depends
 from pydantic import BaseModel,ConfigDict,Field
@@ -12,7 +13,7 @@ from infrastructure.mysql.client_difference_repository import MySqlClientDiffere
 from infrastructure.mysql.payroll_amount_correction_repository import MySqlPayrollAmountRepository
 from infrastructure.mysql.staff_recovery_disposition_repository import MySqlStaffRecoveryDispositionRepository
 from subsystems.client_finance.difference_resolution import ClientDifferenceApplication,ClientDifferenceCommand,ClientDifferenceView
-from subsystems.payroll.amount_correction import PayrollAmountApplication,PayrollAmountCommand,PayrollAmountView
+from subsystems.payroll.amount_correction import HistoricalUnpaidPayableCommand,PayrollAmountApplication,PayrollAmountCommand,PayrollAmountView
 from subsystems.staff_payables.recovery_disposition import StaffRecoveryDispositionApplication,StaffRecoveryDispositionCommand,StaffRecoveryDispositionView
 
 router=APIRouter(prefix='/api/v1/orders/{case_no}',tags=['Accounting Differences'])
@@ -50,6 +51,18 @@ class DifferenceBody(BaseModel):
     reason:str=Field(default='',max_length=500)
     expected_version:int=Field(ge=0)
     key:str=Field(min_length=1,max_length=191)
+
+
+class HistoricalUnpaidPayableBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    staff_id: int = Field(gt=0)
+    obligation_identity: str | None = Field(default=None, min_length=1, max_length=191)
+    expected_event_id: int | None = Field(default=None, gt=0)
+    amount_ntd: int = Field(gt=0, le=9999999999, strict=True)
+    due_date: date | None = None
+    evidence: str = Field(min_length=1, max_length=500)
+    confirmed_unpaid: Literal[True]
+    key: str = Field(min_length=1, max_length=100)
 
 
 def _call(action):
@@ -93,6 +106,17 @@ def payroll_query(case_no:str,principal=Depends(require_admin),application=Depen
 @router.post('/payroll/amount-corrections',response_model=BaseResponse[PayrollAmountView])
 def payroll_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_payroll_application)):
     return _call(lambda:application.apply(PayrollAmountCommand(case_no,body.identity,body.action,body.amount_ntd,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+
+
+@router.post('/payroll/historical-unpaid-payable', response_model=BaseResponse[str])
+def record_historical_unpaid_payable(
+    case_no: str, body: HistoricalUnpaidPayableBody,
+    principal=Depends(require_system_admin), application=Depends(get_payroll_application),
+):
+    return _call(lambda: application.record_historical_unpaid(HistoricalUnpaidPayableCommand(
+        case_no, body.staff_id, body.obligation_identity, body.expected_event_id,
+        body.amount_ntd, body.due_date, body.evidence, body.key, admin_actor_context(principal).actor_id,
+    )))
 
 
 @router.get('/staff-payables/recovery-dispositions',response_model=BaseResponse[StaffRecoveryDispositionView])

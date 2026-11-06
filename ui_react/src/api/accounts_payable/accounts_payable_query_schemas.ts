@@ -39,5 +39,12 @@ export const CaseStaffPayableAuditSchema = z.strictObject({
   })),
 });
 export const CaseStaffPayableAuditResponseSchema = z.strictObject({ success: z.boolean(), message: z.string(), data: CaseStaffPayableAuditSchema, error: z.string().nullable().optional() });
+const HistoricalPayableAuditItemSchema = CaseStaffPayableAuditSchema.shape.items.element.extend({
+  current_event_id: z.number().int().positive().nullable(),
+});
+export const HistoricalPayableLookupResponseSchema = CaseStaffPayableAuditResponseSchema.extend({
+  data: z.array(HistoricalPayableAuditItemSchema),
+});
+export type HistoricalPayableAuditItem = z.infer<typeof HistoricalPayableAuditItemSchema>;
 export type AccountsPayablePreview = z.infer<typeof AccountsPayablePreviewSchema>;
 export type CaseStaffPayableAudit = z.infer<typeof CaseStaffPayableAuditSchema>;

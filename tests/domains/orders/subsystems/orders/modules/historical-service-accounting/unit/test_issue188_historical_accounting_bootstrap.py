@@ -1,6 +1,5 @@
-"""Focused regression coverage for issue #188 historical accounting bootstrap."""
+"""Historical comparisons read verified pricing and report missing sources."""
 
-import inspect
 from datetime import date
 from decimal import Decimal
 
@@ -8,18 +7,18 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes.historical_service_accounting import _call
+from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.calculation import PayrollPolicyKind, rate_snapshot
 from infrastructure.mysql.historical_service_accounting_repository import (
     MySqlHistoricalServiceAccountingRepository,
-    _ensure_accounting_accounts,
 )
 from shared_kernel.identities import CorrelationId
 from shared_kernel.money import MoneyNTD
 from subsystems.orders.historical_service_accounting_workflow import (
     HistoricalServiceAccountingAssignmentFacts,
     HistoricalServiceAccountingFacts,
-    HistoricalServiceAccountingReceipt,
+    ConfirmHistoricalServiceDaysIntent,
     HistoricalServiceAccountingWorkflow,
 )
 
@@ -88,14 +87,6 @@ class _LoadConnection:
         return self.cursor_instance
 
 
-class _RecordingCursor:
-    def __init__(self):
-        self.statements = []
-
-    def execute(self, statement, parameters):
-        self.statements.append((" ".join(statement.split()), parameters))
-
-
 def test_missing_account_roots_project_as_zero_without_false_not_found():
     connection = _LoadConnection()
 
@@ -119,53 +110,11 @@ def test_missing_client_payment_terms_fails_closed_with_specific_code():
         repository.load("CASE-188", for_update=False)
 
 
-def test_default_accounting_cannot_silently_skip_missing_payment_terms():
-    repository = MySqlHistoricalServiceAccountingRepository(_LoadConnection(terms=False))
-    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
-    with pytest.raises(ValueError, match="historical_client_payment_terms_missing"):
-        workflow.establish_default_in_current_unit_of_work(case_no="CASE-188", source_identity="source:188",
-            actor="admin", correlation_id="corr-188")
-    assert len(repository._connection.cursor_instance.statements) == 1
-
-
 def test_missing_payroll_rate_fails_closed_with_specific_code():
     repository = MySqlHistoricalServiceAccountingRepository(_LoadConnection(rate=False))
 
     with pytest.raises(ValueError, match="historical_payroll_rate_policy_missing"):
         repository.load("CASE-188", for_update=False)
-
-
-def test_apply_bootstrap_only_creates_zero_version_account_roots():
-    cursor = _RecordingCursor()
-
-    _ensure_accounting_accounts(cursor, "CASE-188")
-
-    assert cursor.statements == [
-        (
-            "INSERT INTO client_finance_accounts (case_no,aggregate_version) VALUES (%s,0) "
-            "ON DUPLICATE KEY UPDATE case_no=VALUES(case_no)",
-            ("CASE-188",),
-        ),
-        (
-            "INSERT INTO payroll_case_accounts (case_no,aggregate_version) VALUES (%s,0) "
-            "ON DUPLICATE KEY UPDATE case_no=VALUES(case_no)",
-            ("CASE-188",),
-        ),
-    ]
-
-
-def test_account_bootstrap_runs_before_historical_event_and_obligation_writes():
-    source = inspect.getsource(MySqlHistoricalServiceAccountingRepository.persist)
-
-    assert source.index("_ensure_accounting_accounts") < source.index(
-        "INSERT INTO historical_service_day_events"
-    )
-    assert source.index("_ensure_accounting_accounts") < source.index(
-        "_write_client_obligation"
-    )
-    assert source.index("_ensure_accounting_accounts") < source.index(
-        "_write_staff_obligations"
-    )
 
 
 @pytest.mark.parametrize(
@@ -220,29 +169,16 @@ def test_historical_service_accounting_facts_rejects_float_service_hours():
         )
 
 
-def test_service_hours_per_day_loads_as_decimal_and_supports_default_accounting():
+def test_service_hours_per_day_loads_as_decimal_and_supports_manual_comparison():
     connection = _LoadConnection()
     repository = MySqlHistoricalServiceAccountingRepository(connection)
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
 
-    facts = repository.load("CASE-188", for_update=False)
-
+    facts = workflow.query("CASE-188")
     assert isinstance(facts.service_hours_per_day, Decimal)
     assert facts.service_hours_per_day == Decimal("8")
-
-    persisted_box = []
-    repository.persist = lambda request, candidate: persisted_box.append(candidate) or HistoricalServiceAccountingReceipt(
-        "CASE-188", 1, 1, 1,
-        candidate.service_days.total_actual_service_days,
-        candidate.client_finance.total_receivable.amount,
-        candidate.payroll.total_payable.amount,
-        candidate.fingerprint,
-    )
-    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
-    workflow.establish_default_in_current_unit_of_work(
-        case_no="CASE-188",
-        source_identity="historical-source:188",
-        actor="admin",
-        correlation_id="corr-188",
-    )
-    assert len(persisted_box) == 1
-    assert persisted_box[0].service_days.total_actual_service_days == 30
+    comparison = workflow.preview(ConfirmHistoricalServiceDaysIntent(
+        "CASE-188", (HistoricalActualServiceDaysInput("assignment:188", 18, 26),),
+    ))
+    assert comparison.service_days.total_actual_service_days == 26
+    assert all(statement.startswith("SELECT") for statement, _ in connection.cursor_instance.statements)

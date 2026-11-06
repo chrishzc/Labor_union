@@ -58,7 +58,6 @@ _VALIDATION_MESSAGES = {
     "historical_order_source_schedule_conflict": "歷史訂單工作簿存在跨案件月嫂排程重疊衝突。",
     "historical_client_payment_terms_missing": "歷史案件缺少客戶付款條款，無法建立帳務。",
     "historical_payroll_rate_policy_missing": "歷史案件缺少月嫂薪資費率，無法建立帳務。",
-    "historical_default_accounting_unavailable": "歷史訂單的帳務建立服務未就緒。",
     "historical_order_import_counts_not_conserved": "系統核對匯入結果時，來源列數與結果筆數不一致，請提供追蹤編號。",
     "historical_order_not_imported_rows_not_conserved": "系統核對匯入結果時，未匯入列的明細與筆數不一致，請提供追蹤編號。",
 }

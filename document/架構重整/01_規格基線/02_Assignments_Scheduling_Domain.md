@@ -1,6 +1,6 @@
 # Assignments／Scheduling Domain
 
-> Historical Orders 的 count-based 單薪帳務不建立或偽造正式服務日，也不取得 Scheduling occupancy；
+> Historical Orders 承接的服務期間、服務量與原帳務不建立或偽造正式服務日，也不取得 Scheduling occupancy；
 > 只有工會人員執行重啟天數精算後才重新進入本 Domain 的正常 generation／assignment／service-date
 > 契約。完整邊界見 `27_歷史訂單生命週期與服務天數帳務正式規格.md`。
 

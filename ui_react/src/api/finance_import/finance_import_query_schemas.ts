@@ -17,6 +17,10 @@ export type FinanceImportRunPage = z.infer<typeof FinanceImportRunPageSchema>;
 
 const bankSchema = z.enum(['sinopac', 'taishin']);
 const optionalCount = z.number().int().nonnegative().nullable();
+export const FinanceClientReceiptReviewSchema = z.strictObject({
+  reason: z.string(),
+  candidates: z.array(z.strictObject({ obligation_identity: z.string(), obligation_type: z.string(), due_date: z.iso.date() })),
+});
 export const FinanceBankTransactionPageSchema = z.strictObject({
   items: z.array(z.strictObject({
     row_id: z.number().int().positive(), row_identity: z.string(), transaction_date: z.string().nullable(),
@@ -24,6 +28,7 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
     classification_type: z.string(), status: z.enum(['pending', 'posted']), disposition: z.string(),
     review_reason: z.string().nullable(), available_actions: z.array(z.string()),
     dispatch_reason: z.string().nullish(),
+    recorded_client_receipt_review: FinanceClientReceiptReviewSchema.nullish(),
     reference: z.string(), counterparty_name: z.string().nullable(), cases: z.array(z.string()),
     reconciliation_target: z.strictObject({
       case_no: z.string(), obligation_identities: z.array(z.string()).min(1), staff_id: z.number().int().positive().nullable(),

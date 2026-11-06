@@ -133,7 +133,7 @@ def test_partial_cash_then_topup_preserves_sources_and_only_completes_deposit_at
     finally:connection.close()
 
 
-def _seed_mixed_case(connection, case, overage, *, partial_only=False):
+def _seed_mixed_case(connection, case, overage, *, partial_only=False, stage_amounts=(5000, 5000), bank_amounts=None):
     identities=[case+':deposit',case+':first'];banks=[]
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,'Synthetic Client')",(case,))
@@ -144,12 +144,15 @@ def _seed_mixed_case(connection, case, overage, *, partial_only=False):
         cursor.execute("INSERT INTO beclass_records(query_no,bound_case_no,refund_bank_code,refund_account_no) VALUES (%s,%s,'000','SYNTHETIC-ACCOUNT')",('source:'+case,case))
         cursor.execute("INSERT INTO client_finance_accounts(case_no) VALUES (%s)",(case,))
         for index,stage in enumerate(('deposit','first')):
-            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client','established',0,5000,%s,'synthetic',0,%s,'synthetic','fixture')",(identities[index],case,stage,'2026-10-0'+str(index+1),identities[index]))
+            amount = stage_amounts[index]
+            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client','established',0,%s,%s,'synthetic',0,%s,'synthetic','fixture')",(identities[index],case,stage,amount,'2026-10-0'+str(index+1),identities[index]))
             event=cursor.lastrowid
-            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',5000,%s,'open',%s,0)",(identities[index],case,stage,'2026-10-0'+str(index+1),event))
+            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',%s,%s,'open',%s,0)",(identities[index],case,stage,amount,'2026-10-0'+str(index+1),event))
         cursor.execute("INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) VALUES ('sinopac','synthetic',1,2)")
         batch=cursor.lastrowid
-        for index,amount in enumerate((9000,) if partial_only else (9000,1100 if overage else 1000)):
+        if bank_amounts is None:
+            bank_amounts = (9000,) if partial_only else (9000, 1100 if overage else 1000)
+        for index,amount in enumerate(bank_amounts):
             cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,batch_id,format_id,transaction_date,credit,direction,bank_references,warnings,raw_payload,classification_type) VALUES (%s,%s,'sinopac','2026-10-02',%s,'incoming','{}','[]','{}','client_receipt')",(hashlib.sha256(f'{case}-{index}'.encode()).hexdigest(),batch,amount))
             banks.append(str(cursor.lastrowid))
             cursor.execute("INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,evidence,available_actions,actor,reason) VALUES (%s,%s,1,1,'client_receipt','manual_review',%s,%s,'[]','[]','synthetic','synthetic case confirmed')",(batch,int(banks[-1]),'a'*64,json.dumps(identities)))

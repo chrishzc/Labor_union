@@ -1,4 +1,5 @@
 """Real owner noncash/mode transactions; no user data or external effects."""
+from dataclasses import replace
 import os,runpy
 from uuid import uuid4
 from types import SimpleNamespace
@@ -28,6 +29,76 @@ def connection():
 
 
 def _app(conn):return ClientDifferenceApplication(MySqlClientDifferenceRepository(conn),lambda:MySqlUnitOfWork(conn))
+
+
+def test_confirmed_unallocated_historical_duplicate_exits_reconciliation(connection):
+    case = 'DIFF-HISTORY-' + uuid4().hex[:10]
+    (deposit, first), banks = support['_seed_mixed_case'](
+        connection, case, False, stage_amounts=(6000, 12000), bank_amounts=(6000, 12000),
+    )
+    baseline = f'historical-service:{case}:revision:1:client:receivable_from_client'
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE orders SET status='歷史訂單－服務完成' WHERE case_no=%s", (case,))
+        cursor.execute(
+            "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,"
+            "before_amount_ntd,after_amount_ntd,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
+            "VALUES(%s,%s,'adjustment','receivable_from_client','established',0,18000,%s,0,%s,'synthetic','legacy duplicate')",
+            (baseline, case, f'{case}:baseline-source', f'{case}:baseline'),
+        )
+        cursor.execute(
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,status,current_event_id,projection_version) "
+            "VALUES(%s,%s,'adjustment','receivable_from_client',18000,'open',%s,0)",
+            (baseline, case, cursor.lastrowid),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,occurred_on,"
+            "reconciliation_reference,idempotency_key,actor,reason) "
+            "VALUES(%s,%s,'receipt',6000,'2026-10-02',%s,%s,'synthetic','已核銷原訂金')",
+            (case, int(banks[0]), case + ':original-deposit', case + ':original-ledger'),
+        )
+        cursor.execute(
+            "INSERT INTO client_ledger_obligation_allocations(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) "
+            "VALUES(%s,%s,6000,1)", (cursor.lastrowid, deposit),
+        )
+        cursor.execute(
+            "UPDATE client_obligations SET amount_due_ntd=0,status='settled',projection_version=1 WHERE obligation_identity=%s",
+            (deposit,),
+        )
+        cursor.execute("UPDATE client_finance_accounts SET aggregate_version=1 WHERE case_no=%s", (case,))
+    connection.commit()
+
+    repository = support['MySqlClientReceiptReconciliationRepository'](connection)
+
+    def candidates():
+        return {row['obligation_identity']: row['amount_due_ntd'] for row in repository.query(case)['obligations']}
+
+    assert candidates() == {first: 12000, baseline: 18000}
+    original_items, original_transactions = query_case_accounting(connection, case)
+    assert next(item for item in original_items if item.identity == deposit).actual_ntd == 6000
+    app = _app(connection)
+    before = app.query(case)
+    command = ClientDifferenceCommand(
+        case, baseline, 'manual_amount', 0, '合成原帳冊同源：訂金及第一期已涵蓋整筆基準應收',
+        before.version, case + ':correct-duplicate', 'synthetic',
+    )
+    after = app.apply(command)
+    assert after.version == before.version + 1
+    assert app.apply(command) == after
+    assert candidates() == {first: 12000}
+    items, transactions = query_case_accounting(connection, case)
+    assert transactions == original_transactions
+    assert [replace(item, version='') for item in items if item.identity in (deposit, first)] == [
+        replace(item, version='') for item in original_items if item.identity in (deposit, first)
+    ]
+    assert not any(item.direction == 'payable' for item in items)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT event_type,after_amount_ntd FROM client_obligation_events WHERE obligation_identity=%s ORDER BY id",
+            (baseline,),
+        )
+        assert [(row['event_type'], row['after_amount_ntd']) for row in cursor.fetchall()] == [
+            ('established', 18000), ('adjusted', 0),
+        ]
 
 
 def _cash(conn,case,*,overage=False,partial=False):

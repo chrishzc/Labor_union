@@ -37,6 +37,41 @@ function chooseWorkbook(){
 }
 
 describe('finance import operation identity after an observed result',()=>{
+  it('submits a review-only batch so the recorded reason remains available after reload', async () => {
+    const pending = {
+      ...preview, counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 },
+      rows: [{
+        row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 12000,
+        classification_type: 'client_receipt', disposition: 'business_pending', target_identities: [],
+        evidence: [], available_actions: [], integrity_violations: [], fingerprint_collision: false,
+        formal_reference_conflict: false, client_receipt_review: {
+          reason: 'sinopac_client_receipt_multiple_same_month_exact', candidates: [
+            { obligation_identity: 'first', obligation_type: 'first', due_date: '2026-10-19' },
+            { obligation_identity: 'second', obligation_type: 'second', due_date: '2026-10-27' },
+          ],
+        },
+      }],
+    };
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue(pending);
+    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockImplementation(async () => {
+      vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+        items: [{
+          row_id: 41, row_identity: 'finance-import-row:41', transaction_date: '2026-10-20', bank: 'sinopac',
+          direction: 'incoming', amount_ntd: 12000, classification_type: 'client_receipt', status: 'pending',
+          disposition: 'business_pending', review_reason: null, available_actions: [], reference: 'Sheet1#2',
+          counterparty_name: null, cases: [], recorded_client_receipt_review: pending.rows[0].client_receipt_review,
+        }], pending_count: 1, next_before_row_id: null,
+      });
+      return { job_id: 'job-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: null,
+        receipt: { batch_identity: pending.batch_identity, resulting_batch_version: 1,
+          preview_fingerprint: fingerprint, reconciled_count: 0, existing_count: 0, pending_count: 0 } };
+    });
+    chooseWorkbook();
+    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
+    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(pending);
+    expect(await screen.findByText(/第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/)).toBeVisible();
+  });
+
   it('allows a new confirmed submission after known failure, without reusing the failed job key',async()=>{
     chooseWorkbook();
     await screen.findByText('未完成銷帳，請查看未銷帳明細與原因。');

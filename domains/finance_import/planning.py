@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -37,6 +37,19 @@ class FinanceImportDisposition(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ClientReceiptReviewCandidate:
+    obligation_identity: str
+    obligation_type: str
+    due_date: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClientReceiptReviewDiagnostic:
+    reason: str
+    candidates: tuple[ClientReceiptReviewCandidate, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalFinanceImportRow:
     row_identity: str
     canonical_fact_version: int
@@ -50,6 +63,7 @@ class CanonicalFinanceImportRow:
     integrity_violations: tuple[str, ...] = ()
     fingerprint_collision: bool = False
     formal_reference_conflict: bool = False
+    client_receipt_review: ClientReceiptReviewDiagnostic | None = None
 
     def __post_init__(self) -> None:
         _validate_row_identity(self)
@@ -310,7 +324,7 @@ def _counts_payload(counts):
 
 
 def _row_payload(row):
-    return {
+    payload = {
         "row_identity": row.row_identity,
         "canonical_fact_version": row.canonical_fact_version,
         "amount_ntd": row.amount.amount,
@@ -322,6 +336,9 @@ def _row_payload(row):
         "available_actions": row.available_actions,
         "blocking_codes": _row_blocking_codes(row),
     }
+    if row.client_receipt_review is not None:
+        payload["client_receipt_review"] = asdict(row.client_receipt_review)
+    return payload
 
 
 def _summary_payload(summary):

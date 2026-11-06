@@ -12,6 +12,7 @@
 月份查詢組合各 owner 正式到期款與已提交銀行事實；銀行來源單筆只計一次，人工原始明細不列現金，歷史案件標記整案排除統計。跨統計範圍而無正式分配金額的銀行款不拆算，現金結果回 unavailable/null，到期款查詢可繼續。案件歷史人工核銷僅寫 application metadata，保存當下原金額快照、原因、人員與時間，不改 owner 金額或 Orders。
 
 ## Implementation
+- `ui_react/src/components/HistoricalPayableReview.tsx` — 每月帳務及案件抽屜查核歷史月嫂款，帶入同案、同月嫂，委派正式應付的補登／更正至 Payroll。
 - `domains/finance_import/statement_archive.py`
 - `subsystems/finance_import/statement_archive.py`
 - `subsystems/finance_import/accounting_workspace.py`
@@ -54,6 +55,7 @@
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints: `statements/export`, `statements/manual`, `statements/duplicates` beneath `/api/v1/finance-import`
 - `bank-transactions` — 以已辨識業務對象／案件／政府補助之原始銀行流水為清單身分（無關流水於匯入前丟棄且不列入待核對），跨批次分頁並補齊對象與關聯案件，正式核銷證據決定狀態；待核對列僅在案件及正式款項可唯一確認時提供案件核對目標。
+- 永豐客戶入款的待核對原因沿原 Apply 收據讀取；同月等額候選保留當次期別及到期日。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan`; server actor, plan version CAS and same-command replay under the Orders case identity lock, one outer metadata transaction. No collection, bank uniqueness or legacy direct-arrangement prerequisite; no financial/date writer or payable generation.
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`

@@ -21,7 +21,7 @@ class FakeCursor:
         self.executed.append((statement, params))
         if self.fail_on_execute == len(self.executed):
             raise RuntimeError("database write failed")
-        if statement.startswith("SELECT id, classification_type, matched_identity_ids"):
+        if statement.startswith(("SELECT id, classification_type, matched_identity_ids", "SELECT id FROM finance_import_rows")):
             self._fetchone = self.rows_by_fingerprint.get(params[0])
             return
         if statement.startswith("INSERT INTO"):
@@ -273,7 +273,7 @@ def test_canonical_staging_does_not_import_or_write_formal_accounting_modules():
     assert ".rollback(" not in source
 
 
-def test_existing_fingerprint_only_adds_occurrence_and_keeps_existing_state(monkeypatch):
+def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(monkeypatch):
     fingerprint = staging.build_dedup_fingerprint(_row())
     cursor = FakeCursor(
         existing_rows={
@@ -310,11 +310,11 @@ def test_existing_fingerprint_only_adds_occurrence_and_keeps_existing_state(monk
         "result": "skipped_existing",
     }]
     assert sum(sql.startswith("INSERT INTO finance_import_rows") for sql, _ in cursor.executed) == 0
-    assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 1
+    assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 0
     assert sum(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed) == 0
 
 
-def test_duplicate_fingerprint_in_same_batch_keeps_both_occurrences_and_warns(monkeypatch):
+def test_duplicate_fingerprint_in_same_batch_saves_only_one_occurrence(monkeypatch):
     cursor = FakeCursor()
     classifier_calls = []
     monkeypatch.setattr(
@@ -336,13 +336,12 @@ def test_duplicate_fingerprint_in_same_batch_keeps_both_occurrences_and_warns(mo
     assert [item["result"] for item in result["staged_rows"]] == ["inserted", "skipped_existing"]
     assert len(classifier_calls) == 1
     occurrences = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_occurrences")]
-    assert len(occurrences) == 2
-    assert "duplicate_fingerprint_in_same_batch" not in json.loads(occurrences[0][-1])
-    assert "duplicate_fingerprint_in_same_batch" in json.loads(occurrences[1][-1])
+    assert len(occurrences) == 1
+    assert json.loads(occurrences[0][-1]) == _row()["warnings"]
 
 
 @pytest.mark.parametrize("formally_dispatched", [False, True])
-def test_same_fingerprint_changed_bank_fact_preserves_occurrence_and_blocks(formally_dispatched):
+def test_same_fingerprint_ignores_changed_non_identity_fields(formally_dispatched):
     original = _row()
     fingerprint = staging.build_dedup_fingerprint(original)
     stored = {
@@ -354,11 +353,10 @@ def test_same_fingerprint_changed_bank_fact_preserves_occurrence_and_blocks(form
     assert staging.build_dedup_fingerprint(incoming) == fingerprint
     cursor = FakeCursor(existing_rows={fingerprint: stored})
     staging.stage_finance_rows(cursor, _normalized([incoming]), {})
-    events = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_integrity_events")]
-    assert [event[2] for event in events] == (["fingerprint_collision", "formal_reference_conflict"] if formally_dispatched else ["fingerprint_collision"])
-    assert all(json.loads(event[3])["differing_fields"] == ["posting_date"] for event in events)
-    assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 1
-    assert not any(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed)
+    assert not any(
+        sql.startswith(("INSERT INTO finance_import_integrity_events", "INSERT INTO finance_import_occurrences"))
+        for sql, _ in cursor.executed
+    )
 
 
 def test_taishin_outgoing_unknown_recipient_is_preserved_for_review():
@@ -484,3 +482,91 @@ def test_sinopac_unmatched_rows_remain_separate_bank_facts():
     ]
     insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
     assert len(insert_calls) == 3
+
+
+def _normalized_row(**overrides) -> dict[str, object]:
+    base: dict[str, object] = {
+        "format_id": "taishin",
+        "source_file": "taishin.xlsx",
+        "source_bank_account": "000000000001",
+        "sheet_name": "交易明細查詢",
+        "source_row": 2,
+        "source_reference": None,
+        "transaction_date": "2026-10-15",
+        "transaction_time": "09:00:00",
+        "posting_date": "2026-10-15",
+        "value_date": None,
+        "debit": None,
+        "credit": Decimal("10000"),
+        "direction": "incoming",
+        "balance": Decimal("80000"),
+        "currency": "TWD",
+        "summary": "轉帳",
+        "memo": "借款",
+        "counterparty_name": None,
+        "counterparty_account": None,
+        "cancellation_code": None,
+        "bank_references": {"sequence": "0001"},
+        "warnings": [],
+        "raw_payload": {"memo": "借款"},
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.parametrize(("bank", "expected", "unrelated"), [
+    ("taishin", "新竹市政府補助入款", "借款"),
+    ("sinopac", "虛擬帳號入帳", "無關轉帳"),
+])
+def test_business_only_staging_keeps_only_matched_new_transactions(bank, expected, unrelated):
+    matched = _normalized_row(format_id=bank, source_row=3, memo=expected, cancellation_code="99781699115001",
+                              bank_references={"銷帳編號": "99781699115001"})
+    unmatched = _normalized_row(format_id=bank, source_row=2, memo=unrelated)
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(
+        cursor, {**_normalized([unmatched, matched]), "format_id": bank},
+        {"known_virtual_accounts": frozenset({"99781699115001"})}, business_only=True,
+    )
+    assert len(result["staged_rows"]) == 1
+    assert result["staged_rows"][0]["dedup_fingerprint"] == staging.build_dedup_fingerprint(matched)
+
+
+@pytest.mark.parametrize("bank", ["sinopac", "taishin"])
+@pytest.mark.parametrize("amount", [11899, 12001])
+def test_business_only_staging_preserves_known_same_month_payout_differences(bank, amount):
+    row = _normalized_row(format_id=bank, direction="outgoing", debit=Decimal(amount), credit=None,
+                          counterparty_name="Synthetic Staff", bank_references={})
+    identity_maps = {"staff_payout_candidates": ({
+        "staff_id": 12, "name": "Synthetic Staff", "due_date": "2026-10-20", "amount_due_ntd": 12000,
+    },)}
+    result = staging.stage_finance_rows(
+        FakeCursor(), {**_normalized([row]), "format_id": bank}, identity_maps, business_only=True,
+    )
+    assert result["staged_rows"][0]["matched_identity_ids"] == [12]
+
+
+def test_business_only_staging_preserves_batch_name_when_all_rows_are_filtered():
+    row = _normalized_row(source_file="only-loan.xlsx")
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(cursor, _normalized([row]), {}, business_only=True)
+    assert result["staged_rows"] == []
+    assert cursor.executed[0][1][1] == "only-loan.xlsx"
+    assert cursor.executed[-1][1][0] == 0
+
+
+@pytest.mark.parametrize("bank", ["sinopac", "taishin"])
+def test_business_only_repeat_checks_identity_before_classification(bank, monkeypatch):
+    row = _normalized_row(format_id=bank)
+    fingerprint = staging.build_dedup_fingerprint(row)
+    cursor = FakeCursor(existing_rows={fingerprint: {"id": 77}})
+    monkeypatch.setattr(staging, "classify_row_with_identity_maps",
+                        lambda *_args: pytest.fail("an existing row must bypass admission"))
+
+    result = staging.stage_finance_rows(
+        cursor, {**_normalized([row]), "format_id": bank}, {}, business_only=True,
+    )
+
+    assert result["staged_rows"] == [{
+        "row_id": 77, "dedup_fingerprint": fingerprint, "result": "skipped_existing",
+    }]
+    assert len(cursor.executed) == 2

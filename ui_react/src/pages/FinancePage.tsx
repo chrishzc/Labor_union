@@ -14,6 +14,8 @@ import { FinanceImportQueryError } from '../api/finance_import/finance_import_qu
 import { FinanceCaseList } from '../components/FinanceCaseList';
 import { FinanceGovernmentSubsidyList } from '../components/FinanceGovernmentSubsidyList';
 import { FinanceMonthlyAccounting } from '../components/FinanceMonthlyAccounting';
+import type { HistoricalPayableAuditItem } from '../api/accounts_payable/accounts_payable_query_schemas';
+import { HistoricalPayableEditor } from '../components/HistoricalPayableReview';
 import type { AccountingRange } from '../api/finance_import/monthly_accounting_client';
 import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
 import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
@@ -25,6 +27,12 @@ type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | 
 type IngestionCommand = Parameters<typeof financeImportMutationClient.queryIngestionOutcome>[0];
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
+
+function canApplyImportedBatch(preview: FinanceImportBatchPreview): boolean {
+  return preview.apply_allowed && (preview.counts.ready_dispatch > 0 || preview.rows.some(
+    row => row.disposition === 'business_pending' && row.client_receipt_review != null,
+  ));
+}
 
 function currentMonth(): string {
   const now = new Date();
@@ -99,6 +107,7 @@ export const FinancePage: React.FC = () => {
     normalizeFinanceTab(entry.tab, entry.overdue, Boolean(entry.caseNo))
   );
   const [caseDrawer, setCaseDrawer] = useState(entry.caseNo);
+  const [payableReview, setPayableReview] = useState<HistoricalPayableAuditItem | null>(null);
   const [bankReview, setBankReview] = useState<FinanceBankTransaction | null>(null);
   const [cancellationPosted, setCancellationPosted] = useState(false);
   const [bankReviewBusy, setBankReviewBusy] = useState(false);
@@ -112,6 +121,7 @@ export const FinancePage: React.FC = () => {
 
   const openCase = (caseNo: string, noticeStage?: 'deposit' | 'first' | 'second') => {
     setBankReview(null);
+    setPayableReview(null);
     setCancellationPosted(false);
     setCaseClientName('');
     setCaseNotice(noticeStage);
@@ -129,6 +139,7 @@ export const FinancePage: React.FC = () => {
 
   const closeCase = () => {
     setCaseDrawer('');
+    setPayableReview(null);
     setBankReview(null);
     setCancellationPosted(false);
   };
@@ -260,13 +271,13 @@ export const FinancePage: React.FC = () => {
       const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      if (preview.apply_allowed && preview.counts.ready_dispatch > 0) await applyImportedBatch(preview);
+      if (canApplyImportedBatch(preview)) await applyImportedBatch(preview);
     }
     catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') }); }
   };
 
   const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
-    if (!checked.apply_allowed || checked.counts.ready_dispatch <= 0) return;
+    if (!canApplyImportedBatch(checked)) return;
     if (applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
@@ -327,7 +338,7 @@ export const FinancePage: React.FC = () => {
     { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason },
     {
       baseline: { '待匯入檔案': '', '原因': '' },
-      enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0)),
+      enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && !canApplyImportedBatch(batchPreview.data)),
       busy: unconfirmedIngestion !== null || importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
       save: ingestWorkbook,
       discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); },
@@ -422,6 +433,10 @@ export const FinancePage: React.FC = () => {
           initialRange={monthlyRange}
           onRangeChange={setMonthlyRange}
           onCase={openCase}
+          onPayableReview={item => {
+            openCase(item.case_no);
+            setPayableReview(item);
+          }}
         />
       )}
 
@@ -446,14 +461,20 @@ export const FinancePage: React.FC = () => {
             </button>
           }
         >
+          {payableReview && <HistoricalPayableEditor
+            key={`${payableReview.case_no}:${payableReview.staff_id}:${payableReview.obligation_identity}`}
+            item={payableReview} onSaved={() => setReload(value => value + 1)}
+          />}
           {cancellationPosted ? <section aria-label="取消結算核銷結果">
             <p role="status">已記錄本次核銷，請查看本案帳務確認最新餘額。</p>
             <button type="button" onClick={() => setCancellationPosted(false)}>查看本案帳務</button>
           </section> : <FinanceCaseAccounting
-            key={bankReview?.row_identity ?? caseDrawer}
+            key={bankReview?.row_identity ?? (payableReview ? `${caseDrawer}:${reload}` : caseDrawer)}
             embedded
             initialCase={caseDrawer}
             initialNoticeStage={caseNotice}
+            onPayableReview={payableReview ? undefined : setPayableReview}
+            reviewObligation={payableReview && (payableReview.balance_ntd ?? 0) > 0 ? payableReview.obligation_identity ?? undefined : undefined}
             bankReconciliation={bankReview ? { row: bankReview, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy } : undefined}
             onIdentity={(caseNo, name) => {
               if (caseNo === caseDrawer) setCaseClientName(name);

@@ -332,7 +332,15 @@ class FinanceImportQueryService:
                 page AS (
                     SELECT * FROM {scope} WHERE {page_where} ORDER BY row_id DESC LIMIT %s
                 )
-                SELECT page.*, SUBSTRING_INDEX(diagnostic.blocker, ':', -1) AS dispatch_reason
+                SELECT page.*, SUBSTRING_INDEX(diagnostic.blocker, ':', -1) AS dispatch_reason,
+                    (
+                        SELECT JSON_EXTRACT(receipt.result_snapshot, CONCAT(
+                            '$.client_receipt_reviews."finance-import-row:',page.row_id,'"'
+                        ))
+                        FROM finance_import_apply_receipts receipt
+                        WHERE receipt.batch_id=page.batch_id
+                        ORDER BY receipt.id DESC LIMIT 1
+                    ) AS recorded_client_receipt_review
                 FROM page
                 LEFT JOIN finance_import_batch_contracts contract
                     ON page.transaction_status='pending' AND contract.batch_id=page.batch_id
@@ -910,18 +918,19 @@ def _enrich_bank_transactions(
                         open_rows = receipt_obligations[resolved_case]
                         target_rows = open_rows
                         bank_amount = _integer_money(row)
-                        if not any(int(item["amount_due_ntd"]) == bank_amount for item in open_rows):
+                        exact_count = sum(int(item["amount_due_ntd"]) == bank_amount for item in open_rows)
+                        if exact_count != 1:
                             month_rows = [
                                 item for item in open_rows
                                 if _is_same_month(row.get("transaction_date"), item.get("due_date"))
                             ]
-                            if len(month_rows) == 1:
+                            if len(month_rows) == 1 and int(month_rows[0]["amount_due_ntd"]) != bank_amount:
                                 review_reason = (
                                     "sinopac_client_receipt_shortfall"
                                     if bank_amount < int(month_rows[0]["amount_due_ntd"])
                                     else "sinopac_client_receipt_overage"
                                 )
-                            elif open_rows and not month_rows and row.get("transaction_date"):
+                            elif open_rows and not month_rows and exact_count == 0 and row.get("transaction_date"):
                                 review_reason = "sinopac_client_receipt_month_no_match"
                         if not open_rows:
                             review_reason = "sinopac_client_receipt_no_open_obligation"
@@ -1084,7 +1093,8 @@ def _enrich_bank_transactions(
             amount = _integer_money(row)
             if c_type == "client_receipt":
                 exact = [item for item in scoped_rows if int(item["amount_due_ntd"]) == amount]
-                selected = exact if exact else month_rows
+                month_exact = [item for item in month_rows if int(item["amount_due_ntd"]) == amount]
+                selected = exact if len(exact) == 1 else month_exact or month_rows
             elif len(month_rows) <= 1:
                 selected = month_rows
             else:
@@ -1122,6 +1132,10 @@ def _bank_transaction(row, cases, reconciliation_target=None):
         "disposition": row["disposition"],
         "review_reason": row["review_reason"],
         "dispatch_reason": row.get("dispatch_reason"),
+        "recorded_client_receipt_review": (
+            _json_dict(row.get("recorded_client_receipt_review")) or None
+            if row["transaction_status"] == "pending" else None
+        ),
         "available_actions": _text_tuple(row["available_actions"]),
         "reference": reference,
         "counterparty_name": row["counterparty_name"],

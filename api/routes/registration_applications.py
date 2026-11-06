@@ -1,4 +1,7 @@
-"""Internal human review of saved LINE demand applications."""
+"""
+File: registration_applications.py
+Description: 非市民需求申請之內部審核與手動新增歷史非市民案件 API。
+"""
 from __future__ import annotations
 
 import json
@@ -21,7 +24,7 @@ from shared_kernel.identities import CorrelationId
 from subsystems.case_import.case_import_workflow import CaseImportWorkflowError
 
 
-router = APIRouter(prefix="/api/v1/admin/registration-applications", tags=["需求申請審核"])
+router = APIRouter(prefix="/api/v1/admin/registration-applications", tags=["非市民申請審核"])
 
 
 class ApplicationField(BaseModel):
@@ -47,6 +50,64 @@ class ApplicationView(BaseModel):
 class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_version: int = Field(ge=1)
+
+
+class VirtualAccountCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    virtual_account: str = Field(min_length=1, max_length=50)
+    case_no: str | None = None
+
+
+class VirtualAccountCheckView(BaseModel):
+    virtual_account: str
+    conflict: bool
+    conflict_case_no: str | None = None
+    conflict_case_status: str | None = None
+    conflict_case_client_name: str | None = None
+    conflict_case_client_phone: str | None = None
+    has_accounting_details: bool = False
+    received_total_ntd: int = 0
+    accounting_description: str = ""
+    cancel_reason: str | None = None
+
+
+class ManualNonCitizenCaseCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    case_no: str = Field(min_length=1, max_length=50)
+    virtual_account: str = Field(min_length=14, max_length=14)
+    name: str = Field(min_length=1, max_length=100)
+    phone: str = Field(min_length=8, max_length=20)
+    gender: str = "女"
+    identity_status: str = "非市民"
+    service_start_date: str = Field(description="YYYY-MM-DD")
+    service_end_date: str | None = None
+    service_days: int = Field(ge=1)
+    service_time: str
+    service_type: str = "連續服務"
+    delivery_type: str = "自然產"
+    residence_type: str = "電梯大樓"
+    baby_info: str = "單胞胎"
+    city: str | None = None
+    address: str | None = None
+    due_month: str | None = None
+    birth_date: str | None = None
+    email: str | None = None
+    line_id: str | None = None
+    notes: str | None = None
+    admin_notes: str | None = None
+    requires_cooking: bool = False
+    refund_bank_code: str | None = None
+    refund_account_no: str | None = None
+    override_conflict: bool = False
+    override_case_no: str | None = None
+
+
+class ManualNonCitizenCaseReceiptView(BaseModel):
+    case_no: str
+    virtual_account: str
+    client_id: int
+    overridden_case_no: str | None = None
+    message: str
 
 
 def _view(snapshot) -> ApplicationView:
@@ -128,4 +189,56 @@ def reject_application(registration_id: int, body: ApprovalRequest, principal=De
     snapshot = _translate(lambda: application.reject_registration(
         registration_id, body.expected_version, admin_actor_context(principal).actor_id))
     return BaseResponse(data=_view(snapshot), message=("申請已到期，問卷內容已清除。"
-        if snapshot.status == "expired" else "需求申請已拒絕，問卷內容已清除。"))
+        if snapshot.status == "expired" else "非市民申請已拒絕，問卷內容已清除。"))
+
+
+@router.post("/manual-non-citizen/check", response_model=BaseResponse[VirtualAccountCheckView])
+def check_manual_non_citizen_account(
+    body: VirtualAccountCheckRequest,
+    principal=Depends(require_admin),
+):
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from subsystems.case_import.non_citizen_registration_application import (
+        check_case_number_duplicate,
+        check_virtual_account_conflict,
+    )
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            if body.case_no and check_case_number_duplicate(cursor, body.case_no.strip()):
+                raise typed_http_error(
+                    422, "validation", "case_no_duplicate",
+                    f"案件編號「{body.case_no.strip()}」已存在，不能與其他案件重複。", uuid4().hex
+                )
+            result = check_virtual_account_conflict(cursor, body.virtual_account.strip(), body.case_no.strip() if body.case_no else None)
+            return BaseResponse(data=VirtualAccountCheckView(**result))
+    except ValueError as exc:
+        raise typed_http_error(422, "validation", "invalid_input", str(exc), uuid4().hex) from exc
+    finally:
+        connection.close()
+
+
+@router.post("/manual-non-citizen", response_model=BaseResponse[ManualNonCitizenCaseReceiptView])
+def create_manual_non_citizen(
+    body: ManualNonCitizenCaseCreateRequest,
+    principal=Depends(require_admin),
+):
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from subsystems.case_import.non_citizen_registration_application import create_manual_non_citizen_case
+    actor = admin_actor_context(principal).actor_id
+    connection = get_connection()
+    try:
+        result = create_manual_non_citizen_case(connection, body.model_dump(), actor)
+        return BaseResponse(
+            data=ManualNonCitizenCaseReceiptView(**result),
+            message=result["message"],
+        )
+    except ValueError as exc:
+        raise typed_http_error(422, "validation", "manual_non_citizen_invalid", str(exc), uuid4().hex) from exc
+    except CaseImportWorkflowError as exc:
+        raise typed_http_error(
+            422, "domain_blocked", exc.error.code, f"建案失敗：{exc.error.message}",
+            exc.error.correlation_id.value
+        ) from exc
+    finally:
+        connection.close()

@@ -82,13 +82,13 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
     let receipt;
     try { receipt = await historicalServiceAccountingClient.apply(checked, checkedInputs, reason.trim()); }
     catch (error) { const rejected = error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429; setOutcomeUnknown(!rejected); throw error; }
-    setPreview(checked); unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。');
+    setPreview(checked); unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數已儲存。若帳務有差異，請從本案正式帳務流程處理。');
     onSaved?.();
   }
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
     <h2>🧮 歷史訂單實際服務天數與帳務</h2>
-    <p>只填每位月嫂的實際服務天數；系統會自動重算月嫂應付，已有付款紀錄時則建立差額，不改動歷史訂單完成狀態。</p>
+    <p>填寫每位月嫂的實際服務天數。重算金額供核對，原期款和核銷紀錄依正式帳務查閱。</p>
     <div className="import-result-title-row">
       {propCaseNo ? (
         <div>
@@ -109,12 +109,12 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>
       {facts.assignments.map((item) => <label key={item.assignment_identity} style={{ display: 'block', marginBottom: 8 }}>{staffIdentity.label(item.staff_id, item.staff_name)}實際服務天數 <input type="number" min="1" step="1" value={days[item.assignment_identity] ?? ''} disabled={busy || outcomeUnknown} onChange={(event) => { setDays((current) => ({ ...current, [item.assignment_identity]: event.target.value })); setPreview(null); }} /></label>)}
       <label>更新原因（選填）<input value={reason} maxLength={500} disabled={busy || outcomeUnknown} onChange={event => setReason(event.target.value)} /></label>
-      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(save)}>儲存服務天數與帳務</button>
+      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(save)}>儲存服務天數</button>
     </div>}
     {preview && <div className="import-result-state" role="status">
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
-      <p>客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
-      {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>{staffIdentity.label(item.staff_id, facts?.assignments.find(person => person.staff_id === item.staff_id)?.staff_name)}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
+      <p>重算供比較：客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元，月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
+      {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>{staffIdentity.label(item.staff_id, facts?.assignments.find(person => person.staff_id === item.staff_id)?.staff_name)}：{item.actual_service_days} 天，重算 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
     </div>}
     {outcomeUnknown && <p role="alert">儲存結果尚未確認；請重新查詢服務帳務並核對目前資料，勿重複送出。</p>}
     {message && <p role="alert">{message}</p>}

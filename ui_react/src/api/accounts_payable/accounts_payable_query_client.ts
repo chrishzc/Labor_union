@@ -5,13 +5,19 @@
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
-import { AccountsPayableResponseSchema, CaseStaffPayableAuditResponseSchema, type AccountsPayablePreview, type CaseStaffPayableAudit } from './accounts_payable_query_schemas';
+import { AccountsPayableResponseSchema, CaseStaffPayableAuditResponseSchema, HistoricalPayableLookupResponseSchema, type AccountsPayablePreview, type CaseStaffPayableAudit, type HistoricalPayableAuditItem } from './accounts_payable_query_schemas';
 import { AccountsPayableQueryError, mapAccountsPayableQueryError } from './accounts_payable_query_errors';
 export interface AccountsPayableQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface AccountsPayableQueryClient {
   query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview>;
   queryCase(caseNo: string, targetMonth: string, options?: AccountsPayableQueryOptions): Promise<CaseStaffPayableAudit>;
+  lookupHistorical(keyword: string, targetMonth: string, signal?: AbortSignal): Promise<HistoricalPayableAuditItem[]>;
+  recordHistoricalUnpaid(caseNo: string, command: HistoricalUnpaidPayableCommand): Promise<void>;
 }
+export type HistoricalUnpaidPayableCommand = {
+  staff_id: number; obligation_identity: string | null; expected_event_id: number | null;
+  amount_ntd: number; due_date: string | null; evidence: string; confirmed_unpaid: true; key: string;
+};
 
 let correlationSequence = 0;
 
@@ -21,6 +27,19 @@ function nextCorrelationId(): string {
 }
 
 class DefaultAccountsPayableQueryClient implements AccountsPayableQueryClient {
+  async lookupHistorical(keyword: string, targetMonth: string, signal?: AbortSignal) {
+    const raw = await transport.get<unknown>('/api/v1/finance-reports/accounts-payable/historical-lookup', {
+      signal, token: sessionClient.getToken(), params: { keyword, target_month: targetMonth },
+    });
+    return HistoricalPayableLookupResponseSchema.parse(raw).data;
+  }
+
+  async recordHistoricalUnpaid(caseNo: string, command: HistoricalUnpaidPayableCommand) {
+    await transport.post(`/api/v1/orders/${encodeURIComponent(caseNo)}/payroll/historical-unpaid-payable`, command, {
+      token: sessionClient.getToken(),
+    });
+  }
+
   async query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview> {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_VALIDATION', 'targetMonth必須是YYYY-MM。');
     const token = sessionClient.getToken();

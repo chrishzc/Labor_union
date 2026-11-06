@@ -16,6 +16,60 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
   success: z.literal(true), message: z.string(), data: schema, error: z.null(),
 });
 export type RegistrationApplication = z.infer<typeof view>;
+
+const virtualAccountCheckView = z.strictObject({
+  virtual_account: z.string(),
+  conflict: z.boolean(),
+  conflict_case_no: z.string().nullable(),
+  conflict_case_status: z.string().nullable(),
+  conflict_case_client_name: z.string().nullable(),
+  conflict_case_client_phone: z.string().nullable(),
+  has_accounting_details: z.boolean(),
+  received_total_ntd: z.number().int(),
+  accounting_description: z.string(),
+  cancel_reason: z.string().nullable(),
+});
+export type VirtualAccountCheckResult = z.infer<typeof virtualAccountCheckView>;
+
+export interface ManualNonCitizenCaseInput {
+  case_no: string;
+  virtual_account: string;
+  name: string;
+  phone: string;
+  gender?: string;
+  identity_status?: string;
+  service_start_date: string;
+  service_end_date?: string | null;
+  service_days: number;
+  service_time: string;
+  service_type?: string;
+  delivery_type?: string;
+  residence_type?: string;
+  baby_info?: string;
+  city?: string;
+  address?: string;
+  due_month?: string;
+  birth_date?: string;
+  email?: string;
+  line_id?: string;
+  notes?: string;
+  admin_notes?: string;
+  requires_cooking?: boolean;
+  refund_bank_code?: string;
+  refund_account_no?: string;
+  override_conflict?: boolean;
+  override_case_no?: string | null;
+}
+
+const manualCaseReceiptView = z.strictObject({
+  case_no: z.string(),
+  virtual_account: z.string(),
+  client_id: z.number().int(),
+  overridden_case_no: z.string().nullable(),
+  message: z.string(),
+});
+export type ManualNonCitizenCaseReceipt = z.infer<typeof manualCaseReceiptView>;
+
 const path = '/api/v1/admin/registration-applications';
 const options = () => {
   const token = sessionClient.getToken();
@@ -43,5 +97,13 @@ export const registrationApplicationsClient = {
     if (result.registration_id !== application.registration_id || !result.approved) throw new Error('核准結果尚未確認，請重新查詢同一筆申請。');
     if (result.registration_kind === 'non_citizen' && (!result.case_no || !result.approved_at_utc)) throw new Error('正式案件尚未確認，請重新查詢同一筆申請。');
     return result;
+  },
+  async checkAccount(virtualAccount: string, caseNo?: string): Promise<VirtualAccountCheckResult> {
+    return decodePayload(envelope(virtualAccountCheckView), await transport.post(`${path}/manual-non-citizen/check`,
+      { virtual_account: virtualAccount, case_no: caseNo || null }, options())).data;
+  },
+  async createManualNonCitizen(input: ManualNonCitizenCaseInput): Promise<ManualNonCitizenCaseReceipt> {
+    return decodePayload(envelope(manualCaseReceiptView), await transport.post(`${path}/manual-non-citizen`,
+      input, options())).data;
   },
 };

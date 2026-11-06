@@ -11,10 +11,7 @@ import json
 from typing import Any, Mapping
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
-from domains.finance_import.transaction_fingerprint import (
-    build_dedup_fingerprint,
-    canonical_fact_differences,
-)
+from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 
 
 def _json_default(value: Any) -> str:
@@ -163,8 +160,10 @@ def stage_finance_rows(
     cursor: Any,
     normalized_result: Mapping[str, Any],
     identity_maps: Mapping[str, Any],
+    *,
+    business_only: bool = False,
 ) -> dict[str, Any]:
-    """Stage every normalized row before classification; never commit or reconcile."""
+    """Stage new bank facts and count repeat fingerprints without writing a second occurrence."""
     assert callable(getattr(cursor, "execute", None)), "cursor must provide execute()"
     if not isinstance(normalized_result, Mapping):
         raise ValueError("normalized_result must be a mapping")
@@ -204,7 +203,10 @@ def stage_finance_rows(
         raise RuntimeError("finance import batch id was not generated")
 
     staged_rows = []
-    fingerprints_in_batch: set[str] = set()
+    columns = "id" if business_only else (
+        "id, classification_type, matched_identity_ids, "
+        "resolved_counterparty_account, reconciliation_status"
+    )
     for row in rows:
         if not isinstance(row, Mapping):
             raise ValueError("each normalized row must be a mapping")
@@ -213,74 +215,32 @@ def stage_finance_rows(
 
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
-            """SELECT id, classification_type, matched_identity_ids,
-                      resolved_counterparty_account, reconciliation_status,
-                      source_reference, posting_date, value_date, currency,
-                      counterparty_name, counterparty_account, bank_references,
-                      EXISTS(SELECT 1 FROM finance_import_dispatch_events AS dispatch
-                             WHERE dispatch.finance_import_row_id=finance_import_rows.id
-                             AND dispatch.outcome IN ('reconciled','existing')) AS has_formal_reference
-               FROM finance_import_rows
-               WHERE dedup_fingerprint=%s FOR UPDATE""",
+            f"SELECT {columns} FROM finance_import_rows WHERE dedup_fingerprint=%s FOR UPDATE",
             (dedup_fingerprint,),
         )
         existing = cursor.fetchone()
-        duplicate_in_batch = dedup_fingerprint in fingerprints_in_batch
-        fingerprints_in_batch.add(dedup_fingerprint)
-
         if existing is not None:
             if not isinstance(existing, Mapping):
                 raise TypeError("cursor must return mapping rows")
-            occurrence_warnings = list(row.get("warnings") or [])
-            if duplicate_in_batch and "duplicate_fingerprint_in_same_batch" not in occurrence_warnings:
-                occurrence_warnings.append("duplicate_fingerprint_in_same_batch")
-            cursor.execute(
-                """INSERT INTO finance_import_occurrences (
-                       batch_id, finance_import_row_id, source_file,
-                       sheet_name, source_row, warnings
-                   ) VALUES (%s,%s,%s,%s,%s,%s)""",
-                (
-                    batch_id,
-                    existing["id"],
-                    row.get("source_file"),
-                    row.get("sheet_name"),
-                    row.get("source_row"),
-                    _json(occurrence_warnings),
-                ),
-            )
-            occurrence_id = cursor.lastrowid
-            differences = canonical_fact_differences(dict(existing), dict(row))
-            if differences:
-                codes = ["fingerprint_collision"]
-                if existing["has_formal_reference"]:
-                    codes.append("formal_reference_conflict")
-                for code in codes:
-                    cursor.execute(
-                        "INSERT INTO finance_import_integrity_events "
-                        "(batch_id,finance_import_row_id,issue_code,active,"
-                        "evidence_snapshot,source_event_identity) VALUES (%s,%s,%s,1,%s,%s)",
-                        (
-                            batch_id, existing["id"], code,
-                            _json({"occurrence_id": occurrence_id, "differing_fields": differences}),
-                            f"finance-import:occurrence:{occurrence_id}:{code}",
-                        ),
-                    )
-            staged_rows.append(
-                {
-                    "row_id": existing["id"],
-                    "dedup_fingerprint": dedup_fingerprint,
-                    "classification_type": existing["classification_type"],
-                    "matched_identity_ids": _matched_identity_ids(
-                        existing["matched_identity_ids"]
-                    ),
-                    "resolved_counterparty_account": existing[
-                        "resolved_counterparty_account"
-                    ],
-                    "reconciliation_status": existing["reconciliation_status"],
-                    "result": "skipped_existing",
-                }
-            )
+            skipped = {
+                "row_id": existing["id"],
+                "dedup_fingerprint": dedup_fingerprint,
+                "result": "skipped_existing",
+            }
+            if not business_only:
+                skipped.update(
+                    classification_type=existing["classification_type"],
+                    matched_identity_ids=_matched_identity_ids(existing["matched_identity_ids"]),
+                    resolved_counterparty_account=existing["resolved_counterparty_account"],
+                    reconciliation_status=existing["reconciliation_status"],
+                )
+            staged_rows.append(skipped)
             continue
+
+        if business_only:
+            classification = classify_row_with_identity_maps(row, identity_maps)
+            if classification["classification_type"] == "non_business_review":
+                continue
 
         cursor.execute(
             """INSERT INTO finance_import_rows (
@@ -342,7 +302,8 @@ def stage_finance_rows(
             ),
         )
 
-        classification = classify_row_with_identity_maps(row, identity_maps)
+        if not business_only:
+            classification = classify_row_with_identity_maps(row, identity_maps)
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])
         resolved_counterparty_account = classification.get("resolved_counterparty_account")

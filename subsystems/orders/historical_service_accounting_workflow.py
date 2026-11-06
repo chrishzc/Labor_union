@@ -1,6 +1,6 @@
 """
 File: historical_service_accounting_workflow.py
-Description: 協調歷史訂單每位服務人員服務天數與薪資帳務的跨領域建立與套用流程。
+Description: 保存歷史訂單實際服務天數與帳務比較結果。
 """
 
 from __future__ import annotations
@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from hashlib import sha256
 from typing import Callable, Protocol
 
 from domains.client_finance.historical_obligation_calculation import (
@@ -31,10 +30,6 @@ from domains.payroll.historical_calculation import (
     HistoricalAssignmentServiceFacts,
     HistoricalCasePayrollCandidate,
     build_historical_case_payroll_candidate,
-)
-from domains.payroll.payment_due_date import (
-    calculate_staff_payment_due_date,
-    is_full_subsidy_eligible,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -129,7 +124,6 @@ class HistoricalServiceAccountingCandidate:
     service_days: HistoricalActualServiceDaysCandidate
     payroll: HistoricalCasePayrollCandidate
     client_finance: HistoricalClientObligationCandidate
-    staff_payment_due_date: date
     fingerprint: PreviewFingerprint
 
 
@@ -249,48 +243,6 @@ class HistoricalServiceAccountingWorkflow:
             )
         return self._repository.persist(request, candidate)
 
-    def establish_default_in_current_unit_of_work(
-        self,
-        *,
-        case_no: str,
-        source_identity: str,
-        actor: str,
-        correlation_id: str,
-    ) -> HistoricalServiceAccountingReceipt | None:
-        facts = self._repository.load(case_no, for_update=True)
-        if facts.historical_day_revision > 0:
-            return None
-        if len(facts.assignments) != 1:
-            raise ValueError("historical_default_accounting_requires_one_staff")
-        assignment = facts.assignments[0]
-        intent = ConfirmHistoricalServiceDaysIntent(
-            case_no,
-            (
-                HistoricalActualServiceDaysInput(
-                    assignment.assignment_identity,
-                    assignment.staff_id,
-                    facts.contracted_service_days,
-                ),
-            ),
-        )
-        candidate = _candidate(facts, intent)
-        digest = sha256(source_identity.encode("utf-8")).hexdigest()
-        return self.apply_in_current_unit_of_work(
-            ApplyHistoricalServiceAccounting(
-                intent,
-                facts.lifecycle_version,
-                facts.historical_day_revision,
-                facts.client_finance_version,
-                facts.payroll_version,
-                candidate.fingerprint,
-                IdempotencyKey(f"historical-default-accounting:{digest}"),
-                ActorContext(actor),
-                "依歷史訂單原服務天數建立預設帳務",
-                CorrelationId(correlation_id),
-            )
-        )
-
-
 def _candidate(
     facts: HistoricalServiceAccountingFacts,
     intent: ConfirmHistoricalServiceDaysIntent,
@@ -343,13 +295,6 @@ def _candidate(
         service_hours_per_day=_decimal_hours(facts.service_hours_per_day),
         historical_floor_fee=MoneyNTD(service_days.historical_floor_fee_ntd),
     )
-    calculated_due_date = calculate_staff_payment_due_date(
-        facts.completed_on,
-        client_finance.total_receivable.amount,
-        is_full_subsidy_eligible(facts.client_identity_status)
-        and client_finance.total_receivable.is_zero,
-    )
-    staff_payment_due_date = facts.staff_payment_due_date or calculated_due_date
     payload = {
         "case_no": facts.case_no,
         "lifecycle_status": facts.lifecycle_status.value,
@@ -362,14 +307,13 @@ def _candidate(
         "service_days_fingerprint": service_days.fingerprint.value,
         "payroll_fingerprint": payroll.fingerprint.value,
         "client_finance_fingerprint": client_finance.fingerprint.value,
-        "staff_payment_due_date": staff_payment_due_date.isoformat(),
+        "staff_payment_due_date": facts.staff_payment_due_date.isoformat() if facts.staff_payment_due_date else None,
     }
     return HistoricalServiceAccountingCandidate(
         facts,
         service_days,
         payroll,
         client_finance,
-        staff_payment_due_date,
         fingerprint_payload(payload),
     )
 

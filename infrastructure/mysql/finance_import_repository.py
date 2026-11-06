@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import asdict
 from decimal import Decimal
 import hashlib
 import json
@@ -17,6 +18,8 @@ from domains.finance_import.correction import (
     FinanceOwningDomain,
 )
 from domains.finance_import.planning import (
+    ClientReceiptReviewCandidate,
+    ClientReceiptReviewDiagnostic,
     CanonicalFinanceImportRow,
     FinanceClassificationType,
     FinanceImportBatchFacts,
@@ -159,6 +162,10 @@ class MySqlFinanceImportRepository:
         with _mysql_cursor(self._connection) as cursor:
             payload = _apply_receipt_payload(receipt)
             payload["history"] = {"pending_count": batch_review_count(cursor, batch_id)}
+            if stored.client_receipt_reviews:
+                payload["client_receipt_reviews"] = {
+                    row_identity: asdict(review) for row_identity, review in stored.client_receipt_reviews
+                }
             cursor.execute(
                 _APPLY_RECEIPT_INSERT_SQL,
                 (
@@ -388,9 +395,11 @@ def _load_batch_facts(cursor, batch_identity, for_update):
             for row in raw_rows
         )
     )
+    receipt_duplicates = header.get("receipt_duplicate_count")
+    duplicate_count = int(counts["duplicate_occurrence_count"] if receipt_duplicates is None else receipt_duplicates)
     batch_occurrences_total = (
         int(counts["canonical_created_count"])
-        + int(counts["duplicate_occurrence_count"])
+        + duplicate_count
         + int(counts["source_review_occurrence_count"])
     )
     effective_row_count = int(header["row_count"])
@@ -402,7 +411,7 @@ def _load_batch_facts(cursor, batch_identity, for_update):
         int(header["batch_version"]),
         effective_row_count,
         int(counts["canonical_created_count"]),
-        int(counts["duplicate_occurrence_count"]),
+        duplicate_count,
         str(header["source_content_digest"]),
         str(header["classifier_version"]),
         str(header["fingerprint_version"]),
@@ -618,6 +627,12 @@ def _stored_apply_receipt(row):
     return StoredFinanceImportReceipt(
         PreviewFingerprint(str(row["command_fingerprint"])),
         receipt,
+        tuple(
+            (row_identity, ClientReceiptReviewDiagnostic(
+                review["reason"], tuple(ClientReceiptReviewCandidate(**item) for item in review["candidates"]),
+            ))
+            for row_identity, review in sorted(payload.get("client_receipt_reviews", {}).items())
+        ),
     )
 
 
@@ -826,7 +841,10 @@ _BATCH_HEADER_SQL = (
     "SELECT contract.batch_id,contract.batch_identity,"
     "contract.source_content_digest,contract.classifier_version,"
     "contract.fingerprint_version,contract.batch_version,batch.row_count,"
-    "batch.status FROM finance_import_batch_contracts AS contract "
+    "batch.status,(SELECT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.duplicate_occurrence_count')),'null') "
+    "FROM finance_import_ingestion_receipts AS receipt WHERE receipt.batch_id=batch.id "
+    "ORDER BY receipt.id DESC LIMIT 1) AS receipt_duplicate_count "
+    "FROM finance_import_batch_contracts AS contract "
     "JOIN finance_import_batches AS batch ON batch.id=contract.batch_id "
     "WHERE contract.batch_identity=%s"
 )

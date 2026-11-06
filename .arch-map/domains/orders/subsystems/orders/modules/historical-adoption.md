@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納、檔外取消與基準帳務共用同一 outer UoW。歷史完成訂單依 Orders 原 `service_days × service_hours_per_day` 建立基準帳務，不推測逐日排假。
+將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納與檔外取消共用同一 outer UoW。採納保留原帳務，不建立基準義務或推測逐日排假。
 
 ## Implementation
 - primary:
@@ -40,7 +40,6 @@
 ## Dependencies
 - outbound: `scheduling/matching-coordination` — discussion＋開始日空白＋唯一月嫂來源透過 typed borrowed-transaction port 建立正式 proposed Matching plan；其他來源不得製造 Matching root。
 - outbound: `anomalies/anomalies` — committed review evidence由 `subsystems/orders/historical_order_adoption_outbox_consumer.py`確認投遞；歷史服務日曆未確認維持 owner review，不建立推測帳務。
-- outbound: `orders/historical-service-accounting`、`payroll/historical-service-accounting`、`client-finance/historical-service-accounting` — 歷史完成訂單採納時使用唯一月嫂與 Orders 原服務天數，在同一 outer UoW 建立基準帳務；不建立逐日服務日。
 - outbound: `orders/service-date-confirmation` — 只有歷史未服務／服務中案件明確重啟後，才由正常流程建立正式服務日；歷史完成訂單的天數修正留在 `orders/historical-service-accounting`。
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 

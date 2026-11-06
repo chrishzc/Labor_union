@@ -50,10 +50,10 @@ export const ClientRegistryPage: React.FC = () => {
     <div className="client-registry-tabs" role="tablist" aria-label="客戶名冊檢視">
       <button type="button" role="tab" aria-selected={activeTab === 'roster'} onClick={() => selectTab('roster')}>客戶清單</button>
       <button type="button" role="tab" aria-selected={activeTab === 'virtual-accounts'} onClick={() => selectTab('virtual-accounts')}>虛擬帳號匯入</button>
-      <button type="button" role="tab" aria-selected={activeTab === 'applications'} onClick={() => selectTab('applications')}>待核准需求</button>
+      <button type="button" role="tab" aria-selected={activeTab === 'applications'} onClick={() => selectTab('applications')}>非市民申請</button>
       <button type="button" role="tab" aria-selected={activeTab === 'profile-requests'} onClick={() => selectTab('profile-requests')}>資料異動審核</button>
     </div>
-    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'applications' ? '待核准需求' : activeTab === 'profile-requests'?'資料異動審核':'虛擬帳號匯入'}>
+    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'applications' ? '非市民申請' : activeTab === 'profile-requests'?'資料異動審核':'虛擬帳號匯入'}>
       {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : activeTab === 'applications' ? <RegistrationApplications key={location.registration} initialId={location.registration?Number(location.registration):undefined} onEditStateChange={onEditStateChange} /> : activeTab === 'profile-requests' ? <ClientProfileRequestWorkbench key={location.requestId} requestId={location.requestId}/> : <LegacyVirtualAccountImport />}
     </section>
   </div></>;

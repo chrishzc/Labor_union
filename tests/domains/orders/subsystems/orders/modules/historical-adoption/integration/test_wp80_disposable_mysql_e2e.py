@@ -15,7 +15,7 @@ from infrastructure.mysql.historical_order_adoption_repository import MySqlHisto
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from .historical_accounting_fixture import default_accounting, seed_accounting_basis
+from .historical_accounting_fixture import seed_accounting_basis
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
@@ -47,7 +47,6 @@ def test_historical_order_apply_is_atomic_and_replays():
             MySqlHistoricalOrderAdoptionRepository(connection),
             lambda: MySqlUnitOfWork(connection),
             MySqlHistoricalAssignmentWriter(connection),
-            default_accounting=default_accounting(connection),
         )
         preview = workflow.preview(row)
         request = HistoricalOrderAdoptionRequest(
@@ -132,6 +131,13 @@ def _assert_persisted(connection, case_no, staff_id, key):
             (assignment["id"],),
         )
         assert int(cursor.fetchone()["count"]) == 1
+        for statement in (
+            "SELECT COUNT(*) AS count FROM client_obligations WHERE case_no=%s",
+            "SELECT COUNT(*) AS count FROM staff_obligations WHERE case_no=%s",
+            "SELECT COUNT(*) AS count FROM historical_service_day_events WHERE case_no=%s",
+        ):
+            cursor.execute(statement, (case_no,))
+            assert cursor.fetchone()["count"] == 0
         cursor.execute(
             "SELECT COUNT(*) AS count FROM historical_order_adoption_outbox WHERE receipt_id IN "
             "(SELECT id FROM historical_order_adoption_receipts WHERE idempotency_key=%s)",

@@ -875,6 +875,7 @@ def _row_payload(row):
         "integrity_violations": list(row.integrity_violations),
         "fingerprint_collision": row.fingerprint_collision,
         "formal_reference_conflict": row.formal_reference_conflict,
+        "client_receipt_review": _materialize(row.client_receipt_review),
     }
 
 

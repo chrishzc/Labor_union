@@ -61,8 +61,8 @@ class _Repository:
         return HistoricalServiceAccountingReceipt(
             "CASE-19",
             1,
-            3,
-            5,
+            candidate.facts.client_finance_version,
+            candidate.facts.payroll_version,
             candidate.service_days.total_actual_service_days,
             candidate.client_finance.total_receivable.amount,
             candidate.payroll.total_payable.amount,
@@ -127,7 +127,10 @@ def test_query_preview_apply_expose_server_owned_count_accounting():
         },
     )
     assert apply.status_code == 200
-    assert apply.json()["data"]["resulting_historical_day_revision"] == 1
+    receipt = apply.json()["data"]
+    assert receipt["resulting_historical_day_revision"] == 1
+    assert receipt["resulting_client_finance_version"] == 2
+    assert receipt["resulting_payroll_version"] == 4
 
 
 def test_preview_rejects_missing_assignment_day_count():

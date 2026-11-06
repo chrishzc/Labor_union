@@ -15,7 +15,7 @@ it('名冊深連結直接讀取不在第一頁的需求申請，開頁不核准'
  const detail=vi.spyOn(registrationApplicationsClient,'detail').mockResolvedValue({...applicationLifecycle,registration_id:73,version:1,name:'測試需求',phone:'',approved:false,fields:[],registration_kind:'subsidy',case_no:null,approved_at_utc:null});
  const approve=vi.spyOn(registrationApplicationsClient,'approve');
  render(<ClientRegistryPage/>);await screen.findByRole('heading',{name:'申請 73：測試需求'});
- expect(screen.getByRole('tab',{name:'待核准需求'})).toHaveAttribute('aria-selected','true');
+ expect(screen.getByRole('tab',{name:'非市民申請'})).toHaveAttribute('aria-selected','true');
  expect(detail).toHaveBeenCalledWith(73);expect(approve).not.toHaveBeenCalled();
 });
 it('資料異動依指定申請單獨讀取，不受待審核清單分頁影響，核准仍走原 writer',async()=>{

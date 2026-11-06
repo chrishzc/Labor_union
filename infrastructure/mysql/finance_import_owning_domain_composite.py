@@ -20,6 +20,8 @@ from domains.client_finance.client_refund_reversal import (
 from domains.finance_import.correction import FinanceImportCorrectionCandidate
 from domains.finance_import.planning import (
     CanonicalFinanceImportRow,
+    ClientReceiptReviewCandidate,
+    ClientReceiptReviewDiagnostic,
     FinanceClassificationType,
     FinanceImportDisposition,
 )
@@ -328,6 +330,10 @@ def _resolve_client_receipt(connection, candidate):
         )
     # 2026-11-05 人工裁決：非精確匹配（未完全相符）時比對月份
     if trans_date is None:
+        if case_no is not None:
+            return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
+                "sinopac_client_receipt_transaction_date_missing",
+            ))
         return candidate
     try:
         with connection.cursor() as cursor:
@@ -340,22 +346,27 @@ def _resolve_client_receipt(connection, candidate):
     except StopIteration:
         return candidate
     if not open_rows:
-        return candidate
+        return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
+            "sinopac_client_receipt_no_open_obligation",
+        ))
     month_matched = [
         row for row in open_rows
         if _is_same_month(trans_date, row.get("due_date"))
     ]
+    month_exact = [
+        row for row in month_matched if int(row["amount_due_ntd"]) == candidate.amount.amount
+    ]
+    if len(month_exact) == 1:
+        return _ready_candidate(
+            candidate,
+            (str(month_exact[0]["obligation_identity"]),),
+            "exact-open-client-obligation-in-transaction-month",
+        )
     if len(month_matched) == 1:
         target = str(month_matched[0]["obligation_identity"])
         due_amount = int(month_matched[0]["amount_due_ntd"])
         diff = candidate.amount.amount - due_amount
-        diff_tag = (
-            f"diff_over:{diff}"
-            if diff > 0
-            else f"diff_under:{abs(diff)}"
-            if diff < 0
-            else "diff_zero"
-        )
+        diff_tag = f"diff_over:{diff}" if diff > 0 else f"diff_under:{abs(diff)}"
         evidence = tuple(
             sorted(
                 set((
@@ -365,7 +376,9 @@ def _resolve_client_receipt(connection, candidate):
                 ))
             )
         )
-        return replace(candidate, target_identities=(target,), evidence=evidence)
+        reason = "sinopac_client_receipt_overage" if diff > 0 else "sinopac_client_receipt_shortfall"
+        return replace(candidate, target_identities=(target,), evidence=evidence,
+                       client_receipt_review=ClientReceiptReviewDiagnostic(reason))
     if len(month_matched) > 1:
         targets = tuple(
             sorted(str(row["obligation_identity"]) for row in month_matched)
@@ -373,8 +386,19 @@ def _resolve_client_receipt(connection, candidate):
         evidence = tuple(
             sorted(set((*candidate.evidence, "month-matched-client-obligations")))
         )
-        return replace(candidate, target_identities=targets, evidence=evidence)
-    return candidate
+        if len(month_exact) > 1:
+            diagnostic = ClientReceiptReviewDiagnostic(
+                "sinopac_client_receipt_multiple_same_month_exact",
+                tuple(ClientReceiptReviewCandidate(
+                    str(row["obligation_identity"]), str(row["obligation_type"]), str(row["due_date"]),
+                ) for row in month_exact),
+            )
+        else:
+            diagnostic = ClientReceiptReviewDiagnostic("sinopac_client_receipt_multiple_month_candidates")
+        return replace(candidate, target_identities=targets, evidence=evidence, client_receipt_review=diagnostic)
+    return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
+        "sinopac_client_receipt_month_no_match",
+    ))
 
 
 def _virtual_account_case_info(connection, row_identity):
@@ -400,7 +424,7 @@ def _virtual_account_case_info(connection, row_identity):
 
 def _client_receipt_open_obligations_query(client_id, case_no):
     base = (
-        "SELECT obligation.obligation_identity,obligation.due_date,obligation.amount_due_ntd "
+        "SELECT obligation.obligation_identity,obligation.due_date,obligation.amount_due_ntd,obligation.obligation_type "
         "FROM client_obligations obligation "
     )
     predicates = (

@@ -16,6 +16,7 @@ interface Props {
   caseNo: string;
   clientItems: CaseAccounting['client_items'];
   staffItems: AccountingItem[];
+  initialStaffObligation?: string;
   subsidyNtd?: number;
   onSuccess: (updated: CaseAccounting) => void;
   onClose: () => void;
@@ -25,6 +26,7 @@ export function CaseManualSupplementWorkbench({
   caseNo,
   clientItems,
   staffItems,
+  initialStaffObligation,
   subsidyNtd = 0,
   onSuccess,
   onClose,
@@ -33,7 +35,9 @@ export function CaseManualSupplementWorkbench({
   const dirGroupId = useId();
 
   const [bank, setBank] = useState<'sinopac' | 'taishin'>('sinopac');
-  const [direction, setDirection] = useState<'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy'>('client_receipt');
+  const [direction, setDirection] = useState<'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy'>(
+    initialStaffObligation ? 'staff_salary' : 'client_receipt',
+  );
 
   // 計算候選期款項目
   const stageNames: Record<string, string> = { deposit: '訂金', first: '第一期', second: '第二期' };
@@ -73,8 +77,11 @@ export function CaseManualSupplementWorkbench({
     ];
   }
 
-  const [targetItem, setTargetItem] = useState<string>(candidateItems[0]?.identity || '');
-  const [amount, setAmount] = useState<string>(String(candidateItems[0]?.remaining || ''));
+  const initialTarget = initialStaffObligation
+    ? candidateItems.find(item => item.identity === initialStaffObligation)
+    : candidateItems[0];
+  const [targetItem, setTargetItem] = useState<string>(initialTarget?.identity ?? '');
+  const [amount, setAmount] = useState<string>(String(initialTarget?.remaining || ''));
   const [transactionDate, setTransactionDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );

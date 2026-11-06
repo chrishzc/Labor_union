@@ -66,20 +66,6 @@ class _Repository:
         )
 
 
-class _Accounting:
-    def __init__(self) -> None:
-        self.calls = []
-
-    def establish_default_in_current_unit_of_work(self, **values):
-        self.calls.append(values)
-
-
-class _RejectedAccounting(_Accounting):
-    def establish_default_in_current_unit_of_work(self, **values):
-        super().establish_default_in_current_unit_of_work(**values)
-        raise ValueError("historical_default_accounting_blocked")
-
-
 def _facts(*, end=date(2026, 9, 21), version=7):
     return HistoricalServiceCompletionFacts(
         "115000069",
@@ -102,30 +88,22 @@ def _request(*, version=7, evaluation=date(2026, 9, 22)):
     )
 
 
-def test_due_historical_service_advances_and_establishes_accounting_in_one_unit() -> None:
+def test_due_historical_service_advances_without_an_accounting_writer() -> None:
     repository = _Repository(_facts())
-    accounting = _Accounting()
     unit = _Unit()
 
     receipt = HistoricalServiceCompletionApplyWorkflow(
-        repository, lambda: unit, accounting
+        repository, lambda: unit
     ).apply(_request())
 
     assert receipt.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
     assert receipt.resulting_order_version == 8
     assert unit.committed is True
     assert len(repository.persisted) == 1
-    assert accounting.calls == [{
-        "case_no": "115000069",
-        "source_identity": "historical-source:115000069",
-        "actor": "system:historical-service-completion",
-        "correlation_id": "historical-service-completion:115000069:7",
-    }]
 
 
 def test_end_date_equal_to_business_date_does_not_advance() -> None:
     repository = _Repository(_facts(end=date(2026, 9, 22)))
-    accounting = _Accounting()
     unit = _Unit()
 
     with pytest.raises(
@@ -133,12 +111,11 @@ def test_end_date_equal_to_business_date_does_not_advance() -> None:
         match="historical_service_completion_not_due",
     ):
         HistoricalServiceCompletionApplyWorkflow(
-            repository, lambda: unit, accounting
+            repository, lambda: unit
         ).apply(_request())
 
     assert unit.committed is False
     assert repository.persisted == []
-    assert accounting.calls == []
 
 
 def test_version_drift_fails_closed_before_persistence() -> None:
@@ -150,23 +127,28 @@ def test_version_drift_fails_closed_before_persistence() -> None:
         match="historical_service_completion_candidate_stale",
     ):
         HistoricalServiceCompletionApplyWorkflow(
-            repository, lambda: unit, _Accounting()
+            repository, lambda: unit
         ).apply(_request(version=7))
 
     assert unit.committed is False
     assert repository.persisted == []
 
 
-def test_accounting_failure_prevents_transaction_commit() -> None:
-    repository = _Repository(_facts())
+def test_completion_write_failure_prevents_transaction_commit() -> None:
+    class RejectingRepository(_Repository):
+        def persist_service_completion(self, request, candidate):
+            super().persist_service_completion(request, candidate)
+            raise RuntimeError("completion_write_failed")
+
+    repository = RejectingRepository(_facts())
     unit = _Unit()
 
     with pytest.raises(
-        HistoricalServiceCompletionApplyError,
-        match="historical_default_accounting_blocked",
+        RuntimeError,
+        match="completion_write_failed",
     ):
         HistoricalServiceCompletionApplyWorkflow(
-            repository, lambda: unit, _RejectedAccounting()
+            repository, lambda: unit
         ).apply(_request())
 
     assert unit.committed is False
@@ -203,7 +185,7 @@ def test_historical_due_job_uses_dedicated_command_and_replays_receipt() -> None
     )
 
     receipt = HistoricalServiceCompletionApplyWorkflow(
-        repository, lambda: _Unit(), _Accounting()
+        repository, _Unit
     ).apply(request)
     assert receipt.replayed is True
     assert repository.persisted == []

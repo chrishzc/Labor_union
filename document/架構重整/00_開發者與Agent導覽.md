@@ -66,12 +66,11 @@ npm test -- <direct-test>
 
 Schema、migration、production、provider、credential 與外部寫入是不同權限；文件或測試通過不構成執行授權。
 
-## 零元客戶基準義務升級（2026-09-29）
+## 零元客戶基準義務升級紀錄（2026-09-29，歷史追溯）
 
 本次人工授權範圍為 schema／migration 修復、完成本機 development DB 關卡並套用升級、commit／push；
 原匯入檔案不在本機，匯入重試由操作人員在原主機完成。部署或 production DB 不在範圍內。
-Orders 歷史服務天數帳務沿用正式規格 27 §6.5、§7：全補助且無樓層費的零元客戶基準義務
-立即 settled，仍保留事件與 source identity，供結清 readback 與後續差額關聯使用。
+本節記錄當時已發行的 schema 相容性修復及其驗證。當時的匯入零元基準義務流程已由現行[規格 27 §6](01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-accounting-carry-forward)取代。現行歷史案件承接有證據的原帳務，缺項列待確認。已保存的零元事件及 source identity 供原紀錄查核與追溯。
 
 新 release `labor-union-client-zero-obligation-establishment-2026-09-29-v1` 僅替換
 `client_obligation_events.chk_client_obligation_event_amount`。新增例外限定 `established`、

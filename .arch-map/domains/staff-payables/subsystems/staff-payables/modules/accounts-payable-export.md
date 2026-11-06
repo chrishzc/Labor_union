@@ -15,6 +15,7 @@
 - primary: `subsystems/staff_payables/accounts_payable_export.py`
 - composition: `api/dependencies/accounts_payable_export.py`
 - api-schema: `api/schemas/accounts_payable_export.py`
+- client: `ui_react/src/api/accounts_payable/accounts_payable_query_client.ts`、`ui_react/src/api/accounts_payable/accounts_payable_query_schemas.ts`
 - source: `infrastructure/mysql/accounts_payable_export_sources.py`
 - archive: `infrastructure/archive/accounts_payable.py`
 - archive configuration: `api/dependencies/accounts_payable_export.py` reads `ACCOUNTS_PAYABLE_ARCHIVE_ROOT`; installations without this setting default to `downloads/accounts_payable_archive`.
@@ -27,10 +28,11 @@
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — §2.5、§2.5.1、§2.5.5。
 - `api/routes/finance_reports.py` — accounts-payable query/export。
+- `api/routes/finance_reports.py` — 歷史月嫂款可用案號、月嫂完整姓名或公會編號查未列入原因，讀取同一案件應付查核來源。
 - `api/routes/finance_reports.py` — authenticated bounded `/accounts-payable/cash-requirements` GET；既有 query/export 與付款入口不變。
 
 ## Dependencies
-- outbound: `orders/orders/module:historical-service-accounting` — 舊案缺義務轉介既有 Preview／Apply 補建，不代算或代寫。
+- outbound: `payroll/payroll/module:payroll-adjustment` — 缺義務或正式未付款項更正轉介原 Payroll 流程。清冊查詢不代算或代寫。
 - outbound: `payroll/historical-service-accounting` — 只讀該 owner 已建立的正式義務，不在報表重跑單薪／樓層費公式。
 - outbound: `scheduling` — 與 Assignment Plan Query 共用 `order_terms_read_model.select_current_assignments`，不以 `orders.staff_id` 或任意最大 assignment id 代替 current binding。
 - outbound: `client-finance/client-finance/module:client-subsidy-return-query` — 沿用 Domain `project_subsidy_return` 與補助到期日規則，只將目前排班結束日作為明示預估日期來源。

@@ -268,10 +268,16 @@ def test_subsidy_funding_is_checked_before_dispatch_and_updates_after_government
     government = ingest_and_preview(source(government=True),case+':government-source')
     assert government['counts']['ready_dispatch']==1,government
     post(government,case+':government-apply')
-    funded = ingest_and_preview(source(repacked=True),case+':refund-repacked-source')
-    assert funded['batch_identity'] != pending['batch_identity']
+    repeat = ingest_and_preview(source(repacked=True),case+':refund-repacked-source')
+    assert repeat['batch_identity'] != pending['batch_identity']
+    assert repeat['rows'] == []
+    assert repeat['counts']['canonical_created'] == 0
+    assert repeat['counts']['duplicate_occurrences'] == 1
+    assert repeat['counts']['ready_dispatch'] == 0
+    response = client.post('/api/v1/finance-import/batches/preview',json={'batch_identity':pending['batch_identity']})
+    assert response.status_code==200,response.text
+    funded = response.json()['data']
     assert funded['rows'][0]['row_identity'] == pending['rows'][0]['row_identity']
-    assert funded['counts']['canonical_created'] == 0
     assert funded['counts']['ready_dispatch']==1 and funded['counts']['business_pending']==0,funded
     post(funded,case+':refund-apply')
     saved = accounting_snapshot(case)

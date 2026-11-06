@@ -106,9 +106,7 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 
 雙倍日原始工時已包含於 actual hours，再加一次 double-pay hours，結果恰為兩倍。
 
-歷史分支固定 `double_pay_hours = 0`，並允許實際服務天數少於或大於原合約天數；歷史樓層費隨天數
-比例增減後再按逐 assignment 天數守恆分配。完整公式、來源、重算與正常流程回歸契約見
-`27_歷史訂單生命週期與服務天數帳務正式規格.md` §6、§8。
+歷史訂單承接可證實的原月嫂應付、日期與付款關聯。人工更正實際服務天數時，依已確認的服務量、原有效費率及樓層費等計價依據重算，差異沿 Payroll／Staff Payables 正式流程處理。舊案原本適用的單薪或樓層費計價須有來源依據；匯入或服務到期推進不得單憑歷史身分、服務天數或當期政策重新建立應付。承接、缺項及更正流程見[規格 27 §6](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-accounting-carry-forward)。
 
 中途取消的樓層費先以 `ROUND_HALF_UP` 算出全案整數，再以最大餘數法按 assignment 服務日分配。完整履約後取消被拒絕，不套用縮減。
 

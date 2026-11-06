@@ -346,6 +346,17 @@ class FinanceBankReconciliationTargetView(_StrictModel):
     staff_id: int | None = Field(default=None, gt=0)
 
 
+class FinanceBankClientReceiptReviewCandidateView(_StrictModel):
+    obligation_identity: str
+    obligation_type: str
+    due_date: str
+
+
+class FinanceBankClientReceiptReviewView(_StrictModel):
+    reason: str
+    candidates: list[FinanceBankClientReceiptReviewCandidateView]
+
+
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
     row_identity: str
@@ -358,6 +369,7 @@ class FinanceBankTransactionView(_StrictModel):
     disposition: str
     review_reason: str | None
     dispatch_reason: str | None = None
+    recorded_client_receipt_review: FinanceBankClientReceiptReviewView | None = None
     available_actions: list[str]
     reference: str
     counterparty_name: str | None
@@ -510,6 +522,7 @@ class FinanceImportRowView(_StrictModel):
     integrity_violations: list[str]
     fingerprint_collision: bool
     formal_reference_conflict: bool
+    client_receipt_review: FinanceBankClientReceiptReviewView | None = None
 
 
 class FinanceImportBatchPreviewView(_StrictModel):

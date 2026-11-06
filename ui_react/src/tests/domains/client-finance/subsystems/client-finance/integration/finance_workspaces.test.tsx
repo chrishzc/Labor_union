@@ -1,279 +1,352 @@
-vi.mock('../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),payroll:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),staff:vi.fn(async(case_no:string)=>({case_no,items:[],events:[]}))}}));
-import { monthlyAccountingClient } from '../../../../../../api/finance_import/monthly_accounting_client';
-import { caseCategoriesClient } from '../../../../../../api/client_finance/case_categories_client';
-/** Agreed workspace composition, separate totals, exact case detail and recovery. */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from '../../../../../../pages/FinancePage';
-import { ordersQueryClient } from '../../../../../../api/orders/order_query_client';
-import { clientFinanceHistoryClient } from '../../../../../../api/client_finance/client_finance_history_client';
+import { monthlyAccountingClient, type AccountingRange, type MonthlyAccountingReport } from '../../../../../../api/finance_import/monthly_accounting_client';
+import { financeAccountingClient, type CaseAccounting } from '../../../../../../api/finance_import/finance_accounting_client';
+import { financeImportQueryClient } from '../../../../../../api/finance_import/finance_import_query_client';
+import type { FinanceBankTransaction } from '../../../../../../api/finance_import/finance_import_query_schemas';
 import { cashRequirementsQueryClient } from '../../../../../../api/accounts_payable/cash_requirements_query_client';
-import { clientSubsidyReturnQueryClient } from '../../../../../../api/client_finance/client_subsidy_return_query_client';
-import { subsidyPeriodClient,type SubsidyPeriod } from '../../../../../../api/government_subsidy/period_reconciliation_client';
-import { subsidyAdvanceSettlementClient as recovery } from '../../../../../../api/client_finance/subsidy_advance_settlement_client';
-import { ApiNetworkError } from '../../../../../../api/shared/typed_errors';
-import { staffDirectoryClient } from '../../../../../../api/staff_directory/staff_directory_client';
-import { staffPayablesQueryClient } from '../../../../../../api/staff_payables/staff_payables_query_client';
+import { staffPayoutRemediationClient } from '../../../../../../api/staff_payables/staff_payout_remediation_client';
+import { subsidyPeriodClient, type SubsidyPeriod } from '../../../../../../api/government_subsidy/period_reconciliation_client';
+import { subsidyAdvanceSettlementClient } from '../../../../../../api/client_finance/subsidy_advance_settlement_client';
+import { weeklyOperationsReportQueryClient } from '../../../../../../api/reports/weekly_operations_report_query_client';
+import { transport } from '../../../../../../api/shared/transport';
+import { WEEKLY_OPERATIONS_REPORT } from '../../../../../fixtures/reports/weekly_operations_report_contract_fixtures';
 
-const caseNo = 'TEST-001';
-const advance = { advance_id: 10, case_no: caseNo, client_name: '測試客戶', advanced_on: '2026-03-15', advance_amount_ntd: 12000,
-  government_received_ntd: 12000, received_on: '2026-04-01', recovered_amount_ntd: 0, status: 'ready' as const, review_reason: null };
-const caseCoverage={case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:12000,coverage:[{receipt_id:9,label:'2026 年 第 1 季',amount_ntd:36000,recorded_case_amount_ntd:12000,recorded_service_end_date:'2026-01-20',recovered_advance_ntd:12000}]};
-const periodView=(period:SubsidyPeriod)=>({period,version:1,label:`${period.year} 年 第 ${period.index} 季`,lines:[{case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:12000,unavailable_reason:null}],total_ntd:12000,coverage:[],recorded_lines:[],changed_cases:[],blocked_cases:[],can_reconcile:true});
-beforeEach(() => {
-  vi.restoreAllMocks();
-  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const])));
-  window.location.hash = '#finance?tab=receipts';
-  vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
-  vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
-  vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: caseNo, client_name: '測試客戶', order_status: '訂單完成', staff_name: null, identity_status: '一般市民', start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: 5, total_employer_self_pay_payable: 20000 }], next_cursor: null, etag: 'a'.repeat(64) });
-  vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({ case_no: caseNo, client_id: 1, staff_id: null, client_name: '測試客戶', staff_name: null, order_status: '訂單完成', identity_status: '一般市民', cancel_reason: null, line_group_id: null, contract_identity: null, actual_start_date: null, actual_end_date: null, deposit_date: null, start_date: null, end_date: null, service_days: 5, service_hours_per_day: 8, deposit_service_days: null, floor_fee: 0, custom_rest_dates: null });
-  vi.spyOn(clientFinanceHistoryClient, 'queryAll').mockResolvedValue([{ case_no: caseNo, account_version: '3', open_receivable_amount_ntd: 0, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 1, receipt_entry_count: 0, receipt_status: 'settled' as const }]);
-  vi.spyOn(clientFinanceHistoryClient, 'query').mockResolvedValue({ case_no: caseNo, account_version: '3', obligations: [], ledger_entries: [{ entry_id: 10, entry_type: 'subsidy_advance', amount_ntd: 12000, occurred_on: '2026-03-15', reconciliation_reference: 'test', reversal_of_entry_id: null, created_at: '2026-03-15T00:00:00', allocations: [] }] });
-  vi.spyOn(monthlyAccountingClient,'receivables').mockImplementation(async(month,category)=>{
-    const summaries=await clientFinanceHistoryClient.queryAll();
-    const categories=await caseCategoriesClient.query();
-    return {due_month:month,category,undated_count:0,items:summaries.filter(row=>category==='all'||categories.get(row.case_no)===category).map(row=>{
-      const actual=['received','partially_received'].includes(row.receipt_status)?1000:0;
-      return {case_no:row.case_no,client_name:row.case_no===caseNo?'測試客戶':'合成客戶',identity:row.case_no+':first',direction:'receivable' as const,label:'第一期',party:'合成客戶',due_date:(month??'2026-11')+'-01',expected_ntd:row.open_receivable_amount_ntd+actual,actual_ntd:actual,remaining_ntd:row.open_receivable_amount_ntd,noncash_ntd:0};
-    })};
-  });
-  vi.spyOn(clientSubsidyReturnQueryClient, 'queryAll').mockResolvedValue({ rows: [], next_cursor: null });
-  vi.spyOn(subsidyPeriodClient,'query').mockImplementation(async period=>periodView(period));
-  vi.spyOn(subsidyPeriodClient,'bankRows').mockResolvedValue([]);
-  vi.spyOn(subsidyPeriodClient,'caseCoverage').mockResolvedValue(caseCoverage);
-  vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([
-    { row_id: 'formal', case_no: caseNo, recipient_name: '測試客戶', payment_type: 'client_subsidy_return', certainty: 'confirmed', source: 'client_refund', payment_status: 'pending' as const, source_amount_ntd: 12000, unpaid_amount_ntd: 12000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [] },
-    { row_id: 'estimate', case_no: 'TEST-002', recipient_name: '預估客戶', payment_type: 'client_subsidy_return', certainty: 'estimated', source: 'subsidy_estimate', payment_status: 'pending' as const, source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] },
-  ]);
-  vi.spyOn(recovery, 'queryAll').mockResolvedValue([advance, { ...advance, advance_id: 11, case_no: 'TEST-001-OTHER', client_name: '其他案件客戶' }]);
-  vi.spyOn(recovery, 'preview').mockResolvedValue({ row: advance, account_version: 3, batch_version: 5, preview_fingerprint: 'a'.repeat(64) });
-  vi.spyOn(recovery, 'apply').mockResolvedValue({ advance_id: 10, case_no: caseNo, recovered_amount_ntd: 12000, account_version: 4 });
-});
-afterEach(() => { cleanup(); window.location.hash = ''; vi.restoreAllMocks(); });
+const caseNo = 'CASE-RPT-001';
+const now = new Date();
+const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+const date = `${month}-15`;
+type MonthRow = MonthlyAccountingReport['rows'][number];
+type Item = MonthRow['items'][number];
+type Bank = MonthRow['bank_facts'][number];
 
-async function openDetail() {
-  fireEvent.click(await screen.findByRole('button', { name: '案件補助明細' }));
-  const drawer = await screen.findByRole('dialog');
-  await within(drawer).findByText(/已核銷/);
-  return drawer;
+function item(case_no: string, direction: Item['direction'], expected_ntd: number, actual_ntd: number, remaining_ntd: number, noncash_ntd = 0) {
+  return {
+    case_no, direction, expected_ntd, actual_ntd, remaining_ntd, noncash_ntd,
+    identity: `${case_no}:${direction}`, client_name: case_no, party: case_no,
+    due_date: date, label: direction === 'payable' ? '月嫂薪資' : '第一期',
+  } satisfies Item;
 }
-describe('four finance workspaces', () => {
-  it('retires the global collection-account entry and resolves its old link to monthly accounting', async () => {
-    window.location.hash = '#finance?tab=payment-destination';
-    const query = vi.spyOn(monthlyAccountingClient, 'query').mockResolvedValue({start_month:'2026-11',end_month:'2026-11',category:'subsidy',as_of:'2026-11-02',excluded_cases:[],undated_item_count:0,rows:[]});
-    render(<FinancePage />);
-    await screen.findByRole('heading', {name:'每月帳務狀況'});
-    expect(query).toHaveBeenCalled();
-    expect(screen.queryByRole('button', {name:'舊帳戶維護'})).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', {name:'工會／代收付帳戶'})).not.toBeInTheDocument();
+
+function bank(case_no: string, cash_flow: NonNullable<Bank['cash_flow']>, amount_ntd: number) {
+  return {
+    identity: `bank:${case_no}`, occurred_on: date, direction: ['C', 'G'].includes(cash_flow) ? 'in' : 'out',
+    cases: [case_no], bank: cash_flow === 'G' ? 'taishin' : 'sinopac', cash_flow, amount_ntd,
+  } satisfies Bank;
+}
+
+function report(range: AccountingRange, items: ReturnType<typeof item>[] = [], bank_facts: ReturnType<typeof bank>[] = [], undated_item_count = 0): MonthlyAccountingReport {
+  const sum = (direction: Item['direction'], field: 'expected_ntd' | 'actual_ntd' | 'remaining_ntd' | 'noncash_ntd') =>
+    items.filter(row => row.direction === direction).reduce((total, row) => total + row[field], 0);
+  const cash = (direction: Bank['direction']) => bank_facts.filter(row => row.direction === direction).reduce((total, row) => total + row.amount_ntd, 0);
+  return {
+    ...range, as_of: date, excluded_cases: [], undated_item_count,
+    rows: [{
+      month: range.start_month, items, bank_facts,
+      expected_in_ntd: sum('receivable', 'expected_ntd'), received_ntd: sum('receivable', 'actual_ntd'),
+      remaining_in_ntd: sum('receivable', 'remaining_ntd'), other_in_ntd: sum('receivable', 'noncash_ntd'),
+      expected_out_ntd: sum('payable', 'expected_ntd'), paid_ntd: sum('payable', 'actual_ntd'),
+      remaining_out_ntd: sum('payable', 'remaining_ntd'), other_out_ntd: sum('payable', 'noncash_ntd'),
+      cash_in_ntd: cash('in'), cash_out_ntd: cash('out'),
+    }],
+  };
+}
+
+function detail(case_no: string, overrides: Partial<CaseAccounting> = {}): CaseAccounting {
+  return {
+    case_no, client_name: case_no, receivable_ntd: null, received_ntd: null, payable_ntd: null, paid_ntd: null,
+    pending_warning_count: 0, client_items: [], staff_items: [], transactions: [], warnings: [], ...overrides,
+  };
+}
+
+const governmentRow: FinanceBankTransaction = {
+  row_id: 9, row_identity: 'finance-import-row:9', transaction_date: date, bank: 'taishin', direction: 'incoming',
+  amount_ntd: 12000, classification_type: 'government_subsidy', status: 'pending', disposition: 'business_pending',
+  reference: 'G-9', counterparty_name: '新竹市政府', cases: [], review_reason: null, available_actions: [],
+};
+
+function periodView(period: SubsidyPeriod) {
+  return {
+    period, version: 1, label: `${period.year} · ${period.unit} · ${period.index}`, lines: [],
+    total_ntd: 12000, coverage: [], recorded_lines: [], changed_cases: [], blocked_cases: [], can_reconcile: true,
+  };
+}
+
+beforeEach(() => {
+  // Every external request in this suite is either replaced by a typed owner fixture or rejected locally.
+  for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+    vi.spyOn(transport, method).mockRejectedValue(new Error('No network in finance workbench tests'));
+  }
+  vi.spyOn(monthlyAccountingClient, 'query').mockImplementation(async range => report(range));
+  vi.spyOn(financeAccountingClient, 'query').mockImplementation(async case_no => detail(case_no));
+  vi.spyOn(financeImportQueryClient, 'listBankTransactions').mockResolvedValue({ items: [governmentRow], pending_count: 1, next_before_row_id: null });
+  vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue(WEEKLY_OPERATIONS_REPORT);
+  vi.spyOn(subsidyPeriodClient, 'query').mockImplementation(async period => periodView(period));
+});
+
+afterEach(() => {
+  cleanup();
+  window.history.replaceState(null, '', window.location.pathname);
+  vi.restoreAllMocks();
+});
+
+function openFinance(tab = 'monthly') {
+  window.history.replaceState(null, '', `#finance?tab=${tab}`);
+  return render(<FinancePage />);
+}
+
+async function monthDetails() {
+  fireEvent.click(await screen.findByRole('button', { name: '展開明細' }));
+  return within(await screen.findByRole('region', { name: /明細/ }));
+}
+
+async function openCase(scope: ReturnType<typeof within>, selected: string, label = selected) {
+  fireEvent.click(await scope.findByRole('button', { name: label }));
+  return within(await screen.findByRole('dialog', { name: `案件帳務 · ${selected}` }));
+}
+
+async function openGovernment() {
+  openFinance('bank');
+  fireEvent.click(await screen.findByRole('button', { name: '核對交易 G-9' }));
+  return within(await screen.findByRole('dialog', { name: '政府整期核對' }));
+}
+
+function changeCategory(category: AccountingRange['category']) {
+  fireEvent.change(screen.getByLabelText('案件類別'), { target: { value: category } });
+  fireEvent.click(screen.getByRole('button', { name: '查詢' }));
+}
+
+describe('current finance workspaces', () => {
+  it('redirects the retired payment destination link to monthly accounting', async () => {
+    openFinance('payment-destination');
+    await screen.findByRole('heading', { name: '每月帳務狀況' });
+    await waitFor(() => expect(monthlyAccountingClient.query).toHaveBeenCalled());
+    expect(screen.queryByRole('heading', { name: '工會／代收付帳戶' })).not.toBeInTheDocument();
   });
 
-  it('uses the same case category for receipt/payment rows, counts and totals, including numeric legacy non-citizens', async () => {
-    vi.mocked(caseCategoriesClient.query).mockResolvedValue(new Map([[caseNo,'subsidy'],['115000099','non_citizen']]));
-    const citizen = {case_no:caseNo,account_version:'1',open_receivable_amount_ntd:100,open_payable_amount_ntd:0,obligation_count:1,ledger_entry_count:0,receipt_entry_count:0,receipt_status:'unpaid' as const};
-    vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([citizen,{...citizen,case_no:'115000099',open_receivable_amount_ntd:500}]);
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
-      row_id:'nc-refund',case_no:'115000099',recipient_name:'非市民合成客戶',payment_type:'client_refund',
-      certainty:'confirmed',source:'client_refund',payment_status:'pending',source_amount_ntd:700,
-      unpaid_amount_ntd:700,payment_date:'2026-11-15',date_is_estimate:false,pending_reasons:[],
-    }]);
-    render(<FinancePage />);
-    await screen.findByText(caseNo);
-    expect(screen.queryByText('115000099')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('案件類別')).toHaveValue('subsidy');
-    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'non_citizen'}});
-    expect(await screen.findByText('115000099')).toBeInTheDocument();
-    expect(screen.queryByText(caseNo)).not.toBeInTheDocument();
-    expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('目前待收 NT$ 500');
-    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'all'}});
-    await waitFor(()=>expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('目前待收 NT$ 600'));
-    fireEvent.click(screen.getByRole('button',{name:'應付款'}));
-    await screen.findByText('沒有符合條件的付款項目。');
-    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'non_citizen'}});
-    expect(screen.getByText('非市民合成客戶')).toBeInTheDocument();
-    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('1 筆確認待付 NT$ 700');
+  it('applies the same case category to receipt and payable rows and totals', async () => {
+    const citizen = [item(caseNo, 'receivable', 100, 0, 100)];
+    const nonCitizen = [item('115000099', 'receivable', 500, 0, 500), item('115000099', 'payable', 700, 0, 700)];
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range,
+      range.category === 'all' ? [...citizen, ...nonCitizen] : range.category === 'non_citizen' ? nonCitizen : citizen));
+    openFinance();
+    changeCategory('subsidy');
+    await screen.findByText('待收 NT$ 100');
+    expect((await monthDetails()).getByRole('button', { name: caseNo })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '115000099' })).not.toBeInTheDocument();
+
+    changeCategory('non_citizen');
+    expect(await screen.findByText('待收 NT$ 500')).toBeVisible();
+    expect(screen.getByText('待付 NT$ 700')).toBeVisible();
+    expect((await monthDetails()).getAllByRole('button', { name: '115000099' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: caseNo })).not.toBeInTheDocument();
+
+    changeCategory('all');
+    expect(await screen.findByText('待收 NT$ 600')).toBeVisible();
+    expect(screen.getByText('待付 NT$ 700')).toBeVisible();
+    expect(monthlyAccountingClient.query).toHaveBeenLastCalledWith(expect.objectContaining({ category: 'all' }), expect.any(AbortSignal));
   });
-  it('distinguishes a missing canonical payable from an unpaid or zero balance', async () => {
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
-      row_id: 'missing', case_no: 'HISTORICAL-MISSING', recipient_name: '帳務未建月嫂', staff_id: 9,
-      payment_type: 'staff_payable', certainty: 'estimated', source: 'missing_payroll', payment_status: 'pending',
-      source_amount_ntd: null, unpaid_amount_ntd: null, payment_date: null, date_is_estimate: false,
-      pending_reasons: ['尚未建立月嫂應付帳務'],
-    }]);
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    const row = (await screen.findByText('未設定 帳務未建月嫂')).closest('tr')!;
-    expect(within(row).getByText('服務與薪資資料待確認')).toBeInTheDocument();
-    expect(within(row).queryByText('NT$ 0')).not.toBeInTheDocument();
-    expect(within(row).queryByText('確認待付')).not.toBeInTheDocument();
+
+  it('keeps an absent staff obligation distinct from a real unpaid or zero balance', async () => {
+    const missing = 'HISTORICAL-MISSING';
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [
+      item(missing, 'receivable', 3000, 0, 3000), item('UNPAID', 'payable', 4000, 0, 4000), item('PAID', 'payable', 5000, 5000, 0),
+    ]));
+    openFinance();
+    const table = await monthDetails();
+    expect(table.getByRole('row', { name: /UNPAID/ })).toHaveTextContent('NT$ 4,000');
+    expect(table.getByRole('row', { name: /PAID.*已付清/ })).toBeVisible();
+    const drawer = await openCase(table, missing);
+    expect(await drawer.findByText('本案目前無月嫂應付項目。')).toBeVisible();
+    expect(drawer.queryByText('出款已結清')).not.toBeInTheDocument();
   });
-  it('shows owner payment status after requery without mixing paid rows into outstanding totals', async () => {
-    const base = { row_id: 'paid', case_no: 'HISTORICAL', recipient_name: '歷史月嫂', payment_type: 'staff_payable' as const,
-      certainty: 'confirmed' as const, source: 'staff_obligation' as const, source_amount_ntd: 24000, unpaid_amount_ntd: 0,
-      payment_date: null, date_is_estimate: false, pending_reasons: [], staff_id: 9, payment_status: 'paid' as const };
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([
-      base, { ...base, row_id: 'partial', recipient_name: '部分付款月嫂', unpaid_amount_ntd: 5000, payment_status: 'partially_paid' },
-      { ...base, row_id: 'settled', recipient_name: '結清月嫂', payment_status: 'settled' },
+
+  it('requeries owner payment progress and excludes closed balances from outstanding totals', async () => {
+    let paid = 24000;
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [
+      item('HISTORICAL', 'payable', 24000, paid, 24000 - paid),
+      item('PARTIAL', 'payable', 24000, 19000, 5000),
+      item('SETTLED', 'payable', 24000, 0, 0, 24000),
+    ]));
+    openFinance();
+    expect(await screen.findByText('待付 NT$ 5,000')).toBeVisible();
+    const table = await monthDetails();
+    expect(within(table.getByRole('row', { name: /HISTORICAL/ })).getAllByRole('cell')[4]).toHaveTextContent('NT$ 24,000');
+    expect(within(table.getByRole('row', { name: /SETTLED/ })).getAllByRole('cell')[5]).toHaveTextContent('NT$ 24,000');
+
+    paid = 0;
+    fireEvent.click(screen.getByRole('button', { name: '查詢' }));
+    expect(await screen.findByText('待付 NT$ 29,000')).toBeVisible();
+    expect((await monthDetails()).getByRole('row', { name: /HISTORICAL/ })).not.toHaveTextContent('已付清');
+  });
+
+  it('keeps an overpaid caregiver at zero payable and shows the discrepancy in the case drawer', async () => {
+    const overpaid = item('HANDOVER', 'payable', 16800, 17500, 0);
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [overpaid]));
+    vi.mocked(financeAccountingClient.query).mockResolvedValue(detail('HANDOVER', {
+      staff_items: [{ ...overpaid, has_payment: true, version: '1' }],
+    }));
+    openFinance();
+    expect(await screen.findByText('待付 NT$ 0')).toBeVisible();
+    const drawer = await openCase(await monthDetails(), 'HANDOVER');
+    expect(await drawer.findByText('超付款待核對')).toBeVisible();
+    expect(drawer.getByText('已付 NT$ 17,500')).toBeVisible();
+  });
+
+  it('preserves a historically paid receipt without inventing a canonical bank receipt', async () => {
+    const historical = item('HISTORICAL-PAID', 'receivable', 5000, 5000, 0);
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [historical]));
+    vi.mocked(financeAccountingClient.query).mockResolvedValue(detail('HISTORICAL-PAID', {
+      client_items: [{ ...historical, payment_stage: 'first', has_payment: true, version: '4' }],
+    }));
+    openFinance();
+    const table = await monthDetails();
+    expect(table.getByRole('row', { name: /HISTORICAL-PAID/ })).toHaveTextContent('已收齊');
+    const drawer = await openCase(table, 'HISTORICAL-PAID');
+    expect(await drawer.findByText('已繳齊')).toBeVisible();
+    fireEvent.click(drawer.getAllByRole('button', { name: '關閉案件' })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: '已核銷收付款' }));
+    expect(screen.getByText(/所選月份沒有資料/)).toBeVisible();
+  });
+
+  it('keeps partial and full actual receipts separate from refunds and non-cash ledger entries', async () => {
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [
+      item('PARTIAL', 'receivable', 6000, 1000, 5000),
+      item('PAID', 'receivable', 6000, 6000, 0),
+      item('ADJUSTMENT', 'receivable', 4000, 0, 0, 4000),
+    ], [bank('PARTIAL', 'C', 1000), bank('PAID', 'C', 6000), bank('REFUND', 'RS', 500), bank('SUBSIDY_RETURN', 'RT', 700)]));
+    openFinance();
+    expect((await monthDetails()).getByRole('row', { name: /PARTIAL/ })).toHaveTextContent('NT$ 5,000');
+    fireEvent.click(screen.getByRole('tab', { name: '已核銷收付款' }));
+    const table = await monthDetails();
+    expect(within(table.getByRole('row', { name: /PARTIAL/ })).getAllByRole('cell')[4]).toHaveTextContent('NT$ 1,000');
+    expect(within(table.getByRole('row', { name: /PAID/ })).getAllByRole('cell')[4]).toHaveTextContent('NT$ 6,000');
+    for (const caseId of ['REFUND', 'SUBSIDY_RETURN']) {
+      expect(within(table.getByRole('row', { name: new RegExp(caseId) })).getAllByRole('cell')[4]).toHaveTextContent('—');
+    }
+    expect(table.queryByRole('row', { name: /ADJUSTMENT|REVERSAL|SUBSIDY_ADVANCE/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText('NT$ 7,000').length).toBeGreaterThan(0);
+  });
+
+  it('queries month, quarter and year through the same government period owner', async () => {
+    const drawer = await openGovernment();
+    const unit = await drawer.findByLabelText('彙總單位');
+    await waitFor(() => expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(expect.objectContaining({ unit: 'quarter' }), expect.any(AbortSignal)));
+    for (const value of ['month', 'year']) {
+      fireEvent.change(unit, { target: { value } });
+      await waitFor(() => expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(expect.objectContaining({ unit: value, index: 1 }), expect.any(AbortSignal)));
+    }
+    expect(drawer.queryByText('核准金額')).not.toBeInTheDocument();
+  });
+
+  it('exposes current navigation and separates formal amounts from undated and estimated amounts', async () => {
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range,
+      [item('FORMAL', 'payable', 12000, 0, 12000)], [], 1));
+    const caseWorkspace = openFinance('case-accounting');
+    const nav = within(screen.getByRole('navigation', { name: '帳務工作區' }));
+    expect(nav.getAllByRole('button').map(button => button.textContent)).toEqual(['案件帳務', '銀行對帳', '政府補助清單', '每月帳務']);
+    await screen.findByRole('region', { name: '進行中案件清單' });
+    expect(monthlyAccountingClient.query).not.toHaveBeenCalled();
+    caseWorkspace.unmount();
+
+    openFinance('monthly');
+    expect(await screen.findByText('待付 NT$ 12,000')).toBeVisible();
+    expect(screen.getByText(/另有 1 筆未定到期日款項未分入月份/)).toBeVisible();
+    expect(screen.queryByText(/NT\$ 21,000/)).not.toBeInTheDocument();
+  });
+
+  it('lists only formal due obligations and leaves service and collection estimates out of confirmed totals', async () => {
+    const estimate = {
+      row_id: 'service-estimate', case_no: 'SERVICE', recipient_name: '服務待結束客戶',
+      payment_type: 'client_subsidy_return', certainty: 'estimated', source: 'subsidy_estimate',
+      payment_status: 'pending', source_amount_ntd: 9000, unpaid_amount_ntd: 9000,
+      payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'],
+    } as const;
+    const forecast = vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([
+      { ...estimate, pending_reasons: [...estimate.pending_reasons] },
+      { ...estimate, row_id: 'collection-estimate', case_no: 'OTHER', recipient_name: '收款待確認客戶', pending_reasons: ['客戶服務費尚未收齊'] },
     ]);
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    const paid = (await screen.findByText('未設定 歷史月嫂')).closest('tr')!;
-    expect(within(paid).getByText('已付款')).toBeInTheDocument();
-    expect(within(paid).getByText('NT$ 0')).toBeInTheDocument();
-    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('確認待付 NT$ 5,000');
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'paid' } });
-    expect(screen.queryByText('未設定 部分付款月嫂')).not.toBeInTheDocument();
-    expect(screen.queryByText('未設定 結清月嫂')).not.toBeInTheDocument();
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{ ...base, unpaid_amount_ntd: 24000, payment_status: 'pending' }]);
-    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
-    await waitFor(() => expect(screen.queryByText('未設定 歷史月嫂')).not.toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'all' } });
-    expect(await screen.findByText('未設定 歷史月嫂')).toBeInTheDocument();
-    expect(within(screen.getByText('未設定 歷史月嫂').closest('tr')!).getByText('確認待付')).toBeInTheDocument();
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range,
+      [item('FORMAL', 'payable', 9000, 0, 9000)]));
+    openFinance();
+    expect(await screen.findByText('待付 NT$ 9,000')).toBeVisible();
+    const table = await monthDetails();
+    expect(table.getByRole('button', { name: 'FORMAL' })).toBeVisible();
+    expect(table.queryByRole('row', { name: /SERVICE|OTHER|服務待結束|收款待確認/ })).not.toBeInTheDocument();
+    expect(forecast).not.toHaveBeenCalled();
   });
 
-  it('keeps an overpaid caregiver at zero payable with the owner recovery hint visible', async () => {
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
-      row_id: 'handover-paid', case_no: 'HANDOVER', recipient_name: '原月嫂', staff_id: 9,
-      payment_type: 'staff_payable', certainty: 'confirmed', source: 'staff_obligation',
-      source_amount_ntd: 16800, unpaid_amount_ntd: 0, payment_status: 'paid',
-      payment_date: '2026-11-15', date_is_estimate: false,
-      pending_reasons: ['已有超付款，請至人員帳務處理追償'],
-    }]);
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    const row = (await screen.findByText('未設定 原月嫂')).closest('tr')!;
-    expect(within(row).getByText('已付款')).toBeInTheDocument();
-    expect(within(row).getByText('NT$ 0')).toBeInTheDocument();
-    expect(within(row).getByText('已有超付款，請至人員帳務處理追償')).toBeInTheDocument();
-    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('確認待付 NT$ 0');
+  it('opens the same exact-case subsidy and refund facts from the report and monthly payable', async () => {
+    vi.mocked(financeAccountingClient.query).mockResolvedValue(detail(caseNo, {
+      subsidy_ntd: 12000, bank_facts: [bank(caseNo, 'G', 12000)],
+      client_items: [{ ...item(caseNo, 'payable', 8000, 0, 8000), label: '補助退款', version: '1', has_payment: false }],
+    }));
+    vi.mocked(monthlyAccountingClient.query).mockImplementation(async range => report(range, [item(caseNo, 'payable', 8000, 0, 8000)]));
+    const recovery = vi.spyOn(subsidyAdvanceSettlementClient, 'apply');
+    openFinance('government-list');
+    const fromReport = await openCase(within(screen.getByRole('region', { name: '政府補助報表查詢工作區' })), caseNo, `開啟案件 ${caseNo}`);
+    expect(await fromReport.findByText('實撥 NT$ 12,000')).toBeVisible();
+    fireEvent.click(fromReport.getAllByRole('button', { name: '關閉案件' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '每月帳務' }));
+    const fromPayable = await openCase(await monthDetails(), caseNo);
+    expect(await fromPayable.findByText('實撥 NT$ 12,000')).toBeVisible();
+    expect(fromPayable.getByRole('columnheader', { name: '預計退款日' })).toBeVisible();
+    expect(fromPayable.getByText('客戶退款待結：', { exact: false })).toHaveTextContent('NT$ 8,000');
+    expect(vi.mocked(financeAccountingClient.query).mock.calls.map(([selected]) => selected)).toEqual([caseNo, caseNo]);
+    expect(recovery).not.toHaveBeenCalled();
   });
 
-  it('shows historical receipt status from the owner even without canonical receipt entries', async () => {
-    vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([
-      { case_no: 'HISTORICAL-PAID', account_version: '4', open_receivable_amount_ntd: 0, open_payable_amount_ntd: 0,
-        obligation_count: 1, ledger_entry_count: 0, receipt_entry_count: 0, receipt_status: 'received' },
-    ]);
-    render(<FinancePage />);
-    const row = (await screen.findByText('HISTORICAL-PAID')).closest('tr')!;
-    expect(within(row).getByText('已核銷')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('核銷狀態'), { target: { value: 'received' } });
-    expect(screen.getByText('HISTORICAL-PAID')).toBeInTheDocument();
+  it('opens the staff owner identified by the matched bank payable', async () => {
+    const payable = item(caseNo, 'payable', 42000, 0, 42000);
+    vi.mocked(financeAccountingClient.query).mockResolvedValue(detail(caseNo, {
+      staff_items: [{ ...payable, party: '第二位人員', has_payment: false, version: '1' }],
+    }));
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{
+        ...governmentRow, bank: 'sinopac', direction: 'outgoing', classification_type: 'staff_payout',
+        reference: 'P-9', cases: [caseNo], counterparty_name: '第二位人員',
+        reconciliation_target: { case_no: caseNo, obligation_identities: [payable.identity], staff_id: 22 },
+      }], pending_count: 1, next_before_row_id: null,
+    });
+    const query = vi.spyOn(staffPayoutRemediationClient, 'query').mockResolvedValue({
+      staff_id: 22, staff_payables_version: 1, events: [],
+      obligations: [{ obligation_identity: payable.identity, case_no: caseNo, due_date: date,
+        amount_due_ntd: 42000, net_paid_ntd: 0, balance_ntd: 42000, payout_status: 'payable' }],
+    });
+    openFinance('bank');
+    fireEvent.click(await screen.findByRole('button', { name: '核對交易 P-9' }));
+    await waitFor(() => expect(query).toHaveBeenCalledWith(22, expect.anything()));
+    expect(await screen.findByText(/餘額 NT\$ 42,000/)).toBeVisible();
+    expect(query).not.toHaveBeenCalledWith(11, expect.anything());
   });
 
-  it('filters received clients by actual receipts, retaining partially collected cases and excluding other ledger-only cases', async () => {
-    const base = { case_no: 'PARTIAL', account_version: '3', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 2, receipt_entry_count: 1, receipt_status: 'partially_received' as const };
-    vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([
-      base,
-      { ...base, case_no: 'PAID', open_receivable_amount_ntd: 0, receipt_status: 'received' },
-      ...['REFUND', 'ADJUSTMENT', 'REVERSAL', 'SUBSIDY_RETURN', 'SUBSIDY_ADVANCE'].map(case_no => ({ ...base, case_no, receipt_entry_count: 0, receipt_status: 'unpaid' as const })),
-    ]);
-    render(<FinancePage />);
-    await screen.findByText('PARTIAL');
-    expect(screen.queryByRole('option', { name: '含入帳紀錄' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('核銷狀態'), { target: { value: 'received' } });
-    const table = screen.getByRole('table');
-    expect(within(table).getByText('PARTIAL')).toBeInTheDocument();
-    expect(within(table).getByText('PAID')).toBeInTheDocument();
-    expect(within(table).getAllByRole('row')).toHaveLength(3);
-    for (const case_no of ['REFUND', 'ADJUSTMENT', 'REVERSAL', 'SUBSIDY_RETURN', 'SUBSIDY_ADVANCE', caseNo]) expect(within(table).queryByText(case_no)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('核銷狀態'), { target: { value: 'open' } });
-    expect(within(table).getByText('PARTIAL')).toBeInTheDocument();
-    expect(within(table).queryByText('PAID')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('核銷狀態'), { target: { value: 'all' } });
-    expect(within(table).getByText('REFUND')).toBeInTheDocument();
-    expect(clientFinanceHistoryClient.query).not.toHaveBeenCalled();
-    expect(monthlyAccountingClient.receivables).toHaveBeenCalled();
-  });
-  it('uses the same period query for month quarter and year without application stages',async()=>{
-    render(<FinancePage/>);fireEvent.change(screen.getByLabelText('收款來源'),{target:{value:'government'}});
-    await screen.findByRole('heading',{name:'政府補助整期帳務'});
-    await screen.findByRole('button',{name:caseNo});
-    expect(screen.queryByText('核准金額')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('彙總單位'),{target:{value:'month'}});
-    await waitFor(()=>expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(expect.objectContaining({unit:'month'}),expect.any(AbortSignal)));
-    fireEvent.change(screen.getByLabelText('彙總單位'),{target:{value:'year'}});
-    await waitFor(()=>expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(expect.objectContaining({unit:'year',index:1}),expect.any(AbortSignal)));
-  });
-  it('includes case accounting and shared warnings while separating confirmed money, estimates and unknown dates', async () => {
-    render(<FinancePage />);
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['收付款', '案件帳務', '銀行對帳', '逾期提醒']);
-    await screen.findByRole('button', { name: '查看案件' });
-    expect(cashRequirementsQueryClient.queryAll).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    const summary = await screen.findByLabelText('付款摘要');
-    expect(summary).toHaveTextContent('確認待付 NT$ 12,000'); expect(summary).toHaveTextContent('預估 NT$ 9,000'); expect(summary).not.toHaveTextContent('21,000');
-    fireEvent.change(screen.getByLabelText('付款月份'), { target: { value: '2026-11' } });
-    expect(screen.getByText('預估客戶')).toBeInTheDocument(); expect(screen.queryByText('測試客戶')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'confirmed' } });
-    expect(screen.queryByText('預估客戶')).not.toBeInTheDocument(); expect(summary).toHaveTextContent('確認待付 NT$ 0');
-    expect(cashRequirementsQueryClient.queryAll).toHaveBeenCalledTimes(1);
-  });
-  it('distinguishes confirmed payables from pending service completion without relabelling other estimates', async () => {
-    const base = { row_id: 'service', case_no: 'SERVICE', recipient_name: '服務待結束客戶', payment_type: 'client_subsidy_return' as const, certainty: 'estimated' as const, source: 'subsidy_estimate' as const, payment_status: 'pending' as const, source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] };
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([
-      base,
-      { ...base, row_id: 'other', case_no: 'OTHER', recipient_name: '收款待確認客戶', pending_reasons: ['客戶服務費尚未收齊'] },
-      { ...base, row_id: 'formal', case_no: 'FORMAL', recipient_name: '正式退款客戶', certainty: 'confirmed', source: 'client_refund', pending_reasons: ['退款付款日尚未確定'] },
-    ]);
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    await screen.findByText('服務待結束客戶');
-    expect(within(screen.getByLabelText('付款狀態')).getAllByRole('option').map(option => option.textContent)).toEqual(['全部', '確認待付', '計算資料待確認', '部分付款', '已付款', '已結清']);
-    expect(within(screen.getByText('收款待確認客戶').closest('tr')!).getByText('計算資料待確認', { selector: '.finance-badge' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'data_pending' } });
-    expect(screen.getByText('服務待結束客戶')).toBeInTheDocument();
-    expect(screen.getByText('收款待確認客戶')).toBeInTheDocument();
-    expect(screen.queryByText('正式退款客戶')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'confirmed' } });
-    expect(screen.getByText('正式退款客戶')).toBeInTheDocument();
-    expect(screen.queryByText('服務待結束客戶')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'all' } });
-    expect(screen.getByText('收款待確認客戶')).toBeInTheDocument();
-  });
-  it('opens the same exact-case coverage and refund drawer from receipts and payments',async()=>{
-    render(<FinancePage/>);let drawer=await openDetail();
-    expect(within(drawer).getByText('工會代墊補助 NT$ 12,000')).toBeInTheDocument();
-    expect(within(drawer).queryByText('其他案件客戶')).not.toBeInTheDocument();
-    expect(within(drawer).queryByRole('button',{name:/銷帳/})).not.toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole('button',{name:'關閉案件補助明細'}));
-    fireEvent.click(screen.getByRole('button',{name:'應付款'}));
-    const row=(await screen.findByText('測試客戶')).closest('tr')!;
-    fireEvent.click(within(row).getByRole('button',{name:'案件補助明細'}));drawer=await screen.findByRole('dialog');
-    await within(drawer).findByText(/已核銷/);
-    expect(subsidyPeriodClient.caseCoverage).toHaveBeenLastCalledWith(caseNo,expect.any(AbortSignal));
-    expect(recovery.apply).not.toHaveBeenCalled();
-  });
-  it('opens the staff identified by the payable instead of the first directory record', async () => {
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{ row_id: 'staff:22', case_no: caseNo, recipient_name: '第二位人員', payment_type: 'staff_payable', certainty: 'confirmed', source: 'staff_obligation', payment_status: 'pending' as const, source_amount_ntd: 42000, unpaid_amount_ntd: 42000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [], staff_id: 22 }]);
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '第一位人員', phone: null, education: null }, { id: 22, name: '第二位人員', phone: null, education: null }], next_cursor: null });
-    vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue({ staff_id: 22, staff_payables_version: 1, obligations: [], events: [] });
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    fireEvent.click(await screen.findByRole('button', { name: '人員付款明細' }));
-    await waitFor(() => expect(staffPayablesQueryClient.query).toHaveBeenCalledWith(22, expect.objectContaining({ signal: expect.any(AbortSignal) })));
-    expect(screen.getByLabelText('服務人員')).toHaveValue('22');
-  });
-  it('uses service period directly without an application-year operation',async()=>{
-    render(<FinancePage/>);fireEvent.change(screen.getByLabelText('收款來源'),{target:{value:'government'}});
-    await screen.findByText('本期目前計算應收',{exact:false});
-    fireEvent.change(screen.getByLabelText('年度'),{target:{value:'2026'}});
-    fireEvent.change(screen.getByLabelText('季度'),{target:{value:'4'}});
-    await screen.findByText('2026 年 第 4 季');
-    expect(screen.queryByText('預計申請年月')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button',{name:'送件'})).not.toBeInTheDocument();
-  });
-  it('allows retry of a coverage query without inventing zero or performing per-case recovery',async()=>{
-    vi.mocked(subsidyPeriodClient.caseCoverage).mockRejectedValueOnce(new ApiNetworkError('lost reply'));
-    render(<FinancePage/>);fireEvent.click(await screen.findByRole('button',{name:'案件補助明細'}));
-    const drawer=await screen.findByRole('dialog');const detail=within(drawer);
-    await detail.findByText('補助資料待確認。');
-    expect(detail.queryByText('NT$ 0')).not.toBeInTheDocument();
-    fireEvent.click(detail.getByRole('button',{name:'重新查詢'}));
-    await detail.findByText(/已核銷/);
-    expect(subsidyPeriodClient.caseCoverage).toHaveBeenCalledTimes(2);
-    expect(recovery.apply).not.toHaveBeenCalled();
+  it('uses the selected government service period without an application submission step', async () => {
+    const drawer = await openGovernment();
+    const year = await drawer.findByLabelText('年度');
+    const selectedYear = now.getFullYear() - 1;
+    fireEvent.change(year, { target: { value: String(selectedYear) } });
+    fireEvent.change(drawer.getByLabelText('季度'), { target: { value: '4' } });
+    expect(await drawer.findByText(`${selectedYear} · quarter · 4`)).toBeVisible();
+    expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith({ unit: 'quarter', year: selectedYear, index: 4 }, expect.any(AbortSignal));
+    expect(drawer.queryByText('預計申請年月')).not.toBeInTheDocument();
+    expect(drawer.queryByRole('button', { name: '送件' })).not.toBeInTheDocument();
   });
 
+  it('retries the government period query without fabricating zero or performing recovery', async () => {
+    vi.mocked(subsidyPeriodClient.query).mockRejectedValueOnce(new Error('lost reply')).mockImplementation(async period => ({
+      ...periodView(period),
+      coverage: [{ receipt_id: 9, period, label: '本期已入款', amount_ntd: 12000, recovered_advance_ntd: 12000 }],
+    }));
+    const difference = vi.spyOn(subsidyPeriodClient, 'difference');
+    const recovery = vi.spyOn(subsidyAdvanceSettlementClient, 'apply');
+    const drawer = await openGovernment();
+    expect(await drawer.findByRole('alert')).toHaveTextContent('補助資料暫時無法取得');
+    expect(drawer.queryByText('NT$ 0')).not.toBeInTheDocument();
+    fireEvent.click(drawer.getByRole('button', { name: '重新整理補助' }));
+    expect(await drawer.findByText(/首筆實收 NT\$ 12,000；代墊回收 NT\$ 12,000/)).toBeVisible();
+    expect(subsidyPeriodClient.query).toHaveBeenCalledTimes(2);
+    expect(difference).not.toHaveBeenCalled();
+    expect(recovery).not.toHaveBeenCalled();
+  });
 });

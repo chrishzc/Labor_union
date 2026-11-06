@@ -288,7 +288,7 @@ def test_matching_pending_deposit_apply_persists_order_before_matching_in_same_u
     assert matching.command.source_identity == row.source_identity
 
 
-def test_completed_historical_order_establishes_default_accounting_from_order_days(tmp_path):
+def test_completed_historical_order_workbook_adopts_without_default_accounting(tmp_path):
     path = _workbook(
         tmp_path,
         ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
@@ -309,40 +309,27 @@ def test_completed_historical_order_establishes_default_accounting_from_order_da
                 preview_fingerprint=preview.fingerprint,
             )
 
-    class DefaultAccounting:
-        def __init__(self):
-            self.calls = []
-
-        def establish_default_in_current_unit_of_work(self, **values):
-            self.calls.append(values)
-
-    accounting = DefaultAccounting()
     workflow = HistoricalOrderAdoptionWorkflow(
         PersistingRepository(row),
         _UnitOfWork,
         _SchedulingHistoricalAssignment(),
         clock=SimpleNamespace(today=lambda: _BUSINESS_DATE),
-        default_accounting=accounting,
     )
     preview = workflow.preview(row)
 
-    workflow.apply(
+    receipt = workflow.apply(
         HistoricalOrderAdoptionRequest(
             row,
             preview.fingerprint,
-            "historical-order:default-accounting",
+            "historical-order:preserve-accounting",
             "test-operator",
             "adopt completed historical order",
-            "historical-order:default-accounting:correlation",
+            "historical-order:preserve-accounting:correlation",
         )
     )
 
-    assert accounting.calls == [{
-        "case_no": "CASE-1",
-        "source_identity": row.source_identity,
-        "actor": "test-operator",
-        "correlation_id": "historical-order:default-accounting:correlation",
-    }]
+    assert receipt.outcome is HistoricalOrderOutcome.ADOPTED
+    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
 
 
 def test_historical_start_matching_plan_is_an_actual_start_and_completes_service():
@@ -766,7 +753,6 @@ def test_completed_historical_actual_start_skips_formal_rebuild(tmp_path):
         _UnitOfWork,
         _SchedulingHistoricalAssignment(),
         rebuilder,
-        default_accounting=SimpleNamespace(establish_default_in_current_unit_of_work=lambda **_: None),
     )
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE

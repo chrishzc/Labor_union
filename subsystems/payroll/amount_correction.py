@@ -1,5 +1,6 @@
 """Human Payroll correction, with Staff Payables coordination in the same UoW."""
 from dataclasses import dataclass
+from datetime import date
 
 
 @dataclass(frozen=True)
@@ -10,6 +11,19 @@ class PayrollAmountCommand:
     amount_ntd: int | None
     reason: str
     expected_version: int
+    key: str
+    actor: str
+
+
+@dataclass(frozen=True)
+class HistoricalUnpaidPayableCommand:
+    case_no: str
+    staff_id: int
+    obligation_identity: str | None
+    expected_event_id: int | None
+    amount_ntd: int
+    due_date: date | None
+    evidence: str
     key: str
     actor: str
 
@@ -60,3 +74,9 @@ class PayrollAmountApplication:
                 result=self.repository.apply(command)
             work.commit()
             return result
+
+    def record_historical_unpaid(self, command: HistoricalUnpaidPayableCommand) -> str:
+        with self.unit_of_work() as work:
+            identity = self.repository.record_historical_unpaid(command)
+            work.commit()
+            return identity

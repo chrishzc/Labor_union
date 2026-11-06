@@ -29,6 +29,7 @@ from api.schemas.accounts_payable_export import (
     AccountsPayableArchiveView,
     AccountsPayablePreviewView,
     CaseStaffPayableAuditView,
+    HistoricalStaffPayableAuditItemView,
     CashRequirementsPageView,
 )
 from api.schemas.government_subsidy_report import (
@@ -143,6 +144,41 @@ def preview_accounts_payable(
             "accounts_payable_query_internal_error",
             "應付帳款查詢失敗。",
             "accounts-payable-query",
+        ) from exc
+
+
+@router.get(
+    "/accounts-payable/historical-lookup",
+    response_model=BaseResponse[list[HistoricalStaffPayableAuditItemView]],
+)
+def query_historical_staff_payables(
+    keyword: str = Query(..., min_length=1, max_length=50),
+    target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: AccountsPayableExportApplication = Depends(get_accounts_payable_export_application),
+):
+    del principal
+    try:
+        items = application.query_historical_cases(keyword.strip(), _target_payment_date(target_month))
+        return BaseResponse(data=[
+            HistoricalStaffPayableAuditItemView(
+                case_no=item.case_no, staff_id=item.staff_id, recipient_name=item.recipient_name,
+                obligation_identity=item.obligation_identity, order_due_date=item.order_due_date,
+                effective_due_date=item.effective_due_date, source=item.source,
+                amount_due_ntd=item.amount_due.amount if item.amount_due is not None else None,
+                balance_ntd=item.balance.amount if item.balance is not None else None,
+                disposition=item.disposition, reason=item.reason, current_event_id=item.current_event_id,
+            )
+            for item in items
+        ])
+    except ValueError as exc:
+        raise typed_http_error(
+            400, "validation", "historical_payable_lookup_invalid",
+            "請確認案號或月嫂完整姓名。若結果過多，請改用案號或公會編號。", "historical-payable-lookup",
+        ) from exc
+    except Exception as exc:
+        raise internal_query_error(
+            "historical_payable_lookup_internal_error", "暫時無法查核未列入原因。", "historical-payable-lookup",
         ) from exc
 
 

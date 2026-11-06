@@ -84,6 +84,28 @@ class MySqlStaffPayableExportSource:
             "recipient_name": names.get(int(assignment["staff_id"])) if assignment else None})
             for row in order_rows for assignment in (missing or (() if items else (None,))))
 
+    def find_historical_cases(self, keyword: str, target_payment_date: date):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT o.case_no, o.case_no=%s AS exact_case FROM orders o "
+                "LEFT JOIN case_staff_assignments a ON a.case_no=o.case_no AND a.status NOT IN ('cancelled','replaced') "
+                "LEFT JOIN staff s ON s.id=a.staff_id "
+                "WHERE o.status IN ('歷史訂單－服務完成','歷史訂單－帳務完成') "
+                "AND (o.case_no=%s OR s.name=%s OR s.union_no=%s) "
+                "ORDER BY exact_case DESC, o.case_no LIMIT 21",
+                (keyword, keyword, keyword, keyword),
+            )
+            matches = tuple(cursor.fetchall())
+            exact_case = next((row["case_no"] for row in matches if row["exact_case"]), None)
+            candidates = tuple(row["case_no"] for row in matches)
+            cursor.execute("SELECT id FROM staff WHERE name=%s OR union_no=%s", (keyword, keyword))
+            staff_ids = {int(row["id"]) for row in cursor.fetchall()}
+        if len(candidates) > 20 and exact_case is None:
+            raise ValueError("historical_payable_search_too_broad")
+        cases = (exact_case,) if exact_case is not None else candidates
+        return tuple(item for case_no in cases for item in self.load_case(case_no, target_payment_date)
+                     if case_no == exact_case or item.staff_id in staff_ids)
+
 
 class MySqlClientRefundExportSource:
     def __init__(self, connection, *, case_query=None) -> None:
@@ -167,10 +189,16 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
     status = _staff_status(row)
     if historical_confirmation is not None or payout_status == "completed":
         disposition, reason = "paid_or_settled", "已有有效付款／結清證據，不列入待付清冊。"
-    elif status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
-        disposition, reason = "blocked", row.get('funding_reason') or "現行付款狀態或受款資料尚有 blocker。"
     elif due_date is None:
         disposition, reason = "date_not_formed", "月嫂應付日尚未形成。"
+    elif status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
+        disposition = "blocked"
+        if row.get("funding_reason"):
+            reason = row["funding_reason"]
+        elif payout_status in {"payable", "partially_paid"} and not _staff_recipient_is_ready(row):
+            reason = "月嫂主要收款帳戶缺失、重複或資料不完整，請到服務人員名冊查核。"
+        else:
+            reason = "現有付款狀態須查核。"
     elif _date_value(due_date) == target_payment_date:
         disposition, reason = "selected_month", "列入所選付款月份。"
     else:
@@ -187,6 +215,7 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
         source="formal_obligation",
         disposition=disposition,
         reason=reason,
+        current_event_id=row.get("current_event_id"),
         payment_status=(historical_confirmation if historical_confirmation is not None else
                         "paid" if payout_status in {"completed", "recovery_required"}
                             or _integer(row["export_amount_ntd"], "staff payable balance") < 0 else
@@ -198,9 +227,9 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
 def _missing_case_audit_item(row) -> CaseStaffPayableAuditItem:
     due_date = row.get("staff_payment_due_date")
     if due_date is None:
-        disposition, reason = "date_not_formed", "尚未建立月嫂應付帳務與應付日，請由服務天數帳務流程補建。"
+        disposition, reason = "date_not_formed", "尚未建立月嫂應付帳務及付款日，請核對原帳務。"
     else:
-        disposition, reason = "missing_calculation_basis", "案件已有應付日，但尚未建立月嫂應付帳務；請由服務天數帳務流程補建。"
+        disposition, reason = "missing_calculation_basis", "尚未建立月嫂應付帳務，請核對原帳務。"
     staff_id = row.get("staff_id")
     return CaseStaffPayableAuditItem(
         case_no=str(row["case_no"]),
@@ -221,15 +250,13 @@ def _staff_status(row) -> StaffPayableStatus:
     projected_status = StaffPayableStatus(str(row["payout_status"]))
     if projected_status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
         return projected_status
-    if _integer(row["primary_account_count"], "primary account count") != 1:
-        return StaffPayableStatus.ANOMALY
-    if not _clean_text(row.get("recipient_name")):
-        return StaffPayableStatus.ANOMALY
-    if not _clean_text(row.get("bank_code")):
-        return StaffPayableStatus.ANOMALY
-    if not _clean_text(row.get("account_no")):
-        return StaffPayableStatus.ANOMALY
-    return projected_status
+    return projected_status if _staff_recipient_is_ready(row) else StaffPayableStatus.ANOMALY
+
+
+def _staff_recipient_is_ready(row) -> bool:
+    return _integer(row["primary_account_count"], "primary account count") == 1 and all(
+        _clean_text(row.get(key)) for key in ("recipient_name", "bank_code", "account_no")
+    )
 
 
 # One row is materialized cohesively so payable/anomaly cannot use different facts.
@@ -359,6 +386,7 @@ ORDER BY obligations.staff_id, obligations.obligation_identity
 
 _STAFF_PAYABLE_CASE_AUDIT_SQL = """
 SELECT obligations.obligation_identity,
+       obligations.current_event_id,
        obligations.case_no,
        obligations.staff_id,
        staff.name AS recipient_name,
@@ -391,6 +419,7 @@ WHERE obligations.case_no = %s
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
 GROUP BY obligations.obligation_identity,
+         obligations.current_event_id,
          obligations.case_no,
          obligations.staff_id,
          staff.name,

@@ -80,3 +80,31 @@ def test_repository_reads_source_review_occurrence_count_in_batch_snapshot() -> 
     assert "source_review_occurrence_count" in counts_statement
     assert counts_params == (7, 7, 7, 7)
     assert facts.source_review_occurrence_count == 1
+
+
+def test_repository_counts_repeats_without_blocking_a_new_dispatchable_row():
+    cursor = _Cursor()
+    header, counts, *_ = cursor._results
+    cursor._results = (
+        {**header, "row_count": 3, "receipt_duplicate_count": "2"},
+        {**counts, "canonical_created_count": 1, "canonical_member_count": 1, "source_review_occurrence_count": 0},
+        ({
+            "finance_import_row_id": 8,
+            "credit": 12000,
+            "debit": None,
+            "classification_type": "client_receipt",
+            "canonical_fact_version": 0,
+            "disposition": "create",
+            "decision_facts_fingerprint": "b" * 64,
+            "target_identities": '["synthetic-obligation"]',
+            "evidence": "[]",
+            "available_actions": "[]",
+        },),
+        (),
+    )
+    plan = build_finance_import_plan(_load_batch_facts(cursor, "finance-import-batch:7", False))
+    assert "finance_import_ingestion_receipts" in cursor.calls[0][0]
+    assert plan.counts.source_rows == 3
+    assert plan.counts.duplicate_occurrences == 2
+    assert plan.counts.ready_dispatch == 1
+    assert plan.apply_allowed

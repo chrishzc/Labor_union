@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-依歷史來源服務迄日驅動「歷史訂單－服務中」到「歷史訂單－服務完成」的每日推進，不依賴 Scheduling 可用性；同一 outer UoW 內追加 canonical lifecycle event/outbox 並建立既有預設服務帳務。另組合 Orders Step 11 所需的 Orders、Scheduling、Client Finance 與 Staff Payables fresh readback；Query 保持 read-only。當 fresh oracle 證明歷史服務天數完整且雙邊款項均真正結清時，由 bounded Preview／Apply 將 Orders 從「歷史服務完成」推進為「歷史帳務完成」。
+依歷史來源服務迄日驅動「歷史訂單－服務中」到「歷史訂單－服務完成」的每日推進，不依賴 Scheduling 可用性。沿原 outer UoW 追加 canonical lifecycle event/outbox，原帳務保留。另組合 Orders Step 11 所需的 Orders、Scheduling、Client Finance 與 Staff Payables fresh readback；Query 保持 read-only。當 fresh oracle 證明歷史服務天數完整且雙邊款項均真正結清時，由 bounded Preview／Apply 將 Orders 從「歷史服務完成」推進為「歷史帳務完成」。
 
 ## Implementation
 - primary:
@@ -31,7 +31,6 @@
 - outbound: `scheduling`、`client-finance`、`staff-payables` — Query 只讀各 owner typed current readback；Apply 鎖定並驗證 exact owner versions/source vector，不改寫這些 owner root。
 - Staff Payables completion evidence accepts either canonical bank payout/allocation lineage or exact current historical payout projection/event/link lineage；Apply locks both lineage families before fresh re-read，且歷史流程只接受 `payable_to_staff` obligations。
 - outbound: Orders canonical lifecycle writer — 追加 lifecycle event/outbox 並以 lifecycle version CAS 更新 Orders projection。
-- outbound: historical service accounting — 服務迄日已過的狀態推進與既有預設帳務建立共用同一 outer UoW；無 Scheduling root 也必須能執行。
 - inbound: `ui_react/src/pages/FinancePage.tsx` — 客戶收款頁選取歷史服務完成案件時，透過 HistoricalCompletionPanel 呈現 owner referral、預覽並確認帳務完成；成功或手動重新整理後重新讀取案件及完成狀態。案件工作台保留完工摘要與同案帳務連結。
 
 ## Contracts

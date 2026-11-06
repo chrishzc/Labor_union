@@ -8,7 +8,7 @@ import re
 from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
-    CanonicalFinanceImportRow, FinanceImportBatchFacts, FinanceImportPlan,
+    CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
     build_finance_import_plan, mark_suspected_duplicate_client_receipts,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -53,6 +53,7 @@ class FinanceImportApplyReceipt:
 @dataclass(frozen=True, slots=True)
 class StoredFinanceImportReceipt:
     command_fingerprint: PreviewFingerprint; receipt: FinanceImportApplyReceipt
+    client_receipt_reviews: tuple[tuple[str, ClientReceiptReviewDiagnostic], ...] = ()
 
 
 class FinanceImportRepository(Protocol):
@@ -129,7 +130,12 @@ class FinanceImportWorkflow:
     def _persist(self, request, plan, results, command_fingerprint, receipt):
         self._repository.append_dispatch_audit(plan, results); self._repository.append_outbox(plan, results)
         self._repository.advance_batch_version(plan.batch_identity, plan.batch_version, receipt.resulting_batch_version)
-        self._repository.save_receipt(request.idempotency_key, StoredFinanceImportReceipt(command_fingerprint, receipt))
+        reviews = tuple(
+            (row.row_identity, row.client_receipt_review)
+            for row in plan.rows
+            if row.disposition is FinanceImportDisposition.BUSINESS_PENDING and row.client_receipt_review is not None
+        )
+        self._repository.save_receipt(request.idempotency_key, StoredFinanceImportReceipt(command_fingerprint, receipt, reviews))
 
 
 def _validate_batch_version(request, facts):

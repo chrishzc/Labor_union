@@ -269,29 +269,16 @@ class HistoricalServiceCompletionRepository(Protocol):
     ) -> HistoricalServiceCompletionReceipt: ...
 
 
-class HistoricalDefaultAccountingPort(Protocol):
-    def establish_default_in_current_unit_of_work(
-        self,
-        *,
-        case_no: str,
-        source_identity: str,
-        actor: str,
-        correlation_id: str,
-    ) -> object: ...
-
-
 class HistoricalServiceCompletionApplyWorkflow:
-    """Persist the date-driven historical service transition without Scheduling facts."""
+    """Advance the historical lifecycle while preserving the case's original accounting."""
 
     def __init__(
         self,
         repository: HistoricalServiceCompletionRepository,
         unit_of_work_factory: Callable[[], object],
-        default_accounting: HistoricalDefaultAccountingPort,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
-        self._default_accounting = default_accounting
 
     def apply(
         self, request: ApplyHistoricalServiceCompletion
@@ -344,17 +331,6 @@ class HistoricalServiceCompletionApplyWorkflow:
                     candidate.expected_order_version,
                 )
             receipt = self._repository.persist_service_completion(request, candidate)
-            try:
-                self._default_accounting.establish_default_in_current_unit_of_work(
-                    case_no=request.case_no,
-                    source_identity=candidate.source_identity,
-                    actor=request.actor.actor_id,
-                    correlation_id=request.correlation_id.value,
-                )
-            except ValueError as error:
-                raise _service_error(
-                    request, ErrorCategory.DOMAIN_BLOCKED, str(error)
-                ) from error
             unit.commit()
             return receipt
 

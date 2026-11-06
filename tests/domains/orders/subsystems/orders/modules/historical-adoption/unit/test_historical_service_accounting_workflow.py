@@ -86,8 +86,8 @@ class _Repository:
         receipt = HistoricalServiceAccountingReceipt(
             "CASE-19",
             candidate.facts.historical_day_revision + 1,
-            candidate.facts.client_finance_version + 1,
-            candidate.facts.payroll_version + 1,
+            candidate.facts.client_finance_version,
+            candidate.facts.payroll_version,
             candidate.service_days.total_actual_service_days,
             candidate.client_finance.total_receivable.amount,
             candidate.payroll.total_payable.amount,
@@ -140,6 +140,8 @@ def test_apply_locks_rebuilds_and_commits_once() -> None:
     receipt = workflow.apply(_request(preview))
 
     assert receipt.total_actual_service_days == 3
+    assert receipt.resulting_client_finance_version == preview.facts.client_finance_version
+    assert receipt.resulting_payroll_version == preview.facts.payroll_version
     assert repository.persist_calls == 1
     assert events == ["enter", "commit", "exit"]
 

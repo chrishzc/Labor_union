@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_raw_bank_roots_create_one_canonical_row_and_two_occurrences() -> None:
+def test_raw_bank_roots_create_one_canonical_row_and_one_occurrence() -> None:
     from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.finance_import.staging import stage_finance_rows
@@ -79,7 +79,7 @@ def _assert_canonical_dedup(connection, fingerprint: str) -> None:
         occurrence_count = cursor.fetchone()["count"]
     assert row["classification_type"] == "non_business_review"
     assert row["reconciliation_status"] == "pending"
-    assert occurrence_count == 2
+    assert occurrence_count == 1
 
 
 def _formal_output_counts(connection) -> tuple[int, int, int]:
