@@ -613,3 +613,16 @@ def test_three_windows_launchers_delegate_without_initialization_or_reset(tmp_pa
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.dumps([mode, "--dry-run"]) in result.stdout
     assert "-m scripts.initialize_nas_schema" not in launcher.read_text(encoding="utf-8")
+
+
+def test_resolve_client_tool_prioritizes_tools_mysql_folder(tmp_path, monkeypatch):
+    tool_dir = tmp_path / "tools" / "mysql"
+    tool_dir.mkdir(parents=True)
+    fake_dump = tool_dir / ("mysqldump.exe" if os.name == "nt" else "mysqldump")
+    fake_dump.write_text("dummy binary", encoding="utf-8")
+    monkeypatch.setattr(nas, "ROOT", tmp_path)
+    monkeypatch.setattr(nas.shutil, "which", lambda _: "fallback_from_path")
+
+    resolved = nas.resolve_client_tool("mysqldump")
+    assert resolved == str(fake_dump.resolve())
+    assert nas.resolve_client_tool("mysql") == "fallback_from_path"

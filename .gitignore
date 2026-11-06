@@ -124,3 +124,5 @@ desktop.ini
 .~lock.*#
 .~lock.*
 ~$*
+
+tools/mysql/

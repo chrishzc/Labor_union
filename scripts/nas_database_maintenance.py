@@ -112,6 +112,26 @@ def run_windows_powershell(command, *, timeout=30, sta=False):
                           timeout=timeout, check=False)
 
 
+def resolve_client_tool(executable: str) -> str | None:
+    """Resolve mysql or mysqldump executable path.
+    Prioritizes the project tools/mysql directory without requiring system PATH,
+    falling back to system PATH if not found.
+    """
+    stem = executable[:-4] if executable.lower().endswith(".exe") else executable
+    names = [f"{stem}.exe", stem] if os.name == "nt" else [stem, f"{stem}.exe"]
+    search_dirs = [
+        ROOT / "tools" / "mysql",
+        ROOT / "tools" / "bin",
+        ROOT / "tools",
+    ]
+    for directory in search_dirs:
+        for name in names:
+            candidate = directory / name
+            if candidate.is_file():
+                return str(candidate.resolve())
+    return shutil.which(executable)
+
+
 class ConnectionConfig:
     def __init__(self, settings, *, user, password, readonly=False, candidate=None):
         self.settings = settings
@@ -141,8 +161,9 @@ class ConnectionConfig:
         options = ["--ssl-mode=" + self.settings["ssl_mode"]]
         for flag, path in self.settings["tls_files"].items():
             options.append(f"--{flag}={path}")
-        require(shutil.which(executable), f"找不到 MySQL 維護工具「{executable}」；請安裝 MySQL 8 客戶端工具 (含 mysql 與 mysqldump) 並加入系統 PATH。")
-        return [executable, *options]
+        resolved = resolve_client_tool(executable)
+        require(resolved, f"找不到 MySQL 維護工具「{executable}」；請將其置於專案 tools/mysql/ 目錄下，或安裝並加入系統 PATH。")
+        return [resolved, *options]
 
     def run_manifest_backfill(self, backfill, mode, candidate, plan_path, backup_path, receipt_path):
         require(candidate == self.candidate and candidate.startswith("lu_nas_"), "資料轉換只能作用於本次 NAS 副本。")
@@ -596,7 +617,7 @@ def switch_runtime(settings, candidate, original_env_digest, directory):
 
 def upgrade(settings):
     print("正在核對資料庫版本，原資料庫不會被清空。", flush=True)
-    has_tools = bool(shutil.which("mysql") and shutil.which("mysqldump"))
+    has_tools = bool(resolve_client_tool("mysql") and resolve_client_tool("mysqldump"))
     is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
     if not is_strict_nas or not has_tools:
         print("執行直連結構升級（Additive Migration）...", flush=True)
@@ -935,7 +956,7 @@ def format_maintenance_error(error: Exception, settings: dict | None = None) -> 
         return (
             f"[找不到執行工具]\n"
             f"系統找不到指定檔案或命令工具: {fn}\n"
-            f"建議排查：若為 mysql 或 mysqldump，請確認已安裝 MySQL 8 Client 並將其 bin 資料夾加入系統 PATH。"
+            f"建議排查：若為 mysql 或 mysqldump，請確認已放置於專案 tools/mysql/ 目錄下，或安裝並加入系統 PATH。"
         )
 
     err_name = type(error).__name__

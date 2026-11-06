@@ -21,6 +21,12 @@ $tokenPath = Join-Path $runtimeDirectory 'cloudflare-state\tunnel-token'
 Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
+$toolsMysqlDir = Join-Path $ProjectRoot 'tools\mysql'
+if (Test-Path -LiteralPath $toolsMysqlDir) {
+    if ($env:PATH -notlike "*$toolsMysqlDir*") {
+        $env:PATH = "$toolsMysqlDir;$env:PATH"
+    }
+}
 
 function Test-IsSamePath {
     param([string]$Path1, [string]$Path2)
@@ -298,6 +304,13 @@ function Invoke-ManagerAction {
         $cf = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
         if ($cf) {
             Write-Host "[PASS] Cloudflare Tunnel 系統服務存在 (狀態: $($cf.Status))"
+        }
+        $mysqlTool = if (Test-Path (Join-Path $toolsMysqlDir 'mysql.exe')) { Join-Path $toolsMysqlDir 'mysql.exe' } else { (Get-Command 'mysql.exe' -ErrorAction SilentlyContinue).Source }
+        $mysqldumpTool = if (Test-Path (Join-Path $toolsMysqlDir 'mysqldump.exe')) { Join-Path $toolsMysqlDir 'mysqldump.exe' } else { (Get-Command 'mysqldump.exe' -ErrorAction SilentlyContinue).Source }
+        if ($mysqlTool -and $mysqldumpTool) {
+            Write-Host "[PASS] MySQL 維護工具存在: $toolsMysqlDir"
+        } else {
+            Write-Host "[INFO] MySQL 維護工具尚未就緒 (可放置於 tools\mysql\ 或加入系統 PATH)"
         }
         Write-Host '[PASS] Program paths present. No configuration, database, provider or Cloudflare access performed.'
         return
