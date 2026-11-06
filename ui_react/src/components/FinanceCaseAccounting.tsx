@@ -140,7 +140,17 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
        <h4>銀行對帳與帳戶核對資訊</h4>
        <span className="finance-reconciliation-hint">核對永豐銷帳編號與台新退款／出款流水</span>
      </div>
-     {contactPhone && <span className="finance-reconciliation-phone">聯絡電話：{contactPhone}</span>}
+     <div className="finance-reconciliation-actions">
+       {contactPhone && <span className="finance-reconciliation-phone">聯絡電話：{contactPhone}</span>}
+       <button
+         type="button"
+         className="finance-btn-secondary"
+         onClick={() => setShowSupplement(!showSupplement)}
+         aria-expanded={showSupplement}
+       >
+         {showSupplement ? '收合補登' : '手動補登款項'}
+       </button>
+     </div>
    </div>
    <dl className="finance-reconciliation-grid">
      <div className="finance-reconciliation-item">
@@ -198,6 +208,18 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      <small>提示：若銀行對帳單未配對成功，請核對「永豐入帳銷帳編號」是否為此 14 碼虛擬帳號；出款／退款核對客戶上述「退款帳號末四碼」與「戶名」。缺少帳號時請至客戶名冊補齊。</small>
    </div>
  </section>
+ {showSupplement && (
+   <CaseManualSupplementWorkbench
+     caseNo={initialCase}
+     clientItems={data.client_items}
+     staffItems={data.staff_items}
+     onSuccess={updated => {
+       setState(old => ({ ...old, data: updated }));
+       refresh();
+     }}
+     onClose={() => setShowSupplement(false)}
+   />
+ )}
  <details className="finance-case-block" open><summary>01　客戶繳款</summary><div className="finance-case-block-body"><div className="finance-table-container" tabIndex={0} role="region" aria-label="各期繳款與通知，可左右捲動"><table className="finance-table finance-case-periods"><thead><tr><th>期款</th><th>原到期日</th><th>應繳</th><th>已收／待收</th><th>入帳資訊</th><th>通知時間</th><th>通知</th></tr></thead><tbody>{stages.map(stage=>{
  const sources=data.client_items.filter(row=>row.direction==='receivable'&&row.payment_stage===stage),item=sources.length===1?sources[0]:undefined;
  const exempt=data.customer_fully_received===true&&data.customer_amount_ntd===0;
