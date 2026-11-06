@@ -1,4 +1,7 @@
-"""MySQL read model and saga roots for LINE identity management."""
+"""
+File: line_identity_management_repository.py
+Description: LINE 身分管理讀取模型與現狀事實 adapter，支援角色層級綁定、解除歷程與投影比對。
+"""
 
 from __future__ import annotations
 
@@ -507,13 +510,23 @@ def _current_fact_readback(
     rows: tuple[dict[str, Any], ...],
 ) -> LineIdentityCurrentFactReadback:
     roots = tuple(row for row in rows if row.get("source_kind") == "root")
-    root = roots[0] if len(roots) == 1 else None
     root_bindings = tuple(
         binding
         for binding in (_fact_binding(row) for row in roots)
         if binding is not None
     )
-    root_binding = root_bindings[0] if len(root_bindings) == 1 else None
+    active_roots = tuple(
+        row for row in roots
+        if str(row.get("binding_status")) != LineIdentityBindingStatus.REVOKED.value
+    )
+    active_root_bindings = tuple(
+        binding for binding in root_bindings
+        if binding.binding_status != LineIdentityBindingStatus.REVOKED
+    )
+    effective_roots = active_roots or roots
+    effective_bindings = active_root_bindings or root_bindings
+    root = effective_roots[0] if len(effective_roots) == 1 else None
+    root_binding = effective_bindings[0] if len(effective_bindings) == 1 else None
     owner_projections = tuple(
         binding
         for binding in (_fact_binding(row) for row in rows if row.get("source_kind") != "root")
@@ -525,7 +538,7 @@ def _current_fact_readback(
         by_type[projection.subject_type] = by_type.get(projection.subject_type, 0) + 1
     duplicate_type = any(count > 1 for count in by_type.values())
     role_types = set(by_type)
-    root_role_types = {binding.subject_type for binding in root_bindings}
+    root_role_types = {binding.subject_type for binding in active_root_bindings}
     legal_dual_role = (
         role_types
         == {
@@ -535,7 +548,7 @@ def _current_fact_readback(
         and root_role_types == role_types
         and not duplicate_type
     )
-    root_keys = {_fact_key(binding) for binding in root_bindings}
+    root_keys = {_fact_key(binding) for binding in active_root_bindings}
     owner_keys = {_fact_key(projection) for projection in owner_projections}
     projection_mismatch = root_keys != owner_keys
 
@@ -556,7 +569,7 @@ def _current_fact_readback(
         readback_status = LineIdentityCurrentFactReadbackStatus.ROOT_MISSING
     elif duplicate_type:
         readback_status = LineIdentityCurrentFactReadbackStatus.PROJECTION_MULTIPLE
-    elif not owner_projections:
+    elif not owner_projections and active_roots:
         readback_status = LineIdentityCurrentFactReadbackStatus.PROJECTION_MISSING
     elif projection_mismatch:
         readback_status = LineIdentityCurrentFactReadbackStatus.MISMATCH
@@ -577,7 +590,7 @@ def _current_fact_readback(
         findings=tuple(findings),
         readback_status=readback_status,
         manual_actions=tuple(dict.fromkeys(manual_actions)),
-        root_bindings=root_bindings,
+        root_bindings=effective_bindings,
         dual_role_persistence_supported=True,
     )
 

@@ -1,4 +1,7 @@
-"""Repository-level negative contracts for role-scoped LINE identity."""
+"""
+File: test_role_scoped_repository.py
+Description: 角色層級 LINE 身分 repository 契約與解除歷史過濾驗證。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +10,11 @@ import os
 import pytest
 
 from domains.line.identities import LineUserId
-from domains.line.identity_binding import LineBindingSubjectType, LineIdentityClaim
+from domains.line.identity_binding import (
+    LineBindingSubjectType,
+    LineIdentityBindingStatus,
+    LineIdentityClaim,
+)
 from infrastructure.mysql.line_identity_review_repository import (
     MySqlLineIdentityRepository,
 )
@@ -17,7 +24,11 @@ from infrastructure.mysql.line_identity_management_repository import (
 )
 from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
 from shared_kernel.identities import ExpectedVersion
-from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
+from subsystems.line.identity_management_contracts import (
+    LineIdentityCurrentFactFinding,
+    LineIdentityCurrentFactQuery,
+    LineIdentityCurrentFactReadbackStatus,
+)
 
 
 def _binding(subject_type, reference, *, status="bound", version=1):
@@ -90,6 +101,55 @@ def test_management_detail_ignores_revoked_history_when_one_role_is_active() -> 
     assert detail.subject_type is LineBindingSubjectType.CUSTOMER
     assert detail.subject_reference == "customer:7"
     assert len(cursor.executed) == 1
+
+
+def test_current_fact_ignores_revoked_history_when_one_role_is_active() -> None:
+    rows = (
+        {
+            "source_kind": "root",
+            "line_user_id": "U-current-fact",
+            "binding_status": "bound",
+            "aggregate_version": 1,
+            "subject_type": "customer",
+            "subject_reference": "7",
+            "subject_name": None,
+            "owner_line_user_id": None,
+        },
+        {
+            "source_kind": "root",
+            "line_user_id": "U-current-fact",
+            "binding_status": "revoked",
+            "aggregate_version": 3,
+            "subject_type": "admin",
+            "subject_reference": "1",
+            "subject_name": None,
+            "owner_line_user_id": None,
+        },
+        {
+            "source_kind": "customer",
+            "line_user_id": "U-current-fact",
+            "binding_status": None,
+            "aggregate_version": None,
+            "subject_type": "customer",
+            "subject_reference": "7",
+            "subject_name": "測試客戶",
+            "owner_line_user_id": "U-current-fact",
+        },
+    )
+    cursor = _Cursor(all_rows=(rows,))
+    readback = MySqlLineIdentityManagementRepository(
+        _Connection(cursor)
+    ).current_fact(LineIdentityCurrentFactQuery(LineUserId("U-current-fact")))
+
+    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.COMPLETE
+    assert readback.root_status is LineIdentityBindingStatus.BOUND
+    assert readback.root_version == 1
+    assert readback.findings == (LineIdentityCurrentFactFinding.CONSISTENT,)
+    assert readback.root_binding is not None
+    assert readback.root_binding.subject_type is LineBindingSubjectType.CUSTOMER
+    assert readback.root_binding.subject_reference == "7"
+    assert len(readback.root_bindings) == 1
+    assert readback.root_bindings[0].subject_reference == "7"
 
 
 @pytest.mark.parametrize(
