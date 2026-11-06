@@ -1,6 +1,6 @@
 """
 File: windows_remote_runtime.py
-Description: 提供已驗證 Windows 遠端 React 靜態介面（含 Gzip 壓縮）與同源 API 代理。
+Description: 提供已驗證 Windows 遠端 React 靜態介面（含 Gzip 與靜態快取資格透傳）及同源 API 代理。
 """
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def _forward_headers(headers):
     return {
         key: value for key, value in headers.items()
         if key.lower() not in excluded | {'host', 'forwarded', 'content-length'}
-        and not key.lower().startswith(('x-forwarded-', 'cf-access-'))
+        and not key.lower().startswith(('x-forwarded-', 'cf-access-', 'x-react-admin-'))
     }
 
 
@@ -122,7 +122,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
     async def proxy(request: Request):
         path = request.url.path.removeprefix(PREFIX)
         if path == '/api/v1/admin/auth/development-session':
-            return PlainTextResponse('Not Found', status_code=404)
+            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         query = request.scope.get('query_string', b'').decode('ascii')
         url = httpx.URL(path, query=query.encode('ascii'))
         client = request.app.state.api_client
@@ -139,7 +139,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
             )
             response = await client.send(upstream, stream=True)
         except httpx.HTTPError:
-            return PlainTextResponse('API unavailable', status_code=502)
+            return PlainTextResponse('API unavailable', status_code=502, headers={'Cache-Control': 'no-store'})
         headers = _forward_headers(response.headers)
         location = headers.get('location', '')
         if location.startswith('/api/'):
@@ -151,12 +151,12 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         )
 
     async def redirect(request):
-        return RedirectResponse(PREFIX + '/', status_code=307)
+        return RedirectResponse(PREFIX + '/', status_code=307, headers={'Cache-Control': 'no-store'})
 
     async def root_redirect(request: Request):
         if request.url.hostname in {'127.0.0.1', 'localhost', 'chrishzc.com'}:
-            return PlainTextResponse('Not Found', status_code=404)
-        return RedirectResponse('/admin/', status_code=307)
+            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
+        return RedirectResponse('/admin/', status_code=307, headers={'Cache-Control': 'no-store'})
 
     static_app = ResponseCompressionMiddleware(
         ReactAdminStaticApplication(artifact), minimum_size=1024, compresslevel=5,
@@ -169,7 +169,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         Mount(PREFIX, app=static_app),
         # The same immutable /test build is available locally at the familiar
         # /admin URL. Its absolute /test assets/API still use this same gateway.
-        Route('/admin', lambda _: RedirectResponse('/admin/', status_code=307)),
+        Route('/admin', lambda _: RedirectResponse('/admin/', status_code=307, headers={'Cache-Control': 'no-store'})),
         Mount('/admin', app=static_app),
     ]
     app = Starlette(lifespan=lifespan, routes=routes)
@@ -177,13 +177,13 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
     async def boundary(request: Request, call_next):
         allowed_hosts = _configured_allowed_hostnames()
         if request.url.hostname not in allowed_hosts:
-            return PlainTextResponse('Forbidden', status_code=403)
+            return PlainTextResponse('Forbidden', status_code=403, headers={'Cache-Control': 'no-store'})
         if request.url.hostname == 'chrishzc.com' and not request.url.path.startswith(PREFIX):
-            return PlainTextResponse('Not Found', status_code=404)
+            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         if (request.url.path == '/admin' or request.url.path.startswith('/admin/')) and (
             request.url.hostname == 'chrishzc.com'
         ):
-            return PlainTextResponse('Not Found', status_code=404)
+            return PlainTextResponse('Not Found', status_code=404, headers={'Cache-Control': 'no-store'})
         origin = request.headers.get('origin')
         if origin:
             allowed_origins = _configured_public_origins()
@@ -195,7 +195,7 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
                 'http://localhost:5173',
             }
             if origin not in allowed_origins and origin not in loopbacks:
-                return PlainTextResponse('Forbidden', status_code=403)
+                return PlainTextResponse('Forbidden', status_code=403, headers={'Cache-Control': 'no-store'})
         return await call_next(request)
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=boundary)

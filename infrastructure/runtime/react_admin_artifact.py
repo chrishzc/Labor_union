@@ -1,6 +1,6 @@
 """
 File: react_admin_artifact.py
-Description: 驗證並唯讀提供 immutable React 管理端 artifact、selector 與 health attestation。
+Description: 驗證並唯讀提供 React 管理端 artifact、瀏覽器私有快取資格證明與健康檢查。
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ from infrastructure.runtime.react_admin_api_compatibility import (
 
 MANIFEST_NAME = "artifact-manifest.json"
 ROOT_ENTRY = "index.html"
+ASSET_ELIGIBILITY_HEADER = "X-React-Admin-Asset-Eligibility"
+PRIVATE_IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; base-uri 'self'; object-src 'none'; "
@@ -37,7 +39,23 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
 }
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_CONTENT_HASH_PATTERN = re.compile(r"(?:^|[-_.])[A-Za-z0-9_-]{8,}(?=\.)")
+_IMMUTABLE_ASSET_FILENAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8,}\.(?:js|css)$"
+)
+_REQUIRED_MANIFEST_KEYS = frozenset(
+    {
+        "contract",
+        "artifact_version",
+        "source_ref",
+        "build_tools",
+        "api_compatibility_revision",
+        "root_entry",
+        "files",
+        "artifact_digest",
+    }
+)
+_OPTIONAL_MANIFEST_KEYS = frozenset({"immutable_assets"})
+_CONDITIONAL_REQUEST_HEADERS = frozenset({b"if-none-match", b"if-modified-since"})
 _PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
 
 
@@ -61,6 +79,7 @@ class ValidatedReactAdminArtifact:
     artifact_digest: str
     manifest_digest: str
     files: Mapping[str, ArtifactFile]
+    immutable_assets: frozenset[str] = frozenset()
 
     def resolve_manifest(self) -> Path:
         """Return the original manifest only while its bytes remain immutable."""
@@ -131,8 +150,9 @@ class ReactAdminStaticApplication:
             await Response(status_code=404)(scope, receive, send)
             return
         method = str(scope.get("method", "GET")).upper()
+        no_store_headers = {**SECURITY_HEADERS, "Cache-Control": "no-store"}
         if method not in {"GET", "HEAD"}:
-            await Response(status_code=405, headers=SECURITY_HEADERS)(scope, receive, send)
+            await Response(status_code=405, headers=no_store_headers)(scope, receive, send)
             return
         raw_path = str(scope.get("path", ""))
         root_path = str(scope.get("root_path", ""))
@@ -144,16 +164,45 @@ class ReactAdminStaticApplication:
             if relative_path == MANIFEST_NAME:
                 target = self._artifact.resolve_manifest()
                 cache_control = "no-store"
+                eligibility_header: str | None = None
             else:
                 target = self._artifact.resolve_file(relative_path)
-                cache_control = _cache_control(relative_path)
+                expected_file = self._artifact.files[relative_path]
+                if target.stat().st_size != expected_file.size:
+                    raise ReactAdminArtifactError("react admin artifact file size changed")
+                if relative_path in self._artifact.immutable_assets:
+                    cache_control = PRIVATE_IMMUTABLE_CACHE_CONTROL
+                    eligibility_header = (
+                        f"v1;artifact={self._artifact.artifact_digest};sha256={expected_file.sha256}"
+                    )
+                else:
+                    cache_control = "no-store"
+                    eligibility_header = None
         except (OSError, ReactAdminArtifactError, ValueError):
             await JSONResponse(
-                {"detail": "Not Found"}, status_code=404, headers=SECURITY_HEADERS
+                {"detail": "Not Found"}, status_code=404, headers=no_store_headers
             )(scope, receive, send)
             return
-        media_type = "application/json" if relative_path == MANIFEST_NAME else mimetypes.guess_type(target.name)[0]
+        if relative_path == MANIFEST_NAME:
+            media_type: str | None = "application/json"
+        elif target.suffix.lower() == ".js":
+            media_type = "text/javascript"
+        elif target.suffix.lower() == ".css":
+            media_type = "text/css"
+        else:
+            media_type = mimetypes.guess_type(target.name)[0]
         headers = {**SECURITY_HEADERS, "Cache-Control": cache_control}
+        if eligibility_header is not None:
+            headers[ASSET_ELIGIBILITY_HEADER] = eligibility_header
+        raw_headers = scope.get("headers")
+        if raw_headers:
+            filtered_headers = [
+                item
+                for item in raw_headers
+                if item[0].lower() not in _CONDITIONAL_REQUEST_HEADERS
+            ]
+            if len(filtered_headers) != len(raw_headers):
+                scope = {**scope, "headers": filtered_headers}
         await FileResponse(target, media_type=media_type, headers=headers)(scope, receive, send)
 
 
@@ -226,16 +275,12 @@ def validate_react_admin_artifact(
         manifest = json.loads(manifest_bytes.decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ReactAdminArtifactError("react admin artifact manifest is unreadable") from error
-    if not isinstance(manifest, dict) or set(manifest) != {
-        "contract",
-        "artifact_version",
-        "source_ref",
-        "build_tools",
-        "api_compatibility_revision",
-        "root_entry",
-        "files",
-        "artifact_digest",
-    }:
+    manifest_keys = set(manifest) if isinstance(manifest, dict) else set()
+    if (
+        not isinstance(manifest, dict)
+        or not _REQUIRED_MANIFEST_KEYS.issubset(manifest_keys)
+        or not manifest_keys.issubset(_REQUIRED_MANIFEST_KEYS | _OPTIONAL_MANIFEST_KEYS)
+    ):
         raise ReactAdminArtifactError("react admin artifact manifest shape is invalid")
     if manifest["contract"] != "react-admin-artifact/v1" or manifest["root_entry"] != ROOT_ENTRY:
         raise ReactAdminArtifactError("react admin artifact manifest contract is invalid")
@@ -270,6 +315,21 @@ def validate_react_admin_artifact(
         files[path] = ArtifactFile(path, size, digest)
     if ROOT_ENTRY not in files:
         raise ReactAdminArtifactError("react admin artifact root entry is missing")
+    immutable_assets: set[str] = set()
+    if "immutable_assets" in manifest:
+        raw_immutable = manifest["immutable_assets"]
+        if not isinstance(raw_immutable, list):
+            raise ReactAdminArtifactError("react admin immutable asset inventory is invalid")
+        for raw_asset_path in raw_immutable:
+            normalized_asset = _canonical_relative_path(raw_asset_path)
+            if (
+                normalized_asset in immutable_assets
+                or normalized_asset not in files
+                or normalized_asset in {ROOT_ENTRY, MANIFEST_NAME}
+                or not is_immutable_asset_path(normalized_asset)
+            ):
+                raise ReactAdminArtifactError("react admin immutable asset entry is invalid")
+            immutable_assets.add(normalized_asset)
     actual_paths: set[str] = set()
     for candidate in root.rglob("*"):
         if candidate.is_symlink():
@@ -305,6 +365,17 @@ def validate_react_admin_artifact(
         artifact_digest=artifact_digest,
         manifest_digest=_digest_bytes(manifest_bytes),
         files=files,
+        immutable_assets=frozenset(immutable_assets),
+    )
+
+
+def is_immutable_asset_path(relative_path: str) -> bool:
+    if ".." in relative_path:
+        return False
+    path = PurePosixPath(relative_path)
+    return (
+        path.parent == PurePosixPath("assets")
+        and _IMMUTABLE_ASSET_FILENAME_PATTERN.fullmatch(path.name) is not None
     )
 
 
@@ -339,14 +410,6 @@ def _digest_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _cache_control(relative_path: str) -> str:
-    if relative_path == ROOT_ENTRY:
-        return "no-store"
-    if _CONTENT_HASH_PATTERN.search(PurePosixPath(relative_path).name):
-        return "public, max-age=31536000, immutable"
-    return "no-store"
-
-
 def _load_compatibility_registry() -> ReactAdminApiCompatibilityRegistry:
     try:
         return load_react_admin_api_compatibility_registry()
@@ -357,11 +420,14 @@ def _load_compatibility_registry() -> ReactAdminApiCompatibilityRegistry:
 
 
 __all__ = [
+    "ASSET_ELIGIBILITY_HEADER",
     "ArtifactFile",
+    "PRIVATE_IMMUTABLE_CACHE_CONTROL",
     "ReactAdminArtifactError",
     "ReactAdminArtifactRuntime",
     "ReactAdminStaticApplication",
     "ValidatedReactAdminArtifact",
+    "is_immutable_asset_path",
     "load_react_admin_runtime_from_environment",
     "validate_react_admin_artifact",
 ]

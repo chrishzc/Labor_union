@@ -1,6 +1,6 @@
 """
 File: test_react_admin_artifact_build.py
-Description: 驗證 immutable React artifact 建置、root link拒絕與clean-workspace fail-closed契約。
+Description: 驗證 React artifact 建置、Vite 快取資格白名單、環境洗滌與 fail-closed 契約。
 """
 
 from __future__ import annotations
@@ -187,3 +187,102 @@ def test_build_rejects_source_root_symlink(
         monkeypatch.setattr(Path, "is_symlink", lambda path: path == linked or original(path))
     with pytest.raises(ReactAdminArtifactError, match="real directory"):
         build_artifact(tmp_path / "artifact", source=linked)
+
+
+def test_vite_manifest_extracts_only_bundler_versioned_js_and_css_without_exposing_dot_vite(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "vite-dist"
+    (source / "assets").mkdir(parents=True)
+    (source / ".vite").mkdir(parents=True)
+    (source / "index.html").write_text(
+        '<!doctype html><div id="root"></div>'
+        '<script type="module" src="/test/assets/index-CsNYCnR6.js"></script>'
+        '<link rel="stylesheet" href="/test/assets/index-Da987654.css">',
+        encoding="utf-8",
+    )
+    (source / "assets/index-CsNYCnR6.js").write_text("export default 1;\n", encoding="utf-8")
+    (source / "assets/index-Da987654.css").write_text("#root{margin:0}\n", encoding="utf-8")
+    (source / "assets/logo-12345678.svg").write_text("<svg></svg>\n", encoding="utf-8")
+    (source / "assets/public-copied-12345678.js").write_text("unverified();\n", encoding="utf-8")
+    (source / "favicon.svg").write_text("<svg></svg>\n", encoding="utf-8")
+    (source / ".vite/manifest.json").write_text(
+        json.dumps(
+            {
+                "index.html": {
+                    "file": "assets/index-CsNYCnR6.js",
+                    "src": "index.html",
+                    "isEntry": True,
+                    "css": ["assets/index-Da987654.css"],
+                },
+                "src/logo.svg": {
+                    "file": "assets/logo-12345678.svg",
+                    "src": "src/logo.svg",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "artifact"
+    build_artifact(output, source=source, source_ref="vite-proven")
+    validated = validate_react_admin_artifact(output, workspace_root=tmp_path)
+    manifest = json.loads((output / "artifact-manifest.json").read_text(encoding="utf-8"))
+
+    assert not (output / ".vite").exists()
+    assert manifest["immutable_assets"] == [
+        "assets/index-CsNYCnR6.js",
+        "assets/index-Da987654.css",
+    ]
+    assert validated.immutable_assets == frozenset(
+        {"assets/index-CsNYCnR6.js", "assets/index-Da987654.css"}
+    )
+
+
+def test_frontend_build_environment_scrubs_untrusted_vite_variables() -> None:
+    sanitized = artifact_builder._build_frontend_environment(
+        {
+            "PATH": "/usr/bin",
+            "VITE_PUBLIC_PATH_PREFIX": "/test",
+            "VITE_ACCESS_CONTROL_PROFILE": "production",
+            "VITE_LINE_DEVELOPMENT_USER_ID": "U-personal-secret",
+            "VITE_UNEXPECTED_TOKEN": "should-not-leak",
+        }
+    )
+
+    assert sanitized["REACT_ADMIN_ARTIFACT_BUILD"] == "1"
+    assert sanitized["VITE_PUBLIC_PATH_PREFIX"] == "/test"
+    assert sanitized["VITE_ACCESS_CONTROL_PROFILE"] == "production"
+    assert "VITE_LINE_DEVELOPMENT_USER_ID" not in sanitized
+    assert "VITE_UNEXPECTED_TOKEN" not in sanitized
+
+
+@pytest.mark.parametrize(
+    "invalid_entry",
+    [
+        ["index.html"],
+        ["assets/missing-12345678.js"],
+        ["assets/unhashed.js"],
+        ["assets/logo-12345678.svg"],
+    ],
+)
+def test_validation_rejects_invalid_immutable_asset_entries(
+    tmp_path: Path, invalid_entry: list[str]
+) -> None:
+    source = _source(tmp_path)
+    (source / "assets/unhashed.js").write_text("export {};\n", encoding="utf-8")
+    (source / "assets/logo-12345678.svg").write_text("<svg></svg>\n", encoding="utf-8")
+    output = tmp_path / "artifact"
+    build_artifact(output, source=source)
+
+    manifest_path = output / "artifact-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("artifact_digest")
+    manifest["immutable_assets"] = invalid_entry
+    manifest["artifact_digest"] = artifact_builder._digest_bytes(
+        artifact_builder._canonical_json(manifest)
+    )
+    manifest_path.write_bytes(artifact_builder._canonical_json(manifest))
+
+    with pytest.raises(ReactAdminArtifactError, match="immutable asset"):
+        validate_react_admin_artifact(output, workspace_root=tmp_path)

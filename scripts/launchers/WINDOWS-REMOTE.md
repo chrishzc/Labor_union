@@ -60,7 +60,7 @@
 | `lu-windows-origin.chrishzc.com` | `^/test(/.*)?$` | `http://127.0.0.1:5173` |
 | `line.chrishzc.com` | `^/webhook/line/?$` | `http://127.0.0.1:8000` |
 
-4. 原根網站已使用另一條 Tunnel，所以在 **Workers & Pages** 核對／建立 `labor-union-windows-path`，貼上 `deployment/windows-remote/path-router.mjs` 的 module 程式。Routes 只設 `chrishzc.com/test` 與 `chrishzc.com/test/*`，關閉 workers.dev 與 preview URL。它轉送到上表受保護 origin；原根網站其他路徑保留。origin 與 LINE DNS 使用 proxied CNAME 指向本 Tunnel 的 `<Tunnel UUID>.cfargotunnel.com`；後台建立 published route 通常會自動建立，請確認沒有重複記錄。不要把原根 DNS 改指這條 Tunnel。
+4. 原根網站已使用另一條 Tunnel，所以在 **Workers & Pages** 核對／建立 `labor-union-windows-path`，貼上 `deployment/windows-remote/path-router.mjs` 的 module 程式。Routes 只設 `chrishzc.com/test` 與 `chrishzc.com/test/*`，關閉 workers.dev 與 preview URL。它轉送到上表受保護 origin；原根網站其他路徑保留。Worker 上游 `fetch` 維持 `no-store`（Cloudflare edge 共享快取繼續 bypass），僅對經目前 artifact 驗證之內容版本化純 JS／CSS 設定 `private, max-age=31536000, immutable`（並剝除內部資格標頭），HTML、artifact manifest、登入、所有業務 API、下載、redirect 與錯誤一律維持 `no-store`；日後以 `Windows管理.bat -Action frontend`／`--update-frontend` 換版或回復前端產物時自動生效，無須重貼 Worker，若需單獨退回快取例外，只需將 Worker 貼回一律 `no-store` 版本（保留 root DNS、Access、Tunnel、API、背景工作與資料不變）。origin 與 LINE DNS 使用 proxied CNAME 指向本 Tunnel 的 `<Tunnel UUID>.cfargotunnel.com`；後台建立 published route 通常會自動建立，請確認沒有重複記錄。不要把原根 DNS 改指這條 Tunnel。
 5. 在 Tunnel 的安裝／新增 connector 畫面，人工取得安裝指令最後的 **Tunnel token 本身**（不是整串命令、不是帳戶 API key）。每台主機個別建立受限目錄與檔案；在專案根目錄以 PowerShell 執行以下命令，然後在記事本貼上 token，儲存為無副檔名 `tunnel-token`、UTF-8，不要貼進命令列、Git、聊天或 `.env`。只在你自己的電腦操作，不需提供 token 給 Agent。
 
 ```powershell
@@ -141,7 +141,7 @@ scripts\launchers\start_windows_remote.bat --connect
 3. 讓 connector 驗證對應 Access token，對此前綴 bypass cache。只有指定 Email 政策完成後才發布。Tunnel 必須在這台 Windows 或能抵達此 loopback origin 的同機程序執行，不直接使用 Docker 裡的 localhost。
 4. 用手機行動網路驗證：未核准信箱拒絕、核准信箱仍須網站登入與 MFA、API 未帶網站 session 回 401、匯入／PDF／下載正常、原根網站不受影響。Cloudflare 的上傳大小／等待時間限制仍需實測。
 
-這次保留 root DNS 與原 personal web Tunnel，另新增 `lu-windows-origin.chrishzc.com`、`labor-union-windows` Tunnel 及 `labor-union-windows-path` Worker。Worker 僅匹配 `chrishzc.com/test` 與 `chrishzc.com/test/*`，同一 Access 應用保護 prefix 與 origin；connector 驗同一 AUD。登入後 Worker 僅轉送 Access cookie 與網站 Bearer，不傳原根網站其他 cookie，回應不快取。
+這次保留 root DNS 與原 personal web Tunnel，另新增 `lu-windows-origin.chrishzc.com`、`labor-union-windows` Tunnel 及 `labor-union-windows-path` Worker。Worker 僅匹配 `chrishzc.com/test` 與 `chrishzc.com/test/*`，同一 Access 應用保護 prefix 與 origin；connector 驗同一 AUD。登入後 Worker 僅轉送 Access cookie 與網站 Bearer，不傳原根網站其他 cookie；Cloudflare edge 維持 bypass，僅經 artifact 驗證之內容版本化純 JS／CSS 使用瀏覽器私有 `immutable` 快取，HTML、manifest、API、下載與錯誤回應一律 `no-store`。
 
 外網的 Email PIN、網站 MFA、匯入與業務操作仍須實際操作驗證；Tunnel healthy 或登入前阻擋不能代替上述驗收。
 

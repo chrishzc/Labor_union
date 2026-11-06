@@ -1,6 +1,6 @@
 """
 File: build_react_admin_artifact.py
-Description: 建立或唯讀檢查 versioned immutable React 管理端 artifact。
+Description: 建立或唯讀檢查含可驗證 JS／CSS 快取資格的 React 管理端 artifact。
 """
 
 from __future__ import annotations
@@ -14,13 +14,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
-from typing import Sequence
+from pathlib import Path, PurePosixPath
+from typing import Mapping, Sequence
 
 from infrastructure.runtime.react_admin_artifact import (
     MANIFEST_NAME,
     ROOT_ENTRY,
     ReactAdminArtifactError,
+    is_immutable_asset_path,
     validate_react_admin_artifact,
 )
 from infrastructure.runtime.react_admin_api_compatibility import (
@@ -34,6 +35,10 @@ from infrastructure.runtime.react_admin_api_compatibility import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UI_ROOT = PROJECT_ROOT / "ui_react"
 DEFAULT_DIST = UI_ROOT / "dist"
+VITE_MANIFEST_RELATIVE_PATH = ".vite/manifest.json"
+_ALLOWED_VITE_BUILD_ENV_KEYS = frozenset(
+    {"VITE_PUBLIC_PATH_PREFIX", "VITE_ACCESS_CONTROL_PROFILE"}
+)
 
 
 def build_artifact(
@@ -100,6 +105,9 @@ def build_artifact(
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_file, destination, follow_symlinks=False)
         inventory = _inventory(temporary)
+        immutable_assets = _extract_immutable_assets(
+            source_root, {str(row["path"]) for row in inventory}
+        )
         content_identity = _digest_bytes(_canonical_json(inventory))[:16]
         manifest: dict[str, object] = {
             "contract": "react-admin-artifact/v1",
@@ -109,6 +117,7 @@ def build_artifact(
             "api_compatibility_revision": api_revision,
             "root_entry": ROOT_ENTRY,
             "files": inventory,
+            "immutable_assets": immutable_assets,
         }
         manifest["artifact_digest"] = _digest_bytes(_canonical_json(manifest))
         (temporary / MANIFEST_NAME).write_bytes(_canonical_json(manifest) + b"\n")
@@ -129,8 +138,22 @@ def build_artifact(
     return validated.health_attestation("current")
 
 
+def _build_frontend_environment(
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    source_env = os.environ if environment is None else environment
+    sanitized = {
+        key: value
+        for key, value in source_env.items()
+        if not key.startswith("VITE_") or key in _ALLOWED_VITE_BUILD_ENV_KEYS
+    }
+    sanitized["REACT_ADMIN_ARTIFACT_BUILD"] = "1"
+    return sanitized
+
+
 def _run_frontend_build(output: Path) -> None:
     node = _node_executable()
+    build_env = _build_frontend_environment()
     commands = (
         [node, UI_ROOT / "node_modules/typescript/bin/tsc", "-b"],
         [
@@ -146,7 +169,7 @@ def _run_frontend_build(output: Path) -> None:
         if not Path(command[1]).is_file():
             raise ReactAdminArtifactError("react admin frontend build tool is unavailable")
         completed = subprocess.run(
-            [str(part) for part in command], cwd=UI_ROOT, check=False
+            [str(part) for part in command], cwd=UI_ROOT, env=build_env, check=False
         )
         if completed.returncode != 0:
             raise ReactAdminArtifactError("react admin frontend build failed")
@@ -175,10 +198,54 @@ def _source_files(source_root: Path) -> tuple[Path, ...]:
         if candidate.is_file():
             if candidate.name == MANIFEST_NAME:
                 raise ReactAdminArtifactError("react admin build source cannot contain a manifest")
+            if candidate.relative_to(source_root).as_posix() == VITE_MANIFEST_RELATIVE_PATH:
+                continue
             files.append(candidate)
     if not files:
         raise ReactAdminArtifactError("react admin build source is empty")
     return tuple(sorted(files))
+
+
+def _extract_immutable_assets(source_root: Path, available_paths: set[str]) -> list[str]:
+    vite_dir = source_root / ".vite"
+    vite_manifest_path = vite_dir / "manifest.json"
+    if vite_dir.is_symlink() or vite_manifest_path.is_symlink():
+        raise ReactAdminArtifactError("react admin build source cannot contain symlinks")
+    if not vite_manifest_path.exists():
+        return []
+    if not vite_manifest_path.is_file():
+        raise ReactAdminArtifactError("react admin vite manifest must be a regular file")
+    try:
+        raw_manifest = json.loads(vite_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReactAdminArtifactError("react admin vite manifest is unreadable") from error
+    if not isinstance(raw_manifest, dict):
+        raise ReactAdminArtifactError("react admin vite manifest shape is invalid")
+    eligible: set[str] = set()
+    for entry in raw_manifest.values():
+        if not isinstance(entry, dict) or not isinstance(entry.get("file"), str):
+            raise ReactAdminArtifactError("react admin vite manifest entry is invalid")
+        css_items = entry.get("css", [])
+        if not isinstance(css_items, list) or any(not isinstance(item, str) for item in css_items):
+            raise ReactAdminArtifactError("react admin vite manifest css list is invalid")
+        for raw_path in (entry["file"], *css_items):
+            normalized = _canonical_vite_output_path(raw_path)
+            if normalized not in available_paths:
+                raise ReactAdminArtifactError(
+                    "react admin vite manifest references missing output file"
+                )
+            if is_immutable_asset_path(normalized):
+                eligible.add(normalized)
+    return sorted(eligible)
+
+
+def _canonical_vite_output_path(value: str) -> str:
+    if not value or "\\" in value:
+        raise ReactAdminArtifactError("react admin vite manifest path is invalid")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ReactAdminArtifactError("react admin vite manifest path is invalid")
+    return path.as_posix()
 
 
 def _inventory(root: Path) -> list[dict[str, object]]:

@@ -1,6 +1,6 @@
 /**
  * File: vite.config.ts
- * Description: Vite 建置設定，含 vendor chunk 拆分、後端 API 代理與 Vitest 測試環境。
+ * Description: Vite 建置設定，含受控環境隔離、manifest 輸出、vendor 拆分與開發代理。
  */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -14,7 +14,10 @@ if (publicPrefix && !/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(publicPrefix
 export default defineConfig({
   // Managed Windows builds use explicit process settings only. In particular,
   // Vite must not discover .env files when preparing a portable artifact.
-  envDir: process.env.WINDOWS_REMOTE_BUILD === '1' ? false : undefined,
+  envDir:
+    process.env.WINDOWS_REMOTE_BUILD === '1' || process.env.REACT_ADMIN_ARTIFACT_BUILD === '1'
+      ? false
+      : undefined,
   base: publicPrefix ? `${publicPrefix}/` : '/admin/',
   plugins: [react(), {
     name: 'line-webhook-declared-size-limit',
@@ -55,6 +58,7 @@ export default defineConfig({
     },
   },
   build: {
+    manifest: '.vite/manifest.json',
     rollupOptions: {
       output: {
         manualChunks(id: string) {
