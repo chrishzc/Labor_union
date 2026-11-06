@@ -104,10 +104,11 @@ def run_windows_powershell(command, *, timeout=30, sta=False):
     # A parent PowerShell 7 can export an incompatible module search path to
     # Windows PowerShell 5. Use that child's own built-in module defaults.
     environment = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
-    arguments = ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", command]
+    arguments = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
     if sta:
         arguments.insert(1, "-STA")
-    return subprocess.run(arguments,
+    # -WindowStyle Hidden would hide the shared Windows manager console.
+    return subprocess.run(arguments, creationflags=subprocess.CREATE_NO_WINDOW,
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=environment,
                           timeout=timeout, check=False)
 

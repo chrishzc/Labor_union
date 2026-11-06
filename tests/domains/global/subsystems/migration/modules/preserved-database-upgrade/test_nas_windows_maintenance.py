@@ -287,6 +287,8 @@ def test_file_picker_uses_native_single_file_dialog_sta_utf8_and_no_user_timeout
     assert nas.select_backup_file(settings) == Path(selected)
     args, options = calls[0]
     assert "-STA" in args and options["timeout"] is None
+    assert "-WindowStyle" not in args
+    assert options["creationflags"] == nas.subprocess.CREATE_NO_WINDOW
     assert options["encoding"] == "utf-8"
     script = args[-1]
     assert "OpenFileDialog" in script and "*.sql.gz" in script
