@@ -26,11 +26,44 @@ from subsystems.finance_import.accounting_workspace import AccountingConflict
 from subsystems.finance_import.statement_archive import StatementCommandConflict
 
 
-def _bank_references(bank, reason, cancellation_code, memo):
+def _bank_references(bank, reason, cancellation_code, memo, *, allow_overage_disposition=False):
     # Sinopac's canonical parser reads the original reference column; storing
     # only the row-level cancellation_code would make the owner reject it.
-    return {"source": "manual_supplement", "bank": bank, "reason": reason,
-            "銷帳編號": cancellation_code, "備註": memo}
+    references = {"source": "manual_supplement", "bank": bank, "reason": reason,
+                  "銷帳編號": cancellation_code, "備註": memo}
+    if allow_overage_disposition:
+        references["allow_overage_disposition"] = True
+    return references
+
+
+def _supplement_command(case_no, bank, direction, target_item, amount_ntd,
+                        transaction_date, reason, actor, *, allow_overage_disposition=False):
+    command = {
+        "case_no": case_no, "bank": bank, "direction": direction,
+        "target_item": target_item, "amount_ntd": amount_ntd,
+        "transaction_date": transaction_date, "reason": reason, "actor": actor,
+    }
+    # Omission means false, preserving receipts saved before this option existed.
+    if allow_overage_disposition:
+        command["allow_overage_disposition"] = True
+    return command
+
+
+def _replay_reason(command, stored_digest):
+    if stored_digest == fingerprint_payload(command).value:
+        return None
+    # A former no-intent command can never authorize a new overage disposition.
+    if command.get("allow_overage_disposition", False):
+        raise StatementCommandConflict("idempotency_conflict")
+    legacy_note = command["reason"] or "人工補登"
+    legacy_digest = hashlib.sha256(
+        (f"{command['case_no']}:{command['bank']}:{command['direction']}:"
+         f"{command['target_item']}:{command['amount_ntd']}:{command['transaction_date']}:"
+         f"{legacy_note}:{command['actor']}").encode()
+    ).hexdigest()
+    if stored_digest == legacy_digest:
+        return legacy_note
+    raise StatementCommandConflict("idempotency_conflict")
 
 
 class ManualSupplementBlocked(ValueError):
@@ -73,11 +106,14 @@ class CaseManualSupplementService:
         reason: str | None,
         idempotency_key: str,
         actor: str,
+        allow_overage_disposition: bool = False,
     ) -> ManualSupplementResult:
         if bank not in {"sinopac", "taishin"}:
             raise ValueError(f"不支援的操作銀行: {bank}")
         if direction not in {"client_receipt", "staff_salary", "client_refund", "government_subsidy"}:
             raise ValueError(f"不支援的交易方向: {direction}")
+        if not isinstance(allow_overage_disposition, bool) or (allow_overage_disposition and direction != "client_receipt"):
+            raise ValueError("invalid_client_receipt_intent")
         if amount_ntd <= 0:
             raise ValueError("補登金額必須大於 0")
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", transaction_date):
@@ -88,11 +124,10 @@ class CaseManualSupplementService:
             raise ValueError("缺少沖銷對象／期款代碼")
 
         note_text = (reason or "").strip()
-        command = {
-            "case_no": case_no, "bank": bank, "direction": direction,
-            "target_item": target_item, "amount_ntd": amount_ntd,
-            "transaction_date": transaction_date, "reason": note_text, "actor": actor,
-        }
+        command = _supplement_command(
+            case_no, bank, direction, target_item, amount_ntd, transaction_date, note_text, actor,
+            allow_overage_disposition=allow_overage_disposition,
+        )
 
         with self.connection.cursor() as cursor:
             # 1. 驗證訂單存在
@@ -110,16 +145,9 @@ class CaseManualSupplementService:
             if existing:
                 # Old receipts used a delimiter-based digest and a generated
                 # default reason. Accept them only after checking original facts.
-                legacy_note = note_text or "人工補登"
-                legacy_digest = hashlib.sha256(
-                    f"{case_no}:{bank}:{direction}:{target_item}:{amount_ntd}:{transaction_date}:{legacy_note}:{actor}".encode()
-                ).hexdigest()
-                stored_digest = existing["command_digest"]
-                if stored_digest not in {cmd_digest, legacy_digest}:
-                    raise StatementCommandConflict("idempotency_conflict")
                 return self._replay(
                     cursor, existing["result_identity"], command,
-                    legacy_reason=legacy_note if stored_digest != cmd_digest else None,
+                    legacy_reason=_replay_reason(command, existing["command_digest"]),
                 )
 
             # Replay precedes mutable balance/status checks: a settled target can replay.
@@ -196,7 +224,8 @@ class CaseManualSupplementService:
                     memo,
                     cancellation_code,
                     json.dumps(
-                        _bank_references(bank, note_text, cancellation_code, memo),
+                        _bank_references(bank, note_text, cancellation_code, memo,
+                                         allow_overage_disposition=allow_overage_disposition),
                         ensure_ascii=False,
                     ),
                     "[]",
@@ -210,10 +239,19 @@ class CaseManualSupplementService:
             # 4. 領域核銷連動
             entry_id = 0
             if direction == "client_receipt":
-                entry_id = self._post_client_receipt(
-                    cursor, case_no, row_id, target_item, target["obligation_type"],
+                self._post_client_receipt(
+                    case_no, row_id, target_item, target["obligation_type"],
                     idempotency_key, actor, note_text,
+                    allow_overage_disposition=allow_overage_disposition,
                 )
+                cursor.execute(
+                    "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type='receipt'",
+                    (row_id, case_no),
+                )
+                entry = cursor.fetchone()
+                if entry is None:
+                    raise AccountingConflict("manual_supplement_receipt_missing")
+                entry_id = int(entry["id"])
 
             elif direction == "staff_salary":
                 # 月嫂薪資核銷
@@ -424,12 +462,14 @@ class CaseManualSupplementService:
             raise AccountingConflict("manual_supplement_target_not_current")
         return target
 
-    def _post_client_receipt(self, cursor, case_no, row_id, target_item, obligation_type, key, actor, reason):
+    def _post_client_receipt(self, case_no, row_id, target_item, obligation_type, key, actor, reason,
+                             *, allow_overage_disposition=False):
         repository = MySqlClientReceiptReconciliationRepository(self.connection)
         workflow = ClientReconciliationWorkflow(repository, BorrowedTransactionUnitOfWork)
         selection = ReconciliationSelection(
             case_no, PaymentStage(obligation_type), (str(row_id),), (target_item,),
-            allow_partial_receipt=True,
+            allow_overage_disposition=allow_overage_disposition,
+            allow_partial_receipt=not allow_overage_disposition,
         )
         preview = workflow.preview(selection)
         request = ClientReconciliationApplyRequest(
@@ -439,17 +479,13 @@ class CaseManualSupplementService:
         )
         repository.bind_apply_request(request)
         try:
-            workflow.apply(request)
+            return workflow.apply(request)
+        except ValueError as error:
+            if str(error) == "client_refund_recipient_snapshot_missing":
+                raise ManualSupplementBlocked(str(error)) from error
+            raise
         finally:
             repository.clear_apply_request()
-        cursor.execute(
-            "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type='receipt'",
-            (row_id, case_no),
-        )
-        entry = cursor.fetchone()
-        if entry is None:
-            raise AccountingConflict("manual_supplement_receipt_missing")
-        return int(entry["id"])
 
     def _replay(self, cursor, result_identity, command, *, legacy_reason=None):
         if not isinstance(result_identity, str) or re.fullmatch(r"manual:[1-9][0-9]*", result_identity) is None:
@@ -474,6 +510,7 @@ class CaseManualSupplementService:
             or not isinstance(references, dict)
             or references.get("source") != "manual_supplement"
             or references.get("reason") != expected_reason
+            or references.get("allow_overage_disposition", False) is not command.get("allow_overage_disposition", False)
             or source_amount is None
             or int(source_amount) != command["amount_ntd"]
         ):

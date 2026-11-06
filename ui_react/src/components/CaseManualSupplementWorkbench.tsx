@@ -2,7 +2,7 @@
  * File: CaseManualSupplementWorkbench.tsx
  * Description: 案件抽屜手動補登款項工作台，提供操作銀行（永豐、台新）、交易方向、沖銷對象選擇，自動標準化並完成銷帳。
  */
-import { useState, useId } from 'react';
+import { useState, useId, useRef } from 'react';
 import {
   financeAccountingClient,
   type AccountingItem,
@@ -10,6 +10,7 @@ import {
   type CaseManualSupplementCommand,
 } from '../api/finance_import/finance_accounting_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import './FinanceCompactCase.css';
 
 interface Props {
@@ -86,11 +87,16 @@ export function CaseManualSupplementWorkbench({
     new Date().toISOString().slice(0, 10)
   );
   const [reason, setReason] = useState<string>('');
+  const [allowOverageDisposition, setAllowOverageDisposition] = useState(false);
   const [busy, setBusy] = useState<boolean>(false);
+  const [unknown, setUnknown] = useState(false);
   const [error, setError] = useState<string>('');
+  const pendingCommand = useRef<{ caseNo: string; command: CaseManualSupplementCommand; key: string; signature: string } | undefined>(undefined);
+  const disabled = busy || unknown;
 
   function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy') {
     setDirection(newDir);
+    setAllowOverageDisposition(false);
     if (newDir === 'government_subsidy') {
       setBank('taishin');
     }
@@ -140,6 +146,7 @@ export function CaseManualSupplementWorkbench({
 
   function handleTargetChange(identity: string) {
     setTargetItem(identity);
+    setAllowOverageDisposition(false);
     const found = candidateItems.find(c => c.identity === identity);
     if (found && found.remaining > 0) {
       setAmount(String(found.remaining));
@@ -172,17 +179,34 @@ export function CaseManualSupplementWorkbench({
       amount_ntd: parsedAmount <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(parsedAmount) : parsedAmount.toString(),
       transaction_date: transactionDate,
       reason: reason.trim() || null,
+      allow_overage_disposition: direction === 'client_receipt' && allowOverageDisposition,
     };
 
-    const idempotencyKey = `manual-supp-${caseNo}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const signature = JSON.stringify({ case_no: caseNo, ...command });
+    if (unknown && pendingCommand.current?.signature !== signature) {
+      setError('原操作結果尚未確認，請先查回原操作，不能改成另一筆補登。');
+      setBusy(false);
+      return;
+    }
+    if (pendingCommand.current?.signature !== signature) {
+      pendingCommand.current = { caseNo, command, signature, key: crypto.randomUUID() };
+    }
+    const submitted = pendingCommand.current;
 
     try {
-      const updated = await financeAccountingClient.manualSupplement(caseNo, command, idempotencyKey);
+      const updated = await financeAccountingClient.manualSupplement(submitted.caseNo, submitted.command, submitted.key);
+      pendingCommand.current = undefined;
+      setUnknown(false);
       onSuccess(updated);
       onClose();
     } catch (err: unknown) {
+      const rejected = err instanceof ApiHttpError && [400, 401, 403, 404, 409, 422].includes(err.status);
+      setUnknown(!rejected);
       const message = err instanceof Error ? err.message : '補登失敗，請確認資料後重試。';
-      setError(message);
+      const missingAccount = err instanceof ApiHttpError && err.code === 'client_refund_recipient_snapshot_missing';
+      setError(rejected ? missingAccount
+        ? '報名資料缺少客戶退款帳戶，本次未核銷。請先補齊退款帳戶資料，再回本案補登。'
+        : message : '尚未確認原操作結果；已保留原操作，請確認原操作結果後再新增補登。');
     } finally {
       setBusy(false);
     }
@@ -199,7 +223,7 @@ export function CaseManualSupplementWorkbench({
           type="button"
           className="finance-btn-secondary"
           onClick={onClose}
-          disabled={busy}
+          disabled={disabled}
           aria-label="關閉補登表單"
         >
           取消關閉
@@ -219,7 +243,7 @@ export function CaseManualSupplementWorkbench({
                 value="sinopac"
                 checked={bank === 'sinopac'}
                 onChange={() => setBank('sinopac')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>永豐銀行</span>
             </label>
@@ -230,7 +254,7 @@ export function CaseManualSupplementWorkbench({
                 value="taishin"
                 checked={bank === 'taishin'}
                 onChange={() => setBank('taishin')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>台新銀行</span>
             </label>
@@ -247,7 +271,7 @@ export function CaseManualSupplementWorkbench({
                 value="client_receipt"
                 checked={direction === 'client_receipt'}
                 onChange={() => handleDirectionChange('client_receipt')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>客戶收款（入帳）</span>
             </label>
@@ -258,7 +282,7 @@ export function CaseManualSupplementWorkbench({
                 value="staff_salary"
                 checked={direction === 'staff_salary'}
                 onChange={() => handleDirectionChange('staff_salary')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>月嫂薪資（出款）</span>
             </label>
@@ -269,7 +293,7 @@ export function CaseManualSupplementWorkbench({
                 value="client_refund"
                 checked={direction === 'client_refund'}
                 onChange={() => handleDirectionChange('client_refund')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>客戶退款（出款）</span>
             </label>
@@ -280,12 +304,21 @@ export function CaseManualSupplementWorkbench({
                 value="government_subsidy"
                 checked={direction === 'government_subsidy'}
                 onChange={() => handleDirectionChange('government_subsidy')}
-                disabled={busy}
+                disabled={disabled}
               />
               <span>政府入款（G 補助）</span>
             </label>
           </div>
         </div>
+
+        {direction === 'client_receipt' && <div className="supplement-form-row">
+          <label>
+            <input type="checkbox" checked={allowOverageDisposition}
+              onChange={event => setAllowOverageDisposition(event.target.checked)} disabled={disabled} />
+            將超收差額列為客戶退款
+          </label>
+          <p>實收金額全額保留，僅核銷所選期款的待收額，超收差額另列應退客戶款項；不會直接退款。</p>
+        </div>}
 
         <div className="supplement-form-grid">
           <div className="supplement-form-field">
@@ -296,7 +329,7 @@ export function CaseManualSupplementWorkbench({
                 className="finance-select"
                 value={targetItem}
                 onChange={e => handleTargetChange(e.target.value)}
-                disabled={busy}
+                disabled={disabled}
               >
                 {candidateItems.map(c => (
                   <option key={c.identity} value={c.identity}>
@@ -319,7 +352,7 @@ export function CaseManualSupplementWorkbench({
               value={amount}
               onChange={e => setAmount(e.target.value)}
               placeholder="請輸入金額"
-              disabled={busy}
+              disabled={disabled}
               required
             />
           </div>
@@ -332,7 +365,7 @@ export function CaseManualSupplementWorkbench({
               className="finance-input"
               value={transactionDate}
               onChange={e => setTransactionDate(e.target.value)}
-              disabled={busy}
+              disabled={disabled}
               required
             />
           </div>
@@ -347,7 +380,7 @@ export function CaseManualSupplementWorkbench({
               value={reason}
               onChange={e => setReason(e.target.value)}
               placeholder="例如：現金臨櫃收訖、ATM無摺存款"
-              disabled={busy}
+              disabled={disabled}
             />
           </div>
         </div>
@@ -358,7 +391,7 @@ export function CaseManualSupplementWorkbench({
             className="finance-btn-primary"
             disabled={busy || !targetItem || candidateItems.length === 0}
           >
-            {busy ? '正在自動銷帳...' : '確認補登並自動銷帳'}
+            {busy ? '正在自動銷帳...' : unknown ? '確認原操作結果' : '確認補登並自動銷帳'}
           </button>
         </div>
       </form>

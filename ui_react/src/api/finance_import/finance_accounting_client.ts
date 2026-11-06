@@ -52,6 +52,7 @@ export type CaseManualSupplementCommand = {
   amount_ntd: number | string;
   transaction_date: string;
   reason?: string | null;
+  allow_overage_disposition?: boolean;
 };
 export const statementColumns = ['帳號', '交易日', '計息日', '入帳日', '摘要', '幣別', '支出', '存入', '餘額', '票據號碼', '銷帳編號', '交易參考編號', '備註', '更正註記', '存摺備註'] as const;
 function options(signal?: AbortSignal) { const token = sessionClient.getToken(); if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。'); return { token, signal }; }

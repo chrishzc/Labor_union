@@ -7,7 +7,7 @@ from subsystems.client_finance.reconciliation_workflow import ClientReconciliati
 from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
 
 from fastapi import APIRouter, Depends, Header, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from openpyxl import Workbook
 from pymysql import MySQLError
 
@@ -361,6 +361,13 @@ class CaseManualSupplementBody(BaseModel):
     amount_ntd: int = Field(gt=0)
     transaction_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     reason: str | None = Field(default=None, max_length=500)
+    allow_overage_disposition: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_overage_direction(self):
+        if self.allow_overage_disposition and self.direction != "client_receipt":
+            raise ValueError("invalid_client_receipt_intent")
+        return self
 
 
 @router.post("/cases/{case_no}/manual-supplement", response_model=BaseResponse[CaseAccountingView])
@@ -383,9 +390,11 @@ def create_case_manual_supplement(
             reason=body.reason,
             idempotency_key=idempotency_key,
             actor=_actor(principal),
+            allow_overage_disposition=body.allow_overage_disposition,
         )
+        response = BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
         application.state.connection.commit()
-        return BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
+        return response
     except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientReceiptRepositoryUnavailable) as error:
         try:
             application.state.connection.rollback()

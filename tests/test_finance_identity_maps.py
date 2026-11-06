@@ -6,9 +6,60 @@ Description: 驗證銀行匯入身分帳號與收款候選映射載入之唯讀�
 import pytest
 
 from subsystems.finance_import.identity_maps import (
+    _all_client_names,
+    _all_staff_names,
+    _client_refund_name_candidates,
+    _known_case_virtual_accounts,
     _staff_payout_candidates,
     load_finance_identity_maps,
 )
+
+
+@pytest.mark.parametrize("loader", [
+    load_finance_identity_maps, _known_case_virtual_accounts, _all_staff_names,
+    _all_client_names, _client_refund_name_candidates,
+])
+@pytest.mark.parametrize("failure_phase", ["execute", "fetchall"])
+def test_identity_source_failure_does_not_become_empty_or_formula_fallback(loader, failure_phase):
+    failure = ConnectionError("identity source unavailable")
+
+    class Source:
+        def execute(self, _sql):
+            if failure_phase == "execute":
+                raise failure
+
+        def fetchall(self):
+            raise failure
+
+    with pytest.raises(ConnectionError) as raised:
+        loader(Source())
+    assert raised.value is failure
+
+
+@pytest.mark.parametrize("failed_read", range(1, 16))
+@pytest.mark.parametrize("failure_phase", ["execute", "fetchall"])
+def test_each_required_identity_read_failure_aborts_the_whole_map(failed_read, failure_phase):
+    failure = ConnectionError("required identity source unavailable")
+
+    class Source:
+        read = 0
+
+        def execute(self, _sql, _parameters=None):
+            self.read += 1
+            if self.read == failed_read and failure_phase == "execute":
+                raise failure
+
+        def fetchall(self):
+            if self.read == failed_read and failure_phase == "fetchall":
+                raise failure
+            # Reach the per-case legacy-account query as well as all name loaders.
+            if self.read == 7:
+                return [{"case_no": "115000001", "staff_id": 1}]
+            return []
+
+    with pytest.raises(ConnectionError) as raised:
+        load_finance_identity_maps(Source())
+    assert raised.value is failure
 
 
 @pytest.mark.parametrize("failure_phase", ["execute", "fetchall"])
