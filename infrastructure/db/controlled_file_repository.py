@@ -60,9 +60,7 @@ _OWNER_SUBJECT_SQL = {
         "SELECT 1 AS present FROM staff WHERE %s REGEXP '^[1-9][0-9]*$' "
         "AND id=CAST(%s AS UNSIGNED)"
     ),
-    ControlledFileOwner.LINE_INTEGRATION: (
-        "SELECT 1 AS present FROM line_rich_menu_publications WHERE menu_config_id=%s"
-    ),
+    # LINE uses its typed current configuration owner in owner_subject_exists.
 }
 
 
@@ -143,6 +141,15 @@ class MySqlControlledFileWorkflowRepository:
     def owner_subject_exists(
         self, intent: ControlledFileIntent, *, for_update: bool
     ) -> bool:
+        if intent.owner is ControlledFileOwner.LINE_INTEGRATION:
+            from domains.line.configuration import LineConfigurationKind
+            from infrastructure.mysql.line_configuration_publication_repository import MySqlLineConfigurationRepository
+            from subsystems.line.message_configuration import configuration_definition
+            from subsystems.line.rich_menu_models import LineMenusConfig
+            snapshot = MySqlLineConfigurationRepository(self._connection).get(
+                LineConfigurationKind.RICH_MENUS, for_update=for_update)
+            configuration = LineMenusConfig.model_validate(configuration_definition(snapshot))
+            return any(menu.id == intent.subject_reference for menu in configuration.menus)
         statement = _OWNER_SUBJECT_SQL[intent.owner] + _lock_suffix(for_update)
         parameters = (
             (intent.subject_reference, intent.subject_reference)
@@ -385,32 +392,66 @@ class MySqlControlledFileWorkflowRepository:
         if target is None:
             return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
         readback = target.readback
-        if readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
+        if readback.owner is ControlledFileOwner.STAFF and readback.purpose in {
+            ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM,
+        }:
+            from infrastructure.mysql.staff_profile_query_repository import MySqlStaffProfileQueryRepository
+            from subsystems.staff.profile_query import StaffProfileQueryApplication, StaffProfileNotFound
+            try:
+                staff_id = int(readback.subject_reference)
+                if staff_id <= 0 or str(staff_id) != readback.subject_reference:
+                    return _staff_saved_document_reference_status(readback, None)
+                page = StaffProfileQueryApplication(MySqlStaffProfileQueryRepository(self._connection)).query_saved_documents(
+                    staff_id, file_id=file_id)
+            except (StaffProfileNotFound, ValueError):
+                page = None
+            return _staff_saved_document_reference_status(readback, page)
+        if readback.owner is ControlledFileOwner.STAFF and readback.purpose is ControlledFilePurpose.STAFF_RESUME:
+            from infrastructure.mysql.staff_profile_query_repository import MySqlStaffProfileQueryRepository
+            from subsystems.staff.profile_query import StaffProfileQueryApplication, StaffProfileNotFound, query_current_staff_resume
+            try:
+                staff_id = int(readback.subject_reference)
+                if staff_id <= 0 or str(staff_id) != readback.subject_reference:
+                    return _staff_resume_reference_status(readback, None)
+                current = query_current_staff_resume(
+                    StaffProfileQueryApplication(MySqlStaffProfileQueryRepository(self._connection)), self, staff_id)
+            except StaffProfileNotFound:
+                current = None
+            except ValueError:
+                return _staff_resume_reference_status(readback, None)
+            return _staff_resume_reference_status(readback, current)
+        if readback.owner is ControlledFileOwner.LINE_INTEGRATION and readback.purpose is ControlledFilePurpose.RICH_MENU_BACKGROUND:
+            from infrastructure.mysql.line_media_asset_query_repository import MySqlLineRichMenuMediaAssetQueryRepository
+            from infrastructure.mysql.line_configuration_publication_repository import MySqlLineRichMenuPublicationRepository
+            try:
+                reference = MySqlLineRichMenuMediaAssetQueryRepository(self._connection).get_controlled_file_reference(file_id)
+            except (ValueError, TypeError):
+                reference = None
+            try:
+                published = (reference is not None and
+                    MySqlLineRichMenuPublicationRepository(self._connection).controlled_image_publication_matches(reference))
+            except (ValueError, TypeError):
+                published = False
+            return _rich_menu_reference_status(readback, reference, published)
+        if readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose in {
+            ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+        }:
             from infrastructure.db.contract_external_signing_repository import MySqlContractExternalSigningRepository
-            reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(file_id)
+            from subsystems.contract_signing.external_signing_contracts import ExternalSigningTypedError
+            try:
+                reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(file_id)
+            except ExternalSigningTypedError:
+                # Malformed owner lineage is unavailable authority, not a match
+                # or an exemption. Infrastructure errors still propagate to 503.
+                reference = None
             return _contract_reference_status(readback, reference)
         if readback.owner is not ControlledFileOwner.SCHEDULING or readback.purpose not in {
             ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
         }:
             return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
-        # This is the same immutable attachment/object relation read by the
-        # Scheduling business page, not a guessed reference inside arbitrary JSON.
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT reference.reference_kind,attachment.attachment_kind,log.case_no "
-                "FROM controlled_file_objects object JOIN controlled_file_references reference "
-                "ON reference.controlled_file_object_id=object.id "
-                "JOIN scheduling_service_day_log_attachments attachment "
-                "ON attachment.id=reference.service_day_log_attachment_id "
-                "AND attachment.controlled_file_object_id=object.id "
-                "JOIN scheduling_service_day_logs log ON log.id=attachment.service_day_log_id "
-                "WHERE object.opaque_object_id=%s", (file_id,),
-            )
-            rows = tuple(cursor.fetchall())
-        matched = (len(rows) == 1 and rows[0]["case_no"] == readback.subject_reference
-                   and rows[0]["attachment_kind"] == readback.purpose.value
-                   and rows[0]["reference_kind"] == "scheduling_service_day_log_attachment")
-        return {"business_reference": "matched" if matched else "mismatch", "outbound_reference": "unavailable"}
+        from infrastructure.mysql.service_day_log_photo_reference_repository import MySqlSubmittedServiceDayLogPhotoRepository
+        reference = MySqlSubmittedServiceDayLogPhotoRepository(self._connection).get_submitted_photo_reference(file_id)
+        return _scheduling_photo_reference_status(readback, reference)
 
     def append_reconciliation_event(
         self, event: ControlledFileReconciliationEvent
@@ -772,7 +813,9 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
             return f"{MEDIA_DIRECTORY}/rich_menus/選單底圖_{subject}_v{version}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.CONTRACT_SIGNING:
             label = "客戶合約" if "client" in candidate.object_key else "月嫂承攬協議" if "staff" in candidate.object_key else "案件合約"
-            status = "已簽署" if candidate.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT else "未簽署"
+            status = "已簽署" if candidate.purpose in {
+                ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+            } else "未簽署"
             return f"{ORDERS_DIRECTORY}/{subject}/{label}_{subject}_v{version}_{status}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.SCHEDULING:
             return f"{SCHEDULING_DIRECTORY}/{subject}/服務確認_{subject}_v{version}_{digest}{extension}"
@@ -867,17 +910,102 @@ def _gc_candidate(row):
 
 
 def _contract_reference_status(readback, reference):
+    applicable = (readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose in {
+        ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+    })
+    if reference is None:
+        return {"business_reference": "unavailable", "frozen_completion_reference": "unavailable",
+                "external_completion_reference": "unavailable",
+                "outbound_reference": "not_applicable" if applicable else "unavailable"}
+    matched = (applicable and reference.file_id == readback.file_id and reference.case_no == readback.subject_reference
+               and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
+               and reference.purpose is readback.purpose
+               and readback.mime_type == "application/pdf" and reference.current)
+    frozen = matched and reference.completion_receipt_present and reference.file_version == readback.version
+    filename_bound = reference.filename is not None and reference.filename == readback.filename
+    test_only = (readback.filename.startswith("TEST-ONLY-")
+                 or reference.filename is not None and reference.filename.startswith("TEST-ONLY-"))
+    # Spec21's 2026-09-09 final-PDF ruling makes the closed completed owner
+    # receipt/readback aggregate evidence of both parties' signatures; §2026-10-14
+    # permits separate exact members but TEST-ONLY skip is never real signing.
+    # The owner reader binds this filename to the immutable object/member and
+    # proves root/session/receipt/target/hash lineage. A normal name alone proves
+    # nothing. Preserve the real freeze even for test-only completion receipts.
+    completion = ("test_only" if test_only else "matched" if frozen and filename_bound else "unavailable")
+    return {"business_reference": "matched" if matched else "mismatch",
+            "frozen_completion_reference": "matched" if frozen else "unavailable",
+            "external_completion_reference": completion,
+            # The system neither integrates nor simulates the external signing
+            # provider (spec21 2026-08-25); this is no provider-delivery receipt.
+            "outbound_reference": "not_applicable" if applicable else "unavailable"}
+
+
+def _staff_resume_reference_status(readback, current):
+    # This is the exact current file returned by the Staff-owned page consumer,
+    # never a basename match or a claimed qualification/medical attachment.
+    applicable = (readback.owner is ControlledFileOwner.STAFF
+        and readback.purpose is ControlledFilePurpose.STAFF_RESUME)
+    matched = (applicable and current is not None and current.owner is ControlledFileOwner.STAFF
+        and current.purpose is ControlledFilePurpose.STAFF_RESUME
+        and current.file_id == readback.file_id and current.subject_reference == readback.subject_reference
+        and current.version == readback.version and current.sha256_digest == readback.sha256_digest
+        and current.size_bytes == readback.size_bytes and current.mime_type == readback.mime_type == "application/pdf")
+    # Spec19 (2026-10-30) retires LINE resume delivery and assigns transmission
+    # offline; spec33 §4 retains this internal PDF query/version/upload/download.
+    # Under spec30 §12's "external evidence if applicable", only this existing
+    # consumer is N/A. It proves neither human nor provider delivery and does
+    # not exempt other Staff purposes, ContractSigning or LINE publications.
+    return {"business_reference": "matched" if matched else "mismatch",
+            "outbound_reference": "not_applicable" if applicable else "unavailable"}
+
+
+def _rich_menu_reference_status(readback, reference, published):
     if reference is None:
         return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
-    matched = (reference.file_id == readback.file_id and reference.case_no == readback.subject_reference
-               and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
-               and readback.mime_type == "application/pdf" and reference.current)
+    matched = (reference.file_id == readback.file_id and reference.menu_definition_id == readback.subject_reference
+        and reference.version == readback.version and reference.sha256_digest == readback.sha256_digest
+        and reference.size_bytes == readback.size_bytes and reference.mime_type == readback.mime_type == "image/png"
+        and reference.selectable)
     return {"business_reference": "matched" if matched else "mismatch",
-            "frozen_completion_reference": "matched" if matched and reference.completion_receipt_present
-            and reference.file_version == readback.version else "unavailable",
-            # Inbound signing completion proves an immutable business freeze,
-            # never the result of sending this file to an external provider.
-            "outbound_reference": "unavailable"}
+            "outbound_reference": "matched" if matched and published else "unavailable"}
+
+
+def _staff_saved_document_reference_status(readback, page):
+    if readback.owner is not ControlledFileOwner.STAFF or readback.purpose not in {
+        ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM,
+    }:
+        return {"business_reference": "mismatch", "outbound_reference": "unavailable"}
+    if page is None or page.status != "available":
+        return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+    # The original Staff profile consumes this exact collection. File presence
+    # never proves a clinical result, qualification, expiry or external delivery.
+    matched = any(item.staff_id == int(readback.subject_reference) and item.file_id == readback.file_id
+        and item.purpose is readback.purpose and item.version == readback.version
+        and item.sha256_digest == readback.sha256_digest and item.size_bytes == readback.size_bytes
+        and item.mime_type == readback.mime_type and item.filename == readback.filename for item in page.items)
+    return {"business_reference": "matched" if matched else "mismatch", "outbound_reference": "unavailable"}
+
+
+def _scheduling_photo_reference_status(readback, reference):
+    unknown = {"business_reference": "unavailable", "owner_submission_reference": "unavailable", "outbound_reference": "unavailable"}
+    if reference is None:
+        return unknown
+    matched = (readback.owner is ControlledFileOwner.SCHEDULING
+        and readback.purpose in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}
+        and reference.attachment_kind == readback.purpose.value and reference.case_no == readback.subject_reference
+        and reference.file_id == readback.file_id and reference.version == readback.version
+        and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
+        and reference.mime_type == readback.mime_type
+        and type(reference.log_id) is int and reference.log_id > 0
+        and reference.owner_submission_reference == f"scheduling-service-day-log:{reference.log_id}")
+    if not matched:
+        return unknown
+    # Spec20 §5.4 owns this submitted Scheduling record and prohibits photos in
+    # LINE payload/URLs. With its real submitted event and exact frozen tuple,
+    # external photo sending is not applicable under spec30 §12. This proves
+    # neither provider delivery nor an inbox/token verification receipt.
+    return {"business_reference": "matched", "owner_submission_reference": "matched",
+            "owner_submission_reference_id": reference.owner_submission_reference, "outbound_reference": "not_applicable"}
 
 
 def _require_cleanup_safe(row, command, observed_at):

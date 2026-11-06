@@ -379,6 +379,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
     "labor_union_2026_11_06_hcm_review_status_v1.json",
     "labor_union_2026_11_06_staff_payout_payment_sources_v1.json",
+    "labor_union_2026_11_06_controlled_purpose_media_reference_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2332,6 +2333,55 @@ def _modified_parent_predecessor_absent_state(
     defer_missing_triggers: bool,
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
+    if artifact == "1073_contract_document_render_snapshot.sql":
+        new_names = {
+            "render_source_kind", "render_source_snapshot",
+            "render_source_snapshot_sha256", "render_source_sha256", "render_source_size_bytes",
+        }
+        if any(row["table_name"] == "contract_document_versions" and row["column_name"] in new_names
+               for row in snapshot["columns"]) or any(
+            row["table_name"] == "contract_document_versions" and row["constraint_name"] == "chk_contract_document_render_source"
+            for row in snapshot.get("constraints", ())
+        ):
+            return None
+        predecessor = deepcopy(descriptor)
+        for name in new_names:
+            predecessor["parent_columns"]["contract_document_versions"].pop(name)
+        predecessor["parent_columns"]["contract_document_versions"]["media_asset_id"] = _column_contract("bigint", "NO")
+        predecessor["checks"].pop(("contract_document_versions", "chk_contract_document_render_source"))
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact, defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
+    if artifact in {
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+    }:
+        predecessor = deepcopy(descriptor)
+        if artifact.startswith("1071_"):
+            original = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
+            for table in predecessor["parent_columns"]:
+                predecessor["parent_columns"][table]["purpose"] = deepcopy(original["parent_columns"][table]["purpose"])
+            for key in predecessor["checks"]:
+                if key in original["checks"]:
+                    predecessor["checks"][key] = original["checks"][key]
+        else:
+            predecessor["parent_columns"]["media_assets"].pop("controlled_file_object_id")
+            predecessor["indexes"].pop(("media_assets", "idx_media_controlled_file_object"))
+            predecessor["foreign_keys"].pop(("media_assets", "fk_media_controlled_file_object"))
+            if any(row["table_name"] == "media_assets" and row["column_name"] == "controlled_file_object_id"
+                   for row in snapshot["columns"]) or any(
+                row["table_name"] == "media_assets" and row["index_name"] == "idx_media_controlled_file_object"
+                for row in snapshot["indexes"]
+            ) or any(
+                row["table_name"] == "media_assets" and row["constraint_name"] == "fk_media_controlled_file_object"
+                for row in snapshot.get("constraints", ())
+            ):
+                return None
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact, defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
     if artifact == "1070_staff_payout_payment_sources.sql":
         if any(row["table_name"] == "staff_payout_events"
                and row["column_name"] == "payment_source_kind"
@@ -3958,6 +4008,22 @@ def _local_classify_statement(statement: str) -> str:
         reopen_optional = ROOT / "db/schema_parts/1062_order_reopen_reason_optional.sql"
         if normalized.startswith("alter table order_reopen_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reopen_optional.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
+        render_snapshot = ROOT / "db/schema_parts/1073_contract_document_render_snapshot.sql"
+        if normalized.startswith("alter table contract_document_versions "):
+            canonical_render, = split_sql(render_snapshot.read_text(encoding="utf-8"))
+            if normalized.rstrip(";") == re.sub(r"\s+", " ", canonical_render.strip()).casefold().rstrip(";"):
+                return "contract_render_snapshot_source_successor"
+            if "render_source_" in normalized or "modify column media_asset_id" in normalized:
+                raise LocalAdditiveBlocked("noncanonical render source ALTER", code="forbidden_sql_effect")
+        signed_staff = ROOT / "db/schema_parts/1071_controlled_signed_staff_agreement.sql"
+        signed_staff_statements = {
+            re.sub(r"\s+", " ", item.strip()).casefold().rstrip(";")
+            for item in split_sql(signed_staff.read_text(encoding="utf-8"))
+        }
+        if "signed_staff_agreement" in normalized and normalized.rstrip(";") in signed_staff_statements:
+            return "controlled_signed_staff_purpose_successor"
+        if "signed_staff_agreement" in normalized:
+            raise LocalAdditiveBlocked("noncanonical staff purpose ALTER", code="forbidden_sql_effect")
         staff_sources = ROOT / "db/schema_parts/1070_staff_payout_payment_sources.sql"
         if normalized.startswith("alter table staff_payout_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(staff_sources.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "staff_payout_payment_source_widen"
@@ -5698,6 +5764,13 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         ):
             path = ROOT / "db/schema_parts/114_staff_payout_ledger.sql"
     if path is None:
+        if part_name == "166_contract_signing_workflow.sql" and any(
+            item.name == "1073_contract_document_render_snapshot.sql" for item in SCHEMA_PARTS
+        ):
+            # The successor inherits the original immutable document-version
+            # contract without selecting unrelated historical 166 DDL.
+            path = ROOT / "db/schema_parts/166_contract_signing_workflow.sql"
+    if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
@@ -6333,6 +6406,72 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
+    if part_name == "1073_contract_document_render_snapshot.sql":
+        descriptor = _canonical_artifact_descriptor("166_contract_signing_workflow.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({"contract_document_versions"}))
+        descriptor["parent_columns"] = descriptor.pop("tables")
+        descriptor["tables"] = {}
+        descriptor["parent_columns"]["contract_document_versions"].update({
+            "media_asset_id": _column_contract("bigint", "YES"),
+            "render_source_kind": _column_contract("enum('legacy_archived','render_snapshot')", "NO", "legacy_archived"),
+            "render_source_snapshot": _column_contract("json", "YES"),
+            "render_source_snapshot_sha256": _column_contract("char(64)", "YES"),
+            "render_source_sha256": _column_contract("char(64)", "YES"),
+            "render_source_size_bytes": _column_contract("bigint unsigned", "YES"),
+        })
+        opening = sql.index("CHECK (") + len("CHECK ")
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][("contract_document_versions", "chk_contract_document_render_source")] = _normalize_sql_contract(clause)
+    if part_name == "1071_controlled_signed_staff_agreement.sql":
+        descriptor = _canonical_artifact_descriptor("1004_controlled_file_storage_foundation.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({
+            "controlled_file_staging_objects", "controlled_file_objects",
+        }))
+        descriptor["parent_columns"] = descriptor.pop("tables")
+        descriptor["tables"] = {}
+        original = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
+        for kind in ("indexes", "foreign_keys", "checks"):
+            descriptor[kind].update({key: value for key, value in original[kind].items()
+                                     if key[0] in descriptor["parent_columns"]})
+        for statement in split_sql(sql):
+            match = re.search(r"ALTER TABLE (controlled_file_(?:staging_objects|objects))\s+MODIFY COLUMN purpose (ENUM\(.*?\)) NOT NULL", statement, re.I | re.S)
+            if match:
+                table = match.group(1)
+                descriptor["parent_columns"][table]["purpose"] = _column_contract(
+                    _normalize_column_type_contract(match.group(2)), "NO",
+                )
+                check = re.search(r"ADD CONSTRAINT (\w+) CHECK\s*\(", statement, re.I)
+                clause, _ = _extract_parenthesized(statement, check.end() - 1)
+                descriptor["checks"][(table, check.group(1))] = _normalize_sql_contract(clause)
+    if part_name == "1072_line_media_controlled_file_reference.sql":
+        # Read the original parent columns from their owning bootstrap source.
+        base = (ROOT / "db/schema.sql").read_text(encoding="utf-8")
+        start = base.index("CREATE TABLE IF NOT EXISTS media_assets (")
+        body, _ = _extract_parenthesized(base, base.index("(", start))
+        columns = {}
+        for definition in _split_top_level(body):
+            if re.match(r"^(?:PRIMARY|UNIQUE|INDEX|KEY|CONSTRAINT)\b", definition.strip(), re.I):
+                continue
+            name, contract = _parse_column_definition(definition.strip())
+            columns[name] = contract
+        columns["controlled_file_object_id"] = _column_contract("bigint unsigned", "YES")
+        descriptor["parent_columns"]["media_assets"] = columns
+        for name, unique, names in (
+            ("PRIMARY", 0, ("id",)),
+            ("uk_media_storage_key", 0, ("storage_key",)),
+            ("idx_media_owner", 1, ("category", "owner_type", "owner_id", "deleted_at")),
+            ("idx_media_sha256", 1, ("sha256",)),
+            ("idx_media_controlled_file_object", 1, ("controlled_file_object_id",)),
+        ):
+            descriptor["indexes"][("media_assets", name)] = {"non_unique": unique, "columns": names}
+        for name, column, target, delete in (
+            ("fk_media_created_by", "created_by_admin_user_id", "admin_users", "SET NULL"),
+            ("fk_media_controlled_file_object", "controlled_file_object_id", "controlled_file_objects", "RESTRICT"),
+        ):
+            descriptor["foreign_keys"][("media_assets", name)] = {
+                "columns": (column,), "referenced_table": target, "referenced_columns": ("id",),
+                "update_rule": "RESTRICT", "delete_rule": delete,
+            }
     if part_name == "1070_staff_payout_payment_sources.sql":
         # Bind the complete immutable event contract, without taking ownership
         # of 114's projections/outbox evolved by other published successors.
@@ -6741,6 +6880,9 @@ def _release_descriptor_metadata_state(
         "1058_client_refund_overage_receipt.sql",
         "1065_historical_order_reused_pairing_check.sql",
         "1070_staff_payout_payment_sources.sql",
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+        "1073_contract_document_render_snapshot.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6854,6 +6996,20 @@ def _release_descriptor_metadata_state(
     return state
 
 
+def _selected_staff_agreement_purpose_projection(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    compatible = deepcopy(descriptor)
+    if not any(path.name == "1071_controlled_signed_staff_agreement.sql" for path in SCHEMA_PARTS):
+        return compatible
+    successor = _canonical_artifact_descriptor("1071_controlled_signed_staff_agreement.sql")
+    for table, columns in successor["parent_columns"].items():
+        target = compatible["tables"].get(table, compatible["parent_columns"].get(table))
+        if target is not None:
+            target["purpose"] = deepcopy(columns["purpose"])
+    compatible["checks"].update({key: value for key, value in successor["checks"].items()
+                                  if key[1].endswith("_owner_purpose")})
+    return compatible
+
+
 def _controlled_file_storage_foundation_state(
     snapshot: Mapping[str, Any],
     descriptor: Mapping[str, Any],
@@ -6887,9 +7043,14 @@ def _controlled_file_storage_foundation_state(
             "controlled_file_objects",
         }:
             canonical["checks"][key] = clause
+    state = _artifact_metadata_state(
+        snapshot, canonical, "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if state != "drift":
+        return state
     return _artifact_metadata_state(
-        snapshot,
-        canonical,
+        snapshot, _selected_staff_agreement_purpose_projection(canonical),
         "1004_controlled_file_storage_foundation.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
@@ -7185,14 +7346,26 @@ def _contract_external_signing_successor_state(
         )
         if state != "drift":
             return state
+        state = _artifact_metadata_state(
+            snapshot, _selected_staff_agreement_purpose_projection(descriptor),
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        if state != "drift":
+            return state
         compatible = deepcopy(descriptor)
         final_pdf = _canonical_artifact_descriptor(
             "1034_contract_external_signing_final_pdf_completion.sql"
         )
         compatible["checks"].update(final_pdf["checks"])
+        state = _artifact_metadata_state(
+            snapshot, compatible, "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        if state != "drift":
+            return state
         return _artifact_metadata_state(
-            snapshot,
-            compatible,
+            snapshot, _selected_staff_agreement_purpose_projection(compatible),
             "1005_contract_external_signing_successor.sql",
             defer_missing_triggers=defer_missing_triggers,
         )
@@ -7349,6 +7522,14 @@ def _artifact_metadata_state(
         return registry_state
     if owned_tables is not None:
         _limit_descriptor_to_owned_tables(descriptor, owned_tables)
+    if part_name == "166_contract_signing_workflow.sql" and "contract_document_versions" in descriptor["tables"] and any(
+        path.name == "1073_contract_document_render_snapshot.sql" for path in SCHEMA_PARTS
+    ) and any(row["table_name"] == "contract_document_versions" and row["column_name"].startswith("render_source_")
+              for row in snapshot["columns"]):
+        descriptor = deepcopy(descriptor)
+        successor = _canonical_artifact_descriptor("1073_contract_document_render_snapshot.sql")
+        descriptor["tables"]["contract_document_versions"] = deepcopy(successor["parent_columns"]["contract_document_versions"])
+        descriptor["checks"].update(successor["checks"])
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         columns_by_table.setdefault(row["table_name"], {})[
@@ -7356,6 +7537,11 @@ def _artifact_metadata_state(
         ] = row
     required_tables = descriptor["tables"]
     parent_columns = descriptor["parent_columns"]
+    complete_parent_tables = set(parent_columns) if part_name in {
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+        "1073_contract_document_render_snapshot.sql",
+    } else set()
     owned_presence: list[bool] = []
     for table, expected_columns in {
         **required_tables, **parent_columns
@@ -7395,7 +7581,7 @@ def _artifact_metadata_state(
         allowed_extra_columns = _allowed_later_artifact_columns(
             part_name, table
         )
-        if table in required_tables and actual:
+        if table in set(required_tables) | complete_parent_tables and actual:
             if set(actual) != set(expected_columns) | allowed_extra_columns:
                 return "drift"
     indexes = {
@@ -7407,9 +7593,9 @@ def _artifact_metadata_state(
         }
         for row in snapshot["indexes"]
     }
-    # A parent-table ALTER owns only its explicitly declared objects.  Unknown
-    # object rejection is exclusive only for tables created by this artifact.
-    owned_tables = set(required_tables)
+    # Parent ALTERs normally own only declared objects. The selected successors
+    # above explicitly bind complete parent metadata and reject unknown objects.
+    owned_tables = set(required_tables) | complete_parent_tables
     expected_index_keys = {
         key for key in descriptor["indexes"] if key[0] in owned_tables
     }

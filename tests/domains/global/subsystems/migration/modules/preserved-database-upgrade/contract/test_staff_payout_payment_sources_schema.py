@@ -67,8 +67,8 @@ def test_successor_is_current_hash_bound_and_schema_only():
     release = load_migration_release_manifest(MANIFEST, ROOT)
     descriptor = release.owned_object_descriptors(ROOT)[ARTIFACT]
     canonical = migration._canonical_artifact_descriptor(ARTIFACT)
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST.name
-    assert migration.RELEASE_MANIFEST.release_id == release.release_id
+    assert MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
+    assert release.release_id in {item.release_id for item in migration.RELEASE_MANIFEST.manifests}
     assert {key: value for key, value in descriptor.items() if key != "triggers"} == {
         key: value for key, value in canonical.items() if key != "triggers"
     }
@@ -95,7 +95,21 @@ def test_successor_is_current_hash_bound_and_schema_only():
     assert migration._local_classify_statement(statement) == "staff_payout_payment_source_widen"
     with pytest.raises(migration.LocalAdditiveBlocked, match="destructive ALTER"):
         migration._local_classify_statement(statement.replace("CHAR(64) NULL", "CHAR(64) NOT NULL"))
-    assert "DROP" not in statement.upper()
+    assert statement.upper().count("DROP CHECK") == 1
+    assert "DROP CHECK chk_staff_payout_account_hash" in statement
+    assert "DROP COLUMN" not in statement.upper()
+    assert "DROP TABLE" not in statement.upper()
+    original = migration._canonical_artifact_descriptor("114_staff_payout_ledger.sql")
+    check_start = statement.index("ADD CONSTRAINT chk_staff_payout_account_hash")
+    opening = statement.index("CHECK (", check_start) + len("CHECK ")
+    restored, _ = migration._extract_parenthesized(statement, opening)
+    assert migration._normalize_check_contract(restored) == migration._normalize_check_contract(
+        original["checks"][(TABLE, "chk_staff_payout_account_hash")]
+    )
+    with pytest.raises(migration.LocalAdditiveBlocked, match="destructive ALTER"):
+        migration._local_classify_statement(statement.replace(
+            "    DROP CHECK chk_staff_payout_account_hash,\n", ""
+        ))
     assert "finance_import_row_id" not in statement
 
 

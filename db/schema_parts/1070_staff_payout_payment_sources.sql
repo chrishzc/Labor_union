@@ -1,10 +1,13 @@
 -- Staff Payables source provenance for the manual supplement exception (spec 22 section 19).
 -- Preserve all existing event values: the default does not assert a bank/manual origin.
 -- Keep the original account hash CHECK, immutable guards, links and foreign keys.
+-- Unapplied draft candidate correction: MySQL requires dropping a referencing
+-- CHECK in the same ALTER as MODIFY; restore the exact original 114 condition.
 ALTER TABLE staff_payout_events
     ADD COLUMN payment_source_kind ENUM(
         'legacy_unspecified', 'bank_statement', 'manual_supplement'
     ) NOT NULL DEFAULT 'legacy_unspecified',
+    DROP CHECK chk_staff_payout_account_hash,
     MODIFY COLUMN bank_account_identity_hash CHAR(64) NULL,
     ADD CONSTRAINT chk_staff_payout_payment_source CHECK (
         (payment_source_kind IN ('legacy_unspecified', 'bank_statement')
@@ -12,4 +15,6 @@ ALTER TABLE staff_payout_events
          AND bank_account_identity_hash REGEXP '^[0-9a-f]{64}$')
         OR (payment_source_kind = 'manual_supplement'
             AND bank_account_identity_hash IS NULL)
-    );
+    ),
+    ADD CONSTRAINT chk_staff_payout_account_hash
+        CHECK (bank_account_identity_hash REGEXP '^[0-9a-f]{64}$');

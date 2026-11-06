@@ -468,6 +468,9 @@ def _call_workflow(command, correlation_id: str):
 
 def _workflow_http_error(error: ControlledFileWorkflowError, correlation_id: str):
     code = error.code
+    if code == "controlled_file_purpose_retired":
+        return typed_http_error(422, "domain_blocked", code,
+            "此用途已停止建立永久檔案；請使用原業務流程，歷史檔案仍可查閱。", correlation_id)
     if code.endswith("_not_found"):
         return typed_http_error(
             404,

@@ -4,7 +4,7 @@ import json
 
 from subsystems.finance_import.query import BANK_CASE_PROOFS_SQL
 from subsystems.finance_import.statement_archive import (
-    StatementCommandConflict, StatementCommandReceipt, StatementExportRow,
+    StatementCommandConflict, StatementCommandReceipt, StatementExportRow, ManualStatementReplacementRequired,
 )
 
 
@@ -38,13 +38,17 @@ class MySqlStatementArchiveRepository:
         command = {"operation": "manual", "fields": fields, "duplicate_of": duplicate_of, "actor": actor}
 
         def write(cursor):
-            if duplicate_of:
-                self._require_existing(duplicate_of)
-                return StatementCommandReceipt(duplicate_of, 0, 1)
-            cursor.execute("INSERT INTO finance_manual_statements(fields,actor) VALUES (%s,%s)", (json.dumps(fields, ensure_ascii=False), actor))
-            return StatementCommandReceipt(f"manual:{cursor.lastrowid}", 1, 0)
+            return self._confirm_manual_duplicate(duplicate_of)
 
         return self._command(command, key, actor, write)
+
+    def _confirm_manual_duplicate(self, duplicate_of):
+        # _command has already checked the original receipt. §19 replaces only
+        # fresh archive-only creation; historical replay and U8 exclusion remain.
+        if not duplicate_of:
+            raise ManualStatementReplacementRequired()
+        self._require_existing(duplicate_of)
+        return StatementCommandReceipt(duplicate_of, 0, 1)
 
     def exclude_duplicate(self, candidate, kept, key, actor):
         command = {"operation": "exclude", "candidate": candidate, "kept": kept, "actor": actor}

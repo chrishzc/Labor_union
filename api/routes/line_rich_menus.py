@@ -12,6 +12,9 @@ from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
 from fastapi.responses import Response
+from pymysql import MySQLError
+from subsystems.controlled_files.workflow import ControlledFileWorkflowError
+from subsystems.controlled_files.contracts import ControlledFileStorageError
 
 from api.dependencies.admin_auth import (
     admin_actor_context,
@@ -90,6 +93,7 @@ from infrastructure.line.rich_menu_image_store import encode_line_jpeg, render_r
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork, open_line_unit_of_work
 from subsystems.line import media_archive as _media_archive
+from api.dependencies.line_media import configure_rich_menu_archive
 from subsystems.line import rich_menu_publication_workflow as _rich_menu_workflow
 
 
@@ -105,6 +109,7 @@ _media_archive.storage_root_provider = _menu_media_storage_root
 _media_archive.prepare_storage_write = lambda: prepare_component_write(_menu_media_storage_root())
 _media_archive.encode_line_jpeg = encode_line_jpeg
 _media_archive.render_rich_menu_image = render_rich_menu_image
+configure_rich_menu_archive()
 _rich_menu_workflow.get_connection = get_connection
 _rich_menu_workflow.open_line_unit_of_work = open_line_unit_of_work
 _rich_menu_workflow.line_unit_of_work_factory = LineMySqlUnitOfWork
@@ -227,6 +232,9 @@ def _draft_view(result) -> RichMenuDraftView:
 
 
 def _publication_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, (ControlledFileWorkflowError, ControlledFileStorageError)):
+        raise typed_http_error(503 if exc.retryable else 409, "unavailable" if exc.retryable else "conflict",
+            exc.code, "選單圖片目前無法完成保存或讀取。", "rich-menu-publication", retryable=exc.retryable) from exc
     if isinstance(exc, (RichMenuPublicationNotFoundError, MediaAssetNotFoundError)):
         raise typed_http_error(
             404, "not_found", "rich_menu_publication_not_found",
@@ -374,12 +382,14 @@ def rich_menu_draft_apply(
 def preview_rich_menu(payload: RichMenuDefinition):
     try:
         if payload.appearance.image_mode == "uploaded" and payload.appearance.image_asset_id:
-            _, image = read_media_asset(payload.appearance.image_asset_id)
+            asset, image = read_media_asset(payload.appearance.image_asset_id)
+            mime_type = asset["mime_type"]
         else:
             image = render_rich_menu_image(payload.model_dump(mode="json"))
-    except (MediaValidationError, MediaAssetNotFoundError) as exc:
+            mime_type = "image/png"
+    except (ValueError, MediaAssetNotFoundError, ControlledFileWorkflowError, ControlledFileStorageError, MySQLError) as exc:
         _publication_error(exc)
-    return Response(content=image, media_type="image/jpeg")
+    return Response(content=image, media_type=mime_type)
 
 
 @router.post(
@@ -405,7 +415,7 @@ async def upload_rich_menu_image(
             connection_factory=get_connection,
             unit_of_work_factory=LineMySqlUnitOfWork,
         )
-    except (MediaValidationError, MediaAssetNotFoundError) as exc:
+    except (MediaValidationError, MediaAssetNotFoundError, ControlledFileWorkflowError, ControlledFileStorageError, MySQLError) as exc:
         _publication_error(exc)
     request.state.audit_action = "line.rich_menu.image.upload"
     request.state.audit_resource_type = "media_asset"

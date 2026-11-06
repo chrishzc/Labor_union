@@ -196,74 +196,18 @@ def _workflow():
     return workflow, controlled, repository, uow, events
 
 
-def test_render_stage_preview_then_apply_and_document_link_share_outer_uow():
+@pytest.mark.parametrize("blocked_port", [None, "preview", "register_persisted_pdf"])
+def test_retired_unsigned_storage_is_rejected_before_render_or_any_side_effect(blocked_port):
     workflow, controlled, repository, uow, events = _workflow()
-
-    result = workflow.prepare_and_persist(_command())
-
-    assert result.document_version_id == 52
-    assert result.source_document_version_id == 41
-    assert result.replayed is False
-    assert events == [
-        "render",
-        "stage",
-        "preview",
-        "uow:enter",
-        "source:lock",
-        "file:apply",
-        "document:register",
-        "uow:commit",
-    ]
-    stage = controlled.stage_commands[0]
-    assert stage.owner is ControlledFileOwner.CONTRACT_SIGNING
-    assert stage.purpose is ControlledFilePurpose.UNSIGNED_CONTRACT
-    assert stage.subject_reference == "CASE-1"
-    assert "41" in stage.object_key
-    assert "libreoffice-headless-v1" in stage.object_key
-    assert repository.calls[0]["source"].document_version_id == 41
-    assert uow.commits == 1
-    assert uow.rollbacks == 0
-    public = repr(result)
-    assert "cf_" not in public
-    assert "b" * 64 not in public
-
-
-def test_document_registration_failure_rolls_back_apply_transaction():
-    workflow, _, repository, uow, events = _workflow()
-
-    def fail(**_):
-        raise RuntimeError("/private/nas/unsigned.pdf")
-
-    repository.register_persisted_pdf = fail
-
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("retired unsigned draft must not reach persistence ports")
+    if blocked_port == "preview":
+        controlled.preview = unexpected
+    elif blocked_port == "register_persisted_pdf":
+        repository.register_persisted_pdf = unexpected
     with pytest.raises(UnsignedContractPdfError) as captured:
         workflow.prepare_and_persist(_command())
-
-    assert captured.value.code == "contract_pdf_persistence_failed"
-    assert "/private/" not in str(captured.value)
-    assert uow.commits == 0
-    assert uow.rollbacks == 1
-    assert events[-1] == "uow:rollback"
-
-
-def test_controlled_preview_blocker_stops_before_outer_uow():
-    workflow, controlled, repository, uow, _ = _workflow()
-    original = controlled.preview
-
-    def blocked(intent):
-        preview = original(intent)
-        return ControlledFilePreview(
-            preview.candidate,
-            preview.preview_fingerprint,
-            preview.expected_staging_version,
-            ("owner_subject_not_found",),
-        )
-
-    controlled.preview = blocked
-
-    with pytest.raises(UnsignedContractPdfError) as captured:
-        workflow.prepare_and_persist(_command())
-
-    assert captured.value.code == "contract_pdf_controlled_file_blocked"
-    assert repository.calls == []
-    assert uow.commits == 0
+    assert captured.value.code == "contract_unsigned_permanent_storage_retired"
+    assert captured.value.category == "domain_blocked" and not captured.value.retryable
+    assert events == [] and controlled.stage_commands == [] and repository.calls == []
+    assert uow.commits == uow.rollbacks == 0

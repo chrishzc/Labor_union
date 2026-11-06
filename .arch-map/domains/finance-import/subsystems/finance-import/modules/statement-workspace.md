@@ -5,7 +5,7 @@
 - subsystem: `finance-import`
 
 ## Responsibility
-以正式入帳證據與 canonical 原列投影成功明細；獨立保存最小人工明細、identity-only 判重及跨人員警示解除。組合 Client Finance／Staff Payables typed case queries；不重算應收／薪資、不寫 ledger／allocation、不派送外部服務。
+以正式入帳證據與 canonical 原列投影成功明細；保留歷史人工明細匯出、原命令重播、identity-only 判重及跨人員警示解除。§19 新人工補登由案件入口呼叫原 Client Finance／Staff Payables writer，舊 `statements/manual` 不再新寫 archive-only 明細，回 typed 案件補登指引；明示既存重複排除仍可用。Query 組合 typed case facts，不重算應收／薪資、不派送外部服務。
 
 台新成功證據同時承接 Government Subsidy 既有 allocation 與現行整期 entry/member，沿用正式核銷與沖正的案件關聯。
 
@@ -38,7 +38,8 @@
 - `ui_react/src/components/CancellationSettlementAccounting.tsx` — common cancellation readback and notices for case accounting and registry.
 - `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
 - `ui_react/src/api/finance_import/case_manual_supplement_pending.ts` — same-tab journal preserves the original case/command/key before POST and across remount/reload; fresh authenticated actor checks and storage failures block replacement. It stores no authentication token.
-- `subsystems/finance_import/case_manual_supplement.py` — §19 case-scoped manual command composition and immutable source provenance; owner writer integration and remaining unsupported source paths must be checked against current §19 acceptance, not the retired §15 manual-archive semantics.
+- `subsystems/finance_import/case_manual_supplement.py` — §19 case-scoped manual command composition, immutable source provenance and typed source port. Production execute calls existing owner workflows; historical receipt proof is checked before mutable target validation. Acceptance follows current §19, not retired §15 manual-archive semantics.
+- `infrastructure/mysql/case_manual_supplement_source_store.py` — source-specific typed port implementation borrows the original connection/cursor without transaction ownership.
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`
@@ -54,7 +55,7 @@
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — independent append-only manual plan events, not financial mutations or historical arrangement backfill.
 
 ## Contracts
-- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
+- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～19（人工新寫以 §19 取代 §15 舊語義）
 - archive endpoints: `statements/export`, `statements/manual`, `statements/duplicates` beneath `/api/v1/finance-import`
 - `bank-transactions` — 以已辨識業務對象／案件／政府補助之原始銀行流水為清單身分（無關流水於匯入前丟棄且不列入待核對），跨批次分頁並補齊對象與關聯案件，正式核銷證據決定狀態；待核對列僅在案件及正式款項可唯一確認時提供案件核對目標。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；同月等額候選保留當次期別及到期日。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示。
@@ -74,5 +75,6 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py`
+- Focused no-SQL contract tests: `test_legacy_manual_archive_replacement.py` and `test_case_manual_supplement_command_ports.py` in the same integration directory. Typed persistence ports prove application/owner/query calls, not MySQL locks, atomicity or E2E persistence.
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`

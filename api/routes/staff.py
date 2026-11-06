@@ -22,10 +22,9 @@ from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_case_preference_summary import StaffCasePreferenceSummaryView
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
-from api.schemas.staff_profile import StaffProfileView, StaffRosterPageView
+from api.schemas.staff_profile import StaffProfileView, StaffRosterPageView, StaffSavedDocumentPageView
+from shared_kernel.performance import MAXIMUM_PAGE_SIZE
 from subsystems.controlled_files.workflow import (
-    ControlledFileOwner,
-    ControlledFilePurpose,
     ControlledFileWorkflow,
 )
 from subsystems.access.authentication_session import AdminPrincipal
@@ -42,6 +41,9 @@ from subsystems.staff.profile_query import (
     StaffProfileContractError,
     StaffProfileNotFound,
     StaffProfileQueryApplication,
+    query_current_staff_resume,
+    StaffSavedDocumentPage,
+    StaffSavedDocumentCursorInvalid,
 )
 
 router = APIRouter(prefix="/api/v1/staff", tags=["Staff 服務人員/月嫂名冊"])
@@ -87,14 +89,22 @@ def get_staff_profile(
         str | None,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = None,
+    documents_after: str | None = Query(default=None, pattern=r"^cf_[0-9a-f]{32}$"),
+    documents_page_size: int = Query(default=MAXIMUM_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
     principal: AdminPrincipal = Depends(require_registry_reader),
     application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
 ) -> BaseResponse[StaffProfileView]:
     """Return selected Staff personal facts through a bounded admin projection."""
-    del principal
     correlation = correlation_id or uuid4().hex
     try:
         profile = application.query(staff_id)
+        # Preserve the existing Staff reader and the CFS persisted-session
+        # intersection; no extra role gains access to saved health documents.
+        documents = (application.query_saved_documents(staff_id, after=documents_after, page_size=documents_page_size)
+                     if principal.id is not None and principal.enabled else StaffSavedDocumentPage())
+    except StaffSavedDocumentCursorInvalid as error:
+        raise typed_http_error(409, "conflict", "staff_saved_document_cursor_invalid",
+            "文件清單位置已無法使用，請重新讀取。", correlation) from error
     except StaffProfileNotFound as error:
         raise typed_http_error(
             404,
@@ -116,7 +126,8 @@ def get_staff_profile(
             correlation,
         ) from error
     return BaseResponse(
-        data=StaffProfileView.model_validate(profile, from_attributes=True),
+        data=StaffProfileView.model_validate(profile, from_attributes=True).model_copy(update={
+            "documents": StaffSavedDocumentPageView.model_validate(documents, from_attributes=True)}),
         message="成功取得服務人員個人資料",
     )
 
@@ -131,13 +142,9 @@ def get_staff_resume(
     """Return only the current logical STAFF_RESUME for one existing staff member."""
     del principal
     try:
-        profile_application.query(staff_id)
+        current = query_current_staff_resume(profile_application, workflow, staff_id)
     except StaffProfileNotFound as error:
         raise HTTPException(status_code=404, detail="查無服務人員個人資料。") from error
-    current = workflow.find_current_readback(
-        ControlledFileOwner.STAFF, ControlledFilePurpose.STAFF_RESUME,
-        str(staff_id), "resume",
-    )
     return BaseResponse(
         data=StaffResumeView(
             staff_id=staff_id,

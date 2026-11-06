@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.dependencies.contract_templates import get_contract_template_catalog
+from infrastructure.db.contract_unsigned_pdf_repository import MySqlContractRenderSourceRepository
 from datetime import datetime, timezone
 from pathlib import Path
 from infrastructure.file.storage_layout import ORDERS_DIRECTORY, component_storage_root
@@ -46,6 +47,7 @@ def get_staff_contract_signing_application() -> StaffContractSigningApplication:
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
         order_selector=select_order,
         templates=get_contract_template_catalog(),
+        render_source_repository_factory=MySqlContractRenderSourceRepository,
     )
 
 
@@ -60,6 +62,7 @@ def get_client_contract_signing_application() -> ClientContractSigningApplicatio
         completion=_complete_contract_in_transaction,
         template_facts_loader=_load_client_contract_template_facts,
         templates=get_contract_template_catalog(),
+        render_source_repository_factory=MySqlContractRenderSourceRepository,
     )
 
 
@@ -81,7 +84,7 @@ def get_contract_signing_document_query_application():
     connection = get_connection()
     try:
         yield ContractSigningDocumentQueryApplication(
-            MySqlContractSigningDocumentQueryRepository(connection)
+            MySqlContractSigningDocumentQueryRepository(connection, templates=get_contract_template_catalog())
         )
     finally:
         connection.close()

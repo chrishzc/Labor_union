@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-staff-payout-payment-sources-v1",
+  "release_id": "labor-union-validation-schema-controlled-purpose-media-reference-v1",
   "source_bindings": {
-    "assembly_sha256": "9e2b61dda6e02655f1bf391b5dc1fa137dd457fdd9e71373dc7804e9229707f4",
-    "validation_manifest_sha256": "527a573099d0835460c6bad9c8d21041da5932400eb26960b44ad1e08d5fc95f",
+    "assembly_sha256": "d9fb5cc1c8ac5117f6dce7b974a82da88871ba8d3140cd2ad48ad6f337c319e4",
+    "validation_manifest_sha256": "952c8bd67a638cc5af7a0477f87cd9dc4447deb2534d18ae8375d05f2b106aaa",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "4be67d62bb2b717b94cef5791a4732c3ae302526d97766d80aa46c81f4bc1dd2",
+  "sql_sha256": "8baec372da390aa07e239fb6f791de5d97965987f3950d41134f72b1a25243a8",
   "objects": {
     "tables": 399,
     "views": 2,

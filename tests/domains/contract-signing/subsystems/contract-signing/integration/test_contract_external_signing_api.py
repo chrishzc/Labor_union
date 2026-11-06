@@ -246,7 +246,7 @@ class FakeApplication:
         assert idempotency_key.value == KEY
         return {"task_id": 91, "status": "pending", "replayed": False}
 
-    def query_case(self, case_no):
+    def query_case(self, case_no, actor=None):
         assert case_no == CASE_NO
         return {
             "case_no": case_no,
@@ -1005,14 +1005,17 @@ def test_public_receipt_accepts_every_legitimate_command_state_union(
     assert route._public_receipt(value)["command_type"] == command_type
 
 
-def test_final_staging_and_preview_hide_controlled_file_internals() -> None:
+@pytest.mark.parametrize("scope,purpose", [("client", "final_signed_contract"), ("staff", "signed_staff_agreement")])
+def test_final_staging_and_preview_hide_controlled_file_internals(scope, purpose) -> None:
     application = FakeApplication()
     client = _client(application)
     session_id = application.load_facts(CASE_NO).session_id
     staging = client.post(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing/final-document/staging",
         headers={"Idempotency-Key": "contract-final.stage:" + UUID, "X-Correlation-ID": "corr-stage"},
-        data={"session_id": session_id, "expected_status_version": "1", "scope": "client", "document_version_id": "32"},
+        data={"session_id": session_id, "expected_status_version": "1", "scope": scope,
+              "document_version_id": "32" if scope == "client" else "31",
+              **({"matching_segment_id": "71"} if scope == "staff" else {})},
         files={"document": ("signed.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")},
     )
     documents = [{"scope": "client", "matching_segment_id": None, "document_version_id": 32,
@@ -1024,11 +1027,105 @@ def test_final_staging_and_preview_hide_controlled_file_internals() -> None:
     assert staging.status_code == 200
     assert set(staging.json()["data"]) == {"scope", "matching_segment_id", "document_version_id", "expected_staging_version", "staging_id", "filename", "mime_type", "size_bytes", "expires_at"}
     assert application.controlled_files.command.actor.actor_id == "admin:7"
-    assert ":client:v32" in application.controlled_files.command.object_key
+    assert application.controlled_files.command.purpose.value == purpose
+    assert (":client:v32" if scope == "client" else ":staff:71:v31") in application.controlled_files.command.object_key
     assert preview.status_code == 200
     assert set(preview.json()["data"]) == {"preview_token", "session_id", "expected_status_version", "documents", "blockers", "can_apply"}
     assert len(preview.json()["data"]["documents"]) == 2
     assert all(word not in preview.text for word in ("storage_locator", "sha256_digest", "preview_fingerprint"))
+
+
+@pytest.mark.parametrize("scope", ["client", "staff"])
+def test_fresh_snapshot_original_http_prepare_download_replay_and_changed_source_without_nas(tmp_path, scope):
+    import hashlib
+    import json
+    from io import BytesIO
+    from openpyxl import Workbook
+    from shared_kernel.identities import ActorContext
+    from subsystems.contract_signing.render_source_snapshot import RenderSourceRequest, RenderSourceWorkflow, rebuild_render_snapshot
+    from subsystems.contract_signing.unsigned_contract_pdf import UnsignedContractPdfApplication, UnsignedContractRenderSource, DownloadUnsignedContractPdf
+    from subsystems.contract_signing.contract_renderer import RenderedContract
+    from subsystems.contract_signing.staff_contract_application import PreparedExternalStaffContractDocument
+    template_path = tmp_path / "source.xlsx"
+    Workbook().save(template_path)
+    mapping_path = tmp_path / "source.json"
+    template_key = "contract_client_copy" if scope == "client" else "contract_staff_service"
+    mapping_path.write_text(json.dumps({"id": template_key, "param_mappings": {
+        "A1": {"db_key": "name", "status": "approved", "requiredness": "required"},
+    }}), encoding="utf-8")
+    template = SimpleNamespace(template_key=template_key, template_filename="source.xlsx",
+        template_path=template_path, mapping_path=mapping_path,
+        template_sha256=hashlib.sha256(template_path.read_bytes()).hexdigest(),
+        mapping_sha256=hashlib.sha256(mapping_path.read_bytes()).hexdigest())
+    versions, receipts, audits = {}, {}, []
+    facts = {"name": "initial frozen facts"}
+    class SourceRepository:
+        def find_preparation(self, request): return receipts.get(request.idempotency_key.value)
+        def find_matching_source(self, source, snapshot):
+            if versions and versions[max(versions)]["render_source_snapshot_sha256"] == snapshot.snapshot_sha256: return max(versions)
+        def append_source(self, request, source, snapshot):
+            identity = max(versions, default=100) + 1
+            versions[identity] = {**source, "render_source_snapshot": snapshot.payload,
+                "render_source_snapshot_sha256": snapshot.snapshot_sha256,
+                "render_source_sha256": snapshot.source_sha256, "render_source_size_bytes": snapshot.source_size_bytes,
+                "media_asset_id": None}
+            return identity
+        def save_preparation(self, request, document_id):
+            receipts[request.idempotency_key.value] = {"request": request.receipt_identity, "document_version_id": document_id}
+    class SourceDocuments:
+        def prepare_external_document(self, command):
+            request = RenderSourceRequest(command.case_no, "client_contract" if scope == "client" else "staff_segment",
+                None if scope == "client" else command.matching_segment_id, ActorContext(command.actor_id),
+                command.idempotency_key, command.correlation_id)
+            result = RenderSourceWorkflow(SourceRepository()).prepare(request, lambda: (
+                41, template, facts, hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()))
+            return result if scope == "client" else PreparedExternalStaffContractDocument(*result)
+    class PdfRepository:
+        def load_current_pdf(self, *_): return None
+        def load_current_pdf_for_source(self, *_): return None
+        def load_render_source(self, case_no, document_id):
+            value = versions.get(document_id)
+            if value is None: return None
+            return UnsignedContractRenderSource(case_no, document_id, "template_generated", document_id == max(versions),
+                template_key, template.template_sha256, template.mapping_sha256, "source.xlsx",
+                rebuild_render_snapshot(value, template))
+        def append_durable_download_audit(self, audit): audits.append(audit)
+    class Renderer:
+        def render_workbook(self, *, content, filename):
+            assert content.startswith(b"PK")
+            return RenderedContract.from_pdf_bytes(content=b"%PDF-1.4\ndynamic\n%%EOF", filename="dynamic.pdf", renderer_identity="in-memory-test")
+    class Storage:
+        def read_verified(self, *_args, **_kwargs): pytest.fail("dynamic source must not invent a permanent PDF")
+    documents, pdf_repository = SourceDocuments(), PdfRepository()
+    pdf = UnsignedContractPdfApplication(pdf_repository, Storage(), Renderer(),
+        templates=SimpleNamespace(load_exact=lambda *_: template))
+    facade = SimpleNamespace(staff_documents=documents, unsigned_repository=pdf_repository, unsigned_documents=pdf)
+    application = FakeApplication()
+    application.prepare_client_unsigned = lambda case, docs, *args: ContractExternalSigningApplication.prepare_client_unsigned(facade, case, docs, *args)
+    application.prepare_staff_unsigned = lambda case, segment, *args: ContractExternalSigningApplication.prepare_staff_unsigned(facade, case, segment, *args)
+    application.download_unsigned = lambda case, identity, actor, correlation: pdf.download(DownloadUnsignedContractPdf(case, identity, actor, correlation))
+    client = _client(application)
+    client.app.dependency_overrides[route.get_client_contract_signing_application] = lambda: documents
+    target = "client" if scope == "client" else "staff-segments/71"
+    url = f"/api/v1/orders/{CASE_NO}/contract-external-signing/{target}/unsigned-pdf"
+    headers = {"Idempotency-Key": "source:http:first", "X-Correlation-ID": "source:http"}
+    first = client.post(url, headers=headers)
+    assert first.status_code == 200 and first.json()["data"]["document_version_id"] == 101
+    assert "render_source_snapshot" not in first.text and "storage_key" not in first.text
+    replay = client.post(url, headers=headers)
+    assert replay.status_code == 200 and replay.json()["data"]["replayed"] and len(versions) == 1
+    download = client.get(f"/api/v1/orders/{CASE_NO}/contract-external-signing/unsigned-pdf",
+        headers={"X-Expected-Document-Version": "101", "X-Correlation-ID": "source:http:get"})
+    assert download.status_code == 200 and download.content.startswith(b"%PDF-")
+    assert download.headers["X-Contract-Document-Version"] == "101" and len(audits) == 1
+    facts["name"] = "changed facts"
+    changed = client.post(url, headers={**headers, "Idempotency-Key": "source:http:changed"})
+    assert changed.status_code == 200 and changed.json()["data"]["document_version_id"] == 102
+    stale = client.get(f"/api/v1/orders/{CASE_NO}/contract-external-signing/unsigned-pdf",
+        headers={"X-Expected-Document-Version": "101", "X-Correlation-ID": "source:http:stale"})
+    assert stale.status_code == 409 and stale.json()["detail"]["error"]["code"] == "contract_pdf_document_stale"
+    assert len(versions) == 2 and all(value["media_asset_id"] is None for value in versions.values())
+    assert application.controlled_files.command is None and application.reports.command is None
 
 
 def test_final_readback_uses_only_opaque_identities() -> None:

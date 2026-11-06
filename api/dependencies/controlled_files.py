@@ -20,17 +20,20 @@ from subsystems.controlled_files.workflow import ControlledFileWorkflow
 from subsystems.controlled_files.maintenance import ControlledFileMaintenanceApplication
 
 
+def build_controlled_file_workflow(connection) -> ControlledFileWorkflow:
+    """Build on a caller-owned connection; this function never closes or commits it."""
+    capacity = file_read_capacity()
+    return ControlledFileWorkflow(
+        MySqlControlledFileWorkflowRepository(connection),
+        FileSystemControlledFileStorage(configured_storage_root(), max_staging_bytes=capacity, max_read_bytes=capacity),
+        lambda: MySqlUnitOfWork(connection), SystemBusinessClock(),
+    )
+
+
 def get_controlled_file_workflow() -> Iterator[ControlledFileWorkflow]:
     connection = get_connection()
     try:
-        root = configured_storage_root()
-        capacity = file_read_capacity()
-        yield ControlledFileWorkflow(
-            MySqlControlledFileWorkflowRepository(connection),
-            FileSystemControlledFileStorage(root, max_staging_bytes=capacity, max_read_bytes=capacity),
-            lambda: MySqlUnitOfWork(connection),
-            SystemBusinessClock(),
-        )
+        yield build_controlled_file_workflow(connection)
     finally:
         connection.close()
 
@@ -48,4 +51,4 @@ def get_controlled_file_maintenance():
         connection.close()
 
 
-__all__ = ["get_controlled_file_workflow", "get_controlled_file_maintenance"]
+__all__ = ["get_controlled_file_workflow", "get_controlled_file_maintenance", "build_controlled_file_workflow"]

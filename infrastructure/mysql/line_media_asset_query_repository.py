@@ -1,6 +1,6 @@
 """
 File: line_media_asset_query_repository.py
-Description: 唯讀查詢 Rich Menu owner-scoped 圖片 metadata，不公開儲存位置。
+Description: Rich Menu 圖片 metadata、borrowed controlled-file FK 寫入與唯讀引用，不公開儲存位置。
 """
 
 from __future__ import annotations
@@ -20,7 +20,9 @@ from subsystems.line.media_asset_contracts import (
     RichMenuMediaAssetDetailQuery,
     RichMenuMediaAssetListQuery,
     RichMenuMediaAssetPage,
+    RichMenuControlledFileReference,
 )
+from subsystems.controlled_files.workflow import ControlledFileReadback
 
 _PUBLIC_COLUMNS = (
     "id,category,owner_type,owner_id,original_filename,mime_type,file_size,"
@@ -41,6 +43,76 @@ _DETAIL_LOCK_SQL = f"{_DETAIL_SQL} FOR UPDATE"
 class MySqlLineRichMenuMediaAssetQueryRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def find_generated_asset(self, identity, menu_id, *, for_update=False):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT asset.*,object.opaque_object_id controlled_file_id FROM media_assets asset "
+                "JOIN controlled_file_objects object ON object.id=asset.controlled_file_object_id "
+                "WHERE asset.category='rich_menu' AND asset.owner_type='line_menu' AND asset.owner_id=%s "
+                "AND object.owner_type='line_integration' AND object.purpose='rich_menu_background' "
+                "AND object.subject_reference=%s AND object.object_key=%s ORDER BY asset.id LIMIT 2"
+                + (" FOR UPDATE" if for_update else ""), (menu_id, menu_id, "asset:" + identity),
+            )
+            rows = tuple(cursor.fetchall())
+        if len(rows) > 1:
+            raise ValueError("line_rich_menu_generated_identity_ambiguous")
+        return rows[0] if rows else None
+
+    def register_controlled_asset(self, readback: ControlledFileReadback, *, menu_id: str, width: int, height: int,
+                                  created_by_admin_user_id: int | None, storage_provider: str) -> Mapping[str, object]:
+        """Borrow the caller's transaction after ControlledFile Apply, without commit."""
+        from subsystems.controlled_files.workflow import ControlledFileOwner, ControlledFilePurpose
+        if (readback.owner is not ControlledFileOwner.LINE_INTEGRATION
+            or readback.purpose is not ControlledFilePurpose.RICH_MENU_BACKGROUND
+            or readback.subject_reference != menu_id or readback.mime_type != "image/png"):
+            raise ValueError("line_rich_menu_controlled_file_identity_mismatch")
+        if storage_provider not in {"local", "nas"}:
+            raise ValueError("line_rich_menu_storage_provider_invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT asset.* FROM media_assets asset JOIN controlled_file_objects object "
+                "ON object.id=asset.controlled_file_object_id WHERE object.opaque_object_id=%s FOR UPDATE",
+                (readback.file_id,),
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                if (row["category"] != "rich_menu" or row["owner_type"] != "line_menu"
+                    or row["owner_id"] != menu_id or row["sha256"] != readback.sha256_digest
+                    or row["file_size"] != readback.size_bytes or row["mime_type"] != readback.mime_type
+                    or row["storage_key"] != readback.file_id or row["deleted_at"] is not None
+                    or row["width"] != width or row["height"] != height or row["original_filename"] != readback.filename):
+                    raise ValueError("line_rich_menu_controlled_file_replay_mismatch")
+                return row
+            cursor.execute(
+                "INSERT INTO media_assets (category,owner_type,owner_id,storage_provider,storage_key,"
+                "original_filename,mime_type,file_size,sha256,width,height,created_by_admin_user_id,controlled_file_object_id) "
+                "SELECT 'rich_menu','line_menu',%s,%s,object.opaque_object_id,%s,'image/png',%s,%s,%s,%s,%s,object.id "
+                "FROM controlled_file_objects object WHERE object.opaque_object_id=%s "
+                "AND object.owner_type='line_integration' AND object.purpose='rich_menu_background' "
+                "AND object.subject_reference=%s AND object.version_number=%s AND object.content_sha256=%s "
+                "AND object.content_type='image/png' AND object.size_bytes=%s",
+                (menu_id, storage_provider, readback.filename, readback.size_bytes, readback.sha256_digest, width, height,
+                 created_by_admin_user_id, readback.file_id, menu_id, readback.version, readback.sha256_digest, readback.size_bytes),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("line_rich_menu_controlled_file_binding_failed")
+            cursor.execute("SELECT * FROM media_assets WHERE id=%s", (int(cursor.lastrowid),))
+            return cursor.fetchone()
+
+    def get_controlled_file_reference(self, file_id: str) -> RichMenuControlledFileReference | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT asset.id,asset.owner_id,asset.storage_key,asset.sha256,asset.file_size,asset.mime_type,asset.deleted_at,"
+                "object.opaque_object_id,object.version_number,object.content_sha256,object.size_bytes,object.content_type,"
+                "object.subject_reference FROM media_assets asset JOIN controlled_file_objects object "
+                "ON object.id=asset.controlled_file_object_id WHERE object.opaque_object_id=%s "
+                "AND asset.category='rich_menu' AND asset.owner_type='line_menu' "
+                "AND object.owner_type='line_integration' AND object.purpose='rich_menu_background' ORDER BY asset.id LIMIT 2",
+                (file_id,),
+            )
+            rows = tuple(cursor.fetchall())
+        return _controlled_file_reference(rows[0]) if len(rows) == 1 else None
 
     def list(self, query: RichMenuMediaAssetListQuery) -> RichMenuMediaAssetPage:
         if not isinstance(query, RichMenuMediaAssetListQuery):
@@ -104,6 +176,15 @@ class MySqlLineRichMenuMediaAssetQueryRepository:
             )
             row = optional_row(cursor.fetchone())
         return None if row is None else _asset(row, query.menu_definition_id)
+
+
+def _controlled_file_reference(row):
+    if (row["owner_id"] != row["subject_reference"] or row["storage_key"] != row["opaque_object_id"]
+        or row["sha256"] != row["content_sha256"] or row["file_size"] != row["size_bytes"]
+        or row["mime_type"] != row["content_type"] or row["mime_type"] != "image/png"):
+        return None
+    return RichMenuControlledFileReference(int(row["id"]), str(row["owner_id"]), str(row["opaque_object_id"]),
+        int(row["version_number"]), str(row["content_sha256"]), int(row["size_bytes"]), str(row["content_type"]), row["deleted_at"] is None)
 
 
 def _asset(row: Mapping[str, object], expected_menu_definition_id: str) -> RichMenuMediaAsset:

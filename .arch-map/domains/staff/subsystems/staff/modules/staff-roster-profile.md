@@ -46,6 +46,8 @@
 - 名冊主頁預設「現役月嫂」，以「已退役月嫂」分頁分開呈現；`/roster` optional `lifecycle_state=active|retired` 在 cursor／limit 前依 Staff-owned lifecycle 篩選，省略維持原查詢，不增加回應欄位或逐人查詢。退役／復職的正式 readback 同步移除原分頁清單列；搜尋與排序沿用目前分頁。
 - `/summaries` 同樣支援 optional `lifecycle_state=active|retired`，供排班及代班的新選項使用 active；省略仍保留全部人員，`StaffIdentityProvider` 不套用篩選，以保留歷史案件的退役人員名稱與公會編號。
 - 履歷維持既有 staging／Preview／Apply／版本及 authenticated download。`StaffRegistryEditor` 同頁提供所選 PDF 與目前履歷 Blob 預覽、下載及獨立 loading／error／empty 狀態；`staff_resume_client.ts` 讀 controlled-files runtime settings，檔案操作使用專用 timeout，離頁釋放預覽 URL。
+- `subsystems/staff/profile_query.py::query_current_staff_resume` is the original Staff-root/current logical resume query shared by the existing resume API and controlled-file reconciliation. Comparison uses exact opaque file/version/digest/size/purpose, without inventing certificate/medical attachment relations or outbound receipts; Staff resume transmission stays outside the retired LINE matching-confirmation-files entry.
+- The existing single Profile GET also consumes `StaffProfileQueryApplication.query_saved_documents`: saved certificate/health-and-police files are current immutable revisions per controlled logical identity, joined to the Staff root and committed Apply receipt. `documents_after`/`documents_page_size` reuse bounded cursor paging; status distinguishes unavailable from available-empty. The original drawer renders this readonly collection and existing authenticated downloads, without medical/qualification/expiry claims, editor/upload or a new route. Metadata uses the intersection of the Staff reader and existing persisted CFS session. Maintenance reuses exact membership in this owner read model; no outbound exemption is inferred.
 - 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
 - `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md`
@@ -54,6 +56,8 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`
+- focused_documents: `tests/domains/staff/subsystems/staff/modules/staff-roster-profile/test_staff_saved_documents.py` — pure owner/page projections, actual Profile transport/roles, maintenance membership; project SQL is not executed.
+- focused_documents_ui: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/staff_saved_documents.test.tsx` — strict client, authenticated download, readonly pagination and preservation of unsaved edits.
 - test_root: `ui_react/src/tests/domains/staff/subsystems/staff/modules/staff-roster-profile/`
 - routing: `.arch-map/tests/domains/staff/subsystems/staff/modules/staff-roster-profile.md`
 - integration_root: `tests/test_staff_summary_query.py` — 既有 bounded summary projection 契約。

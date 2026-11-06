@@ -5,12 +5,9 @@ Description: LINE Rich Menu 圖片檔案儲存管理與現代化卡片圖文選�
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
-import os
 from pathlib import Path
-from uuid import uuid4
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
@@ -19,9 +16,12 @@ ALLOWED_RICH_MENU_SIZES = {(2500, 843), (2500, 1686)}
 
 
 class FileSystemRichMenuImageStore:
-    def __init__(self, storage_root: str | Path) -> None:
+    def __init__(self, storage_root: str | Path, *, archive_generated=None, resolve_asset=None, controlled_loader=None) -> None:
         self._configured_root = Path(storage_root)
         self._root = Path(storage_root).resolve()
+        self._archive_generated = archive_generated
+        self._resolve_asset = resolve_asset
+        self._controlled_loader = controlled_loader
 
     def materialize(
         self,
@@ -30,33 +30,26 @@ class FileSystemRichMenuImageStore:
     ) -> str:
         menu = json.loads(definition_json)
         appearance = menu.get("appearance", {})
+        if object_reference and object_reference != "rich_menu/unresolved":
+            self.load(object_reference)
+            return object_reference
         if appearance.get("image_mode", "generated") == "uploaded":
             reference = object_reference or appearance.get("image_object_reference")
+            if not reference and appearance.get("image_asset_id") and self._resolve_asset:
+                reference = self._resolve_asset(menu)
             if not isinstance(reference, str) or not reference.strip():
                 raise ValueError("uploaded Rich Menu requires an image object reference")
             self.load(reference)
             return reference
-        content = render_rich_menu_image(menu)
-        from infrastructure.file.storage_layout import prepare_component_write
-        prepare_component_write(self._configured_root)
-        digest = hashlib.sha256(content).hexdigest()
-        reference = f"rich_menus/{digest[:2]}/{digest}.jpg"
-        target = self._target(reference)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                raise RuntimeError("Rich Menu image object reference collision")
-            return reference
-        temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
-        try:
-            temporary.write_bytes(content)
-            os.replace(temporary, target)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        return reference
+        if self._archive_generated is None:
+            raise RuntimeError("Rich Menu controlled image archive is not configured")
+        return self._archive_generated(menu)
 
     def load(self, object_reference: str) -> tuple[bytes, str]:
+        if object_reference.startswith("cf_"):
+            if self._controlled_loader is None:
+                raise RuntimeError("Rich Menu controlled image reader is not configured")
+            return self._controlled_loader(object_reference)
         target = self._target(object_reference)
         if not target.is_file():
             raise FileNotFoundError("Rich Menu image object does not exist")
@@ -278,7 +271,17 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
             fill="#A89587",
         )
 
-    return encode_line_jpeg(image)
+    return encode_line_png(image)
+
+
+def encode_line_png(image: Image.Image) -> bytes:
+    rgb = ImageOps.exif_transpose(image).convert("RGB")
+    output = io.BytesIO()
+    rgb.save(output, format="PNG", optimize=True)
+    data = output.getvalue()
+    if len(data) > MAX_LINE_IMAGE_BYTES:
+        raise ValueError("Rich Menu PNG exceeds provider image limit")
+    return data
 
 
 def encode_line_jpeg(image: Image.Image) -> bytes:
@@ -297,5 +300,6 @@ __all__ = [
     "FileSystemRichMenuImageStore",
     "MAX_LINE_IMAGE_BYTES",
     "encode_line_jpeg",
+    "encode_line_png",
     "render_rich_menu_image",
 ]

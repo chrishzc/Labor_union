@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Literal, Protocol
 
 from shared_kernel.validation import (
@@ -18,15 +19,19 @@ class ContractSigningDocumentDownload:
 
     case_no: str
     document_version_id: int
-    storage_key: str
+    storage_key: str | None
     sha256: str
     mime_type: str
     original_filename: str
+    inline_content: bytes | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
         require_positive_integer(self.document_version_id, "document version ID")
-        require_canonical_text(self.storage_key, "contract document storage key", 500)
+        if self.inline_content is None:
+            require_canonical_text(self.storage_key, "contract document storage key", 500)
+        elif self.storage_key is not None or not isinstance(self.inline_content, bytes) or hashlib.sha256(self.inline_content).hexdigest() != self.sha256:
+            raise ValueError("reconstructed contract document identity is invalid")
         require_sha256_hex(self.sha256, "contract document SHA-256")
         require_canonical_text(self.mime_type, "contract document MIME type", 100)
         require_canonical_text(self.original_filename, "contract document filename", 255)

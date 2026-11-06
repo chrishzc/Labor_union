@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from subsystems.contract_signing.render_source_snapshot import rebuild_render_snapshot, load_snapshot_template
 
 from infrastructure.mysql.line_repository_support import optional_row
 from subsystems.contract_signing.document_query import (
@@ -17,12 +18,16 @@ from subsystems.contract_signing.document_query import (
 _DOCUMENT_FOR_DOWNLOAD_SQL = """
 SELECT document.case_no,
        document.id AS document_version_id,
+       document.document_scope,document.document_target_key,document.matching_plan_id,document.matching_segment_id,
+       document.template_key,document.template_sha256,document.mapping_sha256,document.facts_snapshot_sha256,
+       document.render_source_kind,document.render_source_snapshot,document.render_source_snapshot_sha256,
+       document.render_source_sha256,document.render_source_size_bytes,
        asset.storage_key,
        asset.sha256,
        asset.mime_type,
        asset.original_filename
   FROM contract_document_versions document
-  JOIN media_assets asset ON asset.id = document.media_asset_id
+  LEFT JOIN media_assets asset ON asset.id = document.media_asset_id
  WHERE document.case_no = %s
    AND document.id = %s
 """
@@ -53,16 +58,19 @@ _CLIENT_EVENTS_SQL = (
 _DOCUMENTS_SQL = (
     "SELECT document.id,document.document_scope,document.document_role,"
     "document.document_target_key,document.version_number,document.template_key,"
-    "document.template_sha256,document.mapping_sha256,asset.sha256 AS archive_sha256,"
-    "asset.mime_type,asset.file_size FROM contract_document_versions document "
-    "JOIN media_assets asset ON asset.id=document.media_asset_id "
+    "document.template_sha256,document.mapping_sha256,"
+    "CASE WHEN document.render_source_kind='render_snapshot' THEN document.render_source_sha256 ELSE asset.sha256 END AS archive_sha256,"
+    "CASE WHEN document.render_source_kind='render_snapshot' THEN 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ELSE asset.mime_type END AS mime_type,"
+    "CASE WHEN document.render_source_kind='render_snapshot' THEN document.render_source_size_bytes ELSE asset.file_size END AS file_size "
+    "FROM contract_document_versions document LEFT JOIN media_assets asset ON asset.id=document.media_asset_id "
     "WHERE document.case_no=%s ORDER BY document.id"
 )
 
 
 class MySqlContractSigningDocumentQueryRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, templates=None) -> None:
         self._connection = connection
+        self._templates = templates
 
     def find_document_for_download(
         self, case_no: str, document_version_id: int
@@ -70,7 +78,14 @@ class MySqlContractSigningDocumentQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_DOCUMENT_FOR_DOWNLOAD_SQL, (case_no, document_version_id))
             row = optional_row(cursor.fetchone())
-        return None if row is None else _document(row)
+        if row is None: return None
+        if row.get("render_source_kind", "legacy_archived") == "render_snapshot":
+            template = load_snapshot_template(row, self._templates)
+            content = rebuild_render_snapshot(row, template)
+            return ContractSigningDocumentDownload(row["case_no"], int(row["document_version_id"]), None,
+                row["render_source_sha256"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                template.template_filename, content)
+        return _document(row)
 
     def find_status(self, case_no: str) -> ContractSigningStatus | None:
         with self._connection.cursor() as cursor:

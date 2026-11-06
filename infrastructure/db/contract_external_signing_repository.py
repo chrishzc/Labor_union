@@ -55,12 +55,13 @@ from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
     FinalContractFileReference,
     signed_contract_object_key,
+    signed_contract_purpose,
     SignedContractDocumentReadback,
     SignedContractDocumentPreview,
     FinalSignedContractApplyReceipt,
     StoredFinalSignedContractReceipt,
 )
-from subsystems.controlled_files.workflow import ControlledFileApplyReceipt
+from subsystems.controlled_files.workflow import ControlledFileApplyReceipt, ControlledFilePurpose
 
 
 class MySqlContractExternalSigningRepository:
@@ -678,9 +679,9 @@ class MySqlContractExternalSigningRepository:
         row = self._one(
             "SELECT staging_id,staging_version,original_filename,content_type,size_bytes "
             "FROM controlled_file_staging_objects WHERE owner_type='contract_signing' "
-            "AND purpose='final_signed_contract' AND subject_reference=%s AND object_key=%s "
+            "AND purpose=%s AND subject_reference=%s AND object_key=%s "
             "AND staging_state='staged' AND expires_at_utc>UTC_TIMESTAMP(6) "
-            "ORDER BY id DESC LIMIT 1", (case_no, object_key),
+            "ORDER BY id DESC LIMIT 1", (signed_contract_purpose(target).value, case_no, object_key),
         )
         if row is None:
             return None
@@ -707,24 +708,44 @@ class MySqlContractExternalSigningRepository:
         return None if row is None else _final_document_readback(row)
 
     def get_controlled_file_reference(self, file_id: str) -> FinalContractFileReference | None:
-        """Read the original final-document and its immutable completion receipt."""
-        row = self._one(
-            "SELECT object.opaque_object_id,object.object_key,session.external_signing_session_id,"
-            "document.case_no,document.content_sha256,document.size_bytes,"
-            "(document.id=(SELECT latest.id FROM contract_final_document_versions latest "
-            "WHERE latest.case_no=document.case_no ORDER BY latest.version_number DESC,latest.id DESC LIMIT 1)) is_current,"
-            "(SELECT COUNT(*) FROM contract_external_signing_receipts receipt "
-            "WHERE receipt.final_document_version_id=document.id "
-            "AND receipt.command_type='apply_final_signed_contract' AND receipt.outcome_state='completed') receipt_count "
-            "FROM contract_final_document_versions document JOIN controlled_file_objects object "
-            "ON object.id=document.controlled_file_object_id "
-            "JOIN contract_external_signing_sessions session ON session.id=document.external_signing_session_id "
-            "WHERE object.opaque_object_id=%s AND session.session_state='completed' LIMIT 1", (file_id,),
+        """Read exact immutable receipt members, including non-primary staff PDFs.
+
+        No signing-completion receipt is treated as evidence of external delivery.
+        Legacy members without a digest are provable only through the original
+        primary final-document FK; a staff member cannot borrow the client hash.
+        """
+        object_row = self._one(
+            "SELECT id AS object_id,opaque_object_id,object_key,owner_type,purpose,"
+            "subject_reference,version_number,filename,content_type,size_bytes,content_sha256 "
+            "FROM controlled_file_objects WHERE opaque_object_id=%s "
+            "AND owner_type='contract_signing' "
+            "AND purpose IN ('final_signed_contract','signed_staff_agreement')", (file_id,),
         )
-        if row is None:
+        if object_row is None:
             return None
-        members = self.get_final_documents(str(row["case_no"]))
-        return _final_contract_file_reference(row, members)
+        rows = self._all(
+            "SELECT session.external_signing_session_id,document.case_no,document.final_document_id,"
+            "receipt.receipt_id,receipt.result_status_version,"
+            "document.controlled_file_object_id AS primary_object_id,"
+            "document.content_sha256 AS primary_content_sha256,"
+            "document.size_bytes AS primary_size_bytes,receipt.result_snapshot,"
+            "(document.id=(SELECT latest.id FROM contract_final_document_versions latest "
+            "WHERE latest.case_no=document.case_no ORDER BY latest.version_number DESC,latest.id DESC LIMIT 1)) is_current "
+            "FROM contract_final_document_versions document "
+            "JOIN contract_external_signing_sessions session ON session.id=document.external_signing_session_id "
+            "JOIN contract_external_signing_receipts receipt ON receipt.final_document_version_id=document.id "
+            "WHERE document.case_no=%s AND session.session_state='completed' "
+            "AND receipt.command_type='apply_final_signed_contract' AND receipt.outcome_state='completed' "
+            "ORDER BY document.version_number DESC,document.id DESC,receipt.id DESC",
+            (object_row["subject_reference"],),
+        )
+        for row in rows:
+            reference = _final_contract_file_reference(
+                {**object_row, **row}, _final_contract_reference_members(row)
+            )
+            if reference is not None:
+                return reference
+        return None
 
     def _one(self, statement: str, parameters: tuple[object, ...]):
         with self._connection.cursor() as cursor:
@@ -750,19 +771,57 @@ class MySqlContractExternalSigningRepository:
             return int(cursor.lastrowid)
 
 
-def _final_contract_file_reference(row, members):
-    """Project only the closed owner's receipt, bound to its registered target.
+def _final_contract_reference_members(row):
+    """Bind the immutable member JSON to the actual closed owner receipt/FK."""
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    document = None if snapshot is None else _json_mapping(snapshot.get("document"))
+    if snapshot is None or document is None or not (
+        snapshot.get("receipt_id") == row["receipt_id"]
+        and snapshot.get("session_id") == row["external_signing_session_id"]
+        and snapshot.get("resulting_state") == "completed"
+        and snapshot.get("resulting_status_version") == row["result_status_version"]
+        and document.get("case_no") == row["case_no"]
+        and document.get("final_document_id") == row["final_document_id"]
+    ):
+        raise _stored_fact_error("final_contract_document_members_lineage_invalid")
+    return _signed_document_members(snapshot)
 
-    The digest is transitive through the immutable final-document/object FK;
-    receipt members contain no digest and are not provider-delivery receipts.
-    """
+
+def _final_contract_file_reference(row, members):
+    """Project completion freeze evidence; never infer an outbound provider result."""
     member = next((item for item in members if item.file_id == row["opaque_object_id"]), None)
-    member_matches = (member is not None and member.size_bytes == int(row["size_bytes"])
-        and member.mime_type == "application/pdf"
-        and row["object_key"] == signed_contract_object_key(str(row["external_signing_session_id"]), member.target))
-    return FinalContractFileReference(str(row["opaque_object_id"]), str(row["case_no"]),
-        str(row["content_sha256"]), int(row["size_bytes"]), bool(row["is_current"]),
-        int(row["receipt_count"]) > 0 and member_matches, None if not member_matches else member.version)
+    if member is None:
+        return None
+    purpose = ControlledFilePurpose(row["purpose"])
+    if not (
+        row["owner_type"] == "contract_signing"
+        and row["subject_reference"] == row["case_no"]
+        and member.version == row["version_number"]
+        and member.size_bytes == row["size_bytes"]
+        and member.filename == row["filename"]
+        and member.mime_type == row["content_type"] == "application/pdf"
+        and row["object_key"] == signed_contract_object_key(str(row["external_signing_session_id"]), member.target)
+    ):
+        return None
+    digest = member.sha256_digest
+    primary = row["object_id"] == row["primary_object_id"]
+    if primary and (
+        member.size_bytes != row["primary_size_bytes"]
+        or digest is not None and digest != row["primary_content_sha256"]
+    ):
+        return None
+    if digest is None:
+        # Historical JSON has no member hash/purpose. Only its exact primary FK
+        # supplies independent immutable bytes; do not copy that hash to staff.
+        if not primary or purpose is not ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
+            return None
+        digest = str(row["primary_content_sha256"])
+    elif member.purpose is not purpose:
+        return None
+    return FinalContractFileReference(
+        member.file_id, str(row["case_no"]), digest, member.size_bytes,
+        bool(row["is_current"]), True, member.version, purpose, member.target, member.filename,
+    )
 
 
 def _stored_receipt(row: Mapping[str, object]) -> StoredExternalSigningReportReceipt:
@@ -1171,6 +1230,8 @@ def _final_receipt_snapshot(
             "controlled_file_id": member.file_id, "version_number": member.version,
             "filename": member.filename, "mime_type": member.mime_type,
             "size_bytes": member.size_bytes,
+            **({"content_sha256": member.sha256_digest, "purpose": member.purpose.value}
+               if member.sha256_digest is not None else {}),
         } for member in receipt.documents],
         "document": {
             "applied_at": document.applied_at.astimezone(timezone.utc).isoformat(),
@@ -1202,6 +1263,7 @@ def _signed_document_members(value):
         members = tuple(SignedContractDocumentReadback(
             SignedContractDocumentTarget(row["scope"], row["matching_segment_id"], row["document_version_id"]),
             row["controlled_file_id"], row["version_number"], row["filename"], row["mime_type"], row["size_bytes"],
+            row.get("content_sha256"), None if "purpose" not in row else ControlledFilePurpose(row["purpose"]),
         ) for row in values)
         if len({row.target.key for row in members}) != len(members) or len({row.file_id for row in members}) != len(members):
             raise ValueError("duplicate signed document member")

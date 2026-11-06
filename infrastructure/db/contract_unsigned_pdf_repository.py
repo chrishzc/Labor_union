@@ -21,6 +21,11 @@ from subsystems.contract_signing.unsigned_contract_pdf import (
 from subsystems.contract_signing.unsigned_contract_pdf_persistence import (
     UnsignedContractPdfPersistenceSource,
 )
+from subsystems.contract_signing.render_source_snapshot import (
+    RenderSourceRequest, rebuild_render_snapshot, load_snapshot_template,
+)
+from subsystems.contract_signing.command_receipts import append_command_receipt, _fingerprint as contract_receipt_fingerprint
+import hashlib
 from subsystems.controlled_files.workflow import (
     ControlledFileApplyReceipt,
     ControlledFileOwner,
@@ -30,6 +35,94 @@ from subsystems.controlled_files.workflow import (
 
 
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+class MySqlContractRenderSourceRepository:
+    """Borrow the original source-owner transaction; write real versions, no files/media."""
+    def __init__(self, connection): self._connection = connection
+
+    def _one(self, sql, parameters):
+        with self._connection.cursor() as cursor:
+            cursor.execute(sql, parameters)
+            return cursor.fetchone()
+
+    def find_preparation(self, request: RenderSourceRequest):
+        row = self._one(
+            "SELECT command_kind,command_fingerprint,case_no,document_version_id,result_snapshot FROM contract_signing_command_receipts "
+            "WHERE idempotency_key=%s FOR UPDATE", (_source_receipt_key(request),),
+        )
+        if row is None: return None
+        return _source_preparation_receipt(row)
+
+    def find_matching_source(self, source, snapshot):
+        row = self._one(
+            "SELECT document.id FROM contract_document_versions document LEFT JOIN media_assets asset "
+            "ON asset.id=document.media_asset_id WHERE document.case_no=%s AND document.document_scope=%s "
+            "AND document.document_target_key=%s AND document.matching_plan_id=%s "
+            "AND document.document_role='template_generated' AND document.template_key=%s "
+            "AND document.template_sha256=%s AND document.mapping_sha256=%s AND document.facts_snapshot_sha256=%s "
+            "AND ((document.render_source_kind='render_snapshot' AND document.render_source_snapshot_sha256=%s "
+            "AND document.render_source_sha256=%s AND document.render_source_size_bytes=%s) OR (document.render_source_kind='legacy_archived' "
+            "AND asset.category='contract' AND asset.deleted_at IS NULL AND asset.mime_type=%s)) "
+            "AND NOT EXISTS (SELECT 1 FROM contract_document_versions newer "
+            "LEFT JOIN media_assets newer_asset ON newer_asset.id=newer.media_asset_id "
+            "WHERE newer.case_no=document.case_no AND newer.document_scope=document.document_scope "
+            "AND newer.document_role='template_generated' "
+            "AND newer.document_target_key=document.document_target_key AND newer.version_number>document.version_number "
+            "AND NOT COALESCE((newer.render_source_kind='legacy_archived' AND newer_asset.mime_type='application/pdf' "
+            "AND newer.replaces_document_version_id=document.id),FALSE)) "
+            "ORDER BY document.version_number DESC,document.id DESC LIMIT 1 FOR UPDATE",
+            (source["case_no"], source["document_scope"], source["document_target_key"], source["matching_plan_id"],
+             source["template_key"], source["template_sha256"], source["mapping_sha256"], source["facts_snapshot_sha256"],
+             snapshot.snapshot_sha256, snapshot.source_sha256, snapshot.source_size_bytes, _XLSX_MEDIA_TYPE),
+        )
+        return None if row is None else int(row["id"])
+
+    def append_source(self, request, source, snapshot):
+        previous = self._one(
+            "SELECT id,version_number FROM contract_document_versions WHERE case_no=%s AND document_scope=%s "
+            "AND document_target_key=%s ORDER BY version_number DESC,id DESC LIMIT 1 FOR UPDATE",
+            (source["case_no"], source["document_scope"], source["document_target_key"]),
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO contract_document_versions (case_no,document_scope,document_role,matching_plan_id,"
+                "matching_segment_id,document_target_key,template_key,template_sha256,mapping_sha256,"
+                "facts_snapshot_sha256,media_asset_id,version_number,replaces_document_version_id,created_by,"
+                "render_source_kind,render_source_snapshot,render_source_snapshot_sha256,render_source_sha256,render_source_size_bytes) "
+                "VALUES (%s,%s,'template_generated',%s,%s,%s,%s,%s,%s,%s,NULL,%s,%s,%s,'render_snapshot',%s,%s,%s,%s)",
+                (source["case_no"], source["document_scope"], source["matching_plan_id"], source["matching_segment_id"],
+                 source["document_target_key"], source["template_key"], source["template_sha256"], source["mapping_sha256"],
+                 source["facts_snapshot_sha256"], 1 if previous is None else int(previous["version_number"]) + 1,
+                 None if previous is None else int(previous["id"]), request.actor.actor_id, snapshot.payload,
+                 snapshot.snapshot_sha256, snapshot.source_sha256, snapshot.source_size_bytes),
+            )
+            if cursor.rowcount != 1: raise _metadata_error("contract_unsigned_source_insert_failed")
+            return int(cursor.lastrowid)
+
+    def save_preparation(self, request, document_id):
+        append_command_receipt(self._connection, idempotency_key=_source_receipt_key(request),
+            command_kind="prepare_unsigned_source", case_no=request.case_no,
+            document_version_id=document_id, signing_event_id=None, correlation_id=request.correlation_id.value,
+            result_snapshot={"request": request.receipt_identity, "document_version_id": document_id})
+
+
+def _source_receipt_key(request):
+    return "unsigned-source:sha256:" + hashlib.sha256(request.idempotency_key.value.encode()).hexdigest()
+
+
+def _source_preparation_receipt(row):
+    try:
+        value = row["result_snapshot"]
+        value = json.loads(value) if isinstance(value, (str, bytes)) else value
+        if (row["command_kind"] != "prepare_unsigned_source" or set(value) != {"request", "document_version_id"}
+            or row["document_version_id"] != value["document_version_id"]
+            or row["case_no"] != value["request"]["case_no"]
+            or contract_receipt_fingerprint(row["command_kind"], row["case_no"], value) != row["command_fingerprint"]):
+            raise ValueError("receipt lineage")
+        return value
+    except (TypeError, ValueError, KeyError):
+        raise _metadata_error("contract_unsigned_source_receipt_invalid") from None
 
 
 class MySqlContractUnsignedPdfRepository:
@@ -42,6 +135,7 @@ class MySqlContractUnsignedPdfRepository:
         storage_provider: str = "local",
         archive_root: Path | None = None,
         archive_reader=read_archived_contract_document,
+        templates=None,
     ) -> None:
         if storage_provider not in {"local", "nas"}:
             raise ValueError("unsigned PDF storage provider is invalid")
@@ -49,6 +143,7 @@ class MySqlContractUnsignedPdfRepository:
         self._storage_provider = storage_provider
         self._archive_root = archive_root or Path(__file__).resolve().parents[2] / "runtime_data" / "contracts"
         self._archive_reader = archive_reader
+        self._templates = templates
 
     def load_render_source(
         self, case_no: str, document_version_id: int
@@ -59,22 +154,30 @@ class MySqlContractUnsignedPdfRepository:
         try:
             if str(row["document_scope"]) not in {"staff_segment", "client_contract"}:
                 raise ValueError("unknown document scope")
-            content = self._archive_reader(
-                storage_root=self._archive_root,
-                storage_key=str(row["storage_key"]),
-                expected_sha256=str(row["sha256"]),
-            )
-            if len(content) != int(row["file_size"]):
-                raise ValueError("render source size mismatch")
+            if row.get("render_source_kind", "legacy_archived") == "render_snapshot":
+                template = load_snapshot_template(row, self._templates)
+                content = rebuild_render_snapshot(row, template)
+                filename = template.template_filename
+            elif row.get("render_source_kind", "legacy_archived") == "legacy_archived":
+                content = self._archive_reader(
+                    storage_root=self._archive_root,
+                    storage_key=str(row["storage_key"]),
+                    expected_sha256=str(row["sha256"]),
+                )
+                if len(content) != int(row["file_size"]):
+                    raise ValueError("render source size mismatch")
+                filename = str(row["original_filename"])
+            else:
+                raise ValueError("unknown render source kind")
             return UnsignedContractRenderSource(
                 case_no=str(row["case_no"]),
                 document_version_id=int(row["document_version_id"]),
                 document_role=str(row["document_role"]),
-                is_current=True,
+                is_current=bool(row.get("is_current", True)),
                 template_key=str(row["template_key"]),
                 template_sha256=str(row["template_sha256"]),
                 mapping_sha256=str(row["mapping_sha256"]),
-                source_filename=str(row["original_filename"]),
+                source_filename=filename,
                 source_content=content,
             )
         except (KeyError, OSError, TypeError, ValueError):
@@ -100,6 +203,12 @@ class MySqlContractUnsignedPdfRepository:
             )
         except (KeyError, TypeError, ValueError):
             raise _metadata_error("contract_pdf_persisted_metadata_invalid") from None
+
+    def has_current_unsigned_source(self, case_no: str, document_version_id: int) -> bool:
+        if self.load_current_pdf(case_no, document_version_id) is not None:
+            return True
+        source = self.load_render_source(case_no, document_version_id)
+        return source is not None and source.is_current
 
     def load_current_pdf_for_source(
         self, case_no: str, source_document_version_id: int
@@ -345,15 +454,18 @@ _CURRENT_PREDICATE = (
 _RENDER_SOURCE_SQL = (
     "SELECT document.case_no,document.id AS document_version_id,document.document_scope,"
     "document.document_role,document.matching_plan_id,document.matching_segment_id,"
-    "document.template_key,document.template_sha256,document.mapping_sha256,"
+    "document.document_target_key,document.template_key,document.template_sha256,document.mapping_sha256,"
+    "document.facts_snapshot_sha256,document.render_source_kind,document.render_source_snapshot,"
+    "document.render_source_snapshot_sha256,document.render_source_sha256,document.render_source_size_bytes,"
+    f"({_CURRENT_PREDICATE}) AS is_current,"
     "asset.storage_key,asset.original_filename,asset.file_size,asset.sha256 "
-    "FROM contract_document_versions document JOIN media_assets asset "
+    "FROM contract_document_versions document LEFT JOIN media_assets asset "
     "ON asset.id=document.media_asset_id "
     "WHERE document.case_no=%s AND document.id=%s "
     "AND document.document_role='template_generated' "
     "AND document.source_document_version_id IS NULL "
-    "AND asset.category='contract' AND asset.deleted_at IS NULL "
-    f"AND asset.mime_type='{_XLSX_MEDIA_TYPE}' AND {_CURRENT_PREDICATE}"
+    "AND (document.render_source_kind='render_snapshot' OR "
+    f"(document.render_source_kind='legacy_archived' AND asset.category='contract' AND asset.deleted_at IS NULL AND asset.mime_type='{_XLSX_MEDIA_TYPE}' AND {_CURRENT_PREDICATE}))"
 )
 _CURRENT_PDF_SQL = (
     "SELECT document.case_no,document.id AS document_version_id,document.document_role,"

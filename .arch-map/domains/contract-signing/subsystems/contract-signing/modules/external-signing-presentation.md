@@ -14,6 +14,8 @@
 外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`；案件層級提醒僅能依相同目前方案的交接紀錄建立，方案變動須重新交接。提醒及交接皆不要求系統未簽 PDF，原狀態／身分／重播／完成條件保留。獨立提醒按鈕點擊後直接建立寄送工作，不再顯示確認視窗；一次涵蓋客戶及所有 current 月嫂，fresh-lock 後以既有 committed delivery tasks 及 generic command receipt 同一 outer UoW 保存；未綁定對象保留當時的人工通知清單，身分錯配與版本衝突仍 typed 拒絕。提醒不推進簽約版本、不影響文件驗收；Query 回讀最後提醒，新交接標示未包含提醒，舊交接保留歷史通知事實。
 工作區同案推薦變更後，已掛載的契約下載及欄位預覽依 owner revision 重讀 current targets；舊服務段落不沿用至新推薦。既有檔案、進行中命令及結果未明的原操作保留，待可安全重讀時才更新，不因 revision 清除 recovery flow。
 
+未簽新文件依規格30即時產製、不新增永久NAS草稿；原Contract Signing版本以closed render snapshot保留完整生成facts及原模板／映射hash，真id／scope／plan／target仍供session與簽回引用。新source reader重建並核canonical XLSX hash／size；舊archive與signed-return evidence保持，動態PDF只在原typed consumer內使用，不捏造media或storage locator。
+
 管理端使用「下載契約 → 送交簽署 → 回收簽署文件」單一工作區；下載缺少的 current 未簽 PDF 時沿用正式生成命令，核對資料使用 exact-target 側邊抽屜。客戶與每段月嫂各自選擇簽回文件，簽署內容由人員自行檢查；不提供逐份檢查／重新檢查按鈕，直接儲存時沿用上傳、格式／完整性與完整文件集合驗證及回讀；未完整回收時只保存受控 staging，不推進簽約。最終 Preview 綁定完整文件集合，Apply 在既有 outer UoW 納管各文件並於既有 immutable receipt 保存 typed members，同時完成 Orders／Commitment／Client Finance 協作。已完成文件下載重新授權並限制為該案保存的 members；歷史單一最終 PDF 仍可讀取，不作新提交的替代。
 
 客戶 PDF 可在已回報簽署或簽約完成後再次下載／重新產生，沿既有 prepare 命令重讀 current facts；虛擬帳號改變會產生新來源 snapshot 及新 PDF。回讀後準備中／已交接畫面均保留新版 document ID，未知結果沿用原命令核對。客戶簽回草稿停用重新產生入口；client source writer 在原 UoW 鎖定案件，只 append 新文件或重用相同 snapshot，不覆寫歷史簽回與業務完成事實。最後簽約遭拒顯示具體原因，已選擇的文件保留。
@@ -48,6 +50,7 @@
 - `subsystems/contract_signing/final_document_workflow.py`
 - `subsystems/contract_signing/line_delivery.py`
 - `subsystems/contract_signing/unsigned_contract_pdf.py`
+- `subsystems/contract_signing/render_source_snapshot.py`
 - `subsystems/orders/contract_completion_workflow.py`
 - `infrastructure/mysql/order_contract_completion_repository.py`
 - `subsystems/contract_signing/client_contract_application.py`

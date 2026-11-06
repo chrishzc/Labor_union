@@ -140,6 +140,14 @@ class PreparedUnsignedContractPdf:
 
 
 @dataclass(frozen=True, slots=True)
+class UnsignedContractPdfMetadata:
+    document_version_id: int
+    filename: str
+    mime_type: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class UnsignedContractPdfDownload:
     case_no: str
     document_version_id: int
@@ -240,6 +248,17 @@ class UnsignedContractPdfApplication:
                 "contract_pdf_renderer_result_invalid",
                 "未簽契約 PDF renderer 回應無效。",
             )
+        if not (
+            rendered.mime_type == "application/pdf"
+            and isinstance(rendered.content, bytes)
+            and 0 < len(rendered.content) <= _MAXIMUM_PDF_BYTES
+            and rendered.content.startswith(b"%PDF-")
+            and rendered.content.rstrip().endswith(b"%%EOF")
+            and isinstance(rendered.sha256, str)
+            and hmac.compare_digest(hashlib.sha256(rendered.content).hexdigest(), rendered.sha256)
+        ):
+            raise _error("domain_blocked", "contract_pdf_integrity_mismatch", "未簽契約 PDF 完整性驗證失敗。")
+        _validate_pdf_filename(rendered.filename)
         return PreparedUnsignedContractPdf(
             case_no=source.case_no,
             source_document_version_id=source.document_version_id,
@@ -248,6 +267,16 @@ class UnsignedContractPdfApplication:
             filename=rendered.filename,
             renderer_identity=rendered.renderer_identity,
         )
+
+    def metadata(self, query: PrepareUnsignedContractPdf) -> UnsignedContractPdfMetadata:
+        """Produce truthful PDF metadata without a fake stored-file locator."""
+        _require_persisted_actor(query.actor)
+        stored = self._repository.load_current_pdf(query.case_no, query.document_version_id)
+        if stored is not None:
+            _require_download_identity(query, stored)
+            return UnsignedContractPdfMetadata(stored.document_version_id, stored.filename, stored.mime_type, stored.size_bytes)
+        rendered = self.prepare(query)
+        return UnsignedContractPdfMetadata(rendered.source_document_version_id, rendered.filename, rendered.mime_type, len(rendered.content))
 
     def download(
         self, query: DownloadUnsignedContractPdf
@@ -258,33 +287,43 @@ class UnsignedContractPdfApplication:
             query.document_version_id,
         )
         if stored is None:
-            raise _error(
-                "not_found",
-                "contract_pdf_document_not_found",
-                "找不到未簽契約 PDF。",
+            try:
+                rendered = self.prepare(PrepareUnsignedContractPdf(
+                    query.case_no, query.document_version_id, query.actor,
+                ))
+            except UnsignedContractPdfError as error:
+                if error.code != "contract_pdf_source_not_found":
+                    raise
+                raise _error("not_found", "contract_pdf_document_not_found", "找不到未簽契約 PDF。") from None
+            result = UnsignedContractPdfDownload(
+                case_no=rendered.case_no, document_version_id=rendered.source_document_version_id,
+                content=rendered.content, mime_type=rendered.mime_type, filename=rendered.filename,
             )
-        _require_download_identity(query, stored)
-        try:
-            content = self._storage.read_verified(
-                stored.object_reference,
-                expected_sha256=stored.sha256,
+        else:
+            _require_download_identity(query, stored)
+            try:
+                content = self._storage.read_verified(
+                    stored.object_reference,
+                    expected_sha256=stored.sha256,
+                )
+            except Exception:
+                raise _error(
+                    "unavailable", "contract_pdf_storage_unavailable",
+                    "未簽契約 PDF 儲存目前無法讀取。", retryable=True,
+                ) from None
+            _require_pdf_integrity(stored, content)
+            result = UnsignedContractPdfDownload(
+                case_no=stored.case_no, document_version_id=stored.document_version_id,
+                content=content, mime_type=stored.mime_type, filename=stored.filename,
             )
-        except Exception:
-            raise _error(
-                "unavailable",
-                "contract_pdf_storage_unavailable",
-                "未簽契約 PDF 儲存目前無法讀取。",
-                retryable=True,
-            ) from None
-        _require_pdf_integrity(stored, content)
         audit = UnsignedContractPdfDownloadAudit(
-            case_no=stored.case_no,
-            document_version_id=stored.document_version_id,
+            case_no=result.case_no,
+            document_version_id=result.document_version_id,
             actor_id=query.actor.actor_id,
             correlation_id=query.correlation_id.value,
-            filename=stored.filename,
-            mime_type=stored.mime_type,
-            size_bytes=stored.size_bytes,
+            filename=result.filename,
+            mime_type=result.mime_type,
+            size_bytes=len(result.content),
         )
         try:
             self._repository.append_durable_download_audit(audit)
@@ -295,13 +334,7 @@ class UnsignedContractPdfApplication:
                 "未簽契約 PDF 下載稽核無法保存。",
                 retryable=True,
             ) from None
-        return UnsignedContractPdfDownload(
-            case_no=stored.case_no,
-            document_version_id=stored.document_version_id,
-            content=content,
-            mime_type=stored.mime_type,
-            filename=stored.filename,
-        )
+        return result
 
 
 def _validate_request_identity(
@@ -373,7 +406,7 @@ def _load_current_approved_template(source: UnsignedContractRenderSource, catalo
 
 
 def _require_download_identity(
-    query: DownloadUnsignedContractPdf,
+    query: DownloadUnsignedContractPdf | PrepareUnsignedContractPdf,
     stored: StoredUnsignedContractPdf,
 ) -> None:
     if (

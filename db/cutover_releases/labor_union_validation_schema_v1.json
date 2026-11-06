@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-staff-payout-payment-sources-v1",
+  "release_id": "labor-union-validation-schema-controlled-purpose-media-reference-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,16 +8,16 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 193,
-    "ordered_digest_sha256": "cc6ec523114011b6dbf5abdd1c800a19119411872897a8d8370072e5591cb4d0",
-    "terminal_artifact": "1070_staff_payout_payment_sources.sql"
+    "expected_count": 196,
+    "ordered_digest_sha256": "c316c7736ff1d3620e795d088f4f744e4e0dcda934584c0a660ba520140086c9",
+    "terminal_artifact": "1073_contract_document_render_snapshot.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "9e2b61dda6e02655f1bf391b5dc1fa137dd457fdd9e71373dc7804e9229707f4"
+    "sha256": "d9fb5cc1c8ac5117f6dce7b974a82da88871ba8d3140cd2ad48ad6f337c319e4"
   },
   "full_release": {
-    "path": "db/releases/labor_union_validation_schema_staff_payout_payment_sources_v1.sql",
+    "path": "db/releases/labor_union_validation_schema_controlled_purpose_media_reference_v1.sql",
     "database_token": "__LU_TEST_DATABASE__",
     "generation": "base_schema_then_ordered_schema_parts"
   },

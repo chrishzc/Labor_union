@@ -350,3 +350,49 @@ def test_download_maps_storage_and_audit_failures_without_leaking_details():
 def test_internal_stored_reference_rejects_path_like_locator():
     with pytest.raises(ValueError, match="object reference"):
         _stored(object_reference="cases/CASE-1/unsigned.pdf")
+
+
+def test_dynamic_download_reuses_real_source_version_without_reading_or_saving_pdf_storage():
+    application, repository, storage, renderer = _application(source=_source())
+    result = application.download(DownloadUnsignedContractPdf(
+        "CASE-1", 11, _actor(), CorrelationId("contract-dynamic-download"),
+    ))
+    assert result.document_version_id == 11 and result.content == PDF
+    assert repository.render_queries == [("CASE-1", 11)] and len(renderer.calls) == 1
+    assert storage.calls == []
+    assert len(repository.audits) == 1 and repository.audits[0].document_version_id == 11
+
+
+def test_dynamic_pdf_metadata_uses_actual_rendered_bytes_and_has_no_download_audit_or_storage_effect():
+    application, repository, storage, renderer = _application(source=_source())
+    metadata = application.metadata(PrepareUnsignedContractPdf("CASE-1", 11, _actor()))
+    assert metadata.document_version_id == 11 and metadata.size_bytes == len(PDF)
+    assert metadata.mime_type == "application/pdf" and len(renderer.calls) == 1
+    assert repository.audits == storage.calls == []
+    assert not hasattr(metadata, "object_reference")
+
+
+def test_dynamic_download_rejects_source_drift_without_storage_or_audit_effect():
+    application, repository, storage, _ = _application(source=_source(is_current=False))
+    with pytest.raises(UnsignedContractPdfError) as captured:
+        application.download(DownloadUnsignedContractPdf(
+            "CASE-1", 11, _actor(), CorrelationId("contract-dynamic-stale"),
+        ))
+    assert captured.value.code == "contract_pdf_document_stale"
+    assert storage.calls == [] and repository.audits == []
+
+
+@pytest.mark.parametrize("field,value", [("sha256", "b" * 64), ("content", b"not-pdf"), ("mime_type", "text/plain")])
+def test_dynamic_render_checks_actual_pdf_bytes_before_download_audit(field, value):
+    from dataclasses import replace
+    class InvalidRenderer:
+        def render_workbook(self, **_):
+            valid = RenderedContract.from_pdf_bytes(content=PDF, filename="draft.pdf", renderer_identity="test")
+            return replace(valid, **{field: value})
+    application, repository, storage, _ = _application(source=_source(), renderer=InvalidRenderer())
+    with pytest.raises(UnsignedContractPdfError) as captured:
+        application.download(DownloadUnsignedContractPdf(
+            "CASE-1", 11, _actor(), CorrelationId("contract-dynamic-integrity"),
+        ))
+    assert captured.value.code == "contract_pdf_integrity_mismatch"
+    assert storage.calls == [] and repository.audits == []

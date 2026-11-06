@@ -36,6 +36,7 @@ class ControlledFileOwner(str, Enum):
 class ControlledFilePurpose(str, Enum):
     UNSIGNED_CONTRACT = "unsigned_contract"
     FINAL_SIGNED_CONTRACT = "final_signed_contract"
+    SIGNED_STAFF_AGREEMENT = "signed_staff_agreement"
     SERVICE_DATE_CONFIRMATION = "service_date_confirmation"
     BABY_LOG_PHOTO = "baby_log_photo"
     MEAL_PHOTO = "meal_photo"
@@ -44,6 +45,7 @@ class ControlledFilePurpose(str, Enum):
     STAFF_CERTIFICATE = "staff_certificate"
     STAFF_HEALTH_EXAM = "staff_health_exam"
     RICH_MENU_BACKGROUND = "rich_menu_background"
+    DATABASE_BACKUP = "database_backup"
 
 
 class ControlledFileApplyOutcome(str, Enum):
@@ -64,11 +66,29 @@ class ControlledFileWorkflowError(RuntimeError):
         self.retryable = retryable
 
 
+_PDF_AND_EXCEL = frozenset({"application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
+_PHOTOS = frozenset({"image/jpeg", "image/png"})
+# Runtime owner/format projection of spec30 §3. Backup remains an ops artifact
+# owned by spec10 §9.5, outside generic business-file registration/download.
+FILE_PURPOSE_REGISTRY = {
+    ControlledFilePurpose.FINAL_SIGNED_CONTRACT: (ControlledFileOwner.CONTRACT_SIGNING.value, _PDF_AND_EXCEL),
+    ControlledFilePurpose.SIGNED_STAFF_AGREEMENT: (ControlledFileOwner.CONTRACT_SIGNING.value, _PDF_AND_EXCEL),
+    ControlledFilePurpose.STAFF_RESUME: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf"})),
+    ControlledFilePurpose.STAFF_CERTIFICATE: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf", "image/jpeg"})),
+    ControlledFilePurpose.STAFF_HEALTH_EXAM: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf", "image/jpeg"})),
+    ControlledFilePurpose.BABY_LOG_PHOTO: (ControlledFileOwner.SCHEDULING.value, _PHOTOS),
+    ControlledFilePurpose.MEAL_PHOTO: (ControlledFileOwner.SCHEDULING.value, _PHOTOS),
+    ControlledFilePurpose.RICH_MENU_BACKGROUND: (ControlledFileOwner.LINE_INTEGRATION.value, frozenset({"image/png"})),
+    ControlledFilePurpose.DATABASE_BACKUP: ("global_migration", frozenset({"application/gzip"})),
+}
+# Retain the historical owner/purpose pairing for reads and exact receipt replay.
+# This set is deliberately not the active write policy.
 _ALLOWED_PURPOSES = {
     ControlledFileOwner.CONTRACT_SIGNING: frozenset(
         {
             ControlledFilePurpose.UNSIGNED_CONTRACT,
             ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+            ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
         }
     ),
     ControlledFileOwner.SCHEDULING: frozenset(
@@ -335,6 +355,7 @@ class ControlledFileWorkflow:
         self._clock = clock
 
     def stage(self, command: StageControlledFile) -> ControlledFileStagingResult:
+        _require_current_purpose(command.owner, command.purpose, command.mime_type)
         result = self._storage.put_staged(
             idempotency_key=command.idempotency_key.value,
             filename=command.filename,
@@ -483,6 +504,7 @@ class ControlledFileWorkflow:
     def _build_preview(
         self, intent: ControlledFileIntent, *, for_update: bool
     ) -> ControlledFilePreview:
+        _require_current_purpose(intent.owner, intent.purpose)
         facts = self._repository.load_staging(intent.staging_id, for_update=for_update)
         if facts is None:
             raise ControlledFileWorkflowError("controlled_file_staging_not_found", "staging 不存在")
@@ -499,6 +521,7 @@ class ControlledFileWorkflow:
                 "controlled_file_staging_intent_mismatch",
                 "staging owner 與用途已變更",
             )
+        _require_current_purpose(intent.owner, intent.purpose, facts.staging.mime_type)
 
         now = _utc(self._clock.now())
         expires_at = _utc(facts.staging.expires_at)
@@ -567,6 +590,16 @@ def _validate_owner_fields(owner, purpose, subject_reference, object_key, logica
         value = require_canonical_text(raw_value, field_name, 500)
         if "\\" in value or "://" in value or value.casefold().startswith("file:"):
             raise ValueError(f"{field_name} must not contain a storage locator")
+
+
+def _require_current_purpose(owner, purpose, mime_type=None):
+    policy = FILE_PURPOSE_REGISTRY.get(purpose)
+    if policy is None:
+        raise ControlledFileWorkflowError("controlled_file_purpose_retired", "此用途已停止建立永久檔案，歷史檔案仍可查閱。")
+    if owner.value != policy[0]:
+        raise ControlledFileWorkflowError("controlled_file_purpose_owner_required", "此檔案用途須由原 owner 處理。")
+    if mime_type is not None and (not isinstance(mime_type, str) or mime_type.lower() not in policy[1]):
+        raise ControlledFileWorkflowError("controlled_file_purpose_format_invalid", "檔案格式不符合此用途。")
 
 
 def _staging_command_payload(

@@ -13,6 +13,8 @@
   - `subsystems/scheduling/service_day_log_workflow.py`
   - `subsystems/scheduling/service_day_checkpoint_workflow.py`
   - `infrastructure/mysql/service_day_log_repository.py`
+  - `subsystems/scheduling/service_day_log_photo_reference.py` — bounded typed owner-submission/frozen-photo reference; does not represent a provider send receipt or token-verification attestation.
+  - `infrastructure/mysql/service_day_log_photo_reference_repository.py` — readonly exact file-id lineage through submitted log/event, assignment, attachment, reference and original object/staging metadata; no independent completion writer.
   - `infrastructure/mysql/service_day_checkpoint_repository.py`
   - `infrastructure/mysql/service_day_checkpoint_worker.py`
   - `db/schema_parts/204_scheduling_service_day_logs.sql`
@@ -26,6 +28,7 @@
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-day-log/`
 - integration: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_day_log_controlled_media.py` — controlled meal/baby attachment gates and schema kind contract
+- integration: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_day_log_photo_reference.py` — pure metadata and bounded readonly source checks; real SQL/DB persistence and provider evidence are not executed by this test.
 - legacy focused: `tests/test_service_day_log_workflow.py`
 - routing: `.arch-map/domains/scheduling/subsystems/scheduling/index.md`
 

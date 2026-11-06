@@ -5,7 +5,7 @@
     "release_name": "Staff payout manual supplement source provenance",
     "application_version": "staff-payout-payment-sources-v1",
     "published_at": "2026-11-06",
-    "description": "Add closed payment-source provenance and permit absent bank identity only for manual supplements. Existing events retain all values and use legacy_unspecified; no bank/manual reclassification, seed or financial backfill."
+    "description": "Unapplied draft candidate: add closed source provenance and conditional bank identity; retain legacy values. Same atomic ALTER drops/re-adds the exact original hash CHECK for MySQL MODIFY compatibility. No business backfill."
   },
   "source_baseline": {
     "minimum_mysql_version": "8.0",
@@ -26,7 +26,7 @@
     {
       "name": "1070_staff_payout_payment_sources.sql",
       "relative_path": "db/schema_parts/1070_staff_payout_payment_sources.sql",
-      "sha256": "0cb7f733a98fcf535760ae240922cbfd520e3cb6371fdda4de4b817bb2070d39",
+      "sha256": "2daf3ef96e753c5efe2f67761073257910d4360529ac6ce778db09555169b095",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "discard-candidate-before-entry-switch; retain-events-and-use-compatible-forward-release-after-apply",

@@ -1,4 +1,4 @@
-"""Authenticated transport for the local Windows NAS backup schedule only."""
+"""Authenticated backup readiness and local Windows schedule transport."""
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -11,6 +11,7 @@ from scripts.nas_database_maintenance import MaintenanceBlocked, ScheduleConflic
 from subsystems.access.authentication_session import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/system/database-backup", tags=["Database Backup"])
+data_center_router = APIRouter(prefix="/api/v1/data-center", tags=["Database Backup"])
 
 
 class LastBackupResult(BaseModel):
@@ -37,9 +38,14 @@ class SaveBackupSchedule(BaseModel):
     expected_version: int = Field(ge=0)
 
 
+@data_center_router.get("/backup/readiness", response_model=BaseResponse[BackupStatus])
 @router.get("", response_model=BaseResponse[BackupStatus])
 def read_backup_status(_: AdminPrincipal = Depends(require_admin)):
-    return BaseResponse(data=BackupStatus(**backup_status()))
+    try:
+        return BaseResponse(data=BackupStatus(**backup_status()))
+    except (OSError, ValueError, KeyError, TypeError):
+        raise typed_http_error(503, "unavailable", "backup_status_unavailable",
+            "備份狀態暫時無法讀取，請通知維護人員。", "nas-backup-status", retryable=True) from None
 
 
 @router.put("/schedule", response_model=BaseResponse[BackupStatus])

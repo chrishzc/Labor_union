@@ -583,15 +583,7 @@ class LineRichMenuWorker:
         )
 
     def _step_fingerprint(self, request, step, provider_menu_id):
-        return fingerprint_payload(
-            {
-                "publication_id": request.publication_id.value,
-                "step": step.value,
-                "definition_json": request.definition_json,
-                "image_object_reference": request.image_object_reference,
-                "provider_menu_id": provider_menu_id,
-            }
-        )
+        return rich_menu_step_fingerprint(request, step, provider_menu_id)
 
     def _step_key(self, item, step):
         return f"line-rich-menu:{item.publication.publication_id.value}:{step.value}"
@@ -636,4 +628,15 @@ class LineRichMenuWorker:
             unit_of_work.commit()
 
 
-__all__ = ["LineRichMenuWorker"]
+def rich_menu_step_fingerprint(request, step, provider_menu_id):
+    """The original saga's immutable request identity, also used by readback."""
+    return fingerprint_payload({
+        "publication_id": request.publication_id.value,
+        "step": step.value,
+        "definition_json": request.definition_json,
+        "image_object_reference": request.image_object_reference,
+        "provider_menu_id": provider_menu_id,
+    })
+
+
+__all__ = ["LineRichMenuWorker", "rich_menu_step_fingerprint"]

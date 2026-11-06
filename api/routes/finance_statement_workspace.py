@@ -27,12 +27,15 @@ from domains.finance_import.statement_archive import STATEMENT_COLUMNS
 from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning, ArrangementNotReady
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
-from subsystems.finance_import.statement_archive import StatementCommandConflict
+from subsystems.finance_import.statement_archive import StatementCommandConflict, ManualStatementReplacementRequired
 
 router = APIRouter()
 
 
 def _error(error):
+    if isinstance(error, ManualStatementReplacementRequired):
+        return typed_http_error(422, "domain_blocked", error.code,
+            "請從案件帳務抽屜使用手動補登，選擇本案期款後完成正式核銷。", "finance-workspace")
     if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError)):
         envelope = error.error
         status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500,

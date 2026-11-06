@@ -11,6 +11,14 @@ class StatementCommandConflict(ValueError):
     pass
 
 
+class ManualStatementReplacementRequired(ValueError):
+    """Fresh manual accounting belongs to the existing case-scoped command."""
+    code = "case_manual_supplement_required"
+
+    def __init__(self):
+        super().__init__(self.code)
+
+
 @dataclass(frozen=True)
 class StatementExportRow:
     identity: str
