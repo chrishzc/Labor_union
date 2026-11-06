@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from api.schemas.base import ExactNtd
 
 
 class CancellationServiceDayView(BaseModel):
@@ -26,7 +27,7 @@ class CancellationCaregiverOptionView(BaseModel):
 class ClientFinanceMoneyView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: int = Field(ge=0)
+    amount: ExactNtd = Field(ge=0)
 
 
 class ClientFinanceStagePlanView(BaseModel):
@@ -53,7 +54,7 @@ class ClientFinanceActionView(BaseModel):
     direction: Literal[
         "refund_due", "additional_charge_due", "no_finance_change"
     ]
-    direction_amount_ntd: int = Field(ge=0)
+    direction_amount_ntd: ExactNtd = Field(ge=0)
 
     @model_validator(mode="after")
     def validate_direction_amount(self) -> "ClientFinanceActionView":
@@ -75,6 +76,17 @@ class ClientFinanceSettlementView(BaseModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ClientCancellationSettlementView(BaseModel):
+    service_due_ntd: ExactNtd
+    fee_ntd: ExactNtd
+    net_received_ntd: ExactNtd
+    refund_due_ntd: ExactNtd
+    additional_charge_due_ntd: ExactNtd
+    fee_received_ntd: ExactNtd
+    fee_reason: str
+    processed_on: date | None
+
+
 class ClientFinanceImpactView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -86,6 +98,7 @@ class ClientFinanceImpactView(BaseModel):
     settlement: ClientFinanceSettlementView
     blockers: list[str]
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cancellation_settlement: ClientCancellationSettlementView | None = None
 
 
 class CancellationPayrollImpactView(BaseModel):

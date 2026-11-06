@@ -31,6 +31,7 @@ from subsystems.line.service_day_log_reminders import service_day_log_reminder_d
 from subsystems.line.payment_overdue_reminders import payment_overdue_delivery_is_current
 from subsystems.line.payment_reminder_notifications import payment_reminder_delivery_is_current
 from subsystems.line.payment_receipt_notifications import payment_receipt_delivery_is_current
+from subsystems.line.cancellation_notifications import SOURCE as CANCELLATION_NOTICE_SOURCE, cancellation_notice_delivery_is_current
 from subsystems.line.order_group_application import group_invitation_delivery_is_current
 from subsystems.line.notification_failure_current_fact import (
     append_line_notification_failure_rechecks,
@@ -234,7 +235,13 @@ class LineDeliveryWorker:
         if task.lease is None:
             return False
         with self._unit_of_work_factory() as unit_of_work:
-            current = unit_of_work.delivery_tasks.get(task.task_id)
+            cancellation = task.request.source_aggregate_type == CANCELLATION_NOTICE_SOURCE
+            if cancellation:
+                # Read after locking Orders and Finance, before any snapshot read of the task.
+                source_current = cancellation_notice_delivery_is_current(unit_of_work, task)
+                current = unit_of_work.delivery_tasks.get(task.task_id, lock=True)
+            else:
+                current = unit_of_work.delivery_tasks.get(task.task_id)
             lease_valid = (
                 current is not None
                 and current.status.value == "processing"
@@ -244,6 +251,18 @@ class LineDeliveryWorker:
                 and current.lease.expires_at == task.lease.expires_at
                 and self._now() < current.lease.expires_at
             )
+            if cancellation:
+                if lease_valid and not source_current:
+                    unit_of_work.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
+                        task.task_id, ActorContext(self._worker_identity),
+                        IdempotencyKey(f"cancellation-notice-stale:{task.task_id.value}"), task.request.correlation_id,
+                    ))
+                    unit_of_work.commit()
+                if lease_valid and source_current:
+                    # A crash after this commit leaves evidence that the provider may have received the request.
+                    unit_of_work.payment_receipt_notifications.mark_cancellation_notice_provider_started(task.task_id.value)
+                    unit_of_work.commit()
+                return lease_valid and source_current
             return (lease_valid
                     and service_completion_delivery_is_current(unit_of_work, task)
                     and payment_overdue_delivery_is_current(unit_of_work, task, self._now())

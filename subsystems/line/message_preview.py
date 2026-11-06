@@ -136,6 +136,9 @@ _CURRENT_FLOW_PREVIEWS = (
     ("payment-first-reminder", "第一期款－服務開始日客戶私訊", "text"),
     ("payment-first-greeting", "第一期已結清－服務開始問候", "text"),
     ("payment-first-settled", "第一期款已確認入帳通知", "text"),
+    ("cancellation-notice-settlement", "取消結算明細通知", "text"),
+    ("cancellation-notice-refund", "取消結算退款完成通知", "text"),
+    ("cancellation-notice-collection", "取消結算補收入帳通知", "text"),
     ("payment-second-reminder", "第二期款－到期日客戶私訊", "text"),
     ("service-day-log-reminder", "服務日誌－工會發送案件群組提醒", "text"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
@@ -243,6 +246,8 @@ class LineMessagePreviewApplication:
                staff_id: int | None, actor: ActorContext, *, sample: bool = False) -> PreviewResult:
         key = {"template-bind_success_new_order": "identity-bound-customer", "template-staff_switch_success": "identity-bound-staff",
                "service-other": "service-menu"}.get(key, key)
+        cancellation_copy = key.startswith("cancellation-notice-")
+        cancellation_draft = content if cancellation_copy else None
         templates, rules = self._definitions(actor)
         # The library lists the bundled delivery. Existing direct preview callers
         # keep their readonly contract; no send operation or saved copy is retired.
@@ -394,9 +399,14 @@ class LineMessagePreviewApplication:
             else:
                 copy_values = values
             copy_content = content if not descriptor.allows_draft or (content and content.lstrip().startswith("{")) else None
+            if cancellation_copy:
+                copy_content = cancellation_draft
             if key == "runtime-system-health":
                 copy_values["status"] = "critical"
             payload = render_copy_payload(templates, key, payload, copy_values, copy_content)
+        if cancellation_copy:
+            from subsystems.line.message_preview_samples import cancellation_notice_sample
+            payload["text"] += "\n\n" + cancellation_notice_sample(key)
         if sample:
             from subsystems.line.message_preview_samples import sample_bindings
             binding_content = authored_content if key in {"card-union-question", "card-union-answer"} else content

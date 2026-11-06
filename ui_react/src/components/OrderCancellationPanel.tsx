@@ -1,145 +1,31 @@
 import { useUnsavedDraft } from './UnsavedChanges';
+import { CancellationSettlementNotices } from './CancellationSettlementNotices';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
   type ServiceDay } from '../api/orders/order_cancellation_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore, type CancellationCommand } from '../adapters/orders/order_mutation_flow_store';
 import { sessionClient } from '../api/auth/session_client';
 
-interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void }
+interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void; allowHistoricalRepair?: boolean }
 type DayDraft = { service_date: string; staff_id: string; reason: string };
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const drafts = (days: ServiceDay[]): DayDraft[] => days.map((day) => ({ service_date: day.service_date, staff_id: String(day.staff_id), reason: day.reason ?? '' }));
 const subscribeCancellation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 
-const demoDays = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05'];
-const demoReceived = 6000n;
-const demoCurrency = new Intl.NumberFormat('zh-TW');
-const demoMoney = (amount: bigint) => `NT$${demoCurrency.format(amount)}`;
+export function isCancellationTerminalStatus(status: string | null | undefined) {
+  return ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(status ?? '');
+}
 
-export const OrderCancellationDemoPanel = () => {
-  const [step, setStep] = useState<'input' | 'review' | 'result'>('input');
-  const [days, setDays] = useState(demoDays);
-  const [charge, setCharge] = useState(false);
-  const [feeText, setFeeText] = useState('');
-  const [feeReason, setFeeReason] = useState('');
-  const [cancellationReason, setCancellationReason] = useState('');
-  const [error, setError] = useState<'amount' | 'reason' | null>(null);
-  const [fee, setFee] = useState(0n);
-  const amountInput = useRef<HTMLInputElement>(null);
-  const reasonInput = useRef<HTMLInputElement>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
-  const serviceDue = BigInt(days.length) * 1000n;
-  const total = serviceDue + fee;
-  const surplus = demoReceived > serviceDue ? demoReceived - serviceDue : 0n;
-  const revenue = surplus < fee ? surplus : fee;
-  const difference = demoReceived - total;
-  const balance = difference < 0n ? -difference : difference;
-  const balanceLabel = difference > 0n ? '應退款' : difference < 0n ? '應補收' : '無待收付差額';
-  const nextStep = difference > 0n ? '會計出款後，到銀行對帳核銷。'
-    : difference < 0n ? '客戶繳款入帳後，到銀行對帳核銷。' : '無待退款或待補收款項。';
-
-  useEffect(() => { heading.current?.focus(); }, [step]);
-
-  const preview = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const value = feeText.trim();
-    if (charge && (!/^\d+$/.test(value) || BigInt(value) === 0n)) {
-      setError('amount');
-      amountInput.current?.focus();
-      return;
-    }
-    if (charge && !feeReason.trim()) {
-      setError('reason');
-      reasonInput.current?.focus();
-      return;
-    }
-    setError(null);
-    setFee(charge ? BigInt(value) : 0n);
-    setStep('review');
-  };
-
-  return (
-    <div className="order-cancel-demo">
-      <p className="order-case-review-note"><strong>本機預覽 · 示範帳務</strong><br />原應收 NT$10,000，已入帳 {demoMoney(demoReceived)}。試算與確認結果只保留在這個視窗。</p>
-      <ol className="order-cancel-demo-steps" aria-label="取消進度">
-        <li aria-current={step === 'input' ? 'step' : undefined}>1 核對與填寫</li>
-        <li aria-current={step === 'review' ? 'step' : undefined}>2 預覽與確認</li>
-        <li aria-current={step === 'result' ? 'step' : undefined}>3 取消結果</li>
-      </ol>
-      {step === 'input' && <form onSubmit={preview} noValidate>
-        <h3 ref={heading} tabIndex={-1}>核對實際服務與違約金</h3>
-        <details>
-          <summary>實際服務 {days.length} 日 · {days.length * 8} 小時</summary>
-          <div className="order-cancel-demo-options">
-            {demoDays.map(day => <label key={day}><input type="checkbox" checked={days.includes(day)}
-              onChange={event => setDays(event.target.checked ? [...days, day] : days.filter(value => value !== day))} /> {day} · 8 小時</label>)}
-          </div>
-        </details>
-        <fieldset>
-          <legend>取消違約金</legend>
-          <div className="order-cancel-demo-options">
-            <label><input type="radio" name="demo-cancellation-fee" checked={!charge} onChange={() => { setCharge(false); setError(null); }} /> 不收取</label>
-            <label><input type="radio" name="demo-cancellation-fee" checked={charge} onChange={() => setCharge(true)} /> 收取</label>
-          </div>
-          {charge && <div className="order-cancel-demo-grid">
-            <label>違約金金額（NT$）
-              <input ref={amountInput} inputMode="numeric" value={feeText} required aria-invalid={error === 'amount'}
-                onChange={event => { setFeeText(event.target.value); setError(null); }} />
-              <small>無金額上限，可高於可退款額。</small>
-            </label>
-            <label>收取原因
-              <input ref={reasonInput} value={feeReason} required aria-invalid={error === 'reason'}
-                onChange={event => { setFeeReason(event.target.value); setError(null); }} />
-            </label>
-          </div>}
-        </fieldset>
-        <label>取消原因（選填）<input value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} /></label>
-        {error && <p role="alert">{error === 'amount' ? '請輸入大於 0 的整數金額。' : '請填寫收取原因。'}</p>}
-        <footer><button type="submit">預覽取消帳務</button></footer>
-      </form>}
-      {step === 'review' && <section aria-label="取消帳務預覽">
-        <h3 ref={heading} tabIndex={-1}>取消帳務預覽</h3>
-        <p>實際服務 {days.length} 日 · {days.length * 8} 小時{charge && <> · 收取原因／{feeReason.trim()}</>}</p>
-        {cancellationReason.trim() && <p>取消原因／{cancellationReason.trim()}</p>}
-        <div className="order-cancel-demo-grid">
-          <dl>
-            <div><dt>服務應付</dt><dd>{demoMoney(serviceDue)}</dd></div>
-            <div><dt>取消違約金</dt><dd>{demoMoney(fee)}</dd></div>
-            <div><dt>最終應付</dt><dd>{demoMoney(total)}</dd></div>
-            <div><dt>客戶淨實收</dt><dd>{demoMoney(demoReceived)}</dd></div>
-          </dl>
-          <dl className="order-case-review-note">
-            <div><dt>{balanceLabel}</dt><dd><strong>{demoMoney(balance)}</strong></dd></div>
-            <div><dt>已收違約金／公會營收</dt><dd>{demoMoney(revenue)}</dd></div>
-            <div><dt>違約金待收</dt><dd>{demoMoney(fee - revenue)}</dd></div>
-          </dl>
-        </div>
-        <p>正式流程會在取消提交後通知客戶結算明細。{nextStep}</p>
-        <footer>
-          <button type="button" onClick={() => setStep('input')}>返回調整</button>
-          <button type="button" className="order-v2-danger" onClick={() => setStep('result')}>確認取消（模擬）</button>
-        </footer>
-      </section>}
-      {step === 'result' && <section aria-label="取消結果">
-        <h3 ref={heading} tabIndex={-1}>取消已確認（模擬）</h3>
-        <p className="order-case-review-note"><strong>{balanceLabel} · {demoMoney(balance)}</strong><br />{nextStep}</p>
-        <dl>
-          <div><dt>取消結算明細通知</dt><dd>正式取消提交後發出</dd></div>
-          <div><dt>退款／補收完成通知</dt><dd>{balance ? '待全額核銷' : '結算明細已涵蓋'}</dd></div>
-        </dl>
-        <footer><button type="button" onClick={() => setStep('input')}>返回填寫</button></footer>
-      </section>}
-    </div>
-  );
-};
-
-export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
+export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, allowHistoricalRepair = true }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
   const [reason, setReason] = useState('');
+  const [chargeFee, setChargeFee] = useState(false);
+  const [feeAmount, setFeeAmount] = useState('');
+  const [feeNote, setFeeNote] = useState('');
   const [preview, setPreview] = useState<OrderCancellationPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -155,9 +41,10 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   const unresolved = phase === 'applying' || phase === 'outcome_unknown' || phase === 'observation_failed'
     || flowPhase === 'applying' || flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed' || flowPhase === 'observing';
   const busy = unresolved || phase === 'loading' || phase === 'previewing';
-  const historicalRepair = query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
+  const historicalRepair = allowHistoricalRepair && query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
   const supportsServiceDays = query?.service_started === true || historicalRepair;
   const alreadyCancelled = query?.lifecycle_status === '訂單取消' && !historicalRepair;
+  const cancellationUnavailable = isCancellationTerminalStatus(query?.lifecycle_status) && !historicalRepair;
   useEffect(() => { onBusyChange?.(unresolved); }, [unresolved, onBusyChange]);
   useEffect(() => {
     const previousCaseNo = activeCaseNo.current;
@@ -233,10 +120,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   useEffect(() => { void load(); }, [load]);
 
   const check = async () => {
-    const historicalRepair = query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
-    const supportsServiceDays = query?.service_started === true || historicalRepair;
     const current = orderMutationFlowStore.getCancellation(caseNo);
-    if (!query || (query.lifecycle_status === '訂單取消' && !historicalRepair)
+    if (!query || cancellationUnavailable
       || inFlight.current.has(caseNo) || current) return;
     setError(null);
     if (days.some((day) => !/^\d{4}-\d{2}-\d{2}$/.test(day.service_date)
@@ -247,18 +132,36 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     if (new Set(typed.map((day) => day.service_date)).size !== typed.length) { setError('實際服務日期不可重複。'); return; }
     if (!supportsServiceDays && typed.length !== 0) { setError('服務尚未開始，實際服務日必須為 0 天。'); return; }
     if (historicalRepair && typed.length === 0) { setError('歷史取消補登至少需一日實際服務事實。'); return; }
+    const fee = chargeFee && !historicalRepair ? { fee_ntd: feeAmount.trim(), fee_reason: feeNote.trim() } : undefined;
+    if (fee && (!/^\d+$/.test(fee.fee_ntd) || BigInt(fee.fee_ntd) === 0n || !fee.fee_reason)) {
+      setError('收取違約金時，請填寫正整數金額及收取原因。'); return;
+    }
+    if (fee && BigInt(fee.fee_ntd) > 9_223_372_036_854_775_807n) {
+      setError('違約金金額超出帳務可精確記錄的範圍。'); return;
+    }
     const request = ++sequence.current;
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
     setPhase('previewing'); setPreview(null);
     try {
-      const data = await orderCancellationClient.preview(caseNo, typed.sort((left, right) => left.service_date.localeCompare(right.service_date)), controller.signal);
+      const confirmed = typed.sort((left, right) => left.service_date.localeCompare(right.service_date));
+      const data = fee
+        ? await orderCancellationClient.preview(caseNo, confirmed, controller.signal, fee)
+        : await orderCancellationClient.preview(caseNo, confirmed, controller.signal);
       if (data.lifecycle_impact.case_no !== caseNo || (data.scheduling !== null && data.scheduling.case_no !== caseNo)
         || (data.client_finance_impact !== null && data.client_finance_impact.case_no !== caseNo) || (data.payroll_impact !== null && data.payroll_impact.case_no !== caseNo)) throw new Error('取消預覽案件識別不一致。');
-      if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); await apply(false, data); }
+      if (isActive(request, caseNo)) {
+        setPreview(data); setPhase('idle');
+        if (historicalRepair) await apply(false, data);
+      }
     } catch (caught) {
-      if (isActive(request, caseNo)) { setError(caught instanceof Error ? caught.message : '取消預覽失敗。'); setPhase('idle'); }
+      if (isActive(request, caseNo)) {
+        setError(caught instanceof ApiHttpError && caught.code === 'cancellation_fee_finance_required'
+          ? '案件缺少建立客戶帳務所需的正式資料。請先從客戶名冊補齊案件資料，再重新預覽。'
+          : caught instanceof Error ? caught.message : '取消預覽失敗。');
+        setPhase('idle');
+      }
     } finally {
       if (previewController.current === controller) previewController.current = null;
     }
@@ -278,7 +181,10 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     const data = await orderCancellationClient.query(command.caseNo, controller.signal);
     if (data.case_no !== command.caseNo || data.lifecycle_status !== receipt.lifecycle_status
       || data.lifecycle_status !== '訂單取消' || data.order_version < receipt.order_version
-      || (receipt.scheduling_version !== null && (data.scheduling_version === null || data.scheduling_version < receipt.scheduling_version))) throw new Error('取消已回傳收據，但正式回讀尚未觀察到該版本與取消狀態。');
+      || (receipt.scheduling_version !== null && (data.scheduling_version === null || data.scheduling_version < receipt.scheduling_version))
+      || (receipt.client_finance_version !== null && (data.client_finance_version === null || data.client_finance_version < receipt.client_finance_version))) {
+      throw new Error('取消已回傳收據，但正式回讀尚未觀察到該版本與取消狀態。');
+    }
     orderMutationFlowStore.setCancellation(command.caseNo, { ...saved, status: 'observed', error: null });
     if (!isActive(request, command.caseNo)) return;
     setQuery(data); setDays(drafts(data.confirmed_service_days)); setPreview(null);
@@ -305,6 +211,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
         expected_payroll_version: preview.payroll_version,
         preview_fingerprint: preview.preview_fingerprint,
         reason: reason.trim(),
+        ...(chargeFee && !historicalRepair ? { fee_ntd: feeAmount.trim(), fee_reason: feeNote.trim() } : {}),
       }, idempotencyKey: `beta-cancellation-${crypto.randomUUID()}`,
       actor: sessionClient.getUser()?.username.trim() ?? '',
     } : null);
@@ -379,8 +286,10 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     }
     finally { inFlight.current.delete(caseNo); }
   };
-  useUnsavedDraft('取消訂單', { '服務天數確認': days, '取消原因': reason }, { enabled: !!query, resetKey: query, busy });
+  useUnsavedDraft('取消訂單', { '服務天數確認': days, '取消原因': reason, chargeFee, feeAmount, feeNote }, { enabled: !!query, resetKey: query, busy });
 
+  const settlement = preview?.client_finance_impact?.cancellation_settlement;
+  const blocked = !!preview?.client_finance_impact?.blockers.length || !!preview?.payroll_impact?.blockers.length;
 
   return (
     <section aria-label={`案件 ${caseNo} 訂單取消`}>
@@ -390,11 +299,12 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
       {query && (
         <>
           <p>目前狀態：{query.lifecycle_status}</p>
-          {alreadyCancelled && <p role="status">案件已取消且無歷史服務補登能力；重新開始請使用受控重開。</p>}
+          {alreadyCancelled && <p role="status">案件已取消；重新開始請使用受控重開。</p>}
+          {cancellationUnavailable && !alreadyCancelled && <p role="status">案件已完成，無法辦理取消。</p>}
           {historicalRepair && <p role="status">後端允許補登歷史取消的實際服務事實；不是重新取消或重開。</p>}
-          {!supportsServiceDays && <p>服務尚未開始，取消實際服務日維持 0 天。</p>}
-          {supportsServiceDays && <p>已自動排除取消日之後的排班。請核對已服務日期與月嫂；取消當日尚未服務可移除此日，確認完全未服務可保留 0 日。</p>}
-          {supportsServiceDays && !alreadyCancelled && (
+          {!supportsServiceDays && !cancellationUnavailable && <p>服務尚未開始，取消實際服務日維持 0 天。</p>}
+          {supportsServiceDays && !cancellationUnavailable && <p>已自動排除取消日之後的排班。請核對已服務日期與月嫂；取消當日尚未服務可移除此日，確認完全未服務可保留 0 日。</p>}
+          {supportsServiceDays && !cancellationUnavailable && (
             <fieldset disabled={busy}>
               <legend>實際服務日與月嫂</legend>
               {days.map((day, index) => (
@@ -417,8 +327,16 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
               <button type="button" onClick={() => { setDays((current) => [...current, { service_date: '', staff_id: '', reason: '' }]); invalidate(); }}>新增實際服務日</button>
             </fieldset>
           )}
-          {!alreadyCancelled && <><label>取消原因（選填）<textarea aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label></>}
-          {!alreadyCancelled && <button type="button" className="order-v2-danger" disabled={busy} onClick={() => void check()}>{historicalRepair ? '儲存實際服務事實' : '取消訂單'}</button>}
+          {!cancellationUnavailable && <><label>取消原因（選填）<textarea aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label></>}
+          {!cancellationUnavailable && !historicalRepair && <fieldset disabled={busy}>
+            <legend>取消違約金</legend>
+            <label><input type="checkbox" checked={chargeFee} onChange={event => { setChargeFee(event.target.checked); invalidate(); }} /> 收取違約金</label>
+            {chargeFee && <>
+              <label>違約金金額（NT$）<input inputMode="numeric" value={feeAmount} onChange={event => { setFeeAmount(event.target.value); invalidate(); }} /></label>
+              <label>收取原因<input value={feeNote} maxLength={500} onChange={event => { setFeeNote(event.target.value); invalidate(); }} /></label>
+            </>}
+          </fieldset>}
+          {!cancellationUnavailable && !preview && <button type="button" disabled={busy} onClick={() => void check()}>{historicalRepair ? '儲存實際服務事實' : '預覽取消帳務'}</button>}
         </>
       )}
       {preview && (
@@ -428,10 +346,24 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
           <section aria-label="取消帳務與薪資影響">
             {preview.client_finance_impact === null && <p>沒有客戶帳務需要調整。</p>}
             {preview.payroll_impact === null && <p>沒有月嫂薪資需要調整。</p>}
-            {preview.client_finance_impact?.actions.map((action, index) => <p key={`client-${index}`}>客戶 {({ deposit: '訂金', first: '第一期款', second: '第二期款', adjustment: '調整款' } as Record<string, string>)[action.payment_stage] ?? '款項'}：{({ refund_due: '應退款', additional_charge_due: '應補收', no_finance_change: '無帳務差額' } as Record<string, string>)[action.direction]} NT$ {action.direction_amount_ntd}</p>)}
+            {settlement && <dl>
+              <dt>服務應付</dt><dd>NT$ {settlement.service_due_ntd}</dd>
+              <dt>取消違約金</dt><dd>NT$ {settlement.fee_ntd.toLocaleString('zh-TW')}</dd>
+              <dt>客戶淨實收</dt><dd>NT$ {settlement.net_received_ntd}</dd>
+              <dt>已收違約金／公會營收</dt><dd>NT$ {settlement.fee_received_ntd}</dd>
+              <dt>應退款</dt><dd>NT$ {settlement.refund_due_ntd}</dd>
+              <dt>應補收</dt><dd>NT$ {settlement.additional_charge_due_ntd}</dd>
+            </dl>}
+            {!settlement && preview.client_finance_impact?.actions.map(action => <p key={action.obligation_identity}>
+              {({ refund_due: '應退款', additional_charge_due: '應補收', no_finance_change: '無帳務差額' } as const)[action.direction]} NT$ {action.direction_amount_ntd}
+            </p>)}
             {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{({ payable_to_staff: '應付薪資', receivable_from_staff: '應收回款項' } as Record<string, string>)[action.direction] ?? '薪資調整'} NT$ {action.amount.amount}</p>)}
-            {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
+            {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker === 'cancellation_amount_out_of_storage_range' ? '服務應付加違約金超出帳務可精確記錄的範圍。' : blocker}</p>)}
           </section>
+          {!historicalRepair && !cancellationUnavailable && !flow?.receipt && <>
+            <button type="button" disabled={busy} onClick={invalidate}>返回調整</button>
+            <button type="button" className="order-v2-danger" disabled={busy || blocked} onClick={() => void apply()}>確認取消</button>
+          </>}
 
 
         </>
@@ -440,7 +372,11 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
       {(flowPhase === 'applying' || flowPhase === 'observing' || phase === 'applying') && <p role="status">取消套用／回讀中…</p>}
       {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void apply(true)}>查詢原取消收據並確認結果</button>}
       {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取取消結果</button>}
-      {(flowPhase === 'observed' || phase === 'observed') && <p role="status">訂單取消已完成正式回讀：{query?.lifecycle_status}</p>}
+      {(flowPhase === 'observed' || phase === 'observed') && <>
+        <p role="status">訂單取消已完成正式回讀：{query?.lifecycle_status}</p>
+        <a href={`#finance?tab=case-accounting&case_no=${encodeURIComponent(caseNo)}&from=workbench`}>查看本案帳務</a>
+        <CancellationSettlementNotices key={caseNo} caseNo={caseNo} settlementOnly />
+      </>}
       {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}
     </section>
   );

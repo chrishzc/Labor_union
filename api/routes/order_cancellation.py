@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -61,6 +61,14 @@ class OrderCancellationPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmed_service_days: list[CancellationServiceDayBody]
+    fee_ntd: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
+    fee_reason: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def validate_fee_reason(self):
+        if bool(self.fee_ntd) != bool(self.fee_reason.strip()) or self.fee_reason != self.fee_reason.strip():
+            raise ValueError("cancellation_fee_reason_invalid")
+        return self
 
 
 class OrderCancellationApplyBody(OrderCancellationPreviewBody):
@@ -141,7 +149,7 @@ def preview_order_cancellation(
     confirmed_days = _confirmed_service_days(body.confirmed_service_days)
     return _call_endpoint(
         lambda: _preview_payload(
-            application.preview(case_no, confirmed_days)
+            application.preview(case_no, confirmed_days, body.fee_ntd, body.fee_reason)
         ),
         "成功產生訂單取消預覽",
         identity,
@@ -192,6 +200,8 @@ def _apply_request(case_no, body, key, correlation, principal):
         ActorContext(str(principal.username or "").strip()),
         body.reason,
         CorrelationId(correlation),
+        body.fee_ntd,
+        body.fee_reason,
     )
 
 

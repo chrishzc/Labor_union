@@ -6,8 +6,8 @@
 
 ## Responsibility
 組成訂單取消的 Query／Preview／Apply，驗證 fresh Orders、Scheduling、Client Finance 與 Payroll 根事實，並以單一交易產生取消 receipt／outbox。
-合法不存在的下游 owner 以 NULL 表達；專用 reader 驗證 partial roots／孤立財務歷史，取消不自動 bootstrap。日期-only 開始日不代表已服務。
-Query 依注入的台北業務日期排除未來排班，人員核對當日是否服務；未鎖定服務資料可確認為零日。取消與退款成功不產生 LINE 訊息，既有 terminal menu handoff 保留。
+合法不存在的下游 owner 以 NULL 表達；專用 reader 驗證 partial roots／孤立財務歷史。零服務案件若收取違約金且正式條件齊備，同一交易初始化必要的 Client Finance 主檔與款項。日期-only 開始日不代表已服務。
+Query 依注入的台北業務日期排除未來排班，人員核對當日是否服務；未鎖定服務資料可確認為零日。取消及退款／補收全額核銷更新人工 LINE 通知資格，由人員預覽後發送。既有 terminal menu handoff 保留。
 
 ## Implementation
 - primary:
@@ -32,6 +32,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — §3.5 cancellation 與 Preview／Apply typed errors。
 - `/api/v1/orders/{case_no}/cancellation/{preview,apply}` — `api/routes/order_cancellation.py`。
+- 正式取消視窗先讀全案結算預覽，再由人員確認 Apply。Client Finance 在既有交易關卡建立一般退款或調整款，案件帳務以正式結算識別回讀，銀行核銷沿各原 owner。
 
 ## Verification
 - layout_status: custom_current

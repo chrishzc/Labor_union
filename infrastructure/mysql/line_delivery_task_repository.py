@@ -92,9 +92,9 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute("SELECT id FROM line_delivery_tasks WHERE idempotency_key=%s", (key.value,))
             return cursor.fetchone() is not None
 
-    def get(self, task_id: LineDeliveryTaskId) -> LineDeliveryTaskSnapshot | None:
+    def get(self, task_id: LineDeliveryTaskId, *, lock: bool = False) -> LineDeliveryTaskSnapshot | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_SELECT_SQL, (task_id.value,))
+            cursor.execute(_SELECT_SQL + (" FOR UPDATE" if lock else ""), (task_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _snapshot(row)
 

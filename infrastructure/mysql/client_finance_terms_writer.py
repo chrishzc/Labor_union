@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 
 from domains.client_finance.obligation_planning import (
     ClientObligationAction,
@@ -18,7 +19,8 @@ from subsystems.orders.terms_workflow import (
 def persist_client_finance_terms_impact(cursor, command) -> None:
     terms_changed=bool(_persist_payment_terms(cursor, command))
     from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
-    results={stage.payment_stage:persist_controlled_client_amount(cursor,command,stage.payment_stage.value,stage.amount.amount,stage.due_date) for stage in command.candidate.stage_plans}
+    cancellation = getattr(command.candidate, "cancellation_settlement", None)
+    results = {} if cancellation else {stage.payment_stage:persist_controlled_client_amount(cursor,command,stage.payment_stage.value,stage.amount.amount,stage.due_date) for stage in command.candidate.stage_plans}
     controlled={stage for stage,result in results.items() if result[0]}
     controlled_changed=any(result[1] for result in results.values())
     for ordinal, action in enumerate(command.candidate.actions, start=1):
@@ -28,17 +30,46 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
         _persist_projection(cursor, command, action, event_id)
+        if cancellation and action.action is ClientObligationActionKind.CREATE_REFUND:
+            from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot
+            _insert_refund_recipient_snapshot(
+                cursor, action.obligation_identity, command.candidate.case_no,
+                "amount_correction", require_complete=False,
+            )
     changed = False
     if getattr(command.candidate, "subsidy_return_plan", None) is not None:
         changed = persist_subsidy_return_plan(cursor, command)
     # Terminal subsidy replay has no stage/terms mutation. An already-current
     # controlled result must not emit the same outbox intent again.
-    if not command.candidate.actions and not (controlled_changed or terms_changed or changed):
+    if not command.candidate.actions and not (controlled_changed or terms_changed or changed or cancellation):
         return
     _advance_account_version(cursor, command)
+    if cancellation:
+        _save_cancellation_settlement(cursor, command, cancellation)
     _append_outbox(cursor, command)
     from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
     synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
+
+
+def _save_cancellation_settlement(cursor, command, settlement):
+    snapshot = asdict(settlement)
+    snapshot["processed_on"] = settlement.processed_on.isoformat()
+    snapshot["cancellation_event_id"] = command.source_event_id
+    cursor.execute("SELECT COALESCE(MAX(id),0) AS entry_id FROM client_ledger_entries WHERE case_no=%s",
+                   (command.candidate.case_no,))
+    snapshot["cash_entry_id"] = int(cursor.fetchone()["entry_id"])
+    snapshot["obligation_identity"] = next((
+        action.obligation_identity for action in command.candidate.actions
+        if action.action in (ClientObligationActionKind.CREATE_ADJUSTMENT, ClientObligationActionKind.CREATE_REFUND)
+    ), None)
+    cursor.execute(
+        "INSERT INTO client_finance_apply_receipts "
+        "(idempotency_key,command_fingerprint,preview_fingerprint,case_no,resulting_account_version,result_snapshot) "
+        "VALUES (%s,%s,%s,%s,%s,%s)",
+        (_child_identity(command, "cancellation-receipt", 1), command.candidate.fingerprint.value,
+         command.candidate.fingerprint.value, command.candidate.case_no, command.candidate.resulting_account_version,
+         _canonical_json({"cancellation_settlement": snapshot})),
+    )
 
 
 def _persist_payment_terms(cursor, command):

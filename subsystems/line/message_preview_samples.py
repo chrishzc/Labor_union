@@ -164,6 +164,24 @@ def alert_sample_values():
     )
 
 
+def cancellation_notice_sample(key):
+    from datetime import date
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem, ClientCancellationAccounting
+    from subsystems.line.cancellation_notifications import CancellationNoticeSource, notice_details
+
+    kind = key.removeprefix("cancellation-notice-")
+    refund = kind == "refund"
+    settled = kind != "settlement"
+    accounting = ClientCancellationAccounting(
+        date(2026, 11, 1), 10000, 3000, 19000 if refund else 7000, 3000 if settled else 0,
+        6000 if refund else 0, 0 if refund else 6000, "sample",
+        bank_refunded_ntd=5985 if refund else None, transfer_fee_ntd=15 if refund else None,
+    )
+    item = ClientAccountingItem("sample", "payable" if refund else "receivable", "", "", 6000,
+                                6000 if settled else 2000, True, "1", "2026-11-15", settled)
+    return notice_details(CancellationNoticeSource(CASE.case_no, 1, accounting, item, "99781699000000"), kind)
+
+
 def current_message_sample(key):
     """Explicit current flow examples, rendered by the same pure helpers as delivery."""
     fields = []
@@ -181,6 +199,11 @@ def current_message_sample(key):
         amount=field('本次核銷入帳金額','amount_ntd',12000)
         field('收件人','recipient','客戶私人聊天室')
         payload=first_receipt_message(case(),amount)
+    elif key.startswith("cancellation-notice-"):
+        from subsystems.line.cancellation_notifications import DEFAULT_COPY
+        case()
+        field("收件人", "recipient", "客戶私人聊天室")
+        payload = text(DEFAULT_COPY[key.removeprefix("cancellation-notice-")])
     elif key in {'payment-first-reminder','payment-first-greeting','payment-second-reminder'}:
         from datetime import date
         from types import SimpleNamespace

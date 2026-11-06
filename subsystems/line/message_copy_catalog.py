@@ -23,6 +23,7 @@ def _text_defaults():
     from subsystems.line.webhook_identity_handlers import _identity_link_message
     from subsystems.scheduling.matching_notification_application import matching_response_text
     from subsystems.contract_signing.line_delivery import external_platform_staff_reminder_text
+    from subsystems.line.cancellation_notifications import DEFAULT_COPY as CANCELLATION_NOTICE_COPY
     result = {
         "service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
         "identity-pending": IDENTITY_PENDING,
@@ -44,6 +45,7 @@ def _text_defaults():
         "service-registration-unavailable": help._registration_reply(None),
         "identity-staff-link": _identity_link_message(LineIdentityFlowPurpose.STAFF_VERIFICATION, "{identity_url}"),
         "identity-admin-link": _identity_link_message(LineIdentityFlowPurpose.ADMIN_BINDING, "{identity_url}"),
+        **{f"cancellation-notice-{kind}": copy for kind, copy in CANCELLATION_NOTICE_COPY.items()},
     }
     for role in ("client", "staff"):
         result["contract-signing-" + role] = external_platform_staff_reminder_text("{case_no}")

@@ -2,6 +2,7 @@
  * File: FinanceCaseAccounting.tsx
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
  */
+import { CancellationSettlementAccounting } from './CancellationSettlementAccounting';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
 import {paymentOverdueReminderClient,type CasePaymentReminder} from '../api/line_order_groups/payment_overdue_reminder_client';
@@ -56,7 +57,7 @@ export function buildDefaultVirtualAccount(caseNo: string): string | null {
 }
 
 const labels={over_received:'客戶超收',over_paid:'付款超付',under_paid:'付款差額超過 100 元'};
-const money=(value:number|null|undefined)=>value==null?'待確認':financeMoney(value);
+const money=(value:number|bigint|null|undefined)=>value==null?'待確認':financeMoney(value);
 type Stage='deposit'|'first'|'second';
 const stageNames:Record<Stage,string>={deposit:'訂金',first:'第一期',second:'第二期'};
 const stages:Stage[]=['deposit','first','second'];
@@ -150,7 +151,10 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
  const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
- const refundRemainingTotal=refundClientItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
+ const refundRemainingTotal=refundClientItems.reduce((sum,item)=>{
+  const remaining = item.remaining_ntd == null ? BigInt(item.expected_ntd) - BigInt(item.actual_ntd) : BigInt(item.remaining_ntd);
+  return sum + (remaining > 0n ? remaining : 0n);
+ },0n);
 
  const subsidyTotal=data?.subsidy_ntd??0;
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
@@ -169,6 +173,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
  {data&&bankReconciliation&&<CaseBankReconciliation data={data} {...bankReconciliation}/>}
  {data&&!bankReconciliation&&<><div hidden={view!==null}>
+ <CancellationSettlementAccounting key={revision} data={data} />
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>
  <section className="finance-reconciliation-card" aria-label="銀行對帳與帳戶資訊">
    <div className="finance-reconciliation-header">
@@ -397,7 +402,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
-  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal === 0 ? '已結清' : money(refundRemainingTotal)}</strong></span><span>政府款待入：<strong>{subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal === 0n ? '已結清' : money(refundRemainingTotal)}</strong></span><span>政府款待入：<strong>{subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>

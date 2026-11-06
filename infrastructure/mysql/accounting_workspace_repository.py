@@ -12,7 +12,7 @@ def build_accounting_workspace(connection):
     """One composition for the case page, payable export and original owner writers."""
     from functools import partial
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
-    from infrastructure.mysql.client_payments_query_repository import query_case_accounting, query_case_payment_terms
+    from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting, query_case_accounting, query_case_payment_terms
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
@@ -20,7 +20,8 @@ def build_accounting_workspace(connection):
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
         lambda case_no: MySqlGovernmentSubsidyPeriodRepository(connection).case_coverage(case_no)['amount_ntd'],
-        partial(query_case_payment_terms, connection), plan=state.subsidy_plan)
+        partial(query_case_payment_terms, connection), plan=state.subsidy_plan,
+        cancellation=partial(query_cancellation_accounting, connection))
 
 
 class MySqlAccountingWorkspaceState:

@@ -23,6 +23,7 @@
 - `api/routes/finance_import.py` — composed router and existing bank commands
 - `api/dependencies/finance_import.py`
 - `api/schemas/finance_import.py`
+- shared: `api/schemas/base.py`, `ui_react/src/api/shared/exact_ntd.ts` — transport preserves whole NTD above the browser's safe integer range.
 - `ui_react/src/api/finance_import/finance_accounting_client.ts`
 - `ui_react/src/api/finance_import/monthly_accounting_client.ts`
 - `ui_react/src/components/FinanceMonthlyAccounting.tsx`、`FinanceMonthlyAccounting.css`
@@ -33,6 +34,8 @@
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
+- `ui_react/src/components/CancellationSettlementAccounting.tsx` — common cancellation readback and notices for case accounting and registry.
+- `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`

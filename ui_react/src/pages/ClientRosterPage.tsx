@@ -8,6 +8,8 @@ import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter
 import { rosterFilterColumns, rosterFilterSummary } from '../components/client_roster_filter_columns';
 import { ClientRegistryDetailEditor, type RegistryEditState } from '../components/ClientRegistryDetailEditor';
 import { Drawer } from '../components/Drawer';
+import { isCancellationTerminalStatus, OrderCancellationPanel } from '../components/OrderCancellationPanel';
+import { sessionClient } from '../api/auth/session_client';
 import './ClientRosterPage.css';
 
 type RosterFilters = {
@@ -78,6 +80,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [exportError, setExportError] = useState<string | null>(null);
   const [editState, setEditState] = useState<RegistryEditState>({ dirty: false, busy: false });
   const [deletionBusy, setDeletionBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellationBusy, setCancellationBusy] = useState(false);
+  const [cancellationRefreshError, setCancellationRefreshError] = useState(false);
+  const canCancel = sessionClient.getUser()?.capabilities.includes('system.administration') === true;
+  const selectedOrderStatus = page?.items.find(item => item.case_no === selectedCaseNo)?.order_status;
   useEffect(() => { onEditStateChange?.({ ...editState, busy: editState.busy || deletionBusy }); }, [editState, deletionBusy, onEditStateChange]);
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
@@ -159,6 +166,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const sortLabel = (sortBy: ClientRegistrySortBy) => appliedFilters.sortBy === sortBy ? (appliedFilters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
   const readDetail = async (caseNo: string) => {
     const request = ++detailRequest.current;
+    setCancelling(false); setCancellationRefreshError(false);
     setSelectedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
     try {
       const result = await clientRegistryClient.query(caseNo);
@@ -187,12 +195,19 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   };
   const { requestLeave } = useUnsavedNavigation();
   const closeDetail = () => {
-    if (editState.busy || deletionBusy) return;
+    if (editState.busy || deletionBusy || cancellationBusy) return;
     requestLeave(() => {
     setEditState({ dirty: false, busy: false });
     detailRequest.current += 1;
+    setCancelling(false);
     setSelectedCaseNo(null); setDetail(null); setDetailError(null); setDetailLoading(false);
     });
+  };
+  const refreshAfterCancellation = async () => {
+    setCancellationRefreshError(false);
+    const request = detailRequest.current + 1;
+    try { await refreshDetail(); }
+    catch { if (detailRequest.current === request) setCancellationRefreshError(true); }
   };
   const exportWorkbook = async (kind: 'order-accounting' | 'case-inspection') => {
     const label = kind === 'case-inspection' ? '案件資料檢查' : '訂單帳務';
@@ -313,12 +328,24 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       size="wide"
       closeLabel="關閉案件詳細資料"
       className="client-roster-detail-drawer"
-      closeDisabled={editState.busy || deletionBusy}
+      closeDisabled={editState.busy || deletionBusy || cancellationBusy}
     >
-      {onReturnToCase && selectedCaseNo && <div className="registry-return-row"><button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
+      {cancelling && selectedCaseNo ? <>
+        <div className="registry-return-row">
+          <button type="button" disabled={cancellationBusy} onClick={() => requestLeave(() => setCancelling(false))}>返回案件詳細資料</button>
+        </div>
+        <OrderCancellationPanel key={selectedCaseNo} caseNo={selectedCaseNo} allowHistoricalRepair={false}
+          onObserved={() => void refreshAfterCancellation()} onBusyChange={setCancellationBusy} />
+      </> : <>
+      {(onReturnToCase || (canCancel && detail && !isCancellationTerminalStatus(selectedOrderStatus))) && selectedCaseNo && <div className="registry-return-row">
+      {onReturnToCase && <button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
         if (editState.busy || deletionBusy) return;
         onReturnToCase(selectedCaseNo);
-      }}>返回案件處理 →</button></div>}
+      }}>返回案件處理 →</button>}
+      {canCancel && detail?.case_no === selectedCaseNo && !isCancellationTerminalStatus(selectedOrderStatus) &&
+        <button type="button" className="order-v2-danger" disabled={editState.busy || deletionBusy}
+          onClick={() => requestLeave(() => setCancelling(true))}>取消訂單</button>}
+      </div>}
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
       <div inert={deletionBusy}>
@@ -335,6 +362,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           setSelectedCaseNo(null); setDetail(null); setDetailError(null); setEditState({ dirty: false, busy: false });
           void load(appliedFilters, pageOffset);
         }} />}
+      </>}
+      {cancellationRefreshError && <p role="alert">取消已完成，名冊資料暫時無法更新。<button type="button" onClick={() => void refreshAfterCancellation()}>重新讀取名冊資料</button></p>}
     </Drawer>
   </div>;
 };

@@ -186,7 +186,11 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     try {
       if (kind === 'client_receipt') {
         const data = await clientReceiptQueryClient.query(target);
-        setOptions(data.obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · ${{ deposit: '訂金', first: '第一期', second: '第二期', adjustment: '調整款' }[item.payment_stage] ?? item.payment_stage} · NT$ ${item.amount_due_ntd.toLocaleString()}` })));
+        setOptions(data.obligations.map((item) => {
+          const label = item.obligation_identity.startsWith('client-cancellation:create_adjustment:') ? '取消結算補收'
+            : ({ deposit: '訂金', first: '第一期', second: '第二期', adjustment: '調整款' }[item.payment_stage] ?? item.payment_stage);
+          return { id: item.obligation_identity, label: `${data.case_no} · ${label} · NT$ ${item.amount_due_ntd.toLocaleString()}` };
+        }));
       } else if (kind === 'client_refund' || kind === 'client_subsidy_return') {
         const data = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
         const obligations = kind === 'client_refund' ? data.refund_obligations : data.subsidy_return_obligations;

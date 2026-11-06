@@ -38,6 +38,9 @@ const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }
   'payment-first-reminder': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天，依帳務提醒排程自動寄送' },
   'payment-first-greeting': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天已結清，僅寄送服務問候' },
   'payment-first-settled': { recipient: '客戶私人聊天室', trigger: '第一期正式核銷後，留下內部通知，由人員到帳務確認並發送' },
+  'cancellation-notice-settlement': { recipient: '客戶私人聊天室', trigger: '正式取消後由人員預覽並發送，結算明細與繳款資訊由本案帳務帶入' },
+  'cancellation-notice-refund': { recipient: '客戶私人聊天室', trigger: '退款全額核銷後，由人員預覽並發送' },
+  'cancellation-notice-collection': { recipient: '客戶私人聊天室', trigger: '補收全額核銷後，由人員預覽並發送' },
   'payment-second-reminder': { recipient: '客戶私人聊天室', trigger: '正式第二期到期當天仍有餘額，依帳務提醒排程自動寄送' },
   'service-day-log-reminder': { recipient: '案件群組', trigger: '由工會逐次決定，點「發送提醒」後建立寄送工作' },
 };
@@ -54,6 +57,7 @@ export const PAYMENT_REMINDER_MESSAGE_IDS: readonly string[] = [
   'deposit-reminder', 'payment-first-reminder', 'payment-first-greeting', 'payment-second-reminder',
   'payment-overdue-deposit', 'payment-overdue-first', 'payment-overdue-second',
   'deposit-settled', 'payment-first-settled',
+  'cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection',
 ];
 const RECEIPT_TEMPLATE = 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1';
 
@@ -382,7 +386,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     <section className="notification-workspace" aria-label={paymentOnly ? '繳款提醒內容設定' : '通知內容設定'}>
       {onReturnToFlow && selectedEntryId && <button type="button" className="notification-text-button" disabled={updating} onClick={() => requestLeave(onReturnToFlow)}><ArrowLeft aria-hidden="true" />返回 LINE 流程圖</button>}
       <div className="notification-page-heading">
-        <div><h2>{paymentOnly ? '提醒內容' : '通知與發送'}</h2><p>{paymentOnly ? '維護繳款提醒、結清問候與入帳通知；入帳通知由人員確認後發送，各期逾期文案由自動補寄與人工提醒共用。' : '選擇訊息，自由編寫內容並即時預覽。'}</p></div>
+        <div><h2>{paymentOnly ? '提醒內容' : '通知與發送'}</h2><p>{paymentOnly ? '維護繳款提醒、結清問候、入帳與取消結算範本。取消結算範本可調整開頭，金額與繳款資訊由案件帳務帶入。' : '選擇訊息，自由編寫內容並即時預覽。'}</p></div>
         <div className="notification-heading-actions"><span className="notification-safe-badge"><ShieldCheck />預覽不會實際發送</span><button type="button" className="notification-button" disabled={loading || updating} onClick={() => requestLeave(() => { setSelected(null); setNotice(null); setReload(value => value + 1); })}><RefreshCw aria-hidden="true" />重新整理</button></div>
       </div>
       {notice && <p className="notification-feedback" role="status">{notice}</p>}

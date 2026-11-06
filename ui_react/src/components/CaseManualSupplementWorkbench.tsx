@@ -14,7 +14,7 @@ import './FinanceCompactCase.css';
 
 interface Props {
   caseNo: string;
-  clientItems: AccountingItem[];
+  clientItems: CaseAccounting['client_items'];
   staffItems: AccountingItem[];
   subsidyNtd?: number;
   onSuccess: (updated: CaseAccounting) => void;
@@ -38,7 +38,7 @@ export function CaseManualSupplementWorkbench({
   // 計算候選期款項目
   const stageNames: Record<string, string> = { deposit: '訂金', first: '第一期', second: '第二期' };
 
-  let candidateItems: { identity: string; label: string; remaining: number }[] = [];
+  let candidateItems: { identity: string; label: string; remaining: number | bigint }[] = [];
   if (direction === 'client_receipt') {
     candidateItems = clientItems
       .filter(i => i.direction === 'receivable' && i.payment_stage)
@@ -87,7 +87,7 @@ export function CaseManualSupplementWorkbench({
     if (newDir === 'government_subsidy') {
       setBank('taishin');
     }
-    let nextCandidates: { identity: string; label: string; remaining: number }[] = [];
+    let nextCandidates: typeof candidateItems = [];
     if (newDir === 'client_receipt') {
       nextCandidates = clientItems
         .filter(i => i.direction === 'receivable' && i.payment_stage)
@@ -141,12 +141,12 @@ export function CaseManualSupplementWorkbench({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const parsedAmount = parseInt(amount, 10);
+    const parsedAmount = /^[0-9]+$/.test(amount.trim()) ? BigInt(amount.trim()) : 0n;
     if (!targetItem) {
       setError('請選擇沖銷對象／期款');
       return;
     }
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (parsedAmount <= 0n) {
       setError('請輸入有效的正整數金額');
       return;
     }
@@ -162,7 +162,7 @@ export function CaseManualSupplementWorkbench({
       bank,
       direction,
       target_item: targetItem,
-      amount_ntd: parsedAmount,
+      amount_ntd: parsedAmount <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(parsedAmount) : parsedAmount.toString(),
       transaction_date: transactionDate,
       reason: reason.trim() || null,
     };

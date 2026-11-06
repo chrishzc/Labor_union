@@ -318,6 +318,116 @@ __all__ = [
 ]
 
 
+def query_case_net_cash(cursor, case_no):
+    cursor.execute(
+        "SELECT COALESCE(SUM(CASE "
+        "WHEN entry.entry_type='receipt' THEN entry.amount_ntd "
+        "WHEN entry.entry_type='refund' THEN -entry.amount_ntd "
+        "WHEN entry.entry_type='reversal' AND original.entry_type='receipt' THEN -entry.amount_ntd "
+        "WHEN entry.entry_type='reversal' AND original.entry_type='refund' THEN entry.amount_ntd ELSE 0 END),0) AS amount "
+        "FROM client_ledger_entries entry LEFT JOIN client_ledger_entries original "
+        "ON original.id=entry.reversal_of_entry_id WHERE entry.case_no=%s",
+        (case_no,),
+    )
+    return int(cursor.fetchone()["amount"])
+
+
+CANCELLATION_ALLOCATED_CASH_SQL = (
+    "SELECT entry.case_no,entry.id,entry.created_at,a.obligation_identity,original.id AS original_id,"
+    "CASE WHEN entry.entry_type='receipt' OR original.entry_type='refund' THEN a.amount_ntd "
+    "WHEN entry.entry_type='refund' OR original.entry_type='receipt' THEN -a.amount_ntd "
+    "ELSE 0 END AS cash_delta "
+    "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries entry ON entry.id=a.ledger_entry_id "
+    "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id AND entry.entry_type='reversal' "
+    "WHERE entry.entry_type IN ('receipt','refund','reversal') "
+    "UNION ALL SELECT entry.case_no,entry.id,entry.created_at,NULL,original.id,"
+    "CASE WHEN original.entry_type='receipt' THEN -entry.amount_ntd ELSE entry.amount_ntd END "
+    "FROM client_ledger_entries entry JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
+    "WHERE entry.entry_type='reversal' AND original.entry_type IN ('receipt','refund')"
+)
+_CANCELLATION_CASH_CUTOFF = "CAST(JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.cash_entry_id')) AS UNSIGNED)"
+CANCELLATION_CASH_JOIN = (
+    f"entry.case_no=receipt.case_no AND entry.id>{_CANCELLATION_CASH_CUTOFF} AND ("
+    "(entry.obligation_identity=JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.obligation_identity')) "
+    f"AND (entry.original_id IS NULL OR entry.original_id>{_CANCELLATION_CASH_CUTOFF})) OR "
+    # A reversal of an original cash entry adjusts the latest baseline that included it.
+    f"(entry.obligation_identity IS NULL AND entry.original_id<={_CANCELLATION_CASH_CUTOFF} AND NOT EXISTS ("
+    "SELECT 1 FROM client_finance_apply_receipts later WHERE later.case_no=receipt.case_no AND later.id>receipt.id "
+    "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(later.result_snapshot,'$.cancellation_settlement.cash_entry_id')) AS UNSIGNED)<entry.id)))"
+)
+
+
+def query_cancellation_accounting(connection, case_no, *, cancellation_event_id=None):
+    from subsystems.client_finance.case_accounting_query import ClientCancellationAccounting
+    from domains.client_finance.obligation_planning import cancellation_fee_collected
+    from datetime import date
+    import json
+
+    event_filter = (
+        "AND EXISTS (SELECT 1 FROM order_lifecycle_control_state state "
+        "JOIN order_cancellation_apply_receipts receipt ON receipt.case_no=state.case_no "
+        "AND receipt.cancellation_control_event_id=state.current_event_id "
+        "WHERE state.case_no=finance.case_no AND state.control_type='cancellation' "
+        "AND state.control_key='order_cancelled' AND state.state='active' "
+        "AND receipt.cancellation_event_id=JSON_EXTRACT(finance.result_snapshot,'$.cancellation_settlement.cancellation_event_id')) "
+    )
+    params = (case_no,)
+    if cancellation_event_id is not None:
+        event_filter = "AND JSON_EXTRACT(result_snapshot, '$.cancellation_settlement.cancellation_event_id')=%s "
+        params = (case_no, cancellation_event_id)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT id, JSON_EXTRACT(result_snapshot, '$.cancellation_settlement') AS settlement "
+            "FROM client_finance_apply_receipts finance WHERE case_no=%s "
+            "AND JSON_CONTAINS_PATH(result_snapshot, 'one', '$.cancellation_settlement') "
+            + event_filter + "ORDER BY resulting_account_version DESC, id DESC LIMIT 1",
+            params,
+        )
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    payload = row["settlement"]
+    facts = json.loads(payload) if isinstance(payload, (str, bytes)) else payload
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT COALESCE(SUM(entry.cash_delta),0) AS amount FROM client_finance_apply_receipts receipt "
+            f"LEFT JOIN ({CANCELLATION_ALLOCATED_CASH_SQL}) entry ON {CANCELLATION_CASH_JOIN} "
+            "WHERE receipt.id=%s", (row["id"],),
+        )
+        current_cash = facts["net_received_ntd"] + int(cursor.fetchone()["amount"])
+    current_fee_received = cancellation_fee_collected(facts["fee_ntd"], facts["service_due_ntd"], current_cash)
+    bank_refunded = transfer_fee = None
+    if facts["refund_due_ntd"] and facts["obligation_identity"]:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT a.amount_ntd AS allocated, entry.amount_ntd AS bank_amount, entry.entry_type, "
+                "(SELECT SUM(other.amount_ntd) FROM client_ledger_obligation_allocations other "
+                "WHERE other.ledger_entry_id=entry.id) AS total_allocated "
+                "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries entry ON entry.id=a.ledger_entry_id "
+                "LEFT JOIN client_ledger_entries original ON original.id=entry.reversal_of_entry_id "
+                "WHERE a.obligation_identity=%s AND (entry.entry_type='refund' "
+                "OR (entry.entry_type='reversal' AND original.entry_type='refund'))",
+                (facts["obligation_identity"],),
+            )
+            bank_refunded = transfer_fee = 0
+            for entry in cursor.fetchall():
+                gross = int(entry["allocated"])
+                total = int(entry["total_allocated"])
+                fee = max(0, total - int(entry["bank_amount"]))
+                if fee and total != gross:
+                    bank_refunded = transfer_fee = None
+                    break
+                sign = -1 if entry["entry_type"] == "reversal" else 1
+                bank_refunded += sign * (gross - fee)
+                transfer_fee += sign * fee
+    return ClientCancellationAccounting(
+        date.fromisoformat(facts["processed_on"]), facts["service_due_ntd"], facts["fee_ntd"],
+        facts["net_received_ntd"], current_fee_received, facts["refund_due_ntd"],
+        facts["additional_charge_due_ntd"], facts["obligation_identity"], bank_refunded, transfer_fee,
+        max(0, facts["service_due_ntd"] - current_cash), facts["fee_ntd"] - current_fee_received,
+    )
+
+
 def query_case_accounting(connection, case_no, *, for_update=False):
     """Project original obligation amounts and effective cash allocations only."""
     from subsystems.client_finance.case_accounting_query import (
@@ -415,9 +525,12 @@ def query_case_accounting(connection, case_no, *, for_update=False):
         paid = sums.get(identity, 0)
         if row["confirmation_kind"] == "paid":
             paid += int(row["amount_snapshot_ntd"])
+        label = labels.get(row["obligation_type"], "帳務款項")
+        if identity.startswith("client-cancellation:"):
+            label = "取消結算退款" if row["direction"] == "payable_to_client" else "取消結算補收"
         items.append(ClientAccountingItem(
             identity, "receivable" if row["direction"] == "receivable_from_client" else "payable",
-            labels.get(row["obligation_type"], "帳務款項"), str(row["client_name"]), expected,
+            label, str(row["client_name"]), expected,
             paid, identity in sums or row["confirmation_kind"] == "paid",
             f"{row['account_version']}:{row['projection_version']}:{row['historical_event'] or 0}",
             None if row["due_date"] is None else str(row["due_date"]),

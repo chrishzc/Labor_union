@@ -10,7 +10,11 @@
 
 入帳通知僅讀原已提交核銷標記，三期均由同一 owner 衍生通知中心 payment_receipt 待辦及同案帳務確認入口；第一期不以開工日問候代替收款通知。帳務提示及待辦不自動寄送；專用人員命令建立客戶私訊，送前複核並阻擋舊自動來源。不新增帳務狀態。
 
+取消結算通知讀取目前生效的 Orders 取消事件及其正式 Client Finance 結算、核銷餘額與專屬繳款資訊。人員預覽並確認後才建立既有 LINE 私訊工作，全額核銷才開放退款或補收完成通知。確認未投遞的取消工作可由新預覽接續，使用既有寄送工作與稽核。
+
 ## Implementation
+- `subsystems/line/cancellation_notifications.py` — cancellation Preview、manual Send、provider freshness guard，沿用既有 LINE Unit of Work、寄送工作與稽核。
+- `ui_react/src/api/line_order_groups/cancellation_notification_client.ts`、`ui_react/src/components/CancellationSettlementNotices.tsx` — 取消結果、案件帳務、客戶名冊共用預覽與狀態，範本深連結至帳務通知設定。
 - `subsystems/line/payment_receipt_notifications.py` — typed receipt todos, authenticated manual send and fresh provider guard.
 - `infrastructure/mysql/payment_receipt_notification_repository.py` — marked settlement Query via Finance-owned deposit／first／second payment ports and existing delivery history.
 - `api/routes/line_payment_receipt_notifications.py` — readonly receipt Query and explicit human Send.
@@ -43,12 +47,13 @@
 
 ## Dependencies
 - Finance: `client-finance/receipt-reconciliation` 的 typed `OverdueClientPayment`；LINE 不重算或改寫帳務。
-- Delivery: 既有 committed task、audit、receipt／lease 與取消流程；來源快照放既有 correlation，沒有新 Preview fingerprint 或資料表。
+- Delivery: 既有 committed task、audit、receipt／lease 與取消流程；來源快照放既有 correlation。取消通知 Preview fingerprint 涵蓋獨立更新的帳務、綁定、繳款資訊與文案，避免人工確認後寄出不同內容。
 - Identity: 所有期別沿既有唯一客戶綁定查詢。Reply source 為已驗證 `line_inbox_events`，僅讀本人 user message／postback existence，不帶出 raw payload。
 - Finance: `ClientPaymentReminderFacts` 由 receipt-reconciliation owner 提供目前款項／契約與正式開始日期投影；LINE 不重算期款或日期。
 - Configuration: existing versioned MESSAGE_SCHEDULES／MESSAGE_TEMPLATES; no new table or kind.
 
 ## Contracts
+- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.8 — GET `/api/v1/line/payment-overdue-reminders/cancellation-notices/{case_no}` 預覽，POST 同路徑加 `/send` 建立既有寄送工作。
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6.7～6.11。
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
 

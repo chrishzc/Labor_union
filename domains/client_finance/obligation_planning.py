@@ -226,6 +226,19 @@ class ClientFinanceTermsCandidate:
     fingerprint: PreviewFingerprint
     subsidy_return_plan: ClientSubsidyReturnPlan | None = None
     payment_terms: ClientPaymentTerms | None = None
+    cancellation_settlement: ClientCancellationSettlement | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClientCancellationSettlement:
+    service_due_ntd: int
+    fee_ntd: int
+    net_received_ntd: int
+    refund_due_ntd: int
+    additional_charge_due_ntd: int
+    fee_received_ntd: int
+    fee_reason: str
+    processed_on: date | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +517,11 @@ def build_client_finance_cancellation_impact(
     order_terms: OrderTerms,
     scheduling: SchedulingGenerationCandidate | None,
     change_identity: str,
+    *,
+    net_cash_received: MoneyNTD | None = None,
+    fee: MoneyNTD = MoneyNTD(0),
+    fee_reason: str = "",
+    processed_on: date | None = None,
 ) -> ClientFinanceTermsCandidate:
     service_dates = _scheduling_service_dates(scheduling) if scheduling is not None else ()
     earned_floor_fee = prorate_floor_fee(
@@ -521,6 +539,7 @@ def build_client_finance_cancellation_impact(
         else _terms_facts_from_service_dates(cancellation_source, cancellation_terms, ())
     )
     candidate = build_client_finance_terms_candidate(facts, change_identity)
+    candidate = _settle_cancellation(candidate, source_facts, change_identity, net_cash_received, fee, fee_reason, processed_on)
     plan = _cancellation_subsidy_return_plan(
         cancellation_source,
         cancellation_terms,
@@ -532,17 +551,67 @@ def build_client_finance_cancellation_impact(
     return replace(
         candidate,
         subsidy_return_plan=plan,
-        fingerprint=fingerprint_payload(
-            {
-                "terms_impact": candidate.fingerprint.value,
-                "subsidy_return": {
-                    "identity": plan.obligation_identity,
-                    "amount_ntd": plan.amount.amount,
-                    "due_date": plan.due_date.isoformat(),
-                },
-            }
-        ),
+        fingerprint=fingerprint_payload({
+            "terms_impact": candidate.fingerprint.value,
+            "subsidy_return": {
+                "identity": plan.obligation_identity,
+                "amount_ntd": plan.amount.amount,
+                "due_date": plan.due_date.isoformat(),
+            },
+        }),
     )
+
+
+def _settle_cancellation(candidate, source, change_identity, net_cash_received, fee, fee_reason, processed_on):
+    stages = source.existing_obligations
+    received = net_cash_received.amount if net_cash_received is not None else sum(
+        item.net_settled_amount.amount for item in stages
+    )
+    service_due = sum(item.amount.amount for item in candidate.stage_plans)
+    net_due = service_due + fee.amount - received
+    summary = ClientCancellationSettlement(
+        service_due, fee.amount, received, max(0, -net_due), max(0, net_due),
+        cancellation_fee_collected(fee.amount, service_due, received), fee_reason, processed_on,
+    )
+    actions = [
+        _open_stage_action(ClientStagePlan(item.payment_stage, (), item.net_settled_amount, item.due_date), item)
+        for item in stages
+        if item.net_settled_amount.amount < item.contracted_amount.amount
+    ]
+    if net_due and received >= 0:
+        kind = ClientObligationActionKind.CREATE_REFUND if net_due < 0 else ClientObligationActionKind.CREATE_ADJUSTMENT
+        source_stage = next((item for item in stages if item.net_settled_amount.amount > 0), None)
+        before, after = MoneyNTD(received), MoneyNTD(service_due + fee.amount)
+        actions.append(ClientObligationAction(
+            kind, PaymentStage.ADJUSTMENT,
+            f"client-cancellation:{kind.value}:{change_identity.removeprefix('cancellation:')}",
+            before, after, MoneyNTD(abs(net_due)), None,
+            source_stage.due_date if net_due < 0 and source_stage else None,
+            source_stage.obligation_identity if source_stage else None,
+            *_expected_direction(kind, before, after),
+        ))
+    blockers = candidate.blockers
+    if source.open_nonstage_obligation_count:
+        blockers += ("cancellation_existing_cash_difference_requires_review",)
+    if received < 0:
+        blockers += ("cancellation_net_receipts_inconsistent",)
+    if service_due + fee.amount > 9_223_372_036_854_775_807:
+        blockers += ("cancellation_amount_out_of_storage_range",)
+    return replace(
+        candidate, actions=tuple(actions), blockers=blockers,
+        resulting_account_version=source.account_version + 1,
+        cancellation_settlement=summary,
+        fingerprint=fingerprint_payload({
+            "terms": candidate.fingerprint.value, "net_received_ntd": received,
+            "fee_ntd": fee.amount, "fee_reason": fee_reason,
+            "actions": [_action_payload(action) for action in actions],
+            "blockers": blockers,
+        }),
+    )
+
+
+def cancellation_fee_collected(fee: int, service_due: int, net_cash_received: int) -> int:
+    return min(fee, max(0, net_cash_received - service_due))
 
 
 def _cancellation_subsidy_return_plan(

@@ -4,6 +4,11 @@ from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPa
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from infrastructure.mysql.second_payment_query_repository import MySqlSecondPaymentQueryRepository
 from infrastructure.mysql.first_payment_query_repository import MySqlFirstPaymentQueryRepository
+from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting, query_case_accounting
+from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account, resolve_client_virtual_account
+from subsystems.line.cancellation_notifications import (
+    PROVIDER_STARTED, SOURCE, CancellationNoticeDelivery, CancellationNoticeSource,
+)
 from subsystems.line.payment_receipt_notifications import MANUAL_RECEIPT,PaymentReceiptCandidate,PaymentReceiptHistory
 
 
@@ -42,6 +47,81 @@ class MySqlPaymentReceiptNotificationRepository:
 
     def recipient(self,case_no,*,lock=False):
         return MySqlDepositNotificationRepository(self.connection).customer_line_user_id(case_no,lock=lock)
+
+    def cancellation_source(self, case_no, *, lock=False):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM orders WHERE case_no=%s" + (" FOR UPDATE" if lock else ""), (case_no,))
+            order = cursor.fetchone()
+            if not order or order["status"] != "訂單取消":
+                return None
+            if lock:
+                cursor.execute("SELECT case_no FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+                if not cursor.fetchone():
+                    return None
+            cursor.execute(
+                "SELECT receipt.cancellation_event_id FROM order_lifecycle_control_state state "
+                "JOIN order_cancellation_apply_receipts receipt ON receipt.case_no=state.case_no "
+                "AND receipt.cancellation_control_event_id=state.current_event_id "
+                "WHERE state.case_no=%s AND state.control_type='cancellation' "
+                "AND state.control_key='order_cancelled' AND state.state='active'", (case_no,),
+            )
+            control = cursor.fetchone()
+            if control is None:
+                return None
+            event_id = int(control["cancellation_event_id"])
+            facts = query_cancellation_accounting(self.connection, case_no, cancellation_event_id=event_id)
+            if facts is None:
+                return None
+            item = account = None
+            if facts.obligation_identity:
+                items, _ = query_case_accounting(self.connection, case_no)
+                direction = "payable" if facts.refund_due_ntd else "receivable"
+                item = next((row for row in items if row.identity == facts.obligation_identity
+                             and row.direction == direction), None)
+            if facts.additional_charge_due_ntd and item and item.remaining_ntd:
+                projected = resolve_case_virtual_account(cursor, case_no)["virtual_account"]
+                if resolve_client_virtual_account(cursor, projected)["case_no"] == case_no:
+                    account = projected
+        return CancellationNoticeSource(case_no, event_id, facts, item, account)
+
+    def cancellation_recipient(self, case_no, *, lock=False):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT b.line_user_id, c.line_user_id AS client_line_user_id "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "JOIN line_identity_role_bindings b ON b.subject_type='customer' "
+                "AND b.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                "AND b.binding_status='bound' WHERE o.case_no=%s" + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            rows = cursor.fetchall()
+        if len(rows) == 1 and rows[0]["line_user_id"] == rows[0]["client_line_user_id"]:
+            return str(rows[0]["line_user_id"])
+        return None
+
+    def cancellation_delivery(self, reference, *, lock=False):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT t.id,t.processing_status,t.completed_attempts,t.error_code,EXISTS (SELECT 1 FROM line_delivery_attempt_events a "
+                "WHERE a.task_id=t.id AND a.provider_outcome_type IN ('timeout','unavailable')) AS uncertain "
+                "FROM line_delivery_tasks t WHERE t.source_aggregate_type=%s AND t.source_aggregate_identity=%s "
+                "ORDER BY t.id DESC LIMIT 1" + (" FOR UPDATE" if lock else ""), (SOURCE, reference),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        status = row["processing_status"]
+        may_have_started = row["error_code"] == PROVIDER_STARTED
+        if (row["uncertain"] or may_have_started) and status in ("failed", "retryable_failed", "cancelled"):
+            status = "uncertain"
+        return CancellationNoticeDelivery(int(row["id"]), status, status == "cancelled" and row["completed_attempts"] == 0)
+
+    def mark_cancellation_notice_provider_started(self, task_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE line_delivery_tasks SET error_code=%s WHERE id=%s AND source_aggregate_type=%s",
+                (PROVIDER_STARTED, task_id, SOURCE),
+            )
 
     def automatic_receipt(self,task):
         with self.connection.cursor() as cursor:

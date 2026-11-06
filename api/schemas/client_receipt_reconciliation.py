@@ -1,6 +1,7 @@
 """Typed HTTP contracts for Client Receipt reconciliation."""
 
 from __future__ import annotations
+from api.schemas.base import ExactNtd
 
 from datetime import date
 from typing import Any, Literal
@@ -28,7 +29,7 @@ class ClientReceiptApplyBody(ClientReceiptPreviewBody):
 
 class ClientReceiptBankFactView(_StrictModel):
     finance_import_row_id: int = Field(gt=0)
-    amount_ntd: int = Field(gt=0)
+    amount_ntd: ExactNtd = Field(gt=0)
     transaction_date: date
     dedup_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -36,7 +37,7 @@ class ClientReceiptBankFactView(_StrictModel):
 class ClientReceiptObligationView(_StrictModel):
     obligation_identity: str
     payment_stage: ReceiptStage
-    amount_due_ntd: int = Field(gt=0)
+    amount_due_ntd: ExactNtd = Field(gt=0)
     due_date: date | None
 
 
@@ -48,7 +49,7 @@ class ClientReceiptQueryView(_StrictModel):
 
 
 class MoneyNTDView(_StrictModel):
-    amount: int = Field(ge=0)
+    amount: ExactNtd = Field(ge=0)
 
 
 class ClientReceiptAllocationView(_StrictModel):

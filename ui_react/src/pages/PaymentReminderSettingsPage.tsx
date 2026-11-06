@@ -1,6 +1,6 @@
 /**
  * File: PaymentReminderSettingsPage.tsx
- * Description: 帳務通知設定專屬頁面，整合繳款提醒排程（通知條件）與帳務專用 LINE 訊息範本（10則內容維護）。
+ * Description: 帳務通知設定專屬頁面，整合繳款提醒排程（通知條件）與帳務專用 LINE 訊息範本。
  */
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import React, { useState } from 'react';
@@ -39,7 +39,7 @@ export const PaymentReminderSettingsPage: React.FC = () => {
 
   return (
     <div data-surface-id="finance.payment-reminder-settings.page">
-      <ManagementPageHeader title="帳務通知設定" description="維護客戶各期繳款排程提醒條件、逾期補寄門檻與 10 則帳務專用 LINE 訊息範本。">
+      <ManagementPageHeader title="帳務通知設定" description="維護客戶各期繳款排程提醒條件、逾期補寄門檻與帳務 LINE 訊息範本。">
         <span className="reminder-badge"><Bell size={14} /> 帳務專區</span>
       </ManagementPageHeader>
       <div className="payment-reminder-page-container">
@@ -66,7 +66,7 @@ export const PaymentReminderSettingsPage: React.FC = () => {
           onClick={() => navigateView('reminder-content')}
         >
           <MessageSquareQuote size={16} />
-          <span>帳務 LINE 範本 (10則內容維護)</span>
+          <span>帳務 LINE 範本</span>
         </button>
       </nav>
 

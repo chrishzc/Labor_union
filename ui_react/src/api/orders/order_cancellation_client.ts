@@ -3,6 +3,7 @@
  * Description: 提供 Orders Cancellation 嚴格 typed Query／Preview／Apply client。
  */
 import { z } from 'zod';
+import { exactNtd } from '../shared/exact_ntd';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
@@ -15,6 +16,7 @@ export const ServiceDaySchema = z.strictObject({
   reason: z.string().max(500).nullable(),
 });
 const MoneySchema = z.strictObject({ amount: z.number().int().nonnegative() });
+const ClientMoneySchema = z.strictObject({ amount: exactNtd.refine(value => value >= 0) });
 const SchedulingAssignmentSchema = z.strictObject({
   candidate_key: z.string().min(1),
   source_assignment_id: z.number().int().positive().nullable(),
@@ -45,7 +47,7 @@ const SchedulingImpactSchema = z.strictObject({
 const ClientStagePlanSchema = z.strictObject({
   payment_stage: z.string().min(1),
   service_dates: z.array(DateOnlySchema),
-  amount: MoneySchema,
+  amount: ClientMoneySchema,
   due_date: DateOnlySchema.nullable(),
 });
 export const ClientFinanceDirectionSchema = z.enum([
@@ -57,14 +59,14 @@ const ClientObligationActionSchema = z.strictObject({
   action: z.string().min(1),
   payment_stage: z.string().min(1),
   obligation_identity: z.string().min(1),
-  before_amount: MoneySchema,
-  after_amount: MoneySchema,
-  obligation_amount: MoneySchema,
+  before_amount: ClientMoneySchema,
+  after_amount: ClientMoneySchema,
+  obligation_amount: ClientMoneySchema,
   before_due_date: DateOnlySchema.nullable(),
   after_due_date: DateOnlySchema.nullable(),
   source_obligation_identity: z.string().min(1).nullable(),
   direction: ClientFinanceDirectionSchema,
-  direction_amount_ntd: z.number().int().nonnegative(),
+  direction_amount_ntd: exactNtd.refine(value => value >= 0),
 }).superRefine((value, context) => {
   if (value.direction === 'no_finance_change' && value.direction_amount_ntd !== 0) {
     context.addIssue({
@@ -94,6 +96,16 @@ const ClientFinanceImpactSchema = z.strictObject({
   settlement: ClientSettlementSchema,
   blockers: z.array(z.string()),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  cancellation_settlement: z.strictObject({
+    service_due_ntd: exactNtd.refine(value => value >= 0),
+    fee_ntd: exactNtd.refine(value => value >= 0),
+    net_received_ntd: exactNtd,
+    refund_due_ntd: exactNtd.refine(value => value >= 0),
+    additional_charge_due_ntd: exactNtd.refine(value => value >= 0),
+    fee_received_ntd: exactNtd.refine(value => value >= 0),
+    fee_reason: z.string(),
+    processed_on: DateOnlySchema.nullable(),
+  }).nullable().optional(),
 });
 const PayrollAssignmentSchema = z.strictObject({
   assignment_identity: z.string().min(1),
@@ -231,6 +243,8 @@ export const OrderCancellationApplyPayloadSchema = z.strictObject({
   expected_payroll_version: z.number().int().nonnegative().nullable(),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   reason: z.string().trim().max(500),
+  fee_ntd: z.string().regex(/^[0-9]+$/).optional(),
+  fee_reason: z.string().trim().max(500).optional(),
 });
 
 const envelope = <T>(schema: z.ZodType<T>) => z.strictObject({
@@ -277,10 +291,10 @@ export const orderCancellationClient = {
     if (result.case_no !== caseNo) throw new Error('訂單取消案件識別不一致。');
     return adaptCancellationQueryForWorkbench(result);
   },
-  async preview(caseNo: string, confirmedServiceDays: ServiceDay[], signal?: AbortSignal): Promise<OrderCancellationPreview> {
+  async preview(caseNo: string, confirmedServiceDays: ServiceDay[], signal?: AbortSignal, fee?: { fee_ntd: string; fee_reason: string }): Promise<OrderCancellationPreview> {
     const raw = await transport.post(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/cancellation/preview`,
-      { confirmed_service_days: confirmedServiceDays },
+      { confirmed_service_days: confirmedServiceDays, ...fee },
       options(signal, { 'X-Correlation-ID': `orders-cancellation-preview-${caseNo}-${Date.now()}` }),
     );
     return decode(OrderCancellationPreviewSchema, raw);

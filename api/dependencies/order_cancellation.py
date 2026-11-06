@@ -40,8 +40,8 @@ class OrderCancellationApplication:
         options = self.repository.list_caregiver_options(case_no)
         return OrderCancellationQueryResult(facts, options, self.workflow.cancellation_date)
 
-    def preview(self, case_no, confirmed_service_days):
-        return self.workflow.preview(case_no, confirmed_service_days)
+    def preview(self, case_no, confirmed_service_days, fee_ntd=0, fee_reason=""):
+        return self.workflow.preview(case_no, confirmed_service_days, fee_ntd, fee_reason)
 
     def apply(self, request):
         return self.workflow.apply(request)

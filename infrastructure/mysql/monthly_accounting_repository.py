@@ -1,6 +1,8 @@
 """Report only committed bank sources; do not expose statement payloads or accounts."""
 import calendar
-from datetime import date
+from datetime import date, datetime
+from shared_kernel.clock import TAIPEI_TIME_ZONE
+from domains.client_finance.obligation_planning import cancellation_fee_collected
 
 from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
 from subsystems.finance_import.query import BANK_CASE_PROOFS_SQL
@@ -32,6 +34,36 @@ def _cash_flow(row):
     return bank, flow.get((bank, incoming, owner))
 
 
+def _cancellation_fee_recognitions(rows, start, end):
+    events = []
+    last = None
+    for row in rows:
+        settlement_id = row["settlement_id"]
+        cases = (row["case_no"],)
+        fee = int(row["fee_ntd"])
+        service_due = int(row["service_due_ntd"])
+        if settlement_id != last:
+            last = settlement_id
+            net_cash = int(row["net_received_ntd"])
+            collected = cancellation_fee_collected(fee, service_due, net_cash)
+            processed_on = date.fromisoformat(row["processed_on"])
+            if collected and start <= processed_on <= end:
+                events.append(AccountingRecognition(f"cancellation-fee:{settlement_id}", cases,
+                    "cancellation_fee_revenue", collected, processed_on.isoformat()))
+        if row["entry_id"] is None:
+            continue
+        processed_on = datetime.fromtimestamp(int(row["entry_epoch"]), TAIPEI_TIME_ZONE).date()
+        net_cash += int(row["cash_delta"])
+        next_collected = cancellation_fee_collected(fee, service_due, net_cash)
+        delta = next_collected - collected
+        collected = next_collected
+        if delta and start <= processed_on <= end:
+            events.append(AccountingRecognition(f"cancellation-fee:{settlement_id}:{row['entry_id']}", cases,
+                "cancellation_fee_revenue" if delta > 0 else "cancellation_fee_reversal",
+                abs(delta), processed_on.isoformat()))
+    return tuple(events)
+
+
 class MySqlMonthlyAccountingSource:
     def __init__(self, connection):
         self.connection = connection
@@ -47,6 +79,8 @@ class MySqlMonthlyAccountingSource:
             return tuple(row["case_no"] for row in cursor.fetchall())
 
     def recognitions(self,start,end):
+        from infrastructure.mysql.client_payments_query_repository import CANCELLATION_ALLOCATED_CASH_SQL, CANCELLATION_CASH_JOIN
+
         end_date=date(end.year,end.month,calendar.monthrange(end.year,end.month)[1])
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT CONCAT('client:',id) identity,case_no,action,amount_ntd,confirmed_on FROM client_finance_noncash_events WHERE confirmed_on BETWEEN %s AND %s "
@@ -59,7 +93,23 @@ class MySqlMonthlyAccountingSource:
             grouped={}
             for row in cursor.fetchall():
                 grouped.setdefault(row['identity'],{'row':row,'cases':set()})['cases'].add(row['case_no'])
-        return tuple(AccountingRecognition(identity,tuple(sorted(value['cases'])),value['row']['action'],int(value['row']['amount_ntd']),str(value['row']['confirmed_on'])) for identity,value in grouped.items())
+            cursor.execute(
+                "SELECT receipt.id AS settlement_id,receipt.case_no, "
+                "JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.processed_on')) AS processed_on, "
+                "JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.fee_ntd') AS fee_ntd, "
+                "JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.service_due_ntd') AS service_due_ntd, "
+                "JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.net_received_ntd') AS net_received_ntd, "
+                "entry.id AS entry_id, UNIX_TIMESTAMP(entry.created_at) AS entry_epoch, SUM(entry.cash_delta) AS cash_delta "
+                "FROM client_finance_apply_receipts receipt "
+                f"LEFT JOIN ({CANCELLATION_ALLOCATED_CASH_SQL}) entry ON {CANCELLATION_CASH_JOIN} "
+                "WHERE JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.fee_ntd') > 0 "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.cancellation_settlement.processed_on')) <= %s "
+                "GROUP BY receipt.id,entry.id,entry.created_at "
+                "ORDER BY receipt.id,entry.id",
+                (end_date.isoformat(),),
+            )
+            fees = _cancellation_fee_recognitions(cursor.fetchall(), start, end_date)
+        return (*tuple(AccountingRecognition(identity,tuple(sorted(value['cases'])),value['row']['action'],int(value['row']['amount_ntd']),str(value['row']['confirmed_on'])) for identity,value in grouped.items()), *fees)
 
     def reporting_cases(self, start: date, end: date):
         end_date = date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])

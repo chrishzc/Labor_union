@@ -5,9 +5,62 @@ Description: 定義 Finance Import Preview、Apply、receipt 與 correction 的�
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from api.schemas.base import ExactNtd
+from subsystems.finance_import.accounting_workspace import AccountingBankFact
+from subsystems.finance_import.monthly_accounting import (
+    AccountingRecognition, MonthlyAccountingItem, MonthlyAccountingReport, MonthlyAccountingRow, ReceivableAccountingList,
+)
+
+
+@dataclass(frozen=True)
+class MonthlyAccountingItemView(MonthlyAccountingItem):
+    expected_ntd: ExactNtd
+    actual_ntd: ExactNtd
+    noncash_ntd: ExactNtd
+    remaining_ntd: ExactNtd
+
+
+@dataclass(frozen=True)
+class AccountingRecognitionView(AccountingRecognition):
+    amount_ntd: ExactNtd
+
+
+@dataclass(frozen=True)
+class MonthlyAccountingBankFactView(AccountingBankFact):
+    amount_ntd: ExactNtd
+
+
+@dataclass(frozen=True)
+class MonthlyAccountingRowView(MonthlyAccountingRow):
+    expected_in_ntd: ExactNtd
+    received_ntd: ExactNtd
+    remaining_in_ntd: ExactNtd
+    expected_out_ntd: ExactNtd
+    paid_ntd: ExactNtd
+    remaining_out_ntd: ExactNtd
+    cash_in_ntd: ExactNtd | None
+    cash_out_ntd: ExactNtd | None
+    items: tuple[MonthlyAccountingItemView, ...]
+    bank_facts: tuple[MonthlyAccountingBankFactView, ...]
+    other_in_ntd: ExactNtd = 0
+    other_out_ntd: ExactNtd = 0
+    cash_by_flow: dict[str, ExactNtd] | None = None
+
+
+@dataclass(frozen=True)
+class MonthlyAccountingReportView(MonthlyAccountingReport):
+    rows: tuple[MonthlyAccountingRowView, ...]
+    recognitions: tuple[AccountingRecognitionView, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReceivableAccountingListView(ReceivableAccountingList):
+    items: tuple[MonthlyAccountingItemView, ...]
 
 
 class _StrictModel(BaseModel):
@@ -62,6 +115,15 @@ class AccountingItemView(_StrictModel):
     settled: bool = False
     recognized_ntd: int = 0
     payment_stage: Literal["deposit", "first", "second"] | None = None
+
+
+class ClientAccountingItemView(AccountingItemView):
+    expected_ntd: ExactNtd
+    actual_ntd: ExactNtd
+    unallocated_surplus_ntd: ExactNtd = 0
+    remaining_ntd: ExactNtd | None = None
+    noncash_ntd: ExactNtd = 0
+    recognized_ntd: ExactNtd = 0
 
 
 class AccountingTransactionView(_StrictModel):
@@ -158,22 +220,37 @@ class CollectionProgressView(_StrictModel):
     due_date: str | None = None
 
 
+class CaseCancellationSettlementView(_StrictModel):
+    processed_on: date
+    service_due_ntd: ExactNtd
+    fee_ntd: ExactNtd
+    net_received_ntd: ExactNtd
+    fee_received_ntd: ExactNtd
+    refund_due_ntd: ExactNtd
+    additional_charge_due_ntd: ExactNtd
+    obligation_identity: str | None
+    bank_refunded_ntd: ExactNtd | None = None
+    transfer_fee_ntd: ExactNtd | None = None
+    service_remaining_ntd: ExactNtd = 0
+    fee_remaining_ntd: ExactNtd = 0
+
+
 class CaseAccountingView(_StrictModel):
     case_no: str
     client_name: str
-    receivable_ntd: int | None
-    received_ntd: int | None
-    payable_ntd: int | None
-    paid_ntd: int | None
+    receivable_ntd: ExactNtd | None
+    received_ntd: ExactNtd | None
+    payable_ntd: ExactNtd | None
+    paid_ntd: ExactNtd | None
     pending_warning_count: int
-    client_items: list[AccountingItemView]
+    client_items: list[ClientAccountingItemView]
     staff_items: list[AccountingItemView]
     transactions: list[AccountingTransactionView]
     warnings: list[AccountingWarningView]
     bank_facts: list[AccountingBankFactView] = Field(default_factory=list)
     historical_marker: HistoricalAccountingMarkerView | None = None
-    remaining_in_ntd: int | None = None
-    remaining_out_ntd: int | None = None
+    remaining_in_ntd: ExactNtd | None = None
+    remaining_out_ntd: ExactNtd | None = None
     staff_receivable_ntd: int | None = None
     customer_amount_ntd: int | None = None
     customer_fully_received: bool | None = None
@@ -188,6 +265,7 @@ class CaseAccountingView(_StrictModel):
     collection_progress: CollectionProgressView | None = None
     subsidy_plan: CaseSubsidyPlanView | None = None
     ongoing_completed: bool = False
+    cancellation_settlement: CaseCancellationSettlementView | None = None
 
 
 class FinanceImportBatchPreviewBody(_StrictModel):

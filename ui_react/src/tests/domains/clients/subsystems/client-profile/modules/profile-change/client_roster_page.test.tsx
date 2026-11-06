@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
+import { orderCancellationClient } from '../../../../../../../api/orders/order_cancellation_client';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }) } }));
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
@@ -85,6 +87,31 @@ describe('ClientRosterPage', () => {
       start_date: '2026-09-01', service_days: 26, changed_fields: ['start_date'],
       preview_fingerprint: 'c'.repeat(64), replayed: false,
     });
+  });
+
+  it('opens the formal cancellation for a non-root operator from the selected roster case', async () => {
+    const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
+      id: 7, username: 'operator', display_name: '測試人員', role: 'system_admin',
+      is_root: false, access_control_version: 1, capabilities: ['system.administration'],
+    });
+    const query = vi.spyOn(orderCancellationClient, 'query').mockResolvedValue({
+      case_no: item.case_no, lifecycle_status: '洽談中', actual_start_date: null, contracted_service_days: 26,
+      service_hours_per_day: 8, service_started: false, historical_mid_service_confirmation_available: false,
+      service_data_locked: false, order_version: 1, scheduling_version: 1, scheduling_generation: 1,
+      client_finance_version: 1, payroll_version: 1, confirmed_service_days: [], caregiver_options: [],
+    });
+    try {
+      render(<ClientRosterPage initialCaseNo={item.case_no} />);
+      fireEvent.click(await screen.findByRole('button', { name: '取消訂單' }));
+      expect(await screen.findByRole('button', { name: '預覽取消帳務' })).toBeVisible();
+      expect(query).toHaveBeenCalledWith(item.case_no, expect.any(AbortSignal));
+      expect(screen.queryByRole('button', { name: '刪除此案件' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '返回案件詳細資料' }));
+      expect(await screen.findByLabelText('CASE-001 案件資料編輯')).toBeVisible();
+    } finally {
+      query.mockRestore();
+      user.mockRestore();
+    }
   });
 
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {

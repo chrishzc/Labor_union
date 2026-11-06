@@ -117,6 +117,17 @@ class MySqlOrderCancellationRepository:
         with self._connection.cursor() as cursor:
             persist_client_finance_terms_impact(cursor, command)
 
+    def initialize_cancellation_client_finance(self, request, terms, event_id):
+        from infrastructure.mysql.case_architecture_bootstrap_repository import insert_initial_client_payment_terms
+
+        with self._connection.cursor() as cursor:
+            cursor.execute("INSERT INTO client_finance_accounts (case_no,aggregate_version) VALUES (%s,0)",
+                           (request.case_no,))
+            insert_initial_client_payment_terms(
+                cursor, request.case_no, terms, f"order-cancellation:{event_id}:initial-client-terms",
+                _child_identity(request, "initial-client-terms"), request.actor.actor_id, request.reason,
+            )
+
     def persist_payroll_impact(self, command):
         with self._connection.cursor() as cursor:
             persist_payroll_terms_impact(cursor, command)

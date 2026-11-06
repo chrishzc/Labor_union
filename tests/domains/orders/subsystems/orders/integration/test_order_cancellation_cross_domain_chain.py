@@ -5,6 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from domains.bootstrap.case_architecture import ClientPaymentTermsRootFacts
 from domains.client_finance.obligation_planning import (
     ClientFinanceDirection,
     ClientFinanceTermsSourceFacts,
@@ -51,6 +52,7 @@ class _Repository:
         self.persisted.append(command)
         return SchedulingReplacementResult(8, 3, 12, 13, AssignmentIdentityResolution({"CASE-1:g2:a1": 8}))
     def persist_client_finance_impact(self, command): self.persisted.append(command)
+    def initialize_cancellation_client_finance(self, request, terms, event_id): self.persisted.append(("initial_finance", terms, event_id))
     def persist_payroll_impact(self, command): self.persisted.append(command)
     def activate_cancellation_control(self, *_): self.persisted.append("control"); return 14
     def persist_cancellation_lifecycle(self, *_): self.persisted.append("lifecycle"); return 15
@@ -196,6 +198,7 @@ def test_four_day_twins_cancellation_credits_posted_deposit_and_first_payment():
             ),
         ),
         identity_status="一般市民",
+        existing_subsidy_return_count=1,
     )
     payroll = PayrollTermsSourceFacts(
         "CASE-1",
@@ -299,6 +302,40 @@ def test_unserved_cancellation_without_financial_roots_keeps_explicit_absence(sc
     assert repository.persisted == before
 
 
+def test_cancellation_fee_initializes_only_client_finance_with_approved_terms():
+    facts = _facts()
+    terms = ClientPaymentTermsRootFacts("policy", MoneyNTD(100), 2, date(2026, 7, 1), date(2026, 8, 1))
+    facts = replace(facts, order=replace(facts.order, service_started=False),
+                    scheduling=CancellationSchedulingFacts("CASE-1", None, None, ()),
+                    client_finance=None, payroll=None, initial_client_payment_terms=terms)
+    repo = _Repository(facts)
+    workflow = _workflow(repo)
+    preview = workflow.preview("CASE-1", (), 500, "verified cancellation")
+    assert repo.persisted == [] and preview.client_finance_version is None
+    assert preview.client_finance_impact.cancellation_settlement.additional_charge_due_ntd == 500
+    request = replace(_request(preview), confirmed_service_days=(), expected_scheduling_version=None,
+                      expected_client_finance_version=None, expected_payroll_version=None,
+                      fee_ntd=500, fee_reason="verified cancellation")
+    receipt = workflow.apply(request)
+    assert receipt.client_finance_version == 1 and receipt.payroll_version is None
+    assert ("initial_finance", terms, 11) in repo.persisted and repo.commits == 1
+    assert workflow.apply(request) == receipt
+
+
+def test_large_cancellation_fee_preview_serializes_exact_decimal_values():
+    from api.routes.order_cancellation import _preview_payload
+    from api.schemas.order_cancellation import OrderCancellationPreviewView
+
+    amount = 9_007_199_254_740_993
+    preview = _workflow(_Repository(_facts())).preview(
+        "CASE-1", (ConfirmedServiceDay(date(2026, 8, 1), 7),), amount, "verified cancellation"
+    )
+    view = OrderCancellationPreviewView.model_validate(_preview_payload(preview)).model_dump(mode="json")
+    finance = view["client_finance_impact"]
+    assert finance["cancellation_settlement"]["fee_ntd"] == str(amount)
+    assert finance["actions"][-1]["direction_amount_ntd"] == str(preview.client_finance_impact.actions[-1].direction_amount_ntd)
+
+
 @pytest.mark.parametrize("owner", ["scheduling", "client_finance", "payroll"])
 def test_cancellation_rejects_owner_created_after_absent_owner_preview(owner):
     initialized = _facts()
@@ -328,6 +365,48 @@ def test_deposit_refund_without_assignment_does_not_require_payroll_root():
     assert receipt.client_finance_version == 6
     assert receipt.payroll_version is None
     assert not any(type(item).__name__ == "PayrollImpactPersistenceCommand" for item in repository.persisted)
+
+
+@pytest.mark.parametrize("fee,kind,amount,recognized", [(0, "refund", 2000, 0), (2500, "adjustment", 500, 2000)])
+def test_cancellation_posts_one_cash_difference_for_partial_receipt(monkeypatch, fee, kind, amount, recognized):
+    from infrastructure.mysql import client_finance_terms_writer as writer
+    from infrastructure.mysql import client_difference_repository as differences
+    from infrastructure.mysql import client_receipt_reconciliation_repository as receipts
+    from infrastructure.mysql import government_period_difference_repository as government
+
+    facts = _facts()
+    old = ExistingClientStageObligation("old:first", PaymentStage.FIRST, MoneyNTD(10000), MoneyNTD(6000), date(2026, 8, 1), True)
+    finance = replace(facts.client_finance, existing_obligations=(old,),
+                      payment_terms=replace(facts.client_finance.payment_terms, client_hourly_rate=MoneyNTD(500)))
+    repository = _Repository(replace(facts, client_finance=finance, net_cash_received=MoneyNTD(6000),
+                                     order_terms=replace(facts.order_terms, floor_fee=MoneyNTD(0))))
+    workflow = _workflow(repository)
+    days = (ConfirmedServiceDay(date(2026, 8, 1), 7),)
+    reason = "approved fee" if fee else ""
+    preview = workflow.preview("CASE-1", days, fee, reason)
+    summary = preview.client_finance_impact.cancellation_settlement
+    assert (summary.service_due_ntd, summary.net_received_ntd, summary.fee_received_ntd) == (4000, 6000, recognized)
+    assert repository.persisted == []
+    request = replace(_request(preview), fee_ntd=fee, fee_reason=reason)
+    workflow.apply(request)
+    workflow.apply(request)
+    assert repository.commits == 1
+    command, = [entry for entry in repository.persisted if type(entry).__name__ == "ClientFinanceImpactPersistenceCommand"]
+    statements = []
+    cursor = SimpleNamespace(
+        execute=lambda sql, params: statements.append((sql, params)),
+        rowcount=1, lastrowid=12, fetchone=lambda: {"entry_id": 9},
+    )
+    monkeypatch.setattr(writer, "_persist_payment_terms", lambda *_: False)
+    monkeypatch.setattr(differences, "_cash", lambda *_: 6000)
+    monkeypatch.setattr(differences, "_noncash", lambda *_: 0)
+    monkeypatch.setattr(receipts, "_insert_refund_recipient_snapshot", lambda *_, **__: True)
+    monkeypatch.setattr(government, "synchronize_government_case_amount", lambda *_: None)
+    writer.persist_client_finance_terms_impact(cursor, command)
+    closed, = [params for sql, params in statements if sql == writer._PROJECTION_UPDATE_SQL]
+    assert closed[:3] == (0, date(2026, 8, 1), "settled")
+    inserted, = [params for sql, params in statements if sql == writer._PROJECTION_INSERT_SQL]
+    assert inserted[2:6] == (kind, "payable_to_client" if not fee else "receivable_from_client", "old:first", amount)
 
 
 def test_nullable_cancellation_receipt_roundtrip_and_integrity():

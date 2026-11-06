@@ -1,7 +1,7 @@
 """Human-approved receipt notices over committed Finance facts; no automatic send."""
 from dataclasses import dataclass, asdict
 from hashlib import sha256
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TYPE_CHECKING
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
@@ -10,6 +10,9 @@ from shared_kernel.identities import ActorContext, IdempotencyKey, CorrelationId
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.deposit_notifications import SETTLED, payment_source
 from subsystems.line.message_copy_catalog import configured_payload
+
+if TYPE_CHECKING:
+    from subsystems.line.cancellation_notifications import CancellationNoticeDelivery, CancellationNoticeSource
 
 MANUAL_RECEIPT = 'manual_client_payment_receipt'
 
@@ -50,6 +53,10 @@ class PaymentReceiptHistory:
 
 
 class PaymentReceiptPort(Protocol):
+    def cancellation_source(self, case_no: str, *, lock: bool = False) -> "CancellationNoticeSource | None": ...
+    def cancellation_recipient(self, case_no: str, *, lock: bool = False) -> str | None: ...
+    def cancellation_delivery(self, reference: str, *, lock: bool = False) -> "CancellationNoticeDelivery | None": ...
+    def mark_cancellation_notice_provider_started(self, task_id: int) -> None: ...
     def candidates(self, after: int, limit: int) -> tuple[PaymentReceiptCandidate,...]: ...
     def payment(self, case_no, stage, settlement_identity, *, lock=False): ...
     def recipient(self, case_no, *, lock=False): ...

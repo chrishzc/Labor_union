@@ -100,6 +100,7 @@ export const FinancePage: React.FC = () => {
   );
   const [caseDrawer, setCaseDrawer] = useState(entry.caseNo);
   const [bankReview, setBankReview] = useState<FinanceBankTransaction | null>(null);
+  const [cancellationPosted, setCancellationPosted] = useState(false);
   const [bankReviewBusy, setBankReviewBusy] = useState(false);
   const [caseClientName, setCaseClientName] = useState('');
   const [caseNotice, setCaseNotice] = useState<'deposit' | 'first' | 'second' | undefined>();
@@ -111,6 +112,7 @@ export const FinancePage: React.FC = () => {
 
   const openCase = (caseNo: string, noticeStage?: 'deposit' | 'first' | 'second') => {
     setBankReview(null);
+    setCancellationPosted(false);
     setCaseClientName('');
     setCaseNotice(noticeStage);
     setCaseDrawer(caseNo);
@@ -128,10 +130,16 @@ export const FinancePage: React.FC = () => {
   const closeCase = () => {
     setCaseDrawer('');
     setBankReview(null);
+    setCancellationPosted(false);
   };
 
   const bankReviewPosted = () => {
-    closeCase();
+    if (bankReview?.reconciliation_target?.obligation_identities.some(id => id.startsWith('client-cancellation:'))) {
+      setBankReview(null);
+      setCancellationPosted(true);
+    } else {
+      closeCase();
+    }
     setReload(value => value + 1);
     requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-bank-reconciliation-focus]')?.focus({ preventScroll: true }));
   };
@@ -438,7 +446,10 @@ export const FinancePage: React.FC = () => {
             </button>
           }
         >
-          <FinanceCaseAccounting
+          {cancellationPosted ? <section aria-label="取消結算核銷結果">
+            <p role="status">已記錄本次核銷，請查看本案帳務確認最新餘額。</p>
+            <button type="button" onClick={() => setCancellationPosted(false)}>查看本案帳務</button>
+          </section> : <FinanceCaseAccounting
             key={bankReview?.row_identity ?? caseDrawer}
             embedded
             initialCase={caseDrawer}
@@ -448,7 +459,7 @@ export const FinancePage: React.FC = () => {
               if (caseNo === caseDrawer) setCaseClientName(name);
             }}
             onChanged={() => setReload((value) => value + 1)}
-          />
+          />}
         </Drawer>
       )}
       {bankReview?.classification_type === 'government_subsidy' && (

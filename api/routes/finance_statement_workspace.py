@@ -17,11 +17,12 @@ from api.schemas.finance_import import (
     AccountingWarningBody, CaseAccountingView, ManualStatementBody,
     StatementCommandReceiptView, StatementDuplicateBody, ArrangementBody, CaseArrangementView, ArrangementApplyView,
     CaseSubsidyPlanView, SubsidyPlanBody, SubsidyPlanApplyView,
+    MonthlyAccountingReportView, ReceivableAccountingListView,
 )
 from domains.finance_import.statement_archive import STATEMENT_COLUMNS
 from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning, ArrangementNotReady
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker
-from subsystems.finance_import.monthly_accounting import MonthlyAccountingReport, MonthlyAccountingUnavailable, ReceivableAccountingList
+from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
 from subsystems.finance_import.statement_archive import StatementCommandConflict
 
 router = APIRouter()
@@ -89,24 +90,29 @@ class HistoricalAccountingBody(BaseModel):
     source_versions: dict[str, str]
 
 
-@router.get("/accounting/receivables", response_model=BaseResponse[ReceivableAccountingList])
+@router.get("/accounting/receivables", response_model=BaseResponse[ReceivableAccountingListView])
 def receivable_items(due_month: str | None = None, category: str = "subsidy", undated_only: bool = False,
                      principal=Depends(require_admin), application=Depends(get_monthly_accounting_query)):
     del principal
     try:
-        return BaseResponse(data=application.receivables(due_month, category, undated_only=undated_only), message="成功取得應收款項")
+        return BaseResponse(data=asdict(application.receivables(due_month, category, undated_only=undated_only)), message="成功取得應收款項")
     except (ValueError, MySQLError) as error:
         raise _error(error) from None
 
 
-@router.get("/accounting/monthly", response_model=BaseResponse[MonthlyAccountingReport])
+@router.get("/accounting/monthly", response_model=BaseResponse[MonthlyAccountingReportView])
 def monthly_accounting(start_month: str, end_month: str, category: str = "subsidy",
                        principal=Depends(require_admin), application=Depends(get_monthly_accounting_query)):
     del principal
     try:
-        return BaseResponse(data=application.query(start_month, end_month, category), message="成功取得每月帳務")
+        return BaseResponse(data=asdict(application.query(start_month, end_month, category)), message="成功取得每月帳務")
     except (ValueError, MySQLError) as error:
         raise _error(error) from None
+
+
+def _excel_ntd(amount):
+    # Excel stores at most 15 significant decimal digits in a numeric cell.
+    return str(amount) if amount is not None and abs(amount) >= 10**15 else amount
 
 
 @router.get("/accounting/monthly/export")
@@ -127,14 +133,14 @@ def export_monthly_accounting(start_month: str, end_month: str, category: str = 
         for row in report.rows:
             values = [row.expected_in_ntd, row.received_ntd, row.other_in_ntd, row.remaining_in_ntd, row.expected_out_ntd,
                       row.paid_ntd, row.other_out_ntd, row.remaining_out_ntd, row.expected_in_ntd - row.expected_out_ntd] if basis == "due" else [row.cash_in_ntd, row.cash_out_ntd, row.cash_in_ntd - row.cash_out_ntd]
-            sheet.append([row.month, *values])
+            sheet.append([row.month, *map(_excel_ntd, values)])
             totals = [left + right for left, right in zip(totals, values)]
-        sheet.append(["合計", *totals])
+        sheet.append(["合計", *map(_excel_ntd, totals)])
         if basis == "cash":
             classified = book.create_sheet("已核銷六項")
             classified.append(["交易月份", "永豐客戶入款", "台新政府入款", "永豐付月嫂", "台新轉交月嫂", "永豐退客戶", "台新退先墊補助"])
             for row in report.rows:
-                classified.append([row.month, *[row.cash_by_flow.get(flow) if row.cash_by_flow is not None else None for flow in ("C", "G", "PS", "PT", "RS", "RT")]])
+                classified.append([row.month, *[_excel_ntd(row.cash_by_flow.get(flow)) if row.cash_by_flow is not None else None for flow in ("C", "G", "PS", "PT", "RS", "RT")]])
             classified.append(["空白分類表示來源不足或特殊款；原總收付及銀行證據仍保留。"])
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
@@ -154,13 +160,15 @@ def export_monthly_accounting(start_month: str, end_month: str, category: str = 
         scope.column_dimensions['A'].width = 24
         scope.column_dimensions['B'].width = 95
         recognized=book.create_sheet('差額認列（確認月份）')
-        recognized.append(['確認月份','關聯案件','處理方式','非現金金額'])
-        labels={'loss':'確認收不回，記錄損失','reduce_service_fee':'同意減收服務費','union_bank_fee':'由工會負擔手續費','absorb_overpayment':'工會承擔超付款，不再追回'}
+        recognized.append(['確認月份','關聯案件','處理方式','認列金額'])
+        labels={'loss':'確認收不回，記錄損失','reduce_service_fee':'同意減收服務費','union_bank_fee':'由工會負擔手續費','absorb_overpayment':'工會承擔超付款，不再追回','cancellation_fee_revenue':'取消違約金營收','cancellation_fee_reversal':'取消違約金營收沖正'}
         if report.recognition_unavailable_reason:
             recognized.append(['跨統計範圍，尚缺各案正式分配金額，不提供拆分合計'])
         else:
             for event in report.recognitions:
-                recognized.append([event.confirmed_on[:7],'、'.join(event.cases),labels.get(event.action,event.action),event.amount_ntd])
+                amount = -event.amount_ntd if event.action == 'cancellation_fee_reversal' else event.amount_ntd
+                recognized.append([event.confirmed_on[:7], '、'.join(event.cases),
+                                   labels.get(event.action, event.action), _excel_ntd(amount)])
         for column in ('A','B','C','D'):recognized.column_dimensions[column].width=32
         scope.append(['差額認列月份','依人員實際確認處理的月份列示，與原到期月份、銀行實收付月份分開，不增加銀行現金。'])
         content = BytesIO()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, TypedDict
 
 from domains.orders.cancellation import (
@@ -11,6 +12,8 @@ from domains.orders.cancellation import (
 )
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 from subsystems.orders.cancellation_workflow import CancellationWorkflowFacts
+from shared_kernel.money import MoneyNTD
+from .client_payments_query_repository import query_case_net_cash
 
 from .order_terms_read_model import (
     _load_client_finance,
@@ -156,6 +159,7 @@ def _assemble_cancellation_facts(
     if aggregate_row is None and payroll_present:
         raise ValueError("cancellation_scheduling_facts_inconsistent")
     finance = _load_client_finance(cursor, order_row, schedule_rows, lock) if finance_present else None
+    net_cash_received = MoneyNTD(query_case_net_cash(cursor, case_no)) if finance is not None else None
     payroll = _load_payroll(cursor, order_row, assignment_rows, lock) if payroll_present else None
     lifecycle = _load_lifecycle(cursor, order_row, lock)
     order = _order_facts(order_row)
@@ -177,8 +181,33 @@ def _assemble_cancellation_facts(
             int(generation["generation_number"]) if generation else (0 if aggregate_row else None),
             assignments,
         ),
-        finance, payroll, lifecycle, historical_origin,
+        finance, payroll, lifecycle, historical_origin, net_cash_received,
+        _initial_cancellation_client_terms(cursor, order_row, lock) if finance is None and not assignments else None,
     )
+
+
+def _initial_cancellation_client_terms(cursor, order, lock):
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    from subsystems.case_import.hcm_adapter import build_approved_case_architecture_bootstrap_intent
+
+    cursor.execute("SELECT created_at FROM clients WHERE case_no=%s" + _lock_clause(lock), (order["case_no"],))
+    client = cursor.fetchone()
+    if not client or client["created_at"] is None or order["start_date"] is None:
+        return None
+    try:
+        pricing = load_case_pricing(cursor, order, lock=lock)
+        intent = build_approved_case_architecture_bootstrap_intent(
+            str(order["case_no"]), order["client_identity_status"], client["created_at"],
+            order["start_date"], pricing.rule.value if pricing else None,
+        )
+        terms = intent.client_payment_terms
+        rate = terms.client_hourly_rate if pricing is None else MoneyNTD(
+            pricing.client.covered if pricing.subsidy_hours > 0 else pricing.client.excess
+        )
+        days = pricing.deposit_service_days if pricing and pricing.deposit_service_days is not None else terms.deposit_service_days
+        return replace(terms, client_hourly_rate=rate, deposit_service_days=min(days, order["service_days"]))
+    except ValueError:
+        return None
 
 
 def _select_cancellation_aggregate(cursor, case_no, *, lock):

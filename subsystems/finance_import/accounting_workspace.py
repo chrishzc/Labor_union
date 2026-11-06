@@ -10,7 +10,7 @@ from domains.finance_import.statement_archive import (
 )
 from domains.finance_import.statement_archive import CollectionProgress, CollectionStageSource, current_collection_progress
 from subsystems.client_finance.case_accounting_query import (
-    ClientAccountingItem, ClientAccountingTransaction, ClientCaseFunding, ClientCasePaymentTerms,
+    ClientAccountingItem, ClientAccountingTransaction, ClientCancellationAccounting, ClientCaseFunding, ClientCasePaymentTerms,
 )
 from subsystems.staff_payables.case_accounting_query import StaffAccountingItem, StaffAccountingTransaction
 
@@ -94,6 +94,7 @@ class CaseAccounting:
     ongoing_completed: bool = False
     customer_paid_ntd: int | None = None
     funding: ClientCaseFunding | None = None
+    cancellation_settlement: ClientCancellationAccounting | None = None
 
 
 @dataclass(frozen=True)
@@ -144,12 +145,13 @@ class StaffAccountingPort(Protocol):
 
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
-                 bank=None, subsidy=None, payment_terms=None, plan=None):
+                 bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
         self.payment_terms = payment_terms
         self.plan = plan
+        self.cancellation = cancellation
 
     def subsidy_plan_history(self, case_no: str):
         self.state.case_client(case_no)
@@ -337,6 +339,7 @@ class AccountingWorkspace:
             CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources),
             plan, ongoing_case_completed(fully_received, plan),
             customer_paid_ntd=customer_paid, funding=funding,
+            cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

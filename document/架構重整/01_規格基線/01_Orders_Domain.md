@@ -542,7 +542,7 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.5 Cancellation
 
-適用於全部約定服務完成前，包含尚未服務即取消及服務中提前結束。2026-11-06 人工確認下列流程，取代原「不收違約金」及「不通知客戶」的條文。實作待後續授權。
+適用於全部約定服務完成前，包含尚未服務即取消及服務中提前結束。2026-11-06 人工確認下列流程。
 
 - 尚無正式 assignment 的日期-only 開始日不代表已服務，不得因此要求逐日服務補登。
 - Cancellation 專用 reader 必須驗證下游 owner 的存在與完整性。尚未服務且 Scheduling、Client Finance、Payroll
@@ -565,7 +565,7 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
   `direction`（`refund_due`／`additional_charge_due`／`no_finance_change`）與
   `direction_amount_ntd`。Orders、API 與 UI 不得由 action kind、obligation amount 或金額正負自行推定。
 - 完整履約後取消回 `order_cancellation_after_full_service` blocker 並零寫入；狀態、薪資與服務結算維持完整履約。
-- 取消及帳務結果正式提交後，依[取消結算通知契約](20_LINE客服與月嫂自助服務正式規格.md#order-cancellation-settlement-notices)通知客戶結算明細。退款或補收全額核銷後，再通知客戶該筆結算完成。
+- 取消及帳務結果正式提交並回讀後，在取消結果提供「通知客戶結算明細」。退款或補收全額核銷後，提供相應完成通知入口。兩則均由人員預覽並明確發送 LINE 私訊，依[取消結算通知契約](20_LINE客服與月嫂自助服務正式規格.md#order-cancellation-settlement-notices)。
 
 ```mermaid
 flowchart TD
@@ -575,11 +575,11 @@ flowchart TD
     D --> E{"確認取消？"}
     E -->|返回調整| B
     E -->|確認| F["同一交易保存取消及帳務<br/>有差額時建立待退款或待補收"]
-    F --> G["提交後通知客戶結算明細"]
+    F --> G["正式回讀後提供按鈕<br/>由人員預覽並發送結算明細"]
     F -->|有待退款| H["依銀行出款核銷"]
     F -->|有待補收| I["依銀行入款核銷"]
     F -->|無待收付差額| J["結算完成"]
-    H --> K["部分核銷保留餘額<br/>全額核銷後通知客戶"]
+    H --> K["部分核銷保留餘額<br/>全額核銷後由人員預覽並發送完成通知"]
     I --> K
 ```
 

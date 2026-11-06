@@ -6,9 +6,11 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Callable, Protocol
 
+from domains.bootstrap.case_architecture import ClientPaymentTermsRootFacts
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsCandidate,
     ClientFinanceTermsSourceFacts,
+    ClientPaymentTerms,
     build_client_finance_cancellation_impact,
 )
 from domains.orders.cancellation import (
@@ -26,6 +28,7 @@ from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.money import MoneyNTD
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.orders.terms_workflow import (
@@ -55,6 +58,8 @@ class CancellationWorkflowFacts:
     payroll: PayrollTermsSourceFacts | None
     lifecycle: OrderLifecycleRootFacts
     historical_cancellation_origin: bool = False
+    net_cash_received: MoneyNTD | None = None
+    initial_client_payment_terms: ClientPaymentTermsRootFacts | None = None
 
     def __post_init__(self) -> None:
         if len({item.case_no for item in (self.order, self.scheduling, self.client_finance, self.payroll, self.lifecycle) if item is not None}) != 1:
@@ -84,6 +89,7 @@ class OrderCancellationPreview:
     client_finance_version: int | None
     payroll_version: int | None
     fingerprint: PreviewFingerprint
+    initial_client_payment_terms: ClientPaymentTermsRootFacts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,12 +105,15 @@ class OrderCancellationApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    fee_ntd: int = 0
+    fee_reason: str = ""
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
         require_canonical_text(self.reason, "cancellation reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         if not isinstance(self.confirmed_service_days, tuple):
             raise TypeError("confirmed service days must be a tuple")
+        _validate_fee(self.fee_ntd, self.fee_reason)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +173,7 @@ class CancellationWorkflowRepository(Protocol):
     def cancel_waiting_deposit_lock(self, request: OrderCancellationApplyRequest, cancellation_event_id: int) -> None: ...
     def replace_scheduling_generation(self, command: SchedulingReplacementCommand) -> SchedulingReplacementResult: ...
     def persist_client_finance_impact(self, command: ClientFinanceImpactPersistenceCommand) -> None: ...
+    def initialize_cancellation_client_finance(self, request: OrderCancellationApplyRequest, terms: ClientPaymentTermsRootFacts, event_id: int) -> None: ...
     def persist_payroll_impact(self, command: PayrollImpactPersistenceCommand) -> None: ...
     def activate_cancellation_control(self, request: OrderCancellationApplyRequest, cancellation_event_id: int) -> int: ...
     def persist_cancellation_lifecycle(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview, cancellation_control_event_id: int) -> int: ...
@@ -187,7 +197,8 @@ class OrderCancellationWorkflow:
     def cancellation_date(self) -> date:
         return self._clock.today()
 
-    def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
+    def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int = 0, fee_reason: str = "") -> OrderCancellationPreview:
+        _validate_fee(fee_ntd, fee_reason)
         facts = self._repository.load_for_preview(
             case_no, _confirmed_staff_ids(confirmed_service_days)
         )
@@ -196,7 +207,7 @@ class OrderCancellationWorkflow:
             confirmed_service_days,
             CorrelationId(f"order-cancellation-preview:{case_no}"),
         )
-        return self._build_preview(facts, confirmed_service_days)
+        return self._build_preview(facts, confirmed_service_days, fee_ntd, fee_reason)
 
     def apply(self, request: OrderCancellationApplyRequest) -> OrderCancellationReceipt:
         command_fingerprint = _command_fingerprint(request)
@@ -233,7 +244,7 @@ class OrderCancellationWorkflow:
             facts, request.confirmed_service_days, request.correlation_id
         )
         try:
-            preview = self._build_preview(facts, request.confirmed_service_days)
+            preview = self._build_preview(facts, request.confirmed_service_days, request.fee_ntd, request.fee_reason)
         except CancellationCandidateError as error:
             raise _candidate_workflow_error(request, error) from error
         if preview.fingerprint != request.preview_fingerprint:
@@ -241,16 +252,24 @@ class OrderCancellationWorkflow:
         _raise_if_impacts_blocked(request, preview)
         return preview
 
-    def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
+    def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...], fee_ntd: int, fee_reason: str) -> OrderCancellationPreview:
         effective_order = _effective_order_facts(facts, confirmed_service_days)
+        initial_terms = facts.initial_client_payment_terms if fee_ntd and facts.client_finance is None else None
+        if fee_ntd and facts.client_finance is None and initial_terms is None:
+            raise CancellationWorkflowError(TypedError(
+                ErrorCategory.DOMAIN_BLOCKED, "cancellation_fee_finance_required",
+                "Client Finance facts are required to establish a cancellation fee.",
+                CorrelationId(f"order-cancellation:{facts.order.case_no}"),
+                domain_blockers=("cancellation_fee_finance_required",),
+            ))
         try:
             candidate = build_cancellation_candidate(effective_order, facts.scheduling, self.cancellation_date, confirmed_service_days)
-            finance, payroll = _build_impacts(facts, candidate)
+            finance, payroll = _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms)
         except ValueError as error:
             if str(error) != "payroll_rate_policy_not_found":
                 raise
             raise CancellationCandidateError(CancellationBlocker.PAYROLL_RATE_POLICY_NOT_FOUND) from error
-        return _preview(facts, candidate, finance, payroll, _build_lifecycle_impact(facts, candidate))
+        return _preview(facts, candidate, finance, payroll, _build_lifecycle_impact(facts, candidate), initial_terms)
 
     def _persist(self, request: OrderCancellationApplyRequest, preview: OrderCancellationPreview, command_fingerprint: PreviewFingerprint, receipt: OrderCancellationReceipt) -> None:
         event_id = self._repository.append_cancellation_event(request, preview)
@@ -304,13 +323,26 @@ def _ensure_cancellation_allowed(
         )
 
 
-def _build_impacts(facts, candidate):
+def _build_impacts(facts, candidate, fee_ntd, fee_reason, initial_terms):
     if candidate.official_service_day_count and (facts.client_finance is None or facts.payroll is None):
         raise ValueError("cancellation_financial_roots_inconsistent")
     if candidate.scheduling is None and facts.payroll is not None:
         raise ValueError("cancellation_scheduling_facts_inconsistent")
     change_identity = f"cancellation:{candidate.fingerprint.value}"
-    finance = build_client_finance_cancellation_impact(facts.client_finance, facts.order_terms, candidate.scheduling, change_identity) if facts.client_finance is not None else None
+    finance_source = facts.client_finance
+    if initial_terms:
+        finance_source = ClientFinanceTermsSourceFacts(
+            facts.order.case_no, 0, ClientPaymentTerms(
+                initial_terms.deposit_service_days, initial_terms.client_hourly_rate,
+                initial_terms.deposit_due_date, initial_terms.first_payment_due_date,
+                initial_terms.second_payment_due_date,
+            ), (), (),
+        )
+    finance = build_client_finance_cancellation_impact(
+        finance_source, facts.order_terms, candidate.scheduling, change_identity,
+        net_cash_received=facts.net_cash_received, fee=MoneyNTD(fee_ntd),
+        fee_reason=fee_reason, processed_on=candidate.cancellation_date,
+    ) if finance_source is not None else None
     payroll = build_payroll_cancellation_impact(facts.payroll, candidate.scheduling, facts.order_terms, change_identity) if facts.payroll is not None else None
     return finance, payroll
 
@@ -324,9 +356,14 @@ def _build_lifecycle_impact(facts, candidate):
     return CancellationLifecycleImpact(facts.order.case_no, facts.lifecycle.current_status, OrderLifecycleStatus.CANCELLED, candidate.actual_end_date, True, fingerprint_payload(payload))
 
 
-def _preview(facts, candidate, finance, payroll, lifecycle):
+def _preview(facts, candidate, finance, payroll, lifecycle, initial_terms):
     payload = {"cancellation": candidate.fingerprint.value, "client_finance": finance.fingerprint.value if finance else None, "payroll": payroll.fingerprint.value if payroll else None, "lifecycle": lifecycle.fingerprint.value, "client_finance_version": facts.client_finance.account_version if facts.client_finance else None, "payroll_version": facts.payroll.payroll_version if facts.payroll else None}
-    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version if facts.client_finance else None, facts.payroll.payroll_version if facts.payroll else None, fingerprint_payload(payload))
+    if initial_terms:
+        payload["initial_client_payment_terms"] = [
+            initial_terms.policy_version, initial_terms.client_hourly_rate.amount, initial_terms.deposit_service_days,
+            initial_terms.deposit_due_date.isoformat(), initial_terms.first_payment_due_date.isoformat(),
+        ]
+    return OrderCancellationPreview(candidate, finance, payroll, lifecycle, facts.order.order_version, facts.scheduling.aggregate_version, facts.client_finance.account_version if facts.client_finance else None, facts.payroll.payroll_version if facts.payroll else None, fingerprint_payload(payload), initial_terms)
 
 
 def _scheduling_command(request, preview, command_fingerprint):
@@ -334,6 +371,8 @@ def _scheduling_command(request, preview, command_fingerprint):
 
 
 def _persist_finance_and_payroll(repository, request, preview, event_id, scheduling):
+    if preview.initial_client_payment_terms is not None:
+        repository.initialize_cancellation_client_finance(request, preview.initial_client_payment_terms, event_id)
     if preview.client_finance_impact is not None:
         _persist_client_finance(repository, request, preview, event_id)
     if preview.payroll_impact is not None:
@@ -388,7 +427,18 @@ def _raise_if_claim_incomplete(request, claim_state):
 
 
 def _command_fingerprint(request):
-    return fingerprint_payload(_command_payload(request))
+    payload = _command_payload(request)
+    if request.fee_ntd:
+        payload.update(fee_ntd=request.fee_ntd, fee_reason=request.fee_reason)
+    return fingerprint_payload(payload)
+
+
+def _validate_fee(amount, reason):
+    if type(amount) is not int or not 0 <= amount <= 9_223_372_036_854_775_807:
+        raise ValueError("cancellation_fee_invalid")
+    require_canonical_text(reason, "cancellation fee reason", _REASON_MAXIMUM_LENGTH, allow_empty=amount == 0)
+    if not amount and reason:
+        raise ValueError("cancellation_fee_reason_without_fee")
 
 
 def _command_payload(request):

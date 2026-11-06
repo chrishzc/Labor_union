@@ -11,6 +11,7 @@ import { useUnsavedChanges } from './UnsavedChanges';
 import { ApiHttpError } from '../api/shared/typed_errors';
 
 function getObligationLabel(identity: string, stage?: string | null): string {
+  if (identity.startsWith('client-cancellation:create_adjustment:')) return '取消結算補收';
   const clean = identity.replace(/^client-obligation:[^:]+:/, '');
   const s = stage || clean;
   if (s === 'deposit') return '訂金期款';
@@ -62,8 +63,8 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
   },[caseNo,revision,refreshVersion,requiredBankRowId,initialObligationId]);
 
   const selection=():ReceiptSelection=>({payment_stage:null,finance_import_row_ids:selectedBanks,obligation_identities:selectedItems});
-  const bankTotal=facts?.bank_facts.filter(row=>selectedBanks.includes(row.finance_import_row_id)).reduce((sum,row)=>sum+row.amount_ntd,0)??0;
-  const dueTotal=facts?.obligations.filter(row=>selectedItems.includes(row.obligation_identity)).reduce((sum,row)=>sum+row.amount_due_ntd,0)??0;
+  const bankTotal=facts?.bank_facts.filter(row=>selectedBanks.includes(row.finance_import_row_id)).reduce((sum,row)=>sum+BigInt(row.amount_ntd),0n)??0n;
+  const dueTotal=facts?.obligations.filter(row=>selectedItems.includes(row.obligation_identity)).reduce((sum,row)=>sum+BigInt(row.amount_due_ntd),0n)??0n;
   const diff=bankTotal-dueTotal;
   const invalidate=()=>{setPreview(undefined);setAction('');command.current=undefined;setResult('');};
 
@@ -219,16 +220,16 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                 <div>
                   <small>沖銷差額</small>
                   <strong className={diff < 0 ? 'finance-diff-under' : diff > 0 ? 'finance-diff-over' : 'finance-paid'}>
-                    {diff < 0 ? `短少 ${financeMoney(Math.abs(diff))}` : diff > 0 ? `超收 ${financeMoney(diff)}` : '金額相符'}
+                    {diff < 0 ? `短少 ${financeMoney(-diff)}` : diff > 0 ? `超收 ${financeMoney(diff)}` : '金額相符'}
                   </strong>
                 </div>
               </div>
 
               <div className="finance-recon-calc-explanation">
-                {diff === 0 ? (
+                {diff === 0n ? (
                   <span>✅ 入款金額與待收款項完全相符，確認後將直接全額銷帳結清。</span>
                 ) : diff < 0 ? (
-                  <span>⚠️ 入款金額少於期款應繳：確認後將<strong>認列實收 {financeMoney(bankTotal)}</strong>，剩餘差額 <strong>{financeMoney(Math.abs(diff))}</strong> 繼續待收（可於上方期款點「處置差額」或通知客戶補繳）。</span>
+                  <span>⚠️ 入款金額少於期款應繳：確認後將<strong>認列實收 {financeMoney(bankTotal)}</strong>，剩餘差額 <strong>{financeMoney(-diff)}</strong> 繼續待收（可於上方期款點「處置差額」或通知客戶補繳）。</span>
                 ) : (
                   <span>⚠️ 入款金額多於期待繳：確認後期款全額結清，多收之 <strong>{financeMoney(diff)}</strong> 將另列為待退款。</span>
                 )}

@@ -411,11 +411,18 @@ def _insert_accounts(cursor, candidate) -> None:
 
 # Kept cohesive because the root event and current terms row are inseparable.
 def _insert_client_payment_terms(cursor, command, candidate):
-    terms = candidate.client_payment_terms
+    return insert_initial_client_payment_terms(
+        cursor, candidate.case_no, candidate.client_payment_terms,
+        f"case-bootstrap:{candidate.fingerprint.value}", f"bootstrap-terms:{candidate.fingerprint.value}",
+        command.actor.actor_id, command.reason,
+    )
+
+
+def insert_initial_client_payment_terms(cursor, case_no, terms, source, key, actor, reason):
     cursor.execute(
         _PAYMENT_TERMS_EVENT_INSERT_SQL,
         (
-            candidate.case_no,
+            case_no,
             terms.policy_version,
             terms.client_hourly_rate.amount,
             terms.deposit_service_days,
@@ -423,25 +430,16 @@ def _insert_client_payment_terms(cursor, command, candidate):
             terms.first_payment_due_date,
             terms.second_payment_due_date,
             0,
-            f"case-bootstrap:{candidate.fingerprint.value}",
-            f"bootstrap-terms:{candidate.fingerprint.value}",
-            command.actor.actor_id,
-            command.reason,
+            source, key, actor, reason,
         ),
     )
     if cursor.rowcount != 1:
         raise RuntimeError("client_payment_terms_event_insert_failed")
     event_id = int(cursor.lastrowid)
-    _insert_current_client_payment_terms(cursor, candidate, event_id)
-    return event_id
-
-
-def _insert_current_client_payment_terms(cursor, candidate, event_id):
-    terms = candidate.client_payment_terms
     cursor.execute(
         _PAYMENT_TERMS_INSERT_SQL,
         (
-            candidate.case_no,
+            case_no,
             terms.policy_version,
             terms.client_hourly_rate.amount,
             terms.deposit_service_days,
@@ -453,6 +451,7 @@ def _insert_current_client_payment_terms(cursor, candidate, event_id):
     )
     if cursor.rowcount != 1:
         raise RuntimeError("client_payment_terms_insert_failed")
+    return event_id
 
 
 def _insert_payroll_policy_snapshot(cursor, candidate, bootstrap_event_id):

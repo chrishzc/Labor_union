@@ -31,15 +31,25 @@ function receipt(caseNo = CASE): OrderCancellationReceipt {
     client_finance_version: 5, payroll_version: 6, actual_end_date: null, official_service_day_count: 0,
     official_service_hours: 0, cancelled_assignment_ids: [], created_assignment_keys: [], preview_fingerprint: fingerprint };
 }
-function commitFacts() { facts = { ...facts, lifecycle_status: '訂單取消', order_version: 3, scheduling_version: 4 }; }
+function commitFacts() { facts = { ...facts, lifecycle_status: '訂單取消', order_version: 3, scheduling_version: 4, client_finance_version: 5 }; }
 async function open() {
   await screen.findByText(`目前狀態：${facts.lifecycle_status}`);
 }
 async function confirmPreview() {
   fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '客戶電話確認取消。' } });
 }
+async function requestPreview() {
+  const button = screen.getByRole('button', { name: '預覽取消帳務' });
+  await waitFor(() => expect(button).toBeEnabled());
+  await act(async () => { fireEvent.click(button); });
+}
 async function apply() {
-  const button = screen.getByRole('button', { name: /^(取消訂單|儲存實際服務事實)$/ });
+  const historical = screen.queryByRole('button', { name: '儲存實際服務事實' });
+  if (!historical) {
+    await requestPreview();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  }
+  const button = historical ?? screen.getByRole('button', { name: '確認取消' });
   await waitFor(() => expect(button).toBeEnabled());
   await act(async () => { fireEvent.click(button); });
 }
@@ -54,13 +64,13 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.apply.mockImplementation(async () => { commitFacts(); return receipt(); });
   });
 
-  it('未服務案件自動查詢與零日 Preview，只按一次確認就送出並回讀', async () => {
+  it('未服務案件以零日預覽，明確確認後才送出並回讀', async () => {
     const onObserved = vi.fn(); const onBusyChange = vi.fn();
     render(<OrderCancellationPanel caseNo={CASE} onObserved={onObserved} onBusyChange={onBusyChange} />);
     await open();
     expect(screen.queryByRole('button', { name: '新增實際服務日' })).not.toBeInTheDocument();
     await confirmPreview();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '收取違約金' })).not.toBeChecked();
     expect(screen.queryByRole('button', { name: '讀取取消狀態' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '檢查取消影響' })).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
@@ -92,7 +102,7 @@ describe('Beta 取消與歷史取消服務補登', () => {
     expect(mocks.apply).toHaveBeenCalledWith(CASE, expect.objectContaining({ expected_scheduling_version: null, expected_client_finance_version: null, expected_payroll_version: null }), expect.anything());
   });
 
-  it('保留服務日及月嫂修正並以一次點擊送交 owner 驗證', async () => {
+  it('保留服務日及月嫂修正送交 owner 驗證', async () => {
     facts = { ...facts, service_started: true, actual_start_date: '2026-09-01',
       confirmed_service_days: [{ service_date: '2026-09-01', staff_id: 8, reason: null }] };
     render(<OrderCancellationPanel caseNo={CASE} />); await open();
@@ -130,9 +140,10 @@ describe('Beta 取消與歷史取消服務補登', () => {
 
   it('owner blocker 不能 Apply', async () => {
     mocks.preview.mockResolvedValue({ ...preview(), payroll_impact: { case_no: CASE, actions: [], blockers: ['payroll_frozen'] } });
-    render(<OrderCancellationPanel caseNo={CASE} />); await open(); await apply();
+    render(<OrderCancellationPanel caseNo={CASE} />); await open(); await requestPreview();
     expect(screen.getByText('payroll_frozen')).toBeInTheDocument();
-    expect(screen.getByText('客戶 訂金：應退款 NT$ 1000')).toBeInTheDocument();
+    expect(screen.getByText('應退款 NT$ 1000')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '確認取消' })).toBeDisabled();
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
@@ -140,7 +151,7 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.apply.mockRejectedValue(new ApiHttpError(409, 'stale_preview', '版本已變更'));
     render(<OrderCancellationPanel caseNo={CASE} />); await open(); await confirmPreview(); await apply();
     await screen.findByText('取消未通過檢查，請重新讀取並預覽：版本已變更');
-    expect(screen.queryByRole('button', { name: '確認取消訂單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認取消' })).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(1);
   });
 
@@ -194,7 +205,8 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.apply.mockImplementation(() => new Promise<OrderCancellationReceipt>((resolve) => { finish = resolve; }));
     const onObserved = vi.fn(); const view = render(<OrderCancellationPanel caseNo={CASE} onObserved={onObserved} />);
     await open(); await confirmPreview();
-    const button = screen.getByRole('button', { name: '取消訂單' });
+    await requestPreview();
+    const button = screen.getByRole('button', { name: '確認取消' });
     fireEvent.click(button); fireEvent.click(button);
     await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
     view.unmount(); commitFacts();
@@ -202,7 +214,7 @@ describe('Beta 取消與歷史取消服務補登', () => {
     expect(onObserved).not.toHaveBeenCalled();
   });
 
-  it('取消原因維持選填，空白也能一次送出且不跳確認視窗', async () => {
+  it('取消原因維持選填，空白也能在預覽後送出', async () => {
     render(<OrderCancellationPanel caseNo={CASE} />);
     await open();
     window.alert = vi.fn();

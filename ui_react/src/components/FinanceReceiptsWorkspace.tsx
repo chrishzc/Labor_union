@@ -3,7 +3,7 @@ import { useUnsavedNavigation } from './UnsavedChanges';
 import { PaymentOverdueReminderWorkbench } from './PaymentOverdueReminderWorkbench';
 import { SubsidyPeriodWorkbench } from './SubsidyPeriodWorkbench';
 import { FinanceReceivableItems, type ReceivableFilters } from './FinanceReceivableItems';
-export const financeMoney = (value: number | null) => value === null ? '待確認' : `NT$ ${value.toLocaleString('zh-TW')}`;
+export const financeMoney = (value: number | bigint | null) => value === null ? '待確認' : `NT$ ${value.toLocaleString('zh-TW')}`;
 type Props = { revision: number; initialView?: 'all' | 'overdue'; onOpenBank?: (caseNo: string) => void; initialSource?: 'client' | 'government'; initialRecovery?: boolean; initialFilters?:ReceivableFilters; onFiltersChange?:(filters:ReceivableFilters)=>void; onOpenCase: (caseNo: string) => void; onOpenSubsidy: (caseNo: string) => void };
 export function FinanceReceiptsWorkspace({revision,initialSource='client',initialView='all',initialFilters,onFiltersChange,onOpenBank,onOpenCase,onOpenSubsidy}:Props) {
   const {requestLeave}=useUnsavedNavigation();

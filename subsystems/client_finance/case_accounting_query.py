@@ -1,6 +1,7 @@
 """Bounded Client Finance accounting facts for the finance workspace."""
 from dataclasses import dataclass
 from decimal import Decimal
+from datetime import date
 
 from domains.client_finance.reconciliation import PaymentStage
 from domains.client_finance.subsidy_coverage import is_full_subsidy_case
@@ -24,6 +25,22 @@ class ClientCaseFunding:
 class ClientCasePaymentTerms:
     funding: ClientCaseFunding | None = None
     zero_stages: frozenset[PaymentStage] = frozenset()
+
+
+@dataclass(frozen=True)
+class ClientCancellationAccounting:
+    processed_on: date
+    service_due_ntd: int
+    fee_ntd: int
+    net_received_ntd: int
+    fee_received_ntd: int
+    refund_due_ntd: int
+    additional_charge_due_ntd: int
+    obligation_identity: str | None
+    bank_refunded_ntd: int | None = None
+    transfer_fee_ntd: int | None = None
+    service_remaining_ntd: int = 0
+    fee_remaining_ntd: int = 0
 
 
 @dataclass(frozen=True)
