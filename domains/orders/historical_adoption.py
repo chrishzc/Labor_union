@@ -10,6 +10,7 @@ from datetime import date
 from enum import StrEnum
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 
 
@@ -51,6 +52,7 @@ class HistoricalOrderCurrentFacts:
     planned_start_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
+    service_time: ServiceTimeTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)

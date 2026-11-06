@@ -138,7 +138,6 @@ class _WorkbookRepository:
         self.locked_keys = set()
         self.find_calls = []
         self.cancel_calls = []
-        self.saved = None
 
     def acquire_lock(self, key):
         if key in self.locked_keys:
@@ -148,15 +147,6 @@ class _WorkbookRepository:
 
     def release_lock(self, key):
         self.locked_keys.remove(key)
-
-    def load_receipt(self, _key):
-        return None
-
-    def claim(self, _key, _digest, _correlation_id):
-        return "created"
-
-    def save_receipt(self, key, digest, preview_fingerprint, actor, result):
-        self.saved = (key, digest, preview_fingerprint, actor, result)
 
     def find_open_review_identities(self, _source_event_identities):
         return ()
@@ -239,7 +229,12 @@ def test_preview_and_apply_cancel_every_database_order_absent_from_workbook(monk
             "historical-authoritative-correlation",
         )
     ]
-    assert repository.saved[-1]["absent_order_cancellation_count"] == 2
+    assert repository.find_calls == [((), False), ((), False), ((), True)]
+    assert receipt.import_counts.as_dict() == {
+        "imported_count": 0,
+        "duplicate_skipped_count": 0,
+        "not_imported_count": 0,
+    }
 
 
 def test_apply_rejects_changed_absence_set_after_preview(monkeypatch):

@@ -1,7 +1,6 @@
-"""Regression coverage for Historical Orders terminal replay."""
+"""Regression coverage for reevaluating a previously imported workbook."""
 
 from datetime import date
-import json
 
 from domains.orders.historical_adoption import HistoricalOrderOutcome, HistoricalOrderSourceStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -20,7 +19,7 @@ from subsystems.orders.historical_order_workbook import (
 )
 
 
-def test_terminal_replay_returns_stored_receipt_for_disjoint_source_schedules(
+def test_reimport_reevaluates_every_row_against_current_orders(
     monkeypatch,
 ) -> None:
     digest = "a" * 64
@@ -79,26 +78,44 @@ def test_terminal_replay_returns_stored_receipt_for_disjoint_source_schedules(
         (cancelled_row, completed_row, actual_start_row),
     )
     workflow = _Workflow()
-    repository = _Repository(digest)
+    repository = _Repository()
     service = module.HistoricalOrderWorkbookImportService(
         repository,
         workflow,
         _UnitOfWork,
     )
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
-    supplied = service.preview("historical.xlsx").preview_fingerprint
 
-    receipt = service.apply(
-        "historical.xlsx",
-        "historical-workbook:key",
-        supplied,
-        "operator",
-        "correlation",
-    )
+    def apply(operation):
+        return service.apply(
+            "historical.xlsx",
+            f"historical-workbook:{operation}",
+            service.preview("historical.xlsx").preview_fingerprint,
+            "operator",
+            operation,
+        )
 
+    unchanged = apply("first")
+    assert unchanged.import_counts.as_dict() == {
+        "imported_count": 0,
+        "duplicate_skipped_count": 3,
+        "not_imported_count": 0,
+    }
+    workflow.cancelled_order_reopened = True
+    receipt = apply("second")
+
+    assert receipt.source_content_digest == unchanged.source_content_digest == digest
     assert receipt.assignments_created == 0
-    assert receipt.replayed_workbook is True
-    assert workflow.applied_source_identities == []
+    assert receipt.replayed_workbook is False
+    assert receipt.import_counts.as_dict() == {
+        "imported_count": 1,
+        "duplicate_skipped_count": 2,
+        "not_imported_count": 0,
+    }
+    assert workflow.applied_source_identities == [
+        source_identity, completed_identity, actual_start_identity,
+        source_identity, completed_identity, actual_start_identity,
+    ]
     assert receipt.status_counts.as_dict() == {
         "cancelled_0": 1,
         "deposit_paid_1": 2,
@@ -110,9 +127,15 @@ def test_terminal_replay_returns_stored_receipt_for_disjoint_source_schedules(
 class _Workflow:
     def __init__(self) -> None:
         self.applied_source_identities = []
+        self.cancelled_order_reopened = False
 
     def preview(self, row):
         cancelled = row.case_no == "CASE-1"
+        current_cancelled_order_status = (
+            OrderLifecycleStatus.DISCUSSION
+            if self.cancelled_order_reopened
+            else OrderLifecycleStatus.CANCELLED
+        )
         actual_start_changed = row.case_no == "CASE-3"
         pairing = HistoricalPairingCandidate(
             1,
@@ -131,7 +154,7 @@ class _Workflow:
             0 if cancelled else 1,
             2 if actual_start_changed else 1,
             (
-                OrderLifecycleStatus.DISCUSSION.value
+                current_cancelled_order_status.value
                 if cancelled
                 else OrderLifecycleStatus.COMPLETED.value
             ),
@@ -152,15 +175,16 @@ class _Workflow:
 
     def apply(self, request):
         self.applied_source_identities.append(request.row.source_identity)
-        refreshed = ":refresh:" in request.row.source_identity
+        changed = request.row.case_no == "CASE-1" and self.cancelled_order_reopened
         return HistoricalOrderAdoptionReceipt(
             HistoricalOrderOutcome.ADOPTED,
             request.row.case_no,
             1,
-            int(refreshed and request.row.case_no == "CASE-2"),
+            0,
             None,
-            not refreshed,
+            False,
             request.preview_fingerprint,
+            unchanged=not changed,
         )
 
     def preview_in_current_unit_of_work(self, row, *, for_update):
@@ -172,38 +196,11 @@ class _Workflow:
 
 
 class _Repository:
-    def __init__(self, digest: str) -> None:
-        self._digest = digest
-
     def acquire_lock(self, _key):
         return True
 
     def release_lock(self, _key):
         return None
-
-    def load_receipt(self, _key):
-        return {
-            "request_fingerprint": self._digest,
-            "result_snapshot": json.dumps(
-                {
-                    "source_content_digest": self._digest,
-                    "source_row_count": 3,
-                    "adopted_count": 3,
-                    "unmatched_case_count": 0,
-                    "review_required_count": 1,
-                    "current_conflict_count": 0,
-                    "assignments_created": 0,
-                    "replayed_rows": 1,
-                    "replayed_workbook": False,
-                    "status_counts": {
-                        "cancelled_0": 1,
-                        "completed_1": 2,
-                        "discussion_2": 0,
-                        "invalid_or_blank": 0,
-                    },
-                }
-            ),
-        }
 
     def find_absent_orders(self, _source_case_nos, *, for_update):
         assert type(for_update) is bool

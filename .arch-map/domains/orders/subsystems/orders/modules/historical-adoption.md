@@ -45,7 +45,7 @@
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
-- Preview／Apply 依工作簿可追溯的每日時段區分實際重疊與缺少證據，當次 `row_issues` 顯示雙方 Excel 列號與案件。檔內排除列保留案號，避免被列為檔外取消。
+- Preview／Apply 依工作簿日期、月嫂與每日時段區分實際重疊與缺少證據。標準六欄的時段按案號取自 Orders 完整起訖與跨日標記，既有附時段來源沿用明示時段。當次 `row_issues` 顯示雙方 Excel 列號與案件。檔內排除列保留案號，避免被列為檔外取消。
 - Workbook Apply 只回傳當次結果。同檔重匯依目前版本重新判定，業務資料已一致的列避免重複寫入。整份結果快照與整批 claim 已停止讀寫。
 - 現行逐筆採納資料仍承載可採納時段、指派及帳務的正式引用。`27` §12.1 定義搬遷至 owner 資料及轉接查詢與外鍵後的清除條件。
 - MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。

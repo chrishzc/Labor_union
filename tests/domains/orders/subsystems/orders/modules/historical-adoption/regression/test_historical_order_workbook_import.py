@@ -334,6 +334,30 @@ def test_apply_reports_a_stale_preview_as_a_conflict_before_row_apply(monkeypatc
     assert workflow.apply_calls == 0
 
 
+def test_apply_rejects_an_order_time_changed_between_validation_and_lock(monkeypatch):
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: _workbook("c" * 64))
+
+    class Workflow(_Workflow):
+        def preview(self, row):
+            result = super().preview(row)
+            result.service_time = ServiceTimeTerms(time(9), time(13), 0)
+            return result
+
+        def preview_in_current_unit_of_work(self, row, *, for_update):
+            result = super().preview_in_current_unit_of_work(row, for_update=for_update)
+            result.service_time = ServiceTimeTerms(time(13, 30), time(17, 30), 0)
+            return result
+
+    workflow = Workflow()
+    service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow, _UnitOfWork)
+    preview = service.preview("orders.xlsx")
+
+    with pytest.raises(module.HistoricalOrderWorkbookConflict, match="historical_order_candidate_stale"):
+        service.apply("orders.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
+
+    assert workflow.apply_calls == 0
+
+
 def test_apply_refreshes_a_later_row_after_the_same_case_was_changed_by_this_workbook(monkeypatch):
     workbook = _workbook_with_repeated_case()
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)

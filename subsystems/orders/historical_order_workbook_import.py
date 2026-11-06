@@ -382,6 +382,7 @@ class HistoricalOrderWorkbookImportService:
                         correlation_id,
                         locked_absent_orders,
                         preview_exclusions,
+                        tuple(getattr(row, "service_time", None) for row in row_previews),
                     )
                     unit_of_work.commit()
             except RuntimeError as error:
@@ -415,7 +416,8 @@ class HistoricalOrderWorkbookImportService:
         actor,
         correlation_id,
         absent_orders,
-        preview_exclusions=None,
+        preview_exclusions,
+        preview_service_times,
     ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
         locked_previews: list[object] = []
@@ -433,12 +435,8 @@ class HistoricalOrderWorkbookImportService:
             locked_exclusions = _source_schedule_conflict_exclusions(
                 workbook, initial_locked
             )
-            expected_exclusions = (
-                preview_exclusions
-                if preview_exclusions is not None
-                else locked_exclusions
-            )
-            if locked_exclusions != expected_exclusions:
+            locked_service_times = tuple(getattr(row, "service_time", None) for row in initial_locked)
+            if locked_exclusions != preview_exclusions or locked_service_times != preview_service_times:
                 raise RuntimeError("historical_order_candidate_stale")
         else:
             initial_locked = []
@@ -635,7 +633,7 @@ def _source_schedule_conflict_exclusions(
                 row = workbook.rows[row_index]
                 if own.service_time is None and not any(code.startswith("historical_service_time_") for code in row.issue_codes):
                     issue_codes_by_index[row_index].add(
-                        "historical_service_time_column_missing" if row.service_time_columns_present is False
+                        "historical_service_time_terms_unavailable" if row.service_time_columns_present is False
                         else "historical_service_time_missing"
                     )
                 fields_by_index.setdefault(row_index, set()).update(
@@ -847,7 +845,7 @@ def project_source_schedule_conflicts(
         case_no = getattr(preview, "case_no", None)
         if case_no is None:
             continue
-        service_time = getattr(row, "service_time", None)
+        service_time = getattr(preview, "service_time", None) or getattr(row, "service_time", None)
         confirmed_dates = frozenset(getattr(preview, "canonical_service_dates", ()) or ())
         for pairing_index, pairing in enumerate(preview.pairings, start=1):
             resolution = getattr(pairing.resolution, "value", pairing.resolution)

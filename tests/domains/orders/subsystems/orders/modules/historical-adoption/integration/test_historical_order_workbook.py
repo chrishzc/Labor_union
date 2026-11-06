@@ -77,12 +77,12 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
     )
     path = "/api/v1/orders/historical-adoption/workbooks"
 
-    def workbook_bytes(morning, afternoon, afternoon_start=date(2026, 10, 19)):
+    def workbook_bytes(morning, afternoon, afternoon_start=date(2026, 10, 19), *, standard=False):
         book = Workbook()
         sheet = book.active
-        sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名", "服務時間"])
-        sheet.append([_client_name(morning_case), morning_case, date(2026, 9, 15), date(2026, 10, 30), 1, staff_name, morning])
-        sheet.append([_client_name(afternoon_case), afternoon_case, afternoon_start, date(2026, 11, 9), 1, staff_name, afternoon])
+        sheet.append(["client_name", "case_no", "start_date", "end_date", "status", "staff_name"] + ([] if standard else ["服務時間"]))
+        sheet.append([_client_name(morning_case), morning_case, date(2026, 9, 15), date(2026, 10, 30), 1, staff_name] + ([] if standard else [morning]))
+        sheet.append([_client_name(afternoon_case), afternoon_case, afternoon_start, date(2026, 11, 9), 1, staff_name] + ([] if standard else [afternoon]))
         output = BytesIO()
         book.save(output)
         book.close()
@@ -103,13 +103,29 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         return response.json()["data"]
 
     with TestClient(app) as client:
-        incomplete = workbook_bytes(None, None)
-        excluded = apply_workbook(client, incomplete)
+        corrected = workbook_bytes(None, None, standard=True)
+        excluded = apply_workbook(client, corrected)
         assert excluded["import_counts"]["imported_count"] == 0
         assert excluded["current_conflict_count"] == 2
-        assert apply_workbook(client, incomplete)["current_conflict_count"] == 2
+        assert all("historical_service_time_terms_unavailable" in row["issue_codes"] for row in excluded["row_issues"])
 
-        corrected = workbook_bytes("９：００－１３：００（４小時）", "13:30\u200b−17:30\u00a0(4小時)")
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    "UPDATE orders SET service_start_time=%s,service_end_time=%s,service_end_day_offset=0 "
+                    "WHERE case_no=%s",
+                    (("09:00:00", "13:00:00", morning_case), ("13:30:00", "17:30:00", afternoon_case)),
+                )
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM order_terms_change_events WHERE case_no IN (%s,%s)",
+                    (morning_case, afternoon_case),
+                )
+                assert cursor.fetchone()["total"] == 0
+            connection.commit()
+        finally:
+            connection.close()
+
         imported = apply_workbook(client, corrected)
         assert imported["import_counts"]["imported_count"] == 2
         assert imported["assignments_created"] == 2
@@ -138,6 +154,20 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         assert conflict["import_counts"]["not_imported_count"] == 2
         assert conflict["absent_order_cancellation_count"] == 0
         assert all(any(";overlap=" in code for code in row["issue_codes"]) for row in conflict["row_issues"])
+
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE orders SET service_start_time='12:30:00' WHERE case_no=%s", (afternoon_case,))
+            connection.commit()
+        finally:
+            connection.close()
+        overlapping = workbook_bytes(None, None, date(2026, 9, 15), standard=True)
+        conflict = apply_workbook(client, overlapping)
+        assert conflict["import_counts"]["not_imported_count"] == 2
+        assert conflict["assignments_created"] == 0
+        assert all(any("T12:30:00" in code and "T13:00:00" in code for code in row["issue_codes"])
+                   for row in conflict["row_issues"])
 
     connection = get_connection()
     try:

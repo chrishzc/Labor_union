@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from domains.orders.historical_adoption import HistoricalOrderCurrentFacts, HistoricalOrderOutcome
 from domains.orders.lifecycle import OrderLifecycleStatus
+from infrastructure.mysql.order_terms_read_model import read_service_time_terms
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionReceipt,
@@ -31,7 +32,8 @@ class MySqlHistoricalOrderAdoptionRepository:
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
-                "o.actual_start_date,o.actual_end_date,c.name "
+                "o.actual_start_date,o.actual_end_date,o.service_start_time,o.service_end_time,"
+                "o.service_end_day_offset,c.name "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
                 "WHERE o.case_no=%s" + suffix,
                 (case_no,),
@@ -48,6 +50,7 @@ class MySqlHistoricalOrderAdoptionRepository:
             _optional_date(row.get("start_date")),
             _optional_date(row.get("actual_start_date")),
             _optional_date(row.get("actual_end_date")),
+            read_service_time_terms(row),
         )
 
     def resolve_staff(self, name, *, for_update):
@@ -91,7 +94,10 @@ class MySqlHistoricalOrderAdoptionRepository:
             if (source is None or source["source_fingerprint"] != preview.source_fingerprint
                     or source["resulting_version"] != preview.expected_version):
                 return False
-            if tuple(json.loads(source["result_snapshot"]).get("issue_codes", ())) != preview.issue_codes:
+            snapshot = json.loads(source["result_snapshot"])
+            service_time = preview.service_time.canonical_payload() if preview.service_time is not None else None
+            if (tuple(snapshot.get("issue_codes", ())) != preview.issue_codes
+                    or snapshot.get("historical_service_time") != service_time):
                 return False
             cursor.execute(
                 "SELECT caregiver_ordinal,staff_id,assignment_id,resolution,source_start_date,source_end_date "

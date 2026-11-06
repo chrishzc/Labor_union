@@ -20,6 +20,7 @@ from domains.orders.historical_adoption import (
     build_historical_order_candidate,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.ports import UnitOfWork
@@ -67,6 +68,7 @@ class HistoricalOrderAdoptionPreview:
     pairings: tuple[HistoricalPairingCandidate, ...]
     issue_codes: tuple[str, ...]
     fingerprint: PreviewFingerprint
+    service_time: ServiceTimeTerms | None = None
 
     @property
     def result(self) -> HistoricalOrderResult:
@@ -202,6 +204,8 @@ class HistoricalOrderAdoptionWorkflow:
             source_identity = f"{request.row.source_identity}:{request.idempotency_key.removeprefix('historical-order-row:')}"
             request = replace(request, row=replace(request.row, source_identity=source_identity))
             preview = replace(preview, source_identity=source_identity)
+        if preview.service_time is not None and request.row.service_time is None:
+            request = replace(request, row=replace(request.row, service_time=preview.service_time))
         if (preview.outcome is HistoricalOrderOutcome.ADOPTED
                 and preview.result is HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED
                 and self._default_accounting is None):
@@ -342,7 +346,14 @@ class HistoricalOrderAdoptionWorkflow:
             and not _matching_pending_deposit_eligible(row, pairings)
         ):
             return _not_adopted_preview(row, current, pairings, issues)
-        return _preview(row, current, candidate, pairings, issues)
+        service_time = getattr(row, "service_time", None)
+        if (service_time is None and getattr(row, "service_time_columns_present", None) is False
+                and _historical_calendar_service_result(candidate.result)
+                and current.service_time is not None
+                and isinstance(row.actual_start_date, date)
+                and current.service_time.service_interval(row.actual_start_date) is not None):
+            service_time = current.service_time
+        return _preview(row, current, candidate, pairings, issues, service_time)
 
     def _pairings(self, row, current, candidate, for_update):
         existing = self._repository.active_assignments(
@@ -516,7 +527,7 @@ def _matching_pending_deposit_eligible(row, pairings) -> bool:
     )
 
 
-def _preview(row, current, candidate, pairings, issues):
+def _preview(row, current, candidate, pairings, issues, service_time):
     payload = {
         "source_identity": row.source_identity,
         "source_fingerprint": row.source_fingerprint,
@@ -525,6 +536,8 @@ def _preview(row, current, candidate, pairings, issues):
         "pairings": tuple(_pairing_payload(item) for item in pairings),
         "issue_codes": issues,
     }
+    if service_time is not None:
+        payload["service_time"] = service_time.canonical_payload()
     return HistoricalOrderAdoptionPreview(
         row.source_identity,
         row.source_fingerprint,
@@ -538,6 +551,7 @@ def _preview(row, current, candidate, pairings, issues):
         pairings,
         issues,
         fingerprint_payload(payload),
+        service_time,
     )
 
 

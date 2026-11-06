@@ -644,9 +644,9 @@ lifecycle。狀態、日期、樓層費、雙邊結清、回歸精算、API／UI
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存正式 Orders root、event、outbox 及來源配對關聯。
 
-**HIST-SHIFT-01／同日分時。** Preview 對整份工作簿零寫入驗證採納資格、狀態機、實際期間及同一月嫂跨案班次。以可追溯的歷史來源時段或能證明當時約定的 Orders 完整時段為準，保留起訖及跨日標記。當期條款不能覆蓋已證實的歷史約定，兩種來源矛盾時列待確認。依規格 02 SHIFT-01 比較班次。同日已證實不重疊可並列採納；已證實重疊回 `historical_order_source_schedule_conflict`。日期有交集但缺少時段或服務日證據而無法判定時，回「時段待確認」，不以當前條款、每日時數或預設時間猜填，也不虛構逐日服務。
+**HIST-SHIFT-01／同日分時。** Preview 對整份工作簿零寫入驗證採納資格、狀態機、實際期間及同一月嫂跨案班次。以案號定位既有訂單，依 Excel 服務起訖日及解析出的月嫂 ID 分組，以每日服務起訖及跨日標記依規格 02 SHIFT-01 比較班次。同日已證實不重疊可並列採納，已證實重疊回 `historical_order_source_schedule_conflict`。日期有交集但缺少時段或服務日證據而無法判定時，回可區分的原因。每日時數不代替起訖，來源日期範圍不推算逐日出勤。
 
-來源可使用起訖時間分欄，或在「服務時間／服務時段」欄提供完整區間，例如 `9:00-13:00(4小時)`。區間後的時數只作來源註記；跨午夜須明示跨日，分欄與區間同時存在時須一致。
+標準檔案沿用六欄，不要求時段欄。直接讀取 HCM 建案寫入的 `orders.service_start_time`、`orders.service_end_time`、`orders.service_end_day_offset`，並於正式寫入前重新讀取同一份 Orders 資料。即使首次建案後從未產生條款異動事件，完整合法的時段仍可用於比對。時段缺漏或無效且影響判定時，指出對應訂單的時段欄位問題。既有來源若另附起訖分欄或「服務時間／服務時段」，例如 `9:00-13:00(4小時)`，沿用明示時段。區間後的時數只作來源註記。跨午夜須明示跨日，分欄與區間同時存在時須一致。
 
 Preview 與 Apply 將已證實衝突的雙方列排除至 `current_conflict`／未匯入。缺少時段或服務日的列也進未匯入明細，並指出缺項。明細列出對造 Excel 列號、案件編號、日期及可證實的時段或重疊起訖，沿用 `not_imported_count`、`row_issues` 與適用的 `field_errors` 去敏回傳。排除列零採納寫入，仍按 HIST-IMPORT-02 計入檔內案號。其餘列和檔外取消依 HIST-IMPORT-01～04 執行。
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
