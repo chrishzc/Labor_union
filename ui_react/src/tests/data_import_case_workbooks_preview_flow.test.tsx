@@ -502,9 +502,9 @@ describe('Data Import simple result flows', () => {
           case_no: 'CASE-015',
           fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
           issue_codes: [
-            'historical_order_source_schedule_conflict',
-            'historical_order_source_schedule_conflict_detail:row=28;staff_id=11;own=2026-08-01~2026-08-10;peer=2026-08-08~2026-08-15;case_no=CASE-028',
-            'historical_service_time_missing',
+            'historical_order_source_schedule_unconfirmed',
+            'historical_order_source_schedule_unconfirmed_detail:row=28;staff_id=11;own=2026-08-01~2026-08-10;peer=2026-08-08~2026-08-15;case_no=CASE-028;reason=own_time',
+            'historical_service_time_range_invalid',
           ],
         },
         {
@@ -512,8 +512,8 @@ describe('Data Import simple result flows', () => {
           case_no: 'CASE-028',
           fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
           issue_codes: [
-            'historical_order_source_schedule_conflict',
-            'historical_order_source_schedule_conflict_detail:row=15;staff_id=11;own=2026-08-08~2026-08-15;peer=2026-08-01~2026-08-10;case_no=CASE-015',
+            'historical_order_source_schedule_unconfirmed',
+            'historical_order_source_schedule_unconfirmed_detail:row=15;staff_id=11;own=2026-08-08~2026-08-15;peer=2026-08-01~2026-08-10;case_no=CASE-015;reason=peer_time',
           ],
         },
       ],
@@ -524,8 +524,9 @@ describe('Data Import simple result flows', () => {
     expect(metrics(card)).toEqual(['3', '1', '0', '2']);
     const details = within(card).getByLabelText('未匯入明細');
     expect(details).toHaveTextContent('CASE-015');
-    expect(details).toHaveTextContent('與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂服務時段待確認。');
-    expect(details).toHaveTextContent('本列沒有讀到服務時段');
+    expect(details).toHaveTextContent('本列的服務時段無法確認，與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的日期有交集，無法比對。');
+    expect(details).toHaveTextContent('本列「服務時間」無法解析成有效的開始與結束時間');
+    expect(details).toHaveTextContent('Excel 第 15 列（案件 CASE-015，2026-08-01～2026-08-10）的服務時段無法確認，請查看該列原因。');
     expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
   });
 });

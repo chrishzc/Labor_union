@@ -80,7 +80,7 @@ describe('Four mutually exclusive import result counters', () => {
     expect(adaptHistoricalOrderImportResult({ ...historical, replayed_workbook: true, import_counts: { imported_count: 1, duplicate_skipped_count: 2, not_imported_count: 1 } })).toMatchObject({ importedCount: 1, duplicateCount: 2, notImportedCount: 1, replayedWorkbook: true });
   });
 
-  it('Historical Orders schedule conflict row issues display peer row and case details without duplicate generic label', () => {
+  it('Historical Orders legacy schedule conflict shows the peer and states what the original result recorded', () => {
     const receipt = {
       ...historical,
       source_row_count: 3,
@@ -119,7 +119,7 @@ describe('Four mutually exclusive import result counters', () => {
       sourceRow: 15,
       identifier: 'CASE-015',
       fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
-      reasons: ['與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂服務時段待確認。'],
+      reasons: ['原判定只記錄與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的日期範圍，沒有留下具體時段或服務日原因。'],
     });
   });
 });

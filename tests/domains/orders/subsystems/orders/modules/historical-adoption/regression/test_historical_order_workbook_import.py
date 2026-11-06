@@ -61,6 +61,7 @@ def test_workbook_compares_combined_service_times_across_overlapping_date_ranges
     morning, afternoon = source.rows
     assert morning.service_time == ServiceTimeTerms(time(9), time(13), 0)
     assert afternoon.service_time == ServiceTimeTerms(time(13, 30), time(17, 30), 0)
+    assert morning.service_time_columns_present is True
     previews = tuple(
         SimpleNamespace(
             case_no=row.case_no,
@@ -79,23 +80,35 @@ def test_workbook_compares_combined_service_times_across_overlapping_date_ranges
     assert exclusions[0].fields == ("服務時段", "第 1 位月嫂姓名")
     assert "historical_service_time_missing" in exclusions[0].issue_codes
     assert "historical_service_time_missing" not in exclusions[1].issue_codes
+    assert any(code.endswith(";reason=own_time") for code in exclusions[0].issue_codes)
+    assert any(code.endswith(";reason=peer_time") for code in exclusions[1].issue_codes)
 
     overlapping = replace(afternoon, service_time=ServiceTimeTerms(time(12, 30), time(16, 30), 0))
     conflict, = module.project_source_schedule_conflicts(previews, (morning, overlapping))
     assert conflict.issue_code == "historical_order_source_schedule_conflict"
     assert [instant.strftime("%H:%M") for instant in conflict.overlap] == ["12:30", "13:00"]
+    without_confirmed_dates = tuple(SimpleNamespace(case_no=p.case_no, pairings=p.pairings) for p in previews)
+    possible_overlap = replace(source, rows=(morning, overlapping))
+    exclusions = module._source_schedule_conflict_exclusions(possible_overlap, without_confirmed_dates)
+    assert any(code.endswith(";reason=service_dates") for code in exclusions[0].issue_codes)
 
 
 @pytest.mark.parametrize(
-    ("headers", "values"),
+    ("headers", "values", "issue"),
     [
-        (["服務時間"], ["4小時"]),
-        (["服務時間"], ["22:00-06:00(8小時)"]),
-        (["服務時間", "服務時段"], ["9:00-13:00(4小時)", "10:00-14:00(4小時)"]),
-        (["服務時間", "服務開始時間"], ["9:00-13:00(4小時)", "10:00"]),
+        (["服務時間"], ["4小時"], "range_invalid"),
+        (["服務時間"], ["25:00-26:00"], "range_invalid"),
+        (["服務時間"], ["22:00-06:00(8小時)"], "overnight_missing"),
+        (["服務時間"], ["09:00-09:00"], "interval_empty"),
+        (["服務時間", "服務時段"], ["9:00-13:00(4小時)", "10:00-14:00(4小時)"], "columns_conflict"),
+        (["服務時間", "服務開始時間"], ["9:00-13:00(4小時)", "10:00"], "columns_conflict"),
+        (["服務開始時間", "服務結束時間"], ["早上", "13:00"], "start_invalid"),
+        (["服務開始時間", "服務結束時間"], ["9:00", "中午"], "end_invalid"),
+        (["服務開始時間", "服務結束時間"], ["9:00", None], "split_incomplete"),
+        (["服務時間", "跨日標記"], ["9:00-13:00", 2], "offset_invalid"),
     ],
 )
-def test_workbook_does_not_infer_missing_or_conflicting_service_times(tmp_path, headers, values):
+def test_workbook_reports_specific_service_time_issue(tmp_path, headers, values, issue):
     path = tmp_path / "historical-unconfirmed-time.xlsx"
     workbook = Workbook()
     workbook.active.append(["案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂", *headers])
@@ -105,7 +118,7 @@ def test_workbook_does_not_infer_missing_or_conflicting_service_times(tmp_path, 
 
     row, = load_historical_order_workbook(path).rows
     assert row.service_time is None
-    assert "historical_service_time_unconfirmed" in row.issue_codes
+    assert row.issue_codes == (f"historical_service_time_{issue}",)
 
 
 class _Repository:

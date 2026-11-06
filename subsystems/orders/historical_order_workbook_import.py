@@ -690,12 +690,25 @@ def _source_schedule_conflict_exclusions(
             if conflict.overlap:
                 start, end = conflict.overlap
                 detail_code += f";overlap={start.isoformat()}~{end.isoformat()}"
+            else:
+                missing_times = (own.service_time is None, peer.service_time is None)
+                reason = {
+                    (True, True): "both_times",
+                    (True, False): "own_time",
+                    (False, True): "peer_time",
+                    (False, False): "service_dates",
+                }[missing_times]
+                detail_code += f";reason={reason}"
             for row_index in indices_by_row_case.get((own.source_row, own.case_no), ()):
                 issue_codes_by_index.setdefault(row_index, set()).update(
                     (conflict.issue_code, detail_code)
                 )
-                if own.service_time is None and "historical_service_time_unconfirmed" not in workbook.rows[row_index].issue_codes:
-                    issue_codes_by_index[row_index].add("historical_service_time_missing")
+                row = workbook.rows[row_index]
+                if own.service_time is None and not any(code.startswith("historical_service_time_") for code in row.issue_codes):
+                    issue_codes_by_index[row_index].add(
+                        "historical_service_time_column_missing" if row.service_time_columns_present is False
+                        else "historical_service_time_missing"
+                    )
                 fields_by_index.setdefault(row_index, set()).update(
                     ("服務時段", f"第 {own.pairing_ordinal} 位月嫂姓名")
                 )
@@ -786,7 +799,7 @@ def _historical_issue_fields(issue_code: str) -> tuple[str, ...]:
         return ("客戶姓名",)
     if issue_code == "historical_status_invalid":
         return ("訂單狀態",)
-    if issue_code.startswith("historical_order_source_schedule_") or issue_code == "historical_service_time_unconfirmed":
+    if issue_code.startswith(("historical_order_source_schedule_", "historical_service_time_")):
         return ("服務時段",)
     if "staff" in issue_code:
         return ("月嫂姓名",)

@@ -70,6 +70,11 @@ class HistoricalOrderWorkbookRow:
     caregivers: tuple[HistoricalCaregiverSource, ...]
     issue_codes: tuple[str, ...]
     service_time: ServiceTimeTerms | None = None
+    service_time_columns_present: bool | None = None
+
+
+class _ServiceTimeError(ValueError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,9 +186,9 @@ def _parse_row(values, positions, source_row, epoch, digest):
     ))
     try:
         service_time = _read_service_time(raw_time, (_value(values, index) for index in positions["time_range"]))
-    except (TypeError, ValueError):
+    except _ServiceTimeError as error:
         service_time = None
-        issues += ("historical_service_time_unconfirmed",)
+        issues += (str(error),)
     payload = {
         "case_no": _text(_value(values, positions.get("case_no"))),
         "client_name": _text(_value(values, positions.get("client_name"))),
@@ -213,39 +218,62 @@ def _parse_row(values, positions, source_row, epoch, digest):
         caregivers,
         tuple(sorted(set(issues + tuple(code for item in caregivers for code in item.issue_codes)))),
         service_time,
+        bool(positions["time_range"] or any(field in positions for field in ("start_time", "end_time"))),
     )
 
 
 def _read_service_time(raw_time, raw_ranges) -> ServiceTimeTerms | None:
     start, end, offset = raw_time
+    try:
+        day_offset = None if _blank(offset) else int(_normalize_time_text(offset))
+    except ValueError as error:
+        raise _ServiceTimeError("historical_service_time_offset_invalid") from error
+    if day_offset not in (None, 0, 1):
+        raise _ServiceTimeError("historical_service_time_offset_invalid")
     split = (
-        None if _blank(start) else _clock_time(start),
-        None if _blank(end) else _clock_time(end),
-        None if _blank(offset) else int(_normalize_time_text(offset)),
+        _split_clock(start, "start"),
+        _split_clock(end, "end"),
+        day_offset,
     )
     range_texts = (_normalize_time_text(value) for value in raw_ranges if not _blank(value))
     ranges = {_parse_time_range(text) for text in range_texts if text}
     if len(ranges) > 1:
-        raise ValueError("conflicting historical service time ranges")
+        raise _ServiceTimeError("historical_service_time_columns_conflict")
     service_time = ranges.pop() if ranges else None
     if service_time is not None:
         expected = (service_time.start_time, service_time.end_time, service_time.end_day_offset)
         if any(value is not None and value != expected_value for value, expected_value in zip(split, expected)):
-            raise ValueError("conflicting historical service times")
+            raise _ServiceTimeError("historical_service_time_columns_conflict")
     elif any(value is not None for value in split):
+        if split[0] is None or split[1] is None:
+            raise _ServiceTimeError("historical_service_time_split_incomplete")
         service_time = ServiceTimeTerms(split[0], split[1], split[2] if split[2] is not None else 0)
     if service_time is not None and service_time.service_interval(date(2000, 1, 1)) is None:
-        raise ValueError("invalid historical service interval")
+        if service_time.end_time < service_time.start_time:
+            raise _ServiceTimeError("historical_service_time_overnight_missing")
+        raise _ServiceTimeError("historical_service_time_interval_empty")
     return service_time
 
 
 def _parse_time_range(text: str) -> ServiceTimeTerms:
     match = _TIME_RANGE.fullmatch(text)
     if match is None:
-        raise ValueError("invalid historical service time range")
-    return ServiceTimeTerms(
-        _clock_time(match["start"]), _clock_time(match["end"]), int(bool(match["overnight"])),
-    )
+        raise _ServiceTimeError("historical_service_time_range_invalid")
+    try:
+        return ServiceTimeTerms(
+            _clock_time(match["start"]), _clock_time(match["end"]), int(bool(match["overnight"])),
+        )
+    except ValueError as error:
+        raise _ServiceTimeError("historical_service_time_range_invalid") from error
+
+
+def _split_clock(value, field):
+    if _blank(value):
+        return None
+    try:
+        return _clock_time(value)
+    except ValueError as error:
+        raise _ServiceTimeError(f"historical_service_time_{field}_invalid") from error
 
 
 def _normalize_time_text(value) -> str:

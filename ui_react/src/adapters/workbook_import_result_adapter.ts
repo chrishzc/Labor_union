@@ -36,9 +36,18 @@ const REASON_LABELS: Record<string, string> = {
   historical_calendar_valid_dates_missing: '缺少有效的歷史服務起迄日期',
   historical_calendar_completed_assignment_missing: '缺少已完成的歷史服務指派',
   historical_order_source_schedule_conflict: '與同檔案其他案件的月嫂服務時段重疊',
-  historical_order_source_schedule_unconfirmed: '同一月嫂的服務時段待確認',
-  historical_service_time_unconfirmed: '每日服務起訖或跨日標記不完整',
-  historical_service_time_missing: '本列沒有讀到服務時段，請在 Excel「服務時間」欄填入完整起訖，例如 09:00–13:00。',
+  historical_order_source_schedule_unconfirmed: '原判定沒有留下具體的時段或服務日阻塞原因。',
+  historical_service_time_unconfirmed: '原判定未記錄是服務起訖或跨日標記有問題。',
+  historical_service_time_missing: '本列的服務時段儲存格沒有可讀取的值。請檢查是否空白，或公式結果尚未儲存。',
+  historical_service_time_column_missing: '工作表沒有可辨識的服務時段欄。請核對表頭是否為「服務時間」，或有「服務開始時間」和「服務結束時間」兩欄。',
+  historical_service_time_range_invalid: '本列「服務時間」無法解析成有效的開始與結束時間，例如 09:00–13:00(4小時)。',
+  historical_service_time_start_invalid: '本列「服務開始時間」不是有效的時間。',
+  historical_service_time_end_invalid: '本列「服務結束時間」不是有效的時間。',
+  historical_service_time_offset_invalid: '本列「跨日標記」必須為 0（當天）或 1（次日）。',
+  historical_service_time_split_incomplete: '本列使用分欄格式，但沒有同時提供「服務開始時間」和「服務結束時間」。',
+  historical_service_time_columns_conflict: '本列的服務時間欄位互相矛盾，起訖或跨日標記不一致。',
+  historical_service_time_overnight_missing: '本列結束時間早於開始時間。若是跨夜班，請在結束時間前加「次日」，或把「跨日標記」設為 1。',
+  historical_service_time_interval_empty: '本列開始與結束時間相同，且沒有跨日，服務區間為零。',
 };
 
 const SCHEDULE_CONFLICT_DETAIL_PREFIX = 'historical_order_source_schedule_conflict_detail:';
@@ -48,11 +57,18 @@ function parseScheduleConflictDetail(code: string): string | null {
   const unconfirmed = code.startsWith(SCHEDULE_UNCONFIRMED_DETAIL_PREFIX);
   if (!unconfirmed && !code.startsWith(SCHEDULE_CONFLICT_DETAIL_PREFIX)) return null;
   const payload = code.slice((unconfirmed ? SCHEDULE_UNCONFIRMED_DETAIL_PREFIX : SCHEDULE_CONFLICT_DETAIL_PREFIX).length);
-  const match = /^row=(\d+);staff_id=(\d+);own=([^~;]+)~([^;]+);peer=([^~;]+)~([^;]+);case_no=([^;]*)(?:;overlap=([^~;]+)~([^;]+))?$/.exec(payload);
-  if (!match) return REASON_LABELS.historical_order_source_schedule_unconfirmed;
-  const [, peerRow, , , , peerStart, peerEnd, peerCaseNo, overlapStart, overlapEnd] = match;
+  const match = /^row=(\d+);staff_id=(\d+);own=([^~;]+)~([^;]+);peer=([^~;]+)~([^;]+);case_no=([^;]*)(?:;overlap=([^~;]+)~([^;]+))?(?:;reason=(own_time|peer_time|both_times|service_dates))?$/.exec(payload);
+  if (!match) return '原判定沒有可辨識的衝突明細，無法指出具體阻塞原因。';
+  const [, peerRow, , , , peerStart, peerEnd, peerCaseNo, overlapStart, overlapEnd, reason] = match;
   if (!unconfirmed && overlapStart && overlapEnd) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}）重疊 ${overlapStart.slice(0, 16).replace('T', ' ')}～${overlapEnd.slice(0, 16).replace('T', ' ')}。`;
-  return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo || '未提供'}，${peerStart}～${peerEnd}）的月嫂服務時段待確認。`;
+  const peer = `Excel 第 ${peerRow} 列（案件 ${peerCaseNo || '未提供'}，${peerStart}～${peerEnd}）`;
+  switch (reason) {
+    case 'own_time': return `本列的服務時段無法確認，與 ${peer}的日期有交集，無法比對。`;
+    case 'peer_time': return `${peer}的服務時段無法確認，請查看該列原因。`;
+    case 'both_times': return `本列與 ${peer}都無法確認服務時段，且日期有交集。`;
+    case 'service_dates': return `與 ${peer}的時段可能重疊，但缺少實際服務日資料，無法確認兩班是否在同一時刻出勤。`;
+    default: return `原判定只記錄與 ${peer}的日期範圍，沒有留下具體時段或服務日原因。`;
+  }
 }
 
 // Only receipt-owned codes determine guidance; never infer a historical failure from current data.
