@@ -65,7 +65,8 @@ _PUBLISH_SQL = (
 )
 _FAIL_SQL = (
     "UPDATE scheduling_service_day_log_outbox SET delivery_status=IF(attempt_count+1>=3,'failed','pending'),"
-    "attempt_count=attempt_count+1,next_attempt_at_utc=IF(attempt_count+1>=3,NULL,%s),last_error_code=%s "
+    # MySQL evaluates assignments left to right; both guards need the old count.
+    "next_attempt_at_utc=IF(attempt_count+1>=3,NULL,%s),attempt_count=attempt_count+1,last_error_code=%s "
     "WHERE id=%s AND delivery_status='processing'"
 )
 
