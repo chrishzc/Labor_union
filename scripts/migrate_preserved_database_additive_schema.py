@@ -6750,6 +6750,35 @@ def _normalize_check_contract(value: Any) -> str:
     return normalized.replace("=false", "=0").replace("=true", "=1")
 
 
+def _render_source_check_server_variants(
+    part_name: str, key: tuple[str, str], expected_clause: Any,
+) -> tuple[str, ...]:
+    """Recognize only the captured MySQL 8 rendering of the owned 1073 CHECK."""
+    if part_name not in {
+        "1073_contract_document_render_snapshot.sql", "166_contract_signing_workflow.sql",
+    } or key != ("contract_document_versions", "chk_contract_document_render_source"):
+        return ()
+    if not any(path.name == "1073_contract_document_render_snapshot.sql" for path in SCHEMA_PARTS):
+        return ()
+    canonical = _normalize_check_contract(_canonical_artifact_descriptor(
+        "1073_contract_document_render_snapshot.sql"
+    )["checks"][key])
+    if _normalize_check_contract(expected_clause) != canonical:
+        return ()
+    # These two JSON INTEGER/root BIGINT comparisons render decimal ID text.
+    # Match the entire immutable predicate; never strip charset from arbitrary
+    # CASTs, quoted literals, different operands, lengths or collations.
+    server_rendering = canonical
+    for column in ("matching_plan_id", "matching_segment_id"):
+        cast = f"cast({column}aschar)"
+        if canonical.count(cast) != 1:
+            return ()
+        server_rendering = server_rendering.replace(
+            cast, f"cast({column}ascharcharsetutf8mb4)",
+        )
+    return (server_rendering,)
+
+
 def _flatten_associative_contract(value: str) -> str:
     """Canonicalize nested normalized AND/OR calls as associative lists."""
     call = _normalized_contract_call(value)
@@ -7685,6 +7714,7 @@ def _artifact_metadata_state(
             or str(row.get("enforced") or "YES").upper() != "YES"
             or _normalize_check_contract(actual_clause) not in {
                 _normalize_check_contract(expected_clause),
+                *_render_source_check_server_variants(part_name, key, expected_clause),
                 *[
                     _normalize_check_contract(clause)
                     for clause in allowed_later_checks.get(key, ())

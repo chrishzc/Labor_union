@@ -1,6 +1,9 @@
 """Pure metadata/text checks: no SQL, cursor, DB or provider execution."""
 from copy import deepcopy
 from pathlib import Path
+import ast
+import hashlib
+import inspect
 import runpy
 
 import pytest
@@ -127,3 +130,136 @@ def test_single_exact_alter_and_current_text_bind_same_snapshot_contract():
     assert migration._normalize_check_contract(checks[CHECK]) == migration._normalize_check_contract(canonical["checks"][CHECK])
     assert "`media_asset_id` bigint DEFAULT NULL" in create
     assert "DEFAULT 'legacy_archived'" in create
+
+
+def _mysql8_render_source_fixture():
+    """Portable CHECK fixture using the two CAST spellings captured by MySQL 8."""
+    create, = (step["sql"] for step in load_compact_plan()["steps"]
+               if step["sql"].startswith(f"CREATE TABLE `{TABLE}`"))
+    for column in ("matching_plan_id", "matching_segment_id"):
+        original = f"CAST({column} AS CHAR)"
+        assert create.count(original) == 1
+        create = create.replace(original, f"cast(`{column}` as char charset utf8mb4)")
+    return create, migration._show_create_check_clauses(create)[CHECK]
+
+
+@pytest.mark.parametrize("context", [ARTIFACT, ORIGINAL])
+@pytest.mark.parametrize("show_create", [False, True])
+def test_mysql8_owned_check_rendering_uses_classifier_and_show_create_priority(context, show_create):
+    successor = migration._canonical_artifact_descriptor(ARTIFACT)
+    create, clause = _mysql8_render_source_fixture()
+    # No global charset removal: the ordinary normalizer still distinguishes it.
+    assert migration._normalize_check_contract(clause) != migration._normalize_check_contract(successor["checks"][CHECK])
+    descriptor = migration._canonical_artifact_descriptor(context)
+    current = deepcopy(descriptor)
+    if context == ORIGINAL:
+        current["tables"][TABLE] = successor["parent_columns"][TABLE]
+        current["checks"].update(successor["checks"])
+    snapshot = _snapshot(current)
+    row = next(row for row in snapshot["constraints"] if row["constraint_name"] == CHECK[1])
+    row["check_clause"] = "FALSE" if show_create else clause
+    if show_create:
+        snapshot["show_create_tables"][TABLE] = create
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, context) == "exact"
+
+
+@pytest.mark.parametrize("old,new", [
+    ("charset utf8mb4", "charset latin1"),
+    ("charset utf8mb4", "charset utf8mb3"),
+    ("charset utf8mb4", "charset ascii"),
+    ("as char charset", "as char(20) charset"),
+    ("cast(`matching_plan_id` as char", "cast(`matching_segment_id` as char"),
+    ("cast(`matching_plan_id` as char charset utf8mb4)",
+     "cast(`matching_plan_id` as char charset utf8mb4) COLLATE utf8mb4_bin"),
+    ("'$.source.matching_plan_id'", "'$.source.another_id'"),
+    ("'$.source.matching_plan_id'", "'cast(matching_plan_id as char charset utf8mb4)'"),
+    ("'contract-render-source.v1'", "'contract-render-source.v2'"),
+    ("render_source_size_bytes > 0", "render_source_size_bytes >= 0"),
+    ("AND render_source_size_bytes IS NOT NULL", ""),
+    # Only the complete observed two-CAST rendering is admitted.
+    ("cast(`matching_plan_id` as char charset utf8mb4)", "cast(`matching_plan_id` as char)"),
+])
+@pytest.mark.parametrize("show_create", [False, True])
+def test_mysql8_rendering_does_not_hide_material_check_changes(old, new, show_create):
+    descriptor = migration._canonical_artifact_descriptor(ARTIFACT)
+    create, clause = _mysql8_render_source_fixture()
+    assert old in clause
+    snapshot = _snapshot(descriptor)
+    row = next(row for row in snapshot["constraints"] if row["constraint_name"] == CHECK[1])
+    row["check_clause"] = descriptor["checks"][CHECK] if show_create else clause.replace(old, new, 1)
+    if show_create:
+        snapshot["show_create_tables"][TABLE] = create.replace(old, new, 1)
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, ARTIFACT) == "drift"
+
+
+@pytest.mark.parametrize("damage,expected", [
+    ("missing_check", "partial"), ("not_enforced", "drift"),
+    ("missing_column", "drift"), ("wrong_column_type", "drift"),
+    ("missing_fk", "partial"), ("missing_guard", "partial"),
+    ("changed_guard", "drift"), ("other_check", "drift"),
+])
+def test_mysql8_rendering_retains_original_metadata_guards(damage, expected):
+    descriptor = migration._canonical_artifact_descriptor(ARTIFACT)
+    snapshot = _snapshot(descriptor)
+    _, clause = _mysql8_render_source_fixture()
+    row = next(row for row in snapshot["constraints"] if row["constraint_name"] == CHECK[1])
+    row["check_clause"] = clause
+    if damage == "missing_check":
+        snapshot["constraints"].remove(row)
+    elif damage == "not_enforced":
+        row["enforced"] = "NO"
+    elif damage == "missing_column":
+        snapshot["columns"] = [row for row in snapshot["columns"] if row["column_name"] != "render_source_snapshot"]
+    elif damage == "wrong_column_type":
+        next(row for row in snapshot["columns"] if row["column_name"] == "matching_plan_id")["column_type"] = "int"
+    elif damage == "missing_fk":
+        snapshot["constraints"] = [row for row in snapshot["constraints"] if row["constraint_name"] != "fk_contract_document_media_asset"]
+    elif damage == "missing_guard":
+        snapshot["triggers"] = snapshot["triggers"][1:]
+    elif damage == "changed_guard":
+        snapshot["triggers"][0]["action_statement"] = "BEGIN SET @changed=1; END"
+    else:
+        next(row for row in snapshot["constraints"] if row["constraint_name"] == "chk_contract_document_source")["check_clause"] = "TRUE"
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, ARTIFACT) == expected
+
+
+def test_mysql8_variant_is_bound_to_owner_key_and_complete_expected_contract():
+    descriptor = migration._canonical_artifact_descriptor(ARTIFACT)
+    _, clause = _mysql8_render_source_fixture()
+    snapshot = _snapshot(descriptor)
+    next(row for row in snapshot["constraints"] if row["constraint_name"] == CHECK[1])["check_clause"] = clause
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, "another-owner") == "drift"
+    assert migration._render_source_check_server_variants(ARTIFACT, ("another_table", CHECK[1]), descriptor["checks"][CHECK]) == ()
+    assert migration._render_source_check_server_variants(ARTIFACT, (TABLE, "another_check"), descriptor["checks"][CHECK]) == ()
+    descriptor["checks"][CHECK] = "media_asset_id IS NULL"
+    assert migration._render_source_check_server_variants(ARTIFACT, CHECK, descriptor["checks"][CHECK]) == ()
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, ARTIFACT) == "drift"
+
+
+def test_applied_drift_journal_remains_unmodified_and_exact_skip_stays_before_ddl_selection():
+    statement, = migration.split_sql((ROOT / "db/schema_parts" / ARTIFACT).read_text())
+    receipt = {"candidate_database": "synthetic-candidate", "schema_steps": [{
+        "part": ARTIFACT, "index": 1, "status": "applied",
+        "verification_status": "pending_part_completion", "after_part_state": "drift",
+        "statement_sha256": hashlib.sha256(statement.encode()).hexdigest(),
+    }]}
+    original = deepcopy(receipt)
+    assert ARTIFACT not in migration._receipt_resumable_partial_artifacts(receipt, "synthetic-candidate")
+    assert receipt == original
+    # Source-only proof: apply_schema's exact branch continues before selecting
+    # any statements. Do not execute apply_schema or a fake SQL cursor here.
+    tree = ast.parse(inspect.getsource(migration.apply_schema))
+    loop, = (node for node in ast.walk(tree) if isinstance(node, ast.For)
+             and isinstance(node.target, ast.Name) and node.target.id == "part")
+    selector = next(i for i, node in enumerate(loop.body)
+                    if isinstance(node, ast.Assign) and any(
+                        isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                        and call.func.id == "schema_statements_for_state" for call in ast.walk(node)))
+    exact, = (node for node in loop.body[:selector] if isinstance(node, ast.If)
+              and any(isinstance(compare, ast.Compare)
+                      and isinstance(compare.left, ast.Name) and compare.left.id == "before_state"
+                      and any(isinstance(value, ast.Constant) and value.value == "exact" for value in compare.comparators)
+                      for compare in ast.walk(node.test)))
+    assert isinstance(exact.body[-1], ast.Continue)
+    assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "execute" for child in exact.body for node in ast.walk(child))
