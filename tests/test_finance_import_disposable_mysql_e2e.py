@@ -64,9 +64,9 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
 
     client_account, staff_account = "9" * 16, "8" * 16
     scenarios = (
-        ("refund", "HC115701退款", client_account, 1200, 0),
-        ("staff-hc", "HC115702服務人員", staff_account, 12000, 0),
-        ("staff-a", "A115703服務人員", staff_account, 14000, 0),
+        ("refund", "HC115701退款", f"{client_account} Memo Test Client", 1200, 0),
+        ("staff-hc", "HC115702服務人員", f"{staff_account} Memo Test Staff", 12000, 0),
+        ("staff-a", "A115703服務人員", f"{staff_account} Memo Test Staff", 14000, 0),
         ("passbook-only", "", staff_account, 12000, 0),
         ("multiple-codes", "HC115702 HC115704", staff_account, 12000, 0),
         ("unknown-case", "HC115799退款", client_account, 1200, 0),

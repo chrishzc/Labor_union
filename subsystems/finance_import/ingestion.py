@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -31,11 +32,14 @@ from subsystems.finance_import.staging import stage_finance_rows
 _CLASSIFIER_VERSION = "finance-transaction-classifier-v5"
 _FINGERPRINT_VERSION = "finance-transaction-fingerprint-v1"
 _INITIAL_CLASSIFICATION_REASON = "initial_bank_classification"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
 class _IngestionProgress:
     phase: str = "normalization"
+    mutations_started: bool = False
+    commit_attempted: bool = False
 
 
 class FinanceImportAttemptError(RuntimeError):
@@ -65,10 +69,13 @@ def ingest_finance_workbook(
     started_at = _utc_timestamp()
     progress = _IngestionProgress()
     connection = connection_factory()
+    close_attempted = False
+    completed = False
     try:
         with connection.cursor() as cursor:
             replay = _find_replay_or_attempt(cursor, idempotency_key, command_fingerprint)
         if replay is not None:
+            completed = True
             return replay
         normalized_result = normalizer(str(source_path))
         if source_filename is not None:
@@ -96,27 +103,45 @@ def ingest_finance_workbook(
                 receipt,
                 started_at,
             )
+        progress.commit_attempted = True
         connection.commit()
-    except FinanceImportAttemptError:
-        connection.rollback()
-        raise
-    except _IdempotencyConflict as error:
-        connection.rollback()
-        raise ValueError("idempotency_conflict") from error
+        completed = True
     except Exception as error:
-        connection.rollback()
-        attempt = _record_failed_attempt(
-            connection_factory,
-            idempotency_key,
-            command_fingerprint,
-            source_digest,
-            progress.phase,
-            started_at,
-            _attempt_error_code(error),
-        )
-        raise FinanceImportAttemptError(attempt) from error
+        rolled_back = _cleanup_failed_connection(connection.rollback, error)
+        close_attempted = True
+        _cleanup_failed_connection(connection.close, error)
+        if isinstance(error, FinanceImportAttemptError):
+            raise
+        if isinstance(error, _IdempotencyConflict):
+            raise ValueError("idempotency_conflict") from error
+        # A failed COMMIT acknowledgement is unresolved even if a later rollback
+        # succeeds. After writes, a failed rollback is unresolved too. Preserve
+        # the original error and let the existing outcome query settle its key.
+        if not progress.commit_attempted and (rolled_back or not progress.mutations_started):
+            try:
+                attempt = _record_failed_attempt(
+                    connection_factory,
+                    idempotency_key,
+                    command_fingerprint,
+                    source_digest,
+                    progress.phase,
+                    started_at,
+                    _attempt_error_code(error),
+                )
+            except Exception as audit_error:
+                _retain_secondary_error(error, audit_error)
+            else:
+                # Another connection may already have committed this key. Its
+                # durable success must never be presented as a failed attempt.
+                if attempt.transaction_outcome == "rolled_back":
+                    raise FinanceImportAttemptError(attempt) from error
+        raise
     finally:
-        connection.close()
+        if not close_attempted:
+            if completed:
+                _close_completed_connection(connection)
+            else:
+                connection.close()
     return receipt
 
 
@@ -135,6 +160,7 @@ def _ingest_or_replay(
             return replace(replay, replayed=True)
         progress.phase = "staging"
         identity_maps = load_finance_identity_maps(cursor)
+        progress.mutations_started = True
         staged = stage_finance_rows(
             cursor,
             normalized_result,
@@ -497,6 +523,7 @@ def _record_failed_attempt(
     error_code: str,
 ) -> FinanceImportAttempt:
     connection = connection_factory()
+    close_attempted = False
     try:
         with connection.cursor() as cursor:
             attempt = _save_or_load_failed_attempt(
@@ -505,11 +532,41 @@ def _record_failed_attempt(
             )
         connection.commit()
         return attempt
-    except Exception:
-        connection.rollback()
+    except Exception as error:
+        _cleanup_failed_connection(connection.rollback, error)
+        close_attempted = True
+        _cleanup_failed_connection(connection.close, error)
         raise
     finally:
+        if not close_attempted:
+            _close_completed_connection(connection)
+
+
+def _cleanup_failed_connection(cleanup: Callable[[], Any], primary: Exception) -> bool:
+    try:
+        cleanup()
+    except Exception as secondary:
+        _retain_secondary_error(primary, secondary)
+        return False
+    return True
+
+
+def _retain_secondary_error(primary: Exception, secondary: Exception) -> None:
+    if secondary is primary:
+        return
+    # Preserve the driver's original cause/context exactly. Relinking cleanup
+    # exceptions can form cycles when a driver reuses an exception object. Notes
+    # retain safe diagnostics without copying raw connection details or PII.
+    primary.add_note(f"Finance Import secondary failure ({type(secondary).__name__})")
+
+
+def _close_completed_connection(connection: Any) -> None:
+    try:
         connection.close()
+    except Exception as error:
+        # Commit was acknowledged (or an immutable receipt was read). A local
+        # close failure cannot turn that known result into an ingestion failure.
+        _LOGGER.warning("Finance Import completed connection close failed (%s)", type(error).__name__)
 
 
 def _save_or_load_failed_attempt(
