@@ -188,7 +188,7 @@ class StaffAvailabilityWorkflow:
                     receipt = _replayed_receipt(replay, request_fingerprint)
                     unit_of_work.commit()
                     return receipt
-                receipt = self._apply_fresh(request, request_fingerprint, unit_of_work)
+                receipt = self._apply_fresh(request, request_fingerprint)
                 unit_of_work.commit()
                 return receipt
         except StaffAvailabilityReceiptRaceError:
@@ -207,12 +207,11 @@ class StaffAvailabilityWorkflow:
             unit_of_work.commit()
             return receipt
 
-    def _apply_fresh(self, request, request_fingerprint, unit_of_work):
+    def _apply_fresh(self, request, request_fingerprint):
         facts = self._repository.load_facts(request.intent, for_update=True)
         concurrent_replay = self._repository.load_receipt(request.idempotency_key)
         if concurrent_replay is not None:
             receipt = _replayed_receipt(concurrent_replay, request_fingerprint)
-            unit_of_work.commit()
             return receipt
         _require_version(facts.aggregate_version, request.expected_version)
         preview = build_staff_availability_preview(request.intent, facts)

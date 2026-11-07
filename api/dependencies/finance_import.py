@@ -202,10 +202,13 @@ def get_finance_import_query_service():
 
 def get_statement_archive_application():
     from infrastructure.mysql.finance_statement_archive_repository import MySqlStatementArchiveRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from subsystems.finance_import.statement_archive import StatementArchiveApplication
     connection = get_connection()
     try:
-        yield StatementArchiveApplication(MySqlStatementArchiveRepository(connection))
+        yield StatementArchiveApplication(
+            MySqlStatementArchiveRepository(connection), lambda: MySqlUnitOfWork(connection)
+        )
     finally:
         connection.close()
 
@@ -217,6 +220,15 @@ def get_accounting_workspace():
         yield build_accounting_workspace(connection)
     finally:
         connection.close()
+
+
+def get_case_manual_supplement_application(workspace=Depends(get_accounting_workspace)):
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+    from subsystems.finance_import.case_manual_supplement_application import CaseManualSupplementApplication
+    connection = workspace.state.connection
+    return CaseManualSupplementApplication(CaseManualSupplementService(connection), workspace.query,
+        lambda: MySqlUnitOfWork(connection))
 
 
 def get_monthly_accounting_query(application=Depends(get_accounting_workspace)):

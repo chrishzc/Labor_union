@@ -6,9 +6,10 @@ Description: 以單一外層交易保存受控檔案 staging、版本與 Apply r
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 from typing import Any
 import uuid
 from infrastructure.file.storage_layout import (
@@ -37,8 +38,9 @@ from subsystems.controlled_files.workflow import (
     ControlledFileStagingFacts,
     StoredControlledFileApplyReceipt,
     StageControlledFile,
+    ControlledFileWorkflowError,
 )
-from subsystems.controlled_files.reconciliation import ControlledFileReconciliationEvent
+from subsystems.controlled_files.reconciliation import ControlledFileReconciliationEvent, CommittedControlledFileApplyEvidence
 from subsystems.controlled_files.gc import ControlledFileGcCandidate, ControlledFileGcError
 from subsystems.controlled_files.cleanup import (
     CleanupControlledFileStaging,
@@ -46,6 +48,7 @@ from subsystems.controlled_files.cleanup import (
     ControlledFileCleanupReceipt,
     ControlledFileCleanupTerminal,
     StoredControlledFileCleanup,
+    ControlledFileCleanupError,
 )
 
 
@@ -59,9 +62,7 @@ _OWNER_SUBJECT_SQL = {
         "SELECT 1 AS present FROM staff WHERE %s REGEXP '^[1-9][0-9]*$' "
         "AND id=CAST(%s AS UNSIGNED)"
     ),
-    ControlledFileOwner.LINE_INTEGRATION: (
-        "SELECT 1 AS present FROM line_rich_menu_publications WHERE menu_config_id=%s"
-    ),
+    # LINE uses its typed current configuration owner in owner_subject_exists.
 }
 
 
@@ -142,6 +143,15 @@ class MySqlControlledFileWorkflowRepository:
     def owner_subject_exists(
         self, intent: ControlledFileIntent, *, for_update: bool
     ) -> bool:
+        if intent.owner is ControlledFileOwner.LINE_INTEGRATION:
+            from domains.line.configuration import LineConfigurationKind
+            from infrastructure.mysql.line_configuration_publication_repository import MySqlLineConfigurationRepository
+            from subsystems.line.message_configuration import configuration_definition
+            from subsystems.line.rich_menu_models import LineMenusConfig
+            snapshot = MySqlLineConfigurationRepository(self._connection).get(
+                LineConfigurationKind.RICH_MENUS, for_update=for_update)
+            configuration = LineMenusConfig.model_validate(configuration_definition(snapshot))
+            return any(menu.id == intent.subject_reference for menu in configuration.menus)
         statement = _OWNER_SUBJECT_SQL[intent.owner] + _lock_suffix(for_update)
         parameters = (
             (intent.subject_reference, intent.subject_reference)
@@ -324,9 +334,10 @@ class MySqlControlledFileWorkflowRepository:
             row = cursor.fetchone()
         return None if row is None else _readback(row)
 
-    def list_readbacks(self) -> tuple[ControlledFileReadback, ...]:
+    def list_readbacks(self, *, limit: int | None = None) -> tuple[ControlledFileReadback, ...]:
+        statement, parameters = _bounded_readback_list_query(limit)
         with self._connection.cursor() as cursor:
-            cursor.execute(_READBACK_LIST_SQL)
+            cursor.execute(statement, parameters)
             rows = cursor.fetchall()
         return tuple(_readback(row) for row in rows)
 
@@ -357,17 +368,102 @@ class MySqlControlledFileWorkflowRepository:
             row = cursor.fetchone()
         return None if row is None else _stored_receipt(row).receipt
 
+    def get_committed_apply_evidence(self, file_id: str) -> CommittedControlledFileApplyEvidence | None:
+        """Read this exact file's own immutable receipt; never infer a business fact."""
+        if not isinstance(file_id, str) or re.fullmatch(r"cf_[0-9a-f]{32}", file_id) is None:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(_COMMITTED_APPLY_EVIDENCE_SQL, (file_id,))
+            rows = tuple(cursor.fetchall())
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ControlledFileWorkflowError("controlled_file_receipt_corrupt", "受控檔案收據來源不唯一")
+        return _committed_apply_evidence(rows[0])
+
     def list_staging_gc_candidates(
         self, *, limit: int, observed_at: datetime
     ) -> tuple[ControlledFileGcCandidate, ...]:
-        """Fail closed until every reference and active lease is authoritative."""
+        """Select only governed staging identities; every registered object is protected.
+
+        Object existence protects every owner, including owners whose business
+        references are stored outside the Scheduling-only 1015 reference table.
+        This query never treats an arbitrary NAS path as unreferenced staging.
+        """
         if isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("controlled file GC limit must be between 1 and 100")
-        _ = _mysql_utc(observed_at)
-        raise ControlledFileGcError(
-            "controlled_file_gc_reference_authority_not_ready",
-            "附件 reference 與 active lease SSOT 尚未完成，GC 不得推定零 reference／零 lease",
-        )
+        with self._connection.cursor() as cursor:
+            now = _mysql_utc(observed_at)
+            cursor.execute(_GC_CANDIDATES_SQL, (now, now - timedelta(minutes=30), now, now, limit))
+            rows = tuple(cursor.fetchall())
+        return tuple(_gc_candidate(row) for row in rows)
+
+    def reconciliation_reference_status(self, file_id):
+        target = self.get_download_reference(file_id)
+        if target is None:
+            return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+        readback = target.readback
+        if readback.owner is ControlledFileOwner.STAFF and readback.purpose in {
+            ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM,
+        }:
+            from infrastructure.mysql.staff_profile_query_repository import MySqlStaffProfileQueryRepository
+            from subsystems.staff.profile_query import StaffProfileQueryApplication, StaffProfileNotFound
+            try:
+                staff_id = int(readback.subject_reference)
+                if staff_id <= 0 or str(staff_id) != readback.subject_reference:
+                    return _staff_saved_document_reference_status(readback, None)
+                page = StaffProfileQueryApplication(MySqlStaffProfileQueryRepository(self._connection)).query_saved_documents(
+                    staff_id, file_id=file_id)
+            except (StaffProfileNotFound, ValueError):
+                page = None
+            return _staff_saved_document_reference_status(readback, page)
+        if readback.owner is ControlledFileOwner.STAFF and readback.purpose is ControlledFilePurpose.STAFF_RESUME:
+            from infrastructure.mysql.staff_profile_query_repository import MySqlStaffProfileQueryRepository
+            from subsystems.staff.profile_query import StaffProfileQueryApplication, StaffProfileNotFound, query_current_staff_resume
+            try:
+                staff_id = int(readback.subject_reference)
+                if staff_id <= 0 or str(staff_id) != readback.subject_reference:
+                    return _staff_resume_reference_status(readback, None)
+                current = query_current_staff_resume(
+                    StaffProfileQueryApplication(MySqlStaffProfileQueryRepository(self._connection)), self, staff_id)
+            except StaffProfileNotFound:
+                current = None
+            except ValueError:
+                return _staff_resume_reference_status(readback, None)
+            return _staff_resume_reference_status(readback, current)
+        if readback.owner is ControlledFileOwner.LINE_INTEGRATION and readback.purpose is ControlledFilePurpose.RICH_MENU_BACKGROUND:
+            from infrastructure.mysql.line_media_asset_query_repository import MySqlLineRichMenuMediaAssetQueryRepository
+            from infrastructure.mysql.line_configuration_publication_repository import MySqlLineRichMenuPublicationRepository
+            try:
+                reference = MySqlLineRichMenuMediaAssetQueryRepository(self._connection).get_controlled_file_reference(file_id)
+            except (ValueError, TypeError):
+                reference = None
+            try:
+                published = (reference is not None and
+                    MySqlLineRichMenuPublicationRepository(self._connection).controlled_image_publication_matches(reference))
+            except (ValueError, TypeError):
+                published = False
+            return _rich_menu_reference_status(readback, reference, published)
+        if readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose in {
+            ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+        }:
+            from infrastructure.db.contract_external_signing_repository import MySqlContractExternalSigningRepository
+            from subsystems.contract_signing.external_signing_contracts import ExternalSigningTypedError
+            try:
+                reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(
+                    file_id, apply_evidence_reader=self)
+            except ExternalSigningTypedError:
+                # Malformed owner lineage is unavailable authority, not a match
+                # or an exemption. Infrastructure errors still propagate to 503.
+                reference = None
+            return _contract_reference_status(readback, reference)
+        if readback.owner is not ControlledFileOwner.SCHEDULING or readback.purpose not in {
+            ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
+        }:
+            return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+        from infrastructure.mysql.service_day_log_photo_reference_repository import MySqlSubmittedServiceDayLogPhotoRepository
+        reference = MySqlSubmittedServiceDayLogPhotoRepository(self._connection).get_submitted_photo_reference(file_id)
+        return _scheduling_photo_reference_status(readback, reference)
 
     def append_reconciliation_event(
         self, event: ControlledFileReconciliationEvent
@@ -465,6 +561,20 @@ class MySqlControlledFileWorkflowRepository:
         event_id = _cleanup_event_id(cleanup_id, 1)
         occurred = _mysql_utc(occurred_at)
         with self._connection.cursor() as cursor:
+            # The same staging mutex is taken by registration and lease writers.
+            # Recheck after Preview; a stale zero-reference observation is unsafe.
+            cursor.execute(_CLEANUP_STAGING_LOCK_SQL, (command.staging_id,))
+            target = cursor.fetchone()
+            if not isinstance(target, Mapping):
+                raise ControlledFileCleanupError("controlled_file_staging_not_found", "指定暫存檔案不存在")
+            cursor.execute("SELECT id FROM controlled_file_objects WHERE source_staging_id=%s FOR UPDATE", (target["id"],))
+            objects = tuple(cursor.fetchall())
+            cursor.execute(
+                "SELECT id FROM controlled_file_leases WHERE staging_object_id=%s "
+                "AND lease_state='active' AND expires_at_utc>%s FOR UPDATE", (target["id"], occurred),
+            )
+            leases = tuple(cursor.fetchall())
+            _require_cleanup_safe({**target, "object_count": len(objects), "active_lease_count": len(leases)}, command, occurred_at)
             cursor.execute(
                 _CLEANUP_INTENT_INSERT_SQL,
                 (
@@ -633,6 +743,29 @@ def _readback(row: Mapping[str, object]) -> ControlledFileReadback:
     )
 
 
+def _bounded_readback_list_query(limit):
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 100):
+        raise ValueError("controlled file list limit must be between 1 and 100")
+    return _READBACK_LIST_SQL + " LIMIT %s", (100 if limit is None else limit,)
+
+
+def _committed_apply_evidence(row):
+    try:
+        if (row["command_type"] != "controlled_file_apply" or row["schema_version"] != "controlled-file-apply-receipt.v1"
+            or row["outcome_state"] != "created"
+            or any(type(row[key]) is not int or row[key] <= 0
+                   for key in ("object_database_id", "controlled_object_id", "source_staging_id", "staging_object_id"))
+            or row["controlled_object_id"] != row["object_database_id"]
+            or row["staging_object_id"] != row["source_staging_id"]
+            or row["receipt_actor_ref"] != row["object_actor_ref"]):
+            raise ValueError("receipt binding mismatch")
+        stored = _stored_receipt(row)
+        return CommittedControlledFileApplyEvidence(stored.receipt, IdempotencyKey(row["idempotency_key"]),
+            ActorContext(row["receipt_actor_ref"]), CorrelationId(row["correlation_id"]))
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        raise ControlledFileWorkflowError("controlled_file_receipt_corrupt", "受控檔案收據與不可變檔案來源不一致") from None
+
+
 def _stored_receipt(row: Mapping[str, object]) -> StoredControlledFileApplyReceipt:
     receipt = ControlledFileApplyReceipt(
         receipt_id=str(row["receipt_id"]),
@@ -715,7 +848,9 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
             return f"{MEDIA_DIRECTORY}/rich_menus/選單底圖_{subject}_v{version}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.CONTRACT_SIGNING:
             label = "客戶合約" if "client" in candidate.object_key else "月嫂承攬協議" if "staff" in candidate.object_key else "案件合約"
-            status = "已簽署" if candidate.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT else "未簽署"
+            status = "已簽署" if candidate.purpose in {
+                ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+            } else "未簽署"
             return f"{ORDERS_DIRECTORY}/{subject}/{label}_{subject}_v{version}_{status}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.SCHEDULING:
             return f"{SCHEDULING_DIRECTORY}/{subject}/服務確認_{subject}_v{version}_{digest}{extension}"
@@ -792,6 +927,160 @@ def _lock_suffix(lock: bool) -> str:
     return " FOR UPDATE" if lock else ""
 
 
+def _gc_candidate(row):
+    required = ("staging_id", "staging_version", "content_sha256", "expires_at_utc",
+                "staging_state", "object_count", "active_lease_count")
+    if any(name not in row for name in required):
+        raise ControlledFileGcError("controlled_file_gc_reference_authority_not_ready", "暫存參照資料不完整")
+    counts = (row["object_count"], row["active_lease_count"])
+    if any(type(value) is not int or value < 0 for value in counts):
+        raise ControlledFileGcError("controlled_file_gc_reference_authority_not_ready", "暫存參照資料無法判讀")
+    return ControlledFileGcCandidate(
+        str(row["staging_id"]), int(row["staging_version"]), str(row["content_sha256"]),
+        _aware_utc(row["expires_at_utc"]),
+        ControlledFileStagingRegistrationStatus.UNREGISTERED if row["staging_state"] == "staged" and not row["object_count"]
+        else ControlledFileStagingRegistrationStatus.REGISTERED,
+        row["object_count"], bool(row["active_lease_count"]),
+    )
+
+
+def _contract_reference_status(readback, reference):
+    applicable = (readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose in {
+        ControlledFilePurpose.FINAL_SIGNED_CONTRACT, ControlledFilePurpose.SIGNED_STAFF_AGREEMENT,
+    })
+    if reference is None:
+        return {"business_reference": "unavailable", "frozen_completion_reference": "unavailable",
+                "external_completion_reference": "unavailable",
+                "outbound_reference": "not_applicable" if applicable else "unavailable"}
+    matched = (applicable and reference.file_id == readback.file_id and reference.case_no == readback.subject_reference
+               and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
+               and reference.purpose is readback.purpose
+               and readback.mime_type == "application/pdf" and reference.current)
+    frozen = matched and reference.completion_receipt_present and reference.file_version == readback.version
+    filename_bound = reference.filename is not None and reference.filename == readback.filename
+    test_only = (readback.filename.startswith("TEST-ONLY-")
+                 or reference.filename is not None and reference.filename.startswith("TEST-ONLY-"))
+    # Spec21's 2026-09-09 final-PDF ruling makes the closed completed owner
+    # receipt/readback aggregate evidence of both parties' signatures; §2026-10-14
+    # permits separate exact members but TEST-ONLY skip is never real signing.
+    # The owner reader binds this filename to the immutable object/member and
+    # proves root/session/receipt/target/hash lineage. A normal name alone proves
+    # nothing. Preserve the real freeze even for test-only completion receipts.
+    completion = ("test_only" if test_only else "matched" if frozen and filename_bound else "unavailable")
+    return {"business_reference": "matched" if matched else "mismatch",
+            "frozen_completion_reference": "matched" if frozen else "unavailable",
+            "external_completion_reference": completion,
+            # The system neither integrates nor simulates the external signing
+            # provider (spec21 2026-08-25); this is no provider-delivery receipt.
+            "outbound_reference": "not_applicable" if applicable else "unavailable"}
+
+
+def _staff_resume_reference_status(readback, current):
+    # This is the exact current file returned by the Staff-owned page consumer,
+    # never a basename match or a claimed qualification/medical attachment.
+    applicable = (readback.owner is ControlledFileOwner.STAFF
+        and readback.purpose is ControlledFilePurpose.STAFF_RESUME)
+    matched = (applicable and current is not None and current.owner is ControlledFileOwner.STAFF
+        and current.purpose is ControlledFilePurpose.STAFF_RESUME
+        and current.file_id == readback.file_id and current.subject_reference == readback.subject_reference
+        and current.version == readback.version and current.sha256_digest == readback.sha256_digest
+        and current.size_bytes == readback.size_bytes and current.mime_type == readback.mime_type == "application/pdf")
+    # Spec19 (2026-10-30) retires LINE resume delivery and assigns transmission
+    # offline; spec33 §4 retains this internal PDF query/version/upload/download.
+    # Under spec30 §12's "external evidence if applicable", only this existing
+    # consumer is N/A. It proves neither human nor provider delivery and does
+    # not exempt other Staff purposes, ContractSigning or LINE publications.
+    return {"business_reference": "matched" if matched else "mismatch",
+            "outbound_reference": "not_applicable" if applicable else "unavailable"}
+
+
+def _rich_menu_reference_status(readback, reference, published):
+    if reference is None:
+        return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+    matched = (reference.file_id == readback.file_id and reference.menu_definition_id == readback.subject_reference
+        and reference.version == readback.version and reference.sha256_digest == readback.sha256_digest
+        and reference.size_bytes == readback.size_bytes and reference.mime_type == readback.mime_type == "image/png"
+        and reference.selectable)
+    return {"business_reference": "matched" if matched else "mismatch",
+            "outbound_reference": "matched" if matched and published else "unavailable"}
+
+
+def _staff_saved_document_reference_status(readback, page):
+    if readback.owner is not ControlledFileOwner.STAFF or readback.purpose not in {
+        ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM,
+    }:
+        return {"business_reference": "mismatch", "outbound_reference": "unavailable"}
+    if page is None or page.status != "available":
+        return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+    # The original Staff profile consumes this exact collection. File presence
+    # never proves a clinical result, qualification, expiry or external delivery.
+    matched = any(item.staff_id == int(readback.subject_reference) and item.file_id == readback.file_id
+        and item.purpose is readback.purpose and item.version == readback.version
+        and item.sha256_digest == readback.sha256_digest and item.size_bytes == readback.size_bytes
+        and item.mime_type == readback.mime_type and item.filename == readback.filename for item in page.items)
+    return {"business_reference": "matched" if matched else "mismatch", "outbound_reference": "unavailable"}
+
+
+def _scheduling_photo_reference_status(readback, reference):
+    unknown = {"business_reference": "unavailable", "owner_submission_reference": "unavailable", "outbound_reference": "unavailable"}
+    if reference is None:
+        return unknown
+    matched = (readback.owner is ControlledFileOwner.SCHEDULING
+        and readback.purpose in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}
+        and reference.attachment_kind == readback.purpose.value and reference.case_no == readback.subject_reference
+        and reference.file_id == readback.file_id and reference.version == readback.version
+        and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
+        and reference.mime_type == readback.mime_type
+        and type(reference.log_id) is int and reference.log_id > 0
+        and reference.owner_submission_reference == f"scheduling-service-day-log:{reference.log_id}")
+    if not matched:
+        return unknown
+    # Spec20 §5.4 owns this submitted Scheduling record and prohibits photos in
+    # LINE payload/URLs. With its real submitted event and exact frozen tuple,
+    # external photo sending is not applicable under spec30 §12. This proves
+    # neither provider delivery nor an inbox/token verification receipt.
+    return {"business_reference": "matched", "owner_submission_reference": "matched",
+            "owner_submission_reference_id": reference.owner_submission_reference, "outbound_reference": "not_applicable"}
+
+
+def _require_cleanup_safe(row, command, observed_at):
+    candidate = _gc_candidate(row)
+    now = _aware_utc(observed_at)
+    if (candidate.staging_id != command.staging_id
+        or candidate.staging_version != command.expected_staging_version.value
+        or candidate.expected_sha256 != command.expected_sha256):
+        raise ControlledFileCleanupError("controlled_file_cleanup_staging_conflict", "暫存檔案已變更")
+    if candidate.registration_status is not ControlledFileStagingRegistrationStatus.UNREGISTERED or candidate.reference_count:
+        raise ControlledFileCleanupError("controlled_file_cleanup_referenced", "正式或已引用的檔案不可清理")
+    if candidate.active_lease:
+        raise ControlledFileCleanupError("controlled_file_cleanup_leased", "檔案仍有有效租約")
+    created_at = row.get("created_at_utc")
+    if not isinstance(created_at, datetime) or _aware_utc(created_at) > now - timedelta(minutes=30):
+        raise ControlledFileCleanupError("controlled_file_cleanup_minimum_age", "暫存檔案尚未符合最小保留時間")
+    if command.reason is ControlledFileStagingCleanupReason.EXPIRED and candidate.expires_at > now:
+        raise ControlledFileCleanupError("controlled_file_cleanup_not_expired", "暫存檔案尚未到期")
+
+
+_GC_CANDIDATES_SQL = (
+    "SELECT staging.staging_id,staging.staging_version,staging.content_sha256,"
+    "staging.expires_at_utc,staging.staging_state,"
+    "(SELECT COUNT(*) FROM controlled_file_objects object WHERE object.source_staging_id=staging.id) object_count,"
+    "(SELECT COUNT(*) FROM controlled_file_leases lease WHERE lease.staging_object_id=staging.id "
+    "AND lease.lease_state='active' AND lease.expires_at_utc>%s) active_lease_count "
+    "FROM controlled_file_staging_objects staging WHERE staging.staging_state='staged' "
+    "AND staging.created_at_utc<=%s AND staging.expires_at_utc<=%s "
+    "AND NOT EXISTS (SELECT 1 FROM controlled_file_objects registered WHERE registered.source_staging_id=staging.id) "
+    "AND NOT EXISTS (SELECT 1 FROM controlled_file_leases active WHERE active.staging_object_id=staging.id "
+    "AND active.lease_state='active' AND active.expires_at_utc>%s) "
+    # Oldest expiry first keeps protected/young rows from starving eligible orphans.
+    "ORDER BY staging.expires_at_utc,staging.id LIMIT %s"
+)
+_CLEANUP_STAGING_LOCK_SQL = (
+    "SELECT id,staging_id,staging_version,content_sha256,staging_state,created_at_utc,expires_at_utc "
+    "FROM controlled_file_staging_objects WHERE staging_id=%s FOR UPDATE"
+)
+
+
 _STAGING_SELECT_SQL = (
     "SELECT staging_id,owner_type,subject_reference,object_key,purpose,logical_folder,"
     "original_filename,content_type,size_bytes,content_sha256,"
@@ -844,7 +1133,7 @@ _READBACK_COLUMNS = (
     "o.created_at_utc AS applied_at_utc"
 )
 _READBACK_SELECT_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o WHERE o.opaque_object_id=%s"
-_READBACK_LIST_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o ORDER BY o.id DESC LIMIT 100"
+_READBACK_LIST_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o ORDER BY o.id DESC"
 _CURRENT_READBACK_SELECT_SQL = (
     "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o "
     "WHERE o.owner_type=%s AND o.purpose=%s AND o.subject_reference=%s "
@@ -860,6 +1149,13 @@ _RECEIPT_SELECT_SQL = (
     + _READBACK_COLUMNS
     + " FROM controlled_file_apply_receipts r JOIN controlled_file_objects o "
     "ON o.id=r.controlled_object_id WHERE r.idempotency_key=%s"
+)
+_COMMITTED_APPLY_EVIDENCE_SQL = (
+    "SELECT r.receipt_id,r.command_type,r.schema_version,r.command_fingerprint,r.result_snapshot,r.outcome_state,"
+    "r.idempotency_key,r.actor_ref AS receipt_actor_ref,r.correlation_id,r.controlled_object_id,r.staging_object_id,"
+    "o.id AS object_database_id,o.source_staging_id,o.created_by_actor AS object_actor_ref," + _READBACK_COLUMNS
+    + " FROM controlled_file_apply_receipts r JOIN controlled_file_objects o ON o.id=r.controlled_object_id "
+    "WHERE o.opaque_object_id=%s LIMIT 2"
 )
 _RECEIPT_ID_SELECT_SQL = (
     "SELECT r.receipt_id,r.command_type,r.schema_version,r.command_fingerprint,r.result_snapshot,"

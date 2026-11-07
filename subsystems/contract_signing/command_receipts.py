@@ -9,7 +9,7 @@ from typing import Any
 
 def append_command_receipt(
     connection: Any, *, idempotency_key: str, command_kind: str, case_no: str,
-    document_version_id: int, signing_event_id: int, correlation_id: str,
+    document_version_id: int, signing_event_id: int | None, correlation_id: str,
     result_snapshot: dict[str, object],
 ) -> None:
     with connection.cursor() as cursor:

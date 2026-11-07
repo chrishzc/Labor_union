@@ -2,15 +2,19 @@
 from dataclasses import asdict
 from io import BytesIO
 from typing import Annotated, Literal
-from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+from subsystems.finance_import.case_manual_supplement import ManualSupplementBlocked
+from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
+from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
+from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
+from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationError
 
 from fastapi import APIRouter, Depends, Header, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from openpyxl import Workbook
 from pymysql import MySQLError
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application, get_monthly_accounting_query
+from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application, get_monthly_accounting_query, get_case_manual_supplement_application
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.finance_import import (
@@ -23,12 +27,26 @@ from domains.finance_import.statement_archive import STATEMENT_COLUMNS
 from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning, ArrangementNotReady
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
-from subsystems.finance_import.statement_archive import StatementCommandConflict
+from subsystems.finance_import.statement_archive import StatementCommandConflict, ManualStatementReplacementRequired
 
 router = APIRouter()
 
 
 def _error(error):
+    if isinstance(error, ManualStatementReplacementRequired):
+        return typed_http_error(422, "domain_blocked", error.code,
+            "請從案件帳務抽屜使用手動補登，選擇本案期款後完成正式核銷。", "finance-workspace")
+    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError)):
+        envelope = error.error
+        status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500,
+                  "not_found": 404, "forbidden": 403}.get(envelope.category.value, 422)
+        response = typed_http_error(status, envelope.category.value, envelope.code,
+                                    envelope.message, envelope.correlation_id.value,
+                                    retryable=envelope.retryable)
+        response.detail["error"]["domain_blockers"] = list(envelope.domain_blockers)
+        return response
+    if isinstance(error, ClientReceiptRepositoryUnavailable):
+        return typed_http_error(503, "unavailable", "accounting_unavailable", "帳務資料暫時無法取得，請稍後重試。", "finance-workspace", retryable=True)
     if isinstance(error, MonthlyAccountingUnavailable):
         return typed_http_error(503, "unavailable", "accounting_scope_unavailable", "部分銀行款跨統計範圍，尚缺正式分配金額，無法提供正確合計。請調整案件類別或核對原始款項。", "finance-workspace")
     if isinstance(error, ValueError) and str(error).startswith("invalid_accounting_"):
@@ -349,6 +367,13 @@ class CaseManualSupplementBody(BaseModel):
     amount_ntd: int = Field(gt=0)
     transaction_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     reason: str | None = Field(default=None, max_length=500)
+    allow_overage_disposition: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_overage_direction(self):
+        if self.allow_overage_disposition and self.direction not in {"client_receipt", "client_refund"}:
+            raise ValueError("invalid_client_receipt_intent")
+        return self
 
 
 @router.post("/cases/{case_no}/manual-supplement", response_model=BaseResponse[CaseAccountingView])
@@ -357,11 +382,12 @@ def create_case_manual_supplement(
     case_no: str,
     idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
     principal=Depends(require_admin),
-    application=Depends(get_accounting_workspace),
+    application=Depends(get_case_manual_supplement_application),
 ):
     try:
-        service = CaseManualSupplementService(application.state.connection)
-        service.execute(
+        def readback(case):
+            return BaseResponse(data=_case_view(case), message="人工補登成功，期款已自動銷帳")
+        return application.execute(
             case_no=case_no,
             bank=body.bank,
             direction=body.direction,
@@ -371,12 +397,8 @@ def create_case_manual_supplement(
             reason=body.reason,
             idempotency_key=idempotency_key,
             actor=_actor(principal),
+            allow_overage_disposition=body.allow_overage_disposition,
+            readback=readback,
         )
-        application.state.connection.commit()
-        return BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
-    except (LookupError, ValueError, MySQLError) as error:
-        try:
-            application.state.connection.rollback()
-        except Exception:
-            pass
+    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError, ClientReceiptRepositoryUnavailable) as error:
         raise _error(error) from None

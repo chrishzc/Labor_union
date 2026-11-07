@@ -13,7 +13,7 @@ from typing import Callable, Protocol
 
 from shared_kernel.clock import BusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from shared_kernel.identities import ActorContext, CorrelationId
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
 from subsystems.controlled_files.contracts import (
     ControlledFileStorageError,
@@ -23,6 +23,7 @@ from subsystems.controlled_files.contracts import (
 from subsystems.controlled_files.workflow import (
     ControlledFileDownloadReference,
     ControlledFileStagingFacts,
+    ControlledFileApplyReceipt,
 )
 
 
@@ -32,6 +33,19 @@ class ControlledFileReconciliationOutcome(str, Enum):
     DIGEST_MISMATCH = "digest_mismatch"
     ORPHAN_OBJECT = "orphan_object"
     STILL_WRITING = "still_writing"
+
+
+@dataclass(frozen=True, slots=True)
+class CommittedControlledFileApplyEvidence:
+    """The original immutable per-file Apply receipt and command provenance."""
+    receipt: ControlledFileApplyReceipt
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    correlation_id: CorrelationId
+
+
+class CommittedControlledFileApplyEvidenceReader(Protocol):
+    def get_committed_apply_evidence(self, file_id: str) -> CommittedControlledFileApplyEvidence | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +96,13 @@ class ControlledFileReconciler:
         actor: ActorContext,
         correlation_id: CorrelationId,
     ) -> ControlledFileReconciliationEvent:
+        return self._observe_registered(file_id, actor=actor, correlation_id=correlation_id, persist=True)
+
+    def preview_registered(self, file_id: str, *, actor: ActorContext, correlation_id: CorrelationId):
+        """Read integrity without finalize, writes, or a durable observation event."""
+        return self._observe_registered(file_id, actor=actor, correlation_id=correlation_id, persist=False)
+
+    def _observe_registered(self, file_id, *, actor, correlation_id, persist):
         target = self._repository.get_download_reference(file_id)
         if target is None:
             raise ControlledFileStorageError(
@@ -96,7 +117,7 @@ class ControlledFileReconciler:
             # mutates the owner Domain.  Older adapters can still be audited
             # through their verified-read operation.
             finalize = getattr(self._storage, "finalize_staged", None)
-            if callable(finalize):
+            if persist and callable(finalize):
                 observed = finalize(
                     target.staging_id,
                     expected_sha256=target.readback.sha256_digest,
@@ -106,9 +127,11 @@ class ControlledFileReconciler:
                     target.staging_id,
                     expected_sha256=target.readback.sha256_digest,
                 )
-            outcome = ControlledFileReconciliationOutcome.EXACT
             digest = observed.sha256_digest
             size_bytes = len(observed.content)
+            outcome = (ControlledFileReconciliationOutcome.EXACT
+                       if digest == target.readback.sha256_digest and size_bytes == target.readback.size_bytes
+                       else ControlledFileReconciliationOutcome.DIGEST_MISMATCH)
         except ControlledFileStorageError as error:
             if error.code == "controlled_file_staging_not_found":
                 outcome = ControlledFileReconciliationOutcome.MISSING_OBJECT
@@ -134,7 +157,8 @@ class ControlledFileReconciler:
             correlation_id=correlation_id,
             observed_at=_utc(self._clock.now()),
         )
-        self._append(event)
+        if persist:
+            self._append(event)
         return event
 
     def reconcile_unregistered_staging(
@@ -251,6 +275,8 @@ def _utc(value: datetime) -> datetime:
 
 
 __all__ = [
+    "CommittedControlledFileApplyEvidence",
+    "CommittedControlledFileApplyEvidenceReader",
     "ControlledFileReconciler",
     "ControlledFileReconciliationEvent",
     "ControlledFileReconciliationOutcome",

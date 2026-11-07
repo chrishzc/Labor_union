@@ -45,6 +45,7 @@ from subsystems.contract_signing.staff_contract_application import (
     SendStaffContractCommand,
     StaffContractSigningApplication,
 )
+from subsystems.contract_signing.unsigned_contract_pdf import UnsignedContractPdfError
 from subsystems.contract_signing.document_query import (
     ContractSigningDocumentQueryApplication,
     ContractSigningStatus,
@@ -252,7 +253,7 @@ def download_contract_document(
         document = application.find_document_for_download(case_no, document_version_id)
         if document is None:
             raise ValueError("contract_document_not_found")
-        content = read_archived_contract_document(
+        content = document.inline_content if document.inline_content is not None else read_archived_contract_document(
             storage_root=_archive_root(), storage_key=document.storage_key,
             expected_sha256=document.sha256,
         )
@@ -272,6 +273,9 @@ def download_contract_document(
                 f"filename*=UTF-8''{quote(filename, safe='')}"
             ),
         })
+    except UnsignedContractPdfError as error:
+        raise typed_http_error(404 if error.category == "not_found" else 503 if error.retryable else 409, error.category, error.code,
+            str(error), f"contract-document:{document_version_id}", retryable=error.retryable) from error
     except (ValueError, OSError) as error:
         raise typed_http_error(
             404,
@@ -295,6 +299,9 @@ def _response(operation, message: str, correlation_id: str) -> BaseResponse[Cont
             ),
             message=message,
         )
+    except UnsignedContractPdfError as error:
+        raise typed_http_error(404 if error.category == "not_found" else 503 if error.retryable else 409,
+            error.category, error.code, str(error), correlation_id, retryable=error.retryable) from error
     except ValueError as error:
         code = str(error) or "contract_signing_validation_error"
         status_code = 409 if code in _DOMAIN_BLOCKER_CODES else 422

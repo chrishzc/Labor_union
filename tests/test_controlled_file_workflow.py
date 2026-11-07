@@ -6,7 +6,7 @@ Description: 驗證受控檔案 Preview/Apply 的 fresh-read、outer UoW、重�
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -35,6 +35,8 @@ from subsystems.controlled_files.workflow import (
     ControlledFileDownloadReference,
     StageControlledFile,
     StoredControlledFileApplyReceipt,
+    FILE_PURPOSE_REGISTRY,
+    FilePurposePolicy,
 )
 
 
@@ -195,6 +197,165 @@ class FakeRepository:
 
     def get_receipt(self, receipt_id):
         return None if self.receipt is None else self.receipt.receipt
+
+
+def test_current_purpose_registry_matches_formal_nine_without_legacy_permanent_outputs():
+    assert {purpose.value for purpose in FILE_PURPOSE_REGISTRY} == {
+        "final_signed_contract", "signed_staff_agreement", "staff_resume", "staff_certificate",
+        "staff_health_exam", "baby_log_photo", "meal_photo", "rich_menu_background", "database_backup",
+    }
+    assert FILE_PURPOSE_REGISTRY[ControlledFilePurpose.DATABASE_BACKUP].owner_domain == "global_migration"
+
+
+def test_purpose_policies_define_the_formal_contract_without_claiming_dr_readiness():
+    assert {field.name for field in fields(FilePurposePolicy)} == {
+        "owner_domain", "file_format", "source_of_truth", "generation_cadence", "db_reference",
+        "consumers", "overwrite_policy", "retention_policy", "backup_required", "restore_owner",
+    }
+    for purpose, policy in FILE_PURPOSE_REGISTRY.items():
+        assert policy.owner_domain and policy.file_format and policy.source_of_truth
+        assert policy.generation_cadence and policy.db_reference and policy.consumers
+        if purpose is ControlledFilePurpose.DATABASE_BACKUP:
+            assert policy.backup_required is False  # User explicitly does not require an extra archive replica.
+            assert policy.restore_owner == "global_migration"
+            assert policy.file_format == frozenset({"application/gzip", "text/plain"})
+            assert policy.db_reference == ("no source-DB registration; Global migration backup success receipt",)
+        else:
+            assert policy.backup_required is True  # Global §2.2 metadata AND bytes requirement.
+            assert policy.restore_owner == "nas_administrator"  # User assigns restore; business owner verifies.
+            assert policy.retention_policy == "long_term_no_automatic_purge_of_committed_or_frozen_artifacts"
+
+
+def test_purpose_policy_and_registry_cannot_be_mutated_by_an_upload_consumer():
+    policy = FILE_PURPOSE_REGISTRY[ControlledFilePurpose.STAFF_RESUME]
+    with pytest.raises(FrozenInstanceError):
+        policy.backup_required = False
+    with pytest.raises(TypeError):
+        FILE_PURPOSE_REGISTRY[ControlledFilePurpose.STAFF_RESUME] = policy
+
+
+def test_backup_pair_policy_does_not_create_a_generic_business_upload_owner():
+    for owner in ControlledFileOwner:
+        with pytest.raises(ValueError, match="owner/purpose pairing"):
+            StageControlledFile(owner, ControlledFilePurpose.DATABASE_BACKUP, "ops", "backup", "backups",
+                "backup.sql.gz", "application/gzip", b"not-a-business-file",
+                IdempotencyKey("backup-must-use-migration"), ActorContext("admin-001"), CorrelationId("policy"))
+
+
+@pytest.mark.parametrize("purpose", [purpose for purpose in FILE_PURPOSE_REGISTRY
+    if purpose is not ControlledFilePurpose.DATABASE_BACKUP])
+def test_typed_registry_still_rejects_unsupported_mime_before_staging_effect(purpose, monkeypatch):
+    workflow, repository, storage, uow = _workflow()
+    policy = FILE_PURPOSE_REGISTRY[purpose]
+    monkeypatch.setattr(storage, "put_staged", lambda **_: pytest.fail("invalid MIME staged bytes"))
+    command = StageControlledFile(ControlledFileOwner(policy.owner_domain), purpose, "CASE-001", "file", "files",
+        "invalid.exe", "application/x-msdownload", CONTENT,
+        IdempotencyKey("invalid-policy-mime"), ActorContext("admin-001"), CorrelationId("policy"))
+    with pytest.raises(ControlledFileWorkflowError) as error:
+        workflow.stage(command)
+    assert error.value.code == "controlled_file_purpose_format_invalid"
+    assert storage.reads == repository.registered == uow.commits == 0
+
+
+@pytest.mark.parametrize("owner,purpose", [
+    (ControlledFileOwner.CONTRACT_SIGNING, ControlledFilePurpose.UNSIGNED_CONTRACT),
+    (ControlledFileOwner.SCHEDULING, ControlledFilePurpose.SERVICE_DATE_CONFIRMATION),
+    (ControlledFileOwner.ORDERS, ControlledFilePurpose.ORDER_NOTICE),
+])
+def test_retired_purpose_rejects_new_stage_preview_and_apply_before_bytes_or_writes(monkeypatch, owner, purpose):
+    workflow, repository, storage, uow = _workflow()
+    intent = replace(_intent(), owner=owner, purpose=purpose)
+    monkeypatch.setattr(storage, "put_staged", lambda **_: pytest.fail("retired purpose wrote bytes"))
+    command = StageControlledFile(owner, purpose, "CASE-001", "legacy", "legacy", "legacy.pdf",
+        "application/pdf", CONTENT, IdempotencyKey("legacy-stage"), ActorContext("admin-001"), CorrelationId("policy"))
+    with pytest.raises(ControlledFileWorkflowError, match="停止建立永久檔案"):
+        workflow.stage(command)
+    with pytest.raises(ControlledFileWorkflowError) as preview:
+        workflow.preview(intent)
+    with pytest.raises(ControlledFileWorkflowError) as apply:
+        workflow.apply_borrowed(ApplyControlledFile(intent, ExpectedVersion(1), PreviewFingerprint("0" * 64),
+            IdempotencyKey("legacy-apply"), ActorContext("admin-001"), CorrelationId("policy")))
+    assert preview.value.code == apply.value.code == "controlled_file_purpose_retired"
+    assert not repository.loads and not repository.registered and not repository.saved
+    assert storage.reads == uow.commits == 0
+
+
+@pytest.mark.parametrize("owner,purpose", [
+    (ControlledFileOwner.CONTRACT_SIGNING, ControlledFilePurpose.UNSIGNED_CONTRACT),
+    (ControlledFileOwner.SCHEDULING, ControlledFilePurpose.SERVICE_DATE_CONFIRMATION),
+    (ControlledFileOwner.ORDERS, ControlledFilePurpose.ORDER_NOTICE),
+])
+def test_public_preview_explains_retired_purpose_without_a_stale_retry_or_effect(owner, purpose):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes import controlled_files as routes
+    from api.dependencies.admin_auth import require_persisted_admin
+    workflow, repository, storage, uow = _workflow()
+    app = FastAPI(); app.include_router(routes.router)
+    app.dependency_overrides[require_persisted_admin] = lambda: object()
+    app.dependency_overrides[routes.get_controlled_file_route_workflow] = lambda: workflow
+    with TestClient(app) as client:
+        response = client.post("/api/v1/storage/files/preview", json={
+            "staging_id": STAGING_ID, "owner": owner.value, "purpose": purpose.value,
+            "subject_reference": "CASE-001", "object_key": "legacy", "logical_folder": "legacy",
+        })
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "controlled_file_purpose_retired" and error["category"] == "domain_blocked"
+    assert "停止建立永久檔案" in error["message"]
+    assert not repository.loads and storage.reads == repository.registered == uow.commits == 0
+
+
+def test_retired_committed_receipt_still_replays_and_original_file_can_be_read(monkeypatch):
+    from subsystems.controlled_files.workflow import _command_fingerprint
+    workflow, repository, storage, _ = _workflow()
+    receipt = workflow.apply(_command(workflow.preview(_intent())))
+    legacy_intent = replace(_intent(), purpose=ControlledFilePurpose.UNSIGNED_CONTRACT)
+    legacy_command = ApplyControlledFile(legacy_intent, ExpectedVersion(1), PreviewFingerprint("1" * 64),
+        IdempotencyKey("legacy-committed"), ActorContext("admin-001"), CorrelationId("policy"))
+    legacy_receipt = replace(receipt, readback=replace(receipt.readback, purpose=legacy_intent.purpose))
+    repository.receipt = StoredControlledFileApplyReceipt(_command_fingerprint(legacy_command), legacy_receipt)
+    monkeypatch.setattr(repository, "load_staging", lambda *_args, **_kw: pytest.fail("replay revalidated retired staging"))
+    monkeypatch.setattr(repository, "get_download_reference", lambda _: ControlledFileDownloadReference(legacy_receipt.readback, STAGING_ID))
+    before = (repository.registered, repository.marked, repository.saved)
+    assert workflow.apply_borrowed(legacy_command).outcome is ControlledFileApplyOutcome.REPLAYED
+    assert workflow.read_receipt(legacy_receipt.receipt_id).readback.purpose is legacy_intent.purpose
+    assert workflow.download(FILE_ID).content == CONTENT
+    assert (repository.registered, repository.marked, repository.saved) == before
+
+
+@pytest.mark.parametrize("owner,purpose,mime", [
+    (ControlledFileOwner.STAFF, ControlledFilePurpose.STAFF_RESUME, "image/jpeg"),
+    (ControlledFileOwner.LINE_INTEGRATION, ControlledFilePurpose.RICH_MENU_BACKGROUND, "image/jpeg"),
+    (ControlledFileOwner.SCHEDULING, ControlledFilePurpose.BABY_LOG_PHOTO, "application/pdf"),
+])
+def test_current_purpose_format_is_enforced_before_stage_bytes(monkeypatch, owner, purpose, mime):
+    workflow, repository, storage, _ = _workflow()
+    monkeypatch.setattr(storage, "put_staged", lambda **_: pytest.fail("invalid format wrote bytes"))
+    command = StageControlledFile(owner, purpose, "CASE-001", "source", "files", "source",
+        mime, CONTENT, IdempotencyKey("format-stage"), ActorContext("admin-001"), CorrelationId("policy"))
+    with pytest.raises(ControlledFileWorkflowError) as error:
+        workflow.stage(command)
+    assert error.value.code == "controlled_file_purpose_format_invalid"
+    assert not repository.loads and not repository.registered
+
+
+def test_apply_fresh_reads_purpose_mime_before_using_bytes_or_writing():
+    workflow, repository, storage, _ = _workflow()
+    command = _command(workflow.preview(_intent()))
+    reads_before = storage.reads
+    repository.facts = replace(repository.facts, staging=replace(repository.facts.staging, mime_type="image/jpeg"))
+    with pytest.raises(ControlledFileWorkflowError) as error:
+        workflow.apply_borrowed(command)
+    assert error.value.code == "controlled_file_purpose_format_invalid"
+    assert storage.reads == reads_before and repository.registered == repository.saved == 0
+
+
+@pytest.mark.parametrize("owner", list(ControlledFileOwner))
+def test_database_backup_cannot_enter_generic_business_file_stage(owner):
+    with pytest.raises(ValueError, match="owner/purpose pairing"):
+        StageControlledFile(owner, ControlledFilePurpose.DATABASE_BACKUP, "backup", "backup", "backup", "backup.sql.gz",
+            "application/gzip", CONTENT, IdempotencyKey("backup-stage"), ActorContext("admin-001"), CorrelationId("policy"))
 
 
 def _intent() -> ControlledFileIntent:

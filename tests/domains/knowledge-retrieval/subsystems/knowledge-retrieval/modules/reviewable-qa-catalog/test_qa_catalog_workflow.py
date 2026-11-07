@@ -273,3 +273,48 @@ def test_builtin_catalog_import_rejects_empty_request_identity() -> None:
             "",
             "ui-correlation-id",
         )
+
+
+@pytest.mark.parametrize("operation", ["answer", "outcome"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_inline_knowledge_application_owns_transaction(operation, fail):
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    events = []
+    command, answer = object(), object()
+    failure = ValueError("knowledge_inline_outcome_invalid")
+
+    class Connection:
+        def begin(self): events.append("begin")
+        def commit(self): events.append("commit")
+        def rollback(self): events.append("rollback")
+
+    class Repository:
+        def record_inline_answer(self, actual_command, actual_answer):
+            assert actual_command is command and actual_answer is answer
+            return write()
+
+    class Unit(MySqlUnitOfWork):
+        def __init__(self):
+            super().__init__(Connection())
+            self.knowledge = Repository()
+        def record_inline_outcome(self, actual_command, status):
+            assert actual_command is command and status == "unsupported"
+            return write()
+
+    def write():
+        events.append("write")
+        if fail: raise failure
+        return 47
+
+    application = KnowledgeApplication(Unit)
+    def apply():
+        if operation == "answer": return application.record_inline_answer(command, answer)
+        return application.record_inline_outcome(command, "unsupported")
+
+    if fail:
+        with pytest.raises(ValueError) as caught:
+            apply()
+        assert caught.value is failure
+    else:
+        assert apply() == 47
+    assert events == ["begin", "write", "rollback" if fail else "commit"]

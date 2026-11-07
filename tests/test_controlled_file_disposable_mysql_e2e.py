@@ -5,14 +5,17 @@ Description: 在明確 allowlisted lu_test DB 驗證 controlled-file staging、A
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 import os
 import uuid
 
 import pytest
+from PIL import Image
 
 from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+from infrastructure.file.storage_layout import unified_storage_enabled
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import FixedBusinessClock
@@ -24,6 +27,7 @@ from subsystems.controlled_files.reconciliation import (
 from subsystems.controlled_files.cleanup import (
     CleanupControlledFileStaging,
     ControlledFileCleanupOutcome,
+    ControlledFileCleanupError,
     ControlledFileCleanupWorkflow,
 )
 from subsystems.controlled_files.contracts import ControlledFileStagingCleanupReason
@@ -34,6 +38,7 @@ from subsystems.controlled_files.workflow import (
     ControlledFileOwner,
     ControlledFilePurpose,
     ControlledFileWorkflow,
+    ControlledFileWorkflowError,
     StageControlledFile,
 )
 
@@ -49,6 +54,8 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
     app_env = os.getenv("APP_ENV", "development").lower()
     assert app_env == "development"
     assert database.startswith("lu_test_")
+    assert os.getenv("DB_HOST", "127.0.0.1").casefold() in {"localhost", "127.0.0.1", "::1"}
+    assert not unified_storage_enabled(), "this scenario uses local disposable storage only"
     connection = get_connection()
     suffix = uuid.uuid4().hex
     stage_key = IdempotencyKey(f"controlled-file.stage:{suffix}")
@@ -68,14 +75,30 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
             row = cursor.fetchone()
         assert row is not None
         case_no = str(row["case_no"])
-        content = b"controlled-file-disposable-e2e"
+        with pytest.raises(ControlledFileWorkflowError) as retired:
+            workflow.stage(StageControlledFile(
+                owner=ControlledFileOwner.ORDERS, purpose=ControlledFilePurpose.ORDER_NOTICE,
+                subject_reference=case_no, object_key=f"retired-{suffix}", logical_folder="orders",
+                filename="retired.pdf", mime_type="application/pdf", content=b"retired-purpose",
+                idempotency_key=IdempotencyKey(f"controlled-file.retired:{suffix}"),
+                actor=ActorContext("codex-e2e"), correlation_id=CorrelationId(f"corr-retired-{suffix}"),
+            ))
+        assert retired.value.code == "controlled_file_purpose_retired"
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(name) VALUES (%s)", (f"CFS synthetic resume {suffix}",))
+            staff_id = int(cursor.lastrowid)
+        connection.commit()
+        pdf = BytesIO()
+        with Image.new("RGB", (8, 8), "white") as image:
+            image.save(pdf, format="PDF")
+        content = pdf.getvalue()
         staged = workflow.stage(
             StageControlledFile(
-                owner=ControlledFileOwner.ORDERS,
-                purpose=ControlledFilePurpose.ORDER_NOTICE,
-                subject_reference=case_no,
-                object_key=f"e2e-{suffix}",
-                logical_folder=f"orders/{case_no}/e2e",
+                owner=ControlledFileOwner.STAFF,
+                purpose=ControlledFilePurpose.STAFF_RESUME,
+                subject_reference=str(staff_id),
+                object_key="resume",
+                logical_folder=f"staff/{staff_id}/resume",
                 filename="receipt.pdf",
                 mime_type="application/pdf",
                 content=content,
@@ -86,11 +109,11 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
         )
         intent = ControlledFileIntent(
             staging_id=staged.staging_id,
-            owner=ControlledFileOwner.ORDERS,
-            purpose=ControlledFilePurpose.ORDER_NOTICE,
-            subject_reference=case_no,
-            object_key=f"e2e-{suffix}",
-            logical_folder=f"orders/{case_no}/e2e",
+            owner=ControlledFileOwner.STAFF,
+            purpose=ControlledFilePurpose.STAFF_RESUME,
+            subject_reference=str(staff_id),
+            object_key="resume",
+            logical_folder=f"staff/{staff_id}/resume",
         )
         preview = workflow.preview(intent)
         receipt = workflow.apply(
@@ -110,6 +133,9 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
         assert workflow.read_receipt(receipt_id).readback == receipt.readback
         assert workflow.download(file_id).content == content
         assert any(item.file_id == file_id for item in workflow.list_readbacks())
+        assert repository.reconciliation_reference_status(file_id) == {
+            "business_reference": "matched", "outbound_reference": "not_applicable",
+        }
         reconciler = ControlledFileReconciler(
             repository,
             storage,
@@ -139,14 +165,14 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
         )
         cleanup_staging = workflow.stage(
             StageControlledFile(
-                owner=ControlledFileOwner.ORDERS,
-                purpose=ControlledFilePurpose.ORDER_NOTICE,
-                subject_reference=case_no,
+                owner=ControlledFileOwner.STAFF,
+                purpose=ControlledFilePurpose.STAFF_RESUME,
+                subject_reference=str(staff_id),
                 object_key=f"cleanup-e2e-{suffix}",
-                logical_folder=f"orders/{case_no}/cleanup-e2e",
+                logical_folder=f"staff/{staff_id}/cleanup-e2e",
                 filename="abandoned.pdf",
                 mime_type="application/pdf",
-                content=b"abandoned-controlled-file",
+                content=content,
                 idempotency_key=cleanup_stage_key,
                 actor=ActorContext("codex-e2e"),
                 correlation_id=CorrelationId(f"corr-cleanup-stage-{suffix}"),
@@ -168,6 +194,14 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
             ),
             actor=ActorContext("codex-e2e"),
             correlation_id=CorrelationId(f"corr-cleanup-{suffix}"),
+        )
+        with pytest.raises(ControlledFileCleanupError) as too_young:
+            cleanup_workflow.cleanup(cleanup_command)
+        assert too_young.value.code == "controlled_file_cleanup_minimum_age"
+        assert repository.load_cleanup(cleanup_command.idempotency_key, for_update=False) is None
+        cleanup_workflow = ControlledFileCleanupWorkflow(
+            repository, storage, lambda: MySqlUnitOfWork(connection),
+            FixedBusinessClock(now + timedelta(minutes=31)),
         )
         cleanup_receipt = cleanup_workflow.cleanup(cleanup_command)
         cleanup_replay = cleanup_workflow.cleanup(cleanup_command)
@@ -192,6 +226,7 @@ def test_disposable_mysql_staging_apply_receipt_and_download(tmp_path) -> None:
             (row["event_sequence"], row["event_type"])
             for row in cleanup_events
         ] == [(1, "intent"), (2, "completed")]
+        assert workflow.download(file_id).content == content
     finally:
         # 四組 records 都由 immutable trigger 保護；本測試只允許在可整庫丟棄的 lu_test target
         # 執行，並以唯一 scenario identity 保留 terminal receipt，最後由 task cleanup 丟棄整個 DB。

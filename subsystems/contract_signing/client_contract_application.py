@@ -9,7 +9,8 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from shared_kernel.identities import CorrelationId, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from subsystems.contract_signing.render_source_snapshot import RenderSourceRequest, RenderSourceWorkflow
 from subsystems.contract_signing.document_access import (
     create_document_access_credential,
 )
@@ -110,8 +111,10 @@ class ClientContractSigningApplication:
         ]
         | None = None,
         templates: TemplateCatalogPort | None = None,
+        render_source_repository_factory=None,
     ) -> None:
         self._templates = templates
+        self._render_source_repository_factory = render_source_repository_factory
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
@@ -321,99 +324,61 @@ class ClientContractSigningApplication:
             connection.close()
 
     def prepare_external_document(self, command: PrepareExternalClientContractCommand) -> tuple[int, bool]:
-        """Prepare the current-plan source without LINE or completion facts."""
-        template = self._template("contract_client_copy")
-        archive = None
-        try:
-            def persist(connection):
-                nonlocal archive
+        """Keep a true reconstructible source version without archiving draft bytes."""
+        if self._render_source_repository_factory is None:
+            raise RuntimeError("contract_external_render_source_not_configured")
+        def persist(connection):
+            def load_current():
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT case_no,contract_identity FROM orders WHERE case_no=%s FOR UPDATE",
-                        (command.case_no,),
-                    )
+                    cursor.execute("SELECT case_no,contract_identity FROM orders WHERE case_no=%s FOR UPDATE", (command.case_no,))
                     order = cursor.fetchone()
                 if order is None:
                     raise ValueError("contract_signing_case_facts_not_found")
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT plan.id AS matching_plan_id FROM caregiver_matching_plans plan "
-                                   "WHERE plan.case_no=%s AND plan.is_active=1 "
-                                   "AND plan.status IN ('proposed','accepted') "
-                                   "ORDER BY plan.version DESC LIMIT 2 FOR UPDATE", (command.case_no,))
+                        "WHERE plan.case_no=%s AND plan.is_active=1 AND plan.status IN ('proposed','accepted') "
+                        "ORDER BY plan.version DESC LIMIT 2 FOR UPDATE", (command.case_no,))
                     plans = tuple(cursor.fetchall() or ())
                 if len(plans) != 1:
                     raise ValueError("contract_external_signing_accepted_plan_required")
-                facts = dict(plans[0])
-                template_facts = dict(
-                    self._template_facts(connection, command.case_no, facts)
-                )
-                template_facts["__pdf_presentation_version__"] = (
-                    CONTRACT_PDF_PRESENTATION_VERSION
-                )
-                snapshot = _sha256(_canonical_json(template_facts).encode())
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT d.id,d.facts_snapshot_sha256 FROM contract_document_versions d "
-                                   "JOIN media_assets asset ON asset.id=d.media_asset_id "
-                                   "WHERE d.case_no=%s AND d.document_scope='client_contract' "
-                                   "AND d.document_role='template_generated' AND d.matching_plan_id=%s "
-                                   "AND d.template_sha256=%s AND d.mapping_sha256=%s "
-                                   "AND asset.mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
-                                   "ORDER BY d.version_number DESC LIMIT 1 FOR UPDATE",
-                                   (command.case_no, facts["matching_plan_id"], template.template_sha256, template.mapping_sha256))
-                    existing = cursor.fetchone()
-                if existing and existing["facts_snapshot_sha256"] == snapshot:
-                    return int(existing["id"]), True
-                content = render_contract_template(
-                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
-                    facts=template_facts,
-                )
-                archive = self._archive(
-                    content,
-                    _external_client_template_storage_key(command, content),
-                )
-                return _insert_generated_document(connection, command, facts, template, archive, snapshot=snapshot), False
-            return self._run_in_application_unit_of_work(persist)
-        except Exception:
-            if archive is not None:
-                self._discard(archive.storage_key)
-            raise
+                template = self._template("contract_client_copy")
+                facts = dict(self._template_facts(connection, command.case_no, dict(plans[0])))
+                facts["__pdf_presentation_version__"] = CONTRACT_PDF_PRESENTATION_VERSION
+                return int(plans[0]["matching_plan_id"]), template, facts, _sha256(_canonical_json(facts).encode())
+            request = RenderSourceRequest(command.case_no, "client_contract", None,
+                ActorContext(command.actor_id), command.idempotency_key, command.correlation_id)
+            return RenderSourceWorkflow(self._render_source_repository_factory(connection)).prepare(request, load_current)
+        return self._run_in_application_unit_of_work(persist)
 
     def _persist_sent_contract(self, command, template):
-        archive = None
-        try:
-            def persist(connection):
-                nonlocal archive
-                facts = _client_contract_facts(connection, command.case_no)
-                content = render_contract_template(
-                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
-                    facts=self._template_facts(connection, command.case_no, facts),
-                )
-                archive = self._archive(content, _client_template_storage_key(command))
-                binding = _line_binding(connection, "customer", str(facts["client_id"]))
-                recipient = require_contract_line_recipient(binding, subject_type="customer", subject_reference=str(facts["client_id"]))
-                document_id = _insert_generated_document(connection, command, facts, template, archive)
-                grant_id, raw_token = _insert_access_grant(connection, command, document_id, binding, self._now())
-                request = build_contract_delivery_request(
-                    recipient,
-                    case_no=command.case_no,
-                    document_version_id=document_id,
-                    download_url=_tokenized_download_url(command.download_url, raw_token),
-                    audience_label="客戶契約",
-                    scheduled_at=self._now(),
-                    idempotency_key=command.idempotency_key,
-                    correlation_id=command.correlation_id,
-                )
-                delivery = self._line_delivery_repository(connection).enqueue(request)
-                event_id = _insert_sent_event(connection, command, facts, document_id, int(delivery.task_id.value), grant_id)
-                _append_command_outcome(connection, command, "send_client_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
-                return ClientContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
-            return self._run_in_application_unit_of_work(persist)
-        except Exception:
-            if archive is not None:
-                self._discard(archive.storage_key)
-            raise
+        def persist(connection):
+            facts = _client_contract_facts(connection, command.case_no)
+            render_facts = self._template_facts(connection, command.case_no, facts)
+            if self._render_source_repository_factory is None:
+                raise RuntimeError("contract_external_render_source_not_configured")
+            source_request = RenderSourceRequest(command.case_no, "client_contract", None,
+                ActorContext(command.actor_id), command.idempotency_key, command.correlation_id, "send")
+            document_id, _ = RenderSourceWorkflow(self._render_source_repository_factory(connection)).prepare(
+                source_request, lambda: (int(facts["matching_plan_id"]), template, render_facts,
+                    _sha256(_canonical_json(render_facts).encode())))
+            binding = _line_binding(connection, "customer", str(facts["client_id"]))
+            recipient = require_contract_line_recipient(binding, subject_type="customer", subject_reference=str(facts["client_id"]))
+            grant_id, raw_token = _insert_access_grant(connection, command, document_id, binding, self._now())
+            request = build_contract_delivery_request(
+                recipient,
+                case_no=command.case_no,
+                document_version_id=document_id,
+                download_url=_tokenized_download_url(command.download_url, raw_token),
+                audience_label="客戶契約",
+                scheduled_at=self._now(),
+                idempotency_key=command.idempotency_key,
+                correlation_id=command.correlation_id,
+            )
+            delivery = self._line_delivery_repository(connection).enqueue(request)
+            event_id = _insert_sent_event(connection, command, facts, document_id, int(delivery.task_id.value), grant_id)
+            _append_command_outcome(connection, command, "send_client_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
+            return ClientContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+        return self._run_in_application_unit_of_work(persist)
 
     def _persist_signed_return(self, command, archive):
         try:

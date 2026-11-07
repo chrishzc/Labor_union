@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 import os
 import uuid
 
 import pytest
+from PIL import Image
 
 from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+from infrastructure.file.storage_layout import unified_storage_enabled
+from infrastructure.db.controlled_file_reference_finalize_repository import MySqlControlledFileReferenceFinalizeRepository
+from domains.controlled_files.reference_finalize import ControlledFileFinalizeIntent
 from infrastructure.mysql.controlled_file_finalize_worker import MySqlControlledFileFinalizeRunner
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -21,6 +26,7 @@ from subsystems.controlled_files.workflow import (
     ControlledFileOwner,
     ControlledFilePurpose,
     ControlledFileWorkflow,
+    ControlledFileWorkflowError,
     StageControlledFile,
 )
 
@@ -34,6 +40,8 @@ pytestmark = pytest.mark.skipif(
 def test_finalize_runner_pending_to_available_on_disposable_mysql(tmp_path) -> None:
     assert os.getenv("APP_ENV", "development").lower() == "development"
     assert os.getenv("DB_DATABASE", "").startswith("lu_test_")
+    assert os.getenv("DB_HOST", "127.0.0.1").casefold() in {"localhost", "127.0.0.1", "::1"}
+    assert not unified_storage_enabled(), "this scenario uses local disposable storage only"
 
     connection = get_connection()
     suffix = uuid.uuid4().hex
@@ -51,14 +59,30 @@ def test_finalize_runner_pending_to_available_on_disposable_mysql(tmp_path) -> N
             order = cursor.fetchone()
         assert order is not None
         case_no = str(order["case_no"])
-        content = b"controlled-file-finalize-runner-e2e"
+        with pytest.raises(ControlledFileWorkflowError) as retired:
+            workflow.stage(StageControlledFile(
+                owner=ControlledFileOwner.ORDERS, purpose=ControlledFilePurpose.ORDER_NOTICE,
+                subject_reference=case_no, object_key=f"retired-{suffix}", logical_folder="orders",
+                filename="retired.pdf", mime_type="application/pdf", content=b"retired-purpose",
+                idempotency_key=IdempotencyKey(f"finalize-runner.retired:{suffix}"),
+                actor=ActorContext("codex-finalize-e2e"), correlation_id=CorrelationId(f"corr-retired-{suffix}"),
+            ))
+        assert retired.value.code == "controlled_file_purpose_retired"
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(name) VALUES (%s)", (f"CFS synthetic finalizer {suffix}",))
+            staff_id = int(cursor.lastrowid)
+        connection.commit()
+        pdf = BytesIO()
+        with Image.new("RGB", (8, 8), "white") as image:
+            image.save(pdf, format="PDF")
+        content = pdf.getvalue()
         staged = workflow.stage(
             StageControlledFile(
-                owner=ControlledFileOwner.ORDERS,
-                purpose=ControlledFilePurpose.ORDER_NOTICE,
-                subject_reference=case_no,
-                object_key=f"finalize-runner-{suffix}",
-                logical_folder=f"orders/{case_no}/finalize-runner",
+                owner=ControlledFileOwner.STAFF,
+                purpose=ControlledFilePurpose.STAFF_RESUME,
+                subject_reference=str(staff_id),
+                object_key="resume",
+                logical_folder=f"staff/{staff_id}/resume",
                 filename="finalize-runner.pdf",
                 mime_type="application/pdf",
                 content=content,
@@ -69,11 +93,11 @@ def test_finalize_runner_pending_to_available_on_disposable_mysql(tmp_path) -> N
         )
         intent = ControlledFileIntent(
             staging_id=staged.staging_id,
-            owner=ControlledFileOwner.ORDERS,
-            purpose=ControlledFilePurpose.ORDER_NOTICE,
-            subject_reference=case_no,
-            object_key=f"finalize-runner-{suffix}",
-            logical_folder=f"orders/{case_no}/finalize-runner",
+            owner=ControlledFileOwner.STAFF,
+            purpose=ControlledFilePurpose.STAFF_RESUME,
+            subject_reference=str(staff_id),
+            object_key="resume",
+            logical_folder=f"staff/{staff_id}/resume",
         )
         preview = workflow.preview(intent)
         receipt = workflow.apply(
@@ -96,19 +120,19 @@ def test_finalize_runner_pending_to_available_on_disposable_mysql(tmp_path) -> N
             )
             object_row = cursor.fetchone()
             assert object_row is not None
-            finalize_id = f"cff_{uuid.uuid4().hex}"
             cursor.execute(
-                "INSERT INTO controlled_file_finalize_intents "
-                "(finalize_id,staging_object_id,controlled_file_object_id,expected_sha256,created_at_utc) "
-                "VALUES (%s,%s,%s,%s,%s)",
-                (
-                    finalize_id,
-                    object_row["staging_object_id"],
-                    object_row["controlled_file_object_id"],
-                    receipt.readback.sha256_digest,
-                    now,
-                ),
+                "SELECT finalize_id FROM controlled_file_finalize_intents WHERE controlled_file_object_id=%s",
+                (object_row["controlled_file_object_id"],),
             )
+            assert not cursor.fetchall(), "local registration must not enqueue a second intent"
+        finalize_id = f"cff_{uuid.uuid4().hex}"
+        MySqlControlledFileReferenceFinalizeRepository(connection).create_finalize_intent(
+            ControlledFileFinalizeIntent(
+                finalize_id=finalize_id, staging_id=staged.staging_id,
+                controlled_file_object_id=receipt.readback.file_id,
+                expected_sha256=receipt.readback.sha256_digest, created_at=now,
+            )
+        )
         connection.commit()
 
         runner = MySqlControlledFileFinalizeRunner(

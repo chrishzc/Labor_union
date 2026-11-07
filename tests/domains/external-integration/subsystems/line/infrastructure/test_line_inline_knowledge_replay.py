@@ -154,6 +154,9 @@ def app(monkeypatch):
     methods = {n.name for n in cls.body if isinstance(n, ast.FunctionDef) and n.name != "__init__"}
     load_definitions("infrastructure/mysql/knowledge_retrieval_unit_of_work.py", ns,
                      {"KnowledgeRetrievalMySqlUnitOfWork"}, methods={"KnowledgeRetrievalMySqlUnitOfWork": methods})
+    load_definitions("subsystems/knowledge_retrieval/application.py", ns,
+                     {"KnowledgeApplication"}, methods={"KnowledgeApplication": {
+                         "__init__", "record_inline_answer", "record_inline_outcome"}})
     connection = SqlConnection()
     def open_uow():
         unit = ns["KnowledgeRetrievalMySqlUnitOfWork"](connection)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from scripts import migrate_preserved_database_additive_schema as migration
@@ -153,4 +154,11 @@ def test_1005_owner_accepts_only_the_exact_1034_constraint_successor(
         owner,
         defer_missing_triggers=False,
     ) == "exact"
-    assert len(calls) == 2
+    purpose_successor = migration._selected_staff_agreement_purpose_projection(owner)
+    final_pdf_successor = deepcopy(owner)
+    final_pdf_successor["checks"].update(successor["checks"])
+    # The newer signed-Staff-purpose compatibility step must not replace the
+    # session CHECK; only the exact released 1034 successor may replace it.
+    assert purpose_successor["checks"][CHECK_KEY] == owner["checks"][CHECK_KEY]
+    assert final_pdf_successor["checks"][CHECK_KEY] == successor["checks"][CHECK_KEY]
+    assert calls == [owner, purpose_successor, final_pdf_successor]

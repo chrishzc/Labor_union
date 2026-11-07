@@ -64,9 +64,9 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
 
     client_account, staff_account = "9" * 16, "8" * 16
     scenarios = (
-        ("refund", "HC115701退款", client_account, 1200, 0),
-        ("staff-hc", "HC115702服務人員", staff_account, 12000, 0),
-        ("staff-a", "A115703服務人員", staff_account, 14000, 0),
+        ("refund", "HC115701退款", f"{client_account} Memo Test Client", 1200, 0),
+        ("staff-hc", "HC115702服務人員", f"{staff_account} Memo Test Staff", 12000, 0),
+        ("staff-a", "A115703服務人員", f"{staff_account} Memo Test Staff", 14000, 0),
         ("passbook-only", "", staff_account, 12000, 0),
         ("multiple-codes", "HC115702 HC115704", staff_account, 12000, 0),
         ("unknown-case", "HC115799退款", client_account, 1200, 0),
@@ -320,8 +320,23 @@ def _sinopac_memo_readback(connection):
     return result
 
 
+def _historical_manual_statement_fixture(fields, key, actor):
+    """Serialize a synthetic pre-§19 archive row and its original command receipt."""
+    import hashlib
+    import json
+
+    from domains.finance_import.statement_archive import validate_manual_statement
+
+    values = validate_manual_statement(fields)
+    command = {"operation": "manual", "fields": values, "duplicate_of": None, "actor": actor}
+    return {
+        "key": key, "actor": actor, "fields_json": json.dumps(values, ensure_ascii=False),
+        "command_digest": hashlib.sha256(json.dumps(command, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+    }
+
+
 def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
-    """Real ingestion/settlement plus authenticated archive and case readback."""
+    """Real settlement plus §19 rejection and pre-existing archive compatibility."""
     from io import BytesIO
     import json
 
@@ -330,12 +345,14 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
     from openpyxl import load_workbook
     from api.dependencies.admin_auth import require_admin
     from api.routes.finance_import import router
+    from api.routes.finance_statement_workspace import _actor
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.access.authentication_session import AdminPrincipal
 
     test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path)
     app = FastAPI(); app.include_router(router)
-    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(None, "workspace-test-a", "Synthetic operator", "system_admin")
+    principal = AdminPrincipal(None, "workspace-test-a", "Synthetic operator", "system_admin")
+    app.dependency_overrides[require_admin] = lambda: principal
 
     def post(client, path, body, key):
         response = client.post("/api/v1/finance-import" + path, json=body, headers={"Idempotency-Key": key})
@@ -346,6 +363,19 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
         response = client.get("/api/v1/finance-import/statements/export")
         assert response.status_code == 200, response.text
         return int(response.headers["X-Statement-Count"]), load_workbook(BytesIO(response.content), data_only=False)
+
+    def archive_snapshot():
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                result = []
+                for table, order in (("finance_manual_statements", "id"), ("finance_statement_commands", "idempotency_key"),
+                                     ("finance_statement_exclusions", "finance_import_row_id"), ("finance_statement_archive_state", "id")):
+                    cursor.execute(f"SELECT * FROM {table} ORDER BY {order}")
+                    result.append(cursor.fetchall())
+                return result
+        finally:
+            connection.close()
 
     with TestClient(app) as client:
         count, workbook = export(client)
@@ -363,14 +393,52 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
         finally:
             connection.close()
         body = {"fields": {"交易日": "2026-10-29", "支出": 1200, "備註": "HC115701退款"}}
-        manual = post(client, "/statements/manual", body, "workspace-manual-1")
-        assert manual["saved_count"] == 1
+        formula_body = {"fields": {"交易日": "2025-01-01", "存入": 200, "銷帳編號": "000001", "備註": "=1+1"}}
+        historical_inputs = (("workspace-manual-1", body), ("workspace-manual-2", formula_body),
+                             ("workspace-manual-distinct", body))
+        # These are synthetic pre-existing historical facts, not new commands
+        # accepted by the retired archive-only writer. Preserve its exact fields,
+        # actor and receipt digest so the real compatibility path can read them.
+        connection = get_connection()
+        historical_receipts = {}
+        try:
+            with connection.cursor() as cursor:
+                for key, historical_body in historical_inputs:
+                    fixture = _historical_manual_statement_fixture(historical_body["fields"], key, _actor(principal))
+                    cursor.execute("INSERT INTO finance_manual_statements(fields,actor) VALUES (%s,%s)",
+                                   (fixture["fields_json"], fixture["actor"]))
+                    identity = f"manual:{cursor.lastrowid}"
+                    cursor.execute(
+                        "INSERT INTO finance_statement_commands(idempotency_key,command_digest,result_identity,saved_count,excluded_count,actor) VALUES (%s,%s,%s,%s,%s,%s)",
+                        (fixture["key"], fixture["command_digest"], identity, 1, 0, fixture["actor"]),
+                    )
+                    historical_receipts[key] = {"identity": identity, "saved_count": 1, "excluded_count": 0}
+                cursor.execute("UPDATE finance_statement_archive_state SET version=version+%s WHERE id=1", (len(historical_inputs),))
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        historical_snapshot = archive_snapshot()
+        assert export(client)[0] == 7
+        fresh_commands = (("workspace-manual-fresh", body), ("workspace-manual-fresh", body),
+                          ("workspace-manual-fresh", {"fields": {**body["fields"], "支出": 1201}}),
+                          ("workspace-manual-new-distinct", body))
+        for key, fresh_body in fresh_commands:
+            rejected = client.post("/api/v1/finance-import/statements/manual", json=fresh_body, headers={"Idempotency-Key": key})
+            assert rejected.status_code == 422, rejected.text
+            error = rejected.json()["detail"]["error"]
+            assert (error["category"], error["code"]) == ("domain_blocked", "case_manual_supplement_required")
+            assert archive_snapshot() == historical_snapshot
+        manual = historical_receipts["workspace-manual-1"]
         assert post(client, "/statements/manual", body, "workspace-manual-1") == manual
         mismatch = client.post("/api/v1/finance-import/statements/manual", json={"fields": {**body["fields"], "支出": 1201}}, headers={"Idempotency-Key": "workspace-manual-1"})
         assert mismatch.status_code == 409
-        manual2 = post(client, "/statements/manual", {"fields": {"交易日": "2025-01-01", "存入": 200, "銷帳編號": "000001", "備註": "=1+1"}}, "workspace-manual-2")
-        assert manual2["saved_count"] == 1
-        assert post(client, "/statements/manual", body, "workspace-manual-distinct")["saved_count"] == 1
+        assert mismatch.json()["detail"]["error"]["category"] == "conflict"
+        for key, historical_body in historical_inputs:
+            assert post(client, "/statements/manual", historical_body, key) == historical_receipts[key]
+        assert archive_snapshot() == historical_snapshot
         assert post(client, "/statements/manual", {**body, "duplicate_of": manual["identity"]}, "workspace-manual-duplicate")["excluded_count"] == 1
         assert export(client)[0] == 7
         invalids = ({"交易日": "bad", "支出": 1, "備註": "x"}, {"交易日": "2026-10-29", "支出": 1, "存入": 2, "備註": "x"}, {"交易日": "2026-10-29", "存入": 1})
@@ -404,7 +472,9 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
         count = export(client)[0]
     (tmp_path / "six-features-receipt.json").write_text(json.dumps({
         "database": DATABASE, "archive_and_case_api": "PASS", "original_import": "PASS",
-        "manual_saved": 3, "excluded_raw_saved": 0, "export_count": count,
+        "historical_manual_fixture_rows": 3, "fresh_archive_rows_saved": 0,
+        "fresh_archive_commands_rejected": len(fresh_commands),
+        "historical_receipt_replay": "PASS", "excluded_raw_saved": 0, "export_count": count,
         "owner_facts_unchanged_by_archive": "PASS", "case_isolation": "PASS",
         "multi_case_bank_amount_not_double_counted": "PASS",
     }, ensure_ascii=False, indent=2), encoding="utf-8")

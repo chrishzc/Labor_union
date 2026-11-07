@@ -22,6 +22,7 @@ from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
 from infrastructure.line.redis_wakeup import SleepingLineWakeupSubscriber
 from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
+from api.dependencies.line_media import get_rich_menu_image_store
 from infrastructure.mysql.line_notification_anomaly_worker import MySqlLineNotificationAnomalyWorker
 from infrastructure.mysql.order_pre_start_notification_source_worker import (
     MySqlOrderPreStartNotificationSourceWorker,
@@ -133,7 +134,7 @@ def _canonical_runtime(
         now,
     )
     event_consumer = _event_consumer(worker_identity, now, delivery_worker.run_new_reply_tasks)
-    rich_menu_images = FileSystemRichMenuImageStore(_rich_menu_storage_root())
+    rich_menu_images = get_rich_menu_image_store(_rich_menu_storage_root())
     rich_menu_provider = LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load)
     return CanonicalLineWorkerRuntime(
         event_consumer,

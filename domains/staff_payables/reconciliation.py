@@ -41,6 +41,36 @@ class StaffPayoutDifferenceMode(StrEnum):
     OVERPAYMENT = "overpayment"
 
 
+class StaffPaymentSourceKind(StrEnum):
+    LEGACY_UNSPECIFIED = "legacy_unspecified"
+    BANK_STATEMENT = "bank_statement"
+    MANUAL_SUPPLEMENT = "manual_supplement"
+
+
+@dataclass(frozen=True, slots=True)
+class ManualStaffPayoutFact:
+    """An authenticated manual payment, never a manufactured bank account fact."""
+    identity: str
+    case_no: str
+    obligation_identity: str
+    staff_id: int
+    amount: MoneyNTD
+    command_digest: str
+    raw_fact_identity: str
+
+    def __post_init__(self):
+        from shared_kernel.validation import require_sha256_hex
+        for value in (self.identity, self.case_no, self.obligation_identity, self.raw_fact_identity):
+            _validate_identity(value, "manual staff payment identity")
+        require_positive_integer(self.staff_id, "staff id")
+        _require_positive_money(self.amount, "manual payment amount")
+        require_sha256_hex(self.command_digest, "manual command digest")
+
+    @property
+    def payment_source_kind(self):
+        return StaffPaymentSourceKind.MANUAL_SUPPLEMENT
+
+
 @dataclass(frozen=True, slots=True)
 class StaffPayoutEvent:
     identity: str
@@ -158,6 +188,7 @@ class StaffPayoutLedgerEventCandidate:
     amount: MoneyNTD
     finance_import_fact_identity: str | None = None
     reversal_of_event_identity: str | None = None
+    payment_source_kind: StaffPaymentSourceKind = StaffPaymentSourceKind.BANK_STATEMENT
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "payout event candidate identity")
@@ -174,6 +205,8 @@ class StaffPayoutLedgerEventCandidate:
         )
         if self.status is not StaffPayoutEventStatus.SUCCEEDED:
             raise ValueError("formal staff payout events must be succeeded")
+        if not isinstance(self.payment_source_kind, StaffPaymentSourceKind):
+            raise ValueError("staff_payment_source_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +261,7 @@ class StaffPayoutReopenFact:
     source_payout_event_identity: str
     succeeded: bool = True
     blocking_anomalies: tuple[str, ...] = ()
+    payment_source_kind: StaffPaymentSourceKind = StaffPaymentSourceKind.BANK_STATEMENT
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "payout reopen fact identity")
@@ -243,6 +277,8 @@ class StaffPayoutReopenFact:
         if not isinstance(self.succeeded, bool):
             raise TypeError("payout reopen success flag must be bool")
         _validate_blockers(self.blocking_anomalies)
+        if not isinstance(self.payment_source_kind, StaffPaymentSourceKind):
+            raise ValueError("staff_payment_source_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +341,23 @@ def build_staff_payout_difference_candidate(
     ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
     ordered_payables = tuple(sorted(payable_facts, key=lambda item: item.obligation_identity))
     return _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode)
+
+
+def build_manual_staff_payout_candidate(source: ManualStaffPayoutFact, payable_facts, mode=None):
+    if not isinstance(source, ManualStaffPayoutFact) or len(payable_facts) != 1:
+        raise ValueError("manual_staff_source_invalid")
+    payable = payable_facts[0]
+    if payable.obligation_identity != source.obligation_identity or payable.staff_id != source.staff_id:
+        raise ValueError("manual_staff_source_mismatch")
+    _validate_payable_statuses(payable_facts)
+    remaining = project_staff_payable(payable).balance.amount
+    if source.amount.amount < remaining and mode is StaffPayoutDifferenceMode.UNDERPAYMENT:
+        return _build_difference_payout(source.staff_id, (source,), payable_facts, mode)
+    if source.amount.amount == remaining and mode is None:
+        # Manual evidence has no bank account assertion. The closed source type
+        # selects this internal path; public bank ownership checks remain intact.
+        return _build_owned_payout(source.staff_id, (source,), payable_facts, (), False)
+    raise ValueError("staff_payout_difference_mode_invalid")
 
 
 def _build_owned_payout(
@@ -487,6 +540,8 @@ def _validate_payable_statuses(payable_facts) -> None:
 
 def _raise_if_bank_facts_ineligible(bank_facts, blocking_anomalies) -> None:
     _validate_blockers(blocking_anomalies)
+    if any(not isinstance(item, OutgoingBankFact) for item in bank_facts):
+        raise ValueError("outgoing_bank_fact_not_eligible")
     raw_identities = tuple(item.canonical_raw_fact_identity for item in bank_facts)
     has_duplicate_raw_fact = len(raw_identities) != len(set(raw_identities))
     has_ineligible_fact = any(_bank_fact_is_ineligible(item) for item in bank_facts)
@@ -495,6 +550,8 @@ def _raise_if_bank_facts_ineligible(bank_facts, blocking_anomalies) -> None:
 
 
 def _bank_fact_is_ineligible(bank_fact) -> bool:
+    if not isinstance(bank_fact, OutgoingBankFact):
+        return True
     return (
         not bank_fact.eligible
         or bank_fact.direction is not BankTransactionDirection.OUTGOING
@@ -629,6 +686,8 @@ def _payout_event(bank_fact) -> StaffPayoutLedgerEventCandidate:
         staff_id=bank_fact.staff_id,
         amount=bank_fact.amount,
         finance_import_fact_identity=bank_fact.identity,
+        payment_source_kind=(StaffPaymentSourceKind.MANUAL_SUPPLEMENT
+                             if isinstance(bank_fact, ManualStaffPayoutFact) else StaffPaymentSourceKind.BANK_STATEMENT),
     )
 
 
@@ -709,6 +768,7 @@ def _reopen_candidate(reopen_fact, links, payables) -> StaffPayoutReopenCandidat
         reopen_fact.staff_id,
         reopen_fact.amount,
         reversal_of_event_identity=reopen_fact.source_payout_event_identity,
+        payment_source_kind=reopen_fact.payment_source_kind,
     )
     return StaffPayoutReopenCandidate(
         reopen_fact.staff_id,
@@ -763,7 +823,7 @@ def _link_payload(link) -> dict[str, object]:
 
 
 def _event_payload(event) -> dict[str, object]:
-    return {
+    payload = {
         "identity": event.identity,
         "event_type": event.event_type.value,
         "status": event.status.value,
@@ -772,6 +832,9 @@ def _event_payload(event) -> dict[str, object]:
         "finance_import_fact_identity": event.finance_import_fact_identity,
         "reversal_of_event_identity": event.reversal_of_event_identity,
     }
+    if event.payment_source_kind is not StaffPaymentSourceKind.BANK_STATEMENT:
+        payload["payment_source_kind"] = event.payment_source_kind.value
+    return payload
 
 
 def _derived_event_identity(event_type, source_identity) -> str:

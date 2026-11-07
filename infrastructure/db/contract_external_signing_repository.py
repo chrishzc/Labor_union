@@ -22,6 +22,7 @@ from domains.contract_signing.external_signing import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.validation import require_sha256_hex
 from subsystems.contract_signing.external_signing_contracts import (
     ExternalCompletionReportScope,
     ExternalReportCommandType,
@@ -53,12 +54,22 @@ from subsystems.contract_signing.external_signing_workflow import (
 )
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
+    FinalContractFileReference,
+    signed_contract_object_key,
+    signed_contract_purpose,
+    signed_contract_file_apply_key,
     SignedContractDocumentReadback,
     SignedContractDocumentPreview,
     FinalSignedContractApplyReceipt,
     StoredFinalSignedContractReceipt,
 )
-from subsystems.controlled_files.workflow import ControlledFileApplyReceipt
+from subsystems.controlled_files.workflow import (
+    ControlledFileApplyReceipt, ControlledFileOwner, ControlledFilePurpose,
+    ControlledFileReadback, ControlledFileWorkflowError,
+)
+from subsystems.controlled_files.reconciliation import (
+    CommittedControlledFileApplyEvidence, CommittedControlledFileApplyEvidenceReader,
+)
 
 
 class MySqlContractExternalSigningRepository:
@@ -676,9 +687,9 @@ class MySqlContractExternalSigningRepository:
         row = self._one(
             "SELECT staging_id,staging_version,original_filename,content_type,size_bytes "
             "FROM controlled_file_staging_objects WHERE owner_type='contract_signing' "
-            "AND purpose='final_signed_contract' AND subject_reference=%s AND object_key=%s "
+            "AND purpose=%s AND subject_reference=%s AND object_key=%s "
             "AND staging_state='staged' AND expires_at_utc>UTC_TIMESTAMP(6) "
-            "ORDER BY id DESC LIMIT 1", (case_no, object_key),
+            "ORDER BY id DESC LIMIT 1", (signed_contract_purpose(target).value, case_no, object_key),
         )
         if row is None:
             return None
@@ -704,6 +715,58 @@ class MySqlContractExternalSigningRepository:
         row = self._one(_FINAL_DOCUMENT_READBACK_SQL, (case_no,))
         return None if row is None else _final_document_readback(row)
 
+    def get_controlled_file_reference(
+        self, file_id: str, *,
+        apply_evidence_reader: CommittedControlledFileApplyEvidenceReader | None = None,
+    ) -> FinalContractFileReference | None:
+        """Read exact immutable receipt members, including non-primary staff PDFs.
+
+        No signing-completion receipt is treated as evidence of external delivery.
+        Legacy members use only their original primary FK or their own exact
+        committed child Apply receipt; a staff file never borrows the client hash.
+        """
+        object_row = self._one(
+            "SELECT id AS object_id,opaque_object_id,object_key,owner_type,purpose,"
+            "subject_reference,version_number,filename,content_type,size_bytes,content_sha256 "
+            "FROM controlled_file_objects WHERE opaque_object_id=%s "
+            "AND owner_type='contract_signing' "
+            "AND purpose IN ('final_signed_contract','signed_staff_agreement')", (file_id,),
+        )
+        if object_row is None:
+            return None
+        rows = self._all(
+            "SELECT session.external_signing_session_id,document.case_no,document.final_document_id,"
+            "receipt.receipt_id,receipt.result_status_version,"
+            "receipt.idempotency_key AS parent_idempotency_key,receipt.actor_ref AS parent_actor_ref,"
+            "receipt.correlation_id AS parent_correlation_id,"
+            "document.controlled_file_object_id AS primary_object_id,"
+            "document.version_number AS primary_final_version,"
+            "document.content_sha256 AS primary_content_sha256,"
+            "document.size_bytes AS primary_size_bytes,receipt.result_snapshot,"
+            "(document.id=(SELECT latest.id FROM contract_final_document_versions latest "
+            "WHERE latest.case_no=document.case_no ORDER BY latest.version_number DESC,latest.id DESC LIMIT 1)) is_current "
+            "FROM contract_final_document_versions document "
+            "JOIN contract_external_signing_sessions session ON session.id=document.external_signing_session_id "
+            "JOIN contract_external_signing_receipts receipt ON receipt.final_document_version_id=document.id "
+            "WHERE document.case_no=%s AND session.session_state='completed' "
+            "AND receipt.command_type='apply_final_signed_contract' AND receipt.outcome_state='completed' "
+            "ORDER BY document.version_number DESC,document.id DESC,receipt.id DESC",
+            (object_row["subject_reference"],),
+        )
+        for row in rows:
+            joined = {**object_row, **row}
+            members = _final_contract_reference_members(row)
+            aggregate = _legacy_aggregate_final_reference(joined)
+            if aggregate is not None:
+                return aggregate
+            evidence = _read_legacy_member_apply_evidence(joined, members, apply_evidence_reader)
+            reference = _final_contract_file_reference(
+                joined, members, apply_evidence=evidence,
+            )
+            if reference is not None:
+                return reference
+        return None
+
     def _one(self, statement: str, parameters: tuple[object, ...]):
         with self._connection.cursor() as cursor:
             cursor.execute(statement, parameters)
@@ -726,6 +789,177 @@ class MySqlContractExternalSigningRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("external_signing_persistence_insert_failed")
             return int(cursor.lastrowid)
+
+
+def _final_contract_reference_members(row):
+    """Bind the immutable member JSON to the actual closed owner receipt/FK."""
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    document = None if snapshot is None else _json_mapping(snapshot.get("document"))
+    if snapshot is None or document is None or not (
+        snapshot.get("receipt_id") == row["receipt_id"]
+        and snapshot.get("session_id") == row["external_signing_session_id"]
+        and snapshot.get("resulting_state") == "completed"
+        and snapshot.get("resulting_status_version") == row["result_status_version"]
+        and document.get("case_no") == row["case_no"]
+        and document.get("final_document_id") == row["final_document_id"]
+    ):
+        raise _stored_fact_error("final_contract_document_members_lineage_invalid")
+    return _signed_document_members(snapshot)
+
+
+def _bound_final_contract_member(row, members):
+    member = next((item for item in members if item.file_id == row["opaque_object_id"]), None)
+    if member is None:
+        return None
+    if not (
+        row["owner_type"] == "contract_signing"
+        and row["subject_reference"] == row["case_no"]
+        and member.version == row["version_number"]
+        and member.size_bytes == row["size_bytes"]
+        and member.filename == row["filename"]
+        and member.mime_type == row["content_type"] == "application/pdf"
+        and row["object_key"] == signed_contract_object_key(str(row["external_signing_session_id"]), member.target)
+    ):
+        return None
+    return member
+
+
+def _legacy_aggregate_final_reference(row):
+    """Read the original aggregate document, without inventing member targets.
+
+    Only the historical absent-documents shape is eligible. A modern empty or
+    malformed member collection cannot fall back to the aggregate contract.
+    Final-root and controlled-file versions are separate identity domains.
+    """
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    if snapshot is None or "documents" in snapshot:
+        return None
+    _final_contract_reference_members(row)  # Original closed owner receipt/FK lineage.
+    document = snapshot["document"]
+    try:
+        for name in ("object_id", "primary_object_id", "primary_final_version", "version_number",
+                     "size_bytes", "primary_size_bytes", "result_status_version"):
+            if type(row[name]) is not int or row[name] <= 0:
+                return None
+        require_sha256_hex(row["primary_content_sha256"], "final document SHA-256")
+        applied_at = datetime.fromisoformat(document["applied_at"])
+        if applied_at.tzinfo is None or not (
+            row["object_id"] == row["primary_object_id"]
+            and row["owner_type"] == "contract_signing"
+            and row["purpose"] == ControlledFilePurpose.FINAL_SIGNED_CONTRACT.value
+            and row["subject_reference"] == row["case_no"]
+            and row["content_sha256"] == row["primary_content_sha256"]
+            and document["file_id"] == row["opaque_object_id"]
+            and document["filename"] == row["filename"]
+            and document["mime_type"] == row["content_type"] == "application/pdf"
+            and document["status"] == "completed"
+            and type(document["version"]) is int
+            and document["version"] == row["primary_final_version"]
+            and type(document["size_bytes"]) is int
+            and document["size_bytes"] == row["primary_size_bytes"] == row["size_bytes"]
+            and type(snapshot["resulting_status_version"]) is int
+            and row["is_current"] in (0, 1)
+        ):
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return FinalContractFileReference(
+        file_id=row["opaque_object_id"], case_no=row["case_no"],
+        sha256_digest=row["primary_content_sha256"], size_bytes=row["size_bytes"],
+        current=bool(row["is_current"]), completion_receipt_present=True,
+        file_version=row["version_number"], purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+        target=None, filename=row["filename"],
+    )
+
+
+def _read_legacy_member_apply_evidence(row, members, reader):
+    member = _bound_final_contract_member(row, members)
+    if (reader is None or member is None or member.sha256_digest is not None
+        or member.purpose is not None or row["object_id"] == row["primary_object_id"]
+        or row["purpose"] != ControlledFilePurpose.FINAL_SIGNED_CONTRACT.value
+        or _legacy_parent_file_identity(row, member) is None):
+        return None
+    try:
+        return reader.get_committed_apply_evidence(member.file_id)
+    except ControlledFileWorkflowError as error:
+        if error.code != "controlled_file_receipt_corrupt":
+            raise
+        raise _stored_fact_error("final_contract_apply_receipt_invalid") from None
+
+
+def _legacy_parent_file_identity(row, member):
+    parent_key, actor, correlation = (row.get("parent_idempotency_key"), row.get("parent_actor_ref"), row.get("parent_correlation_id"))
+    if not all(isinstance(value, str) and value for value in (parent_key, actor, correlation)):
+        return None
+    try:
+        return signed_contract_file_apply_key(IdempotencyKey(parent_key), member.target), actor, correlation
+    except (TypeError, ValueError):
+        return None
+
+
+def _legacy_member_apply_digest(row, member, purpose, evidence):
+    # The original separate-return writer stored legacy staff PDFs under FINAL.
+    # A new SIGNED_STAFF_AGREEMENT row may not bypass required member metadata.
+    if purpose is not ControlledFilePurpose.FINAL_SIGNED_CONTRACT: return None
+    if not isinstance(evidence, CommittedControlledFileApplyEvidence): return None
+    if (not isinstance(evidence.receipt, ControlledFileApplyReceipt)
+        or not isinstance(evidence.receipt.readback, ControlledFileReadback)
+        or not isinstance(evidence.idempotency_key, IdempotencyKey)
+        or not isinstance(evidence.actor, ActorContext)
+        or not isinstance(evidence.correlation_id, CorrelationId)):
+        return None
+    parent_identity = _legacy_parent_file_identity(row, member)
+    if parent_identity is None: return None
+    child_key, actor, correlation = parent_identity
+    try:
+        require_sha256_hex(evidence.receipt.readback.sha256_digest, "controlled file SHA-256")
+    except (TypeError, ValueError):
+        return None
+    child = evidence.receipt.readback
+    if not (
+        evidence.idempotency_key == child_key
+        and evidence.actor.actor_id == actor
+        and evidence.correlation_id.value == correlation
+        and child.file_id == member.file_id
+        and child.owner is ControlledFileOwner.CONTRACT_SIGNING
+        and child.purpose is purpose
+        and child.subject_reference == row["case_no"]
+        and type(child.version) is int and child.version == member.version
+        and child.filename == member.filename
+        and child.mime_type == member.mime_type
+        and type(child.size_bytes) is int and child.size_bytes == member.size_bytes
+        and child.sha256_digest == row["content_sha256"]
+    ):
+        return None
+    return child.sha256_digest
+
+
+def _final_contract_file_reference(row, members, *, apply_evidence=None):
+    """Project completion freeze evidence; never infer an outbound provider result."""
+    member = _bound_final_contract_member(row, members)
+    if member is None: return None
+    purpose = ControlledFilePurpose(row["purpose"])
+    digest = member.sha256_digest
+    primary = row["object_id"] == row["primary_object_id"]
+    if primary and (
+        member.size_bytes != row["primary_size_bytes"]
+        or digest is not None and digest != row["primary_content_sha256"]
+    ):
+        return None
+    if digest is None:
+        # Keep historical JSON unchanged. Each non-primary file needs its own
+        # committed child receipt; never copy the primary document's hash.
+        if primary and purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
+            digest = str(row["primary_content_sha256"])
+        elif not primary and member.purpose is None:
+            digest = _legacy_member_apply_digest(row, member, purpose, apply_evidence)
+        if digest is None: return None
+    elif member.purpose is not purpose:
+        return None
+    return FinalContractFileReference(
+        member.file_id, str(row["case_no"]), digest, member.size_bytes,
+        bool(row["is_current"]), True, member.version, purpose, member.target, member.filename,
+    )
 
 
 def _stored_receipt(row: Mapping[str, object]) -> StoredExternalSigningReportReceipt:
@@ -1134,6 +1368,8 @@ def _final_receipt_snapshot(
             "controlled_file_id": member.file_id, "version_number": member.version,
             "filename": member.filename, "mime_type": member.mime_type,
             "size_bytes": member.size_bytes,
+            **({"content_sha256": member.sha256_digest, "purpose": member.purpose.value}
+               if member.sha256_digest is not None else {}),
         } for member in receipt.documents],
         "document": {
             "applied_at": document.applied_at.astimezone(timezone.utc).isoformat(),
@@ -1165,6 +1401,7 @@ def _signed_document_members(value):
         members = tuple(SignedContractDocumentReadback(
             SignedContractDocumentTarget(row["scope"], row["matching_segment_id"], row["document_version_id"]),
             row["controlled_file_id"], row["version_number"], row["filename"], row["mime_type"], row["size_bytes"],
+            row.get("content_sha256"), None if "purpose" not in row else ControlledFilePurpose(row["purpose"]),
         ) for row in values)
         if len({row.target.key for row in members}) != len(members) or len({row.file_id for row in members}) != len(members):
             raise ValueError("duplicate signed document member")

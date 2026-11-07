@@ -80,6 +80,16 @@ def _operation(cursor,command,identity,amount,bank_entry=None):
         'VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)',(identity,'receipt' if command.action=='initial_receipt' else command.action,amount,bank_entry,command.key,_digest(command),command.actor,command.reason,_today()))
 
 
+def save_initial_period_receipt(repository, command, view, amount):
+    """Original first-receipt policy/save, shared by bank and typed manual source."""
+    expected = require_government_initial_receipt(view.lines, amount, command.handling)
+    original = repository.save(replace(view, total_ntd=amount), command.bank_row_id, command.key, command.actor)
+    with repository.connection.cursor() as cursor:
+        cursor.execute('UPDATE government_subsidy_period_balances SET expected_ntd=%s WHERE root_receipt_id=%s AND balance_kind=%s', (expected, original, 'original'))
+        _operation(cursor, command, f'government-period:{original}', amount)
+    return original
+
+
 def apply_government_difference(repository,command):
     connection=repository.connection
     with connection.cursor() as cursor:
@@ -99,12 +109,7 @@ def apply_government_difference(repository,command):
             if view.coverage or view.blocked_cases:
                 raise PeriodReconciliationConflict('subsidy_period_already_covered')
             amount=repository.bank_amount(command.bank_row_id)
-            expected=require_government_initial_receipt(view.lines,amount,command.handling)
-            original=repository.save(replace(view,total_ntd=amount),command.bank_row_id,command.key,command.actor)
-            cursor.execute('UPDATE government_subsidy_period_balances SET expected_ntd=%s WHERE root_receipt_id=%s AND balance_kind=%s',(expected,original,'original'))
-            # The first cash fact is already in the immutable original entry;
-            # no second cash entry is manufactured for the balance projection.
-            _operation(cursor,command,f'government-period:{original}',amount)
+            save_initial_period_receipt(repository, command, view, amount)
             # save has advanced the same year inside this transaction.
             return repository.query(command.period)
         else:

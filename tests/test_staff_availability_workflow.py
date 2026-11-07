@@ -214,6 +214,36 @@ def test_create_pause_apply_is_atomic_and_exact_replay_returns_same_receipt():
     assert repository.receipt_reads == 3
 
 
+def test_receipt_visible_after_fresh_facts_commits_once_without_mutation():
+    repository = FakeRepository()
+    original = _workflow(repository)
+    intent = _pause_intent()
+    preview = original.preview(StaffAvailabilityPreviewRequest(intent))
+    request = _apply_request(intent, preview.preview_fingerprint, 0, "fresh-visible-replay")
+    receipt = original.apply(request)
+    stored = repository.receipts[request.idempotency_key.value]
+    repository.events.clear()
+    repository.occupancy_locks.clear()
+    reads = []
+
+    def load_receipt(_key):
+        reads.append(_key)
+        return None if len(reads) == 1 else stored
+
+    repository.load_receipt = load_receipt
+    unit = _FakeUnitOfWork()
+    replay = _workflow_with_units(repository, [unit]).apply(request)
+
+    assert replay == receipt
+    assert len(reads) == 2
+    assert unit.commit_count == 1
+    assert unit.rollback_count == 0
+    assert repository.events == []
+    assert repository.version == 1
+    assert len(repository.blocks) == 1
+    assert repository.occupancy_locks == [7]
+
+
 def test_apply_rejects_stale_version_without_commit():
     repository = FakeRepository(version=2)
     workflow = _workflow(repository)

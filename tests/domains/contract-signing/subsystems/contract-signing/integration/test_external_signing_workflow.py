@@ -771,6 +771,9 @@ class FakeUnsignedRepository:
     def load_current_pdf(self, case_no, document_id):
         return object() if document_id in self.document_ids else None
 
+    def has_current_unsigned_source(self, case_no, document_id):
+        return document_id in self.document_ids
+
 
 class FakeDeliveryTasks:
     def __init__(self) -> None:

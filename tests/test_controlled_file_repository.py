@@ -10,6 +10,7 @@ import hashlib
 import json
 
 import pytest
+from pymysql.err import ProgrammingError
 
 from infrastructure.db.controlled_file_repository import (
     MySqlControlledFileWorkflowRepository,
@@ -52,9 +53,10 @@ DIGEST = hashlib.sha256(b"signed-contract").hexdigest()
 
 
 class ScriptedCursor:
-    def __init__(self, rows=(), rowcounts=()) -> None:
+    def __init__(self, rows=(), rowcounts=(), *, fetchall_results=()) -> None:
         self.rows = list(rows)
         self.rowcounts = list(rowcounts)
+        self.fetchall_results = list(fetchall_results)
         self.executions = []
         self.rowcount = 0
 
@@ -72,6 +74,8 @@ class ScriptedCursor:
         return self.rows.pop(0) if self.rows else None
 
     def fetchall(self):
+        if self.fetchall_results:
+            return self.fetchall_results.pop(0)
         rows, self.rows = self.rows, []
         return rows
 
@@ -174,8 +178,11 @@ def test_load_staging_maps_state_and_applies_requested_lock_without_commit() -> 
     assert connection.commits == connection.rollbacks == 0
 
 
-def test_gc_candidate_query_fails_closed_without_reference_and_lease_ssot() -> None:
-    cursor = ScriptedCursor()
+@pytest.mark.parametrize("missing", ["object_count", "active_lease_count"])
+def test_gc_candidate_query_fails_closed_without_reference_and_lease_ssot(missing) -> None:
+    row = {**_cleanup_staging_row(), "object_count": 0, "active_lease_count": 0}
+    del row[missing]
+    cursor = ScriptedCursor([row])
     connection = FakeConnection(cursor)
 
     with pytest.raises(ControlledFileGcError) as captured:
@@ -184,8 +191,61 @@ def test_gc_candidate_query_fails_closed_without_reference_and_lease_ssot() -> N
         )
 
     assert captured.value.code == "controlled_file_gc_reference_authority_not_ready"
-    assert cursor.executions == []
+    assert len(cursor.executions) == 1
+    assert "controlled_file_objects" in cursor.executions[0][0]
+    assert "controlled_file_leases" in cursor.executions[0][0]
     assert connection.commits == connection.rollbacks == 0
+
+
+@pytest.mark.parametrize("eligible", [False, True])
+def test_gc_candidate_query_accepts_empty_or_eligible_governed_staging(eligible):
+    row = {**_cleanup_staging_row(), "object_count": 0, "active_lease_count": 0}
+    cursor = ScriptedCursor([row] if eligible else [])
+    connection = FakeConnection(cursor)
+    candidates = MySqlControlledFileWorkflowRepository(connection).list_staging_gc_candidates(
+        limit=10, observed_at=NOW
+    )
+    assert len(candidates) == int(eligible)
+    if eligible:
+        assert candidates[0].staging_id == STAGING_ID
+        assert candidates[0].registration_status is ControlledFileStagingRegistrationStatus.UNREGISTERED
+        assert candidates[0].reference_count == 0 and not candidates[0].active_lease
+    statement, parameters = cursor.executions[0]
+    assert "NOT EXISTS (SELECT 1 FROM controlled_file_objects" in statement
+    assert "NOT EXISTS (SELECT 1 FROM controlled_file_leases" in statement
+    assert "staging.created_at_utc<=%s AND staging.expires_at_utc<=%s" in statement
+    assert parameters == (NOW.replace(tzinfo=None), (NOW-timedelta(minutes=30)).replace(tzinfo=None), NOW.replace(tzinfo=None), NOW.replace(tzinfo=None), 10)
+    assert connection.commits == connection.rollbacks == 0
+
+
+@pytest.mark.parametrize("authority", ["controlled_file_objects", "controlled_file_leases"])
+def test_gc_candidate_query_does_not_treat_unavailable_authority_as_empty(authority):
+    cursor = ScriptedCursor()
+    connection = FakeConnection(cursor)
+    error = ProgrammingError(1146, f"missing governed table {authority}")
+
+    def unavailable(statement, parameters):
+        cursor.executions.append((statement, parameters))
+        raise error
+
+    cursor.execute = unavailable
+    with pytest.raises(ProgrammingError) as raised:
+        MySqlControlledFileWorkflowRepository(connection).list_staging_gc_candidates(limit=10, observed_at=NOW)
+    assert raised.value is error
+    assert authority in cursor.executions[0][0]
+    assert connection.commits == connection.rollbacks == 0
+
+
+def _line_configuration_row(menu_id="menu-staff"):
+    staff = {"id": menu_id, "name": "Staff", "audience_role": "staff",
+             "set_as_default": False, "chat_bar_text": "Menu", "buttons": [{
+                 "id": "help", "label": "Help",
+                 "bounds": {"x": 0, "y": 0, "width": 1, "height": 1},
+                 "action": {"type": "message", "text": "Help"}}]}
+    visitor = {**staff, "id": "menu-visitor", "name": "Visitor",
+               "audience_role": "visitor", "set_as_default": True}
+    return {"configuration_kind": "rich_menus", "revision": 1,
+            "definition_snapshot": {"menus": [visitor, staff]}}
 
 
 @pytest.mark.parametrize(
@@ -195,11 +255,13 @@ def test_gc_candidate_query_fails_closed_without_reference_and_lease_ssot() -> N
         (ControlledFileOwner.SCHEDULING, "CASE-001", "orders"),
         (ControlledFileOwner.ORDERS, "CASE-001", "orders"),
         (ControlledFileOwner.STAFF, "42", "staff"),
-        (ControlledFileOwner.LINE_INTEGRATION, "menu-staff", "line_rich_menu_publications"),
+        (ControlledFileOwner.LINE_INTEGRATION, "menu-staff", "line_configuration_current"),
     ],
 )
 def test_owner_subject_exists_uses_closed_parameterized_routing(owner, subject, table) -> None:
-    cursor = ScriptedCursor([{"present": 1}])
+    cursor = ScriptedCursor([
+        _line_configuration_row() if owner is ControlledFileOwner.LINE_INTEGRATION else {"present": 1}
+    ])
     connection = FakeConnection(cursor)
     intent = ControlledFileIntent(
         staging_id=STAGING_ID,
@@ -222,8 +284,34 @@ def test_owner_subject_exists_uses_closed_parameterized_routing(owner, subject, 
     statement, parameters = cursor.executions[0]
     assert table in statement and statement.endswith(" FOR UPDATE")
     assert subject not in statement
-    assert all(parameter == subject for parameter in parameters)
-    assert connection.commits == 0
+    assert parameters == (("rich_menus",) if owner is ControlledFileOwner.LINE_INTEGRATION else ((subject, subject) if owner is ControlledFileOwner.STAFF else (subject,)))
+    assert connection.commits == connection.rollbacks == 0
+
+
+@pytest.mark.parametrize("row,expected", [
+    (_line_configuration_row("another-menu"), False),
+    ({**_line_configuration_row(), "definition_snapshot": {"menus": []}}, False),
+    (None, None),
+    ({**_line_configuration_row(), "configuration_kind": "unknown"}, None),
+    ({**_line_configuration_row(), "definition_snapshot": {"menus": "invalid"}}, None),
+])
+def test_line_owner_subject_requires_matching_valid_current_configuration(row, expected):
+    cursor = ScriptedCursor([row])
+    connection = FakeConnection(cursor)
+    intent = ControlledFileIntent(
+        staging_id=STAGING_ID, owner=ControlledFileOwner.LINE_INTEGRATION,
+        purpose=ControlledFilePurpose.RICH_MENU_BACKGROUND, subject_reference="menu-staff",
+        object_key="object", logical_folder="folder",
+    )
+    repository = MySqlControlledFileWorkflowRepository(connection)
+    if expected is None:
+        with pytest.raises(ValueError):
+            repository.owner_subject_exists(intent, for_update=True)
+    else:
+        assert repository.owner_subject_exists(intent, for_update=True) is expected
+    assert cursor.executions[0][1] == ("rich_menus",)
+    assert cursor.executions[0][0].endswith(" FOR UPDATE")
+    assert connection.commits == connection.rollbacks == 0
 
 
 def test_claim_command_returns_created_or_mismatch_without_hidden_commit() -> None:
@@ -435,9 +523,16 @@ def _cleanup_command():
     )
 
 
+def _cleanup_staging_row():
+    return {"id": 8, "staging_id": STAGING_ID, "staging_version": 1,
+            "content_sha256": DIGEST, "staging_state": "staged",
+            "created_at_utc": (NOW-timedelta(hours=2)).replace(tzinfo=None),
+            "expires_at_utc": (NOW-timedelta(hours=1)).replace(tzinfo=None)}
+
+
 def test_cleanup_repository_claims_then_completes_without_hidden_commit():
     command = _cleanup_command()
-    cursor = ScriptedCursor(rowcounts=[1, 1, 1, 1])
+    cursor = ScriptedCursor([_cleanup_staging_row()], rowcounts=[0, 0, 0, 1, 1, 1, 1], fetchall_results=[(), ()])
     connection = FakeConnection(cursor)
     repository = MySqlControlledFileWorkflowRepository(connection)
 
@@ -457,9 +552,34 @@ def test_cleanup_repository_claims_then_completes_without_hidden_commit():
     repository.complete_cleanup(stored, receipt, occurred_at=NOW)
 
     assert stored.terminal is ControlledFileCleanupTerminal.INTENT
-    assert "event_sequence,event_type" in cursor.executions[0][0]
-    assert "staging_state='quarantined'" in cursor.executions[1][0]
-    assert "staging_state='cleaned'" in cursor.executions[2][0]
-    assert "'completed'" not in cursor.executions[3][0]
-    assert cursor.executions[3][1][1] == "completed"
+    assert len(cursor.executions) == 7
+    assert all(statement.endswith(" FOR UPDATE") for statement, _ in cursor.executions[:3])
+    assert cursor.executions[0][1] == (STAGING_ID,)
+    assert cursor.executions[1][1] == (8,)
+    assert cursor.executions[2][1] == (8, NOW.replace(tzinfo=None))
+    assert "event_sequence,event_type" in cursor.executions[3][0]
+    assert "staging_state='quarantined'" in cursor.executions[4][0]
+    assert "staging_state='cleaned'" in cursor.executions[5][0]
+    assert "'completed'" not in cursor.executions[6][0]
+    assert cursor.executions[6][1][1] == "completed"
+    assert connection.commits == connection.rollbacks == 0
+
+
+@pytest.mark.parametrize("changed,objects,leases,code", [
+    ({}, ({"id": 9},), (), "controlled_file_cleanup_referenced"),
+    ({}, (), ({"id": 10},), "controlled_file_cleanup_leased"),
+    ({"staging_version": 2}, (), (), "controlled_file_cleanup_staging_conflict"),
+])
+def test_cleanup_repository_rechecks_locked_staging_before_any_claim(changed, objects, leases, code):
+    from subsystems.controlled_files.cleanup import ControlledFileCleanupError
+    cursor = ScriptedCursor([{**_cleanup_staging_row(), **changed}], fetchall_results=[objects, leases])
+    connection = FakeConnection(cursor)
+    with pytest.raises(ControlledFileCleanupError) as raised:
+        MySqlControlledFileWorkflowRepository(connection).begin_cleanup(
+            _cleanup_command(), cleanup_id="cfc_1234567890abcdef1234567890abcdef",
+            command_fingerprint=PreviewFingerprint("d"*64), occurred_at=NOW,
+        )
+    assert raised.value.code == code
+    assert len(cursor.executions) == 3
+    assert all(statement.startswith("SELECT ") and statement.endswith(" FOR UPDATE") for statement, _ in cursor.executions)
     assert connection.commits == connection.rollbacks == 0

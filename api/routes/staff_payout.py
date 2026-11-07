@@ -767,12 +767,16 @@ def _recovery_adjustment_preview_payload(preview):
 
 def _preview_payload(preview, event_type) -> StaffPayoutPreviewView:
     """Convert the Domain candidate once at the HTTP boundary into its closed public view."""
+    candidate = _materialize(preview.candidate)
+    events = candidate.get("events", []) + ([candidate["event"]] if "event" in candidate else [])
+    for event in events:
+        event.pop("payment_source_kind", None)
     return StaffPayoutPreviewView.model_validate(
         {
             "event_type": event_type.value,
             "staff_payables_version": preview.staff_payables_version,
             "bank_facts_version": preview.bank_facts_version,
-            "candidate": _materialize(preview.candidate),
+            "candidate": candidate,
             "preview_fingerprint": preview.fingerprint.value,
         }
     )

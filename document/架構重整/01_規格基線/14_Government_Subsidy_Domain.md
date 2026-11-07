@@ -41,6 +41,8 @@ Government Subsidy 擁有整期入款及沖正；Client Finance 擁有客戶應�
 - 查詢零寫入。金額缺值保留待確認，整期不能核銷；不以零或逐案分配補足。
 - 已存在的目前排班關聯若指向不存在、其他案件或非 effective 的版本，案件補助金額及整期總額均為待確認，禁止整期核銷；季度／年度報表明確回報來源異常，不略過該案湊成總額。尚無正式排班版本的案件仍依完整案件資料計算，不增加排班作業關卡。
 - 人員選擇期間與已匯入的政府整筆銀行款項。Apply fresh-read／lock 案件、年度 root 及銀行事實；所選單位總額必須與實際入款完全一致。
+- 2026-11-06 最新人工明示補充：原政府整期工作台另可**僅首次政府收款**使用「人工補登」，登記工會實際已收的整筆款項；後續補撥及實退仍沿既有銀行流水流程，不新增人工續款或人工退款入口。人員明選月／季／年與年度、期間序號，輸入實收金額及日期、選填備註；不新增強制核對 checkbox 或 Preview。首次少撥／多撥仍須沿原處置明選「先記實收、餘額待補」／「多撥列待退」，不另加精確金額限制。政府直接付客戶不是工會實收，不由此補造。
+- 首次人工來源重用 `finance_import_rows` 的正式人工來源契約，完整保存原命令、不可變 actor、key／digest、期間、金額、日期及處置；使用 `legacy` 正規化格式並明示人工，沒有銀行檔、provider、帳號或 occurrence 不得虛構。原 Government Subsidy writer 在同一 outer UoW 驗證 server-bound typed source、fresh year／case／source facts、原完整性及跨 owner 防重後建立原整期 receipt／members／balance，原 Client Finance 同步不另開交易。原 key 成功重播先回原 row／receipt；新 key 有有效 receipt 或 balance 即拒絕。typed readback 必須在 commit 前完成；未知結果只重送原命令／key，重載亦須保留。畫面、匯出及現金來源標「人工補登」，整筆現金仍不拆逐案，不能為通過 G 分類假設台新銀行。
 - 付款日期或金額不能推定政府付的是哪個月／季／年。Finance Import 保留待整期核對，不再自動匹配舊核准批次。
 - 一次入款只建立一筆期間 receipt；案件及日期／金額快照是證據，不是逐案現金 allocation。年度 aggregate version 表示期間 receipt 的並行版本；來源案件也在 Apply 重新讀取，不能以畫面舊合計核銷。
 - 已核銷季度的月份顯示「已核銷」，另列實際歸屬季度；差額未處理完的案件依 §0.1 顯示「已納入本期」。不拆造月入款。任一重疊的月份、季度、年度禁止重複核銷，即使期間內沒有案件也不能利用另一單位再收一次。
@@ -71,6 +73,8 @@ Government Subsidy 擁有整期入款及沖正；Client Finance 擁有客戶應�
 - `GET .../periods/bank-rows`：最多 200 筆尚未消費的政府銀行事實。
 - `GET .../periods/cases/{case_no}`：本案金額、服務歸屬、案件核銷狀態及歸屬期間；新狀態為規格目標，不表示 API 已實作。
 - `POST .../periods/reconcile`：unit/year/index、bank_row_id、expected_version、idempotency_key。
+- `POST .../periods/manual-initial-receipt`：unit/year/index、amount_ntd、paid_on、handling、選填 reason、expected_version、原 key；只首次實收，不接受 action／bank_row_id／caller actor。沿原 `system.administration` 能力並要求真實管理員 ID；回原 receipt_id 及 commit 前驗證的 typed period view，source_label 為 closed「人工補登」或 null。原 key 上限依 Global 191 字元，原 period writer 的 100 字元 key 使用穩定衍生值，完整原 key 與 digest 保留於來源／收據。
+- 首次人工命令目前沿原政府 browser 的 safe JSON integer 契約。這是瀏覽器命令的安全表示限制，不是補助最高額或金融公式上限：unsafe 輸入零 writer；新來源、period 或 readback 有不可準確表示的數字時，typed response 在 commit 前拒絕並 rollback，不能只因後端 Python int 可容納就先保存。錯誤須明示本次未保存、保留真實金額，禁止為提交而改小金額。原銀行 API／Domain 金額規則不因此改動。成功回應另含從真實 FI source、原 command receipt 與 period entry 核對而來的 immutable receipt（id／period／amount／paid_on／source_label／原 key），不以 request echo 代替；合法後續銀行沖正後，同原 key 仍回原 immutable receipt 與目前真實 view，不把原 id 塞回 active coverage。
 - `POST .../periods/reverse`：receipt_id、整筆出款 bank_row_id、idempotency_key。
 
 權限沿用帳務管理權限。所有入口不發送 LINE、不發布選單、不自動銀行轉帳。

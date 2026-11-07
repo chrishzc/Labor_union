@@ -10,6 +10,9 @@ admin actor、typed errors、opaque projections、digest/readback 與 download r
 
 ## Implementation
 - primary: `api/routes/controlled_files.py`
+- maintenance: `api/routes/controlled_file_maintenance.py` — declared `/api/v1/data-center/staging/{preview,cleanup}` and reconciliation routes, server actor, root authorization, identity/version/digest binding; no arbitrary filesystem paths.
+- consumer: `subsystems/controlled_files/maintenance.py` — same-connection original cleanup intent/terminal facts; read-only observation Preview; four-world success is withheld when authoritative references are unavailable.
+- Reference readback uses the Staff page's original current-resume query and real saved certificate/health-document collection, exact LINE media object FK plus published upload acknowledgement, ContractSigning's typed immutable completion members, and Scheduling's submitted event/assignment/attachment/reference frozen tuple. Required world keys and every supplied proof result must match; submission identity is exposed separately from statuses. Spec19/21/20 define the narrow resume/signing/photo consumer exemptions from system-managed external delivery, never provider success. TEST-ONLY completion, malformed owner facts, unsupported external evidence and qualification/medical meanings remain unverified; a stored document does not establish those facts.
 - dependency: `api/dependencies/controlled_files.py`
 - transfer settings: `infrastructure/runtime/file_transfer_settings.py` — photo/resume byte limits, file timeout and atomic settings JSON; no business DB authority. Public LINE reads private HTTPS policy rather than the management configuration file.
 - `GET /api/v1/storage/transfer-settings` — authenticated runtime projection for resume UI; other controlled-document capacities retain their existing behavior.

@@ -48,8 +48,13 @@ def database():
     connection.row_factory = lambda cursor, values: {
         column[0]: value for column, value in zip(cursor.description, values)
     }
+    # Model every source read by the real identity loader. Empty unrelated
+    # sources are successful reads, not absent tables hidden by a fallback.
+    # This is a read projection fixture, not MySQL schema/constraint acceptance.
     connection.executescript("""
-        CREATE TABLE orders (case_no TEXT, client_id INTEGER);
+        CREATE TABLE orders (
+            case_no TEXT, client_id INTEGER, staff_id INTEGER, status TEXT
+        );
         CREATE TABLE clients (id INTEGER, name TEXT);
         CREATE TABLE beclass_records (
             id INTEGER PRIMARY KEY, query_no TEXT, refund_account_no TEXT
@@ -61,7 +66,22 @@ def database():
         CREATE TABLE client_refund_recipient_snapshots (
             refund_obligation_identity TEXT, case_no TEXT, bank_account TEXT
         );
+        CREATE TABLE client_legacy_virtual_accounts (
+            case_no TEXT NOT NULL, virtual_account TEXT NOT NULL,
+            UNIQUE (case_no, virtual_account)
+        );
+        CREATE TABLE staff (id INTEGER, name TEXT);
         CREATE TABLE staff_bank_accounts (id INTEGER, staff_id INTEGER, account_no TEXT);
+        CREATE TABLE staff_obligations (
+            obligation_identity TEXT, case_no TEXT, staff_id INTEGER,
+            direction TEXT, status TEXT, amount_due_ntd INTEGER, due_date TEXT
+        );
+        CREATE TABLE staff_payable_projections (
+            obligation_identity TEXT, balance_ntd INTEGER, status TEXT
+        );
+        CREATE TABLE case_staff_assignments (
+            case_no TEXT, staff_id INTEGER, status TEXT
+        );
         CREATE TABLE finance_import_rows (
             id INTEGER, bank_references TEXT, format_id TEXT, direction TEXT, memo TEXT
         );
@@ -73,7 +93,9 @@ def database():
 def _add_refund(database, refund_type, *, case_no="synthetic-case-1", client_id=7,
                 snapshot=True):
     identity = f"{refund_type}:{case_no}"
-    database.execute("INSERT INTO orders VALUES (?, ?)", (case_no, client_id))
+    database.execute(
+        "INSERT INTO orders (case_no, client_id) VALUES (?, ?)", (case_no, client_id)
+    )
     database.execute(
         "INSERT INTO beclass_records (query_no, refund_account_no) VALUES (?, ?)",
         (case_no, SNAPSHOT_ACCOUNT),
@@ -203,3 +225,54 @@ def test_multiple_matching_cases_stay_pending_without_guessing(
     resolved = _resolve(database, row, decision)
     assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert resolved.target_identities == ("client:7",)
+
+
+@pytest.mark.parametrize("refund_type", REFUND_TYPES)
+@pytest.mark.parametrize("snapshot", (False, True))
+@pytest.mark.parametrize("legacy_mapping", ("unique", "ambiguous"))
+def test_legacy_account_source_does_not_replace_snapshot_or_verified_name(
+    monkeypatch, database, refund_type, snapshot, legacy_mapping
+):
+    """Read the real mapping source without treating it as refund/name evidence."""
+    _add_refund(database, refund_type, snapshot=snapshot)
+    virtual_account = "99781699" + "115999"
+    database.execute(
+        "INSERT INTO client_legacy_virtual_accounts VALUES (?, ?)",
+        ("synthetic-case-1", virtual_account),
+    )
+    if legacy_mapping == "ambiguous":
+        database.execute(
+            "INSERT INTO orders (case_no, client_id) VALUES (?, ?)",
+            ("synthetic-alias-case-2", 8),
+        )
+        database.execute(
+            "INSERT INTO client_legacy_virtual_accounts VALUES (?, ?)",
+            ("synthetic-alias-case-2", virtual_account),
+        )
+    row = _bank_row(monkeypatch, database)
+    with database.cursor() as cursor:
+        identities = load_finance_identity_maps(cursor)
+
+    # Existing cases are intentionally not formula-representable; membership
+    # proves the imported source was read and shared mappings stayed ambiguous.
+    assert identities["known_virtual_accounts"] == (
+        frozenset({virtual_account}) if legacy_mapping == "unique" else frozenset()
+    )
+    assert identities["known_case_suffixes"] == (
+        frozenset({virtual_account[-6:]}) if legacy_mapping == "unique" else frozenset()
+    )
+    decision = classify_finance_transaction(row, **identities)
+    if not snapshot:
+        assert decision["classification_type"] == "non_business_review"
+        assert decision["matched_identity_ids"] == []
+        return
+
+    assert decision["classification_type"] == (
+        "client_refund" if refund_type == "refund" else "client_subsidy_return"
+    )
+    assert decision["matched_identity_ids"] == [7]
+    assert row["counterparty_name"] is None
+    resolved = _resolve(database, row, decision)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.target_identities == ("client:7",)
+    assert resolved.integrity_violations == ()

@@ -378,6 +378,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
     "labor_union_2026_11_06_hcm_review_status_v1.json",
+    "labor_union_2026_11_06_staff_payout_payment_sources_v1.json",
+    "labor_union_2026_11_06_controlled_purpose_media_reference_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2331,6 +2333,76 @@ def _modified_parent_predecessor_absent_state(
     defer_missing_triggers: bool,
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
+    if artifact == "1073_contract_document_render_snapshot.sql":
+        new_names = {
+            "render_source_kind", "render_source_snapshot",
+            "render_source_snapshot_sha256", "render_source_sha256", "render_source_size_bytes",
+        }
+        if any(row["table_name"] == "contract_document_versions" and row["column_name"] in new_names
+               for row in snapshot["columns"]) or any(
+            row["table_name"] == "contract_document_versions" and row["constraint_name"] == "chk_contract_document_render_source"
+            for row in snapshot.get("constraints", ())
+        ):
+            return None
+        predecessor = deepcopy(descriptor)
+        for name in new_names:
+            predecessor["parent_columns"]["contract_document_versions"].pop(name)
+        predecessor["parent_columns"]["contract_document_versions"]["media_asset_id"] = _column_contract("bigint", "NO")
+        predecessor["checks"].pop(("contract_document_versions", "chk_contract_document_render_source"))
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact, defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
+    if artifact in {
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+    }:
+        predecessor = deepcopy(descriptor)
+        if artifact.startswith("1071_"):
+            original = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
+            for table in predecessor["parent_columns"]:
+                predecessor["parent_columns"][table]["purpose"] = deepcopy(original["parent_columns"][table]["purpose"])
+            for key in predecessor["checks"]:
+                if key in original["checks"]:
+                    predecessor["checks"][key] = original["checks"][key]
+        else:
+            predecessor["parent_columns"]["media_assets"].pop("controlled_file_object_id")
+            predecessor["indexes"].pop(("media_assets", "idx_media_controlled_file_object"))
+            predecessor["foreign_keys"].pop(("media_assets", "fk_media_controlled_file_object"))
+            if any(row["table_name"] == "media_assets" and row["column_name"] == "controlled_file_object_id"
+                   for row in snapshot["columns"]) or any(
+                row["table_name"] == "media_assets" and row["index_name"] == "idx_media_controlled_file_object"
+                for row in snapshot["indexes"]
+            ) or any(
+                row["table_name"] == "media_assets" and row["constraint_name"] == "fk_media_controlled_file_object"
+                for row in snapshot.get("constraints", ())
+            ):
+                return None
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact, defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
+    if artifact == "1070_staff_payout_payment_sources.sql":
+        if any(row["table_name"] == "staff_payout_events"
+               and row["column_name"] == "payment_source_kind"
+               for row in snapshot["columns"]) or any(
+            row["table_name"] == "staff_payout_events"
+            and row["constraint_name"] == "chk_staff_payout_payment_source"
+            for row in snapshot.get("constraints", ())
+        ):
+            # One atomic ALTER has no resumable half-applied predecessor shape.
+            return None
+        predecessor = deepcopy(descriptor)
+        predecessor["parent_columns"]["staff_payout_events"].pop("payment_source_kind")
+        predecessor["parent_columns"]["staff_payout_events"]["bank_account_identity_hash"] = (
+            _column_contract("char(64)", "NO")
+        )
+        predecessor["checks"].pop(("staff_payout_events", "chk_staff_payout_payment_source"))
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact,
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
     predecessor_columns = {
         "1058_client_refund_overage_receipt.sql": {
             "client_refund_reversal_apply_receipts": {"correction_type": _column_contract("enum('refund','refund_return','reversal')", "NO")},
@@ -3936,6 +4008,25 @@ def _local_classify_statement(statement: str) -> str:
         reopen_optional = ROOT / "db/schema_parts/1062_order_reopen_reason_optional.sql"
         if normalized.startswith("alter table order_reopen_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reopen_optional.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
+        render_snapshot = ROOT / "db/schema_parts/1073_contract_document_render_snapshot.sql"
+        if normalized.startswith("alter table contract_document_versions "):
+            canonical_render, = split_sql(render_snapshot.read_text(encoding="utf-8"))
+            if normalized.rstrip(";") == re.sub(r"\s+", " ", canonical_render.strip()).casefold().rstrip(";"):
+                return "contract_render_snapshot_source_successor"
+            if "render_source_" in normalized or "modify column media_asset_id" in normalized:
+                raise LocalAdditiveBlocked("noncanonical render source ALTER", code="forbidden_sql_effect")
+        signed_staff = ROOT / "db/schema_parts/1071_controlled_signed_staff_agreement.sql"
+        signed_staff_statements = {
+            re.sub(r"\s+", " ", item.strip()).casefold().rstrip(";")
+            for item in split_sql(signed_staff.read_text(encoding="utf-8"))
+        }
+        if "signed_staff_agreement" in normalized and normalized.rstrip(";") in signed_staff_statements:
+            return "controlled_signed_staff_purpose_successor"
+        if "signed_staff_agreement" in normalized:
+            raise LocalAdditiveBlocked("noncanonical staff purpose ALTER", code="forbidden_sql_effect")
+        staff_sources = ROOT / "db/schema_parts/1070_staff_payout_payment_sources.sql"
+        if normalized.startswith("alter table staff_payout_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(staff_sources.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
+            return "staff_payout_payment_source_widen"
         canonical_1008 = re.sub(
             r"\s+",
             " ",
@@ -4943,6 +5034,65 @@ def _candidate_preserves_source_data(
     return True
 
 
+def _verified_replay_evidence_is_complete(value: Any) -> bool:
+    """Validate the existing full table-evidence shape before trusting replay."""
+    if not isinstance(value, Mapping) or not value:
+        return False
+    for table, row in value.items():
+        if not isinstance(table, str) or not table or not isinstance(row, Mapping):
+            return False
+        if set(row) != {"count", "checksum", "primary_key_sha256"}:
+            return False
+        if any(type(row[key]) is not int or row[key] < 0 for key in ("count", "checksum")):
+            return False
+        primary = row["primary_key_sha256"]
+        if primary is not None and (
+            not isinstance(primary, str) or re.fullmatch(r"[0-9a-f]{64}", primary) is None
+        ):
+            return False
+    return True
+
+
+def _verified_replay_candidate_baseline(
+    receipt: Mapping[str, Any], plan: Mapping[str, Any], source: str,
+    candidate: str, release_fingerprint: Any, artifact_names: list[str],
+) -> Mapping[str, Any]:
+    """Bind the original verified snapshot before receipt metadata is updated."""
+    if (
+        receipt.get("status") != "verified"
+        or not isinstance(receipt.get("verified_at"), str)
+        or not receipt["verified_at"]
+        or not _verified_replay_evidence_is_complete(receipt.get("source_data"))
+        or not _verified_replay_evidence_is_complete(receipt.get("candidate_data"))
+    ):
+        raise UpgradeBlocked("verified replay baseline is incomplete")
+    identity_keys = ("database", "server", "host", "port")
+    identities = (receipt.get("source"), receipt.get("candidate"), plan.get("source"))
+    if any(not isinstance(identity, Mapping) or any(identity.get(key) is None for key in identity_keys)
+           for identity in identities):
+        raise UpgradeBlocked("verified replay identity is incomplete")
+    recorded_source, recorded_candidate, planned_source = identities
+    if (
+        recorded_source["database"] != source
+        or recorded_candidate["database"] != candidate
+        or receipt.get("candidate_database") != candidate
+        or plan.get("candidate_database") != candidate
+        or any(recorded_source[key] != planned_source[key] for key in identity_keys)
+    ):
+        raise UpgradeBlocked("verified replay identity mismatch")
+    if (
+        not plan.get("release_id") or not release_fingerprint
+        or receipt.get("release_id") != plan.get("release_id")
+        or receipt.get("release_fingerprint") != release_fingerprint
+        or receipt.get("plan_release_fingerprint") != plan.get("release_fingerprint")
+        or receipt.get("artifact_names") != artifact_names
+    ):
+        raise UpgradeBlocked("verified replay release/plan mismatch")
+    if receipt["source_data"] != plan.get("source_data"):
+        raise UpgradeBlocked("verified replay source baseline mismatch")
+    return receipt["candidate_data"]
+
+
 def _validate_plan_integrity(
     plan: Mapping[str, Any], fresh: Mapping[str, Any]
 ) -> None:
@@ -5668,6 +5818,18 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         ):
             path = ROOT / "db/schema_parts/194_historical_order_adoption.sql"
     if path is None:
+        if part_name == "114_staff_payout_ledger.sql" and any(
+            item.name == "1070_staff_payout_payment_sources.sql" for item in SCHEMA_PARTS
+        ):
+            path = ROOT / "db/schema_parts/114_staff_payout_ledger.sql"
+    if path is None:
+        if part_name == "166_contract_signing_workflow.sql" and any(
+            item.name == "1073_contract_document_render_snapshot.sql" for item in SCHEMA_PARTS
+        ):
+            # The successor inherits the original immutable document-version
+            # contract without selecting unrelated historical 166 DDL.
+            path = ROOT / "db/schema_parts/166_contract_signing_workflow.sql"
+    if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
@@ -6303,6 +6465,90 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
+    if part_name == "1073_contract_document_render_snapshot.sql":
+        descriptor = _canonical_artifact_descriptor("166_contract_signing_workflow.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({"contract_document_versions"}))
+        descriptor["parent_columns"] = descriptor.pop("tables")
+        descriptor["tables"] = {}
+        descriptor["parent_columns"]["contract_document_versions"].update({
+            "media_asset_id": _column_contract("bigint", "YES"),
+            "render_source_kind": _column_contract("enum('legacy_archived','render_snapshot')", "NO", "legacy_archived"),
+            "render_source_snapshot": _column_contract("json", "YES"),
+            "render_source_snapshot_sha256": _column_contract("char(64)", "YES"),
+            "render_source_sha256": _column_contract("char(64)", "YES"),
+            "render_source_size_bytes": _column_contract("bigint unsigned", "YES"),
+        })
+        opening = sql.index("CHECK (") + len("CHECK ")
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][("contract_document_versions", "chk_contract_document_render_source")] = _normalize_sql_contract(clause)
+    if part_name == "1071_controlled_signed_staff_agreement.sql":
+        descriptor = _canonical_artifact_descriptor("1004_controlled_file_storage_foundation.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({
+            "controlled_file_staging_objects", "controlled_file_objects",
+        }))
+        descriptor["parent_columns"] = descriptor.pop("tables")
+        descriptor["tables"] = {}
+        original = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
+        for kind in ("indexes", "foreign_keys", "checks"):
+            descriptor[kind].update({key: value for key, value in original[kind].items()
+                                     if key[0] in descriptor["parent_columns"]})
+        for statement in split_sql(sql):
+            match = re.search(r"ALTER TABLE (controlled_file_(?:staging_objects|objects))\s+MODIFY COLUMN purpose (ENUM\(.*?\)) NOT NULL", statement, re.I | re.S)
+            if match:
+                table = match.group(1)
+                descriptor["parent_columns"][table]["purpose"] = _column_contract(
+                    _normalize_column_type_contract(match.group(2)), "NO",
+                )
+                check = re.search(r"ADD CONSTRAINT (\w+) CHECK\s*\(", statement, re.I)
+                clause, _ = _extract_parenthesized(statement, check.end() - 1)
+                descriptor["checks"][(table, check.group(1))] = _normalize_sql_contract(clause)
+    if part_name == "1072_line_media_controlled_file_reference.sql":
+        # Read the original parent columns from their owning bootstrap source.
+        base = (ROOT / "db/schema.sql").read_text(encoding="utf-8")
+        start = base.index("CREATE TABLE IF NOT EXISTS media_assets (")
+        body, _ = _extract_parenthesized(base, base.index("(", start))
+        columns = {}
+        for definition in _split_top_level(body):
+            if re.match(r"^(?:PRIMARY|UNIQUE|INDEX|KEY|CONSTRAINT)\b", definition.strip(), re.I):
+                continue
+            name, contract = _parse_column_definition(definition.strip())
+            columns[name] = contract
+        columns["controlled_file_object_id"] = _column_contract("bigint unsigned", "YES")
+        descriptor["parent_columns"]["media_assets"] = columns
+        for name, unique, names in (
+            ("PRIMARY", 0, ("id",)),
+            ("uk_media_storage_key", 0, ("storage_key",)),
+            ("idx_media_owner", 1, ("category", "owner_type", "owner_id", "deleted_at")),
+            ("idx_media_sha256", 1, ("sha256",)),
+            ("idx_media_controlled_file_object", 1, ("controlled_file_object_id",)),
+        ):
+            descriptor["indexes"][("media_assets", name)] = {"non_unique": unique, "columns": names}
+        for name, column, target, delete in (
+            ("fk_media_created_by", "created_by_admin_user_id", "admin_users", "SET NULL"),
+            ("fk_media_controlled_file_object", "controlled_file_object_id", "controlled_file_objects", "RESTRICT"),
+        ):
+            descriptor["foreign_keys"][("media_assets", name)] = {
+                "columns": (column,), "referenced_table": target, "referenced_columns": ("id",),
+                "update_rule": "RESTRICT", "delete_rule": delete,
+            }
+    if part_name == "1070_staff_payout_payment_sources.sql":
+        # Bind the complete immutable event contract, without taking ownership
+        # of 114's projections/outbox evolved by other published successors.
+        descriptor = _canonical_artifact_descriptor("114_staff_payout_ledger.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({"staff_payout_events"}))
+        descriptor["parent_columns"]["staff_payout_events"] = descriptor["tables"].pop("staff_payout_events")
+        descriptor["parent_columns"]["staff_payout_events"].update({
+            "bank_account_identity_hash": _column_contract("char(64)", "YES"),
+            "payment_source_kind": _column_contract(
+                "enum('legacy_unspecified','bank_statement','manual_supplement')",
+                "NO", "legacy_unspecified",
+            ),
+        })
+        check_start = sql.index("CHECK (") + len("CHECK ")
+        clause, _ = _extract_parenthesized(sql, check_start)
+        descriptor["checks"][("staff_payout_events", "chk_staff_payout_payment_source")] = (
+            _normalize_sql_contract(clause)
+        )
     if part_name == "1051_candidate_weekly_information.sql":
         descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {
             "event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')", "NO"),
@@ -6563,6 +6809,35 @@ def _normalize_check_contract(value: Any) -> str:
     return normalized.replace("=false", "=0").replace("=true", "=1")
 
 
+def _render_source_check_server_variants(
+    part_name: str, key: tuple[str, str], expected_clause: Any,
+) -> tuple[str, ...]:
+    """Recognize only the captured MySQL 8 rendering of the owned 1073 CHECK."""
+    if part_name not in {
+        "1073_contract_document_render_snapshot.sql", "166_contract_signing_workflow.sql",
+    } or key != ("contract_document_versions", "chk_contract_document_render_source"):
+        return ()
+    if not any(path.name == "1073_contract_document_render_snapshot.sql" for path in SCHEMA_PARTS):
+        return ()
+    canonical = _normalize_check_contract(_canonical_artifact_descriptor(
+        "1073_contract_document_render_snapshot.sql"
+    )["checks"][key])
+    if _normalize_check_contract(expected_clause) != canonical:
+        return ()
+    # These two JSON INTEGER/root BIGINT comparisons render decimal ID text.
+    # Match the entire immutable predicate; never strip charset from arbitrary
+    # CASTs, quoted literals, different operands, lengths or collations.
+    server_rendering = canonical
+    for column in ("matching_plan_id", "matching_segment_id"):
+        cast = f"cast({column}aschar)"
+        if canonical.count(cast) != 1:
+            return ()
+        server_rendering = server_rendering.replace(
+            cast, f"cast({column}ascharcharsetutf8mb4)",
+        )
+    return (server_rendering,)
+
+
 def _flatten_associative_contract(value: str) -> str:
     """Canonicalize nested normalized AND/OR calls as associative lists."""
     call = _normalized_contract_call(value)
@@ -6692,6 +6967,10 @@ def _release_descriptor_metadata_state(
         "1053_line_order_group_invitation_url.sql",
         "1058_client_refund_overage_receipt.sql",
         "1065_historical_order_reused_pairing_check.sql",
+        "1070_staff_payout_payment_sources.sql",
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+        "1073_contract_document_render_snapshot.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6805,6 +7084,20 @@ def _release_descriptor_metadata_state(
     return state
 
 
+def _selected_staff_agreement_purpose_projection(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    compatible = deepcopy(descriptor)
+    if not any(path.name == "1071_controlled_signed_staff_agreement.sql" for path in SCHEMA_PARTS):
+        return compatible
+    successor = _canonical_artifact_descriptor("1071_controlled_signed_staff_agreement.sql")
+    for table, columns in successor["parent_columns"].items():
+        target = compatible["tables"].get(table, compatible["parent_columns"].get(table))
+        if target is not None:
+            target["purpose"] = deepcopy(columns["purpose"])
+    compatible["checks"].update({key: value for key, value in successor["checks"].items()
+                                  if key[1].endswith("_owner_purpose")})
+    return compatible
+
+
 def _controlled_file_storage_foundation_state(
     snapshot: Mapping[str, Any],
     descriptor: Mapping[str, Any],
@@ -6838,9 +7131,14 @@ def _controlled_file_storage_foundation_state(
             "controlled_file_objects",
         }:
             canonical["checks"][key] = clause
+    state = _artifact_metadata_state(
+        snapshot, canonical, "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if state != "drift":
+        return state
     return _artifact_metadata_state(
-        snapshot,
-        canonical,
+        snapshot, _selected_staff_agreement_purpose_projection(canonical),
         "1004_controlled_file_storage_foundation.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
@@ -7136,14 +7434,26 @@ def _contract_external_signing_successor_state(
         )
         if state != "drift":
             return state
+        state = _artifact_metadata_state(
+            snapshot, _selected_staff_agreement_purpose_projection(descriptor),
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        if state != "drift":
+            return state
         compatible = deepcopy(descriptor)
         final_pdf = _canonical_artifact_descriptor(
             "1034_contract_external_signing_final_pdf_completion.sql"
         )
         compatible["checks"].update(final_pdf["checks"])
+        state = _artifact_metadata_state(
+            snapshot, compatible, "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        if state != "drift":
+            return state
         return _artifact_metadata_state(
-            snapshot,
-            compatible,
+            snapshot, _selected_staff_agreement_purpose_projection(compatible),
             "1005_contract_external_signing_successor.sql",
             defer_missing_triggers=defer_missing_triggers,
         )
@@ -7300,6 +7610,14 @@ def _artifact_metadata_state(
         return registry_state
     if owned_tables is not None:
         _limit_descriptor_to_owned_tables(descriptor, owned_tables)
+    if part_name == "166_contract_signing_workflow.sql" and "contract_document_versions" in descriptor["tables"] and any(
+        path.name == "1073_contract_document_render_snapshot.sql" for path in SCHEMA_PARTS
+    ) and any(row["table_name"] == "contract_document_versions" and row["column_name"].startswith("render_source_")
+              for row in snapshot["columns"]):
+        descriptor = deepcopy(descriptor)
+        successor = _canonical_artifact_descriptor("1073_contract_document_render_snapshot.sql")
+        descriptor["tables"]["contract_document_versions"] = deepcopy(successor["parent_columns"]["contract_document_versions"])
+        descriptor["checks"].update(successor["checks"])
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         columns_by_table.setdefault(row["table_name"], {})[
@@ -7307,6 +7625,11 @@ def _artifact_metadata_state(
         ] = row
     required_tables = descriptor["tables"]
     parent_columns = descriptor["parent_columns"]
+    complete_parent_tables = set(parent_columns) if part_name in {
+        "1071_controlled_signed_staff_agreement.sql",
+        "1072_line_media_controlled_file_reference.sql",
+        "1073_contract_document_render_snapshot.sql",
+    } else set()
     owned_presence: list[bool] = []
     for table, expected_columns in {
         **required_tables, **parent_columns
@@ -7346,7 +7669,7 @@ def _artifact_metadata_state(
         allowed_extra_columns = _allowed_later_artifact_columns(
             part_name, table
         )
-        if table in required_tables and actual:
+        if table in set(required_tables) | complete_parent_tables and actual:
             if set(actual) != set(expected_columns) | allowed_extra_columns:
                 return "drift"
     indexes = {
@@ -7358,9 +7681,9 @@ def _artifact_metadata_state(
         }
         for row in snapshot["indexes"]
     }
-    # A parent-table ALTER owns only its explicitly declared objects.  Unknown
-    # object rejection is exclusive only for tables created by this artifact.
-    owned_tables = set(required_tables)
+    # Parent ALTERs normally own only declared objects. The selected successors
+    # above explicitly bind complete parent metadata and reject unknown objects.
+    owned_tables = set(required_tables) | complete_parent_tables
     expected_index_keys = {
         key for key in descriptor["indexes"] if key[0] in owned_tables
     }
@@ -7450,6 +7773,7 @@ def _artifact_metadata_state(
             or str(row.get("enforced") or "YES").upper() != "YES"
             or _normalize_check_contract(actual_clause) not in {
                 _normalize_check_contract(expected_clause),
+                *_render_source_check_server_variants(part_name, key, expected_clause),
                 *[
                     _normalize_check_contract(clause)
                     for clause in allowed_later_checks.get(key, ())
@@ -7490,10 +7814,17 @@ def _artifact_metadata_state(
         name for name, value in triggers.items()
         if value["event_object_table"] in owned_tables
     }
+    if part_name == "1070_staff_payout_payment_sources.sql":
+        # This successor explicitly binds the complete payout-event guard set.
+        # Other parent ALTERs own only their named guards, not the parent table.
+        actual_owned_trigger_names.update(
+            name for name, value in triggers.items()
+            if value["event_object_table"] == "staff_payout_events"
+        )
     if actual_owned_trigger_names - expected_trigger_names:
         return "drift"
     if (
-        expected_trigger_names - actual_owned_trigger_names
+        expected_trigger_names - triggers.keys()
         and not defer_missing_triggers
         and any(owned_presence)
     ):
@@ -8186,6 +8517,13 @@ def apply_schema(
         canonical_release_fingerprint = local_additive_release_qualification(
             str(plan["release_id"]), artifact_names[0]
         )["release_fingerprint"]
+    verified_replay = existing_receipt.get("status") == "verified"
+    verified_candidate_data = (
+        _verified_replay_candidate_baseline(
+            existing_receipt, plan, source, candidate,
+            canonical_release_fingerprint, artifact_names,
+        ) if verified_replay else None
+    )
     existing_receipt.update(
         release_id=plan.get("release_id"),
         release_fingerprint=canonical_release_fingerprint,
@@ -8193,7 +8531,8 @@ def apply_schema(
         artifact_names=artifact_names,
         artifact_name=(artifact_names[0] if len(artifact_names) == 1 else None),
     )
-    write_receipt(operation_receipt_path, existing_receipt)
+    if not verified_replay:
+        write_receipt(operation_receipt_path, existing_receipt)
     allowed_partial_artifacts = allowed_partial_artifacts.union(
         _receipt_resumable_partial_artifacts(existing_receipt, candidate)
     )
@@ -8219,13 +8558,21 @@ def apply_schema(
     # restore workflow.  The latter always records candidate_data.
     if isinstance(existing_receipt.get("candidate_data"), Mapping):
         candidate_data = _table_evidence(config, candidate)
-        if not _candidate_preserves_source_data(
+        if verified_replay:
+            if not _verified_replay_evidence_is_complete(candidate_data) or candidate_data != verified_candidate_data:
+                raise UpgradeBlocked("candidate data changed after verification")
+        elif not _candidate_preserves_source_data(
             plan.get("source_data") or {}, candidate_data
         ):
             raise UpgradeBlocked("candidate data does not match restored source")
     candidate_identity = server_identity(config, candidate)
     if candidate_identity["server"] != plan["source"]["server"]:
         raise UpgradeBlocked("candidate is on a different server")
+    if verified_replay and any(
+        candidate_identity.get(key) != existing_receipt["candidate"][key]
+        for key in ("database", "server", "host", "port")
+    ):
+        raise UpgradeBlocked("candidate identity changed after verification")
     rebuild_plan = plan.get("legacy_knowledge_empty_rebuild") or {}
     if rebuild_plan.get("eligible") is True:
         _rebuild_empty_legacy_knowledge_candidate(
@@ -8243,9 +8590,13 @@ def apply_schema(
         raise UpgradeBlocked(
             f"candidate schema is partial/drift: {blocking_states}"
         )
+    if verified_replay and not _candidate_schema_is_exact(states):
+        raise UpgradeBlocked("verified replay candidate schema is not exact")
     receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
         raise UpgradeBlocked("operation receipt targets another candidate")
+    if verified_replay:
+        write_receipt(operation_receipt_path, receipt)
     steps = receipt.setdefault("schema_steps", [])
     connection = config.connect(candidate)
     try:

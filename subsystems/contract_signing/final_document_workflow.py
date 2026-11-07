@@ -28,7 +28,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.ports import UnitOfWork
-from shared_kernel.validation import require_canonical_text, require_positive_integer
+from shared_kernel.validation import require_canonical_text, require_positive_integer, require_sha256_hex
 from subsystems.contract_signing.final_document_preview_token import (
     FinalDocumentPreviewTokenError,
     HmacFinalDocumentPreviewTokenCodec,
@@ -41,6 +41,7 @@ from subsystems.controlled_files.workflow import (
     ControlledFileOwner,
     ControlledFilePurpose,
 )
+from subsystems.controlled_files.reconciliation import CommittedControlledFileApplyEvidenceReader
 from subsystems.orders.contract_completion_workflow import (
     ContractCompletionApplyRequest,
     ContractCompletionPreview,
@@ -105,6 +106,21 @@ class ApplyFinalSignedContractUpload:
 
 
 @dataclass(frozen=True, slots=True)
+class FinalContractFileReference:
+    """Read-only identity/digest evidence for controlled-file reconciliation."""
+    file_id: str
+    case_no: str
+    sha256_digest: str
+    size_bytes: int
+    current: bool
+    completion_receipt_present: bool
+    file_version: int | None = None
+    purpose: ControlledFilePurpose = ControlledFilePurpose.FINAL_SIGNED_CONTRACT
+    target: SignedContractDocumentTarget | None = None
+    filename: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FinalContractDocumentReadback:
     final_document_id: str
     case_no: str
@@ -134,6 +150,8 @@ class SignedContractDocumentReadback:
     filename: str
     mime_type: str
     size_bytes: int
+    sha256_digest: str | None = None
+    purpose: ControlledFilePurpose | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.file_id, "signed contract file ID", 64)
@@ -142,16 +160,32 @@ class SignedContractDocumentReadback:
         require_positive_integer(self.size_bytes, "signed contract file size")
         if self.mime_type != "application/pdf":
             raise ValueError("signed contract must be PDF")
+        if (self.sha256_digest is None) != (self.purpose is None):
+            raise ValueError("signed contract frozen identity is incomplete")
+        if self.sha256_digest is not None:
+            require_sha256_hex(self.sha256_digest, "signed contract SHA-256")
+            if self.purpose is not signed_contract_purpose(self.target):
+                raise ValueError("signed contract purpose does not match target")
 
 
 def signed_contract_object_key(session_id: str, target: SignedContractDocumentTarget) -> str:
     return f"signed-contract:{session_id}:{target.key}:v{target.document_version_id}"
 
 
+def signed_contract_purpose(target: SignedContractDocumentTarget) -> ControlledFilePurpose:
+    return (ControlledFilePurpose.FINAL_SIGNED_CONTRACT if target.scope == "client"
+            else ControlledFilePurpose.SIGNED_STAFF_AGREEMENT)
+
+
+def signed_contract_file_apply_key(parent: IdempotencyKey, target: SignedContractDocumentTarget) -> IdempotencyKey:
+    """The original per-target child identity, shared by Apply and evidence readback."""
+    return _derived_key(parent, "file-" + target.key)
+
+
 def signed_contract_intent(case_no: str, session_id: str, target: SignedContractDocumentTarget, staging_id: str) -> ControlledFileIntent:
     return ControlledFileIntent(
         staging_id, ControlledFileOwner.CONTRACT_SIGNING,
-        ControlledFilePurpose.FINAL_SIGNED_CONTRACT, case_no,
+        signed_contract_purpose(target), case_no,
         signed_contract_object_key(session_id, target), f"contract-signing/{case_no}",
     )
 
@@ -246,6 +280,11 @@ class FinalDocumentRepository(Protocol):
     def get_final_document(
         self, case_no: str
     ) -> FinalContractDocumentReadback | None: ...
+
+    def get_controlled_file_reference(
+        self, file_id: str, *,
+        apply_evidence_reader: CommittedControlledFileApplyEvidenceReader | None = None,
+    ) -> FinalContractFileReference | None: ...
 
 
 class BorrowedControlledFileWorkflow(Protocol):
@@ -428,6 +467,7 @@ class FinalSignedContractWorkflow:
                     upload.target, controlled.readback.file_id,
                     controlled.readback.version, controlled.readback.filename,
                     controlled.readback.mime_type, controlled.readback.size_bytes,
+                    controlled.readback.sha256_digest, controlled.readback.purpose,
                 ) for (upload, _), controlled in zip(file_previews, controlled_receipts, strict=True)),
             )
             self._repository.save_final_receipt(
@@ -604,7 +644,7 @@ def _controlled_apply(command, upload, preview):
         intent=upload.controlled_file_intent,
         expected_staging_version=upload.expected_staging_version,
         preview_fingerprint=preview.preview_fingerprint,
-        idempotency_key=_derived_key(command.idempotency_key, "file-" + upload.target.key),
+        idempotency_key=signed_contract_file_apply_key(command.idempotency_key, upload.target),
         actor=command.actor, correlation_id=command.correlation_id,
     )
 

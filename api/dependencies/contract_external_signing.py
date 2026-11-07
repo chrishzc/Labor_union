@@ -23,6 +23,7 @@ from infrastructure.mysql.contract_full_preview_repository import (
 from infrastructure.mysql.contract_signing_document_query_repository import MySqlContractSigningDocumentQueryRepository
 from infrastructure.db.contract_unsigned_pdf_repository import (
     MySqlContractUnsignedPdfRepository,
+    MySqlContractRenderSourceRepository,
 )
 from infrastructure.db.controlled_file_repository import (
     MySqlControlledFileWorkflowRepository,
@@ -64,10 +65,10 @@ from subsystems.contract_signing.final_document_preview_token import (
 from subsystems.contract_signing.final_document_workflow import FinalSignedContractWorkflow
 from subsystems.contract_signing.unsigned_contract_pdf import (
     DownloadUnsignedContractPdf,
+    PrepareUnsignedContractPdf,
     UnsignedContractPdfApplication,
 )
 from subsystems.contract_signing.unsigned_contract_pdf_persistence import (
-    PrepareAndPersistUnsignedContractPdf,
     UnsignedContractPdfPersistenceWorkflow,
 )
 from subsystems.contract_signing.staff_contract_application import (
@@ -118,7 +119,7 @@ class ContractExternalSigningApplication:
         facts = self.repository.load_active_session_by_case(case_no, for_update=False)
         return facts or self.repository.derive_current_session(case_no, for_update=False)
 
-    def query_case(self, case_no: str) -> dict[str, object]:
+    def query_case(self, case_no: str, actor: ActorContext | None = None) -> dict[str, object]:
         case_handoff = self.repository.load_handoff_notification_facts(case_no, None)
         case_reminder = self.repository.load_latest_reminder_receipt(case_no, None)
         active = self.repository.load_active_session_by_case(case_no, for_update=False)
@@ -154,7 +155,7 @@ class ContractExternalSigningApplication:
                 ],
             }
         reported = frozenset(facts.reported_staff_segment_ids)
-        unsigned_documents = self._unsigned_documents(facts)
+        unsigned_documents = self._unsigned_documents(facts, actor)
         document = {key: unsigned_documents[0][key] for key in ("document_version_id", "filename", "mime_type", "size_bytes")} if unsigned_documents else None
         handoff = self.repository.load_handoff_notification_facts(case_no, facts.session_id) if active is not None else None
         return {
@@ -244,21 +245,15 @@ class ContractExternalSigningApplication:
                 "size_bytes": existing.size_bytes,
                 "replayed": True,
             }
-        persisted = self.unsigned_persistence.prepare_and_persist(
-            PrepareAndPersistUnsignedContractPdf(
-                case_no=case_no,
-                source_document_version_id=source.source_document_version_id,
-                actor=actor,
-                idempotency_key=idempotency_key,
-                correlation_id=correlation_id,
-            )
-        )
+        rendered = self.unsigned_documents.prepare(PrepareUnsignedContractPdf(
+            case_no, source.source_document_version_id, actor,
+        ))
         return {
-            "document_version_id": persisted.document_version_id,
-            "filename": persisted.filename,
-            "mime_type": persisted.mime_type,
-            "size_bytes": persisted.size_bytes,
-            "replayed": source.replayed or persisted.replayed,
+            "document_version_id": rendered.source_document_version_id,
+            "filename": rendered.filename,
+            "mime_type": rendered.mime_type,
+            "size_bytes": len(rendered.content),
+            "replayed": source.replayed,
         }
 
     def prepare_client_unsigned(self, case_no, client_documents, actor, idempotency_key, correlation_id):
@@ -280,12 +275,9 @@ class ContractExternalSigningApplication:
                 "size_bytes": existing.size_bytes,
                 "replayed": True,
             }
-        persisted = self.unsigned_persistence.prepare_and_persist(PrepareAndPersistUnsignedContractPdf(
-            case_no=case_no, source_document_version_id=source_id, actor=actor,
-            idempotency_key=idempotency_key, correlation_id=correlation_id))
-        return {"document_version_id": persisted.document_version_id, "filename": persisted.filename,
-                "mime_type": persisted.mime_type, "size_bytes": persisted.size_bytes,
-                "replayed": replayed or persisted.replayed}
+        rendered = self.unsigned_documents.prepare(PrepareUnsignedContractPdf(case_no, source_id, actor))
+        return {"document_version_id": rendered.source_document_version_id, "filename": rendered.filename,
+                "mime_type": rendered.mime_type, "size_bytes": len(rendered.content), "replayed": replayed}
 
     def staff_reminder_readiness(
         self, case_no: str, matching_segment_id: int
@@ -304,12 +296,12 @@ class ContractExternalSigningApplication:
                 code="external_staff_report_target_not_found",
                 message="找不到指定的月嫂簽約對象。",
             )
-        stored = self.unsigned_repository.load_current_pdf(
+        source_ready = self.unsigned_repository.has_current_unsigned_source(
             case_no, target.document_version_id
         )
         binding = self._staff_binding(target.staff_subject_reference, for_update=False)
         blockers = []
-        if stored is None:
+        if not source_ready:
             blockers.append("contract_unsigned_pdf_missing")
         try:
             require_contract_line_recipient(
@@ -359,9 +351,9 @@ class ContractExternalSigningApplication:
                     code="external_staff_report_document_stale",
                     message="月嫂契約文件版本已變更。",
                 )
-            if self.unsigned_repository.load_current_pdf(
+            if not self.unsigned_repository.has_current_unsigned_source(
                 case_no, target.document_version_id
-            ) is None:
+            ):
                 raise ExternalSigningTypedError(
                     category="conflict",
                     code="contract_unsigned_pdf_missing",
@@ -446,13 +438,19 @@ class ContractExternalSigningApplication:
             "applied_at": _aware_utc(row["applied_at_utc"]),
         }
 
-    def _unsigned_documents(self, facts) -> list[dict[str, object]]:
+    def _unsigned_documents(self, facts, actor: ActorContext | None = None) -> list[dict[str, object]]:
         targets = [("staff", target.matching_segment_id, target.document_version_id) for target in facts.staff_targets]
         if facts.client_document_version_id is not None:
             targets.insert(0, ("client", None, facts.client_document_version_id))
         documents = []
+        prepared = {}
         for scope, segment_id, identity in targets:
-            stored = self.unsigned_repository.load_current_pdf(facts.case_no, identity)
+            if actor is None:
+                stored = self.unsigned_repository.load_current_pdf(facts.case_no, identity)
+            else:
+                if identity not in prepared:
+                    prepared[identity] = self.unsigned_documents.metadata(PrepareUnsignedContractPdf(facts.case_no, identity, actor))
+                stored = prepared[identity]
             if stored is not None:
                 documents.append({"scope": scope, "matching_segment_id": segment_id,
                                   "document_version_id": stored.document_version_id,
@@ -492,6 +490,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
         unsigned_repository = MySqlContractUnsignedPdfRepository(
             connection,
             archive_root=_contract_archive_root(),
+            templates=get_contract_template_catalog(),
         )
         reports = ExternalSigningWorkflow(
             repository,
@@ -534,6 +533,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 discard_document=discard_uncommitted_contract_document,
                 external_template_facts_loader=_load_external_staff_template_facts,
                 templates=get_contract_template_catalog(),
+                render_source_repository_factory=MySqlContractRenderSourceRepository,
             ),
             unsigned_persistence=UnsignedContractPdfPersistenceWorkflow(
                 unsigned_documents,
@@ -542,7 +542,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 unit_of_work_factory,
             ),
             document_query=ContractSigningDocumentQueryApplication(
-                MySqlContractSigningDocumentQueryRepository(connection)
+                MySqlContractSigningDocumentQueryRepository(connection, templates=get_contract_template_catalog())
             ),
         )
     finally:

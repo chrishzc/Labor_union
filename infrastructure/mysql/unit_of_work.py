@@ -24,7 +24,21 @@ class MySqlUnitOfWork:
         return self
 
     def __exit__(self, exception_type, exception, traceback) -> bool:
-        if exception_type is not None or not self._committed:
+        if exception is not None:
+            try:
+                self.rollback()
+            except Exception as rollback_error:
+                if rollback_error is not exception:
+                    # Cleanup is secondary. Keep the same primary object/TB
+                    # and any explicit cause/suppression chosen by its owner.
+                    # Python links a cleanup failure back to the primary;
+                    # break that link before retaining it as diagnostic context.
+                    rollback_error.__context__ = None
+                    if rollback_error.__cause__ is exception:
+                        rollback_error.__cause__ = None
+                    exception.__context__ = rollback_error
+            return False
+        if not self._committed:
             self.rollback()
         return False
 

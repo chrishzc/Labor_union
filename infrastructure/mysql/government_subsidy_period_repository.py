@@ -3,10 +3,17 @@ File: government_subsidy_period_repository.py
 Description: 政府補助整期核銷 MySQL repository，由上層單一交易擁有 commit。
 """
 from dataclasses import replace
+import hashlib
+import json
+import re
 from domains.government_subsidy.period_reconciliation import (
     PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine,
 )
-from subsystems.government_subsidy.period_reconciliation import CasePeriodCoverage, PeriodBankRow, PeriodCoverage, SubsidyPeriodView,GovernmentAmountChange
+from subsystems.government_subsidy.period_reconciliation import CasePeriodCoverage, PeriodBankRow, PeriodCoverage, SubsidyPeriodView,GovernmentAmountChange, GovernmentDifferenceCommand, ManualInitialPeriodSource
+from infrastructure.mysql.government_subsidy_manual_period_source import (
+    manual_initial_references, require_manual_initial_source,
+    verified_manual_initial_receipt, PERIOD_RECEIPT_PROOF_JSON_SQL, manual_initial_receipt_readback,
+)
 from subsystems.government_subsidy.reconciliation_register_query import (
     _select_established_cases, project_receivable_estimate,
 )
@@ -43,6 +50,10 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 ' AND entry.period_start<%s AND entry.period_end>%s ORDER BY entry.id', (period.end, period.start))
             coverage = tuple(PeriodCoverage(int(row['id']), SubsidyPeriod(row['period_unit'], row['period_year'], row['period_index']),
                                            int(row['amount_ntd']), int(row['recovered_advance_ntd'])) for row in cursor.fetchall())
+            labelled = []
+            for item in coverage:
+                labelled.append(replace(item, source_label=_entry_source_label(cursor, item.receipt_id)))
+            coverage = tuple(labelled)
             balances,operations=period_difference_views(cursor,[c.receipt_id for c in coverage])
             originals={b.root_receipt_id:b for b in balances if b.kind=='original'}
             coverage=tuple(replace(c,settled=originals[c.receipt_id].settled) if c.receipt_id in originals else c for c in coverage)
@@ -82,6 +93,72 @@ class MySqlGovernmentSubsidyPeriodRepository:
     def apply_difference(self,command):
         from infrastructure.mysql.government_period_difference_repository import apply_government_difference
         return apply_government_difference(self,command)
+
+    def find_manual_initial_replay(self, command):
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT command_digest,result_identity,actor FROM finance_statement_commands WHERE idempotency_key=%s FOR UPDATE', (command.key,))
+            receipt = cursor.fetchone()
+            if receipt is None:
+                return None
+            identity = re.fullmatch(r'government-manual:([1-9][0-9]*):([1-9][0-9]*)', str(receipt['result_identity']))
+            if receipt['command_digest'] != command.digest or receipt['actor'] != command.actor or identity is None:
+                raise PeriodReconciliationConflict('subsidy_period_manual_idempotency_conflict')
+            source = ManualInitialPeriodSource(int(identity[1]), command)
+            entry_id = int(identity[2])
+            cursor.execute(_MANUAL_INITIAL_SOURCE_SQL, (source.row_id,))
+            require_manual_initial_source(source, cursor.fetchone(), replay=True)
+            cursor.execute('SELECT period_unit,period_year,period_index,finance_import_row_id,amount_ntd,paid_on,actor,reversal_of_id,idempotency_key '
+                'FROM government_subsidy_period_entries WHERE id=%s', (entry_id,))
+            entry = cursor.fetchone()
+            expected = (command.period.unit, command.period.year, command.period.index, source.row_id, command.amount_ntd,
+                        command.paid_on, command.actor, None, command.owner_key)
+            if entry is None or tuple(entry[name] for name in ('period_unit','period_year','period_index','finance_import_row_id',
+                'amount_ntd','paid_on','actor','reversal_of_id','idempotency_key')) != expected:
+                raise PeriodReconciliationConflict('subsidy_period_manual_idempotency_conflict')
+            return entry_id
+
+    def append_manual_initial_source(self, command):
+        raw = {'帳號': None, '交易日': command.paid_on.strftime('%Y/%m/%d'), '計息日': None, '入帳日': None,
+               '摘要': '人工補登', '幣別': 'TWD', '支出': '', '存入': command.amount_ntd, '餘額': '',
+               '票據號碼': '', '銷帳編號': '', '交易參考編號': '', '備註': command.reason, '更正註記': '', '存摺備註': ''}
+        with self.connection.cursor() as cursor:
+            cursor.execute('INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,direction,credit,debit,currency,'
+                'summary,memo,cancellation_code,bank_references,warnings,classification_type,reconciliation_status,raw_payload) '
+                "VALUES(%s,'legacy',%s,'incoming',%s,NULL,'TWD','人工補登',%s,'',%s,'[]','government_subsidy','pending',%s)",
+                (hashlib.sha256(('government-period-manual:' + command.key).encode()).hexdigest(), command.paid_on,
+                 command.amount_ntd, command.reason, json.dumps(manual_initial_references(command), ensure_ascii=False),
+                 json.dumps(raw, ensure_ascii=False)))
+            return ManualInitialPeriodSource(int(cursor.lastrowid), command)
+
+    def save_manual_initial(self, view, source):
+        command = source.command
+        with self.connection.cursor() as cursor:
+            cursor.execute(_MANUAL_INITIAL_SOURCE_SQL, (source.row_id,))
+            require_manual_initial_source(source, cursor.fetchone())
+        # This is an additional exact source proof; every original currency,
+        # direction, integrity and cross-owner consumption guard still runs.
+        amount = self.bank_amount(source.row_id)
+        from infrastructure.mysql.government_period_difference_repository import save_initial_period_receipt
+        original = GovernmentDifferenceCommand(command.period, 'initial_receipt', '', None, source.row_id,
+            command.handling, command.reason, command.expected_version, command.owner_key, command.actor)
+        return save_initial_period_receipt(self, original, view, amount)
+
+    def save_manual_initial_receipt(self, command, source, entry_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute('INSERT INTO finance_statement_commands(idempotency_key,command_digest,result_identity,saved_count,excluded_count,actor) '
+                'VALUES(%s,%s,%s,1,0,%s)', (command.key, command.digest,
+                f'government-manual:{source.row_id}:{entry_id}', command.actor))
+
+    def read_manual_initial_receipt(self, command, entry_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT entry.id AS receipt_id,' + _MANUAL_INITIAL_SOURCE_COLUMNS + ',' + PERIOD_RECEIPT_PROOF_JSON_SQL +
+                ' AS period_receipt,receipt_command.idempotency_key AS stored_key,receipt_command.command_digest AS stored_digest,'
+                'receipt_command.actor AS stored_actor,receipt_command.result_identity AS stored_result_identity '
+                'FROM government_subsidy_period_entries entry '
+                'JOIN finance_import_rows source ON source.id=entry.finance_import_row_id '
+                'JOIN finance_statement_commands receipt_command ON receipt_command.idempotency_key=%s WHERE entry.id=%s', (command.key,entry_id))
+            rows = tuple(cursor.fetchall())
+        return manual_initial_receipt_readback(rows, command, entry_id)
 
     def find_replay(self, key, command):
         with self.connection.cursor() as cursor:
@@ -172,7 +249,8 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 'label':SubsidyPeriod(record['period_unit'],record['period_year'],record['period_index']).label,
                 'amount_ntd':int(record['amount_ntd']),'recorded_case_amount_ntd':int(record['member_amount_ntd']),
                 'recorded_service_end_date':record['service_end_date'],
-                'recovered_advance_ntd':int(record['recovered_advance_ntd'])} for record in cursor.fetchall())
+                'recovered_advance_ntd':int(record['recovered_advance_ntd']),
+                'source_label':_entry_source_label(cursor,int(record['id']))} for record in cursor.fetchall())
             from infrastructure.mysql.government_period_difference_repository import period_difference_views
             balances,_=period_difference_views(cursor,[c['receipt_id'] for c in coverage])
             originals={b.root_receipt_id:b for b in balances if b.kind=='original'}
@@ -249,3 +327,17 @@ class MySqlGovernmentSubsidyPeriodRepository:
             (bank_row_id,),
         )
         return entry_id
+
+
+_MANUAL_INITIAL_SOURCE_COLUMNS = ('source.id,source.format_id,source.transaction_date,source.direction,source.credit,source.debit,'
+    'source.currency,source.classification_type,source.reconciliation_status,source.bank_references,source.batch_id,source.source_file,'
+    'source.sheet_name,source.source_row,source.source_reference,source.source_bank_account,source.counterparty_account,source.resolved_counterparty_account')
+_MANUAL_INITIAL_SOURCE_SQL = ('SELECT ' + _MANUAL_INITIAL_SOURCE_COLUMNS + ' FROM finance_import_rows source WHERE source.id=%s FOR UPDATE')
+
+
+def _entry_source_label(cursor, receipt_id):
+    cursor.execute('SELECT ' + _MANUAL_INITIAL_SOURCE_COLUMNS + ',' + PERIOD_RECEIPT_PROOF_JSON_SQL + ' AS period_receipt '
+        'FROM government_subsidy_period_entries entry JOIN finance_import_rows source ON source.id=entry.finance_import_row_id '
+        'WHERE entry.id=%s', (receipt_id,))
+    source = cursor.fetchone()
+    return '人工補登' if source and verified_manual_initial_receipt(source, source['period_receipt']) else None

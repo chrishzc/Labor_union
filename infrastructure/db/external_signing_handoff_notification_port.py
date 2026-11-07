@@ -63,7 +63,7 @@ class MySqlExternalSigningHandoffNotificationPort:
 
     def validate_documents(self, facts: ExternalSigningSessionFacts) -> None:
         for subject_type, subject_reference, document_id, _ in self._targets(facts):
-            if self._unsigned_repository.load_current_pdf(facts.case_no, document_id) is None:
+            if not self._unsigned_repository.has_current_unsigned_source(facts.case_no, document_id):
                 label = "客戶" if subject_type == "customer" else f"月嫂 {subject_reference}"
                 raise self._blocked("contract_unsigned_pdf_missing", f"{label}未簽契約 PDF 尚未備妥。")
 

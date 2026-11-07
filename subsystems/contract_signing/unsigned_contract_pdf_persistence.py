@@ -169,97 +169,13 @@ class UnsignedContractPdfPersistenceWorkflow:
     def prepare_and_persist(
         self, command: PrepareAndPersistUnsignedContractPdf
     ) -> PersistedUnsignedContractPdf:
-        rendered = self._application.prepare(
-            PrepareUnsignedContractPdf(
-                command.case_no,
-                command.source_document_version_id,
-                command.actor,
-            )
-        )
-        renderer_identity = _require_renderer_identity(rendered.renderer_identity)
-        stage_key = _derived_key("stage", command.idempotency_key)
-        apply_key = _derived_key("apply", command.idempotency_key)
-        object_key = (
-            f"unsigned-contract:{rendered.source_document_version_id}:"
-            f"{renderer_identity}"
-        )
-        try:
-            staging = self._controlled_files.stage(
-                StageControlledFile(
-                    owner=ControlledFileOwner.CONTRACT_SIGNING,
-                    purpose=ControlledFilePurpose.UNSIGNED_CONTRACT,
-                    subject_reference=rendered.case_no,
-                    object_key=object_key,
-                    logical_folder="contracts/unsigned",
-                    filename=rendered.filename,
-                    mime_type=rendered.mime_type,
-                    content=rendered.content,
-                    idempotency_key=stage_key,
-                    actor=command.actor,
-                    correlation_id=command.correlation_id,
-                )
-            )
-            intent = ControlledFileIntent(
-                staging_id=staging.staging_id,
-                owner=ControlledFileOwner.CONTRACT_SIGNING,
-                purpose=ControlledFilePurpose.UNSIGNED_CONTRACT,
-                subject_reference=rendered.case_no,
-                object_key=object_key,
-                logical_folder="contracts/unsigned",
-            )
-            preview = self._controlled_files.preview(intent)
-        except UnsignedContractPdfError:
-            raise
-        except Exception:
-            raise _error(
-                "contract_pdf_controlled_file_unavailable",
-                "未簽契約 PDF staging 目前無法完成。",
-                retryable=True,
-            ) from None
-        if preview.blockers:
-            raise _error(
-                "contract_pdf_controlled_file_blocked",
-                "未簽契約 PDF staging 尚未符合保存條件。",
-            )
-        try:
-            with self._unit_of_work_factory() as unit_of_work:
-                source = self._repository.lock_source_for_persistence(
-                    rendered.case_no,
-                    rendered.source_document_version_id,
-                )
-                receipt = self._controlled_files.apply_borrowed(
-                    ApplyControlledFile(
-                        intent=intent,
-                        expected_staging_version=preview.expected_staging_version,
-                        preview_fingerprint=preview.preview_fingerprint,
-                        idempotency_key=apply_key,
-                        actor=command.actor,
-                        correlation_id=command.correlation_id,
-                    )
-                )
-                document_version_id = self._repository.register_persisted_pdf(
-                    source=source,
-                    controlled_file_receipt=receipt,
-                    renderer_identity=renderer_identity,
-                    actor=command.actor,
-                )
-                unit_of_work.commit()
-        except UnsignedContractPdfError:
-            raise
-        except Exception:
-            raise _error(
-                "contract_pdf_persistence_failed",
-                "未簽契約 PDF 保存失敗。",
-                retryable=True,
-            ) from None
-        return PersistedUnsignedContractPdf(
-            case_no=rendered.case_no,
-            source_document_version_id=rendered.source_document_version_id,
-            document_version_id=document_version_id,
-            filename=receipt.readback.filename,
-            mime_type=receipt.readback.mime_type,
-            size_bytes=receipt.readback.size_bytes,
-            replayed=receipt.outcome is ControlledFileApplyOutcome.REPLAYED,
+        # Keep the historical owner entry/DTO; current drafts use on-demand PDF
+        # generation and must never reach permanent NAS staging or registration.
+        raise UnsignedContractPdfError(
+            category="domain_blocked",
+            code="contract_unsigned_permanent_storage_retired",
+            message="未簽契約草稿已停止永久保存；請使用即時下載或既有歷史檔案。",
+            retryable=False,
         )
 
 

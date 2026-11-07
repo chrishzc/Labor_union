@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "1cdef35d66cad9f6a2d0a0958b848212757d550b0d2340a635c2545579bb2aa5",
+  "active_artifacts_sha256": "c316c7736ff1d3620e795d088f4f744e4e0dcda934584c0a660ba520140086c9",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -198,7 +198,11 @@
     "db/schema_parts/244_finance_case_arrangements.sql",
     "db/schema_parts/245_finance_case_subsidy_plans.sql",
     "db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql",
-    "db/schema_parts/1069_hcm_review_status.sql"
+    "db/schema_parts/1069_hcm_review_status.sql",
+    "db/schema_parts/1070_staff_payout_payment_sources.sql",
+    "db/schema_parts/1071_controlled_signed_staff_agreement.sql",
+    "db/schema_parts/1072_line_media_controlled_file_reference.sql",
+    "db/schema_parts/1073_contract_document_render_snapshot.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",

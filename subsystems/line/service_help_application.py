@@ -26,6 +26,7 @@ from subsystems.customer_service.escalation_contracts import (
 )
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
+from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.ai_router_contracts import (
     Clarification,
@@ -68,6 +69,13 @@ _REPLY_ONLY_SUFFIXES = frozenset({
 
 def _normalized_resume_command(text: str) -> str:
     return "".join(text.split()).casefold()
+
+
+class ManualFallbackBindingNotCurrent(ValueError):
+    """The explicitly requested fallback has no current LINE owner binding."""
+
+    def __init__(self):
+        super().__init__("line_router_preview_binding_not_current")
 
 
 class LineServiceHelpApplication:
@@ -207,6 +215,18 @@ class LineServiceHelpApplication:
             self._retired_ai_action(inbox, unit_of_work, line_user_id)
             return True
         return False
+
+    def apply_bound_manual_fallback(self, inbox, line_user_id, text: str, unit_of_work_factory) -> int:
+        """Own the existing explicit fallback transaction and its binding check."""
+        with unit_of_work_factory() as unit_of_work:
+            fact = unit_of_work.identity_management.current_fact(
+                LineIdentityCurrentFactQuery(line_user_id)
+            )
+            if fact.root_version is None or not fact.owner_projections:
+                raise ManualFallbackBindingNotCurrent()
+            ticket_id = self.apply_manual_fallback(inbox, unit_of_work, line_user_id, text)
+            unit_of_work.commit()
+        return ticket_id
 
     def apply_manual_fallback(self, inbox, unit_of_work, line_user_id, text: str) -> int:
         """Create the typed manual fallback selected by the development preview."""

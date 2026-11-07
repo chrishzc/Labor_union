@@ -297,6 +297,10 @@ def test_apply_uses_one_outer_uow_and_required_lock_order() -> None:
     ]
     assert len(controlled.applies) == 2
     assert {member.target.key for member in receipt.documents} == {"client", "staff:11"}
+    assert {member.target.scope: member.purpose.value for member in receipt.documents} == {
+        "client": "final_signed_contract", "staff": "signed_staff_agreement",
+    }
+    assert {member.sha256_digest for member in receipt.documents} == {controlled.digest}
     assert len(orders.applies) == 1
     assert orders.applies[0].expected_client_finance_version.value == 5
 
@@ -451,7 +455,7 @@ class FakeControlledFiles:
         readback = ControlledFileReadback(
             file_id="cf_" + ("c" * 32 if ":client:" in command.intent.object_key else hashlib.sha256(command.intent.object_key.encode()).hexdigest()[:32]),
             owner=ControlledFileOwner.CONTRACT_SIGNING,
-            purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+            purpose=command.intent.purpose,
             subject_reference=command.intent.subject_reference,
             filename="final-contract.pdf",
             logical_folder="contracts",

@@ -56,6 +56,7 @@ from subsystems.contract_signing.final_document_workflow import (
     SignedContractDocumentUpload,
     signed_contract_intent,
     signed_contract_object_key,
+    signed_contract_purpose,
 )
 from subsystems.contract_signing.full_contract_preview import (
     FullContractPreviewApplication,
@@ -497,11 +498,11 @@ def _application():
 )
 def query_external_signing(
     case_no: str = ApiPath(pattern=_CASE),
-    _: AdminPrincipal = Depends(require_persisted_admin),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
     application: ContractExternalSigningApplication = Depends(_application),
 ):
     return _call(
-        lambda: BaseResponse(data=_public_query(application.query_case(case_no))),
+        lambda: BaseResponse(data=_public_query(application.query_case(case_no, admin_actor_context(principal)))),
         "query",
     )
 
@@ -944,7 +945,7 @@ def stage_final_document(
         result = application.controlled_files.stage(
             StageControlledFile(
                 owner=ControlledFileOwner.CONTRACT_SIGNING,
-                purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+                purpose=signed_contract_purpose(target),
                 subject_reference=case_no,
                 object_key=signed_contract_object_key(session_id, target),
                 logical_folder=f"contract-signing/{case_no}",

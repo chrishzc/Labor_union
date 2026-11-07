@@ -10,6 +10,10 @@ from domains.staff.retirement import StaffLifecycleState
 
 from subsystems.staff.summary_query import StaffSummaryQueryRequest
 from subsystems.staff.qualification_master_query import StaffRosterServiceProfile
+from subsystems.controlled_files.workflow import ControlledFileOwner, ControlledFilePurpose, ControlledFileReadback, FILE_PURPOSE_REGISTRY
+from shared_kernel.performance import MAXIMUM_PAGE_SIZE
+from shared_kernel.validation import require_positive_integer, require_sha256_hex
+import re
 
 
 _MAX_BANK_ACCOUNTS = 20
@@ -21,6 +25,62 @@ class StaffProfileContractError(ValueError):
 
 class StaffProfileNotFound(LookupError):
     """Raised when the requested Staff root does not exist."""
+
+
+class StaffSavedDocumentSourceUnavailable(RuntimeError):
+    pass
+
+
+class StaffSavedDocumentCursorInvalid(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class StaffSavedDocument:
+    staff_id: int
+    file_id: str
+    purpose: ControlledFilePurpose
+    filename: str
+    version: int
+    sha256_digest: str
+    mime_type: str
+    size_bytes: int
+
+    def __post_init__(self):
+        require_positive_integer(self.staff_id, "Staff document owner")
+        require_positive_integer(self.version, "Staff document version")
+        require_positive_integer(self.size_bytes, "Staff document size")
+        require_sha256_hex(self.sha256_digest, "Staff document SHA-256")
+        if (not re.fullmatch(r"cf_[0-9a-f]{32}", self.file_id)
+            or self.purpose not in {ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM}
+            or self.mime_type not in FILE_PURPOSE_REGISTRY[self.purpose].file_format
+            or not isinstance(self.filename, str) or not self.filename.strip()
+            or any(character in self.filename for character in ("/", "\\", "\n", "\r", "\x00"))):
+            raise StaffProfileContractError("Staff saved document facts are invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class StaffSavedDocumentPage:
+    status: str = "unavailable"
+    items: tuple[StaffSavedDocument, ...] = ()
+    next_cursor: str | None = None
+
+
+class StaffResumeFileQuery(Protocol):
+    def find_current_readback(self, owner: ControlledFileOwner, purpose: ControlledFilePurpose,
+                              subject_reference: str, object_key: str) -> ControlledFileReadback | None: ...
+
+
+def query_current_staff_resume(profile_application: StaffProfileQueryApplication,
+                              files: StaffResumeFileQuery, staff_id: int) -> ControlledFileReadback | None:
+    """The Staff page's existing current-resume contract, shared with reconciliation.
+
+    The logical key is defined by the original upload/page consumer. It does
+    not infer attachment relations for certificates, medical facts or filenames.
+    """
+    profile_application.query(staff_id)
+    return files.find_current_readback(ControlledFileOwner.STAFF, ControlledFilePurpose.STAFF_RESUME,
+                                       str(staff_id), "resume")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +123,9 @@ class StaffProfileRepository(Protocol):
 
     def fetch_bank_accounts(self, staff_id: int) -> tuple[Mapping[str, object], ...]: ...
 
+    def fetch_saved_documents(self, staff_id: int, *, after: str | None, page_size: int,
+                              file_id: str | None) -> StaffSavedDocumentPage: ...
+
     def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None, lifecycle_state: StaffLifecycleState | None = None) -> tuple[Mapping[str, object], ...]: ...
 
     def fetch_bank_accounts_for_staff(self, staff_ids: tuple[int, ...]) -> Mapping[int, tuple[Mapping[str, object], ...]]: ...
@@ -103,6 +166,37 @@ class StaffProfileQueryApplication:
         if len(bank_rows) > _MAX_BANK_ACCOUNTS:
             raise StaffProfileContractError("staff profile bank accounts exceed bounded maximum")
         return _profile(row, bank_rows, staff_id)
+
+    def query_saved_documents(self, staff_id: int, *, after: str | None = None,
+                              page_size: int = MAXIMUM_PAGE_SIZE, file_id: str | None = None) -> StaffSavedDocumentPage:
+        """Saved file collection only; no medical/qualification/expiry inference.
+
+        The existing Profile API consumes this read model. Maintenance uses its
+        exact-file membership query with the same current-per-logical-key source.
+        """
+        self.query(staff_id)
+        if type(page_size) is not int or not 1 <= page_size <= MAXIMUM_PAGE_SIZE:
+            raise StaffSavedDocumentCursorInvalid("Staff document page size is invalid")
+        if after is not None and not re.fullmatch(r"cf_[0-9a-f]{32}", after):
+            raise StaffSavedDocumentCursorInvalid("Staff document cursor is invalid")
+        fetch = getattr(self._repository, "fetch_saved_documents", None)
+        if not callable(fetch):
+            return StaffSavedDocumentPage()
+        try:
+            page = fetch(staff_id, after=after, page_size=page_size, file_id=file_id)
+            if (not isinstance(page, StaffSavedDocumentPage) or page.status != "available"
+                or len(page.items) > page_size or any(not isinstance(item, StaffSavedDocument) for item in page.items)
+                or len({item.file_id for item in page.items}) != len(page.items)
+                or any(item.staff_id != staff_id for item in page.items)
+                or file_id is not None and any(item.file_id != file_id for item in page.items)
+                or file_id is not None and page.next_cursor is not None
+                or page.next_cursor is not None and (not page.items or page.next_cursor != page.items[-1].file_id)):
+                raise StaffProfileContractError("Staff saved document page is invalid")
+            return page
+        except (StaffSavedDocumentSourceUnavailable, StaffProfileContractError, ValueError, TypeError, KeyError) as error:
+            if isinstance(error, StaffSavedDocumentCursorInvalid):
+                raise
+            return StaffSavedDocumentPage()
 
     def query_page(self, request: StaffSummaryQueryRequest, *, lifecycle_state: StaffLifecycleState | None = None) -> StaffRosterPage:
         rows = self._repository.fetch_page(after_id=request.after_id, page_size=request.page_size, staff_id=request.staff_id, lifecycle_state=lifecycle_state)
@@ -292,4 +386,9 @@ __all__ = [
     "StaffProfileRepository",
     "StaffRosterItem",
     "StaffRosterPage",
+    "StaffSavedDocument",
+    "StaffSavedDocumentPage",
+    "StaffSavedDocumentCursorInvalid",
+    "StaffSavedDocumentSourceUnavailable",
+    "query_current_staff_resume",
 ]

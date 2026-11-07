@@ -20,7 +20,10 @@ from infrastructure.mysql.staff_qualification_master_repository import (
     MySqlStaffQualificationMasterRepository,
 )
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.staff.profile_query import StaffProfileQueryApplication
+from subsystems.staff.profile_query import (
+    StaffProfileQueryApplication, StaffSavedDocument, StaffSavedDocumentPage,
+)
+from subsystems.controlled_files.workflow import ControlledFilePurpose
 from subsystems.staff.qualification_master_query import StaffRosterServiceProfile, StaffServiceProfileItem
 
 
@@ -246,6 +249,43 @@ def test_roster_returns_all_profile_fields_with_bounded_cursor_and_one_account_b
     assert service['holiday_availability'] == [{'value':'中秋節','detail':None}]
     assert service['weekly_rest'] == [{'value':'週休1日','detail':None}]
     assert service['baby_types'] == [{'value':'雙胞胎','detail':None}]
+
+
+
+def test_roster_keeps_unqueried_documents_unavailable_without_per_staff_document_reads():
+    class DocumentRepository(_Repository):
+        def __init__(self):
+            self.document_reads = []
+
+        def fetch_saved_documents(self, staff_id, *, after, page_size, file_id):
+            self.document_reads.append((staff_id, after, page_size, file_id))
+            document = StaffSavedDocument(
+                staff_id, "cf_" + "a" * 32, ControlledFilePurpose.STAFF_CERTIFICATE,
+                "synthetic-certificate.pdf", 1, "c" * 64, "application/pdf", 3,
+            )
+            return StaffSavedDocumentPage("available", (document,))
+
+    repository = DocumentRepository()
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: StaffProfileQueryApplication(repository)
+
+    response = client.get('/api/v1/staff/roster', params={'page_size': 1})
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['next_cursor'] == 7 and len(data['items']) == 1
+    profile = data['items'][0]['profile']
+    assert profile['documents'] == {'status': 'unavailable', 'items': [], 'next_cursor': None}
+    assert repository.document_reads == []
+    assert repository.page_reads == repository.batch_reads == repository.service_reads == 1
+    assert repository.selected_ids == (7,)
+
+    detail = client.get('/api/v1/staff/7/profile').json()['data']
+    assert detail['documents']['status'] == 'available'
+    assert detail['documents']['items'][0]['file_id'] == 'cf_' + 'a' * 32
+    assert repository.document_reads == [(7, None, 200, None)]
+    assert {key: value for key, value in profile.items() if key != 'documents'} == {
+        key: value for key, value in detail.items() if key != 'documents'
+    }
 
 
 def test_roster_requires_the_same_reader_permission_as_sensitive_profile():

@@ -1,0 +1,171 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-payout-payment-sources-2026-11-06-v1",
+  "descriptors": {
+    "1070_staff_payout_payment_sources.sql": {
+      "tables": {},
+      "indexes": {
+        "staff_payout_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "staff_payout_events.uq_staff_payout_import_row": {
+          "non_unique": 0,
+          "columns": [
+            "finance_import_row_id"
+          ]
+        },
+        "staff_payout_events.uq_staff_payout_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "staff_payout_events.idx_staff_payout_staff_date": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "occurred_on",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "staff_payout_events.fk_staff_payout_staff": {
+          "columns": [
+            "staff_id"
+          ],
+          "referenced_table": "staff",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_payout_events.fk_staff_payout_import_row": {
+          "columns": [
+            "finance_import_row_id"
+          ],
+          "referenced_table": "finance_import_rows",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_payout_events.fk_staff_payout_reversal": {
+          "columns": [
+            "reversal_of_event_id"
+          ],
+          "referenced_table": "staff_payout_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "staff_payout_events.chk_staff_payout_amount": "atom(amount_ntd>0)",
+        "staff_payout_events.chk_staff_payout_account_hash": "atom(regexp_like(bank_account_identity_hash,'^[0-9a-f]{64}$'))",
+        "staff_payout_events.chk_staff_payout_reversal_shape": "or(and(atom(event_type='payout'),atom(reversal_of_event_idisnull)),and(atom(event_typein('return','reversal')),atom(reversal_of_event_idisnotnull)))",
+        "staff_payout_events.chk_staff_payout_payment_source": "or(and(atom(payment_source_kindin('legacy_unspecified','bank_statement')),atom(bank_account_identity_hashisnotnull),atom(regexp_like(bank_account_identity_hash,'^[0-9a-f]{64}$'))),and(atom(payment_source_kind='manual_supplement'),atom(bank_account_identity_hashisnull)))"
+      },
+      "triggers": [
+        "trg_staff_payout_events_before_update",
+        "trg_staff_payout_events_before_delete"
+      ],
+      "parent_columns": {
+        "staff_payout_events": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "finance_import_row_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "event_type": {
+            "column_type": "enum('payout','return','reversal')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "occurred_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "bank_account_identity_hash": {
+            "column_type": "char(64)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "reversal_of_event_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "reconciliation_reference": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          },
+          "payment_source_kind": {
+            "column_type": "enum('legacy_unspecified','bank_statement','manual_supplement')",
+            "is_nullable": "NO",
+            "column_default": "legacy_unspecified",
+            "extra": ""
+          }
+        }
+      },
+      "views": {}
+    }
+  }
+}

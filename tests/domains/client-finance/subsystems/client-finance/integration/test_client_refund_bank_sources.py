@@ -53,3 +53,40 @@ def test_subsidy_return_fee_preserves_bank_amount_and_settles_only_within_thresh
     assert candidate.amount == MoneyNTD(amount)
     assert candidate.transfer_fee == MoneyNTD(fee)
     assert sum(item.amount.amount for item in candidate.allocations) == allocated
+
+
+@pytest.mark.parametrize("amount,partial,fee,allocated", [
+    (1000, False, 0, 1000), (1000, True, 0, 1000),
+    (970, False, 30, 1000), (970, True, 0, 970),
+    (900, False, 100, 1000), (900, True, 0, 900),
+    (899, True, 0, 899), (300, True, 0, 300),
+])
+def test_explicit_partial_refund_preserves_unpaid_balance_instead_of_inventing_a_fee(
+    amount, partial, fee, allocated,
+):
+    bank = ClientRefundBankFact("partial-source", "CASE", MoneyNTD(amount), "2026-11-06")
+    obligation = ClientRefundObligation("refund:CASE", "CASE", MoneyNTD(1000), "refund")
+
+    result = build_client_refund_candidate(
+        "CASE", (bank,), (obligation,), allow_partial_refund_recovery=partial,
+    )
+
+    assert result.amount.amount == amount
+    assert result.entries[0].amount.amount == amount
+    assert result.transfer_fee.amount == fee
+    assert sum(item.amount.amount for item in result.allocations) == allocated
+    assert 1000 - allocated == (1000 - amount if partial else 0)
+
+
+@pytest.mark.parametrize("amount,partial,error", [
+    (899, False, "refund_requires_exact_settlement"),
+    (1100, False, "allocation_exceeds_obligation"),
+    (1100, True, "allocation_exceeds_obligation"),
+])
+def test_partial_refund_intent_does_not_remove_other_amount_blockers(amount, partial, error):
+    bank = ClientRefundBankFact("blocked-source", "CASE", MoneyNTD(amount), "2026-11-06")
+    obligation = ClientRefundObligation("refund:CASE", "CASE", MoneyNTD(1000), "refund")
+    with pytest.raises(ValueError, match=error):
+        build_client_refund_candidate(
+            "CASE", (bank,), (obligation,), allow_partial_refund_recovery=partial,
+        )

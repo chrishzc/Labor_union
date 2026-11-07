@@ -24,7 +24,7 @@ from domains.client_finance.client_refund_reversal import (
 )
 from domains.finance_import.cancellation_code import extract_sinopac_account_reference
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
 from domains.client_finance.subsidy_advance import SubsidyPayoutFundingFacts
 from subsystems.client_finance.client_refund_reversal_workflow import (
@@ -33,6 +33,7 @@ from subsystems.client_finance.client_refund_reversal_workflow import (
     ClientRefundReversalReceipt,
     ClientRefundReversalStorageError,
     StoredClientRefundReversalReceipt,
+    ManualClientRefundSource,
 )
 
 _RETRYABLE_MYSQL_CODES = frozenset({1062, 1205, 1213})
@@ -53,14 +54,21 @@ class ClientRefundReversalMySqlUnitOfWork(MySqlUnitOfWork):
 
 
 class MySqlClientRefundReversalRepository:
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, *, manual_source: ManualClientRefundSource | None = None) -> None:
+        if manual_source is not None and not isinstance(manual_source, ManualClientRefundSource):
+            raise TypeError("manual refund source requires a typed internal binding")
         self._connection = connection
+        self._manual_source = manual_source
         self._request: ClientRefundReversalApplyRequest | None = None
         self._entry_ids: dict[str, int] = {}
         self._refund_row_metadata: dict[str, tuple[int, date]] = {}
         self.refund_account_matches: bool | None = None
 
     def bind_apply_request(self, request) -> None:
+        if self._manual_source is not None:
+            self._manual_source.validate_selection(request.selection)
+            if request.actor != self._manual_source.actor or request.reason != self._manual_source.reason:
+                raise ValueError("manual_refund_source_mismatch")
         self._request = request
 
     def clear_apply_request(self) -> None:
@@ -70,6 +78,8 @@ class MySqlClientRefundReversalRepository:
 
     def load(self, selection, *, for_update):
         self.refund_account_matches = None
+        if self._manual_source is not None:
+            self._manual_source.validate_selection(selection)
         with _mysql_cursor(self._connection) as cursor:
             if not _case_exists(cursor, selection.case_no):
                 raise ValueError("client_finance_case_not_found")
@@ -82,7 +92,9 @@ class MySqlClientRefundReversalRepository:
                 ClientFinanceCorrectionType.REFUND,
                 ClientFinanceCorrectionType.REFUND_OVERAGE,
             }:
-                facts = self._load_refund(cursor, selection, for_update)
+                facts = (self._load_manual_refund(cursor, selection, for_update)
+                         if self._manual_source is not None
+                         else self._load_refund(cursor, selection, for_update))
             elif selection.correction_type is ClientFinanceCorrectionType.REFUND_RETURN:
                 facts = self._load_refund_return(cursor, selection, for_update)
             else:
@@ -268,6 +280,24 @@ class MySqlClientRefundReversalRepository:
             ),
             "obligations": _refund_obligations(obligation_rows),
         }
+
+    def _load_manual_refund(self, cursor, selection, lock):
+        # A manual cash fact has no bank recipient account. Its authenticated
+        # command binding replaces only bank-source matching, never owner facts.
+        rows = _load_refund_bank_rows(cursor, selection.bank_fact_identities, lock)
+        suffix = " FOR UPDATE" if lock else ""
+        types = _manual_refund_obligation_types(self._manual_source)
+        cursor.execute(
+            "SELECT obligation_identity,case_no,obligation_type,direction,status,amount_due_ntd "
+            "FROM client_obligations WHERE obligation_identity=%s AND case_no=%s "
+            "AND direction='payable_to_client' AND status='open' AND amount_due_ntd>0 "
+            f"AND obligation_type IN ({_placeholders(types)})" + suffix,
+            (self._manual_source.target_item, self._manual_source.case_no, *types),
+        )
+        obligations = tuple(cursor.fetchall())
+        facts = _manual_refund_facts(self._manual_source, selection, rows, obligations)
+        self._refund_row_metadata = _refund_metadata(rows)
+        return facts
 
     def _load_reversal(self, cursor, selection, lock):
         targets = _load_reversal_target_rows(cursor, selection, lock)
@@ -470,6 +500,73 @@ def _refund_bank_facts(rows, case_no, refund_purpose, recipient_account):
         for row in rows
         if _is_positive_integer_money(row.get("debit"))
     )
+
+
+def _manual_refund_obligation_types(source):
+    return ("subsidy_return",) if source.refund_purpose is ClientRefundPurpose.SUBSIDY_RETURN else ("refund", "adjustment")
+
+
+def _manual_refund_facts(source, selection, rows, obligation_rows):
+    """Project a manual source only after its exact server-side binding matches."""
+    source.validate_selection(selection)
+    if len(rows) != 1 or len(obligation_rows) != 1:
+        raise ValueError("manual_refund_source_mismatch")
+    row, obligation = rows[0], obligation_rows[0]
+    try:
+        references = _json_object(row.get("bank_references"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("manual_refund_source_mismatch") from error
+    command = references.get("manual_command")
+    if not isinstance(command, Mapping):
+        raise ValueError("manual_refund_source_mismatch")
+    try:
+        actual_digest = fingerprint_payload(dict(command)).value
+    except (TypeError, ValueError) as error:
+        raise ValueError("manual_refund_source_mismatch") from error
+    if (
+        references.get("source") != "manual_supplement"
+        or references.get("manual_command_digest") != source.command_digest
+        or references.get("reason") != source.reason
+        or references.get("allow_overage_disposition", False) is not source.allow_overage_disposition
+        or actual_digest != source.command_digest
+        or command.get("case_no") != source.case_no
+        or command.get("actor") != source.actor.actor_id
+        or command.get("reason") != source.reason
+        or command.get("direction") != "client_refund"
+        or command.get("target_item") != source.target_item
+        or type(command.get("amount_ntd")) is not int
+        or command.get("amount_ntd") != source.amount_ntd
+        or command.get("transaction_date") != source.transaction_date
+        or command.get("allow_overage_disposition", False) is not source.allow_overage_disposition
+        or type(row.get("id")) is not int or row["id"] != source.row_id
+        or row.get("format_id") != command.get("bank")
+        or not _is_positive_integer_money(row.get("debit"))
+        or _integer_money(row["debit"]).amount != source.amount_ntd
+        or not _is_zero_or_none(row.get("credit"))
+        or row.get("direction") != "outgoing"
+        or row.get("effective_classification_type") != _classification_for_purpose(source.refund_purpose)
+        or row.get("reconciliation_status") != "pending"
+        or row.get("ledger_entry_id") is not None
+        or _date_text(row.get("transaction_date")) != source.transaction_date
+        or not _is_twd(row.get("currency"))
+    ):
+        raise ValueError("manual_refund_source_mismatch")
+    if (
+        obligation.get("obligation_identity") != source.target_item
+        or obligation.get("case_no") != source.case_no
+        or obligation.get("direction") != "payable_to_client"
+        or obligation.get("status") != "open"
+        or obligation.get("obligation_type") not in _manual_refund_obligation_types(source)
+        or not _is_positive_integer_money(obligation.get("amount_due_ntd"))
+    ):
+        raise ValueError("client_obligation_not_found")
+    return {
+        "manual_source": source,
+        "bank_facts": (ClientRefundBankFact(
+            str(source.row_id), source.case_no, MoneyNTD(source.amount_ntd), source.transaction_date,
+        ),),
+        "obligations": _refund_obligations(obligation_rows),
+    }
 
 
 def _refund_return_bank_facts(rows, case_no):

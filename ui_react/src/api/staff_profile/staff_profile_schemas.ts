@@ -14,6 +14,21 @@ export const StaffBankAccountSchema = z.strictObject({
   is_active: z.boolean(),
 });
 
+export const StaffSavedDocumentSchema = z.strictObject({
+  staff_id: z.number().int().positive(), file_id: z.string().regex(/^cf_[0-9a-f]{32}$/),
+  purpose: z.enum(['staff_certificate', 'staff_health_exam']), filename: z.string().min(1).max(255),
+  version: z.number().int().positive(), sha256_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  mime_type: z.enum(['application/pdf', 'image/jpeg']), size_bytes: z.number().int().positive(),
+});
+export const StaffSavedDocumentPageSchema = z.strictObject({
+  status: z.enum(['available', 'unavailable']), items: z.array(StaffSavedDocumentSchema).max(200),
+  next_cursor: z.string().regex(/^cf_[0-9a-f]{32}$/).nullable(),
+}).refine(page => (page.status === 'available' || (!page.items.length && page.next_cursor === null))
+  && new Set(page.items.map(item => item.file_id)).size === page.items.length
+  && (page.next_cursor === null || page.items.at(-1)?.file_id === page.next_cursor), '文件清單分頁結構異常。');
+export type StaffSavedDocument = z.infer<typeof StaffSavedDocumentSchema>;
+export type StaffSavedDocumentPage = z.infer<typeof StaffSavedDocumentPageSchema>;
+
 export const StaffProfileSchema = z.strictObject({
   staff_id: z.number().int().positive(),
   union_no: z.string().max(50).nullable().optional(),
@@ -35,6 +50,7 @@ export const StaffProfileSchema = z.strictObject({
   emergency_contact_phone: z.string().max(30).nullable(),
   admin_notes: z.string().max(2000).nullable(),
   bank_accounts: z.array(StaffBankAccountSchema).max(20),
+  documents: StaffSavedDocumentPageSchema.nullable().optional(),
 });
 
 export const StaffProfileResponseSchema = z.strictObject({

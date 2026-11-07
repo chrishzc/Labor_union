@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 import os
 
 import pymysql
@@ -256,6 +256,96 @@ def _cancel_assignment_with_formal_rebuild(connection, case_no: str, assignment_
             result = persist_scheduling_replacement(cursor, command)
         assert result.scheduling_version == 2
         unit_of_work.commit()
+
+
+@pytest.mark.parametrize("outbox_kind", ["completion", "rebuild"])
+def test_projection_outbox_retry_deadline_and_claim_native_mysql(outbox_kind) -> None:
+    """Read committed retry facts and due claims from each real outbox owner."""
+    from infrastructure.mysql.scheduling_rebuild_notification_invalidation_repository import (
+        MySqlSchedulingRebuildNotificationInvalidationRepository,
+    )
+    from infrastructure.mysql.service_day_log_notification_stop_repository import (
+        MySqlServiceDayLogNotificationStopRepository,
+    )
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+
+    assert DATABASE and DATABASE.startswith("lu_test_")
+    database = f"{DATABASE}_notification_{outbox_kind}"
+    bootstrap(_arguments(database))
+    connect = _connection_factory(database)
+    connection = connect()
+    if outbox_kind == "completion":
+        table = "scheduling_service_day_log_outbox"
+        repository = MySqlServiceDayLogNotificationStopRepository(connection)
+    else:
+        table = "scheduling_rebuild_notification_outbox"
+        repository = MySqlSchedulingRebuildNotificationInvalidationRepository(connection)
+
+    def read_state():
+        # A separate connection proves that the application transaction committed.
+        reader = connect()
+        try:
+            with reader.cursor() as cursor:
+                cursor.execute(f"SELECT id,delivery_status,attempt_count,next_attempt_at_utc,last_error_code FROM {table} ORDER BY id")
+                rows = cursor.fetchall()
+                assert len(rows) == 1
+                return rows[0]
+        finally:
+            reader.close()
+
+    try:
+        case_no = f"RETRY-{outbox_kind.upper()}"
+        line_user_id = f"U-retry-{outbox_kind}"
+        staff_id, assignment_id = _seed_case(connection, case_no=case_no, line_user_id=line_user_id)
+        if outbox_kind == "completion":
+            _apply_non_cooking_log(connection, staff_id, assignment_id, line_user_id)
+        else:
+            # Reuse the original formal rebuild prerequisite and writer, rather
+            # than inserting an outbox row outside its owning transaction.
+            from infrastructure.mysql.nas_mutations import PROCEDURES
+            arguments, body, _ = PROCEDURES["lu_nas_cancel_occupancy_v1"]
+            with connection.cursor() as cursor:
+                cursor.execute(f"CREATE PROCEDURE lu_nas_cancel_occupancy_v1 ({arguments}) "
+                               f"SQL SECURITY INVOKER BEGIN {body} END")
+            connection.commit()
+            _cancel_assignment_with_formal_rebuild(connection, case_no, assignment_id)
+
+        initial = read_state()
+        assert (initial["delivery_status"], initial["attempt_count"], initial["next_attempt_at_utc"]) == ("pending", 0, None)
+        outbox_id = int(initial["id"])
+        now = _NOW
+        for attempt in (1, 2, 3):
+            with MySqlUnitOfWork(connection) as unit_of_work:
+                claimed = repository.claim_due(now, 1)
+                assert [item.outbox_id for item in claimed] == [outbox_id]
+                repository.mark_retry_or_failed(outbox_id, now, RuntimeError("synthetic projection failure"))
+                unit_of_work.commit()
+            state = read_state()
+            assert state["attempt_count"] == attempt
+            assert state["last_error_code"] == "RuntimeError"
+            if attempt < 3:
+                assert state["delivery_status"] == "pending"
+                assert aware_utc(state["next_attempt_at_utc"]) == now + timedelta(seconds=1)
+                with MySqlUnitOfWork(connection) as unit_of_work:
+                    assert repository.claim_due(now, 1) == ()
+                    unit_of_work.commit()
+                assert read_state() == state
+                # The next loop claims exactly at this persisted deadline.
+                now += timedelta(seconds=1)
+            else:
+                assert state["delivery_status"] == "failed"
+                assert state["next_attempt_at_utc"] is None
+                with MySqlUnitOfWork(connection) as unit_of_work:
+                    assert repository.claim_due(now + timedelta(days=1), 1) == ()
+                    unit_of_work.commit()
+                assert read_state() == state
+        with pytest.raises(RuntimeError, match="outbox_state_conflict$"):
+            with MySqlUnitOfWork(connection) as unit_of_work:
+                repository.mark_retry_or_failed(outbox_id, now, RuntimeError("already terminal"))
+                unit_of_work.commit()
+        assert read_state() == state
+    finally:
+        connection.close()
 
 
 def test_historical_service_day_reminder_native_mysql_stop_rebuild_and_replay() -> None:

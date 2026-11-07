@@ -14,6 +14,7 @@ from typing import Callable
 
 from domains.line.identities import LineDeliveryTaskId
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from subsystems.contract_signing.render_source_snapshot import RenderSourceRequest, RenderSourceWorkflow
 from subsystems.contract_signing.document_access import (
     create_document_access_credential,
 )
@@ -117,8 +118,10 @@ class StaffContractSigningApplication:
         order_selector: Callable[..., object] | None = None,
         external_template_facts_loader: Callable[..., tuple[dict[str, object], str]] | None = None,
         templates: TemplateCatalogPort | None = None,
+        render_source_repository_factory=None,
     ) -> None:
         self._templates = templates
+        self._render_source_repository_factory = render_source_repository_factory
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
@@ -173,59 +176,23 @@ class StaffContractSigningApplication:
     def prepare_external_document(
         self, command: PrepareExternalStaffContractCommand
     ) -> PreparedExternalStaffContractDocument:
-        """Persist the current unsigned XLSX source without creating a LINE task."""
-        if self._external_template_facts_loader is None:
-            raise RuntimeError("contract_external_template_facts_loader_not_configured")
-        template = self._template("contract_staff_service")
-        archive = None
-        try:
-            def persist(connection):
-                nonlocal archive
-                segment = _staff_segment(
-                    connection, command.case_no, command.matching_segment_id
-                )
+        """Keep a true reconstructible source version without archiving draft bytes."""
+        if self._external_template_facts_loader is None or self._render_source_repository_factory is None:
+            raise RuntimeError("contract_external_render_source_not_configured")
+        def persist(connection):
+            def load_current():
+                segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
                 _require_external_staff_segment_applicable(segment)
-                facts, facts_snapshot_sha256 = self._external_template_facts_loader(
-                    connection,
-                    command.case_no,
-                    command.matching_segment_id,
-                    self._now(),
-                    template,
+                template = self._template("contract_staff_service")
+                facts, digest = self._external_template_facts_loader(
+                    connection, command.case_no, command.matching_segment_id, self._now(), template,
                 )
-                existing = _existing_external_generated_document(
-                    connection,
-                    command.case_no,
-                    command.matching_segment_id,
-                    template,
-                    facts_snapshot_sha256,
-                )
-                if existing is not None:
-                    return PreparedExternalStaffContractDocument(existing, True)
-                content = render_contract_template(
-                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
-                    facts=facts,
-                )
-                archive = self._archive(
-                    content,
-                    _external_staff_template_storage_key(command, content),
-                )
-                document_id = _insert_generated_document(
-                    connection,
-                    command,
-                    segment,
-                    template,
-                    content,
-                    archive,
-                    facts_snapshot_sha256=facts_snapshot_sha256,
-                )
-                return PreparedExternalStaffContractDocument(document_id, False)
-
-            return self._run_in_application_unit_of_work(persist)
-        except Exception:
-            if archive is not None:
-                self._discard(archive.storage_key)
-            raise
+                return int(segment["plan_id"]), template, facts, digest
+            request = RenderSourceRequest(command.case_no, "staff_segment", command.matching_segment_id,
+                ActorContext(command.actor_id), command.idempotency_key, command.correlation_id)
+            document_id, replayed = RenderSourceWorkflow(self._render_source_repository_factory(connection)).prepare(request, load_current)
+            return PreparedExternalStaffContractDocument(document_id, replayed)
+        return self._run_in_application_unit_of_work(persist)
 
     def record_signed_return(
         self,
@@ -364,46 +331,40 @@ class StaffContractSigningApplication:
             connection.close()
 
     def _persist_sent_contract(self, command, template):
-        archive = None
-        try:
-            def persist(connection):
-                nonlocal archive
-                segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
-                content = render_contract_template(
-                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
-                    facts=_staff_template_facts(connection, command.case_no, segment),
-                )
-                archive = self._archive(content, _staff_template_storage_key(command))
-                binding = _line_binding(connection, "staff", str(segment["staff_id"]))
-                recipient = require_contract_line_recipient(binding, subject_type="staff", subject_reference=str(segment["staff_id"]))
-                document_id = _insert_generated_document(connection, command, segment, template, content, archive)
-                grant_id, raw_token = _insert_access_grant(
-                    connection,
-                    command,
-                    document_id,
-                    binding,
-                    now=self._now(),
-                )
-                request = build_contract_delivery_request(
-                    recipient,
-                    case_no=command.case_no,
-                    document_version_id=document_id,
-                    download_url=_tokenized_download_url(command.download_url, raw_token),
-                    audience_label="服務人員契約",
-                    scheduled_at=self._now(),
-                    idempotency_key=command.idempotency_key,
-                    correlation_id=command.correlation_id,
-                )
-                delivery = self._line_delivery_repository(connection).enqueue(request)
-                event_id = _insert_sent_event(connection, command, segment, document_id, int(delivery.task_id.value), grant_id)
-                _append_command_outcome(connection, command, "send_staff_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
-                return StaffContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
-            return self._run_in_application_unit_of_work(persist)
-        except Exception:
-            if archive is not None:
-                self._discard(archive.storage_key)
-            raise
+        def persist(connection):
+            segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
+            render_facts = _staff_template_facts(connection, command.case_no, segment)
+            if self._render_source_repository_factory is None:
+                raise RuntimeError("contract_external_render_source_not_configured")
+            source_request = RenderSourceRequest(command.case_no, "staff_segment", command.matching_segment_id,
+                ActorContext(command.actor_id), command.idempotency_key, command.correlation_id, "send")
+            document_id, _ = RenderSourceWorkflow(self._render_source_repository_factory(connection)).prepare(
+                source_request, lambda: (int(segment["plan_id"]), template, render_facts,
+                    _sha256(_canonical_json(render_facts).encode())))
+            binding = _line_binding(connection, "staff", str(segment["staff_id"]))
+            recipient = require_contract_line_recipient(binding, subject_type="staff", subject_reference=str(segment["staff_id"]))
+            grant_id, raw_token = _insert_access_grant(
+                connection,
+                command,
+                document_id,
+                binding,
+                now=self._now(),
+            )
+            request = build_contract_delivery_request(
+                recipient,
+                case_no=command.case_no,
+                document_version_id=document_id,
+                download_url=_tokenized_download_url(command.download_url, raw_token),
+                audience_label="服務人員契約",
+                scheduled_at=self._now(),
+                idempotency_key=command.idempotency_key,
+                correlation_id=command.correlation_id,
+            )
+            delivery = self._line_delivery_repository(connection).enqueue(request)
+            event_id = _insert_sent_event(connection, command, segment, document_id, int(delivery.task_id.value), grant_id)
+            _append_command_outcome(connection, command, "send_staff_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
+            return StaffContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+        return self._run_in_application_unit_of_work(persist)
 
     def _persist_signed_return(self, command, archive):
         try:

@@ -1,0 +1,105 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-controlled-purpose-media-reference-2026-11-06-v1",
+  "release_metadata": {
+    "release_name": "Controlled purposes, exact media references and dynamic contract render snapshots",
+    "application_version": "controlled-purpose-media-reference-v1",
+    "published_at": "2026-11-06",
+    "description": "Schema-only: signed staff purpose, exact LINE media FK and structured dynamic contract render snapshots. Preserve legacy media, purposes, rows, FKs and guards; no seed, business backfill or archived draft bytes."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-payout-payment-sources-2026-11-06-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1071_controlled_signed_staff_agreement.sql",
+      "relative_path": "db/schema_parts/1071_controlled_signed_staff_agreement.sql",
+      "sha256": "501c898acf75534bf5669ff85ec173c3fcb0ed9af7b256bf435e63913fd9fad3",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-objects-references-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt; unknown-or-partial-parent-contract-blocked"
+    },
+    {
+      "name": "1072_line_media_controlled_file_reference.sql",
+      "relative_path": "db/schema_parts/1072_line_media_controlled_file_reference.sql",
+      "sha256": "36468e4b6d455d22d11ad76700263152c2b5cc58be1efdc019a94e2f1d19d531",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-objects-references-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt; unknown-or-partial-parent-contract-blocked"
+    },
+    {
+      "name": "1073_contract_document_render_snapshot.sql",
+      "relative_path": "db/schema_parts/1073_contract_document_render_snapshot.sql",
+      "sha256": "ed7e4a5d0cac216a3ebd328148566a08b958585adc1e91e18f8818a1a14f8e47",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-objects-references-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt; unknown-or-partial-parent-contract-blocked"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "controlled-purpose-media-reference-exact",
+      "phase": "post-schema",
+      "policy": "Exact purpose ENUM/owner CHECKs, original lineage FK and guards retained; nullable unsigned media FK/index exact. Legacy purposes and NULL references unchanged. Partial/drift fail closed.",
+      "read_only": true,
+      "blocking": true
+    },
+    {
+      "verification_id": "contract-document-render-snapshot-exact",
+      "phase": "post-schema",
+      "policy": "Exact closed snapshot/hash/size CHECK; nullable media only for complete render snapshots. Preserve legacy media, rows, FKs and guards; partial/drift blocks.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "controlled-purpose-media-reference-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "controlled-purpose-media-reference-exact",
+      "contract-document-render-snapshot-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_06_controlled_purpose_media_reference_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_06_controlled_purpose_media_reference_v1.descriptors.json",
+    "sha256": "136b0dbc9728290ecedfb9b3ad1f0b23f2ad4df2586a76ae2772a2f2bb2b3f24",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

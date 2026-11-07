@@ -1991,11 +1991,16 @@ CREATE TABLE `contract_document_versions` (
   `template_sha256` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `mapping_sha256` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `facts_snapshot_sha256` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `media_asset_id` bigint NOT NULL,
+  `media_asset_id` bigint DEFAULT NULL,
   `version_number` int NOT NULL,
   `replaces_document_version_id` bigint DEFAULT NULL,
   `created_by` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `render_source_kind` enum('legacy_archived','render_snapshot') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'legacy_archived',
+  `render_source_snapshot` json DEFAULT NULL,
+  `render_source_snapshot_sha256` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `render_source_sha256` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `render_source_size_bytes` bigint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_contract_document_version` (`case_no`,`document_scope`,`document_target_key`,`version_number`),
   KEY `idx_contract_document_case` (`case_no`,`document_scope`,`created_at`),
@@ -2010,6 +2015,62 @@ CREATE TABLE `contract_document_versions` (
   CONSTRAINT `fk_contract_document_replaces` FOREIGN KEY (`replaces_document_version_id`) REFERENCES `contract_document_versions` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_contract_document_segment` FOREIGN KEY (`matching_segment_id`) REFERENCES `caregiver_matching_plan_segments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_contract_document_source` FOREIGN KEY (`source_document_version_id`) REFERENCES `contract_document_versions` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_contract_document_render_source` CHECK (
+        (render_source_kind = 'legacy_archived'
+            AND media_asset_id IS NOT NULL
+            AND render_source_snapshot IS NULL
+            AND render_source_snapshot_sha256 IS NULL
+            AND render_source_sha256 IS NULL
+            AND render_source_size_bytes IS NULL)
+        OR (render_source_kind = 'render_snapshot'
+            AND media_asset_id IS NULL
+            AND document_role = 'template_generated'
+            AND source_document_version_id IS NULL
+            AND template_key IS NOT NULL AND CHAR_LENGTH(TRIM(template_key)) > 0
+            AND template_sha256 IS NOT NULL
+            AND template_sha256 REGEXP '^[0-9a-f]{64}$'
+            AND mapping_sha256 IS NOT NULL
+            AND mapping_sha256 REGEXP '^[0-9a-f]{64}$'
+            AND facts_snapshot_sha256 IS NOT NULL
+            AND facts_snapshot_sha256 REGEXP '^[0-9a-f]{64}$'
+            AND render_source_snapshot IS NOT NULL
+            AND JSON_TYPE(render_source_snapshot) = 'OBJECT'
+            AND JSON_LENGTH(render_source_snapshot) = 4
+            AND JSON_CONTAINS_PATH(render_source_snapshot, 'all',
+                '$.schema', '$.serialization', '$.source', '$.facts')
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.schema'))
+                = 'contract-render-source.v1'
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.serialization'))
+                = 'canonical-xlsx-zip.v1'
+            AND JSON_TYPE(JSON_EXTRACT(render_source_snapshot, '$.source')) = 'OBJECT'
+            AND JSON_LENGTH(JSON_EXTRACT(render_source_snapshot, '$.source')) = 9
+            AND JSON_TYPE(JSON_EXTRACT(render_source_snapshot, '$.facts')) = 'OBJECT'
+            AND JSON_CONTAINS_PATH(render_source_snapshot, 'all',
+                '$.source.case_no', '$.source.document_scope',
+                '$.source.matching_plan_id', '$.source.matching_segment_id',
+                '$.source.document_target_key', '$.source.template_key',
+                '$.source.template_sha256', '$.source.mapping_sha256',
+                '$.source.facts_snapshot_sha256')
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.case_no')) = case_no
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.document_scope')) = document_scope
+            AND JSON_TYPE(JSON_EXTRACT(render_source_snapshot, '$.source.matching_plan_id')) = 'INTEGER'
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.matching_plan_id')) = CAST(matching_plan_id AS CHAR)
+            AND ((matching_segment_id IS NULL
+                    AND JSON_TYPE(JSON_EXTRACT(render_source_snapshot, '$.source.matching_segment_id')) = 'NULL')
+                OR (matching_segment_id IS NOT NULL
+                    AND JSON_TYPE(JSON_EXTRACT(render_source_snapshot, '$.source.matching_segment_id')) = 'INTEGER'
+                    AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.matching_segment_id')) = CAST(matching_segment_id AS CHAR)))
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.document_target_key')) = document_target_key
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.template_key')) = template_key
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.template_sha256')) = template_sha256
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.mapping_sha256')) = mapping_sha256
+            AND JSON_UNQUOTE(JSON_EXTRACT(render_source_snapshot, '$.source.facts_snapshot_sha256')) = facts_snapshot_sha256
+            AND render_source_snapshot_sha256 IS NOT NULL
+            AND render_source_snapshot_sha256 REGEXP '^[0-9a-f]{64}$'
+            AND render_source_sha256 IS NOT NULL
+            AND render_source_sha256 REGEXP '^[0-9a-f]{64}$'
+            AND render_source_size_bytes IS NOT NULL AND render_source_size_bytes > 0)
+    ),
   CONSTRAINT `chk_contract_document_source` CHECK ((((`document_role` = _utf8mb4'template_generated') and (`template_key` is not null) and (`template_sha256` is not null) and (`mapping_sha256` is not null) and (`facts_snapshot_sha256` is not null) and (`source_document_version_id` is null)) or ((`document_role` = _utf8mb4'signed_return') and (`source_document_version_id` is not null)))),
   CONSTRAINT `chk_contract_document_target` CHECK ((((`document_scope` = _utf8mb4'staff_segment') and (`matching_segment_id` is not null) and (char_length(trim(`document_target_key`)) > 0)) or ((`document_scope` = _utf8mb4'client_contract') and (`matching_segment_id` is null) and (char_length(trim(`document_target_key`)) > 0)))),
   CONSTRAINT `chk_contract_document_version` CHECK (((`version_number` >= 1) and (char_length(trim(`created_by`)) > 0)))
@@ -2365,7 +2426,7 @@ CREATE TABLE `controlled_file_objects` (
   `owner_type` enum('contract_signing','scheduling','orders','staff','line_integration') COLLATE utf8mb4_unicode_ci NOT NULL,
   `subject_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `object_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','rich_menu_background') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','rich_menu_background','signed_staff_agreement') COLLATE utf8mb4_unicode_ci NOT NULL,
   `logical_folder` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `storage_locator` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2391,7 +2452,7 @@ CREATE TABLE `controlled_file_objects` (
   CONSTRAINT `chk_controlled_file_object_chain` CHECK ((((`supersedes_object_id` is null) and (`supersedes_version_number` is null) and (`version_number` = 1)) or ((`supersedes_object_id` is not null) and (`supersedes_version_number` is not null) and (`version_number` = (`supersedes_version_number` + 1))))),
   CONSTRAINT `chk_controlled_file_object_digest` CHECK (regexp_like(`content_sha256`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_controlled_file_object_identity` CHECK ((regexp_like(`opaque_object_id`,_utf8mb4'^cf_[0-9a-f]{32}$') and (char_length(trim(`subject_reference`)) > 0) and (char_length(trim(`object_key`)) > 0) and (char_length(trim(`purpose`)) > 0) and (char_length(trim(`filename`)) > 0) and (char_length(trim(`storage_locator`)) > 0) and (char_length(trim(`content_type`)) > 0) and (char_length(trim(`created_by_actor`)) > 0) and (`size_bytes` > 0) and (`version_number` > 0))),
-  CONSTRAINT `chk_controlled_file_object_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background'))))
+  CONSTRAINT `chk_controlled_file_object_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract',_utf8mb4'signed_staff_agreement'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background'))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `controlled_file_reconciliation_events` (
@@ -2444,7 +2505,7 @@ CREATE TABLE `controlled_file_staging_objects` (
   `owner_type` enum('contract_signing','scheduling','orders','staff','line_integration') COLLATE utf8mb4_unicode_ci NOT NULL,
   `subject_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `object_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','rich_menu_background') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `purpose` enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','rich_menu_background','signed_staff_agreement') COLLATE utf8mb4_unicode_ci NOT NULL,
   `logical_folder` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `original_filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `content_type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2467,7 +2528,7 @@ CREATE TABLE `controlled_file_staging_objects` (
   KEY `idx_controlled_file_staging_cleanup` (`staging_state`,`expires_at_utc`,`id`),
   CONSTRAINT `chk_controlled_file_staging_digest` CHECK ((regexp_like(`content_sha256`,_utf8mb4'^[0-9a-f]{64}$') and regexp_like(`command_fingerprint`,_utf8mb4'^[0-9a-f]{64}$'))),
   CONSTRAINT `chk_controlled_file_staging_identity` CHECK ((regexp_like(`staging_id`,_utf8mb4'^cfs_[0-9a-f]{32}$') and (char_length(trim(`storage_locator`)) > 0) and (char_length(trim(`subject_reference`)) > 0) and (char_length(trim(`object_key`)) > 0) and (char_length(trim(`purpose`)) > 0) and (char_length(trim(`original_filename`)) > 0) and (char_length(trim(`content_type`)) > 0) and regexp_like(`idempotency_key`,_utf8mb4'^[a-z0-9][a-z0-9._:-]{0,190}$') and (char_length(trim(`created_by_actor`)) > 0) and (`size_bytes` > 0) and (`expires_at_utc` > `created_at_utc`))),
-  CONSTRAINT `chk_controlled_file_staging_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background')))),
+  CONSTRAINT `chk_controlled_file_staging_owner_purpose` CHECK ((((`owner_type` = _utf8mb4'contract_signing') and (`purpose` in (_utf8mb4'unsigned_contract',_utf8mb4'final_signed_contract',_utf8mb4'signed_staff_agreement'))) or ((`owner_type` = _utf8mb4'scheduling') and (`purpose` in (_utf8mb4'service_date_confirmation',_utf8mb4'baby_log_photo',_utf8mb4'meal_photo'))) or ((`owner_type` = _utf8mb4'orders') and (`purpose` = _utf8mb4'order_notice')) or ((`owner_type` = _utf8mb4'staff') and (`purpose` in (_utf8mb4'staff_resume',_utf8mb4'staff_certificate',_utf8mb4'staff_health_exam'))) or ((`owner_type` = _utf8mb4'line_integration') and (`purpose` = _utf8mb4'rich_menu_background')))),
   CONSTRAINT `chk_controlled_file_staging_state` CHECK ((((`staging_state` = _utf8mb4'applied') and (`applied_at_utc` is not null) and (`cleaned_at_utc` is null)) or ((`staging_state` = _utf8mb4'cleaned') and (`applied_at_utc` is null) and (`cleaned_at_utc` is not null)) or ((`staging_state` in (_utf8mb4'staged',_utf8mb4'quarantined')) and (`applied_at_utc` is null) and (`cleaned_at_utc` is null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -5768,11 +5829,14 @@ CREATE TABLE `media_assets` (
   `created_by_admin_user_id` bigint DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
+  `controlled_file_object_id` bigint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_media_storage_key` (`storage_key`),
   KEY `idx_media_owner` (`category`,`owner_type`,`owner_id`,`deleted_at`),
   KEY `idx_media_sha256` (`sha256`),
   KEY `fk_media_created_by` (`created_by_admin_user_id`),
+  KEY `idx_media_controlled_file_object` (`controlled_file_object_id`),
+  CONSTRAINT `fk_media_controlled_file_object` FOREIGN KEY (`controlled_file_object_id`) REFERENCES `controlled_file_objects` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_media_created_by` FOREIGN KEY (`created_by_admin_user_id`) REFERENCES `admin_users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -8062,13 +8126,14 @@ CREATE TABLE `staff_payout_events` (
   `event_type` enum('payout','return','reversal') COLLATE utf8mb4_unicode_ci NOT NULL,
   `amount_ntd` bigint NOT NULL,
   `occurred_on` date NOT NULL,
-  `bank_account_identity_hash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `bank_account_identity_hash` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `reversal_of_event_id` bigint DEFAULT NULL,
   `reconciliation_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `payment_source_kind` enum('legacy_unspecified','bank_statement','manual_supplement') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'legacy_unspecified',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_staff_payout_idempotency` (`idempotency_key`),
   UNIQUE KEY `uq_staff_payout_import_row` (`finance_import_row_id`),
@@ -8079,6 +8144,7 @@ CREATE TABLE `staff_payout_events` (
   CONSTRAINT `fk_staff_payout_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_staff_payout_account_hash` CHECK (regexp_like(`bank_account_identity_hash`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_staff_payout_amount` CHECK ((`amount_ntd` > 0)),
+  CONSTRAINT `chk_staff_payout_payment_source` CHECK ((((`payment_source_kind` in (_utf8mb4'legacy_unspecified',_utf8mb4'bank_statement')) and (`bank_account_identity_hash` is not null) and regexp_like(`bank_account_identity_hash`,_utf8mb4'^[0-9a-f]{64}$')) or ((`payment_source_kind` = _utf8mb4'manual_supplement') and (`bank_account_identity_hash` is null)))),
   CONSTRAINT `chk_staff_payout_reversal_shape` CHECK ((((`event_type` = _utf8mb4'payout') and (`reversal_of_event_id` is null)) or ((`event_type` in (_utf8mb4'return',_utf8mb4'reversal')) and (`reversal_of_event_id` is not null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

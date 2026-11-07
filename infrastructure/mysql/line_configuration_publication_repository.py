@@ -67,9 +67,9 @@ class MySqlLineConfigurationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot:
+    def get(self, kind: LineConfigurationKind, *, for_update: bool = False) -> LineConfigurationSnapshot:
         with self._connection.cursor() as cursor:
-            cursor.execute(_CONFIG_SELECT_SQL, (kind.value,))
+            cursor.execute(_CONFIG_SELECT_SQL + (" FOR UPDATE" if for_update else ""), (kind.value,))
             row = optional_row(cursor.fetchone())
         if row is None:
             return LineConfigurationSnapshot(kind, LineConfigurationRevision(0), "{}")
@@ -180,6 +180,21 @@ class MySqlLineConfigurationRepository:
 class MySqlLineRichMenuPublicationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def controlled_image_publication_matches(self, reference):
+        """Read a real published saga and its immutable upload acknowledgement."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT task.id,task.menu_definition_id,task.publication_status,task.definition_snapshot,"
+                "task.image_object_reference,task.provider_menu_id,ack.provider_menu_id acknowledged_provider_menu_id,"
+                "ack.request_fingerprint FROM line_rich_menu_publication_tasks task "
+                "JOIN line_rich_menu_publication_step_acknowledgements ack ON ack.publication_id=task.id "
+                "AND ack.step_name='upload' WHERE task.menu_definition_id=%s AND task.image_object_reference=%s "
+                "AND task.publication_status='published' ORDER BY task.id DESC LIMIT 100",
+                (reference.menu_definition_id, reference.file_id),
+            )
+            rows = tuple(cursor.fetchall())
+        return any(_controlled_image_publication_matches(row, reference) for row in rows)
 
     def get(
         self,
@@ -711,6 +726,25 @@ class MySqlLineRichMenuPublicationRepository:
         if actual != expected:
             raise RuntimeError("line_rich_menu_idempotency_conflict")
         return QueueLineRichMenuPublicationResult(LineRichMenuCommandOutcome.EXISTING, existing)
+
+
+def _controlled_image_publication_matches(row, reference):
+    from subsystems.line.rich_menu_contracts import LineRichMenuProviderRequest
+    from subsystems.line.rich_menu_worker import rich_menu_step_fingerprint
+    from subsystems.line.ports import LineRichMenuPublicationStep
+    if (row["menu_definition_id"] != reference.menu_definition_id or row["image_object_reference"] != reference.file_id
+        or row["publication_status"] != "published" or not row["provider_menu_id"]
+        or row["provider_menu_id"] != row["acknowledged_provider_menu_id"]):
+        return False
+    try:
+        definition = canonical_json_value(row["definition_snapshot"])
+        snapshot = json.loads(definition)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(snapshot, dict) or snapshot.get("id") != reference.menu_definition_id:
+        return False
+    request = LineRichMenuProviderRequest(LineRichMenuPublicationId(int(row["id"])), definition, reference.file_id)
+    return rich_menu_step_fingerprint(request, LineRichMenuPublicationStep.UPLOAD, row["provider_menu_id"]).value == row["request_fingerprint"]
 
 
 def _configuration_snapshot(row):
