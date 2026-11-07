@@ -1242,12 +1242,27 @@ def test_reminder_api_does_not_accept_recipient_filter_or_anonymous_operator():
 def test_query_preserves_last_reminder_snapshot_without_exposing_command_details():
     application = FakeApplication()
     query = application.query_case(CASE_NO)
-    query["signing_reminder"] = SimpleNamespace(receipt_id=RECEIPT_ID, session_id=SESSION_ID, status_version=1, replayed=False, manual_notification_targets=())
-    application.query_case = lambda _case: query
-    response = _client(application).get(f"/api/v1/orders/{CASE_NO}/contract-external-signing")
+    query["signing_reminder"] = SimpleNamespace(receipt_id=RECEIPT_ID, session_id=SESSION_ID, status_version=1, replayed=False, manual_notification_targets=(), command_fingerprint="private-reminder-command", idempotency_key="private-reminder-key")
+    observed = []
+
+    def query_case(case_no, actor):
+        assert case_no == CASE_NO
+        assert actor.actor_id == "admin:7"
+        observed.append((case_no, actor.actor_id))
+        return query
+
+    application.query_case = query_case
+    response = _client(application).get(f"/api/v1/orders/{CASE_NO}/contract-external-signing", headers={"X-Actor-Id": "untrusted-actor"})
     assert response.status_code == 200
     assert response.json()["data"]["signing_reminder"]["receipt_id"] == RECEIPT_ID
     assert "command_fingerprint" not in response.text
+    assert "private-reminder-command" not in response.text
+    assert "private-reminder-key" not in response.text
+    assert observed == [(CASE_NO, "admin:7")]
+    assert application.reports.command is None
+    anonymous = _local_bypass_client(application).get(f"/api/v1/orders/{CASE_NO}/contract-external-signing")
+    assert anonymous.status_code in {401, 403}
+    assert observed == [(CASE_NO, "admin:7")]
 
 
 def test_production_works_with_internal_preview_secret(monkeypatch) -> None:
