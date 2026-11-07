@@ -151,10 +151,26 @@ def require_mysql_apply_client(mysql_container: str | None) -> None:
 
 def validate_local_source(config, source: str, environment=None) -> None:
     values = environment if environment is not None else os.environ
+    host = getattr(config, "host", None)
+    if not isinstance(host, str) or host.casefold() not in LOCAL_HOSTS:
+        raise LocalDatabaseUpdateError(
+            "developer update only accepts local MySQL", code="target_profile_blocked"
+        )
     if not isinstance(source, str) or not migration.IDENTIFIER.fullmatch(source):
         raise LocalDatabaseUpdateError("source database name is invalid")
     if len(source) > MYSQL_IDENTIFIER_MAX_LENGTH:
         raise LocalDatabaseUpdateError("source database name exceeds 64 characters")
+    if any("prod" in str(values.get(key, "")).casefold() for key in ("APP_ENV", "ENV", "FLASK_ENV")):
+        raise LocalDatabaseUpdateError(
+            "production environment refused", code="target_profile_blocked"
+        )
+    profile = str(
+        values.get("APP_ENV", values.get("ENV", values.get("FLASK_ENV", "local")))
+    ).casefold()
+    if profile not in {"local", "development", "dev", "test", "testing", "validation"}:
+        raise LocalDatabaseUpdateError(
+            "local development profile required", code="target_profile_blocked"
+        )
     if source.casefold() in migration.LOCAL_ADDITIVE_SYSTEM_DATABASES:
         raise LocalDatabaseUpdateError(
             "developer update refuses MySQL system databases"

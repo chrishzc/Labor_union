@@ -4,10 +4,160 @@ Description: 驗證本機 ordered release 升級、current gate 與 launcher 的
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts import update_local_database as update
+
+
+@pytest.mark.parametrize("host", ["localhost", "LOCALHOST", "127.0.0.1", "::1"])
+def test_local_source_accepts_original_local_hosts(host):
+    update.validate_local_source(
+        SimpleNamespace(host=host, user="root"), "union_db", {"APP_ENV": "development"}
+    )
+
+
+@pytest.mark.parametrize("environment", [
+    {},
+    {"APP_ENV": "local"},
+    {"APP_ENV": "development"},
+    {"APP_ENV": "dev"},
+    {"ENV": "test"},
+    {"FLASK_ENV": "testing"},
+    {"APP_ENV": "validation"},
+    {"APP_ENV": "DeVeLoPmEnT", "ENV": "unknown", "FLASK_ENV": "staging"},
+])
+def test_local_source_preserves_profile_aliases_default_and_priority(environment):
+    update.validate_local_source(
+        SimpleNamespace(host="127.0.0.1", user="root"), "developer_schema", environment
+    )
+
+
+@pytest.mark.parametrize("host_values", [
+    {},
+    {"host": None},
+    {"host": ""},
+    {"host": 123},
+    {"host": "db.example.invalid"},
+    {"host": "127.0.0.2"},
+    {"host": "localhost.example.invalid"},
+    {"host": " localhost "},
+])
+def test_local_source_rejects_missing_invalid_or_remote_host(host_values):
+    with pytest.raises(update.LocalDatabaseUpdateError, match="only accepts local MySQL") as raised:
+        update.validate_local_source(SimpleNamespace(**host_values), "union_db", {})
+    assert raised.value.code == "target_profile_blocked"
+
+
+@pytest.mark.parametrize("environment", [
+    {"APP_ENV": "production"},
+    {"ENV": "PRODUCTION"},
+    {"FLASK_ENV": "preproduction"},
+    {"APP_ENV": "development", "ENV": "production"},
+    {"APP_ENV": "validation", "FLASK_ENV": "production"},
+    {"APP_ENV": "production", "ENV": "development"},
+    {"APP_ENV": ""},
+    {"ENV": ""},
+    {"FLASK_ENV": ""},
+    {"APP_ENV": None},
+    {"APP_ENV": "staging"},
+    {"APP_ENV": "unknown", "ENV": "development"},
+])
+def test_local_source_rejects_production_hidden_production_and_unknown_profile(environment):
+    with pytest.raises(update.LocalDatabaseUpdateError) as raised:
+        update.validate_local_source(SimpleNamespace(host="localhost"), "union_db", environment)
+    assert raised.value.code == "target_profile_blocked"
+
+
+@pytest.mark.parametrize("source", ["union_db", "lu_test_local", "developer_schema"])
+def test_local_source_keeps_root_and_non_system_names(source):
+    update.validate_local_source(SimpleNamespace(host="localhost", user="root"), source, {})
+
+
+@pytest.mark.parametrize("source", ["mysql", "information_schema", "performance_schema", "sys", "invalid-name"])
+def test_local_source_keeps_system_and_identifier_rejections(source):
+    with pytest.raises(update.LocalDatabaseUpdateError):
+        update.validate_local_source(SimpleNamespace(host="localhost"), source, {})
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("values,process_environment", [
+    ({"DB_HOST": "db.example.invalid", "APP_ENV": "development"}, {}),
+    ({"DB_HOST": "", "APP_ENV": "development"}, {}),
+    ({"DB_HOST": "localhost", "APP_ENV": "production"}, {}),
+    ({"DB_HOST": "localhost", "APP_ENV": "development", "ENV": "production"}, {}),
+    ({"DB_HOST": "localhost", "APP_ENV": "validation"}, {"FLASK_ENV": "production"}),
+    ({"DB_HOST": "localhost", "APP_ENV": "unknown"}, {}),
+    ({"DB_HOST": "localhost", "APP_ENV": ""}, {}),
+])
+def test_original_update_entry_rejects_unsafe_target_before_database_ports(
+    monkeypatch, tmp_path, apply, values, process_environment
+):
+    for key in ("APP_ENV", "ENV", "FLASK_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in process_environment.items():
+        monkeypatch.setenv(key, value)
+    environment = tmp_path / ".env"
+    environment.write_text(
+        "DB_DATABASE=union_db\nDB_USER=root\n"
+        + "".join(f"{key}={value}\n" for key, value in values.items()), encoding="utf-8"
+    )
+    monkeypatch.setattr(update, "resolve_mysql_container", lambda *_args: None)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("unsafe target reached a database, preview, backup or Apply port")
+
+    monkeypatch.setattr(update.migration.DatabaseConfig, "connect", forbidden)
+    monkeypatch.setattr(update.migration, "database_exists", forbidden)
+    monkeypatch.setattr(update.additive, "plan", forbidden)
+    monkeypatch.setattr(update.additive, "prepare_backup", forbidden)
+    monkeypatch.setattr(update.additive, "apply", forbidden)
+    with pytest.raises(update.LocalDatabaseUpdateError) as raised:
+        update.update_local_database(
+            environment_file=environment, receipt_root=tmp_path / "receipts",
+            apply=apply, confirm_database="union_db",
+        )
+    assert raised.value.code == "target_profile_blocked"
+    assert not (tmp_path / "receipts").exists()
+
+
+@pytest.mark.parametrize("values,source,expected_host", [
+    ({"DB_HOST": "LOCALHOST", "APP_ENV": "validation"}, "union_db", "LOCALHOST"),
+    ({"DB_HOST": "::1", "ENV": "test"}, "developer_schema", "::1"),
+    ({}, "lu_test_local", "127.0.0.1"),
+])
+def test_original_update_entry_preserves_local_defaults_and_reaches_only_readonly_port(
+    monkeypatch, tmp_path, values, source, expected_host
+):
+    for key in ("APP_ENV", "ENV", "FLASK_ENV", "DB_HOST"):
+        monkeypatch.delenv(key, raising=False)
+    environment = tmp_path / ".env"
+    environment.write_text(
+        f"DB_DATABASE={source}\nDB_USER=root\n"
+        + "".join(f"{key}={value}\n" for key, value in values.items()), encoding="utf-8"
+    )
+    monkeypatch.setattr(update, "resolve_mysql_container", lambda *_args: None)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("readonly-port sentinel must not access a database or mutation port")
+
+    monkeypatch.setattr(update.migration.DatabaseConfig, "connect", forbidden)
+    monkeypatch.setattr(update.additive, "prepare_backup", forbidden)
+    monkeypatch.setattr(update.additive, "apply", forbidden)
+    seen = []
+
+    def readonly_port(config, database, **_kwargs):
+        seen.append((config.host, config.user, database))
+        return {"status": "blocked", "code": "readonly_port_sentinel"}
+
+    monkeypatch.setattr(update.additive, "plan", readonly_port)
+    result = update.update_local_database(
+        environment_file=environment, receipt_root=tmp_path / "receipts"
+    )
+    assert result == {"status": "blocked", "code": "readonly_port_sentinel"}
+    assert seen == [(expected_host, "root", source)]
+    assert not (tmp_path / "receipts").exists()
 
 
 def test_readonly_nas_preview_has_loaded_both_canonical_runners():
