@@ -68,7 +68,11 @@ class StaffProfileView(BaseModel):
     emergency_contact_phone: str | None = Field(default=None, max_length=30)
     admin_notes: str | None = Field(default=None, max_length=2000)
     bank_accounts: tuple[StaffBankAccountView, ...] = Field(max_length=20)
-    documents: StaffSavedDocumentPageView | None = None
+    # Roster/profile projections that do not query saved files have no source
+    # evidence; use the same explicit unavailable state as the detail reader.
+    documents: StaffSavedDocumentPageView | None = Field(
+        default_factory=lambda: StaffSavedDocumentPageView(status="unavailable", items=())
+    )
 
 
 class StaffRosterServiceProfileView(StaffServiceProfileView):

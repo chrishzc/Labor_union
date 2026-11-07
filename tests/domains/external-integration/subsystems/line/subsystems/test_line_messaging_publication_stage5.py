@@ -145,7 +145,19 @@ def test_image_message_creates_durable_media_outbox_intent() -> None:
     assert json.loads(outbox.items[0].payload_json)["provider_media_id"] == "media-1"
 
 
-def test_rich_menu_definition_and_image_are_deterministic(tmp_path) -> None:
+def test_rich_menu_definition_and_image_are_deterministic(tmp_path, monkeypatch) -> None:
+    from hashlib import sha256
+    from importlib import import_module
+
+    import pytest
+
+    from infrastructure.line.rich_menu_image_store import render_rich_menu_image
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.line import media_archive
+
+    controlled_fixture = import_module(
+        "tests.domains.external-integration.subsystems.line.integration.test_rich_menu_controlled_files"
+    )
     menu = {
         "id": "menu-1",
         "name": "測試選單",
@@ -162,15 +174,35 @@ def test_rich_menu_definition_and_image_are_deterministic(tmp_path) -> None:
         ],
     }
     provider = json.loads(rich_menu_provider_definition(menu))
-    store = FileSystemRichMenuImageStore(tmp_path)
     definition = canonical_line_payload_json(menu)
+    with pytest.raises(RuntimeError, match="controlled image archive is not configured"):
+        FileSystemRichMenuImageStore(tmp_path).materialize(definition)
+    connection, _, port = controlled_fixture.wire_archive(monkeypatch, tmp_path)
+    monkeypatch.setattr(media_archive, "render_rich_menu_image", render_rich_menu_image, raising=False)
+    store = FileSystemRichMenuImageStore(
+        tmp_path,
+        archive_generated=lambda value: media_archive.store_generated_rich_menu_image(
+            value, created_by_admin_user_id=None, connection_factory=lambda: connection,
+            unit_of_work_factory=MySqlUnitOfWork,
+        )["storage_key"],
+        controlled_loader=lambda reference: media_archive.read_controlled_media(
+            reference, connection_factory=lambda: connection,
+        ),
+    )
 
     first = store.materialize(definition)
     second = store.materialize(definition)
 
     assert provider["chatBarText"] == "開啟選單"
     assert first == second
-    assert store.load(first)[1] == "image/jpeg"
+    content, content_type = store.load(first)
+    assert store.load(second) == (content, content_type)
+    assert content_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert port.readback.file_id == first and port.readback.subject_reference == menu["id"]
+    assert port.readback.owner is controlled_fixture.ControlledFileOwner.LINE_INTEGRATION
+    assert port.readback.purpose is controlled_fixture.ControlledFilePurpose.RICH_MENU_BACKGROUND
+    assert port.readback.sha256_digest == sha256(content).hexdigest()
+    assert connection.events.count("controlled_object") == connection.events.count("media_fk") == 1
 
 
 def test_rich_menu_liff_uri_formatting_no_spurious_slash(monkeypatch) -> None:
