@@ -130,7 +130,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_weekly_operations_report_contract.py
-          tests/test_weekly_operations_report_totals.py
+          tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py
           tests/test_weekly_operations_report_api_versions.py
       - name: Run session-authenticated API and export against MySQL
         if: ${{ !cancelled() && steps.database.outcome == 'success' }}
