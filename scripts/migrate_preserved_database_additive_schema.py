@@ -5034,6 +5034,65 @@ def _candidate_preserves_source_data(
     return True
 
 
+def _verified_replay_evidence_is_complete(value: Any) -> bool:
+    """Validate the existing full table-evidence shape before trusting replay."""
+    if not isinstance(value, Mapping) or not value:
+        return False
+    for table, row in value.items():
+        if not isinstance(table, str) or not table or not isinstance(row, Mapping):
+            return False
+        if set(row) != {"count", "checksum", "primary_key_sha256"}:
+            return False
+        if any(type(row[key]) is not int or row[key] < 0 for key in ("count", "checksum")):
+            return False
+        primary = row["primary_key_sha256"]
+        if primary is not None and (
+            not isinstance(primary, str) or re.fullmatch(r"[0-9a-f]{64}", primary) is None
+        ):
+            return False
+    return True
+
+
+def _verified_replay_candidate_baseline(
+    receipt: Mapping[str, Any], plan: Mapping[str, Any], source: str,
+    candidate: str, release_fingerprint: Any, artifact_names: list[str],
+) -> Mapping[str, Any]:
+    """Bind the original verified snapshot before receipt metadata is updated."""
+    if (
+        receipt.get("status") != "verified"
+        or not isinstance(receipt.get("verified_at"), str)
+        or not receipt["verified_at"]
+        or not _verified_replay_evidence_is_complete(receipt.get("source_data"))
+        or not _verified_replay_evidence_is_complete(receipt.get("candidate_data"))
+    ):
+        raise UpgradeBlocked("verified replay baseline is incomplete")
+    identity_keys = ("database", "server", "host", "port")
+    identities = (receipt.get("source"), receipt.get("candidate"), plan.get("source"))
+    if any(not isinstance(identity, Mapping) or any(identity.get(key) is None for key in identity_keys)
+           for identity in identities):
+        raise UpgradeBlocked("verified replay identity is incomplete")
+    recorded_source, recorded_candidate, planned_source = identities
+    if (
+        recorded_source["database"] != source
+        or recorded_candidate["database"] != candidate
+        or receipt.get("candidate_database") != candidate
+        or plan.get("candidate_database") != candidate
+        or any(recorded_source[key] != planned_source[key] for key in identity_keys)
+    ):
+        raise UpgradeBlocked("verified replay identity mismatch")
+    if (
+        not plan.get("release_id") or not release_fingerprint
+        or receipt.get("release_id") != plan.get("release_id")
+        or receipt.get("release_fingerprint") != release_fingerprint
+        or receipt.get("plan_release_fingerprint") != plan.get("release_fingerprint")
+        or receipt.get("artifact_names") != artifact_names
+    ):
+        raise UpgradeBlocked("verified replay release/plan mismatch")
+    if receipt["source_data"] != plan.get("source_data"):
+        raise UpgradeBlocked("verified replay source baseline mismatch")
+    return receipt["candidate_data"]
+
+
 def _validate_plan_integrity(
     plan: Mapping[str, Any], fresh: Mapping[str, Any]
 ) -> None:
@@ -8458,6 +8517,13 @@ def apply_schema(
         canonical_release_fingerprint = local_additive_release_qualification(
             str(plan["release_id"]), artifact_names[0]
         )["release_fingerprint"]
+    verified_replay = existing_receipt.get("status") == "verified"
+    verified_candidate_data = (
+        _verified_replay_candidate_baseline(
+            existing_receipt, plan, source, candidate,
+            canonical_release_fingerprint, artifact_names,
+        ) if verified_replay else None
+    )
     existing_receipt.update(
         release_id=plan.get("release_id"),
         release_fingerprint=canonical_release_fingerprint,
@@ -8465,7 +8531,8 @@ def apply_schema(
         artifact_names=artifact_names,
         artifact_name=(artifact_names[0] if len(artifact_names) == 1 else None),
     )
-    write_receipt(operation_receipt_path, existing_receipt)
+    if not verified_replay:
+        write_receipt(operation_receipt_path, existing_receipt)
     allowed_partial_artifacts = allowed_partial_artifacts.union(
         _receipt_resumable_partial_artifacts(existing_receipt, candidate)
     )
@@ -8491,13 +8558,21 @@ def apply_schema(
     # restore workflow.  The latter always records candidate_data.
     if isinstance(existing_receipt.get("candidate_data"), Mapping):
         candidate_data = _table_evidence(config, candidate)
-        if not _candidate_preserves_source_data(
+        if verified_replay:
+            if not _verified_replay_evidence_is_complete(candidate_data) or candidate_data != verified_candidate_data:
+                raise UpgradeBlocked("candidate data changed after verification")
+        elif not _candidate_preserves_source_data(
             plan.get("source_data") or {}, candidate_data
         ):
             raise UpgradeBlocked("candidate data does not match restored source")
     candidate_identity = server_identity(config, candidate)
     if candidate_identity["server"] != plan["source"]["server"]:
         raise UpgradeBlocked("candidate is on a different server")
+    if verified_replay and any(
+        candidate_identity.get(key) != existing_receipt["candidate"][key]
+        for key in ("database", "server", "host", "port")
+    ):
+        raise UpgradeBlocked("candidate identity changed after verification")
     rebuild_plan = plan.get("legacy_knowledge_empty_rebuild") or {}
     if rebuild_plan.get("eligible") is True:
         _rebuild_empty_legacy_knowledge_candidate(
@@ -8515,9 +8590,13 @@ def apply_schema(
         raise UpgradeBlocked(
             f"candidate schema is partial/drift: {blocking_states}"
         )
+    if verified_replay and not _candidate_schema_is_exact(states):
+        raise UpgradeBlocked("verified replay candidate schema is not exact")
     receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
         raise UpgradeBlocked("operation receipt targets another candidate")
+    if verified_replay:
+        write_receipt(operation_receipt_path, receipt)
     steps = receipt.setdefault("schema_steps", [])
     connection = config.connect(candidate)
     try:

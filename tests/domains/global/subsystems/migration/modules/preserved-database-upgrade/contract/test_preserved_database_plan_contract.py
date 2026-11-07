@@ -5,6 +5,7 @@ Description: 驗證 preserve-data plan、release catalog 與候選升級的安�
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -22,6 +23,219 @@ from infrastructure.migration.rehearsal_runtime import (
 )
 from scripts import migrate_preserved_database_additive_schema as runner
 from scripts.schema_assembly import load_schema_assembly
+
+
+class _MutationConnectionReached(Exception):
+    """Stop before obtaining any cursor: these tests never execute SQL."""
+
+
+def _verified_replay_ports(tmp_path, monkeypatch):
+    source_identity = {"database": "source", "host": "host", "port": 1, "server": "server"}
+    candidate_identity = {**source_identity, "database": "candidate"}
+    source_data = {
+        "staff_payout_events": {"count": 1, "checksum": 101, "primary_key_sha256": "a" * 64},
+        "contract_document_versions": {"count": 1, "checksum": 202, "primary_key_sha256": "b" * 64},
+    }
+    candidate_data = deepcopy(source_data)
+    candidate_data["staff_payout_events"]["checksum"] = 303
+    candidate_data["contract_document_versions"]["checksum"] = 404
+    artifacts = [{"name": "1070_staff_payout_payment_sources.sql"},
+                 {"name": "1073_contract_document_render_snapshot.sql"}]
+    plan = {
+        "status": "ready", "source": source_identity, "candidate_database": "candidate",
+        "release_id": runner.RELEASE_MANIFEST.release_id,
+        "release_fingerprint": runner.RELEASE_MANIFEST.fingerprint,
+        "source_schema_sha256": "source-schema", "source_data": source_data,
+        "schema_artifacts": artifacts, "backfills": [], "phase_order": [x["name"] for x in artifacts],
+    }
+    plan["plan_fingerprint"] = hashlib.sha256(runner._canonical_json(plan)).hexdigest()
+    receipt = {
+        "status": "verified", "phase": "post_schema_complete", "verified_at": "2026-11-07T00:00:00Z",
+        "source": source_identity, "candidate": candidate_identity, "candidate_database": "candidate",
+        "release_id": plan["release_id"], "release_fingerprint": plan["release_fingerprint"],
+        "plan_release_fingerprint": plan["release_fingerprint"],
+        "artifact_names": [x["name"] for x in artifacts], "artifact_name": None,
+        "source_data": source_data, "candidate_data": candidate_data,
+        "schema_steps": [{"part": artifacts[-1]["name"], "index": 0, "status": "exact"}],
+    }
+    state = {
+        "plan": deepcopy(plan), "fresh_plan": deepcopy(plan), "receipt": deepcopy(receipt),
+        "candidate_data": deepcopy(candidate_data), "candidate_identity": candidate_identity,
+        "states": {"1070_staff_payout_payment_sources.sql": "exact",
+                   "1073_contract_document_render_snapshot.sql": "exact",
+                   "153_retire_empty_legacy_field_inventory.sql": "absent"},
+        "database_exists": True, "connects": [], "writes": [],
+    }
+    state["preapply_states"] = deepcopy(state["states"])
+    plan_path, receipt_path = tmp_path / "plan.json", tmp_path / "operation.json"
+    real_write = runner.write_receipt
+
+    def persist():
+        real_write(plan_path, state["plan"])
+        real_write(receipt_path, state["receipt"])
+
+    def write(path, value):
+        state["writes"].append(str(path))
+        return real_write(path, value)
+
+    def connect(database):
+        state["connects"].append(database)
+        raise _MutationConnectionReached()
+
+    persist()
+    monkeypatch.setattr(runner, "write_receipt", write)
+    monkeypatch.setattr(runner, "build_plan", lambda *_: deepcopy(state["fresh_plan"]))
+    monkeypatch.setattr(runner, "database_exists", lambda *_: state["database_exists"])
+    monkeypatch.setattr(runner, "_table_evidence", lambda *_: deepcopy(state["candidate_data"]))
+    monkeypatch.setattr(runner, "server_identity", lambda *_: deepcopy(state["candidate_identity"]))
+    monkeypatch.setattr(runner, "_schema_snapshot", lambda *_: {"sha256": "candidate-schema"})
+    monkeypatch.setattr(runner, "_owned_classification", lambda *_, **kwargs: deepcopy(
+        state["preapply_states"] if kwargs.get("defer_missing_triggers") else state["states"]
+    ))
+    state.update(plan_path=plan_path, receipt_path=receipt_path, persist=persist)
+    state["apply"] = lambda: runner.apply_schema(
+        SimpleNamespace(connect=connect), "source", "candidate", plan_path, receipt_path,
+    )
+    return state
+
+
+@pytest.mark.parametrize("retained_phase", ["post_schema_complete", "schema_complete", "restore", None])
+def test_verified_replay_compares_complete_postverify_snapshot_before_mutation_connection(tmp_path, monkeypatch, retained_phase):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    # verify_candidate sets status/verified_at/snapshots, retaining the prior phase.
+    if retained_phase is None:
+        state["receipt"].pop("phase")
+    else:
+        state["receipt"]["phase"] = retained_phase
+    state["persist"]()
+    assert not runner._candidate_preserves_source_data(state["plan"]["source_data"], state["candidate_data"])
+    before = state["receipt_path"].read_bytes()
+    with pytest.raises(_MutationConnectionReached):
+        state["apply"]()
+    assert state["connects"] == ["candidate"]
+    assert state["receipt_path"].read_bytes() == before
+    assert json.loads(before)["schema_steps"] == state["receipt"]["schema_steps"]
+
+
+@pytest.mark.parametrize("change", ["old_value_checksum", "new_value_checksum", "count", "pk", "missing_table", "extra_table", "unknown_checksum"])
+def test_verified_replay_rejects_changed_candidate_before_writes_or_new_steps(tmp_path, monkeypatch, change):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    row = state["candidate_data"]["staff_payout_events"]
+    if change == "old_value_checksum":
+        row["checksum"] += 1
+    elif change == "new_value_checksum":
+        state["candidate_data"]["contract_document_versions"]["checksum"] += 1
+    elif change == "count":
+        row["count"] += 1
+    elif change == "pk":
+        row["primary_key_sha256"] = "c" * 64
+    elif change == "missing_table":
+        state["candidate_data"].pop("contract_document_versions")
+    elif change == "extra_table":
+        state["candidate_data"]["unexpected_table"] = deepcopy(row)
+    else:
+        row["checksum"] = None
+    before = state["receipt_path"].read_bytes()
+    with pytest.raises(runner.UpgradeBlocked, match="changed after verification"):
+        state["apply"]()
+    assert state["connects"] == state["writes"] == []
+    assert state["receipt_path"].read_bytes() == before
+
+
+@pytest.mark.parametrize("change", [
+    "verified_at", "missing_source_data", "missing_candidate_data", "empty_candidate_data",
+    "missing_checksum", "unknown_checksum", "boolean_count", "malformed_pk", "source_baseline",
+    "source_identity", "candidate_target", "missing_identity", "release_id", "release_fingerprint",
+    "plan_release_fingerprint", "artifact_names",
+])
+def test_verified_replay_rejects_unbound_or_malformed_receipt_without_rewriting_it(tmp_path, monkeypatch, change):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    receipt = state["receipt"]
+    if change == "verified_at":
+        receipt.pop("verified_at")
+    elif change in {"missing_source_data", "missing_candidate_data"}:
+        receipt.pop(change.removeprefix("missing_"))
+    elif change == "empty_candidate_data":
+        receipt["candidate_data"] = {}
+    elif change == "missing_checksum":
+        receipt["candidate_data"]["staff_payout_events"].pop("checksum")
+    elif change == "unknown_checksum":
+        receipt["candidate_data"]["staff_payout_events"]["checksum"] = None
+    elif change == "boolean_count":
+        receipt["candidate_data"]["staff_payout_events"]["count"] = True
+    elif change == "malformed_pk":
+        receipt["candidate_data"]["staff_payout_events"]["primary_key_sha256"] = "unknown"
+    elif change == "source_baseline":
+        receipt["source_data"]["staff_payout_events"]["checksum"] += 1
+    elif change == "source_identity":
+        receipt["source"]["server"] = "another-server"
+    elif change == "candidate_target":
+        receipt["candidate_database"] = "another-candidate"
+    elif change == "missing_identity":
+        receipt["candidate"].pop("host")
+    elif change == "artifact_names":
+        receipt["artifact_names"] = []
+    else:
+        receipt[change] = "another-release"
+    state["persist"]()
+    before = state["receipt_path"].read_bytes()
+    with pytest.raises(runner.UpgradeBlocked, match="verified replay"):
+        state["apply"]()
+    assert state["connects"] == state["writes"] == []
+    assert state["receipt_path"].read_bytes() == before
+
+
+@pytest.mark.parametrize("change", ["source_schema", "source_data", "source_identity", "plan_hash", "candidate_identity", "missing_candidate", "metadata_drift", "metadata_partial"])
+def test_verified_replay_retains_original_fresh_source_plan_identity_and_metadata_gates(tmp_path, monkeypatch, change):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    if change == "source_schema":
+        state["fresh_plan"]["source_schema_sha256"] = "changed"
+    elif change == "source_data":
+        state["fresh_plan"]["source_data"]["staff_payout_events"]["checksum"] += 1
+    elif change == "source_identity":
+        state["fresh_plan"]["source"]["server"] = "changed"
+    elif change == "plan_hash":
+        state["plan"]["plan_fingerprint"] = "invalid"
+        state["persist"]()
+    elif change == "candidate_identity":
+        state["candidate_identity"]["host"] = "changed"
+    elif change == "missing_candidate":
+        state["database_exists"] = False
+    else:
+        state["states"]["1073_contract_document_render_snapshot.sql"] = change.removeprefix("metadata_")
+        if change == "metadata_drift":
+            state["preapply_states"] = deepcopy(state["states"])
+    before = state["receipt_path"].read_bytes()
+    with pytest.raises(runner.UpgradeBlocked):
+        state["apply"]()
+    assert state["connects"] == state["writes"] == []
+    assert state["receipt_path"].read_bytes() == before
+
+
+@pytest.mark.parametrize("legacy_minimal", [False, True])
+def test_unverified_restore_keeps_original_strict_data_comparison_and_legacy_compatibility(tmp_path, monkeypatch, legacy_minimal):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    state["receipt"].update(status="restored", phase="restore")
+    if legacy_minimal:
+        state["receipt"].pop("candidate_data")
+    state["persist"]()
+    expected = _MutationConnectionReached if legacy_minimal else runner.UpgradeBlocked
+    with pytest.raises(expected):
+        state["apply"]()
+    assert len(state["writes"]) == 1  # Original nonverified receipt-write timing is retained.
+    assert state["connects"] == (["candidate"] if legacy_minimal else [])
+
+
+def test_verified_replay_allows_known_no_primary_key_shape_without_inventing_a_pk_requirement(tmp_path, monkeypatch):
+    state = _verified_replay_ports(tmp_path, monkeypatch)
+    for value in (state["plan"]["source_data"], state["fresh_plan"]["source_data"],
+                  state["receipt"]["source_data"], state["receipt"]["candidate_data"], state["candidate_data"]):
+        value["staff_payout_events"]["primary_key_sha256"] = None
+    state["plan"].pop("plan_fingerprint")
+    state["plan"]["plan_fingerprint"] = hashlib.sha256(runner._canonical_json(state["plan"])).hexdigest()
+    state["persist"]()
+    with pytest.raises(_MutationConnectionReached):
+        state["apply"]()
 
 
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
