@@ -11,6 +11,7 @@ import pymysql
 import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from infrastructure.mysql.nas_mutations import ensure_nas_procedures
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -644,7 +645,13 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
 ) -> None:
     suffix = "unserved" if historical_status == "歷史訂單－未服務" else "in_service"
     database = f"{DATABASE}_{suffix}"
-    bootstrap(_arguments(database))
+    arguments = _arguments(database)
+    assert arguments.host.casefold() in {"localhost", "127.0.0.1", "::1"}
+    assert os.getenv("APP_ENV", "").casefold() in {
+        "local", "development", "dev", "test", "testing", "validation",
+    }
+    assert database.startswith("lu_test_")
+    bootstrap(arguments)
     from infrastructure.mysql.scheduling_current_projection_repository import (
         MySqlSchedulingCurrentProjectionRepository,
     )
@@ -674,6 +681,8 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
         autocommit=False,
     )
     try:
+        # Procedure DDL is fixture substrate, before any business transaction.
+        ensure_nas_procedures(connection)
         with connection.cursor() as cursor:
             staff_id, _legacy_assignment_id = _seed_owner_roots(cursor, case_no, historical_status)
             _seed_settled_deposit(cursor, case_no)

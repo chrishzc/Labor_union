@@ -11,6 +11,7 @@ import os
 import secrets
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -38,7 +39,13 @@ V4 = {**PARAMS, "schema_version": "operations-report.v4"}
 
 
 @pytest.fixture(scope="module")
-def api():
+def _weekly_report_environment():
+    with pytest.MonkeyPatch.context() as environment:
+        yield environment
+
+
+@pytest.fixture(scope="module")
+def api(_weekly_report_environment):
     # The target is shared by real dependency factories, not patched connections.
     if (os.getenv("APP_ENV") != "test"
             or DB_CONFIG["host"] not in {"localhost", "127.0.0.1"}
@@ -48,6 +55,10 @@ def api():
         host=DB_CONFIG["host"], port=DB_CONFIG["port"], user=DB_CONFIG["user"],
         password=DB_CONFIG["password"], database=DATABASE, confirm_database=DATABASE,
     ))
+    _weekly_report_environment.setenv(
+        "ACCESS_CONTROL_TOTP_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}",
+    )
+    _weekly_report_environment.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "v1")
     assert admin_auth_is_enabled()
     password = secrets.token_urlsafe(32)
     bootstrap_root_admin(
@@ -138,12 +149,28 @@ def test_real_mysql_counts_and_both_wire_versions(api):
     assert (annual["application_count"], august["application_count"], september["application_count"]) == (12, 5, 6)
     assert [(t["month"], t["promotion_count"], t["inquiry_count"]) for t in (august, september)] == [(8, 12, 34), (9, 5, 0)]
     assert (annual["promotion_count"], annual["inquiry_count"]) == (24, 43)
-    for status in OrderLifecycleStatus:
-        assert annual["order_status_counts"][status.value] == (2 if status == OrderLifecycleStatus.ESTABLISHED else 1)
-    for total in (annual, august, september):
+    # CASESTAT-03 merges the four historical states without changing their roots.
+    expected_counts = (
+        {"待補件": 1, "洽談中": 1, "訂單成立": 3, "服務中": 2,
+         "訂單完成": 3, "訂單取消": 1, "無訂單／狀態缺值": 1},
+        {"待補件": 1, "洽談中": 1, "訂單成立": 1, "服務中": 1,
+         "訂單完成": 1, "訂單取消": 0, "無訂單／狀態缺值": 0},
+        {"待補件": 0, "洽談中": 0, "訂單成立": 1, "服務中": 1,
+         "訂單完成": 2, "訂單取消": 1, "無訂單／狀態缺值": 1},
+    )
+    flag_fields = ("order_established_count", "negotiating_count", "cancelled_count", "review_rejected_count")
+    expected_flags = ((8, 1, 1, 0), (3, 1, 0, 0), (4, 0, 1, 0))
+    for total, counts, flags in zip((annual, august, september), expected_counts, expected_flags, strict=True):
+        assert total["order_status_counts"] == counts
         assert sum(total["order_status_counts"].values()) == total["application_count"]
+        assert tuple(total[field] for field in flag_fields) == flags
     assert september["order_status_counts"]["無訂單／狀態缺值"] == 1
-    assert september["order_status_counts"]["訂單取消"] == september["review_rejected_count"] == 1
+    assert september["order_status_counts"]["訂單取消"] == 1
+    # A textual rejection reason is not a formal HCM review decision.
+    assert all(row["review_result"] == "pending" and row["review_rejected"] == 0
+               for row in current["case_rows"])
+    cancelled = next(row for row in current["case_rows"] if row["case_no"] == "115000007")
+    assert cancelled["cancelled"] == 1 and cancelled["review_rejected"] == 0
 
 
 def test_real_metric_writer_reload_preserves_null_and_zero(api):
@@ -177,20 +204,33 @@ def test_real_export_matches_api_totals_without_mutating_business_rows(api):
     assert response.status_code == 200, response.text[:200]
     assert response.headers["X-Operations-Report-Version"] == "operations-report.v4"
     workbook = load_workbook(BytesIO(response.content), data_only=True)
-    assert len(workbook.sheetnames) == 3
+    assert workbook.sheetnames == ["週報案件受理總表", "補助案件統計表", "每周服務中說明"]
     sheet = workbook["週報案件受理總表"]
     annual, = data["annual_totals"]
     assert sheet.cell(4, 1).value == "115年度累計"
     assert sheet.cell(4, 8).value == annual["application_count"]
-    for column, status in enumerate((*[s.value for s in OrderLifecycleStatus], "無訂單／狀態缺值"), 13):
-        assert sheet.cell(3, column).value == status
-        assert sheet.cell(4, column).value == annual["order_status_counts"][status]
+    assert tuple(sheet.cell(3, column).value for column in range(13, 17)) == (
+        "訂單成立", "洽談中", "取消", "審核不符合",
+    )
+    assert sheet.cell(2, 13).value == "申請案件狀況"
+    assert sheet.cell(2, 17).value == "服務天數"
+    assert sheet.max_column == 23
     labels = [(row, sheet.cell(row, 1).value) for row in range(5, sheet.max_row + 1)]
     august_row = next(row for row, label in labels if label == "115年8月小計")
     september_row = next(row for row, label in labels if label == "115年9月小計")
     assert august_row == 10 and september_row == 17
     assert sheet.cell(august_row, 8).value == 5
     assert sheet.cell(september_row, 8).value == 6
+    august, september = data["monthly_subtotals"]
+    flag_fields = ("order_established_count", "negotiating_count", "cancelled_count", "review_rejected_count")
+    for row_number, total, flags, metrics in (
+        (4, annual, (8, 1, 1, 0), (24, 43)),
+        (august_row, august, (3, 1, 0, 0), (12, 34)),
+        (september_row, september, (4, 0, 1, 0), (5, 0)),
+    ):
+        assert tuple(sheet.cell(row_number, column).value for column in range(13, 17)) == flags
+        assert tuple(total[field] for field in flag_fields) == flags
+        assert tuple(sheet.cell(row_number, column).value for column in (6, 7)) == metrics
     assert business_rows() == before
 
 
