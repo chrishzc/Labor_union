@@ -36,7 +36,23 @@ def test_release_is_hash_bound_schema_only_latest_and_in_fresh_assembly():
     assert fresh.read_bytes() == (ROOT / 'db/schema_parts' / ARTIFACT).read_bytes()
     assert fresh in load_schema_assembly().active_artifact_paths
     entries = migration._local_ordered_upgrade_entries()
-    assert entries[-1]['artifact']['name'] == ARTIFACT
+    canonical_names = [schema.artifact.name for schema in migration.RELEASE_MANIFEST.schema_artifacts]
+    assert [entry['artifact']['name'] for entry in entries] == canonical_names[
+        canonical_names.index(migration.LOCAL_ADDITIVE_BASELINE_ARTIFACT):
+    ]
+    selected = [entry for entry in entries if entry['artifact']['name'] == ARTIFACT]
+    assert len(selected) == 1
+    entry = selected[0]
+    schema, = release.schema_artifacts
+    assert entry['release_id'] == release.release_id
+    assert entry['release_fingerprint'] == release.fingerprint
+    assert entry['data_effect'] == schema.data_effect == 'schema_only'
+    assert entry['backfill_ids'] == ()
+    assert entry['artifact'] == {
+        'name': schema.artifact.name,
+        'relative_path': schema.artifact.relative_path,
+        'sha256': schema.artifact.sha256,
+    }
     sql = migration.split_sql(fresh.read_text(encoding='utf-8'))
     assert len(sql) == 1
     assert migration._local_classify_statement(sql[0]) == 'alter_add_only'

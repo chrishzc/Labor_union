@@ -31,6 +31,7 @@ from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.terms_workflow import (
     ClientFinanceImpactPersistenceCommand,
     PayrollImpactPersistenceCommand,
+    PersistedBeClassPaymentTermsChange,
 )
 from subsystems.payroll.terms_impact import build_payroll_rate_correction_impact
 
@@ -71,7 +72,7 @@ class MySqlBeClassFinancialSync:
                     cursor, order_row, lock=True
                 )
             change_identity = f"beclass-rate-correction:{correction_event_id}"
-            _persist_effective_client_rate(
+            terms_change = _persist_effective_client_rate(
                 cursor,
                 finance_facts,
                 correction_event_id,
@@ -92,6 +93,7 @@ class MySqlBeClassFinancialSync:
                     correlation_id=correlation_id,
                     source_event_family="beclass-correction",
                     source_event_id=correction_event_id,
+                    persisted_payment_terms_change=terms_change,
                 ),
             )
             if facts is None:
@@ -213,7 +215,7 @@ def _persist_effective_client_rate(
     actor,
     reason,
     key,
-):
+) -> PersistedBeClassPaymentTermsChange | None:
     terms = finance_facts.payment_terms
     cursor.execute(
         "SELECT policy_version,client_hourly_rate_ntd FROM client_payment_terms "
@@ -254,6 +256,9 @@ def _persist_effective_client_rate(
     )
     if cursor.rowcount != 1:
         raise RuntimeError("client_payment_terms_not_found")
+    return PersistedBeClassPaymentTermsChange(
+        finance_facts.case_no, event_id, finance_facts.account_version, correction_event_id,
+    )
 
 
 def _child_key(parent: IdempotencyKey, purpose: str) -> IdempotencyKey:

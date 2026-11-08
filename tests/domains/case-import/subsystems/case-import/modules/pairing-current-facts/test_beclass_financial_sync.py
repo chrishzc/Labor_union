@@ -1,6 +1,7 @@
 """BeClass rate correction coordinates Client Finance in the same transaction."""
 
 from datetime import date
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -8,8 +9,13 @@ import pytest
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsFacts,
     ClientPaymentTerms,
+    ClientSubsidyReturnPlan,
 )
 from infrastructure.mysql import beclass_financial_sync as module
+from infrastructure.mysql import client_finance_terms_writer as terms_writer
+from subsystems.orders.terms_workflow import (
+    ClientFinanceImpactPersistenceCommand, PersistedBeClassPaymentTermsChange,
+)
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 
@@ -20,6 +26,10 @@ class _Cursor:
         self.rowcount = 0
         self.statements = []
         self.current = None
+        self.rate = 300
+        self.current_event_id = None
+        self.account_version = 4
+        self.terms_events = {}
 
     def __enter__(self):
         return self
@@ -29,10 +39,16 @@ class _Cursor:
 
     def execute(self, statement, parameters):
         self.statements.append((" ".join(statement.split()), parameters))
-        if "FROM client_payment_terms" in statement:
+        if statement.startswith("SELECT event.id AS terms_event_id"):
+            event = self.terms_events.get(self.current_event_id)
+            self.current = None if event is None else {
+                **event, "current_event_id": self.current_event_id,
+                "current_hourly_rate_ntd": self.rate, "aggregate_version": self.account_version,
+            }
+        elif "FROM client_payment_terms" in statement:
             self.current = {
                 "policy_version": "citizen-v1",
-                "client_hourly_rate_ntd": 300,
+                "client_hourly_rate_ntd": self.rate,
             }
         elif statement.startswith("SELECT case_no FROM client_finance_accounts"):
             self.current = {"case_no": parameters[0]}
@@ -40,13 +56,27 @@ class _Cursor:
             self.current = None
         elif "INSERT INTO client_payment_terms_events" in statement:
             self.lastrowid = 31
+            self.terms_events[31] = {
+                "terms_event_id": 31, "case_no": parameters[0],
+                "client_hourly_rate_ntd": parameters[2],
+                "expected_account_version": parameters[7],
+                "source_event_identity": parameters[8], "actor": parameters[10],
+            }
             self.current = None
         elif "UPDATE client_payment_terms" in statement:
+            self.rate, self.current_event_id = parameters[:2]
             self.rowcount = 1
             self.current = None
+        elif "UPDATE client_finance_accounts" in statement:
+            self.rowcount = int(parameters[2] == self.account_version)
+            if self.rowcount:
+                self.account_version = parameters[0]
 
     def fetchone(self):
         return self.current
+
+    def fetchall(self):
+        return [] if self.current is None else [self.current]
 
 
 class _Connection:
@@ -251,3 +281,148 @@ def test_formal_assignment_cannot_skip_missing_financial_roots(monkeypatch):
     with pytest.raises(ValueError, match="^beclass_rate_correction_assignment_facts_inconsistent$"):
         _apply(connection)
     assert all(sql.startswith("SELECT") for sql, _ in connection.cursor_value.statements)
+
+
+def _unassigned_facts():
+    return ClientFinanceTermsFacts(
+        case_no="CASE-PREWRITTEN", account_version=4, service_hours_per_day=8,
+        floor_fee=MoneyNTD(0), charge_days=(),
+        payment_terms=ClientPaymentTerms(5, MoneyNTD(450), date(2026, 9, 1), date(2026, 10, 1), None),
+        existing_obligations=(),
+    )
+
+
+def _prewritten_command(connection):
+    facts = _unassigned_facts()
+    change = module._persist_effective_client_rate(
+        connection.cursor_value, facts, 9, ActorContext("admin"), "actual rate change",
+        IdempotencyKey("prewritten-terms"),
+    )
+    candidate = module.build_client_finance_rate_correction_candidate(facts, "beclass-rate-correction:9")
+    return ClientFinanceImpactPersistenceCommand(
+        candidate, IdempotencyKey("prewritten-finance"), ActorContext("admin"), "actual rate change",
+        CorrelationId("prewritten-finance"), "beclass-correction", 9, change,
+    )
+
+
+def test_actual_terms_event_is_checked_before_version_and_outbox_once():
+    connection = _Connection()
+    command = _prewritten_command(connection)
+    assert command.persisted_payment_terms_change == PersistedBeClassPaymentTermsChange("CASE-PREWRITTEN", 31, 4, 9)
+    terms_writer.persist_client_finance_terms_impact(connection.cursor_value, command)
+    statements = connection.cursor_value.statements
+    assert connection.cursor_value.account_version == 5
+    assert sum("INSERT INTO client_payment_terms_events" in sql for sql, _ in statements) == 1
+    assert sum("UPDATE client_finance_accounts" in sql for sql, _ in statements) == 1
+    assert sum("INSERT INTO client_finance_outbox" in sql for sql, _ in statements) == 1
+    assert not any("INSERT INTO client_obligation" in sql for sql, _ in statements)
+
+
+def test_already_equal_rate_does_not_emit_terms_version_or_outbox():
+    connection = _Connection()
+    connection.cursor_value.rate = 450
+    command = _prewritten_command(connection)
+    assert command.persisted_payment_terms_change is None
+    terms_writer.persist_client_finance_terms_impact(connection.cursor_value, command)
+    terms_writer.persist_client_finance_terms_impact(connection.cursor_value, command)
+    assert connection.cursor_value.account_version == 4
+    assert all(sql.startswith("SELECT") for sql, _ in connection.cursor_value.statements)
+
+
+@pytest.mark.parametrize("mutation", [
+    "case", "version", "source", "event", "current_event", "event_case",
+    "event_version", "event_source", "event_actor", "rate", "account_version", "untyped", "family",
+])
+def test_prewritten_terms_mismatch_is_rejected_before_other_writer_changes(monkeypatch, mutation):
+    connection = _Connection()
+    command = _prewritten_command(connection)
+    change = command.persisted_payment_terms_change
+    cursor = connection.cursor_value
+    if mutation in {"case", "version", "source", "event"}:
+        change = replace(change, **{
+            "case": {"case_no": "OTHER"}, "version": {"expected_account_version": 3},
+            "source": {"correction_event_id": 8}, "event": {"terms_event_id": 32},
+        }[mutation])
+        command = replace(command, persisted_payment_terms_change=change)
+    elif mutation == "family":
+        command = replace(command, source_event_family="order-terms")
+    elif mutation == "untyped":
+        command = replace(command, persisted_payment_terms_change=True)
+    elif mutation == "current_event":
+        cursor.current_event_id = 999
+    elif mutation == "rate":
+        cursor.rate = 300
+    elif mutation == "account_version":
+        cursor.account_version = 5
+    else:
+        field, value = {
+            "event_case": ("case_no", "OTHER"), "event_version": ("expected_account_version", 3),
+            "event_source": ("source_event_identity", "beclass-correction:8"),
+            "event_actor": ("actor", "other-admin"),
+        }[mutation]
+        cursor.terms_events[31][field] = value
+    before = len(cursor.statements)
+    monkeypatch.setattr(terms_writer, "_persist_payment_terms", lambda *_: pytest.fail("proof must be checked first"))
+    with pytest.raises(ValueError, match="(invalid_persisted|persisted)_payment_terms_change"):
+        terms_writer.persist_client_finance_terms_impact(cursor, command)
+    assert all(sql.startswith("SELECT") for sql, _ in cursor.statements[before:])
+
+
+@pytest.mark.parametrize("field,value", [("terms_event_id", 0), ("correction_event_id", True), ("expected_account_version", -1)])
+def test_persisted_terms_change_requires_an_actual_event_identity(field, value):
+    values = dict(case_no="CASE", terms_event_id=31, expected_account_version=4, correction_event_id=9)
+    values[field] = value
+    with pytest.raises(ValueError, match="invalid_persisted_payment_terms_change"):
+        PersistedBeClassPaymentTermsChange(**values)
+
+
+def test_original_account_cas_rowcount_zero_still_rejects_before_outbox():
+    connection = _Connection()
+    command = _prewritten_command(connection)
+    cursor = connection.cursor_value
+    execute = cursor.execute
+
+    def reject_cas(statement, parameters):
+        if statement.startswith("UPDATE client_finance_accounts"):
+            cursor.statements.append((" ".join(statement.split()), parameters))
+            cursor.rowcount = 0
+        else:
+            execute(statement, parameters)
+
+    cursor.execute = reject_cas
+    with pytest.raises(RuntimeError, match="^client_finance_candidate_stale$"):
+        terms_writer.persist_client_finance_terms_impact(cursor, command)
+    assert cursor.account_version == 4
+    assert not any("INSERT INTO client_finance_outbox" in sql for sql, _ in cursor.statements)
+
+
+def test_existing_terminal_subsidy_plan_replay_keeps_the_original_noop_guard():
+    class TerminalCursor(_Cursor):
+        def execute(self, statement, parameters):
+            self.statements.append((" ".join(statement.split()), parameters))
+            if "LEFT JOIN client_finance_amount_controls" in statement:
+                self.current = None
+            elif "FROM client_obligations o JOIN client_obligation_events" in statement:
+                self.current = {
+                    "obligation_identity": "subsidy:CASE-PREWRITTEN", "amount_due_ntd": 12000,
+                    "due_date": date(2026, 11, 15), "after_amount_ntd": 12000,
+                }
+            elif "FROM client_refund_recipient_snapshots" in statement:
+                self.current = {"refund_obligation_identity": "subsidy:CASE-PREWRITTEN"}
+            elif " paid " in statement:
+                self.current = {"paid": 0}
+            elif " recovered " in statement:
+                self.current = {"recovered": 0}
+            else:
+                pytest.fail("Unexpected terminal replay query or mutation")
+
+    facts = _unassigned_facts()
+    candidate = replace(module.build_client_finance_rate_correction_candidate(facts, "terminal-current"),
+        subsidy_return_plan=ClientSubsidyReturnPlan("subsidy:CASE-PREWRITTEN", MoneyNTD(12000), date(2026, 11, 15)))
+    command = ClientFinanceImpactPersistenceCommand(candidate, IdempotencyKey("terminal-current"),
+        ActorContext("admin"), "already current", CorrelationId("terminal-current"), "service-completion", 1)
+    cursor = TerminalCursor()
+    terms_writer.persist_client_finance_terms_impact(cursor, command)
+    terms_writer.persist_client_finance_terms_impact(cursor, command)
+    assert cursor.account_version == 4
+    assert all(sql.startswith("SELECT") for sql, _ in cursor.statements)

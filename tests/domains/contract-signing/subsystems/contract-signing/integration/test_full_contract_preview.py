@@ -874,7 +874,7 @@ def test_contract_templates_print_one_page_wide_without_horizontal_fragment_page
 
 def test_client_finance_coverage_projection_caps_citizen_subsidy_at_current_limit():
     facts = {
-        "identity_status": "補助市民",
+        "identity_status": "一般市民",
         "total_hours": 80,
         "service_hours_per_day": 8,
         "floor_fee": 0,
@@ -884,6 +884,24 @@ def test_client_finance_coverage_projection_caps_citizen_subsidy_at_current_limi
     assert facts["subsidy_hours"] == 40
     assert facts["client_finance_self_pay_days"] == 5
     assert facts["projected_subsidy_amount"] == 12000
+    assert owners["client_finance"] != "a" * 64
+
+
+
+@pytest.mark.parametrize("total_hours,covered_hours,self_pay_days,subsidy_amount", [
+    (80, 80, 0, 28000),
+    (160, 120, 5, 42000),
+])
+def test_unbound_subsidized_citizen_coverage_is_separate_from_general_citizen(
+    total_hours, covered_hours, self_pay_days, subsidy_amount,
+):
+    facts = {"identity_status": "補助市民", "total_hours": total_hours,
+             "service_hours_per_day": 8, "floor_fee": 0}
+    owners = {"client_finance": "a" * 64}
+    _project_subsidy_coverage(facts, owners)
+    assert facts["subsidy_hours"] == covered_hours
+    assert facts["client_finance_self_pay_days"] == self_pay_days
+    assert facts["projected_subsidy_amount"] == subsidy_amount
     assert owners["client_finance"] != "a" * 64
 
 

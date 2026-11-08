@@ -13,10 +13,17 @@ from domains.client_finance.reconciliation import PaymentStage
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.terms_workflow import (
     ClientFinanceImpactPersistenceCommand,
+    PersistedBeClassPaymentTermsChange,
 )
 
 
 def persist_client_finance_terms_impact(cursor, command) -> None:
+    prewritten_terms = getattr(command, "persisted_payment_terms_change", None)
+    if prewritten_terms is not None:
+        if not isinstance(prewritten_terms, PersistedBeClassPaymentTermsChange):
+            raise ValueError("invalid_persisted_payment_terms_change")
+        prewritten_terms.validate_command(command)
+        _validate_prewritten_payment_terms(cursor, command, prewritten_terms)
     terms_changed=bool(_persist_payment_terms(cursor, command))
     from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
     cancellation = getattr(command.candidate, "cancellation_settlement", None)
@@ -41,7 +48,7 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
         changed = persist_subsidy_return_plan(cursor, command)
     # Terminal subsidy replay has no stage/terms mutation. An already-current
     # controlled result must not emit the same outbox intent again.
-    if not command.candidate.actions and not (controlled_changed or terms_changed or changed or cancellation):
+    if not command.candidate.actions and not (controlled_changed or terms_changed or changed or cancellation or prewritten_terms):
         return
     _advance_account_version(cursor, command)
     if cancellation:
@@ -49,6 +56,31 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
     _append_outbox(cursor, command)
     from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
     synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
+
+
+def _validate_prewritten_payment_terms(cursor, command, change) -> None:
+    cursor.execute(
+        "SELECT event.id AS terms_event_id,event.case_no,event.expected_account_version,"
+        "event.source_event_identity,event.actor,event.client_hourly_rate_ntd,"
+        "terms.current_event_id,terms.client_hourly_rate_ntd AS current_hourly_rate_ntd,"
+        "account.aggregate_version FROM client_payment_terms terms "
+        "JOIN client_payment_terms_events event ON event.id=terms.current_event_id "
+        "AND event.case_no=terms.case_no "
+        "JOIN client_finance_accounts account ON account.case_no=terms.case_no "
+        "WHERE terms.case_no=%s FOR UPDATE",
+        (change.case_no,),
+    )
+    current = cursor.fetchone()
+    if (current is None
+            or current["terms_event_id"] != change.terms_event_id
+            or current["current_event_id"] != change.terms_event_id
+            or current["case_no"] != change.case_no
+            or current["expected_account_version"] != change.expected_account_version
+            or current["aggregate_version"] != change.expected_account_version
+            or current["source_event_identity"] != f"beclass-correction:{change.correction_event_id}"
+            or current["actor"] != command.actor.actor_id
+            or current["client_hourly_rate_ntd"] != current["current_hourly_rate_ntd"]):
+        raise ValueError("persisted_payment_terms_change_mismatch")
 
 
 def _save_cancellation_settlement(cursor, command, settlement):

@@ -6,7 +6,7 @@ Description: 原子建立等待訂金檔期鎖；只接受工會確認方案的 
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable
 from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
@@ -317,29 +317,47 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any], *, lock: bool = 
     fixed_staff_params = _fixed_staff_params(staff_ids)
     conflicts: list[dict[str, Any]] = []
     for wanted in wanted_rows:
-        if wanted["lock_kind"] == "buffer":
-            continue
+        is_buffer = wanted["lock_kind"] == "buffer"
         staff_id, day = wanted["staff_id"], wanted["lock_date"]
         for source, rows in (("schedule", schedule_rows), ("active_lock", waiting_rows)):
             for row in rows:
                 if int(row["staff_id"]) != staff_id:
                     continue
                 fact = StaffOccupancyFact(staff_id, row["occupancy_date"], row["case_no"], read_service_time_terms(row))
-                if service_shift_may_overlap(day, service_time, fact):
+                if is_buffer:
+                    # Buffer owns calendar dates, not a copy of the proposed shift.
+                    last_source_day = fact.occupancy_date
+                    if fact.service_time is not None:
+                        _, source_end = fact.service_time.service_interval(fact.occupancy_date)
+                        last_source_day = (source_end - timedelta(microseconds=1)).date()
+                    overlaps = fact.occupancy_date <= day <= last_source_day
+                else:
+                    overlaps = service_shift_may_overlap(day, service_time, fact)
+                if overlaps:
                     conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": source, "source_id": row["source_id"]})
         for row in blocks:
             if int(row["staff_id"]) != staff_id:
                 continue
             fact = StaffOccupancyFact(staff_id, row["start_date"], "staff_unavailability",
                                       all_day=True, block_end=row["end_date"])
-            if service_shift_may_overlap(day, service_time, fact):
+            overlaps = (
+                fact.occupancy_date <= day <= (
+                    fact.block_end if fact.block_end is not None else date.max
+                )
+                if is_buffer else service_shift_may_overlap(day, service_time, fact)
+            )
+            if overlaps:
                 conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "staff_unavailability", "source_id": row["id"]})
         for row in legacy_assignments:
             if int(row["staff_id"]) != staff_id:
                 continue
             fact = StaffOccupancyFact(staff_id, row["assigned_start_date"], row["case_no"],
                                       possible_end=row["assigned_end_date"])
-            if service_shift_may_overlap(day, service_time, fact):
+            overlaps = (
+                fact.occupancy_date <= day <= fact.possible_end
+                if is_buffer else service_shift_may_overlap(day, service_time, fact)
+            )
+            if overlaps:
                 conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "assignment", "source_id": row["id"]})
     cursor.execute(
         "SELECT id AS source_id, staff_id, buffer_date AS lock_date "

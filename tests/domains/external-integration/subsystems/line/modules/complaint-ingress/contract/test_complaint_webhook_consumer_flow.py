@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 
-from domains.customer_service.escalation import AutomationHoldState, TriggerCode
+import pytest
+
+from domains.customer_service.escalation import AutomationHoldState, EscalationWorkflowStatus, TriggerCode
 from domains.line.identities import (
     LineDestinationId,
     LineSourceIdentity,
@@ -23,6 +25,7 @@ from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
+from subsystems.line.webhook_immediate_reply import LineWebhookImmediateReplyService
 
 
 class _WebhookInbox:
@@ -80,14 +83,16 @@ class _Escalations:
         self.alerts = []
         self.events = []
         self.receipts = []
+        self.rows = []
+        self.by_key = {}
 
-    def get_by_idempotency(self, _key, *, lock=False):
+    def get_by_idempotency(self, key, *, lock=False):
         del lock
-        return None
+        return self.by_key.get(key)
 
-    def get_by_source(self, _source_event_identity, *, lock=False):
+    def get_by_source(self, source_event_identity, *, lock=False):
         del lock
-        return None
+        return next((row for row in self.rows if row["source_event_identity"] == source_event_identity), None)
 
     def get_active_by_scope(self, _hold_scope, *, lock=False):
         del lock
@@ -98,14 +103,21 @@ class _Escalations:
 
     def create(self, command, ticket):
         self.commands.append(command)
-        return {
+        row = {
             "id": 41,
             "ticket_id": ticket.ticket_id,
+            "source_event_identity": command.source_event_identity,
+            "source_fingerprint": command.source_fingerprint,
+            "trigger_code": command.trigger_code.value,
+            "urgency": "high",
+            "context": command.context.as_dict(),
             "workflow_status": "open",
             "workflow_version": 0,
             "hold_state": "active",
             "hold_version": 0,
         }
+        self.rows.append(row)
+        return row
 
     def enqueue_alert(self, intent):
         self.alerts.append(intent)
@@ -115,6 +127,8 @@ class _Escalations:
 
     def save_receipt(self, key, fingerprint, receipt):
         self.receipts.append((key, fingerprint, receipt))
+        row = next(row for row in self.rows if row["id"] == receipt.escalation_id)
+        self.by_key[key] = {**row, "request_fingerprint": fingerprint, "receipt": receipt}
 
 
 class _State:
@@ -192,7 +206,7 @@ def _complaint_event(now):
     )
 
 
-def _handoff_postback_event(now):
+def _handoff_postback_event(now, *, raw_payload=None):
     line_user_id = LineUserId("U123456789")
     event = build_line_webhook_event(
         provider_event_id="event-handoff-confirm-postback",
@@ -204,7 +218,7 @@ def _handoff_postback_event(now):
             line_user_id,
         ),
         occurred_at=now,
-        canonical_payload={
+        canonical_payload=raw_payload if raw_payload is not None else {
             "replyToken": "reply-event-handoff-confirm-postback",
             "postback": {"data": "customer-service:handoff:confirm"},
         },
@@ -272,14 +286,18 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
         "redaction_version": "m4-mask.v1",
     }
 
-    assert len(state.escalations.alerts) == 1
-    alert = state.escalations.alerts[0]
-    assert alert.trigger_code is TriggerCode.COMPLAINT
-    assert alert.hold_state is AutomationHoldState.ACTIVE
-    assert alert.urgency == "high"
-    assert alert.safe_summary == "complaint_explicit"
-    assert "王小美" not in repr(alert)
-    assert "0912345678" not in repr(alert)
+    # Admin automatic alerts retired; the HIGH escalation and hold still exist.
+    assert state.escalations.alerts == []
+    assert len(state.escalations.rows) == len(state.escalations.receipts) == 1
+    stored = state.escalations.rows[0]
+    receipt = state.escalations.receipts[0][2]
+    assert stored["trigger_code"] == TriggerCode.COMPLAINT.value
+    assert stored["urgency"] == "high"
+    assert stored["context"]["summary_code"] == "complaint_explicit"
+    assert receipt.resulting_hold_state is AutomationHoldState.ACTIVE
+    assert receipt.resulting_workflow_status is EscalationWorkflowStatus.OPEN
+    assert "王小美" not in repr(stored)
+    assert "0912345678" not in repr(stored)
 
     assert len(state.customer_service.messages) == 1
     assert state.customer_service.messages[0].message == (
@@ -299,8 +317,18 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
     assert "很抱歉讓您有不好的感受" in empathy
     assert "AI" not in empathy
 
+    before = (len(state.escalations.commands), len(state.escalations.events), len(state.escalations.receipts),
+              len(state.customer_service.messages), len(state.delivery_tasks.requests), len(state.audit.intents), state.commits)
+    replay = escalation.create_for_ticket(command, SimpleNamespace(ticket_id=31), _UnitOfWork(state))
+    assert replay.replayed is True and replay.receipt_id == receipt.receipt_id
+    assert replay.committed_at == receipt.committed_at
+    assert (len(state.escalations.commands), len(state.escalations.events), len(state.escalations.receipts),
+            len(state.customer_service.messages), len(state.delivery_tasks.requests), len(state.audit.intents), state.commits) == before
+    assert state.escalations.alerts == []
+
 
 def test_call_postback_reaches_ticket_hold_and_short_acknowledgement():
+    """The webhook owns the short Reply; this consumer creates no background ack."""
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     state = _State(_handoff_postback_event(now))
     unit_of_work_factory = _UnitOfWorkFactory(state)
@@ -322,6 +350,64 @@ def test_call_postback_reaches_ticket_hold_and_short_acknowledgement():
     assert consumer.run_once() == 1
     assert len(state.customer_service.messages) == 1
     assert len(state.escalations.commands) == 1
-    payload = json.loads(state.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。"
-    assert "quickReply" not in payload
+    assert state.escalations.receipts[0][2].resulting_hold_state is AutomationHoldState.ACTIVE
+    assert state.escalations.alerts == []
+    assert state.delivery_tasks.requests == []
+    assert state.commits == 2 and len(state.webhook_inbox.completions) == 1
+
+
+@pytest.mark.parametrize("reply_mode", ["success", "missing", "timeout"])
+def test_webhook_reply_outcome_never_changes_ticket_persistence_or_enqueues_push(reply_mode):
+    now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+
+    class ReplyPort:
+        def __init__(self):
+            self.replies = []
+            self.pushes = []
+
+        def reply(self, token, payload):
+            self.replies.append((token, payload))
+            if reply_mode == "timeout":
+                raise TimeoutError("synthetic Reply uncertainty")
+            return SimpleNamespace(outcome_type=SimpleNamespace(value="success"))
+
+        def push(self, *args):
+            self.pushes.append(args)
+            raise AssertionError("manual acknowledgement must never fall back to Push")
+
+    raw_event = {"type": "postback", "postback": {"data": "customer-service:handoff:confirm"}}
+    if reply_mode != "missing":
+        raw_event["replyToken"] = "synthetic-reply-token"
+    reply_port = ReplyPort()
+    reply = LineWebhookImmediateReplyService(reply_port)
+    assert reply.try_immediate_reply(raw_event) is (reply_mode == "success")
+    if reply_mode == "success":
+        assert reply.try_immediate_reply(raw_event) is True
+    assert len(reply_port.replies) == (0 if reply_mode == "missing" else 1)
+    if reply_port.replies:
+        assert reply_port.replies[0][1] == {
+            "type": "text", "text": "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。",
+        }
+    assert reply_port.pushes == []
+
+    state = _State(_handoff_postback_event(now, raw_payload=raw_event))
+    factory = _UnitOfWorkFactory(state)
+    handlers = LineWebhookIdentityHandlers(
+        lambda: now, lambda _purpose, _flow_id: "https://example.test/identity",
+        service_help_application=LineServiceHelpApplication(
+            lambda: now, escalation_gateway=HumanEscalationApplication(factory, lambda: now),
+        ),
+    )
+    consumer = LineWebhookEventConsumer(factory, LineEventDispatcher(handlers.registry()), "line-worker:test", lambda: now)
+    assert consumer.run_once() == 1
+    assert len(state.customer_service.messages) == len(state.escalations.rows) == 1
+    assert state.escalations.receipts[0][2].resulting_hold_state is AutomationHoldState.ACTIVE
+    assert state.delivery_tasks.requests == state.escalations.alerts == []
+    before = (len(state.customer_service.messages), len(state.escalations.events), len(state.escalations.receipts),
+              len(state.delivery_tasks.requests), len(state.audit.intents), len(state.webhook_inbox.completions))
+    assert consumer.run_once() == 0
+    # The original consumer may commit its empty claim transaction; no business
+    # event, acknowledgement or completion may be created by that empty cycle.
+    assert (len(state.customer_service.messages), len(state.escalations.events), len(state.escalations.receipts),
+            len(state.delivery_tasks.requests), len(state.audit.intents), len(state.webhook_inbox.completions)) == before
+    assert reply_port.pushes == []

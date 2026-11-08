@@ -201,6 +201,31 @@ class OrderTermsPersistenceCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class PersistedBeClassPaymentTermsChange:
+    """Same-transaction fact returned only after the BeClass terms writer succeeds."""
+
+    case_no: str
+    terms_event_id: int
+    expected_account_version: int
+    correction_event_id: int
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 191)
+        for value in (self.terms_event_id, self.correction_event_id):
+            if type(value) is not int or value < 1:
+                raise ValueError("invalid_persisted_payment_terms_change")
+        if type(self.expected_account_version) is not int or self.expected_account_version < 0:
+            raise ValueError("invalid_persisted_payment_terms_change")
+
+    def validate_command(self, command: ClientFinanceImpactPersistenceCommand) -> None:
+        if (command.source_event_family != "beclass-correction"
+                or command.source_event_id != self.correction_event_id
+                or command.candidate.case_no != self.case_no
+                or command.candidate.expected_account_version != self.expected_account_version):
+            raise ValueError("persisted_payment_terms_change_mismatch")
+
+
+@dataclass(frozen=True, slots=True)
 class ClientFinanceImpactPersistenceCommand:
     candidate: Any
     idempotency_key: Any
@@ -209,6 +234,7 @@ class ClientFinanceImpactPersistenceCommand:
     correlation_id: Any
     source_event_family: str
     source_event_id: int
+    persisted_payment_terms_change: PersistedBeClassPaymentTermsChange | None = None
 
 
 @dataclass(frozen=True, slots=True)

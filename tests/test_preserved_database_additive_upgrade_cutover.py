@@ -1245,6 +1245,13 @@ def test_restore_data_mismatch_is_retained_and_fails_closed(
     operation = tmp_path / "operation.json"
     cursor = _FakeApplyCursor("candidate_db")
     config = _FakeApplyConfig(cursor)
+
+    def source_defaults(actual_config, database):
+        assert actual_config is config
+        assert database == "source_db"
+        return "utf8mb4", "utf8mb4_unicode_ci"
+
+    monkeypatch.setattr(migration, "_database_character_defaults", source_defaults)
     monkeypatch.setattr(migration, "database_exists", lambda *args: False)
     monkeypatch.setattr(
         migration,
@@ -1292,6 +1299,9 @@ def test_restore_data_mismatch_is_retained_and_fails_closed(
     receipt = read_receipt(operation)
     assert receipt["status"] == "partial"
     assert receipt["failed_phase"] == "restore_validation"
+    assert receipt["database_defaults"] == {
+        "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"
+    }
 
 
 def test_orders_legacy_projection_mismatch_fails_closed(

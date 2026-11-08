@@ -269,3 +269,135 @@ def test_assigned_birth_corrections_keep_next_operations_readable(registry_datab
             assert all(row["hourly_rate_ntd"] == 300 for row in cursor.fetchall())
     finally:
         connection.close()
+
+
+def _seed_existing_incomplete_client_terms(case_no):
+    """Explicit pre-existing finance roots; no invented service days or assignment."""
+    from domains.bootstrap.case_architecture import ClientPaymentTermsRootFacts
+    from infrastructure.mysql.case_architecture_bootstrap_repository import insert_initial_client_payment_terms
+    from shared_kernel.money import MoneyNTD
+
+    # A known planned start is the original rate-policy date anchor. Actual
+    # service dates/service_days remain absent, selecting the contract-only path.
+    seed_case(case_no, date(2026, 10, 1))
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT policy_version,policy_kind,hourly_rate_ntd FROM payroll_rate_policies "
+                "WHERE policy_kind IN ('citizen','twins') AND effective_from<=%s "
+                "AND (effective_until IS NULL OR effective_until>=%s)",
+                (date(2026, 10, 1), date(2026, 10, 1)),
+            )
+            policies = cursor.fetchall()
+            assert len(policies) == 2
+            policies = {row["policy_kind"]: row for row in policies}
+            assert policies["citizen"]["hourly_rate_ntd"] == 300
+            assert policies["twins"]["hourly_rate_ntd"] == 450
+            cursor.execute("INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES (%s,4)", (case_no,))
+            # Client payment-policy version is an opaque existing terms label
+            # (no policy FK in the owner schema), not a Payroll policy binding.
+            terms = ClientPaymentTermsRootFacts(
+                "synthetic-existing-client-terms-v1", MoneyNTD(300), 5,
+                date(2026, 9, 1), date(2026, 10, 1), None,
+            )
+            insert_initial_client_payment_terms(
+                cursor, case_no, terms, "synthetic-existing-terms:" + case_no,
+                "synthetic-existing-terms:" + case_no, "synthetic", "pre-existing incomplete finance fixture",
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _incomplete_finance_readback(case_no, key):
+    """Each call opens a fresh connection to observe actual committed results."""
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            result = {}
+            for name, sql, parameters in (
+                ("order", "SELECT start_date,actual_start_date,service_days FROM orders WHERE case_no=%s", (case_no,)),
+                ("terms", "SELECT * FROM client_payment_terms WHERE case_no=%s", (case_no,)),
+                ("account", "SELECT * FROM client_finance_accounts WHERE case_no=%s", (case_no,)),
+                ("terms_events", "SELECT * FROM client_payment_terms_events WHERE case_no=%s ORDER BY id", (case_no,)),
+                ("outbox", "SELECT * FROM client_finance_outbox WHERE case_no=%s ORDER BY id", (case_no,)),
+                ("corrections", "SELECT e.* FROM beclass_record_correction_events e JOIN beclass_records b ON b.id=e.beclass_record_id WHERE b.bound_case_no=%s ORDER BY e.id", (case_no,)),
+                ("correction_state", "SELECT s.* FROM beclass_record_correction_states s JOIN beclass_records b ON b.id=s.beclass_record_id WHERE b.bound_case_no=%s", (case_no,)),
+                ("receipt", "SELECT * FROM admin_command_receipts WHERE command_family='client_beclass_correction/v1' AND idempotency_key=%s", (key,)),
+                ("claim", "SELECT * FROM application_command_claims WHERE idempotency_key=%s", (key,)),
+                ("client_obligations", "SELECT * FROM client_obligations WHERE case_no=%s", (case_no,)),
+                ("staff_obligations", "SELECT * FROM staff_obligations WHERE case_no=%s", (case_no,)),
+                ("assignments", "SELECT * FROM case_staff_assignments WHERE case_no=%s", (case_no,)),
+            ):
+                cursor.execute(sql, parameters)
+                result[name] = list(cursor.fetchall())
+            return result
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("failure,status", [(None, 200), ("cas", 409), ("outbox", 500)])
+def test_incomplete_existing_finance_birth_correction_refreshes_once_and_rolls_back(
+    registry_database, monkeypatch, failure, status,
+):
+    from infrastructure.mysql import beclass_financial_sync, client_finance_terms_writer
+
+    case_no = "REG-EXISTING-INCOMPLETE-" + str(failure)
+    key = case_no + "-birth"
+    _seed_existing_incomplete_client_terms(case_no)
+    before = _incomplete_finance_readback(case_no, key)
+    assert before["order"][0]["service_days"] is None
+    assert before["order"][0]["actual_start_date"] is None
+    assert before["assignments"] == before["client_obligations"] == before["staff_obligations"] == []
+    contract_loads = []
+    original_load = beclass_financial_sync.load_contract_client_finance_facts
+
+    def observe_contract_branch(*args, **kwargs):
+        facts = original_load(*args, **kwargs)
+        assert facts.charge_days == facts.existing_obligations == ()
+        contract_loads.append(facts.account_version)
+        return facts
+
+    monkeypatch.setattr(beclass_financial_sync, "load_contract_client_finance_facts", observe_contract_branch)
+    injected = []
+    with TestClient(create_app()) as client:
+        path = f"/api/v1/admin/registries/clients/{case_no}/beclass"
+        body = {"changes": {"multi_birth_count": "雙胞胎"}, "expected_version": 0}
+        preview = post(client, path + "/preview", body, key + "-preview")
+        command = {**body, "preview_fingerprint": preview["preview_fingerprint"], "reason": "Synthetic incomplete existing terms correction"}
+        with monkeypatch.context() as fault:
+            if failure is not None:
+                def fail_original_seam(*_args):
+                    injected.append(failure)
+                    raise RuntimeError("client_finance_candidate_stale" if failure == "cas" else "synthetic outbox seam failure")
+                fault.setattr(client_finance_terms_writer,
+                    "_advance_account_version" if failure == "cas" else "_append_outbox", fail_original_seam)
+            response = client.post(path + "/apply", json=command,
+                headers={"Idempotency-Key": key, "X-Correlation-ID": key})
+            assert response.status_code == status, response.text
+        assert contract_loads == [4]
+        if failure is not None:
+            assert injected == [failure]
+            # Python seam injection, followed by real MySQL rollback/readback;
+            # this is not a physical CAS race, trigger or socket-failure test.
+            assert _incomplete_finance_readback(case_no, key) == before
+            saved = post(client, path + "/apply", command, key)
+        else:
+            saved = response.json()["data"]
+        assert saved["readback"]["multi_birth_count"] == "雙胞胎"
+        after = _incomplete_finance_readback(case_no, key)
+        assert after["account"][0]["aggregate_version"] == 5
+        assert after["terms"][0]["client_hourly_rate_ntd"] == 450
+        assert after["terms"][0]["deposit_service_days"] == 5
+        assert len(after["terms_events"]) == len(before["terms_events"]) + 1
+        event = after["terms_events"][-1]
+        assert event["id"] == after["terms"][0]["current_event_id"]
+        assert event["expected_account_version"] == 4
+        assert event["source_event_identity"] == f"beclass-correction:{after['corrections'][0]['id']}"
+        assert len(after["outbox"]) == 1 and after["outbox"][0]["intent_type"] == "projection_refresh"
+        assert len(after["receipt"]) == len(after["claim"]) == 1
+        assert after["client_obligations"] == after["staff_obligations"] == after["assignments"] == []
+        assert after["order"] == before["order"]
+        assert post(client, path + "/apply", command, key)["replayed"]
+        assert _incomplete_finance_readback(case_no, key) == after

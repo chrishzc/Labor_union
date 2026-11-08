@@ -1,6 +1,6 @@
 """
 File: test_line_registration_atomicity.py
-Description: 驗證 LIFF 登記、LINE binding、owner projection 與 intent 共用單一 outer UoW。
+Description: 驗證保留的內部核准 writer、LINE binding、owner projection 與 intent 共用單一 outer UoW；不代表公開收件／Redis 邊界驗收。
 """
 
 from __future__ import annotations
@@ -50,6 +50,8 @@ def test_registration_intake_does_not_create_binding_then_human_approval_commits
     ]
     assert len(uow.outbox.items) == 1
     assert len(uow.delivery.items) == 1
+    assert uow.registration.load_calls == [(5, True)]
+    assert uow.registration.approval_snapshots == [uow.registration.loaded_application]
 
 
 def test_registration_does_not_require_preexisting_customer_lookup() -> None:
@@ -66,6 +68,8 @@ def test_registration_does_not_require_preexisting_customer_lookup() -> None:
         ("17", LineUserId("U-registration"), LineUserId("U-registration"))
     ]
     assert uow.customer.resolve_calls == 0
+    assert uow.registration.load_calls == [(5, True)]
+    assert uow.registration.approval_snapshots == [uow.registration.loaded_application]
 
 
 def test_registration_rolls_back_when_binding_projection_fails() -> None:
@@ -77,6 +81,8 @@ def test_registration_rolls_back_when_binding_projection_fails() -> None:
 
     assert uow.commits == 0
     assert uow.rollbacks == 1
+    assert uow.registration.load_calls == [(5, True)]
+    assert uow.registration.approval_snapshots == [uow.registration.loaded_application]
 
 
 def test_registration_apply_rejects_payload_changed_after_preview_before_any_write() -> None:
@@ -170,17 +176,27 @@ class _RegistrationUow:
 class _RegistrationRepository:
     def __init__(self) -> None:
         self.candidates = []
+        self.load_calls = []
+        self.loaded_application = None
+        self.approval_snapshots = []
 
     def apply(self, candidate):
         self.candidates.append(candidate)
         return ProvisionalRegistrationReceipt(5, None, None, "王小美", False, True)
 
-    def load_application(self, registration_id):
-        return RegistrationApplicationSnapshot(registration_id, 1, build_provisional_registration_candidate(_intent()),
-                                               None, None, None)
+    def load_application(self, registration_id, *, for_update=False):
+        self.load_calls.append((registration_id, for_update))
+        self.loaded_application = RegistrationApplicationSnapshot(
+            registration_id, 1, build_provisional_registration_candidate(_intent()), None, None, None,
+        )
+        return self.loaded_application
 
-    def approve(self, registration_id, expected_version, actor):
+    def approve(self, registration_id, expected_version, actor, *, snapshot=None):
         assert expected_version == 1 and actor == "admin:7"
+        assert self.load_calls[-1] == (registration_id, True)
+        assert snapshot is self.loaded_application
+        assert snapshot.registration_id == registration_id and snapshot.version == expected_version
+        self.approval_snapshots.append(snapshot)
         return ProvisionalRegistrationReceipt(5, 17, 23, "王小美", False, True)
 
 

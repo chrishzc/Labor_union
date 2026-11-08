@@ -211,6 +211,9 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
     if not days:
         _, dates = _select_confirmed_service_dates(cursor, case_no, lock)
         if not dates:
+            for field in ("start_date", "service_days"):
+                if order_row[field] is None:
+                    raise ValueError(f"order_terms_{field}_required")
             dates = tuple(order_row["start_date"] + timedelta(days=i) for i in range(int(order_row["service_days"])))
         days = tuple(ClientChargeDay(value, False) for value in dates)
     source = _load_client_finance(cursor, order_row, schedules, lock)

@@ -5,6 +5,7 @@ import pytest
 
 from domains.bootstrap.case_architecture import (
     BootstrapPresence,
+    BootstrapDomainError,
     CaseArchitectureBootstrapFacts,
     CaseArchitectureBootstrapIntent,
     CaseRootFacts,
@@ -20,7 +21,7 @@ from shared_kernel.money import MoneyNTD
 
 @pytest.mark.parametrize(
     ("identity", "deposit_days"),
-    (("補助市民", 5), ("社福", 0), ("非市民", 5)),
+    (("一般市民", 5), ("補助市民", 0), ("社福", 0), ("非市民", 5)),
 )
 def test_twins_override_every_identity_policy(identity, deposit_days):
     candidate = _candidate(identity, deposit_days, "雙胞胎", PayrollPolicyKind.TWINS)
@@ -31,17 +32,29 @@ def test_twins_override_every_identity_policy(identity, deposit_days):
 
 @pytest.mark.parametrize(
     ("identity", "expected"),
-    (("補助市民", PayrollPolicyKind.CITIZEN), ("社福", PayrollPolicyKind.SUBSIDIZED_CITIZEN), ("非市民", PayrollPolicyKind.NON_CITIZEN)),
+    (("一般市民", PayrollPolicyKind.CITIZEN), ("補助市民", PayrollPolicyKind.SUBSIDIZED_CITIZEN), ("社福", PayrollPolicyKind.SUBSIDIZED_CITIZEN), ("非市民", PayrollPolicyKind.NON_CITIZEN)),
 )
 def test_non_twins_keep_identity_policy(identity, expected):
     assert payroll_policy_kind_for_case(identity, None) is expected
 
 
-def test_twin_fact_changes_bootstrap_fingerprint():
-    twins = _candidate("補助市民", 5, "雙胞胎", PayrollPolicyKind.TWINS)
-    singleton = _candidate("補助市民", 5, None, PayrollPolicyKind.CITIZEN)
+@pytest.mark.parametrize("identity,deposit_days,singleton_policy", [
+    ("一般市民", 5, PayrollPolicyKind.CITIZEN),
+    ("補助市民", 0, PayrollPolicyKind.SUBSIDIZED_CITIZEN),
+])
+def test_twin_fact_changes_bootstrap_fingerprint(identity, deposit_days, singleton_policy):
+    twins = _candidate(identity, deposit_days, "雙胞胎", PayrollPolicyKind.TWINS)
+    singleton = _candidate(identity, deposit_days, None, singleton_policy)
 
     assert twins.fingerprint != singleton.fingerprint
+
+
+@pytest.mark.parametrize("identity,wrong_deposit_days", [
+    ("一般市民", 0), ("補助市民", 5), ("社福", 5), ("非市民", 0),
+])
+def test_twin_payroll_override_does_not_bypass_unbound_client_deposit_policy(identity, wrong_deposit_days):
+    with pytest.raises(BootstrapDomainError, match="deposit service days do not match identity policy"):
+        _candidate(identity, wrong_deposit_days, "雙胞胎", PayrollPolicyKind.TWINS)
 
 
 def test_mysql_bootstrap_uses_case_import_multi_birth_projection():
@@ -59,15 +72,15 @@ def test_mysql_bootstrap_uses_case_import_multi_birth_projection():
 
 
 @pytest.mark.parametrize("days,identity,deposit,fee,hours,expected", [
-    (30, "補助市民", 5, 0, 8, date(2026, 11, 16)),
-    (20, "補助市民", 5, 0, 8, None),
+    (30, "一般市民", 5, 0, 8, date(2026, 11, 16)),
+    (20, "一般市民", 5, 0, 8, None),
     (30, "社福", 0, 0, 8, date(2026, 11, 16)),
     (30, "社福", 0, 0, 1, None),
     (30, "社福", 0, 1000, 1, date(2026, 11, 16)),
 ])
 def test_bootstrap_saves_owner_calculated_second_due_date(days, identity, deposit, fee, hours, expected):
     first = date(2026, 11, 1)
-    kind = PayrollPolicyKind.CITIZEN if identity == "補助市民" else PayrollPolicyKind.SUBSIDIZED_CITIZEN
+    kind = PayrollPolicyKind.CITIZEN if identity == "一般市民" else PayrollPolicyKind.SUBSIDIZED_CITIZEN
     rate = 300 if kind is PayrollPolicyKind.CITIZEN else 350
     facts = CaseArchitectureBootstrapFacts(
         CaseRootFacts("CASE-DATE", 0, first, days, hours, identity, floor_fee=MoneyNTD(fee)),

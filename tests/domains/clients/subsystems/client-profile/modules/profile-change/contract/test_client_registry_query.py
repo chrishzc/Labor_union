@@ -626,6 +626,83 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
     assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
 
 
+@pytest.fixture
+def incomplete_registry_finance(monkeypatch):
+    from infrastructure.mysql import client_registry_query_repository as registry
+    from infrastructure.mysql import order_terms_read_model as reader
+
+    class NoSqlCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, *_):
+            pytest.fail("incomplete finance query must not read amounts or mutate facts")
+
+    connection = SimpleNamespace(
+        cursor=NoSqlCursor,
+        commit=lambda: pytest.fail("registry query must not commit"),
+        rollback=lambda: pytest.fail("registry query must not roll back"),
+    )
+    order = {
+        "case_no": "CASE-001", "status": "待補件", "start_date": None,
+        "service_days": None, "service_hours_per_day": 8, "floor_fee": 0,
+    }
+    monkeypatch.setattr(registry, "select_order", lambda *_args, **_kwargs: order)
+    monkeypatch.setattr(reader, "select_scheduling_aggregate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(reader, "_select_generation", lambda *_: None)
+    monkeypatch.setattr(reader, "_select_schedules", lambda *_: ())
+    monkeypatch.setattr(reader, "_committed_charge_days", lambda *_: ())
+    monkeypatch.setattr(reader, "_select_confirmed_service_dates", lambda *_: (None, ()))
+    monkeypatch.setattr(reader, "_load_client_finance", lambda *_: pytest.fail("missing days must not be priced"))
+    return connection, order
+
+
+@pytest.mark.parametrize("start,days,code", [
+    (None, 10, "order_terms_start_date_required"),
+    (date(2026, 10, 1), None, "order_terms_service_days_required"),
+    (None, None, "order_terms_start_date_required"),
+])
+def test_incomplete_registry_finance_remains_readable_without_fabricating_amounts(
+    incomplete_registry_finance, start, days, code,
+):
+    connection, order = incomplete_registry_finance
+    order.update(start_date=start, service_days=days)
+
+    class IncompleteRepository(_Repository):
+        def load_detail(self, case_no):
+            status, finance_code, values = _finance_values(connection, case_no)
+            return {
+                **super().load_detail(case_no),
+                "finance_status": status, "finance_code": finance_code, "finance_values": values,
+            }
+
+    def unavailable_terms(_case_no):
+        raise ValueError(code)
+
+    response = get_client_registry(
+        case_no="CASE-001",
+        principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
+        application=ClientRegistryQueryApplication(IncompleteRepository()),
+        order_terms=SimpleNamespace(query_registry=unavailable_terms),
+    )
+
+    assert response.data.finance.model_dump() == {"status": "not_ready", "code": code, "values": None}
+    assert response.data.order_terms.status == "not_ready"
+    assert response.data.order_terms.code == code
+    assert order["start_date"] is start and order["service_days"] == days
+
+
+def test_registry_finance_does_not_hide_malformed_nonmissing_calendar(incomplete_registry_finance):
+    connection, order = incomplete_registry_finance
+    order.update(start_date="not-a-date", service_days=10)
+
+    with pytest.raises(TypeError):
+        _finance_values(connection, "CASE-001")
+
+
 @pytest.mark.parametrize("effective,received,remaining,reduction,charge", [
     (15000, 0, 15000, 0, 15000), (15000, 1000, 14000, 0, 15000),
     (16400, 1000, 15300, 0, 16400), (None, 0, 16100, 100, 16300),

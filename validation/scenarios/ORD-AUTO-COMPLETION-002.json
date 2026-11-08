@@ -38,8 +38,8 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_order_auto_completion_persistent_mysql_e2e.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_persistent_mysql_e2e.py"
     ],
-    "test_paths": ["tests/test_order_auto_completion_persistent_mysql_e2e.py"]
+    "test_paths": ["tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_persistent_mysql_e2e.py"]
   }
 }

@@ -141,12 +141,28 @@ class _DeliveryTasks:
         self.requests.append(request)
 
 
+class _Escalations:
+    """This fixture explicitly has no active escalation for its one ticket."""
+
+    def __init__(self) -> None:
+        self.reads = []
+        self.error: Exception | None = None
+
+    def active_for_ticket(self, ticket_id):
+        assert ticket_id == 41
+        self.reads.append(ticket_id)
+        if self.error is not None:
+            raise self.error
+        return ()
+
+
 class _UnitOfWork:
-    def __init__(self, repository, receipts, audit, delivery_tasks) -> None:
+    def __init__(self, repository, receipts, audit, delivery_tasks, escalations) -> None:
         self.customer_service = repository
         self.receipts = receipts
         self.audit = audit
         self.delivery_tasks = delivery_tasks
+        self.escalations = escalations
         self.committed = False
         self.rolled_back = False
 
@@ -168,6 +184,7 @@ class _Fixture:
         self.receipts = _Receipts()
         self.audit = _Audit()
         self.delivery_tasks = _DeliveryTasks()
+        self.escalations = _Escalations()
         self.units: list[_UnitOfWork] = []
         self.application = CustomerServiceApplication(self.unit_of_work)
 
@@ -177,6 +194,7 @@ class _Fixture:
             self.receipts,
             self.audit,
             self.delivery_tasks,
+            self.escalations,
         )
         self.units.append(unit)
         return unit
@@ -231,6 +249,7 @@ def test_preview_is_zero_write_and_uses_the_frozen_candidate_payload():
         }
     )
     assert fixture.repository.get_locks == [False]
+    assert fixture.escalations.reads == []
     assert fixture.repository.events == []
     assert fixture.repository.updates == []
     assert fixture.receipts.items == {}
@@ -254,6 +273,7 @@ def test_apply_fresh_locks_then_commits_event_receipt_and_audit_without_delivery
     assert receipt.readback["ticket"]["status"] == "resolved"
     assert receipt.readback["ticket"]["version"] == 4
     assert fixture.repository.get_locks[-1] is True
+    assert fixture.escalations.reads == [41]
     assert len(fixture.repository.events) == 1
     assert fixture.repository.updates == [
         (41, 3, CustomerServiceStatus.RESOLVED, "已完成", 7)
@@ -275,6 +295,7 @@ def test_apply_replays_same_payload_without_a_second_write():
     event_count = len(fixture.repository.events)
     update_count = len(fixture.repository.updates)
     audit_count = len(fixture.audit.items)
+    escalation_reads = tuple(fixture.escalations.reads)
 
     replay = fixture.application.apply_update(command)
 
@@ -285,6 +306,7 @@ def test_apply_replays_same_payload_without_a_second_write():
     assert len(fixture.repository.events) == event_count
     assert len(fixture.repository.updates) == update_count
     assert len(fixture.audit.items) == audit_count
+    assert tuple(fixture.escalations.reads) == escalation_reads
     assert fixture.delivery_tasks.requests == []
     assert fixture.units[-1].committed is False
     assert fixture.units[-1].rolled_back is True
@@ -363,6 +385,27 @@ def test_repository_failure_rolls_back_event_and_does_not_append_receipt_or_audi
     assert fixture.receipts.items == {}
     assert fixture.audit.items == []
     assert fixture.delivery_tasks.requests == []
+    assert fixture.units[-1].committed is False
+    assert fixture.units[-1].rolled_back is True
+
+
+def test_escalation_query_failure_rolls_back_before_ticket_or_receipt_mutation():
+    fixture = _Fixture()
+    preview = fixture.application.preview_update(_preview_command())
+    original_ticket = fixture.repository.ticket
+    failure = OperationalError(2006, "synthetic escalation source unavailable")
+    fixture.escalations.error = failure
+
+    with pytest.raises(OperationalError) as caught:
+        fixture.application.apply_update(_apply_command(preview.preview_fingerprint))
+
+    assert caught.value is failure
+    assert fixture.escalations.reads == [41]
+    assert fixture.repository.get_locks == [False]
+    assert fixture.repository.ticket is original_ticket
+    assert fixture.repository.events == fixture.repository.updates == []
+    assert fixture.receipts.items == {}
+    assert fixture.audit.items == fixture.delivery_tasks.requests == []
     assert fixture.units[-1].committed is False
     assert fixture.units[-1].rolled_back is True
 
