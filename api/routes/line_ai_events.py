@@ -19,6 +19,7 @@ from api.dependencies.line_ai_qa_catalog import (
 from api.dependencies.line_runtime import get_line_feedback_application
 from api.schemas.base import BaseResponse
 from api.schemas.line_ai_events import (
+    LineNavigationAliasesUpdateRequest,
     LineQaCatalogItemView,
     LineQaCatalogView,
     LineQaItemCreateRequest,
@@ -41,7 +42,14 @@ from subsystems.customer_service.escalation_application import HumanEscalationAp
 from subsystems.line.ai_router_contracts import Unavailable
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
-from subsystems.line.navigation_catalog import CATALOG_REVISION, CATALOG_SOURCE_IDENTITY, catalog_entries
+from subsystems.line.navigation_catalog import (
+    CATALOG_REVISION,
+    CATALOG_SOURCE_IDENTITY,
+    catalog_entries,
+    get_current_revision,
+    reset_route_aliases,
+    update_route_aliases,
+)
 from subsystems.line.service_help_application import LineServiceHelpApplication
 
 
@@ -89,11 +97,56 @@ def preview_router(
 def get_navigation_catalog(
     _: AdminPrincipal = Depends(require_line_configuration_reader),
 ):
+    entries = catalog_entries()
+    revision = get_current_revision()
     return BaseResponse(
         data=LineNavigationCatalogView(
-            revision=CATALOG_REVISION,
-            entries=tuple(LineNavigationEntryView.model_validate(asdict(entry)) for entry in catalog_entries()),
+            revision=revision,
+            entries=tuple(LineNavigationEntryView.model_validate(asdict(entry)) for entry in entries),
         )
+    )
+
+
+@router.put("/catalog/{route_key}/aliases", response_model=BaseResponse[LineNavigationCatalogView])
+def update_catalog_aliases(
+    route_key: str,
+    payload: LineNavigationAliasesUpdateRequest,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        new_revision, entries = update_route_aliases(route_key, list(payload.aliases))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="route_key_not_found")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(
+        data=LineNavigationCatalogView(
+            revision=new_revision,
+            entries=tuple(LineNavigationEntryView.model_validate(asdict(entry)) for entry in entries),
+        ),
+        message=f"已成功更新「{route_key}」的觸發指令",
+    )
+
+
+@router.post("/catalog/{route_key}/reset", response_model=BaseResponse[LineNavigationCatalogView])
+def reset_catalog_aliases(
+    route_key: str,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        new_revision, entries = reset_route_aliases(route_key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="route_key_not_found")
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(
+        data=LineNavigationCatalogView(
+            revision=new_revision,
+            entries=tuple(LineNavigationEntryView.model_validate(asdict(entry)) for entry in entries),
+        ),
+        message=f"已將「{route_key}」的觸發指令恢復預設",
     )
 
 

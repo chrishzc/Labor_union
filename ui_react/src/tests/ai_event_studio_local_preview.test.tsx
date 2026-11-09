@@ -14,6 +14,22 @@ describe('AI 事件工作室正式規則 readback', () => {
 
   const mockReadback = (resolvedRate: number | null = 2 / 3) => vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const path = String(input);
+    if (path.includes('/catalog/profile_update/aliases') && init?.method === 'PUT') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { aliases: string[] };
+      return new Response(JSON.stringify({
+        data: {
+          revision: 4,
+          entries: body.aliases.map((a: string) => ({
+            alias: a,
+            route_key: 'profile_update',
+            tier: 'navigation',
+            source_identity: 'LU96-M2-ROUTER-REPLY-SOURCE-V1',
+            revision: 4,
+          })),
+        },
+        message: '已成功更新「profile_update」的觸發指令',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (path.endsWith('/catalog')) {
       return new Response(JSON.stringify({ data: {
         revision: 3,
@@ -21,14 +37,28 @@ describe('AI 事件工作室正式規則 readback', () => {
           {
             alias: '修改登記資料',
             route_key: 'profile_update',
-            tier: 'service',
+            tier: 'navigation',
             source_identity: 'LU96-M2-ROUTER-REPLY-SOURCE-V1',
             revision: 3,
           },
           {
             alias: '我要改資料',
             route_key: 'profile_update',
-            tier: 'service',
+            tier: 'navigation',
+            source_identity: 'LU96-M2-ROUTER-REPLY-SOURCE-V1',
+            revision: 3,
+          },
+          {
+            alias: '綁定訂單',
+            route_key: 'customer_binding',
+            tier: 'identity',
+            source_identity: 'LU96-M2-ROUTER-REPLY-SOURCE-V1',
+            revision: 3,
+          },
+          {
+            alias: '工會選單',
+            route_key: 'union_menu',
+            tier: 'admin',
             source_identity: 'LU96-M2-ROUTER-REPLY-SOURCE-V1',
             revision: 3,
           },
@@ -119,5 +149,63 @@ describe('AI 事件工作室正式規則 readback', () => {
       expect(screen.getByText('已找到符合的引導動作。')).toBeInTheDocument();
       expect(screen.getByText('命中')).toBeInTheDocument();
     });
+  });
+
+  it('支援分類標籤篩選引導動作', async () => {
+    mockReadback();
+    render(React.createElement(AiEventStudio));
+
+    await waitFor(() => {
+      expect(screen.getByText('全部 (3)')).toBeInTheDocument();
+      expect(screen.getByText('服務導覽 (1)')).toBeInTheDocument();
+      expect(screen.getByText('身分綁定 (1)')).toBeInTheDocument();
+      expect(screen.getByText('工會管理 (1)')).toBeInTheDocument();
+    });
+
+    // Filter by identity
+    fireEvent.click(screen.getByRole('tab', { name: /身分綁定/ }));
+    expect(screen.getByText('綁定訂單')).toBeInTheDocument();
+    expect(screen.queryByText('工會選單')).not.toBeInTheDocument();
+
+    // Filter by admin
+    fireEvent.click(screen.getByRole('tab', { name: /工會管理/ }));
+    expect(screen.getByText('工會選單')).toBeInTheDocument();
+    expect(screen.queryByText('綁定訂單')).not.toBeInTheDocument();
+
+    // Back to all
+    fireEvent.click(screen.getByRole('tab', { name: /全部/ }));
+    expect(screen.getByText('綁定訂單')).toBeInTheDocument();
+    expect(screen.getByText('工會選單')).toBeInTheDocument();
+  });
+
+  it('支援編輯、新增與儲存觸發指令', async () => {
+    const fetchSpy = mockReadback();
+    render(React.createElement(AiEventStudio));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /編輯指令/ })).toBeInTheDocument();
+    });
+
+    // Enter edit mode
+    fireEvent.click(screen.getByRole('button', { name: /編輯指令/ }));
+    expect(screen.getByPlaceholderText(/輸入新觸發指令/)).toBeInTheDocument();
+
+    // Add a new alias
+    fireEvent.change(screen.getByPlaceholderText(/輸入新觸發指令/), {
+      target: { value: '手機號碼更新' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /新增指令/ }));
+    expect(screen.getByText('手機號碼更新')).toBeInTheDocument();
+
+    // Save changes
+    fireEvent.click(screen.getByRole('button', { name: /儲存變更/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/已成功更新/)).toBeInTheDocument();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/v1/line/ai-events/catalog/profile_update/aliases',
+      expect.objectContaining({ method: 'PUT' }),
+    );
   });
 });

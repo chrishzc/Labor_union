@@ -84,3 +84,9 @@ class LineQaItemCreateRequest(BaseModel):
     aliases: tuple[str, ...] = ()
     enabled: bool = True
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class LineNavigationAliasesUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    aliases: tuple[str, ...] = Field(min_length=1)

@@ -99,6 +99,18 @@ _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
 )
 _CONFIRMED_HUMAN_ALIASES = {"聯絡專人服務", "呼叫專員", "聯絡工會專員", "專人客服", "轉接真人客服", "轉真人客服"}
 
+_ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
+    "registration": None,
+    "service_help_menu": None,
+    "order_update_menu": None,
+    "order_update_request": CustomerServiceCategory.OTHER,
+    "service_flow": CustomerServiceCategory.SERVICE_FLOW,
+    "payment_subsidy": CustomerServiceCategory.PAYMENT_SUBSIDY,
+    "service_progress": CustomerServiceCategory.SERVICE_PROGRESS,
+    "profile_update": CustomerServiceCategory.PROFILE_UPDATE,
+    "other": None,
+}
+
 
 def is_confirmed_human_request(text: str) -> bool:
     normalized = text.strip() if isinstance(text, str) else ""
@@ -141,6 +153,28 @@ class DeterministicLineRouter:
             )
 
         entry = entry_for_alias(normalized)
+        if entry is not None:
+            if entry.tier == "identity":
+                return DeterministicRoute(
+                    entry.route_key, None, entry.route_key, "protected_identity_alias",
+                    entry.source_identity, entry.revision, entry.source_identity,
+                    "protected_route", 100,
+                )
+            if entry.tier == "admin":
+                return DeterministicRoute(
+                    entry.route_key, None, None, "approved_group_intent",
+                    entry.source_identity, entry.revision, entry.source_identity,
+                    "protected_route", 100,
+                )
+            if entry.tier == "navigation":
+                category = _ROUTE_CATEGORY_MAP.get(entry.route_key)
+                route_key = "service_help_menu" if entry.route_key == "other" else entry.route_key
+                return DeterministicRoute(
+                    route_key, category, None, "approved_service_help_alias",
+                    entry.source_identity, entry.revision, entry.source_identity,
+                    "navigation", 100,
+                )
+
         if normalized in _IDENTITY_ALIASES and entry is not None:
             return DeterministicRoute(
                 entry.route_key, None, entry.route_key, "protected_identity_alias",
