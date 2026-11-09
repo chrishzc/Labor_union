@@ -16,7 +16,7 @@ import {
   type StaffPayoutJobAccepted,
   type StaffPayoutPreview,
 } from '../api/staff_payables/staff_payout_remediation_schemas';
-import { StaffPayoutRemediationError } from '../api/staff_payables/staff_payout_remediation_errors';
+import { StaffPayoutRemediationError, staffPayoutBlockerMessage } from '../api/staff_payables/staff_payout_remediation_errors';
 import type { StaffPayablesQuery } from '../api/staff_payables/staff_payables_query_schemas';
 
 export interface StaffPayoutRemediationTarget {
@@ -30,6 +30,7 @@ export interface StaffPayoutRemediationWorkbenchProps {
   onResolved?: () => void | Promise<void>;
   onPosted?: () => void;
   financeImportRowId?: number;
+  sourceBank?: 'sinopac' | 'taishin';
   confirmPreview?: boolean;
   onBusyChange?: (busy: boolean) => void;
   client?: StaffPayoutRemediationClient;
@@ -65,8 +66,10 @@ function targetSettled(query: StaffPayablesQuery, target: StaffPayoutRemediation
   return targetPresent(query, target) && activeObligations(query, target).every((item) => item.balance_ntd === 0 && item.payout_status === 'completed');
 }
 
-function displayError(error: unknown): string {
+function displayError(error: unknown, sourceBank?: string): string {
   if (error instanceof StaffPayoutRemediationError) {
+    const blocker = staffPayoutBlockerMessage(error.code,sourceBank);
+    if (blocker) return blocker;
     if (error.code.toLowerCase().includes('stale')) return '應付款資料已更新，請重新查詢後再檢查核銷影響。';
     if (error.code === 'STAFF_PAYOUT_SCHEMA_MISMATCH') return '應付款核銷資料目前不完整，已停止操作。';
     if (['STAFF_PAYOUT_TIMEOUT', 'STAFF_PAYOUT_NETWORK', 'STAFF_PAYOUT_ABORTED', 'STAFF_PAYOUT_UNKNOWN', 'STAFF_PAYOUT_JOB_TIMEOUT'].includes(error.code)) {
@@ -87,8 +90,15 @@ function isUnknownApplyOutcome(error: unknown): boolean {
     && ['STAFF_PAYOUT_TIMEOUT', 'STAFF_PAYOUT_NETWORK', 'STAFF_PAYOUT_ABORTED', 'STAFF_PAYOUT_UNKNOWN'].includes(error.code);
 }
 
-function terminalMessage(job: StaffPayoutJob): string {
-  if (job.status === 'failed') return '核銷處理未完成，異常仍會保留；請確認資料後再試。';
+function terminalMessage(job: StaffPayoutJob, sourceBank?: string): string {
+  if (job.status === 'failed') {
+    if (job.outcome?.kind === 'failure') {
+      const blocker = staffPayoutBlockerMessage(job.outcome.error.code,sourceBank);
+      if (blocker) return blocker;
+      if (job.outcome.error.code.toLowerCase().includes('stale')) return '應付款資料已更新，請重新查詢後再檢查核銷影響。';
+    }
+    return '核銷處理未完成，未留存可顯示的具體阻擋原因；請重新查詢帳務資料。';
+  }
   if (job.status === 'cancelled') return '背景核銷已取消；異常仍保留。';
   return '背景核銷尚未完成；異常仍保留。';
 }
@@ -130,6 +140,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   onResolved,
   onPosted,
   financeImportRowId,
+  sourceBank,
   confirmPreview = false,
   onBusyChange,
   client = staffPayoutRemediationClient,
@@ -186,10 +197,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
       if (current === generation.current && mounted.current) { setQuery(fresh); setBusy(null); }
     }).catch((caught: unknown) => {
-      if (current === generation.current && mounted.current) { setBusy(null); setError(displayError(caught)); }
+      if (current === generation.current && mounted.current) { setBusy(null); setError(displayError(caught,sourceBank)); }
     });
     return () => { generation.current += 1; };
-  }, [client, requestOptions, target, financeImportRowId]);
+  }, [client, requestOptions, target, financeImportRowId, sourceBank]);
 
   const invalidatePreview = () => { setPreview(null); setNotice(null); command.current = null; };
   const obligations = activeObligations(query, target);
@@ -210,7 +221,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', 'Preview 未回傳同一 Staff 與原義務。');
       setPreview(value);
       if (!confirmPreview) await runApply(value);
-    } catch (caught) { setError(displayError(caught)); }
+    } catch (caught) { setError(displayError(caught,sourceBank)); }
     finally { if (mounted.current) setBusy(null); }
   };
 
@@ -229,7 +240,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     try {
       await loadQuery(false);
     } catch (caught) {
-      if (mounted.current) setError(displayError(caught));
+      if (mounted.current) setError(displayError(caught,sourceBank));
     }
   };
 
@@ -246,7 +257,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_TIMEOUT', 'Job 在期限內沒有 terminal 結果。', true);
     }
     if (latest.status !== 'succeeded') {
-      setPreview(null); setAccepted(null); command.current = null; setNotice(terminalMessage(latest));
+      setPreview(null); setAccepted(null); command.current = null; setNotice(terminalMessage(latest,sourceBank));
       return;
     }
     if (latest.outcome?.kind !== 'success' || latest.outcome.result_reference !== `staff_payout:${target.staffId}`) {
@@ -268,7 +279,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     } catch (caught) {
       if (isUnknownApplyOutcome(caught)) {
         setUnknownOutcome(true);
-        setError(displayError(caught));
+        setError(displayError(caught,sourceBank));
       } else {
         setUnknownOutcome(false); setPreview(null); setJob(null); setAccepted(null); command.current = null;
         if (isStaleApplyError(caught)) {
@@ -276,10 +287,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
             await loadQuery(false);
             setNotice('應付款資料已更新；請依最新餘額重新檢查核銷影響。');
           } catch (queryError) {
-            setError(displayError(queryError));
+            setError(displayError(queryError,sourceBank));
           }
         } else {
-          setError(displayError(caught));
+          setError(displayError(caught,sourceBank));
         }
       }
       if (mounted.current) setBusy(null);
@@ -290,14 +301,14 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       await pollToTerminal(next.job_id);
     } catch (caught) {
       setUnknownOutcome(true);
-      setError(displayError(caught));
+      setError(displayError(caught,sourceBank));
     } finally { if (mounted.current) setBusy(null); }
   };
 
   const reconcile = async () => {
     if (!accepted || busy !== null) return;
     try { await pollToTerminal(accepted.job_id); }
-    catch (caught) { setUnknownOutcome(true); setError(displayError(caught)); }
+    catch (caught) { setUnknownOutcome(true); setError(displayError(caught,sourceBank)); }
     finally { if (mounted.current) setBusy(null); }
   };
   const continueRemaining = () => {

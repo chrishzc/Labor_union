@@ -7,6 +7,9 @@
 ## Responsibility
 由 Client Finance 擁有案件專屬虛擬帳號的確定性產生／解析規則；匯入實際對照優先於公式候選，只有完全沒有匯入對照時才使用公式。驗證客戶收款與應收義務，並編排 fresh Preview／Apply、核銷分配與收據。一般核銷維持精確；人員明示部分收款時才保留實收與餘額，明示超收才沿既有退款義務流程。案件層級核對可不指定單一期款，按正式到期日排列選定義務，讓同案多筆合計跨期核銷；不放寬跨案件或重複銀行來源。部分收款不宣告訂金收足或發出該期收款完成通知；後續補足保留所有來源，訂金投影記累計分配，通知證據沿本次 settlement 的分配額。
 等待訂金檔期釋放可借用原外層 UoW 的唯讀 `query_unreceived_deposit`：完整查核 account 版本、同案 obligations／義務事件／ledger，以 Domain-owned `UnreceivedDepositConfirmation` 提供未建立帳务且未收款證明；不因缺 settlement projection 推定零、不建立 account 或帳務根事實。
+案件 Receipt Query 的 `bank_fact_blockers` 僅投影已確認同案、因缺交易日／非新臺幣而被排除的來源編號及原因碼；不把受阻來源加入 `bank_facts`。Preview／fresh Apply load沿用同一診斷，銀行抽屜按固定原流水顯示原因，不將來源資格不符解釋為案件未辨識。缺期款到期日只阻止所需的月份自動配對，不阻止明確選款後的合法同案合計核銷，亦不補造日期。
+明示超收另列退款時，Preview 與 fresh Apply 在正式寫入前經 repository 唯讀 `validate_overage_refund_recipient`，與退款快照 writer 共用同案 BeClass 有效帳戶檢查。缺件沿既有 `client_refund_recipient_snapshot_missing`；畫面預覽與正式拒絕共用提示。未建立超收退款的精確／部分收款不要求退款帳戶。
+銀行來源 eligibility 依本案專屬虛擬帳號或既有正式同案義務 targets 驗證；舊姓名／帳號／金額猜測標記及單一 client identity 不提供旁路核銷資格。
 
 ## Implementation
 - difference owner: `domains/client_finance/difference_resolution.py`, `subsystems/client_finance/difference_resolution.py`, `infrastructure/mysql/client_difference_repository.py` — noncash loss/reduction/fee/absorption, state-only refund closure and original cash preservation; amount modes borrow original source writer.

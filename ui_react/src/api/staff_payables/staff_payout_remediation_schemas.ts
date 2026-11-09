@@ -35,6 +35,7 @@ const CandidateSchema = z.strictObject({
   obligation_links: z.array(ObligationLinkSchema),
   resulting_status: z.enum(['payable', 'partially_paid', 'completed', 'recovery_required', 'anomaly']),
   difference_mode: z.enum(['underpayment', 'overpayment']).nullable(),
+  transfer_fee: MoneySchema.nullish(),
   recovery: z.strictObject({
     identity: z.string().min(1),
     staff_id: z.number().int().positive(),

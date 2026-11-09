@@ -10,8 +10,17 @@ from decimal import Decimal
 import json
 from typing import Any, Mapping
 
-from domains.finance_import.transaction_classifier import classify_finance_transaction
+from domains.finance_import.cancellation_code import (
+    extract_sinopac_memo_case_suffix,
+    resolve_finance_cancellation_code,
+    sinopac_memo_case_suffixes,
+)
+from domains.finance_import.transaction_classifier import _is_same_month, classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
+from subsystems.client_finance.virtual_account_resolution import (
+    resolve_client_virtual_account,
+    resolve_client_virtual_account_suffix,
+)
 
 
 def _json_default(value: Any) -> str:
@@ -145,6 +154,7 @@ def classify_row_with_identity_maps(
             staff_payout_candidates,
             known_virtual_accounts,
             known_case_suffixes,
+            staff_name_identities=identity_maps.get("staff_name_identities"),
         )
     except TypeError:
         return classify_finance_transaction(
@@ -154,6 +164,60 @@ def classify_row_with_identity_maps(
             subsidy_return_accounts,
             receipt_candidates,
         )
+
+
+def _has_unique_import_case(cursor, row, classification, identity_maps):
+    kind = classification["classification_type"]
+    if kind == "non_business_review":
+        return False
+    if kind == "government_subsidy":
+        return True
+    if kind == "client_receipt":
+        code = resolve_finance_cancellation_code(row)["cancellation_code"]
+        if code:
+            known_accounts = identity_maps.get("known_virtual_accounts")
+            if known_accounts is not None:
+                return code in known_accounts
+            return resolve_client_virtual_account(cursor, code)["result"] == "resolved"
+    elif (row["direction"] == "outgoing" and sinopac_memo_case_suffixes(row.get("memo"))
+          and not (row["format_id"] == "taishin" and kind == "staff_salary")):
+        suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+        return resolve_client_virtual_account_suffix(cursor, suffix)["result"] == "resolved"
+
+    owner_ids = classification["matched_identity_ids"]
+    if len(owner_ids) != 1:
+        return False
+    owner_id = owner_ids[0]
+    owner_column = "client_id"
+    if kind in {"staff_salary", "staff_legacy_subsidy"}:
+        owner_column = "staff_id"
+        obligations = [item for item in identity_maps.get("staff_payout_candidates", ()) if item["staff_id"] == owner_id]
+    elif kind == "client_receipt":
+        cursor.execute(
+            "SELECT o.case_no,o.due_date,o.amount_due_ntd FROM client_obligations o "
+            "JOIN orders ord ON ord.case_no=o.case_no WHERE ord.client_id=%s "
+            "AND o.direction='receivable_from_client' AND o.status='open' AND o.amount_due_ntd>0",
+            (owner_id,),
+        )
+        obligations = cursor.fetchall()
+        exact = [item for item in obligations if int(item["amount_due_ntd"]) == int(row["credit"])]
+        if len(exact) == 1:
+            return bool(exact[0]["case_no"])
+    else:
+        obligation_types = {"subsidy_return"} if kind == "client_subsidy_return" else {"refund", "adjustment"}
+        obligations = [item for item in identity_maps.get("taishin_client_refund_candidates", ())
+                       if item["client_id"] == owner_id and item["obligation_type"] in obligation_types]
+
+    month_cases = {item["case_no"] for item in obligations if item.get("case_no")
+                   and _is_same_month(row["transaction_date"], item.get("due_date"))}
+    cases = month_cases or {item["case_no"] for item in obligations if item.get("case_no")}
+    if cases:
+        return len(cases) == 1
+    cursor.execute(
+        f"SELECT DISTINCT case_no FROM orders WHERE {owner_column}=%s AND status<>'訂單取消' LIMIT 2",
+        (owner_id,),
+    )
+    return len(cursor.fetchall()) == 1
 
 
 def stage_finance_rows(
@@ -239,7 +303,7 @@ def stage_finance_rows(
 
         if business_only:
             classification = classify_row_with_identity_maps(row, identity_maps)
-            if classification["classification_type"] == "non_business_review":
+            if not _has_unique_import_case(cursor, row, classification, identity_maps):
                 continue
 
         cursor.execute(

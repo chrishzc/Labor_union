@@ -54,8 +54,11 @@
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints: `statements/export`, `statements/manual`, `statements/duplicates` beneath `/api/v1/finance-import`
-- `bank-transactions` — 以已辨識業務對象／案件／政府補助之原始銀行流水為清單身分（無關流水於匯入前丟棄且不列入待核對），跨批次分頁並補齊對象與關聯案件，正式核銷證據決定狀態；待核對列僅在案件及正式款項可唯一確認時提供案件核對目標。
-- 永豐客戶入款的待核對原因沿原 Apply 收據讀取；同月等額候選保留當次期別及到期日。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示。
+- `bank-transactions` — 以已定位唯一案件或已辨識政府補助的原始銀行流水為清單身分。沿原規則自動配對後，案件與對象已確認的待核對列均可開抽屜；唯一款項直接預選，其餘target以requires_selection及同案同對象候選IDs要求人工選款，候選可為空並顯示缺項。來源完整性受阻、對象／用途不明或舊流水無唯一案件仍只顯示具體原因。正式owner重驗核銷，不由Query／UI寫帳。
+- 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
+- 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
+- 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
+- 台新客戶補助的入口依原始備註唯一六碼與正式虛擬帳號對照確認案件，並沿既有姓名擷取排除命中月嫂姓名的來源；不以舊對象辨識欄位或原因碼決定能否開啟。候選限同案補助待退款，可人工選款或顯示缺款；Query 不回填舊欄位，正式 Preview／Apply 仍驗原備註、資金資格、日期及核銷規則。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan`; server actor, plan version CAS and same-command replay under the Orders case identity lock, one outer metadata transaction. No collection, bank uniqueness or legacy direct-arrangement prerequisite; no financial/date writer or payable generation.
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`
@@ -67,7 +70,7 @@
 - case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection; absent government money is never direct-arrangement evidence. Direct arrangement facts are explicit append-only confirm_direct/withdraw_direct events, never inferred from missing government cash; same-case GET/POST arrangement is the authenticated metadata writer, with arrangement version, Orders identity lock and original-command replay.
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and obligation; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
+- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and matched obligations or unselected same-case candidates; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
 
 ## Verification
 - layout_status: `custom_current`

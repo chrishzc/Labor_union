@@ -110,6 +110,16 @@ class CorrectionAllocation:
 
 
 @dataclass(frozen=True, slots=True)
+class ClientRefundCorrectionPreview:
+    """Read-only Client Finance result; Finance Import does not calculate its fee policy."""
+    obligation_identities: tuple[str, ...]
+    allocations: tuple[CorrectionAllocation, ...]
+    transfer_fee: MoneyNTD
+    remaining_amount: MoneyNTD
+    fingerprint: PreviewFingerprint
+
+
+@dataclass(frozen=True, slots=True)
 class FinanceImportCorrectionCandidate:
     row_identity: str
     batch_identity: str
@@ -124,27 +134,36 @@ class FinanceImportCorrectionCandidate:
     allow_partial_refund_recovery: bool = False
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
+    refund_preview: ClientRefundCorrectionPreview | None = None
 
 
 def build_finance_import_correction_candidate(
     selection: FinanceImportCorrectionSelection,
     facts: FinanceImportCorrectionFacts,
+    *,
+    refund_preview: ClientRefundCorrectionPreview | None = None,
 ) -> FinanceImportCorrectionCandidate:
     _validate_correction_blockers(facts)
-    owning_domain, allocations = _build_allocations(selection, facts)
-    fingerprint = fingerprint_payload(
-        _candidate_payload(selection, facts, owning_domain, allocations)
-    )
+    owning_domain, allocations = _build_allocations(selection, facts, refund_preview)
+    payload = _candidate_payload(selection, facts, owning_domain, allocations)
+    if refund_preview is not None:
+        payload['refund_preview'] = {
+            'transfer_fee_ntd': refund_preview.transfer_fee.amount,
+            'remaining_ntd': refund_preview.remaining_amount.amount,
+            'owner_preview_fingerprint': refund_preview.fingerprint.value,
+        }
+    fingerprint = fingerprint_payload(payload)
     return _correction_candidate(
         selection,
         facts,
         owning_domain,
         allocations,
         fingerprint,
+        refund_preview,
     )
 
 
-def _build_allocations(selection, facts):
+def _build_allocations(selection, facts, refund_preview):
     obligations = _selected_obligations(selection, facts)
     owning_domain = _single_owning_domain(obligations)
     _validate_classification_owner(selection.classification_type, owning_domain)
@@ -152,13 +171,27 @@ def _build_allocations(selection, facts):
         CorrectionAllocation(item.obligation_identity, item.remaining_amount)
         for item in obligations
     )
-    if selection.allow_partial_refund_recovery:
-        return owning_domain, _build_refund_recovery_allocations(
-            facts.bank_amount,
-            allocations,
-        )
-    if selection.allow_refund_overage_recovery:
-        return owning_domain, _build_refund_overage_allocations(facts.bank_amount, allocations)
+    if selection.classification_type in {FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.CLIENT_SUBSIDY_RETURN}:
+        if refund_preview is None:
+            raise ValueError('refund_owner_preview_required')
+        expected = {item.obligation_identity: item.remaining_amount.amount for item in obligations}
+        supplied = {item.obligation_identity: item.amount.amount for item in refund_preview.allocations}
+        allocated = sum(supplied.values())
+        if (
+            refund_preview.obligation_identities != selection.target_obligation_identities
+            or len(supplied) != len(refund_preview.allocations)
+            or not supplied
+            or any(
+                identity not in expected or amount <= 0 or amount > expected[identity]
+                for identity, amount in supplied.items()
+            )
+            or refund_preview.remaining_amount.amount != sum(expected.values()) - allocated
+            or allocated != min(sum(expected.values()), facts.bank_amount.amount + refund_preview.transfer_fee.amount)
+        ):
+            raise ValueError('refund_owner_preview_mismatch')
+        return owning_domain, refund_preview.allocations
+    if refund_preview is not None:
+        raise ValueError('classification_target_owner_mismatch')
     if selection.allow_client_receipt_overage:
         return owning_domain, _build_client_receipt_overage_allocations(facts.bank_amount, allocations)
     _validate_exact_allocation(facts.bank_amount, allocations)
@@ -171,6 +204,7 @@ def _correction_candidate(
     owning_domain,
     allocations,
     fingerprint,
+    refund_preview,
 ):
     return FinanceImportCorrectionCandidate(
         selection.row_identity,
@@ -186,6 +220,7 @@ def _correction_candidate(
         selection.allow_partial_refund_recovery,
         selection.allow_refund_overage_recovery,
         selection.allow_client_receipt_overage,
+        refund_preview,
     )
 
 
@@ -229,30 +264,6 @@ def _validate_exact_allocation(bank_amount, allocations) -> None:
     allocated = sum(item.amount.amount for item in allocations)
     if allocated != bank_amount.amount:
         raise ValueError("allocation_not_exact")
-
-
-def _build_refund_recovery_allocations(bank_amount, allocations):
-    remaining_amount = bank_amount.amount
-    total_due = sum(item.amount.amount for item in allocations)
-    if remaining_amount >= total_due:
-        raise ValueError("refund_recovery_requires_underpayment")
-    selected: list[CorrectionAllocation] = []
-    for allocation in allocations:
-        if not remaining_amount:
-            break
-        amount = min(remaining_amount, allocation.amount.amount)
-        selected.append(CorrectionAllocation(allocation.obligation_identity, MoneyNTD(amount)))
-        remaining_amount -= amount
-    if remaining_amount:
-        raise ValueError("allocation_not_exact")
-    return tuple(selected)
-
-
-def _build_refund_overage_allocations(bank_amount, allocations):
-    total_due = sum(item.amount.amount for item in allocations)
-    if bank_amount.amount <= total_due:
-        raise ValueError("refund_overage_required")
-    return allocations
 
 
 def _build_client_receipt_overage_allocations(bank_amount, allocations):
@@ -335,7 +346,7 @@ def _validate_partial_refund_recovery(selection) -> None:
         raise TypeError("partial refund recovery must be bool")
     if (
         selection.allow_partial_refund_recovery
-        and selection.classification_type is not FinanceClassificationType.CLIENT_REFUND
+        and selection.classification_type not in {FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.CLIENT_SUBSIDY_RETURN}
     ):
         raise ValueError("partial_refund_recovery_not_allowed")
 
@@ -347,7 +358,7 @@ def _validate_refund_overage_recovery(selection) -> None:
         raise ValueError("refund_recovery_mode_conflict")
     if (
         selection.allow_refund_overage_recovery
-        and selection.classification_type is not FinanceClassificationType.CLIENT_REFUND
+        and selection.classification_type not in {FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.CLIENT_SUBSIDY_RETURN}
     ):
         raise ValueError("refund_overage_recovery_not_allowed")
 
@@ -417,6 +428,7 @@ def _require_positive_money(value, field_name) -> None:
 
 
 __all__ = [
+    "ClientRefundCorrectionPreview",
     "CorrectionAllocation",
     "CorrectionTargetObligation",
     "FinanceImportCorrectionCandidate",

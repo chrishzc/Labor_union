@@ -61,7 +61,7 @@ Staff Payables 讀取 Payroll 的正式應付與 assignment 歸屬，案件月�
 
 ### Payout Reconciliation Preview
 
-驗證所有銀行列為 outgoing debit、同一月嫂、帳戶 owner 唯一，且無重複 raw fact。一般核銷的支出總額須恰等於所選義務的當下剩餘款。付款不足走不足額核銷，先記實付並保留餘額；付款超額走超額核銷，另列追收。不得跨 staff、重用已核銷銀行列或改寫原應付。
+驗證所有銀行列為 outgoing debit、同一月嫂且無重複 raw fact。永豐及其他原帳號辨識路徑仍須帳戶 owner 唯一；台新補助 P台依規格22 §15.6.3，在 Preview／Apply 重新以原始備註姓名唯一確認月嫂，不要求交易帳號或主要帳戶，姓名須與所選義務的 staff_id 相同。不得跨 staff、重用已核銷銀行列或改寫原應付。一般核銷金額及0～100元內扣手續費依規格22 §15.6.4；超出範圍的不足額保留餘額，超額另列追收。
 
 ### Payout Apply
 
@@ -147,7 +147,7 @@ Archive 在本輪預設永久保留且不提供自動刪除。存取權限治理
 
 - 同月嫂同月兩訂單且付款日／出款銀行／收款帳戶相同：兩筆義務、一列匯出、一筆銀行支出完整連結兩筆；永豐一般款與台新補助款分列，沿規格16 APX-A01～09驗收。
 - completed／anomaly 不匯出。
-- 一般足額核銷拒絕不足／超額；專用差額核銷依規格 16 保存實付、待付餘額或超額追償。混 staff、帳戶不唯一不得建立正式 payout。
+- 一般核銷依規格22 §15.6.4處理0～100元手續費，其餘不足／超額走規格16專用差額核銷。混 staff 或對象不唯一不得建立正式 payout；台新原始備註姓名唯一且同人時，缺帳號不阻擋，其他帳號辨識路徑仍須帳戶唯一。
 - return／reversal 重開 payable。
 - exact replay 不重複 event 或 links。
 - 4 日、5 日多次下載各自保存；archive 與 response bytes 完全相同。
@@ -177,6 +177,7 @@ Stable errors：
 - `invalid_staff_payout_intent`
 - `outgoing_bank_fact_not_eligible`
 - `staff_bank_account_ambiguous`
+- `staff_memo_recipient_unconfirmed`
 - `cross_staff_allocation_forbidden`
 - `staff_payout_amount_mismatch`
 - `staff_obligation_not_exactly_settled`

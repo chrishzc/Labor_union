@@ -342,14 +342,15 @@ class FinanceImportReviewRowPageView(_StrictModel):
 
 class FinanceBankReconciliationTargetView(_StrictModel):
     case_no: str
-    obligation_identities: list[str] = Field(min_length=1)
+    obligation_identities: list[str]
     staff_id: int | None = Field(default=None, gt=0)
+    requires_selection: bool = False
 
 
 class FinanceBankClientReceiptReviewCandidateView(_StrictModel):
     obligation_identity: str
     obligation_type: str
-    due_date: str
+    due_date: str | None
 
 
 class FinanceBankClientReceiptReviewView(_StrictModel):
@@ -370,11 +371,13 @@ class FinanceBankTransactionView(_StrictModel):
     review_reason: str | None
     dispatch_reason: str | None = None
     recorded_client_receipt_review: FinanceBankClientReceiptReviewView | None = None
+    recorded_pending_reason: str | None = None
     available_actions: list[str]
     reference: str
     counterparty_name: str | None
     cases: list[str]
     reconciliation_target: FinanceBankReconciliationTargetView | None = None
+    reconciliation_unavailable_reason: str | None = None
 
 
 class FinanceBankTransactionPageView(_StrictModel):
@@ -523,6 +526,7 @@ class FinanceImportRowView(_StrictModel):
     fingerprint_collision: bool
     formal_reference_conflict: bool
     client_receipt_review: FinanceBankClientReceiptReviewView | None = None
+    pending_reason: str | None = None
 
 
 class FinanceImportBatchPreviewView(_StrictModel):
@@ -590,6 +594,11 @@ class FinanceImportCorrectionAllocationView(_StrictModel):
     amount_ntd: int = Field(gt=0)
 
 
+class FinanceImportRefundSummaryView(_StrictModel):
+    transfer_fee_ntd: int = Field(ge=0, le=100)
+    remaining_ntd: int = Field(ge=0)
+
+
 class FinanceImportCorrectionCandidateView(_StrictModel):
     row_identity: str
     batch_identity: str
@@ -604,6 +613,7 @@ class FinanceImportCorrectionCandidateView(_StrictModel):
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
     candidate_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    refund_summary: FinanceImportRefundSummaryView | None = None
 
 
 class FinanceImportCorrectionPreviewView(_StrictModel):
@@ -635,6 +645,7 @@ class FinanceImportCorrectionJobOutcomeView(_StrictModel):
     max_attempts: int = Field(ge=0)
     result_reference: str | None = Field(default=None, min_length=1, max_length=191)
     receipt: FinanceImportCorrectionReceiptView | None = None
+    failure_code: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[a-z0-9_]+$")
 
 
 class RefundReturnReviewPreviewBody(_StrictModel):

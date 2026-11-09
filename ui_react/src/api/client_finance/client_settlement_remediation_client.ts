@@ -11,6 +11,7 @@ import {
   ClientPayablePreviewResponseSchema, ClientPayableReceiptResponseSchema,
   ClientReceiptPreviewResponseSchema, ClientReceiptReceiptResponseSchema,
   ClientSettlementQueryResponseSchema,
+  ClientRefundReturnQueryResponseSchema, ClientRefundReturnPreviewResponseSchema, ClientRefundReturnReceiptResponseSchema,
   type ClientPayablePreview, type ClientPayableReceipt, type ClientPaymentStage,
   type ClientReceiptPreview, type ClientReceiptReceipt, type ClientSettlementQuery,
 } from './client_settlement_remediation_schemas';
@@ -95,3 +96,33 @@ class DefaultClient implements ClientSettlementRemediationClient {
 }
 
 export const clientSettlementRemediationClient: ClientSettlementRemediationClient = new DefaultClient();
+
+export type RefundReturnSelection = { finance_import_row_id: number; refund_ledger_entry_id: number };
+export const clientRefundReturnClient = {
+  async query(caseNo: string, request: ClientSettlementOptions = {}) {
+    try {
+      const data = decode(ClientRefundReturnQueryResponseSchema, await transport.get<unknown>(`${base(caseNo)}/refund-reversal`, options(request, `refund-return-query-${crypto.randomUUID()}`))).data;
+      if (data.case_no !== caseNo.trim()) throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_IDENTITY_MISMATCH', '退匯案件資料不一致。');
+      return data;
+    } catch (error) { throw mapped(error); }
+  },
+  async preview(caseNo: string, selection: RefundReturnSelection) {
+    try {
+      const data = decode(ClientRefundReturnPreviewResponseSchema, await transport.post<unknown>(`${base(caseNo)}/refund-return/preview`, selection, options({}, `refund-return-preview-${crypto.randomUUID()}`))).data;
+      const entries = data.candidate.entries;
+      if (data.candidate.case_no !== caseNo.trim() || entries.length !== 1
+        || entries[0].finance_import_row_identity !== String(selection.finance_import_row_id)
+        || entries[0].reversal_of_entry_identity !== String(selection.refund_ledger_entry_id)) {
+        throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_IDENTITY_MISMATCH', '退匯預覽與原流水或原退款不一致。');
+      }
+      return data;
+    } catch (error) { throw mapped(error); }
+  },
+  async apply(caseNo: string, command: RefundReturnSelection & { expected_account_version: number; preview_fingerprint: string; reason: string }, request: ClientSettlementApplyOptions) {
+    try {
+      const data = decode(ClientRefundReturnReceiptResponseSchema, await transport.post<unknown>(`${base(caseNo)}/refund-return/apply`, command, options(request, request.correlationId, request.idempotencyKey))).data;
+      if (data.case_no !== caseNo.trim()) throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_IDENTITY_MISMATCH', '退匯核銷結果與案件不一致。');
+      return data;
+    } catch (error) { throw mapped(error); }
+  },
+};

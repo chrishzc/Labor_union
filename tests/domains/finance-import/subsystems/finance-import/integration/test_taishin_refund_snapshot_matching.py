@@ -1,4 +1,4 @@
-"""Synthetic Taishin refunds use frozen recipient accounts and need no case column."""
+"""Synthetic frozen accounts do not classify new Taishin outflows; old results remain readable."""
 
 import json
 import sqlite3
@@ -63,7 +63,8 @@ def database():
         );
         CREATE TABLE staff_bank_accounts (id INTEGER, staff_id INTEGER, account_no TEXT);
         CREATE TABLE finance_import_rows (
-            id INTEGER, bank_references TEXT, format_id TEXT, direction TEXT, memo TEXT
+            id INTEGER, bank_references TEXT, format_id TEXT, direction TEXT, memo TEXT,
+            transaction_date TEXT, currency TEXT
         );
     """)
     yield connection
@@ -99,8 +100,8 @@ def _bank_row(monkeypatch, database, account=SNAPSHOT_ACCOUNT):
     monkeypatch.setattr(taishin.pd, "read_excel", lambda *_args, **_kwargs: frame)
     [row] = taishin.normalize_taishin_rows("synthetic-only.xlsx", "synthetic", 1)
     database.execute(
-        "INSERT INTO finance_import_rows VALUES (?, ?, ?, ?, ?)",
-        (1, json.dumps(row["bank_references"]), "taishin", "outgoing", row.get("memo")),
+        "INSERT INTO finance_import_rows VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, json.dumps(row["bank_references"]), "taishin", "outgoing", row.get("memo"), row.get("transaction_date"), row.get("currency")),
     )
     return row
 
@@ -126,7 +127,7 @@ def _resolve(database, row, decision):
 
 @pytest.mark.parametrize("refund_type", REFUND_TYPES)
 @pytest.mark.parametrize("profile_changed", (False, True))
-def test_snapshot_outflow_keeps_identity_but_requires_name_for_automatic_posting(
+def test_snapshot_account_is_not_new_admission_evidence_and_legacy_row_stays_pending(
     monkeypatch, database, refund_type, profile_changed
 ):
     _add_refund(database, refund_type)
@@ -141,11 +142,12 @@ def test_snapshot_outflow_keeps_identity_but_requires_name_for_automatic_posting
 
     decision = _classify(database, row)
 
-    assert decision["classification_type"] == (
-        "client_refund" if refund_type == "refund" else "client_subsidy_return"
-    )
-    assert decision["matched_identity_ids"] == [7]
-    resolved = _resolve(database, row, decision)
+    assert decision["classification_type"] == "non_business_review"
+    assert decision["matched_identity_ids"] == []
+    resolved = _resolve(database, row, {
+        "classification_type": "client_refund" if refund_type == "refund" else "client_subsidy_return",
+        "matched_identity_ids": [7],
+    })
     assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert resolved.target_identities == ("client:7",)
     assert resolved.integrity_violations == ()
@@ -199,7 +201,5 @@ def test_multiple_matching_cases_stay_pending_without_guessing(
     row = _bank_row(monkeypatch, database)
     decision = _classify(database, row)
 
-    assert decision["matched_identity_ids"] == [7]
-    resolved = _resolve(database, row, decision)
-    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
-    assert resolved.target_identities == ("client:7",)
+    assert decision["classification_type"] == "non_business_review"
+    assert decision["matched_identity_ids"] == []

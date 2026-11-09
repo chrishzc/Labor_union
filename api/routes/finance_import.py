@@ -217,7 +217,7 @@ def query_finance_import_correction_job_outcome(
     repository: BackgroundJobRepository = Depends(get_job_repository),
     query_service=Depends(get_finance_import_query_service),
 ) -> BaseResponse[FinanceImportCorrectionJobOutcomeView]:
-    """Return only the typed receipt for a Finance Import correction job."""
+    """Return the typed receipt or failure code for a Finance Import correction job."""
     del principal
     correlation_id = f"finance-import-correction-job:{job_id}"
     job = repository.get_job(job_id)
@@ -265,6 +265,8 @@ def query_finance_import_correction_job_outcome(
                 else None
             ),
             receipt=receipt,
+            failure_code=(public_job.outcome.error.code
+                          if public_job.outcome is not None and public_job.outcome.kind == "failure" else None),
         ),
         message="成功取得 Finance Import correction Apply terminal outcome",
     )
@@ -876,6 +878,7 @@ def _row_payload(row):
         "fingerprint_collision": row.fingerprint_collision,
         "formal_reference_conflict": row.formal_reference_conflict,
         "client_receipt_review": _materialize(row.client_receipt_review),
+        "pending_reason": row.pending_reason,
     }
 
 
@@ -900,6 +903,10 @@ def _correction_preview_payload(preview):
             "evidence": list(candidate.evidence),
             "refund_ledger_entry_identity": candidate.refund_ledger_entry_identity,
             "candidate_fingerprint": candidate.fingerprint.value,
+            "refund_summary": None if candidate.refund_preview is None else {
+                "transfer_fee_ntd": candidate.refund_preview.transfer_fee.amount,
+                "remaining_ntd": candidate.refund_preview.remaining_amount.amount,
+            },
         },
         "batch_version": preview.batch_version,
         "canonical_fact_version": preview.canonical_fact_version,

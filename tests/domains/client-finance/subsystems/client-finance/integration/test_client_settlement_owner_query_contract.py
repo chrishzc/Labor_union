@@ -4,6 +4,7 @@ Description: 驗證客戶退款與補助退還查詢只暴露 owner 可用的精
 """
 
 from datetime import date
+from decimal import Decimal
 
 from api.schemas.client_refund_reversal import ClientRefundReversalQueryView
 from domains.client_finance.client_refund_reversal import ClientRefundPurpose
@@ -15,8 +16,24 @@ from domains.client_finance.client_refund_reversal import (
 from infrastructure.mysql.client_refund_reversal_repository import (
     _load_refund_obligation_rows,
     _query_outgoing_bank_facts,
+    _query_reversal_targets,
 )
 from shared_kernel.money import MoneyNTD
+
+
+def test_original_refund_query_exposes_mysql_sum_as_integer_money() -> None:
+    class Cursor:
+        def execute(self, sql, params):
+            assert "ledger.case_no=%s AND ledger.entry_type=%s" in sql
+            assert "HAVING reversed_ntd=0" in sql
+            assert params == ("C-RETURN", "refund")
+
+        def fetchall(self):
+            return [{"id": 51, "amount_ntd": 12000, "occurred_on": date(2026, 10, 20), "reversed_ntd": Decimal("0")}]
+
+    [target] = _query_reversal_targets(Cursor(), "C-RETURN", "refund")
+    assert target["reversed_ntd"] == 0
+    assert type(target["reversed_ntd"]) is int
 
 
 def _bank_row(row_id: int, classification: str, account: str) -> dict[str, object]:
@@ -53,11 +70,13 @@ def test_outgoing_candidates_are_purpose_and_recipient_bound() -> None:
         rows,
         (_obligation("refund:C-1", "refund", "refund-account"),),
         ClientRefundPurpose.CUSTOMER_REFUND,
+        "C-1",
     )
     subsidy = _query_outgoing_bank_facts(
         rows,
         (_obligation("subsidy:C-1", "subsidy_return", "subsidy-account"),),
         ClientRefundPurpose.SUBSIDY_RETURN,
+        "C-1",
     )
 
     assert [item["finance_import_row_id"] for item in refund] == [11]
@@ -71,6 +90,7 @@ def test_outgoing_candidate_without_exact_recipient_is_not_exposed() -> None:
         (_bank_row(13, "client_refund", "different-account"),),
         (_obligation("refund:C-2", "refund", "expected-account"),),
         ClientRefundPurpose.CUSTOMER_REFUND,
+        "C-2",
     )
     assert facts == ()
 

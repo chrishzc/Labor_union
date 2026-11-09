@@ -237,7 +237,7 @@ def test_replayed_manual_review_row_preserves_ready_rows_for_apply() -> None:
         FinanceClassificationType.NON_BUSINESS_REVIEW,
         manual_review,
         PreviewFingerprint("a" * 64),
-        evidence=("counterparty_account_no_match",),
+        evidence=("sinopac_staff_account_no_match",),
         available_actions=("preview_manual_correction",),
     )
     ready_row = CanonicalFinanceImportRow(
@@ -436,6 +436,198 @@ class _EnrichCursor:
         return list(self._rows)
 
 
+@pytest.mark.parametrize('reference,owners,same_case,format_id,matched,targets,allowed',[
+    ('000000001234',[19],True,'sinopac',[],[],True),
+    ('000000001234 合成月嫂',[19],True,'sinopac',[],[],True),
+    ('000000001234',[19,20],True,'sinopac',[],[],False),
+    ('000000001234',[],True,'sinopac',[],[],False),
+    ('000000001234',[19],False,'sinopac',[],[],False),
+    (None,[19],True,'sinopac',[],[],False),
+    ('not-an-account',[19],True,'sinopac',[],[],False),
+    ('000000001234',[19],True,'taishin',[],[],False),
+    ('000000001234',[19],True,'sinopac',[19,20],[],False),
+    ('000000001234',[19],True,'sinopac',[],['staff:19','staff:20'],False),
+])
+def test_sinopac_legacy_staff_entry_uses_the_original_unique_account_and_same_case_obligation(reference,owners,same_case,format_id,matched,targets,allowed):
+    import json
+    from copy import deepcopy
+    class Cursor(_EnrichCursor):
+        def __init__(self):super().__init__();self.calls=[]
+        def execute(self,statement,params=()):
+            self.calls.append((statement,params))
+            if 'FROM staff_bank_accounts' in statement:
+                assert 'account_no=%s AND is_primary=1' in statement
+                assert params==('000000001234',)
+                self._rows=[{'staff_id':identity} for identity in owners]
+            elif 'SELECT 1 AS same_case FROM staff_obligations' in statement:
+                assert params==('115000001',19)
+                self._one={'same_case':1} if same_case else None
+            elif 'FROM staff_obligations' in statement:
+                self._rows=[{'case_no':'115000001','obligation_identity':'legacy:first','amount_due_ntd':12000,'due_date':'2026-10-19'}]
+            else:super().execute(statement,params)
+    source={
+        'row_id':51,'transaction_date':'2026-10-20','format_id':format_id,'direction':'outgoing',
+        'debit':12000,'credit':None,'memo':'HC115001','classification_type':'staff_payout',
+        'transaction_status':'pending','disposition':'business_pending','review_reason':'sinopac_unique_staff_case_suffix_in_memo',
+        'matched_identity_ids':json.dumps(matched),'target_identities':json.dumps(targets),
+        'bank_references':json.dumps({'交易參考編號':reference}),
+        'resolved_counterparty_account':'000000001234','counterparty_name':None,
+        'available_actions':'[]','safe_reference':'SYNTHETIC-LEGACY-51',
+    }
+    original=deepcopy(source);cursor=Cursor()
+    [row]=_enrich_bank_transactions(cursor,[source],{})
+    assert source==original
+    if allowed:
+        assert row['reconciliation_target']=={'case_no':'115000001','obligation_identities':['legacy:first'],'staff_id':19}
+        assert row['reconciliation_unavailable_reason'] is None
+    else:assert row['reconciliation_target'] is None
+    assert all(statement.startswith('SELECT') for statement,_ in cursor.calls)
+
+
+@pytest.mark.parametrize("direction,memo,disposition,allowed,reason", [
+    ("incoming", "HC115001", "business_pending", True, None),
+    ("outgoing", "HC115001", "business_pending", False, "direction_unconfirmed"),
+    ("incoming", "無案件參照", "business_pending", False, "case_unconfirmed"),
+    ("incoming", "HC115001", "blocked", False, "blocked"),
+])
+def test_known_case_refund_return_has_original_refund_selection_entry(direction, memo, disposition, allowed, reason):
+    [row] = _enrich_bank_transactions(_EnrichCursor(), [{
+        "row_id": 31, "transaction_date": "2026-11-02", "format_id": "sinopac",
+        "direction": direction, "debit": 12000 if direction == "outgoing" else None,
+        "credit": 12000 if direction == "incoming" else None, "memo": memo,
+        "classification_type": "client_refund_return", "transaction_status": "pending",
+        "review_reason": "sinopac_refund_return_matched",
+        "disposition": disposition, "matched_identity_ids": "[]", "target_identities": "[]",
+        "bank_references": "{}", "available_actions": "[]", "safe_reference": "RETURN-31",
+    }], {})
+    if allowed:
+        assert row["reconciliation_target"] == {
+            "case_no": "115000001", "obligation_identities": [], "staff_id": None,
+            "requires_selection": True,
+        }
+    else:
+        assert row["reconciliation_target"] is None
+    assert row["reconciliation_unavailable_reason"] == reason
+
+
+@pytest.mark.parametrize('old_reason,memo,staff_names,direction,format_id,count,allowed',[
+    ('subsidy_advance_not_due','HC115001',[],'outgoing','taishin',1,True),
+    ('unrecognized_historical_reason','HC115001',[],'outgoing','taishin',1,True),
+    (None,'HC115001',[],'outgoing','taishin',1,True),
+    ('taishin_client_subsidy_case_suffix_in_memo','HC115001',[],'outgoing','taishin',1,True),
+    ('subsidy_advance_not_due','HC115001 HC115001',[],'outgoing','taishin',1,True),
+    ('subsidy_advance_not_due','HC115001',[],'outgoing','taishin',2,True),
+    ('subsidy_advance_not_due','HC115001',[],'outgoing','taishin',0,True),
+    ('taishin_client_subsidy_case_suffix_in_memo','合成月嫂HC115001',['合成月嫂'],'outgoing','taishin',1,False),
+    ('subsidy_advance_not_due','HC115001 HC115002',[],'outgoing','taishin',1,False),
+    ('subsidy_advance_not_due','HC115999',[],'outgoing','taishin',1,False),
+    ('subsidy_advance_not_due','沒有案件六碼',[],'outgoing','taishin',1,False),
+    ('taishin_client_subsidy_case_suffix_in_memo','HC115001',[],'incoming','taishin',1,False),
+    ('subsidy_advance_not_due','HC115001',[],'outgoing','sinopac',1,False),
+])
+def test_taishin_subsidy_entry_uses_unique_original_memo_instead_of_the_legacy_reason(old_reason,memo,staff_names,direction,format_id,count,allowed):
+    from copy import deepcopy
+    class Cursor(_EnrichCursor):
+        def __init__(self):super().__init__();self.calls=[]
+        def execute(self,statement,params=()):
+            self.calls.append((statement,params))
+            if statement.startswith('SELECT name FROM staff WHERE name IS NOT NULL'):
+                self._rows=[{'name':name} for name in staff_names]
+            elif statement.startswith('SELECT case_no,due_date,obligation_identity,amount_due_ntd FROM client_obligations'):
+                assert params==('115000001',)
+                self._rows=[{'case_no':'115000001','obligation_identity':f'subsidy:{i}','amount_due_ntd':12000,'due_date':'2026-10-15'} for i in range(count)]
+            else:super().execute(statement,params)
+    source={
+        'row_id':61,'transaction_date':'2026-10-20','format_id':format_id,'direction':direction,
+        'debit':12000 if direction=='outgoing' else None,'credit':12000 if direction=='incoming' else None,
+        'memo':memo,'classification_type':'client_subsidy_return','transaction_status':'pending',
+        'disposition':'business_pending','review_reason':old_reason,'matched_identity_ids':'[]','target_identities':'[]',
+        'bank_references':'{}','counterparty_name':None,'available_actions':'[]','safe_reference':'SYNTHETIC-SUBSIDY-61',
+    }
+    original=deepcopy(source);cursor=Cursor()
+    [row]=_enrich_bank_transactions(cursor,[source],{})
+    assert source==original and row['review_reason']==old_reason
+    if allowed:
+        assert row['reconciliation_target']=={
+            'case_no':'115000001','obligation_identities':[f'subsidy:{i}' for i in range(count)],'staff_id':None,
+            **({'requires_selection':True} if count!=1 else {}),
+        }
+    else:assert row['reconciliation_target'] is None
+    assert all(statement.startswith('SELECT') for statement,_ in cursor.calls)
+
+
+@pytest.mark.parametrize('kind,bank,evidence,reason', [
+    (FinanceClassificationType.CLIENT_SUBSIDY_RETURN,'taishin','taishin_client_subsidy_case_suffix_in_memo','outgoing_client_refund_multiple_fee_matches'),
+    (FinanceClassificationType.CLIENT_REFUND,'sinopac','sinopac_unique_client_refund_account_in_transaction_reference','client_refund_source_account_missing'),
+    (FinanceClassificationType.CLIENT_REFUND,'sinopac','sinopac_unique_client_refund_account_in_transaction_reference','due_date_missing'),
+    (FinanceClassificationType.STAFF_PAYOUT,'taishin','unique_staff_payout_name_month_fee_matched','due_date_missing'),
+    (FinanceClassificationType.STAFF_PAYOUT,'taishin','unique_staff_payout_name_month_fee_matched','staff_memo_recipient_unconfirmed'),
+])
+def test_refund_matching_reason_survives_apply_receipt_and_query_mapping(monkeypatch,kind,bank,evidence,reason):
+    import json
+    from dataclasses import replace
+    from unittest.mock import Mock
+    import subsystems.finance_import.query as query
+    from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository, _stored_apply_receipt
+    from shared_kernel.identities import ActorContext, ExpectedVersion, IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportWorkflow, FinanceImportApplyRequest
+
+    row = CanonicalFinanceImportRow('finance-import-row:1', 0, MoneyNTD(12000),
+        kind, FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint('a'*64), evidence=(evidence,))
+    facts = FinanceImportBatchFacts('finance-import-batch:1', 0, 1, 1, 0, 'b'*64, 'v1', 'v1', (row,))
+    repository = Mock(); repository.load.return_value = facts; repository.find_receipt.return_value = None
+    port = Mock(); port.resolve.return_value = replace(row, pending_reason=reason)
+    unit = Mock(); unit.__enter__ = Mock(return_value=unit); unit.__exit__ = Mock(return_value=False)
+    workflow = FinanceImportWorkflow(repository, port, lambda: unit)
+    preview = workflow.preview(facts.batch_identity, CorrelationId('synthetic'))
+    workflow.apply(FinanceImportApplyRequest(facts.batch_identity, ExpectedVersion(0), preview.fingerprint,
+        IdempotencyKey('synthetic-pending'), ActorContext('synthetic'), '合成原因保存', CorrelationId('synthetic')))
+    stored = repository.save_receipt.call_args.args[1]
+    assert stored.pending_reasons == ((row.row_identity, reason),)
+    assert stored.client_receipt_reviews == ()
+    port.post.assert_not_called()
+
+    cursor = _Cursor([])
+    monkeypatch.setattr(query, 'batch_review_count', lambda *args: 1)
+    MySqlFinanceImportRepository(_Connection(cursor)).save_receipt(IdempotencyKey('synthetic-pending'), stored)
+    sql, params = cursor.calls[-1]
+    payload = json.loads(params[-1])
+    assert payload['pending_reasons'] == {row.row_identity: reason}
+    assert _stored_apply_receipt({'command_fingerprint':params[1], 'result_snapshot':params[-1]}) == stored
+
+    source = dict(row_id=1, format_id=bank,safe_reference='synthetic',transaction_date='2026-10-20',
+        direction='outgoing',debit=12000,credit=0,classification_type=kind.value,transaction_status='pending',
+        disposition='business_pending',review_reason=evidence,
+        recorded_pending_reason=payload['pending_reasons'][row.row_identity],available_actions='[]',counterparty_name=None)
+    assert query._bank_transaction(source, ['C-1'])['recorded_pending_reason'] == reason
+    assert query._bank_transaction({**source, 'transaction_status':'posted'}, ['C-1'])['recorded_pending_reason'] is None
+    assert query._bank_transaction({**source, 'recorded_pending_reason':None}, ['C-1'])['recorded_pending_reason'] is None
+
+
+def test_missing_receipt_due_date_is_saved_as_null_and_decoded_without_inventing_a_date(monkeypatch):
+    import json
+    from api.schemas.finance_import import FinanceBankClientReceiptReviewView
+    from domains.finance_import.planning import ClientReceiptReviewCandidate, ClientReceiptReviewDiagnostic
+    from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository, _stored_apply_receipt
+    from shared_kernel.identities import IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportApplyReceipt, StoredFinanceImportReceipt
+    import subsystems.finance_import.query as query
+    review=ClientReceiptReviewDiagnostic('due_date_missing',(ClientReceiptReviewCandidate('first','first',None),))
+    stored=StoredFinanceImportReceipt(PreviewFingerprint('a'*64),
+        FinanceImportApplyReceipt('finance-import-batch:1',1,PreviewFingerprint('b'*64),0,0,1),
+        (('finance-import-row:1',review),))
+    cursor=_Cursor([])
+    monkeypatch.setattr(query,'batch_review_count',lambda *args:1)
+    MySqlFinanceImportRepository(_Connection(cursor)).save_receipt(IdempotencyKey('missing-due'),stored)
+    _,params=cursor.calls[-1]
+    payload=json.loads(params[-1])
+    decoded=FinanceBankClientReceiptReviewView.model_validate(payload['client_receipt_reviews']['finance-import-row:1'])
+    assert decoded.reason=='due_date_missing'
+    assert decoded.candidates[0].due_date is None
+    assert _stored_apply_receipt({'command_fingerprint':params[1],'result_snapshot':params[-1]})==stored
+
+
 def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_rows() -> None:
     page = [
         {
@@ -511,20 +703,31 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
 
     assert [item["review_reason"] for item in items] == [
         "taishin_incoming_government_subsidy",
-        "sinopac_client_receipt_shortfall",
+        "client_receipt_underpaid",
         "staff_account_matched",
     ]
     [cross_month] = _enrich_bank_transactions(
         _EnrichCursor(), [{**page[1], "transaction_date": "2026-11-15"}], {},
     )
     assert cross_month["review_reason"] == "sinopac_client_receipt_month_no_match"
-    assert cross_month["reconciliation_target"] is None
+    assert cross_month["reconciliation_target"] == {
+        "case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None,
+        "requires_selection": True,
+    }
     [same_month_exact] = _enrich_bank_transactions(_EnrichCursor([
         {"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6000},
         {"obligation_identity": "receipt:second", "due_date": "2026-11-19", "amount_due_ntd": 6000},
     ]), [page[1]], {})
     assert same_month_exact["reconciliation_target"] == {
         "case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None,
+    }
+    [multiple] = _enrich_bank_transactions(_EnrichCursor([
+        {"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6000},
+        {"obligation_identity": "receipt:second", "due_date": "2026-10-27", "amount_due_ntd": 6000},
+    ]), [page[1]], {})
+    assert multiple["reconciliation_target"] == {
+        "case_no": "115000001", "obligation_identities": ["receipt:first", "receipt:second"],
+        "staff_id": None, "requires_selection": True,
     }
 
     assert [item["reconciliation_target"] for item in items] == [
@@ -534,9 +737,19 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
     ]
     assert [item["dispatch_reason"] for item in items] == [None, None, "staff_bank_account_ambiguous"]
     [ambiguous] = _enrich_bank_transactions(
-        _EnrichCursor(), [{**page[2], "memo": "HC115009 HC115010"}], {},
+        _EnrichCursor(), [{**page[2], "format_id": "sinopac", "memo": "HC115009 HC115010"}], {},
     )
     assert ambiguous["reconciliation_target"] is None
+    assert ambiguous["reconciliation_unavailable_reason"] == "case_reference_unconfirmed"
+    [unassigned] = _enrich_bank_transactions(_EnrichCursor(), [{**page[2], "matched_identity_ids": "[]"}], {})
+    assert unassigned["reconciliation_unavailable_reason"] == "case_unconfirmed"
+    [staff_missing] = _enrich_bank_transactions(_EnrichCursor(), [{
+        **page[2], "format_id": "sinopac", "memo": "HC115001 月嫂薪資", "matched_identity_ids": "[]",
+    }], {})
+    assert staff_missing["cases"] == ["115000001"]
+    assert staff_missing["reconciliation_target"] is None
+    assert staff_missing["reconciliation_unavailable_reason"] == "staff_unconfirmed"
+    assert cross_month["reconciliation_unavailable_reason"] == "no_same_month_items"
 
 
     assert [(item["counterparty_name"], item["cases"]) for item in items] == [

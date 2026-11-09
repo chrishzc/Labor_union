@@ -2,7 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
-from domains.finance_import.correction import FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts, FinanceImportCorrectionSelection, build_finance_import_correction_candidate
+from domains.finance_import.correction import ClientRefundCorrectionPreview, FinanceImportCorrectionCandidate, FinanceImportCorrectionFacts, FinanceImportCorrectionSelection, build_finance_import_correction_candidate
+from domains.finance_import.planning import FinanceClassificationType
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -31,6 +32,8 @@ class FinanceImportCorrectionRepository(Protocol):
     def save_correction_receipt(self, key, stored): ...
 class FinanceImportCorrectionPostingPort(Protocol):
     def post(self, candidate: FinanceImportCorrectionCandidate) -> int: ...
+    def validate_client_refund(self, candidate: FinanceImportCorrectionCandidate, correlation_id: CorrelationId) -> None: ...
+    def preview_client_refund(self, selection: FinanceImportCorrectionSelection, facts: FinanceImportCorrectionFacts, correlation_id: CorrelationId) -> ClientRefundCorrectionPreview: ...
 class FinanceImportRepositoryUnavailable(RuntimeError): pass
 class FinanceImportCorrectionWorkflowError(Exception):
     def __init__(self, error: TypedError) -> None: super().__init__(error.message); self.error = error
@@ -39,7 +42,8 @@ class FinanceImportCorrectionWorkflow:
     def __init__(self, repository: FinanceImportCorrectionRepository, posting_port: FinanceImportCorrectionPostingPort, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository=repository; self._posting_port=posting_port; self._unit_of_work_factory=unit_of_work_factory
     def preview(self, selection, correlation_id):
-        try: return _build_preview(selection, self._repository.load(selection, for_update=False))
+        try:
+            return self._preview(selection, self._repository.load(selection, for_update=False), correlation_id)
         except FinanceImportRepositoryUnavailable as error: raise _preview_transaction_error(correlation_id,error) from error
         except ValueError as error: raise _domain_error(correlation_id,str(error)) from error
     def correct_and_post(self, request):
@@ -62,18 +66,22 @@ class FinanceImportCorrectionWorkflow:
         raise _workflow_error(request.correlation_id,ErrorCategory.IDEMPOTENCY_MISMATCH,"idempotency_conflict","Idempotency key was used by another correction command.")
     def _fresh_preview(self,request):
         facts=self._repository.load(request.selection,for_update=True); _validate_expected_versions(request,facts)
-        try: preview=_build_preview(request.selection,facts)
+        try: preview=self._preview(request.selection,facts,request.correlation_id)
         except ValueError as error: raise _domain_error(request.correlation_id,str(error)) from error
         if preview.fingerprint != request.preview_fingerprint: raise _stale_error(request,facts)
         return preview
+    def _preview(self, selection, facts, correlation_id):
+        owner_preview = (self._posting_port.preview_client_refund(selection, facts, correlation_id)
+            if selection.classification_type in {FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.CLIENT_SUBSIDY_RETURN} else None)
+        return _build_preview(selection, facts, owner_preview)
     def _persist_formal_result(self,request,preview):
         candidate=preview.candidate; self._repository.append_manual_classification(candidate,request.actor); count=self._posting_port.post(candidate)
         if count < 1: raise RuntimeError("correction posting created no formal ledger entry")
         self._repository.append_reconciliation_receipt(candidate); alert_resolved_event_count=self._repository.append_alert_resolved_event(candidate,request.actor) or 0; self._repository.append_outbox(candidate); self._repository.advance_batch_version(candidate,preview.batch_version,preview.batch_version+1); return count, alert_resolved_event_count
     def _save_receipt(self,request,fingerprint,receipt): self._repository.save_correction_receipt(request.idempotency_key,StoredFinanceImportCorrectionReceipt(fingerprint,receipt))
 
-def _build_preview(selection,facts):
-    candidate=build_finance_import_correction_candidate(selection,facts); fingerprint=fingerprint_payload({"candidate_fingerprint":candidate.fingerprint.value,"batch_version":facts.batch_version,"canonical_fact_version":facts.canonical_fact_version,"alert_version":facts.alert_version}); return FinanceImportCorrectionPreview(candidate,facts.batch_version,facts.canonical_fact_version,facts.alert_version,fingerprint)
+def _build_preview(selection,facts,refund_preview=None):
+    candidate=build_finance_import_correction_candidate(selection,facts,refund_preview=refund_preview); fingerprint=fingerprint_payload({"candidate_fingerprint":candidate.fingerprint.value,"batch_version":facts.batch_version,"canonical_fact_version":facts.canonical_fact_version,"alert_version":facts.alert_version}); return FinanceImportCorrectionPreview(candidate,facts.batch_version,facts.canonical_fact_version,facts.alert_version,fingerprint)
 def _validate_expected_versions(request,facts):
     if (request.expected_batch_version.value,request.expected_canonical_fact_version.value,request.expected_alert_version.value)!=(facts.batch_version,facts.canonical_fact_version,facts.alert_version): raise _workflow_error(request.correlation_id,ErrorCategory.CONFLICT,"stale_preview","Correction facts changed before Apply.")
 def _build_receipt(preview,ledger_entry_count,alert_resolved_event_count):

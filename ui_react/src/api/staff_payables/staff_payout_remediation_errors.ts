@@ -25,6 +25,44 @@ export class StaffPayoutRemediationError extends ApiError {
   ) { super(message); this.code = code; this.retryable = retryable; this.status = status; }
 }
 
+const PAYOUT_BLOCKER_MESSAGES: Readonly<Record<string, string>> = {
+  staff_bank_account_ambiguous: '銀行流水缺少收款帳號，或無法對應唯一有效的月嫂主要帳戶，請核對原流水與月嫂帳戶。',
+  staff_memo_recipient_unconfirmed: '銀行備註中的月嫂姓名無法唯一確認，請核對原始備註與月嫂姓名。',
+  cross_staff_allocation_forbidden: '銀行流水、收款帳戶與待付款項的月嫂歸屬不一致，請核對付款對象。',
+  bank_transaction_date_missing: '原銀行流水缺少交易日，無法核銷月嫂付款，請先查核來源資料。',
+  bank_currency_not_twd: '原銀行流水幣別不是新臺幣，無法核銷月嫂付款，請先查核來源資料。',
+  outgoing_bank_fact_not_eligible: '原銀行出款未通過核銷資格檢查，原操作未留存更細的拒絕原因，請查核原流水。',
+};
+
+export const SINOPAC_PAYOUT_REASON_MESSAGES: Readonly<Record<string,string>> = {
+  staff_payout_amount_mismatch: '銀行實付與本次待付合計不符合足額或100元內手續費條件，請核對差額；不足額或超付須選對應方式處理。',
+  outgoing_staff_payout_amount_mismatch: '銀行實付與本次待付合計不符合足額或100元內手續費條件，請核對差額；不足額或超付須選對應方式處理。',
+  outgoing_staff_payout_target_ambiguous: '舊紀錄未留存當次符合金額的候選數量，請核對款項與合計。',
+  outgoing_staff_payout_multiple_fee_matches: '有多個單筆或合併付款集合符合金額及手續費條件，無法唯一選定，請人工選款。',
+  outgoing_staff_payout_no_open_obligation: '已確認案件及月嫂，目前沒有未清待付款項。',
+  due_date_missing: '待付款項缺少原預計撥款日，無法完成月份配對，請回本案核對。',
+  staff_obligation_not_exactly_settled: '所選應付款狀態或本次分配不符合核銷條件，請重新查核目前款項與餘額；這不代表禁止部分付款。',
+  staff_payout_difference_mode_invalid: '選取的不足額或超付方式與實際金額關係不符，請重新選擇核銷方式。',
+};
+
+export const TAISHIN_PAYOUT_REASON_MESSAGES: Readonly<Record<string,string>> = {
+  ...SINOPAC_PAYOUT_REASON_MESSAGES,
+  bank_transaction_date_missing: '原銀行流水缺少交易日，無法核銷台新月嫂補助付款。',
+  bank_currency_not_twd: '原銀行流水幣別不是新臺幣，無法核銷台新月嫂補助付款。',
+  outgoing_staff_payout_month_no_match: '交易日與預計撥款日都有值，但找不到同年月的未清待付款；請人工選款核對。',
+  staff_memo_recipient_unconfirmed: '原銀行備註的月嫂姓名無法唯一確認，請查核原始備註與月嫂名冊；不以六碼或帳號代替月嫂姓名。',
+  cross_staff_allocation_forbidden: '原銀行備註確認的月嫂與所選應付款月嫂不同，請核對付款對象及款項。',
+  outgoing_staff_payout_name_ambiguous: '紀錄只保留月嫂姓名不唯一的辨識診斷，未留存當次核銷阻擋細節。',
+  staff_bank_account_ambiguous: '紀錄只留有帳戶檢查原因；現行台新月嫂補助核銷不要求帳號，請重新核對原始備註姓名及款項。',
+  staff_payable_not_found: '所選應付款已不存在或無法讀取，請重新查詢目前款項。',
+  invalid_staff_payout_intent: '核銷的流水或款項選取不完整，請重新查詢並選款。',
+};
+
+export function staffPayoutBlockerMessage(code?: string | null, sourceBank?: string): string | undefined {
+  const bankReasons = sourceBank === 'sinopac' ? SINOPAC_PAYOUT_REASON_MESSAGES : sourceBank === 'taishin' ? TAISHIN_PAYOUT_REASON_MESSAGES : {};
+  return code ? bankReasons[code] ?? PAYOUT_BLOCKER_MESSAGES[code] : undefined;
+}
+
 export function mapStaffPayoutRemediationError(error: unknown): StaffPayoutRemediationError {
   if (error instanceof StaffPayoutRemediationError) return error;
   if (error instanceof ApiAbortError) return new StaffPayoutRemediationError('STAFF_PAYOUT_ABORTED', error.message);

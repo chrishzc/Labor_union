@@ -41,11 +41,17 @@ class ClientReceiptObligationView(_StrictModel):
     due_date: date | None
 
 
+class ClientReceiptBankFactBlockerView(_StrictModel):
+    finance_import_row_id: int = Field(gt=0)
+    codes: list[Literal["bank_transaction_date_missing", "bank_currency_not_twd"]] = Field(min_length=1)
+
+
 class ClientReceiptQueryView(_StrictModel):
     case_no: str
     account_version: int = Field(ge=0)
     bank_facts: list[ClientReceiptBankFactView]
     obligations: list[ClientReceiptObligationView]
+    bank_fact_blockers: list[ClientReceiptBankFactBlockerView] = Field(default_factory=list)
 
 
 class MoneyNTDView(_StrictModel):

@@ -166,6 +166,8 @@ class MySqlFinanceImportRepository:
                 payload["client_receipt_reviews"] = {
                     row_identity: asdict(review) for row_identity, review in stored.client_receipt_reviews
                 }
+            if stored.pending_reasons:
+                payload["pending_reasons"] = dict(stored.pending_reasons)
             cursor.execute(
                 _APPLY_RECEIPT_INSERT_SQL,
                 (
@@ -633,6 +635,7 @@ def _stored_apply_receipt(row):
             ))
             for row_identity, review in sorted(payload.get("client_receipt_reviews", {}).items())
         ),
+        tuple(sorted(payload.get("pending_reasons", {}).items())),
     )
 
 

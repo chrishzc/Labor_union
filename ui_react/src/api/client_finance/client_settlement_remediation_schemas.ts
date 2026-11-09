@@ -92,3 +92,28 @@ export type ClientPayablePreview = z.infer<typeof ClientPayablePreviewSchema>;
 export type ClientReceiptReceipt = z.infer<typeof ClientReceiptReceiptSchema>;
 export type ClientPayableReceipt = z.infer<typeof ClientPayableReceiptSchema>;
 export type ClientPaymentStage = z.infer<typeof stage>;
+
+const refundReturnTarget = z.strictObject({
+  id: z.number().int().positive(), amount_ntd: z.number().int().positive(),
+  occurred_on: date, reversed_ntd: z.number().int().nonnegative(),
+});
+export const ClientRefundReturnQueryResponseSchema = envelope(z.strictObject({
+  case_no: identity, account_version: z.number().int().nonnegative(),
+  refund_obligations: z.array(payableObligation), subsidy_return_obligations: z.array(payableObligation),
+  refund_bank_facts: z.array(outgoingBankFact), subsidy_return_bank_facts: z.array(outgoingBankFact),
+  reversal_targets: z.array(refundReturnTarget), refund_return_targets: z.array(refundReturnTarget),
+}));
+export const ClientRefundReturnPreviewResponseSchema = envelope(z.strictObject({
+  account_version: z.number().int().nonnegative(), preview_fingerprint: fingerprint,
+  candidate: z.strictObject({
+    correction_type: z.literal('refund_return'), case_no: identity, amount: money,
+    entries: z.array(z.strictObject({ identity, entry_type: z.literal('refund_reversal'), amount: money,
+      occurred_on: date, reversal_of_entry_identity: identity, finance_import_row_identity: identity })),
+    allocations: z.array(correctionAllocation), affected_obligations: z.array(identity),
+    reversal_entry_type: z.literal('refund'), recovery_amount: money, fingerprint,
+    transfer_fee: money.nullish(),
+  }),
+}));
+export const ClientRefundReturnReceiptResponseSchema = envelope(ClientPayableReceiptSchema.extend({ correction_type: z.literal('refund_return') }));
+export type ClientRefundReturnQuery = z.infer<typeof ClientRefundReturnQueryResponseSchema>['data'];
+export type ClientRefundReturnPreview = z.infer<typeof ClientRefundReturnPreviewResponseSchema>['data'];

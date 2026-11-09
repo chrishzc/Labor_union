@@ -10,15 +10,17 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 import json
+import unicodedata
 from typing import Any
 from domains.finance_import.cancellation_code import (
+    extract_sinopac_account_reference,
     extract_sinopac_memo_case_suffix,
     sinopac_memo_case_suffixes,
     resolve_finance_cancellation_code,
 )
 from domains.finance_import.statement_archive import bank_import_type
 from domains.finance_import.ingestion import FinanceWorkbookIngestionReceipt
-from domains.finance_import.transaction_classifier import _is_same_month
+from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, _is_same_month, extract_name_from_row_text
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
@@ -340,7 +342,15 @@ class FinanceImportQueryService:
                         FROM finance_import_apply_receipts receipt
                         WHERE receipt.batch_id=page.batch_id
                         ORDER BY receipt.id DESC LIMIT 1
-                    ) AS recorded_client_receipt_review
+                    ) AS recorded_client_receipt_review,
+                    (
+                        SELECT JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot, CONCAT(
+                            '$.pending_reasons."finance-import-row:',page.row_id,'"'
+                        )))
+                        FROM finance_import_apply_receipts receipt
+                        WHERE receipt.batch_id=page.batch_id
+                        ORDER BY receipt.id DESC LIMIT 1
+                    ) AS recorded_pending_reason
                 FROM page
                 LEFT JOIN finance_import_batch_contracts contract
                     ON page.transaction_status='pending' AND contract.batch_id=page.batch_id
@@ -806,6 +816,33 @@ def _single_entity_id(row: Mapping[str, Any], prefix: str) -> int | None:
     return unique_matched[0] if len(unique_matched) == 1 else None
 
 
+def _sinopac_legacy_staff_id(cursor, row, case_no):
+    if (
+        row.get("format_id") != "sinopac" or row.get("direction") != "outgoing"
+        or _json_list(row.get("matched_identity_ids"))
+        or any(str(identity).startswith(("staff:", "client:")) for identity in _json_list(row.get("target_identities")))
+    ):
+        return None
+    account = extract_sinopac_account_reference(_json_dict(row.get("bank_references")).get("交易參考編號"))
+    if account is None:
+        return None
+    cursor.execute(
+        "SELECT staff_id FROM staff_bank_accounts WHERE account_no=%s AND is_primary=1 "
+        "ORDER BY staff_id,id LIMIT 2",
+        (account,),
+    )
+    owners = cursor.fetchall()
+    if len(owners) != 1:
+        return None
+    staff_id = int(owners[0]["staff_id"])
+    cursor.execute(
+        "SELECT 1 AS same_case FROM staff_obligations WHERE case_no=%s AND staff_id=%s "
+        "AND direction='payable_to_staff' AND status<>'cancelled' LIMIT 1",
+        (case_no, staff_id),
+    )
+    return staff_id if cursor.fetchone() is not None else None
+
+
 def _enrich_bank_transactions(
     cursor: Any,
     page: Sequence[Mapping[str, Any]],
@@ -820,6 +857,7 @@ def _enrich_bank_transactions(
     va_cache: dict[str, str | None] = {}
     suffix_cache: dict[str, str | None] = {}
     receipt_obligations: dict[str, Sequence[Mapping[str, Any]]] = {}
+    memo_staff_names: list[str] | None = None
 
     def client_name_by_id(client_id: int) -> str | None:
         if client_id not in client_name_cache:
@@ -883,6 +921,9 @@ def _enrich_bank_transactions(
     for row in page:
         row_id = int(row["row_id"])
         c_type = str(row.get("classification_type") or "")
+        taishin_staff = row.get("format_id") == "taishin" and c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"}
+        taishin_subsidy = row.get("format_id") == "taishin" and c_type == "client_subsidy_return"
+        taishin_subsidy_memo_confirmed = False
         status = str(row.get("transaction_status") or "pending")
         review_reason = row["review_reason"]
         target = None
@@ -924,11 +965,13 @@ def _enrich_bank_transactions(
                                 item for item in open_rows
                                 if _is_same_month(row.get("transaction_date"), item.get("due_date"))
                             ]
-                            if len(month_rows) == 1 and int(month_rows[0]["amount_due_ntd"]) != bank_amount:
+                            if any(item.get('due_date') is None for item in open_rows):
+                                review_reason = 'due_date_missing'
+                            elif len(month_rows) == 1 and int(month_rows[0]["amount_due_ntd"]) != bank_amount:
                                 review_reason = (
-                                    "sinopac_client_receipt_shortfall"
+                                    "client_receipt_underpaid"
                                     if bank_amount < int(month_rows[0]["amount_due_ntd"])
-                                    else "sinopac_client_receipt_overage"
+                                    else "client_receipt_overpaid"
                                 )
                             elif open_rows and not month_rows and exact_count == 0 and row.get("transaction_date"):
                                 review_reason = "sinopac_client_receipt_month_no_match"
@@ -969,11 +1012,13 @@ def _enrich_bank_transactions(
         elif c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"}:
             staff_id = _single_entity_id(row, "staff:")
             if status == "pending" and not cases:
-                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+                suffix = None if taishin_staff else extract_sinopac_memo_case_suffix(row.get("memo"))
                 if suffix:
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
+                if staff_id is None and len(cases) == 1:
+                    staff_id = _sinopac_legacy_staff_id(cursor, row, cases[0])
                 if staff_id is not None:
                     cursor.execute(
                         "SELECT o.case_no, o.due_date, o.obligation_identity, "
@@ -1026,7 +1071,20 @@ def _enrich_bank_transactions(
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
-                if client_id is not None:
+                if taishin_subsidy and row.get("direction") == "outgoing" and suffix and len(cases) == 1:
+                    if memo_staff_names is None:
+                        cursor.execute("SELECT name FROM staff WHERE name IS NOT NULL AND name<>''")
+                        memo_staff_names = sorted({unicodedata.normalize("NFKC", str(person["name"])).strip() for person in cursor.fetchall()}, key=len, reverse=True)
+                    taishin_subsidy_memo_confirmed = extract_name_from_row_text({"memo": row.get("memo")}, memo_staff_names) is None
+                if c_type == "client_subsidy_return" and cases and (review_reason == TAISHIN_CLIENT_SUBSIDY_MEMO_REASON or taishin_subsidy_memo_confirmed):
+                    cursor.execute(
+                        "SELECT case_no,due_date,obligation_identity,amount_due_ntd FROM client_obligations "
+                        "WHERE case_no=%s AND direction='payable_to_client' AND obligation_type='subsidy_return' "
+                        "AND status='open' AND amount_due_ntd>0",
+                        (cases[0],),
+                    )
+                    target_rows = cursor.fetchall()
+                elif client_id is not None:
                     type_sql = (
                         "AND o.obligation_type='subsidy_return'"
                         if c_type == "client_subsidy_return"
@@ -1073,13 +1131,37 @@ def _enrich_bank_transactions(
                     cp_name = client_name_by_id(client_id)
 
         # This target opens the existing workflow. The owner revalidates it at Preview/Apply.
-        if (
-            status == "pending" and row["disposition"] != "blocked" and len(cases) == 1
-            and (
-                row["direction"] != "outgoing" or not sinopac_memo_case_suffixes(row.get("memo"))
-                or resolve_suffix(extract_sinopac_memo_case_suffix(row.get("memo"))) == cases[0]
-            )
+        unavailable = None
+        memo_suffixes = sinopac_memo_case_suffixes(row.get("memo")) if row["direction"] == "outgoing" and not taishin_staff else ()
+        if status != "pending":
+            pass
+        elif row["disposition"] == "blocked":
+            unavailable = "blocked"
+        elif taishin_subsidy and not taishin_subsidy_memo_confirmed:
+            unavailable = "direction_unconfirmed" if row["direction"] != "outgoing" else "case_reference_unconfirmed"
+        elif c_type == "government_subsidy":
+            if row["direction"] == "unknown":
+                unavailable = "direction_unconfirmed"
+        elif c_type == "client_refund_return":
+            if row["direction"] != "incoming":
+                unavailable = "direction_unconfirmed"
+            elif len(cases) != 1:
+                unavailable = "case_unconfirmed"
+            else:
+                target = {
+                    "case_no": cases[0], "obligation_identities": [],
+                    "staff_id": None, "requires_selection": True,
+                }
+        elif c_type not in {"client_receipt", "staff_payout", "staff_salary", "staff_legacy_subsidy",
+                            "client_refund", "client_subsidy_return"}:
+            unavailable = "purpose_unconfirmed"
+        elif memo_suffixes and (
+            len(cases) != 1 or resolve_suffix(extract_sinopac_memo_case_suffix(row.get("memo"))) != cases[0]
         ):
+            unavailable = "case_reference_unconfirmed"
+        elif len(cases) != 1:
+            unavailable = "case_unconfirmed"
+        else:
             case_no = cases[0]
             scoped_rows = [
                 item for item in target_rows
@@ -1101,18 +1183,39 @@ def _enrich_bank_transactions(
                 singles = [item for item in month_rows if 0 <= int(item["amount_due_ntd"]) - amount <= 100]
                 grouped = 0 <= sum(int(item["amount_due_ntd"]) for item in month_rows) - amount <= 100
                 selected = month_rows if grouped and not singles else singles if len(singles) == 1 and not grouped else []
-            if selected and (c_type != "client_receipt" or len(selected) == 1):
+            if c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"} and staff_id is None:
+                unavailable = "staff_unconfirmed"
+            elif c_type in {"client_refund", "client_subsidy_return"} and client_id is None and review_reason != TAISHIN_CLIENT_SUBSIDY_MEMO_REASON and not taishin_subsidy_memo_confirmed:
+                unavailable = "client_unconfirmed"
+            elif selected and (c_type != "client_receipt" or len(selected) == 1):
                 target = {
                     "case_no": case_no,
                     "obligation_identities": sorted(item["obligation_identity"] for item in selected),
                     "staff_id": target_staff_id,
                 }
+            elif not scoped_rows:
+                unavailable = "no_open_items"
+            elif not row.get("transaction_date"):
+                unavailable = "transaction_date_missing"
+            elif not month_rows:
+                unavailable = "due_date_missing" if not any(item.get("due_date") for item in scoped_rows) else "no_same_month_items"
+            else:
+                unavailable = "items_not_unique" if selected or len(month_rows) > 1 else "no_eligible_item"
+            if target is None and unavailable not in {"staff_unconfirmed", "client_unconfirmed"}:
+                # An unresolved installment is a reason for manual selection,
+                # not a reason to hide the same-case bank reconciliation entry.
+                target = {
+                    "case_no": case_no,
+                    "obligation_identities": sorted(item["obligation_identity"] for item in scoped_rows),
+                    "staff_id": target_staff_id,
+                    "requires_selection": True,
+                }
 
-        enriched.append(_bank_transaction({**row, "counterparty_name": cp_name, "review_reason": review_reason}, cases, target))
+        enriched.append(_bank_transaction({**row, "counterparty_name": cp_name, "review_reason": review_reason}, cases, target, unavailable))
     return enriched
 
 
-def _bank_transaction(row, cases, reconciliation_target=None):
+def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_unavailable_reason=None):
     bank = "taishin" if row["format_id"] == "taishin" else "sinopac"
     reference = row["safe_reference"]
     if not reference:
@@ -1136,11 +1239,13 @@ def _bank_transaction(row, cases, reconciliation_target=None):
             _json_dict(row.get("recorded_client_receipt_review")) or None
             if row["transaction_status"] == "pending" else None
         ),
+        "recorded_pending_reason": row.get("recorded_pending_reason") if row["transaction_status"] == "pending" else None,
         "available_actions": _text_tuple(row["available_actions"]),
         "reference": reference,
         "counterparty_name": row["counterparty_name"],
         "cases": cases,
         "reconciliation_target": reconciliation_target,
+        "reconciliation_unavailable_reason": reconciliation_unavailable_reason,
     }
 
 

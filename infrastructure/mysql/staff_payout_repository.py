@@ -11,11 +11,13 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import unicodedata
 import re
 from typing import Iterator, Mapping
 
 from pymysql.err import IntegrityError, OperationalError
 from domains.finance_import.cancellation_code import extract_sinopac_account_reference
+from domains.finance_import.transaction_classifier import extract_name_from_row_text
 
 from domains.staff_payables.reconciliation import (
     BankTransactionDirection,
@@ -285,6 +287,13 @@ class MySqlStaffPayoutRepository:
         obligation_rows,
         lock,
     ):
+        if selection.event_type is StaffPayoutEventType.PAYOUT:
+            for row in bank_rows:
+                if row.get("transaction_date") is None:
+                    raise ValueError("bank_transaction_date_missing")
+                if not _is_twd(row.get("currency")):
+                    raise ValueError("bank_currency_not_twd")
+            bank_rows = _verify_taishin_memo_recipients(cursor, bank_rows, lock)
         bank_accounts = _load_bank_accounts(cursor, bank_rows, lock)
         events = _load_obligation_events(
             cursor,
@@ -477,7 +486,7 @@ def _load_selected_bank_rows(cursor, selection, lock):
     placeholders = _placeholders(row_ids)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT fir.id,fir.dedup_fingerprint,fir.transaction_date,fir.format_id,fir.bank_references,"
+        "SELECT fir.id,fir.dedup_fingerprint,fir.transaction_date,fir.format_id,fir.bank_references,fir.memo,"
         "fir.debit,fir.credit,fir.direction,fir.currency,"
         "fir.resolved_counterparty_account,fir.classification_type,"
         "classification.classification_type AS authoritative_classification_type,"
@@ -495,6 +504,28 @@ def _load_selected_bank_rows(cursor, selection, lock):
         {**row, "resolved_counterparty_account": _payout_source_account(row)}
         for row in cursor.fetchall()
     )
+
+
+def _verify_taishin_memo_recipients(cursor, bank_rows, lock):
+    if not any(row.get("format_id") == "taishin" for row in bank_rows):
+        return bank_rows
+    cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name<>'' ORDER BY id" + (" FOR UPDATE" if lock else ""))
+    names = {}
+    for person in cursor.fetchall():
+        name = unicodedata.normalize("NFKC", str(person["name"])).strip()
+        names.setdefault(name, []).append(int(person["id"]))
+    name_order = sorted(names, key=len, reverse=True)
+    verified = []
+    for row in bank_rows:
+        if row.get("format_id") != "taishin":
+            verified.append(row)
+            continue
+        name = extract_name_from_row_text({"memo": row.get("memo")}, name_order)
+        matches = names.get(name, ())
+        if len(matches) != 1:
+            raise ValueError("staff_memo_recipient_unconfirmed")
+        verified.append({**row, "taishin_memo_staff_id": matches[0]})
+    return tuple(verified)
 
 
 def _payout_source_account(row):
@@ -661,6 +692,7 @@ def _outgoing_bank_fact(row, staff_id, anomaly_codes):
         str(row["dedup_fingerprint"]),
         eligible,
         anomaly_codes,
+        taishin_memo_staff_id=row.get("taishin_memo_staff_id"),
     )
 
 

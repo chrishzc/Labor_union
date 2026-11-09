@@ -1,6 +1,6 @@
 # Client Finance Domain
 
-> 2026-11-05 對帳單支出匯款手續費（100元以內）直接核銷最新裁決：依 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)，所有銀行對帳單支出（含客戶退款 R永／補助退還 R台 及月嫂薪資 P永／P台）統一依「月嫂或客戶姓名 → 交易日月份 → 金額差距 `0 <= 應付 - 實付 <= 100` 唯一綁定成功 → 計算手續費（可為 0，不預設固定值）並直接核銷結清」處理；與客戶存入差額由工會負擔手續費（`CF-DIFF-06`）分開。本輪僅更新規格與流程圖，未修改正式程式或資料庫。
+> 2026-11-05 對帳單支出匯款手續費（100元以內）直接核銷最新裁決：依 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)，所有銀行對帳單支出（含客戶退款 R永／補助退還 R台 及月嫂薪資 P永／P台）統一依「各銀行正式證據確認案件及對象（R台用備註唯一六碼，月嫂姓名優先；不要求客戶姓名或帳號） → 交易日月份 → 金額差距 `0 <= 應付 - 實付 <= 100` 唯一綁定成功 → 計算手續費（可為 0，不預設固定值）並直接核銷結清」處理；與客戶存入差額由工會負擔手續費（`CF-DIFF-06`）分開。本輪僅更新規格與流程圖，未修改正式程式或資料庫。
 
 > 2026-11-05 全額補助免自備最新裁決：依 [`22` §17.4.1](22_銀行流水匯入與帳務異常處理正式規格.md#full-subsidy-no-advance-20261105)，補助市民／原住民且H≤本案有效補助上限L，自動S＝T、B＝0、方案一、轉交月嫂，不需客戶實付或人工免自備確認；H>L回一般三方案，缺值不當0。這是下文「不由身分／時數判方案」的一項明定例外，不恢復固定120／80路由。本輪只更新規格及方案，不修改程式或資料。
 
@@ -138,7 +138,7 @@ Authority：使用者於2026-11-03採用第三版「帳務方案、對帳來源�
 | 收款／退款／adjustment／reversal | immutable client ledger |
 | transaction allocation | append-only M:N allocations |
 | current balance／settled at | obligation 與 ledger reducer |
-| 客戶代墊／補助退還／資金回收 | 一般服務費 receivable 與 receipt、依已確認方案／對象及正式來源成立的 `subsidy_return` 應退與 immutable payout；資料齊全即由身分自動建退款的舊路由已取代，僅供歷史追溯，以及 Government Subsidy receipt-allocation fact 的 M:N settlement link |
+| 客戶代墊／補助退還／資金回收 | 一般服務費 receivable 與 receipt、已確認方案／對象及正式來源的 `subsidy_return` 義務與 immutable payout；政府資金來源及回收依 Government Subsidy 正式整期歸屬與不可變出款／沖正lineage，不建立或要求逐案政府現金allocation |
 | `client_payments` | current／compatibility projection |
 | review status | root-derived projection，不可人工直接修改 |
 
@@ -356,7 +356,7 @@ CF-SCHEME-FULL成立時不等待客戶付款；其餘客戶款未齊時不對歷
 
 **已取代，僅供歷史追溯**：原系統曾依一般市民／社福身分、有效服務量與凍結客戶單價自動同步應退，資料足夠即建立，且不等待客戶齊款或政府款。這是原實作與舊流程證據，不是新三方案的退款建立規則；本次不修改程式、回填既有帳或強制重建。
 
-對已正式成立的客戶退款，實際出款及部分退款仍沿原 owner、帳戶 snapshot、concurrency 與既有 due date 規則；政府後入不得造成第二筆同款 payout。原代墊及整期回收僅針對既有真實出款／沖正 lineage，依規格 14 查閱，不補造現金或逐案政府分配。已付 ledger／allocation 不改寫，超退仍沿既有差額追償；新模式的義務接線待後續實作收斂。
+對已正式成立的客戶退款，實際出款及部分退款仍沿原 owner、concurrency 與既有 due date 規則；一般退款保留帳戶snapshot驗證。台新客戶補助R台依規格22 §15.6.3，Preview／Apply重新讀原始備註唯一六碼，經本Domain正式虛擬帳號對照確認所選案件；備註命中月嫂姓名時不能改走客戶補助。此核銷路徑不要求交易收款帳號或退款帳戶snapshot，亦不得補造；付款清冊與其他銀行帳戶檢查不變。政府後入不得造成第二筆同款payout。原代墊及整期回收僅針對既有真實出款／沖正lineage，依規格14查閱，不補造現金或逐案政府分配。已付ledger／allocation不改寫，超退仍沿既有差額追償；新模式的義務接線待後續實作收斂。
 
 `GET /api/v1/finance-reports/client-subsidy-returns` 保留 bounded cursor、exact case、搜尋及退款月份條件。日期及金額來自 current owner projection；缺值不是零，缺收款帳戶不使案件消失。
 
@@ -373,7 +373,7 @@ CF-SCHEME-FULL成立時不等待客戶付款；其餘客戶款未齊時不對歷
 
 ### Adjustment Accounting
 
-adjustment 是獨立義務，不修改歷史服務費。一筆銀行交易可明確 allocation 到多筆 adjustment，但每筆所選義務都必須完整核銷。
+adjustment 是獨立義務，不修改歷史服務費。一筆銀行交易可明確 allocation 到多筆 adjustment；足額核銷時所選款項完整結清，適用已核准部分收款時完整記錄實收並保留未清餘額。此例外不放寬 adjustment 本身的成立、歸屬及更正規則。
 
 adjustment 的原因、方向或歸屬若不能從已確認根事實唯一決定，必須先進異常中心，由人員查看完整事件鏈並啟動 typed Adjustment Preview／Apply；不得為了讓差額歸零而自動建立。
 
@@ -438,7 +438,7 @@ replay 回原操作，不重複釋放或新建財務事實。
 ## 5. 驗收
 
 - 三階段義務及多流水完整核銷。
-- 一筆流水跨多義務時，每筆義務皆完整歸零。
+- 一筆流水跨多義務時，實收須完整分配；足額模式驗證所選款項結清，明示部分收款模式保留各筆未清餘額，不要求全部歸零。
 - 少收／超收初次對帳零正式交易並形成異常 fact。
 - obligation 後降建立 over-receipt／refund obligation。
 - 合法退款與 reversal 的淨額結果不同且正確。
@@ -481,6 +481,9 @@ Stable errors：
 - `client_finance_case_not_found`
 - `invalid_client_finance_intent`
 - `bank_fact_not_eligible`
+- `bank_transaction_date_missing`（既存客戶入款來源缺交易日，Preview／Apply同因拒絕）
+- `bank_currency_not_twd`（既存客戶入款來源幣別不符，Preview／Apply同因拒絕）
+- `client_subsidy_memo_recipient_unconfirmed`
 - `client_obligation_not_found`
 - `allocation_not_exact`
 - `client_receipt_underpaid`
@@ -527,7 +530,7 @@ Stable errors：
   適用永豐銀行對帳單存入且配對到 14 碼銷帳編號（固定前綴 `99781699` + 6 碼）之入款：
   1. **第一階段（虛擬帳號解析與案件關聯）**：解析銷帳編號，確定唯一歸屬該案件編號。
   2. **第二階段（期款金額匹配判定）**：比對金額。該案件是否有未清償且「金額完全一致」的單一期款？若有，自動精確核銷，自動寫入正式帳本（`client_ledger_entries`），期款即時顯示已收已繳齊，入帳資訊顯示入帳日與來源。
-  3. **第三階段（非精確匹配處理分流：比對月份）**：若金額沒有完全符合（分次拆款或金額不符），觸發非精確匹配分流，進一步比對月份（銀行交易日月份 vs. 該案件未清償期款應付期限月份）：
+  3. **第三階段（非精確匹配處理分流：比對月份）**：若無法以金額唯一定位（含多筆等額期款、分次拆款或金額不符），觸發月份比對分流，進一步比對月份（銀行交易日月份 vs. 該案件未清償期款應付期限月份）：
      - **若月份符合**：先配對至該同月份期款，並生成、顯示差額（實收金額、短少差額或超收差額）。於案件端主動呈現配對結果，提供人員直接進行差額處置與確認核銷。
      - **若月份不符合**：顯示為待核對入款（Pending Fact），不擅自跨月配對期款，留待人員手動指定期款或跨期核銷。
   案件端（案件帳務抽屜）主動呈現本案待核對入款及合計，並提供人工核銷與差額處置入口，不得因未完全精確匹配而跳過不顯示。
@@ -538,6 +541,8 @@ Stable errors：
   使用現行公式候選。案件對外顯示帳號亦採相同順位：唯一匯入帳號優先；同案存在多個不同匯入帳號時
   必須明確回傳不唯一，不得任選其一或退回公式。
 - 2026-11-02 使用者明確退役舊全域工會／代收付帳戶：移除維護畫面、typed client、Query／Preview／Apply API、Domain/application/repository 與三張專屬設定／event／receipt 表，不再提供讀寫或契約來源。此裁決取代舊的保留維護要求。單案虛擬帳號、退款與月嫂個人帳戶、登入帳號管理不受影響。新庫依 retirement register 排除；既有本機庫依規格 10 的獨立備份、計畫、engine 與精確移除程序執行。已發布的歷史 migration／release 僅作重現證據，不改寫。
+
+永豐客戶入帳原因及新舊碼對齊沿規格22 §16.5.2；唯有無法用金額唯一定位才需要月份比對，不能將缺到期日誤報為不同月。不同銀行來源不得只因同一義務而判重；明確選取同案多筆合計足額時沿原 Preview／Apply 核銷，不增加逐筆差額處理。正式少收／超收碼保留 `client_receipt_underpaid`／`client_receipt_overpaid`；精確及部分收款不以退款帳戶為前提，超收另列退款才沿原檢查。
 
 ### 8.1 客戶名冊單案虛擬帳號修改（2026-10-15 人工裁決）
 

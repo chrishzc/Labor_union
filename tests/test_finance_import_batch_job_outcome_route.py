@@ -78,6 +78,21 @@ def test_succeeded_correction_job_reads_typed_receipt_not_durable_raw_payload() 
     assert response.data.receipt.alert_resolved_event_count == 0
 
 
+@pytest.mark.parametrize('code', ['client_refund_recipient_account_ambiguous', 'client_refund_recipient_account_mismatch', 'bank_currency_not_twd', 'bank_transaction_date_missing', 'subsidy_advance_not_due'])
+def test_failed_correction_exposes_only_typed_failure_code(code):
+    job = _job('failed')
+    job.command_type = 'finance_import_correction_apply'
+    job.error_payload = {'kind': 'failure', 'schema_version': 1, 'error': {
+        'category': 'domain_blocked', 'code': code, 'message': 'Finance Import correction cannot be posted.',
+        'retryable': False, 'domain_blockers': [code], 'correlation_id': 'synthetic-failure',
+    }}
+    response = query_finance_import_correction_job_outcome('finance-job-1', None,
+        SimpleNamespace(get_job=lambda _: job), SimpleNamespace())
+    assert response.data.failure_code == code
+    assert response.data.receipt is None
+    assert 'error_payload' not in response.data.model_dump()
+
+
 def test_correction_receipt_parser_rejects_negative_alert_count_and_extra_fields() -> None:
     payload = {
         "row_identity": "finance-import-row:9",

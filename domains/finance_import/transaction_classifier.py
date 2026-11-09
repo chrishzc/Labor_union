@@ -31,6 +31,9 @@ CLASSIFICATION_TYPES = frozenset(
 )
 
 
+TAISHIN_CLIENT_SUBSIDY_MEMO_REASON = "taishin_client_subsidy_case_suffix_in_memo"
+
+
 def _ids_for_account(accounts: Mapping[str, Any], account: str | None) -> list[Any]:
     if account is None or account not in accounts:
         return []
@@ -68,117 +71,6 @@ def _review(reason: str) -> dict[str, Any]:
 def _valid_client_virtual_account(row: Mapping[str, Any]) -> bool:
     projection = resolve_finance_cancellation_code(row)
     return projection["cancellation_code"] is not None
-
-
-def _normalized_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = unicodedata.normalize("NFKC", value).strip()
-    return normalized or None
-
-
-def _incoming_amount(row: Mapping[str, Any]) -> int | None:
-    amount = row.get("credit")
-    if isinstance(amount, bool) or not isinstance(amount, (int, float, Decimal)):
-        return None
-    if isinstance(amount, float) and not amount.is_integer():
-        return None
-    if isinstance(amount, Decimal) and amount != amount.to_integral_value():
-        return None
-    return int(amount)
-
-
-def _receipt_candidate_matches(
-    row: Mapping[str, Any], candidate: Mapping[str, Any]
-) -> bool:
-    client_name = _normalized_text(row.get("counterparty_name"))
-    client_account = _normalized_text(row.get("counterparty_account"))
-    amount = _incoming_amount(row)
-    if client_name is None or client_account is None or amount is None:
-        return False
-    candidate_name = _normalized_text(candidate.get("name"))
-    candidate_account = _normalized_text(candidate.get("account"))
-    open_amounts = candidate.get("open_amounts")
-    if candidate_name != client_name or candidate_account != client_account:
-        return False
-    if not isinstance(open_amounts, Sequence) or isinstance(open_amounts, str):
-        return False
-    return amount in open_amounts
-
-
-def _classify_client_receipt_heuristic(
-    row: Mapping[str, Any], client_receipt_candidates: Sequence[Mapping[str, Any]]
-) -> dict[str, Any] | None:
-    matched_client_ids = {
-        candidate.get("client_id")
-        for candidate in client_receipt_candidates
-        if isinstance(candidate, Mapping)
-        and isinstance(candidate.get("client_id"), int)
-        and not isinstance(candidate.get("client_id"), bool)
-        and _receipt_candidate_matches(row, candidate)
-    }
-    if len(matched_client_ids) == 1:
-        return _result(
-            "client_receipt",
-            sorted(matched_client_ids),
-            "client_receipt_heuristic:name+account+amount",
-        )
-    if len(matched_client_ids) > 1:
-        return _review("client_receipt_heuristic_ambiguous")
-    return None
-
-
-def _classify_taishin_outgoing(
-    row: Mapping[str, Any],
-    client_refund_accounts: Mapping[str, Any],
-    staff_accounts: Mapping[str, Any],
-    client_subsidy_return_accounts: Mapping[str, Any],
-) -> dict[str, Any]:
-    account = row["counterparty_account"]
-    if account is None:
-        return _review("counterparty_account_missing")
-    if not isinstance(account, str):
-        return _review("counterparty_account_invalid")
-
-    refund_client_ids = _ids_for_account(client_refund_accounts, account)
-    subsidy_return_client_ids = _ids_for_account(
-        client_subsidy_return_accounts, account
-    )
-    staff_ids = _ids_for_account(staff_accounts, account)
-    owner_categories = sum(
-        bool(ids)
-        for ids in (refund_client_ids, subsidy_return_client_ids, staff_ids)
-    )
-    if owner_categories > 1:
-        return _review("counterparty_identity_type_conflict")
-    if len(refund_client_ids) == 1:
-        return _result(
-            "client_refund",
-            refund_client_ids,
-            "taishin_unique_client_refund_account",
-            account,
-        )
-    if len(subsidy_return_client_ids) == 1:
-        return _result(
-            "client_subsidy_return",
-            subsidy_return_client_ids,
-            "taishin_unique_client_subsidy_return_account",
-            account,
-        )
-    if len(staff_ids) == 1:
-        return _result(
-            "staff_legacy_subsidy",
-            staff_ids,
-            "taishin_unique_staff_account",
-            account,
-        )
-    if (
-        len(refund_client_ids) > 1
-        or len(subsidy_return_client_ids) > 1
-        or len(staff_ids) > 1
-    ):
-        return _review("counterparty_account_multiple_matches")
-    return _review("counterparty_account_no_match")
 
 
 def _classify_sinopac_outgoing(
@@ -365,6 +257,8 @@ def _classify_outgoing_by_name_month_fee(
     debit_val = row.get("debit")
 
     if matched_staff is not None:
+        if row["format_id"] == "taishin" and all_staff_names.count(matched_staff) > 1:
+            return _review("outgoing_staff_payout_name_ambiguous")
         matching_obligations = [
             c for c in staff_payout_candidates if c.get("name") == matched_staff
         ]
@@ -373,6 +267,13 @@ def _classify_outgoing_by_name_month_fee(
         if len({c["staff_id"] for c in matching_obligations}) != 1:
             return _review("outgoing_staff_payout_name_ambiguous")
 
+        if row['format_id'] in {'sinopac', 'taishin'}:
+            reason = ('bank_transaction_date_missing' if trans_date is None
+                      else 'bank_currency_not_twd' if row['format_id'] == 'taishin' and row.get('currency') is not None and str(row['currency']).upper() not in {'TWD', 'NTD'}
+                      else 'due_date_missing' if any(c.get('due_date') is None for c in matching_obligations)
+                      else None)
+            if reason:
+                return _result('staff_salary', [matching_obligations[0]['staff_id']], reason)
         month_matched = [
             c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
         ]
@@ -416,31 +317,40 @@ def _classify_outgoing_by_name_month_fee(
             )
         return _result(
             "staff_salary", [matching_obligations[0]["staff_id"]],
-            "outgoing_staff_payout_amount_mismatch" if len(month_matched) == 1
-            else "outgoing_staff_payout_target_ambiguous",
+            ("staff_payout_amount_mismatch" if row["format_id"] in {"sinopac", "taishin"} else
+             "outgoing_staff_payout_amount_mismatch" if len(month_matched) == 1
+             else "outgoing_staff_payout_target_ambiguous"),
         )
 
     if matched_client is not None:
-        is_taishin = row["format_id"] == "taishin"
-        allowed_types = {"subsidy_return"} if is_taishin else {"refund", "adjustment"}
         matching_obligations = [
             c for c in taishin_client_refund_candidates
             if c.get("name") == matched_client
-            and (c.get("obligation_type") is None or c["obligation_type"] in allowed_types)
+            and c.get("obligation_type") in {None, "refund", "adjustment"}
         ]
         if not matching_obligations:
-            return _review("taishin_client_refund_no_open_obligation")
+            return _review("outgoing_client_refund_no_open_obligation")
         if len({c["client_id"] for c in matching_obligations}) != 1:
             return _review("outgoing_client_refund_name_ambiguous")
+
+        if row["format_id"] == "sinopac":
+            source_reason = (
+                "bank_transaction_date_missing" if trans_date is None
+                else "bank_currency_not_twd" if row.get("currency") is not None and str(row["currency"]).upper() not in {"TWD", "NTD"}
+                else "due_date_missing" if any(c.get("due_date") is None for c in matching_obligations)
+                else None
+            )
+            if source_reason:
+                return _result("client_refund", [matching_obligations[0]["client_id"]], source_reason)
 
         month_matched = [
             c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
         ]
         if not month_matched:
             return _result(
-                "client_subsidy_return" if is_taishin else "client_refund",
+                "client_refund",
                 [matching_obligations[0]["client_id"]],
-                "taishin_client_refund_month_no_match",
+                "outgoing_client_refund_month_no_match",
             )
 
         fee_matched = [
@@ -458,12 +368,12 @@ def _classify_outgoing_by_name_month_fee(
         if grouped_matches:
             if len(grouped_matches) != 1 or fee_matched:
                 return _result(
-                    "client_subsidy_return" if is_taishin else "client_refund",
+                    "client_refund",
                     [matching_obligations[0]["client_id"]],
-                    "taishin_client_refund_multiple_exact_matches",
+                    "outgoing_client_refund_multiple_fee_matches",
                 )
             fee_matched = grouped_matches
-            reason = "taishin_unique_client_refund_name_month_fee_matched"
+            reason = "unique_client_refund_name_month_fee_matched"
         else:
             reason = None
         if len(fee_matched) == 1:
@@ -471,24 +381,23 @@ def _classify_outgoing_by_name_month_fee(
             diff = Decimal(str(cand["amount_due_ntd"])) - Decimal(str(debit_val))
             if reason is None and diff == 0:
                 reason = (
-                    "taishin_unique_client_refund_name_and_month_matched"
+                    "unique_client_refund_name_and_month_matched"
                     if len(matching_obligations) == 1
-                    else "taishin_client_refund_disambiguated_by_month_and_amount"
+                    else "client_refund_disambiguated_by_month_and_amount"
                 )
             elif reason is None:
-                reason = "taishin_unique_client_refund_name_month_fee_matched"
-            kind = "client_subsidy_return" if cand.get("obligation_type") == "subsidy_return" else "client_refund"
-            return _result(kind, [cand["client_id"]], reason)
+                reason = "unique_client_refund_name_month_fee_matched"
+            return _result("client_refund", [cand["client_id"]], reason)
         if len(fee_matched) > 1:
             return _result(
-                "client_subsidy_return" if is_taishin else "client_refund",
+                "client_refund",
                 [matching_obligations[0]["client_id"]],
-                "taishin_client_refund_multiple_exact_matches",
+                "outgoing_client_refund_multiple_fee_matches",
             )
         return _result(
-            "client_subsidy_return" if is_taishin else "client_refund",
+            "client_refund",
             [matching_obligations[0]["client_id"]],
-            "taishin_client_refund_amount_mismatch" if len(month_matched) == 1
+            "outgoing_client_refund_amount_mismatch" if row["format_id"] == "sinopac" or len(month_matched) == 1
             else "outgoing_client_refund_target_ambiguous",
         )
 
@@ -509,6 +418,7 @@ def classify_finance_transaction(
     staff_payout_candidates: Sequence[Mapping[str, Any]] = (),
     known_virtual_accounts: set[str] | frozenset[str] | None = None,
     known_case_suffixes: set[str] | frozenset[str] | None = None,
+    staff_name_identities: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -524,7 +434,7 @@ def classify_finance_transaction(
         client_refund_accounts = {}
 
     fallback_review: dict[str, Any] | None = None
-    if direction == "outgoing":
+    if direction == "outgoing" and format_id != "taishin":
         memo = row.get("memo")
         government_memo = isinstance(memo, str) and any(marker in memo for marker in ("新竹市政府", "新竹市府"))
         if not government_memo:
@@ -560,6 +470,20 @@ def classify_finance_transaction(
                     if other_ids or any(candidates and set(candidates) != set(ids) for candidates in (account_ids, case_ids)):
                         return _review("counterparty_identity_type_conflict")
                     return {**fee_result, "resolved_counterparty_account": account}
+                if format_id == 'sinopac' and fee_result['reason'] == 'outgoing_staff_payout_name_ambiguous':
+                    # A shared name is not a veto when the original reference
+                    # provides one legal account owner in that name's candidates.
+                    account = extract_sinopac_account_reference(row['bank_references'].get('交易參考編號'))
+                    owners = _ids_for_account(staff_accounts, account)
+                    pool = sorted(set(all_staff_names) | {c['name'] for c in staff_payout_candidates if c.get('name')},key=len,reverse=True)
+                    name = extract_name_from_row_text(row,pool)
+                    name_ids = {c['staff_id'] for c in staff_payout_candidates if c.get('name') == name}
+                    case_ids = _ids_for_account(staff_case_suffixes or {},extract_sinopac_memo_case_suffix(memo))
+                    other_ids = _ids_for_account(client_refund_accounts,account) + _ids_for_account(client_subsidy_return_accounts,account)
+                    if len(owners) == 1 and owners[0] in name_ids:
+                        if other_ids or (case_ids and owners[0] not in case_ids):
+                            return _review('counterparty_identity_type_conflict')
+                        return _result('staff_salary',owners,'sinopac_unique_staff_account_in_transaction_reference',account)
                 if fee_result["reason"] in {
                     "counterparty_identity_type_conflict",
                     "outgoing_staff_payout_name_ambiguous",
@@ -583,11 +507,6 @@ def classify_finance_transaction(
                                "sinopac_staff_return_requires_matching", account)
             if staff_ids:
                 return _review("sinopac_staff_account_identity_ambiguous")
-            heuristic_result = _classify_client_receipt_heuristic(
-                row, client_receipt_candidates
-            )
-            if heuristic_result is not None:
-                return heuristic_result
             if cancellation_code is not None:
                 return _review("sinopac_virtual_account_case_not_found")
             return _review("sinopac_invalid_or_missing_virtual_account")
@@ -618,84 +537,22 @@ def classify_finance_transaction(
                 return _review("counterparty_identity_type_conflict")
             return _result("government_subsidy", [], "taishin_government_return_memo")
 
-        is_staff_kw = any(k in memo_text for k in ("服務人員", "月嫂", "薪資", "補助款"))
-        is_refund_kw = any(k in memo_text for k in ("退款", "退費", "客戶"))
-        suffix = extract_sinopac_memo_case_suffix(memo)
-
-        if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
-            staff_case_map = staff_case_suffixes or {}
-            refund_case_map = client_refund_case_suffixes or {}
-            memo_staff_ids = _ids_for_account(staff_case_map, suffix)
-            memo_refund_ids = _ids_for_account(refund_case_map, suffix)
-
-            if memo_staff_ids and memo_refund_ids:
-                if is_staff_kw and not is_refund_kw:
-                    memo_refund_ids = []
-                elif is_refund_kw and not is_staff_kw:
-                    memo_staff_ids = []
-                else:
-                    return _review("counterparty_identity_type_conflict")
-
-            if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
-                return _review("counterparty_account_multiple_matches")
-            if memo_staff_ids:
-                return _result(
-                    "staff_salary",
-                    memo_staff_ids,
-                    "taishin_unique_staff_case_suffix_in_memo",
-                    suffix,
-                )
-            if memo_refund_ids:
-                return _result(
-                    "client_refund",
-                    memo_refund_ids,
-                    "taishin_unique_client_refund_case_suffix_in_memo",
-                    suffix,
-                )
-            if known_case_suffixes is not None and suffix in known_case_suffixes:
-                if is_staff_kw and not is_refund_kw:
-                    return _result(
-                        "staff_salary",
-                        [],
-                        "taishin_staff_case_suffix_in_memo",
-                        suffix,
-                    )
-                if is_refund_kw and not is_staff_kw:
-                    return _result(
-                        "client_refund",
-                        [],
-                        "taishin_client_refund_case_suffix_in_memo",
-                        suffix,
-                    )
-
-        if is_staff_kw and not is_refund_kw:
-            account = row.get("counterparty_account")
-            staff_ids = _ids_for_account(staff_accounts, account)
-            if len(staff_ids) == 1:
-                return _result(
-                    "staff_salary",
-                    staff_ids,
-                    "taishin_unique_staff_account",
-                    account,
-                )
-            if len(staff_ids) > 1:
-                return _review("counterparty_account_multiple_matches")
-
-        taishin_result = _classify_taishin_outgoing(
-            row,
-            client_refund_accounts,
-            staff_accounts,
-            client_subsidy_return_accounts,
+        staff_result = _classify_outgoing_by_name_month_fee(
+            {**row, "counterparty_name": None, "summary": None, "bank_references": {}},
+            all_staff_names, staff_payout_candidates, (), (),
         )
-        if (
-            taishin_result["classification_type"] != "non_business_review"
-            or taishin_result["reason"] in {"counterparty_identity_type_conflict", "counterparty_account_multiple_matches"}
-        ):
-            return taishin_result
-        if fallback_review is not None:
-            return fallback_review
-        if all_client_names or taishin_client_refund_candidates or all_staff_names or staff_payout_candidates:
-            return _review("taishin_outgoing_unrecognized")
-        return taishin_result
+        if staff_result is not None:
+            if staff_result["reason"] == "outgoing_staff_payout_no_open_obligation" and staff_name_identities:
+                name = extract_name_from_row_text({"memo": memo}, all_staff_names)
+                identities = tuple(staff_name_identities.get(name, ()))
+                if len(identities) == 1:
+                    return _result("staff_salary", list(identities), staff_result["reason"], row.get("counterparty_account"))
+            if staff_result["classification_type"] == "staff_salary":
+                return {**staff_result, "resolved_counterparty_account": row.get("counterparty_account")}
+            return staff_result
+        suffix = extract_sinopac_memo_case_suffix(memo)
+        if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
+            return _result("client_subsidy_return", [], TAISHIN_CLIENT_SUBSIDY_MEMO_REASON)
+        return _review("taishin_outgoing_unrecognized")
 
     return _review("unsupported_bank_direction")

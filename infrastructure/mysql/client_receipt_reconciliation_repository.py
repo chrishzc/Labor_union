@@ -135,6 +135,9 @@ class MySqlClientReceiptReconciliationRepository:
                 selection,
                 lock=for_update,
             )
+        blockers = _query_bank_fact_blockers(bank_rows, selection)
+        if blockers:
+            raise ValueError(blockers[0]["codes"][0])
         self._capture_loaded_facts(bank_rows, obligation_rows)
         return ClientReconciliationFacts(
             account_version,
@@ -147,6 +150,10 @@ class MySqlClientReceiptReconciliationRepository:
             cursor.execute(_RECEIPT_SELECT_SQL, (key.value,))
             row = cursor.fetchone()
         return None if row is None else _stored_receipt(row)
+
+    def validate_overage_refund_recipient(self, case_no: str) -> None:
+        with _mysql_cursor(self._connection) as cursor:
+            _load_refund_recipient_account(cursor, case_no, require_complete=True)
 
     # Kept cohesive so each immutable entry claims its source bank row.
     def append_ledger_entries(self, candidate) -> None:
@@ -366,6 +373,7 @@ class MySqlClientReceiptReconciliationRepository:
             "account_version": account_version,
             "obligations": obligations,
             "bank_facts": _query_bank_facts(bank_rows, case_no),
+            "bank_fact_blockers": _query_bank_fact_blockers(bank_rows, case_no),
         }
 
     def _capture_loaded_facts(self, bank_rows, obligation_rows) -> None:
@@ -581,8 +589,6 @@ def _bank_row_matches_selection(row, selection) -> bool:
         return _matches_legacy_case_selection(row, selection)
     if _resolved_case_no(row) == selection.case_no:
         return True
-    if _is_single_heuristic_client_candidate(row):
-        return True
     return _has_exact_authoritative_targets(row, selection)
 
 
@@ -591,7 +597,7 @@ def _matches_legacy_case_selection(row, case_no: str) -> bool:
         return True
     targets = _json_array(row.get('authoritative_target_identities'))
     exact_case_targets = bool(targets) and set(targets) <= row.get('selected_case_obligation_identities', frozenset())
-    return _is_single_heuristic_client_candidate(row) or exact_case_targets
+    return exact_case_targets
 
 
 def _has_exact_authoritative_targets(row, selection) -> bool:
@@ -601,19 +607,6 @@ def _has_exact_authoritative_targets(row, selection) -> bool:
     if selection.payment_stage is None:
         return bool(targets) and set(targets) <= set(selection.obligation_identities)
     return tuple(sorted(targets)) == selection.obligation_identities
-
-
-def _is_single_heuristic_client_candidate(row) -> bool:
-    reason = row.get("authoritative_reason")
-    client_id = row.get("selected_client_id")
-    if not isinstance(reason, str) or not reason.startswith(
-        "client_receipt_heuristic:"
-    ):
-        return False
-    if isinstance(client_id, bool) or not isinstance(client_id, int) or client_id < 1:
-        return False
-    targets = _json_array(row.get("authoritative_target_identities"))
-    return targets == [f"client:{client_id}"]
 
 
 def _classification_type(row):
@@ -911,7 +904,7 @@ def _query_obligations(cursor, case_no):
     )
 
 
-# Kept as one query so source eligibility filtering remains database-side.
+# Keep rejected date/currency sources for same-case diagnostics; bank_facts still requires full eligibility.
 def _query_candidate_bank_rows(cursor, case_no):
     cursor.execute(
         "SELECT fir.id,fir.dedup_fingerprint,fir.format_id,"
@@ -943,8 +936,6 @@ def _query_candidate_bank_rows(cursor, case_no):
         "AND fir.format_id IN ('legacy','sinopac') "
         "AND fir.credit>0 "
         "AND (fir.debit IS NULL OR fir.debit=0) "
-        "AND (fir.currency IS NULL OR fir.currency IN ('TWD','NTD')) "
-        "AND fir.transaction_date IS NOT NULL "
         "AND ledger.id IS NULL "
         "ORDER BY fir.transaction_date,fir.id", (case_no,),
     )
@@ -962,6 +953,21 @@ def _query_bank_facts(rows, case_no):
         for row in rows
         if _bank_row_is_eligible(row, case_no)
     )
+
+
+def _query_bank_fact_blockers(rows, case_no):
+    result = []
+    for row in rows:
+        if not _bank_row_matches_selection(row, case_no):
+            continue
+        codes = []
+        if row.get("transaction_date") is None:
+            codes.append("bank_transaction_date_missing")
+        if not _is_twd(row.get("currency")):
+            codes.append("bank_currency_not_twd")
+        if codes:
+            result.append({"finance_import_row_id": int(row["id"]), "codes": tuple(codes)})
+    return tuple(result)
 
 
 def _receipt_payload(receipt):
@@ -1096,14 +1102,19 @@ _OVERAGE_DISPOSITION_INSERT_SQL = (
 )
 
 
+def _load_refund_recipient_account(cursor, case_no, *, require_complete):
+    account = load_effective_refund_account(cursor, case_no)
+    if account is None and require_complete:
+        raise ValueError("client_refund_recipient_snapshot_missing")
+    return account
+
+
 def _insert_refund_recipient_snapshot(cursor, refund_identity, case_no, source_kind, *, require_complete=True) -> bool:
     cursor.execute('SELECT refund_obligation_identity FROM client_refund_recipient_snapshots WHERE refund_obligation_identity=%s', (refund_identity,))
     if cursor.fetchone() is not None:
         return False
-    account = load_effective_refund_account(cursor, case_no)
+    account = _load_refund_recipient_account(cursor, case_no, require_complete=require_complete)
     if account is None:
-        if require_complete:
-            raise ValueError("client_refund_recipient_snapshot_missing")
         return False
     cursor.execute(
         'INSERT INTO client_refund_recipient_snapshots '

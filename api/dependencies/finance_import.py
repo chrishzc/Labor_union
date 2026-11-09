@@ -49,8 +49,19 @@ class FinanceImportOwningDomainCompositePort(Protocol):
 
     def post(self, candidate): ...
 
+    def validate_client_refund(self, candidate, correlation_id): ...
+    def preview_client_refund(self, selection, facts, correlation_id): ...
+
 
 class UnavailableOwningDomainCompositePort:
+    def preview_client_refund(self, selection, facts, correlation_id):
+        del selection, facts, correlation_id
+        raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")
+
+    def validate_client_refund(self, candidate, correlation_id):
+        del candidate, correlation_id
+        raise FinanceImportRepositoryUnavailable("Owning Finance Domain composite writer is not configured.")
+
     def bind_request(self, request):
         del request
 

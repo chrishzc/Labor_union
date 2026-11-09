@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StaffPayoutRemediationWorkbench } from '../components/StaffPayoutRemediationWorkbench';
 import type { StaffPayoutRemediationClient } from '../api/staff_payables/staff_payout_remediation_client';
 import type { StaffPayoutJob } from '../api/staff_payables/staff_payout_remediation_schemas';
-import { StaffPayoutRemediationError } from '../api/staff_payables/staff_payout_remediation_errors';
+import { StaffPayoutRemediationError, staffPayoutBlockerMessage } from '../api/staff_payables/staff_payout_remediation_errors';
 
 const initial = { staff_id: 11, staff_payables_version: 4, obligations: [{ obligation_identity: 'obligation:11:CASE-1', case_no: 'CASE-1', amount_due_ntd: 12000, due_date: '2026-08-01', net_paid_ntd: 0, balance_ntd: 12000, payout_status: 'payable' }], events: [] };
 const settled = { ...initial, staff_payables_version: 5, obligations: [{ ...initial.obligations[0], net_paid_ntd: 12000, balance_ntd: 0, payout_status: 'completed' }] };
@@ -26,6 +26,97 @@ function clientFor(values: { query?: typeof initial; preview?: typeof preview; j
 
 describe('PAYOUT-001 remediation workbench', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it.each(['staff_payout_amount_mismatch','staff_obligation_not_exactly_settled','staff_payout_difference_mode_invalid'])(
+    'shows the scoped Sinopac reason for preview, direct Apply and terminal rejection: %s',async code=>{
+      const {cleanup}=await import('@testing-library/react');
+      const message=staffPayoutBlockerMessage(code,'sinopac')!;
+      expect(message).toBeTruthy();
+      expect(staffPayoutBlockerMessage(code,'legacy')).toBeUndefined();
+      for(const stage of ['preview','apply','job']){
+        const client=clientFor({job:{job_id:'job-1',status:'failed',command_type:'staff_payout_apply',attempt_count:1,max_attempts:3,
+          outcome:{kind:'failure',schema_version:1,error:{category:'domain_blocked',code,message:'private detail',retryable:false,correlation_id:'synthetic',domain_blockers:[code]}}}});
+        if(stage==='preview')client.preview=vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code,'private detail'));
+        if(stage==='apply')client.apply=vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code,'private detail'));
+        render(<StaffPayoutRemediationWorkbench target={{staffId:11,obligationIdentity:'obligation:11:CASE-1'}} sourceBank="sinopac"
+          financeImportRowId={91} client={client} pollIntervalMs={0}/>);
+        await screen.findByText(/餘額 NT\$ 12,000/);
+        fireEvent.click(screen.getByRole('button',{name:'儲存核銷'}));
+        expect(await screen.findByText(message)).toBeInTheDocument();
+        expect(screen.queryByText('private detail')).not.toBeInTheDocument();
+        if(stage==='preview')expect(client.apply).not.toHaveBeenCalled();
+        cleanup();
+      }
+    });
+
+  it.each([
+    ['bank_transaction_date_missing','缺少交易日'],
+    ['bank_currency_not_twd','不是新臺幣'],
+    ['due_date_missing','缺少原預計撥款日'],
+    ['staff_payout_amount_mismatch','不符合足額或100元內手續費條件'],
+    ['staff_memo_recipient_unconfirmed','不以六碼或帳號代替月嫂姓名'],
+    ['cross_staff_allocation_forbidden','原銀行備註確認的月嫂與所選應付款月嫂不同'],
+    ['staff_payable_not_found','所選應付款已不存在或無法讀取'],
+    ['staff_obligation_not_exactly_settled','這不代表禁止部分付款'],
+  ])('shows the Taishin cause consistently in preview, direct Apply and terminal: %s',async(code,expected)=>{
+    const {cleanup}=await import('@testing-library/react');
+    for(const stage of ['preview','apply','job']){
+      const client=clientFor({job:{job_id:'job-1',status:'failed',command_type:'staff_payout_apply',attempt_count:1,max_attempts:3,
+        outcome:{kind:'failure',schema_version:1,error:{category:'domain_blocked',code,message:'private detail',retryable:false,correlation_id:'synthetic',domain_blockers:[code]}}}});
+      if(stage==='preview')client.preview=vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code,'private detail'));
+      if(stage==='apply')client.apply=vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code,'private detail'));
+      render(<StaffPayoutRemediationWorkbench target={{staffId:11,obligationIdentity:'obligation:11:CASE-1'}} sourceBank="taishin" financeImportRowId={91} client={client} pollIntervalMs={0}/>);
+      await screen.findByText(/餘額 NT\$ 12,000/);
+      fireEvent.click(screen.getByRole('button',{name:'儲存核銷'}));
+      expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument();
+      expect(screen.queryByText('private detail')).not.toBeInTheDocument();
+      if(stage==='preview')expect(client.apply).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  it.each([
+    ['staff_bank_account_ambiguous', '銀行流水缺少收款帳號，或無法對應唯一有效的月嫂主要帳戶，請核對原流水與月嫂帳戶。'],
+    ['staff_memo_recipient_unconfirmed', '銀行備註中的月嫂姓名無法唯一確認，請核對原始備註與月嫂姓名。'],
+    ['cross_staff_allocation_forbidden', '銀行流水、收款帳戶與待付款項的月嫂歸屬不一致，請核對付款對象。'],
+    ['bank_transaction_date_missing', '原銀行流水缺少交易日，無法核銷月嫂付款，請先查核來源資料。'],
+    ['bank_currency_not_twd', '原銀行流水幣別不是新臺幣，無法核銷月嫂付款，請先查核來源資料。'],
+    ['outgoing_bank_fact_not_eligible', '原銀行出款未通過核銷資格檢查，原操作未留存更細的拒絕原因，請查核原流水。'],
+  ])('shows the same safe cause at preview, direct Apply rejection and failed terminal: %s', async (code, message) => {
+    const { cleanup } = await import('@testing-library/react');
+    for (const stage of ['preview', 'apply', 'job']) {
+      const client = clientFor({ job: { job_id: 'job-1', status: 'failed', command_type: 'staff_payout_apply',
+        attempt_count: 1, max_attempts: 3, outcome: { kind: 'failure', schema_version: 1, error: {
+          category: 'domain_blocked', code, message: 'private provider detail', retryable: false,
+          correlation_id: 'synthetic-cause', domain_blockers: [code],
+        } } } });
+      if (stage === 'preview') client.preview = vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code, 'private provider detail'));
+      if (stage === 'apply') client.apply = vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code, 'private provider detail'));
+      const onResolved = vi.fn(); const onPosted = vi.fn();
+      render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }}
+        client={client} pollIntervalMs={0} onResolved={onResolved} onPosted={onPosted} />);
+      await screen.findByText(/餘額 NT\$ 12,000/);
+      fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } });
+      fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.queryByText(/private provider detail/)).not.toBeInTheDocument();
+      expect(onResolved).not.toHaveBeenCalled(); expect(onPosted).not.toHaveBeenCalled();
+      if (stage === 'preview') expect(client.apply).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  it('marks unknown or missing terminal causes without exposing the server message', async () => {
+    const client = clientFor({ job: { job_id: 'job-1', status: 'failed', command_type: 'staff_payout_apply', attempt_count: 1, max_attempts: 3,
+      outcome: { kind: 'failure', schema_version: 1, error: { category: 'domain_blocked', code: 'unknown_legacy_reason',
+        message: 'private provider detail', retryable: false, correlation_id: null, domain_blockers: [] } } } });
+    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} pollIntervalMs={0} />);
+    await screen.findByText(/餘額 NT\$ 12,000/);
+    fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+    expect(await screen.findByText(/未留存可顯示的具體阻擋原因/)).toBeInTheDocument();
+    expect(screen.queryByText(/private provider detail|unknown_legacy_reason/)).not.toBeInTheDocument();
+  });
 
   it('React StrictMode effect replay 後仍完成 owner Query，不停在永久讀取狀態', async () => {
     const client = clientFor({});

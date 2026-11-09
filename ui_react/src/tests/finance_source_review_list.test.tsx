@@ -1,473 +1,152 @@
 /**
- * File: finance_source_review_list.test.tsx
- * Description: 驗證 Finance Import Preview 的人工確認 KPI、清單與 batch identity 共用 owner readback。
+ * 現行銀行工作台的原因文案；原批次人工配對清單已無 UI consumer。
+ * 核對抽屜及選款由 bank_reconciliation_workspace.test.tsx 驗證，
+ * 匯入原命令與重送由 import_retry.test.tsx 驗證。
  */
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionClient } from '../api/auth/session_client';
-import { financeImportMutationClient, type FinanceImportBatchPreview } from '../api/finance_import/finance_import_mutation_client';
-import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
-import { transport } from '../api/shared/transport';
-import { readFileSync } from 'node:fs';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { FinancePage } from '../pages/FinancePage';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { paymentReceiptClient } from '../api/line_order_groups/payment_receipt_notification_client';
-import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
-import { financeImportCorrectionClient } from '../api/finance_import/finance_import_correction_client';
+import {describe,expect,it} from 'vitest';
+import {financeImportReviewReason} from '../adapters/finance/finance_import_query_adapter';
 
-const BATCH = 'BATCH-REVIEW-222';
-const PREVIEW: FinanceImportBatchPreview = {
-  batch_identity: BATCH,
-  batch_version: 7,
-  source_content_digest: 'a'.repeat(64),
-  classifier_version: 'v1',
-  fingerprint_version: 'v1',
-  counts: {
-    source_rows: 2,
-    canonical_created: 1,
-    duplicate_occurrences: 0,
-    ready_dispatch: 0,
-    existing: 0,
-    manual_review: 0,
-    business_pending: 0,
-    blocked: 0,
-  },
-  dispatch_summaries: [],
-  rows: [],
-  blocking_codes: [],
-  apply_allowed: true,
-  preview_fingerprint: 'b'.repeat(64),
-};
+const source = {classification_type:'client_receipt',direction:'incoming',available_actions:[],disposition:'business_pending'} as const;
 
-const MANIFEST = {
-  batch_id: 222,
-  batch_identity: BATCH,
-  format_id: 'fixture',
-  source_file: 'finance.xlsx',
-  sheet_name: 'Sheet1',
-  header_row: 1,
-  source_row_count: 2,
-  status: 'previewed',
-  batch_version: 7,
-  source_content_digest: 'a'.repeat(64),
-  classifier_version: 'v1',
-  fingerprint_version: 'v1',
-  canonical_row_count: 1,
-  occurrence_count: 2,
-  review_count: 1,
-  dispatch_event_count: 0,
-  reconciliation_receipt_count: 0,
-  created_at: '2026-09-07T00:00:00+08:00',
-  completed_at: null,
-};
-
-const REVIEW_PAGE = {
-  batch_identity: BATCH,
-  source_reviews: [] as { review_id: number; review_identity: string; source_sheet: string; source_row: number; issue_codes: string[]; created_at: string }[],
-  next_after_source_review_id: null as number | null,
-  items: [{
-    row_id: 301,
-    row_identity: 'ROW-REVIEW-222',
-    transaction_date: '2026-09-01',
-    direction: 'credit',
-    amount_ntd: 5000,
-    classification_type: 'client_receipt',
-    disposition: 'manual_review',
-    reconciliation_status: 'unmatched',
-    source_sheet: 'Sheet1',
-    source_row: 3,
-    occurrence_count: 1,
-    available_actions: [],
-    created_at: '2026-09-07T00:00:00+08:00',
-  }],
-  next_after_row_id: null,
-};
-
-async function showPreview() {
-  render(<FinancePage />);
-  fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-  fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
-  fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-  await screen.findByText(/^未銷帳明細 \d+ 筆$/);
-}
-function reviewCount() {
-  return screen.getByText(/^未銷帳明細 \d+ 筆$/).textContent?.match(/未銷帳明細 (\d+)/)?.[1];
-}
-
-function previewRow(row: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'][number], evidence: string[]): FinanceImportBatchPreview['rows'][number] {
-  return { row_identity: row.row_identity, canonical_fact_version: 0, amount_ntd: row.amount_ntd,
-    classification_type: row.classification_type, disposition: row.disposition, target_identities: [], evidence,
-    available_actions: row.available_actions, integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false };
-}
-
-describe('Finance source-review owner readback', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    sessionClient.setSession('finance-review-test-session', {
-      id: 7,
-      username: 'finance-review',
-      display_name: 'Finance Review',
-      role: 'admin',
-    });
-    window.location.hash = '#finance?tab=bank';
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
-    vi.spyOn(paymentReceiptClient, 'list').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
-    vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue({
-      batch_identity: BATCH,
-      source_content_digest: 'a'.repeat(64),
-      source_row_count: 2,
-      canonical_created_count: 1,
-      duplicate_occurrence_count: 0,
-      source_warning_count: 1,
-      source_warning_created_count: 1,
-      replayed: false,
-    });
-    vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(structuredClone(PREVIEW));
-    vi.spyOn(financeImportMutationClient, 'apply').mockResolvedValue({ job_id: 'review-job', status_url: '/api/v1/jobs/review-job', replayed: false });
-    vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockResolvedValue({ job_id: 'review-job', status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'finance_import_batch:fixture', receipt: { batch_identity: BATCH, resulting_batch_version: 8, preview_fingerprint: PREVIEW.preview_fingerprint, reconciled_count: 1, existing_count: 0, pending_count: 1 } });
-    vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(MANIFEST);
-    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue(REVIEW_PAGE);
-  });
-
-  afterEach(() => {
-    cleanup();
-    sessionClient.clearSession();
-    window.location.hash = '';
-    vi.restoreAllMocks();
-  });
-
-  it('settles manual-review KPI and list from the same batch owner fact and supports a consistent re-query', async () => {
-    render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-
-    const file = new File(['finance-review'], 'finance.xlsx');
-    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-
-    const manualReviewSummary = await screen.findByText('未銷帳明細 1 筆');
-    expect(screen.getByLabelText('匯入結果')).toHaveTextContent('本次已銷帳 0 筆｜已存在略過 0 筆');
-    expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢未銷帳明細' }));
-    await waitFor(() => expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(2));
-    expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2);
-    expect(manualReviewSummary).toHaveTextContent('未銷帳明細 1 筆');
-    expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
-  });
-
-  it('offers exact-order correction for a business-pending client receipt', async () => {
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({
-      ...REVIEW_PAGE,
-      items: [{
-        ...REVIEW_PAGE.items[0],
-        classification_type: 'client_receipt',
-        disposition: 'business_pending',
-        available_actions: ['resolve_owning_domain_target'],
-      }],
-    });
-
-    await showPreview();
-
-    const entry = await screen.findByRole('button', { name: '指定正確訂單' });
-    expect(screen.getByText(/尚未確認可自動銷帳的案件及待收款項/)).toBeInTheDocument();
-    entry.focus();
-    fireEvent.click(entry);
-    expect(screen.getByRole('dialog', { name: '指定銀行入款的正確訂單' })).toBeInTheDocument();
-    expect(screen.getAllByText(/尚未確認可自動銷帳的案件及待收款項/)).toHaveLength(2);
-    expect(screen.getByLabelText('案件編號')).toBeInTheDocument();
-    expect(screen.getByText('查詢待核銷款項')).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(entry).toHaveFocus();
-  });
-
+describe('current bank review reasons',()=>{
   it.each([
-    ['suspected_duplicate_business_match', '多筆銀行交易對應到同一筆待收款，需確認是否重複入款。'],
-    ['sinopac_valid_virtual_account', '銷帳編號格式可辨識，但尚未唯一配對到金額相符的待收款項，請確認案件與入款金額。'],
-  ])('shows the specific %s preview reason for the exact row in the list and drawer', async (code, reason) => {
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [{ ...REVIEW_PAGE.items[0], disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] }] });
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, rows: [{ row_identity: REVIEW_PAGE.items[0].row_identity, canonical_fact_version: 0, amount_ntd: 5000, classification_type: 'client_receipt', disposition: 'business_pending', target_identities: [], evidence: [code], available_actions: [], integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false }] });
-    await showPreview();
-    expect(await screen.findByText(reason)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '指定正確訂單' }));
-    expect(screen.getAllByText(reason, { exact: false })).toHaveLength(2);
+    ['bank_currency_not_twd','不是新臺幣'],
+    ['due_date_missing','缺少正式預計退款日'],
+    ['client_subsidy_memo_case_mismatch','定位的案件與所選案件不同'],
+    ['client_subsidy_memo_staff_matched','先命中月嫂姓名'],
+    ['subsidy_advance_not_due','早於本筆正式到期日'],
+    ['subsidy_advance_settlement_ambiguous','正式款項或政府整期資金來源'],
+  ])('shows the actual Taishin customer subsidy cause: %s',(code,text)=>{
+    const result=financeImportReviewReason({...source,available_actions:[],bank:'taishin',classification_type:'client_subsidy_return',direction:'outgoing',recorded_pending_reason:code});
+    expect(result).toContain(text);
   });
-
-  it('paginates a full review page instead of treating its cursor as an inconsistency', async () => {
-    const rows = Array.from({ length: 51 }, (_, i) => ({ ...REVIEW_PAGE.items[0], row_id: i + 1, row_identity: `row-${i + 1}`, source_row: i + 1 }));
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 51 });
-    vi.mocked(financeImportQueryClient.listReviewRows)
-      .mockResolvedValueOnce({ ...REVIEW_PAGE, items: rows.slice(0, 50), next_after_row_id: 50 })
-      .mockResolvedValueOnce({ ...REVIEW_PAGE, items: rows.slice(50) });
-    await showPreview();
-    await waitFor(() => expect(reviewCount()).toBe('51'));
-    expect(screen.getByText('Sheet1#51')).toBeInTheDocument();
-    expect(financeImportQueryClient.listReviewRows).toHaveBeenLastCalledWith(BATCH, expect.objectContaining({ afterRowId: 50 }));
-  });
-
-  it('keeps matched business-pending rows and discards unrelated source warnings', async () => {
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 1 });
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({
-      ...REVIEW_PAGE,
-      items: [{ ...REVIEW_PAGE.items[0], disposition: 'business_pending' }],
-      source_reviews: [{ review_id: 11, review_identity: 'source-review-11', source_sheet: '交易明細', source_row: 4, issue_codes: ['invalid:transaction_amount'], created_at: MANIFEST.created_at }],
+  it.each(['outgoing_client_refund_name_ambiguous','outgoing_client_refund_target_ambiguous','client_refund_recipient_account_ambiguous','client_refund_recipient_account_mismatch','client_refund_source_account_missing'])(
+    'does not present a removed Taishin customer subsidy code as a current reason: %s',code=>{
+      expect(financeImportReviewReason({...source,available_actions:[],bank:'taishin',classification_type:'client_subsidy_return',direction:'outgoing',review_reason:code})).toBe('未留存當次阻擋原因。');
     });
-    await showPreview();
-    await waitFor(() => expect(reviewCount()).toBe('1'));
-    expect(screen.queryByText('交易明細#4')).not.toBeInTheDocument();
-    expect(screen.queryByText('invalid:transaction_amount')).not.toBeInTheDocument();
-    expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  it('keeps the saved subsidy cause before generic or stale operation feedback',()=>{
+    const row={...source,available_actions:[],bank:'taishin' as const,classification_type:'client_subsidy_return',direction:'outgoing',recorded_pending_reason:'due_date_missing'};
+    for(const dispatch_reason of ['bank_fact_not_eligible','stale_preview'])expect(financeImportReviewReason({...row,dispatch_reason})).toContain('缺少正式預計退款日');
+  });
+  it.each([
+    ['bank_transaction_date_missing','缺少交易日'],
+    ['bank_currency_not_twd','不是新臺幣'],
+    ['due_date_missing','缺少原預計撥款日'],
+    ['outgoing_staff_payout_month_no_match','交易日與預計撥款日都有值'],
+    ['staff_payout_amount_mismatch','不符合足額或100元內手續費條件'],
+    ['outgoing_staff_payout_multiple_fee_matches','多個單筆或合併付款集合'],
+    ['staff_memo_recipient_unconfirmed','原銀行備註的月嫂姓名無法唯一確認'],
+    ['cross_staff_allocation_forbidden','原銀行備註確認的月嫂與所選應付款月嫂不同'],
+  ])('shows the actual saved Taishin salary step: %s',(code,message)=>{
+    const result=financeImportReviewReason({...source,available_actions:[],bank:'taishin',classification_type:'staff_payout',direction:'outgoing',
+      review_reason:'unique_staff_payout_name_month_fee_matched',recorded_pending_reason:code});
+    expect(result).toContain(message);
+    expect(result).not.toContain('未留存');
+  });
+  it('reads old Taishin amount aliases but keeps missing ambiguity detail and account diagnostics explicit',()=>{
+    const row={...source,available_actions:[],bank:'taishin' as const,classification_type:'staff_payout',direction:'outgoing'};
+    expect(financeImportReviewReason({...row,review_reason:'outgoing_staff_payout_amount_mismatch'}))
+      .toBe(financeImportReviewReason({...row,review_reason:'staff_payout_amount_mismatch'}));
+    expect(financeImportReviewReason({...row,review_reason:'outgoing_staff_payout_target_ambiguous'})).toContain('舊紀錄未留存');
+    expect(financeImportReviewReason({...row,review_reason:'staff_bank_account_ambiguous'})).toContain('不要求帳號');
+    expect(financeImportReviewReason({...row,dispatch_reason:'outgoing_bank_fact_not_eligible',recorded_pending_reason:'due_date_missing'})).toContain('缺少原預計撥款日');
+    expect(financeImportReviewReason({...row,dispatch_reason:'staff_payable_candidate_stale',recorded_pending_reason:'staff_payout_amount_mismatch'})).toContain('不符合足額或100元內手續費條件');
+  });
+  it.each([
+    ['bank_transaction_date_missing','缺少交易日'],
+    ['due_date_missing','缺少預計退款日'],
+    ['outgoing_client_refund_month_no_match','交易日與預計退款日都有值'],
+    ['outgoing_client_refund_amount_mismatch','單筆或同案同月合併待退金額'],
+    ['outgoing_client_refund_multiple_fee_matches','多個單筆或合併退款配對'],
+    ['client_refund_source_account_missing','原銀行流水未能辨識收款帳號'],
+    ['client_refund_recipient_account_mismatch','收款帳號與所選退款單收款帳戶不同'],
+    ['client_refund_recipient_account_ambiguous','所選退款單的收款帳戶缺少或不一致'],
+  ])('shows the actual saved Sinopac refund step without subsidy copy: %s',(code,text)=>{
+    const message=financeImportReviewReason({...source,available_actions:[],bank:'sinopac',classification_type:'client_refund',direction:'outgoing',
+      review_reason:'sinopac_unique_client_refund_account_in_transaction_reference',recorded_pending_reason:code});
+    expect(message).toContain(text);
+    expect(message).not.toContain('補助');
+    expect(message).not.toContain('已由交易參考帳號');
+  });
+  it('does not reinterpret old refund ambiguity and does not replace a saved cause with a generic operation failure',()=>{
+    const row={...source,available_actions:[],bank:'sinopac' as const,classification_type:'client_refund' as const,direction:'outgoing' as const};
+    expect(financeImportReviewReason({...row,review_reason:'outgoing_client_refund_target_ambiguous'})).toContain('未留存實際是');
+    expect(financeImportReviewReason({...row,dispatch_reason:'bank_fact_not_eligible',recorded_pending_reason:'due_date_missing'})).toContain('缺少預計退款日');
+    expect(financeImportReviewReason({...row,dispatch_reason:'stale_preview',recorded_pending_reason:'outgoing_client_refund_amount_mismatch'})).toContain('合併待退金額');
+  });
+  it.each([
+    ['staff_payout_amount_mismatch','不符合足額或100元內手續費條件'],
+    ['due_date_missing','缺少原預計撥款日'],
+    ['outgoing_staff_payout_multiple_fee_matches','多個單筆或合併付款集合'],
+    ['outgoing_staff_payout_no_open_obligation','目前沒有未清待付款項'],
+  ])('shows the saved Sinopac salary cause before successful identification: %s',(recorded_pending_reason,text)=>{
+    const message=financeImportReviewReason({...source,bank:'sinopac',classification_type:'staff_payout',direction:'outgoing',available_actions:[],
+      recorded_pending_reason,review_reason:'sinopac_unique_staff_account_in_transaction_reference'});
+    expect(message).toContain(text);
+    expect(message).not.toContain('已由交易參考帳號');
+  });
+  it.each([
+    ['sinopac_client_receipt_shortfall','client_receipt_underpaid'],
+    ['sinopac_client_receipt_overage','client_receipt_overpaid'],
+    ['sinopac_client_receipt_multiple_same_month_exact','sinopac_client_receipt_multiple_month_candidates'],
+    ['sinopac_client_receipt_transaction_date_missing','bank_transaction_date_missing'],
+  ])('reads an old receipt reason as the same category without changing stored history: %s',(oldCode,currentCode)=>{
+    const render=(reason:string)=>financeImportReviewReason({...source,available_actions:[],recorded_client_receipt_review:{reason,candidates:[]}});
+    expect(render(oldCode)).toBe(render(currentCode));
   });
 
-  it.each(['blocked', 'no-ready-rows'] as const)('never auto-submits %s', async policy => {
-    const preview = structuredClone(PREVIEW);
-    if (policy === 'blocked') { preview.apply_allowed = false; preview.counts.ready_dispatch = 1; preview.blocking_codes = ['fingerprint_collision']; }
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue(preview);
-    await showPreview();
-    await waitFor(() => expect(reviewCount()).toBe('1'));
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  it('shows the original missing due date and retains an actual overage reason before a refund-operation error',()=>{
+    const message=financeImportReviewReason({...source,available_actions:[],recorded_client_receipt_review:{
+      reason:'due_date_missing',candidates:[{obligation_identity:'first',obligation_type:'first',due_date:null}],
+    }});
+    expect(message).toContain('缺少原到期日');
+    expect(message).toContain('第一期（到期日 未設定）');
+    expect(message).not.toContain('月份不符');
+    const overage=financeImportReviewReason({...source,available_actions:[],dispatch_reason:'client_refund_recipient_snapshot_missing',
+      recorded_client_receipt_review:{reason:'client_receipt_overpaid',candidates:[]}});
+    expect(overage).toContain('核對合計差額');
+    expect(overage).not.toContain('退款帳戶');
+  });
+  it.each([
+    ['outgoing_client_refund_no_open_obligation','未清客戶補助退款單'],
+    ['due_date_missing','缺少正式預計退款日'],
+    ['outgoing_client_refund_month_no_match','交易日與正式預計退款日都有值'],
+    ['outgoing_client_refund_amount_mismatch','銀行實付'],
+    ['outgoing_client_refund_multiple_fee_matches','多個單筆或合併補助退款配對'],
+  ])('shows the saved subsidy failure before the successful memo identification: %s',(recorded_pending_reason,text)=>{
+    const message=financeImportReviewReason({...source,available_actions:[],classification_type:'client_subsidy_return',
+      review_reason:'taishin_client_subsidy_case_suffix_in_memo',recorded_pending_reason});
+    expect(message).toContain(text);
+    expect(message).not.toContain('已依備註六碼');
+  });
+  it.each([
+    ['sinopac_unique_staff_account_in_transaction_reference','已由交易參考帳號辨識月嫂，未留存當次阻擋原因。'],
+    ['sinopac_unique_client_refund_account_in_transaction_reference','已由交易參考帳號辨識客戶退款對象，未留存當次阻擋原因。'],
+    ['taishin_client_subsidy_case_suffix_in_memo','已依備註六碼定位客戶補助案件，請核對同案補助待退款。'],
+    ['outgoing_client_refund_multiple_fee_matches','同月有多個待退款配對符合金額或手續費條件，無法唯一選定。'],
+    ['taishin_outgoing_unrecognized','備註未辨識到月嫂姓名或可唯一定位案件的六碼；新匯入跳過，不建立流水。'],
+  ])('describes only the actual evidence or blocker: %s',(review_reason,message)=>{
+    expect(financeImportReviewReason({...source,available_actions:[],review_reason})).toBe(message);
   });
 
-  it('automatically refreshes owner review after terminal Apply', async () => {
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
-    await showPreview();
-    await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆');
-    await waitFor(() => expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledOnce());
-    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
-    expect(reviewCount()).toBe('1');
-    expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
+  it.each([null,'unrecognized_historical_reason'])('does not invent a current cause from missing or unknown history: %s',review_reason=>{
+    expect(financeImportReviewReason({...source,available_actions:[],review_reason})).toBe('未留存當次阻擋原因。');
   });
 
-  it('posts eligible rows without waiting for manual matching and shows only receipt counts plus remaining reasons', async () => {
-    const manual = { ...REVIEW_PAGE.items[0], classification_type: 'non_business_review', available_actions: ['preview_manual_correction'] };
-    const pending = { ...REVIEW_PAGE.items[0], row_id: 302, row_identity: 'ROW-302', source_row: 4, disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] };
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW,
-      counts: { ...PREVIEW.counts, ready_dispatch: 2, existing: 3, manual_review: 1, business_pending: 1 },
-      rows: [previewRow(manual, ['counterparty_account_no_match']), previewRow(pending, ['sinopac_valid_virtual_account'])] });
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 2 });
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [manual, pending] });
-    let finish!: (value: Awaited<ReturnType<typeof financeImportMutationClient.queryBatchOutcome>>) => void;
-    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockReturnValue(new Promise(resolve => { finish = resolve; }));
-    render(<FinancePage />);
-    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['mixed'], 'mixed.xlsx')] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    await waitFor(() => expect(financeImportMutationClient.queryBatchOutcome).toHaveBeenCalledOnce());
-    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
-    expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText('匯入結果')).not.toBeInTheDocument();
-    await act(async () => finish({ job_id: 'review-job', status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'batch', receipt: { batch_identity: BATCH, resulting_batch_version: 8, preview_fingerprint: PREVIEW.preview_fingerprint, reconciled_count: 1, existing_count: 4, pending_count: 2 } }));
-    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 4 筆')).toBeInTheDocument();
-    expect(await screen.findByText('未銷帳明細 2 筆')).toBeInTheDocument();
-    expect(screen.getByText('交易帳號找不到對應的收付款對象。')).toBeInTheDocument();
-    expect(screen.getByText(/銷帳編號格式可辨識/)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: '指定正確訂單' })).toHaveLength(2);
-    expect(screen.queryByText(/可自動入帳|待業務配對|需人工處理 \d/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  it('shows the recorded formal rejection before classification evidence',()=>{
+    expect(financeImportReviewReason({...source,available_actions:[],classification_type:'client_refund',direction:'outgoing',
+      review_reason:'unique_client_refund_name_and_month_matched',dispatch_reason:'bank_currency_not_twd'}))
+      .toBe('原銀行流水幣別不是新臺幣，無法核銷退款／補助，請先查核來源資料。');
   });
 
-  it('skips existing rows without creating a new Apply', async () => {
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, existing: 3 } });
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 0 });
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [] });
-    await showPreview();
-    expect(await screen.findByText('本次已銷帳 0 筆｜已存在略過 3 筆')).toBeInTheDocument();
-    expect(screen.getByText('目前沒有未銷帳資料。')).toBeInTheDocument();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  it('lists the recorded installment dates without selecting a target',()=>{
+    const text=financeImportReviewReason({...source,available_actions:[],recorded_client_receipt_review:{
+      reason:'sinopac_client_receipt_multiple_same_month_exact',candidates:[
+        {obligation_identity:'first',obligation_type:'first',due_date:'2026-10-19'},
+        {obligation_identity:'second',obligation_type:'second',due_date:'2026-10-27'},
+      ],
+    }});
+    expect(text).toContain('第一期（到期日 2026-10-19）');
+    expect(text).toContain('第二期（到期日 2026-10-27）');
   });
-
-  it('lists a blocked transaction and its cause while reporting that automatic posting did not run', async () => {
-    const blocked = { ...REVIEW_PAGE.items[0], disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] };
-    const ready = { ...REVIEW_PAGE.items[0], row_id: 302, row_identity: 'ROW-302', source_row: 4, disposition: 'create' };
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 2 });
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [blocked, ready] });
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, apply_allowed: false, blocking_codes: ['fingerprint_collision'], counts: { ...PREVIEW.counts, ready_dispatch: 1, blocked: 1 }, rows: [{ ...previewRow(blocked, []), disposition: 'blocked', fingerprint_collision: true }, previewRow(ready, [])] });
-    await showPreview();
-    expect(await screen.findByText('本次已銷帳 0 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('自動銷帳未執行：存在可能重複的銀行交易');
-    const row = within(screen.getByText('Sheet1#3').closest('tr')!);
-    expect(row.getByText('存在可能重複的銀行交易，需先核對原始資料。')).toBeInTheDocument();
-    expect(row.getByText('5000')).toBeInTheDocument();
-    expect(row.queryByRole('button', { name: '指定正確訂單' })).not.toBeInTheDocument();
-    expect(screen.getByText('未銷帳明細 2 筆')).toBeInTheDocument();
-    expect(within(screen.getByText('Sheet1#4').closest('tr')!).getByText('此筆資料已匯入入帳，符合自動銷帳條件，但因批次預覽有阻擋，尚未執行自動銷帳。')).toBeInTheDocument();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
-  });
-
-  it('keeps the confirmed posting result when reading the remaining list fails, and retries only that query', async () => {
-    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
-    vi.mocked(financeImportQueryClient.listReviewRows).mockRejectedValueOnce(new Error('read unavailable')).mockResolvedValue(REVIEW_PAGE);
-    render(<FinancePage />);
-    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['mixed'], 'mixed.xlsx')] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('未銷帳明細載入失敗');
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢未銷帳明細' }));
-    await screen.findByText('未銷帳明細 1 筆');
-    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
-  });
-
-  it('updates the posted count and removes the row after successful manual correction', async () => {
-    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValueOnce({ ...REVIEW_PAGE, items: [{ ...REVIEW_PAGE.items[0], available_actions: ['preview_manual_correction'] }] }).mockResolvedValue({ ...REVIEW_PAGE, items: [] });
-    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValueOnce(MANIFEST).mockResolvedValue({ ...MANIFEST, review_count: 0 });
-    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({ items: [{ case_no: '115000701', client_name: '測試客戶' }], next_cursor: null, etag: 'c'.repeat(64) } as never);
-    vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue({ case_no: '115000701', obligations: [{ obligation_identity: 'obligation:1', payment_stage: 'deposit', amount_due_ntd: 5000 }] } as never);
-    vi.spyOn(financeImportCorrectionClient, 'preview').mockResolvedValue({ candidate: { row_identity: REVIEW_PAGE.items[0].row_identity, batch_identity: BATCH, classification_type: 'client_receipt', bank_amount_ntd: 5000, allocations: [{ obligation_identity: 'obligation:1', amount_ntd: 5000 }] }, preview_fingerprint: 'a'.repeat(64) } as never);
-    vi.spyOn(financeImportCorrectionClient, 'apply').mockResolvedValue({ job_id: 'correction-job' } as never);
-    vi.spyOn(financeImportCorrectionClient, 'queryOutcome').mockResolvedValue({ status: 'succeeded', receipt: { row_identity: REVIEW_PAGE.items[0].row_identity, batch_identity: BATCH, preview_fingerprint: 'a'.repeat(64) } } as never);
-    await showPreview();
-    fireEvent.click(screen.getByRole('button', { name: '指定正確訂單' }));
-    await screen.findByRole('option', { name: '115000701｜測試客戶' });
-    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: '115000701' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
-    const obligation = await screen.findByRole('checkbox', { name: '115000701 · 訂金 · NT$ 5,000' });
-    await waitFor(() => expect(obligation).toBeEnabled());
-    fireEvent.click(obligation);
-    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
-    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(await screen.findByText('未銷帳明細 0 筆')).toBeInTheDocument();
-    expect(screen.queryByText('Sheet1#3')).not.toBeInTheDocument();
-    expect(financeImportCorrectionClient.apply).toHaveBeenCalledOnce();
-  });
-
-  it('locks file selection while checking and discards a late response after unmount', async () => {
-    let resolve!: (value: FinanceImportBatchPreview) => void;
-    vi.mocked(financeImportMutationClient.preview).mockReturnValue(new Promise(done => { resolve = done; }));
-    const { unmount } = render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    const input = screen.getByLabelText('選擇銀行交易明細工作簿');
-    fireEvent.change(input, { target: { files: [new File(['first'], 'first.xlsx')] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    await waitFor(() => expect(financeImportMutationClient.preview).toHaveBeenCalledOnce());
-    expect(input).toBeDisabled();
-    unmount();
-    await act(async () => { resolve(PREVIEW); });
-    expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
-  });
-
-  const exchangePath = process.env.FI_REVIEW_EXCHANGE;
-  (exchangePath ? it : it.skip)('decodes same-run source-review owner envelopes through the real typed query client', async () => {
-    const raw = JSON.parse(readFileSync(exchangePath!, 'utf-8')) as Record<string, any>;
-    const batch = raw.ingestion.data.batch_identity as string;
-    const matchedRow = raw.reviews.data.items[0] as { source_sheet: string; source_row: number };
-    const sourceReview = raw.source_audit as { source_sheet: string; source_row: number; issue_codes: string[] };
-    expect(raw.reviews.data.source_reviews).toEqual([]);
-    vi.restoreAllMocks();
-    vi.spyOn(paymentReceiptClient, 'list').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
-    vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
-    vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(raw.preview.data);
-    // The exchange proves real owner readback; later posting is an explicit test boundary.
-    vi.spyOn(financeImportMutationClient, 'apply').mockResolvedValue({ job_id: 'review-proof', status_url: '/api/v1/jobs/review-proof', replayed: false });
-    vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockResolvedValue({ job_id: 'review-proof', status: 'cancelled', attempt_count: 0, max_attempts: 1, result_reference: null, receipt: null });
-    const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
-      if (path.endsWith('/manifest')) return raw.manifest;
-      if (path.endsWith('/review-rows')) return raw.reviews;
-      throw new Error(`unexpected GET ${path}`);
-    });
-
-    await showPreview();
-    await waitFor(() => expect(reviewCount()).toBe('1'));
-    expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledWith(batch, expect.anything());
-    expect(screen.getByText(`${matchedRow.source_sheet}#${matchedRow.source_row}`)).toBeInTheDocument();
-    expect(screen.queryByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).not.toBeInTheDocument();
-    expect(screen.queryByText(sourceReview.issue_codes[0])).not.toBeInTheDocument();
-    expect(get.mock.calls.some(([path]) => String(path).endsWith('/manifest'))).toBe(true);
-    expect(get.mock.calls.some(([path]) => String(path).endsWith('/review-rows'))).toBe(true);
-  });
-
-  const refundExchangePath = process.env.FI_REFUND_REVIEW_EXCHANGE;
-  (refundExchangePath ? it : it.skip)('completes same-run refund-review entry, partial payment, balance refresh and top-up through real typed clients', async () => {
-    const raw = JSON.parse(readFileSync(refundExchangePath!, 'utf-8')) as Record<string, any>;
-    vi.restoreAllMocks();
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: raw.case_no, client_name: '測試客戶' }], next_cursor: null, etag: 'c'.repeat(64) } as never);
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
-    let phase: 'partial' | 'topup' = 'partial';
-    let posted = false;
-    const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
-      const evidence = raw[phase];
-      if (path.endsWith('/correction-outcome')) { posted = true; return evidence.correction.outcome; }
-      if (path.endsWith('/batch-outcome')) { posted = true; return evidence.outcome; }
-      const state = evidence[posted ? 'after' : 'before'];
-      if (path.endsWith('/manifest')) return state.manifest;
-      if (path.endsWith('/review-rows')) return state.reviews;
-      if (path.includes('/settlement-remediation')) return state.settlement;
-      if (path.endsWith('/cash-requirements')) return state.cash;
-      throw new Error(`unexpected GET ${path}`);
-    });
-    const post = vi.spyOn(transport, 'post').mockImplementation(async (path: string) => {
-      const evidence = raw[phase];
-      if (path.endsWith('/workbooks/ingest')) return evidence.ingestion;
-      if (path.endsWith('/batches/preview')) return evidence.preview;
-      if (path.endsWith('/corrections/preview')) return evidence.correction.preview;
-      if (path.endsWith('/corrections/apply')) return evidence.correction.accepted;
-      if (path.endsWith('/batches/apply')) return evidence.accepted;
-      throw new Error(`unexpected POST ${path}`);
-    });
-    window.location.hash = '#finance?tab=bank';
-    render(<FinancePage />);
-    const workbook = (stage: 'partial' | 'topup') => new File([Uint8Array.from(atob(raw[stage].workbook_base64), char => char.charCodeAt(0))], `${stage}.xlsx`);
-    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [workbook('partial')] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    const entry = await screen.findByRole('button', { name: '處理客戶退款' });
-    expect(reviewCount()).toBe('1');
-    expect(raw.partial.before.manifest.data.review_count).toBe(1);
-    fireEvent.click(entry);
-    expect(screen.getByLabelText('款項用途')).toHaveValue('client_refund');
-    await screen.findByRole('option', { name: `${raw.case_no}｜測試客戶` });
-    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
-    fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 12,000/ }));
-    fireEvent.change(screen.getByLabelText('退款核銷方式'), { target: { value: 'partial' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
-    expect(await screen.findByText('更正已受理，請查詢處理結果；尚未完成核銷。')).toBeInTheDocument();
-    const applied = post.mock.calls.find(([path]) => path.endsWith('/corrections/apply'))!;
-    expect(applied[1]).toMatchObject({
-      row_identity: raw.partial.before.reviews.data.items[0].row_identity,
-      classification_type: 'client_refund', allow_partial_refund_recovery: true,
-      target_obligation_identities: [raw.partial.before.settlement.data.refund_obligations[0].obligation_identity],
-    });
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢更正結果' }));
-    await waitFor(() => expect(reviewCount()).toBe('0'));
-    expect(screen.queryByRole('button', { name: '處理客戶退款' })).not.toBeInTheDocument();
-    expect(raw.partial.after.settlement.data.refund_obligations[0].amount_due_ntd).toBe(8000);
-    fireEvent.click(screen.getByRole('button', { name: /^付款$/ }));
-    fireEvent.change(screen.getByPlaceholderText('受款人或案件編號'), { target: { value: raw.case_no } });
-    fireEvent.change(screen.getByLabelText('款項類型'), { target: { value: 'client_refund' } });
-    expect(await screen.findByText('NT$ 8,000', { selector: 'td' })).toBeInTheDocument();
-
-    phase = 'topup'; posted = false;
-    fireEvent.click(screen.getByRole('button', { name: /^銀行對帳$/ }));
-    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [workbook('topup')] } });
-    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    fireEvent.click(await screen.findByRole('button', { name: '處理客戶退款' }));
-    expect(reviewCount()).toBe('1');
-    await screen.findByRole('option', { name: `${raw.case_no}｜測試客戶` });
-    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
-    fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 8,000/ }));
-    expect(screen.getByLabelText('退款核銷方式')).toHaveValue('exact');
-    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
-    expect(await screen.findByText('更正已受理，請查詢處理結果；尚未完成核銷。')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢更正結果' }));
-    await waitFor(() => expect(reviewCount()).toBe('0'));
-    expect(screen.queryByRole('button', { name: '處理客戶退款' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^付款$/ }));
-    fireEvent.change(screen.getByPlaceholderText('受款人或案件編號'), { target: { value: raw.case_no } });
-    fireEvent.change(screen.getByLabelText('款項類型'), { target: { value: 'client_refund' } });
-    expect(await screen.findByText('NT$ 0', { selector: 'td' })).toBeInTheDocument();
-    expect(screen.getByText('已付款', { selector: 'span' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'confirmed' } });
-    expect(screen.getByText('沒有符合條件的付款項目。')).toBeInTheDocument();
-    expect(post.mock.calls.filter(([path]) => path.endsWith('/corrections/apply'))).toHaveLength(2);
-    expect(post.mock.calls.filter(([path]) => path.endsWith('/batches/apply'))).toHaveLength(0);
-    expect(get.mock.calls.filter(([path]) => path.includes('/settlement-remediation'))).toHaveLength(4);
-    window.location.hash = '';
-  });
-
 });

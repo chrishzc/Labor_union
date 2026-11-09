@@ -4,7 +4,7 @@ from domains.finance_import.planning import (
     CanonicalFinanceImportRow,
     FinanceClassificationType,
     FinanceImportDisposition,
-    mark_suspected_duplicate_client_receipts,
+    defer_overlapping_client_receipts,
 )
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from infrastructure.mysql.client_receipt_reconciliation_repository import (
@@ -14,7 +14,7 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
 
 
-def test_name_account_and_amount_build_one_client_receipt_candidate_without_virtual_account():
+def test_name_account_and_amount_cannot_replace_the_complete_virtual_account():
     result = classify_finance_transaction(
         _incoming_row(),
         {},
@@ -25,14 +25,14 @@ def test_name_account_and_amount_build_one_client_receipt_candidate_without_virt
     )
 
     assert result == {
-        "classification_type": "client_receipt",
-        "matched_identity_ids": [7],
+        "classification_type": "non_business_review",
+        "matched_identity_ids": [],
         "resolved_counterparty_account": None,
-        "reason": "client_receipt_heuristic:name+account+amount",
+        "reason": "sinopac_invalid_or_missing_virtual_account",
     }
 
 
-def test_two_equally_plausible_clients_require_review_instead_of_auto_settlement():
+def test_multiple_name_account_candidates_do_not_create_a_receipt_path():
     result = classify_finance_transaction(
         _incoming_row(),
         {},
@@ -44,22 +44,32 @@ def test_two_equally_plausible_clients_require_review_instead_of_auto_settlement
     )
 
     assert result["classification_type"] == "non_business_review"
-    assert result["reason"] == "client_receipt_heuristic_ambiguous"
+    assert result["reason"] == "sinopac_invalid_or_missing_virtual_account"
 
 
-def test_second_different_bank_row_for_the_same_obligation_stays_pending():
-    first, second = mark_suspected_duplicate_client_receipts(
+def test_complete_virtual_account_takes_priority_over_unrelated_name_account_candidates():
+    row = {**_incoming_row(), 'bank_references': {'銷帳編號': '99781699115001'}}
+    result = classify_finance_transaction(row, {}, {}, known_virtual_accounts=frozenset({'99781699115001'}),
+        client_receipt_candidates=({'client_id': 99, 'name': '王小美', 'account': '001234', 'open_amounts': (3000,)},))
+    assert result['classification_type'] == 'client_receipt'
+    assert result['matched_identity_ids'] == []
+    assert result['reason'] == 'sinopac_valid_virtual_account'
+
+
+def test_two_full_payments_for_one_period_require_combined_overage_review_not_duplicate_review():
+    first, second = defer_overlapping_client_receipts(
         (_resolved_row("finance-import-row:11"), _resolved_row("finance-import-row:12"))
     )
 
-    assert first.disposition is FinanceImportDisposition.CREATE
+    assert first.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert second.disposition is FinanceImportDisposition.BUSINESS_PENDING
-    assert second.evidence[-1] == "suspected_duplicate_business_match"
-    assert second.available_actions == ("review_suspected_duplicate_business_match",)
+    assert first.client_receipt_review.reason == second.client_receipt_review.reason == "client_receipt_overpaid"
+    assert first.evidence == second.evidence == ("sinopac_valid_virtual_account",)
+    assert second.available_actions == ("resolve_owning_domain_target",)
 
 
-def test_duplicate_detection_retains_every_row_and_continues_to_later_targets():
-    rows = mark_suspected_duplicate_client_receipts(
+def test_combined_review_retains_all_original_rows_and_unrelated_targets():
+    rows = defer_overlapping_client_receipts(
         (
             _resolved_row("finance-import-row:11", "deposit:C-1"),
             _resolved_row("finance-import-row:12", "deposit:C-1"),
@@ -73,13 +83,26 @@ def test_duplicate_detection_retains_every_row_and_continues_to_later_targets():
         "finance-import-row:13",
     )
     assert tuple(row.disposition for row in rows) == (
-        FinanceImportDisposition.CREATE,
+        FinanceImportDisposition.BUSINESS_PENDING,
         FinanceImportDisposition.BUSINESS_PENDING,
         FinanceImportDisposition.CREATE,
     )
 
 
-def test_unique_heuristic_candidate_can_enter_the_canonical_receipt_workflow():
+def test_partial_and_topup_for_one_period_keep_both_sources_without_a_duplicate_flag():
+    from dataclasses import replace
+    from domains.finance_import.planning import ClientReceiptReviewDiagnostic
+    rows = tuple(replace(_resolved_row(f'finance-import-row:{i}'), amount=MoneyNTD(amount),
+                         disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                         client_receipt_review=ClientReceiptReviewDiagnostic('client_receipt_underpaid'))
+                 for i, amount in ((11,9000),(12,1000)))
+    result = defer_overlapping_client_receipts(rows)
+    assert result == rows
+    assert sum(row.amount.amount for row in result) == 10000
+    assert all('suspected_duplicate_business_match' not in row.evidence for row in result)
+
+
+def test_old_client_identity_without_a_virtual_account_or_selected_obligation_is_ineligible():
     row = {
         "format_id": "legacy",
         "direction": "incoming",
@@ -87,7 +110,7 @@ def test_unique_heuristic_candidate_can_enter_the_canonical_receipt_workflow():
         "credit": 3000,
         "classification_type": "client_receipt",
         "authoritative_classification_type": "client_receipt",
-        "authoritative_reason": "client_receipt_heuristic:name+amount",
+        "authoritative_reason": "unrecognized_historical_reason",
         "authoritative_target_identities": ["client:7"],
         "selected_client_id": 7,
         "reconciliation_status": "pending",
@@ -98,10 +121,10 @@ def test_unique_heuristic_candidate_can_enter_the_canonical_receipt_workflow():
         "bank_references": {},
     }
 
-    assert _bank_row_is_eligible(row, "115000007") is True
+    assert _bank_row_is_eligible(row, "115000007") is False
 
 
-def test_heuristic_candidate_cannot_cross_the_selected_client_boundary():
+def test_other_client_identity_cannot_cross_the_selected_client_boundary():
     row = {
         "format_id": "legacy",
         "direction": "incoming",
@@ -109,7 +132,7 @@ def test_heuristic_candidate_cannot_cross_the_selected_client_boundary():
         "credit": 3000,
         "classification_type": "client_receipt",
         "authoritative_classification_type": "client_receipt",
-        "authoritative_reason": "client_receipt_heuristic:name+amount",
+        "authoritative_reason": "unrecognized_historical_reason",
         "authoritative_target_identities": ["client:8"],
         "selected_client_id": 7,
         "reconciliation_status": "pending",
@@ -160,6 +183,6 @@ def _resolved_row(row_identity, target="deposit:C-1"):
         FinanceImportDisposition.CREATE,
         PreviewFingerprint("a" * 64),
         (target,),
-        ("client_receipt_heuristic:name+amount",),
+        ("sinopac_valid_virtual_account",),
         ("preview_apply",),
     )

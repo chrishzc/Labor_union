@@ -25,6 +25,7 @@ from infrastructure.mysql.staff_payout_repository import (
     _load_selected_bank_rows,
     _load_bank_accounts,
     _outgoing_bank_fact,
+    _verify_taishin_memo_recipients,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -49,6 +50,20 @@ class _Cursor:
         self.calls.append((statement, tuple(params)))
 
 
+@pytest.mark.parametrize('lock', [False, True])
+@pytest.mark.parametrize('occurred_on,currency,code', [
+    (None, 'TWD', 'bank_transaction_date_missing'),
+    (date(2026, 11, 8), 'USD', 'bank_currency_not_twd'),
+])
+def test_staff_payout_source_reason_is_specific_for_preview_and_fresh_apply(lock, occurred_on, currency, code):
+    from types import SimpleNamespace
+    repository = MySqlStaffPayoutRepository(object())
+    selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT)
+    with pytest.raises(ValueError, match=code):
+        repository._assemble_facts(object(), selection, 7, 0,
+            ({'transaction_date': occurred_on, 'currency': currency},), (), lock)
+
+
 class _Connection:
     def __init__(self) -> None:
         self.cursor_value = _Cursor()
@@ -71,6 +86,8 @@ class _BankReadCursor(_Cursor):
         elif 'FROM staff_bank_accounts' in statement:
             self.rows = ([{'account_no': '000012345678', 'staff_id': self.account_owner, 'is_primary': 1}]
                          if '000012345678' in params else [])
+        elif 'FROM staff WHERE' in statement:
+            self.rows = [{'id': 7, 'name': '合成月嫂甲'}, {'id': 8, 'name': '合成月嫂乙'}]
         else:
             raise AssertionError('Unexpected bank projection query')
 
@@ -82,6 +99,7 @@ def _candidate_from_bank_source(source, account_owner=7):
     cursor = _BankReadCursor(source, account_owner)
     selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, ('33',), ('obligation:1',))
     rows = _load_selected_bank_rows(cursor, selection, False)
+    rows = _verify_taishin_memo_recipients(cursor, rows, False)
     accounts = _load_bank_accounts(cursor, rows, False)
     return build_staff_payout_candidate(
         (_outgoing_bank_fact(rows[0], 7, ()),),
@@ -118,6 +136,22 @@ def test_sinopac_memo_cannot_replace_missing_recipient_account():
     source['bank_references'] = {'備註': 'HC115807服務人員'}
     with pytest.raises(ValueError, match='staff_bank_account_ambiguous'):
         _candidate_from_bank_source(source)
+
+
+@pytest.mark.parametrize('memo,error', [
+    ('合成月嫂甲 HC115807', None),
+    ('合成月嫂乙', 'cross_staff_allocation_forbidden'),
+    ('HC115807', 'staff_memo_recipient_unconfirmed'),
+])
+def test_taishin_payout_verifies_only_original_memo_name_without_bank_account(memo, error):
+    source = {**_sinopac_bank_source(), 'format_id': 'taishin', 'memo': memo,
+              'resolved_counterparty_account': None, 'bank_references': {}}
+    if error:
+        with pytest.raises(ValueError, match=error):
+            _candidate_from_bank_source(source)
+    else:
+        assert _candidate_from_bank_source(source).resulting_status is StaffPayableStatus.COMPLETED
+    assert source['resolved_counterparty_account'] is None
 
 
 def _candidate(

@@ -8,14 +8,14 @@ import './FinanceBankReconciliationWorkspace.css';
 import { Drawer } from './Drawer';
 import { FinanceStatementArchive } from './FinanceStatementArchive';
 import { financeMoney } from './FinanceReceiptsWorkspace';
-import { financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
+import { bankReconciliationUnavailableReason, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage } from '../api/finance_import/finance_import_query_schemas';
 import type { FinanceImportBatchOutcome, FinanceImportBatchPreview, FinanceImportJobAccepted, FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 const purposeLabels: Record<string, string> = {
-  client_receipt: '客戶入款', client_refund: '客戶退款', client_subsidy_return: '退客戶先墊補助',
+  client_receipt: '客戶入款', client_refund: '客戶退款', client_subsidy_return: '退客戶先墊補助', client_refund_return: '客戶退匯',
   staff_payout: '付月嫂', staff_salary: '付月嫂', staff_legacy_subsidy: '補助轉交月嫂',
   government_subsidy: '政府補助',
 };
@@ -493,7 +493,7 @@ export function FinanceBankReconciliationWorkspace({
                         ) : row.classification_type === 'government_subsidy' ? (
                           <span className="bank-reconcile-sub" style={{ fontSize: '0.82rem' }}>整期核銷（待選期間）</span>
                         ) : (
-                          <span className="bank-reconcile-sub" style={{ fontSize: '0.82rem' }}>待選擇案件</span>
+                          <span className="bank-reconcile-sub" style={{ fontSize: '0.82rem' }}>未確認唯一案件</span>
                         )}
                       </td>
                       <td>
@@ -504,7 +504,7 @@ export function FinanceBankReconciliationWorkspace({
                         <span className="bank-chip-amber">
                           {[
                             'outgoing_staff_payout_amount_mismatch',
-                            'taishin_client_refund_amount_mismatch',
+                            'outgoing_client_refund_amount_mismatch',
                             'sinopac_client_receipt_shortfall',
                             'sinopac_client_receipt_overage',
                           ].some(reason => reason === (row.recorded_client_receipt_review?.reason ?? row.review_reason)) ? '差額待核對' : '待核對'}
@@ -522,7 +522,7 @@ export function FinanceBankReconciliationWorkspace({
                           >
                             核對交易
                           </button>
-                        ) : <span className="bank-reconcile-sub">對應款項待確認</span>}
+                        ) : <span className="bank-reconcile-sub">{bankReconciliationUnavailableReason(row)}</span>}
                         <button
                           type="button"
                           className="bank-btn-action btn-view"

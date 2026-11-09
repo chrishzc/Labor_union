@@ -19,7 +19,7 @@ const bankSchema = z.enum(['sinopac', 'taishin']);
 const optionalCount = z.number().int().nonnegative().nullable();
 export const FinanceClientReceiptReviewSchema = z.strictObject({
   reason: z.string(),
-  candidates: z.array(z.strictObject({ obligation_identity: z.string(), obligation_type: z.string(), due_date: z.iso.date() })),
+  candidates: z.array(z.strictObject({ obligation_identity: z.string(), obligation_type: z.string(), due_date: z.iso.date().nullable() })),
 });
 export const FinanceBankTransactionPageSchema = z.strictObject({
   items: z.array(z.strictObject({
@@ -29,10 +29,13 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
     review_reason: z.string().nullable(), available_actions: z.array(z.string()),
     dispatch_reason: z.string().nullish(),
     recorded_client_receipt_review: FinanceClientReceiptReviewSchema.nullish(),
+    recorded_pending_reason: z.string().nullish(),
     reference: z.string(), counterparty_name: z.string().nullable(), cases: z.array(z.string()),
     reconciliation_target: z.strictObject({
-      case_no: z.string(), obligation_identities: z.array(z.string()).min(1), staff_id: z.number().int().positive().nullable(),
+      case_no: z.string(), obligation_identities: z.array(z.string()), staff_id: z.number().int().positive().nullable(),
+      requires_selection: z.boolean().optional(),
     }).nullish(),
+    reconciliation_unavailable_reason: z.string().nullish(),
   })),
   pending_count: optionalCount,
   next_before_row_id: z.number().int().positive().nullable(),

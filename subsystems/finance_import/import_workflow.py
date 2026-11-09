@@ -9,7 +9,7 @@ from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
     CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
-    build_finance_import_plan, mark_suspected_duplicate_client_receipts,
+    build_finance_import_plan, defer_overlapping_client_receipts,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -54,6 +54,7 @@ class FinanceImportApplyReceipt:
 class StoredFinanceImportReceipt:
     command_fingerprint: PreviewFingerprint; receipt: FinanceImportApplyReceipt
     client_receipt_reviews: tuple[tuple[str, ClientReceiptReviewDiagnostic], ...] = ()
+    pending_reasons: tuple[tuple[str, str], ...] = ()
 
 
 class FinanceImportRepository(Protocol):
@@ -122,7 +123,7 @@ class FinanceImportWorkflow:
         return build_finance_import_plan(
             replace(
                 facts,
-                rows=mark_suspected_duplicate_client_receipts(resolved_rows),
+                rows=defer_overlapping_client_receipts(resolved_rows),
             )
         )
     def _dispatch(self, plan, request):
@@ -135,7 +136,9 @@ class FinanceImportWorkflow:
             for row in plan.rows
             if row.disposition is FinanceImportDisposition.BUSINESS_PENDING and row.client_receipt_review is not None
         )
-        self._repository.save_receipt(request.idempotency_key, StoredFinanceImportReceipt(command_fingerprint, receipt, reviews))
+        pending_reasons = tuple((row.row_identity, row.pending_reason) for row in plan.rows
+                               if row.disposition is FinanceImportDisposition.BUSINESS_PENDING and row.pending_reason is not None)
+        self._repository.save_receipt(request.idempotency_key, StoredFinanceImportReceipt(command_fingerprint, receipt, reviews, pending_reasons))
 
 
 def _validate_batch_version(request, facts):

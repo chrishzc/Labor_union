@@ -12,7 +12,8 @@
 - `infrastructure/mysql/case_staff_accounting_repository.py` — case-scoped effective obligation, payout and historical evidence; no month filter, no cash writer.
 - `domains/staff_payables/reconciliation.py`
 - `subsystems/staff_payables/payout_reconciliation.py`
-- `infrastructure/mysql/staff_payout_repository.py` — 永豐以原始交易參考編號的完整帳號投影付款收款人，借用 Finance Import 的 `extract_sinopac_account_reference`；備註六碼只限縮案件，不作銀行帳戶。其他格式的既有帳戶投影不變。
+- `infrastructure/mysql/staff_payout_repository.py` — 永豐以原始交易參考編號的完整帳號投影付款收款人；台新於Preview／Apply以原始備註姓名唯一確認月嫂，投影typed memo staff proof取代帳號必填，所選義務仍須同人。借用Finance Import的完整帳號及姓名擷取；備註六碼不作台新月嫂定位或銀行帳戶。其他格式的既有帳戶投影不變。
+- Finance Import 的永豐薪資及台新月嫂補助候選，在宣稱可自動核銷前委派本 owner 的同一 Preview；台新先重新驗證原始備註姓名且不要求帳戶，永豐沿原帳戶規則。正式 Apply 仍重驗原版本、來源及分配，不新增核銷 writer 或 transaction owner。
 
 ## Contracts
 - `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` §2–3。

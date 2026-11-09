@@ -4,7 +4,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceBankReconciliationWorkspace } from '../../../../../../../components/FinanceBankReconciliationWorkspace';
 import { financeImportReviewReason } from '../../../../../../../adapters/finance/finance_import_query_adapter';
@@ -20,6 +20,9 @@ import { clientRegistryClient } from '../../../../../../../api/client_registry/c
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { paymentOverdueReminderClient } from '../../../../../../../api/line_order_groups/payment_overdue_reminder_client';
 import { transport } from '../../../../../../../api/shared/transport';
+import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
+import { staffPayoutRemediationClient } from '../../../../../../../api/staff_payables/staff_payout_remediation_client';
+import { financeImportCorrectionClient } from '../../../../../../../api/finance_import/finance_import_correction_client';
 
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
   financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn() },
@@ -132,13 +135,16 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
   });
 
   it.each([
-    ['taishin_unique_staff_account', null, /月嫂姓名配對/],
+    ['unique_staff_payout_name_and_month_matched', null, /月嫂姓名與同月款項已辨識，未留存當次阻擋原因/],
     ['outgoing_staff_payout_month_no_match', null, /預計撥款日同月/],
-    ['taishin_client_refund_month_no_match', null, /預計退款日同月/],
+    ['outgoing_client_refund_month_no_match', null, /預計退款日同月/],
     ['sinopac_client_receipt_month_no_match', null, /原到期日同月/],
-    ['taishin_client_refund_amount_mismatch', 'client_refund_recipient_account_mismatch', /與待退款項的收款帳戶不符/],
-    ['staff_account_matched', 'staff_bank_account_ambiguous', /唯一有效的月嫂主要帳戶/],
+    ['outgoing_client_refund_amount_mismatch', 'client_refund_recipient_account_mismatch', /與待退款項的收款帳戶不符/],
+    ['sinopac_unique_staff_account_in_transaction_reference', 'staff_bank_account_ambiguous', /唯一有效的月嫂主要帳戶/],
+    ['unique_staff_payout_name_and_month_matched', 'staff_memo_recipient_unconfirmed', /備註姓名驗證未通過/],
+    ['taishin_client_subsidy_case_suffix_in_memo', 'client_subsidy_memo_recipient_unconfirmed', /銀行備註無法確認本案客戶補助對象/],
     ['sinopac_valid_virtual_account', null, /已由虛擬帳號定位案件，未留存當次阻擋原因/],
+    ['unrecognized_historical_reason', null, /未留存當次阻擋原因/],
     [null, null, /未留存當次阻擋原因/],
   ] as const)('shows the concrete reason in transaction details (%s, %s)', async (review_reason, dispatch_reason, message) => {
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
@@ -167,11 +173,24 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     });
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
 
-    const reason = /同月有多筆等額待收期款.*第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/;
+    const reason = /同月有多筆候選期款.*第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/;
     expect(within(await screen.findByRole('row', { name: /Sheet1#2/ })).getByText(reason)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '查看交易 finance-import-row:101' }));
     expect(within(screen.getByRole('dialog', { name: '待核對交易明細' })).getByText(reason)).toBeVisible();
     expect(onReconcile).not.toHaveBeenCalled();
+  });
+
+  it('keeps the reconciliation entry for a period with no due date and displays that actual cause',async()=>{
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[{...sinopac,
+      recorded_client_receipt_review:{reason:'due_date_missing',candidates:[{obligation_identity:'first',obligation_type:'first',due_date:null}]},
+      reconciliation_target:{case_no:'115000001',staff_id:null,obligation_identities:['first'],requires_selection:true},
+    }],pending_count:1,next_before_row_id:null});
+    render(<FinanceBankReconciliationWorkspace {...defaultProps}/>);
+    expect(await screen.findByText(/待收期款缺少原到期日/)).toHaveTextContent('第一期（到期日 未設定）');
+    fireEvent.click(screen.getByRole('button',{name:/核對交易/}));
+    expect(onReconcile).toHaveBeenCalledWith(expect.objectContaining({
+      row_identity:sinopac.row_identity,reconciliation_target:{case_no:'115000001',staff_id:null,obligation_identities:['first'],requires_selection:true},
+    }));
   });
 
   it('reports a failed batch without assigning its failure to an otherwise eligible row', () => {
@@ -220,8 +239,13 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     }
   });
 
-  it('opens the shared case drawer with the clicked bank source and matched obligation already selected', async () => {
+  it.each([false, true])('opens the shared case drawer with the clicked bank source (manual selection: %s)', async (manual) => {
     window.location.hash = '#finance?tab=bank';
+    if (manual) vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...sinopac, reconciliation_target: { case_no: '115000001', staff_id: null,
+        obligation_identities: ['receipt:first', 'receipt:second'], requires_selection: true } }],
+      pending_count: 1, next_before_row_id: null,
+    });
     const mocks = [
       vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
         case_no: '115000001', client_name: '測試客戶', receivable_ntd: 20000, received_ntd: 0,
@@ -230,6 +254,9 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
         client_items: [{
           identity: 'receipt:first', direction: 'receivable', label: '第一期', party: '測試客戶',
           expected_ntd: 20000, actual_ntd: 0, remaining_ntd: 20000, has_payment: false, version: '1', due_date: '2026-01-08',
+        }, {
+          identity: 'receipt:second', direction: 'receivable', label: '第二期', party: '測試客戶',
+          expected_ntd: 12000, actual_ntd: 0, remaining_ntd: 12000, has_payment: false, version: '1', due_date: '2026-01-27',
         }],
       }),
       vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue({
@@ -257,8 +284,14 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(await within(drawer).findByRole('checkbox', { name: '納入銀行款 101' })).toBeChecked();
       expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 101' })).toBeDisabled();
       expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 103' })).not.toBeChecked();
-      expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).toBeChecked();
+      if (manual) expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).not.toBeChecked();
+      else expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).toBeChecked();
       expect(within(drawer).getByRole('checkbox', { name: /receipt:second/ })).not.toBeChecked();
+      if (manual) {
+        fireEvent.click(within(drawer).getByRole('checkbox', { name: /receipt:second/ }));
+        expect(within(drawer).getByRole('checkbox', { name: /receipt:second/ })).toBeChecked();
+        expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).not.toBeChecked();
+      }
 
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -269,6 +302,118 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     }
   });
 
+  it.each(['staff', 'refund'] as const)('opens same-case %s candidates without preselection and previews only the human selection', async kind => {
+    window.location.hash = '#finance?tab=bank';
+    const ids = [`${kind}:first`, `${kind}:second`];
+    const row: FinanceBankTransaction = { ...sinopac, bank: 'taishin', direction: 'outgoing',
+      classification_type: kind === 'staff' ? 'staff_payout' : 'client_subsidy_return',
+      reconciliation_target: { case_no: '115000001', staff_id: kind === 'staff' ? 7 : null,
+        obligation_identities: ids, requires_selection: true } };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    const items = ids.map((identity, index) => ({ identity, direction: 'payable' as const, label: `合成款項${index + 1}`,
+      party: '合成對象', expected_ntd: 15000, actual_ntd: 0, remaining_ntd: 15000, has_payment: false,
+      version: '1', due_date: '2026-01-15' }));
+    const staffPreview = vi.spyOn(staffPayoutRemediationClient, 'preview').mockRejectedValue(new Error('synthetic preview stop'));
+    const refundPreview = vi.spyOn(financeImportCorrectionClient, 'preview').mockRejectedValue(new Error('synthetic preview stop'));
+    const mocks = [staffPreview, refundPreview,
+      vi.spyOn(staffPayoutRemediationClient, 'query').mockResolvedValue({ staff_id: 7, staff_payables_version: 1, events: [],
+        obligations: ids.map(obligation_identity => ({ obligation_identity, case_no: '115000001', amount_due_ntd: 15000,
+          due_date: '2026-01-15', net_paid_ntd: 0, balance_ntd: 15000, payout_status: 'payable' })) }),
+      vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({ case_no: '115000001', client_name: '合成客戶',
+        receivable_ntd: 0, received_ntd: 0, payable_ntd: 30000, paid_ntd: 0, pending_warning_count: 0,
+        warnings: [], transactions: [], staff_items: kind === 'staff' ? items : [], client_items: kind === 'refund' ? items : [] }),
+      vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(clientRegistryClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(caseVirtualAccountClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(paymentOverdueReminderClient, 'case').mockRejectedValue(new Error('not needed')),
+    ];
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: '核對交易 Sheet1#2' }));
+      const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
+      const first = await within(drawer).findByRole('checkbox', { name: `核銷款項 ${ids[0]}` });
+      expect(first).not.toBeChecked();
+      expect(within(drawer).getByRole('checkbox', { name: `核銷款項 ${ids[1]}` })).not.toBeChecked();
+      expect(within(drawer).queryByRole('button', { name: '預覽核銷' })).not.toBeInTheDocument();
+      fireEvent.click(within(drawer).getByRole('checkbox', { name: `核銷款項 ${ids[1]}` }));
+      const previewButton = await within(drawer).findByRole('button', { name: '預覽核銷' });
+      await waitFor(() => expect(previewButton).toBeEnabled());
+      fireEvent.click(previewButton);
+      await waitFor(() => {
+        if (kind === 'staff') expect(staffPreview).toHaveBeenCalledWith({ financeImportRowIds: [101], obligationIdentities: [ids[1]] }, expect.anything());
+        else expect(refundPreview).toHaveBeenCalledWith(expect.objectContaining({ row_identity: row.row_identity, target_obligation_identities: [ids[1]] }));
+      });
+      expect(first).not.toBeChecked();
+    } finally {
+      mocks.forEach(mock => mock.mockRestore());
+      window.location.hash = '';
+    }
+  });
+
+  it.each([false, true])('reconciles a bank return against the selected original refund (timeout replay: %s)', async timeout => {
+    window.location.hash = '#finance?tab=bank';
+    const row: FinanceBankTransaction = { ...sinopac, classification_type: 'client_refund_return',
+      reconciliation_target: { case_no: '115000001', staff_id: null, obligation_identities: [], requires_selection: true } };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    const original = [51, 52].map(id => ({ id, amount_ntd: 15000, occurred_on: '2026-01-01', reversed_ntd: 0 }));
+    let applied = false;
+    let attempts = 0;
+    const envelope = (data: unknown) => ({ success: true, message: '', data, error: null });
+    const get = vi.spyOn(transport, 'get').mockImplementation(async path => {
+      expect(path).toBe('/api/v1/orders/115000001/client-finance/refund-reversal');
+      return envelope({ case_no: '115000001', account_version: applied ? 4 : 3,
+        refund_obligations: [], subsidy_return_obligations: [], refund_bank_facts: [], subsidy_return_bank_facts: [],
+        reversal_targets: [], refund_return_targets: applied ? [original[0]] : original }) as never;
+    });
+    const post = vi.spyOn(transport, 'post').mockImplementation(async (path, _body, _options) => {
+      if (path.endsWith('/preview')) return envelope({ account_version: 3, preview_fingerprint: 'b'.repeat(64),
+        candidate: { correction_type: 'refund_return', case_no: '115000001', amount: { amount: 15000 },
+          entries: [{ identity: 'refund-return:101', entry_type: 'refund_reversal', amount: { amount: 15000 },
+            occurred_on: '2026-01-09', reversal_of_entry_identity: '52', finance_import_row_identity: '101' }],
+          allocations: [{ entry_identity: 'refund-return:101', obligation_identity: 'refund:second', amount: { amount: 15000 } }],
+          affected_obligations: ['refund:second'], reversal_entry_type: 'refund', recovery_amount: { amount: 0 },
+          fingerprint: 'c'.repeat(64), transfer_fee: { amount: 0 } } }) as never;
+      attempts += 1;
+      if (timeout && attempts === 1) throw new ApiTimeoutError(30_000);
+      applied = true;
+      return envelope({ case_no: '115000001', correction_type: 'refund_return', account_version: 4,
+        correction_identity: 'd'.repeat(64), ledger_entry_count: 1, allocation_count: 1, affected_obligations: ['refund:second'] }) as never;
+    });
+    const mocks = [get, post, vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session'),
+      vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({ case_no: '115000001', client_name: '合成客戶',
+        receivable_ntd: 0, received_ntd: 0, payable_ntd: 30000, paid_ntd: 30000, pending_warning_count: 0,
+        warnings: [], transactions: [], staff_items: [], client_items: [] }),
+      vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(clientRegistryClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(caseVirtualAccountClient, 'query').mockRejectedValue(new Error('not needed')),
+      vi.spyOn(paymentOverdueReminderClient, 'case').mockRejectedValue(new Error('not needed')),
+    ];
+    try {
+      render(<FinancePage />);
+      fireEvent.click(await screen.findByRole('button', { name: '核對交易 Sheet1#2' }));
+      const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
+      const select = await within(drawer).findByRole('combobox', { name: '原退款' });
+      expect(select).toHaveValue('');
+      expect(within(drawer).getByRole('button', { name: '預覽退匯核銷' })).toBeDisabled();
+      fireEvent.change(select, { target: { value: '52' } });
+      fireEvent.click(within(drawer).getByRole('button', { name: '預覽退匯核銷' }));
+      fireEvent.click(await within(drawer).findByRole('button', { name: '確認退匯核銷' }));
+      if (timeout) {
+        const retry = await within(drawer).findByRole('button', { name: '查回原次核銷結果' });
+        expect(select).toBeDisabled();
+        expect(within(drawer).getByRole('button', { name: '重新查詢原退款' })).toBeDisabled();
+        fireEvent.click(retry);
+      }
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      const commands = post.mock.calls.filter(([path]) => path.endsWith('/apply'));
+      expect(commands).toHaveLength(timeout ? 2 : 1);
+      expect(commands[0][1]).toEqual(expect.objectContaining({ finance_import_row_id: 101, refund_ledger_entry_id: 52,
+        expected_account_version: 3, preview_fingerprint: 'b'.repeat(64) }));
+      if (timeout) expect(commands[1]).toEqual(commands[0]);
+      expect(get).toHaveBeenCalledTimes(2);
+    } finally { mocks.forEach(mock => mock.mockRestore()); window.location.hash = ''; }
+  });
+
   it('keeps an unresolved row visible without opening an arbitrary case', async () => {
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
       items: [{ ...sinopac, reconciliation_target: null }], pending_count: 1, next_before_row_id: null,
@@ -276,6 +421,26 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
     expect(await screen.findByText('對應款項待確認')).toBeVisible();
     expect(screen.queryByRole('button', { name: '核對交易 Sheet1#2' })).not.toBeInTheDocument();
+  });
+
+  it('labels an already stored unassigned row without offering case selection or reconciliation', async () => {
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...sinopac, cases: [], reconciliation_target: null, reconciliation_unavailable_reason: 'case_unconfirmed' }],
+      pending_count: 1, next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    expect(await screen.findByText('尚未確認唯一案件。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /核對交易|選擇案件/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the missing payee on a Taishin row with an identified case', async () => {
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...taishin, direction: 'outgoing', classification_type: 'staff_salary', cases: ['115000001'],
+        reconciliation_target: null, reconciliation_unavailable_reason: 'staff_unconfirmed' }], pending_count: 1, next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    expect(await screen.findByText('案件已定位，尚未確認這筆出款的月嫂。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /核對交易|選擇案件/ })).not.toBeInTheDocument();
   });
 
   it('passes the selected bank row and obligation to the shared drawer entry', async () => {

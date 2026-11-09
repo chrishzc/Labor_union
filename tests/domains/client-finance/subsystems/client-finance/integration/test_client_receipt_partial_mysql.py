@@ -76,9 +76,9 @@ def test_partial_cash_then_topup_preserves_sources_and_only_completes_deposit_at
             assert cursor.fetchone()=={'contracted_amount_ntd':10000,'allocated_net_amount_ntd':10000}
             cursor.execute('SELECT amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))
             assert [row['amount_ntd'] for row in cursor.fetchall()]==[9000,1000]
-        for overage in (False, True):
-            mixed_case='ACCT-MIXED-'+str(int(overage))
-            identities,mixed_banks=_seed_mixed_case(connection,mixed_case,overage)
+        for overage,missing_due in ((False,False),(True,False),(False,True)):
+            mixed_case='ACCT-MIXED-'+str(int(overage))+('-NO-DUE' if missing_due else '')
+            identities,mixed_banks=_seed_mixed_case(connection,mixed_case,overage,missing_due=missing_due)
             mixed=ReconciliationSelection(mixed_case,None,tuple(sorted(mixed_banks)),tuple(sorted(identities)),allow_overage_disposition=overage)
             assert {str(row['finance_import_row_id']) for row in app.query(mixed_case)['bank_facts']}==set(mixed_banks)
             if not overage:
@@ -97,6 +97,11 @@ def test_partial_cash_then_topup_preserves_sources_and_only_completes_deposit_at
             receipt=app.apply(mixed_request)
             assert receipt.ledger_entry_count==2 and app.apply(mixed_request)==receipt
             with connection.cursor() as cursor:
+                cursor.execute('SELECT amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(mixed_case,))
+                assert [row['amount_ntd'] for row in cursor.fetchall()]==[9000,1100 if overage else 1000]
+                if missing_due:
+                    cursor.execute('SELECT due_date FROM client_obligations WHERE case_no=%s',(mixed_case,))
+                    assert all(row['due_date'] is None for row in cursor.fetchall())
                 cursor.execute('SELECT COUNT(*) n FROM client_obligations WHERE case_no=%s AND direction=\'receivable_from_client\' AND amount_due_ntd>0',(mixed_case,))
                 assert cursor.fetchone()['n']==0
                 cursor.execute("SELECT COALESCE(SUM(amount_due_ntd),0) amount FROM client_obligations WHERE case_no=%s AND obligation_type='refund'",(mixed_case,))
@@ -133,7 +138,7 @@ def test_partial_cash_then_topup_preserves_sources_and_only_completes_deposit_at
     finally:connection.close()
 
 
-def _seed_mixed_case(connection, case, overage, *, partial_only=False, stage_amounts=(5000, 5000), bank_amounts=None):
+def _seed_mixed_case(connection, case, overage, *, partial_only=False, stage_amounts=(5000, 5000), bank_amounts=None, missing_due=False):
     identities=[case+':deposit',case+':first'];banks=[]
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,'Synthetic Client')",(case,))
@@ -145,9 +150,10 @@ def _seed_mixed_case(connection, case, overage, *, partial_only=False, stage_amo
         cursor.execute("INSERT INTO client_finance_accounts(case_no) VALUES (%s)",(case,))
         for index,stage in enumerate(('deposit','first')):
             amount = stage_amounts[index]
-            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client','established',0,%s,%s,'synthetic',0,%s,'synthetic','fixture')",(identities[index],case,stage,amount,'2026-10-0'+str(index+1),identities[index]))
+            due=None if missing_due else '2026-10-0'+str(index+1)
+            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client','established',0,%s,%s,'synthetic',0,%s,'synthetic','fixture')",(identities[index],case,stage,amount,due,identities[index]))
             event=cursor.lastrowid
-            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',%s,%s,'open',%s,0)",(identities[index],case,stage,amount,'2026-10-0'+str(index+1),event))
+            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',%s,%s,'open',%s,0)",(identities[index],case,stage,amount,due,event))
         cursor.execute("INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) VALUES ('sinopac','synthetic',1,2)")
         batch=cursor.lastrowid
         if bank_amounts is None:

@@ -135,7 +135,10 @@ class StaffPayoutReconciliationWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, selection: StaffPayoutSelection, correlation_id: CorrelationId) -> StaffPayoutReconciliationPreview:
-        facts = self._repository.load(selection, for_update=False)
+        try:
+            facts = self._repository.load(selection, for_update=False)
+        except ValueError as error:
+            raise _domain_error(correlation_id, str(error)) from error
         return _build_typed_preview(selection, facts, correlation_id)
 
     def apply(self, request: StaffPayoutApplyRequest) -> StaffPayoutReceipt:
@@ -169,7 +172,10 @@ class StaffPayoutReconciliationWorkflow:
         raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict", "Idempotency key was used by another Staff Payables command.")
 
     def _fresh_preview(self, request: StaffPayoutApplyRequest) -> StaffPayoutReconciliationPreview:
-        facts = self._repository.load(request.selection, for_update=True)
+        try:
+            facts = self._repository.load(request.selection, for_update=True)
+        except ValueError as error:
+            raise _domain_error(request.correlation_id, str(error)) from error
         _validate_expected_versions(request, facts)
         preview = _build_typed_preview(request.selection, facts, request.correlation_id)
         if preview.fingerprint != request.preview_fingerprint:
@@ -298,7 +304,10 @@ def _sorted_obligation_payloads(obligations):
 
 
 def _bank_fact_payload(bank_fact):
-    return {"identity": bank_fact.identity, "staff_id": bank_fact.staff_id, "amount_ntd": bank_fact.amount.amount, "bank_account_identity": bank_fact.bank_account_identity, "direction": bank_fact.direction.value, "raw_fact_identity": bank_fact.canonical_raw_fact_identity, "eligible": bank_fact.eligible, "blocking_anomalies": bank_fact.blocking_anomalies}
+    payload = {"identity": bank_fact.identity, "staff_id": bank_fact.staff_id, "amount_ntd": bank_fact.amount.amount, "bank_account_identity": bank_fact.bank_account_identity, "direction": bank_fact.direction.value, "raw_fact_identity": bank_fact.canonical_raw_fact_identity, "eligible": bank_fact.eligible, "blocking_anomalies": bank_fact.blocking_anomalies}
+    if bank_fact.taishin_memo_staff_id is not None:
+        payload["taishin_memo_staff_id"] = bank_fact.taishin_memo_staff_id
+    return payload
 
 
 def _bank_account_payload(bank_account):

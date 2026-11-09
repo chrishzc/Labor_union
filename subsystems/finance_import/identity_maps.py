@@ -205,6 +205,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
             c_id = _positive_id(r.get("client_id"), "client_id")
             refund_case_candidates.setdefault(suffix, set()).add(c_id)
 
+    staff_name_identities = _staff_name_identities(cursor)
     return {
         "client_refund_accounts": _stable_map(refund_candidates),
         "client_subsidy_return_accounts": _stable_map(
@@ -216,7 +217,8 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         "client_refund_case_suffixes": _stable_map(refund_case_candidates),
         "all_client_names": _all_client_names(cursor),
         "taishin_client_refund_candidates": _client_refund_name_candidates(cursor),
-        "all_staff_names": _all_staff_names(cursor),
+        "all_staff_names": tuple(name for name, identities in staff_name_identities.items() for _ in identities),
+        "staff_name_identities": staff_name_identities,
         "staff_payout_candidates": _staff_payout_candidates(cursor),
         "known_virtual_accounts": known_virtual_accounts,
         "known_case_suffixes": known_case_suffixes,
@@ -270,18 +272,18 @@ def _known_case_virtual_accounts(
     return frozenset(valid_virtual_accounts), known_suffixes
 
 
-def _all_staff_names(cursor: Any) -> tuple[str, ...]:
+def _staff_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:
     try:
-        cursor.execute("SELECT DISTINCT name FROM staff WHERE name IS NOT NULL AND name <> ''")
-        names = []
+        cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name <> ''")
+        names: dict[str, set[int]] = {}
         for row in cursor.fetchall():
             if isinstance(row, Mapping) and row.get("name"):
                 normalized = _account(row.get("name"))
                 if normalized:
-                    names.append(normalized)
-        return tuple(sorted(set(names), key=len, reverse=True))
+                    names.setdefault(normalized, set()).add(_positive_id(row["id"], "staff_id"))
+        return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
     except Exception:
-        return ()
+        return {}
 
 
 def _staff_payout_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:

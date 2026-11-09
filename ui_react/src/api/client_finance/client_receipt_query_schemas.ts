@@ -27,6 +27,10 @@ export const ClientReceiptQuerySchema = z.strictObject({
   account_version: z.number().int().nonnegative(),
   bank_facts: z.array(ClientReceiptBankFactSchema),
   obligations: z.array(ClientReceiptObligationSchema),
+  bank_fact_blockers: z.array(z.strictObject({
+    finance_import_row_id: z.number().int().positive(),
+    codes: z.array(z.enum(['bank_transaction_date_missing', 'bank_currency_not_twd'])).min(1),
+  })).optional(),
 });
 
 export const ClientReceiptQueryResponseSchema = z.strictObject({

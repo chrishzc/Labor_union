@@ -24,7 +24,7 @@ const previewRowSchema = z.strictObject({
   row_identity: z.string(), canonical_fact_version: z.number().int().nonnegative(), amount_ntd: z.number().int().positive(),
   classification_type: z.string(), disposition: z.string(), target_identities: z.array(z.string()), evidence: z.array(z.string()),
   available_actions: z.array(z.string()), integrity_violations: z.array(z.string()), fingerprint_collision: z.boolean(),
-  formal_reference_conflict: z.boolean(), client_receipt_review: FinanceClientReceiptReviewSchema.nullish(),
+  formal_reference_conflict: z.boolean(), client_receipt_review: FinanceClientReceiptReviewSchema.nullish(), pending_reason: z.string().nullish(),
 });
 const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_version: z.number().int().nonnegative(), source_content_digest: sha256, classifier_version: z.string(), fingerprint_version: z.string(), counts: countsSchema, dispatch_summaries: z.array(z.strictObject({ classification_type: z.string(), candidate_count: z.number().int().nonnegative(), total_amount_ntd: z.number().int().nonnegative() })), rows: z.array(previewRowSchema), blocking_codes: z.array(z.string()), apply_allowed: z.boolean(), preview_fingerprint: sha256 });
 const jobAcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), status_url: z.string().min(1), replayed: z.boolean() });

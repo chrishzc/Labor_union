@@ -47,6 +47,7 @@ class ClientReconciliationError(Exception):
 
 class ClientReconciliationRepository(Protocol):
     def load(self, selection: ReconciliationSelection, *, for_update: bool) -> ClientReconciliationFacts: ...
+    def validate_overage_refund_recipient(self, case_no: str) -> None: ...
     def find_receipt(self, key: IdempotencyKey) -> StoredClientReconciliationReceipt | None: ...
     def append_ledger_entries(self, candidate: ClientReconciliationCandidate) -> None: ...
     def append_allocations(self, candidate: ClientReconciliationCandidate) -> None: ...
@@ -58,7 +59,13 @@ class ClientReconciliationRepository(Protocol):
 
 class ClientReconciliationWorkflow:
     def __init__(self, repository: ClientReconciliationRepository, unit_of_work_factory: Callable[[], object]): self._repository=repository; self._unit_of_work_factory=unit_of_work_factory
-    def preview(self, selection: ReconciliationSelection) -> ClientReconciliationPreview: return _preview(selection, self._repository.load(selection, for_update=False))
+    def preview(self, selection: ReconciliationSelection) -> ClientReconciliationPreview:
+        return self._preview(selection, self._repository.load(selection, for_update=False))
+    def _preview(self, selection, facts):
+        preview = _preview(selection, facts)
+        if preview.candidate.status is ReconciliationStatus.OVERAGE:
+            self._repository.validate_overage_refund_recipient(selection.case_no)
+        return preview
     def apply(self, request: ClientReconciliationApplyRequest) -> ClientReconciliationReceipt:
         command = _command(request)
         with self._unit_of_work_factory() as unit:
@@ -68,7 +75,7 @@ class ClientReconciliationWorkflow:
                 return replay.receipt
             facts=self._repository.load(request.selection, for_update=True)
             if facts.account_version != request.expected_account_version.value:raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=facts.account_version)
-            try:preview=_preview(request.selection, facts)
+            try:preview=self._preview(request.selection, facts)
             except ValueError as error:
                 if str(error)=="invalid_client_receipt_facts":raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=facts.account_version) from None
                 raise

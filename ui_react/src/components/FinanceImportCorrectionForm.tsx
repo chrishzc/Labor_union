@@ -5,7 +5,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
-import { financeImportCorrectionClient, type FinanceImportCorrectionPreview, type FinanceImportCorrectionSelection } from '../api/finance_import/finance_import_correction_client';
+import { financeImportCorrectionClient, financeRefundBlockerMessage, type FinanceImportCorrectionPreview, type FinanceImportCorrectionSelection } from '../api/finance_import/finance_import_correction_client';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { StaffPayoutRemediationWorkbench, type StaffPayoutRemediationTarget } from './StaffPayoutRemediationWorkbench';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
@@ -195,7 +195,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
         const data = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
         const obligations = kind === 'client_refund' ? data.refund_obligations : data.subsidy_return_obligations;
         const label = kind === 'client_refund' ? '客戶退款' : '退客戶先墊補助';
-        setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · ${label} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}` })));
+        setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · ${label} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}${kind === 'client_refund' ? ` · ${item.obligation_type === 'adjustment' ? '退款調整' : '一般退款'} · 預計退款日 ${item.due_date ?? '未設定'}` : ''}` })));
       } else {
         const data = await staffPayablesQueryClient.query(Number(target));
         setOptions(data.obligations.filter((item) => item.balance_ntd > 0).map((item) => ({ id: item.obligation_identity, label: `${item.case_no} · 未付 NT$ ${item.balance_ntd.toLocaleString()}` })));
@@ -207,8 +207,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     if (retryCommand) return;
     setBusy(true); invalidate();
     const request: FinanceImportCorrectionSelection = { row_identity: rowIdentity, classification_type: kind,
-      target_obligation_identities: selected, refund_ledger_entry_identity: null, allow_partial_refund_recovery: kind === 'client_refund' && refundMode === 'partial',
-      allow_refund_overage_recovery: kind === 'client_refund' && refundMode === 'overage', allow_client_receipt_overage: false, reason: reason.trim(), evidence: [sourceLabel] };
+      target_obligation_identities: selected, refund_ledger_entry_identity: null, allow_partial_refund_recovery: (kind === 'client_refund' || kind === 'client_subsidy_return') && refundMode === 'partial',
+      allow_refund_overage_recovery: (kind === 'client_refund' || kind === 'client_subsidy_return') && refundMode === 'overage', allow_client_receipt_overage: false, reason: reason.trim(), evidence: [sourceLabel] };
     try {
       const result = await financeImportCorrectionClient.preview(request);
       if (result.candidate.row_identity !== rowIdentity || result.candidate.classification_type !== kind) throw new Error('更正預覽對象不一致。');
@@ -249,17 +249,23 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
           || outcome.receipt.batch_identity !== checkedPreview.candidate.batch_identity
           || outcome.receipt.preview_fingerprint !== checkedPreview.preview_fingerprint
         ) throw new Error('更正收據尚未確認，不能判定完成。');
-        if (kind === 'client_refund') {
+        if (kind === 'client_refund' || kind === 'client_subsidy_return') {
           const fresh = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
-          setOptions(fresh.refund_obligations.map((item) => ({ id: item.obligation_identity, label: `${fresh.case_no} · 客戶退款 · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}` })));
+          const obligations = kind === 'client_refund' ? fresh.refund_obligations : fresh.subsidy_return_obligations;
+          setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${fresh.case_no} · ${kind === 'client_refund' ? '客戶退款' : '客戶補助退款'} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}${kind === 'client_refund' ? ` · ${item.obligation_type === 'adjustment' ? '退款調整' : '一般退款'} · 預計退款日 ${item.due_date ?? '未設定'}` : ''}` })));
           setSelected([]);
           const overage = checkedPreview.candidate.allow_refund_overage_recovery
             && checkedPreview.candidate.bank_amount_ntd > checkedPreview.candidate.allocations.reduce((sum, item) => sum + item.amount_ntd, 0);
           setMessage(overage ? '退款核銷完成；超退金額已另列待追回款，請至案件帳務查看。'
-            : fresh.refund_obligations.length ? '退款核銷完成；已更新剩餘待退款，後續清冊只列餘額。' : '退款核銷完成；本案一般退款已退清。');
+            : obligations.length ? '退款核銷完成；已更新剩餘待退款，後續清冊只列餘額。' : kind === 'client_refund' ? '退款核銷完成；本案一般退款已退清。' : '客戶補助退款核銷完成；本案補助待退款已退清。');
         } else setMessage('帳務更正完成，已確認核銷收據。');
         setCompleted(true); onPosted?.();
-      } else { if (outcome.status === 'failed' || outcome.status === 'cancelled') setCompleted(true); setMessage(outcome.status === 'failed' || outcome.status === 'cancelled' ? '更正未完成，請重新查詢帳務資料。' : '更正仍在處理中。'); }
+      } else {
+        if (outcome.status === 'failed' || outcome.status === 'cancelled') setCompleted(true);
+        setMessage(outcome.status === 'failed' && (kind === 'client_refund' || kind === 'client_subsidy_return')
+          ? financeRefundBlockerMessage(outcome.failure_code, kind)
+          : outcome.status === 'failed' || outcome.status === 'cancelled' ? '更正未完成，請重新查詢帳務資料。' : '更正仍在處理中。');
+      }
     } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
     finally { setBusy(false); }
   };
@@ -419,7 +425,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
           </>}
           {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} disabled={!!lockedObligations} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
           {kind === 'staff_payout' && bankRow && <button type="button" disabled={!selected.length} onClick={() => setPayoutTarget({ staffId: Number(target), obligationIdentity: selected[0], obligationIdentities: selected })}>處理付款不足或超額</button>}
-          {kind === 'client_refund' && <><label>退款核銷方式<select value={refundMode} onChange={(event) => { setRefundMode(event.target.value as keyof typeof refundModes); invalidate(); }}>{Object.entries(refundModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{refundMode === 'overage' && <p>銀行多退的金額會另列待追回款；原銀行支出保留全額。</p>}</>}
+          {(kind === 'client_refund' || kind === 'client_subsidy_return') && <><label>退款核銷方式<select value={refundMode} onChange={(event) => { setRefundMode(event.target.value as keyof typeof refundModes); invalidate(); }}>{Object.entries(refundModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{refundMode === 'overage' && <p>銀行多退的金額會另列待追回款；原銀行支出保留全額。</p>}</>}
           <label>更正原因（選填）<input maxLength={500} value={reason} onChange={(event) => { if (retryCommand) return; setReason(event.target.value); invalidate(); }} /></label>
           <button type="button" disabled={!selected.length} onClick={() => void review()}>預覽核銷</button>
         </>
@@ -437,7 +443,16 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       </>
     )}
     {payoutTarget && bankRow && <div><StaffPayoutRemediationWorkbench target={payoutTarget} financeImportRowId={Number(bankRow[1])} onBusyChange={setPayoutBusy} onPosted={() => setSubmitted(true)}/><button type="button" disabled={payoutBusy} onClick={() => setPayoutTarget(null)}>關閉差額核銷</button></div>}
-    {preview && <div><p>銀行金額 NT$ {preview.candidate.bank_amount_ntd.toLocaleString()}，將核銷 {preview.candidate.allocations.length} 筆款項。</p><ul>{preview.candidate.allocations.map((item) => <li key={item.obligation_identity}>{options.find((option) => option.id === item.obligation_identity)?.label ?? '待確認款項'}：本次核銷 NT$ {item.amount_ntd.toLocaleString()}</li>)}</ul></div>}
+    {preview && <div>
+      {['client_refund', 'client_subsidy_return'].includes(kind) && preview.candidate.refund_summary ? <dl aria-label={kind === 'client_subsidy_return' ? '客戶補助退款核銷預覽' : '客戶退款核銷預覽'}>
+        <dt>銀行實付</dt><dd>{financeMoney(preview.candidate.bank_amount_ntd)}</dd>
+        <dt>匯款手續費</dt><dd>{financeMoney(preview.candidate.refund_summary.transfer_fee_ntd)}</dd>
+        <dt>本次核銷</dt><dd>{financeMoney(preview.candidate.allocations.reduce((sum, item) => sum + item.amount_ntd, 0))}</dd>
+        <dt>核銷後待退餘額（本次選取款項）</dt><dd>{financeMoney(preview.candidate.refund_summary.remaining_ntd)}</dd>
+        {kind === 'client_subsidy_return' && preview.candidate.allow_refund_overage_recovery && <><dt>超退待追回</dt><dd>{financeMoney(preview.candidate.bank_amount_ntd - preview.candidate.allocations.reduce((sum, item) => sum + item.amount_ntd, 0))}</dd></>}
+      </dl> : <p>銀行金額 NT$ {preview.candidate.bank_amount_ntd.toLocaleString()}，將核銷 {preview.candidate.allocations.length} 筆款項。</p>}
+      <ul>{preview.candidate.allocations.map((item) => <li key={item.obligation_identity}>{options.find((option) => option.id === item.obligation_identity)?.label ?? '待確認款項'}：本次核銷 NT$ {item.amount_ntd.toLocaleString()}</li>)}</ul>
+    </div>}
     {preview && selection && !retryCommand && !submitted && (
       <button type="button" disabled={busy} onClick={() => void apply()}>確認核銷</button>
     )}

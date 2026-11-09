@@ -183,7 +183,14 @@ def test_sinopac_receipt_posts_only_a_unique_installment_and_replay_is_safe(tmp_
             assert [(row['status'], row['cases']) for row in page['items']] == [
                 ('posted' if should_post else 'pending', [case_no]),
             ]
-            assert page['items'][0]['reconciliation_target'] is None
+            target = page['items'][0]['reconciliation_target']
+            if should_post:
+                assert target is None
+            else:
+                assert target == {
+                    'case_no': case_no, 'staff_id': None, 'requires_selection': True,
+                    'obligation_identities': sorted(f'client-obligation:{case_no}:{stage}' for stage, _, _ in installments),
+                }
             recorded = page['items'][0]['recorded_client_receipt_review']
             if should_post:
                 assert recorded is None
@@ -209,6 +216,171 @@ def test_sinopac_receipt_posts_only_a_unique_installment_and_replay_is_safe(tmp_
                 assert list(cursor.fetchall()) == (
                     [{'amount_ntd': 12000, 'obligation_identity': first_identity, 'allocated': 12000}] if should_post else []
                 )
+            if not should_post:
+                # The same pending bank source enters the existing owner flow;
+                # a human explicitly chooses first, leaving second untouched.
+                from api.dependencies.client_receipt_reconciliation import ClientReceiptReconciliationApplication
+                from infrastructure.mysql.client_receipt_reconciliation_repository import MySqlClientReceiptReconciliationRepository, ClientReceiptMySqlUnitOfWork
+                from subsystems.client_finance.reconciliation_workflow import ClientReconciliationWorkflow, ReconciliationSelection, ClientReconciliationApplyRequest
+                from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+                accounting = build_accounting_workspace(connection).query(case_no)
+                assert set(target['obligation_identities']) <= {item.identity for item in accounting.client_items}
+                repository = MySqlClientReceiptReconciliationRepository(connection)
+                manual = ClientReceiptReconciliationApplication(repository, ClientReconciliationWorkflow(repository, lambda: ClientReceiptMySqlUnitOfWork(connection)))
+                selection = ReconciliationSelection(case_no, None, (row_id,), (first_identity,))
+                preview = manual.preview(selection)
+                command = ClientReconciliationApplyRequest(selection, ExpectedVersion(preview.account_version), preview.fingerprint,
+                                                           IdempotencyKey(f'{case_no}:manual'), actor, 'Synthetic human selects first', correlation)
+                manual_receipt = manual.apply(command)
+                assert manual.apply(command) == manual_receipt
+                with connection.cursor() as cursor:
+                    cursor.execute('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s', (first_identity,))
+                    assert cursor.fetchone() == {'amount_due_ntd': 0, 'status': 'settled'}
+                    cursor.execute('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s', (f'client-obligation:{case_no}:second',))
+                    assert cursor.fetchone() == {'amount_due_ntd': 12000, 'status': 'open'}
+                    cursor.execute('SELECT amount_ntd,finance_import_row_id FROM client_ledger_entries WHERE case_no=%s', (case_no,))
+                    assert list(cursor.fetchall()) == [{'amount_ntd': 12000, 'finance_import_row_id': int(row_id)}]
+                refreshed = query.bank_transactions(bank='sinopac', direction='incoming', status='all', start=None,
+                                                    end=None, search=f'bank:{row_id}', limit=10, before_row_id=None)
+                assert refreshed['items'][0]['status'] == 'posted'
+    finally:
+        connection.close()
+
+
+def test_taishin_import_uses_only_memo_case_suffix_or_staff_name(tmp_path):
+    bootstrap(_arguments())
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import ActorContext, IdempotencyKey
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    _seed_deposit('115000003', 'synthetic-taishin-case-proof')
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO staff(name) VALUES ('合成人員甲')")
+            cursor.execute("UPDATE orders SET staff_id=%s WHERE case_no='115000003'", (cursor.lastrowid,))
+        connection.commit()
+    finally:
+        connection.close()
+    workbook = tmp_path / 'taishin-case-proof.xlsx'
+    pd.DataFrame([
+        ['說明'],
+        ['序號', '交易日期', '交易時間', '帳務日期', '摘要', '支出金額', '存入金額', '帳戶餘額', '備註'],
+        ['0001', '2026/10/15', '09:01:00', '2026/10/15', '轉出', '12000', '', '88000', 'HC115003'],
+        ['0002', '2026/10/15', '09:02:00', '2026/10/15', '轉出', '12000', '', '76000', 'HC115004'],
+        ['0003', '2026/10/15', '09:03:00', '2026/10/15', '轉出', '12000', '', '64000', '無識別資料'],
+        ['0004', '2026/10/15', '09:04:00', '2026/10/15', '轉出', '12000', '', '52000', '合成人員甲'],
+    ]).to_excel(workbook, index=False, header=False)
+
+    receipt = ingest_finance_workbook(str(workbook), IdempotencyKey('synthetic-case-proof'), ActorContext('test'),
+                                      connection_factory=get_connection, normalizer=normalize_workbook)
+    assert receipt.canonical_created_count == 2
+    assert _counts()['finance_import_rows'] == _counts()['finance_import_occurrences'] == 2
+    connection = get_connection()
+    try:
+        page = FinanceImportQueryService(connection).bank_transactions(
+            bank='taishin', direction='outgoing', status='pending', start=None, end=None, search='',
+            limit=10, before_row_id=None,
+        )
+        assert {row['classification_type'] for row in page['items']} == {'client_subsidy_return', 'staff_payout'}
+        for row in page['items']:
+            assert row['cases'] == ['115000003']
+            assert row['reconciliation_target']['case_no'] == '115000003'
+            assert row['reconciliation_target']['obligation_identities'] == []
+            assert row['reconciliation_target']['requires_selection'] is True
+            assert row['reconciliation_unavailable_reason'] == 'no_open_items'
+    finally:
+        connection.close()
+
+
+def test_taishin_accountless_subsidies_post_and_replay_without_duplicate_ledger(tmp_path):
+    """Real owner writers accept memo proof, not a fabricated bank account."""
+    bootstrap(_arguments())
+    from api.dependencies.finance_import import build_finance_import_application
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.client_refund_reversal_repository import MySqlClientRefundReversalRepository
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    client_case, staff_case = '115000003', '115000004'
+    _seed_deposit(client_case, 'synthetic-client-subsidy')
+    _seed_deposit(staff_case, 'synthetic-staff-subsidy')
+    client_obligation, staff_obligation = 'subsidy:115000003', 'payable:115000004'
+    actor = ActorContext('synthetic-taishin-payout')
+    correlation = CorrelationId('synthetic-taishin-payout')
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE orders SET actual_end_date='2026-08-31',end_date='2026-08-31' WHERE case_no=%s", (client_case,))
+            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,'subsidy_return','payable_to_client','established',0,12000,'2026-10-15',%s,0,%s,'test','Synthetic subsidy payable')", (client_obligation, client_case, client_obligation, client_obligation))
+            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,'subsidy_return','payable_to_client',12000,'2026-10-15','open',%s,0)", (client_obligation, client_case, cursor.lastrowid))
+            cursor.execute("INSERT INTO staff(name) VALUES ('合成月嫂甲')")
+            staff_id = cursor.lastrowid
+            cursor.execute('UPDATE orders SET staff_id=%s WHERE case_no=%s', (staff_id, staff_case))
+            cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,status) VALUES (%s,%s,1,'completed')", (staff_case, staff_id))
+            assignment_id = cursor.lastrowid
+            cursor.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,6000,'2026-10-15',%s,0,1,%s,'test','Synthetic original payable')", (staff_obligation, assignment_id, staff_case, staff_id, 'a' * 64, staff_obligation))
+            cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',6000,'2026-10-15','open',%s,1)", (staff_obligation, assignment_id, staff_case, staff_id, cursor.lastrowid))
+        connection.commit()
+
+        workbook = tmp_path / 'taishin-accountless-payouts.xlsx'
+        pd.DataFrame([
+            ['說明'],
+            ['序號', '交易日期', '交易時間', '帳務日期', '摘要', '支出金額', '存入金額', '帳戶餘額', '備註'],
+            ['0001', '2026/10/15', '09:01:00', '2026/10/15', '轉出', '12000', '', '88000', 'HC115003'],
+            # Conflicting six digits point to the client case; the staff name must win.
+            ['0002', '2026/10/15', '09:02:00', '2026/10/15', '轉出', '6000', '', '82000', '合成月嫂甲 HC115003'],
+        ]).to_excel(workbook, index=False, header=False)
+        first = ingest_finance_workbook(str(workbook), IdempotencyKey('taishin-accountless:first'), actor,
+                                       connection_factory=get_connection, normalizer=normalize_workbook)
+        assert first.canonical_created_count == 2
+        application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+        plan = application.preview_batch(first.batch_identity, correlation)
+        assert plan.counts.ready_dispatch == 2, plan
+        assert MySqlClientRefundReversalRepository(connection).query(client_case)['subsidy_return_bank_facts'][0]['eligible_obligation_identities'] == (client_obligation,)
+        assert MySqlClientRefundReversalRepository(connection).query(staff_case)['subsidy_return_bank_facts'] == ()
+        request = FinanceImportApplyRequest(first.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+                                           IdempotencyKey('taishin-accountless:apply'), actor, 'Synthetic verified memo payouts', correlation)
+        receipt = application.apply_batch(request)
+        assert receipt.reconciled_count == 2
+        applied = _counts()
+        assert application.apply_batch(request) == receipt
+        assert _counts() == applied
+        repeat = ingest_finance_workbook(str(workbook), IdempotencyKey('taishin-accountless:reimport'), actor,
+                                        connection_factory=get_connection, normalizer=normalize_workbook)
+        assert repeat.canonical_created_count == 0 and repeat.duplicate_occurrence_count == 2
+        assert application.preview_batch(repeat.batch_identity, correlation).counts.ready_dispatch == 0
+        final = _counts()
+        assert final['client_ledger_entries'] == applied['client_ledger_entries'] == 1
+        assert final['staff_payout_events'] == applied['staff_payout_events'] == 1
+        assert final['finance_import_dispatch_events'] == applied['finance_import_dispatch_events'] == 2
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s', (client_obligation,))
+            assert cursor.fetchone() == {'amount_due_ntd': 0, 'status': 'settled'}
+            cursor.execute('SELECT obligation_amount_ntd,net_paid_ntd,balance_ntd,status FROM staff_payable_projections WHERE obligation_identity=%s', (staff_obligation,))
+            assert cursor.fetchone() == {'obligation_amount_ntd': 6000, 'net_paid_ntd': 6000, 'balance_ntd': 0, 'status': 'completed'}
+            cursor.execute('SELECT amount_ntd,finance_import_row_id FROM staff_payout_events')
+            staff_event = cursor.fetchone()
+            assert staff_event['amount_ntd'] == 6000
+            cursor.execute('SELECT amount_ntd,finance_import_row_id FROM client_ledger_entries')
+            client_entry = cursor.fetchone()
+            assert client_entry['amount_ntd'] == 12000
+            assert client_entry['finance_import_row_id'] != staff_event['finance_import_row_id']
+            for table in ('staff_bank_accounts', 'client_refund_recipient_snapshots'):
+                cursor.execute(f'SELECT COUNT(*) n FROM {table}')
+                assert cursor.fetchone()['n'] == 0
+            cursor.execute('SELECT counterparty_account,debit,memo FROM finance_import_rows ORDER BY id')
+            assert list(cursor.fetchall()) == [
+                {'counterparty_account': None, 'debit': 12000, 'memo': 'HC115003'},
+                {'counterparty_account': None, 'debit': 6000, 'memo': '合成月嫂甲 HC115003'},
+            ]
+        page = FinanceImportQueryService(connection).bank_transactions(bank='taishin', direction='outgoing', status='all',
+                                                                       start=None, end=None, search='', limit=10, before_row_id=None)
+        assert sorted((item['cases'], item['status']) for item in page['items']) == [([client_case], 'posted'), ([staff_case], 'posted')]
     finally:
         connection.close()
 

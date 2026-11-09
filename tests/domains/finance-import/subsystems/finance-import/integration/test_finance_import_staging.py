@@ -535,14 +535,76 @@ def test_business_only_staging_keeps_only_matched_new_transactions(bank, expecte
 @pytest.mark.parametrize("amount", [11899, 12001])
 def test_business_only_staging_preserves_known_same_month_payout_differences(bank, amount):
     row = _normalized_row(format_id=bank, direction="outgoing", debit=Decimal(amount), credit=None,
-                          counterparty_name="Synthetic Staff", bank_references={})
+                          memo="Synthetic Staff", counterparty_name="Synthetic Staff", bank_references={})
     identity_maps = {"staff_payout_candidates": ({
-        "staff_id": 12, "name": "Synthetic Staff", "due_date": "2026-10-20", "amount_due_ntd": 12000,
+        "staff_id": 12, "name": "Synthetic Staff", "case_no": "115000001", "due_date": "2026-10-20", "amount_due_ntd": 12000,
     },)}
     result = staging.stage_finance_rows(
         FakeCursor(), {**_normalized([row]), "format_id": bank}, identity_maps, business_only=True,
     )
     assert result["staged_rows"][0]["matched_identity_ids"] == [12]
+
+
+def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases():
+    row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
+                          memo="Synthetic Staff", counterparty_name="Synthetic Staff", bank_references={})
+    first = {"staff_id": 12, "name": "Synthetic Staff", "case_no": "115000001",
+             "due_date": "2026-10-20", "amount_due_ntd": 12000}
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(cursor, _normalized([row]), {
+        "staff_payout_candidates": (first, {**first, "case_no": "115000002"}),
+    }, business_only=True)
+
+    assert result["staged_rows"] == []
+    assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
+
+
+@pytest.mark.parametrize("resolved", [True, False])
+@pytest.mark.parametrize("memo", ["HC115001", "115001月嫂薪資"])
+def test_workbook_staging_keeps_taishin_client_subsidy_only_if_memo_case_is_unique(monkeypatch, resolved, memo):
+    row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
+                          memo=memo, bank_references={})
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix", lambda _cursor, suffix: {
+        "result": "resolved" if resolved and suffix == "115001" else "pending",
+    })
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(cursor, _normalized([row]), {
+        "known_case_suffixes": frozenset({"115001"}),
+    }, business_only=True)
+
+    assert len(result["staged_rows"]) == int(resolved)
+    if resolved:
+        assert result["staged_rows"][0]["classification_type"] == "client_subsidy_return"
+        assert result["staged_rows"][0]["matched_identity_ids"] == []
+    else:
+        assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
+
+
+def test_taishin_staff_name_precedes_an_unrelated_six_digit_memo_without_an_account(monkeypatch):
+    row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
+                          memo="Synthetic Staff HC115002", counterparty_account=None, bank_references={})
+    monkeypatch.setattr(staging, 'resolve_client_virtual_account_suffix',
+                        lambda *_: pytest.fail('Staff name must take priority over the six-digit memo'))
+    result = staging.stage_finance_rows(FakeCursor(), _normalized([row]), {
+        'all_staff_names': ('Synthetic Staff',),
+        'staff_payout_candidates': ({'staff_id': 12, 'name': 'Synthetic Staff', 'case_no': '115000001',
+            'due_date': '2026-10-20', 'amount_due_ntd': 12000},),
+    }, business_only=True)
+    assert result['staged_rows'][0]['classification_type'] == 'staff_salary'
+    assert result['staged_rows'][0]['matched_identity_ids'] == [12]
+
+
+def test_incoming_name_account_and_amount_without_a_virtual_account_is_not_persisted():
+    row = _normalized_row(format_id='sinopac', direction='incoming', debit=None, credit=Decimal(12000),
+                          cancellation_code=None, memo='Synthetic Client', counterparty_name='Synthetic Client',
+                          counterparty_account='synthetic-account', bank_references={})
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(cursor, {**_normalized([row]), 'format_id': 'sinopac'}, {
+        'client_receipt_candidates': ({'client_id': 7, 'name': 'Synthetic Client',
+            'account': 'synthetic-account', 'open_amounts': (12000,)},),
+    }, business_only=True)
+    assert result['staged_rows'] == []
+    assert not any('INSERT INTO finance_import_rows' in sql for sql, _ in cursor.executed)
 
 
 def test_business_only_staging_preserves_batch_name_when_all_rows_are_filtered():

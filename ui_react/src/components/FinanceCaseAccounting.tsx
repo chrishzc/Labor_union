@@ -3,7 +3,8 @@
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
  */
 import { CancellationSettlementAccounting } from './CancellationSettlementAccounting';
-import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import { ClientRefundReturnReconciliationPanel } from './ClientRefundReturnReconciliationPanel';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
 import {paymentOverdueReminderClient,type CasePaymentReminder} from '../api/line_order_groups/payment_overdue_reminder_client';
 import {ordersQueryClient} from '../api/orders/order_query_client';
@@ -92,12 +93,21 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
   onBusyChange: (busy: boolean) => void;
 }) {
   const target = row.reconciliation_target;
-  const staffTarget = useMemo(() => target?.staff_id ? {
-    staffId: target.staff_id, obligationIdentity: target.obligation_identities[0],
-    obligationIdentities: target.obligation_identities,
-  } : null, [target]);
+  const [chosenIds, setChosenIds] = useState<string[]>([]);
+  const [selectionBusy, setSelectionBusy] = useState(false);
+  const requiresSelection = target?.requires_selection ?? false;
+  const selectedIds = requiresSelection ? chosenIds : target?.obligation_identities ?? [];
+  const staffTarget = useMemo(() => target?.staff_id && selectedIds.length ? {
+    staffId: target.staff_id, obligationIdentity: selectedIds[0],
+    obligationIdentities: selectedIds,
+  } : null, [target, selectedIds]);
+  const reportBusy = useCallback((busy: boolean) => {
+    setSelectionBusy(busy);
+    onBusyChange(busy);
+  }, [onBusyChange]);
   if (!target || target.case_no !== data.case_no) return <p role="alert">對應款項已變更，請返回銀行對帳重新查詢。</p>;
   const isReceipt = row.classification_type === 'client_receipt';
+  const isRefundReturn = row.classification_type === 'client_refund_return';
   const isStaff = target.staff_id !== null;
   const items = isStaff ? data.staff_items : data.client_items;
   const direction = isReceipt ? 'receivable' : 'payable';
@@ -108,20 +118,35 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
   const initialKind = row.classification_type === 'client_subsidy_return' ? 'client_subsidy_return' : 'client_refund';
   return <section className="finance-case-subview" aria-label="案件銀行交易核對">
     <header>
-      <h3>{isReceipt ? '客戶繳款' : isStaff ? '月嫂薪資' : '客戶退款'} · 核對交易</h3>
+      <h3>{isRefundReturn ? '客戶退匯' : isReceipt ? '客戶繳款' : isStaff ? '月嫂薪資' : '客戶退款'} · 核對交易</h3>
       <p>{row.bank === 'sinopac' ? '永豐' : '台新'} · {row.transaction_date ?? '日期未提供'} · {row.reference} · {money(row.amount_ntd)}</p>
     </header>
-    {isReceipt ? (
+    {requiresSelection && !isReceipt && !isRefundReturn && <fieldset disabled={selectionBusy}>
+      <legend>選擇本次核銷款項</legend>
+      <p>原銀行流水已帶入，請選擇本次要核銷的同案款項。</p>
+      {!obligations.length && <p>本案目前沒有可選款項，請回案件帳務確認正式款項資料。</p>}
+      {obligations.map(item => <label key={item.identity} style={{ display: 'block' }}>
+        <input type="checkbox" aria-label={`核銷款項 ${item.identity}`}
+          checked={chosenIds.includes(item.identity)}
+          onChange={() => setChosenIds(ids => ids.includes(item.identity) ? ids.filter(id => id !== item.identity) : [...ids, item.identity])} />
+        {item.label || '應付款項'} · 到期日 {item.due_date ?? '未提供'} · 餘額 {money(item.remaining_ntd)}
+      </label>)}
+    </fieldset>}
+    {isRefundReturn ? (
+      <ClientRefundReturnReconciliationPanel caseNo={data.case_no} bankRowId={row.row_id} onPosted={onPosted} onBusyChange={onBusyChange} />
+    ) : isReceipt ? (
       <ClientReceiptReconciliationPanel caseNo={data.case_no} requiredBankRowId={row.row_id}
-        initialObligationId={target.obligation_identities[0]} onChanged={onPosted} onBusyChange={onBusyChange} />
+        initialObligationId={requiresSelection ? undefined : target.obligation_identities[0]} onChanged={onPosted} onBusyChange={onBusyChange} />
+    ) : requiresSelection && !selectedIds.length ? (
+      <p>請先選擇核銷款項，再檢查核銷影響。</p>
     ) : staffTarget ? (
-      <StaffPayoutRemediationWorkbench target={staffTarget} financeImportRowId={row.row_id} confirmPreview onPosted={onPosted} onBusyChange={onBusyChange} />
+      <StaffPayoutRemediationWorkbench key={selectedIds.join('|')} target={staffTarget} financeImportRowId={row.row_id} sourceBank={row.bank} confirmPreview onPosted={onPosted} onBusyChange={reportBusy} />
     ) : (
-      <FinanceImportCorrectionForm rowIdentity={row.row_identity} sourceLabel={row.reference}
+      <FinanceImportCorrectionForm key={selectedIds.join('|')} rowIdentity={row.row_identity} sourceLabel={row.reference}
         staff={[]} initialKind={initialKind} initialCaseNo={data.case_no}
-        lockedObligations={obligations.map(item => ({
+        lockedObligations={obligations.filter(item => selectedIds.includes(item.identity)).map(item => ({
           id: item.identity, label: `${item.label || '應退款項'} · 待退 ${money(item.remaining_ntd)}`,
-        }))} onPosted={onPosted} onBusyChange={onBusyChange} />
+        }))} onPosted={onPosted} onBusyChange={reportBusy} />
     )}
   </section>;
 }
@@ -173,7 +198,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
- {data&&bankReconciliation&&<CaseBankReconciliation data={data} {...bankReconciliation}/>}
+ {data&&bankReconciliation&&<CaseBankReconciliation key={bankReconciliation.row.row_identity} data={data} {...bankReconciliation}/>}
  {data&&!bankReconciliation&&<><div hidden={view!==null}>
  <CancellationSettlementAccounting key={revision} data={data} />
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>

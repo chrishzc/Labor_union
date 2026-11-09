@@ -11,6 +11,9 @@
 ## Implementation
 - settlement rules: `domains/client_finance/client_refund_reversal.py` — 客戶退款與補助退還核銷的金額分配、結清及沖正規則。
 - primary: `ui_react/src/components/ClientSettlementRemediationWorkbench.tsx`
+- bank refund return: `ui_react/src/components/ClientRefundReturnReconciliationPanel.tsx` — 同案選有效原退款，固定原流水，沿既有 refund-return Preview／Apply 及 fresh Query；結果未明重送原命令。
+- typed client: `ui_react/src/api/client_finance/client_settlement_remediation_client.ts`
+- response schemas: `ui_react/src/api/client_finance/client_settlement_remediation_schemas.ts`
 - transport: `api/routes/client_refund_reversal.py`
 
 ## Contracts

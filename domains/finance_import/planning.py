@@ -40,7 +40,7 @@ class FinanceImportDisposition(StrEnum):
 class ClientReceiptReviewCandidate:
     obligation_identity: str
     obligation_type: str
-    due_date: str
+    due_date: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +64,7 @@ class CanonicalFinanceImportRow:
     fingerprint_collision: bool = False
     formal_reference_conflict: bool = False
     client_receipt_review: ClientReceiptReviewDiagnostic | None = None
+    pending_reason: str | None = None
 
     def __post_init__(self) -> None:
         _validate_row_identity(self)
@@ -164,38 +165,29 @@ def build_finance_import_plan(
     )
 
 
-def mark_suspected_duplicate_client_receipts(
+def defer_overlapping_client_receipts(
     rows: tuple[CanonicalFinanceImportRow, ...],
 ) -> tuple[CanonicalFinanceImportRow, ...]:
-    seen_targets: set[tuple[str, ...]] = set()
+    # Each resolved automatic candidate settles its one target in full. Different
+    # sources targeting that same full balance require combined cash review,
+    # never a claim that the independent bank transactions are duplicates.
+    target_counts: dict[tuple[str, ...], int] = {}
+    for row in rows:
+        if _is_exact_client_receipt(row):
+            target_counts[row.target_identities] = target_counts.get(row.target_identities, 0) + 1
     return tuple(
-        _mark_duplicate_client_receipt(row, seen_targets)
+        replace(row, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                client_receipt_review=ClientReceiptReviewDiagnostic('client_receipt_overpaid'),
+                available_actions=('resolve_owning_domain_target',))
+        if _is_exact_client_receipt(row) and target_counts[row.target_identities] > 1 else row
         for row in rows
     )
 
 
-def _mark_duplicate_client_receipt(row, seen_targets):
-    if not _is_new_client_receipt(row):
-        return row
-    if row.target_identities not in seen_targets:
-        seen_targets.add(row.target_identities)
-        return row
-    return replace(
-        row,
-        disposition=FinanceImportDisposition.BUSINESS_PENDING,
-        evidence=tuple(
-            sorted(set((*row.evidence, "suspected_duplicate_business_match")))
-        ),
-        available_actions=("review_suspected_duplicate_business_match",),
-    )
-
-
-def _is_new_client_receipt(row):
-    return (
-        row.classification_type is FinanceClassificationType.CLIENT_RECEIPT
-        and row.disposition is FinanceImportDisposition.CREATE
-        and bool(row.target_identities)
-    )
+def _is_exact_client_receipt(row):
+    return (row.classification_type is FinanceClassificationType.CLIENT_RECEIPT
+            and row.disposition is FinanceImportDisposition.CREATE
+            and len(row.target_identities) == 1)
 
 
 def _finance_import_plan(
@@ -338,6 +330,8 @@ def _row_payload(row):
     }
     if row.client_receipt_review is not None:
         payload["client_receipt_review"] = asdict(row.client_receipt_review)
+    if row.pending_reason is not None:
+        payload["pending_reason"] = row.pending_reason
     return payload
 
 
@@ -463,5 +457,5 @@ __all__ = [
     "FinanceImportPlan",
     "FinanceImportPreviewCounts",
     "build_finance_import_plan",
-    "mark_suspected_duplicate_client_receipts",
+    "defer_overlapping_client_receipts",
 ]

@@ -154,8 +154,11 @@ def build_client_refund_candidate(
     obligation_total = sum(item.amount_due.amount for item in ordered_obligations)
     diff = obligation_total - bank_total
     fee_eligible = purpose is ClientRefundPurpose.CUSTOMER_REFUND or (
-        purpose is ClientRefundPurpose.SUBSIDY_RETURN and len(ordered_banks) == 1
+        purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
+        and len(ordered_banks) == 1
     )
+    if diff > 0 and not fee_eligible and not allow_partial_refund_recovery:
+        raise ValueError("refund_requires_exact_settlement")
     if fee_eligible and 0 < diff <= 100:
         allocations = tuple(
             ClientCorrectionAllocation(
@@ -187,16 +190,17 @@ def build_client_refund_overage_candidate(
     case_no: str,
     bank_facts: tuple[ClientRefundBankFact, ...],
     obligations: tuple[ClientRefundObligation, ...],
+    purpose: ClientRefundPurpose = ClientRefundPurpose.CUSTOMER_REFUND,
 ) -> ClientRefundReversalCandidate:
     _validate_refund_scope(case_no, bank_facts, obligations)
     ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
     ordered_obligations = tuple(sorted(obligations, key=lambda item: item.identity))
-    _validate_refund_obligation_types(ordered_obligations, ClientRefundPurpose.CUSTOMER_REFUND)
+    _validate_refund_obligation_types(ordered_obligations, purpose)
     bank_total = sum(item.amount.amount for item in ordered_banks)
     obligation_total = sum(item.amount_due.amount for item in ordered_obligations)
     if bank_total <= obligation_total:
         raise ValueError("client_refund_overage_required")
-    entries = tuple(_refund_entry(item, ClientRefundPurpose.CUSTOMER_REFUND) for item in ordered_banks)
+    entries = tuple(_refund_entry(item, purpose) for item in ordered_banks)
     allocations = _allocate_refund(ordered_banks, ordered_obligations, allow_overage=True)
     return _candidate(
         ClientFinanceCorrectionType.REFUND_OVERAGE,
@@ -296,8 +300,6 @@ def _require_bank_total_is_payable(
     obligation_total = sum(item.amount_due.amount for item in obligations)
     if bank_total > obligation_total:
         raise ValueError("allocation_exceeds_obligation")
-    if purpose is not ClientRefundPurpose.CUSTOMER_REFUND:
-        return
     if bank_total == obligation_total:
         return
     if 0 <= obligation_total - bank_total <= 100:

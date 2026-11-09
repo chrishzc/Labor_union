@@ -20,6 +20,7 @@ def test_only_real_discrepancies_create_anomaly_intents(stage,overage):
             (IncomingBankFact('bank',MoneyNTD(110 if overage else 100),stage),),
             (ClientObligation('ob','CASE',MoneyNTD(100),stage),))
         def find_receipt(self,_):return None
+        def validate_overage_refund_recipient(self,_):pass
         def append_ledger_entries(self,_):calls.append('ledger')
         def append_allocations(self,_):calls.append('allocation')
         def update_projection(self,*_):calls.append('projection')

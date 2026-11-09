@@ -25,6 +25,23 @@ describe('PAYOUT-001 remediation client', () => {
   beforeEach(() => sessionClient.setSession('payout-token', { id: 7, username: 'admin', display_name: 'Admin', role: 'admin' }));
   afterEach(() => { globalThis.fetch = originalFetch; sessionClient.clearSession(); vi.restoreAllMocks(); });
 
+  it.each(['staff_bank_account_ambiguous', 'staff_memo_recipient_unconfirmed', 'cross_staff_allocation_forbidden', 'bank_transaction_date_missing', 'bank_currency_not_twd'])(
+    'preserves the actual preview and formal failure cause: %s', async code => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 409, statusText: 'Conflict',
+        headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ detail: { error: {
+          category: 'domain_blocked', code, message: 'Staff payout facts do not permit a formal ledger event.',
+          correlation_id: 'synthetic-preview', field_errors: [], domain_blockers: [code], retryable: false, current_version: null,
+        } } }),
+      }).mockResolvedValueOnce(response({ job_id: 'job-1', status: 'failed', command_type: 'staff_payout_apply', attempt_count: 1, max_attempts: 3,
+        outcome: { kind: 'failure', schema_version: 1, error: { category: 'domain_blocked', code,
+          message: 'Staff payout facts do not permit a formal ledger event.', correlation_id: 'synthetic-apply', retryable: false, domain_blockers: [code] } } }));
+      const error = await staffPayoutRemediationClient.preview({ financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] }).catch(value => value);
+      expect(error.code).toBe(code);
+      const job = await staffPayoutRemediationClient.queryJob('job-1');
+      expect(job.outcome).toMatchObject({ kind: 'failure', error: { code } });
+    },
+  );
+
   it('Preview／Apply 使用正式 endpoint、版本、fingerprint 與冪等 headers', async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(response(preview))
@@ -50,6 +67,22 @@ describe('PAYOUT-001 remediation client', () => {
     expect(calls[0][0]).toBe('/api/v1/staff-payables/payout-difference/preview');
     expect(calls[1][0]).toBe('/api/v1/staff-payables/payout-difference/apply');
     expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ mode: differenceMode, reason: '' });
+  });
+
+  it.each([0, 30, 100])('接受正式預覽回傳的匯款手續費 %s 元並保留原金額', async fee => {
+    const wire = { ...preview, candidate: { ...preview.candidate,
+      bank_total: { amount: 12000 - fee }, transfer_fee: { amount: fee } } };
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(response(wire));
+    const received = await staffPayoutRemediationClient.preview({ financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] });
+    expect(received.candidate).toMatchObject({ bank_total: { amount: 12000 - fee },
+      obligation_total: { amount: 12000 }, transfer_fee: { amount: fee } });
+    expect(received.preview_fingerprint).toBe(preview.preview_fingerprint);
+  });
+
+  it.each([{ amount: -1 }, { amount: 1.5 }, { amount: 30, extra: true }])('手續費仍須符合封閉的整數金額契約 %j', async transfer_fee => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(response({ ...preview, candidate: { ...preview.candidate, transfer_fee } }));
+    await expect(staffPayoutRemediationClient.preview({ financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] }))
+      .rejects.toMatchObject({ code: 'STAFF_PAYOUT_SCHEMA_MISMATCH' });
   });
 
   it('Job terminal 嚴格解碼並拒絕錯誤 command 或 identity', async () => {

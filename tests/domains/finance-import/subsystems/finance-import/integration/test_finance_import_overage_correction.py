@@ -1,4 +1,5 @@
 from domains.finance_import.correction import (
+    ClientRefundCorrectionPreview, CorrectionAllocation,
     CorrectionTargetObligation,
     FinanceImportCorrectionFacts,
     FinanceImportCorrectionSelection,
@@ -7,6 +8,7 @@ from domains.finance_import.correction import (
 )
 from domains.finance_import.planning import FinanceClassificationType
 from shared_kernel.money import MoneyNTD
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 def test_client_receipt_overage_uses_only_the_real_receivable_amount() -> None:
@@ -23,6 +25,7 @@ def test_client_refund_overage_uses_only_the_real_refund_amount() -> None:
     candidate = build_finance_import_correction_candidate(
         _selection(FinanceClassificationType.CLIENT_REFUND, refund_overage=True),
         _facts(750, 500),
+        refund_preview=ClientRefundCorrectionPreview(('obligation-1',), (CorrectionAllocation('obligation-1', MoneyNTD(500)),), MoneyNTD(0), MoneyNTD(0), PreviewFingerprint('c'*64)),
     )
 
     assert [item.amount for item in candidate.allocations] == [MoneyNTD(500)]

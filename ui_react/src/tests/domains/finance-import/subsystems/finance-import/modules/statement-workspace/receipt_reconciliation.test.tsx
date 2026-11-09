@@ -1,16 +1,230 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientReceiptReconciliationPanel } from '../../../../../../../components/ClientReceiptReconciliationPanel';
 import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
 import { clientReceiptReconciliationClient, type ReceiptPreview } from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { ClientReceiptQuerySchema } from '../../../../../../../api/client_finance/client_receipt_query_schemas';
 vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()=>({clientReceiptQueryClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
 const facts={case_no:'CASE',account_version:1,bank_facts:[{finance_import_row_id:9,amount_ntd:9000,transaction_date:'2026-10-01',dedup_fingerprint:'a'.repeat(64)},{finance_import_row_id:10,amount_ntd:1000,transaction_date:'2026-10-02',dedup_fingerprint:'b'.repeat(64)}],obligations:[{obligation_identity:'first',payment_stage:'first' as const,amount_due_ntd:5000,due_date:'2026-09-01'},{obligation_identity:'second',payment_stage:'second' as const,amount_due_ntd:5000,due_date:'2026-10-01'}]};
 function preview(status:ReceiptPreview['candidate']['status']='exact'):ReceiptPreview{return{account_version:1,preview_fingerprint:'c'.repeat(64),candidate:{status,payment_stage:null,bank_total:{amount:status==='partial'||status==='review_required'?9000:10000},obligation_total:{amount:10000},overage_amount:{amount:0},allocations:[],blockers:status==='review_required'?['client_receipt_underpaid']:[],settlement_identity:'d'.repeat(64)}};}
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(clientReceiptQueryClient.query).mockResolvedValue(facts);vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue(preview());});
 describe('本案客戶入款核銷',()=>{
-  it('explains missing refund-account validation without claiming settlement or offering an unavailable editor',async()=>{
+  it.each(['bank_transaction_date_missing','bank_currency_not_twd'])('shows the same actual source rejection for preview and confirmation: %s',async code=>{
+    const message=code==='bank_transaction_date_missing'?'原銀行流水缺少交易日':'原銀行流水幣別不是新臺幣';
+    vi.mocked(clientReceiptReconciliationClient.preview).mockRejectedValueOnce(new ApiHttpError(422,code,'source invalid'));
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
+    vi.mocked(clientReceiptReconciliationClient.apply).mockRejectedValueOnce(new ApiHttpError(422,code,'source invalid'));
+    fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  });
+
+  it('allows explicit reconciliation of two same-case sources when the original period date is missing',async()=>{
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({...facts,obligations:[{...facts.obligations[0],amount_due_ntd:10000,due_date:null}]});
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),candidate:{...preview().candidate,allocations:[
+      {bank_fact_identity:'9',obligation_identity:'first',amount:{amount:9000}},
+      {bank_fact_identity:'10',obligation_identity:'first',amount:{amount:1000}},
+    ]}});
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    expect(await screen.findByRole('table',{name:'本次期款核銷明細'})).toHaveTextContent('NT$ 10,000');
+    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));
+    await waitFor(()=>expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledOnce());
+    expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledWith('CASE',expect.objectContaining({selection:{payment_stage:null,finance_import_row_ids:[9,10],obligation_identities:['first']}}));
+    expect(screen.queryByText(/疑似重複/)).not.toBeInTheDocument();
+  });
+  it.each([
+    {mode:'exact',cash:12000,selected:['first'],allocated:12000,selectedRemaining:0,otherRemaining:6000},
+    {mode:'exact',cash:18000,selected:['deposit','first'],allocated:18000,selectedRemaining:0,otherRemaining:0},
+    {mode:'partial',cash:9000,selected:['first'],allocated:9000,selectedRemaining:3000,otherRemaining:6000},
+    {mode:'overage',cash:12500,selected:['first'],allocated:12000,selectedRemaining:0,otherRemaining:6000},
+  ] as const)('shows selected periods and the whole-case remainder before $mode confirmation ($cash)',async scenario=>{
+    const original={...facts,bank_facts:[{...facts.bank_facts[0],amount_ntd:scenario.cash}],obligations:[
+      {obligation_identity:'deposit',payment_stage:'deposit' as const,amount_due_ntd:6000,due_date:'2026-06-26'},
+      {obligation_identity:'first',payment_stage:'first' as const,amount_due_ntd:12000,due_date:'2026-10-19'},
+    ]};
+    const selected=original.obligations.filter(item=>(scenario.selected as readonly string[]).includes(item.obligation_identity));
+    let remainingCash=scenario.allocated;
+    const allocations=selected.map(item=>{const amount=Math.min(item.amount_due_ntd,remainingCash);remainingCash-=amount;return{bank_fact_identity:'9',obligation_identity:item.obligation_identity,amount:{amount}};});
+    const candidate={...preview().candidate,status:scenario.mode,bank_total:{amount:scenario.cash},obligation_total:{amount:selected.reduce((sum,item)=>sum+item.amount_due_ntd,0)},overage_amount:{amount:scenario.mode==='overage'?500:0},allocations};
+    const after={...original,account_version:2,bank_facts:[],obligations:original.obligations.map(item=>({...item,amount_due_ntd:item.amount_due_ntd-(allocations.find(row=>row.obligation_identity===item.obligation_identity)?.amount.amount??0)})).filter(item=>item.amount_due_ntd>0)};
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?after:original);
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValueOnce({...preview(),candidate:{...candidate,status:scenario.mode==='exact'?'exact':'review_required',allocations:scenario.mode==='exact'?allocations:[]}});
+    if(scenario.mode!=='exact')vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValueOnce({...preview(),candidate});
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:scenario.mode,settlement_identity:'d'.repeat(64),ledger_entry_count:1,allocation_count:allocations.length,blockers:[]});
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()}/>);
+    await screen.findByRole('checkbox',{name:'納入銀行款 9'});
+    const boxes=screen.getAllByRole('checkbox');
+    for(const item of selected)fireEvent.click(boxes[original.obligations.indexOf(item)+1]);
+    expect(screen.queryByText(/全額銷帳結清|案件已結清/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
+    if(scenario.mode!=='exact')fireEvent.change(await screen.findByRole('combobox',{name:'選擇差額處理'}),{target:{value:scenario.mode}});
+    const table=await screen.findByRole('table',{name:'本次期款核銷明細'});
+    expect(within(table).getAllByRole('row')).toHaveLength(selected.length+1);
+    for(const item of selected){
+      const row=within(table).getByText(item.payment_stage==='deposit'?'訂金期款':'第一期期款').closest('tr')!;
+      const amount=allocations.find(allocation=>allocation.obligation_identity===item.obligation_identity)!.amount.amount;
+      expect(within(row).getAllByRole('cell').map(cell=>cell.textContent)).toEqual([item.payment_stage==='deposit'?'訂金期款':'第一期期款',item.due_date,`NT$ ${amount.toLocaleString()}`,`NT$ ${(item.amount_due_ntd-amount).toLocaleString()}`]);
+    }
+    const summary=screen.getByLabelText('本次核銷後餘額');
+    for(const [label,amount] of [['本次核銷合計',scenario.allocated],['本次選取期款剩餘待收',scenario.selectedRemaining],['其他未選期款待收',scenario.otherRemaining],['核銷後案件全部應收餘額',scenario.selectedRemaining+scenario.otherRemaining]] as const){
+      expect(within(summary).getByText(label).nextElementSibling).toHaveTextContent(`NT$ ${amount.toLocaleString()}`);
+    }
+    expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));
+    if(scenario.selectedRemaining+scenario.otherRemaining===0)expect(await screen.findByText(/已核銷本次收款。 案件已結清。/)).toBeInTheDocument();
+    else{
+      expect(await screen.findByText(new RegExp(`案件尚有待收 NT\\$ ${(scenario.selectedRemaining+scenario.otherRemaining).toLocaleString()}。`))).toBeInTheDocument();
+      expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+    }
+  });
+
+  it('does not offer confirmation when the case query and preview have different versions',async()=>{
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),account_version:2});
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('核對失敗，資料可能已變更');
+    expect(screen.queryByRole('button',{name:'確認核銷本次收款'})).not.toBeInTheDocument();
+    expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+  });
+
+  it('does not claim settlement from an older readback even when no obligations are returned',async()=>{
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?{...facts,obligations:[]}:facts);
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+    expect(await screen.findByText(/案件餘額尚待重新查詢確認/)).toBeInTheDocument();
+    expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+  });
+
+  it('clears a confirmed settlement label when switching cases or refreshing without a successful readback',async()=>{
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?{...facts,account_version:2,bank_facts:[],obligations:[]}:facts);
+    const view=render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+    await screen.findByText(/案件已結清/);
+    vi.mocked(clientReceiptQueryClient.query).mockRejectedValueOnce(new Error('readback unavailable'));
+    fireEvent.click(screen.getByRole('button',{name:'重新查詢'}));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({...facts,case_no:'OTHER'});
+    view.rerender(<ClientReceiptReconciliationPanel caseNo="OTHER" onChanged={vi.fn()}/>);
+    await screen.findByRole('checkbox',{name:'納入銀行款 9'});
+    expect(screen.queryByText(/案件已結清|已核銷本次收款/)).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])('does not calculate overage or promise settlement without selected periods (no open periods: %s)', async noOpen => {
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({ ...facts, obligations: noOpen ? [] : facts.obligations });
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
+    await screen.findByRole('checkbox', { name: '納入銀行款 9' });
+    expect(await screen.findByText(noOpen ? '本案目前沒有未清期款，無款項可核銷。請回案件帳務查核。'
+      : '請先選擇本次要核銷的期款，再核對金額。')).toBeInTheDocument();
+    expect(screen.getByText('尚未核對')).toBeInTheDocument();
+    expect(screen.queryByText(/超收|全額銷帳結清|確認後期款全額結清|待退款|金額相符/)).not.toBeInTheDocument();
+    const inspect = screen.getByRole('button', { name: '核對本案入款' });
+    expect(inspect).toBeDisabled(); fireEvent.click(inspect);
+    expect(clientReceiptReconciliationClient.preview).not.toHaveBeenCalled();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+  });
+
+  it('clears a prior result and amount comparison when all periods are deselected', async () => {
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '核對本案入款' }));
+    await screen.findByRole('button', { name: '確認核銷本次收款' });
+    for (const box of screen.getAllByRole('checkbox').slice(2)) fireEvent.click(box);
+    expect(screen.getByText('請先選擇本次要核銷的期款，再核對金額。')).toBeInTheDocument();
+    expect(screen.queryByText(/超收|合計相符|全額銷帳結清|確認後期款全額結清|待退款|金額相符/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認核銷本次收款' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '核對本案入款' })).toBeDisabled();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+  });
+
+  it('does not promise receipt or settlement when all bank sources are deselected', async () => {
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()} />);
+    await screen.findByRole('checkbox', { name: '納入銀行款 9' });
+    fireEvent.click(screen.getByRole('checkbox', { name: '納入銀行款 9' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '納入銀行款 10' }));
+    expect(screen.getByText('請先選擇本次要核銷的銀行入款，再核對金額。')).toBeInTheDocument();
+    expect(screen.queryByText(/短少|超收|全額銷帳結清|確認後期款全額結清|金額相符/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '核對本案入款' })).toBeDisabled();
+  });
+
+  it('resumes the actual comparison after a period is selected', async () => {
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
+    await screen.findByRole('checkbox', { name: '納入銀行款 9' });
+    expect(screen.queryByText(/超收/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('checkbox')[2]);
+    expect(screen.getByText('超收 NT$ 4,000')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '核對本案入款' })).toBeEnabled();
+    expect(screen.queryByText('尚未核對')).not.toBeInTheDocument();
+  });
+  it.each([
+    [['bank_transaction_date_missing'], '原銀行流水缺少交易日，無法核銷客戶入款，請先查核來源資料。'],
+    [['bank_currency_not_twd'], '原銀行流水幣別不是新臺幣，無法核銷客戶入款，請先查核來源資料。'],
+    [['bank_transaction_date_missing', 'bank_currency_not_twd'], '原銀行流水缺少交易日，無法核銷客戶入款，請先查核來源資料。 原銀行流水幣別不是新臺幣，無法核銷客戶入款，請先查核來源資料。'],
+  ])('shows authoritative source causes instead of claiming that the case is unidentified: %j', async (codes, message) => {
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue(ClientReceiptQuerySchema.parse({ ...facts,
+      bank_facts: [facts.bank_facts[1]], bank_fact_blockers: [{ finance_import_row_id: 9, codes }],
+    }));
+    const changed = vi.fn();
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={changed} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(message as string);
+    expect(screen.queryByText(/此筆交易尚未辨識為本案入款/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '核對本案入款' })).not.toBeInTheDocument();
+    expect(clientReceiptReconciliationClient.preview).not.toHaveBeenCalled();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('does not use another source rejection to explain an unrecognized source', async () => {
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({ ...facts, bank_facts: [],
+      bank_fact_blockers: [{ finance_import_row_id: 10, codes: ['bank_currency_not_twd'] }],
+    });
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('此筆交易尚未辨識為本案入款');
+    expect(screen.queryByText(/幣別不是新臺幣/)).not.toBeInTheDocument();
+  });
+
+  it('keeps unrelated rejected sources out of the normal receipt selection', async () => {
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({ ...facts,
+      bank_fact_blockers: [{ finance_import_row_id: 11, codes: ['bank_transaction_date_missing'] }],
+    });
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
+    expect(await screen.findByRole('checkbox', { name: '納入銀行款 9' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: '納入銀行款 11' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('rejects undeclared or unsafe source-diagnostic fields', () => {
+    for (const item of [
+      { finance_import_row_id: 9, codes: ['invented_reason'] },
+      { finance_import_row_id: 9, codes: [] },
+      { finance_import_row_id: 9, codes: ['bank_currency_not_twd'], raw_account: 'private' },
+    ]) expect(ClientReceiptQuerySchema.safeParse({ ...facts, bank_fact_blockers: [item] }).success).toBe(false);
+  });
+  it('blocks an overage preview with the actual missing-refund-account reason and offers no confirmation',async()=>{
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValueOnce({...preview('review_required'),candidate:{...preview('review_required').candidate,bank_total:{amount:11000}}})
+      .mockRejectedValueOnce(new ApiHttpError(422,'client_refund_recipient_snapshot_missing','validation'));
+    const changed=vi.fn();render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={changed}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    fireEvent.change(await screen.findByRole('combobox',{name:'選擇差額處理'}),{target:{value:'overage'}});
+    expect(await screen.findByRole('alert')).toHaveTextContent('報名資料缺少客戶退款帳戶，本次未核銷。請先補齊退款帳戶資料，再回本案核對。');
+    expect(screen.queryByRole('button',{name:'確認核銷本次收款'})).not.toBeInTheDocument();
+    expect(screen.queryByText(/合計相符|案件已結清/)).not.toBeInTheDocument();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('shows the same missing-refund-account reason if the account disappears after preview',async()=>{
     vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue(preview('overage'));
     vi.mocked(clientReceiptReconciliationClient.apply).mockRejectedValue(new ApiHttpError(422,'client_refund_recipient_snapshot_missing','validation'));
     const changed=vi.fn();render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={changed}/>);
@@ -28,7 +242,7 @@ describe('本案客戶入款核銷',()=>{
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
     expect(await screen.findByText('合計相符，可直接核銷。')).toBeInTheDocument();
     expect(clientReceiptReconciliationClient.preview).toHaveBeenCalledWith('CASE',{payment_stage:null,finance_import_row_ids:[9,10],obligation_identities:['first','second']},'exact');
-    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));expect(await screen.findByText('已核銷本次收款。')).toBeInTheDocument();expect(changed).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));expect(await screen.findByText(/^已核銷本次收款。/)).toBeInTheDocument();expect(changed).toHaveBeenCalledOnce();
   });
   it('does not preselect partial handling and reuses the same command when the result is unknown',async()=>{
     vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValueOnce(preview('review_required')).mockResolvedValueOnce(preview('partial'));
@@ -39,7 +253,7 @@ describe('本案客戶入款核銷',()=>{
     await screen.findByRole('button',{name:'確認原操作結果'});rendered.rerender(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={changed} refreshVersion={1}/>);
     fireEvent.click(await screen.findByRole('button',{name:'確認原操作結果'}));await waitFor(()=>expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledTimes(2));
     expect(vi.mocked(clientReceiptReconciliationClient.apply).mock.calls[0]).toEqual(vi.mocked(clientReceiptReconciliationClient.apply).mock.calls[1]);
-    expect(await screen.findByText('已記錄實際收款，剩餘款項繼續待收。')).toBeInTheDocument();
+    expect(await screen.findByText(/^已記錄實際收款，剩餘款項繼續待收。/)).toBeInTheDocument();
   });
   it('starts from the selected bank transaction and only includes explicitly selected related rows and periods', async () => {
     render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
