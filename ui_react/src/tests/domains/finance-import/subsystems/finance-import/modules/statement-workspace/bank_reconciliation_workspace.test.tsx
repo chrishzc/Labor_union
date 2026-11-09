@@ -199,11 +199,11 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     { name: 'generic operation failure preserves actual cause', patch: { dispatch_reason: 'bank_fact_not_eligible', recorded_pending_reason: 'client_receipt_underpaid' },
       label: '金額不符', reason: /實收低於/, nextStep: /請核對金額並選擇處理方式/ },
     { name: 'old source recognition only', patch: { review_reason: 'sinopac_valid_virtual_account' },
-      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+      label: '待核對', reason: /未留存當次未核銷原因，請進入核對確認/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
     { name: 'old unknown cause', patch: { review_reason: 'unrecognized_historical_reason' },
-      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+      label: '待核對', reason: /未留存當次未核銷原因，請進入核對確認/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
     { name: 'no saved cause', patch: { review_reason: null },
-      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+      label: '待核對', reason: /未留存當次未核銷原因，請進入核對確認/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
   ])('uses one actual cause for the badge and next step: $name', async ({ patch, label, reason, nextStep }) => {
     const transaction = { ...sinopac, ...patch };
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
@@ -220,6 +220,60 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(onReconcile).toHaveBeenCalledWith(transaction);
   });
 
+  it.each([
+    ['sinopac','client_receipt',['sinopac_valid_virtual_account','sinopac_virtual_account_matched']],
+    ['sinopac','staff_payout',['outgoing_staff_payout_target_ambiguous','unique_staff_payout_name_month_fee_matched']],
+    ['sinopac','client_refund',['outgoing_client_refund_target_ambiguous','client_refund_disambiguated_by_month_and_amount']],
+    ['taishin','staff_payout',['outgoing_staff_payout_target_ambiguous','unique_staff_payout_name_and_month_matched']],
+    ['taishin','client_subsidy_return',['outgoing_client_refund_target_ambiguous','taishin_client_subsidy_case_suffix_in_memo']],
+  ] as const)('keeps legacy %s %s diagnostics unknown in the list and details, with the original review entry',async(bank,classification,codes)=>{
+    const {cleanup}=await import('@testing-library/react');
+    const message='未留存當次未核銷原因，請進入核對確認';
+    for(const code of codes){
+      for(const source of ['review_reason','recorded_pending_reason','dispatch_reason'] as const){
+        const staff=classification==='staff_payout';
+        const row:FinanceBankTransaction={...sinopac,bank,classification_type:classification,
+          direction:classification==='client_receipt'?'incoming':'outgoing',review_reason:null,[source]:code,
+          reconciliation_target:{case_no:'115000001',staff_id:staff?7:null,
+            obligation_identities:[staff?'staff:first':classification==='client_receipt'?'receipt:first':'refund:first'],requires_selection:true}};
+        const original=structuredClone(row);
+        expect(financeBankReviewPresentation(row)).toEqual({label:'待核對',reason:message,nextStep:message});
+        expect(financeImportReviewReason(row)).toBe(message);
+        vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[row],pending_count:1,next_before_row_id:null});
+        render(<FinanceBankReconciliationWorkspace {...defaultProps}/>);
+        const tableRow=within(await screen.findByRole('row',{name:/Sheet1#2/}));
+        expect(tableRow.getAllByText(message)).toHaveLength(1);
+        expect(tableRow.queryByText('金額不符')).not.toBeInTheDocument();
+        expect(tableRow.queryByText('有多個候選款項')).not.toBeInTheDocument();
+        fireEvent.click(tableRow.getByRole('button',{name:'核對交易 Sheet1#2'}));
+        expect(onReconcile).toHaveBeenLastCalledWith(original);
+        fireEvent.click(screen.getByRole('button',{name:'查看交易 finance-import-row:101'}));
+        const details=within(screen.getByRole('dialog',{name:'待核對交易明細'}));
+        expect(details.getByText(message)).toBeVisible();
+        expect(row).toEqual(original);
+        cleanup();
+      }
+    }
+  });
+
+  it('does not infer candidate count from an unknown review, or hide a saved concrete cause behind legacy diagnostics',()=>{
+    const message='未留存當次未核銷原因，請進入核對確認';
+    expect(financeBankReviewPresentation({...sinopac,review_reason:'sinopac_client_receipt_shortfall'}))
+      .toEqual({label:'待核對',reason:message,nextStep:message});
+    expect(financeBankReviewPresentation({...sinopac,recorded_pending_reason:'sinopac_client_receipt_shortfall'}))
+      .toMatchObject({label:'金額不符'});
+    expect(financeBankReviewPresentation({...sinopac,recorded_client_receipt_review:{reason:'unrecognized_historical_reason',
+      candidates:[{obligation_identity:'first',obligation_type:'first',due_date:'2026-10-19'},
+                  {obligation_identity:'second',obligation_type:'second',due_date:'2026-10-27'}]}}))
+      .toEqual({label:'待核對',reason:message,nextStep:message});
+    expect(financeBankReviewPresentation({...sinopac,bank:'sinopac',direction:'outgoing',classification_type:'staff_payout',
+      dispatch_reason:'outgoing_staff_payout_target_ambiguous',recorded_pending_reason:'staff_payout_amount_mismatch'}))
+      .toMatchObject({label:'金額不符',reason:expect.stringContaining('銀行實付')});
+    expect(financeBankReviewPresentation({...sinopac,recorded_pending_reason:'sinopac_valid_virtual_account',
+      recorded_client_receipt_review:{reason:'sinopac_client_receipt_multiple_month_candidates',candidates:[]}}))
+      .toMatchObject({label:'有多個候選款項'});
+  });
+
   it('uses the preview cause only when no actual cause was saved, without reclassifying old ambiguous targets', () => {
     const preview = {
       row_identity: sinopac.row_identity, canonical_fact_version: 0, amount_ntd: sinopac.amount_ntd,
@@ -232,7 +286,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       .toMatchObject({ label: '待核對', nextStep: expect.stringContaining('請核對款項日期') });
     expect(financeBankReviewPresentation({ ...sinopac, classification_type: 'client_refund',
       recorded_pending_reason: 'outgoing_client_refund_target_ambiguous' }))
-      .toMatchObject({ label: '待核對', reason: expect.stringContaining('未留存實際是金額不符或有多個有效配對') });
+      .toMatchObject({ label: '待核對', reason: '未留存當次未核銷原因，請進入核對確認' });
     expect(financeBankReviewPresentation({ ...sinopac, review_reason: 'sinopac_client_receipt_shortfall' }))
       .toMatchObject({ label: '待核對', nextStep: expect.stringContaining('未留存當次未核銷原因') });
   });
@@ -248,17 +302,17 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
   });
 
   it.each([
-    ['unique_staff_payout_name_and_month_matched', null, /月嫂姓名與同月款項已辨識，未留存當次阻擋原因/],
-    ['outgoing_staff_payout_month_no_match', null, /預計撥款日同月/],
-    ['outgoing_client_refund_month_no_match', null, /預計退款日同月/],
-    ['sinopac_client_receipt_month_no_match', null, /原到期日同月/],
+    ['unique_staff_payout_name_and_month_matched', null, /未留存當次未核銷原因，請進入核對確認/],
+    ['outgoing_staff_payout_month_no_match', null, /未留存當次未核銷原因，請進入核對確認/],
+    ['outgoing_client_refund_month_no_match', null, /未留存當次未核銷原因，請進入核對確認/],
+    ['sinopac_client_receipt_month_no_match', null, /未留存當次未核銷原因，請進入核對確認/],
     ['outgoing_client_refund_amount_mismatch', 'client_refund_recipient_account_mismatch', /與待退款項的收款帳戶不符/],
     ['sinopac_unique_staff_account_in_transaction_reference', 'staff_bank_account_ambiguous', /唯一有效的月嫂主要帳戶/],
     ['unique_staff_payout_name_and_month_matched', 'staff_memo_recipient_unconfirmed', /備註姓名驗證未通過/],
     ['taishin_client_subsidy_case_suffix_in_memo', 'client_subsidy_memo_recipient_unconfirmed', /銀行備註無法確認本案客戶補助對象/],
-    ['sinopac_valid_virtual_account', null, /已由虛擬帳號定位案件，未留存當次阻擋原因/],
-    ['unrecognized_historical_reason', null, /未留存當次阻擋原因/],
-    [null, null, /未留存當次阻擋原因/],
+    ['sinopac_valid_virtual_account', null, /未留存當次未核銷原因，請進入核對確認/],
+    ['unrecognized_historical_reason', null, /未留存當次未核銷原因，請進入核對確認/],
+    [null, null, /未留存當次未核銷原因，請進入核對確認/],
   ] as const)('shows the concrete reason in transaction details (%s, %s)', async (review_reason, dispatch_reason, message) => {
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
       items: [{ ...sinopac, review_reason, dispatch_reason }],

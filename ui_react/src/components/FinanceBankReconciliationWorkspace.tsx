@@ -500,7 +500,7 @@ export function FinanceBankReconciliationWorkspace({
                       <td>
                         {purposeLabels[row.classification_type] ?? '款項用途待確認'}
                         <small className="bank-reconcile-sub">{review.reason}</small>
-                        <small className="bank-reconcile-sub">{review.nextStep}</small>
+                        {review.nextStep !== review.reason && <small className="bank-reconcile-sub">{review.nextStep}</small>}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <span className="bank-chip-amber">

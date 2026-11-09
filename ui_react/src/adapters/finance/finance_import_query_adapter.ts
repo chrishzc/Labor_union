@@ -67,10 +67,17 @@ const CLIENT_INSTALLMENT_LABELS: Readonly<Record<string, string>> = {
   deposit: '訂金', first: '第一期', second: '第二期',
 };
 const MISSING_REVIEW_REASON = '未留存當次阻擋原因。';
-const CURRENT_RECEIPT_REASONS = new Set([
-  'sinopac_client_receipt_month_no_match', 'sinopac_client_receipt_no_open_obligation',
-  'sinopac_client_receipt_shortfall', 'sinopac_client_receipt_overage',
-  'client_receipt_underpaid', 'client_receipt_overpaid', 'due_date_missing',
+const UNRECORDED_REVIEW_MESSAGE = '未留存當次未核銷原因，請進入核對確認';
+// Recognition and old target diagnostics do not identify an actual posting failure.
+const LEGACY_REVIEW_DIAGNOSTICS = new Set([
+  'outgoing_staff_payout_target_ambiguous', 'outgoing_client_refund_target_ambiguous',
+  'outgoing_staff_payout_name_ambiguous', 'outgoing_client_refund_name_ambiguous',
+  'sinopac_valid_virtual_account', 'taishin_client_subsidy_case_suffix_in_memo',
+  'sinopac_unique_staff_case_suffix_in_memo', 'sinopac_unique_client_refund_case_suffix_in_memo',
+  'sinopac_unique_staff_account_in_transaction_reference', 'sinopac_unique_client_refund_account_in_transaction_reference',
+  'unique_staff_payout_name_and_month_matched', 'staff_payout_disambiguated_by_month_and_amount',
+  'unique_staff_payout_name_month_fee_matched', 'unique_client_refund_name_and_month_matched',
+  'client_refund_disambiguated_by_month_and_amount', 'unique_client_refund_name_month_fee_matched',
 ]);
 
 const RECONCILIATION_UNAVAILABLE_LABELS: Readonly<Record<string, string>> = {
@@ -103,15 +110,16 @@ function resolveFinanceImportReview(
   preview?: FinanceImportBatchPreview['rows'][number],
   postingStopped?: 'preview_blocked' | 'apply_failed',
 ): ReviewResult {
+  const casePayment = ['client_receipt','staff_payout','staff_salary','client_refund','client_subsidy_return'].includes(row.classification_type);
   const reasonLabel = (code: string) => {
+    if (casePayment && LEGACY_REVIEW_DIAGNOSTICS.has(code)) return MISSING_REVIEW_REASON;
     if ((row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return') {
       if (code === 'bank_fact_not_eligible') return MISSING_REVIEW_REASON;
       if (['refund_requires_exact_settlement','allocation_exceeds_obligation'].includes(code)) return TAISHIN_SUBSIDY_REFUND_BLOCKERS.outgoing_client_refund_amount_mismatch;
       return TAISHIN_SUBSIDY_REFUND_BLOCKERS[code] ?? MISSING_REVIEW_REASON;
     }
     if (row.bank === 'sinopac' && row.classification_type === 'client_refund') {
-      if (code === 'outgoing_client_refund_target_ambiguous') return '舊紀錄僅保留退款目標不明的原因，未留存實際是金額不符或有多個有效配對。';
-      if (['outgoing_client_refund_name_ambiguous', 'counterparty_identity_type_conflict'].includes(code)) return '舊紀錄僅保留對象辨識診斷，未留存當次核銷阻擋原因。';
+      if (code === 'counterparty_identity_type_conflict') return MISSING_REVIEW_REASON;
       if (code === 'bank_fact_not_eligible') return MISSING_REVIEW_REASON;
       if (['refund_requires_exact_settlement', 'allocation_exceeds_obligation'].includes(code)) return SINOPAC_REFUND_BLOCKERS.outgoing_client_refund_amount_mismatch;
       if (SINOPAC_REFUND_BLOCKERS[code]) return SINOPAC_REFUND_BLOCKERS[code];
@@ -124,11 +132,10 @@ function resolveFinanceImportReview(
     }
     if (row.bank === 'sinopac' && ['staff_payout','staff_salary'].includes(row.classification_type)) {
       if (code === 'outgoing_bank_fact_not_eligible') return MISSING_REVIEW_REASON;
-      if (code === 'outgoing_staff_payout_name_ambiguous') return '舊紀錄僅保留姓名辨識不唯一的診斷，未留存當次核銷阻擋原因。';
       if (SINOPAC_PAYOUT_REASON_MESSAGES[code]) return SINOPAC_PAYOUT_REASON_MESSAGES[code];
     }
     if (row.bank === 'taishin' && ['staff_payout','staff_salary'].includes(row.classification_type)) {
-      if (code === 'outgoing_bank_fact_not_eligible') return MISSING_REVIEW_REASON;
+      if (code === 'outgoing_bank_fact_not_eligible' || code === 'staff_bank_account_ambiguous') return MISSING_REVIEW_REASON;
       if (TAISHIN_PAYOUT_REASON_MESSAGES[code]) return TAISHIN_PAYOUT_REASON_MESSAGES[code];
     }
     return REVIEW_REASON_LABELS[code];
@@ -147,13 +154,20 @@ function resolveFinanceImportReview(
     && ['outgoing_bank_fact_not_eligible','staff_payout_difference_mode_invalid','staff_payable_candidate_stale'].includes(row.dispatch_reason ?? '');
   const taishinSubsidyOperationOnly = (row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return'
     && ['bank_fact_not_eligible','stale_preview'].includes(row.dispatch_reason ?? '');
-  if (row.dispatch_reason && !receiptOperationOnly && !staffOperationOnly && !refundOperationOnly && !taishinStaffOperationOnly && !taishinSubsidyOperationOnly) return describe(row.dispatch_reason, `正式核銷檢查未通過。${MISSING_REVIEW_REASON}`);
+  if (row.dispatch_reason && !receiptOperationOnly && !staffOperationOnly && !refundOperationOnly && !taishinStaffOperationOnly && !taishinSubsidyOperationOnly) {
+    const result = describe(row.dispatch_reason, `正式核銷檢查未通過。${MISSING_REVIEW_REASON}`);
+    if (!casePayment || result.reasonCode !== null) return result;
+  }
   const pendingReason = row.recorded_pending_reason ?? (preview?.disposition === 'business_pending' ? preview.pending_reason : null);
-  if (pendingReason) return describe(pendingReason);
+  if (pendingReason) {
+    const result = describe(pendingReason);
+    if (!casePayment || result.reasonCode !== null) return result;
+  }
   const review = row.recorded_client_receipt_review ?? (preview?.disposition === 'business_pending' ? preview.client_receipt_review : null);
   if (review) {
     const { reason, candidates } = review;
     const result = describe(reason);
+    if (casePayment && result.reasonCode === null) return { reasonCode: null, message: UNRECORDED_REVIEW_MESSAGE };
     if (!candidates.length) return result;
     const installments = candidates.map(({ obligation_type, due_date }) =>
       `${CLIENT_INSTALLMENT_LABELS[obligation_type] ?? '其他應收款'}（到期日 ${due_date ?? '未設定'}）`);
@@ -167,10 +181,8 @@ function resolveFinanceImportReview(
       ? '流水已保存。批次預覽有阻擋，尚未執行自動核銷。'
       : `流水已保存。當次批次核銷未完成。${MISSING_REVIEW_REASON}` };
   }
+  if (casePayment) return { reasonCode: null, message: UNRECORDED_REVIEW_MESSAGE };
   const reviewReason = row.review_reason ?? '';
-  if (row.classification_type === 'client_receipt' && CURRENT_RECEIPT_REASONS.has(reviewReason)) {
-    return { reasonCode: null, message: `${MISSING_REVIEW_REASON} 依目前期款檢查，${reasonLabel(reviewReason)}` };
-  }
   const reasons = [...(preview?.evidence ?? []), reviewReason].flatMap(code => reasonLabel(code) ? [reasonLabel(code)] : []);
   if (reasons.length) return { reasonCode: null, message: [...new Set(reasons)].join(' ') };
   if (row.disposition === 'business_pending' && row.classification_type === 'government_subsidy') {
@@ -194,6 +206,7 @@ export function financeBankReviewPresentation(
   postingStopped?: 'preview_blocked' | 'apply_failed',
 ): { label: string; reason: string; nextStep: string } {
   const { reasonCode, message: reason } = resolveFinanceImportReview(row, preview, postingStopped);
+  if (reason === UNRECORDED_REVIEW_MESSAGE) return { label: '待核對', reason, nextStep: reason };
   if (row.classification_type === 'non_business_review' && reasonCode === null
       && row.review_reason === 'taishin_memo_case_requires_manual_scheme') {
     return {label: '待人工確認方案', reason: '已依備註六碼辨識案件，款項用途尚未確認。', nextStep: '請點案件編號，查看原始備註並設定補助方案。'};
