@@ -61,7 +61,7 @@ def test_case_get_preserves_original_memos_as_strict_typed_list():
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application
 from api.routes.finance_statement_workspace import router
-from domains.finance_import.statement_archive import accounting_warning, bank_import_type, validate_manual_statement
+from domains.finance_import.statement_archive import accounting_warning, bank_import_type
 from subsystems.finance_import.statement_archive import StatementExportRow
 
 
@@ -98,26 +98,22 @@ def test_case_get_projects_bank_and_historical_collections_to_strict_http_lists(
         assert data['historical_marker']['amounts'][0]['remaining_ntd'] == 100
 
 
-@pytest.mark.parametrize("fields", [
-    {"交易日": "2026-10-29", "支出": "9970", "備註": "HC115001退款"},
-    {"交易日": "2026-10-29", "存入": 10000, "銷帳編號": "000001"},
-    {"交易日": "2026-10-29", "支出": 10, "銷帳編號": "000001", "備註": "=1+1"},
+@pytest.mark.parametrize("body", [
+    {"fields": {"交易日": "2026-10-29", "支出": 1000, "備註": "synthetic"}},
+    {"fields": {"交易日": "invalid", "支出": -1}},
+    {"fields": {}, "duplicate_of": "bank:1"}, {},
 ])
-def test_manual_minimum_fields_preserve_missing_values(fields):
-    result = validate_manual_statement(fields)
-    assert result["帳號"] is None and result["計息日"] is None
-    assert result["備註"] == fields.get("備註")
-    assert result["銷帳編號"] == fields.get("銷帳編號")
-
-
-@pytest.mark.parametrize("update", [
-    {"交易日": None}, {"交易日": "2026-02-30"}, {"支出": None},
-    {"支出": "0"}, {"支出": -1}, {"支出": "NaN"}, {"支出": "1.5"},
-    {"支出": True}, {"存入": "1"}, {"備註": " "}, {"未知欄位": "x"},
-])
-def test_invalid_manual_input_is_rejected(update):
-    with pytest.raises(ValueError):
-        validate_manual_statement({"交易日": "2026-10-29", "支出": "9970", "備註": "HC115001退款", **update})
+def test_retired_manual_endpoint_never_opens_storage_or_replays_a_write(body):
+    app = FastAPI(); app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: object()
+    def forbid_storage():
+        pytest.fail("retired manual entry must not open storage")
+    app.dependency_overrides[get_statement_archive_application] = forbid_storage
+    with TestClient(app) as client:
+        response = client.post('/statements/manual',json=body,headers={'Idempotency-Key':'old-operation'})
+    assert response.status_code == 410
+    assert 'legacy_manual_statement_retired' in response.text
+    assert '/cases/' not in response.text
 
 
 @pytest.mark.parametrize("difference,warning", [(0, None), (30, None), (99, None), (100, None), (101, "under_paid"), (-1, "over_paid"), (-30, "over_paid")])
@@ -179,7 +175,6 @@ def test_full_export_keeps_both_bank_columns_and_text_without_formulas():
             return (
                 StatementExportRow("bank:1", "sinopac", "reconciled", ("115000001",), (("帳號", "000001"), ("備註", "=1+1"), ("更正註記", "Y"))),
                 StatementExportRow("bank:2", "taishin", "reconciled", ("115000002",), (("台新原欄", "000002"), ("備註", "+cmd"))),
-                StatementExportRow("manual:1", "manual", "manual", (), (("交易日", "2026-01-01"), ("支出", 10), ("備註", "備註"))),
             )
     app = FastAPI(); app.include_router(router)
     app.dependency_overrides[require_admin] = lambda: object()
@@ -187,14 +182,33 @@ def test_full_export_keeps_both_bank_columns_and_text_without_formulas():
     app.dependency_overrides[get_accounting_workspace] = lambda: object()
     with TestClient(app) as client:
         response = client.get("/statements/export")
-    assert response.status_code == 200 and response.headers["X-Statement-Count"] == "3"
+    assert response.status_code == 200 and response.headers["X-Statement-Count"] == "2"
     workbook = load_workbook(BytesIO(response.content), data_only=False)
-    assert workbook.sheetnames == ["人工新增", "永豐", "台新"]
+    assert workbook.sheetnames == ["永豐", "台新"]
     sheet = workbook["永豐"]
     assert sheet["A2"].value == "000001" and sheet["M2"].data_type == "s"
     assert sheet["M2"].value == "=1+1" and sheet.auto_filter.ref
     assert workbook["台新"]["A2"].value == "000002"
-    assert workbook["人工新增"]["A2"].value is None
+
+
+def test_historical_reference_export_is_separate_readonly_and_preserves_text():
+    class Archive:
+        def legacy_reference_rows(self):
+            return (StatementExportRow('manual:1','manual','reference',(),(('備註','=1+1'),('原欄位','000001'))),)
+    app=FastAPI();app.include_router(router)
+    app.dependency_overrides[require_admin]=lambda:object()
+    app.dependency_overrides[get_statement_archive_application]=Archive
+    with TestClient(app) as client:response=client.get('/statements/manual/export')
+    assert response.status_code==200 and response.headers['X-Statement-Count']=='1'
+    assert response.headers['Cache-Control']=='no-store'
+    assert 'manual-statement-references.xlsx' in response.headers['Content-Disposition']
+    workbook=load_workbook(BytesIO(response.content),data_only=False)
+    assert workbook.sheetnames==['歷史人工備查']
+    sheet=workbook.active;headers=[cell.value for cell in sheet[1]]
+    assert sheet.cell(2,headers.index('備註')+1).value=='=1+1'
+    assert sheet.cell(2,headers.index('備註')+1).data_type=='s'
+    assert sheet.cell(2,headers.index('原欄位')+1).value=='000001'
+    assert sheet.cell(2,headers.index('資料來源')+1).value=='歷史人工備查（不代表已核銷）'
 
 
 def test_export_failure_never_returns_partial_workbook_and_requires_authorization():
@@ -212,7 +226,7 @@ def test_export_failure_never_returns_partial_workbook_and_requires_authorizatio
             raise HTTPException(403, "forbidden")
         app.dependency_overrides[require_admin] = deny
         app.dependency_overrides[get_accounting_workspace] = lambda: object()
-        for path in ("/statements/export", "/cases/115000001/accounting", "/accounting/warnings"):
+        for path in ("/statements/export", "/statements/manual/export", "/cases/115000001/accounting", "/accounting/warnings"):
             assert client.get(path).status_code == 403
 
 

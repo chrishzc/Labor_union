@@ -23,28 +23,20 @@ class MySqlStatementArchiveRepository:
                 "WHERE x.finance_import_row_id IS NULL ORDER BY b.id,p.case_no"
             )
             canonical = cursor.fetchall()
-            cursor.execute("SELECT id,fields FROM finance_manual_statements ORDER BY id")
-            manual = cursor.fetchall()
         by_id = {}
         for row in canonical:
             entry = by_id.setdefault(int(row["id"]), {"bank": row["format_id"], "fields": _object(row["raw_payload"]), "cases": []})
             if row["case_no"] not in entry["cases"]:
                 entry["cases"].append(row["case_no"])
         result = [StatementExportRow(f"bank:{identity}", row["bank"], "reconciled", tuple(row["cases"]), tuple(row["fields"].items())) for identity, row in by_id.items()]
-        result.extend(StatementExportRow(f"manual:{row['id']}", "manual", "manual", (), tuple(_object(row["fields"]).items())) for row in manual)
         return tuple(result)
 
-    def create_manual(self, fields, key, actor, duplicate_of=None):
-        command = {"operation": "manual", "fields": fields, "duplicate_of": duplicate_of, "actor": actor}
-
-        def write(cursor):
-            if duplicate_of:
-                self._require_existing(duplicate_of)
-                return StatementCommandReceipt(duplicate_of, 0, 1)
-            cursor.execute("INSERT INTO finance_manual_statements(fields,actor) VALUES (%s,%s)", (json.dumps(fields, ensure_ascii=False), actor))
-            return StatementCommandReceipt(f"manual:{cursor.lastrowid}", 1, 0)
-
-        return self._command(command, key, actor, write)
+    def legacy_reference_rows(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT id,fields FROM finance_manual_statements ORDER BY id")
+            rows = cursor.fetchall()
+        return tuple(StatementExportRow(f"manual:{row['id']}", "manual", "reference", (),
+                                       tuple(_object(row["fields"]).items())) for row in rows)
 
     def exclude_duplicate(self, candidate, kept, key, actor):
         command = {"operation": "exclude", "candidate": candidate, "kept": kept, "actor": actor}

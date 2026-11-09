@@ -4,7 +4,6 @@ import {paymentOverdueReminderClient} from '../../../../../../../api/line_order_
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceCaseAccounting, FinanceAccountingWarnings, AccountingWarningList } from '../../../../../../../components/FinanceCaseAccounting';
-import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
 import { loadAllCoreStageTimelines } from '../../../../../../../api/orders/load_all_core_stage_timelines';
 import { FinanceCaseList } from '../../../../../../../components/FinanceCaseList';
 import { FinanceGovernmentSubsidyList } from '../../../../../../../components/FinanceGovernmentSubsidyList';
@@ -25,7 +24,7 @@ vi.mock('../../../../../../../api/client_finance/difference_resolution_client',(
 vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()=>({clientReceiptQueryClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client', async importOriginal => ({ ...await importOriginal<typeof import('../../../../../../../api/orders/order_query_client')>(), ordersQueryClient: { getOrderSummaries: vi.fn(), getOrderDetail: vi.fn().mockResolvedValue({case_no:'115000701',actual_start_date:'2026-10-01',actual_end_date:'2026-10-31'}) } }));
 
-vi.mock('../../../../../../../api/finance_import/finance_accounting_client', async importOriginal => ({ ...await importOriginal<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>(), financeAccountingClient: { arrangement:vi.fn(),confirmArrangement:vi.fn(),query: vi.fn(), warnings: vi.fn(), dismiss: vi.fn(), manual: vi.fn(), duplicate: vi.fn(), download: vi.fn() } }));
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client', async importOriginal => ({ ...await importOriginal<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>(), financeAccountingClient: { arrangement:vi.fn(),confirmArrangement:vi.fn(),query: vi.fn(), warnings: vi.fn(), dismiss: vi.fn(), duplicate: vi.fn(), download: vi.fn(), downloadLegacyReferences: vi.fn() } }));
 
 function detail(caseNo = '115000701'): CaseAccounting {
   return { case_no: caseNo, client_name: '測試客戶', receivable_ntd: 10000, received_ntd: 10030, payable_ntd: 10000, paid_ntd: 9970, pending_warning_count: 1,
@@ -90,99 +89,30 @@ describe('案件帳務及成功明細', () => {
   it('preserves warning dismissal and server history in its owning tool',async()=>{const dismissed=detail();dismissed.pending_warning_count=0;dismissed.warnings[0]={...dismissed.warnings[0],dismissed:true,dismissed_by:'operator',dismissed_at:'2026-10-29'};vi.mocked(financeAccountingClient.dismiss).mockResolvedValue(dismissed);const onChange=vi.fn();const {rerender}=render(<AccountingWarningList data={detail()} onChange={onChange}/>);fireEvent.click(screen.getByRole('button',{name:'解除警示'}));await waitFor(()=>expect(onChange).toHaveBeenCalledWith(dismissed));rerender(<AccountingWarningList data={dismissed} onChange={onChange}/>);expect(screen.getByText('帳務警示 · 待檢查 0')).toBeInTheDocument();fireEvent.click(screen.getByRole('checkbox',{name:'顯示已解除'}));expect(screen.getByText(/已解除 · operator/)).toBeInTheDocument();});
   it('keeps the warning visible after failed dismissal',async()=>{vi.mocked(financeAccountingClient.dismiss).mockRejectedValue(Error('conflict'));render(<AccountingWarningList data={detail()} onChange={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'解除警示'}));expect(await screen.findByRole('alert')).toHaveTextContent('解除失敗');expect(screen.getByText('帳務警示 · 待檢查 1')).toBeInTheDocument();});
   it('ignores delayed old case response after source selection changes',async()=>{let finish:(value:CaseAccounting)=>void=()=>{};vi.mocked(financeAccountingClient.query).mockImplementation(caseNo=>caseNo==='115000701'?new Promise(resolve=>{finish=resolve;}):Promise.resolve(detail(caseNo)));const {rerender}=render(<FinanceCaseAccounting initialCase="115000701"/>);rerender(<FinanceCaseAccounting initialCase="115000702"/>);await screen.findByRole('heading',{name:'115000702 · 測試客戶'});finish(detail());await waitFor(()=>expect(screen.queryByRole('heading',{name:'115000701 · 測試客戶'})).not.toBeInTheDocument());});
-  it.each(['支出', '存入'] as const)('saves a minimal %s statement through the drawer and maps only the selected amount column', async direction => {
-    vi.mocked(financeAccountingClient.manual).mockResolvedValue({ identity: 'manual:1', saved_count: 1, excluded_count: 0 });
-    render(<FinanceStatementArchive />);
-    const trigger = screen.getByRole('button', { name: '新增人工明細' });
-    trigger.focus(); fireEvent.click(trigger);
-    expect(screen.getByRole('dialog', { name: '新增人工明細' })).toBeInTheDocument();
-    expect(screen.getByLabelText('金額（必填）')).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: direction === '存入' ? '支出' : '存入' } });
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '9970' } });
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: direction } });
-    fireEvent.change(screen.getByLabelText('交易日（必填）'), { target: { value: '2026-10-29' } });
-    fireEvent.change(screen.getByLabelText('備註'), { target: { value: 'HC115001退款' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存明細' }));
-    await waitFor(() => expect(financeAccountingClient.manual).toHaveBeenCalledWith({ 交易日: '2026-10-29', [direction]: '9970', 備註: 'HC115001退款' }, expect.any(String)));
-    expect(await screen.findByRole('status')).toHaveTextContent('人工明細已保存');
-    expect(screen.queryByRole('dialog', { name: '新增人工明細' })).not.toBeInTheDocument();
-    await waitFor(() => expect(trigger).toHaveFocus());
-    expect(screen.queryByLabelText('案件編號')).not.toBeInTheDocument();
-    expect(screen.queryByText('處理已確認的重複明細')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/明細識別/)).not.toBeInTheDocument();
-    expect(financeAccountingClient.duplicate).not.toHaveBeenCalled();
+  it.each([false,true])('offers only separate readonly exports (compact: %s)',async compact=>{
+    const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:synthetic');
+    const click=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+    vi.mocked(financeAccountingClient.download).mockResolvedValue(new Blob(['formal']));
+    vi.mocked(financeAccountingClient.downloadLegacyReferences).mockResolvedValue(new Blob(['reference']));
+    render(<FinanceStatementArchive compact={compact}/>);
+    expect(screen.queryByRole('button',{name:'新增人工明細'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'匯出 Excel'}));
+    expect(await screen.findByRole('status')).toHaveTextContent('成功明細已匯出');
+    expect(financeAccountingClient.download).toHaveBeenCalledOnce();
+    expect(financeAccountingClient.downloadLegacyReferences).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'匯出歷史備查'}));
+    expect(await screen.findByRole('status')).toHaveTextContent('不代表已核銷');
+    expect(financeAccountingClient.downloadLegacyReferences).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledTimes(2);create.mockRestore();click.mockRestore();
   });
 
-  it('shows field errors before saving and preserves optional original values', async () => {
-    vi.mocked(financeAccountingClient.manual).mockResolvedValue({ identity: 'manual:1', saved_count: 1, excluded_count: 0 });
-    render(<FinanceStatementArchive />);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '新增人工明細' }));
-    fireEvent.click(screen.getByRole('button', { name: '儲存明細' }));
-    expect(screen.getByText('請填寫交易日。')).toBeInTheDocument();
-    expect(screen.getByText('請選擇存入或支出。')).toBeInTheDocument();
-    expect(screen.getByText('銷帳編號或備註至少填寫一項。')).toBeInTheDocument();
-    expect(financeAccountingClient.manual).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('交易日（必填）'), { target: { value: '2026-10-30' } });
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: '存入' } });
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '12.5' } });
-    fireEvent.change(screen.getByLabelText('銷帳編號'), { target: { value: '00123456' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存明細' }));
-    expect(screen.getByText('請填寫大於 0 的整數金額。')).toBeInTheDocument();
-    expect(financeAccountingClient.manual).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '1250' } });
-    fireEvent.click(screen.getByText('其他資料（選填）'));
-    fireEvent.change(screen.getByLabelText('帳號'), { target: { value: '0000123456' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存明細' }));
-    await waitFor(() => expect(financeAccountingClient.manual).toHaveBeenCalledWith({ 交易日: '2026-10-30', 存入: '1250', 銷帳編號: '00123456', 帳號: '0000123456' }, expect.any(String)));
-    expect(await screen.findByRole('status')).toHaveTextContent('人工明細已保存');
-  });
-
-  it('keeps an uncertain save locked in the drawer and retries the same payload and key', async () => {
-    vi.mocked(financeAccountingClient.manual).mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({ identity: 'manual:1', saved_count: 1, excluded_count: 0 });
-    render(<FinanceStatementArchive />);
-    fireEvent.click(screen.getByRole('button', { name: '新增人工明細' }));
-    fireEvent.change(screen.getByLabelText('交易日（必填）'), { target: { value: '2026-10-30' } });
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: '支出' } });
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '1500' } });
-    fireEvent.change(screen.getByLabelText('備註'), { target: { value: '合成測試明細' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存明細' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('儲存結果尚未確認');
-    expect(screen.getByLabelText('金額（必填）')).toBeDisabled();
-    expect(screen.getByLabelText('交易方向（必填）')).toBeDisabled();
-    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '關閉人工新增明細' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '匯出 Excel' })).toBeDisabled();
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('dialog', { name: '新增人工明細' })).toBeInTheDocument();
-    const original = vi.mocked(financeAccountingClient.manual).mock.calls[0];
-    fireEvent.click(screen.getByRole('button', { name: '重新確認儲存結果' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('人工明細已保存');
-    expect(vi.mocked(financeAccountingClient.manual).mock.calls[1]).toEqual(original);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('closes an empty drawer with Escape and asks before discarding an edited draft', async () => {
-    render(<UnsavedChangesProvider><FinanceStatementArchive /></UnsavedChangesProvider>);
-    const trigger = screen.getByRole('button', { name: '新增人工明細' });
-    trigger.focus(); fireEvent.click(trigger);
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: '新增人工明細' })).not.toBeInTheDocument();
-    await waitFor(() => expect(trigger).toHaveFocus());
-    fireEvent.click(trigger);
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: '存入' } });
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '2500' } });
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-    const guard = await screen.findByRole('dialog', { name: '尚有未儲存的變更' });
-    fireEvent.click(within(guard).getByRole('button', { name: '繼續編輯' }));
-    expect(screen.getByLabelText('金額（必填）')).toHaveValue('2500');
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-    fireEvent.click(screen.getByRole('button', { name: '捨棄變更並離開' }));
-    expect(screen.queryByRole('dialog', { name: '新增人工明細' })).not.toBeInTheDocument();
-    fireEvent.click(trigger);
-    expect(screen.getByLabelText('交易方向（必填）')).toHaveValue('');
-    expect(screen.getByLabelText('金額（必填）')).toHaveValue('');
-    expect(financeAccountingClient.manual).not.toHaveBeenCalled();
+  it('reports reference-export failure without claiming success',async()=>{
+    vi.mocked(financeAccountingClient.downloadLegacyReferences).mockRejectedValue(new Error('unavailable'));
+    render(<FinanceStatementArchive/>);
+    fireEvent.click(screen.getByRole('button',{name:'匯出歷史備查'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('匯出失敗');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('keeps same-name cases distinct until explicit selection',async()=>{vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(orderPage(['115000701','115000702'],'同名客戶'));vi.mocked(financeAccountingClient.query).mockImplementation(async caseNo=>detail(caseNo));const onCase=vi.fn();render(<FinanceCaseList onCase={onCase}/>);await screen.findByRole('button',{name:'115000702'});expect(onCase).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'115000702'}));expect(onCase).toHaveBeenCalledWith('115000702');});

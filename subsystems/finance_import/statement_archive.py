@@ -1,9 +1,6 @@
-"""Successful bank statements: full read-only export and explicit manual commands."""
+"""Formal successful statements and separately retained historical references."""
 from dataclasses import dataclass
 from typing import Protocol
-
-from domains.finance_import.statement_archive import validate_manual_statement
-
 
 class StatementCommandConflict(ValueError):
     pass
@@ -27,7 +24,7 @@ class StatementCommandReceipt:
 
 class StatementArchivePort(Protocol):
     def export_rows(self) -> tuple[StatementExportRow, ...]: ...
-    def create_manual(self, fields, key, actor, duplicate_of) -> StatementCommandReceipt: ...
+    def legacy_reference_rows(self) -> tuple[StatementExportRow, ...]: ...
     def exclude_duplicate(self, candidate, kept, key, actor) -> StatementCommandReceipt: ...
 
 
@@ -38,9 +35,8 @@ class StatementArchiveApplication:
     def export_rows(self):
         return self.repository.export_rows()
 
-    def create_manual(self, fields, key, actor, duplicate_of=None):
-        values = validate_manual_statement(fields)
-        return self.repository.create_manual(values, key, actor, duplicate_of)
+    def legacy_reference_rows(self):
+        return self.repository.legacy_reference_rows()
 
     def exclude_duplicate(self, candidate, kept, key, actor):
         if candidate == kept:

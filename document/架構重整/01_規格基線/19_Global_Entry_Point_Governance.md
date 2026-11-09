@@ -87,6 +87,8 @@ Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source
 
 2026-11-02 使用者明確退役 Finance 工作台「舊帳戶維護」與 `/api/v1/client-finance/payment-destination` 的 GET、`/preview`、`/apply`。API 自路由與 OpenAPI 移除，不留替代讀寫入口；舊 `#finance?tab=payment-destination` 回既有每月帳務。專屬設定、事件及收據資料依規格 10 受控移除，舊契約帳戶維護規格不再有效；本案虛擬帳號及 `account-management` 登入帳號管理保留。
 
+銀行無案件人工新增 `POST /api/v1/finance-import/statements/manual` 已停用，經既有認證後回 typed 410，不能寫入或回放舊新增成功結果。案件補登改用規格22 §19原正式核銷入口。成功匯出只接受正式核銷證據；既有人工備查另經 `GET /api/v1/finance-import/statements/manual/export` 唯讀下載，不混入成功匯出、不刪除原紀錄。
+
 ## 5. Standard local runtime
 
 標準本機管理端固定為：

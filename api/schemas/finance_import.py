@@ -67,11 +67,6 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-class ManualStatementBody(_StrictModel):
-    fields: dict[str, str | StrictInt | None]
-    duplicate_of: str | None = Field(default=None, min_length=1, max_length=191)
-
-
 class StatementDuplicateBody(_StrictModel):
     candidate_identity: str = Field(min_length=1, max_length=191)
     kept_identity: str = Field(min_length=1, max_length=191)

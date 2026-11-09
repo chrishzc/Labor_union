@@ -363,31 +363,24 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
         finally:
             connection.close()
         body = {"fields": {"交易日": "2026-10-29", "支出": 1200, "備註": "HC115701退款"}}
-        manual = post(client, "/statements/manual", body, "workspace-manual-1")
-        assert manual["saved_count"] == 1
-        assert post(client, "/statements/manual", body, "workspace-manual-1") == manual
-        mismatch = client.post("/api/v1/finance-import/statements/manual", json={"fields": {**body["fields"], "支出": 1201}}, headers={"Idempotency-Key": "workspace-manual-1"})
-        assert mismatch.status_code == 409
-        manual2 = post(client, "/statements/manual", {"fields": {"交易日": "2025-01-01", "存入": 200, "銷帳編號": "000001", "備註": "=1+1"}}, "workspace-manual-2")
-        assert manual2["saved_count"] == 1
-        assert post(client, "/statements/manual", body, "workspace-manual-distinct")["saved_count"] == 1
-        assert post(client, "/statements/manual", {**body, "duplicate_of": manual["identity"]}, "workspace-manual-duplicate")["excluded_count"] == 1
-        assert export(client)[0] == 7
-        invalids = ({"交易日": "bad", "支出": 1, "備註": "x"}, {"交易日": "2026-10-29", "支出": 1, "存入": 2, "備註": "x"}, {"交易日": "2026-10-29", "存入": 1})
-        for index, fields in enumerate(invalids):
-            assert client.post("/api/v1/finance-import/statements/manual", json={"fields": fields}, headers={"Idempotency-Key": f"invalid-{index}"}).status_code == 422
-        sheet = workbook["永豐"]
-        headers = [cell.value for cell in sheet[1]]
-        bank_id = next(row[headers.index("明細識別")] for row in sheet.iter_rows(min_row=2, values_only=True) if row[headers.index("票據號碼")] == "refund")
-        duplicate = {"candidate_identity": bank_id, "kept_identity": manual["identity"]}
-        assert post(client, "/statements/duplicates", duplicate, "workspace-bank-duplicate")["excluded_count"] == 1
-        assert post(client, "/statements/duplicates", duplicate, "workspace-bank-duplicate")["excluded_count"] == 1
+        legacy_fields = {"交易日": "2026-10-29", "支出": 10, "備註": "=1+1", "帳號": "000001"}
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                for _ in range(3):
+                    cursor.execute("INSERT INTO finance_manual_statements(fields,actor) VALUES (%s,'synthetic-existing')", (json.dumps(legacy_fields),))
+            connection.commit()
+        finally:
+            connection.close()
+        for fields in (legacy_fields, {}, {"交易日":"bad","支出":-1}):
+            assert client.post("/api/v1/finance-import/statements/manual",json={"fields":fields},headers={"Idempotency-Key":"retired-key"}).status_code==410
         count, workbook = export(client)
-        assert count == 6
-        manual_sheet = workbook["人工新增"]
-        assert any(cell.value == "000001" for row in manual_sheet for cell in row)
-        formula = next(cell for row in manual_sheet for cell in row if cell.value == "=1+1")
-        assert formula.data_type == "s"
+        assert count==4 and "人工新增" not in workbook.sheetnames
+        response=client.get("/api/v1/finance-import/statements/manual/export")
+        assert response.status_code==200 and response.headers["X-Statement-Count"]=="3"
+        reference=load_workbook(BytesIO(response.content),data_only=False)["歷史人工備查"]
+        assert any(cell.value=="000001" for row in reference for cell in row)
+        assert next(cell for row in reference for cell in row if cell.value=="=1+1").data_type=="s"
         connection = get_connection()
         try:
             assert _sinopac_memo_readback(connection) == unchanged
@@ -404,7 +397,7 @@ def test_statement_archive_and_accounting_workspace_mysql(tmp_path):
         count = export(client)[0]
     (tmp_path / "six-features-receipt.json").write_text(json.dumps({
         "database": DATABASE, "archive_and_case_api": "PASS", "original_import": "PASS",
-        "manual_saved": 3, "excluded_raw_saved": 0, "export_count": count,
+        "legacy_references_preserved": 3, "manual_creation": "retired_410", "excluded_raw_saved": 0, "export_count": count,
         "owner_facts_unchanged_by_archive": "PASS", "case_isolation": "PASS",
         "multi_case_bank_amount_not_double_counted": "PASS",
     }, ensure_ascii=False, indent=2), encoding="utf-8")

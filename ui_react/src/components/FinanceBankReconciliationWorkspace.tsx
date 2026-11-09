@@ -221,7 +221,7 @@ export function FinanceBankReconciliationWorkspace({
             匯入台新對帳單
           </button>
           <button type="button" className="finance-btn-secondary" onClick={() => setHistoryOpen(true)}>匯入紀錄</button>
-          <FinanceStatementArchive compact={true} showManual={false} />
+          <FinanceStatementArchive compact={true} />
         </div>
       </section>
 

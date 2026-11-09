@@ -1,14 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../components/UnsavedChanges';
 import { AccountingParametersPage, initialPricingPolicy } from '../../../../../../pages/AccountingParametersPage';
-import { FinanceStatementArchive } from '../../../../../../components/FinanceStatementArchive';
 import { SubsidyPeriodWorkbench } from '../../../../../../components/SubsidyPeriodWorkbench';
 import { accountingPricingClient, type PricingCatalog } from '../../../../../../api/client_finance/accounting_pricing_client';
-import { financeAccountingClient } from '../../../../../../api/finance_import/finance_accounting_client';
 import { subsidyPeriodClient } from '../../../../../../api/government_subsidy/period_reconciliation_client';
-import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
 
 function Navigation({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -37,24 +34,6 @@ describe('financial forms share direct save and protected navigation', () => {
     expect(screen.getByLabelText('變更說明（選填）')).not.toBeRequired();
     await leaveAndSave(); await screen.findByText('已離開帳務頁');
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ effective_on: initialPricingPolicy().effective_on }), 0, '', expect.any(String));
-  });
-
-  it('preserves an invalid manual statement and only leaves after a confirmed save', async () => {
-    const manual = vi.spyOn(financeAccountingClient, 'manual').mockRejectedValueOnce(new ApiHttpError(422, 'invalid', 'invalid')).mockResolvedValue({ identity: 'manual:1', saved_count: 1, excluded_count: 0 });
-    mount(<FinanceStatementArchive />);
-    fireEvent.click(screen.getByRole('button', {name:'新增人工明細'}));
-    fireEvent.change(screen.getByLabelText('交易日（必填）'), { target: { value: '2026-10-29' } });
-    fireEvent.change(screen.getByLabelText('交易方向（必填）'), { target: { value: '支出' } });
-    fireEvent.change(screen.getByLabelText('金額（必填）'), { target: { value: '100' } });
-    fireEvent.change(screen.getByLabelText('備註'), { target: { value: 'synthetic transfer' } });
-    await leaveAndSave();
-    await screen.findByRole('alert');
-    expect(screen.queryByText('已離開帳務頁')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('金額（必填）')).toHaveValue('100');
-    const dialog = screen.getByRole('dialog', {name:'尚有未儲存的變更'});
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '儲存變更並離開' })).toBeEnabled());
-    fireEvent.click(within(dialog).getByRole('button', { name: '儲存變更並離開' }));
-    await screen.findByText('已離開帳務頁'); expect(manual).toHaveBeenCalledTimes(2);
   });
 
   it('saves a confirmed exact whole-period receipt before leaving', async () => {

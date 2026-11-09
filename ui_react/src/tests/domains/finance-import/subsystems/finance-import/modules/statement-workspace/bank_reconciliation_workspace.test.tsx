@@ -28,10 +28,10 @@ vi.mock('../../../../../../../api/finance_import/finance_import_query_client', (
   financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn() },
 }));
 vi.mock('../../../../../../../components/FinanceStatementArchive', () => ({
-  FinanceStatementArchive: ({ compact: _compact, showManual = false }: { compact?: boolean; showManual?: boolean }) => (
+  FinanceStatementArchive: ({ compact: _compact }: { compact?: boolean }) => (
     <div data-testid="statement-archive">
       <button type="button">匯出 Excel</button>
-      {showManual && <button type="button">新增人工明細</button>}
+      <button type="button">匯出歷史備查</button>
     </div>
   ),
 }));

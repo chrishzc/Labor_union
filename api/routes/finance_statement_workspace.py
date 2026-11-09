@@ -19,7 +19,7 @@ from api.dependencies.finance_import import get_accounting_workspace, get_statem
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.finance_import import (
-    AccountingWarningBody, CaseAccountingView, ManualStatementBody, ManualSupplementReceiptView,
+    AccountingWarningBody, CaseAccountingView, ManualSupplementReceiptView,
     StatementCommandReceiptView, StatementDuplicateBody, ArrangementBody, CaseArrangementView, ArrangementApplyView,
     CaseSubsidyPlanView, SubsidyPlanBody, SubsidyPlanApplyView,
     MonthlyAccountingReportView, ReceivableAccountingListView,
@@ -260,59 +260,64 @@ def mark_historical_accounting(case_no: str, body: HistoricalAccountingBody,
 def export_statements(principal=Depends(require_admin), application=Depends(get_statement_archive_application)):
     del principal
     try:
-        rows = application.export_rows()
-        workbook = Workbook()
-        workbook.remove(workbook.active)
-        banks = sorted({row.bank for row in rows}) or ["manual"]
-        labels = {"sinopac": "永豐", "taishin": "台新", "legacy": "歷史格式", "manual": "人工新增"}
-        for bank in banks:
-            selected = [row for row in rows if row.bank == bank]
-            columns = list(STATEMENT_COLUMNS) if bank in {"sinopac", "manual"} else []
-            for row in selected:
-                for name, _ in row.fields:
-                    if name not in columns:
-                        columns.append(name)
-            metadata = []
-            for name in ("明細識別", "資料來源", "關聯案件"):
-                while name in columns:
-                    name = "_" + name
-                metadata.append(name)
-            sheet = workbook.create_sheet(labels.get(bank, bank) if rows else "無成功明細（0筆）")
-            sheet.append([*columns, *metadata])
-            for cell in sheet[1]:
+        return _statement_export_response(application.export_rows())
+    except (ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+@router.get("/statements/manual/export")
+def export_legacy_statement_references(principal=Depends(require_admin), application=Depends(get_statement_archive_application)):
+    del principal
+    try:
+        return _statement_export_response(application.legacy_reference_rows(), reference=True)
+    except (ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+def _statement_export_response(rows, *, reference=False):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    banks = sorted({row.bank for row in rows}) or ["manual"]
+    labels = {"sinopac": "永豐", "taishin": "台新", "legacy": "歷史格式", "manual": "歷史人工備查"}
+    for bank in banks:
+        selected = [row for row in rows if row.bank == bank]
+        columns = list(STATEMENT_COLUMNS) if bank in {"sinopac", "manual"} else []
+        for row in selected:
+            for name, _ in row.fields:
+                if name not in columns:
+                    columns.append(name)
+        metadata = []
+        for name in ("明細識別", "資料來源", "關聯案件"):
+            while name in columns:
+                name = "_" + name
+            metadata.append(name)
+        sheet = workbook.create_sheet(labels.get(bank, bank) if rows else ("無歷史備查（0筆）" if reference else "無成功明細（0筆）"))
+        sheet.append([*columns, *metadata])
+        for cell in sheet[1]:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
+        for row in selected:
+            fields = dict(row.fields)
+            values = [fields.get(column) for column in columns] + [row.identity, "歷史人工備查（不代表已核銷）" if reference else row.source, ",".join(row.cases)]
+            sheet.append(values)
+            # Bank text is untrusted spreadsheet content, never a formula.
+            for cell in sheet[sheet.max_row]:
                 if isinstance(cell.value, str):
                     cell.data_type = "s"
-            for row in selected:
-                fields = dict(row.fields)
-                values = [fields.get(column) for column in columns] + [row.identity, row.source, ",".join(row.cases)]
-                sheet.append(values)
-                # Bank text is untrusted spreadsheet content, never a formula.
-                for cell in sheet[sheet.max_row]:
-                    if isinstance(cell.value, str):
-                        cell.data_type = "s"
-            sheet.freeze_panes = "A2"
-            sheet.auto_filter.ref = sheet.dimensions
-        content = BytesIO()
-        workbook.save(content)
-        return Response(content.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
-            "Content-Disposition": 'attachment; filename="bank-statements.xlsx"',
-            "X-Statement-Count": str(len(rows)), "Cache-Control": "no-store",
-        })
-    except (ValueError, MySQLError) as error:
-        raise _error(error) from None
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+    content = BytesIO()
+    workbook.save(content)
+    return Response(content.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+        "Content-Disposition": 'attachment; filename="manual-statement-references.xlsx"' if reference else 'attachment; filename="bank-statements.xlsx"',
+        "X-Statement-Count": str(len(rows)), "Cache-Control": "no-store",
+    })
 
-
-@router.post("/statements/manual", response_model=BaseResponse[StatementCommandReceiptView])
-def create_manual_statement(
-    body: ManualStatementBody,
-    idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
-    principal=Depends(require_admin), application=Depends(get_statement_archive_application),
-):
-    try:
-        result = application.create_manual(body.fields, idempotency_key, _actor(principal), body.duplicate_of)
-        return BaseResponse(data=StatementCommandReceiptView(**asdict(result)), message="重複明細已排除" if result.excluded_count else "人工明細已保存")
-    except (ValueError, MySQLError) as error:
-        raise _error(error) from None
+@router.post("/statements/manual", deprecated=True)
+def create_manual_statement(principal=Depends(require_admin)):
+    del principal
+    raise typed_http_error(410, "validation", "legacy_manual_statement_retired",
+        "無案件人工新增已停用，請從案件帳務選擇正式款項進行補登；既有備查紀錄可另行查閱。", "finance-workspace")
 
 
 @router.post("/statements/duplicates", response_model=BaseResponse[StatementCommandReceiptView])

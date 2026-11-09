@@ -81,13 +81,11 @@ export const financeAccountingClient = {
     const { item_identity, kind, expected_ntd, actual_ntd, difference_ntd, source_version } = source;
     return verify(decodePayload(envelope(caseDetail), await transport.post(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/accounting/dismiss`, { item_identity, kind, expected_ntd, actual_ntd, difference_ntd, source_version }, options())).data, caseNo);
   },
-  async manual(fields: Record<string, string>, key: string, duplicateOf?: string) {
-    return decodePayload(envelope(receipt), await transport.post('/api/v1/finance-import/statements/manual', { fields, duplicate_of: duplicateOf || null }, { ...options(), headers: { 'Idempotency-Key': key } })).data;
-  },
   async duplicate(candidate: string, kept: string, key: string) {
     return decodePayload(envelope(receipt), await transport.post('/api/v1/finance-import/statements/duplicates', { candidate_identity: candidate, kept_identity: kept }, { ...options(), headers: { 'Idempotency-Key': key } })).data;
   },
   async download() { return transport.get<Blob>('/api/v1/finance-import/statements/export', { ...options(), responseType: 'blob', timeoutMs: 60000 }); },
+  async downloadLegacyReferences() { return transport.get<Blob>('/api/v1/finance-import/statements/manual/export', { ...options(), responseType: 'blob', timeoutMs: 60000 }); },
   async manualSupplement(caseNo: string, command: CaseManualSupplementCommand, key: string) {
     return verify(decodePayload(envelope(caseDetail), await transport.post(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/manual-supplement`, command, { ...options(), headers: { 'Idempotency-Key': key } })).data, caseNo);
   },
