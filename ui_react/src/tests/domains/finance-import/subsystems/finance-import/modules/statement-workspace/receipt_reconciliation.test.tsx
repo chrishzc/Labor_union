@@ -357,7 +357,7 @@ describe('本案客戶入款核銷',()=>{
     const source = await screen.findByRole('checkbox', { name: '納入銀行款 9' });
     const related = screen.getByRole('checkbox', { name: '納入銀行款 10' });
     expect(source).toBeChecked();
-    expect(source).toBeDisabled();
+    expect(source).toBeEnabled();
     expect(related).not.toBeChecked();
     const periods = screen.getAllByRole('checkbox').slice(2);
     for (const period of periods) expect(period).not.toBeChecked();
@@ -368,5 +368,42 @@ describe('本案客戶入款核銷',()=>{
       'CASE', { payment_stage: null, finance_import_row_ids: [9, 10], obligation_identities: ['first', 'second'] }, 'exact',
     ));
     expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+  });
+  it('replaces the entry source with another same-case receipt and requires a fresh preview before applying', async () => {
+    const original={...facts,bank_facts:facts.bank_facts.map(row=>({...row,amount_ntd:12000})),obligations:[
+      {obligation_identity:'deposit',payment_stage:'deposit' as const,amount_due_ntd:12000,due_date:'2026-03-13'},
+      {obligation_identity:'first',payment_stage:'first' as const,amount_due_ntd:24000,due_date:'2026-06-03'},
+    ]};
+    vi.mocked(clientReceiptQueryClient.query).mockResolvedValue(original);
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),candidate:{...preview().candidate,
+      bank_total:{amount:12000},obligation_total:{amount:12000},
+      allocations:[{bank_fact_identity:'10',obligation_identity:'deposit',amount:{amount:12000}}],
+    }});
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]});
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={10} initialObligationId="deposit" onChanged={vi.fn()} />);
+    const entry=await screen.findByRole('checkbox',{name:'納入銀行款 10'});
+    const other=screen.getByRole('checkbox',{name:'納入銀行款 9'});
+    expect(entry).toBeChecked();expect(entry).toBeEnabled();expect(other).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
+    await screen.findByRole('button',{name:'確認核銷本次收款'});
+    fireEvent.click(entry);
+    expect(screen.queryByRole('button',{name:'確認核銷本次收款'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'核對本案入款'})).toBeDisabled();
+    expect(screen.getByText('尚未核對')).toBeInTheDocument();
+    fireEvent.click(other);
+    expect(entry).not.toBeChecked();expect(other).toBeChecked();
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),candidate:{...preview().candidate,
+      bank_total:{amount:12000},obligation_total:{amount:12000},
+      allocations:[{bank_fact_identity:'9',obligation_identity:'deposit',amount:{amount:12000}}],
+    }});
+    fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
+    await screen.findByRole('button',{name:'確認核銷本次收款'});
+    expect(clientReceiptReconciliationClient.preview).toHaveBeenLastCalledWith('CASE',
+      {payment_stage:null,finance_import_row_ids:[9],obligation_identities:['deposit']},'exact');
+    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));
+    await waitFor(()=>expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledWith('CASE',expect.objectContaining({
+      selection:{payment_stage:null,finance_import_row_ids:[9],obligation_identities:['deposit']},
+    })));
   });
 });
