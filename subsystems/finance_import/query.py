@@ -20,7 +20,7 @@ from domains.finance_import.cancellation_code import (
 )
 from domains.finance_import.statement_archive import bank_import_type
 from domains.finance_import.ingestion import FinanceWorkbookIngestionReceipt
-from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, _is_same_month, extract_name_from_row_text
+from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, _is_same_month, extract_name_from_row_text
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
@@ -274,6 +274,8 @@ class FinanceImportQueryService:
                 FROM raw_rows
                 WHERE transaction_status='posted'
                    OR is_manual_supplement=1
+                   OR (format_id='taishin' AND direction='outgoing'
+                       AND review_reason='{TAISHIN_CASE_MEMO_REASON}')
                    OR (
                        COALESCE(classification_type,'')<>'non_business_review'
                        AND NOT (
@@ -931,6 +933,10 @@ def _enrich_bank_transactions(
         target_staff_id = None
         cases = list(dict.fromkeys(posted_cases_by_id.get(row_id, [])))
         cp_name = str(row["counterparty_name"]).strip() if row.get("counterparty_name") else None
+        if (row.get('format_id') == 'taishin' and row.get('direction') == 'outgoing'
+                and review_reason == TAISHIN_CASE_MEMO_REASON):
+            resolved_case = resolve_suffix(extract_sinopac_memo_case_suffix(row.get('memo')))
+            cases = [resolved_case] if resolved_case else []
 
         if c_type == "government_subsidy":
             cp_name = cp_name or "新竹市政府"

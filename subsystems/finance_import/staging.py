@@ -15,7 +15,7 @@ from domains.finance_import.cancellation_code import (
     resolve_finance_cancellation_code,
     sinopac_memo_case_suffixes,
 )
-from domains.finance_import.transaction_classifier import _is_same_month, classify_finance_transaction
+from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON, _is_same_month, classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
@@ -59,6 +59,23 @@ def _matched_identity_ids(value: Any) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError("matched_identity_ids must be a JSON array")
     return value
+
+
+def _append_occurrence(cursor: Any, batch_id: int, row_id: int, row: Mapping[str, Any]) -> None:
+    cursor.execute(
+        """INSERT INTO finance_import_occurrences (
+               batch_id, finance_import_row_id, source_file,
+               sheet_name, source_row, warnings
+           ) VALUES (%s,%s,%s,%s,%s,%s)""",
+        (
+            batch_id,
+            row_id,
+            row.get("source_file"),
+            row.get("sheet_name"),
+            row.get("source_row"),
+            _json(row.get("warnings")),
+        ),
+    )
 
 
 def _identity_maps(
@@ -169,6 +186,10 @@ def classify_row_with_identity_maps(
 def _has_unique_import_case(cursor, row, classification, identity_maps):
     kind = classification["classification_type"]
     if kind == "non_business_review":
+        if (row["format_id"] == "taishin" and row["direction"] == "outgoing"
+                and classification["reason"] == TAISHIN_CASE_MEMO_REASON):
+            suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+            return resolve_client_virtual_account_suffix(cursor, suffix)["result"] == "resolved"
         return False
     if kind == "government_subsidy":
         return True
@@ -227,7 +248,7 @@ def stage_finance_rows(
     *,
     business_only: bool = False,
 ) -> dict[str, Any]:
-    """Stage new bank facts and count repeat fingerprints without writing a second occurrence."""
+    """Keep source positions for new batch facts; count earlier-batch repeats in the receipt."""
     assert callable(getattr(cursor, "execute", None)), "cursor must provide execute()"
     if not isinstance(normalized_result, Mapping):
         raise ValueError("normalized_result must be a mapping")
@@ -267,6 +288,7 @@ def stage_finance_rows(
         raise RuntimeError("finance import batch id was not generated")
 
     staged_rows = []
+    inserted_fingerprints = set()
     columns = "id" if business_only else (
         "id, classification_type, matched_identity_ids, "
         "resolved_counterparty_account, reconciliation_status"
@@ -286,6 +308,8 @@ def stage_finance_rows(
         if existing is not None:
             if not isinstance(existing, Mapping):
                 raise TypeError("cursor must return mapping rows")
+            if dedup_fingerprint in inserted_fingerprints:
+                _append_occurrence(cursor, batch_id, existing["id"], row)
             skipped = {
                 "row_id": existing["id"],
                 "dedup_fingerprint": dedup_fingerprint,
@@ -351,20 +375,8 @@ def stage_finance_rows(
         if not staged_row_id:
             raise RuntimeError("finance import row id was not generated")
 
-        cursor.execute(
-            """INSERT INTO finance_import_occurrences (
-                   batch_id, finance_import_row_id, source_file,
-                   sheet_name, source_row, warnings
-               ) VALUES (%s,%s,%s,%s,%s,%s)""",
-            (
-                batch_id,
-                staged_row_id,
-                row.get("source_file"),
-                row.get("sheet_name"),
-                row.get("source_row"),
-                _json(row.get("warnings")),
-            ),
-        )
+        _append_occurrence(cursor, batch_id, staged_row_id, row)
+        inserted_fingerprints.add(dedup_fingerprint)
 
         if not business_only:
             classification = classify_row_with_identity_maps(row, identity_maps)

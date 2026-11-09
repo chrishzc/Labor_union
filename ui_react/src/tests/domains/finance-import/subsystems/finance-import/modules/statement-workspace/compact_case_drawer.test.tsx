@@ -27,6 +27,30 @@ function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{re
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
+ it('原始歷史備註逐筆顯示，人工選擇方案才保存且回讀後仍保留原文',async()=>{
+  const original=facts();
+  original.bank_memos=[
+   {identity:'finance-import-row:1',occurred_on:'2026-11-09',memo:'ＨＣ１１５０３２服務人員薪資'},
+   {identity:'finance-import-row:2',occurred_on:'2026-11-09',memo:'ＨＣ１１５０９３雇主補助款'},
+  ];
+  const saved={case_no:caseNo,version:1,events:[{version:1,scheme:'split' as const,actor:'合成人員',created_at:'2026-11-09T00:00:00Z'}]};
+  vi.mocked(financeAccountingClient.query).mockResolvedValueOnce(original).mockResolvedValue({...original,subsidy_plan:saved});
+  vi.mocked(financeAccountingClient.saveSubsidyPlan).mockResolvedValue({case_no:caseNo,applied_version:1,plan:saved});
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  expect(await screen.findByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
+  expect(screen.getByText('ＨＣ１１５０９３雇主補助款')).toBeVisible();
+  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'設定補助退款方案'}));
+  expect(within(screen.getByRole('region',{name:'設定補助退款方案'})).getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
+  for(const radio of screen.getAllByRole('radio'))expect(radio).not.toBeChecked();
+  fireEvent.click(screen.getByRole('radio',{name:/客戶與政府分別入款/}));
+  fireEvent.click(screen.getByRole('button',{name:'儲存方案'}));
+  await waitFor(()=>expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledOnce());
+  expect(vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls[0][1]).toEqual({scheme:'split',expected_version:0});
+  expect(await screen.findByRole('button',{name:'修改補助退款方案'})).toBeVisible();
+  expect(screen.getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
+  expect(screen.getByText('ＨＣ１１５０９３雇主補助款')).toBeVisible();
+ });
   it('呈現完整四個帳務區塊（客戶繳款、補助方案、月嫂薪資、補助退款核銷）；各項帳務事實照實呈現',async()=>{
     wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
     const periodsTable=await screen.findByLabelText('各期繳款與通知，可左右捲動');

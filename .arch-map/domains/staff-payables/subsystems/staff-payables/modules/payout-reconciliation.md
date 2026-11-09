@@ -13,6 +13,7 @@
 - `domains/staff_payables/reconciliation.py`
 - `subsystems/staff_payables/payout_reconciliation.py`
 - `infrastructure/mysql/staff_payout_repository.py` — 永豐以原始交易參考編號的完整帳號投影付款收款人；台新於Preview／Apply以原始備註姓名唯一確認月嫂，投影typed memo staff proof取代帳號必填，所選義務仍須同人。借用Finance Import的完整帳號及姓名擷取；備註六碼不作台新月嫂定位或銀行帳戶。其他格式的既有帳戶投影不變。
+- 規格22 §19人工補登另以Finance Import命令收據綁定的同案exact obligations確認月嫂，投影manual_confirmed_staff_id；不要求交易帳號，不改一般銀行來源的帳號／備註驗證。核銷金額、fee、difference、projection、receipt及outbox仍由本owner原workflow負責。
 - Finance Import 的永豐薪資及台新月嫂補助候選，在宣稱可自動核銷前委派本 owner 的同一 Preview；台新先重新驗證原始備註姓名且不要求帳戶，永豐沿原帳戶規則。正式 Apply 仍重驗原版本、來源及分配，不新增核銷 writer 或 transaction owner。
 
 ## Contracts

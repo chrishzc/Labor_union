@@ -103,6 +103,7 @@ class OutgoingBankFact:
     eligible: bool = True
     blocking_anomalies: tuple[str, ...] = ()
     taishin_memo_staff_id: int | None = None
+    manual_confirmed_staff_id: int | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "outgoing bank fact identity")
@@ -120,6 +121,8 @@ class OutgoingBankFact:
         _validate_blockers(self.blocking_anomalies)
         if self.taishin_memo_staff_id is not None:
             require_positive_integer(self.taishin_memo_staff_id, "Taishin memo staff id")
+        if self.manual_confirmed_staff_id is not None:
+            require_positive_integer(self.manual_confirmed_staff_id, "manual confirmed staff id")
 
     @property
     def canonical_raw_fact_identity(self) -> str:
@@ -518,6 +521,10 @@ def _validate_primary_account_owners(
 
 
 def _validate_bank_fact_owner(bank_fact, bank_accounts, staff_id) -> None:
+    if bank_fact.manual_confirmed_staff_id is not None:
+        if bank_fact.manual_confirmed_staff_id != staff_id:
+            raise ValueError("cross_staff_allocation_forbidden")
+        return
     if bank_fact.taishin_memo_staff_id is not None:
         if bank_fact.taishin_memo_staff_id != staff_id:
             raise ValueError("cross_staff_allocation_forbidden")

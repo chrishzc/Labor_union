@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from pymysql.err import IntegrityError
 from domains.finance_import.statement_archive import ArrangementEvent, CaseArrangement, SubsidyPlanEvent, CaseSubsidyPlan
 
-from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker, HistoricalAccountingAmount, AccountingConflict
+from subsystems.finance_import.accounting_workspace import CaseBankMemo, HistoricalAccountingMarker, HistoricalAccountingAmount, AccountingConflict
+from domains.finance_import.cancellation_code import extract_sinopac_memo_case_suffix
+from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account, resolve_client_virtual_account_suffix
 
 
 def build_accounting_workspace(connection):
@@ -21,7 +23,37 @@ def build_accounting_workspace(connection):
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
         lambda case_no: MySqlGovernmentSubsidyPeriodRepository(connection).case_coverage(case_no)['amount_ntd'],
         partial(query_case_payment_terms, connection), plan=state.subsidy_plan,
-        cancellation=partial(query_cancellation_accounting, connection))
+        cancellation=partial(query_cancellation_accounting, connection),
+        bank_memos=partial(query_case_bank_memos, connection))
+
+
+def query_case_bank_memos(connection, case_no):
+    """Read original Taishin notes under the canonical case account; no cash inference."""
+    with connection.cursor() as cursor:
+        account = resolve_case_virtual_account(cursor, case_no)
+        if account['result'] != 'resolved' or not account['virtual_account']:
+            return ()
+        suffix = account['virtual_account'][-6:]
+        resolution = resolve_client_virtual_account_suffix(cursor, suffix)
+        if resolution['result'] != 'resolved' or resolution['case_no'] != case_no:
+            return ()
+        fullwidth = suffix.translate(str.maketrans('0123456789', '０１２３４５６７８９'))
+        cursor.execute(
+            "SELECT id,transaction_date,memo FROM finance_import_rows "
+            "WHERE format_id='taishin' AND direction='outgoing' "
+            "AND (memo LIKE %s OR memo LIKE %s) ORDER BY transaction_date,id",
+            (f'%{suffix}%', f'%{fullwidth}%'),
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            if extract_sinopac_memo_case_suffix(row['memo']) != suffix:
+                continue
+            occurred = row['transaction_date']
+            result.append(CaseBankMemo(f"finance-import-row:{row['id']}",
+                occurred.isoformat() if hasattr(occurred, 'isoformat') else str(occurred) if occurred else None,
+                row['memo']))
+        return tuple(result)
 
 
 class MySqlAccountingWorkspaceState:

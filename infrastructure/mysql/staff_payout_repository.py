@@ -293,6 +293,12 @@ class MySqlStaffPayoutRepository:
                     raise ValueError("bank_transaction_date_missing")
                 if not _is_twd(row.get("currency")):
                     raise ValueError("bank_currency_not_twd")
+            from infrastructure.mysql.manual_supplement_evidence import manual_source_matches
+            cases = {row.get("case_no") for row in obligation_rows}
+            bank_rows = tuple({**row, "manual_confirmed_staff_id": staff_id}
+                if len(cases) == 1 and None not in cases and manual_source_matches(cursor, row, case_no=next(iter(cases)),
+                    direction="staff_salary", obligations=selection.obligation_identities) else row
+                for row in bank_rows)
             bank_rows = _verify_taishin_memo_recipients(cursor, bank_rows, lock)
         bank_accounts = _load_bank_accounts(cursor, bank_rows, lock)
         events = _load_obligation_events(
@@ -460,7 +466,7 @@ def _load_obligation_rows(cursor, identities, *, lock):
     placeholders = _placeholders(identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT obligations.obligation_identity,obligations.staff_id,"
+        "SELECT obligations.obligation_identity,obligations.staff_id,obligations.case_no,"
         + effective_staff_obligation_amount() + " AS amount_due_ntd,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments "
         "FROM staff_obligations obligations "
         f"WHERE obligations.obligation_identity IN ({placeholders}) "
@@ -507,7 +513,7 @@ def _load_selected_bank_rows(cursor, selection, lock):
 
 
 def _verify_taishin_memo_recipients(cursor, bank_rows, lock):
-    if not any(row.get("format_id") == "taishin" for row in bank_rows):
+    if not any(row.get("format_id") == "taishin" and row.get("manual_confirmed_staff_id") is None for row in bank_rows):
         return bank_rows
     cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name<>'' ORDER BY id" + (" FOR UPDATE" if lock else ""))
     names = {}
@@ -517,7 +523,7 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock):
     name_order = sorted(names, key=len, reverse=True)
     verified = []
     for row in bank_rows:
-        if row.get("format_id") != "taishin":
+        if row.get("format_id") != "taishin" or row.get("manual_confirmed_staff_id") is not None:
             verified.append(row)
             continue
         name = extract_name_from_row_text({"memo": row.get("memo")}, name_order)
@@ -693,6 +699,7 @@ def _outgoing_bank_fact(row, staff_id, anomaly_codes):
         eligible,
         anomaly_codes,
         taishin_memo_staff_id=row.get("taishin_memo_staff_id"),
+        manual_confirmed_staff_id=row.get("manual_confirmed_staff_id"),
     )
 
 

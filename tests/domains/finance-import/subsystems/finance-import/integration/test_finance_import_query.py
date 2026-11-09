@@ -436,6 +436,24 @@ class _EnrichCursor:
         return list(self._rows)
 
 
+def test_case_only_taishin_bank_entry_opens_case_without_reconciliation_target(monkeypatch):
+    from subsystems.finance_import import query
+    monkeypatch.setattr(query, 'resolve_client_virtual_account_suffix',
+        lambda _, suffix: {'result':'resolved','case_no':'115000032'} if suffix=='115032' else {'result':'pending'})
+    source = {
+        'row_id':1,'transaction_date':'2026-11-09','format_id':'taishin','direction':'outgoing',
+        'debit':1000,'credit':None,'memo':'ＨＣ１１５０３２服務人員薪資',
+        'classification_type':'non_business_review','transaction_status':'pending',
+        'disposition':'manual_review','review_reason':'taishin_memo_case_requires_manual_scheme',
+        'matched_identity_ids':'[]','target_identities':'[]','bank_references':'{}',
+        'counterparty_name':None,'available_actions':'[]','safe_reference':'SYNTHETIC',
+    }
+    [result] = _enrich_bank_transactions(_EnrichCursor(),[source],{})
+    assert result['cases'] == ['115000032']
+    assert result['reconciliation_target'] is None
+    assert result['reconciliation_unavailable_reason'] == 'purpose_unconfirmed'
+
+
 @pytest.mark.parametrize('reference,owners,same_case,format_id,matched,targets,allowed',[
     ('000000001234',[19],True,'sinopac',[],[],True),
     ('000000001234 合成月嫂',[19],True,'sinopac',[],[],True),

@@ -10,7 +10,8 @@ reprocess與必要 owner validation／migration evidence，不再提供 anomaly 
 
 ## Implementation
 - `domains/finance_import/cancellation_code.py` — 銀行格式限定的完整帳號／虛擬帳號 projection。
-- `domains/finance_import/transaction_classifier.py` — 正常匯入的純分類與唯一 ownership 候選；永豐客戶入款使用完整銷帳編號，不採姓名／帳號／金額猜測；台新客戶補助讀備註六碼，月嫂補助讀備註姓名且優先於六碼。一般退款原因碼使用 outgoing/client_refund，不以 taishin 名稱誤指永豐流程。
+- `domains/finance_import/transaction_classifier.py` — 正常匯入的純分類與唯一 ownership 候選；永豐客戶入款使用完整銷帳編號，不採姓名／帳號／金額猜測；U13 台新只有備註六碼時以 `taishin_memo_case_requires_manual_scheme` 保留人工確認，不預設客戶補助退款或自動核銷。既有月嫂姓名路徑維持；一般退款原因碼使用 outgoing/client_refund。
+- `scripts/imports/finance_formats/taishin.py` — 解析台新格式，原始備註保留全形、空白及換行，辨識正規化不回寫來源。
 - `domains/finance_import/transaction_fingerprint.py` — canonical identity，指紋命中只計入匯入收據的重複筆數。
 - `domains/finance_import/planning.py` — 正常批次配對計畫及待核對原因快照。不同客戶銀行來源不因相同義務而判重；多筆各自全額命中同一期款時，改為合計超收人工核對，避免重複自動清償。
 - `subsystems/finance_import/ingestion.py`

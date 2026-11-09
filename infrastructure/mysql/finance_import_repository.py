@@ -399,19 +399,11 @@ def _load_batch_facts(cursor, batch_identity, for_update):
     )
     receipt_duplicates = header.get("receipt_duplicate_count")
     duplicate_count = int(counts["duplicate_occurrence_count"] if receipt_duplicates is None else receipt_duplicates)
-    batch_occurrences_total = (
-        int(counts["canonical_created_count"])
-        + duplicate_count
-        + int(counts["source_review_occurrence_count"])
-    )
-    effective_row_count = int(header["row_count"])
-    if effective_row_count > batch_occurrences_total and batch_occurrences_total > 0:
-        effective_row_count = batch_occurrences_total
 
     return FinanceImportBatchFacts(
         str(header["batch_identity"]),
         int(header["batch_version"]),
-        effective_row_count,
+        int(header["row_count"]),
         int(counts["canonical_created_count"]),
         duplicate_count,
         str(header["source_content_digest"]),

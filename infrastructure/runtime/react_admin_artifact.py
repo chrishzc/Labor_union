@@ -168,8 +168,8 @@ class ReactAdminStaticApplication:
             else:
                 target = self._artifact.resolve_file(relative_path)
                 expected_file = self._artifact.files[relative_path]
-                if target.stat().st_size != expected_file.size:
-                    raise ReactAdminArtifactError("react admin artifact file size changed")
+                if target.stat().st_size != expected_file.size or _digest_file(target) != expected_file.sha256:
+                    raise ReactAdminArtifactError("react admin artifact file changed")
                 if relative_path in self._artifact.immutable_assets:
                     cache_control = PRIVATE_IMMUTABLE_CACHE_CONTROL
                     eligibility_header = (

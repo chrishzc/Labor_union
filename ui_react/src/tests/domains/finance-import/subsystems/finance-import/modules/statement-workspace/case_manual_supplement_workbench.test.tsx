@@ -6,6 +6,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaseManualSupplementWorkbench } from '../../../../../../../components/CaseManualSupplementWorkbench';
 import { financeAccountingClient, type AccountingItem, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
+import { ApiNetworkError, ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import {UnsavedChangesProvider} from '../../../../../../../components/UnsavedChanges';
 
 vi.mock('../../../../../../../api/finance_import/finance_accounting_client', () => ({
   financeAccountingClient: {
@@ -161,6 +163,7 @@ describe('CaseManualSupplementWorkbench', () => {
     // 修改補登金額為 10000（部分收款）
     const amountInput = screen.getByLabelText('補登金額 (NT$)');
     fireEvent.change(amountInput, { target: { value: '10000' } });
+    fireEvent.change(screen.getByLabelText('核銷方式'), {target: {value: 'partial'}});
 
     // 輸入備註
     const reasonInput = screen.getByLabelText('備註說明（選填）');
@@ -177,6 +180,7 @@ describe('CaseManualSupplementWorkbench', () => {
           direction: 'client_receipt',
           target_item: 'client-obligation:115001:deposit',
           amount_ntd: 10000,
+          settlement_mode: 'partial',
           reason: '臨櫃現金存入',
         }),
         expect.any(String)
@@ -184,5 +188,34 @@ describe('CaseManualSupplementWorkbench', () => {
       expect(onSuccess).toHaveBeenCalledWith(mockUpdatedCase);
       expect(onClose).toHaveBeenCalled();
     });
+  });
+
+  it.each([new ApiNetworkError(),new ApiHttpError(408,'timeout','結果未確認')])('freezes an unknown result and retries the identical command with its original key (%s)', async failure => {
+    vi.mocked(financeAccountingClient.manualSupplement).mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({case_no:'115001'} as CaseAccounting);
+    render(<UnsavedChangesProvider><CaseManualSupplementWorkbench caseNo="115001" clientItems={mockClientItems} staffItems={mockStaffItems} onSuccess={onSuccess} onClose={onClose}/></UnsavedChangesProvider>);
+    fireEvent.change(screen.getByLabelText('核銷方式'), {target:{value:'overage'}});
+    fireEvent.change(screen.getByLabelText('補登金額 (NT$)'), {target:{value:'14000'}});
+    fireEvent.click(screen.getByRole('button',{name:'確認補登並自動銷帳'}));
+    await screen.findByRole('button',{name:'原樣重送並查詢結果'});
+    const original = vi.mocked(financeAccountingClient.manualSupplement).mock.calls.at(-1)!;
+    expect(original[1].settlement_mode).toBe('overage');
+    expect(screen.getByLabelText('補登金額 (NT$)')).toBeDisabled();
+    expect(screen.getByLabelText('核銷方式')).toBeDisabled();
+    const unload=new Event('beforeunload',{cancelable:true});
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:'原樣重送並查詢結果'}));
+    await waitFor(()=>expect(onSuccess).toHaveBeenCalled());
+    expect(vi.mocked(financeAccountingClient.manualSupplement).mock.calls.at(-1)).toEqual(original);
+  });
+
+  it('allows correcting input after a confirmed rejection', async () => {
+    vi.mocked(financeAccountingClient.manualSupplement).mockRejectedValueOnce(new ApiHttpError(422,'blocked','請核對原款項'));
+    render(<CaseManualSupplementWorkbench caseNo="115001" clientItems={mockClientItems} staffItems={mockStaffItems} onSuccess={onSuccess} onClose={onClose}/>);
+    fireEvent.click(screen.getByRole('button',{name:'確認補登並自動銷帳'}));
+    await screen.findByText('請核對原款項');
+    expect(screen.getByLabelText('補登金額 (NT$)')).not.toBeDisabled();
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 });

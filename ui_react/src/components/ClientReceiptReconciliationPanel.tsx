@@ -9,6 +9,28 @@ import { clientReceiptReconciliationClient, type ReceiptAction, type ReceiptComm
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { useUnsavedChanges } from './UnsavedChanges';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
+
+function caseReceivableBalance(facts:ClientReceiptQuery,accounting:CaseAccounting|undefined,requiredIdentities:readonly string[]):bigint|undefined{
+  if(!accounting||accounting.case_no!==facts.case_no||accounting.customer_amount_ntd==null
+    ||accounting.customer_amount_ntd<0||typeof accounting.customer_fully_received!=='boolean')return undefined;
+  const items=accounting.client_items.filter(item=>item.direction==='receivable');
+  if(!items.length||items.some(item=>item.version.split(':')[0]!==String(facts.account_version)
+    ||item.remaining_ntd==null||item.remaining_ntd<0))return undefined;
+  if(new Set(items.map(item=>item.identity)).size!==items.length)return undefined;
+  if(requiredIdentities.some(identity=>!items.some(item=>item.identity===identity)))return undefined;
+  if(facts.obligations.some(row=>!items.some(item=>item.identity===row.obligation_identity
+    &&BigInt(item.remaining_ntd!)===BigInt(row.amount_due_ntd))))return undefined;
+  return items.reduce((sum,item)=>sum+BigInt(item.remaining_ntd!),0n);
+}
+
+async function queryReceiptScope(caseNo:string,signal?:AbortSignal,requiredIdentities:readonly string[]=[]){
+  const [facts,accounting]=await Promise.all([
+    clientReceiptQueryClient.query(caseNo,{signal}),
+    financeAccountingClient.query(caseNo,signal).catch(()=>undefined),
+  ]);
+  return {facts,remaining:caseReceivableBalance(facts,accounting,requiredIdentities)};
+}
 
 const missingRefundAccountMessage='報名資料缺少客戶退款帳戶，本次未核銷。請先補齊退款帳戶資料，再回本案核對。';
 function receiptFailureMessage(failure: unknown): string | undefined {
@@ -37,6 +59,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
   caseNo:string;onChanged:()=>void;refreshVersion?:number;requiredBankRowId?:number;initialObligationId?:string;onBusyChange?:(busy:boolean)=>void;
 }){
   const [facts,setFacts]=useState<ClientReceiptQuery>();
+  const [caseBalance,setCaseBalance]=useState<bigint>();
   const [selectedBanks,setSelectedBanks]=useState<number[]>([]);
   const [selectedItems,setSelectedItems]=useState<string[]>([]);
   const [preview,setPreview]=useState<ReceiptPreview>();
@@ -47,7 +70,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
   const [result,setResult]=useState('');
   const [revision,setRevision]=useState(0);
   const command=useRef<ReceiptCommand|undefined>(undefined);
-  const postedReceipt=useRef<{caseNo:string;accountVersion:number;message:string}|undefined>(undefined);
+  const postedReceipt=useRef<{caseNo:string;accountVersion:number;message:string;obligationIdentities:string[]}|undefined>(undefined);
   const operationPending=useRef(false);operationPending.current=busy||unknown;
   useUnsavedChanges('客戶收款核銷',[],{busy:busy||unknown});
   useEffect(() => { onBusyChange?.(busy || unknown); return () => onBusyChange?.(false); }, [busy, unknown, onBusyChange]);
@@ -56,15 +79,14 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
     if(postedReceipt.current?.caseNo===caseNo)setResult(postedReceipt.current.message);
     else{postedReceipt.current=undefined;setResult('');}
     command.current=undefined;setAction('');
-    const controller=new AbortController();setFacts(undefined);setPreview(undefined);setError('');
+    const controller=new AbortController();setFacts(undefined);setCaseBalance(undefined);setPreview(undefined);setError('');
     queueMicrotask(()=>{if(controller.signal.aborted)return;
-    void clientReceiptQueryClient.query(caseNo,{signal:controller.signal}).then(value=>{
+    void queryReceiptScope(caseNo,controller.signal,postedReceipt.current?.obligationIdentities).then(({facts:value,remaining})=>{
       if(controller.signal.aborted)return;
       const banks=value.bank_facts.map(row=>row.finance_import_row_id);
       const posted=postedReceipt.current?.caseNo===caseNo?postedReceipt.current:undefined;
       if(posted){
-        const remaining=value.obligations.reduce((sum,item)=>sum+BigInt(item.amount_due_ntd),0n);
-        setResult(`${posted.message} ${value.account_version<posted.accountVersion?'案件餘額尚待重新查詢確認。':remaining===0n?'案件已結清。':`案件尚有待收 ${financeMoney(remaining)}。`}`);
+        setResult(`${posted.message} ${value.account_version<posted.accountVersion||remaining===undefined?'案件餘額尚待重新查詢確認。':remaining===0n?'案件已結清。':`案件尚有待收 ${financeMoney(remaining)}。`}`);
       }
       if(!posted&&requiredBankRowId!==undefined&&!banks.includes(requiredBankRowId)){
         const blocker=value.bank_fact_blockers?.find(row=>row.finance_import_row_id===requiredBankRowId);
@@ -81,6 +103,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
         return;
       }
       setFacts(value);
+      setCaseBalance(remaining);
       setSelectedBanks(requiredBankRowId===undefined?banks:banks.filter(id=>id===requiredBankRowId));
       setSelectedItems(initialObligationId ? value.obligations.filter(item=>item.obligation_identity===initialObligationId).map(item=>item.obligation_identity) : requiredBankRowId===undefined?value.obligations.map(row=>row.obligation_identity):[]);
     }).catch(()=>{if(!controller.signal.aborted)setError('本案待核對入款暫時無法取得，請重新查詢。');});
@@ -101,7 +124,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
     return {...item,allocated,remaining:BigInt(item.amount_due_ntd)-allocated};
   }) : undefined;
   const allocatedTotal=previewRows?.reduce((sum,item)=>sum+item.allocated,0n)??0n;
-  const caseRemaining=(facts?.obligations.reduce((sum,item)=>sum+BigInt(item.amount_due_ntd),0n)??0n)-allocatedTotal;
+  const caseRemaining=caseBalance===undefined||caseBalance<allocatedTotal?undefined:caseBalance-allocatedTotal;
   const invalidate=()=>{setPreview(undefined);setAction('');command.current=undefined;postedReceipt.current=undefined;setResult('');};
 
   async function inspect(next:ReceiptAction='exact'){
@@ -109,10 +132,10 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
     try{
       const [candidate,current]=await Promise.all([
         clientReceiptReconciliationClient.preview(caseNo,selection(),next),
-        clientReceiptQueryClient.query(caseNo),
+        queryReceiptScope(caseNo),
       ]);
-      if(candidate.account_version!==current.account_version)throw new Error('stale_receipt_preview');
-      setFacts(current);setPreview(candidate);setAction(next==='exact'?'':next);
+      if(candidate.account_version!==current.facts.account_version)throw new Error('stale_receipt_preview');
+      setFacts(current.facts);setCaseBalance(current.remaining);setPreview(candidate);setAction(next==='exact'?'':next);
     }
     catch(failure){setError(receiptFailureMessage(failure)??'核對失敗，資料可能已變更，請重新查詢。');}
     finally{setBusy(false);}
@@ -127,7 +150,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
       setUnknown(false);setPreview(undefined);command.current=undefined;
       const message=receipt.status==='partial'?'已記錄實際收款，剩餘款項繼續待收。'
         :receipt.status==='overage'?'本次選取期款已核銷，多收款另列待退款。':'已核銷本次收款。';
-      postedReceipt.current={caseNo,accountVersion:receipt.account_version,message};
+      postedReceipt.current={caseNo,accountVersion:receipt.account_version,message,obligationIdentities:facts?.obligations.map(item=>item.obligation_identity)??[]};
       setResult(message);setRevision(value=>value+1);onChanged();
     }
     catch(failure){const status=Number((failure as {status?:number}).status??0);setUnknown(status===0||status>=500);setError(receiptFailureMessage(failure)??(status===409?'帳務或銀行資料已變更，請重新查詢後核對。':status===401||status===403?'目前登入狀態或權限無法執行核銷。':status===0||status>=500?'尚未確認原操作結果；保留原操作，請勿重建另一筆。':'未能核銷選取款項，請重新查詢後核對。'));}
@@ -350,8 +373,8 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                   <dl aria-label="本次核銷後餘額">
                     <dt>本次核銷合計</dt><dd>{financeMoney(allocatedTotal)}</dd>
                     <dt>本次選取期款剩餘待收</dt><dd>{financeMoney(dueTotal-allocatedTotal)}</dd>
-                    <dt>其他未選期款待收</dt><dd>{financeMoney(caseRemaining-(dueTotal-allocatedTotal))}</dd>
-                    <dt>核銷後案件全部應收餘額</dt><dd>{financeMoney(caseRemaining)}</dd>
+                    <dt>其他未選期款待收</dt><dd>{caseRemaining===undefined?'待確認':financeMoney(caseRemaining-(dueTotal-allocatedTotal))}</dd>
+                    <dt>核銷後案件全部應收餘額</dt><dd>{caseRemaining===undefined?'待確認':financeMoney(caseRemaining)}</dd>
                   </dl>
                   <div className="finance-recon-confirm-row">
                     <p className="finance-recon-preview-desc">
@@ -361,7 +384,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                         ? '本次選取期款核銷，多收另列退款待付。'
                         : '合計相符，可直接核銷。'}
                     </p>
-                    <p>{caseRemaining===0n?'本次核銷後，案件所有應收餘額將歸零。':'本次核銷後，案件仍有待收款項。'}</p>
+                    <p>{caseRemaining===undefined?'案件應收來源或餘額尚待確認；本次僅核銷所選期款。':caseRemaining===0n?'本次核銷後，案件所有應收餘額將歸零。':'本次核銷後，案件仍有待收款項。'}</p>
                     <button
                       type="button"
                       className="finance-btn-primary finance-btn-lg"

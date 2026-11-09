@@ -188,3 +188,136 @@
 .supplement-form-field{display:grid;gap:5px}
 .supplement-form-field label{font-size:.82rem;font-weight:600;color:#5a493e}
 .supplement-form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:6px;border-top:1px dashed #ebdcd1;padding-top:12px}
+
+
+/* 銀行對核空狀態、處置動作按鈕與返回橫幅 */
+.finance-empty-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.finance-empty-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.finance-empty-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #2d2621;
+}
+.finance-empty-desc {
+  font-size: 0.82rem;
+  color: #6b5f54;
+  line-height: 1.6;
+  margin: 0 0 14px 0;
+}
+.finance-empty-action-group {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.finance-btn-action-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--md-sys-color-primary, #c2410c);
+  color: #ffffff;
+  border: 1px solid var(--md-sys-color-primary, #c2410c);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(194, 65, 12, 0.12);
+  white-space: nowrap;
+}
+.finance-btn-action-primary:hover:not(:disabled) {
+  background: var(--md-sys-color-primary-hover, #9a3412);
+  border-color: var(--md-sys-color-primary-hover, #9a3412);
+}
+.finance-btn-action-primary:focus-visible {
+  outline: 3px solid var(--md-sys-color-focus, #9a3412);
+  outline-offset: 2px;
+}
+.finance-btn-action-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: #ffffff;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  border: 1px solid var(--md-sys-color-outline, #dec0b6);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.finance-btn-action-secondary:hover:not(:disabled) {
+  background: #fff8f5;
+  border-color: var(--md-sys-color-primary, #c2410c);
+  color: var(--md-sys-color-primary, #c2410c);
+}
+.finance-btn-action-secondary:focus-visible {
+  outline: 3px solid var(--md-sys-color-focus, #9a3412);
+  outline-offset: 2px;
+}
+.finance-reconciliation-return-banner {
+  background: linear-gradient(135deg, #fffaf6 0%, #fff0e6 100%);
+  border: 1px solid var(--md-sys-color-secondary-container, #fed9b8);
+  border-radius: 10px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 1px 4px rgba(194, 65, 12, 0.08);
+}
+.finance-recon-action-guidance {
+  background: #ffffff;
+  border: 1px solid #ebdcd1;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-top: 16px;
+}
+.finance-recon-action-guidance h5 {
+  margin: 0 0 10px 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #2d2621;
+}
+.finance-recon-guidance-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+  display: grid;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: #5c4f45;
+  line-height: 1.6;
+}
+.finance-recon-guidance-list li {
+  position: relative;
+  padding-left: 18px;
+}
+.finance-recon-guidance-list li::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: var(--md-sys-color-primary, #c2410c);
+  font-weight: 700;
+}

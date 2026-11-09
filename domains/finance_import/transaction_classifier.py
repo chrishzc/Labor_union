@@ -32,6 +32,7 @@ CLASSIFICATION_TYPES = frozenset(
 
 
 TAISHIN_CLIENT_SUBSIDY_MEMO_REASON = "taishin_client_subsidy_case_suffix_in_memo"
+TAISHIN_CASE_MEMO_REASON = "taishin_memo_case_requires_manual_scheme"
 
 
 def _ids_for_account(accounts: Mapping[str, Any], account: str | None) -> list[Any]:
@@ -470,20 +471,44 @@ def classify_finance_transaction(
                     if other_ids or any(candidates and set(candidates) != set(ids) for candidates in (account_ids, case_ids)):
                         return _review("counterparty_identity_type_conflict")
                     return {**fee_result, "resolved_counterparty_account": account}
-                if format_id == 'sinopac' and fee_result['reason'] == 'outgoing_staff_payout_name_ambiguous':
-                    # A shared name is not a veto when the original reference
-                    # provides one legal account owner in that name's candidates.
-                    account = extract_sinopac_account_reference(row['bank_references'].get('交易參考編號'))
-                    owners = _ids_for_account(staff_accounts, account)
-                    pool = sorted(set(all_staff_names) | {c['name'] for c in staff_payout_candidates if c.get('name')},key=len,reverse=True)
-                    name = extract_name_from_row_text(row,pool)
-                    name_ids = {c['staff_id'] for c in staff_payout_candidates if c.get('name') == name}
-                    case_ids = _ids_for_account(staff_case_suffixes or {},extract_sinopac_memo_case_suffix(memo))
-                    other_ids = _ids_for_account(client_refund_accounts,account) + _ids_for_account(client_subsidy_return_accounts,account)
+                if format_id == "sinopac" and fee_result["reason"] in {
+                    "outgoing_staff_payout_name_ambiguous", "outgoing_client_refund_name_ambiguous",
+                }:
+                    # Resolve shared names only with the original account/case
+                    # evidence, before admission can discard a legitimate row.
+                    is_staff = fee_result["reason"] == "outgoing_staff_payout_name_ambiguous"
+                    kind = "staff_salary" if is_staff else "client_refund"
+                    identity_key = "staff_id" if is_staff else "client_id"
+                    candidates = staff_payout_candidates if is_staff else tuple(
+                        item for item in taishin_client_refund_candidates
+                        if item.get("obligation_type") in {None, "refund", "adjustment"}
+                    )
+                    names = all_staff_names if is_staff else all_client_names
+                    pool = sorted(set(names) | {item["name"] for item in candidates if item.get("name")},
+                                  key=len, reverse=True)
+                    name = extract_name_from_row_text(row, pool)
+                    name_ids = {item[identity_key] for item in candidates if item.get("name") == name}
+                    account = extract_sinopac_account_reference(row["bank_references"].get("交易參考編號"))
+                    owners = _ids_for_account(staff_accounts if is_staff else client_refund_accounts, account)
+                    case_ids = _ids_for_account(
+                        (staff_case_suffixes if is_staff else client_refund_case_suffixes) or {},
+                        extract_sinopac_memo_case_suffix(memo),
+                    )
+                    other_ids = (
+                        _ids_for_account(client_refund_accounts, account)
+                        + _ids_for_account(client_subsidy_return_accounts, account)
+                        if is_staff else _ids_for_account(staff_accounts, account)
+                        + _ids_for_account(client_subsidy_return_accounts, account)
+                    )
+                    prefix = "staff" if is_staff else "client_refund"
                     if len(owners) == 1 and owners[0] in name_ids:
                         if other_ids or (case_ids and owners[0] not in case_ids):
-                            return _review('counterparty_identity_type_conflict')
-                        return _result('staff_salary',owners,'sinopac_unique_staff_account_in_transaction_reference',account)
+                            return _review("counterparty_identity_type_conflict")
+                        return _result(kind, owners, f"sinopac_unique_{prefix}_account_in_transaction_reference", account)
+                    if len(case_ids) == 1 and case_ids[0] in name_ids:
+                        if other_ids or (owners and set(owners) != set(case_ids)):
+                            return _review("counterparty_identity_type_conflict")
+                        return _result(kind, case_ids, f"sinopac_unique_{prefix}_case_suffix_in_memo", account)
                 if fee_result["reason"] in {
                     "counterparty_identity_type_conflict",
                     "outgoing_staff_payout_name_ambiguous",
@@ -552,7 +577,7 @@ def classify_finance_transaction(
             return staff_result
         suffix = extract_sinopac_memo_case_suffix(memo)
         if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
-            return _result("client_subsidy_return", [], TAISHIN_CLIENT_SUBSIDY_MEMO_REASON)
+            return _review(TAISHIN_CASE_MEMO_REASON)
         return _review("taishin_outgoing_unrecognized")
 
     return _review("unsupported_bank_direction")

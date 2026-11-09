@@ -257,8 +257,8 @@ def test_taishin_government_memo_cannot_override_another_confirmed_recipient(own
 
 
 @pytest.mark.parametrize(("memo", "expected"), [
-    ("115001", "client_subsidy_return"),
-    ("115001其他文字", "client_subsidy_return"),
+    ("115001", "non_business_review"),
+    ("115001其他文字", "non_business_review"),
     ("115001 115002", "non_business_review"),
     ("合成客戶退款", "non_business_review"),
     ("合成人員甲", "staff_salary"),
@@ -266,11 +266,11 @@ def test_taishin_government_memo_cannot_override_another_confirmed_recipient(own
     ("合成人員甲115001", "staff_salary"),
     ("合成人員甲115999", "staff_salary"),
     ("合成人員甲115001 115002", "staff_salary"),
-    ("115001月嫂薪資", "client_subsidy_return"),
+    ("115001月嫂薪資", "non_business_review"),
     ("月嫂薪資", "non_business_review"),
     (None, "non_business_review"),
 ])
-def test_taishin_uses_case_suffix_for_client_subsidy_and_memo_name_for_staff(memo, expected):
+def test_taishin_case_suffix_waits_for_manual_scheme_and_name_only_staff_path_remains(memo, expected):
     row = _row(format_id="taishin", direction="outgoing", debit=Decimal("100"), credit=None,
                memo=memo, counterparty_name="合成人員甲", counterparty_account="A")
     result = classify_finance_transaction(row, {"A": [7]}, {"A": [9]},

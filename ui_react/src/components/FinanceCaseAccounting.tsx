@@ -15,7 +15,7 @@ import {caseVirtualAccountClient,type CaseVirtualAccountView} from '../api/clien
 import {financeMoney} from './FinanceReceiptsWorkspace';
 import {useUnsavedChanges,useUnsavedNavigation} from './UnsavedChanges';
 import {ApiHttpError} from '../api/shared/typed_errors';
-import {FinanceSubsidyPlanForm,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
+import {FinanceSubsidyPlanForm,FinanceCaseBankMemos,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
 import {FinanceCaseNotice,lastNotification,notificationTime,notificationStatus} from './FinanceCaseNotice';
 import {CaseManualSupplementWorkbench} from './CaseManualSupplementWorkbench';
 import { HistoricalPayableLookup } from './HistoricalPayableReview';
@@ -86,11 +86,273 @@ export function AccountingWarningList({ data, onChange }: { data: CaseAccounting
   </section>;
 }
 
-function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
+function CaseRefundReconciliation({
+  row,
+  data,
+  obligations,
+  selectedIds,
+  onSelectionChange,
+  initialKind,
+  onPosted,
+  reportBusy,
+  selectionBusy,
+  onViewCase,
+}: {
+  row: FinanceBankTransaction;
+  data: CaseAccounting;
+  obligations: CaseAccounting['client_items'];
+  selectedIds: string[];
+  onSelectionChange: (updater: (prev: string[]) => string[]) => void;
+  initialKind: 'client_subsidy_return' | 'client_refund';
+  onPosted: () => void;
+  reportBusy: (busy: boolean) => void;
+  selectionBusy: boolean;
+  onViewCase?: () => void;
+}) {
+  const [showReassign, setShowReassign] = useState(false);
+  const bankTotal = row.amount_ntd;
+  const dueTotal = obligations.filter(item => selectedIds.includes(item.identity)).reduce((sum, item) => sum + Number(item.remaining_ntd ?? 0), 0);
+  const diff = bankTotal - dueTotal;
+
+  return (
+    <div className="case-accounting-card finance-advanced-reconciliation-card" aria-label="客戶退款核銷">
+      <div className="finance-section-heading">
+        <div className="finance-reconciliation-heading-group">
+          <h3>待沖銷銀行退款與案件待退款對核</h3>
+          <span className="finance-tag-imported">客戶退款沖銷</span>
+        </div>
+      </div>
+
+      <div className="finance-advanced-reconciliation-guide">
+        <strong>💡 作用說明：</strong>銀行對帳單已辨識到本案的退款流水（如下左側）。請確認要將此筆款項<strong>沖抵哪一項待退款項</strong>（如下右側）。核對確認後，系統將正式記錄實退並更新退款狀態。
+      </div>
+
+      <div className="finance-recon-deck">
+        <div className="finance-recon-deck-grid">
+          {/* 左側：銀行退款出款 */}
+          <div className="finance-recon-col finance-recon-col-bank">
+            <div className="finance-recon-col-header">
+              <span className="finance-recon-badge-step">步驟 1</span>
+              <h4>銀行已退款項（來源流水）</h4>
+            </div>
+            <div className="finance-table-container">
+              <table className="finance-table finance-recon-table">
+                <thead>
+                  <tr>
+                    <th>納入</th>
+                    <th>退款日期</th>
+                    <th>銀行來源</th>
+                    <th>退款金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="is-selected-row">
+                    <td>
+                      <input type="checkbox" checked disabled readOnly aria-label={`納入銀行退款 ${row.row_id}`} />
+                    </td>
+                    <td><strong>{row.transaction_date ?? '日期未提供'}</strong></td>
+                    <td>
+                      <span>{row.bank === 'sinopac' ? '永豐銀行' : row.bank === 'taishin' ? '台新銀行' : '銀行出款'}</span>
+                      <small className="finance-mono-sub">{row.reference}</small>
+                    </td>
+                    <td><strong className="finance-paid">{money(row.amount_ntd)}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="finance-recon-col-summary">
+              <span>已勾選退款合計：<strong>{money(row.amount_ntd)}</strong>（共 1 筆）</span>
+            </div>
+          </div>
+
+          {/* 中間箭頭 */}
+          <div className="finance-recon-arrow-divider" aria-hidden="true">
+            <span className="finance-recon-arrow-icon">➔</span>
+            <small>沖抵核銷</small>
+          </div>
+
+          {/* 右側：案件待退款項 */}
+          <div className="finance-recon-col finance-recon-col-target">
+            <div className="finance-recon-col-header">
+              <span className="finance-recon-badge-step">步驟 2</span>
+              <h4>預計沖抵待退款項（核銷目標）</h4>
+            </div>
+            {!obligations.length ? (
+              <div className="finance-reconciliation-empty-box">
+                <div className="finance-empty-header">
+                  <span className="finance-empty-badge">無可沖銷款項</span>
+                  <h5 className="finance-empty-title">本案目前沒有可選待退款項</h5>
+                </div>
+                <p className="finance-empty-desc">
+                  原銀行流水已帶入（{row.bank === 'sinopac' ? '永豐銀行' : '台新銀行'} {money(row.amount_ntd)}），但本案帳務尚未建立待退款或補助退款義務。請先至案件帳務確認正式款項資料後，再進行核對。
+                </p>
+                {onViewCase && (
+                  <div className="finance-empty-action-group">
+                    <button
+                      type="button"
+                      className="finance-btn-action-primary"
+                      onClick={onViewCase}
+                      disabled={selectionBusy}
+                    >
+                      查看本案帳務（設定方案／補登款項）
+                    </button>
+                    <button
+                      type="button"
+                      className="finance-btn-action-secondary"
+                      onClick={() => setShowReassign((prev) => !prev)}
+                      disabled={selectionBusy}
+                    >
+                      {showReassign ? '收合更正表單' : '更正款項用途／重新歸屬'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="finance-recon-obligations-list">
+                {obligations.map((item) => {
+                  const isChecked = selectedIds.includes(item.identity);
+                  return (
+                    <label
+                      key={item.identity}
+                      className={`finance-recon-obligation-item ${isChecked ? 'is-selected-item' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`核銷款項 ${item.identity}`}
+                        checked={isChecked}
+                        disabled={selectionBusy}
+                        onChange={() => onSelectionChange((ids) => ids.includes(item.identity) ? ids.filter((id) => id !== item.identity) : [...ids, item.identity])}
+                      />
+                      <div className="finance-recon-ob-info">
+                        <div className="finance-recon-ob-name">
+                          <strong>{item.label || '應退款項'}</strong>
+                          <small>{item.due_date ? `到期日：${item.due_date}` : '未提供到期日'}</small>
+                        </div>
+                        <div className="finance-recon-ob-meta">
+                          <span>待退 <strong>{money(item.remaining_ntd)}</strong></span>
+                          <small className="finance-mono-sub">{item.identity}</small>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <div className="finance-recon-col-summary">
+              <span>已勾選待退款：<strong>{money(dueTotal)}</strong>（共 {selectedIds.length} 項）</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 試算與決策條 */}
+        <div className="finance-recon-calculation-bar">
+          <div className="finance-recon-calc-metrics">
+            <div>
+              <small>勾選銀行實退</small>
+              <strong>{money(bankTotal)}</strong>
+            </div>
+            <span className="finance-recon-calc-operator">−</span>
+            <div>
+              <small>對應待退款項</small>
+              <strong>{money(dueTotal)}</strong>
+            </div>
+            <span className="finance-recon-calc-operator">=</span>
+            <div>
+              <small>沖銷差額</small>
+              <strong className={!selectedIds.length ? undefined : diff === 0 ? 'finance-paid' : diff < 0 ? 'finance-diff-under' : 'finance-diff-over'}>
+                {!obligations.length || !selectedIds.length ? '尚未核對' : diff === 0 ? '金額相符' : diff < 0 ? `短少 ${money(-diff)}` : `超出 ${money(diff)}`}
+              </strong>
+            </div>
+          </div>
+
+          <div className="finance-recon-calc-explanation">
+            {!obligations.length ? (
+              <span>本案目前沒有可選款項，請點選「前往本案帳務」確認正式款項資料，或於下方進行流水用途更正。</span>
+            ) : !selectedIds.length ? (
+              <span>請先選擇本次要核銷的退款款項，再核對金額。</span>
+            ) : diff === 0 ? (
+              <span>退款金額與本次選取款項相符；請在下方檢查核銷影響並確認核銷。</span>
+            ) : (
+              <span>退款金額與選取款項存在差額，請在下方核銷表單選擇差額處理方式。</span>
+            )}
+          </div>
+        </div>
+
+        {/* 無款項時提供合規處置指引面板 */}
+        {!obligations.length && (
+          <div className="finance-recon-action-guidance">
+            <h5>異常處置與業務指引</h5>
+            <ul className="finance-recon-guidance-list">
+              <li>
+                <strong>本案確有退款但尚未建立款項：</strong>
+                請點擊「查看本案帳務」，確認【02 補助退款方案】是否已選定為「方案二（客戶先墊後退）」或執行【手動補登款項】。設定完成後返回此抽屜即可核對。
+              </li>
+              <li>
+                <strong>銀行出款非本案退款（流水誤判）：</strong>
+                請點擊「更正款項用途／重新歸屬」，重新指定受款案件或將用途變更為月嫂薪資、整期補助退款等其他款項性質。
+              </li>
+            </ul>
+            <div className="finance-empty-action-group">
+              {onViewCase && (
+                <button type="button" className="finance-btn-action-primary" onClick={onViewCase} disabled={selectionBusy}>
+                  查看本案帳務
+                </button>
+              )}
+              <button type="button" className="finance-btn-action-secondary" onClick={() => setShowReassign((prev) => !prev)} disabled={selectionBusy}>
+                {showReassign ? '收合更正表單' : '更正款項用途／重新歸屬'}
+              </button>
+            </div>
+            {showReassign && (
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #ebdcd1' }}>
+                <FinanceImportCorrectionForm
+                  rowIdentity={row.row_identity}
+                  sourceLabel={row.reference}
+                  bankAmount={row.amount_ntd}
+                  initialKind={initialKind}
+                  initialCaseNo={data.case_no}
+                  staff={[]}
+                  onPosted={onPosted}
+                  onBusyChange={reportBusy}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 預覽與確認核銷（當有選取款項時） */}
+        {selectedIds.length > 0 && (
+          <div className="finance-scope-note finance-recon-preview-box">
+            <div className="finance-recon-preview-header">
+              <h5>核銷處置與預覽確認</h5>
+            </div>
+            <FinanceImportCorrectionForm
+              key={selectedIds.join('|')}
+              rowIdentity={row.row_identity}
+              sourceLabel={row.reference}
+              staff={[]}
+              initialKind={initialKind}
+              initialCaseNo={data.case_no}
+              lockedObligations={obligations.filter((item) => selectedIds.includes(item.identity)).map((item) => ({
+                id: item.identity,
+                label: `${item.label || '應退款項'} · 待退 ${money(item.remaining_ntd)}`,
+              }))}
+              onPosted={onPosted}
+              onBusyChange={reportBusy}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase }: {
   row: FinanceBankTransaction;
   data: CaseAccounting;
   onPosted: () => void;
   onBusyChange: (busy: boolean) => void;
+  onViewCase?: () => void;
 }) {
   const target = row.reconciliation_target;
   const [chosenIds, setChosenIds] = useState<string[]>([]);
@@ -121,32 +383,36 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
       <h3>{isRefundReturn ? '客戶退匯' : isReceipt ? '客戶繳款' : isStaff ? '月嫂薪資' : '客戶退款'} · 核對交易</h3>
       <p>{row.bank === 'sinopac' ? '永豐' : '台新'} · {row.transaction_date ?? '日期未提供'} · {row.reference} · {money(row.amount_ntd)}</p>
     </header>
-    {requiresSelection && !isReceipt && !isRefundReturn && <fieldset disabled={selectionBusy}>
-      <legend>選擇本次核銷款項</legend>
-      <p>原銀行流水已帶入，請選擇本次要核銷的同案款項。</p>
-      {!obligations.length && <p>本案目前沒有可選款項，請回案件帳務確認正式款項資料。</p>}
-      {obligations.map(item => <label key={item.identity} style={{ display: 'block' }}>
-        <input type="checkbox" aria-label={`核銷款項 ${item.identity}`}
-          checked={chosenIds.includes(item.identity)}
-          onChange={() => setChosenIds(ids => ids.includes(item.identity) ? ids.filter(id => id !== item.identity) : [...ids, item.identity])} />
-        {item.label || '應付款項'} · 到期日 {item.due_date ?? '未提供'} · 餘額 {money(item.remaining_ntd)}
-      </label>)}
+    {isStaff && requiresSelection && <fieldset disabled={selectionBusy}>
+      <legend>本次核銷款項</legend>
+      {obligations.length ? obligations.map(item=><label key={item.identity}>
+        <input type="checkbox" aria-label={`核銷款項 ${item.identity}`} checked={selectedIds.includes(item.identity)}
+          onChange={()=>setChosenIds(ids=>ids.includes(item.identity)?ids.filter(id=>id!==item.identity):[...ids,item.identity])}/>
+        {item.label || '月嫂應付款'} · 待付 {money(item.remaining_ntd)} · {item.due_date ?? '未定日期'}
+      </label>) : <p>本案目前沒有可選款項，請回案件帳務確認正式款項資料。</p>}
     </fieldset>}
     {isRefundReturn ? (
       <ClientRefundReturnReconciliationPanel caseNo={data.case_no} bankRowId={row.row_id} onPosted={onPosted} onBusyChange={onBusyChange} />
     ) : isReceipt ? (
       <ClientReceiptReconciliationPanel caseNo={data.case_no} requiredBankRowId={row.row_id}
         initialObligationId={requiresSelection ? undefined : target.obligation_identities[0]} onChanged={onPosted} onBusyChange={onBusyChange} />
-    ) : requiresSelection && !selectedIds.length ? (
+    ) : isStaff && !staffTarget ? (
       <p>請先選擇核銷款項，再檢查核銷影響。</p>
     ) : staffTarget ? (
       <StaffPayoutRemediationWorkbench key={selectedIds.join('|')} target={staffTarget} financeImportRowId={row.row_id} sourceBank={row.bank} confirmPreview onPosted={onPosted} onBusyChange={reportBusy} />
     ) : (
-      <FinanceImportCorrectionForm key={selectedIds.join('|')} rowIdentity={row.row_identity} sourceLabel={row.reference}
-        staff={[]} initialKind={initialKind} initialCaseNo={data.case_no}
-        lockedObligations={obligations.filter(item => selectedIds.includes(item.identity)).map(item => ({
-          id: item.identity, label: `${item.label || '應退款項'} · 待退 ${money(item.remaining_ntd)}`,
-        }))} onPosted={onPosted} onBusyChange={reportBusy} />
+      <CaseRefundReconciliation
+        row={row}
+        data={data}
+        obligations={obligations}
+        selectedIds={selectedIds}
+        onSelectionChange={setChosenIds}
+        initialKind={initialKind}
+        onPosted={onPosted}
+        reportBusy={reportBusy}
+        selectionBusy={selectionBusy}
+        onViewCase={onViewCase}
+      />
     )}
   </section>;
 }
@@ -156,6 +422,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
  const[showSupplement,setShowSupplement]=useState(false);
+  const [showFullCase, setShowFullCase] = useState(false);
  const[copied,setCopied]=useState(false);
  const section=useRef<HTMLElement>(null),returnScroll=useRef(0),returnFocus=useRef<HTMLElement|null>(null);
  useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal),caseVirtualAccountClient.query(initialCase,controller.signal)]).then(([accounting,order,notices,registry,accountView])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
@@ -198,8 +465,21 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
- {data&&bankReconciliation&&<CaseBankReconciliation key={bankReconciliation.row.row_identity} data={data} {...bankReconciliation}/>}
- {data&&!bankReconciliation&&<><div hidden={view!==null}>
+ {data&&bankReconciliation&&!showFullCase&&<CaseBankReconciliation key={bankReconciliation.row.row_identity} data={data} {...bankReconciliation} onViewCase={()=>setShowFullCase(true)}/>}
+ {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
+ {showFullCase&&bankReconciliation&&(
+   <div className="finance-reconciliation-return-banner">
+     <div>
+       <span className="finance-empty-badge" style={{marginRight:'8px'}}>正在核對銀行流水</span>
+       <span style={{fontSize:'0.88rem',fontWeight:600,color:'var(--md-sys-color-on-surface,#1e1b19)'}}>
+         {bankReconciliation.row.bank==='sinopac'?'永豐銀行':'台新銀行'} · {bankReconciliation.row.transaction_date??'日期未提供'} · {bankReconciliation.row.reference} · {money(bankReconciliation.row.amount_ntd)}
+       </span>
+     </div>
+     <button type="button" className="finance-btn-action-primary" onClick={()=>{setShowFullCase(false);refresh();}}>
+       返回對核交易
+     </button>
+   </div>
+ )}
  <CancellationSettlementAccounting key={revision} data={data} />
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>
  <section className="finance-reconciliation-card" aria-label="銀行對帳與帳戶資訊">
@@ -299,7 +579,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   return <tr key={stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{expected===0?'不需繳納':item?.due_date??'日期待確認'}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='manual'?'人工補登':receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {row.bank==='manual'?'人工補登':'入帳'} · {money(row.amount_ntd)}</p>)}</details>}</>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><div className="finance-case-period-actions"><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'通知'+stageNames[stage]} disabled={remaining==null||remaining<=0||!notice?.can_send||!!state.loading} title={remaining===0?(expected===0?'本期免繳':'本期已繳齊'):notice?.unavailable_reason??(notice?'查看本期通知內容與紀錄':'通知來源待確認')} onClick={()=>open(stage)}>通知</button></div></td></tr>;
   })}</tbody></table></div>{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
 </div></details>
- <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'由人員設定補助款歸屬，不從歷史金流自動代選。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><p>可提前設定，不改各期應繳。案件結束後再處理補助與應付清單。</p>{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'由人員設定補助款歸屬，不從歷史金流自動代選。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可提前設定，不改各期應繳。案件結束後再處理補助與應付清單。</p>{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
  <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
   {onPayableReview && state.order?.order_status.startsWith('歷史訂單－') &&
     <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
@@ -617,7 +897,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     </small>
   </div>
  </div></details>
- </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
+ </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} bankMemos={data.bank_memos??[]} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  </section>;
 }
 export function FinanceAccountingWarnings({ onCase }: { onCase: (caseNo: string) => void }) {

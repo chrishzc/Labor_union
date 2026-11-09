@@ -6,6 +6,58 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 import pytest
 
+
+@pytest.mark.parametrize('suffix,memo', [
+    ('115032', '  ＨＣ１１５０３２服務人員薪資\n'),
+    ('115093', 'ＨＣ１１５０９３雇主補助款'),
+])
+def test_case_original_bank_memos_use_unique_canonical_case_without_payment(suffix, memo):
+    from infrastructure.mysql.accounting_workspace_repository import query_case_bank_memos
+    case = '115000' + suffix[-3:]
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, sql, params):
+            assert sql.startswith('SELECT') and 'FOR UPDATE' not in sql
+            if 'SELECT DISTINCT virtual_account' in sql:
+                self.rows = [{'virtual_account': '99781699' + suffix}]
+            elif 'FROM finance_import_rows' in sql:
+                assert "format_id='taishin' AND direction='outgoing'" in sql
+                self.rows = [
+                    {'id':1,'transaction_date':'2026-11-09','memo':memo},
+                    {'id':2,'transaction_date':'2026-11-09','memo':'HC115999其他案件'},
+                    {'id':3,'transaction_date':'2026-11-09','memo':memo+' HC115999'},
+                    {'id':4,'transaction_date':'2026-11-09','memo':'1234567890123456789'},
+                ]
+            else:
+                assert 'client_legacy_virtual_accounts' in sql
+                self.rows = [{'case_no':case}]
+        def fetchall(self): return self.rows
+
+    class Connection:
+        def cursor(self): return Cursor()
+
+    [note] = query_case_bank_memos(Connection(), case)
+    assert note.memo == memo
+    assert note.identity == 'finance-import-row:1'
+
+
+def test_case_get_preserves_original_memos_as_strict_typed_list():
+    from types import SimpleNamespace
+    from subsystems.finance_import.accounting_workspace import CaseAccounting, CaseBankMemo
+    case = CaseAccounting('115000032','Synthetic',None,None,None,None,0,(),(),(),(),
+        bank_memos=(CaseBankMemo('finance-import-row:1','2026-11-09','ＨＣ１１５０３２服務人員薪資'),))
+    app = FastAPI(); app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: object()
+    app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(query=lambda _: case)
+    with TestClient(app) as client:
+        response = client.get('/cases/115000032/accounting')
+    assert response.status_code == 200
+    assert response.json()['data']['bank_memos'] == [
+        {'identity':'finance-import-row:1','occurred_on':'2026-11-09','memo':'ＨＣ１１５０３２服務人員薪資'},
+    ]
+
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application
 from api.routes.finance_statement_workspace import router
@@ -688,7 +740,7 @@ def test_manual_plan_body_does_not_accept_forged_actor_or_financial_values():
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,actor='forged')
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,amount_ntd=10)
 
-def test_case_manual_supplement_api_endpoint_success():
+def test_case_manual_supplement_api_endpoint_success(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import MagicMock
     from fastapi import FastAPI
@@ -706,14 +758,12 @@ def test_case_manual_supplement_api_endpoint_success():
         (), (), (),
     )
     mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.fetchone.side_effect = [
-        {"case_no": "115000001"},
-        None,
-        {"amount_due_ntd": 10000, "total_paid": 10000},
-    ]
-    mock_cursor.lastrowid = 101
+    from subsystems.finance_import.case_manual_supplement import ManualSupplementResult
+    repository = MagicMock()
+    repository.reserve_or_replay.return_value = None
+    repository.reconcile.return_value = ManualSupplementResult('115000001',101,202,'client_receipt',
+        'client-obligation:115000001:deposit',13500,True)
+    monkeypatch.setattr('api.routes.finance_statement_workspace.MySqlCaseManualSupplementRepository', lambda _: repository)
 
     app = FastAPI()
     app.include_router(router)
@@ -738,4 +788,6 @@ def test_case_manual_supplement_api_endpoint_success():
         )
     assert res.status_code == 200
     assert res.json()["success"] is True
-    assert res.json()["message"] == "人工補登成功，期款已自動銷帳"
+    assert res.json()["data"]["manual_supplement_receipt"]["row_id"] == 101
+    assert repository.reconcile.call_args.args[0].actor == 'admin_user_id:1'
+    mock_conn.commit.assert_called_once()

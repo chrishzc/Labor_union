@@ -62,6 +62,13 @@ class AccountingBankFact:
 
 
 @dataclass(frozen=True)
+class CaseBankMemo:
+    identity: str
+    occurred_on: str | None
+    memo: str
+
+
+@dataclass(frozen=True)
 class CaseAccounting:
     case_no: str
     client_name: str
@@ -95,6 +102,7 @@ class CaseAccounting:
     customer_paid_ntd: int | None = None
     funding: ClientCaseFunding | None = None
     cancellation_settlement: ClientCancellationAccounting | None = None
+    bank_memos: tuple[CaseBankMemo, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -145,13 +153,14 @@ class StaffAccountingPort(Protocol):
 
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
-                 bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None):
+                 bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
         self.payment_terms = payment_terms
         self.plan = plan
         self.cancellation = cancellation
+        self.bank_memos = bank_memos
 
     def subsidy_plan_history(self, case_no: str):
         self.state.case_client(case_no)
@@ -340,6 +349,7 @@ class AccountingWorkspace:
             plan, ongoing_case_completed(fully_received, plan),
             customer_paid_ntd=customer_paid, funding=funding,
             cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,
+            bank_memos=self.bank_memos(case_no) if include_sources and self.bank_memos else (),
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

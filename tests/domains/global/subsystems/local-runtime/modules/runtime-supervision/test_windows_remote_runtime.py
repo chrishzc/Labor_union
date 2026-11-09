@@ -105,6 +105,41 @@ def test_factory_refuses_inherited_bypass_before_loading_artifact(monkeypatch):
         remote.create_app()
 
 
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+@pytest.mark.parametrize('mount', ['/test', '/admin'])
+@pytest.mark.parametrize('extension,original,replacement', [
+    ('js', b'export const version = 1;\n', b'export const version = 2;\n'),
+    ('css', b'body { color: black; }\n', b'body { color: white; }\n'),
+])
+def test_equal_size_asset_corruption_after_gateway_start_is_not_served_or_cached(
+    tmp_path, method, mount, extension, original, replacement,
+):
+    source = tmp_path / 'source'
+    (source / 'assets').mkdir(parents=True)
+    (source / '.vite').mkdir()
+    relative = f'assets/app-a1b2c3d4.{extension}'
+    (source / 'index.html').write_text('<div id="root"></div>', encoding='utf-8')
+    (source / relative).write_bytes(original)
+    (source / '.vite/manifest.json').write_text(
+        json.dumps({'entry': {'file': relative}}), encoding='utf-8',
+    )
+    output = tmp_path / 'artifact'
+    build_artifact(output, source=source)
+    validated = validate_react_admin_artifact(output, workspace_root=remote.ROOT)
+    app = remote.create_gateway(validated, transport=httpx.MockTransport(lambda _: httpx.Response(401)))
+    with TestClient(app, base_url='http://127.0.0.1:5173') as client:
+        original_response = client.request(method, f'{mount}/{relative}')
+        assert original_response.status_code == 200
+        assert original_response.headers['cache-control'] == PRIVATE_IMMUTABLE_CACHE_CONTROL
+        assert len(original) == len(replacement)
+        (output / relative).write_bytes(replacement)
+        rejected = client.request(method, f'{mount}/{relative}')
+        assert rejected.status_code == 404
+        assert rejected.headers['cache-control'] == 'no-store'
+        assert ASSET_ELIGIBILITY_HEADER.lower() not in rejected.headers
+        assert replacement not in rejected.content
+
+
 def test_static_assets_above_threshold_are_gzip_compressed_across_test_and_admin_mounts(tmp_path):
     source = tmp_path / 'gzip_source'
     assets = source / 'assets'

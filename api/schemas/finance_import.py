@@ -235,7 +235,24 @@ class CaseCancellationSettlementView(_StrictModel):
     fee_remaining_ntd: ExactNtd = 0
 
 
+class CaseBankMemoView(_StrictModel):
+    identity: str
+    occurred_on: str | None
+    memo: str
+
+
+class ManualSupplementReceiptView(_StrictModel):
+    case_no: str
+    row_id: int
+    entry_id: int
+    direction: str
+    target_item: str
+    amount_ntd: ExactNtd
+    reconciled: bool
+
+
 class CaseAccountingView(_StrictModel):
+    manual_supplement_receipt: ManualSupplementReceiptView | None = None
     case_no: str
     client_name: str
     receivable_ntd: ExactNtd | None
@@ -264,6 +281,7 @@ class CaseAccountingView(_StrictModel):
     can_confirm_direct: bool = False
     collection_progress: CollectionProgressView | None = None
     subsidy_plan: CaseSubsidyPlanView | None = None
+    bank_memos: list[CaseBankMemoView] = Field(default_factory=list)
     ongoing_completed: bool = False
     cancellation_settlement: CaseCancellationSettlementView | None = None
 

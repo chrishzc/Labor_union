@@ -267,6 +267,11 @@ class MySqlClientRefundReversalRepository:
             # Simulate only the explicit correction's classification; bank facts stay immutable.
             bank_rows = tuple({**row, "effective_classification_type": self._preview_refund_classification} for row in bank_rows)
         obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
+        from infrastructure.mysql.manual_supplement_evidence import manual_source_matches
+        bank_rows = tuple({**row, "manual_confirmed_case_no": selection.case_no}
+            if manual_source_matches(cursor, row, case_no=selection.case_no, direction="client_refund",
+                                     obligations=selection.obligation_identities) else row for row in bank_rows)
+        manual_verified = bool(bank_rows) and all(row.get("manual_confirmed_case_no") == selection.case_no for row in bank_rows)
         is_sinopac_refund = (selection.refund_purpose is ClientRefundPurpose.CUSTOMER_REFUND
                              and bool(bank_rows) and all(row.get("format_id") == "sinopac" for row in bank_rows))
         is_taishin_subsidy = (selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
@@ -279,13 +284,13 @@ class MySqlClientRefundReversalRepository:
                     raise ValueError("bank_currency_not_twd")
             if not obligation_rows:
                 raise ValueError("outgoing_client_refund_no_open_obligation")
-            if is_sinopac_refund and any(_refund_source_account(row) is None for row in bank_rows):
+            if is_sinopac_refund and not manual_verified and any(_refund_source_account(row) is None for row in bank_rows):
                 raise ValueError("client_refund_source_account_missing")
-        if selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
+        if not manual_verified and selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
             bank_rows = _verify_taishin_subsidy_cases(cursor, bank_rows, lock=lock, expected_case_no=selection.case_no)
             if any(row.get("format_id") == "taishin" and row.get("taishin_memo_case_no") != selection.case_no for row in bank_rows):
                 raise ValueError("client_subsidy_memo_recipient_unconfirmed")
-        memo_verified = bool(bank_rows) and all(row.get("taishin_memo_case_no") == selection.case_no for row in bank_rows)
+        memo_verified = manual_verified or (bool(bank_rows) and all(row.get("taishin_memo_case_no") == selection.case_no for row in bank_rows))
         recipient_account = None if memo_verified else _single_refund_recipient_account(obligation_rows)
         if len(bank_rows) == 1:
             self.refund_account_matches = memo_verified or _refund_source_account(bank_rows[0]) == recipient_account
@@ -536,7 +541,9 @@ def _refund_return_bank_facts(rows, case_no):
 
 
 def _refund_row_is_eligible(row, case_no, expected_classification, recipient_account):
-    if row.get("format_id") == "taishin" and expected_classification == "client_subsidy_return":
+    if row.get("manual_confirmed_case_no") == case_no:
+        recipient_matches = True
+    elif row.get("format_id") == "taishin" and expected_classification == "client_subsidy_return":
         recipient_matches = row.get("taishin_memo_case_no") == case_no
     else:
         recipient_matches = bool(recipient_account) and _refund_source_account(row) == recipient_account

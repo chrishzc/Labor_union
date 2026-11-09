@@ -273,7 +273,11 @@ def test_canonical_staging_does_not_import_or_write_formal_accounting_modules():
     assert ".rollback(" not in source
 
 
-def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(monkeypatch):
+@pytest.mark.parametrize("reconciliation_status", ["pending", "reconciled"])
+@pytest.mark.parametrize("repeat_count", [1, 2])
+def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(
+    monkeypatch, reconciliation_status, repeat_count,
+):
     fingerprint = staging.build_dedup_fingerprint(_row())
     cursor = FakeCursor(
         existing_rows={
@@ -284,7 +288,7 @@ def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(mo
                 "classification_type": "manually_adjusted",
                 "matched_identity_ids": "[8]",
                 "resolved_counterparty_account": "0012345678901234",
-                "reconciliation_status": "reconciled",
+                "reconciliation_status": reconciliation_status,
             }
         }
     )
@@ -294,9 +298,13 @@ def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(mo
         lambda *args: pytest.fail("existing canonical row must not be reclassified"),
     )
 
+    original = dict(cursor.rows_by_fingerprint[fingerprint])
     result = staging.stage_finance_rows(
         cursor,
-        _normalized([_row()]),
+        _normalized([
+            {**_row(17 + index), "source_file": "另一檔案.xlsx"}
+            for index in range(repeat_count)
+        ]),
         {"client_refund_accounts": {}, "staff_accounts": {}},
     )
 
@@ -306,38 +314,55 @@ def test_existing_fingerprint_keeps_existing_state_without_another_occurrence(mo
         "classification_type": "manually_adjusted",
         "matched_identity_ids": [8],
         "resolved_counterparty_account": "0012345678901234",
-        "reconciliation_status": "reconciled",
+        "reconciliation_status": reconciliation_status,
         "result": "skipped_existing",
-    }]
+    }] * repeat_count
+    assert cursor.rows_by_fingerprint[fingerprint] == original
     assert sum(sql.startswith("INSERT INTO finance_import_rows") for sql, _ in cursor.executed) == 0
     assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 0
     assert sum(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed) == 0
 
 
-def test_duplicate_fingerprint_in_same_batch_saves_only_one_occurrence(monkeypatch):
+@pytest.mark.parametrize("business_only", [False, True])
+def test_duplicate_fingerprint_in_same_batch_preserves_both_source_positions(monkeypatch, business_only):
     cursor = FakeCursor()
     classifier_calls = []
     monkeypatch.setattr(
         staging,
         "classify_finance_transaction",
-        lambda row, *_: classifier_calls.append(row) or {
-            "classification_type": "non_business_review",
+        lambda row, *_, **__: classifier_calls.append(row) or {
+            "classification_type": "government_subsidy",
             "matched_identity_ids": [],
             "reason": "manual review",
         },
     )
 
+    rows = [
+        {**_row(position), "direction": "incoming", "debit": None,
+         "credit": Decimal("1200"), "memo": "新竹市政府補助款"}
+        for position in (17, 18)
+    ]
+    rows[1]["warnings"] = ["second_source_warning"]
+    assert staging.build_dedup_fingerprint(rows[0]) == staging.build_dedup_fingerprint(rows[1])
     result = staging.stage_finance_rows(
         cursor,
-        _normalized([_row(17), _row(18)]),
+        _normalized(rows),
         {"client_refund_accounts": {}, "staff_accounts": {}},
+        business_only=business_only,
     )
 
     assert [item["result"] for item in result["staged_rows"]] == ["inserted", "skipped_existing"]
     assert len(classifier_calls) == 1
     occurrences = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_occurrences")]
-    assert len(occurrences) == 1
-    assert json.loads(occurrences[0][-1]) == _row()["warnings"]
+    row_id = result["staged_rows"][0]["row_id"]
+    assert {item["row_id"] for item in result["staged_rows"]} == {row_id}
+    assert sum(sql.startswith("INSERT INTO finance_import_rows") for sql, _ in cursor.executed) == 1
+    assert len(occurrences) == 2
+    for occurrence, row in zip(occurrences, rows, strict=True):
+        assert occurrence[:5] == (
+            result["batch_id"], row_id, row["source_file"], row["sheet_name"], row["source_row"],
+        )
+        assert json.loads(occurrence[-1]) == row["warnings"]
 
 
 @pytest.mark.parametrize("formally_dispatched", [False, True])
@@ -545,14 +570,15 @@ def test_business_only_staging_preserves_known_same_month_payout_differences(ban
     assert result["staged_rows"][0]["matched_identity_ids"] == [12]
 
 
-def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases():
+@pytest.mark.parametrize("other_case_amount", [12000, 20000])
+def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases(other_case_amount):
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo="Synthetic Staff", counterparty_name="Synthetic Staff", bank_references={})
     first = {"staff_id": 12, "name": "Synthetic Staff", "case_no": "115000001",
              "due_date": "2026-10-20", "amount_due_ntd": 12000}
     cursor = FakeCursor()
     result = staging.stage_finance_rows(cursor, _normalized([row]), {
-        "staff_payout_candidates": (first, {**first, "case_no": "115000002"}),
+        "staff_payout_candidates": (first, {**first, "case_no": "115000002", "amount_due_ntd": other_case_amount}),
     }, business_only=True)
 
     assert result["staged_rows"] == []
@@ -560,8 +586,8 @@ def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases(
 
 
 @pytest.mark.parametrize("resolved", [True, False])
-@pytest.mark.parametrize("memo", ["HC115001", "115001月嫂薪資"])
-def test_workbook_staging_keeps_taishin_client_subsidy_only_if_memo_case_is_unique(monkeypatch, resolved, memo):
+@pytest.mark.parametrize("memo", ["HC115001", "115001月嫂薪資", "ＨＣ１１５００１服務人員薪資", "ＨＣ１１５００１雇主補助款"])
+def test_workbook_staging_keeps_taishin_case_for_manual_scheme_only_if_unique(monkeypatch, resolved, memo):
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo=memo, bank_references={})
     monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix", lambda _cursor, suffix: {
@@ -574,10 +600,22 @@ def test_workbook_staging_keeps_taishin_client_subsidy_only_if_memo_case_is_uniq
 
     assert len(result["staged_rows"]) == int(resolved)
     if resolved:
-        assert result["staged_rows"][0]["classification_type"] == "client_subsidy_return"
+        assert result["staged_rows"][0]["classification_type"] == "non_business_review"
         assert result["staged_rows"][0]["matched_identity_ids"] == []
+        updates = [params for sql, params in cursor.executed if sql.startswith('UPDATE finance_import_rows')]
+        assert updates[0][3] == 'taishin_memo_case_requires_manual_scheme'
     else:
         assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
+
+
+def test_taishin_normalization_preserves_original_note_spacing_and_fullwidth(tmp_path):
+    import pandas as pd
+    from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
+    from scripts.imports.finance_statement_normalizer import normalize_workbook
+    memo = '  ＨＣ１１５０３２服務人員薪資\n'
+    target = tmp_path / 'synthetic.xlsx'
+    pd.DataFrame([list(TAISHIN_HEADERS),[1,'2026/11/09','10:00:00','2026/11/09','轉帳',1000,None,0,memo]]).to_excel(target,header=False,index=False)
+    assert normalize_workbook(target)['normalized_rows'][0]['memo'] == memo
 
 
 def test_taishin_staff_name_precedes_an_unrelated_six_digit_memo_without_an_account(monkeypatch):
@@ -632,3 +670,91 @@ def test_business_only_repeat_checks_identity_before_classification(bank, monkey
         "row_id": 77, "dedup_fingerprint": fingerprint, "result": "skipped_existing",
     }]
     assert len(cursor.executed) == 2
+
+
+@pytest.mark.parametrize("kind", ["staff_salary", "client_refund"])
+@pytest.mark.parametrize(
+    "proof,admitted",
+    [("account", True), ("case", True), ("both", True), ("none", False),
+     ("conflict", False), ("other_person", False), ("ambiguous_account", False), ("cross_type", False)],
+)
+def test_sinopac_shared_names_use_only_consistent_original_evidence_before_admission(
+    monkeypatch, kind, proof, admitted,
+):
+    name, account = "合成同名對象", "0000007001"
+    is_staff = kind == "staff_salary"
+    person_key = "staff_id" if is_staff else "client_id"
+    candidates = tuple(
+        {person_key: person, "name": name, "case_no": f"11500000{person - 6}",
+         "due_date": "2026-10-15", "amount_due_ntd": 12000, "obligation_type": "refund"}
+        for person in (7, 8)
+    )
+    has_case = proof in {"case", "both", "conflict"}
+    has_account = proof not in {"case", "none"}
+    owners = [8] if proof == "conflict" else [9] if proof == "other_person" else [7, 8] if proof == "ambiguous_account" else [7]
+    accounts = {account: owners} if has_account else {}
+    other_accounts = {account: [9]} if proof == "cross_type" else {}
+    maps = {
+        "staff_accounts": accounts if is_staff else other_accounts,
+        "client_refund_accounts": other_accounts if is_staff else accounts,
+        "client_subsidy_return_accounts": {},
+        "all_staff_names" if is_staff else "all_client_names": (name, name),
+        "staff_payout_candidates" if is_staff else "taishin_client_refund_candidates": candidates,
+        "staff_case_suffixes" if is_staff else "client_refund_case_suffixes": {"115001": [7]} if has_case else {},
+    }
+    row = _normalized_row(
+        format_id="sinopac", direction="outgoing", debit=Decimal("11970"), credit=None,
+        memo=f"{name} HC115001" if has_case else name,
+        bank_references={"交易參考編號": account} if has_account else {},
+    )
+    unrelated = _normalized_row(
+        format_id="sinopac", source_row=3, direction="outgoing", debit=Decimal("500"), credit=None,
+        memo="無關交易", bank_references={},
+    )
+    resolved_suffixes = []
+
+    def resolve_case(_cursor, suffix):
+        resolved_suffixes.append(suffix)
+        assert suffix == "115001"
+        return {"result": "resolved", "case_no": "115000001"}
+
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix", resolve_case)
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(
+        cursor, {**_normalized([row, unrelated]), "format_id": "sinopac"}, maps, business_only=True,
+    )
+
+    assert len(result["staged_rows"]) == int(admitted)
+    inserts = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
+    occurrences = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_occurrences")]
+    assert len(inserts) == len(occurrences) == int(admitted)
+    assert resolved_suffixes == (["115001"] if admitted and has_case else [])
+    if admitted:
+        saved = result["staged_rows"][0]
+        assert saved["classification_type"] == kind
+        assert saved["matched_identity_ids"] == [7]
+        assert saved["reconciliation_status"] == "pending"
+        assert occurrences[0][2:5] == (row["source_file"], row["sheet_name"], row["source_row"])
+        assert json.loads(inserts[0][22]) == row["bank_references"]
+        assert json.loads(inserts[0][24]) == row["raw_payload"]
+
+
+@pytest.mark.parametrize("case_count", [0, 1, 2])
+def test_taishin_unique_memo_staff_without_open_payables_keeps_only_a_unique_case(case_count):
+    class CaseCursor(FakeCursor):
+        def fetchall(self):
+            return tuple({"case_no": f"11500000{index + 1}"} for index in range(case_count))
+
+    name = "合成台新月嫂"
+    row = _normalized_row(direction="outgoing", debit=Decimal("11970"), credit=None,
+                          memo=name, bank_references={})
+    cursor = CaseCursor()
+    result = staging.stage_finance_rows(cursor, _normalized([row]), {
+        "all_staff_names": (name,), "staff_name_identities": {name: (7,)},
+    }, business_only=True)
+
+    assert len(result["staged_rows"]) == int(case_count == 1)
+    if case_count == 1:
+        assert result["staged_rows"][0]["classification_type"] == "staff_salary"
+        assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+        assert result["staged_rows"][0]["reconciliation_status"] == "pending"

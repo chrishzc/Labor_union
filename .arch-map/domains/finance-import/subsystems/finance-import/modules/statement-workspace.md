@@ -20,6 +20,7 @@
 - `infrastructure/mysql/monthly_accounting_repository.py`
 - `infrastructure/mysql/finance_statement_archive_repository.py`
 - `infrastructure/mysql/accounting_workspace_repository.py`
+- `query_case_bank_memos`／typed `CaseBankMemo`：台新備註六碼經 Client Finance 正式帳號對照確認唯一案件，原文逐筆投影至案件 `bank_memos`；不要求有款項、不推用途或計入金流。方案區及既有人工選擇頁顯示原文，沿原方案 metadata writer 明確保存。
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
 - `api/dependencies/finance_import.py`
@@ -37,6 +38,9 @@
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
 - `ui_react/src/components/CancellationSettlementAccounting.tsx` — common cancellation readback and notices for case accounting and registry.
 - `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
+- `subsystems/finance_import/case_manual_supplement.py` — typed人工補登命令與完整內容冪等檢查；不含SQL或金融root writer。
+- `infrastructure/mysql/case_manual_supplement_repository.py` — 保存人工來源及命令收據，借用route的單一outer transaction呼叫Client Receipt／Staff Payout／Client Refund原正式Preview／Apply；同鍵同內容回原流水／入帳收據，不同內容typed conflict。
+- `infrastructure/mysql/manual_supplement_evidence.py` — 驗證人工來源與命令收據、exact row、案件及指定款項的關聯，供原Staff Payout／Client Refund adapter投影typed人工對象證據；不把JSON標記當權威，不補造帳號。
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`
@@ -54,7 +58,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints: `statements/export`, `statements/manual`, `statements/duplicates` beneath `/api/v1/finance-import`
-- `bank-transactions` — 以已定位唯一案件或已辨識政府補助的原始銀行流水為清單身分。沿原規則自動配對後，案件與對象已確認的待核對列均可開抽屜；唯一款項直接預選，其餘target以requires_selection及同案同對象候選IDs要求人工選款，候選可為空並顯示缺項。來源完整性受阻、對象／用途不明或舊流水無唯一案件仍只顯示具體原因。正式owner重驗核銷，不由Query／UI寫帳。
+- `bank-transactions` — 以已定位唯一案件或已辨識政府補助的原始銀行流水為清單身分。U13 台新僅六碼定位的來源保留待人工確認方案及案件入口，不建立核銷 target；同案抽屜顯示原備註。其他來源沿原規則自動配對，案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘target以requires_selection及同案同對象候選IDs要求選款。正式owner重驗核銷，不由Query／UI寫帳。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
 - 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
 - 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
@@ -71,9 +75,12 @@
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
 - case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and matched obligations or unselected same-case candidates; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
+- 客戶收款面板的全案餘額同時消費既有 Receipt Query 與案件帳務 Query：只彙總版本一致、來源完整的客戶應收正式餘額；缺來源、缺列或未知餘額保留待確認，不從未清清單為空推定結清，也不加入月嫂應付或退款結清門檻。正式成功後依收據版本與回讀再次確認。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py`
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement.py`
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement_mysql.py` — opt-in isolated MySQL：三方向正式核銷、足額／部分／手續費／超收退款／超付追償、完整回滾及同鍵重送／衝突／並行。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.
 - test_root: `ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/`

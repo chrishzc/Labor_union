@@ -208,6 +208,16 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       .toMatchObject({ label: '待核對', nextStep: expect.stringContaining('未留存當次未核銷原因') });
   });
 
+  it('keeps the manual-scheme hint only while purpose remains unconfirmed, below actual posting causes',()=>{
+    const original={...sinopac,bank:'taishin' as const,direction:'outgoing' as const,
+      classification_type:'non_business_review',review_reason:'taishin_memo_case_requires_manual_scheme'};
+    expect(financeBankReviewPresentation(original)).toMatchObject({label:'待人工確認方案'});
+    expect(financeBankReviewPresentation({...original,classification_type:'client_subsidy_return',
+      dispatch_reason:'outgoing_client_refund_amount_mismatch'})).toMatchObject({label:'金額不符'});
+    expect(financeBankReviewPresentation({...original,classification_type:'client_subsidy_return',
+      recorded_pending_reason:'outgoing_client_refund_multiple_fee_matches'})).toMatchObject({label:'有多個候選款項'});
+  });
+
   it.each([
     ['unique_staff_payout_name_and_month_matched', null, /月嫂姓名與同月款項已辨識，未留存當次阻擋原因/],
     ['outgoing_staff_payout_month_no_match', null, /預計撥款日同月/],
@@ -376,7 +386,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     }
   });
 
-  it.each(['staff', 'refund'] as const)('opens same-case %s candidates without preselection and previews only the human selection', async kind => {
+  it.each([['staff',1],['staff',2],['refund',1],['refund',2]] as const)('opens same-case %s candidates without preselection and freezes %s selected items during preview', async (kind,count) => {
     window.location.hash = '#finance?tab=bank';
     const ids = [`${kind}:first`, `${kind}:second`];
     const row: FinanceBankTransaction = { ...sinopac, bank: 'taishin', direction: 'outgoing',
@@ -387,8 +397,9 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     const items = ids.map((identity, index) => ({ identity, direction: 'payable' as const, label: `合成款項${index + 1}`,
       party: '合成對象', expected_ntd: 15000, actual_ntd: 0, remaining_ntd: 15000, has_payment: false,
       version: '1', due_date: '2026-01-15' }));
-    const staffPreview = vi.spyOn(staffPayoutRemediationClient, 'preview').mockRejectedValue(new Error('synthetic preview stop'));
-    const refundPreview = vi.spyOn(financeImportCorrectionClient, 'preview').mockRejectedValue(new Error('synthetic preview stop'));
+    const pendingPreview = new Promise<never>(()=>{});
+    const staffPreview = vi.spyOn(staffPayoutRemediationClient, 'preview').mockReturnValue(pendingPreview);
+    const refundPreview = vi.spyOn(financeImportCorrectionClient, 'preview').mockReturnValue(pendingPreview);
     const mocks = [staffPreview, refundPreview,
       vi.spyOn(staffPayoutRemediationClient, 'query').mockResolvedValue({ staff_id: 7, staff_payables_version: 1, events: [],
         obligations: ids.map(obligation_identity => ({ obligation_identity, case_no: '115000001', amount_due_ntd: 15000,
@@ -410,14 +421,23 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(within(drawer).getByRole('checkbox', { name: `核銷款項 ${ids[1]}` })).not.toBeChecked();
       expect(within(drawer).queryByRole('button', { name: '預覽核銷' })).not.toBeInTheDocument();
       fireEvent.click(within(drawer).getByRole('checkbox', { name: `核銷款項 ${ids[1]}` }));
+      const currentFirst=within(drawer).getByRole('checkbox',{name:`核銷款項 ${ids[0]}`});
+      expect(currentFirst).not.toBeChecked();
+      if(count===2)fireEvent.click(currentFirst);
       const previewButton = await within(drawer).findByRole('button', { name: '預覽核銷' });
       await waitFor(() => expect(previewButton).toBeEnabled());
       fireEvent.click(previewButton);
       await waitFor(() => {
-        if (kind === 'staff') expect(staffPreview).toHaveBeenCalledWith({ financeImportRowIds: [101], obligationIdentities: [ids[1]] }, expect.anything());
-        else expect(refundPreview).toHaveBeenCalledWith(expect.objectContaining({ row_identity: row.row_identity, target_obligation_identities: [ids[1]] }));
+        const selected=count===2?ids:[ids[1]];
+        if(kind==='staff'){
+          expect(staffPreview).toHaveBeenCalledWith({financeImportRowIds:[101],obligationIdentities:expect.arrayContaining(selected)},expect.anything());
+          expect(staffPreview.mock.calls[0][0].obligationIdentities).toHaveLength(count);
+        }else{
+          expect(refundPreview).toHaveBeenCalledWith(expect.objectContaining({row_identity:row.row_identity,target_obligation_identities:expect.arrayContaining(selected)}));
+          expect(refundPreview.mock.calls[0][0].target_obligation_identities).toHaveLength(count);
+        }
       });
-      expect(first).not.toBeChecked();
+      for(const id of ids)for(const checkbox of within(drawer).getAllByRole('checkbox',{name:`核銷款項 ${id}`}))expect(checkbox).toBeDisabled();
     } finally {
       mocks.forEach(mock => mock.mockRestore());
       window.location.hash = '';

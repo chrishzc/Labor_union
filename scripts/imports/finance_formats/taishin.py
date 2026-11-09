@@ -195,7 +195,8 @@ def normalize_taishin_rows(
         warnings: list[str] = []
         debit = _decimal(source_values["支出金額"], "debit", warnings)
         credit = _decimal(source_values["存入金額"], "credit", warnings)
-        memo = _text(source_values["備註"])
+        memo_value = source_values["備註"]
+        memo = None if _is_missing(memo_value) or not str(memo_value).strip() else str(memo_value)
         row = {
             "format_id": "taishin",
             "source_file": str(Path(excel_path)),

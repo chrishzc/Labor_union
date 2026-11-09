@@ -11,6 +11,7 @@
 - payout policy: `domains/client_finance/subsidy_advance.py`
 - refund settlement: `domains/client_finance/client_refund_reversal.py`、`subsystems/client_finance/client_refund_reversal_workflow.py` — 補助退還與代墊共用既有 100 元內手續費規則；超過100元須明確選擇部分退款，保留原義務餘額。資金資格沿原正式到期日，不以後續服務日期重推。台新單筆／合併退款支援明選超退，沿同一 owner 建立一筆追償，完整原義務集合由ledger allocations追溯；ledger 保留銀行實付，Preview／fresh Apply 同源。
 - funding adapter: `infrastructure/mysql/client_refund_reversal_repository.py` — 台新補助出款於Query／Preview／Apply以原始備註六碼經正式虛擬帳號解析確認案件，月嫂姓名優先，不要求帳號快照；一般退款及其他銀行仍沿帳戶驗證。
+- 人工補登依規格22 §19，由Finance Import命令收據綁定exact row、案件及所選退款義務，另行確認人工收款對象；不補造帳號或退款快照。原退款／部分退款／手續費／超退追償及資金資格仍由本owner原workflow執行；一般銀行來源不採此人工證據捷徑。
 - current presentation: 由 Government Subsidy `SubsidyPeriodWorkbench.tsx` 整期直接處理，原逐案面板已退役清理。
 - retained historical query: `api/routes/subsidy_advance_settlement.py` — GET 唯讀；POST 410。
 - historical implementation: `domains/client_finance/subsidy_advance_settlement.py`、`subsystems/client_finance/subsidy_advance_settlement.py`、`infrastructure/mysql/subsidy_advance_settlement_repository.py`、`ui_react/src/api/client_finance/subsidy_advance_settlement_client.ts`。

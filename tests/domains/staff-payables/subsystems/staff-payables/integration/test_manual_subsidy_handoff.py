@@ -1,16 +1,22 @@
 """HANDOFF-A02..07: manual precedence, exact remaining balances and item-local blockers."""
 from dataclasses import replace
-from datetime import date
+from contextlib import nullcontext
+from copy import deepcopy
+from datetime import date, datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from openpyxl import load_workbook
 
 from domains.staff_payables.subsidy_handoff import SubsidyHandoffFacts, decide_subsidy_handoff
 from domains.staff_payables.reconciliation import StaffPayableStatus
 from infrastructure.mysql.accounts_payable_export_sources import (
-    MySqlClientRefundExportSource, _staff_fact, _staff_payment_route,
+    MySqlClientRefundExportSource, MySqlStaffPayableExportSource, _staff_fact, _staff_payment_route,
 )
-from subsystems.staff_payables.accounts_payable_export import aggregate_accounts_payable_rows
+from subsystems.staff_payables.accounts_payable_export import (
+    AccountsPayableExportWorkflow, ArchivedWorkbook, aggregate_accounts_payable_rows,
+)
 from subsystems.staff_payables.cash_requirements_query import (
     CashRefundFact, CashRequirementCase, query_cash_requirements,
 )
@@ -183,3 +189,129 @@ def test_historical_formal_refund_without_a_new_plan_keeps_its_original_legal_so
 def test_historical_source_conflict_is_not_relaxed_by_the_new_manual_handoff():
     result=handoff(manual_scheme=None,historical_scheme='unknown',historical_conflict=True,order_status='歷史訂單－服務完成')
     assert _staff_fact(_staff_payment_route(staff_row('client'),result)).status is StaffPayableStatus.ANOMALY
+
+
+def full_handoff(**changes):
+    facts = dict(manual_scheme=None, total_ntd=30000, subsidy_ntd=30000,
+        customer_amount_ntd=0, customer_paid_ntd=0, staff_paid_ntd=18000,
+        staff_subsidy_paid_ntd=18000, full_subsidy_order=True)
+    facts.update(changes)
+    return handoff(**facts)
+
+
+@pytest.mark.parametrize('government_paid', [None, 0])
+@pytest.mark.parametrize('customer_paid', [None, 0])
+def test_formal_full_subsidy_needs_no_manual_plan_or_cash_receipt_to_export_remaining_payable(
+    government_paid, customer_paid,
+):
+    decision = full_handoff(government_received_ntd=government_paid, customer_paid_ntd=customer_paid)
+
+    assert decision.scheme == 'split' and decision.full_subsidy
+    assert not decision.manual and not decision.requires_manual_plan
+    assert decision.staff_subsidy_reason is None
+    assert decision.client_subsidy_reason is not None
+    rows = aggregate_accounts_payable_rows((_staff_fact(_staff_payment_route(staff_row(), decision)),), ())
+    assert len(rows) == 1 and rows[0].outgoing_bank == '633'
+    assert rows[0].amount.amount == 12000
+    assert 18000 + rows[0].amount.amount == 30000
+    assert cash_rows(cash_case(confirmed_scheme=decision.scheme, subsidy_ntd=decision.subsidy_ntd,
+        manual_subsidy_plan=decision.manual, manual_plan_required=decision.requires_manual_plan,
+        subsidy_refund_reason=decision.client_subsidy_reason)) == ()
+
+
+@pytest.mark.parametrize('changes', [
+    dict(full_subsidy_order=False), dict(total_ntd=None), dict(subsidy_ntd=None),
+    dict(customer_amount_ntd=None), dict(total_ntd=0, subsidy_ntd=0),
+    dict(subsidy_ntd=12000), dict(customer_amount_ntd=1), dict(customer_paid_ntd=1),
+    dict(funding_conflict=True), dict(historical_conflict=True), dict(order_status='服務中'),
+    dict(staff_paid_ntd=30000), dict(staff_subsidy_paid_ntd=30001),
+    dict(has_customer_subsidy_payable=True), dict(customer_subsidy_paid_ntd=1),
+])
+def test_automatic_full_subsidy_keeps_missing_conflicting_or_exhausted_sources_blocked(changes):
+    decision = full_handoff(**changes)
+    fact = _staff_fact(_staff_payment_route(staff_row(), decision))
+
+    assert decision.staff_subsidy_reason is not None
+    if changes.get('full_subsidy_order') is not False:
+        assert '尚未人工保存' not in decision.staff_subsidy_reason
+    assert fact.status is StaffPayableStatus.ANOMALY
+    assert aggregate_accounts_payable_rows((fact,), ()) == ()
+
+
+@pytest.mark.parametrize('paid', [0, 18000, 30000])
+def test_full_subsidy_handoff_and_original_readers_feed_the_same_list_and_excel_without_financial_writes(
+    monkeypatch, paid,
+):
+    from infrastructure.mysql import accounting_workspace_repository as workspace_repository
+
+    target_date = date(2026, 11, 15)
+    case = SimpleNamespace(
+        funding=SimpleNamespace(full_subsidy=True, total_ntd=30000),
+        staff_receivable_ntd=30000, subsidy_ntd=30000, customer_amount_ntd=0, customer_paid_ntd=0,
+        subsidy_plan=None, scheme='split', scheme_conflict=False,
+        cash_by_flow={'C': 0, 'G': 0, 'PS': 0, 'PT': paid, 'RS': 0, 'RT': 0},
+        staff_items=(SimpleNamespace(direction='payable', summary_included=True, actual_ntd=paid),),
+    )
+    full_row = {**staff_row(), 'export_amount_ntd': 30000 - paid,
+                'payout_status': 'partially_paid' if paid else 'payable'}
+    ordinary = {**staff_row('client'), 'obligation_identity': 'staff:other:1', 'case_no': 'OTHER',
+                'staff_id': 2, 'recipient_name': '一般月嫂', 'amount_due_ntd': 5000,
+                'export_amount_ntd': 5000, 'payout_status': 'payable'}
+    staff_rows = (ordinary,) if paid == 30000 else (full_row, ordinary)
+    refunds = ({'obligation_identity': 'normal:1', 'case_no': 'CASE', 'obligation_type': 'refund',
+        'recipient_name': '一般退款', 'amount_due_ntd': 500, 'net_refunded_ntd': 0,
+        'due_date': target_date, 'refund_bank_code': '0040000', 'refund_account_no': '000001'},)
+    before = deepcopy((case, staff_rows, refunds))
+
+    class ReadOnlyCursor(Cursor):
+        def execute(self, sql, parameters):
+            super().execute(sql, parameters)
+            if 'AS has_customer_subsidy_payable' in sql:
+                self.rows = ({'status': '訂單完成', 'has_customer_subsidy_payable': 0},)
+            elif 'FROM client_obligations' in sql:
+                self.rows = refunds
+            else:
+                self.rows = staff_rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+    connection = SimpleNamespace(reader=ReadOnlyCursor(()))
+    connection.cursor = lambda: connection.reader
+    def workspace(actual):
+        assert actual is connection
+        return SimpleNamespace(query=lambda case_no: case)
+
+    monkeypatch.setattr(workspace_repository, 'build_accounting_workspace', workspace)
+
+    def case_query(case_no):
+        if case_no == 'OTHER':
+            return handoff()
+        return workspace_repository.query_subsidy_payable_handoff(connection, case_no)
+
+    archived = []
+
+    def save(year, filename, content, digest):
+        archived.append(content)
+        return ArchivedWorkbook(filename, digest)
+
+    workflow = AccountsPayableExportWorkflow(
+        MySqlStaffPayableExportSource(connection, case_query=case_query),
+        MySqlClientRefundExportSource(connection, case_query=case_query),
+        SimpleNamespace(save=save), nullcontext,
+        lambda: datetime(2026, 11, 1, tzinfo=timezone.utc),
+    )
+    listed = workflow.query(target_date)
+    receipt = workflow.export(target_date)
+    sheet = load_workbook(BytesIO(receipt.workbook_bytes)).active
+    exported = tuple(sheet.iter_rows(min_row=3, values_only=True))
+
+    full_rows = [row for row in listed if row.outgoing_bank == '633']
+    assert len(full_rows) == int(paid < 30000)
+    assert paid + sum(row.amount.amount for row in full_rows) == 30000
+    assert sorted(row.amount.amount for row in listed if row.outgoing_bank == '31') == [500, 5000]
+    assert receipt.row_count == len(listed) == len(exported)
+    assert sorted((row[1], row[5]) for row in exported) == sorted(
+        ('台新銀行' if row.outgoing_bank == '633' else '永豐銀行', row.amount.amount) for row in listed)
+    assert archived == [receipt.workbook_bytes]
+    assert (case, staff_rows, refunds) == before

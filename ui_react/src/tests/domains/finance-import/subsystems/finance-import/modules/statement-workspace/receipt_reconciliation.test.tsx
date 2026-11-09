@@ -5,11 +5,27 @@ import { clientReceiptQueryClient } from '../../../../../../../api/client_financ
 import { clientReceiptReconciliationClient, type ReceiptPreview } from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import { ClientReceiptQuerySchema } from '../../../../../../../api/client_finance/client_receipt_query_schemas';
+import type { ClientReceiptQuery } from '../../../../../../../api/client_finance/client_receipt_query_schemas';
+import { financeAccountingClient, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()=>({clientReceiptQueryClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
 const facts={case_no:'CASE',account_version:1,bank_facts:[{finance_import_row_id:9,amount_ntd:9000,transaction_date:'2026-10-01',dedup_fingerprint:'a'.repeat(64)},{finance_import_row_id:10,amount_ntd:1000,transaction_date:'2026-10-02',dedup_fingerprint:'b'.repeat(64)}],obligations:[{obligation_identity:'first',payment_stage:'first' as const,amount_due_ntd:5000,due_date:'2026-09-01'},{obligation_identity:'second',payment_stage:'second' as const,amount_due_ntd:5000,due_date:'2026-10-01'}]};
 function preview(status:ReceiptPreview['candidate']['status']='exact'):ReceiptPreview{return{account_version:1,preview_fingerprint:'c'.repeat(64),candidate:{status,payment_stage:null,bank_total:{amount:status==='partial'||status==='review_required'?9000:10000},obligation_total:{amount:10000},overage_amount:{amount:0},allocations:[],blockers:status==='review_required'?['client_receipt_underpaid']:[],settlement_identity:'d'.repeat(64)}};}
-beforeEach(()=>{vi.clearAllMocks();vi.mocked(clientReceiptQueryClient.query).mockResolvedValue(facts);vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue(preview());});
+function accounting(current:ClientReceiptQuery,initial:ClientReceiptQuery=current):CaseAccounting{
+  const items=[...new Map([...initial.obligations,...current.obligations].map(item=>[item.obligation_identity,item])).values()];
+  return {case_no:current.case_no,client_name:'測試客戶',receivable_ntd:10000,received_ntd:0,payable_ntd:null,paid_ntd:null,
+    pending_warning_count:0,staff_items:[],transactions:[],warnings:[],customer_amount_ntd:10000,customer_fully_received:current.obligations.length===0,
+    client_items:items.map(item=>({identity:item.obligation_identity,direction:'receivable',label:item.payment_stage,party:'測試客戶',
+      expected_ntd:item.amount_due_ntd,actual_ntd:0,has_payment:false,version:`${current.account_version}:1:0`,due_date:item.due_date,
+      remaining_ntd:current.obligations.find(row=>row.obligation_identity===item.obligation_identity)?.amount_due_ntd??0}))};
+}
+beforeEach(()=>{
+  vi.clearAllMocks();vi.mocked(clientReceiptQueryClient.query).mockResolvedValue(facts);vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue(preview());
+  vi.mocked(financeAccountingClient.query).mockImplementation(async()=>accounting(
+    await vi.mocked(clientReceiptQueryClient.query).mock.results.at(-1)!.value,
+    await vi.mocked(clientReceiptQueryClient.query).mock.results[0].value));
+});
 describe('本案客戶入款核銷',()=>{
   it.each(['bank_transaction_date_missing','bank_currency_not_twd'])('shows the same actual source rejection for preview and confirmation: %s',async code=>{
     const message=code==='bank_transaction_date_missing'?'原銀行流水缺少交易日':'原銀行流水幣別不是新臺幣';
@@ -105,6 +121,36 @@ describe('本案客戶入款核銷',()=>{
     expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
   });
 
+  it.each(['missing terms','unknown balance','missing rows','old version','wrong case','unavailable'] as const)(
+    'does not infer whole-case zero from an empty open-period list when accounting has %s',async condition=>{
+      vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),candidate:{...preview().candidate,allocations:[
+        {bank_fact_identity:'9',obligation_identity:'first',amount:{amount:5000}},
+        {bank_fact_identity:'9',obligation_identity:'second',amount:{amount:4000}},
+        {bank_fact_identity:'10',obligation_identity:'second',amount:{amount:1000}},
+      ]}});
+      vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
+      vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?{...facts,account_version:2,bank_facts:[],obligations:[]}:facts);
+      vi.mocked(financeAccountingClient.query).mockImplementation(async()=>{
+        if(condition==='unavailable')throw new Error('accounting unavailable');
+        const current=await vi.mocked(clientReceiptQueryClient.query).mock.results.at(-1)!.value;
+        const value=accounting(current,facts);
+        if(condition==='missing terms')value.customer_amount_ntd=null;
+        if(condition==='unknown balance')value.client_items[0].remaining_ntd=null;
+        if(condition==='missing rows')value.client_items=[];
+        if(condition==='old version')value.client_items[0].version='0:1:0';
+        if(condition==='wrong case')value.case_no='OTHER';
+        return value;
+      });
+      render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+      fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+      const summary=await screen.findByLabelText('本次核銷後餘額');
+      expect(within(summary).getByText('核銷後案件全部應收餘額').nextElementSibling).toHaveTextContent('待確認');
+      expect(screen.queryByText(/案件所有應收餘額將歸零/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));
+      expect(await screen.findByText(/已核銷本次收款。 案件餘額尚待重新查詢確認。/)).toBeInTheDocument();
+      expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
+    });
+
   it('clears a confirmed settlement label when switching cases or refreshing without a successful readback',async()=>{
     vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
     vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?{...facts,account_version:2,bank_facts:[],obligations:[]}:facts);
@@ -120,6 +166,50 @@ describe('本案客戶入款核銷',()=>{
     view.rerender(<ClientReceiptReconciliationPanel caseNo="OTHER" onChanged={vi.fn()}/>);
     await screen.findByRole('checkbox',{name:'納入銀行款 9'});
     expect(screen.queryByText(/案件已結清|已核銷本次收款/)).not.toBeInTheDocument();
+  });
+
+  it('keeps an undated adjustment in the whole-case balance without adding staff or refund settlement gates',async()=>{
+    const original={...facts,bank_facts:[{...facts.bank_facts[0],amount_ntd:10000}],obligations:[
+      {...facts.obligations[0],amount_due_ntd:10000},
+      {obligation_identity:'adjustment',payment_stage:'adjustment' as const,amount_due_ntd:8000,due_date:null},
+    ]};
+    const after={...original,account_version:2,bank_facts:[],obligations:[original.obligations[1]]};
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?after:original);
+    vi.mocked(financeAccountingClient.query).mockImplementation(async()=>{
+      const current=await vi.mocked(clientReceiptQueryClient.query).mock.results.at(-1)!.value;
+      const value=accounting(current,original);
+      value.staff_items=[{identity:'staff',direction:'payable',label:'月嫂款',party:'測試月嫂',expected_ntd:9000,actual_ntd:0,
+        has_payment:false,version:'staff:1',due_date:null,remaining_ntd:9000}];
+      value.client_items.push({...value.client_items[0],identity:'refund',direction:'payable',remaining_ntd:500});
+      return value;
+    });
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValue({...preview(),candidate:{...preview().candidate,allocations:[
+      {bank_fact_identity:'9',obligation_identity:'first',amount:{amount:10000}},
+    ]}});
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]});
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} initialObligationId="first" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    const summary=await screen.findByLabelText('本次核銷後餘額');
+    expect(within(summary).getByText('其他未選期款待收').nextElementSibling).toHaveTextContent('NT$ 8,000');
+    expect(within(summary).getByText('核銷後案件全部應收餘額').nextElementSibling).toHaveTextContent('NT$ 8,000');
+    fireEvent.click(screen.getByRole('button',{name:'確認核銷本次收款'}));
+    expect(await screen.findByText(/已核銷本次收款。 案件尚有待收 NT\$ 8,000。/)).toBeInTheDocument();
+  });
+
+  it('does not claim settlement if a previously observed period disappears from the full readback',async()=>{
+    vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:2,allocation_count:2,blockers:[]});
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?{...facts,account_version:2,bank_facts:[],obligations:[]}:facts);
+    vi.mocked(financeAccountingClient.query).mockImplementation(async()=>{
+      const current=await vi.mocked(clientReceiptQueryClient.query).mock.results.at(-1)!.value;
+      const value=accounting(current,facts);
+      if(current.account_version===2)value.client_items.shift();
+      return value;
+    });
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+    expect(await screen.findByText(/案件餘額尚待重新查詢確認/)).toBeInTheDocument();
+    expect(screen.queryByText(/案件已結清/)).not.toBeInTheDocument();
   });
 
   it.each([true, false])('does not calculate overage or promise settlement without selected periods (no open periods: %s)', async noOpen => {

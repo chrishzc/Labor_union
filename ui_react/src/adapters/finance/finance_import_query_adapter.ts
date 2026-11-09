@@ -25,6 +25,7 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   taishin_outgoing_unrecognized: '備註未辨識到月嫂姓名或可唯一定位案件的六碼；新匯入跳過，不建立流水。',
   taishin_government_memo: '已辨識為新竹市政府補助入款，請選擇核銷期間完成整期核銷。',
   taishin_client_subsidy_case_suffix_in_memo: '已依備註六碼定位客戶補助案件，請核對同案補助待退款。',
+  taishin_memo_case_requires_manual_scheme: '已辨識案件，請查看原始備註並人工確認補助方案。',
   sinopac_unique_staff_case_suffix_in_memo: '已由備註六碼定位月嫂款案件，請核對原交易帳號及同案待付款。',
   sinopac_unique_client_refund_case_suffix_in_memo: '已由備註六碼定位客戶退款案件，請核對原交易帳號及同案待退款。',
   sinopac_unique_staff_account_in_transaction_reference: '已由交易參考帳號辨識月嫂，未留存當次阻擋原因。',
@@ -193,6 +194,10 @@ export function financeBankReviewPresentation(
   postingStopped?: 'preview_blocked' | 'apply_failed',
 ): { label: string; reason: string; nextStep: string } {
   const { reasonCode, message: reason } = resolveFinanceImportReview(row, preview, postingStopped);
+  if (row.classification_type === 'non_business_review' && reasonCode === null
+      && row.review_reason === 'taishin_memo_case_requires_manual_scheme') {
+    return {label: '待人工確認方案', reason: '已依備註六碼辨識案件，款項用途尚未確認。', nextStep: '請點案件編號，查看原始備註並設定補助方案。'};
+  }
   if (reasonCode && [
     'client_receipt_underpaid', 'client_receipt_overpaid',
     'sinopac_client_receipt_shortfall', 'sinopac_client_receipt_overage',

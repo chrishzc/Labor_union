@@ -2,7 +2,12 @@
 from dataclasses import asdict
 from io import BytesIO
 from typing import Annotated, Literal
-from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService, ManualSupplementConflict
+from infrastructure.mysql.case_manual_supplement_repository import MySqlCaseManualSupplementRepository
+from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
+from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
+from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationError
+from shared_kernel.errors import ErrorCategory
 
 from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -14,7 +19,7 @@ from api.dependencies.finance_import import get_accounting_workspace, get_statem
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.finance_import import (
-    AccountingWarningBody, CaseAccountingView, ManualStatementBody,
+    AccountingWarningBody, CaseAccountingView, ManualStatementBody, ManualSupplementReceiptView,
     StatementCommandReceiptView, StatementDuplicateBody, ArrangementBody, CaseArrangementView, ArrangementApplyView,
     CaseSubsidyPlanView, SubsidyPlanBody, SubsidyPlanApplyView,
     MonthlyAccountingReportView, ReceivableAccountingListView,
@@ -29,6 +34,14 @@ router = APIRouter()
 
 
 def _error(error):
+    if isinstance(error, ManualSupplementConflict):
+        return typed_http_error(409, "idempotency_mismatch", "manual_supplement_idempotency_conflict", "此操作鍵已用於其他補登內容，請核對原操作結果。", "finance-workspace")
+    if isinstance(error, (ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError)):
+        detail = error.error
+        status = {ErrorCategory.CONFLICT:409, ErrorCategory.IDEMPOTENCY_MISMATCH:409,
+                  ErrorCategory.UNAVAILABLE:503, ErrorCategory.INTERNAL:500,
+                  ErrorCategory.FORBIDDEN:403, ErrorCategory.NOT_FOUND:404}.get(detail.category, 422)
+        return typed_http_error(status, detail.category.value, detail.code, "補登未完成，請依核銷原因確認原款項與差額處置。", "finance-workspace")
     if isinstance(error, MonthlyAccountingUnavailable):
         return typed_http_error(503, "unavailable", "accounting_scope_unavailable", "部分銀行款跨統計範圍，尚缺正式分配金額，無法提供正確合計。請調整案件類別或核對原始款項。", "finance-workspace")
     if isinstance(error, ValueError) and str(error).startswith("invalid_accounting_"):
@@ -66,7 +79,7 @@ def _case_view(case):
     payload = asdict(case)
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
-    for field in ("client_items", "staff_items", "transactions", "warnings"):
+    for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos"):
         payload[field] = list(payload[field])
     for field in ("client_items", "staff_items"):
         for item, projected in zip(getattr(case, field), payload[field]):
@@ -349,6 +362,7 @@ class CaseManualSupplementBody(BaseModel):
     amount_ntd: int = Field(gt=0)
     transaction_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     reason: str | None = Field(default=None, max_length=500)
+    settlement_mode: Literal["exact", "partial", "overage"] = "exact"
 
 
 @router.post("/cases/{case_no}/manual-supplement", response_model=BaseResponse[CaseAccountingView])
@@ -360,8 +374,8 @@ def create_case_manual_supplement(
     application=Depends(get_accounting_workspace),
 ):
     try:
-        service = CaseManualSupplementService(application.state.connection)
-        service.execute(
+        service = CaseManualSupplementService(MySqlCaseManualSupplementRepository(application.state.connection))
+        receipt = service.execute(
             case_no=case_no,
             bank=body.bank,
             direction=body.direction,
@@ -371,12 +385,21 @@ def create_case_manual_supplement(
             reason=body.reason,
             idempotency_key=idempotency_key,
             actor=_actor(principal),
+            settlement_mode=body.settlement_mode,
         )
+        view = _case_view(application.query(case_no))
+        view.manual_supplement_receipt = ManualSupplementReceiptView(**asdict(receipt))
+        response = BaseResponse(data=view, message="人工補登已完成本次核銷，餘額依正式結果更新")
         application.state.connection.commit()
-        return BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
-    except (LookupError, ValueError, MySQLError) as error:
+        return response
+    except Exception as error:
         try:
             application.state.connection.rollback()
         except Exception:
             pass
-        raise _error(error) from None
+        if isinstance(error, (LookupError, ValueError, MySQLError, ClientReconciliationError,
+                              ClientRefundReversalError, StaffPayoutReconciliationError)):
+            if isinstance(error, ValueError) and str(error) == "client_refund_recipient_snapshot_missing":
+                raise typed_http_error(422, "domain_blocked", str(error), "超收另列退款前，請先補齊本案退款帳戶。", "finance-workspace") from None
+            raise _error(error) from None
+        raise
