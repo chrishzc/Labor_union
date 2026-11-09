@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceBankReconciliationWorkspace } from '../../../../../../../components/FinanceBankReconciliationWorkspace';
-import { financeImportReviewReason } from '../../../../../../../adapters/finance/finance_import_query_adapter';
+import { financeBankReviewPresentation, financeImportReviewReason } from '../../../../../../../adapters/finance/finance_import_query_adapter';
 import { financeImportQueryClient } from '../../../../../../../api/finance_import/finance_import_query_client';
 import type { FinanceBankTransaction } from '../../../../../../../api/finance_import/finance_import_query_schemas';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
@@ -123,15 +123,89 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
 
   it('marks a known difference separately from government period selection', async () => {
     vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-      items: [{ ...sinopac, review_reason: 'sinopac_client_receipt_shortfall' }, taishin],
+      items: [{ ...sinopac, recorded_client_receipt_review: { reason: 'client_receipt_underpaid', candidates: [] } }, taishin],
       pending_count: 2,
       next_before_row_id: null,
     });
 
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
 
-    expect(within(await screen.findByRole('row', { name: /Sheet1#2/ })).getByText('差額待核對')).toBeVisible();
+    expect(within(await screen.findByRole('row', { name: /Sheet1#2/ })).getByText('金額不符')).toBeVisible();
     expect(within(screen.getByRole('row', { name: /交易明細#3/ })).getByText('待核對')).toBeVisible();
+  });
+
+  it.each<{
+    name: string; patch: Partial<FinanceBankTransaction>; label: string; reason: RegExp; nextStep: RegExp;
+  }>([
+    { name: 'receipt underpaid', patch: { recorded_client_receipt_review: { reason: 'client_receipt_underpaid', candidates: [] } },
+      label: '金額不符', reason: /實收低於/, nextStep: /請核對金額並選擇處理方式/ },
+    { name: 'receipt overpaid', patch: { recorded_client_receipt_review: { reason: 'client_receipt_overpaid', candidates: [] } },
+      label: '金額不符', reason: /實收高於/, nextStep: /請核對金額並選擇處理方式/ },
+    ...(['sinopac', 'taishin'] as const).flatMap(bank => [
+      { name: `${bank} staff amount`, patch: { bank, direction: 'outgoing' as const, classification_type: 'staff_payout', recorded_pending_reason: 'staff_payout_amount_mismatch' },
+        label: '金額不符', reason: /銀行實付與本次待付合計/, nextStep: /請核對金額並選擇處理方式/ },
+      { name: `${bank} staff candidates`, patch: { bank, direction: 'outgoing' as const, classification_type: 'staff_payout', recorded_pending_reason: 'outgoing_staff_payout_multiple_fee_matches' },
+        label: '有多個候選款項', reason: /多個單筆或合併付款集合/, nextStep: /請選擇本次核銷款項/ },
+      { name: `${bank} staff date`, patch: { bank, direction: 'outgoing' as const, classification_type: 'staff_payout', recorded_pending_reason: 'due_date_missing' },
+        label: '待核對', reason: /缺少原預計撥款日/, nextStep: /請核對款項日期/ },
+      { name: `${bank} refund amount`, patch: { bank, direction: 'outgoing' as const, classification_type: bank === 'sinopac' ? 'client_refund' : 'client_subsidy_return', recorded_pending_reason: 'outgoing_client_refund_amount_mismatch' },
+        label: '金額不符', reason: /銀行實付/, nextStep: /請核對金額並選擇處理方式/ },
+      { name: `${bank} refund candidates override old amount`, patch: { bank, direction: 'outgoing' as const, classification_type: bank === 'sinopac' ? 'client_refund' : 'client_subsidy_return', review_reason: 'outgoing_client_refund_amount_mismatch', recorded_pending_reason: 'outgoing_client_refund_multiple_fee_matches' },
+        label: '有多個候選款項', reason: /多個單筆或合併/, nextStep: /請選擇本次核銷款項/ },
+      { name: `${bank} refund date`, patch: { bank, direction: 'outgoing' as const, classification_type: bank === 'sinopac' ? 'client_refund' : 'client_subsidy_return', recorded_pending_reason: 'due_date_missing' },
+        label: '待核對', reason: /缺少.*退款日|缺少.*到期日/, nextStep: /請核對款項日期/ },
+    ]),
+    { name: 'receipt candidates', patch: { recorded_client_receipt_review: {
+      reason: 'sinopac_client_receipt_multiple_month_candidates', candidates: [
+        { obligation_identity: 'test:first', obligation_type: 'first', due_date: '2026-10-19' },
+        { obligation_identity: 'test:second', obligation_type: 'second', due_date: '2026-10-27' },
+      ],
+    } }, label: '有多個候選款項', reason: /第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/, nextStep: /請選擇本次核銷款項/ },
+    { name: 'receipt missing due date', patch: { recorded_client_receipt_review: { reason: 'due_date_missing', candidates: [] } },
+      label: '待核對', reason: /缺少原到期日/, nextStep: /請核對款項日期/ },
+    { name: 'missing transaction date overrides candidates', patch: { transaction_date: null, dispatch_reason: 'bank_transaction_date_missing', recorded_client_receipt_review: { reason: 'sinopac_client_receipt_multiple_month_candidates', candidates: [] } },
+      label: '待核對', reason: /缺少交易日/, nextStep: /補正原銀行流水交易日/ },
+    { name: 'currency overrides old and saved amount causes', patch: { review_reason: 'outgoing_client_refund_amount_mismatch', dispatch_reason: 'bank_currency_not_twd', recorded_pending_reason: 'client_receipt_underpaid' },
+      label: '待核對', reason: /幣別不是新臺幣/, nextStep: /查核原銀行流水幣別/ },
+    { name: 'generic operation failure preserves actual cause', patch: { dispatch_reason: 'bank_fact_not_eligible', recorded_pending_reason: 'client_receipt_underpaid' },
+      label: '金額不符', reason: /實收低於/, nextStep: /請核對金額並選擇處理方式/ },
+    { name: 'old source recognition only', patch: { review_reason: 'sinopac_valid_virtual_account' },
+      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+    { name: 'old unknown cause', patch: { review_reason: 'unrecognized_historical_reason' },
+      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+    { name: 'no saved cause', patch: { review_reason: null },
+      label: '待核對', reason: /未留存當次阻擋原因/, nextStep: /未留存當次未核銷原因，請進入核對確認/ },
+  ])('uses one actual cause for the badge and next step: $name', async ({ patch, label, reason, nextStep }) => {
+    const transaction = { ...sinopac, ...patch };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [transaction], pending_count: 1, next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    const row = within(await screen.findByRole('row', { name: /Sheet1#2/ }));
+    const cells = row.getAllByRole('cell');
+    expect(cells[6]).toHaveTextContent(label);
+    expect(row.getByText(reason)).toBeVisible();
+    expect(row.getByText(nextStep)).toBeVisible();
+    expect(row.queryByText('差額待核對')).not.toBeInTheDocument();
+    fireEvent.click(row.getByRole('button', { name: '核對交易 Sheet1#2' }));
+    expect(onReconcile).toHaveBeenCalledWith(transaction);
+  });
+
+  it('uses the preview cause only when no actual cause was saved, without reclassifying old ambiguous targets', () => {
+    const preview = {
+      row_identity: sinopac.row_identity, canonical_fact_version: 0, amount_ntd: sinopac.amount_ntd,
+      classification_type: 'client_receipt', disposition: 'business_pending', target_identities: [],
+      evidence: [], available_actions: [], integrity_violations: [], fingerprint_collision: false,
+      formal_reference_conflict: false, pending_reason: 'client_receipt_underpaid',
+    };
+    expect(financeBankReviewPresentation(sinopac, preview)).toMatchObject({ label: '金額不符' });
+    expect(financeBankReviewPresentation({ ...sinopac, recorded_pending_reason: 'due_date_missing' }, preview))
+      .toMatchObject({ label: '待核對', nextStep: expect.stringContaining('請核對款項日期') });
+    expect(financeBankReviewPresentation({ ...sinopac, classification_type: 'client_refund',
+      recorded_pending_reason: 'outgoing_client_refund_target_ambiguous' }))
+      .toMatchObject({ label: '待核對', reason: expect.stringContaining('未留存實際是金額不符或有多個有效配對') });
+    expect(financeBankReviewPresentation({ ...sinopac, review_reason: 'sinopac_client_receipt_shortfall' }))
+      .toMatchObject({ label: '待核對', nextStep: expect.stringContaining('未留存當次未核銷原因') });
   });
 
   it.each([

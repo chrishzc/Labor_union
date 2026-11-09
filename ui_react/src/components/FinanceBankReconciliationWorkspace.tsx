@@ -8,7 +8,7 @@ import './FinanceBankReconciliationWorkspace.css';
 import { Drawer } from './Drawer';
 import { FinanceStatementArchive } from './FinanceStatementArchive';
 import { financeMoney } from './FinanceReceiptsWorkspace';
-import { bankReconciliationUnavailableReason, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
+import { bankReconciliationUnavailableReason, financeBankReviewPresentation, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage } from '../api/finance_import/finance_import_query_schemas';
 import type { FinanceImportBatchOutcome, FinanceImportBatchPreview, FinanceImportJobAccepted, FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
@@ -459,6 +459,7 @@ export function FinanceBankReconciliationWorkspace({
               {/* 待核對交易列 */}
               {(filterStatus === 'pending' || filterStatus === 'all') &&
                 pendingRows.map((row) => {
+                  const review = financeBankReviewPresentation(row, previewRows.get(row.row_identity), postingStopped);
                   return (
                     <tr key={row.row_identity}>
                       <td>
@@ -498,16 +499,12 @@ export function FinanceBankReconciliationWorkspace({
                       </td>
                       <td>
                         {purposeLabels[row.classification_type] ?? '款項用途待確認'}
-                        <small className="bank-reconcile-sub">{financeImportReviewReason(row, previewRows.get(row.row_identity), postingStopped)}</small>
+                        <small className="bank-reconcile-sub">{review.reason}</small>
+                        <small className="bank-reconcile-sub">{review.nextStep}</small>
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <span className="bank-chip-amber">
-                          {[
-                            'outgoing_staff_payout_amount_mismatch',
-                            'outgoing_client_refund_amount_mismatch',
-                            'sinopac_client_receipt_shortfall',
-                            'sinopac_client_receipt_overage',
-                          ].some(reason => reason === (row.recorded_client_receipt_review?.reason ?? row.review_reason)) ? '差額待核對' : '待核對'}
+                          {review.label}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>

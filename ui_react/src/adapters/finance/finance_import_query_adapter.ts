@@ -93,13 +93,15 @@ export function bankReconciliationUnavailableReason(row: FinanceBankTransaction)
 }
 
 type ReviewDisposition = Pick<FinanceImportReviewPage['items'][number], 'classification_type' | 'direction' | 'available_actions' | 'disposition'>;
+type ReviewRow = ReviewDisposition & Partial<Pick<FinanceBankTransaction,
+  'bank' | 'review_reason' | 'dispatch_reason' | 'transaction_date' | 'recorded_client_receipt_review' | 'recorded_pending_reason'>>;
+type ReviewResult = { reasonCode: string | null; message: string };
 
-export function financeImportReviewReason(
-  row: ReviewDisposition & Partial<Pick<FinanceBankTransaction,
-    'bank' | 'review_reason' | 'dispatch_reason' | 'transaction_date' | 'recorded_client_receipt_review' | 'recorded_pending_reason'>>,
+function resolveFinanceImportReview(
+  row: ReviewRow,
   preview?: FinanceImportBatchPreview['rows'][number],
   postingStopped?: 'preview_blocked' | 'apply_failed',
-): string {
+): ReviewResult {
   const reasonLabel = (code: string) => {
     if ((row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return') {
       if (code === 'bank_fact_not_eligible') return MISSING_REVIEW_REASON;
@@ -130,6 +132,10 @@ export function financeImportReviewReason(
     }
     return REVIEW_REASON_LABELS[code];
   };
+  const describe = (code: string, fallback = MISSING_REVIEW_REASON): ReviewResult => {
+    const message = reasonLabel(code);
+    return { reasonCode: message && message !== MISSING_REVIEW_REASON ? code : null, message: message ?? fallback };
+  };
   const receiptOperationOnly = row.classification_type === 'client_receipt'
     && (row.dispatch_reason === 'bank_fact_not_eligible' || row.dispatch_reason === 'client_refund_recipient_snapshot_missing');
   const staffOperationOnly = row.bank === 'sinopac' && ['staff_payout','staff_salary'].includes(row.classification_type)
@@ -140,37 +146,81 @@ export function financeImportReviewReason(
     && ['outgoing_bank_fact_not_eligible','staff_payout_difference_mode_invalid','staff_payable_candidate_stale'].includes(row.dispatch_reason ?? '');
   const taishinSubsidyOperationOnly = (row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return'
     && ['bank_fact_not_eligible','stale_preview'].includes(row.dispatch_reason ?? '');
-  if (row.dispatch_reason && !receiptOperationOnly && !staffOperationOnly && !refundOperationOnly && !taishinStaffOperationOnly && !taishinSubsidyOperationOnly) return reasonLabel(row.dispatch_reason) ?? `正式核銷檢查未通過。${MISSING_REVIEW_REASON}`;
+  if (row.dispatch_reason && !receiptOperationOnly && !staffOperationOnly && !refundOperationOnly && !taishinStaffOperationOnly && !taishinSubsidyOperationOnly) return describe(row.dispatch_reason, `正式核銷檢查未通過。${MISSING_REVIEW_REASON}`);
   const pendingReason = row.recorded_pending_reason ?? (preview?.disposition === 'business_pending' ? preview.pending_reason : null);
-  if (pendingReason) return reasonLabel(pendingReason) ?? MISSING_REVIEW_REASON;
+  if (pendingReason) return describe(pendingReason);
   const review = row.recorded_client_receipt_review ?? (preview?.disposition === 'business_pending' ? preview.client_receipt_review : null);
   if (review) {
     const { reason, candidates } = review;
-    const message = reasonLabel(reason) ?? MISSING_REVIEW_REASON;
-    if (!candidates.length) return message;
+    const result = describe(reason);
+    if (!candidates.length) return result;
     const installments = candidates.map(({ obligation_type, due_date }) =>
       `${CLIENT_INSTALLMENT_LABELS[obligation_type] ?? '其他應收款'}（到期日 ${due_date ?? '未設定'}）`);
-    return `${message} 候選期款：${installments.join('、')}。`;
+    return { ...result, message: `${result.message} 候選期款：${installments.join('、')}。` };
   }
-  if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
-  if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
-  if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
+  if (preview?.fingerprint_collision) return { reasonCode: 'fingerprint_collision', message: '存在可能重複的銀行交易，需先核對原始資料。' };
+  if (preview?.formal_reference_conflict) return { reasonCode: 'formal_reference_conflict', message: '正式參考資料互相衝突，需先確認正確來源。' };
+  if (preview?.integrity_violations.length) return { reasonCode: 'integrity_violations', message: `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。` };
   if (postingStopped && preview?.disposition === 'create') {
-    return postingStopped === 'preview_blocked'
+    return { reasonCode: null, message: postingStopped === 'preview_blocked'
       ? '流水已保存。批次預覽有阻擋，尚未執行自動核銷。'
-      : `流水已保存。當次批次核銷未完成。${MISSING_REVIEW_REASON}`;
+      : `流水已保存。當次批次核銷未完成。${MISSING_REVIEW_REASON}` };
   }
   const reviewReason = row.review_reason ?? '';
   if (row.classification_type === 'client_receipt' && CURRENT_RECEIPT_REASONS.has(reviewReason)) {
-    return `${MISSING_REVIEW_REASON} 依目前期款檢查，${reasonLabel(reviewReason)}`;
+    return { reasonCode: null, message: `${MISSING_REVIEW_REASON} 依目前期款檢查，${reasonLabel(reviewReason)}` };
   }
   const reasons = [...(preview?.evidence ?? []), reviewReason].flatMap(code => reasonLabel(code) ? [reasonLabel(code)] : []);
-  if (reasons.length) return [...new Set(reasons)].join(' ');
+  if (reasons.length) return { reasonCode: null, message: [...new Set(reasons)].join(' ') };
   if (row.disposition === 'business_pending' && row.classification_type === 'government_subsidy') {
-    return '已辨識為新竹市政府補助款，請選擇核銷期間完成整期核銷。';
+    return { reasonCode: null, message: '已辨識為新竹市政府補助款，請選擇核銷期間完成整期核銷。' };
   }
-  if (row.transaction_date === null) return `${MISSING_REVIEW_REASON} 原銀行流水缺少交易日。`;
-  return MISSING_REVIEW_REASON;
+  if (row.transaction_date === null) return { reasonCode: null, message: `${MISSING_REVIEW_REASON} 原銀行流水缺少交易日。` };
+  return { reasonCode: null, message: MISSING_REVIEW_REASON };
+}
+
+export function financeImportReviewReason(
+  row: ReviewRow,
+  preview?: FinanceImportBatchPreview['rows'][number],
+  postingStopped?: 'preview_blocked' | 'apply_failed',
+): string {
+  return resolveFinanceImportReview(row, preview, postingStopped).message;
+}
+
+export function financeBankReviewPresentation(
+  row: ReviewRow,
+  preview?: FinanceImportBatchPreview['rows'][number],
+  postingStopped?: 'preview_blocked' | 'apply_failed',
+): { label: string; reason: string; nextStep: string } {
+  const { reasonCode, message: reason } = resolveFinanceImportReview(row, preview, postingStopped);
+  if (reasonCode && [
+    'client_receipt_underpaid', 'client_receipt_overpaid',
+    'sinopac_client_receipt_shortfall', 'sinopac_client_receipt_overage',
+    'staff_payout_amount_mismatch', 'outgoing_staff_payout_amount_mismatch',
+    'outgoing_client_refund_amount_mismatch', 'refund_requires_exact_settlement', 'allocation_exceeds_obligation',
+  ].includes(reasonCode)) {
+    return { label: '金額不符', reason, nextStep: '金額不符，請核對金額並選擇處理方式。' };
+  }
+  if (reasonCode && [
+    'sinopac_client_receipt_multiple_month_candidates', 'sinopac_client_receipt_multiple_same_month_exact',
+    'outgoing_staff_payout_multiple_fee_matches', 'outgoing_client_refund_multiple_fee_matches',
+  ].includes(reasonCode)) {
+    return { label: '有多個候選款項', reason, nextStep: '有多個候選款項，請選擇本次核銷款項。' };
+  }
+  const nextSteps: Readonly<Record<string, string>> = {
+    bank_transaction_date_missing: '請查核並補正原銀行流水交易日後重新核對。',
+    sinopac_client_receipt_transaction_date_missing: '請查核並補正原銀行流水交易日後重新核對。',
+    due_date_missing: '請核對款項日期；確認對應款項後，可進入核對人工選款。',
+    bank_currency_not_twd: '請查核原銀行流水幣別及來源資料後重新核對。',
+  };
+  return {
+    label: '待核對', reason,
+    nextStep: reasonCode
+      ? nextSteps[reasonCode] ?? '請依上述原因核對資料，再選擇對應款項及處理方式。'
+      : row.classification_type === 'government_subsidy'
+        ? '請選擇原政府期間核對。'
+        : '未留存當次未核銷原因，請進入核對確認。',
+  };
 }
 
 export function financeImportDispositionLabel(disposition: string): string {
