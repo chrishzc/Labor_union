@@ -31,7 +31,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         obligations = cursor.fetchall()
         cursor.execute(
             "SELECT e.id,e.event_type,e.occurred_on,l.obligation_identity,l.allocated_amount_ntd,b.format_id,e.reconciliation_reference,b.summary "
-            ",e.amount_ntd AS bank_amount_ntd,CASE WHEN e.event_type='payout' THEN GREATEST(0,"
+            ",CASE WHEN e.event_type='payout' THEN e.amount_ntd ELSE NULL END AS bank_amount_ntd,CASE WHEN e.event_type='payout' THEN GREATEST(0,"
             "(SELECT SUM(all_links.allocated_amount_ntd) FROM staff_payout_obligation_links all_links WHERE all_links.payout_event_id=e.id)-e.amount_ntd) ELSE 0 END AS transfer_fee_ntd "
             "FROM staff_payout_obligation_links l JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity "
             "JOIN staff_payout_events e ON e.id=l.payout_event_id "
@@ -86,6 +86,10 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         actual += surplus.get(identity, 0)
         if row["confirmation_kind"] == "paid":
             actual += int(row["amount_snapshot_ntd"])
+        if funding[identity] and (sum(p.settled_ntd or 0 for p in funding[identity]) != actual
+                or sum(p.amount_ntd for p in funding[identity]) != int(row['expected_ntd'])):
+            from dataclasses import replace
+            funding[identity] = tuple(replace(p, settled_ntd=None, remaining_ntd=None) for p in funding[identity])
         items.append(StaffAccountingItem(
             identity, "payable", "月嫂付款", str(row["staff_name"]), int(row["expected_ntd"]), actual,
             identity in paid_ids or row["confirmation_kind"] == "paid",

@@ -17,6 +17,7 @@
 - api-schema: `api/schemas/accounts_payable_export.py`
 - client: `ui_react/src/api/accounts_payable/accounts_payable_query_client.ts`、`ui_react/src/api/accounts_payable/accounts_payable_query_schemas.ts`
 - source: `infrastructure/mysql/accounts_payable_export_sources.py`
+- `_staff_funding_rows` 沿原 Staff Payables `query_staff_funding_portions` 的銀行別核銷連結讀取分期餘額；Payroll SQL 只列日期／帳戶等候選，不以總已付假定先付自備款。已付分期不重列，未知分配明示 blocked；同一投影供月清冊及逐案查核。
 - archive: `infrastructure/archive/accounts_payable.py`
 - archive configuration: `api/dependencies/accounts_payable_export.py` reads `ACCOUNTS_PAYABLE_ARCHIVE_ROOT`; installations without this setting default to `downloads/accounts_payable_archive`.
 - cash planning: `subsystems/staff_payables/cash_requirements_query.py` — 付款統一清單來源，唯讀保留 staff_id 供逐人明細精確定位；金額與日期規則不變。

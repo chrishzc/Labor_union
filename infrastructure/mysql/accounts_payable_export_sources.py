@@ -45,10 +45,12 @@ class MySqlStaffPayableExportSource:
     ) -> tuple[StaffPayableExportFact, ...]:
         with self._connection.cursor() as cursor:
             cursor.execute(installment_export_sql(_STAFF_PAYABLES_SQL), (target_payment_date,))
-            rows = tuple(cursor.fetchall())
+            rows = _staff_funding_rows(cursor, tuple(cursor.fetchall()))
         cases = {}
         routed = []
         for row in rows:
+            if row.get('installment_funding') is not None and row['export_amount_ntd'] == 0:
+                continue
             case = None
             if self._case_query is not None:
                 if row['case_no'] not in cases:
@@ -63,7 +65,7 @@ class MySqlStaffPayableExportSource:
     ) -> tuple[CaseStaffPayableAuditItem, ...]:
         with self._connection.cursor() as cursor:
             cursor.execute(installment_export_sql(_STAFF_PAYABLE_CASE_AUDIT_SQL), (case_no,))
-            formal_rows = tuple(cursor.fetchall())
+            formal_rows = _staff_funding_rows(cursor, tuple(cursor.fetchall()))
             cursor.execute(_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL, (case_no,))
             order_rows = tuple(cursor.fetchall())
             case = self._case_query(case_no) if self._case_query is not None else None
@@ -138,8 +140,32 @@ class MySqlClientRefundExportSource:
         return tuple(facts)
 
 
+def _staff_funding_rows(cursor, rows):
+    """Reuse the payout owner's bank-specific settlement/fee/reopen projection."""
+    from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
+    cache, projected = {}, []
+    for row in rows:
+        if row.get('installment_funding') is None:
+            projected.append(row)
+            continue
+        identity = row['obligation_identity']
+        if identity not in cache:
+            cache[identity] = query_staff_funding_portions(cursor, identity,
+                settled_total=int(row['funding_settled_total']), amount_total=int(row['funding_root_total']))
+        portion = next((p for p in cache[identity] if p.funding_kind == row['installment_funding']), None)
+        if portion is None or portion.remaining_ntd is None:
+            projected.append({**row, 'payout_status': 'anomaly', 'funding_reason': '來源分期與已核銷付款無法確認，請核對原付款來源及正式金額。'})
+        else:
+            balance = portion.remaining_ntd
+            projected.append({**row, 'export_amount_ntd': balance,
+                'payout_status': 'completed' if balance == 0 else 'partially_paid' if balance < portion.amount_ntd else 'payable'})
+    return tuple(projected)
+
+
 def _staff_payment_route(row, case):
     """Only the affected subsidy portion consumes the shared handoff decision."""
+    if row.get('funding_reason'):
+        return {**row, 'outgoing_bank': '31', 'payout_status': 'anomaly'}
     if row.get('historical_confirmation_kind') is not None or row.get('export_amount_ntd', 0) <= 0:
         return {**row, 'outgoing_bank': '31'}
     portion = row.get('installment_funding')

@@ -161,6 +161,10 @@
 .finance-recon-ob-name strong{display:block;font-size:.84rem;color:#2d2621}
 .finance-recon-ob-name small{display:block;font-size:.74rem;color:#7d7268;margin-top:2px}
 .finance-recon-ob-meta{text-align:right;font-size:.84rem;flex-shrink:0;overflow-wrap:anywhere}
+@media(max-width:600px){
+  .finance-recon-ob-info{flex-direction:column;align-items:stretch}
+  .finance-recon-ob-meta{text-align:left}
+}
 .finance-recon-calculation-bar{background:#fdfcfb;border:2px solid #e0c8b8;border-radius:10px;padding:16px 18px;display:grid;gap:12px}
 .finance-recon-calc-metrics{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid #ebdcd1}
 .finance-recon-calc-metrics>div{text-align:center}

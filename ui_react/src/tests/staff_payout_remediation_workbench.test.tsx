@@ -27,6 +27,28 @@ function clientFor(values: { query?: typeof initial; preview?: typeof preview; j
 describe('PAYOUT-001 remediation workbench', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('尚無方案與分期可明選方案一，必須預覽確認才保存並核銷', async () => {
+    const client = clientFor({});
+    const before = { ...initial, obligations: [{...initial.obligations[0],amount_due_ntd:30000,balance_ntd:30000}] };
+    const after = { ...before,staff_payables_version:5,obligations:[{...before.obligations[0],net_paid_ntd:18000,balance_ntd:12000,payout_status:'partially_paid',funding_portions:[
+      {funding_kind:'client',amount_ntd:18000,due_date:'2026-10-15',settled_ntd:18000,remaining_ntd:0},
+      {funding_kind:'subsidy',amount_ntd:12000,due_date:'2026-11-15',settled_ntd:0,remaining_ntd:12000}]}] };
+    client.query = vi.fn().mockResolvedValueOnce(before).mockResolvedValue(after);
+    client.preview = vi.fn().mockResolvedValue({...preview,candidate:{...preview.candidate,obligation_total:{amount:18000},bank_total:{amount:17935},transfer_fee:{amount:65},allocations:[{...preview.candidate.allocations[0],amount:{amount:18000}}]},subsidy_split:{
+      case_no:'CASE-1',total_ntd:30000,subsidy_ntd:12000,client_remaining_ntd:18000,subsidy_remaining_ntd:12000,client_due_date:'2026-10-15',subsidy_due_date:'2026-11-15'}});
+    render(<StaffPayoutRemediationWorkbench target={{staffId:11,obligationIdentity:initial.obligations[0].obligation_identity}}
+      sourceBank="sinopac" financeImportRowId={91} client={client} pollIntervalMs={0}/>);
+    await screen.findByText(/餘額 NT\$ 30,000/);
+    fireEvent.change(screen.getByLabelText('核銷方式'),{target:{value:'subsidy_split'}});
+    fireEvent.click(screen.getByRole('button',{name:'預覽核銷'}));
+    expect(await screen.findByText('正式補助款：NT$ 12,000')).toBeInTheDocument();
+    expect(client.preview).toHaveBeenCalledWith(expect.objectContaining({differenceMode:'subsidy_split'}),expect.anything());
+    expect(client.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'確認方案一並核銷'}));
+    expect(await screen.findByText(/補助方案一已保存，自備款已核銷；剩餘補助待付 NT\$ 12,000/)).toBeInTheDocument();
+    expect(screen.getByText('核銷後剩餘待付：NT$ 12,000')).toBeInTheDocument();
+  });
+
   it('顯示完整出款、正式65元手續費，方案一保留補助待付並等待台新核銷', async () => {
     const portions = [
       { funding_kind: 'client', amount_ntd: 18000, due_date: '2026-10-15', settled_ntd: 0, remaining_ntd: 18000 },
@@ -56,6 +78,7 @@ describe('PAYOUT-001 remediation workbench', () => {
     expect(client.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認核銷' }));
     await screen.findByText(/最新應付款仍未結清（餘額 NT\$ 12,000/);
+    expect(screen.getByText('核銷後剩餘待付：NT$ 12,000')).toBeInTheDocument();
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByText(/自備款（永豐）：應付 NT\$ 18,000 · 待付 NT\$ 0/)).toBeInTheDocument();
     expect(screen.getByText(/補助款（台新）：應付 NT\$ 12,000 · 待付 NT\$ 12,000/)).toBeInTheDocument();

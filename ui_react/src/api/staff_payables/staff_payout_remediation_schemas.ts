@@ -58,6 +58,11 @@ export const StaffPayoutPreviewSchema = z.strictObject({
   bank_facts_version: z.number().int().nonnegative(),
   candidate: z.union([CandidateSchema, ReopenCandidateSchema]),
   preview_fingerprint: FingerprintSchema,
+  subsidy_split: z.strictObject({
+    case_no: z.string(), total_ntd: z.number().int().positive(), subsidy_ntd: z.number().int().nonnegative(),
+    client_remaining_ntd: z.number().int().nonnegative(), subsidy_remaining_ntd: z.number().int().nonnegative(),
+    client_due_date: z.string().nullable(), subsidy_due_date: z.string().nullable(),
+  }).nullish(),
 });
 
 export const StaffPayoutJobAcceptedSchema = z.strictObject({

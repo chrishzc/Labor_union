@@ -10,6 +10,8 @@
 ## Implementation
 - primary: `ui_react/src/components/StaffPayoutRemediationWorkbench.tsx`
 - transport: `ui_react/src/api/staff_payables/staff_payout_remediation_client.ts`、`ui_react/src/api/staff_payables/staff_payout_remediation_schemas.ts`
+- 原銀行入口帶入日期、實付、對象及摘要；共用 Query 的 `funding_portions` 顯示自備款／補助款各自待付。確認前以正式 Preview 顯示手續費及剩餘款，成功後回讀未清補助，不由畫面推斷整案結清。
+- 永豐核銷方式可明選「補助方案一：核銷自備款，補助款保留待付」；帶 `confirm_subsidy_split` 至原 payout endpoint，必須取得含正式 T／S／兩來源待付及日期的預覽後再確認。方案／分期與付款一起成功才回讀並提示已保存；未知結果保留原背景命令，不拆成前端兩次儲存。
 
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。

@@ -20,10 +20,28 @@ const preview: StaffPayoutPreview = {
   }, preview_fingerprint: 'b'.repeat(64),
 };
 
+
 describe('PAYOUT-001 remediation client', () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => sessionClient.setSession('payout-token', { id: 7, username: 'admin', display_name: 'Admin', role: 'admin' }));
   afterEach(() => { globalThis.fetch = originalFetch; sessionClient.clearSession(); vi.restoreAllMocks(); });
+
+  it('方案一選項走原正式付款入口並將共同確認旗標帶入Preview與背景Apply', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(response(preview))
+      .mockResolvedValueOnce(response({ job_id: 'split-job', status_url: '/api/v1/jobs/split-job' }, 202));
+    const selected = { financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'], differenceMode: 'subsidy_split' as const };
+    const checked = await staffPayoutRemediationClient.preview(selected);
+    await staffPayoutRemediationClient.apply(checked, selected, '', {idempotencyKey:'split-one',correlationId:'split-one'});
+    const calls = vi.mocked(globalThis.fetch).mock.calls;
+    expect(calls[0][0]).toBe('/api/v1/staff-payables/payout/preview');
+    expect(calls[1][0]).toBe('/api/v1/staff-payables/payout/apply');
+    for (const call of calls) {
+      const body = JSON.parse(String(call[1]?.body));
+      expect(body.confirm_subsidy_split).toBe(true);
+      expect(body.mode).toBeUndefined();
+      expect(body.subsidy_ntd).toBeUndefined();
+    }
+  });
 
   it.each(['staff_bank_account_ambiguous', 'staff_memo_recipient_unconfirmed', 'cross_staff_allocation_forbidden', 'bank_transaction_date_missing', 'bank_currency_not_twd'])(
     'preserves the actual preview and formal failure cause: %s', async code => {

@@ -14,6 +14,14 @@ class PayrollInstallment:
     due_date: date | None
 
 
+def confirmed_subsidy_installments(total: int, subsidy: int, client_due: date | None, completed_on: date) -> tuple[PayrollInstallment, ...]:
+    """Schedule a confirmed split of one existing entitlement; never add salary."""
+    if any(not isinstance(v, int) or isinstance(v, bool) for v in (total, subsidy)) or not 0 <= subsidy < total:
+        raise ValueError('staff_subsidy_split_amount_conflict')
+    return (PayrollInstallment('client', total - subsidy, client_due),
+            PayrollInstallment('subsidy', subsidy, funding_due_date(completed_on, directly_subsidized=True)))
+
+
 def payroll_installments(candidate: AssignmentPayrollCandidate, completed_on: date | None, *, effective_total: int | None = None) -> tuple[PayrollInstallment, ...]:
     total = candidate.total_payable.amount if effective_total is None else effective_total
     if not isinstance(total,int) or isinstance(total,bool) or total<0:
@@ -23,8 +31,3 @@ def payroll_installments(candidate: AssignmentPayrollCandidate, completed_on: da
     return tuple(PayrollInstallment(kind, amount,
         funding_due_date(completed_on, directly_subsidized=kind == "subsidy") if completed_on else None)
         for kind, amount in (("client", client), ("subsidy", subsidy)) if amount > 0)
-
-
-def installment_balances(client: int, subsidy: int, paid: int) -> tuple[int, int]:
-    """Allocate immutable actual net payouts to the earlier client portion first."""
-    return max(0, client - max(0, paid)), max(0, subsidy - max(0, paid - client))

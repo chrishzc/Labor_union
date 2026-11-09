@@ -416,6 +416,7 @@ def _staff_payout_request(payload: dict[str, Any]):
             tuple(selection["obligation_identities"]),
             selection["reopen_fact_identity"],
             None if selection.get("difference_mode") is None else StaffPayoutDifferenceMode(selection["difference_mode"]),
+              confirm_subsidy_split=selection.get('confirm_subsidy_split', False),
         ),
         ExpectedVersion(payload["expected_staff_payables_version"]),
         ExpectedVersion(payload["expected_bank_facts_version"]),

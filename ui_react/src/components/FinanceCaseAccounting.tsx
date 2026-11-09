@@ -421,7 +421,8 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
     ) : isStaff && !staffTarget ? (
       <p>請先選擇核銷款項，再檢查核銷影響。</p>
     ) : staffTarget ? (
-      <StaffPayoutRemediationWorkbench key={selectedIds.join('|')} target={staffTarget} financeImportRowId={row.row_id} sourceBank={row.bank} bankSource={row} confirmPreview onPosted={onPosted} onBusyChange={reportBusy} />
+      <StaffPayoutRemediationWorkbench key={selectedIds.join('|')} target={staffTarget} financeImportRowId={row.row_id} sourceBank={row.bank} bankSource={row}
+        requiresFundingSplit={(data.subsidy_plan?.events.at(-1)?.scheme ?? data.scheme) === 'split'} confirmPreview onPosted={onPosted} onBusyChange={reportBusy} />
     ) : (
       <CaseRefundReconciliation
         row={row}
@@ -698,6 +699,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                 <td>
                   <strong>{item.party}</strong>
                   <small>{item.label || '月嫂服務費'}</small>
+                  {(selected ?? data.scheme) === 'split' && !item.funding_portions?.length && <small>自備款／補助款分配待確認，可由原永豐流水選擇「補助方案一：核銷自備款，補助款保留待付」預覽確認。</small>}
                   {item.funding_portions?.map(p => <small key={p.funding_kind}>
                     {p.funding_kind === 'client' ? '自備款（永豐）' : '補助款（台新）'}：應付 {money(p.amount_ntd)} · 待付 {money(p.remaining_ntd)} · {p.due_date ?? '撥款日未設定'}
                   </small>)}

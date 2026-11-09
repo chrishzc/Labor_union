@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class _StrictModel(BaseModel):
@@ -25,18 +25,24 @@ class StaffPayoutApplyFields(_StrictModel):
 class PayoutPreviewBody(_StrictModel):
     finance_import_row_ids: list[int] = Field(min_length=1)
     obligation_identities: list[str] = Field(min_length=1)
+    confirm_subsidy_split: StrictBool = False
 
 
 class PayoutApplyBody(StaffPayoutApplyFields):
     finance_import_row_ids: list[int] = Field(min_length=1)
     obligation_identities: list[str] = Field(min_length=1)
+    confirm_subsidy_split: StrictBool = False
 
 
-class PayoutDifferencePreviewBody(PayoutPreviewBody):
+class PayoutDifferencePreviewBody(_StrictModel):
+    finance_import_row_ids: list[int] = Field(min_length=1)
+    obligation_identities: list[str] = Field(min_length=1)
     mode: Literal["underpayment", "overpayment"]
 
 
-class PayoutDifferenceApplyBody(PayoutApplyBody):
+class PayoutDifferenceApplyBody(StaffPayoutApplyFields):
+    finance_import_row_ids: list[int] = Field(min_length=1)
+    obligation_identities: list[str] = Field(min_length=1)
     mode: Literal["underpayment", "overpayment"]
 
 
@@ -305,12 +311,23 @@ class StaffPayablesQueryView(_StrictModel):
     events: list[StaffPayoutEventView]
 
 
+class StaffSubsidySplitPreviewView(_StrictModel):
+    case_no: str
+    total_ntd: int
+    subsidy_ntd: int
+    client_remaining_ntd: int
+    subsidy_remaining_ntd: int
+    client_due_date: date | None
+    subsidy_due_date: date | None
+
+
 class StaffPayoutPreviewView(_StrictModel):
     event_type: str
     staff_payables_version: int = Field(ge=0)
     bank_facts_version: int = Field(ge=0)
     candidate: StaffPayoutCandidatePreviewView | StaffPayoutReopenCandidatePreviewView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    subsidy_split: StaffSubsidySplitPreviewView | None = None
 
 
 class StaffPayoutReceiptView(_StrictModel):

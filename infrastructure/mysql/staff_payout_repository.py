@@ -104,6 +104,17 @@ class MySqlStaffPayoutRepository:
         self._event_metadata.clear()
         self._event_ids.clear()
 
+    def save_subsidy_split(self, split):
+        request = self._require_request()
+        from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+        from infrastructure.mysql.payroll_installments import establish_confirmed_subsidy_installments
+        with _mysql_cursor(self._connection) as cursor:
+            if split.establish_installments:
+                establish_confirmed_subsidy_installments(cursor, split.obligation_identity, split.installments)
+        if not split.plan_already_split:
+            MySqlAccountingWorkspaceState(self._connection).append_subsidy_plan(split.case_no,
+                split.plan_version + 1, 'split', request.actor.actor_id, request.idempotency_key.value)
+
     def load(self, selection, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
             return self._load_facts(cursor, selection, for_update)
@@ -254,6 +265,19 @@ class MySqlStaffPayoutRepository:
             lock=False,
         )
         staff_id = _intended_staff_id(obligation_rows)
+        if getattr(selection, 'confirm_subsidy_split', False) and for_update:
+            cases = {row['case_no'] for row in obligation_rows}
+            if len(cases) != 1 or len(obligation_rows) != 1:
+                raise ValueError('staff_subsidy_split_selection_invalid')
+            case_no = next(iter(cases))
+            cursor.execute('SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE', (case_no,))
+            cursor.fetchall()
+            cursor.execute('SELECT case_no FROM client_finance_accounts WHERE case_no=%s FOR UPDATE', (case_no,))
+            cursor.fetchall()
+            cursor.execute('SELECT case_no FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE', (case_no,))
+            cursor.fetchall()
+            cursor.execute('SELECT case_no FROM government_subsidy_amount_controls WHERE case_no=%s FOR UPDATE', (case_no,))
+            cursor.fetchall()
         account_version = (
             _load_account_version(cursor, staff_id, lock=for_update)
             if obligation_rows
@@ -307,17 +331,27 @@ class MySqlStaffPayoutRepository:
             lock,
         )
         obligations = _obligation_facts(obligation_rows, events)
-        if selection.event_type is StaffPayoutEventType.PAYOUT and bank_rows:
+        subsidy_split = None
+        if getattr(selection, 'confirm_subsidy_split', False):
+            from dataclasses import replace
+            subsidy_split = self._prepare_subsidy_split(cursor, bank_rows, obligation_rows, obligations, lock)
+            obligations = (replace(obligations[0], installment_limit=MoneyNTD(subsidy_split.client_remaining_ntd)),)
+        if selection.event_type is StaffPayoutEventType.PAYOUT and bank_rows and subsidy_split is None:
             from dataclasses import replace
             limits = {}
             for row in obligation_rows:
                 if not row.get("has_installments"):
+                    if row.get('requires_funding_split'):
+                        raise ValueError('staff_installment_funding_unconfirmed')
                     continue
                 formats = {source['format_id'] for source in bank_rows}
                 if len(formats) != 1 or not formats <= {'sinopac', 'taishin'}:
                     raise ValueError('staff_installment_funding_ambiguous')
                 funding = 'client' if 'sinopac' in formats else 'subsidy'
-                portions = query_staff_funding_portions(cursor, row['obligation_identity'], lock=lock)
+                from domains.staff_payables.reconciliation import project_staff_payable
+                payable = next(item for item in obligations if item.obligation_identity == row['obligation_identity'])
+                portions = query_staff_funding_portions(cursor, row['obligation_identity'], lock=lock,
+                    settled_total=project_staff_payable(payable).net_paid.amount, amount_total=payable.amount_due.amount)
                 if any(p.remaining_ntd is None for p in portions):
                     raise ValueError('staff_installment_funding_unconfirmed')
                 limits[str(row['obligation_identity'])] = sum(p.remaining_ntd for p in portions if p.funding_kind == funding)
@@ -347,7 +381,57 @@ class MySqlStaffPayoutRepository:
             obligations,
             reopen_fact,
             _global_blockers(blockers),
+            subsidy_split,
         )
+
+    def _prepare_subsidy_split(self, cursor, bank_rows, obligation_rows, obligations, lock):
+        from domains.payroll.installments import confirmed_subsidy_installments, PayrollInstallment
+        from domains.staff_payables.reconciliation import project_staff_payable
+        from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace, MySqlAccountingWorkspaceState
+        from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
+        if len(obligation_rows) != 1 or len(bank_rows) != 1 or bank_rows[0]['format_id'] != 'sinopac':
+            raise ValueError('staff_subsidy_split_selection_invalid')
+        root, payable = obligation_rows[0], obligations[0]
+        case_no = root['case_no']
+        plan = MySqlAccountingWorkspaceState(self._connection).subsidy_plan(case_no)
+        if plan.selected_scheme not in (None, 'split'):
+            raise ValueError('staff_subsidy_split_plan_conflict')
+        case = build_accounting_workspace(self._connection).query(case_no)
+        total, subsidy = case.staff_receivable_ntd, case.subsidy_ntd
+        if subsidy is None:
+            raise ValueError('staff_subsidy_split_amount_missing')
+        if total != payable.amount_due.amount or not 0 <= subsidy < total or case.scheme_conflict:
+            raise ValueError('staff_subsidy_split_amount_conflict')
+        if ((case.customer_amount_ntd is not None and case.customer_amount_ntd != total - subsidy)
+                or (case.customer_paid_ntd is not None and case.customer_paid_ntd > total - subsidy)):
+            raise ValueError('staff_subsidy_split_amount_conflict')
+        cursor.execute("SELECT 1 FROM client_obligations WHERE case_no=%s AND obligation_type='subsidy_return' AND status<>'cancelled' AND amount_due_ntd>0 LIMIT 1", (case_no,))
+        if cursor.fetchone():
+            raise ValueError('staff_subsidy_split_refund_conflict')
+        existing = query_staff_funding_portions(cursor, root['obligation_identity'], lock=lock,
+            settled_total=project_staff_payable(payable).net_paid.amount, amount_total=total)
+        if existing:
+            if any(p.remaining_ntd is None for p in existing) or sum(p.amount_ntd for p in existing if p.funding_kind == 'subsidy') != subsidy:
+                raise ValueError('staff_installment_funding_unconfirmed')
+            installments = tuple(PayrollInstallment(p.funding_kind, p.amount_ntd, p.due_date) for p in existing)
+            remaining = {p.funding_kind: p.remaining_ntd for p in existing}
+        else:
+            cursor.execute('SELECT actual_end_date FROM orders WHERE case_no=%s', (case_no,))
+            order = cursor.fetchone()
+            if not order or order['actual_end_date'] is None:
+                raise ValueError('staff_subsidy_split_service_end_missing')
+            installments = confirmed_subsidy_installments(total, subsidy, root.get('due_date'), order['actual_end_date'])
+            paid, unconfirmed = _funding_settlements(cursor, root['obligation_identity'])
+            if unconfirmed or sum(paid.values()) != project_staff_payable(payable).net_paid.amount:
+                raise ValueError('staff_installment_funding_unconfirmed')
+            if any(paid[p.funding_kind] > p.amount or paid[p.funding_kind] < 0 for p in installments):
+                raise ValueError('staff_subsidy_split_amount_conflict')
+            remaining = {p.funding_kind: p.amount - paid[p.funding_kind] for p in installments}
+        actual = next(item.actual_ntd for item in case.staff_items if item.identity == root['obligation_identity'])
+        if actual != project_staff_payable(payable).net_paid.amount:
+            raise ValueError('staff_installment_funding_unconfirmed')
+        return StaffSubsidySplit(case_no, root['obligation_identity'], plan.version, plan.selected_scheme == 'split',
+            total, subsidy, remaining.get('client', 0), remaining.get('subsidy', 0), not existing, installments)
 
     def _outgoing_bank_facts(self, bank_rows, staff_id, blockers):
         facts = tuple(
@@ -467,7 +551,8 @@ def _load_obligation_rows(cursor, identities, *, lock):
     placeholders = _placeholders(identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT obligations.obligation_identity,obligations.staff_id,obligations.case_no,"
+        "SELECT obligations.obligation_identity,obligations.staff_id,obligations.case_no,obligations.due_date,"
+        "COALESCE((SELECT plan.scheme FROM finance_case_subsidy_plan_events plan WHERE plan.case_no=obligations.case_no ORDER BY plan.version DESC LIMIT 1),'')='split' AS requires_funding_split,"
         + effective_staff_obligation_amount() + " AS amount_due_ntd,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments "
         "FROM staff_obligations obligations "
         f"WHERE obligations.obligation_identity IN ({placeholders}) "
@@ -1196,18 +1281,7 @@ def _stored_receipt(row) -> StoredStaffPayoutReceipt:
     )
 
 
-def query_staff_funding_portions(cursor, identity, *, lock=False):
-    """Project original funding schedules against committed settlement links by bank.
-
-    A link includes a confirmed transfer fee; bank cash alone cannot measure the
-    amount discharged. Unknown historical funding is never assigned by order.
-    """
-    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
-    cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments '
-        'WHERE obligation_identity=%s ORDER BY funding_kind' + (' FOR UPDATE' if lock else ''), (identity,))
-    installments = tuple(cursor.fetchall())
-    if not installments:
-        return ()
+def _funding_settlements(cursor, identity):
     cursor.execute(
         'SELECT COALESCE(b.format_id,original_bank.format_id) AS format_id,'
         "SUM(CASE WHEN e.event_type='payout' THEN l.allocated_amount_ntd ELSE -l.allocated_amount_ntd END) AS settled_ntd "
@@ -1224,9 +1298,27 @@ def query_staff_funding_portions(cursor, identity, *, lock=False):
             unconfirmed = True
         if kind:
             paid[kind] += int(row['settled_ntd'])
+    return paid, unconfirmed
+
+
+def query_staff_funding_portions(cursor, identity, *, lock=False, settled_total=None, amount_total=None):
+    """Project original funding schedules against committed settlement links by bank.
+
+    A link includes a confirmed transfer fee; bank cash alone cannot measure the
+    amount discharged. Unknown historical funding is never assigned by order.
+    """
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments '
+        'WHERE obligation_identity=%s ORDER BY funding_kind' + (' FOR UPDATE' if lock else ''), (identity,))
+    installments = tuple(cursor.fetchall())
+    if not installments:
+        return ()
+    paid, unconfirmed = _funding_settlements(cursor, identity)
     portions = tuple(StaffFundingPortion(str(row['funding_kind']), int(row['amount_ntd']), row['due_date'],
         paid[str(row['funding_kind'])], max(0, int(row['amount_ntd']) - paid[str(row['funding_kind'])])) for row in installments)
-    if unconfirmed or any(p.settled_ntd < 0 or p.settled_ntd > p.amount_ntd for p in portions):
+    if (unconfirmed or any(p.settled_ntd < 0 or p.settled_ntd > p.amount_ntd for p in portions)
+            or (settled_total is not None and sum(p.settled_ntd for p in portions) != settled_total)
+            or (amount_total is not None and sum(p.amount_ntd for p in portions) != amount_total)):
         from dataclasses import replace
         return tuple(replace(p, settled_ntd=None, remaining_ntd=None) for p in portions)
     return portions
@@ -1237,13 +1329,7 @@ def _query_obligation_rows(cursor, staff_id):
         "SELECT obligations.obligation_identity,obligations.case_no,"
         "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments,"
         + effective_staff_obligation_amount() + " AS amount_due_ntd,"
-        "CASE WHEN EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) "
-        "THEN (SELECT MIN(i.due_date) FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity "
-        "AND i.amount_ntd>0 AND CASE WHEN i.funding_kind='client' THEN "
-        "COALESCE(projection.balance_ntd,obligations.amount_due_ntd)-COALESCE((SELECT s.amount_ntd FROM staff_obligation_installments s "
-        "WHERE s.obligation_identity=i.obligation_identity AND s.funding_kind='subsidy'),0) "
-        "ELSE COALESCE(projection.balance_ntd,obligations.amount_due_ntd) END>0) "
-        "ELSE obligations.due_date END AS due_date,"
+        "obligations.due_date AS due_date,"
         "COALESCE(projection.net_paid_ntd,0) AS net_paid_ntd,"
         "COALESCE(projection.balance_ntd,obligations.amount_due_ntd) "
         "AS balance_ntd,"
@@ -1261,9 +1347,20 @@ def _query_obligation_rows(cursor, staff_id):
     )
     rows = tuple(_materialize_query_row(row) for row in cursor.fetchall())
     from dataclasses import asdict
-    return tuple({**{k: v for k, v in row.items() if k != 'has_installments'}, 'funding_portions': [
-        {**asdict(p), 'due_date': _date_text(p.due_date)}
-        for p in (query_staff_funding_portions(cursor, row['obligation_identity']) if row.get('has_installments') else ())]} for row in rows)
+    result = []
+    for row in rows:
+        portions = query_staff_funding_portions(cursor, row['obligation_identity'],
+            settled_total=int(row['net_paid_ntd']), amount_total=int(row['amount_due_ntd'])) if row.get('has_installments') else ()
+        item = {k: v for k, v in row.items() if k != 'has_installments'}
+        item['funding_portions'] = [{**asdict(p), 'due_date': _date_text(p.due_date)} for p in portions]
+        if any(p.remaining_ntd is None for p in portions):
+            item['due_date'] = None
+        else:
+            unpaid = [p for p in portions if p.remaining_ntd > 0]
+            if unpaid:
+                item['due_date'] = None if any(p.due_date is None for p in unpaid) else _date_text(min(p.due_date for p in unpaid))
+        result.append(item)
+    return tuple(result)
 
 
 def _query_event_rows(cursor, staff_id):

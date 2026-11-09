@@ -88,6 +88,50 @@ def test_funding_projection_uses_settlement_links_by_bank_including_fee_and_reop
     assert 'reversal_of_event_id' in cursor.calls[1][0]
 
 
+@pytest.mark.parametrize('bank,expected', [('sinopac', 18000), ('taishin', 12000)])
+def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due_amount(monkeypatch, bank, expected):
+    from types import SimpleNamespace
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    import infrastructure.mysql.staff_payout_repository as module
+    cursor = _Cursor()
+    repository = MySqlStaffPayoutRepository(object())
+    selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
+    import infrastructure.mysql.manual_supplement_evidence as evidence
+    monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, '_verify_taishin_memo_recipients', lambda _c, rows, _lock: rows)
+    monkeypatch.setattr(module, '_load_bank_accounts', lambda *_: ())
+    monkeypatch.setattr(module, '_load_obligation_events', lambda *_: ())
+    monkeypatch.setattr(module, '_obligation_facts', lambda *_: (StaffPayableFacts('obligation:1', 7, MoneyNTD(30000)),))
+    monkeypatch.setattr(module, '_load_blocking_anomalies', lambda *_: {})
+    monkeypatch.setattr(repository, '_outgoing_bank_facts', lambda *_: ())
+    monkeypatch.setattr(repository, '_reopen_fact', lambda *_: None)
+    monkeypatch.setattr(module, '_bank_facts_version', lambda *_: 1)
+    monkeypatch.setattr(module, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
+        StaffFundingPortion('client', 18000, date(2026, 10, 15), 0, 18000),
+        StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 0, 12000)))
+    facts = repository._assemble_facts(cursor, selection, 7, 1,
+        ({'transaction_date': date(2026, 10, 15), 'currency': 'TWD', 'format_id': bank},),
+        ({'obligation_identity': 'obligation:1', 'case_no': 'SYNTHETIC', 'has_installments': True},), True)
+    assert facts.obligations[0].installment_limit == MoneyNTD(expected)
+    with pytest.raises(ValueError, match='staff_installment_funding_unconfirmed'):
+        repository._assemble_facts(cursor, selection, 7, 1,
+            ({'transaction_date': date(2026, 10, 15), 'currency': 'TWD', 'format_id': bank},),
+            ({'obligation_identity': 'obligation:1', 'case_no': 'SYNTHETIC', 'has_installments': False, 'requires_funding_split': True},), True)
+
+
+def test_query_due_date_follows_unpaid_funding_when_subsidy_was_paid_first(monkeypatch):
+    import infrastructure.mysql.staff_payout_repository as module
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    class Cursor(_Cursor):
+        def fetchall(self):
+            return ({'obligation_identity': 'obligation:1', 'has_installments': True, 'due_date': date(2026, 10, 15),
+                'net_paid_ntd': 12000, 'amount_due_ntd': 30000},)
+    monkeypatch.setattr(module, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
+        StaffFundingPortion('client', 18000, date(2026, 11, 15), 0, 18000),
+        StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 12000, 0)))
+    assert module._query_obligation_rows(Cursor(), 7)[0]['due_date'] == '2026-11-15'
+
+
 class _Connection:
     def __init__(self) -> None:
         self.cursor_value = _Cursor()

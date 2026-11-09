@@ -637,6 +637,7 @@ def _staff_payout_payload(request):
             "obligation_identities": list(selection.obligation_identities),
             "reopen_fact_identity": selection.reopen_fact_identity,
             "difference_mode": None if selection.difference_mode is None else selection.difference_mode.value,
+            **({'confirm_subsidy_split': True} if selection.confirm_subsidy_split else {}),
         },
     }
 
@@ -646,6 +647,7 @@ def _payout_selection(body) -> StaffPayoutSelection:
         StaffPayoutEventType.PAYOUT,
         _canonical_integer_identities(body.finance_import_row_ids),
         _canonical_text_identities(body.obligation_identities),
+        confirm_subsidy_split=body.confirm_subsidy_split,
     )
 
 
@@ -767,6 +769,13 @@ def _recovery_adjustment_preview_payload(preview):
 
 def _preview_payload(preview, event_type) -> StaffPayoutPreviewView:
     """Convert the Domain candidate once at the HTTP boundary into its closed public view."""
+    split = getattr(preview, 'subsidy_split', None)
+    split_view = None if split is None else {
+        'case_no': split.case_no, 'total_ntd': split.total_ntd, 'subsidy_ntd': split.subsidy_ntd,
+        'client_remaining_ntd': split.client_remaining_ntd, 'subsidy_remaining_ntd': split.subsidy_remaining_ntd,
+        'client_due_date': next((p.due_date for p in split.installments if p.funding_kind == 'client'), None),
+        'subsidy_due_date': next((p.due_date for p in split.installments if p.funding_kind == 'subsidy'), None),
+    }
     return StaffPayoutPreviewView.model_validate(
         {
             "event_type": event_type.value,
@@ -774,6 +783,7 @@ def _preview_payload(preview, event_type) -> StaffPayoutPreviewView:
             "bank_facts_version": preview.bank_facts_version,
             "candidate": _materialize(preview.candidate),
             "preview_fingerprint": preview.fingerprint.value,
+            'subsidy_split': split_view,
         }
     )
 

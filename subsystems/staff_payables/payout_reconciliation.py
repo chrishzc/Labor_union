@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Callable, Protocol, TypeAlias
 
 from domains.staff_payables.reconciliation import (
@@ -24,6 +24,7 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
+from domains.payroll.installments import PayrollInstallment
 
 _IDENTITY_MAXIMUM_LENGTH = 191
 _REASON_MAXIMUM_LENGTH = 500
@@ -37,12 +38,30 @@ class StaffPayoutSelection:
     obligation_identities: tuple[str, ...]
     reopen_fact_identity: str | None = None
     difference_mode: StaffPayoutDifferenceMode | None = None
+    confirm_subsidy_split: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.event_type, StaffPayoutEventType):
             raise TypeError("staff payout event type is invalid")
         _validate_identity_tuple(self.obligation_identities, "staff obligations", required=True)
         _validate_selection_intent(self)
+        if not isinstance(self.confirm_subsidy_split, bool) or (self.confirm_subsidy_split and (
+                self.event_type is not StaffPayoutEventType.PAYOUT or self.difference_mode is not None)):
+            raise ValueError('staff_subsidy_split_selection_invalid')
+
+
+@dataclass(frozen=True, slots=True)
+class StaffSubsidySplit:
+    case_no: str
+    obligation_identity: str
+    plan_version: int
+    plan_already_split: bool
+    total_ntd: int
+    subsidy_ntd: int
+    client_remaining_ntd: int
+    subsidy_remaining_ntd: int
+    establish_installments: bool
+    installments: tuple[PayrollInstallment, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +73,7 @@ class StaffPayoutReconciliationFacts:
     obligations: tuple[StaffPayableFacts, ...]
     reopen_fact: StaffPayoutReopenFact | None = None
     blocking_anomalies: tuple[str, ...] = ()
+    subsidy_split: StaffSubsidySplit | None = None
 
     def __post_init__(self) -> None:
         require_nonnegative_integer(self.staff_payables_version, "staff payables version")
@@ -70,6 +90,7 @@ class StaffPayoutReconciliationPreview:
     staff_payables_version: int
     bank_facts_version: int
     fingerprint: PreviewFingerprint
+    subsidy_split: StaffSubsidySplit | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +138,7 @@ class StaffPayoutReconciliationRepository(Protocol):
     def update_payable_projection(self, selection: StaffPayoutSelection, resulting_version: int, resulting_status: StaffPayableStatus) -> None: ...
     def append_outbox(self, candidate: StaffPayoutFormalCandidate) -> None: ...
     def save_receipt(self, key: IdempotencyKey, stored_receipt: StoredStaffPayoutReceipt) -> None: ...
+    def save_subsidy_split(self, split: StaffSubsidySplit) -> None: ...
 
 
 class StaffPayoutRepositoryUnavailable(RuntimeError):
@@ -175,15 +197,24 @@ class StaffPayoutReconciliationWorkflow:
         try:
             facts = self._repository.load(request.selection, for_update=True)
         except ValueError as error:
+            if request.selection.confirm_subsidy_split:
+                raise _stale_error(request, 'Subsidy split facts changed after Preview.') from error
             raise _domain_error(request.correlation_id, str(error)) from error
         _validate_expected_versions(request, facts)
-        preview = _build_typed_preview(request.selection, facts, request.correlation_id)
+        try:
+            preview = _build_typed_preview(request.selection, facts, request.correlation_id)
+        except StaffPayoutReconciliationError as error:
+            if request.selection.confirm_subsidy_split:
+                raise _stale_error(request, 'Subsidy split facts no longer match Preview.') from error
+            raise
         if preview.fingerprint != request.preview_fingerprint:
             raise _stale_error(request, "Staff payout facts changed after Preview.")
         return preview
 
     def _persist(self, request, preview, command_fingerprint, receipt) -> None:
         candidate = preview.candidate
+        if preview.subsidy_split is not None:
+            self._repository.save_subsidy_split(preview.subsidy_split)
         self._repository.append_events(candidate)
         self._repository.append_obligation_links(candidate)
         if isinstance(candidate, StaffPayoutCandidate) and candidate.recovery is not None:
@@ -210,7 +241,7 @@ def _build_preview(selection, facts):
         "root_facts": _root_facts_payload(facts),
         "candidate_fingerprint": candidate.fingerprint.value,
     })
-    return StaffPayoutReconciliationPreview(candidate, facts.staff_payables_version, facts.bank_facts_version, fingerprint)
+    return StaffPayoutReconciliationPreview(candidate, facts.staff_payables_version, facts.bank_facts_version, fingerprint, facts.subsidy_split)
 
 
 def _build_candidate(selection, facts):
@@ -284,11 +315,19 @@ def _command_fingerprint(request) -> PreviewFingerprint:
 
 
 def _selection_payload(selection):
-    return {"event_type": selection.event_type.value, "bank_fact_identities": selection.bank_fact_identities, "obligation_identities": selection.obligation_identities, "reopen_fact_identity": selection.reopen_fact_identity, "difference_mode": None if selection.difference_mode is None else selection.difference_mode.value}
+    payload = {"event_type": selection.event_type.value, "bank_fact_identities": selection.bank_fact_identities, "obligation_identities": selection.obligation_identities, "reopen_fact_identity": selection.reopen_fact_identity, "difference_mode": None if selection.difference_mode is None else selection.difference_mode.value}
+    if selection.confirm_subsidy_split:
+        payload['confirm_subsidy_split'] = True
+    return payload
 
 
 def _root_facts_payload(facts):
-    return {"bank_facts": _sorted_bank_fact_payloads(facts.bank_facts), "bank_accounts": _sorted_bank_account_payloads(facts.bank_accounts), "obligations": _sorted_obligation_payloads(facts.obligations), "reopen_fact": _reopen_fact_payload(facts.reopen_fact), "blocking_anomalies": facts.blocking_anomalies}
+    payload = {"bank_facts": _sorted_bank_fact_payloads(facts.bank_facts), "bank_accounts": _sorted_bank_account_payloads(facts.bank_accounts), "obligations": _sorted_obligation_payloads(facts.obligations), "reopen_fact": _reopen_fact_payload(facts.reopen_fact), "blocking_anomalies": facts.blocking_anomalies}
+    if facts.subsidy_split is not None:
+        split = asdict(facts.subsidy_split)
+        split['installments'] = [{**p, 'due_date': None if p['due_date'] is None else p['due_date'].isoformat()} for p in split['installments']]
+        payload['subsidy_split'] = split
+    return payload
 
 
 def _sorted_bank_fact_payloads(bank_facts):

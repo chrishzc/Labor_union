@@ -26,6 +26,12 @@ export class StaffPayoutRemediationError extends ApiError {
 }
 
 const PAYOUT_BLOCKER_MESSAGES: Readonly<Record<string, string>> = {
+  staff_subsidy_split_selection_invalid: '請一次選擇同一案件的一筆月嫂應付及一筆永豐出款，再確認補助方案一。',
+  staff_subsidy_split_plan_conflict: '本案已有不同補助方案，請先回案件帳務確認原方案及已成立的收付款。',
+  staff_subsidy_split_amount_missing: '本案正式補助金額尚未確認，不能由銀行差額推算；請先補齊補助金額來源。',
+  staff_subsidy_split_amount_conflict: '本案月嫂總應付、補助額或既有分配互相矛盾，無法核銷自備款；免自備案件請核對台新補助款。',
+  staff_subsidy_split_refund_conflict: '本案已有客戶補助退款，請先確認既有退款與補助方案。',
+  staff_subsidy_split_service_end_missing: '本案缺少正式服務結束日，無法確認補助款撥款日期，請先確認服務資料。',
   staff_bank_account_ambiguous: '銀行流水缺少收款帳號，或無法對應唯一有效的月嫂主要帳戶，請核對原流水與月嫂帳戶。',
   staff_memo_recipient_unconfirmed: '銀行備註中的月嫂姓名無法唯一確認，請核對原始備註與月嫂姓名。',
   cross_staff_allocation_forbidden: '銀行流水、收款帳戶與待付款項的月嫂歸屬不一致，請核對付款對象。',
@@ -62,6 +68,7 @@ export const TAISHIN_PAYOUT_REASON_MESSAGES: Readonly<Record<string,string>> = {
 
 export function staffPayoutBlockerMessage(code?: string | null, sourceBank?: string): string | undefined {
   if (code && ['staff_installment_funding_ambiguous', 'staff_installment_funding_unconfirmed', 'staff_installment_funding_conflict'].includes(code)) {
+    if (sourceBank === 'sinopac') return '自備款與補助款分配待確認；若本案為方案一，可選「補助方案一：核銷自備款，補助款保留待付」預覽。金額或原付款來源仍有衝突時，須先核對來源，不以補助待付款當作手續費。';
     return '自備款與補助款的付款來源或已核銷分配無法確認，請分銀行核對正式分期及原付款；不以補助待付款當作手續費。';
   }
   const bankReasons = sourceBank === 'sinopac' ? SINOPAC_PAYOUT_REASON_MESSAGES : sourceBank === 'taishin' ? TAISHIN_PAYOUT_REASON_MESSAGES : {};

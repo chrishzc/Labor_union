@@ -63,11 +63,8 @@ def test_zero_subsidy_uses_self_pay_rate_without_zeroing_salary():
 
 
 def test_installment_cash_closes_only_due_portion_and_preserves_whole_entitlement():
-    from domains.payroll.installments import installment_balances
     from domains.staff_payables.reconciliation import (OutgoingBankFact, StaffPrimaryBankAccount,
         StaffPayableFacts, StaffPayableStatus, build_staff_payout_candidate)
-    assert installment_balances(12000,42000,12000) == (0,42000)
-    assert installment_balances(12000,42000,14000) == (0,40000)
     payable = StaffPayableFacts('salary-root',1,MoneyNTD(54000),installment_limit=MoneyNTD(12000))
     bank = OutgoingBankFact('bank-fixture',1,MoneyNTD(12000),'account-fixture')
     account = StaffPrimaryBankAccount('account-fixture',1)

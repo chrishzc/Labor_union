@@ -33,6 +33,7 @@ export interface StaffPayoutRemediationWorkbenchProps {
   financeImportRowId?: number;
   sourceBank?: 'sinopac' | 'taishin';
   bankSource?: Pick<FinanceBankTransaction, 'transaction_date' | 'amount_ntd' | 'reference' | 'counterparty_name'>;
+  requiresFundingSplit?: boolean;
   confirmPreview?: boolean;
   onBusyChange?: (busy: boolean) => void;
   client?: StaffPayoutRemediationClient;
@@ -144,6 +145,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   financeImportRowId,
   sourceBank,
   bankSource,
+  requiresFundingSplit = false,
   confirmPreview = false,
   onBusyChange,
   client = staffPayoutRemediationClient,
@@ -153,9 +155,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
 }) => {
   const [query, setQuery] = useState<StaffPayablesQuery | null>(null);
   const [rowIdsText, setRowIdsText] = useState('');
-  const [differenceMode, setDifferenceMode] = useState<'' | 'underpayment' | 'overpayment'>('');
+  const [differenceMode, setDifferenceMode] = useState<'' | 'underpayment' | 'overpayment' | 'subsidy_split'>('');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<StaffPayoutPreview | null>(null);
+  const [previewRemainingBefore, setPreviewRemainingBefore] = useState(0);
   const [job, setJob] = useState<StaffPayoutJob | null>(null);
   const [accepted, setAccepted] = useState<StaffPayoutJobAccepted | null>(null);
   const [busy, setBusy] = useState<Busy>('query');
@@ -211,6 +214,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   const active = obligations.some((item) => item.balance_ntd > 0 && item.payout_status !== 'completed');
   const payoutCandidate = preview && 'allocations' in preview.candidate ? preview.candidate : null;
   const remainingTotal = obligations.reduce((sum, item) => sum + item.balance_ntd, 0);
+  const needsConfirmation = confirmPreview || differenceMode === 'subsidy_split';
   const selection = (): StaffPayoutSelection | null => {
     const financeImportRowIds = parseRowIds(rowIdsText);
     if (!financeImportRowIds || !active || (financeImportRowId !== undefined && (financeImportRowIds.length !== 1 || financeImportRowIds[0] !== financeImportRowId))) return null;
@@ -222,9 +226,11 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     setBusy('preview'); setError(null); setNotice(null); setPreview(null);
     try {
       const value = await client.preview(selected, requestOptions);
+      if (selected.differenceMode === 'subsidy_split' && !value.subsidy_split) throw new StaffPayoutRemediationError('STAFF_PAYOUT_SCHEMA_MISMATCH', '方案一預覽缺少正式補助分配。');
       if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', 'Preview 未回傳同一 Staff 與原義務。');
+      setPreviewRemainingBefore(remainingTotal);
       setPreview(value);
-      if (!confirmPreview) await runApply(value);
+      if (!needsConfirmation) await runApply(value);
     } catch (caught) { setError(displayError(caught,sourceBank)); }
     finally { if (mounted.current) setBusy(null); }
   };
@@ -234,6 +240,11 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     onPosted?.();
     const current = activeObligations(fresh, target);
     if (!targetSettled(fresh, target)) {
+      if (differenceMode === 'subsidy_split') {
+        const subsidy = current.flatMap(item => item.funding_portions ?? []).find(p => p.funding_kind === 'subsidy');
+        setNotice(`補助方案一已保存，自備款已核銷；剩餘補助待付 NT$ ${subsidy?.remaining_ntd?.toLocaleString('zh-TW') ?? '待確認'}，待台新補助款核銷後結清。`);
+        return;
+      }
       setNotice(`最新應付款仍未結清（餘額 NT$ ${current.reduce((sum, item) => sum + item.balance_ntd, 0).toLocaleString('zh-TW')}、狀態 ${current.map((item) => payoutStatusLabel(item.payout_status)).join('／')}）；異常仍會保留。`);
       return;
     }
@@ -363,7 +374,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       <div className="finance-advanced-reconciliation-guide">
         <strong>💡 作用說明：</strong>銀行對帳單已辨識到本案的月嫂款項出款（如下左側）。請確認要將此筆款項<strong>沖抵哪一筆應付款項</strong>（如下右側）。核對確認後，系統將正式記錄實付並更新應付款狀態。
         <span style={{ display: 'block', marginTop: '4px', fontSize: '0.8rem', color: '#6b5f54' }}>
-          <strong>解除條件：</strong>只核對既有銀行入帳資料，不會發動銀行匯款。核銷處理完成後，系統仍會重新確認此筆應付款已結清。
+          <strong>核銷結果：</strong>只核對既有銀行出款資料，不會發動銀行匯款。完成後重新讀取待付餘額；方案一依自備款、補助款分別核銷，兩部分清償後才整筆結清。
         </span>
       </div>
 
@@ -386,9 +397,9 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                 <div className="finance-recon-ob-info">
                   <div className="finance-recon-ob-name">
                     <strong>{sourceBank === 'sinopac' ? '永豐銀行' : sourceBank === 'taishin' ? '台新銀行' : '銀行出款'}</strong>
-                    <span>交易日：{bankSource?.transaction_date ?? '未提供'}</span>
-                    <span>收款對象：{bankSource?.counterparty_name ?? '未提供'}</span>
-                    <span style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>交易摘要：{bankSource?.reference || '未提供'}</span>
+                    <small>交易日：{bankSource?.transaction_date ?? '未提供'}</small>
+                    <small>收款對象：{bankSource?.counterparty_name ?? '未提供'}</small>
+                    <small style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>交易摘要：{bankSource?.reference || '未提供'}</small>
                     <strong>銀行實付：{bankSource ? `NT$ ${bankSource.amount_ntd.toLocaleString('zh-TW')}` : '待確認'}</strong>
                   </div>
                 </div>
@@ -441,8 +452,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                         {portion.funding_kind === 'client' ? '自備款（永豐）' : '補助款（台新）'}：應付 NT$ {portion.amount_ntd.toLocaleString('zh-TW')} · 待付 NT$ {(portion.remaining_ntd === null ? '待確認' : portion.remaining_ntd.toLocaleString('zh-TW'))} · {portion.due_date ?? '未設定撥款日'}
                       </small>)}
                       {!!obligation.funding_portions?.length && <small>方案一分別核銷：永豐核銷自備款，剩餘補助由台新轉付；兩部分完成後才結清。</small>}
+                      {!obligation.funding_portions?.length && sourceBank === 'sinopac' && <small>若本案為補助方案一，可在下方核銷方式選擇「補助方案一：核銷自備款，補助款保留待付」預覽確認。</small>}
+                      {requiresFundingSplit && !obligation.funding_portions?.length && sourceBank !== 'sinopac' && <small>補助分配待確認，請先由原永豐自備款核對或案件帳務確認來源。</small>}
                     </div>
-                    <div className="finance-recon-ob-meta" style={{ display: 'grid', gap: 2, textAlign: 'right' }}>
+                    <div className="finance-recon-ob-meta" style={{ display: 'grid', gap: 2 }}>
                       <span>應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}</span>
                       <span>餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}</span>
                     </div>
@@ -475,6 +488,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                   <option value="">足額核銷本次款項（含 100 元內手續費）</option>
                   <option value="underpayment">付款不足，先核銷實付</option>
                   <option value="overpayment">付款超額，另列追收</option>
+                  {sourceBank === 'sinopac' && <option value="subsidy_split">補助方案一：核銷自備款，補助款保留待付</option>}
                 </select>
               </label>
               <label style={{ flex: 2, minWidth: 260 }}>
@@ -490,6 +504,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
               </label>
             </div>
             <p>內扣手續費：待預覽確認。符合條件的 0～100 元差額由收款方負擔；補助待付款另列，不列為手續費。</p>
+            {differenceMode === 'subsidy_split' && <p>確認後會一併保存補助方案一、核銷本次自備款，並保留補助待付；請先預覽本案正式金額。</p>}
             <div className="finance-recon-action-row">
               <button
                 type="button"
@@ -497,7 +512,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                 disabled={!selection() || busy !== null || unknownOutcome || accepted !== null}
                 onClick={() => void runPreview()}
               >
-                {confirmPreview ? '預覽核銷' : '儲存核銷'}
+                {needsConfirmation ? '預覽核銷' : '儲存核銷'}
               </button>
             </div>
           </fieldset>
@@ -511,10 +526,17 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
               <span>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</span>
             </div>
             <p>內扣手續費：{payoutCandidate.transfer_fee ? `NT$ ${payoutCandidate.transfer_fee.amount.toLocaleString('zh-TW')}` : '未提供，待確認'}</p>
-            <p>核銷後剩餘待付：NT$ {Math.max(0, remainingTotal - payoutCandidate.allocations.reduce((sum, item) => sum + item.amount.amount, 0)).toLocaleString('zh-TW')}</p>
+            {preview.subsidy_split && <div aria-label="補助方案一核銷預覽">
+              <p>月嫂總應付：NT$ {preview.subsidy_split.total_ntd.toLocaleString('zh-TW')}</p>
+              <p>正式補助款：NT$ {preview.subsidy_split.subsidy_ntd.toLocaleString('zh-TW')}</p>
+              <p>本次自備款待付：NT$ {preview.subsidy_split.client_remaining_ntd.toLocaleString('zh-TW')} · 撥款日 {preview.subsidy_split.client_due_date ?? '未設定'}</p>
+              <p>補助款保留待付：NT$ {preview.subsidy_split.subsidy_remaining_ntd.toLocaleString('zh-TW')} · 撥款日 {preview.subsidy_split.subsidy_due_date ?? '未設定'}</p>
+              <p>確認時一併保存補助方案一，補助款後續由台新轉付月嫂。</p>
+            </div>}
+            <p>核銷後剩餘待付：NT$ {Math.max(0, previewRemainingBefore - payoutCandidate.allocations.reduce((sum, item) => sum + item.amount.amount, 0)).toLocaleString('zh-TW')}</p>
             {sourceBank === 'sinopac' && obligations.some(item => item.funding_portions?.some(p => p.funding_kind === 'subsidy' && p.remaining_ntd !== null && p.remaining_ntd > 0)) &&
               <p>剩餘補助待付：NT$ {obligations.reduce((sum, item) => sum + (item.funding_portions?.filter(p => p.funding_kind === 'subsidy').reduce((total, p) => total + (p.remaining_ntd ?? 0), 0) ?? 0), 0).toLocaleString('zh-TW')}，由方案一補助款經台新轉付，本次不結清補助部分。</p>}
-            {confirmPreview && preview && !accepted && !unknownOutcome && (
+            {needsConfirmation && preview && !accepted && !unknownOutcome && (
               <div className="finance-recon-confirm-row">
                 <button
                   type="button"
@@ -522,7 +544,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                   disabled={busy !== null}
                   onClick={() => void runApply(preview)}
                 >
-                  確認核銷
+                  {preview.subsidy_split ? '確認方案一並核銷' : '確認核銷'}
                 </button>
               </div>
             )}
@@ -561,7 +583,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
 
         {!active && !accepted && (
           <div role="status" className="finance-state">
-            目前應付款已非逾期待處理；系統會依最新應付款資料判斷是否解除異常。
+            所選應付款目前已無待付餘額，請核對已核銷紀錄。
           </div>
         )}
       </div>

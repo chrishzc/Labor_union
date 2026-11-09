@@ -3,6 +3,20 @@
 from domains.payroll.installments import payroll_installments
 
 
+def establish_confirmed_subsidy_installments(cursor, identity, portions):
+    """Insert only a previewed, absent schedule under the caller's owner locks/UoW."""
+    cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments '
+        'WHERE obligation_identity=%s FOR UPDATE', (identity,))
+    existing = tuple(cursor.fetchall())
+    expected = {(p.funding_kind, p.amount, p.due_date) for p in portions}
+    if existing:
+        if {(r['funding_kind'], int(r['amount_ntd']), r['due_date']) for r in existing} != expected:
+            raise ValueError('staff_subsidy_split_schedule_changed')
+        return
+    cursor.executemany('INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) VALUES(%s,%s,%s,%s)',
+        tuple((identity, p.funding_kind, p.amount, p.due_date) for p in portions))
+
+
 def payment_date_projection(portions):
     dated = tuple((kind, amount, due) for kind, amount, due in portions if amount > 0)
     if not dated or any(due is None for _, _, due in dated):
@@ -56,16 +70,13 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None):
 
 
 def installment_export_sql(statement):
-    """Extend existing bank/account/status filters to one scheduled funding portion."""
+    """Select funding candidates; the payout owner's projection supplies balances."""
     original_balance = "COALESCE(projection.balance_ntd, obligations.amount_due_ntd)"
     from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount
     effective=effective_staff_obligation_amount('obligations')
     controlled_balance=f'COALESCE(projection.balance_ntd,{effective})'
     remaining = ("CASE WHEN installments.obligation_identity IS NULL THEN " + original_balance +
-        " ELSE GREATEST(0,LEAST(installments.amount_ntd," + original_balance +
-        "-CASE WHEN installments.funding_kind='client' THEN COALESCE((SELECT later.amount_ntd "
-        "FROM staff_obligation_installments later WHERE later.obligation_identity=installments.obligation_identity "
-        "AND later.funding_kind='subsidy'),0) ELSE 0 END)) END")
+        " ELSE installments.amount_ntd END")
     amount = f"CASE WHEN installments.obligation_identity IS NULL THEN {effective} ELSE installments.amount_ntd END"
     due = "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END"
     # Replace complete select expressions before their component columns.
@@ -78,5 +89,7 @@ def installment_export_sql(statement):
     statement = statement.replace(original_balance, remaining.replace(original_balance,controlled_balance))
     statement = statement.replace("FROM staff_obligations obligations", "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments ON installments.obligation_identity=obligations.obligation_identity AND installments.amount_ntd>0")
     statement = statement.replace("GROUP BY obligations.obligation_identity,", "GROUP BY installments.funding_kind,installments.amount_ntd,installments.due_date,obligations.obligation_identity,")
-    statement = statement.replace("SELECT obligations.obligation_identity,", "SELECT installments.funding_kind AS installment_funding,obligations.obligation_identity,", 1)
+    statement = statement.replace("SELECT obligations.obligation_identity,", "SELECT installments.funding_kind AS installment_funding,"
+        + f"MAX({effective}) AS funding_root_total,MAX(COALESCE(projection.net_paid_ntd,0)) AS funding_settled_total,"
+        + "obligations.obligation_identity,", 1)
     return statement

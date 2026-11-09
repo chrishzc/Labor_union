@@ -51,6 +51,18 @@ def test_underpayment_records_actual_cash_and_preserves_remaining_entitlement():
     assert candidate.recovery is None
 
 
+@pytest.mark.parametrize('cash,mode,settled,recovery', [
+    (17000, StaffPayoutDifferenceMode.UNDERPAYMENT, 17000, None),
+    (19000, StaffPayoutDifferenceMode.OVERPAYMENT, 18000, 1000),
+])
+def test_difference_mode_cannot_consume_the_other_funding_portion(cash, mode, settled, recovery):
+    payable = StaffPayableFacts('obligation:1', 7, MoneyNTD(30000), installment_limit=MoneyNTD(18000))
+    candidate = build_staff_payout_difference_candidate((_bank(cash),), (payable,), mode)
+    assert candidate.obligation_total == MoneyNTD(18000)
+    assert sum(link.allocated_amount.amount for link in candidate.obligation_links) == settled
+    assert (candidate.recovery.original_amount.amount if candidate.recovery else None) == recovery
+
+
 def test_supplemental_payout_only_settles_remaining_balance():
     from domains.staff_payables.reconciliation import StaffPayoutEvent, project_staff_payable
     payable = StaffPayableFacts("obligation:1", 7, MoneyNTD(20_000), (

@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from api.schemas.base import ExactNtd
+from api.schemas.staff_payout import StaffFundingPortionView
 from subsystems.finance_import.accounting_workspace import AccountingBankFact
 from subsystems.finance_import.monthly_accounting import (
     AccountingRecognition, MonthlyAccountingItem, MonthlyAccountingReport, MonthlyAccountingRow, ReceivableAccountingList,
@@ -91,9 +92,6 @@ class AccountingWarningView(AccountingWarningBody):
     dismissed: bool
     dismissed_by: str | None
     dismissed_at: str | None
-
-
-from api.schemas.staff_payout import StaffFundingPortionView
 
 
 class AccountingItemView(_StrictModel):
