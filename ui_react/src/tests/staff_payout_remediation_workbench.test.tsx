@@ -27,6 +27,40 @@ function clientFor(values: { query?: typeof initial; preview?: typeof preview; j
 describe('PAYOUT-001 remediation workbench', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('顯示完整出款、正式65元手續費，方案一保留補助待付並等待台新核銷', async () => {
+    const portions = [
+      { funding_kind: 'client', amount_ntd: 18000, due_date: '2026-10-15', settled_ntd: 0, remaining_ntd: 18000 },
+      { funding_kind: 'subsidy', amount_ntd: 12000, due_date: '2026-10-15', settled_ntd: 0, remaining_ntd: 12000 },
+    ];
+    const query = { ...initial, obligations: [{ ...initial.obligations[0], amount_due_ntd: 30000, balance_ntd: 30000, funding_portions: portions }] };
+    const after = { ...query, staff_payables_version: 5, obligations: [{ ...query.obligations[0], net_paid_ntd: 18000, balance_ntd: 12000,
+      payout_status: 'partially_paid', funding_portions: [{ ...portions[0], settled_ntd: 18000, remaining_ntd: 0 }, portions[1]] }] };
+    const checked = { ...preview, candidate: { ...preview.candidate, bank_total: { amount: 17935 }, obligation_total: { amount: 18000 },
+      transfer_fee: { amount: 65 }, resulting_status: 'partially_paid', allocations: [{ bank_fact_identity: 'bank:91', obligation_identity: initial.obligations[0].obligation_identity, amount: { amount: 18000 } }] } };
+    const client = clientFor({});
+    client.query = vi.fn().mockResolvedValueOnce(query).mockResolvedValue(after);
+    client.preview = vi.fn().mockResolvedValue(checked);
+    const onResolved = vi.fn();
+    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: initial.obligations[0].obligation_identity }}
+      sourceBank="sinopac" financeImportRowId={91} bankSource={{ transaction_date: '2026-10-15', amount_ntd: 17935, reference: '合成轉帳摘要', counterparty_name: '合成月嫂' }}
+      confirmPreview client={client} onResolved={onResolved} pollIntervalMs={0} />);
+    await screen.findByText('交易日：2026-10-15');
+    expect(screen.getByText('收款對象：合成月嫂')).toBeInTheDocument();
+    expect(screen.getByText('交易摘要：合成轉帳摘要')).toBeInTheDocument();
+    expect(screen.getByText('銀行實付：NT$ 17,935')).toBeInTheDocument();
+    expect(screen.queryByText('內扣手續費：NT$ 65')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '預覽核銷' }));
+    await screen.findByText('內扣手續費：NT$ 65');
+    expect(screen.getByText('核銷後剩餘待付：NT$ 12,000')).toBeInTheDocument();
+    expect(screen.getByText(/剩餘補助待付：NT\$ 12,000/)).toBeInTheDocument();
+    expect(client.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '確認核銷' }));
+    await screen.findByText(/最新應付款仍未結清（餘額 NT\$ 12,000/);
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.getByText(/自備款（永豐）：應付 NT\$ 18,000 · 待付 NT\$ 0/)).toBeInTheDocument();
+    expect(screen.getByText(/補助款（台新）：應付 NT\$ 12,000 · 待付 NT\$ 12,000/)).toBeInTheDocument();
+  });
+
   it.each(['staff_payout_amount_mismatch','staff_obligation_not_exactly_settled','staff_payout_difference_mode_invalid'])(
     'shows the scoped Sinopac reason for preview, direct Apply and terminal rejection: %s',async code=>{
       const {cleanup}=await import('@testing-library/react');

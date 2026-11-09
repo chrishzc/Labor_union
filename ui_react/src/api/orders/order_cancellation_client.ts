@@ -338,6 +338,7 @@ export const orderCancellationClient = {
     );
     const result = decode(OrderCancellationReceiptSchema, raw);
     if (result.case_no !== caseNo) throw new Error('訂單取消收據案件識別不一致。');
+    notifyCaseAccountingChanged(caseNo);
     return result;
   },
 };

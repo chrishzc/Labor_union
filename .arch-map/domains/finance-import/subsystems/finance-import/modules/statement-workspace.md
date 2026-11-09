@@ -12,6 +12,7 @@
 月份查詢組合各 owner 正式到期款與已提交銀行事實；銀行來源單筆只計一次，人工原始明細不列現金，歷史案件標記整案排除統計。跨統計範圍而無正式分配金額的銀行款不拆算，現金結果回 unavailable/null，到期款查詢可繼續。案件歷史人工核銷僅寫 application metadata，保存當下原金額快照、原因、人員與時間，不改 owner 金額或 Orders。
 
 ## Implementation
+- `ui_react/src/api/shared/case_accounting_changes.ts` — 本頁及跨分頁的 committed case invalidation；Terms／個案計價／取消沿正式成功收據發布，Finance Page／案件抽屜重查。抽屜借用既有 Terms 與個案計價面板，不擁有重算；依銀行 `row_id` 精確重查候選，儲存／未知核銷保留原命令，重新同步使舊預覽失效。
 - `ui_react/src/components/HistoricalPayableReview.tsx` — 每月帳務及案件抽屜查核歷史月嫂款，帶入同案、同月嫂，委派正式應付的補登／更正至 Payroll。
 - `domains/finance_import/statement_archive.py`
 - `subsystems/finance_import/statement_archive.py`

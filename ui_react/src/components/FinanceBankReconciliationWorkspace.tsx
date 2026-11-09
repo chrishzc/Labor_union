@@ -20,6 +20,12 @@ const purposeLabels: Record<string, string> = {
   government_subsidy: '政府補助',
 };
 
+function bankPurposeLabel(row: FinanceBankTransaction): string {
+  return row.bank === 'taishin' && ['staff_payout', 'staff_salary'].includes(row.classification_type)
+    ? '補助轉交月嫂'
+    : purposeLabels[row.classification_type] ?? '款項用途待確認';
+}
+
 const directionLabel = (direction: FinanceBankTransaction['direction']) =>
   direction === 'incoming' ? '入款' : direction === 'outgoing' ? '出款' : '方向待確認';
 
@@ -498,7 +504,7 @@ export function FinanceBankReconciliationWorkspace({
                         )}
                       </td>
                       <td>
-                        {purposeLabels[row.classification_type] ?? '款項用途待確認'}
+                        {bankPurposeLabel(row)}
                         <small className="bank-reconcile-sub">{review.reason}</small>
                         {review.nextStep !== review.reason && <small className="bank-reconcile-sub">{review.nextStep}</small>}
                       </td>
@@ -521,6 +527,15 @@ export function FinanceBankReconciliationWorkspace({
                           >
                             核對交易
                           </button>
+                        ) : row.cases.length === 1 ? (
+                          <>
+                            <button type="button" className="bank-btn-action" onClick={() => onCase(row.cases[0])}>
+                              {row.review_reason === 'taishin_memo_case_requires_manual_scheme' ? '確認補助方案' : '查看案件帳務'}
+                            </button>
+                            <small className="bank-reconcile-sub">{row.reconciliation_unavailable_reason === 'purpose_unconfirmed'
+                              ? '款項用途待確認；設定方案不會自動建立或核銷款項。'
+                              : bankReconciliationUnavailableReason(row)}</small>
+                          </>
                         ) : <span className="bank-reconcile-sub">{bankReconciliationUnavailableReason(row)}</span>}
                         <button
                           type="button"
@@ -568,7 +583,7 @@ export function FinanceBankReconciliationWorkspace({
                       {row.cases.length > 1 && <small className="bank-reconcile-sub">整筆跨案來源</small>}
                     </td>
                     <td>
-                      <span>{purposeLabels[row.classification_type] ?? '用途已確認'}</span>
+                      <span>{bankPurposeLabel(row)}</span>
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span className="bank-chip-green">已核銷</span>
@@ -631,7 +646,7 @@ export function FinanceBankReconciliationWorkspace({
             <div className="bank-fact-grid">
               <div>
                 <span>款項用途</span>
-                <strong>{purposeLabels[viewedTransaction.classification_type] ?? '款項用途待確認'}</strong>
+                <strong>{bankPurposeLabel(viewedTransaction)}</strong>
               </div>
               <div>
                 <span>處理狀態</span>

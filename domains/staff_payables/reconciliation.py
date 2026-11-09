@@ -396,7 +396,7 @@ def _allocate_settlement(ordered_banks, ordered_payables):
 
 def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
     bank_total = MoneyNTD(sum(item.amount.amount for item in ordered_banks))
-    remaining_total = MoneyNTD(sum(project_staff_payable(item).balance.amount for item in ordered_payables))
+    remaining_total = MoneyNTD(sum(_allocatable_amount(item, True) for item in ordered_payables))
     _validate_difference_mode(mode, bank_total, remaining_total)
     allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
     events = tuple(_payout_event(bank_fact) for bank_fact in ordered_banks)

@@ -1,5 +1,15 @@
 """Bounded Staff Payables accounting facts without a month filter."""
 from dataclasses import dataclass
+from datetime import date
+
+
+@dataclass(frozen=True)
+class StaffFundingPortion:
+    funding_kind: str
+    amount_ntd: int
+    due_date: date | None
+    settled_ntd: int | None
+    remaining_ntd: int | None
 
 
 @dataclass(frozen=True)
@@ -17,6 +27,7 @@ class StaffAccountingItem:
     unallocated_surplus_ntd: int = 0
     settled: bool = False
     recognized_ntd: int = 0
+    funding_portions: tuple[StaffFundingPortion, ...] = ()
 
     @property
     def remaining_ntd(self):
@@ -35,3 +46,5 @@ class StaffAccountingTransaction:
     kind: str
     amount_ntd: int
     bank: str | None
+    bank_amount_ntd: int | None = None
+    transfer_fee_ntd: int | None = None

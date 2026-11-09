@@ -93,6 +93,9 @@ class AccountingWarningView(AccountingWarningBody):
     dismissed_at: str | None
 
 
+from api.schemas.staff_payout import StaffFundingPortionView
+
+
 class AccountingItemView(_StrictModel):
     identity: str
     direction: Literal["receivable", "payable"]
@@ -110,6 +113,7 @@ class AccountingItemView(_StrictModel):
     settled: bool = False
     recognized_ntd: int = 0
     payment_stage: Literal["deposit", "first", "second"] | None = None
+    funding_portions: list[StaffFundingPortionView] = Field(default_factory=list)
 
 
 class ClientAccountingItemView(AccountingItemView):
@@ -128,6 +132,8 @@ class AccountingTransactionView(_StrictModel):
     kind: str
     amount_ntd: int
     bank: str | None
+    bank_amount_ntd: int | None = None
+    transfer_fee_ntd: int | None = None
 
 
 class AccountingBankFactView(_StrictModel):

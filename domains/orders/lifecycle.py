@@ -120,7 +120,9 @@ class LifecycleImpactCandidate:
     fingerprint: PreviewFingerprint
 
 
-def build_financial_correction_lifecycle_impact(root_facts, actual_end_date, evaluation_at):
+def build_financial_correction_lifecycle_impact(
+    root_facts: OrderLifecycleRootFacts, actual_end_date: date | None, evaluation_at: datetime,
+) -> LifecycleImpactCandidate:
     """A fee correction preserves the completed service and lifecycle roots."""
     return _candidate(root_facts, None, actual_end_date, None, evaluation_at.date(),
                       False, root_facts.current_status, ())

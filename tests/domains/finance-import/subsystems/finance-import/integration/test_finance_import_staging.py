@@ -586,7 +586,7 @@ def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases(
 
 
 @pytest.mark.parametrize("resolved", [True, False])
-@pytest.mark.parametrize("memo", ["HC115001", "115001月嫂薪資", "ＨＣ１１５００１服務人員薪資", "ＨＣ１１５００１雇主補助款"])
+@pytest.mark.parametrize("memo", ["HC115001", "115001月嫂薪資", "ＨＣ１１５００１服務人員薪資", "ＨＣ１１５００１雇主補助款", "合成台新月嫂ＨＣ１１５００１薪資"])
 def test_workbook_staging_keeps_taishin_case_for_manual_scheme_only_if_unique(monkeypatch, resolved, memo):
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo=memo, bank_references={})
@@ -596,6 +596,8 @@ def test_workbook_staging_keeps_taishin_case_for_manual_scheme_only_if_unique(mo
     cursor = FakeCursor()
     result = staging.stage_finance_rows(cursor, _normalized([row]), {
         "known_case_suffixes": frozenset({"115001"}),
+        "all_staff_names": ("合成台新月嫂",),
+        "staff_name_identities": {"合成台新月嫂": (7,)},
     }, business_only=True)
 
     assert len(result["staged_rows"]) == int(resolved)

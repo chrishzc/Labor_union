@@ -1,4 +1,4 @@
-import {fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {FinanceCaseAccounting} from '../../../../../../../components/FinanceCaseAccounting';
 import {FinanceCaseNotice} from '../../../../../../../components/FinanceCaseNotice';
@@ -11,6 +11,12 @@ import {clientRegistryClient} from '../../../../../../../api/client_registry/cli
 import {caseVirtualAccountClient} from '../../../../../../../api/client_finance/case_virtual_account_client';
 import {clientReceiptQueryClient} from '../../../../../../../api/client_finance/client_receipt_query_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
+import {notifyCaseAccountingChanged} from '../../../../../../../api/shared/case_accounting_changes';
+import {financeImportQueryClient} from '../../../../../../../api/finance_import/finance_import_query_client';
+import {clientReceiptReconciliationClient} from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
+import type {FinanceBankTransaction} from '../../../../../../../api/finance_import/finance_import_query_schemas';
+vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn()}}));
+vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
 vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn()}}));
 vi.mock('../../../../../../../api/line_order_groups/payment_overdue_reminder_client',()=>({paymentOverdueReminderClient:{case:vi.fn(),sendCase:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client',()=>({ordersQueryClient:{getOrderDetail:vi.fn()}}));
@@ -27,6 +33,35 @@ function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{re
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
+ it('committed changes replace stale bank candidates and previews before reconciling the same original row',async()=>{
+  let version=1,identity='first';
+  const data=()=>({...facts(),client_items:[{...facts().client_items[1],identity,expected_ntd:1000,actual_ntd:0,remaining_ntd:1000,version:`${version}:1:0`}]});
+  const receiptFacts=()=>({case_no:caseNo,account_version:version,
+   bank_facts:[{finance_import_row_id:7,amount_ntd:1000,transaction_date:'2026-11-09',dedup_fingerprint:'a'.repeat(64)}],
+   obligations:[{obligation_identity:identity,payment_stage:'first' as const,amount_due_ntd:1000,due_date:'2026-11-09'}]});
+  const bank=()=>({row_id:7,row_identity:'bank:7',bank:'sinopac',direction:'incoming',transaction_date:'2026-11-09',
+   reference:'original-7',amount_ntd:1000,status:'pending',classification_type:'client_receipt',
+   reconciliation_target:{case_no:caseNo,staff_id:null,obligation_identities:[identity],requires_selection:false}} as FinanceBankTransaction);
+  vi.mocked(financeAccountingClient.query).mockImplementation(async()=>data());
+  vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>receiptFacts());
+  vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async()=>({items:[bank()],pending_count:1,next_before_row_id:null}));
+  vi.mocked(clientReceiptReconciliationClient.preview).mockImplementation(async()=>({account_version:version,preview_fingerprint:String(version).repeat(64),candidate:{status:'exact',payment_stage:null,bank_total:{amount:1000},obligation_total:{amount:1000},overage_amount:{amount:0},allocations:[],blockers:[],settlement_identity:'a'.repeat(64)}}));
+  vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:caseNo,account_version:3,status:'exact',settlement_identity:'a'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]});
+  const posted=vi.fn();
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{row:bank(),onPosted:posted,onBusyChange:vi.fn()}}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+  await screen.findByRole('button',{name:'確認核銷本次收款'});
+  version=2;identity='corrected-adjustment';await act(async()=>notifyCaseAccountingChanged(caseNo));
+  await waitFor(()=>expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledTimes(2));
+  await screen.findByRole('checkbox',{name:/第一期/});
+  expect(screen.queryByRole('button',{name:'確認核銷本次收款'})).not.toBeInTheDocument();
+  expect(screen.getByRole('checkbox',{name:'納入銀行款 7'})).toBeChecked();
+  fireEvent.click(screen.getByRole('button',{name:'核對本案入款'}));
+  fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+  await waitFor(()=>expect(posted).toHaveBeenCalledTimes(1));
+  expect(clientReceiptReconciliationClient.apply).toHaveBeenCalledWith(caseNo,expect.objectContaining({expected_account_version:2,
+   selection:{payment_stage:null,finance_import_row_ids:[7],obligation_identities:['corrected-adjustment']}}));
+ });
  it('原始歷史備註逐筆顯示，人工選擇方案才保存且回讀後仍保留原文',async()=>{
   const original=facts();
   original.bank_memos=[
@@ -55,7 +90,7 @@ describe('精簡案件抽屜',()=>{
     wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
     const periodsTable=await screen.findByLabelText('各期繳款與通知，可左右捲動');
     expect(within(periodsTable).getAllByRole('columnheader').map(e=>e.textContent)).toEqual(['期款','原到期日','應繳','已收／待收','入帳資訊','通知時間','通知']);
-    expect(document.querySelectorAll('details.finance-case-block')).toHaveLength(4);
+    expect(document.querySelectorAll('details.finance-case-block:not(.finance-case-edit-tools)')).toHaveLength(4);
     expect(screen.getByText(/01.*客戶繳款/)).toBeInTheDocument();
     expect(screen.getByText(/02.*補助退款方案/)).toBeInTheDocument();
     expect(screen.getByText(/03.*月嫂薪資/)).toBeInTheDocument();

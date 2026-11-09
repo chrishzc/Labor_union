@@ -16,6 +16,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         amount = effective_staff_obligation_amount("o")
         cursor.execute(
             "SELECT o.obligation_identity,o.due_date,o.payroll_version,s.name AS staff_name,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=o.obligation_identity) AS has_installments,"
             + amount + " AS expected_ntd,p.net_paid_ntd,p.aggregate_version,p.status AS payout_status,"
             "h.confirmation_kind,h.amount_snapshot_ntd,h.current_event_id AS historical_event,"
             "COALESCE(a.aggregate_version,0) AS account_version "
@@ -30,6 +31,8 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         obligations = cursor.fetchall()
         cursor.execute(
             "SELECT e.id,e.event_type,e.occurred_on,l.obligation_identity,l.allocated_amount_ntd,b.format_id,e.reconciliation_reference,b.summary "
+            ",e.amount_ntd AS bank_amount_ntd,CASE WHEN e.event_type='payout' THEN GREATEST(0,"
+            "(SELECT SUM(all_links.allocated_amount_ntd) FROM staff_payout_obligation_links all_links WHERE all_links.payout_event_id=e.id)-e.amount_ntd) ELSE 0 END AS transfer_fee_ntd "
             "FROM staff_payout_obligation_links l JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity "
             "JOIN staff_payout_events e ON e.id=l.payout_event_id "
             "LEFT JOIN finance_import_rows b ON b.id=e.finance_import_row_id "
@@ -66,9 +69,15 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         str(row["occurred_on"]), row["event_type"], int(row["allocated_amount_ntd"]) * (
             -1 if row["event_type"] in {"return", "reversal"} else 1
         ), "manual" if ((row.get("reconciliation_reference") or "").startswith("manual") or row.get("summary") == "人工補登") else row["format_id"],
+        None if row.get('bank_amount_ntd') is None else int(row['bank_amount_ntd']),
+        None if row.get('transfer_fee_ntd') is None else int(row['transfer_fee_ntd']),
     ) for row in rows)
     paid_ids = {row.item_identity for row in transactions}
     items = []
+    from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
+    with connection.cursor() as cursor:
+        funding = {row['obligation_identity']: query_staff_funding_portions(cursor, row['obligation_identity'], lock=for_update)
+            if row.get('has_installments') else () for row in obligations}
     for row in obligations:
         identity = row["obligation_identity"]
         if identity in paid_ids and row["net_paid_ntd"] is None:
@@ -83,6 +92,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
             f"{row['account_version']}:{row['payroll_version']}:{row['aggregate_version'] or 0}:{row['historical_event'] or 0}",
             None if row["due_date"] is None else str(row["due_date"]),
             settled=row["confirmation_kind"] == "settled" or row.get("payout_status") == "completed",
+            funding_portions=funding[identity],
         ))
     seen = set()
     for row in overages:

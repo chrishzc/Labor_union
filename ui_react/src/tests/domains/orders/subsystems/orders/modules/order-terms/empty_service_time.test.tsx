@@ -77,6 +77,21 @@ async function submittedTerms() {
 }
 
 describe('Issue #337 empty service time', () => {
+  it('only enables the floor fee in the explicit closed-service correction flow', async () => {
+    const current={...queryFixture(),service_data_locked:true};
+    render(<OrderTermsMutationPanel caseNo={current.case_no} query={current} />);
+    expect(screen.getByRole('spinbutton',{name:'樓層加給'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button',{name:'更正結案樓層費'}));
+    expect(screen.getByRole('spinbutton',{name:'樓層加給'})).toBeEnabled();
+    expect(screen.getByLabelText('約定服務開始日')).toBeDisabled();
+    expect(screen.getByLabelText('服務天數')).toBeDisabled();
+    fireEvent.change(screen.getByRole('spinbutton',{name:'樓層加給'}),{target:{value:'1200'}});
+    fireEvent.click(screen.getByRole('button',{name:'儲存樓層費更正'}));
+    await waitFor(()=>expect(orderTermsMutationClient.preview).toHaveBeenCalled());
+    expect(vi.mocked(orderTermsMutationClient.preview).mock.calls[0][1]).toEqual({
+      floor_fee_correction:true,proposed_terms:{...current.terms,floor_fee_ntd:1200},
+    });
+  });
   it('accepts an all-null tuple while rejecting a partial tuple', () => {
     const input = queryFixture().terms;
     expect(OrderTermsInputSchema.parse(input).service_time).toEqual(emptyTime);

@@ -1,0 +1,296 @@
+/**
+ * File: AccountingParameters.css
+ * Description: 案件帳務核心參數展示卡片、銀行核對抽屜即時資訊條與滑出式參數調整抽屜樣式。
+ * 符合專案 Nurture Core 蜜桃珊瑚/陶褐暖色調 (design-tokens.css, Drawer.css, FinanceCompactCase.css)
+ */
+
+/* 1. 案件帳務詳細頂部參數卡片 */
+.accounting-params-card {
+  border: 1px solid var(--md-sys-color-outline-variant, #f0d9cf);
+  border-radius: var(--radius-md, 10px);
+  background: #ffffff;
+  padding: 16px 20px;
+  margin: 0 0 18px 0;
+  box-shadow: 0 1px 4px rgba(74, 69, 67, 0.04);
+}
+
+.accounting-params-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #f0e7e1);
+}
+
+.accounting-params-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accounting-params-title h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+}
+
+.accounting-params-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--md-sys-color-primary, #c2410c);
+  background: #ffeedb;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.accounting-params-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .accounting-params-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .accounting-params-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.accounting-param-item {
+  background: #faf7f2;
+  border: 1px solid #eddcd2;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.accounting-param-item dt {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--md-sys-color-secondary, #776e65);
+}
+
+.accounting-param-item dd {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.param-highlight {
+  color: var(--md-sys-color-primary, #c2410c);
+  font-variant-numeric: tabular-nums;
+}
+
+.accounting-params-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--md-sys-color-outline-variant, #eedfd5);
+  font-size: 0.76rem;
+  color: var(--md-sys-color-secondary, #74593f);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 2. 標籤徽章 (Chips) */
+.chip-twins-single {
+  background: #f3f0eb;
+  color: #746a5e;
+  border: 1px solid #e0d9cf;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.chip-twins-multi {
+  background: #ffeedb;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.chip-subsidy {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* 3. 銀行對帳核銷抽屜內的參數醒目條 */
+.bank-params-inline-bar {
+  background: #fffdfc;
+  border: 1px solid var(--md-sys-color-outline-variant, #f0d9cf);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bank-params-summary-text {
+  font-size: 0.82rem;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bank-params-summary-text strong {
+  color: var(--md-sys-color-primary, #c2410c);
+}
+
+/* 4. 參數調整抽屜內專屬控制項 */
+.accounting-drawer-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.accounting-drawer-label {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+
+.accounting-drawer-hint {
+  font-size: 0.74rem;
+  color: var(--md-sys-color-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.accounting-segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.accounting-segmented-btn {
+  border: 1px solid var(--md-sys-color-outline);
+  background: #ffffff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--md-sys-color-secondary);
+  transition: all 0.15s ease;
+}
+
+.accounting-segmented-btn.active {
+  border-color: var(--md-sys-color-primary);
+  background: #fff5ed;
+  color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+}
+
+.accounting-rates-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 6px;
+}
+
+.accounting-rates-table th, .accounting-rates-table td {
+  border: 1px solid var(--md-sys-color-outline-variant);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.accounting-rates-table th {
+  background: #fff0e3;
+  color: var(--md-sys-color-secondary);
+  font-weight: 700;
+}
+
+.accounting-rates-table input {
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #dec0b6;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.accounting-rates-table input:focus-visible {
+  outline: 3px solid #ff7f50;
+  border-color: var(--md-sys-color-primary);
+}
+
+.accounting-impact-card {
+  background: #fdfaf7;
+  border: 1px dashed var(--md-sys-color-primary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.accounting-impact-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--md-sys-color-primary);
+  margin-bottom: 6px;
+}
+
+.accounting-impact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  font-size: 0.78rem;
+}
+
+.accounting-impact-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.accounting-impact-grid span {
+  color: var(--md-sys-color-secondary);
+}
+
+.accounting-impact-grid strong {
+  font-size: 0.95rem;
+  color: var(--md-sys-color-on-surface);
+  font-variant-numeric: tabular-nums;
+}

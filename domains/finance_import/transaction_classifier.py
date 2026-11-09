@@ -583,7 +583,12 @@ def classify_finance_transaction(
             {**row, "counterparty_name": None, "summary": None, "bank_references": {}},
             all_staff_names, staff_payout_candidates, (), (),
         )
+        suffix = extract_sinopac_memo_case_suffix(memo)
         if staff_result is not None:
+            if (staff_result["reason"] == "outgoing_staff_payout_no_open_obligation"
+                    and suffix is not None
+                    and (known_case_suffixes is None or suffix in known_case_suffixes)):
+                return _review(TAISHIN_CASE_MEMO_REASON)
             if staff_result["reason"] == "outgoing_staff_payout_no_open_obligation" and staff_name_identities:
                 name = extract_name_from_row_text({"memo": memo}, all_staff_names)
                 identities = tuple(staff_name_identities.get(name, ()))
@@ -592,7 +597,6 @@ def classify_finance_transaction(
             if staff_result["classification_type"] == "staff_salary":
                 return {**staff_result, "resolved_counterparty_account": row.get("counterparty_account")}
             return staff_result
-        suffix = extract_sinopac_memo_case_suffix(memo)
         if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
             return _review(TAISHIN_CASE_MEMO_REASON)
         return _review("taishin_outgoing_unrecognized")

@@ -44,6 +44,7 @@ from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.payroll.terms_impact import (
     build_payroll_terms_impact,
+    build_payroll_rate_correction_impact,
     build_preassignment_payroll_noop,
     PayrollSpecialPayEventCandidate,
 )
@@ -399,6 +400,11 @@ class OrderTermsWorkflow:
         )
         scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
+        reuses_assignments = bool(scheduling.assignments) and (
+            proposed_terms.service_time == facts.order.terms.service_time
+            and not _scheduling_replacement_required(facts.scheduling, scheduling, facts.planned_service_dates))
+        if reuses_assignments:
+            change_identity = f"terms:{facts.order.case_no}:order:{facts.order.version + 1}"
         if floor_fee_correction:
             change_identity = f"floor-fee:{facts.order.case_no}:order:{facts.order.version + 1}"
         if not facts.scheduling.segments:
@@ -441,7 +447,8 @@ class OrderTermsWorkflow:
             client_finance = build_client_finance_terms_impact(
                 facts.client_finance, proposed_terms, scheduling, change_identity
             )
-            payroll = build_payroll_terms_impact(
+            payroll_builder = build_payroll_rate_correction_impact if reuses_assignments else build_payroll_terms_impact
+            payroll = payroll_builder(
                 facts.payroll, scheduling, proposed_terms, change_identity
             )
             lifecycle = build_terms_lifecycle_impact(
@@ -464,7 +471,7 @@ class OrderTermsWorkflow:
                              requires_formal_apply=True,
                              fingerprint=fingerprint_payload({"floor_fee_correction": True,
                                  "preview": result.fingerprint.value, "before": facts.order.terms.canonical_payload(),
-                                 "planned_end_date": facts.planned_end_date}))
+                                 "planned_end_date": facts.planned_end_date.isoformat() if facts.planned_end_date else None}))
         return result
 
     def _persist_ordinary(self, request, preview, receipt):

@@ -18,6 +18,7 @@ import {
 } from '../api/staff_payables/staff_payout_remediation_schemas';
 import { StaffPayoutRemediationError, staffPayoutBlockerMessage } from '../api/staff_payables/staff_payout_remediation_errors';
 import type { StaffPayablesQuery } from '../api/staff_payables/staff_payables_query_schemas';
+import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
 
 export interface StaffPayoutRemediationTarget {
   staffId: number;
@@ -31,6 +32,7 @@ export interface StaffPayoutRemediationWorkbenchProps {
   onPosted?: () => void;
   financeImportRowId?: number;
   sourceBank?: 'sinopac' | 'taishin';
+  bankSource?: Pick<FinanceBankTransaction, 'transaction_date' | 'amount_ntd' | 'reference' | 'counterparty_name'>;
   confirmPreview?: boolean;
   onBusyChange?: (busy: boolean) => void;
   client?: StaffPayoutRemediationClient;
@@ -141,6 +143,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   onPosted,
   financeImportRowId,
   sourceBank,
+  bankSource,
   confirmPreview = false,
   onBusyChange,
   client = staffPayoutRemediationClient,
@@ -207,6 +210,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   const obligation = obligations[0] ?? null;
   const active = obligations.some((item) => item.balance_ntd > 0 && item.payout_status !== 'completed');
   const payoutCandidate = preview && 'allocations' in preview.candidate ? preview.candidate : null;
+  const remainingTotal = obligations.reduce((sum, item) => sum + item.balance_ntd, 0);
   const selection = (): StaffPayoutSelection | null => {
     const financeImportRowIds = parseRowIds(rowIdsText);
     if (!financeImportRowIds || !active || (financeImportRowId !== undefined && (financeImportRowIds.length !== 1 || financeImportRowIds[0] !== financeImportRowId))) return null;
@@ -377,29 +381,17 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
               <h4>銀行已出款項（來源流水）</h4>
             </div>
             {financeImportRowId !== undefined ? (
-              <div className="finance-table-container">
-                <table className="finance-table finance-recon-table">
-                  <thead>
-                    <tr>
-                      <th>納入</th>
-                      <th>銀行來源</th>
-                      <th>流水編號</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="is-selected-row">
-                      <td>
-                        <input type="checkbox" checked disabled readOnly aria-label="納入銀行款" />
-                      </td>
-                      <td>
-                        <span>{sourceBank === 'sinopac' ? '永豐銀行' : sourceBank === 'taishin' ? '台新銀行' : '銀行出款'}</span>
-                      </td>
-                      <td>
-                        <small className="finance-mono-sub">bank:{financeImportRowId}</small>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div className="finance-recon-obligation-item is-selected-item" aria-label="銀行出款明細">
+                <input type="checkbox" checked disabled readOnly aria-label="納入銀行款" />
+                <div className="finance-recon-ob-info">
+                  <div className="finance-recon-ob-name">
+                    <strong>{sourceBank === 'sinopac' ? '永豐銀行' : sourceBank === 'taishin' ? '台新銀行' : '銀行出款'}</strong>
+                    <span>交易日：{bankSource?.transaction_date ?? '未提供'}</span>
+                    <span>收款對象：{bankSource?.counterparty_name ?? '未提供'}</span>
+                    <span style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>交易摘要：{bankSource?.reference || '未提供'}</span>
+                    <strong>銀行實付：{bankSource ? `NT$ ${bankSource.amount_ntd.toLocaleString('zh-TW')}` : '待確認'}</strong>
+                  </div>
+                </div>
               </div>
             ) : (
               <div style={{ padding: '8px 0' }}>
@@ -417,7 +409,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
               </div>
             )}
             <div className="finance-recon-col-summary">
-              <span>{financeImportRowId !== undefined ? '使用已選取的銀行流水。' : `已指定流水：${parseRowIds(rowIdsText)?.length ?? 0} 筆`}</span>
+              <span>{financeImportRowId !== undefined && bankSource ? `銀行實付合計：NT$ ${bankSource.amount_ntd.toLocaleString('zh-TW')}` : `已指定流水：${parseRowIds(rowIdsText)?.length ?? 0} 筆`}</span>
             </div>
           </div>
 
@@ -445,6 +437,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                     <div className="finance-recon-ob-name">
                       <strong>案件 {obligation.case_no} 應付款</strong>
                       <small>{obligation.due_date ? `到期日：${obligation.due_date}` : '未設定到期日'} · 狀態 {payoutStatusLabel(obligation.payout_status)}</small>
+                      {obligation.funding_portions?.map(portion => <small key={portion.funding_kind}>
+                        {portion.funding_kind === 'client' ? '自備款（永豐）' : '補助款（台新）'}：應付 NT$ {portion.amount_ntd.toLocaleString('zh-TW')} · 待付 NT$ {(portion.remaining_ntd === null ? '待確認' : portion.remaining_ntd.toLocaleString('zh-TW'))} · {portion.due_date ?? '未設定撥款日'}
+                      </small>)}
+                      {!!obligation.funding_portions?.length && <small>方案一分別核銷：永豐核銷自備款，剩餘補助由台新轉付；兩部分完成後才結清。</small>}
                     </div>
                     <div className="finance-recon-ob-meta" style={{ display: 'grid', gap: 2, textAlign: 'right' }}>
                       <span>應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}</span>
@@ -476,7 +472,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                   onChange={(event) => { setDifferenceMode(event.target.value as typeof differenceMode); invalidatePreview(); }}
                   style={{ width: '100%', padding: '6px 10px', border: '1px solid #ebdcd1', borderRadius: 6 }}
                 >
-                  <option value="">足額核銷剩餘款</option>
+                  <option value="">足額核銷本次款項（含 100 元內手續費）</option>
                   <option value="underpayment">付款不足，先核銷實付</option>
                   <option value="overpayment">付款超額，另列追收</option>
                 </select>
@@ -493,6 +489,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
                 />
               </label>
             </div>
+            <p>內扣手續費：待預覽確認。符合條件的 0～100 元差額由收款方負擔；補助待付款另列，不列為手續費。</p>
             <div className="finance-recon-action-row">
               <button
                 type="button"
@@ -513,6 +510,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
               <h5>本次核銷資料</h5>
               <span>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</span>
             </div>
+            <p>內扣手續費：{payoutCandidate.transfer_fee ? `NT$ ${payoutCandidate.transfer_fee.amount.toLocaleString('zh-TW')}` : '未提供，待確認'}</p>
+            <p>核銷後剩餘待付：NT$ {Math.max(0, remainingTotal - payoutCandidate.allocations.reduce((sum, item) => sum + item.amount.amount, 0)).toLocaleString('zh-TW')}</p>
+            {sourceBank === 'sinopac' && obligations.some(item => item.funding_portions?.some(p => p.funding_kind === 'subsidy' && p.remaining_ntd !== null && p.remaining_ntd > 0)) &&
+              <p>剩餘補助待付：NT$ {obligations.reduce((sum, item) => sum + (item.funding_portions?.filter(p => p.funding_kind === 'subsidy').reduce((total, p) => total + (p.remaining_ntd ?? 0), 0) ?? 0), 0).toLocaleString('zh-TW')}，由方案一補助款經台新轉付，本次不結清補助部分。</p>}
             {confirmPreview && preview && !accepted && !unknownOutcome && (
               <div className="finance-recon-confirm-row">
                 <button

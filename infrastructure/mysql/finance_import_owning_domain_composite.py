@@ -843,6 +843,7 @@ def _resolve_staff_payout(connection, candidate):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT obligation.obligation_identity,obligation.due_date,"
+            "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligation.obligation_identity) AS has_installments,"
             "COALESCE(projection.balance_ntd,obligation.amount_due_ntd) "
             "AS amount_due_ntd "
             "FROM staff_obligations obligation "
@@ -858,6 +859,24 @@ def _resolve_staff_payout(connection, candidate):
             parameters,
         )
         rows = tuple(cursor.fetchall())
+        if is_sinopac or is_taishin:
+            from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
+            funding = 'client' if is_sinopac else 'subsidy'
+            scoped_rows = []
+            for row in rows:
+                if not row.get('has_installments'):
+                    scoped_rows.append(row)
+                    continue
+                try:
+                    portions = query_staff_funding_portions(cursor, row['obligation_identity'])
+                    if any(p.remaining_ntd is None for p in portions):
+                        raise ValueError('staff_installment_funding_unconfirmed')
+                except ValueError as error:
+                    return replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                        available_actions=('resolve_owning_domain_target',), pending_reason=str(error))
+                scoped_rows.extend({**row, 'due_date': p.due_date, 'amount_due_ntd': p.remaining_ntd}
+                    for p in portions if p.funding_kind == funding and p.remaining_ntd > 0)
+            rows = tuple(scoped_rows)
     if is_sinopac or is_taishin:
         if trans_date is None:
             return replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING, available_actions=('resolve_owning_domain_target',), pending_reason='bank_transaction_date_missing')

@@ -194,6 +194,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const submittedTarget = useRef<OrderTermsApplyPayload | null>(null);
   const pendingCommand = useRef<{ payload: OrderTermsApplyPayload; key?: string } | null>(null);
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
+  const [floorCorrection, setFloorCorrection] = useState(false);
+  useEffect(() => { setFloorCorrection(false); }, [caseNo]);
   const mounted = useRef(false);
   const activeCase = useRef(caseNo);
   activeCase.current = caseNo;
@@ -306,6 +308,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   }, [termsDirty, status, outcomeUnknown, receipt, readback, onEditStateChange]);
 
   const proposedTermsPayload = (dates = replacementDates) => ({
+    ...(floorCorrection ? { floor_fee_correction: true } : {}),
     ...(needsReplacement && dates ? {
       replacement_service_dates: dates,
       replacement_allocations: (currentQuery.assignments ?? []).map((assignment) => ({
@@ -344,7 +347,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const replacementReady = !needsReplacement || (serviceMode !== ''
     && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
       && currentQuery.assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === Number(draft.serviceDays) : true));
-  const locked = currentQuery.service_data_locked || status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
+  const savingLocked = status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
+  const locked = currentQuery.service_data_locked || savingLocked;
 
   const calculateReplacement = async () => {
     if (!serviceMode || !draftReady || locked) return;
@@ -390,7 +394,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   };
 
   const previewTerms = async () => {
-    if (!draftReady || !replacementReady || locked) return;
+    if (!draftReady || !replacementReady || (floorCorrection ? savingLocked : locked)) return;
     const generation = ++previewGeneration.current;
     previewAbort.current?.abort();
     const controller = new AbortController();
@@ -434,7 +438,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
   const applyTerms = async (calculatedPreview = preview, proposedPayload = proposedTermsPayload()) => {
     const preview = calculatedPreview;
-    if (!preview || currentQuery.service_data_locked) return;
+    if (!preview || (currentQuery.service_data_locked && !proposedPayload.floor_fee_correction)) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
@@ -523,7 +527,9 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       <h3 id="order-v2-terms-mutation-heading">預覽與儲存服務條件</h3>
       <p className="order-v2-drawer-note">尚未建立服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
       {currentQuery.service_data_locked && (
-        <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
+        <div><p role="status">服務條件已鎖定；漏填或誤填樓層費可正式更正，原服務日期與收付款紀錄保留，差額由帳務承接。</p>
+          {!floorCorrection && <button type="button" disabled={savingLocked} onClick={()=>{setDraft(draftFromQuery(currentQuery));setFloorCorrection(true);}}>更正結案樓層費</button>}
+        </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
@@ -554,7 +560,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           </select>
         </label>
         <label>樓層加給（NTD）
-          <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
+          <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={floorCorrection?savingLocked:locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
         </label>
         <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', background: '#faf6f0', borderRadius: '8px', border: '1px solid #ebdcd0', marginTop: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
@@ -636,11 +642,11 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       )}
 
           <><label>變更原因（選填）
-            <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
+            <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={floorCorrection?savingLocked:locked} onChange={(event) => setReason(event.target.value)} />
           </label></>
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
-        <button type="button" disabled={locked || !draftReady || !replacementReady} onClick={() => void previewTerms()}>
-          {status === 'previewing' ? '正在儲存服務條件…' : '儲存服務條件'}
+        <button type="button" disabled={(floorCorrection?savingLocked:locked) || !draftReady || !replacementReady || (floorCorrection&&Number(draft.floorFeeNtd)===currentQuery.terms.floor_fee_ntd)} onClick={() => void previewTerms()}>
+          {status === 'previewing' ? '正在儲存服務條件…' : floorCorrection?'儲存樓層費更正':'儲存服務條件'}
         </button>
       </div>
 

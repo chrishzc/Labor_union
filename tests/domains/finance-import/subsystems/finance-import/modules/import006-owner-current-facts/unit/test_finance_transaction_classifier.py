@@ -293,14 +293,15 @@ def test_taishin_memo_name_shared_by_two_staff_is_not_admitted():
     assert result["reason"] == "outgoing_staff_payout_name_ambiguous"
 
 
-def test_taishin_identifies_memo_staff_name_before_checking_open_payables():
+@pytest.mark.parametrize("suffix", ["", "HC115001", "ＨＣ１１５００１"])
+def test_taishin_identifies_memo_staff_name_before_checking_open_payables(suffix):
     row = _row(format_id="taishin", direction="outgoing", debit=Decimal("100"), credit=None,
-               memo="合成人員甲")
+               memo="合成人員甲" + suffix)
     result = classify_finance_transaction(row, {}, {}, all_staff_names=("合成人員甲",),
                                           staff_name_identities={"合成人員甲": (9,)})
-    assert result["classification_type"] == "staff_salary"
-    assert result["matched_identity_ids"] == [9]
-    assert result["reason"] == "outgoing_staff_payout_no_open_obligation"
+    assert result["classification_type"] == ("non_business_review" if suffix else "staff_salary")
+    assert result["matched_identity_ids"] == ([] if suffix else [9])
+    assert result["reason"] == ("taishin_memo_case_requires_manual_scheme" if suffix else "outgoing_staff_payout_no_open_obligation")
 
 
 def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():

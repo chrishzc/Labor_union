@@ -28,7 +28,7 @@ from subsystems.finance_import.query import batch_review_count
 from subsystems.finance_import.staging import stage_finance_rows
 
 
-_CLASSIFIER_VERSION = "finance-transaction-classifier-v6"
+_CLASSIFIER_VERSION = "finance-transaction-classifier-v7"
 _FINGERPRINT_VERSION = "finance-transaction-fingerprint-v1"
 _INITIAL_CLASSIFICATION_REASON = "initial_bank_classification"
 

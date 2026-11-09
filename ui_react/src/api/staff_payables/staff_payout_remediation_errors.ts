@@ -61,6 +61,9 @@ export const TAISHIN_PAYOUT_REASON_MESSAGES: Readonly<Record<string,string>> = {
 };
 
 export function staffPayoutBlockerMessage(code?: string | null, sourceBank?: string): string | undefined {
+  if (code && ['staff_installment_funding_ambiguous', 'staff_installment_funding_unconfirmed', 'staff_installment_funding_conflict'].includes(code)) {
+    return '自備款與補助款的付款來源或已核銷分配無法確認，請分銀行核對正式分期及原付款；不以補助待付款當作手續費。';
+  }
   const bankReasons = sourceBank === 'sinopac' ? SINOPAC_PAYOUT_REASON_MESSAGES : sourceBank === 'taishin' ? TAISHIN_PAYOUT_REASON_MESSAGES : {};
   return code ? bankReasons[code] ?? PAYOUT_BLOCKER_MESSAGES[code] : undefined;
 }

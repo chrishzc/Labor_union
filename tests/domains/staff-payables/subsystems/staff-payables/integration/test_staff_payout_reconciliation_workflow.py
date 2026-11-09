@@ -90,6 +90,31 @@ def _request(preview, *, version=4, key="payout-1"):
     )
 
 
+@pytest.mark.parametrize('total,portion,cash,fee,status', [
+    (18000, 18000, 17935, 65, StaffPayableStatus.COMPLETED),
+    (30000, 18000, 17935, 65, StaffPayableStatus.PARTIALLY_PAID),
+    (30000, 12000, 11970, 30, StaffPayableStatus.PARTIALLY_PAID),
+    (30000, 18000, 18000, 0, StaffPayableStatus.PARTIALLY_PAID),
+])
+def test_fee_settles_only_selected_funding_portion_and_preserves_other_portion(total, portion, cash, fee, status):
+    from dataclasses import replace
+    facts = replace(_facts(), bank_facts=(OutgoingBankFact('bank:1', 7, MoneyNTD(cash), 'account:7'),),
+        obligations=(StaffPayableFacts('obligation:1', 7, MoneyNTD(total), installment_limit=MoneyNTD(portion)),))
+    repository = _Repository(facts)
+    workflow = StaffPayoutReconciliationWorkflow(repository, _UnitOfWork)
+    preview = workflow.preview(_selection(), CorrelationId('funding-fee'))
+    assert preview.candidate.bank_total.amount == cash
+    assert preview.candidate.obligation_total.amount == portion
+    assert preview.candidate.transfer_fee.amount == fee
+    assert sum(link.allocated_amount.amount for link in preview.candidate.obligation_links) == portion
+    assert preview.candidate.resulting_status is status
+    receipt = workflow.apply(_request(preview))
+    assert receipt.resulting_status is status
+    before = list(repository.calls)
+    assert workflow.apply(_request(preview)) == receipt
+    assert repository.calls == [*before, ('find',)]
+
+
 def test_preview_apply_persists_ledger_projection_outbox_and_receipt():
     repository = _Repository(_facts())
     unit_of_work = _UnitOfWork()

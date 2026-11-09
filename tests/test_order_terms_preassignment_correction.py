@@ -474,6 +474,49 @@ def _assigned_facts():
     )
 
 
+def test_closed_floor_fee_correction_keeps_service_roots_and_replays_original_receipt():
+    facts = _assigned_facts()
+    facts = replace(facts, order=replace(facts.order, service_data_locked=True),
+                    lifecycle=replace(facts.lifecycle, current_status=OrderLifecycleStatus.COMPLETED,
+                                      service_data_locked=True), actual_end_date=date(2026, 9, 14))
+    repository = _AssignedPersistenceRepository(facts)
+    workflow = terms_workflow.OrderTermsWorkflow(repository, object(), _Clock())
+    proposed = replace(facts.order.terms, floor_fee=MoneyNTD(1000))
+    with pytest.raises(ValueError, match='service_data_locked'):
+        workflow.preview(facts.order.case_no, proposed)
+    preview = workflow.preview(facts.order.case_no, proposed, floor_fee_correction=True)
+    assert preview.requires_formal_apply
+    assert not preview.scheduling_replacement_required
+    assert preview.lifecycle_impact.after_status is OrderLifecycleStatus.COMPLETED
+    assert preview.lifecycle_impact.actual_end_date == facts.actual_end_date
+    assert preview.planned_end_date == facts.planned_end_date
+    request = terms_workflow.OrderTermsApplyRequest(
+        facts.order.case_no, proposed, ExpectedVersion(facts.order.version),
+        ExpectedVersion(facts.scheduling.aggregate_version), ExpectedVersion(4), ExpectedVersion(7),
+        preview.fingerprint, IdempotencyKey('closed-floor-fee'), ActorContext('internal-admin'),
+        '補正樓層費', CorrelationId('closed-floor-fee'), floor_fee_correction=True)
+    first = workflow.apply_in_current_uow(request)
+    assert workflow.apply_in_current_uow(request) == first
+    assert 'scheduling_generation' not in repository.writes
+    assert first.lifecycle_status is OrderLifecycleStatus.COMPLETED
+    assert first.scheduling_version == facts.scheduling.aggregate_version
+    with pytest.raises(terms_workflow.TermsWorkflowError) as error:
+        workflow.apply_in_current_uow(replace(request, proposed_terms=replace(proposed, floor_fee=MoneyNTD(2000))))
+    assert error.value.error.category.value == 'idempotency_mismatch'
+
+
+def test_closed_floor_fee_correction_cannot_change_dates_or_smuggle_replacement():
+    facts = _assigned_facts()
+    facts = replace(facts, order=replace(facts.order, service_data_locked=True))
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(facts), object(), _Clock())
+    proposed = replace(facts.order.terms, floor_fee=MoneyNTD(1000))
+    with pytest.raises(ValueError, match='floor_fee_correction_must_only_change_fee'):
+        workflow.preview(facts.order.case_no, replace(proposed, service_days=6), floor_fee_correction=True)
+    with pytest.raises(ValueError, match='floor_fee_correction_must_only_change_fee'):
+        workflow.preview(facts.order.case_no, proposed, floor_fee_correction=True,
+                         replacement_service_dates=facts.planned_service_dates)
+
+
 def test_preassignment_cooking_correction_builds_empty_scheduling_candidate(
 ):
     workflow = terms_workflow.OrderTermsWorkflow(_Repository(_facts()), object(), _Clock())
@@ -879,7 +922,8 @@ def test_assigned_half_hour_terms_keep_fractional_hours_in_finance_and_payroll()
         5,
         4.5,
         MoneyNTD(0),
-        ServiceTimeTerms(time(9), time(13, 30), 0),
+        # Orders §3.2: a billable-hours correction reuses assignments only if the shift stays unchanged.
+        facts.order.terms.service_time,
         None,
     )
 

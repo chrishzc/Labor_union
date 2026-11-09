@@ -64,6 +64,30 @@ def test_staff_payout_source_reason_is_specific_for_preview_and_fresh_apply(lock
             ({'transaction_date': occurred_on, 'currency': currency},), (), lock)
 
 
+@pytest.mark.parametrize('paid,client_remaining,subsidy_remaining', [
+    ((), 18000, 12000),
+    (({'format_id': 'sinopac', 'settled_ntd': 18000},), 0, 12000),
+    (({'format_id': 'taishin', 'settled_ntd': 12000},), 18000, 0),
+    (({'format_id': 'sinopac', 'settled_ntd': 18000}, {'format_id': 'taishin', 'settled_ntd': 12000}), 0, 0),
+    (({'format_id': None, 'settled_ntd': 100},), None, None),
+])
+def test_funding_projection_uses_settlement_links_by_bank_including_fee_and_reopen(paid, client_remaining, subsidy_remaining):
+    from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
+    class Cursor(_Cursor):
+        def __init__(self):
+            super().__init__()
+            self.responses = iter((
+                ({'funding_kind': 'client', 'amount_ntd': 18000, 'due_date': date(2026, 10, 15)},
+                 {'funding_kind': 'subsidy', 'amount_ntd': 12000, 'due_date': date(2026, 10, 15)}), paid))
+        def fetchall(self):
+            return next(self.responses)
+    cursor = Cursor()
+    portions = query_staff_funding_portions(cursor, 'obligation:1', lock=True)
+    assert {p.funding_kind: p.remaining_ntd for p in portions} == {'client': client_remaining, 'subsidy': subsidy_remaining}
+    assert 'FOR UPDATE' in cursor.calls[0][0]
+    assert 'reversal_of_event_id' in cursor.calls[1][0]
+
+
 class _Connection:
     def __init__(self) -> None:
         self.cursor_value = _Cursor()

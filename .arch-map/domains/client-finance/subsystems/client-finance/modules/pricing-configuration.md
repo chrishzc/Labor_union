@@ -22,6 +22,10 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/pages/AccountingParametersPage.tsx`
 - `ui_react/src/pages/AccountingParametersPage.css`
 - `ui_react/src/components/CasePricingAdjustmentPanel.tsx`
+- `ui_react/src/components/AccountingParametersCard.tsx`
+- `ui_react/src/components/AccountingParametersBar.tsx`
+- `ui_react/src/components/AccountingParametersDrawer.tsx`
+- `ui_react/src/components/AccountingParameters.css`
 
 ## Contracts
 - Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding, double-pay and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.

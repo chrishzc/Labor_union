@@ -449,15 +449,15 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       const drawer = await screen.findByRole('dialog', { name: '案件帳務 · 115000001' });
       expect(await within(drawer).findByRole('heading', { name: '客戶繳款 · 核對交易' })).toBeVisible();
       expect(await within(drawer).findByRole('checkbox', { name: '納入銀行款 101' })).toBeChecked();
-      expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 101' })).toBeDisabled();
+      expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 101' })).toBeEnabled();
       expect(within(drawer).getByRole('checkbox', { name: '納入銀行款 103' })).not.toBeChecked();
-      if (manual) expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).not.toBeChecked();
-      else expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).toBeChecked();
-      expect(within(drawer).getByRole('checkbox', { name: /receipt:second/ })).not.toBeChecked();
+      if (manual) expect(within(drawer).getByRole('checkbox', { name: /第一期/ })).not.toBeChecked();
+      else expect(within(drawer).getByRole('checkbox', { name: /第一期/ })).toBeChecked();
+      expect(within(drawer).getByRole('checkbox', { name: /第二期/ })).not.toBeChecked();
       if (manual) {
-        fireEvent.click(within(drawer).getByRole('checkbox', { name: /receipt:second/ }));
-        expect(within(drawer).getByRole('checkbox', { name: /receipt:second/ })).toBeChecked();
-        expect(within(drawer).getByRole('checkbox', { name: /receipt:first/ })).not.toBeChecked();
+        fireEvent.click(within(drawer).getByRole('checkbox', { name: /第二期/ }));
+        expect(within(drawer).getByRole('checkbox', { name: /第二期/ })).toBeChecked();
+        expect(within(drawer).getByRole('checkbox', { name: /第一期/ })).not.toBeChecked();
       }
 
       fireEvent.keyDown(window, { key: 'Escape' });
@@ -640,6 +640,22 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
 
     expect(onReconcile).toHaveBeenCalledWith(sinopac);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['non_business_review', 'taishin_memo_case_requires_manual_scheme', '確認補助方案'],
+    ['staff_payout', 'outgoing_staff_payout_no_open_obligation', '查看案件帳務'],
+  ])('keeps the unique case reachable without payable items (%s)', async (classification_type, review_reason, action) => {
+    const row = { ...taishin, direction: 'outgoing' as const, classification_type, review_reason,
+      cases: ['115000001'], reconciliation_target: null, reconciliation_unavailable_reason: 'purpose_unconfirmed' };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({ items: [row], pending_count: 1, next_before_row_id: null });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    fireEvent.click(await screen.findByRole('button', { name: action }));
+    expect(onCase).toHaveBeenCalledWith('115000001');
+    expect(onReconcile).not.toHaveBeenCalled();
+    expect(screen.queryByText('此款項目前沒有可用的案件核對入口。')).not.toBeInTheDocument();
+    if (classification_type === 'staff_payout') expect(screen.getByText('補助轉交月嫂')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /核對交易/ })).not.toBeInTheDocument();
   });
 
   it('shows both banks across all uploads and opens import history independently', async () => {

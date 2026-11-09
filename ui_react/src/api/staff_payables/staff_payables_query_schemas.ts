@@ -5,6 +5,10 @@
 import { z } from 'zod';
 
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const StaffFundingPortionSchema = z.strictObject({
+  funding_kind: z.enum(['client', 'subsidy']), amount_ntd: z.number().int().nonnegative(),
+  due_date: DateSchema.nullable(), settled_ntd: z.number().int().nonnegative().nullable(), remaining_ntd: z.number().int().nonnegative().nullable(),
+});
 export const StaffPayablesQuerySchema = z.strictObject({
   staff_id: z.number().int().positive(),
   staff_payables_version: z.number().int().nonnegative(),
@@ -16,6 +20,7 @@ export const StaffPayablesQuerySchema = z.strictObject({
     net_paid_ntd: z.number().int().nonnegative(),
     balance_ntd: z.number().int(),
     payout_status: z.string(),
+    funding_portions: z.array(StaffFundingPortionSchema).optional(),
   })),
   events: z.array(z.strictObject({
     id: z.number().int().positive(),

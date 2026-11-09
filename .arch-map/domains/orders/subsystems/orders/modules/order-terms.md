@@ -5,6 +5,8 @@
 - subsystem: `orders`
 
 ## Responsibility
+
+2026-11-09：既有 Terms input 的 `floor_fee_correction=true` 僅允許服務鎖後樓層費更正，保留原服務／結案／日期及 Scheduling roots；同交易委派原 Finance／Payroll 差額 writer，沿原 Terms 事件與收據。沿用 current assignment 的連續費用更正以 Orders version 區分，Payroll 借用既有 rate-correction candidate 避免重複義務 identity。
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply。Preview 衍生 `requires_formal_apply`：不形成 Scheduling、confirmed dates、Finance、Payroll 或 lifecycle 正式影響的普通保存只更新 Orders aggregate，不建立 command claim、事件或永久 receipt；有正式影響時才以單一 outer Unit of Work 套用跨 owner 影響並產生可追溯 receipt。Terms caller 另比對 current effective assignments 與 candidate 的 identity／人員／日期／區間形狀；形狀未變時不呼叫 Scheduling replacement writer，沿用 current generation 與真實 assignment identity，Terms receipt 的 Scheduling receipt linkage 為 nullable。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。
 
 尚未建立 assignment 且沒有既有下游義務時，與付款計算無關的修改只讀 Orders／Scheduling 與下游完整性的最小存在 facts；Finance／Payroll version 與 impact 明確為 nullable。預計開始日、服務天數、每日時數或樓層費異動且已有 Finance root 時，額外讀取 Finance 付款計算 facts，由 owner 重算階段並在日期有變化時同步條款與 immutable event，依完整資料同步全部期款，不新增未指派的 Payroll 依賴。已有 assignment 時仍使用完整下游 facts 與版本控制。
@@ -57,6 +59,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling generation ownership。
 
 ## Verification
+- integration_root: `tests/domains/orders/subsystems/orders/integration/test_accounting_change_reconciliation_mysql.py` — opt-in localhost：結案樓層費、原收付款不變、失敗回滾／重送、連續更正、個案計價及提前結束後原流水核銷。
 - layout_status: `custom_current`
 - test_root: `tests/test_order_terms_preassignment_correction.py`
 - test_root: `tests/domains/orders/subsystems/orders/modules/order-terms/`

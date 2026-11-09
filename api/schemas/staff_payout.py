@@ -213,6 +213,14 @@ class StaffOverpaymentRecoveryQueryView(_StrictModel):
     matchings: list[StaffOverpaymentRecoveryMatchingQueryView]
 
 
+class StaffFundingPortionView(_StrictModel):
+    funding_kind: Literal['client', 'subsidy']
+    amount_ntd: int = Field(ge=0)
+    due_date: date | None
+    settled_ntd: int | None = Field(ge=0)
+    remaining_ntd: int | None = Field(ge=0)
+
+
 class StaffPayableObligationView(_StrictModel):
     obligation_identity: str
     case_no: str
@@ -221,6 +229,7 @@ class StaffPayableObligationView(_StrictModel):
     net_paid_ntd: int = Field(ge=0)
     balance_ntd: int
     payout_status: str
+    funding_portions: list[StaffFundingPortionView] = Field(default_factory=list)
 
 
 class StaffPayoutEventView(_StrictModel):

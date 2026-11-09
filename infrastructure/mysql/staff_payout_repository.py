@@ -307,21 +307,22 @@ class MySqlStaffPayoutRepository:
             lock,
         )
         obligations = _obligation_facts(obligation_rows, events)
-        if selection.event_type is StaffPayoutEventType.PAYOUT and selection.difference_mode is None and bank_rows:
+        if selection.event_type is StaffPayoutEventType.PAYOUT and bank_rows:
             from dataclasses import replace
-            occurred_on = min(_bank_event_metadata(row).occurred_on for row in bank_rows)
             limits = {}
             for row in obligation_rows:
                 if not row.get("has_installments"):
                     continue
-                cursor.execute("SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments "
-                    "WHERE obligation_identity=%s" + (" FOR UPDATE" if lock else ""), (row["obligation_identity"],))
-                installments = tuple(cursor.fetchall())
-                due_amount = sum(int(item["amount_ntd"]) for item in installments if item["due_date"] is not None and item["due_date"] <= occurred_on)
-                limits[str(row["obligation_identity"])] = due_amount
+                formats = {source['format_id'] for source in bank_rows}
+                if len(formats) != 1 or not formats <= {'sinopac', 'taishin'}:
+                    raise ValueError('staff_installment_funding_ambiguous')
+                funding = 'client' if 'sinopac' in formats else 'subsidy'
+                portions = query_staff_funding_portions(cursor, row['obligation_identity'], lock=lock)
+                if any(p.remaining_ntd is None for p in portions):
+                    raise ValueError('staff_installment_funding_unconfirmed')
+                limits[str(row['obligation_identity'])] = sum(p.remaining_ntd for p in portions if p.funding_kind == funding)
             if limits:
-                from domains.staff_payables.reconciliation import project_staff_payable
-                obligations = tuple(replace(item, installment_limit=MoneyNTD(max(0, limits[item.obligation_identity] - project_staff_payable(item).net_paid.amount)))
+                obligations = tuple(replace(item, installment_limit=MoneyNTD(limits[item.obligation_identity]))
                     if item.obligation_identity in limits else item for item in obligations)
         blockers = _load_blocking_anomalies(cursor, bank_rows)
         bank_facts = (
@@ -1195,9 +1196,46 @@ def _stored_receipt(row) -> StoredStaffPayoutReceipt:
     )
 
 
+def query_staff_funding_portions(cursor, identity, *, lock=False):
+    """Project original funding schedules against committed settlement links by bank.
+
+    A link includes a confirmed transfer fee; bank cash alone cannot measure the
+    amount discharged. Unknown historical funding is never assigned by order.
+    """
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments '
+        'WHERE obligation_identity=%s ORDER BY funding_kind' + (' FOR UPDATE' if lock else ''), (identity,))
+    installments = tuple(cursor.fetchall())
+    if not installments:
+        return ()
+    cursor.execute(
+        'SELECT COALESCE(b.format_id,original_bank.format_id) AS format_id,'
+        "SUM(CASE WHEN e.event_type='payout' THEN l.allocated_amount_ntd ELSE -l.allocated_amount_ntd END) AS settled_ntd "
+        'FROM staff_payout_obligation_links l JOIN staff_payout_events e ON e.id=l.payout_event_id '
+        'LEFT JOIN finance_import_rows b ON b.id=e.finance_import_row_id '
+        'LEFT JOIN staff_payout_events original ON original.id=e.reversal_of_event_id '
+        'LEFT JOIN finance_import_rows original_bank ON original_bank.id=original.finance_import_row_id '
+        'WHERE l.obligation_identity=%s GROUP BY COALESCE(b.format_id,original_bank.format_id)', (identity,))
+    paid = {'client': 0, 'subsidy': 0}
+    unconfirmed = False
+    for row in cursor.fetchall():
+        kind = {'sinopac': 'client', 'taishin': 'subsidy'}.get(row['format_id'])
+        if kind is None and int(row['settled_ntd']) != 0:
+            unconfirmed = True
+        if kind:
+            paid[kind] += int(row['settled_ntd'])
+    portions = tuple(StaffFundingPortion(str(row['funding_kind']), int(row['amount_ntd']), row['due_date'],
+        paid[str(row['funding_kind'])], max(0, int(row['amount_ntd']) - paid[str(row['funding_kind'])])) for row in installments)
+    if unconfirmed or any(p.settled_ntd < 0 or p.settled_ntd > p.amount_ntd for p in portions):
+        from dataclasses import replace
+        return tuple(replace(p, settled_ntd=None, remaining_ntd=None) for p in portions)
+    return portions
+
+
 def _query_obligation_rows(cursor, staff_id):
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.case_no,"
+        "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments,"
         + effective_staff_obligation_amount() + " AS amount_due_ntd,"
         "CASE WHEN EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) "
         "THEN (SELECT MIN(i.due_date) FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity "
@@ -1221,7 +1259,11 @@ def _query_obligation_rows(cursor, staff_id):
         "ORDER BY obligations.due_date,obligations.obligation_identity",
         (staff_id,),
     )
-    return tuple(_materialize_query_row(row) for row in cursor.fetchall())
+    rows = tuple(_materialize_query_row(row) for row in cursor.fetchall())
+    from dataclasses import asdict
+    return tuple({**{k: v for k, v in row.items() if k != 'has_installments'}, 'funding_portions': [
+        {**asdict(p), 'due_date': _date_text(p.due_date)}
+        for p in (query_staff_funding_portions(cursor, row['obligation_identity']) if row.get('has_installments') else ())]} for row in rows)
 
 
 def _query_event_rows(cursor, staff_id):

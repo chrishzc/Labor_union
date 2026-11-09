@@ -60,6 +60,7 @@ def registry_client(order_row):
     case_no = order_row["case_no"]
     detail = SimpleNamespace(
         case_no=case_no,
+        order_dates=None,
         service_type=None,
         client=SimpleNamespace(client_id=1, version=0, values={"name": "測試客戶"}),
         beclass=SimpleNamespace(
