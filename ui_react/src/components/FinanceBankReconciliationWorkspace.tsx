@@ -514,8 +514,10 @@ export function FinanceBankReconciliationWorkspace({
                           <button
                             type="button"
                             className="bank-btn-action"
+                            disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
                             onClick={() => onReconcile(row)}
                             aria-label={`核對交易 ${row.reference}`}
+                            title={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '匯入處理中，請稍候' : undefined}
                           >
                             核對交易
                           </button>

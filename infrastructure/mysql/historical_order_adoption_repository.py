@@ -131,6 +131,11 @@ class MySqlHistoricalOrderAdoptionRepository:
         )
         self._append_pairing_evidence(receipt_id, preview, assignment_ids)
         self._append_outbox(receipt_id, request, preview, review_identity)
+        if preview.after_status in ("歷史訂單－服務完成", "歷史訂單－帳務完成") and preview.case_no:
+            from subsystems.payroll.historical_baseline_obligation_sync import (
+                sync_historical_staff_baseline_obligations,
+            )
+            sync_historical_staff_baseline_obligations(self._connection, preview.case_no)
         return HistoricalOrderAdoptionReceipt(
             preview.outcome,
             preview.case_no,

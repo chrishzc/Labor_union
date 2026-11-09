@@ -107,7 +107,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
           bank_currency_not_twd:'原銀行流水幣別不是新臺幣，無法核銷客戶入款，請先查核來源資料。',
         };
         setError(blocker ? [...new Set(blocker.codes)].map(code=>messages[code]).join(' ')
-          : '此筆交易尚未辨識為本案入款，請返回銀行對帳重新確認歸屬。');
+          : '此筆交易尚未辨識為本案入款。若為剛匯入之流水，可能正在非同步處理中，請點擊右上角「重新查詢」或返回確認歸屬。');
         return;
       }
       const selectable=value.obligations.filter(item=>isSelectableReceiptObligation(item,initialObligationId));
@@ -194,6 +194,11 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
           </div>
         ) : (
           <div className="finance-recon-deck">
+            {facts.bank_facts.length > 1 && (
+              <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fffbeb', borderRadius: 4, color: '#92400e', fontSize: '0.88rem' }}>
+                💡 本案尚有其他未核銷入款（左側共 {facts.bank_facts.length} 筆待沖銷流水），請確認本次沖抵期款與先後順序。
+              </div>
+            )}
             <div className="finance-recon-deck-grid">
               {/* 左側：銀行收到的入款 */}
               <div className="finance-recon-col finance-recon-col-bank">

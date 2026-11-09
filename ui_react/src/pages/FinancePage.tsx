@@ -319,6 +319,11 @@ export const FinancePage: React.FC = () => {
           if (expected && outcome.status !== 'succeeded') {
             financeApplyCommandByPreview.current.delete(expected.previewFingerprint);
           }
+          if (outcome.status === 'succeeded') {
+            setFinanceWorkbook(null);
+            setBatchPreview({ kind: 'idle' });
+            setApplyReason('');
+          }
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);
           return;
@@ -338,9 +343,9 @@ export const FinancePage: React.FC = () => {
     { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason },
     {
       baseline: { '待匯入檔案': '', '原因': '' },
-      enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && !canApplyImportedBatch(batchPreview.data)),
+      enabled: activeTab === 'finance-import' && !caseDrawer && batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && !canApplyImportedBatch(batchPreview.data)),
       busy: unconfirmedIngestion !== null || importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
-      save: ingestWorkbook,
+
       discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); },
     }
   );

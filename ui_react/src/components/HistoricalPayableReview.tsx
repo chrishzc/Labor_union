@@ -120,15 +120,15 @@ export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPay
     {saved ? <p role="status">原應付已更新，清冊查核結果已重新讀取。</p>
       : editable ? <form onSubmit={submit}>
         <p>請先核對原薪資、付款日及付款紀錄。此操作建立或更正應付義務。已付款或付款狀態不明的款項須先查核。</p>
-        <fieldset disabled={busy || unknown}>
-          <legend>{title}</legend>
-          <label>原應付金額<input type="number" min="1" max="9999999999" step="1" required value={amount}
+        <fieldset disabled={busy || unknown} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', border: '1px solid #ebdcd1', borderRadius: '8px', padding: '16px', margin: '14px 0' }}>
+          <legend style={{ fontWeight: 700, padding: '0 8px' }}>{title}</legend>
+          <label style={{ display: 'grid', gap: '6px' }}>原應付金額<input className="finance-input" type="number" min="1" max="9999999999" step="1" required value={amount}
             onChange={event => { setAmount(event.target.value); setConfirmed(false); }} /></label>
-          <label>原付款日<input type="date" value={dueDate}
+          <label style={{ display: 'grid', gap: '6px' }}>原付款日<input className="finance-input" type="date" value={dueDate}
             onChange={event => { setDueDate(event.target.value); setConfirmed(false); }} /></label>
-          <label>原帳務依據<textarea required maxLength={500} value={evidence}
+          <label style={{ display: 'grid', gap: '6px', gridColumn: '1 / -1' }}>原帳務依據<textarea className="finance-input" style={{ minHeight: '64px', resize: 'vertical' }} required maxLength={500} value={evidence}
             onChange={event => { setEvidence(event.target.value); setConfirmed(false); }} /></label>
-          <label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', gridColumn: '1 / -1' }}><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
             已核對原帳務及付款紀錄，確認這筆款項全額未付</label>
         </fieldset>
         <button type="submit" className="finance-btn-primary"

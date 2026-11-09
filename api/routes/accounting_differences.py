@@ -1,6 +1,6 @@
 """Typed owner commands for noncash processing and system amount corrections."""
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 from fastapi import APIRouter,Depends
 from pydantic import BaseModel,ConfigDict,Field
 from pymysql.err import IntegrityError,OperationalError
@@ -117,6 +117,25 @@ def record_historical_unpaid_payable(
         case_no, body.staff_id, body.obligation_identity, body.expected_event_id,
         body.amount_ntd, body.due_date, body.evidence, body.key, admin_actor_context(principal).actor_id,
     )))
+
+
+@router.post('/payroll/sync-historical-baseline-obligations', response_model=BaseResponse[dict[str, Any]])
+def sync_historical_baseline_obligations_route(
+    case_no: str,
+    principal=Depends(require_admin),
+):
+    del principal
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from subsystems.payroll.historical_baseline_obligation_sync import (
+        sync_historical_staff_baseline_obligations,
+    )
+    conn = get_connection()
+    try:
+        result = sync_historical_staff_baseline_obligations(conn, case_no)
+        conn.commit()
+        return BaseResponse(data=result)
+    finally:
+        conn.close()
 
 
 @router.get('/staff-payables/recovery-dispositions',response_model=BaseResponse[StaffRecoveryDispositionView])

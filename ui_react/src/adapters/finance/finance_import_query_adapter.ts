@@ -217,7 +217,7 @@ export function financeBankReviewPresentation(
     'staff_payout_amount_mismatch', 'outgoing_staff_payout_amount_mismatch',
     'outgoing_client_refund_amount_mismatch', 'refund_requires_exact_settlement', 'allocation_exceeds_obligation',
   ].includes(reasonCode)) {
-    return { label: '金額不符', reason, nextStep: '金額不符，請核對金額並選擇處理方式。' };
+    return { label: '金額不符', reason, nextStep: '金額不符或有多筆入款待指定，請核對金額並選擇處理方式。' };
   }
   if (reasonCode && [
     'sinopac_client_receipt_multiple_month_candidates', 'sinopac_client_receipt_multiple_same_month_exact',

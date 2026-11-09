@@ -933,6 +933,8 @@ def _enrich_bank_transactions(
         target_staff_id = None
         cases = list(dict.fromkeys(posted_cases_by_id.get(row_id, [])))
         cp_name = str(row["counterparty_name"]).strip() if row.get("counterparty_name") else None
+        if cp_name in {"0", "none", "null", ""}:
+            cp_name = None
         if (row.get('format_id') == 'taishin' and row.get('direction') == 'outgoing'
                 and review_reason == TAISHIN_CASE_MEMO_REASON):
             resolved_case = resolve_suffix(extract_sinopac_memo_case_suffix(row.get('memo')))
