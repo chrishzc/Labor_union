@@ -710,10 +710,11 @@ def test_verify_restored_inventory_semantic_match_and_mismatches():
 
 def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch):
     archive, _ = make_backup(settings, monkeypatch)
+    executed_statements = []
     class DummyCursor:
         def __enter__(self): return self
         def __exit__(self, *args): pass
-        def execute(self, *args, **kwargs): pass
+        def execute(self, stmt, *args, **kwargs): executed_statements.append(stmt)
         def fetchall(self): return [{"Msg_type": "status", "Msg_text": "OK"}]
     class DummyConnection:
         def cursor(self): return DummyCursor()
@@ -737,23 +738,19 @@ def test_restore_automatically_applies_pending_additive_migration(settings, monk
     monkeypatch.setattr(nas, "switch_runtime", lambda *args: None)
 
     from scripts import update_local_database as updater
-    applied_calls = []
+    previews = []
     def fake_preview(cfg, cand, r):
-        if not applied_calls:
-            return {"status": "ready", "pending_releases": [{"release_id": "20261109_add_column"}]}
-        return {"status": "current", "release_id": "20261109_add_column"}
-
-    def fake_apply(cfg, cand, r):
-        applied_calls.append((cand, r))
-        return {"status": "current", "release_id": "20261109_add_column"}
+        if not previews:
+            previews.append("initial")
+            return {"status": "ready", "pending_releases": [{"release_id": "labor-union-hcm-review-status-2026-11-06-v1"}]}
+        return {"status": "current", "release_id": "labor-union-hcm-review-status-2026-11-06-v1"}
 
     monkeypatch.setattr(updater, "build_additive_preview", fake_preview)
-    monkeypatch.setattr(updater, "apply_additive_update", fake_apply)
     monkeypatch.setattr(updater, "require_current_database", lambda res: None)
 
     run = nas.restore(settings, archive)
-    assert len(applied_calls) == 1
-    assert "lu_nas_restore_" in applied_calls[0][0]
+    assert len(previews) == 1
+    assert any("hcm_review_status" in str(stmt) for stmt in executed_statements)
 
 
 def test_restore_blocks_incompatible_version_with_clear_reason(settings, monkeypatch):

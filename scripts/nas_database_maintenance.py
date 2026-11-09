@@ -125,12 +125,35 @@ def resolve_client_tool(executable: str) -> str | None:
         ROOT / "tools" / "bin",
         ROOT / "tools",
     ]
+    if os.name == "nt":
+        for env_key in ("ProgramFiles", "ProgramFiles(x86)"):
+            pf = os.environ.get(env_key)
+            if pf:
+                mysql_root = Path(pf) / "MySQL"
+                if mysql_root.is_dir():
+                    for sub in mysql_root.glob("**/bin"):
+                        if sub.is_dir():
+                            search_dirs.append(sub)
+        for common_path in ("C:\\xampp\\mysql\\bin", "C:\\laragon\\bin\\mysql"):
+            p = Path(common_path)
+            if p.is_dir():
+                search_dirs.append(p)
     for directory in search_dirs:
         for name in names:
             candidate = directory / name
             if candidate.is_file():
                 return str(candidate.resolve())
-    return shutil.which(executable)
+    which_hit = shutil.which(executable)
+    if which_hit:
+        return which_hit
+    if os.name == "nt":
+        other_tool = "mysql" if stem == "mysqldump" else "mysqldump"
+        other_hit = shutil.which(other_tool)
+        if other_hit:
+            peer = Path(other_hit).parent / f"{stem}.exe"
+            if peer.is_file():
+                return str(peer.resolve())
+    return None
 
 
 class ConnectionConfig:
@@ -455,6 +478,50 @@ def verify_restored_inventory(actual, expected):
     print("備份副本物件結構核對通過（語意相符，已放寬純文字定義特徵差異）。", flush=True)
 
 
+def apply_candidate_additive_migrations(config, candidate, run, preview):
+    """在復原副本上套用相容的 Additive Migration。
+
+    復原副本本身即為備份之暫存驗證實體，若升級失敗原庫完好無損。
+    採用 PyMySQL 直連執行 canonical DDL，避免客戶端缺少 mysqldump 時
+    產生非必要的本地快照失敗（如 FileNotFoundError）。
+    """
+    from scripts import update_local_database as updater
+    from scripts import migrate_preserved_database_additive_schema as migration
+
+    entries = migration._local_ordered_upgrade_entries()
+    entries_by_id = {e["release_id"]: e for e in entries}
+
+    pending_releases = preview.get("pending_releases", [])
+    require(pending_releases, "沒有待套用的資料庫遷移項目。")
+
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            for pending in pending_releases:
+                release_id = pending.get("release_id")
+                entry = entries_by_id.get(release_id)
+                require(entry, f"未知的遷移版本：{release_id}")
+                artifact = entry.get("artifact", {})
+                rel_path = artifact.get("relative_path")
+                require(rel_path, f"遷移項目缺少 SQL 路徑：{release_id}")
+                sql_path = migration.ROOT / rel_path
+                require(sql_path.is_file(), f"找不到遷移 SQL 檔案：{sql_path}")
+
+                print(f"正在套用相容遷移：{release_id} ({artifact.get('name')})...", flush=True)
+                statements = migration.split_sql(sql_path.read_text(encoding="utf-8"))
+                for statement in statements:
+                    statement = statement.strip()
+                    if statement:
+                        cursor.execute(statement)
+    finally:
+        connection.close()
+
+    current = updater.build_additive_preview(config, candidate, run)
+    require(current.get("status") == "current",
+            f"副本結構升級後核對未通過（狀態：{current.get('status')}，原因：{current.get('blocked_reason') or current.get('error')}），未切換資料庫；原資料庫不變。")
+    return current
+
+
 def backup(settings):
     print("正在備份資料，完成前請勿關閉視窗。", flush=True)
     root = destination_ready(settings, writable=True)
@@ -777,7 +844,7 @@ def restore(settings, archive):
     if current.get("status") != "current":
         if current.get("status") == "ready" and current.get("pending_releases"):
             print("備份副本結構有效，檢測到相容的新版遷移項目，正在自動升級副本...", flush=True)
-            current = updater.apply_additive_update(config, candidate, run)
+            current = apply_candidate_additive_migrations(config, candidate, run, current)
             print(f"副本已升級至最新版本：{current.get('release_id')}", flush=True)
         else:
             reason = current.get("blocked_reason") or current.get("error") or current.get("code") or "版本差異"
