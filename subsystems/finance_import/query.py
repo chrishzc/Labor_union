@@ -207,13 +207,17 @@ class FinanceImportQueryService:
         self._connection = connection
 
     def bank_transactions(
-        self, *, bank, direction, status, start, end, search, limit, before_row_id,
+        self, *, bank, direction, status, start, end, search, limit, before_row_id, row_id=None,
     ):
         _validate_page(limit, before_row_id, "before_row_id")
         if start and end and start > end:
             raise ValueError("bank_transaction_invalid_date_range")
         search = search.strip()
         conditions, params = [], []
+        if row_id is not None:
+            _validate_page(1, row_id, "row_id")
+            conditions.append("finance_row.id=%s")
+            params.append(row_id)
         if bank:
             conditions.append("finance_row.format_id IN ('sinopac','legacy')" if bank == "sinopac"
                               else "finance_row.format_id='taishin'")

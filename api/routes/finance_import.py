@@ -283,6 +283,7 @@ def list_bank_transactions(
     search: Annotated[str, Query(max_length=120)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     before_row_id: Annotated[int | None, Query(ge=1)] = None,
+    row_id: Annotated[int | None, Query(ge=1)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
@@ -290,6 +291,7 @@ def list_bank_transactions(
         lambda: _materialize(query_service.bank_transactions(
             bank=bank, direction=direction, status=transaction_status, start=start_date,
             end=end_date, search=search, limit=limit, before_row_id=before_row_id,
+            **({"row_id": row_id} if row_id is not None else {}),
         )),
         "成功載入銀行對帳交易",
         CorrelationId(_request_correlation(request)),

@@ -3,6 +3,7 @@
  * Description: 嚴格解碼 Orders Terms Query／Preview／Apply，並保存 fresh version 與冪等標頭契約。
  */
 import { z } from 'zod';
+import { notifyCaseAccountingChanged } from '../shared/case_accounting_changes';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
@@ -92,6 +93,7 @@ export const OrderTermsReceiptSchema = z.strictObject({
 
 export const OrderTermsPreviewPayloadSchema = z.strictObject({
   proposed_terms: OrderTermsInputSchema,
+  floor_fee_correction: z.boolean().optional(),
   replacement_service_dates: z.array(DateSchema).optional(),
   replacement_allocations: z.array(z.strictObject({ assignment_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
 });
@@ -231,6 +233,7 @@ export const orderTermsMutationClient = {
         }),
       ));
       if (result.case_no !== canonical) throw new Error('訂單條款收據案件識別不一致。');
+      notifyCaseAccountingChanged(canonical);
       return result;
     });
   },

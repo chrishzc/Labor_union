@@ -18,7 +18,7 @@ async function decode<T>(promise: Promise<unknown>, schema: ReturnType<typeof fi
 export const financeImportQueryClient = {
   async listBankTransactions(params: {
     bank?: 'sinopac' | 'taishin'; direction?: 'incoming' | 'outgoing'; transaction_status: 'pending' | 'posted' | 'all';
-    start_date?: string; end_date?: string; search?: string; before_row_id?: number;
+    start_date?: string; end_date?: string; search?: string; before_row_id?: number; row_id?: number;
   }, source?: FinanceImportQueryOptions): Promise<FinanceBankTransactionPage> {
     return decode(transport.get<unknown>('/api/v1/finance-import/bank-transactions', {
       ...options(source, 'finance-bank-transactions'), params,

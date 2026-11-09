@@ -3,6 +3,8 @@
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
  */
 import { CancellationSettlementAccounting } from './CancellationSettlementAccounting';
+import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { ClientRefundReturnReconciliationPanel } from './ClientRefundReturnReconciliationPanel';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
@@ -422,6 +424,24 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
  const[showSupplement,setShowSupplement]=useState(false);
+ const[reconciliationBusy,setReconciliationBusy]=useState(false);
+ const[pendingAccountingRefresh,setPendingAccountingRefresh]=useState(false);
+ const[freshBankRow,setFreshBankRow]=useState<FinanceBankTransaction|null>(null);
+ const[bankRefreshError,setBankRefreshError]=useState('');
+ const reportReconciliationBusy=useCallback((busy:boolean)=>{setReconciliationBusy(busy);bankReconciliation?.onBusyChange(busy);},[bankReconciliation?.onBusyChange]);
+ useEffect(()=>subscribeCaseAccountingChanges(caseNo=>{if(caseNo===initialCase)setPendingAccountingRefresh(true);}),[initialCase]);
+ useEffect(()=>{if(pendingAccountingRefresh&&!reconciliationBusy){setPendingAccountingRefresh(false);setRevision(v=>v+1);}},[pendingAccountingRefresh,reconciliationBusy]);
+ useEffect(()=>{
+   if(!bankReconciliation)return;
+   const controller=new AbortController();setFreshBankRow(null);setBankRefreshError('');
+   void financeImportQueryClient.listBankTransactions({transaction_status:'all',row_id:bankReconciliation.row.row_id},{signal:controller.signal}).then(page=>{
+     if(controller.signal.aborted)return;
+     const row=page.items.find(item=>item.row_id===bankReconciliation.row.row_id);
+     if(!row||row.reconciliation_target?.case_no!==initialCase){setBankRefreshError('原流水目前沒有本案可核銷款項，請核對最新帳務。');return;}
+     setFreshBankRow(row);
+   }).catch(()=>{if(!controller.signal.aborted)setBankRefreshError('原流水的最新核銷款項讀取失敗，請重新查詢。');});
+   return()=>controller.abort();
+ },[initialCase,bankReconciliation?.row.row_id,revision]);
   const [showFullCase, setShowFullCase] = useState(false);
  const[copied,setCopied]=useState(false);
  const section=useRef<HTMLElement>(null),returnScroll=useRef(0),returnFocus=useRef<HTMLElement|null>(null);
@@ -465,7 +485,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
- {data&&bankReconciliation&&!showFullCase&&<CaseBankReconciliation key={bankReconciliation.row.row_identity} data={data} {...bankReconciliation} onViewCase={()=>setShowFullCase(true)}/>}
+ {data&&bankReconciliation&&!showFullCase&&<>
+   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)}/>}
+ </>}
  {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
  {showFullCase&&bankReconciliation&&(
    <div className="finance-reconciliation-return-banner">

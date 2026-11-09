@@ -606,6 +606,7 @@ def _facts_from_rows(
         ),
         planned_service_dates=official_dates,
         planned_end_date=order_row["end_date"],
+        actual_end_date=order_row.get("actual_end_date"),
         client_finance=client_finance,
         payroll=payroll,
         lifecycle=lifecycle,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { notifyCaseAccountingChanged } from '../shared/case_accounting_changes';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
@@ -84,7 +85,9 @@ export const accountingPricingClient = {
       { terms: PricingTermsSchema.parse(terms), expected_revision: expectedRevision }, options()));
   },
   async applyCase(caseNo: string, terms: PricingTerms, expectedRevision: number, reason: string, key: string) {
-    return decode(receipt, await transport.post(`${root}/cases/${encodeURIComponent(caseNo)}/apply`,
+    const result = decode(receipt, await transport.post(`${root}/cases/${encodeURIComponent(caseNo)}/apply`,
       { terms: PricingTermsSchema.parse(terms), expected_revision: expectedRevision, reason }, options(key)));
+    notifyCaseAccountingChanged(caseNo);
+    return result;
   },
 };

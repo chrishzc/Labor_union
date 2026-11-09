@@ -16,6 +16,7 @@ from domains.client_finance.obligation_planning import (
     deposit_gate_override_survives_terms_impact,
 )
 from domains.orders.lifecycle import (
+    build_financial_correction_lifecycle_impact,
     build_preassignment_terms_lifecycle_impact,
     build_terms_lifecycle_impact,
 )
@@ -94,6 +95,7 @@ class TermsWorkflowFacts:
     lifecycle: Any
     confirmed_service_date_version: int | None = None
     confirmed_service_dates: tuple[Any, ...] = ()
+    actual_end_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +114,7 @@ class OrderTermsApplyRequest:
     replacement_service_dates: tuple[date, ...] | None = None
     replacement_allocations: tuple[tuple[int, int], ...] = ()
     requires_formal_apply: bool = True
+    floor_fee_correction: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -295,10 +298,10 @@ class OrderTermsWorkflow:
         return facts.version + 1
 
     def preview(self, case_no: str, proposed_terms: Any, *,
-                replacement_service_dates=None, replacement_allocations=()) -> Any:
+                replacement_service_dates=None, replacement_allocations=(), floor_fee_correction=False) -> Any:
         return self._build_preview(
             self._repository.load_for_preview(case_no, proposed_terms=proposed_terms), proposed_terms,
-            replacement_service_dates, replacement_allocations,
+            replacement_service_dates, replacement_allocations, floor_fee_correction,
         )
 
     def apply(self, request: OrderTermsApplyRequest) -> Any:
@@ -368,7 +371,7 @@ class OrderTermsWorkflow:
         _validate_versions(request, facts)
         preview = self._build_preview(facts, request.proposed_terms,
                                       request.replacement_service_dates,
-                                      request.replacement_allocations)
+                                      request.replacement_allocations, request.floor_fee_correction)
         if preview.requires_formal_apply != request.requires_formal_apply:
             raise _workflow_error(
                 request,
@@ -387,13 +390,17 @@ class OrderTermsWorkflow:
         return preview
 
     def _build_preview(self, facts, proposed_terms, replacement_service_dates=None,
-                       replacement_allocations=()):
-        validate_terms_change(facts.order, proposed_terms)
+                       replacement_allocations=(), floor_fee_correction=False):
+        validate_terms_change(facts.order, proposed_terms, floor_fee_correction=floor_fee_correction)
+        if floor_fee_correction and (replacement_service_dates is not None or replacement_allocations):
+            raise ValueError("floor_fee_correction_must_only_change_fee")
         candidate_facts = _replacement_facts(
             facts, proposed_terms, replacement_service_dates, replacement_allocations
         )
         scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
+        if floor_fee_correction:
+            change_identity = f"floor-fee:{facts.order.case_no}:order:{facts.order.version + 1}"
         if not facts.scheduling.segments:
             change_identity = f"terms:{scheduling.case_no}:order:{facts.order.version + 1}"
             if facts.client_finance is None and facts.payroll is None:
@@ -445,8 +452,20 @@ class OrderTermsWorkflow:
                 client_finance.settlement,
                 self._clock.now(),
             )
-        return _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
-                               replacement_service_dates)
+        if floor_fee_correction:
+            lifecycle = build_financial_correction_lifecycle_impact(
+                facts.lifecycle, facts.actual_end_date, self._clock.now())
+        result = _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle,
+                                 replacement_service_dates)
+        if floor_fee_correction:
+            if result.scheduling_replacement_required:
+                raise ValueError("floor_fee_correction_service_facts_conflict")
+            result = replace(result, planned_end_date=facts.planned_end_date,
+                             requires_formal_apply=True,
+                             fingerprint=fingerprint_payload({"floor_fee_correction": True,
+                                 "preview": result.fingerprint.value, "before": facts.order.terms.canonical_payload(),
+                                 "planned_end_date": facts.planned_end_date}))
+        return result
 
     def _persist_ordinary(self, request, preview, receipt):
         self._repository.update_order_terms(
@@ -1000,6 +1019,7 @@ def _command_fingerprint(request):
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id,
         "reason": request.reason,
+        **({"floor_fee_correction": True} if request.floor_fee_correction else {}),
         **({"replacement_service_dates": ([d.isoformat() for d in request.replacement_service_dates]
                                              if request.replacement_service_dates is not None else None),
             "replacement_allocations": request.replacement_allocations}

@@ -196,7 +196,16 @@ def is_unique_cooking_requirement_correction(
 def validate_terms_change(
     current: OrderAggregateFacts,
     proposed_terms: OrderTerms,
+    *, floor_fee_correction: bool = False,
 ) -> None:
+    if floor_fee_correction:
+        if not current.service_data_locked:
+            raise ValueError("floor_fee_correction_requires_closed_service")
+        if replace(proposed_terms, floor_fee=current.terms.floor_fee) != current.terms:
+            raise ValueError("floor_fee_correction_must_only_change_fee")
+        if proposed_terms.floor_fee == current.terms.floor_fee:
+            raise ValueError("floor_fee_correction_requires_change")
+        return
     if current.service_data_locked:
         raise ValueError("service_data_locked")
     if (

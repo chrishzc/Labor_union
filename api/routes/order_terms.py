@@ -82,6 +82,7 @@ class TermsAllocationInput(BaseModel):
 
 class OrderTermsPreviewRequest(BaseModel):
     proposed_terms: OrderTermsInput
+    floor_fee_correction: bool = False
     replacement_service_dates: list[date] | None = None
     replacement_allocations: list[TermsAllocationInput] = Field(default_factory=list)
 
@@ -91,6 +92,7 @@ class OrderTermsPreviewRequest(BaseModel):
                                           if self.replacement_service_dates is not None else None),
             "replacement_allocations": tuple((a.assignment_id, a.service_days)
                                              for a in self.replacement_allocations),
+            **({"floor_fee_correction": True} if self.floor_fee_correction else {}),
         }
 
 

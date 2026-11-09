@@ -6,6 +6,7 @@ import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
  * Description: 呈現 Finance 四大主工作區（案件帳務、銀行對帳、政府補助清單、每月帳務），收斂舊作業工具並維護受控銀行交易明細。
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { Drawer } from '../components/Drawer';
 import './FinancePage.css';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
@@ -165,6 +166,7 @@ export const FinancePage: React.FC = () => {
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
+  useEffect(() => subscribeCaseAccountingChanges(() => setReload(value => value + 1)), []);
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
   const financeApplyCommandByPreview = useRef(new Map<string, { idempotencyKey: string; correlationId: string; reason: string }>());
