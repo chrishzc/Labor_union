@@ -441,7 +441,160 @@ def test_overlapping_payment_sources_preserve_independent_postings_mysql(tmp_pat
         connection.close()
 
 
-def _seed_sinopac_memo_cases(connection):
+def test_sinopac_recipient_identity_survives_paid_namesakes_and_query_failure_mysql(tmp_path):
+    import hashlib
+    import json
+    from api.dependencies.finance_import import build_finance_import_application
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.ingestion import FinanceImportAttemptError, ingest_finance_workbook
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS count FROM finance_import_rows")
+            assert cursor.fetchone()["count"] == 0
+        _seed_sinopac_memo_cases(connection, staff_cases=(2, 4))
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE clients SET name='Memo Test Client' WHERE case_no='115000706'")
+            for case, name, account, amount in (
+                ("115000703", "Memo Test Staff", "6" * 16, 12000),
+                ("115000706", "Unrelated Longer Staff Name", "5" * 16, 13000),
+            ):
+                cursor.execute("INSERT INTO staff(name) VALUES (%s)", (name,))
+                staff_id = cursor.lastrowid
+                cursor.execute("INSERT INTO staff_bank_accounts(staff_id,bank_code,account_no,is_primary) VALUES (%s,'999',%s,1)",
+                               (staff_id, account))
+                cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,status) VALUES (%s,%s,1,'completed')",
+                               (case, staff_id))
+                assignment = cursor.lastrowid
+                cursor.execute("INSERT INTO payroll_case_accounts(case_no,aggregate_version) VALUES (%s,1)", (case,))
+                identity = f"staff:{case}"
+                cursor.execute(
+                    "INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,"
+                    "event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
+                    "resulting_payroll_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',"
+                    "'established',0,%s,'2026-10-29',%s,0,1,%s,'namesake-test','synthetic root')",
+                    (identity, assignment, case, staff_id, amount, hashlib.sha256(identity.encode()).hexdigest(), identity),
+                )
+                event = cursor.lastrowid
+                cursor.execute(
+                    "INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,"
+                    "amount_due_ntd,due_date,status,current_event_id,payroll_version) VALUES (%s,%s,%s,%s,'service_pay',"
+                    "'payable_to_staff',%s,'2026-10-29','open',%s,1)", (identity, assignment, case, staff_id, amount, event),
+                )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def workbook(name, entries, *, hour=9):
+        rows = []
+        for index, (label, memo, account, recipient, amount) in enumerate(entries, 1):
+            row = dict.fromkeys(SINOPAC_HEADERS)
+            row.update({"帳號": "10000001", "交易日": f"2026-10-29 {hour:02d}:00:{index:02d}", "計息日": "2026-10-29",
+                        "入帳日": "2026-10-29", "摘要": "轉帳", "幣別": "TWD", "支出": amount, "存入": 0,
+                        "餘額": 100000 - index, "交易參考編號": account + recipient, "備註": memo,
+                        "票據號碼": label, "存摺備註": "Unrelated Longer Staff Name"})
+            rows.append(row)
+        path = tmp_path / name
+        pd.DataFrame(rows, columns=SINOPAC_HEADERS).to_excel(path, index=False)
+        return path
+
+    initial = workbook("initial-settlements.xlsx", [
+        (f"initial-staff-{case}", f"HC{case}服務人員", "8" * 16, "Memo Test Staff", 12000) for case in ("115702", "115704")
+    ] + [
+        (f"initial-refund-{case}", f"HC{case}退款", "9" * 16, "Memo Test Client", 1200) for case in ("115701", "115702", "115704")
+    ])
+
+    class FailingCursor:
+        def __init__(self, inner): self.inner = inner
+        def __enter__(self): self.inner.__enter__(); return self
+        def __exit__(self, *args): return self.inner.__exit__(*args)
+        def __getattr__(self, name): return getattr(self.inner, name)
+        def execute(self, statement, parameters=None):
+            if "COALESCE(projection.balance_ntd" in statement:
+                statement = statement.replace("projection.balance_ntd", "projection.missing_identity_probe")
+            return self.inner.execute(statement, parameters)
+
+    class FailingConnection:
+        def __init__(self): self.inner = get_connection()
+        def __getattr__(self, name): return getattr(self.inner, name)
+        def cursor(self): return FailingCursor(self.inner.cursor())
+
+    actor = ActorContext("namesake-mysql-test")
+    with pytest.raises(FinanceImportAttemptError) as failed:
+        ingest_finance_workbook(str(initial), IdempotencyKey("namesake-query-failure"), actor,
+                               connection_factory=FailingConnection, normalizer=normalize_workbook)
+    assert failed.value.attempt.phase == "staging"
+    assert failed.value.attempt.transaction_outcome == "rolled_back"
+    assert failed.value.attempt.error_code == "finance_import_processing_failed"
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            for table in ("finance_import_rows", "finance_import_batches", "finance_import_ingestion_receipts"):
+                cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                assert cursor.fetchone()["count"] == 0
+    finally:
+        connection.close()
+
+    def ingest_and_apply(path, key):
+        ingested = ingest_finance_workbook(str(path), IdempotencyKey(key), actor,
+                                           connection_factory=get_connection, normalizer=normalize_workbook)
+        current_connection = get_connection()
+        try:
+            app = build_finance_import_application(current_connection, MySqlFinanceImportOwningDomainComposite(current_connection))
+            preview = app.preview_batch(ingested.batch_identity, CorrelationId(key))
+            request = FinanceImportApplyRequest(preview.batch_identity, ExpectedVersion(preview.batch_version), preview.fingerprint,
+                                               IdempotencyKey(key + "-apply"), actor, "synthetic namesake payments", CorrelationId(key))
+            return ingested, app.apply_batch(request), request
+        finally:
+            current_connection.close()
+
+    initial_ingested, initial_applied, _ = ingest_and_apply(initial, "namesake-initial")
+    assert initial_ingested.canonical_created_count == initial_applied.reconciled_count == 5
+    later = workbook("later-namesake-payments.xlsx", [
+        ("paid-staff-source", "HC115702服務人員", "8" * 16, "Memo Test Staff", 12000),
+        ("paid-client-source", "HC115701退款", "9" * 16, "Memo Test Client", 1200),
+        ("open-staff-source", "HC115703服務人員", "6" * 16, "Memo Test Staff", 11970),
+        ("open-client-source", "HC115706退款", "7" * 16, "Memo Test Client", 1170),
+    ], hour=10)
+    later_ingested, later_applied, request = ingest_and_apply(later, "namesake-later")
+    assert later_ingested.canonical_created_count == 4
+    assert later_ingested.duplicate_occurrence_count == 0
+    assert later_applied.reconciled_count == 2
+    connection = get_connection()
+    try:
+        query = FinanceImportQueryService(connection)
+        pending = query.bank_transactions(bank="sinopac", direction="outgoing", status="pending", start=None, end=None,
+                                          search="", limit=100, before_row_id=None)
+        assert len(pending["items"]) == 2
+        assert {tuple(row["cases"]): row["recorded_pending_reason"] for row in pending["items"]} == {
+            ("115000702",): "outgoing_staff_payout_no_open_obligation",
+            ("115000701",): "outgoing_client_refund_no_open_obligation",
+        }
+        assert query.get_batch_apply_receipt(request.idempotency_key.value).reconciled_count == 2
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_references FROM finance_import_rows")
+            assert all(json.loads(row["bank_references"])["存摺備註"] == "Unrelated Longer Staff Name" for row in cursor.fetchall())
+            cursor.execute("SELECT COUNT(*) AS count FROM client_ledger_entries")
+            assert cursor.fetchone()["count"] == 4
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
+            assert cursor.fetchone()["count"] == 3
+        connection.rollback()
+        app = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+        assert app.apply_batch(request) == later_applied
+        posted = query.bank_transactions(bank="sinopac", direction="outgoing", status="posted", start=None, end=None,
+                                         search="", limit=100, before_row_id=None)
+        assert len(posted["items"]) == 7
+    finally:
+        connection.close()
+
+
+def _seed_sinopac_memo_cases(connection, *, staff_cases=(1, 2, 3, 4)):
     """Create synthetic root facts only; all settlement goes through real owners."""
     import hashlib
 
@@ -494,7 +647,7 @@ def _seed_sinopac_memo_cases(connection):
                         "VALUES (%s,%s,'999',%s,'test-fixture')",
                         (identity, case_no, ("7" if index == 6 else "9") * 16),
                     )
-            if index <= 4:
+            if index in staff_cases:
                 identity = f"staff:{case_no}"
                 amount = {1: 9000, 2: 12000, 3: 14000, 4: 12000}[index]
                 cursor.execute(

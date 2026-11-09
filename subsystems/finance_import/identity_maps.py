@@ -65,20 +65,21 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         subsidy_return_candidates.setdefault(account, set()).add(client_id)
 
     cursor.execute(
-        """SELECT order_row.client_id, snapshot.bank_account AS refund_account_no
+        """SELECT order_row.client_id, snapshot.bank_account AS refund_account_no,
+                  obligation.status, obligation.amount_due_ntd
            FROM client_obligations obligation
            JOIN orders order_row ON order_row.case_no=obligation.case_no
            JOIN client_refund_recipient_snapshots snapshot
              ON snapshot.refund_obligation_identity=obligation.obligation_identity
             AND snapshot.case_no=obligation.case_no
            WHERE obligation.direction='payable_to_client'
-             AND obligation.status='open'
-             AND obligation.amount_due_ntd>0
+             AND obligation.status<>'cancelled'
              AND obligation.obligation_type IN ('refund','adjustment')
            ORDER BY order_row.client_id, obligation.obligation_identity"""
     )
     refund_rows = cursor.fetchall()
     refund_candidates: dict[str, set[int]] = {}
+    refund_identity_candidates: dict[str, set[int]] = {}
     for row in refund_rows:
         if not isinstance(row, Mapping):
             raise TypeError("cursor must return mapping rows")
@@ -86,7 +87,9 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         if account is None:
             continue
         client_id = _positive_id(row.get("client_id"), "client_id")
-        refund_candidates.setdefault(account, set()).add(client_id)
+        refund_identity_candidates.setdefault(account, set()).add(client_id)
+        if row["status"] == "open" and int(row["amount_due_ntd"]) > 0:
+            refund_candidates.setdefault(account, set()).add(client_id)
 
     cursor.execute(
         """SELECT sba.staff_id, sba.account_no
@@ -108,55 +111,42 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
     receipt_candidates = _client_receipt_candidates(cursor)
     known_virtual_accounts, known_case_suffixes = _known_case_virtual_accounts(cursor)
 
-    try:
-        cursor.execute(
-            """SELECT obligation.case_no, obligation.staff_id
-               FROM staff_obligations obligation
-               WHERE obligation.direction='payable_to_staff'
-                 AND obligation.status<>'cancelled'
-                 AND obligation.amount_due_ntd>0
-               ORDER BY obligation.staff_id, obligation.obligation_identity"""
-        )
-        staff_obligation_rows = cursor.fetchall()
-    except Exception:
-        staff_obligation_rows = ()
+    cursor.execute(
+        """SELECT obligation.case_no, obligation.staff_id
+           FROM staff_obligations obligation
+           WHERE obligation.direction='payable_to_staff'
+             AND obligation.status<>'cancelled'
+             AND obligation.amount_due_ntd>0
+           ORDER BY obligation.staff_id, obligation.obligation_identity"""
+    )
+    staff_obligation_rows = cursor.fetchall()
 
-    try:
-        cursor.execute(
-            """SELECT case_no, staff_id
-               FROM orders
-               WHERE staff_id IS NOT NULL AND status <> '訂單取消'"""
-        )
-        order_staff_rows = cursor.fetchall()
-    except Exception:
-        order_staff_rows = ()
+    cursor.execute(
+        """SELECT case_no, staff_id
+           FROM orders
+           WHERE staff_id IS NOT NULL AND status <> '訂單取消'"""
+    )
+    order_staff_rows = cursor.fetchall()
 
-    try:
-        cursor.execute(
-            """SELECT case_no, staff_id
-               FROM case_staff_assignments
-               WHERE staff_id IS NOT NULL AND status='active'"""
-        )
-        assignment_staff_rows = cursor.fetchall()
-    except Exception:
-        assignment_staff_rows = ()
+    cursor.execute(
+        """SELECT case_no, staff_id
+           FROM case_staff_assignments
+           WHERE staff_id IS NOT NULL AND status='active'"""
+    )
+    assignment_staff_rows = cursor.fetchall()
 
     all_staff_case_rows = list(staff_obligation_rows) + list(order_staff_rows) + list(assignment_staff_rows)
 
-    try:
-        cursor.execute(
-            """SELECT obligation.case_no, order_row.client_id
-               FROM client_obligations obligation
-               JOIN orders order_row ON order_row.case_no=obligation.case_no
-               WHERE obligation.direction='payable_to_client'
-                 AND obligation.status='open'
-                 AND obligation.amount_due_ntd>0
-                 AND obligation.obligation_type IN ('refund','adjustment')
-               ORDER BY order_row.client_id, obligation.obligation_identity"""
-        )
-        refund_obligation_rows = cursor.fetchall()
-    except Exception:
-        refund_obligation_rows = ()
+    cursor.execute(
+        """SELECT obligation.case_no, order_row.client_id
+           FROM client_obligations obligation
+           JOIN orders order_row ON order_row.case_no=obligation.case_no
+           WHERE obligation.direction='payable_to_client'
+             AND obligation.status<>'cancelled'
+             AND obligation.obligation_type IN ('refund','adjustment')
+           ORDER BY order_row.client_id, obligation.obligation_identity"""
+    )
+    refund_obligation_rows = cursor.fetchall()
 
     all_cases = {
         str(r["case_no"]) for r in all_staff_case_rows if isinstance(r, Mapping) and r.get("case_no")
@@ -165,19 +155,16 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
     }
     case_suffixes: dict[str, str] = {}
     if all_cases:
-        try:
-            format_strings = ",".join("%s" for _ in all_cases)
-            cursor.execute(
-                f"SELECT case_no, virtual_account FROM client_legacy_virtual_accounts WHERE case_no IN ({format_strings})",
-                tuple(all_cases),
-            )
-            legacy_va = {
-                str(row["case_no"]): str(row["virtual_account"])
-                for row in cursor.fetchall()
-                if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account")
-            }
-        except Exception:
-            legacy_va = {}
+        format_strings = ",".join("%s" for _ in all_cases)
+        cursor.execute(
+            f"SELECT case_no, virtual_account FROM client_legacy_virtual_accounts WHERE case_no IN ({format_strings})",
+            tuple(all_cases),
+        )
+        legacy_va = {
+            str(row["case_no"]): str(row["virtual_account"])
+            for row in cursor.fetchall()
+            if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account")
+        }
         for case_no in all_cases:
             va = legacy_va.get(case_no) or build_client_virtual_account(case_no)
             if va and len(va) >= 6:
@@ -206,8 +193,10 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
             refund_case_candidates.setdefault(suffix, set()).add(c_id)
 
     staff_name_identities = _staff_name_identities(cursor)
+    client_name_identities = _client_name_identities(cursor)
     return {
         "client_refund_accounts": _stable_map(refund_candidates),
+        "client_refund_identity_accounts": _stable_map(refund_identity_candidates),
         "client_subsidy_return_accounts": _stable_map(
             subsidy_return_candidates
         ),
@@ -215,7 +204,8 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         "client_receipt_candidates": receipt_candidates,
         "staff_case_suffixes": _stable_map(staff_case_candidates),
         "client_refund_case_suffixes": _stable_map(refund_case_candidates),
-        "all_client_names": _all_client_names(cursor),
+        "all_client_names": tuple(client_name_identities),
+        "client_name_identities": client_name_identities,
         "taishin_client_refund_candidates": _client_refund_name_candidates(cursor),
         "all_staff_names": tuple(name for name, identities in staff_name_identities.items() for _ in identities),
         "staff_name_identities": staff_name_identities,
@@ -228,24 +218,18 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
 def _known_case_virtual_accounts(
     cursor: Any,
 ) -> tuple[frozenset[str] | None, frozenset[str] | None]:
-    try:
-        cursor.execute("SELECT case_no FROM orders WHERE case_no IS NOT NULL")
-        existing_cases = {
-            str(row["case_no"])
-            for row in cursor.fetchall()
-            if isinstance(row, Mapping) and row.get("case_no")
-        }
-    except Exception:
-        return None, None
+    cursor.execute("SELECT case_no FROM orders WHERE case_no IS NOT NULL")
+    existing_cases = {
+        str(row["case_no"])
+        for row in cursor.fetchall()
+        if isinstance(row, Mapping) and row.get("case_no")
+    }
 
-    try:
-        cursor.execute(
-            "SELECT case_no, virtual_account FROM client_legacy_virtual_accounts "
-            "WHERE case_no IS NOT NULL AND virtual_account IS NOT NULL"
-        )
-        legacy_rows = list(cursor.fetchall())
-    except Exception:
-        legacy_rows = []
+    cursor.execute(
+        "SELECT case_no, virtual_account FROM client_legacy_virtual_accounts "
+        "WHERE case_no IS NOT NULL AND virtual_account IS NOT NULL"
+    )
+    legacy_rows = list(cursor.fetchall())
 
     va_to_cases: dict[str, set[str]] = {}
     for row in legacy_rows:
@@ -273,116 +257,104 @@ def _known_case_virtual_accounts(
 
 
 def _staff_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:
-    try:
-        cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name <> ''")
-        names: dict[str, set[int]] = {}
-        for row in cursor.fetchall():
-            if isinstance(row, Mapping) and row.get("name"):
-                normalized = _account(row.get("name"))
-                if normalized:
-                    names.setdefault(normalized, set()).add(_positive_id(row["id"], "staff_id"))
-        return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
-    except Exception:
-        return {}
+    cursor.execute("SELECT id,name FROM staff WHERE name IS NOT NULL AND name <> ''")
+    names: dict[str, set[int]] = {}
+    for row in cursor.fetchall():
+        if isinstance(row, Mapping) and row.get("name"):
+            normalized = _account(row.get("name"))
+            if normalized:
+                names.setdefault(normalized, set()).add(_positive_id(row["id"], "staff_id"))
+    return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
 
 
 def _staff_payout_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
-    try:
-        cursor.execute(
-            """SELECT obligation.staff_id, staff.name, obligation.case_no,
-                      obligation.obligation_identity,
-                      COALESCE(projection.balance_ntd, obligation.amount_due_ntd) AS amount_due_ntd,
-                      obligation.due_date
-               FROM staff_obligations obligation
-               JOIN staff staff ON staff.id=obligation.staff_id
-               LEFT JOIN staff_payable_projections projection
-                 ON projection.obligation_identity=obligation.obligation_identity
-               WHERE obligation.direction='payable_to_staff'
-                 AND obligation.status<>'cancelled'
-                 AND obligation.amount_due_ntd>0
-                 AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid'))
-               ORDER BY obligation.staff_id, obligation.obligation_identity"""
+    cursor.execute(
+        """SELECT obligation.staff_id, staff.name, obligation.case_no,
+                  obligation.obligation_identity,
+                  COALESCE(projection.balance_ntd, obligation.amount_due_ntd) AS amount_due_ntd,
+                  obligation.due_date
+           FROM staff_obligations obligation
+           JOIN staff staff ON staff.id=obligation.staff_id
+           LEFT JOIN staff_payable_projections projection
+             ON projection.obligation_identity=obligation.obligation_identity
+           WHERE obligation.direction='payable_to_staff'
+             AND obligation.status<>'cancelled'
+             AND obligation.amount_due_ntd>0
+             AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid'))
+           ORDER BY obligation.staff_id, obligation.obligation_identity"""
+    )
+    results = []
+    for row in cursor.fetchall():
+        if not isinstance(row, Mapping):
+            continue
+        staff_id = _positive_id(row.get("staff_id"), "staff_id")
+        name = _account(row.get("name")) or ""
+        due_date = row.get("due_date")
+        due_date_str = (
+            due_date.isoformat()
+            if hasattr(due_date, "isoformat")
+            else (str(due_date) if due_date else None)
         )
-        results = []
-        for row in cursor.fetchall():
-            if not isinstance(row, Mapping):
-                continue
-            staff_id = _positive_id(row.get("staff_id"), "staff_id")
-            name = _account(row.get("name")) or ""
-            due_date = row.get("due_date")
-            due_date_str = (
-                due_date.isoformat()
-                if hasattr(due_date, "isoformat")
-                else (str(due_date) if due_date else None)
-            )
-            results.append(
-                {
-                    "staff_id": staff_id,
-                    "name": name,
-                    "case_no": str(row.get("case_no") or ""),
-                    "obligation_identity": str(row.get("obligation_identity") or ""),
-                    "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
-                    "due_date": due_date_str,
-                }
-            )
-        return tuple(results)
-    except Exception:
-        return ()
+        results.append(
+            {
+                "staff_id": staff_id,
+                "name": name,
+                "case_no": str(row.get("case_no") or ""),
+                "obligation_identity": str(row.get("obligation_identity") or ""),
+                "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
+                "due_date": due_date_str,
+            }
+        )
+    return tuple(results)
 
 
-def _all_client_names(cursor: Any) -> tuple[str, ...]:
-    try:
-        cursor.execute("SELECT DISTINCT name FROM clients WHERE name IS NOT NULL AND name <> ''")
-        names = []
-        for row in cursor.fetchall():
-            if isinstance(row, Mapping) and row.get("name"):
-                normalized = _account(row.get("name"))
-                if normalized:
-                    names.append(normalized)
-        return tuple(sorted(set(names), key=len, reverse=True))
-    except Exception:
-        return ()
+def _client_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:
+    cursor.execute("SELECT id,name FROM clients WHERE name IS NOT NULL AND name <> ''")
+    names: dict[str, set[int]] = {}
+    for row in cursor.fetchall():
+        if isinstance(row, Mapping) and row.get("name"):
+            normalized = _account(row.get("name"))
+            if normalized:
+                names.setdefault(normalized, set()).add(_positive_id(row["id"], "client_id"))
+    return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
 
 
 def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
-    try:
-        cursor.execute(
-            """SELECT order_row.client_id, client.name, obligation.case_no,
-                      obligation.obligation_identity, obligation.obligation_type, obligation.amount_due_ntd,
-                      obligation.due_date
-               FROM client_obligations obligation
-               JOIN orders order_row ON order_row.case_no=obligation.case_no
-               JOIN clients client ON client.id=order_row.client_id
-               WHERE obligation.direction='payable_to_client'
-                 AND obligation.status='open' AND obligation.amount_due_ntd>0
-               ORDER BY order_row.client_id, obligation.obligation_identity"""
+    cursor.execute(
+        """SELECT order_row.client_id, client.name, obligation.case_no,
+                  obligation.obligation_identity, obligation.obligation_type, obligation.amount_due_ntd,
+                  obligation.due_date
+           FROM client_obligations obligation
+           JOIN orders order_row ON order_row.case_no=obligation.case_no
+           JOIN clients client ON client.id=order_row.client_id
+           WHERE obligation.direction='payable_to_client'
+             AND obligation.status='open' AND obligation.amount_due_ntd>0
+           ORDER BY order_row.client_id, obligation.obligation_identity"""
+    )
+    results = []
+    for row in cursor.fetchall():
+        if not isinstance(row, Mapping):
+            continue
+        client_id = _positive_id(row.get("client_id"), "client_id")
+        name = _account(row.get("name")) or ""
+        due_date = row.get("due_date")
+        due_date_str = (
+            due_date.isoformat()
+            if hasattr(due_date, "isoformat")
+            else (str(due_date) if due_date else None)
         )
-        results = []
-        for row in cursor.fetchall():
-            if not isinstance(row, Mapping):
-                continue
-            client_id = _positive_id(row.get("client_id"), "client_id")
-            name = _account(row.get("name")) or ""
-            due_date = row.get("due_date")
-            due_date_str = (
-                due_date.isoformat()
-                if hasattr(due_date, "isoformat")
-                else (str(due_date) if due_date else None)
-            )
-            results.append(
-                {
-                    "client_id": client_id,
-                    "name": name,
-                    "case_no": str(row.get("case_no") or ""),
-                    "obligation_identity": str(row.get("obligation_identity") or ""),
-                    "obligation_type": row.get("obligation_type"),
-                    "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
-                    "due_date": due_date_str,
-                }
-            )
-        return tuple(results)
-    except Exception:
-        return ()
+        results.append(
+            {
+                "client_id": client_id,
+                "name": name,
+                "case_no": str(row.get("case_no") or ""),
+                "obligation_identity": str(row.get("obligation_identity") or ""),
+                "obligation_type": row.get("obligation_type"),
+                "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
+                "due_date": due_date_str,
+            }
+        )
+    return tuple(results)
 
 
 def _client_receipt_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:

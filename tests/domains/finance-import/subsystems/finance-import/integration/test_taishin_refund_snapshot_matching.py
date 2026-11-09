@@ -49,7 +49,8 @@ def database():
         column[0]: value for column, value in zip(cursor.description, values)
     }
     connection.executescript("""
-        CREATE TABLE orders (case_no TEXT, client_id INTEGER);
+        CREATE TABLE orders (case_no TEXT, client_id INTEGER, staff_id INTEGER, status TEXT DEFAULT '訂單完成');
+        CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
         CREATE TABLE clients (id INTEGER, name TEXT);
         CREATE TABLE beclass_records (
             id INTEGER PRIMARY KEY, query_no TEXT, refund_account_no TEXT
@@ -62,6 +63,13 @@ def database():
             refund_obligation_identity TEXT, case_no TEXT, bank_account TEXT
         );
         CREATE TABLE staff_bank_accounts (id INTEGER, staff_id INTEGER, account_no TEXT);
+        CREATE TABLE staff (id INTEGER, name TEXT);
+        CREATE TABLE staff_obligations (
+            obligation_identity TEXT, case_no TEXT, staff_id INTEGER, direction TEXT,
+            status TEXT, amount_due_ntd INTEGER, due_date TEXT
+        );
+        CREATE TABLE staff_payable_projections (obligation_identity TEXT, balance_ntd INTEGER, status TEXT);
+        CREATE TABLE case_staff_assignments (case_no TEXT, staff_id INTEGER, status TEXT);
         CREATE TABLE finance_import_rows (
             id INTEGER, bank_references TEXT, format_id TEXT, direction TEXT, memo TEXT,
             transaction_date TEXT, currency TEXT
@@ -74,7 +82,7 @@ def database():
 def _add_refund(database, refund_type, *, case_no="synthetic-case-1", client_id=7,
                 snapshot=True):
     identity = f"{refund_type}:{case_no}"
-    database.execute("INSERT INTO orders VALUES (?, ?)", (case_no, client_id))
+    database.execute("INSERT INTO orders(case_no,client_id) VALUES (?, ?)", (case_no, client_id))
     database.execute(
         "INSERT INTO beclass_records (query_no, refund_account_no) VALUES (?, ?)",
         (case_no, SNAPSHOT_ACCOUNT),
@@ -110,6 +118,18 @@ def _classify(database, row):
     with database.cursor() as cursor:
         identities = load_finance_identity_maps(cursor)
     return classify_finance_transaction(row, **identities)
+
+
+def test_settled_refund_keeps_identity_evidence_without_becoming_an_unpaid_candidate(database):
+    identity = _add_refund(database, "refund")
+    database.execute("INSERT INTO clients VALUES (7, 'Synthetic Paid Client')")
+    database.execute("UPDATE client_obligations SET status='settled',amount_due_ntd=0 WHERE obligation_identity=?", (identity,))
+    with database.cursor() as cursor:
+        maps = load_finance_identity_maps(cursor)
+    assert maps["client_refund_identity_accounts"] == {SNAPSHOT_ACCOUNT: [7]}
+    assert maps["client_refund_accounts"] == {}
+    assert maps["taishin_client_refund_candidates"] == ()
+    assert maps["client_name_identities"]["Synthetic Paid Client"] == (7,)
 
 
 def _resolve(database, row, decision):

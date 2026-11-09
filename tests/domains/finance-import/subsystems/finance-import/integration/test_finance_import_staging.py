@@ -739,6 +739,68 @@ def test_sinopac_shared_names_use_only_consistent_original_evidence_before_admis
         assert json.loads(inserts[0][24]) == row["raw_payload"]
 
 
+@pytest.mark.parametrize("kind", ["staff_salary", "client_refund"])
+@pytest.mark.parametrize("unrelated_field", ["存摺備註", "summary"])
+def test_sinopac_unrelated_names_cannot_override_original_recipient(monkeypatch, kind, unrelated_field):
+    staff = kind == "staff_salary"
+    key = "staff_id" if staff else "client_id"
+    candidates = tuple({key: person, "name": name, "case_no": f"11500000{person - 6}",
+                        "due_date": "2026-10-15", "amount_due_ntd": 12000, "obligation_type": "refund"}
+                       for person, name in ((7, "合成甲"), (8, "合成乙乙")))
+    maps = {"client_subsidy_return_accounts": {},
+            "staff_accounts" if staff else "client_refund_accounts": {"0000007001": [7]},
+            "staff_case_suffixes" if staff else "client_refund_case_suffixes": {"115001": [7]},
+            "all_staff_names" if staff else "all_client_names": ("合成甲", "合成乙乙"),
+            "staff_name_identities" if staff else "client_name_identities": {"合成甲": (7,), "合成乙乙": (8,)},
+            "staff_payout_candidates" if staff else "taishin_client_refund_candidates": candidates}
+    references = {"交易參考編號": "0000007001合成甲"}
+    if unrelated_field == "存摺備註":
+        references[unrelated_field] = "合成乙乙其他案件"
+    row = _normalized_row(format_id="sinopac", direction="outgoing", debit=Decimal(12000), credit=None,
+                          transaction_date="2026-10-20", memo="HC115001", bank_references=references,
+                          summary="合成乙乙" if unrelated_field == "summary" else "轉帳")
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
+                        lambda *_: {"result": "resolved", "case_no": "115000001"})
+    cursor = FakeCursor()
+    result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "sinopac"}, maps, business_only=True)
+    assert len(result["staged_rows"]) == 1
+    assert result["staged_rows"][0]["classification_type"] == kind
+    assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+    inserted = [params for sql, params in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
+    assert json.loads(inserted[0][22]) == references
+
+
+@pytest.mark.parametrize("kind", ["staff_salary", "client_refund"])
+@pytest.mark.parametrize("proof", ["account", "case", "both", "none", "conflict"])
+def test_sinopac_paid_namesake_remains_identifiable_before_open_payment_matching(monkeypatch, kind, proof):
+    staff = kind == "staff_salary"
+    name = "合成同名對象"
+    key = "staff_id" if staff else "client_id"
+    has_case = proof in {"case", "both", "conflict"}
+    has_account = proof in {"account", "both", "conflict"}
+    maps = {"client_subsidy_return_accounts": {},
+            "staff_accounts" if staff else "client_refund_accounts": {"0000007001": [7]} if has_account else {},
+            "staff_case_suffixes" if staff else "client_refund_case_suffixes": {"115001": [8 if proof == "conflict" else 7]} if has_case else {},
+            "all_staff_names" if staff else "all_client_names": (name, name),
+            "staff_name_identities" if staff else "client_name_identities": {name: (7, 8)},
+            "staff_payout_candidates" if staff else "taishin_client_refund_candidates": (
+                {key: 8, "name": name, "case_no": "115000002", "due_date": "2026-10-15",
+                 "amount_due_ntd": 12000, "obligation_type": "refund"},)}
+    row = _normalized_row(format_id="sinopac", direction="outgoing", debit=Decimal(12000), credit=None,
+                          transaction_date="2026-10-20", memo=f"HC115001{name}" if has_case else name,
+                          bank_references={"交易參考編號": f"0000007001{name}"} if has_account else {})
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
+                        lambda *_: {"result": "resolved", "case_no": "115000001"})
+    cursor = FakeCursor()
+    cursor.fetchall = lambda: [{"case_no": "115000001"}]
+    result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "sinopac"}, maps, business_only=True)
+    admitted = proof not in {"none", "conflict"}
+    assert len(result["staged_rows"]) == int(admitted)
+    if admitted:
+        assert result["staged_rows"][0]["classification_type"] == kind
+        assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+
+
 @pytest.mark.parametrize("case_count", [0, 1, 2])
 def test_taishin_unique_memo_staff_without_open_payables_keeps_only_a_unique_case(case_count):
     class CaseCursor(FakeCursor):

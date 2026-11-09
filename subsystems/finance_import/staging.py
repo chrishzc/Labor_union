@@ -172,6 +172,8 @@ def classify_row_with_identity_maps(
             known_virtual_accounts,
             known_case_suffixes,
             staff_name_identities=identity_maps.get("staff_name_identities"),
+            client_name_identities=identity_maps.get("client_name_identities"),
+            client_refund_identity_accounts=identity_maps.get("client_refund_identity_accounts"),
         )
     except TypeError:
         return classify_finance_transaction(
