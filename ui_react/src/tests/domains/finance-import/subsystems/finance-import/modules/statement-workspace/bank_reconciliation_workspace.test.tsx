@@ -22,6 +22,7 @@ import { paymentOverdueReminderClient } from '../../../../../../../api/line_orde
 import { transport } from '../../../../../../../api/shared/transport';
 import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { staffPayoutRemediationClient } from '../../../../../../../api/staff_payables/staff_payout_remediation_client';
+import { staffPayoutBlockerMessage } from '../../../../../../../api/staff_payables/staff_payout_remediation_errors';
 import { financeImportCorrectionClient } from '../../../../../../../api/finance_import/finance_import_correction_client';
 
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
@@ -96,6 +97,34 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     onReconcile,
     confirmedImportReceipt: null,
   };
+
+  it.each(['staff_payout','staff_salary'] as const)(
+    'keeps Sinopac %s source failures consistent with payout preview and Apply and preserves the review entry', async classification => {
+      const {cleanup}=await import('@testing-library/react');
+      for(const source of ['recorded_pending_reason','dispatch_reason'] as const){
+        for(const [code,expected] of [
+          ['bank_transaction_date_missing','原銀行流水缺少交易日，無法核銷月嫂付款，請先查核來源資料。'],
+          ['bank_currency_not_twd','原銀行流水幣別不是新臺幣，無法核銷月嫂付款，請先查核來源資料。'],
+        ] as const){
+          const row:FinanceBankTransaction={...sinopac,direction:'outgoing',classification_type:classification,
+            transaction_date:code==='bank_transaction_date_missing'?null:sinopac.transaction_date,
+            [source]:code,reconciliation_target:{case_no:'115000001',staff_id:7,obligation_identities:['staff:first']}};
+          const presentation=financeBankReviewPresentation(row);
+          expect(presentation.reason).toBe(expected);
+          expect(presentation.reason).toBe(staffPayoutBlockerMessage(code,'sinopac'));
+          expect(presentation.reason).not.toContain('退款／補助');
+          expect(presentation.label).toBe('待核對');
+          expect(presentation.nextStep).toContain(code==='bank_transaction_date_missing'?'交易日':'幣別');
+          vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[row],pending_count:1,next_before_row_id:null});
+          render(<FinanceBankReconciliationWorkspace {...defaultProps}/>);
+          expect(await screen.findByText(expected)).toBeInTheDocument();
+          const review=screen.getByRole('button',{name:'核對交易 Sheet1#2'});
+          expect(review).toBeEnabled();fireEvent.click(review);
+          expect(onReconcile).toHaveBeenLastCalledWith(row);
+          cleanup();
+        }
+      }
+    });
 
   it('renders the WF-03 banner, KPI summary pills, and integrated filters', async () => {
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);

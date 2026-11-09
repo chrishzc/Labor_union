@@ -35,6 +35,8 @@ const PAYOUT_BLOCKER_MESSAGES: Readonly<Record<string, string>> = {
 };
 
 export const SINOPAC_PAYOUT_REASON_MESSAGES: Readonly<Record<string,string>> = {
+  bank_transaction_date_missing: PAYOUT_BLOCKER_MESSAGES.bank_transaction_date_missing,
+  bank_currency_not_twd: PAYOUT_BLOCKER_MESSAGES.bank_currency_not_twd,
   staff_payout_amount_mismatch: '銀行實付與本次待付合計不符合足額或100元內手續費條件，請核對差額；不足額或超付須選對應方式處理。',
   outgoing_staff_payout_amount_mismatch: '銀行實付與本次待付合計不符合足額或100元內手續費條件，請核對差額；不足額或超付須選對應方式處理。',
   outgoing_staff_payout_target_ambiguous: '舊紀錄未留存當次符合金額的候選數量，請核對款項與合計。',

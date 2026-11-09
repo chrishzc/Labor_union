@@ -94,6 +94,7 @@ describe('PAYOUT-001 remediation workbench', () => {
       if (stage === 'apply') client.apply = vi.fn().mockRejectedValue(new StaffPayoutRemediationError(code, 'private provider detail'));
       const onResolved = vi.fn(); const onPosted = vi.fn();
       render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }}
+        sourceBank={['bank_transaction_date_missing','bank_currency_not_twd'].includes(code) ? 'sinopac' : undefined}
         client={client} pollIntervalMs={0} onResolved={onResolved} onPosted={onPosted} />);
       await screen.findByText(/餘額 NT\$ 12,000/);
       fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } });

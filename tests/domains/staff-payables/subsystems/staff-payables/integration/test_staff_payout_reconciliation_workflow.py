@@ -259,11 +259,12 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
 
 
 @pytest.mark.parametrize('missing_date,currency,code', [(True,'TWD','bank_transaction_date_missing'),(False,'USD','bank_currency_not_twd')])
-def test_taishin_owner_checks_source_date_and_currency_before_any_payment(monkeypatch,missing_date,currency,code):
+@pytest.mark.parametrize('bank_format', ['sinopac', 'taishin'])
+def test_owner_checks_source_date_and_currency_before_any_payment(monkeypatch,missing_date,currency,code,bank_format):
     from datetime import date
     from shared_kernel.fingerprints import PreviewFingerprint
     from infrastructure.mysql.staff_payout_repository import MySqlStaffPayoutRepository
-    bank={'id':88,'format_id':'taishin','transaction_date':None if missing_date else date(2026,10,20),'currency':currency}
+    bank={'id':88,'format_id':bank_format,'transaction_date':None if missing_date else date(2026,10,20),'currency':currency}
     reader=MySqlStaffPayoutRepository(object())
     repo=_Repository(_facts())
     repo.load=lambda selection,*,for_update:reader._assemble_facts(object(),selection,7,4,(bank,),(),for_update)
