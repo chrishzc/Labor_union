@@ -37,6 +37,31 @@ function chooseWorkbook(){
 }
 
 describe('finance import operation identity after an observed result',()=>{
+  it.each([
+    ['staff_payout', 'staff_payout_amount_mismatch'],
+    ['client_refund', 'outgoing_client_refund_amount_mismatch'],
+  ])('submits a pending-only %s batch to preserve its actual reason', async (classification, reason) => {
+    const pending: FinanceImportBatchPreview = {
+      ...preview, counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 },
+      rows: [{
+        row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 12000,
+        classification_type: classification, disposition: 'business_pending', target_identities: ['payment:1'],
+        evidence: [], available_actions: ['resolve_owning_domain_target'], integrity_violations: [],
+        fingerprint_collision: false, formal_reference_conflict: false, pending_reason: reason,
+      }],
+    };
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue(pending);
+    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockResolvedValue({
+      job_id: 'job-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: null,
+      receipt: { batch_identity: pending.batch_identity, resulting_batch_version: 1,
+        preview_fingerprint: fingerprint, reconciled_count: 0, existing_count: 0, pending_count: 0 },
+    });
+    chooseWorkbook();
+    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
+    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(pending);
+    await waitFor(() => expect(financeImportMutationClient.queryBatchOutcome).toHaveBeenCalledOnce());
+  });
+
   it('submits a review-only batch so the recorded reason remains available after reload', async () => {
     const pending = {
       ...preview, counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 },

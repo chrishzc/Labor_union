@@ -4,6 +4,8 @@ Description: 驗證 Finance Import durable Apply 只透過 canonical receipt tab
 """
 
 from types import SimpleNamespace
+from dataclasses import asdict
+import json
 
 import pytest
 
@@ -13,7 +15,40 @@ from subsystems.finance_import.query import (
     FinanceImportBatchApplyReceipt,
     FinanceImportCorrectionApplyReceipt,
     _correction_apply_receipt,
+    _batch_apply_receipt,
 )
+
+
+@pytest.mark.parametrize("metadata", [
+    {"history": {"pending_count": 2}},
+    {"pending_reasons": {"finance-import-row:7": "staff_payout_amount_mismatch"}},
+    {"client_receipt_reviews": {"finance-import-row:8": {"reason": "client_receipt_underpaid", "candidates": []}}},
+    {"history": {"pending_count": 2},
+     "pending_reasons": {"finance-import-row:7": "staff_payout_amount_mismatch"},
+     "client_receipt_reviews": {"finance-import-row:8": {"reason": "client_receipt_underpaid", "candidates": []}}},
+])
+def test_batch_receipt_projects_public_result_with_persisted_review_evidence(metadata):
+    public = {
+        "batch_identity": "finance-import-batch:9", "resulting_batch_version": 1,
+        "preview_fingerprint": "a" * 64, "reconciled_count": 4, "existing_count": 0, "pending_count": 0,
+    }
+    stored = {**public, **metadata}
+    receipt = _batch_apply_receipt({"result_snapshot": json.dumps(stored)})
+    assert asdict(receipt) == public
+
+
+@pytest.mark.parametrize("invalid", [
+    {"unexpected_evidence": {}}, {"reconciled_count": True}, {"pending_count": -1},
+])
+def test_review_evidence_does_not_relax_the_public_batch_receipt_contract(invalid):
+    stored = {
+        "batch_identity": "finance-import-batch:9", "resulting_batch_version": 1,
+        "preview_fingerprint": "a" * 64, "reconciled_count": 4, "existing_count": 0, "pending_count": 0,
+        "pending_reasons": {"finance-import-row:7": "staff_payout_amount_mismatch"},
+        **invalid,
+    }
+    with pytest.raises(ValueError, match="finance_import_apply_receipt_contract_invalid"):
+        _batch_apply_receipt({"result_snapshot": stored})
 
 
 def _job(status="succeeded"):

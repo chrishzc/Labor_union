@@ -1325,7 +1325,11 @@ def _batch_apply_receipt(row: dict[str, Any]) -> FinanceImportBatchApplyReceipt:
     snapshot = row.get("result_snapshot")
     parsed = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
     if isinstance(parsed, dict):
-        parsed = {key: value for key, value in parsed.items() if key != "history"}
+        # The canonical writer stores review evidence beside the public receipt.
+        # Keep those known internal sections out of the terminal projection,
+        # while rejecting any other unexpected receipt field below.
+        internal_sections = {"history", "client_receipt_reviews", "pending_reasons"}
+        parsed = {key: value for key, value in parsed.items() if key not in internal_sections}
     if not isinstance(parsed, dict) or set(parsed) != {
         "batch_identity", "resulting_batch_version", "preview_fingerprint",
         "reconciled_count", "existing_count", "pending_count",

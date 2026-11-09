@@ -9,7 +9,7 @@ from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
     CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
-    build_finance_import_plan, defer_overlapping_client_receipts,
+    build_finance_import_plan, defer_overlapping_client_receipts, defer_overlapping_outgoing_payments,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -123,7 +123,7 @@ class FinanceImportWorkflow:
         return build_finance_import_plan(
             replace(
                 facts,
-                rows=defer_overlapping_client_receipts(resolved_rows),
+                rows=defer_overlapping_outgoing_payments(defer_overlapping_client_receipts(resolved_rows)),
             )
         )
     def _dispatch(self, plan, request):

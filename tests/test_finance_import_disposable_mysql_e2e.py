@@ -36,6 +36,10 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     import json
 
     from api.dependencies.finance_import import build_finance_import_application
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from api.routes.finance_import import apply_finance_import_batch, query_finance_import_batch_job_outcome
+    from api.schemas.finance_import import FinanceImportBatchApplyBody
+    from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from infrastructure.mysql.finance_import_owning_domain_composite import (
         MySqlFinanceImportOwningDomainComposite,
     )
@@ -47,6 +51,12 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
     from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from subsystems.finance_import.identity_maps import load_finance_identity_maps
+    from subsystems.finance_import.query import FinanceImportQueryService
+    from subsystems.finance_import.staging import classify_row_with_identity_maps, _has_unique_import_case
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.jobs.command_application import DurableJobCommandApplication
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     assert DATABASE and DATABASE.startswith("lu_test_")
     connection = get_connection()
@@ -92,12 +102,41 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
         rows.append(row)
     workbook = tmp_path / "sinopac-synthetic-memo-cases.xlsx"
     pd.DataFrame(rows, columns=SINOPAC_HEADERS).to_excel(workbook, index=False)
-    actor = ActorContext("memo-mysql-test")
+    expected_skipped = {"passbook-only", "multiple-codes", "unknown-case", "seven-digits"}
+    expected_posted = {"refund", "staff-hc", "staff-a", "receipt-source"}
+    expected_pending = {"wrong-client", "wrong-case-amount"}
+    expected_admitted = expected_posted | expected_pending
+    normalized = normalize_workbook(workbook)
+    assert normalized["source_row_count"] == 10
+    assert len(normalized["normalized_rows"]) == 10
+    assert normalized["source_reviews"] == []
+    normalized_by_label = {row["bank_references"]["票據號碼"]: row for row in normalized["normalized_rows"]}
+    assert set(normalized_by_label) == expected_admitted | expected_skipped
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            maps = load_finance_identity_maps(cursor)
+            admission = {}
+            for label, row in normalized_by_label.items():
+                classification = classify_row_with_identity_maps(row, maps)
+                admission[label] = {
+                    "admitted": _has_unique_import_case(cursor, row, classification, maps),
+                    "classification_reason": classification["reason"],
+                }
+        # Spec 22 §15.3 / §15.6.1: unresolved new sources are skipped before
+        # persistence, while known cases with payment/account issues stay visible.
+        assert {label for label, result in admission.items() if result["admitted"]} == expected_admitted
+        assert {label for label, result in admission.items() if not result["admitted"]} == expected_skipped
+    finally:
+        connection.rollback()
+        connection.close()
+    actor = ActorContext("admin_user_id:1")
     ingest_arguments = (str(workbook), IdempotencyKey("memo-mysql-ingest"), actor)
     receipt = ingest_finance_workbook(
         *ingest_arguments, connection_factory=get_connection, normalizer=normalize_workbook,
     )
-    assert receipt.source_row_count == receipt.canonical_created_count == 10
+    assert receipt.source_row_count == receipt.canonical_created_count == len(expected_admitted)
+    assert receipt.duplicate_occurrence_count == 0
     assert receipt.source_warning_count == 0
 
     connection = get_connection()
@@ -108,12 +147,23 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
                 "FROM finance_import_rows ORDER BY id"
             )
             immutable_before = cursor.fetchall()
+            row_ids = {json.loads(row["bank_references"])["票據號碼"]: row["id"] for row in immutable_before}
+            assert set(row_ids) == expected_admitted
+            for row in immutable_before:
+                label = json.loads(row["bank_references"])["票據號碼"]
+                assert json.loads(row["raw_payload"]) == normalized_by_label[label]["raw_payload"]
+            for table in ("finance_import_occurrences", "finance_import_classification_events"):
+                cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                assert cursor.fetchone()["count"] == len(expected_admitted)
         application = build_finance_import_application(
             connection, MySqlFinanceImportOwningDomainComposite(connection),
         )
         preview = application.preview_batch(receipt.batch_identity, CorrelationId("memo-preview"))
         assert preview.apply_allowed
-        assert len(preview.rows) == 10
+        assert len(preview.rows) == len(expected_admitted)
+        assert {row.row_identity for row in preview.dispatchable_rows} == {
+            f"finance-import-row:{row_ids[label]}" for label in expected_posted
+        }
         assert {row.target_identities for row in preview.dispatchable_rows} == {
             ("refund:115000701",), ("staff:115000702",),
             ("staff:115000703",), ("deposit:115000705",),
@@ -140,8 +190,55 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
             failing_application.apply_batch(request)
         assert archive.export_rows() == ()
         assert _workspace_financial_snapshot(connection) == snapshot
+        connection.rollback()
+        # Exercise the same durable submission, worker and terminal receipt
+        # used by automatic import, including an accepted-command retry.
+        principal = AdminPrincipal(1, "memo-mysql-test", "Memo Test", "system_admin")
+        repository = BackgroundJobRepository(connection)
+        apply_arguments = {
+            "body": FinanceImportBatchApplyBody(
+                batch_identity=request.batch_identity, expected_batch_version=preview.batch_version,
+                preview_fingerprint=preview.fingerprint.value, reason=request.reason,
+            ),
+            "idempotency_key": request.idempotency_key.value,
+            "correlation_id": request.correlation_id.value,
+            "principal": principal,
+            "job_application": DurableJobCommandApplication(repository, connection),
+        }
+        accepted = apply_finance_import_batch(**apply_arguments)
+        accepted_replay = apply_finance_import_batch(**apply_arguments)
+        assert accepted_replay.data.job_id == accepted.data.job_id
+        assert accepted_replay.data.replayed
+        worker_connection = get_connection()
+        try:
+            worker_repository = BackgroundJobRepository(worker_connection)
+            worker = DurableJobWorker(worker_repository, worker_connection, default_job_handlers(), "memo-case-worker")
+            assert worker.recover_and_run_once() is True
+            job = worker_repository.get_job(accepted.data.job_id)
+            assert job.status == "succeeded", job.error_payload
+            assert job.attempt_count == 1
+            assert worker.recover_and_run_once() is False
+        finally:
+            worker_connection.close()
+        outcome = query_finance_import_batch_job_outcome(
+            accepted.data.job_id, principal, repository, FinanceImportQueryService(connection),
+        )
+        assert outcome.data.status == "succeeded"
+        assert outcome.data.receipt.batch_identity == receipt.batch_identity
+        assert outcome.data.receipt.preview_fingerprint == preview.fingerprint.value
+        assert outcome.data.receipt.reconciled_count == len(expected_posted)
+        assert len(archive.export_rows()) == len(expected_posted)
         applied = application.apply_batch(request)
-        assert applied.reconciled_count == 4
+        assert applied.reconciled_count == len(expected_posted)
+        pending = FinanceImportQueryService(connection).bank_transactions(
+            bank="sinopac", direction=None, status="pending", start=None, end=None,
+            search="", limit=100, before_row_id=None,
+        )
+        assert {row["row_id"] for row in pending["items"]} == {row_ids[label] for label in expected_pending}
+        assert {row["row_id"]: row["recorded_pending_reason"] for row in pending["items"]} == {
+            row_ids["wrong-client"]: "client_refund_recipient_account_mismatch",
+            row_ids["wrong-case-amount"]: "staff_payout_amount_mismatch",
+        }
         after = _sinopac_memo_readback(connection)
         assert after["client_entries"] == [
             {"case_no": "115000701", "entry_type": "refund", "amount_ntd": 1200},
@@ -178,7 +275,7 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
                 "WHERE client_entry.id IS NULL AND staff_event.id IS NULL ORDER BY bank_row.id"
             )
             unposted_ids = [row["id"] for row in cursor.fetchall()]
-            assert unposted_ids == [immutable_before[i]["id"] for i in (3, 4, 5, 6, 7, 9)]
+            assert set(unposted_ids) == {row_ids[label] for label in expected_pending}
             cursor.execute(
                 "SELECT id,memo,debit,credit,bank_references,raw_payload "
                 "FROM finance_import_rows ORDER BY id"
@@ -189,29 +286,54 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     finally:
         connection.close()
 
-    assert ingest_finance_workbook(
+    replayed_ingestion = ingest_finance_workbook(
         *ingest_arguments, connection_factory=get_connection, normalizer=normalize_workbook,
-    ) == receipt
+    )
+    assert replayed_ingestion == receipt
+    renamed_workbook = tmp_path / "renamed-sinopac-statement.xlsx"
+    renamed_workbook.write_bytes(workbook.read_bytes())
+    reimported = ingest_finance_workbook(
+        str(renamed_workbook), IdempotencyKey("memo-mysql-cross-file"), actor,
+        connection_factory=get_connection, normalizer=normalize_workbook,
+    )
+    assert reimported.batch_identity != receipt.batch_identity
+    assert reimported.canonical_created_count == 0
+    assert reimported.duplicate_occurrence_count == len(expected_admitted)
     connection = get_connection()
     try:
         assert _sinopac_memo_readback(connection) == after
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM finance_import_rows")
-            assert cursor.fetchone()["count"] == 10
+            assert cursor.fetchone()["count"] == len(expected_admitted)
+            for table, count in (
+                ("finance_import_occurrences", len(expected_admitted)),
+                ("finance_import_classification_events", len(expected_admitted)),
+                ("finance_import_dispatch_events", len(expected_posted)),
+                ("finance_import_apply_receipts", 1), ("background_jobs", 1),
+            ):
+                cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                assert cursor.fetchone()["count"] == count
             cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
             assert cursor.fetchone()["count"] == 2
+        duplicate_preview = build_finance_import_application(
+            connection, MySqlFinanceImportOwningDomainComposite(connection),
+        ).preview_batch(reimported.batch_identity, CorrelationId("memo-cross-file-preview"))
+        assert duplicate_preview.rows == ()
+        assert duplicate_preview.counts.ready_dispatch == 0
     finally:
         connection.close()
     report = {
         "status": "PASS", "database": DATABASE,
         "new_cases": [f"11500070{i}" for i in range(1, 7)],
-        "source_rows": 10, "settled_rows": 4, "unposted_rows": 6,
+        "source_rows": 10, "imported_rows": 6, "skipped_rows": 4, "settled_rows": 4, "unposted_rows": 2,
+        "admission": admission,
         "checks": {name: "PASS" for name in (
             "refund_memo_case", "staff_hc_memo_case", "staff_a_memo_case",
-            "missing_memo_no_passbook_fallback", "multiple_codes_pending",
-            "unknown_case_pending", "wrong_counterparty_pending", "seven_digits_pending",
+            "missing_memo_no_passbook_fallback", "multiple_codes_skipped",
+            "unknown_case_skipped", "wrong_counterparty_pending", "seven_digits_skipped",
             "wrong_case_amount_pending", "receipt_reads_cancellation_column",
             "decoy_obligations_unchanged", "immutable_bank_source", "idempotent_replay",
+            "durable_worker_posting", "terminal_receipt", "cross_file_duplicate_exclusion",
         )},
         "before": before, "after": after,
         "external_provider_effects": 0, "production_writes": 0,
@@ -220,6 +342,103 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     (tmp_path / "memo-case-receipt.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
     )
+
+
+@pytest.mark.parametrize("payment_type", ["staff_payout", "client_refund"])
+def test_overlapping_payment_sources_preserve_independent_postings_mysql(tmp_path, payment_type):
+    """Competing full settlements stay pending without rolling back other cases."""
+    from api.dependencies.finance_import import build_finance_import_application
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            for table in ("orders", "clients", "staff", "finance_import_rows"):
+                cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                assert cursor.fetchone()["count"] == 0, "requires fresh empty fixture database"
+        _seed_sinopac_memo_cases(connection)
+    finally:
+        connection.close()
+
+    payout = payment_type == "staff_payout"
+    memo = "HC115702服務人員" if payout else "HC115701退款"
+    account, amount = ("8" * 16, 12000) if payout else ("9" * 16, 1200)
+    scenarios = (
+        ("independent-receipt", "", "", 0, 2000),
+        ("competing-payment-one", memo, account, amount, 0),
+        ("competing-payment-two", memo, account, amount, 0),
+        ("independent-payout", "HC115703服務人員", "8" * 16, 14000, 0),
+    )
+    rows = []
+    for index, (label, row_memo, row_account, debit, credit) in enumerate(scenarios, 1):
+        row = dict.fromkeys(SINOPAC_HEADERS)
+        row.update({
+            "帳號": "10000001", "交易日": f"2026-10-29 09:00:{index:02d}",
+            "計息日": "2026-10-29", "入帳日": "2026-10-29", "摘要": "轉帳",
+            "幣別": "TWD", "支出": debit, "存入": credit, "餘額": 100000 - index,
+            "交易參考編號": row_account, "備註": row_memo, "票據號碼": label,
+        })
+        if credit:
+            row["銷帳編號"] = build_client_virtual_account("115000705")
+        rows.append(row)
+    workbook = tmp_path / "competing-payment-sources.xlsx"
+    pd.DataFrame(rows, columns=SINOPAC_HEADERS).to_excel(workbook, index=False)
+    actor = ActorContext("competing-payment-test")
+    ingested = ingest_finance_workbook(
+        str(workbook), IdempotencyKey("competing-payment-ingest"), actor,
+        connection_factory=get_connection, normalizer=normalize_workbook,
+    )
+    assert ingested.canonical_created_count == 4
+    assert ingested.duplicate_occurrence_count == 0
+
+    connection = get_connection()
+    try:
+        app = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+        preview = app.preview_batch(ingested.batch_identity, CorrelationId("competing-payment-preview"))
+        request = FinanceImportApplyRequest(
+            preview.batch_identity, ExpectedVersion(preview.batch_version), preview.fingerprint,
+            IdempotencyKey("competing-payment-apply"), actor, "synthetic competing payments",
+            CorrelationId("competing-payment-apply"),
+        )
+        receipt = app.apply_batch(request)
+        assert receipt.reconciled_count == 2
+        pending = [row for row in preview.rows if row.disposition.value == "business_pending"]
+        assert len(pending) == 2
+        expected_reason = "staff_payout_amount_mismatch" if payout else "outgoing_client_refund_amount_mismatch"
+        assert {row.pending_reason for row in pending} == {expected_reason}
+        from subsystems.finance_import.query import FinanceImportQueryService
+        listed = FinanceImportQueryService(connection).bank_transactions(
+            bank=None, direction=None, status="pending", start=None, end=None,
+            search="", limit=100, before_row_id=None,
+        )
+        assert len(listed["items"]) == 2
+        assert {row["recorded_pending_reason"] for row in listed["items"]} == {expected_reason}
+        posted = FinanceImportQueryService(connection).bank_transactions(
+            bank=None, direction=None, status="posted", start=None, end=None,
+            search="", limit=100, before_row_id=None,
+        )
+        assert len(posted["items"]) == 2
+        assert {row["classification_type"] for row in posted["items"]} == {"client_receipt", "staff_payout"}
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT case_no,amount_ntd FROM client_ledger_entries")
+            assert list(cursor.fetchall()) == [{"case_no": "115000705", "amount_ntd": 2000}]
+            cursor.execute("SELECT obligation_identity FROM staff_payout_obligation_links")
+            assert [row["obligation_identity"] for row in cursor.fetchall()] == ["staff:115000703"]
+        connection.rollback()  # End the read snapshot before replaying the committed command.
+        assert app.apply_batch(request) == receipt
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS count FROM client_ledger_entries")
+            assert cursor.fetchone()["count"] == 1
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
+            assert cursor.fetchone()["count"] == 1
+    finally:
+        connection.close()
 
 
 def _seed_sinopac_memo_cases(connection):

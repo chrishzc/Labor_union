@@ -1,10 +1,14 @@
 from decimal import Decimal
+from dataclasses import replace
+
+import pytest
 
 from domains.finance_import.planning import (
     CanonicalFinanceImportRow,
     FinanceClassificationType,
     FinanceImportDisposition,
     defer_overlapping_client_receipts,
+    defer_overlapping_outgoing_payments,
 )
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from infrastructure.mysql.client_receipt_reconciliation_repository import (
@@ -100,6 +104,38 @@ def test_partial_and_topup_for_one_period_keep_both_sources_without_a_duplicate_
     assert result == rows
     assert sum(row.amount.amount for row in result) == 10000
     assert all('suspected_duplicate_business_match' not in row.evidence for row in result)
+
+
+@pytest.mark.parametrize("classification,reason", [
+    (FinanceClassificationType.STAFF_PAYOUT, "staff_payout_amount_mismatch"),
+    (FinanceClassificationType.CLIENT_REFUND, "outgoing_client_refund_amount_mismatch"),
+    (FinanceClassificationType.CLIENT_SUBSIDY_RETURN, "outgoing_client_refund_amount_mismatch"),
+])
+@pytest.mark.parametrize("second_targets", [("payment:A",), ("payment:A", "payment:B")])
+def test_competing_full_payments_include_partly_overlapping_groups(classification, reason, second_targets):
+    rows = (
+        replace(_resolved_row("finance-import-row:11", "payment:A"), classification_type=classification),
+        replace(_resolved_row("finance-import-row:12"), classification_type=classification, target_identities=second_targets),
+        replace(_resolved_row("finance-import-row:13", "payment:C"), classification_type=classification),
+        _resolved_row("finance-import-row:14"),
+    )
+    result = defer_overlapping_outgoing_payments(rows)
+    assert tuple(row.row_identity for row in result) == tuple(row.row_identity for row in rows)
+    assert tuple(row.target_identities for row in result) == tuple(row.target_identities for row in rows)
+    assert all(row.disposition is FinanceImportDisposition.BUSINESS_PENDING for row in result[:2])
+    assert {row.pending_reason for row in result[:2]} == {reason}
+    assert all(row.available_actions == ("resolve_owning_domain_target",) for row in result[:2])
+    assert tuple(row.evidence for row in result) == tuple(row.evidence for row in rows)
+    assert result[2:] == rows[2:]
+    assert all(row.disposition is FinanceImportDisposition.CREATE for row in rows)
+
+
+def test_pending_or_posted_payment_does_not_block_a_ready_source():
+    ready = replace(_resolved_row("finance-import-row:11", "payment:A"),
+                    classification_type=FinanceClassificationType.STAFF_PAYOUT)
+    rows = (ready, replace(ready, row_identity="finance-import-row:12", disposition=FinanceImportDisposition.EXISTING),
+            replace(ready, row_identity="finance-import-row:13", disposition=FinanceImportDisposition.BUSINESS_PENDING))
+    assert defer_overlapping_outgoing_payments(rows) == rows
 
 
 def test_old_client_identity_without_a_virtual_account_or_selected_obligation_is_ineligible():

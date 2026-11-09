@@ -190,6 +190,34 @@ def _is_exact_client_receipt(row):
             and len(row.target_identities) == 1)
 
 
+def defer_overlapping_outgoing_payments(
+    rows: tuple[CanonicalFinanceImportRow, ...],
+) -> tuple[CanonicalFinanceImportRow, ...]:
+    # Each automatic payment fully settles its selected obligations, including
+    # any transfer fee. Independent bank sources cannot both consume the same
+    # remaining balance, even when their selected groups only partly overlap.
+    reasons = {
+        FinanceClassificationType.STAFF_PAYOUT: "staff_payout_amount_mismatch",
+        FinanceClassificationType.CLIENT_REFUND: "outgoing_client_refund_amount_mismatch",
+        FinanceClassificationType.CLIENT_SUBSIDY_RETURN: "outgoing_client_refund_amount_mismatch",
+    }
+    target_counts: dict[tuple[FinanceClassificationType, str], int] = {}
+    for row in rows:
+        if row.disposition is FinanceImportDisposition.CREATE and row.classification_type in reasons:
+            for target in row.target_identities:
+                key = (row.classification_type, target)
+                target_counts[key] = target_counts.get(key, 0) + 1
+    return tuple(
+        replace(row, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                pending_reason=reasons[row.classification_type],
+                available_actions=("resolve_owning_domain_target",))
+        if row.disposition is FinanceImportDisposition.CREATE and row.classification_type in reasons
+        and any(target_counts[(row.classification_type, target)] > 1 for target in row.target_identities)
+        else row
+        for row in rows
+    )
+
+
 def _finance_import_plan(
     facts,
     planned_rows,
@@ -458,4 +486,5 @@ __all__ = [
     "FinanceImportPreviewCounts",
     "build_finance_import_plan",
     "defer_overlapping_client_receipts",
+    "defer_overlapping_outgoing_payments",
 ]
