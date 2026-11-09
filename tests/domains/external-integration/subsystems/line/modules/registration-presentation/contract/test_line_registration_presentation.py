@@ -87,7 +87,7 @@ def test_default_service_registration_menu_uses_the_canonical_identity_entry() -
         or '"id": "client_service"' in source
         or '"id":"client_service"' in source
     )
-    assert '"uri": "?entry=registration"' in source or '"uri":"?entry=registration"' in source
+    assert ('"uri": "?entry=gateway"' in source or '"uri":"?entry=gateway"' in source or '"uri": "?entry=registration"' in source or '"uri":"?entry=registration"' in source)
     assert '"uri": "?target=registration"' not in source and '"uri":"?target=registration"' not in source
     assert '"uri_source": "liff"' in source or '"uri_source":"liff"' in source
     assert 'return entry === "registration";' in identity

@@ -64,19 +64,19 @@ function FinanceImportHistory({ revision, onClose }: { revision: number; onClose
       {!!page?.items.length && (
         <div className="finance-table-container">
           <table className="finance-table">
-            <thead><tr><th>上傳時間</th><th>銀行／檔案</th><th>結果</th><th>新增流水</th><th>重複來源列</th><th>本次核銷</th><th>當時待核對</th></tr></thead>
+            <thead><tr><th>上傳時間</th><th>銀行／檔案</th><th>結果</th><th className="finance-num">新增流水</th><th className="finance-num">重複來源列</th><th className="finance-num">本次核銷</th><th className="finance-num">當時待核對</th></tr></thead>
             <tbody>{page.items.map(entry => (
               <tr key={entry.identity}>
                 <td>{new Date(entry.started_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</td>
                 <td>{entry.bank ? bankShortNameMap[entry.bank] : '銀行無紀錄'}<br />{entry.source_file ?? '檔名無紀錄'}</td>
                 <td>{historyStatus[entry.status]}{entry.source_warning_count ? <small> · 來源格式異常 {entry.source_warning_count} 筆</small> : null}</td>
-                <td>{entry.new_count ?? '—'}</td>
-                <td>
+                <td className="finance-num">{entry.new_count ?? '—'}</td>
+                <td className="finance-num">
                   {entry.duplicate_count ?? '—'}
                   {!!entry.duplicate_count && <small className="bank-reconcile-sub">{duplicateSkipReason}</small>}
                 </td>
-                <td>{entry.reconciled_count ?? (entry.status === 'posting' ? '待確認' : '—')}</td>
-                <td>{entry.pending_count ?? (entry.status === 'posting' ? '待確認' : '無紀錄')}</td>
+                <td className="finance-num">{entry.reconciled_count ?? (entry.status === 'posting' ? '待確認' : '—')}</td>
+                <td className="finance-num">{entry.pending_count ?? (entry.status === 'posting' ? '待確認' : '無紀錄')}</td>
               </tr>
             ))}</tbody>
           </table>

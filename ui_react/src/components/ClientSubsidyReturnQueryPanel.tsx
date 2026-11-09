@@ -65,10 +65,10 @@ export function ClientSubsidyReturnQueryPanel({ targetMonth, onMonthChange, onOp
       </div>
       {rows.length === 0 ? <div className="finance-state">沒有符合條件的補助退款案件。可清除搜尋或月份篩選，查看全部應退案件。</div> : <div className="finance-table-container"><table className="finance-table">
         <caption className="subsidy-refund-caption">應退補助案件；預估金額依目前服務條件，結案後依實際服務與正式退款資料確認。</caption>
-        <thead><tr><th scope="col">客戶</th><th scope="col">案件</th><th scope="col">訂單狀態</th><th scope="col">應退補助金額</th><th scope="col">應退款日期</th></tr></thead>
+        <thead><tr><th scope="col">客戶</th><th scope="col">案件</th><th scope="col">訂單狀態</th><th scope="col" className="finance-num">應退補助金額</th><th scope="col">應退款日期</th></tr></thead>
         <tbody>{rows.map(row => <tr key={row.case_no}>
           <td><strong>{row.client_name}</strong></td><td>{row.case_no}</td><td>{row.order_status}</td>
-          <td className="subsidy-refund-money">{row.amount_ntd === null ? '待確認' : formatMoney(row.amount_ntd)}{row.is_estimate && row.amount_ntd !== null && <span className="subsidy-refund-estimate">預估</span>}</td>
+          <td className="subsidy-refund-money finance-num">{row.amount_ntd === null ? '待確認' : formatMoney(row.amount_ntd)}{row.is_estimate && row.amount_ntd !== null && <span className="subsidy-refund-estimate">預估</span>}</td>
           <td>{row.due_date ?? (['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(row.order_status) ? '待確認' : '待結案')}</td>
         </tr>)}</tbody>
       </table></div>}

@@ -9,6 +9,7 @@ import type {
   RichMenuDraft,
   RichMenuDraftDefinition,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
+import { getLiffTargetsForRole } from '../adapters/line_configuration/liff_target_catalog';
 
 interface Props {
   draft: RichMenuDraft;
@@ -22,31 +23,12 @@ type EditableActionType = 'message' | 'uri' | 'postback';
 function initialAction(kind: EditableActionType): RichMenuAction {
   switch (kind) {
     case 'message': return { type: 'message', text: '' };
-    case 'uri': return { type: 'uri', uri: '?entry=registration', uri_source: 'liff' };
+    case 'uri': return { type: 'uri', uri: '?entry=gateway', uri_source: 'liff' };
     case 'postback': return { type: 'postback', data: '' };
   }
 }
 
-const CANONICAL_LIFF_TARGETS = [
-  { value: '?entry=gateway', label: '?entry=gateway（服務確認與身分導流 Gateway）' },
-  { value: '?entry=registration', label: '?entry=registration（服務登記／身分導流）' },
-  { value: '?target=gateway', label: '?target=gateway（服務確認與身分導流 Gateway）' },
-  { value: '?target=profile_update', label: '?target=profile_update（修改登記資料）' },
-  { value: '?target=staff_order_search', label: '?target=staff_order_search（月嫂案件查詢）' },
-  { value: '?target=staff_schedule', label: '?target=staff_schedule（月嫂服務行程）' },
-  { value: '?target=staff_leave_apply', label: '?target=staff_leave_apply（月嫂請假登記，相容入口）' },
-  { value: '?target=staff_baby_log', label: '?target=staff_baby_log（月嫂寶寶日誌）' },
-  { value: '?target=staff_verification', label: '?target=staff_verification（月嫂身分綁定）' },
-  { value: '?target=staff_payout', label: '?target=staff_payout（薪資請款）' },
-  { value: '?target=order_update', label: '?target=order_update（修改訂單資訊）' },
-  { value: '?target=order_tracking', label: '?target=order_tracking（狀態追蹤）' },
-  { value: '?target=faq', label: '?target=faq（常見問答）' },
-  { value: '?target=ai_assistant', label: '?target=ai_assistant（AI 智慧問答）' },
-  { value: '?target=dashboard', label: '?target=dashboard（營運摘要）' },
-  { value: '?target=customer_service', label: '?target=customer_service（客服管理）' },
-  { value: '?target=scheduling_review', label: '?target=scheduling_review（排班審核）' },
-  { value: '?target=staff_review', label: '?target=staff_review（待辦工作台）' },
-];
+// Canonical LIFF targets are dynamically derived from ASSET_ITEMS via liff_target_catalog
 
 export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
   draft,
@@ -164,7 +146,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
               <span>{action.uri_source === 'liff' ? 'LIFF 入口' : 'HTTPS 網址'}</span>
               {action.uri_source === 'liff' ? (() => {
                 const currentUri = action.uri ?? '?entry=gateway';
-                const isListed = CANONICAL_LIFF_TARGETS.some((target) => target.value === currentUri);
+                const liffTargets = getLiffTargetsForRole(menu?.audience_role);
+                const isListed = liffTargets.some((target) => target.value === currentUri);
                 return (
                   <select
                     className="richmenu-form-select"
@@ -177,8 +160,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
                         {currentUri}（自訂／未收錄入口）
                       </option>
                     )}
-                    {CANONICAL_LIFF_TARGETS.map((target) => (
-                      <option key={target.value} value={target.value}>{target.label.replace(/^.*?（/, '').replace(/）$/, '')}</option>
+                    {liffTargets.map((target) => (
+                      <option key={target.value} value={target.value}>{target.label}</option>
                     ))}
                   </select>
                 );

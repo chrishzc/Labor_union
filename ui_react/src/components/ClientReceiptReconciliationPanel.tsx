@@ -182,7 +182,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
       </div>
 
       <div className="finance-advanced-reconciliation-guide">
-        <strong>💡 作用說明：</strong>銀行對帳單已辨識到本案的匯款流水（如下左側）。請確認要將此筆款項<strong>沖抵哪一期款項</strong>（如下右側）。核對確認後，系統將正式記錄實收並更新期款狀態。
+        <strong>💡 作用說明：</strong>左側列出本案尚未核銷的銀行入款。可取消預選、改選其他入款或合併多筆，再於右側選擇<strong>本次要沖抵的期款</strong>。核對預覽並確認後，系統才會正式記錄實收並更新期款狀態。
       </div>
 
       {!facts&&!error&&<p role="status">正在查詢本案入款…</p>}
@@ -199,7 +199,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
               <div className="finance-recon-col finance-recon-col-bank">
                 <div className="finance-recon-col-header">
                   <span className="finance-recon-badge-step">步驟 1</span>
-                  <h4>銀行已收到款項（來源流水）</h4>
+                  <h4>尚未核銷的銀行入款（可複選）</h4>
                 </div>
                 <div className="finance-table-container">
                   <table className="finance-table finance-recon-table">
@@ -208,7 +208,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                         <th>納入</th>
                         <th>入帳日期</th>
                         <th>銀行來源</th>
-                        <th>入款金額</th>
+                        <th className="finance-num">入款金額</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -218,7 +218,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                             <input
                               aria-label={`納入銀行款 ${row.finance_import_row_id}`}
                               type="checkbox"
-                              disabled={busy||unknown||row.finance_import_row_id===requiredBankRowId}
+                              disabled={busy||unknown}
                               checked={selectedBanks.includes(row.finance_import_row_id)}
                               onChange={event => {
                                 invalidate();
@@ -231,7 +231,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                             <span>永豐銀行入款</span>
                             <small className="finance-mono-sub">bank:{row.finance_import_row_id}</small>
                           </td>
-                          <td><strong className="finance-paid">{financeMoney(row.amount_ntd)}</strong></td>
+                          <td className="finance-num"><strong className="finance-paid">{financeMoney(row.amount_ntd)}</strong></td>
                         </tr>
                       ))}
                     </tbody>

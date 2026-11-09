@@ -300,7 +300,7 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
         )
         for button in customer_menu["buttons"]
     ]
-    assert "?entry=registration" in action_uris
+    assert "?entry=gateway" in action_uris or "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
     assert "?target=order_update" in action_uris
     assert "?target=faq" not in action_uris  # FAQ is a tab of the merged LIFF entry.

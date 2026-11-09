@@ -381,6 +381,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.finance-table th.finance-num,
+.finance-table td.finance-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
 .finance-table tr:hover td {
   background: #fffaf7;
 }

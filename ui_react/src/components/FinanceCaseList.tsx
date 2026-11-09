@@ -215,7 +215,7 @@ export function FinanceCaseList({
                 <th>案件／客戶</th>
                 <th>實際開始／結束日</th>
                 <th>相關月嫂</th>
-                <th>案件總額 T</th>
+                <th className="finance-num">案件總額 T</th>
                 <th>應操作／目前狀態</th>
                 <th>操作</th>
               </tr>
@@ -242,7 +242,7 @@ export function FinanceCaseList({
                       <small>實際結束 {order.actual_end_date ?? '待確認'}</small>
                     </td>
                     <td>{order.staff_display_label ?? order.staff_name ?? '待確認'}</td>
-                    <td>{money(a?.staff_receivable_ntd)}</td>
+                    <td className="finance-num">{money(a?.staff_receivable_ntd)}</td>
                     <td>
                       <div className="finance-ongoing-item">
                         <strong>

@@ -34,7 +34,7 @@
           "action": {
             "type": "uri",
             "text": null,
-            "uri": "?entry=registration",
+            "uri": "?entry=gateway",
             "uri_source": "liff",
             "data": null
           },

@@ -1,4 +1,16 @@
-.finance-monthly{display:grid;gap:16px;min-width:0}.finance-month-filter{display:flex;align-items:end;gap:16px;flex-wrap:wrap}.finance-month-filter>label{display:grid;gap:8px;flex:1 1 190px;min-width:0}.finance-month-filter input,.finance-month-filter select{min-width:0;width:100%;padding:10px 12px;border:1px solid #dec8bd;border-radius:8px;font:inherit;background:white}.finance-month-quick{display:flex;align-items:center;gap:10px;flex:1 0 100%;color:#79695f;font-size:13px}.finance-month-quick .finance-btn-secondary{border-radius:20px;padding:6px 14px}.finance-month-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.finance-month-table{min-width:960px;white-space:nowrap}.finance-month-table td:not(:last-child){text-align:right;font-variant-numeric:tabular-nums}.finance-month-table tfoot{background:#faf1ea;font-weight:600}.finance-month-details{padding:16px 0;white-space:normal;max-width:1100px;text-align:left}.finance-month-details td{text-align:left!important}.finance-month-details small{display:block}.finance-monthly [role=tab][aria-selected=true]{background:#fff0e8;color:#ab482d}.finance-monthly [role=tab]:focus-visible{outline:3px solid #b66d49;outline-offset:2px}
+/**
+ * File: FinanceMonthlyAccounting.css
+ * Description: 每月帳務狀況樣式，定義到期款進度與已核銷收付款表格、篩選器與彈窗排版。
+ */
+
+.finance-monthly{display:grid;gap:16px;min-width:0}.finance-month-filter{display:flex;align-items:end;gap:16px;flex-wrap:wrap}.finance-month-filter>label{display:grid;gap:8px;flex:1 1 190px;min-width:0}.finance-month-filter input,.finance-month-filter select{min-width:0;width:100%;padding:10px 12px;border:1px solid #dec8bd;border-radius:8px;font:inherit;background:white}.finance-month-quick{display:flex;align-items:center;gap:10px;flex:1 0 100%;color:#79695f;font-size:13px}.finance-month-quick .finance-btn-secondary{border-radius:20px;padding:6px 14px}.finance-month-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.finance-month-table{min-width:960px;white-space:nowrap}.finance-month-table th:not(:first-child):not(:last-child),.finance-month-table td:not(:last-child){text-align:right;font-variant-numeric:tabular-nums}.finance-month-table tfoot{background:#faf1ea;font-weight:600}.finance-month-details{padding:16px 0;white-space:normal;max-width:1100px;text-align:left}.finance-month-details td{text-align:left!important}.finance-month-details small{display:block}
+.finance-table th.finance-num,
+.finance-table td.finance-num,
+.finance-month-details th.finance-num,
+.finance-month-details td.finance-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}.finance-monthly [role=tab][aria-selected=true]{background:#fff0e8;color:#ab482d}.finance-monthly [role=tab]:focus-visible{outline:3px solid #b66d49;outline-offset:2px}
 @media(max-width:720px){.finance-month-filter{display:grid;grid-template-columns:1fr 1fr}.finance-month-filter>label:nth-child(3),.finance-month-filter>.finance-btn-primary,.finance-month-quick{grid-column:1/-1}.finance-month-summary{grid-template-columns:1fr 1fr}.finance-month-details{width:calc(100vw - 110px);max-width:calc(100vw - 110px)}}
 
 .finance-monthly{grid-template-columns:minmax(0,1fr)}

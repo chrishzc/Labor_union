@@ -52,6 +52,11 @@
 @media(max-width:720px){.case-accounting-allocation{width:calc(100vw - 110px);max-width:calc(100vw - 110px)}.case-accounting-totals{grid-template-columns:1fr}.case-accounting .finance-table-container{overflow:auto}}
 
 .finance-receivables-table{min-width:1000px;white-space:nowrap}
+.finance-table th.finance-num,
+.finance-table td.finance-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
 .accounting-difference-panel textarea,.subsidy-period-workbench textarea{width:100%;min-height:84px;box-sizing:border-box;font:inherit;border:1px solid #dec8bd;border-radius:8px;padding:12px}
 .accounting-difference-panel .case-accounting-field,.subsidy-period-workbench .case-accounting-field{margin:14px 0}
 .accounting-difference-panel small{display:block;margin-top:8px;white-space:normal;max-width:300px}
