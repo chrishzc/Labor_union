@@ -217,13 +217,24 @@ def test_case_pricing_recalculates_terms_and_reconciles_waiting_original_source(
     assert bank_candidate(connection, waiting)['status'] == 'posted'
 
 
-def test_early_service_end_replaces_bank_candidates_and_receives_original_source(connection):
+@pytest.mark.parametrize('paid', (0, 1000))
+def test_early_service_end_replaces_bank_candidates_and_receives_original_source(connection, paid):
     from domains.orders.cancellation import ConfirmedServiceDay
     from infrastructure.mysql.order_cancellation_repository import MySqlOrderCancellationRepository
     from subsystems.orders.cancellation_workflow import OrderCancellationWorkflow, OrderCancellationApplyRequest
     change_fee(connection, 1000, 'terms-before-cancellation')
     original = receipt_application(connection).query(_CASE_NO)['obligations']
-    waiting = bank_source(connection, 6800, [item['obligation_identity'] for item in original])
+    if paid:
+        staff_items, _ = query_case_staff_accounting(connection, _CASE_NO)
+        staff_item = next(item for item in staff_items if item.direction == 'payable')
+        service = CaseManualSupplementService(MySqlCaseManualSupplementRepository(connection))
+        for direction, target in (('client_receipt', original[0]['obligation_identity']), ('staff_salary', staff_item.identity)):
+            with MySqlUnitOfWork(connection) as unit:
+                service.execute(_CASE_NO, 'sinopac', direction, target, paid, '2026-10-01',
+                    '合成原收付款', 'early-original-' + direction, 'synthetic-accounting', settlement_mode='partial')
+                unit.commit()
+    original_cash = cash_snapshot(connection)
+    waiting = bank_source(connection, 6800-paid, [item['obligation_identity'] for item in original])
     with connection.cursor() as cursor:
         cursor.execute("UPDATE orders SET status='服務中',actual_start_date='2026-10-01' WHERE case_no=%s", (_CASE_NO,))
         cursor.execute('SELECT staff_id FROM case_staff_assignments WHERE case_no=%s', (_CASE_NO,))
@@ -237,10 +248,32 @@ def test_early_service_end_replaces_bank_candidates_and_receives_original_source
         ExpectedVersion(preview.scheduling_version), ExpectedVersion(preview.client_finance_version),
         ExpectedVersion(preview.payroll_version),preview.fingerprint,IdempotencyKey('early-end'),
         ActorContext('synthetic-accounting'),'確認實際提前結束',CorrelationId('early-end'))
+    if paid:
+        class FailingRepository(MySqlOrderCancellationRepository):
+            def persist_payroll_impact(self, command):
+                super().persist_payroll_impact(command)
+                raise RuntimeError('synthetic cancellation payroll rollback')
+        failure = OrderCancellationWorkflow(FailingRepository(connection), lambda: MySqlUnitOfWork(connection),
+            FixedBusinessClock(datetime(2026,10,3,12,tzinfo=TAIPEI_TIME_ZONE)))
+        with pytest.raises(RuntimeError, match='synthetic cancellation payroll rollback'):
+            failure.apply(request)
+        assert cash_snapshot(connection) == original_cash
+        items, _ = query_case_staff_accounting(connection, _CASE_NO)
+        assert sum(item.expected_ntd for item in items if item.direction=='payable' and item.summary_included) == 13000
     receipt = workflow.apply(request)
     assert workflow.apply(request) == receipt
+    assert cash_snapshot(connection) == original_cash
+    items, _ = query_case_staff_accounting(connection, _CASE_NO)
+    payables = [item for item in items if item.direction=='payable' and item.summary_included]
+    assert sum(item.expected_ntd for item in payables) == 5200
+    assert sum(item.actual_ntd for item in payables) == paid
+    assert sum(item.remaining_ntd for item in payables) == 5200-paid
     target = bank_candidate(connection, waiting)['reconciliation_target']
     assert target is not None
     assert target['obligation_identities'] != [item['obligation_identity'] for item in original]
     receive(connection, waiting, target['obligation_identities'], 'early-end-receipt')
     assert bank_candidate(connection, waiting)['status'] == 'posted'
+    after_cash = cash_snapshot(connection)
+    assert all(row in after_cash[table] for table, rows in original_cash.items() for row in rows)
+    assert after_cash['staff_payout_events'] == original_cash['staff_payout_events']
+    assert after_cash['staff_payout_obligation_links'] == original_cash['staff_payout_obligation_links']

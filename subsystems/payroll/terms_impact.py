@@ -278,6 +278,10 @@ def build_payroll_cancellation_impact(source_facts: PayrollTermsSourceFacts, sch
         return build_payroll_handover_impact(source_facts, scheduling, order_terms, change_identity)
     facts = _impact_facts(source_facts, scheduling, order_terms)
     payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy)
+    if any(item.payout_history_exists for item in facts.existing_obligations):
+        # Preserve paid roots and adjust their legal entitlement, rather than
+        # adding the remaining cash due beside the original unpaid balance.
+        return _handover_candidate(facts, payroll, rates, change_identity)
     return _candidate(facts, payroll, rates, _build_cancellation_actions(facts, payroll, change_identity))
 
 
