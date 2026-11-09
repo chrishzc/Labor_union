@@ -297,3 +297,125 @@ def test_real_reset_preview_uses_compact_baseline_without_connecting():
     assert result["assembly_id"] == expected["assembly_id"]
     assert result["base_schema_sha256"] == resetter._sha256_bytes(SQL_PATH)
     assert result["schema_parts"] == []
+
+
+def test_validate_target_supports_nas_operator_and_remote_host():
+    nas_db = "lu_nas_restore_20261106094646_f005ea7e"
+    # 支援 lu_nas_* 作為 operator target
+    assert resetter.validate_target(
+        _config(nas_db), {"APP_ENV": "development"}, nas_db, operator_reset=True
+    ) == nas_db
+
+    # 未指定 target_database 時，自動推導當前 DB_DATABASE
+    assert resetter.validate_target(
+        _config(nas_db), {"APP_ENV": "development"}, operator_reset=True
+    ) == nas_db
+
+    # 開發環境下，allow_remote_host=True 或環境變數放寬遠端 host
+    remote_host = "192.168.1.50"
+    assert resetter.validate_target(
+        _config(nas_db, host=remote_host),
+        {"APP_ENV": "development"},
+        nas_db,
+        operator_reset=True,
+        allow_remote_host=True,
+    ) == nas_db
+
+    assert resetter.validate_target(
+        _config(nas_db, host=remote_host),
+        {"APP_ENV": "development", "ALLOW_REMOTE_RESET": "1"},
+        nas_db,
+        operator_reset=True,
+    ) == nas_db
+
+    # 未開啟 allow_remote_host 時，開發環境仍拒絕遠端 host
+    with pytest.raises(resetter.FakeDatabaseResetError, match="local MySQL host"):
+        resetter.validate_target(
+            _config(nas_db, host=remote_host),
+            {"APP_ENV": "development"},
+            nas_db,
+            operator_reset=True,
+        )
+
+    # production 模式下，即使傳入 allow_remote_host 仍嚴格拒絕遠端 host
+    with pytest.raises(resetter.FakeDatabaseResetError, match="local MySQL host"):
+        resetter.validate_target(
+            _config("union_db", host=remote_host),
+            {"APP_ENV": "production"},
+            "union_db",
+            operator_reset=True,
+            allow_remote_host=True,
+        )
+
+
+def test_operator_reset_supports_nas_restore_database(monkeypatch, tmp_path):
+    nas_db = "lu_nas_restore_20261106094646_f005ea7e"
+    assembly = _assembly(tmp_path)
+    plan_path = tmp_path / "plan.json"
+    receipt_path = tmp_path / "terminal.json"
+    config = _config(nas_db, host="192.168.1.100")
+    calls = []
+    monkeypatch.setattr(resetter, "capture_root_authentication", lambda *_a, **_k: calls.append("capture") or {})
+    monkeypatch.setattr(resetter, "save_root_authentication", lambda *_a, **_k: calls.append("durable_backup") or {"status": "encrypted_and_verified"})
+    monkeypatch.setattr(resetter, "restore_root_authentication", lambda *_a, **_k: calls.append("restore_and_compare") or {"status": "preserved"})
+    monkeypatch.setattr(
+        resetter,
+        "_canonical_bootstrap_contract",
+        lambda: (assembly, {"release_id": "r1"}),
+    )
+    monkeypatch.setattr(
+        resetter,
+        "_check_connected_identity",
+        lambda *_args, **_kwargs: {
+            "database": None,
+            "server": "nas-server",
+            "port": 3306,
+        },
+    )
+    monkeypatch.setattr(
+        resetter,
+        "rebuild_schema",
+        lambda *_args, **_kwargs: calls.append("drop_rebuild") or {"schema_postcheck": "pass"},
+    )
+    # Plan
+    resetter.reset(
+        operator_reset=True,
+        target_database=nas_db,
+        allow_remote_host=True,
+        plan_receipt=plan_path,
+        config=config,
+        environment={"APP_ENV": "development"},
+    )
+    # Apply
+    result = resetter.reset(
+        apply=True,
+        operator_reset=True,
+        allow_remote_host=True,
+        confirm_apply="RESET",
+        confirm_database=nas_db,
+        target_database=nas_db,
+        plan_receipt=plan_path,
+        receipt_path=receipt_path,
+        config=config,
+        environment={"APP_ENV": "development"},
+    )
+    assert result["status"] == "completed"
+    assert result["target_database"] == nas_db
+    assert calls == ["capture", "durable_backup", "drop_rebuild", "restore_and_compare"]
+    assert receipt_path.is_file()
+
+
+def test_main_cli_supports_inferred_target_database_and_remote_host(monkeypatch, tmp_path, capsys):
+    nas_db = "lu_nas_restore_demo"
+    monkeypatch.setattr(resetter, "DB_CONFIG", _config(nas_db, host="10.0.0.5"))
+    assembly = _assembly(tmp_path)
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    monkeypatch.setenv("APP_ENV", "development")
+    plan = tmp_path / "plan.json"
+    # CLI 未帶 --target-database，但帶 --allow-remote-host 與 --operator-reset
+    args = ["--operator-reset", "--allow-remote-host", "--plan-receipt", str(plan), "--dry-run"]
+    monkeypatch.setattr(resetter, "_check_connected_identity", lambda *_a, **_k: pytest.fail("must not connect"))
+
+    assert resetter.main(args) == 0
+    assert '"target_database": "lu_nas_restore_demo"' in capsys.readouterr().out
+    assert plan.is_file()

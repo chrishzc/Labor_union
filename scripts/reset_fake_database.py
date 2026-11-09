@@ -40,9 +40,14 @@ class FakeDatabaseResetError(RuntimeError):
 
 _TARGET_PATTERN = re.compile(r"lu_test_[a-z0-9_]+\Z")
 _OPERATOR_TARGET = "union_db"
+_OPERATOR_PATTERN = re.compile(r"(?:union_db|lu_nas_[a-zA-Z0-9_]+)\Z")
 _LOCAL_PROFILES = frozenset(
     {"development", "dev", "local", "test", "testing", "validation"}
 )
+
+
+def _is_operator_target(database: str) -> bool:
+    return bool(_OPERATOR_PATTERN.fullmatch(database))
 
 
 def validate_target(
@@ -52,37 +57,52 @@ def validate_target(
     host: str | None = None,
     *,
     operator_reset: bool = False,
+    allow_remote_host: bool = False,
 ) -> str:
     """Validate explicit target, configured identity, and local authority."""
     config = DB_CONFIG if config is None else config
     environment = os.environ if environment is None else environment
-    target = str(target_database or "").strip()
     configured_database = str(config.get("database") or "").strip()
+    if target_database is not None and str(target_database).strip():
+        target = str(target_database).strip()
+    else:
+        target = configured_database
     configured_host = str(config.get("host") or "").strip()
     requested_host = str(host if host is not None else configured_host).strip()
     if not target:
         raise FakeDatabaseResetError("explicit --target-database is required")
-    if target != _OPERATOR_TARGET and not _TARGET_PATTERN.fullmatch(target):
+    if not _is_operator_target(target) and not _TARGET_PATTERN.fullmatch(target):
         raise FakeDatabaseResetError(
-            "target database must be union_db or an explicitly named "
+            "target database must be union_db, lu_nas_*, or an explicitly named "
             "lu_test_* database"
         )
     if configured_database != target:
         raise FakeDatabaseResetError(
             "target database must exactly match configured DB_DATABASE"
         )
-    if requested_host.lower() not in {"localhost", "127.0.0.1", "::1"}:
-        raise FakeDatabaseResetError("destructive reset requires local MySQL host")
-    if not configured_host or requested_host != configured_host:
-        raise FakeDatabaseResetError("target host must exactly match configured DB_HOST")
     configured_environment = str(environment.get("APP_ENV") or "").strip().lower()
     if not configured_environment:
         configured_environment = str(environment.get("ENV") or "").strip().lower()
+
+    allow_remote = (
+        bool(allow_remote_host)
+        or environment.get("ALLOW_REMOTE_RESET") == "1"
+        or environment.get("ALLOW_REMOTE_HOST") == "1"
+    )
+    is_local_host = requested_host.lower() in {"localhost", "127.0.0.1", "::1"}
     if configured_environment in {"prod", "production"}:
+        if not is_local_host:
+            raise FakeDatabaseResetError("destructive reset requires local MySQL host")
         if not operator_reset or target != _OPERATOR_TARGET:
             raise FakeDatabaseResetError("production mode requires the local union_db operator reset route")
     elif configured_environment not in _LOCAL_PROFILES:
         raise FakeDatabaseResetError("development or validation environment required")
+    else:
+        if not is_local_host and not allow_remote:
+            raise FakeDatabaseResetError("destructive reset requires local MySQL host")
+
+    if not configured_host or requested_host != configured_host:
+        raise FakeDatabaseResetError("target host must exactly match configured DB_HOST")
     return target
 
 
@@ -99,9 +119,9 @@ def _canonical_bootstrap_contract() -> tuple[SchemaAssembly, dict[str, object]]:
 
 def _base_schema_for(path: Path, database: str) -> str:
     """Render the canonical base schema for one validated local target."""
-    if database != _OPERATOR_TARGET and not _TARGET_PATTERN.fullmatch(database):
+    if not _is_operator_target(database) and not _TARGET_PATTERN.fullmatch(database):
         raise FakeDatabaseResetError(
-            "base schema requires union_db or a disposable lu_test_* target"
+            "base schema requires union_db, lu_nas_*, or a disposable lu_test_* target"
         )
     return (
         f"DROP DATABASE IF EXISTS `{database}`;\n"
@@ -156,7 +176,7 @@ def _plan_payload(
         "business_fixture_rows_loaded": 0,
         "system_seed_policy": "canonical_schema_declared_only",
         "root_authentication_policy": (
-            "preserve_existing_root_and_mfa_v1" if target_database == _OPERATOR_TARGET
+            "preserve_existing_root_and_mfa_v1" if _is_operator_target(target_database)
             else "disposable_target_discard"
         ),
     }
@@ -363,19 +383,26 @@ def reset(
     verify: bool = False,
     replay: bool = False,
     operator_reset: bool = False,
+    allow_remote_host: bool = False,
     config: dict[str, object] | None = None,
     environment: dict[str, str] | None = None,
     connection_factory: Callable[..., Any] = pymysql.connect,
 ) -> dict[str, object]:
     config = DB_CONFIG if config is None else config
-    target = validate_target(config, environment, target_database, operator_reset=operator_reset)
-    if operator_reset and target != _OPERATOR_TARGET:
+    target = validate_target(
+        config,
+        environment,
+        target_database,
+        operator_reset=operator_reset,
+        allow_remote_host=allow_remote_host,
+    )
+    if operator_reset and not _is_operator_target(target):
         raise FakeDatabaseResetError(
-            "operator reset is restricted to union_db"
+            "operator reset is restricted to union_db or lu_nas_* targets"
         )
-    if target == _OPERATOR_TARGET and not operator_reset:
+    if _is_operator_target(target) and not operator_reset:
         raise FakeDatabaseResetError(
-            "union_db requires the explicit operator reset route"
+            f"{target} requires the explicit operator reset route"
         )
     assembly, manifest = _canonical_bootstrap_contract()
     plan = _plan_payload(assembly, manifest, target, config)
@@ -459,8 +486,10 @@ def reset(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target-database", required=True)
+    parser.add_argument("--print-target", action="store_true", help="Print configured DB_DATABASE and exit.")
+    parser.add_argument("--target-database", default=None)
     parser.add_argument("--operator-reset", action="store_true")
+    parser.add_argument("--allow-remote-host", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Plan only (the default).")
     parser.add_argument("--verify", action="store_true")
@@ -471,6 +500,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backup-receipt", type=Path)
     parser.add_argument("--receipt-path", type=Path)
     args = parser.parse_args(argv)
+    if args.print_target:
+        print(str(DB_CONFIG.get("database") or _OPERATOR_TARGET).strip())
+        return 0
     if args.dry_run and (args.apply or args.verify or args.replay):
         parser.error("--dry-run cannot be combined with --apply, --verify, or --replay")
     if sum(bool(value) for value in (args.apply, args.verify, args.replay)) > 1:
@@ -487,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
             verify=args.verify,
             replay=args.replay,
             operator_reset=args.operator_reset,
+            allow_remote_host=args.allow_remote_host,
         )
     except (FakeDatabaseResetError, OSError, ValueError) as exc:
         print(
