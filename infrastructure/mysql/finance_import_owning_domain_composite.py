@@ -385,6 +385,10 @@ def _resolve_client_receipt(connection, candidate):
         rows = tuple(cursor.fetchall())
     if len(rows) == 1:
         target = str(rows[0]["obligation_identity"])
+        if _is_same_month(trans_date, rows[0].get("due_date")):
+            candidate = _ready_candidate(candidate, (target,), "exact-open-client-obligation-in-transaction-month")
+    if len(rows) == 1 and ("due_date" not in rows[0] or trans_date is None or _is_same_month(trans_date, rows[0].get("due_date"))):
+        target = str(rows[0]["obligation_identity"])
         return _ready_candidate(
             candidate,
             (target,),
@@ -406,6 +410,8 @@ def _resolve_client_receipt(connection, candidate):
             cursor.execute(statement, parameters)
             open_rows = _without_redundant_historical_baseline(tuple(cursor.fetchall()))
     except StopIteration:
+        if len(rows) == 1:
+            return _ready_candidate(candidate, (str(rows[0]["obligation_identity"]),), "exact-open-client-obligation")
         return candidate
     if not open_rows:
         return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
@@ -464,6 +470,8 @@ def _resolve_client_receipt(connection, candidate):
         else:
             diagnostic = ClientReceiptReviewDiagnostic("sinopac_client_receipt_multiple_month_candidates")
         return replace(candidate, target_identities=targets, evidence=evidence, client_receipt_review=diagnostic)
+    if len(rows) == 1:
+        return _ready_candidate(candidate, (str(rows[0]["obligation_identity"]),), "exact-open-client-obligation")
     return replace(candidate, client_receipt_review=ClientReceiptReviewDiagnostic(
         "sinopac_client_receipt_month_no_match",
     ))
@@ -554,7 +562,7 @@ def _virtual_account_case_no(connection, row_identity):
 
 def _client_receipt_target_query(client_id, case_no, amount_ntd):
     base = (
-        "SELECT obligation.obligation_identity "
+        "SELECT obligation.obligation_identity,obligation.due_date "
         "FROM client_obligations obligation "
     )
     predicates = (
@@ -821,6 +829,7 @@ def _monthly_payout_target_candidates(rows, trans_date, amount, *, by_case=False
 
 
 def _resolve_staff_payout(connection, candidate):
+    from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount
     staff_id = _single_prefixed_identity(candidate, "staff:")
     if staff_id is None:
         return candidate
@@ -844,6 +853,8 @@ def _resolve_staff_payout(connection, candidate):
         cursor.execute(
             "SELECT obligation.obligation_identity,obligation.due_date,"
             "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligation.obligation_identity) AS has_installments,"
+            "COALESCE((SELECT plan.scheme FROM finance_case_subsidy_plan_events plan WHERE plan.case_no=obligation.case_no ORDER BY plan.version DESC LIMIT 1),'')='split' AS requires_funding_split,"
+            + effective_staff_obligation_amount('obligation') + " AS full_amount_ntd,COALESCE(projection.net_paid_ntd,0) AS settled_total_ntd,"
             "COALESCE(projection.balance_ntd,obligation.amount_due_ntd) "
             "AS amount_due_ntd "
             "FROM staff_obligations obligation "
@@ -865,10 +876,14 @@ def _resolve_staff_payout(connection, candidate):
             scoped_rows = []
             for row in rows:
                 if not row.get('has_installments'):
+                    if row.get('requires_funding_split'):
+                        return replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                            available_actions=('resolve_owning_domain_target',), pending_reason='staff_installment_funding_unconfirmed')
                     scoped_rows.append(row)
                     continue
                 try:
-                    portions = query_staff_funding_portions(cursor, row['obligation_identity'])
+                    portions = query_staff_funding_portions(cursor, row['obligation_identity'],
+                        settled_total=row.get('settled_total_ntd'), amount_total=row.get('full_amount_ntd'))
                     if any(p.remaining_ntd is None for p in portions):
                         raise ValueError('staff_installment_funding_unconfirmed')
                 except ValueError as error:

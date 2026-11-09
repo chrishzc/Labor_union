@@ -974,7 +974,12 @@ def _enrich_bank_transactions(
                         open_rows = receipt_obligations[resolved_case]
                         target_rows = open_rows
                         bank_amount = _integer_money(row)
-                        exact_count = sum(int(item["amount_due_ntd"]) == bank_amount for item in open_rows)
+                        month_rows = [item for item in open_rows if _is_same_month(row.get("transaction_date"), item.get("due_date"))]
+                        exact_count = (
+                            sum(int(item["amount_due_ntd"]) == bank_amount for item in (month_rows or open_rows))
+                            if not any(item.get("due_date") is None for item in open_rows)
+                            else sum(int(item["amount_due_ntd"]) == bank_amount for item in open_rows)
+                        )
                         if exact_count != 1:
                             month_rows = [
                                 item for item in open_rows
@@ -1191,7 +1196,7 @@ def _enrich_bank_transactions(
             if c_type == "client_receipt":
                 exact = [item for item in scoped_rows if int(item["amount_due_ntd"]) == amount]
                 month_exact = [item for item in month_rows if int(item["amount_due_ntd"]) == amount]
-                selected = exact if len(exact) == 1 else month_exact or month_rows
+                selected = month_exact if len(month_exact) == 1 else exact if len(exact) == 1 and not month_rows else month_exact or month_rows
             elif len(month_rows) <= 1:
                 selected = month_rows
             else:

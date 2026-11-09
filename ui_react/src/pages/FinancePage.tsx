@@ -1,11 +1,11 @@
+/**
+ * File: FinancePage.tsx
+ * Description: 呈現帳務四大工作區（案件帳務、銀行對帳、政府補助清單、每月帳務）並協調銀行對帳單匯入與自動核銷生命週期。
+ */
+import React, { useEffect, useRef, useState } from 'react';
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
-/**
- * File: FinancePage.tsx
- * Description: 呈現 Finance 四大主工作區（案件帳務、銀行對帳、政府補助清單、每月帳務），收斂舊作業工具並維護受控銀行交易明細。
- */
-import React, { useEffect, useRef, useState } from 'react';
 import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { Drawer } from '../components/Drawer';
 import './FinancePage.css';
@@ -228,7 +228,6 @@ export const FinancePage: React.FC = () => {
       const receipt = await financeImportMutationClient.ingest(snapshot, command);
       setUnconfirmedIngestion(null);
       setIngestion({ kind: 'ready', data: receipt });
-      setReload(value => value + 1);
       await previewImportedBatch(receipt);
     } catch (error) {
       const status = error instanceof FinanceImportQueryError ? error.status : undefined;
@@ -251,7 +250,6 @@ export const FinancePage: React.FC = () => {
       if (outcome.status === 'committed' && outcome.receipt) {
         setUnconfirmedIngestion(null);
         setIngestion({ kind: 'ready', data: outcome.receipt });
-        setReload(value => value + 1);
         await previewImportedBatch(outcome.receipt);
       } else if (outcome.status === 'rolled_back') {
         setUnconfirmedIngestion(null);
@@ -273,9 +271,18 @@ export const FinancePage: React.FC = () => {
       const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      if (canApplyImportedBatch(preview)) await applyImportedBatch(preview);
+      if (canApplyImportedBatch(preview)) {
+        await applyImportedBatch(preview);
+      } else {
+        setReload(value => value + 1);
+      }
     }
-    catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') }); }
+    catch (error) {
+      if (current('batch-preview', request.sequence, request.controller)) {
+        setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') });
+        setReload(value => value + 1);
+      }
+    }
   };
 
   const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
@@ -293,7 +300,10 @@ export const FinancePage: React.FC = () => {
         batchIdentity: checked.batch_identity,
         previewFingerprint: checked.preview_fingerprint,
       });
-    } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認，請按「以原操作確認匯入結果」。') }); }
+    } catch (error) {
+      setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認，請按「以原操作確認匯入結果」。') });
+      setReload(value => value + 1);
+    }
   };
 
   const observeApplyOutcome = async (
@@ -322,8 +332,6 @@ export const FinancePage: React.FC = () => {
             financeApplyCommandByPreview.current.delete(expected.previewFingerprint);
           }
           if (outcome.status === 'succeeded') {
-            setFinanceWorkbook(null);
-            setBatchPreview({ kind: 'idle' });
             setApplyReason('');
           }
           setBatchOutcome({ kind: 'ready', data: outcome });
@@ -334,20 +342,30 @@ export const FinancePage: React.FC = () => {
       }
       if (current('batch-outcome', request.sequence, request.controller)) {
         setBatchOutcome({ kind: 'error', message: '正式銷帳仍在處理中；可重新查詢結果，不需重複上傳。' });
+        setReload((value) => value + 1);
       }
     } catch (error) {
-      if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
+      if (current('batch-outcome', request.sequence, request.controller)) {
+        setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
+        setReload((value) => value + 1);
+      }
     }
   };
 
   useUnsavedDraft(
     '銀行交易匯入',
-    { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason },
+    { '原因': applyReason },
     {
-      baseline: { '待匯入檔案': '', '原因': '' },
-      enabled: activeTab === 'finance-import' && !caseDrawer && batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && !canApplyImportedBatch(batchPreview.data)),
-      busy: unconfirmedIngestion !== null || importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
-
+      baseline: { '原因': '' },
+      enabled: activeTab === 'finance-import' && !caseDrawer && batchOutcome.kind !== 'ready',
+      busy:
+        unconfirmedIngestion !== null ||
+        importBusy ||
+        ingestion.kind === 'loading' ||
+        batchPreview.kind === 'loading' ||
+        applyJob.kind === 'loading' ||
+        batchOutcome.kind === 'loading' ||
+        (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
       discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); },
     }
   );
@@ -407,7 +425,7 @@ export const FinancePage: React.FC = () => {
           financeWorkbook={financeWorkbook}
           onWorkbookChange={(file) => {
             controllers.current.get('batch-preview')?.abort();
-                    controllers.current.get('batch-outcome')?.abort();
+            controllers.current.get('batch-outcome')?.abort();
             setFinanceWorkbook(file);
             setIngestion({ kind: 'idle' });
             setBatchPreview({ kind: 'idle' });

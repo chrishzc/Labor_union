@@ -1,4 +1,7 @@
-"""Deterministic Finance Import Preview planning from canonical bank facts."""
+"""
+File: planning.py
+Description: 依據正規化銀行流水事實建立決定性的 Finance Import 預覽與核銷計畫。
+"""
 
 from __future__ import annotations
 
@@ -170,16 +173,25 @@ def defer_overlapping_client_receipts(
 ) -> tuple[CanonicalFinanceImportRow, ...]:
     # Each resolved automatic candidate settles its one target in full. Different
     # sources targeting that same full balance require combined cash review,
-    # never a claim that the independent bank transactions are duplicates.
+    # unless a single candidate uniquely matched the obligation in its transaction month.
     target_counts: dict[tuple[str, ...], int] = {}
+    same_month_counts: dict[tuple[str, ...], int] = {}
     for row in rows:
         if _is_exact_client_receipt(row):
             target_counts[row.target_identities] = target_counts.get(row.target_identities, 0) + 1
+            if "exact-open-client-obligation-in-transaction-month" in row.evidence:
+                same_month_counts[row.target_identities] = same_month_counts.get(row.target_identities, 0) + 1
     return tuple(
         replace(row, disposition=FinanceImportDisposition.BUSINESS_PENDING,
                 client_receipt_review=ClientReceiptReviewDiagnostic('client_receipt_overpaid'),
                 available_actions=('resolve_owning_domain_target',))
-        if _is_exact_client_receipt(row) and target_counts[row.target_identities] > 1 else row
+        if _is_exact_client_receipt(row)
+        and target_counts[row.target_identities] > 1
+        and not (
+            same_month_counts.get(row.target_identities, 0) == 1
+            and "exact-open-client-obligation-in-transaction-month" in row.evidence
+        )
+        else row
         for row in rows
     )
 

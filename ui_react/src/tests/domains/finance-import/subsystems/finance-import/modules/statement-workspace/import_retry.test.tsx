@@ -1,3 +1,7 @@
+/**
+ * File: import_retry.test.tsx
+ * Description: 驗證銀行對帳單匯入、自動核銷結果輪詢、預覽狀態保留與失敗重試生命週期。
+ */
 import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {FinancePage} from '../../../../../../../pages/FinancePage';
@@ -151,5 +155,21 @@ describe('finance import operation identity after an observed result',()=>{
     await waitFor(() => expect(financeImportMutationClient.ingest).toHaveBeenCalledTimes(2));
     const [first, retry] = vi.mocked(financeImportMutationClient.ingest).mock.calls;
     expect(retry[1]).toEqual(first[1]);
+  });
+
+  it('preserves batchPreview summary after successful outcome and does not register workbook file as unsaved form field', async () => {
+    const { useUnsavedDraft } = await import('../../../../../../../components/UnsavedChanges');
+    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockResolvedValue({
+      job_id: 'job-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: null,
+      receipt: { batch_identity: preview.batch_identity, resulting_batch_version: 1,
+        preview_fingerprint: fingerprint, reconciled_count: 1, existing_count: 0, pending_count: 0 },
+    });
+    chooseWorkbook();
+    expect(await screen.findByText(/本次自動核銷 1 筆/)).toBeVisible();
+    const draftCalls = vi.mocked(useUnsavedDraft).mock.calls;
+    expect(draftCalls.length).toBeGreaterThan(0);
+    for (const [, draft] of draftCalls) {
+      expect(draft).not.toHaveProperty('待匯入檔案');
+    }
   });
 });

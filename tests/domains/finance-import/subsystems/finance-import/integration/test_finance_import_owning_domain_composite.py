@@ -87,6 +87,42 @@ class _VirtualAccountConnection:
         return self.cursor_instance
 
 
+@pytest.mark.parametrize('split,total,missing', [(False, 18000, False), (True, 30000, False), (True, 30000, True)])
+def test_65_fee_auto_matching_uses_bank_funding_portion_before_owner_preview(monkeypatch, split, total, missing):
+    from unittest.mock import Mock
+    import infrastructure.mysql.finance_import_owning_domain_composite as module
+    import infrastructure.mysql.staff_payout_repository as payout
+    from domains.staff_payables.reconciliation import OutgoingBankFact, StaffPayableFacts, StaffPrimaryBankAccount
+    from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationFacts
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    from datetime import date
+    row = dict(obligation_identity='obligation:fee65', due_date='2026-10-15', amount_due_ntd=total,
+        has_installments=split and not missing, requires_funding_split=split)
+    source = dict(format_id='sinopac', direction='outgoing', memo='合成服務', transaction_date='2026-10-15', currency='TWD')
+    connection = _VirtualAccountConnection((source, (row,)))
+    monkeypatch.setattr(payout, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
+        StaffFundingPortion('client', 18000, date(2026, 10, 15), 0, 18000),
+        StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 0, 12000)))
+    repository = Mock()
+    repository.load.return_value = StaffPayoutReconciliationFacts(4, 8,
+        (OutgoingBankFact('88', 7, MoneyNTD(17935), 'account:7'),), (StaffPrimaryBankAccount('account:7', 7),),
+        (StaffPayableFacts(row['obligation_identity'], 7, MoneyNTD(total), installment_limit=MoneyNTD(18000) if split else None),))
+    monkeypatch.setattr(module, 'MySqlStaffPayoutRepository', lambda *_: repository)
+    candidate = CanonicalFinanceImportRow('finance-import-row:88', 0, MoneyNTD(17935), FinanceClassificationType.STAFF_PAYOUT,
+        FinanceImportDisposition.BUSINESS_PENDING, PreviewFingerprint('a' * 64), target_identities=('staff:7',))
+    result = _resolve_staff_payout(connection, candidate)
+    if missing:
+        assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert result.pending_reason == 'staff_installment_funding_unconfirmed'
+        repository.load.assert_not_called()
+        return
+    assert result.disposition is FinanceImportDisposition.CREATE
+    assert result.target_identities == ('obligation:fee65',)
+    assert result.pending_reason is None
+    repository.load.assert_called_once()
+    repository.append_events.assert_not_called()
+
+
 def _pending_receipt(amount=12000):
     return CanonicalFinanceImportRow(
         "finance-import-row:97",
@@ -168,6 +204,7 @@ def test_taishin_subsidy_records_actual_failed_matching_step(monkeypatch, date, 
     assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert result.target_identities == ()
     owner.assert_not_called()
+
 
 
 @pytest.mark.parametrize(("canonical", "reference"), [
@@ -749,3 +786,40 @@ def test_sinopac_refund_resolver_saves_actual_step_and_keeps_manual_action(monke
     assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert result.available_actions==('resolve_owning_domain_target',)
     owner.assert_not_called()
+
+
+
+def test_sinopac_receipt_with_same_month_open_obligation_does_not_steal_earlier_month_exact_deposit() -> None:
+    deposit = {
+        "obligation_identity": "client-obligation:115000038:deposit",
+        "obligation_type": "deposit",
+        "due_date": "2026-03-15",
+        "amount_due_ntd": 6000,
+    }
+    second = {
+        "obligation_identity": "client-obligation:115000038:second",
+        "obligation_type": "second",
+        "due_date": "2026-10-06",
+        "amount_due_ntd": 18000,
+    }
+    march_conn = _VirtualAccountConnection((
+        {"format_id": "sinopac", "cancellation_code": None, "bank_references": {"銷帳編號": "99781699115038"}, "transaction_date": "2026-03-18"},
+        ({"case_no": "115000038"},),
+        (deposit,),
+    ))
+    march_resolved = _resolve_client_receipt(march_conn, _pending_receipt(6000))
+    assert march_resolved.disposition is FinanceImportDisposition.CREATE
+    assert march_resolved.target_identities == (deposit["obligation_identity"],)
+    assert "exact-open-client-obligation-in-transaction-month" in march_resolved.evidence
+
+    october_conn = _VirtualAccountConnection((
+        {"format_id": "sinopac", "cancellation_code": None, "bank_references": {"銷帳編號": "99781699115038"}, "transaction_date": "2026-10-08"},
+        ({"case_no": "115000038"},),
+        (deposit,),
+        (deposit, second),
+    ))
+    october_resolved = _resolve_client_receipt(october_conn, _pending_receipt(6000))
+    assert october_resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert october_resolved.target_identities == (second["obligation_identity"],)
+    assert october_resolved.client_receipt_review.reason == "client_receipt_underpaid"
+    assert "diff_under:12000" in october_resolved.evidence

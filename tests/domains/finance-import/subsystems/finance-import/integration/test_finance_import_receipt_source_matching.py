@@ -1,3 +1,7 @@
+"""
+File: test_finance_import_receipt_source_matching.py
+Description: 驗證客戶入款來源分類、重疊候選分流與同年月精確配對保留規則。
+"""
 from decimal import Decimal
 from dataclasses import replace
 
@@ -160,6 +164,7 @@ def test_old_client_identity_without_a_virtual_account_or_selected_obligation_is
     assert _bank_row_is_eligible(row, "115000007") is False
 
 
+
 def test_other_client_identity_cannot_cross_the_selected_client_boundary():
     row = {
         "format_id": "legacy",
@@ -180,6 +185,7 @@ def test_other_client_identity_cannot_cross_the_selected_client_boundary():
     }
 
     assert _bank_row_is_eligible(row, "115000007") is False
+
 
 
 def _incoming_row():
@@ -222,3 +228,18 @@ def _resolved_row(row_identity, target="deposit:C-1"):
         ("sinopac_valid_virtual_account",),
         ("preview_apply",),
     )
+
+
+def test_same_month_exact_receipt_is_not_blocked_by_cross_month_competing_receipt():
+    same_month = replace(
+        _resolved_row("finance-import-row:11", "deposit:C-1"),
+        evidence=("exact-open-client-obligation", "exact-open-client-obligation-in-transaction-month", "sinopac_valid_virtual_account"),
+    )
+    cross_month = replace(
+        _resolved_row("finance-import-row:12", "deposit:C-1"),
+        evidence=("exact-open-client-obligation", "sinopac_valid_virtual_account"),
+    )
+    first, second = defer_overlapping_client_receipts((same_month, cross_month))
+    assert first.disposition is FinanceImportDisposition.CREATE
+    assert second.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert second.client_receipt_review.reason == "client_receipt_overpaid"
