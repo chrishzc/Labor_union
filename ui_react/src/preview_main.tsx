@@ -8,197 +8,138 @@ import './styles/design-tokens.css';
 import './components/FinanceCompactCase.css';
 import './components/FinanceCaseAccounting.css';
 import './components/FinanceBankReconciliationWorkspace.css';
+import { ClientReceiptReconciliationPanel } from './components/ClientReceiptReconciliationPanel';
+import { clientReceiptQueryClient } from './api/client_finance/client_receipt_query_client';
+import { clientReceiptReconciliationClient } from './api/client_finance/client_receipt_reconciliation_client';
+import { financeAccountingClient } from './api/finance_import/finance_accounting_client';
 
-// 狀況 1：客戶入款（標準版範本，對照截圖 2）
+const syntheticCaseNo = '115000103';
+const syntheticReceiptFacts = {
+  case_no: syntheticCaseNo,
+  account_version: 1,
+  bank_facts: [
+    {
+      finance_import_row_id: 241,
+      amount_ntd: 6000,
+      transaction_date: '2026-06-29',
+      dedup_fingerprint: 'a'.repeat(64),
+    },
+    {
+      finance_import_row_id: 365,
+      amount_ntd: 12000,
+      transaction_date: '2026-10-20',
+      dedup_fingerprint: 'b'.repeat(64),
+    },
+  ],
+  obligations: [
+    {
+      obligation_identity: 'historical-service:115000103:revision:1:client:receivable_from_client',
+      payment_stage: 'adjustment' as const,
+      amount_due_ntd: 18000,
+      due_date: null,
+    },
+    {
+      obligation_identity: 'client-obligation:115000103:deposit',
+      payment_stage: 'deposit' as const,
+      amount_due_ntd: 6000,
+      due_date: '2026-06-26',
+    },
+    {
+      obligation_identity: 'client-obligation:115000103:first',
+      payment_stage: 'first' as const,
+      amount_due_ntd: 12000,
+      due_date: '2026-10-19',
+    },
+  ],
+};
+
+clientReceiptQueryClient.query = async () => syntheticReceiptFacts;
+financeAccountingClient.query = async () => ({
+  case_no: syntheticCaseNo,
+  client_name: '柯雅玲',
+  receivable_ntd: 18000,
+  received_ntd: 0,
+  payable_ntd: null,
+  paid_ntd: null,
+  pending_warning_count: 0,
+  customer_amount_ntd: 18000,
+  customer_fully_received: false,
+  client_items: syntheticReceiptFacts.obligations.map((item) => ({
+    identity: item.obligation_identity,
+    direction: 'receivable' as const,
+    label: item.payment_stage,
+    party: '柯雅玲',
+    expected_ntd: item.amount_due_ntd,
+    actual_ntd: 0,
+    has_payment: false,
+    version: `1:1:0`,
+    due_date: item.due_date,
+    remaining_ntd: item.amount_due_ntd,
+  })),
+  staff_items: [],
+  transactions: [],
+  warnings: [],
+});
+clientReceiptReconciliationClient.preview = async (_caseNo, selection, action) => {
+  const bankTotal = syntheticReceiptFacts.bank_facts
+    .filter((b) => selection.finance_import_row_ids.includes(b.finance_import_row_id))
+    .reduce((s, b) => s + b.amount_ntd, 0);
+  const selectedObligations = syntheticReceiptFacts.obligations.filter((o) =>
+    selection.obligation_identities.includes(o.obligation_identity)
+  );
+  const obligationTotal = selectedObligations.reduce((s, o) => s + o.amount_due_ntd, 0);
+  const status =
+    bankTotal === obligationTotal
+      ? 'exact'
+      : action === 'partial'
+      ? 'partial'
+      : action === 'overage'
+      ? 'overage'
+      : 'review_required';
+  let remainingBank = bankTotal;
+  const allocations = selectedObligations.map((o) => {
+    const allocated = Math.min(remainingBank, o.amount_due_ntd);
+    remainingBank -= allocated;
+    return {
+      bank_fact_identity: String(selection.finance_import_row_ids[0] ?? 365),
+      obligation_identity: o.obligation_identity,
+      amount: { amount: allocated },
+    };
+  });
+  return {
+    account_version: 1,
+    preview_fingerprint: 'c'.repeat(64),
+    candidate: {
+      status,
+      payment_stage: null,
+      bank_total: { amount: bankTotal },
+      obligation_total: { amount: obligationTotal },
+      overage_amount: { amount: Math.max(0, bankTotal - obligationTotal) },
+      allocations,
+      blockers: status === 'review_required' ? ['amount_mismatch'] : [],
+      settlement_identity: 'd'.repeat(64),
+    },
+  };
+};
+clientReceiptReconciliationClient.apply = async (caseNo) => ({
+  case_no: caseNo,
+  account_version: 1,
+  status: 'exact',
+  settlement_identity: 'd'.repeat(64),
+  ledger_entry_count: 1,
+  allocation_count: 1,
+  blockers: [],
+});
+
+// 狀況 1：客戶入款（標準版範本，直接掛載真實 ClientReceiptReconciliationPanel 與合成測試資料）
 function ClientReceiptReconciliationPreview() {
-  const [selectedBanks, setSelectedBanks] = useState<number[]>([365]);
-  const [selectedItems, setSelectedItems] = useState<string[]>(['first']);
-
-  const bankTotal = selectedBanks.includes(365) ? 12000 : 0;
-  const dueTotal = selectedItems.includes('first') ? 12000 : 0;
-  const diff = bankTotal - dueTotal;
-
   return (
-    <section className="case-accounting-card finance-advanced-reconciliation-card" aria-label="本案待核對客戶入款">
-      <div className="finance-section-heading">
-        <div className="finance-reconciliation-heading-group">
-          <h3>待沖銷銀行入款與期款對核</h3>
-          <span className="finance-tag-imported">入款對帳沖銷</span>
-        </div>
-        <button type="button" className="finance-btn-secondary">重新查詢</button>
-      </div>
-
-      <div className="finance-advanced-reconciliation-guide">
-        <strong>💡 作用說明：</strong>銀行對帳單已辨識到本案的匯款流水（如下左側）。請確認要將此筆款項<strong>沖抵哪一期款項</strong>（如下右側）。核對確認後，系統將正式記錄實收並更新期款狀態。
-      </div>
-
-      <div className="finance-recon-deck">
-        <div className="finance-recon-deck-grid">
-          {/* 左側：銀行收到的入款 */}
-          <div className="finance-recon-col finance-recon-col-bank">
-            <div className="finance-recon-col-header">
-              <span className="finance-recon-badge-step">步驟 1</span>
-              <h4>銀行已收到款項（來源流水）</h4>
-            </div>
-            <div className="finance-table-container">
-              <table className="finance-table finance-recon-table">
-                <thead>
-                  <tr>
-                    <th>納入</th>
-                    <th>入帳日期</th>
-                    <th>銀行來源</th>
-                    <th>入款金額</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selectedBanks.includes(241)}
-                        onChange={(e) => setSelectedBanks(e.target.checked ? [...selectedBanks, 241] : selectedBanks.filter(id => id !== 241))}
-                      />
-                    </td>
-                    <td><strong>2026-06-29</strong></td>
-                    <td>
-                      <span>永豐銀行入款</span>
-                      <small className="finance-mono-sub">bank:241</small>
-                    </td>
-                    <td><strong className="finance-paid">NT$ 6,000</strong></td>
-                  </tr>
-                  <tr className="is-selected-row">
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selectedBanks.includes(365)}
-                        onChange={(e) => setSelectedBanks(e.target.checked ? [...selectedBanks, 365] : selectedBanks.filter(id => id !== 365))}
-                      />
-                    </td>
-                    <td><strong>2026-10-20</strong></td>
-                    <td>
-                      <span>永豐銀行入款</span>
-                      <small className="finance-mono-sub">bank:365</small>
-                    </td>
-                    <td><strong className="finance-paid">NT$ 12,000</strong></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="finance-recon-col-summary">
-              <span>已勾選入款合計：<strong>NT$ {bankTotal.toLocaleString()}</strong>（共 {selectedBanks.length} 筆）</span>
-            </div>
-          </div>
-
-          {/* 中間箭頭 */}
-          <div className="finance-recon-arrow-divider" aria-hidden="true">
-            <span className="finance-recon-arrow-icon">➔</span>
-            <small>沖抵核銷</small>
-          </div>
-
-          {/* 右側：欲沖抵的案件期款 */}
-          <div className="finance-recon-col finance-recon-col-target">
-            <div className="finance-recon-col-header">
-              <span className="finance-recon-badge-step">步驟 2</span>
-              <h4>預計沖抵案件期款（核銷目標）</h4>
-            </div>
-            <div className="finance-recon-obligations-list">
-              <label className={`finance-recon-obligation-item ${selectedItems.includes('adj') ? 'is-selected-item' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={selectedItems.includes('adj')}
-                  onChange={(e) => setSelectedItems(e.target.checked ? [...selectedItems, 'adj'] : selectedItems.filter(id => id !== 'adj'))}
-                />
-                <div className="finance-recon-ob-info">
-                  <div className="finance-recon-ob-name">
-                    <strong>調整應收款</strong>
-                    <small>未定到期日</small>
-                  </div>
-                  <div className="finance-recon-ob-meta">
-                    <span>待收 <strong>NT$ 18,000</strong></span>
-                    <small className="finance-mono-sub">client:receivable_from_client</small>
-                  </div>
-                </div>
-              </label>
-
-              <label className={`finance-recon-obligation-item ${selectedItems.includes('deposit') ? 'is-selected-item' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={selectedItems.includes('deposit')}
-                  onChange={(e) => setSelectedItems(e.target.checked ? [...selectedItems, 'deposit'] : selectedItems.filter(id => id !== 'deposit'))}
-                />
-                <div className="finance-recon-ob-info">
-                  <div className="finance-recon-ob-name">
-                    <strong>訂金期款</strong>
-                    <small>到期日：2026-06-26</small>
-                  </div>
-                  <div className="finance-recon-ob-meta">
-                    <span>待收 <strong>NT$ 6,000</strong></span>
-                    <small className="finance-mono-sub">client-obligation:115000103:deposit</small>
-                  </div>
-                </div>
-              </label>
-
-              <label className={`finance-recon-obligation-item ${selectedItems.includes('first') ? 'is-selected-item' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={selectedItems.includes('first')}
-                  onChange={(e) => setSelectedItems(e.target.checked ? [...selectedItems, 'first'] : selectedItems.filter(id => id !== 'first'))}
-                />
-                <div className="finance-recon-ob-info">
-                  <div className="finance-recon-ob-name">
-                    <strong>第一期期款</strong>
-                    <small>到期日：2026-10-19</small>
-                  </div>
-                  <div className="finance-recon-ob-meta">
-                    <span>待收 <strong>NT$ 12,000</strong></span>
-                    <small className="finance-mono-sub">client-obligation:115000103:first</small>
-                  </div>
-                </div>
-              </label>
-            </div>
-            <div className="finance-recon-col-summary">
-              <span>已勾選期款待收：<strong>NT$ {dueTotal.toLocaleString()}</strong>（共 {selectedItems.length} 項）</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 試算與決策條 */}
-        <div className="finance-recon-calculation-bar">
-          <div className="finance-recon-calc-metrics">
-            <div>
-              <small>勾選銀行實收</small>
-              <strong>NT$ {bankTotal.toLocaleString()}</strong>
-            </div>
-            <span className="finance-recon-calc-operator">−</span>
-            <div>
-              <small>對應期款待收</small>
-              <strong>NT$ {dueTotal.toLocaleString()}</strong>
-            </div>
-            <span className="finance-recon-calc-operator">=</span>
-            <div>
-              <small>沖銷差額</small>
-              <strong className={diff === 0 ? 'finance-paid' : 'finance-diff-under'}>
-                {diff === 0 ? '金額相符' : `差額 NT$ ${diff.toLocaleString()}`}
-              </strong>
-            </div>
-          </div>
-
-          <div className="finance-recon-calc-explanation">
-            {diff === 0 ? (
-              <span>入款金額與本次選取期款相符；核對預覽後，確認本次核銷金額與案件剩餘待收。</span>
-            ) : (
-              <span>入款金額與選取期款不符，請調整勾選項目或選擇差額處理策略。</span>
-            )}
-          </div>
-
-          <div className="finance-recon-action-row">
-            <button type="button" className="finance-btn-primary finance-btn-lg">
-              核對本案入款
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
+    <ClientReceiptReconciliationPanel
+      caseNo={syntheticCaseNo}
+      requiredBankRowId={365}
+      initialObligationId="client-obligation:115000103:first"
+      onChanged={() => {}}
+    />
   );
 }
 

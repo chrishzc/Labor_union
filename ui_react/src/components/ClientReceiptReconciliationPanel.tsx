@@ -55,6 +55,18 @@ function getObligationLabel(identity: string, stage?: string | null): string {
   return identity;
 }
 
+function isSelectableReceiptObligation(
+  item: ClientReceiptQuery['obligations'][number],
+  initialObligationId?: string,
+): boolean {
+  if (item.obligation_identity === initialObligationId) return true;
+  if (item.obligation_identity.startsWith('historical-service:')) return false;
+  if (item.payment_stage === 'adjustment') {
+    return item.obligation_identity.startsWith('client-cancellation:create_adjustment:');
+  }
+  return true;
+}
+
 export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersion=0,requiredBankRowId,initialObligationId,onBusyChange}:{
   caseNo:string;onChanged:()=>void;refreshVersion?:number;requiredBankRowId?:number;initialObligationId?:string;onBusyChange?:(busy:boolean)=>void;
 }){
@@ -98,28 +110,30 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
           : '此筆交易尚未辨識為本案入款，請返回銀行對帳重新確認歸屬。');
         return;
       }
-      if(!posted&&initialObligationId!==undefined&&!value.obligations.some(item=>item.obligation_identity===initialObligationId)){
+      const selectable=value.obligations.filter(item=>isSelectableReceiptObligation(item,initialObligationId));
+      if(!posted&&initialObligationId!==undefined&&!selectable.some(item=>item.obligation_identity===initialObligationId)){
         setError('對應期款已變更，請返回銀行對帳重新查詢。');
         return;
       }
       setFacts(value);
       setCaseBalance(remaining);
       setSelectedBanks(requiredBankRowId===undefined?banks:banks.filter(id=>id===requiredBankRowId));
-      setSelectedItems(initialObligationId ? value.obligations.filter(item=>item.obligation_identity===initialObligationId).map(item=>item.obligation_identity) : requiredBankRowId===undefined?value.obligations.map(row=>row.obligation_identity):[]);
+      setSelectedItems(initialObligationId ? selectable.filter(item=>item.obligation_identity===initialObligationId).map(item=>item.obligation_identity) : requiredBankRowId===undefined?selectable.map(row=>row.obligation_identity):[]);
     }).catch(()=>{if(!controller.signal.aborted)setError('本案待核對入款暫時無法取得，請重新查詢。');});
     });
     return()=>controller.abort();
   },[caseNo,revision,refreshVersion,requiredBankRowId,initialObligationId]);
 
+  const selectableObligations=facts?.obligations.filter(item=>isSelectableReceiptObligation(item,initialObligationId))??[];
   const selection=():ReceiptSelection=>({payment_stage:null,finance_import_row_ids:selectedBanks,obligation_identities:selectedItems});
   const bankTotal=facts?.bank_facts.filter(row=>selectedBanks.includes(row.finance_import_row_id)).reduce((sum,row)=>sum+BigInt(row.amount_ntd),0n)??0n;
-  const dueTotal=facts?.obligations.filter(row=>selectedItems.includes(row.obligation_identity)).reduce((sum,row)=>sum+BigInt(row.amount_due_ntd),0n)??0n;
+  const dueTotal=selectableObligations.filter(row=>selectedItems.includes(row.obligation_identity)).reduce((sum,row)=>sum+BigInt(row.amount_due_ntd),0n);
   const diff=bankTotal-dueTotal;
-  const selectionHint=facts&&!facts.obligations.length
+  const selectionHint=facts&&!selectableObligations.length
     ? '本案目前沒有未清期款，無款項可核銷。請回案件帳務查核。'
     : !selectedItems.length ? '請先選擇本次要核銷的期款，再核對金額。'
     : !selectedBanks.length ? '請先選擇本次要核銷的銀行入款，再核對金額。' : '';
-  const previewRows=preview&&preview.candidate.status!=='review_required' ? facts?.obligations.filter(item=>selectedItems.includes(item.obligation_identity)).map(item=>{
+  const previewRows=preview&&preview.candidate.status!=='review_required' ? selectableObligations.filter(item=>selectedItems.includes(item.obligation_identity)).map(item=>{
     const allocated=preview.candidate.allocations.filter(row=>row.obligation_identity===item.obligation_identity).reduce((sum,row)=>sum+BigInt(row.amount.amount),0n);
     return {...item,allocated,remaining:BigInt(item.amount_due_ntd)-allocated};
   }) : undefined;
@@ -243,7 +257,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                 <details open className="finance-recon-obligations-card">
                   <summary>查看／調整本次核對款項</summary>
                   <div className="finance-recon-obligations-list">
-                    {facts.obligations.map(item => {
+                    {selectableObligations.map(item => {
                       const isChecked = selectedItems.includes(item.obligation_identity);
                       return (
                         <label className={`finance-recon-obligation-item ${isChecked ? 'is-selected-item' : ''}`} key={item.obligation_identity}>
@@ -264,7 +278,6 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                             </div>
                             <div className="finance-recon-ob-meta">
                               <span>待收 <strong>{financeMoney(item.amount_due_ntd)}</strong></span>
-                              <small className="finance-mono-sub">{item.obligation_identity}</small>
                             </div>
                           </div>
                         </label>

@@ -713,6 +713,12 @@ def _finance_values(connection, case_no):
             receivable_rows = tuple(
                 r for r in obligation_rows if r.get("direction") == "receivable_from_client"
             )
+            if any(r.get("obligation_type") in ("deposit", "first", "second") for r in receivable_rows):
+                receivable_rows = tuple(
+                    r
+                    for r in receivable_rows
+                    if not str(r.get("obligation_identity", "")).startswith("historical-service:")
+                )
             deposit_amount = sum(
                 int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "deposit"
             )

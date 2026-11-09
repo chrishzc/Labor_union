@@ -1,3 +1,7 @@
+/**
+ * File: receipt_reconciliation.test.tsx
+ * Description: 驗證本案客戶入款核銷面板之期款選取過濾、餘額試算與阻擋訊息。
+ */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientReceiptReconciliationPanel } from '../../../../../../../components/ClientReceiptReconciliationPanel';
@@ -171,7 +175,7 @@ describe('本案客戶入款核銷',()=>{
   it('keeps an undated adjustment in the whole-case balance without adding staff or refund settlement gates',async()=>{
     const original={...facts,bank_facts:[{...facts.bank_facts[0],amount_ntd:10000}],obligations:[
       {...facts.obligations[0],amount_due_ntd:10000},
-      {obligation_identity:'adjustment',payment_stage:'adjustment' as const,amount_due_ntd:8000,due_date:null},
+      {obligation_identity:'historical-service:CASE:revision:1:client:receivable_from_client',payment_stage:'adjustment' as const,amount_due_ntd:8000,due_date:null},
     ]};
     const after={...original,account_version:2,bank_facts:[],obligations:[original.obligations[1]]};
     vi.mocked(clientReceiptQueryClient.query).mockImplementation(async()=>vi.mocked(clientReceiptReconciliationClient.apply).mock.calls.length?after:original);
@@ -188,7 +192,10 @@ describe('本案客戶入款核銷',()=>{
     ]}});
     vi.mocked(clientReceiptReconciliationClient.apply).mockResolvedValue({case_no:'CASE',account_version:2,status:'exact',settlement_identity:'d'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]});
     render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} initialObligationId="first" onChanged={vi.fn()}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    const inspectButton=await screen.findByRole('button',{name:'核對本案入款'});
+    expect(screen.queryByText('調整應收款')).not.toBeInTheDocument();
+    expect(screen.queryByText('historical-service:CASE:revision:1:client:receivable_from_client')).not.toBeInTheDocument();
+    fireEvent.click(inspectButton);
     const summary=await screen.findByLabelText('本次核銷後餘額');
     expect(within(summary).getByText('其他未選期款待收').nextElementSibling).toHaveTextContent('NT$ 8,000');
     expect(within(summary).getByText('核銷後案件全部應收餘額').nextElementSibling).toHaveTextContent('NT$ 8,000');

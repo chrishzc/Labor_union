@@ -961,7 +961,10 @@ def _enrich_bank_transactions(
                                 "AND status='open' AND amount_due_ntd>0",
                                 (resolved_case,),
                             )
-                            receipt_obligations[resolved_case] = cursor.fetchall()
+                            fetched_rows = cursor.fetchall()
+                            if any(not str(r.get("obligation_identity", "")).startswith("historical-service:") for r in fetched_rows):
+                                fetched_rows = [r for r in fetched_rows if not str(r.get("obligation_identity", "")).startswith("historical-service:")]
+                            receipt_obligations[resolved_case] = fetched_rows
                         open_rows = receipt_obligations[resolved_case]
                         target_rows = open_rows
                         bank_amount = _integer_money(row)

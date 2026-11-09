@@ -404,7 +404,7 @@ def _resolve_client_receipt(connection, candidate):
                 case_no,
             )
             cursor.execute(statement, parameters)
-            open_rows = tuple(cursor.fetchall())
+            open_rows = _without_redundant_historical_baseline(tuple(cursor.fetchall()))
     except StopIteration:
         return candidate
     if not open_rows:
@@ -493,6 +493,20 @@ def _virtual_account_case_info(connection, row_identity):
     return str(resolution["case_no"]), row.get("transaction_date"), blocker
 
 
+def _without_redundant_historical_baseline(rows):
+    has_stage_or_formal = any(
+        not str(row.get("obligation_identity", "")).startswith("historical-service:")
+        for row in rows
+    )
+    if not has_stage_or_formal:
+        return rows
+    return tuple(
+        row
+        for row in rows
+        if not str(row.get("obligation_identity", "")).startswith("historical-service:")
+    )
+
+
 def _client_receipt_open_obligations_query(client_id, case_no):
     base = (
         "SELECT obligation.obligation_identity,obligation.due_date,obligation.amount_due_ntd,obligation.obligation_type "
@@ -547,6 +561,16 @@ def _client_receipt_target_query(client_id, case_no, amount_ntd):
         "AND obligation.direction='receivable_from_client' "
         "AND obligation.status='open' "
         "AND obligation.amount_due_ntd=%s "
+        "AND NOT ("
+        "obligation.obligation_identity LIKE 'historical-service:%%:client:receivable_from_client' "
+        "AND EXISTS ("
+        "SELECT 1 FROM client_obligations stage_obligation "
+        "WHERE stage_obligation.case_no=obligation.case_no "
+        "AND stage_obligation.direction='receivable_from_client' "
+        "AND stage_obligation.status='open' "
+        "AND stage_obligation.obligation_type IN ('deposit','first','second')"
+        ")"
+        ") "
         "ORDER BY obligation.obligation_identity"
     )
     if client_id is not None:

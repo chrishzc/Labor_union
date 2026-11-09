@@ -105,7 +105,7 @@ def check_case_accounting_details(cursor, case_no: str) -> tuple[bool, int, str]
     ledger_count = int(row["cnt"] if isinstance(row, dict) else row[0]) if row else 0
 
     cursor.execute(
-        "SELECT COUNT(*) AS cnt FROM client_obligations WHERE case_no=%s AND status IN ('paid', 'partially_paid')",
+        "SELECT COUNT(*) AS cnt FROM client_obligations WHERE case_no=%s AND status IN ('paid', 'partially_paid', 'settled')",
         (case_no,),
     )
     row = cursor.fetchone()
