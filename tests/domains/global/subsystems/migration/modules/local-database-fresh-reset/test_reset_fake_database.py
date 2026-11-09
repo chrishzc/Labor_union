@@ -1,3 +1,8 @@
+"""
+檔案：test_reset_fake_database.py
+說明：驗證 MySQL schema reset 的目標資料庫、環境、遠端主機授權與 root 認證保留契約。
+"""
+
 from pathlib import Path
 
 import pytest
@@ -337,14 +342,29 @@ def test_validate_target_supports_nas_operator_and_remote_host():
             operator_reset=True,
         )
 
-    # production 模式下，即使傳入 allow_remote_host 仍嚴格拒絕遠端 host
+    # production 模式下支援 lu_nas_* operator reset（含本機或明確授權的遠端 host）
+    assert resetter.validate_target(
+        _config(nas_db),
+        {"APP_ENV": "production"},
+        nas_db,
+        operator_reset=True,
+    ) == nas_db
+
+    assert resetter.validate_target(
+        _config(nas_db, host=remote_host),
+        {"APP_ENV": "production"},
+        nas_db,
+        operator_reset=True,
+        allow_remote_host=True,
+    ) == nas_db
+
+    # production 模式下未傳入 allow_remote_host 時仍拒絕遠端 host
     with pytest.raises(resetter.FakeDatabaseResetError, match="local MySQL host"):
         resetter.validate_target(
-            _config("union_db", host=remote_host),
+            _config(nas_db, host=remote_host),
             {"APP_ENV": "production"},
-            "union_db",
+            nas_db,
             operator_reset=True,
-            allow_remote_host=True,
         )
 
 

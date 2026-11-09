@@ -1,11 +1,6 @@
-"""Canonical local MySQL schema reset runner.
-
-The module keeps two explicit destructive surfaces: disposable ``lu_test_*``
-targets require a target-matching backup, while the operator-only ``union_db``
-route requires an exact ``RESET`` business-data discard confirmation and preserves
-the existing root account and MFA facts. Both routes require
-a prior dry-run plan and a terminal receipt.  Dry-run, verify, and replay paths
-do not open a database connection.
+"""
+檔案：scripts/reset_fake_database.py
+說明：MySQL canonical schema 重建執行器；驗證目標庫與環境，支援 operator reset 保留既有 root 與 MFA。
 """
 
 from __future__ import annotations
@@ -91,9 +86,9 @@ def validate_target(
     )
     is_local_host = requested_host.lower() in {"localhost", "127.0.0.1", "::1"}
     if configured_environment in {"prod", "production"}:
-        if not is_local_host:
+        if not is_local_host and not allow_remote:
             raise FakeDatabaseResetError("destructive reset requires local MySQL host")
-        if not operator_reset or target != _OPERATOR_TARGET:
+        if not operator_reset or not _is_operator_target(target):
             raise FakeDatabaseResetError("production mode requires the local union_db operator reset route")
     elif configured_environment not in _LOCAL_PROFILES:
         raise FakeDatabaseResetError("development or validation environment required")
