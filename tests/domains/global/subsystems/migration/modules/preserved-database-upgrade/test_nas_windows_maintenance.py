@@ -628,3 +628,162 @@ def test_resolve_client_tool_prioritizes_tools_mysql_folder(tmp_path, monkeypatc
     resolved = nas.resolve_client_tool("mysqldump")
     assert resolved == str(fake_dump.resolve())
     assert nas.resolve_client_tool("mysql") == "fallback_from_path"
+
+
+def test_verify_restored_inventory_semantic_match_and_mismatches():
+    base = {
+        "tables": [{"name": "members", "kind": "BASE TABLE"}, {"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+        "collation": "utf8mb4_unicode_ci",
+        "definitions_sha256": "abc123expected",
+    }
+    # 1. definitions_sha256 與 collation 格式不同，但語意物件結構完全吻合 -> 放行通過
+    actual_diff_sha = {
+        "tables": [{"name": "members", "kind": "BASE TABLE"}, {"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+        "collation": "utf8mb4_0900_ai_ci",
+        "definitions_sha256": "xyz789drift",
+    }
+    nas.verify_restored_inventory(actual_diff_sha, base)
+
+    # 2. 缺少表格 -> 拋出 MaintenanceBlocked 並指出缺少表格
+    actual_missing_table = {
+        "tables": [{"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+    }
+    with pytest.raises(nas.MaintenanceBlocked, match=r"缺少資料表: \['members'\]"):
+        nas.verify_restored_inventory(actual_missing_table, base)
+
+    # 3. 多出非預期表格
+    actual_extra_table = {
+        "tables": [{"name": "members", "kind": "BASE TABLE"}, {"name": "v_members", "kind": "VIEW"}, {"name": "hacked", "kind": "BASE TABLE"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+    }
+    with pytest.raises(nas.MaintenanceBlocked, match=r"多出非預期資料表: \['hacked'\]"):
+        nas.verify_restored_inventory(actual_extra_table, base)
+
+    # 4. 表格型態不符
+    actual_kind_mismatch = {
+        "tables": [{"name": "members", "kind": "VIEW"}, {"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+    }
+    with pytest.raises(nas.MaintenanceBlocked, match=r"資料表型態不符: \['members'\]"):
+        nas.verify_restored_inventory(actual_kind_mismatch, base)
+
+    # 5. 缺少觸發程序或預存程序
+    actual_missing_routine = {
+        "tables": [{"name": "members", "kind": "BASE TABLE"}, {"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": [],
+        "events": ["ev_daily_sync"],
+        "charset": "utf8mb4",
+    }
+    with pytest.raises(nas.MaintenanceBlocked, match="缺少預存程序或函數"):
+        nas.verify_restored_inventory(actual_missing_routine, base)
+
+    # 6. 字元集不一致
+    actual_wrong_charset = {
+        "tables": [{"name": "members", "kind": "BASE TABLE"}, {"name": "v_members", "kind": "VIEW"}],
+        "triggers": ["trg_members_update"],
+        "routines": ["sp_calculate_fees"],
+        "events": ["ev_daily_sync"],
+        "charset": "latin1",
+    }
+    with pytest.raises(nas.MaintenanceBlocked, match="字元集不相符"):
+        nas.verify_restored_inventory(actual_wrong_charset, base)
+
+
+def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch):
+    archive, _ = make_backup(settings, monkeypatch)
+    class DummyCursor:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, *args, **kwargs): pass
+        def fetchall(self): return [{"Msg_type": "status", "Msg_text": "OK"}]
+    class DummyConnection:
+        def cursor(self): return DummyCursor()
+        def close(self): pass
+    dummy_config = SimpleNamespace(
+        host="127.0.0.1",
+        port=3306,
+        user="root",
+        password="pwd",
+        tls={},
+        settings=settings,
+        client_prefix=lambda *_: ["mysql"],
+        connect=lambda *args: DummyConnection(),
+    )
+    monkeypatch.setattr(nas, "writer", lambda *_: dummy_config)
+    monkeypatch.setattr(nas, "schema_inventory", lambda *args, **kw: {"tables": [{"name": "fixture", "kind": "BASE TABLE"}], "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
+    monkeypatch.setattr(nas.migration, "database_exists", lambda *_: False)
+    monkeypatch.setattr(nas.migration, "restore_sql_dump", lambda *args, **kw: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
+    monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: None)
+    monkeypatch.setattr(nas, "switch_runtime", lambda *args: None)
+
+    from scripts import update_local_database as updater
+    applied_calls = []
+    def fake_preview(cfg, cand, r):
+        if not applied_calls:
+            return {"status": "ready", "pending_releases": [{"release_id": "20261109_add_column"}]}
+        return {"status": "current", "release_id": "20261109_add_column"}
+
+    def fake_apply(cfg, cand, r):
+        applied_calls.append((cand, r))
+        return {"status": "current", "release_id": "20261109_add_column"}
+
+    monkeypatch.setattr(updater, "build_additive_preview", fake_preview)
+    monkeypatch.setattr(updater, "apply_additive_update", fake_apply)
+    monkeypatch.setattr(updater, "require_current_database", lambda res: None)
+
+    run = nas.restore(settings, archive)
+    assert len(applied_calls) == 1
+    assert "lu_nas_restore_" in applied_calls[0][0]
+
+
+def test_restore_blocks_incompatible_version_with_clear_reason(settings, monkeypatch):
+    archive, _ = make_backup(settings, monkeypatch)
+    class DummyCursor:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, *args, **kwargs): pass
+        def fetchall(self): return [{"Msg_type": "status", "Msg_text": "OK"}]
+    dummy_config = SimpleNamespace(
+        host="127.0.0.1",
+        port=3306,
+        user="root",
+        password="pwd",
+        tls={},
+        settings=settings,
+        client_prefix=lambda *_: ["mysql"],
+        connect=lambda *args: SimpleNamespace(cursor=lambda: DummyCursor(), close=lambda: None),
+    )
+    monkeypatch.setattr(nas, "writer", lambda *_: dummy_config)
+    monkeypatch.setattr(nas, "schema_inventory", lambda *args, **kw: {"tables": [{"name": "fixture", "kind": "BASE TABLE"}], "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
+    monkeypatch.setattr(nas.migration, "database_exists", lambda *_: False)
+    monkeypatch.setattr(nas.migration, "restore_sql_dump", lambda *args, **kw: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
+
+    from scripts import update_local_database as updater
+    monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {
+        "status": "blocked",
+        "blocked_reason": "schema_state_drift_detected",
+    })
+
+    with pytest.raises(nas.MaintenanceBlocked, match="不相容.*schema_state_drift_detected.*未切換"):
+        nas.restore(settings, archive)

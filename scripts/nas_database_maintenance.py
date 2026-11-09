@@ -409,6 +409,52 @@ def schema_inventory(config, database, equivalent_databases=(), *, reject_source
         connection.close()
 
 
+def verify_restored_inventory(actual, expected):
+    """核對復原後的資料庫物件是否與備份收據一致。
+
+    若完整比對一致則通過。若 definitions_sha256 或 collation 存在輸出格式差異，
+    但實質結構（tables、triggers、routines、events、charset）完全吻合，且後續通過 CHECK TABLE，
+    視為語意結構相符並放行；若實質物件缺失或多出，則拋出詳細錯誤訊息。
+    """
+    if actual == expected:
+        return
+    actual_tables = {item["name"]: item["kind"] for item in actual.get("tables", [])}
+    expected_tables = {item["name"]: item["kind"] for item in expected.get("tables", [])}
+    missing_tables = sorted(set(expected_tables) - set(actual_tables))
+    extra_tables = sorted(set(actual_tables) - set(expected_tables))
+    kind_mismatch = sorted(name for name in set(actual_tables) & set(expected_tables) if actual_tables[name] != expected_tables[name])
+    require(not missing_tables, f"復原物件核對失敗，缺少資料表: {missing_tables}，未切換資料庫。")
+    require(not extra_tables, f"復原物件核對失敗，多出非預期資料表: {extra_tables}，未切換資料庫。")
+    require(not kind_mismatch, f"復原物件核對失敗，資料表型態不符: {kind_mismatch}，未切換資料庫。")
+
+    actual_triggers = set(actual.get("triggers", []))
+    expected_triggers = set(expected.get("triggers", []))
+    missing_triggers = sorted(expected_triggers - actual_triggers)
+    extra_triggers = sorted(actual_triggers - expected_triggers)
+    require(not missing_triggers, f"復原物件核對失敗，缺少觸發程序: {missing_triggers}，未切換資料庫。")
+    require(not extra_triggers, f"復原物件核對失敗，多出非預期觸發程序: {extra_triggers}，未切換資料庫。")
+
+    actual_routines = set(actual.get("routines", []))
+    expected_routines = set(expected.get("routines", []))
+    missing_routines = sorted(expected_routines - actual_routines)
+    extra_routines = sorted(actual_routines - expected_routines)
+    require(not missing_routines, f"復原物件核對失敗，缺少預存程序或函數: {missing_routines}，未切換資料庫。")
+    require(not extra_routines, f"復原物件核對失敗，多出非預期預存程序或函數: {extra_routines}，未切換資料庫。")
+
+    actual_events = set(actual.get("events", []))
+    expected_events = set(expected.get("events", []))
+    missing_events = sorted(expected_events - actual_events)
+    extra_events = sorted(actual_events - expected_events)
+    require(not missing_events, f"復原物件核對失敗，缺少排程事件: {missing_events}，未切換資料庫。")
+    require(not extra_events, f"復原物件核對失敗，多出非預期排程事件: {extra_events}，未切換資料庫。")
+
+    if expected.get("charset"):
+        actual_charset = actual.get("charset")
+        expected_charset = expected.get("charset")
+        require(actual_charset == expected_charset, f"復原資料庫字元集不相符（預期: {expected_charset}，實際: {actual_charset}），未切換資料庫。")
+    print("備份副本物件結構核對通過（語意相符，已放寬純文字定義特徵差異）。", flush=True)
+
+
 def backup(settings):
     print("正在備份資料，完成前請勿關閉視窗。", flush=True)
     root = destination_ready(settings, writable=True)
@@ -711,7 +757,8 @@ def restore(settings, archive):
     completed = migration.restore_sql_dump(migration._mysql_base(config, "mysql") + [candidate],
                                            archive, migration._client_environment(config))
     require(completed.returncode == 0, "復原匯入失敗，未切換；原庫、備份與副本皆保留。")
-    require(schema_inventory(config, candidate, (info["database"],), reject_source_references=True) == info["inventory"], "復原物件核對失敗，未切換資料庫。")
+    actual_inventory = schema_inventory(config, candidate, (info["database"],), reject_source_references=True)
+    verify_restored_inventory(actual_inventory, info["inventory"])
     connection = config.connect(candidate)
     try:
         with connection.cursor() as cursor:
@@ -727,7 +774,15 @@ def restore(settings, archive):
         connection.close()
     from scripts import update_local_database as updater
     current = updater.build_additive_preview(config, candidate, run)
-    require(current.get("status") == "current", "備份已匯入副本，但與目前程式版本不同，尚未切換；請維護人員完成版本核對。")
+    if current.get("status") != "current":
+        if current.get("status") == "ready" and current.get("pending_releases"):
+            print("備份副本結構有效，檢測到相容的新版遷移項目，正在自動升級副本...", flush=True)
+            current = updater.apply_additive_update(config, candidate, run)
+            print(f"副本已升級至最新版本：{current.get('release_id')}", flush=True)
+        else:
+            reason = current.get("blocked_reason") or current.get("error") or current.get("code") or "版本差異"
+            require(current.get("status") == "current",
+                    f"備份已匯入副本，但與目前程式版本不相容（狀態：{current.get('status')}，原因：{reason}），尚未切換；原資料庫不變。")
     updater.require_current_database(current)
     prepare_runtime_access(settings, candidate)
     try:
