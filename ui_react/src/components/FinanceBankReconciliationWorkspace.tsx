@@ -302,6 +302,22 @@ export function FinanceBankReconciliationWorkspace({
         </div>
 
         {/* 上傳與審查即時結果 */}
+        {batchPreview.kind==='ready'&&batchPreview.data.rows.some(row=>row.subsidy_preflight)&&<section aria-label="補助處理預檢">
+          <h4>本次補助處理預檢</h4><p>以下為套用前的計畫；實際確認、建款與核銷結果依套用回讀。</p>
+          {batchPreview.data.rows.map(row=>{const p=row.subsidy_preflight;if(!p)return null;const amount=(n:number|bigint|null)=>n==null?'待確認':n.toLocaleString()+' 元';return <div key={row.row_identity}>
+            <strong>{p.case_no}：{p.scheme==='split'?'補助轉交月嫂':'補助退還先墊款客戶'}</strong>
+            <p>本案補助 {amount(p.subsidy_ntd)}；銀行原實付 {amount(p.bank_cash_ntd)}。</p>
+            {p.confirmation_only?<p>本次只確認方案，尚未到款項成立時點，不建款或核銷。</p>:<p>本次款項 {amount(p.payable_amount_ntd)}，日期 {p.payable_due_date??'待確認'}；手續費 {amount(p.transfer_fee_ntd)}；預計核銷 {amount(p.settlement_ntd)}，剩餘 {amount(p.remaining_ntd)}。</p>}
+            {p.blocker&&!p.confirmation_only&&<p role="alert">{/[\u3400-\u9fff]/.test(p.blocker)?p.blocker:financeImportReviewReason({classification_type:row.classification_type,direction:'outgoing',available_actions:row.available_actions,disposition:row.disposition,review_reason:p.blocker},row)}</p>}
+          </div>;})}
+          {batchPreview.data.counts.ready_dispatch > 0 && applyJob.kind === 'idle' && batchOutcome.kind === 'idle' && submittedFinanceCommand === undefined && (
+            <button type="button" className="finance-btn-primary" disabled={importBusy}
+              onClick={() => onApply(batchPreview.data)}>
+              確認套用本次明細
+            </button>
+          )}
+          {batchPreview.data.counts.ready_dispatch === 0 && <p>本次沒有通過預檢的可套用動作，請先核對上述原因。</p>}
+        </section>}
         {ingestion.kind === 'error' && <p className="finance-state error" role="alert">{ingestion.message}</p>}
         {ingestionNeedsLookup && (
           <button type="button" className="finance-btn-secondary" disabled={importBusy} onClick={onLookupIngestion}>

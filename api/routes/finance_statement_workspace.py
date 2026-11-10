@@ -27,6 +27,7 @@ from api.schemas.finance_import import (
 from domains.finance_import.statement_archive import STATEMENT_COLUMNS
 from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning, ArrangementNotReady
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker
+from api.schemas.finance_import import SubsidyPlanPreviewView
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
 from subsystems.finance_import.statement_archive import StatementCommandConflict
 
@@ -84,6 +85,8 @@ def _case_view(case):
     for field in ("client_items", "staff_items"):
         for item, projected in zip(getattr(case, field), payload[field]):
             projected.update(remaining_ntd=item.remaining_ntd, noncash_ntd=item.noncash_ntd)
+            if field == 'staff_items':
+                projected['funding_portions'] = list(projected['funding_portions'])
     payload["bank_facts"] = [
         {**bank, "cases": list(bank["cases"])} for bank in payload["bank_facts"]
     ]
@@ -201,12 +204,27 @@ def subsidy_plan_history(case_no: str, principal=Depends(require_admin), applica
         raise _error(error) from None
 
 
+@router.post("/cases/{case_no}/accounting/subsidy-plan/preview", response_model=BaseResponse[SubsidyPlanPreviewView])
+def preview_subsidy_plan(case_no: str, body: SubsidyPlanBody,
+                         principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
+    del principal
+    try:
+        preview = application.preview_subsidy_plan(case_no, body.scheme, body.expected_version)
+        return BaseResponse(data=SubsidyPlanPreviewView(case_no=preview.case_no,scheme=preview.scheme,
+            plan_version=preview.plan_version,subsidy_ntd=preview.subsidy_ntd,total_ntd=preview.total_ntd,
+            confirmation_only=preview.confirmation_only,payables=[asdict(p) for p in preview.payables],
+            blocker=preview.blocker,preview_fingerprint=preview.fingerprint.value))
+    except (LookupError, ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
 @router.post("/cases/{case_no}/accounting/subsidy-plan", response_model=BaseResponse[SubsidyPlanApplyView])
 def save_subsidy_plan(case_no: str, body: SubsidyPlanBody,
                       idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
                       principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
     try:
-        result = application.save_subsidy_plan(case_no, body.scheme, body.expected_version, idempotency_key, _actor(principal))
+        arguments = {'preview_fingerprint': body.preview_fingerprint} if body.preview_fingerprint is not None else {}
+        result = application.save_subsidy_plan(case_no, body.scheme, body.expected_version, idempotency_key, _actor(principal), **arguments)
         return BaseResponse(data=SubsidyPlanApplyView(case_no=result.case_no, applied_version=result.applied_version,
             plan=_subsidy_plan_view(result.plan)), message="人工方案已保存；原各期金額及實際收付不變")
     except (LookupError, ValueError, MySQLError) as error:

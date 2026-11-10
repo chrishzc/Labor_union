@@ -26,7 +26,7 @@ const financeLabels: Record<string, string> = {
   virtual_account: '本案專屬虛擬帳號', service_unit_price_ntd: '服務單價', service_hours: '服務總時數',
   customer_payable_total_ntd: '客戶應付總額', deposit_amount_ntd: '定金金額', first_payment_amount_ntd: '第一期金額',
   second_payment_amount_ntd: '第二期金額', received_total_ntd: '已入帳金額', customer_balance_ntd: '客戶待繳／應退差額',
-  subsidy_return_amount_ntd: '補助退款金額', subsidy_return_due_date: '補助退款日期', subsidy_return_status: '補助退款狀態',
+  subsidy_amount_ntd: '本案補助金額', subsidy_return_amount_ntd: '客戶補助待退金額', subsidy_return_due_date: '補助退款日期', subsidy_return_status: '補助退款狀態',
 };
 type Section = 'profile' | 'beclass' | 'care';
 type Scalar = string | boolean | number | null;

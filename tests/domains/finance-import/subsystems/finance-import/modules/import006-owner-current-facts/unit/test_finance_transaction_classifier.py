@@ -299,9 +299,43 @@ def test_taishin_identifies_memo_staff_name_before_checking_open_payables(suffix
                memo="合成人員甲" + suffix)
     result = classify_finance_transaction(row, {}, {}, all_staff_names=("合成人員甲",),
                                           staff_name_identities={"合成人員甲": (9,)})
-    assert result["classification_type"] == ("non_business_review" if suffix else "staff_salary")
-    assert result["matched_identity_ids"] == ([] if suffix else [9])
-    assert result["reason"] == ("taishin_memo_case_requires_manual_scheme" if suffix else "outgoing_staff_payout_no_open_obligation")
+    assert result["classification_type"] == "staff_legacy_subsidy"
+    assert result["matched_identity_ids"] == [9]
+    assert result["reason"] == "taishin_staff_subsidy_identity_pending_preflight"
+
+
+@pytest.mark.parametrize('memo,kind', [('HC115001雇主補助款','client_subsidy_return'),
+    ('ＨＣ１１５００１客戶補助返還','client_subsidy_return'), ('HC115001','non_business_review')])
+def test_taishin_customer_purpose_can_precede_manual_scheme_and_refund(memo,kind):
+    result=classify_finance_transaction(_row(format_id='taishin',direction='outgoing',debit=Decimal(11970),credit=None,memo=memo),
+        {},{},client_case_suffixes={'115001':[17]},known_case_suffixes=frozenset({'115001'}))
+    assert result['classification_type']==kind
+    assert result['matched_identity_ids']==([17] if kind=='client_subsidy_return' else [])
+
+
+def test_taishin_duplicate_staff_names_cannot_be_disambiguated_by_unpaid_amount():
+    result=classify_finance_transaction(_row(format_id='taishin',direction='outgoing',debit=Decimal(12000),credit=None,memo='合成人員甲補助款'),
+        {},{},all_staff_names=('合成人員甲','合成人員甲'),staff_name_identities={'合成人員甲':(9,10)},
+        staff_payout_candidates=({'staff_id':9,'name':'合成人員甲','amount_due_ntd':12000,'case_no':'115001','due_date':'2026-07-13'},))
+    assert result['classification_type']=='non_business_review'
+
+
+@pytest.mark.parametrize('named_ids,kind', [((17,), 'client_subsidy_return'),
+    ((18,), 'non_business_review'), ((17,18), 'non_business_review')])
+def test_taishin_named_customer_subsidy_uses_the_same_unique_case_identity(named_ids,kind):
+    result=classify_finance_transaction(_row(format_id='taishin',direction='outgoing',
+        debit=Decimal(11970),credit=None,memo='HC115001合成家長補助返還'), {},{},
+        client_case_suffixes={'115001':[17]},known_case_suffixes=frozenset({'115001'}),
+        client_name_identities={'合成家長':named_ids})
+    assert result['classification_type']==kind
+
+
+def test_sinopac_memo_case_and_account_cannot_name_different_staff():
+    row=_row(direction='outgoing',debit=Decimal(12000),credit=None,memo='HC115001服務人員',
+        bank_references={'交易參考編號':'123456789012'})
+    result=classify_finance_transaction(row,{}, {'123456789012':[10]},staff_case_suffixes={'115001':[9]})
+    assert result['classification_type']=='non_business_review'
+    assert result['reason']=='counterparty_identity_type_conflict'
 
 
 def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():

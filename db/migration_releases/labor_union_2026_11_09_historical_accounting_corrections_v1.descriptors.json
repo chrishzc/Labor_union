@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-accounting-corrections-2026-11-09-v1",
+  "descriptors": {
+    "1070_historical_order_terms_receipt_status.sql": {
+      "tables": {},
+      "parent_columns": {
+        "order_terms_apply_receipts": {
+          "lifecycle_status": {
+            "column_type": "enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

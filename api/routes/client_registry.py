@@ -487,6 +487,7 @@ def _order_terms_section(application, case_no: str) -> dict[str, Any]:
             "client_finance_version": facts.client_finance_version,
             "payroll_version": facts.payroll_version,
             "service_data_locked": facts.order.service_data_locked,
+            "floor_fee_correction_available": facts.order.service_data_locked or facts.order.historical_service_completed,
             "terms": facts.order.terms.canonical_payload(),
         }),
         "field_capabilities": _field_capabilities(

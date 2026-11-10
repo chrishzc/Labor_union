@@ -867,6 +867,16 @@ def _plan_payload(plan):
 
 
 def _row_payload(row):
+    subsidy = row.subsidy_preflight
+    preflight = None
+    if subsidy is not None:
+        ready = row.disposition.value == 'create' and not subsidy.confirmation_only and subsidy.payable_amount_ntd is not None
+        preflight = {'case_no':subsidy.case_no,'scheme':subsidy.scheme,'subsidy_ntd':subsidy.subsidy_ntd,
+            'total_ntd':subsidy.total_ntd,'confirmation_only':subsidy.confirmation_only,
+            'payable_amount_ntd':subsidy.payable_amount_ntd,'payable_due_date':subsidy.payable_due_date,
+            'bank_cash_ntd':row.amount.amount,'transfer_fee_ntd':subsidy.payable_amount_ntd-row.amount.amount if ready else None,
+            'settlement_ntd':subsidy.payable_amount_ntd if ready else None,'remaining_ntd':0 if ready else None,
+            'blocker':subsidy.blocker or row.pending_reason}
     return {
         "row_identity": row.row_identity,
         "canonical_fact_version": row.canonical_fact_version,
@@ -881,6 +891,7 @@ def _row_payload(row):
         "formal_reference_conflict": row.formal_reference_conflict,
         "client_receipt_review": _materialize(row.client_receipt_review),
         "pending_reason": row.pending_reason,
+        "subsidy_preflight": preflight,
     }
 
 

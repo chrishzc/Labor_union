@@ -132,7 +132,7 @@ class MySqlClientRefundExportSource:
                 if fact.case_no not in cases:
                     cases[fact.case_no] = self._case_query(fact.case_no)
                 handoff = cases[fact.case_no]
-                if handoff.client_subsidy_reason is not None or (handoff.manual and
+                if handoff.client_subsidy_reason is not None or (handoff.confirmed and
                     subsidy_refund_amount_reason(handoff.subsidy_ntd, fact.amount.amount, int(row['net_refunded_ntd'])) is not None):
                     from dataclasses import replace
                     fact = replace(fact, payable=False, anomaly=True)
@@ -170,7 +170,7 @@ def _staff_payment_route(row, case):
         return {**row, 'outgoing_bank': '31'}
     portion = row.get('installment_funding')
     outgoing, reason = '31', None
-    if case is not None and not case.requires_manual_plan and case.staff_subsidy_reason is not None:
+    if case is not None and not case.confirmation_required and case.staff_subsidy_reason is not None:
         reason = case.staff_subsidy_reason
     elif case is not None and (portion == 'subsidy' or case.full_subsidy or (case.scheme == 'split' and portion is None)):
         reason = case.staff_subsidy_reason

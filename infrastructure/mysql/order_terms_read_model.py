@@ -343,6 +343,23 @@ def _assemble_facts(
     omit_payroll_details: bool = False,
     proposed_terms: OrderTerms | None = None,
 ) -> TermsWorkflowFacts:
+    if omit_preassignment_downstream and str(order_row.get('status')) in ('歷史訂單－服務完成','歷史訂單－帳務完成'):
+        cursor.execute("SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='order_terms_apply_receipts' AND column_name='lifecycle_status'")
+        column = cursor.fetchone()
+        if column is None or any(status not in column['COLUMN_TYPE'] for status in ('歷史訂單－服務完成','歷史訂單－帳務完成')):
+            raise ValueError('historical_floor_fee_schema_upgrade_required')
+        from infrastructure.mysql.pricing_configuration_repository import load_historical_pricing_facts, historical_repricing_plan
+        from subsystems.orders.terms_workflow import HistoricalFinancialVersions
+        from domains.orders.floor_fee import prorate_historical_floor_fee
+        pricing = load_historical_pricing_facts(cursor.connection, str(order_row['case_no']), lock=lock, order=order_row)
+        terms = proposed_terms if proposed_terms is not None else _order_facts(order_row).terms
+        actual_days = int(pricing.historical_service_hours / Decimal(str(order_row['service_hours_per_day'])))
+        fee = prorate_historical_floor_fee(terms.floor_fee, int(order_row['service_days']), actual_days).amount
+        plan = historical_repricing_plan(cursor.connection, pricing, pricing.terms, floor_fee=fee, lock=lock)
+        versions = HistoricalFinancialVersions(plan.client_version, plan.payroll_version)
+        facts = _facts_from_rows(order_row, aggregate_row, None, (), (), versions, versions,
+            _load_lifecycle(cursor, order_row, lock), None, ())
+        return replace(facts, historical_correction=plan)
     generation_row = _select_generation(cursor, aggregate_row, lock)
     assignment_rows = _select_assignments(cursor, generation_row, lock)
     schedule_rows = _select_schedules(cursor, generation_row, lock)
@@ -1161,6 +1178,7 @@ def _order_facts(row: Mapping[str, Any]) -> OrderAggregateFacts:
         terms,
         bool(row["service_data_locked"]),
         str(row["client_identity_status"]),
+        str(row.get('status')) in ('歷史訂單－服務完成','歷史訂單－帳務完成'),
     )
 
 

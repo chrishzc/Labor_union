@@ -5,6 +5,8 @@
 - subsystem: `client-finance`
 
 ## Responsibility
+
+歷史完成案件以 `CasePricingFacts.historical_service_hours` 借用已採納／已確認服務量計價，不建逐日資料或套現代分期。typed historical repricing plan 把價格差額分配至原期款、既有補助退款及原月嫂應付，交各原金額更正 writer 在同一外層交易處理；人工金額控制與現金 lineage 保留。
 Versioned customer pricing/subsidy limits, policy selection at first case creation,
 and typed coordination of explicit per-case repricing. Payroll owns salary tiers.
 No query writes; one outer transaction and typed stale/idempotency conflicts.
@@ -23,6 +25,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/pages/AccountingParametersPage.css`
 - `ui_react/src/components/CasePricingAdjustmentPanel.tsx`
 - `ui_react/src/components/AccountingParametersCard.tsx`
+- AccountingParametersCard 僅顯示正式 CasePricing terms／impact 及傳入 owner 金額；讀取失敗或缺來源時維持待確認，不補 0 小時、160 小時、預設費率或在瀏覽器重算總額。
 - `ui_react/src/components/AccountingParametersBar.tsx`
 - `ui_react/src/components/AccountingParametersDrawer.tsx`
 - `ui_react/src/components/AccountingParameters.css`

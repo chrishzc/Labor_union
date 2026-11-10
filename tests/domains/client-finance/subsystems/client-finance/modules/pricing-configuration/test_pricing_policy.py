@@ -7,6 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from dataclasses import replace
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
 from subsystems.client_finance.pricing_configuration import (
@@ -16,6 +17,23 @@ from subsystems.client_finance.pricing_configuration import (
 
 def terms(rule=IdentityRule.SOCIAL):
     return CasePricingTerms("補助市民", rule, Decimal(120), HourlyRates(350, 300), HourlyRates(350, 310))
+
+
+def test_historical_volume_preserves_original_installments_and_manual_amounts():
+    from subsystems.client_finance.pricing_configuration import HistoricalAmountFacts, build_historical_repricing_plan
+    current=CasePricingTerms('一般市民',IdentityRule.CITIZEN,Decimal(40),HourlyRates(300,400),HourlyRates(300,400))
+    facts=CasePricingFacts('historical',0,(1,1,1,0,3,5),current,'manual',(),0,historical_service_hours=Decimal(160))
+    assert pricing_impact(current,facts).client_amount==60000
+    candidate=replace(current,subsidy_hours=Decimal(80))
+    plan=build_historical_repricing_plan(facts,candidate,
+        (HistoricalAmountFacts('original-first',59000,59000,'automatic'),HistoricalAmountFacts('original-second',1000,900,'manual')),
+        HistoricalAmountFacts('original-payable',60000,60000,'automatic'))
+    updates={item.identity:item for item in plan.client_updates}
+    assert (updates['original-first'].computed,updates['original-first'].effective)==(56000,56000)
+    assert (updates['original-second'].computed,updates['original-second'].effective)==(0,900)
+    assert plan.staff_updates[0].effective==56000
+    assert plan.source_versions==facts.versions
+    assert facts.days==() and facts.historical_service_hours==160
 
 
 def test_citizen_identities_are_distinct_through_import_subsidy_and_payment_rules():

@@ -195,6 +195,10 @@ class MySqlFinanceImportOwningDomainComposite:
             raise TypeError("unsupported Finance Import resolution candidate")
         if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
             return candidate
+        from infrastructure.mysql.subsidy_confirmation_repository import resolve_subsidy_confirmation
+        subsidy = resolve_subsidy_confirmation(self._connection, candidate, for_update=self._context is not None)
+        if subsidy is not None:
+            return subsidy
         if candidate.classification_type is _CLIENT_RECEIPT:
             return _resolve_client_receipt(self._connection, candidate)
         if candidate.classification_type is _CLIENT_REFUND:
@@ -221,11 +225,28 @@ class MySqlFinanceImportOwningDomainComposite:
             GovernmentSubsidyWorkflowError,
             StaffPayoutReconciliationError,
         ) as error:
+            if getattr(candidate, 'subsidy_preflight', None) is not None:
+                if error.error.category not in {ErrorCategory.DOMAIN_BLOCKED, ErrorCategory.CONFLICT}:
+                    from subsystems.finance_import.import_workflow import FinanceImportWorkflowError
+                    raise FinanceImportWorkflowError(error.error) from error
+                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.CONFLICT,
+                    reason_code=error.error.code)
             return _typed_domain_result(candidate, error.error)
         except GovernmentSubsidyDomainError as error:
             return _government_subsidy_domain_result(candidate, error)
+        except ValueError as error:
+            if getattr(candidate, 'subsidy_preflight', None) is not None:
+                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.CONFLICT,
+                    reason_code=str(error))
+            raise
 
     def _post(self, candidate, context):
+        if isinstance(candidate, CanonicalFinanceImportRow) and candidate.subsidy_preflight is not None:
+            from infrastructure.mysql.subsidy_confirmation_repository import apply_subsidy_confirmation
+            apply_subsidy_confirmation(self._connection, candidate, context)
+            if candidate.subsidy_preflight.confirmation_only:
+                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.PENDING,
+                    reason_code='subsidy_scheme_confirmed_service_not_completed')
         if candidate.classification_type is _CLIENT_RECEIPT:
             return self._post_client_receipt(candidate, context)
         if candidate.classification_type is _CLIENT_REFUND:
@@ -261,6 +282,8 @@ class MySqlFinanceImportOwningDomainComposite:
             StaffPayoutEventType.PAYOUT,
             (_row_id(candidate.row_identity),),
             _target_identities(candidate),
+            confirm_subsidy_split=bool(getattr(candidate, 'subsidy_preflight', None)
+                                      and candidate.subsidy_preflight.staff_confirm_split),
         )
         repository = MySqlStaffPayoutRepository(self._connection)
         workflow = StaffPayoutReconciliationWorkflow(
@@ -836,6 +859,8 @@ def _resolve_staff_payout(connection, candidate):
     memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(
         connection, candidate.row_identity, taishin_staff=True
     )
+    if candidate.subsidy_preflight is not None:
+        case_no = candidate.subsidy_preflight.case_no
     with connection.cursor() as cursor:
         cursor.execute('SELECT format_id,currency FROM finance_import_rows WHERE id=%s', (_row_id(candidate.row_identity),))
         source = cursor.fetchone() or {}

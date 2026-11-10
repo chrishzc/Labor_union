@@ -77,8 +77,11 @@ async function submittedTerms() {
 }
 
 describe('Issue #337 empty service time', () => {
-  it('only enables the floor fee in the explicit closed-service correction flow', async () => {
-    const current={...queryFixture(),service_data_locked:true};
+  it.each([
+    {service_data_locked:true},
+    {service_data_locked:false,floor_fee_correction_available:true},
+  ])('only enables the floor fee in the explicit closed-service correction flow: %j', async (eligibility) => {
+    const current={...queryFixture(),...eligibility};
     render(<OrderTermsMutationPanel caseNo={current.case_no} query={current} />);
     expect(screen.getByRole('spinbutton',{name:'樓層加給'})).toBeDisabled();
     fireEvent.click(screen.getByRole('button',{name:'更正結案樓層費'}));

@@ -164,6 +164,7 @@ class ClientRegistryFinanceValuesView(_StrictModel):
     received_total_ntd: int = Field(ge=0)
     customer_balance_ntd: int
     subsidy_return_amount_ntd: int | None = Field(default=None, ge=0)
+    subsidy_amount_ntd: int | None = Field(default=None, ge=0)
     subsidy_return_due_date: date | None = None
     subsidy_return_status: str | None = None
 

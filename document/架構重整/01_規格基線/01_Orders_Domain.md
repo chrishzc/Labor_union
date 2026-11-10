@@ -177,7 +177,7 @@ React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 pro
 
 ### 3.2 Terms Preview／Apply
 
-2026-11-09 人工授權：已結案漏填樓層費，使用既有 Terms Preview／Apply 的明示 `floor_fee_correction=true` 正式更正。此模式只允許服務資料鎖已形成案件的樓層費異動；服務日期、天數、時段、人員與其他條件不得改動，不得夾帶替代日期／分配。原服務鎖、結案狀態、預計及實際結束日、Scheduling generation 保留。沿原 Finance／Payroll owner 同交易處理未清義務或已收付款的差額，保存 Terms before／after、操作者、原因與不可變收據；不得改寫原 ledger、allocation、實收實付或已簽文件。缺少可驗證的正式服務／計價來源須明示阻擋，不補造來源。原服務條件一般編輯仍受鎖限制。重送、版本衝突及回滾沿原流程。
+2026-11-09 人工授權：已結案漏填樓層費，使用既有 Terms Preview／Apply 的明示 `floor_fee_correction=true` 正式更正。此模式只允許服務資料鎖已形成案件，或規格 27 §6.3.1 可證實原服務量及原帳務的歷史完成案件之樓層費異動；服務日期、天數、時段、人員與其他條件不得改動，不得夾帶替代日期／分配。原服務鎖、結案狀態、預計及實際結束日、Scheduling generation 保留。沿原 Finance／Payroll owner 同交易處理未清義務或已收付款的差額，保存 Terms before／after、操作者、原因與不可變收據；不得改寫原 ledger、allocation、實收實付或已簽文件。缺少可驗證的正式服務／計價來源須明示阻擋，不補造來源。原服務條件一般編輯仍受鎖限制。Query 明示 `floor_fee_correction_available`，不把歷史完成資格冒稱已有一般服務鎖。重送、版本衝突及回滾沿原流程。
 
 Terms 的唯讀 Query 與 Preview／Apply 的異動資格檢查分離。已有客戶應付義務但尚未建立執行 assignment 是正式簽約流程的合法狀態，不得因此拒絕 Query；Query 回傳已保存條款、各 owner 的實際版本、確認服務日期及目前指派。服務資料鎖仍限制編輯而不限制查閱；Preview／Apply 保留下游完整性與版本檢查。此合法狀態下修改預計開始日、服務天數、每日時數或樓層費，須讀取 current Finance facts，透過 owner 重算已存在期款，並在同一 Apply 同步付款條款與 immutable event；不得僅因已有客戶期款拒絕此次補正，也不得提前建立尚未存在的期款。
 

@@ -28,7 +28,7 @@ HEADERS = (
     "預產期／預計服務開始月份", "預計服務日期", "雙胞胎",
     "目前訂單狀態", "匯入虛擬帳號", "內建虛擬帳號", "服務天數", "每日服務時數", "總服務時數",
     "是否需要下廚", "樓層費", "每小時服務單價", "客戶應付總額", "訂金金額",
-    "第一期金額", "第二期金額", "已收總額", "客戶未收餘額", "補助返還金額",
+    "第一期金額", "第二期金額", "已收總額", "客戶未收餘額", "本案補助金額",
     "預計服務開始日", "預計服務結束日", "實際服務開始日", "實際服務結束日",
     "訂金到期日", "第一期到期日", "第二期到期日", "訂金入帳日",
     "補助返還到期日", "補助返還狀態", "服務人員付款到期日",
@@ -86,6 +86,7 @@ class OrderAccountingExportRow:
     staff_payment_due_date: date | None
     claim_application_year: int | None
     claim_application_month: int | None
+    subsidy_amount_ntd: int | None = None
 
 
 class OrderAccountingExportRepository(Protocol):
@@ -137,7 +138,7 @@ def build_order_accounting_workbook(
             row.second_payment_amount_ntd,
             row.received_total_ntd,
             row.customer_balance_ntd,
-            row.subsidy_return_amount_ntd,
+            row.subsidy_amount_ntd,
             row.planned_start_date,
             row.planned_end_date,
             row.actual_start_date,

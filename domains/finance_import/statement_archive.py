@@ -98,10 +98,12 @@ class CollectionProgress:
     due_date: str | None = None
 
 
-def current_collection_progress(sources: tuple[CollectionStageSource, ...]) -> CollectionProgress:
+def current_collection_progress(sources: tuple[CollectionStageSource, ...], *, historical: bool = False) -> CollectionProgress:
     """Expose one current collection item; never treat missing terms as zero."""
     for stage in ("deposit", "first", "second"):
         matches = [source for source in sources if source.stage == stage]
+        if historical and sources and not matches:
+            continue
         if len(matches) != 1:
             return CollectionProgress(stage, False)
         source = matches[0]
@@ -119,6 +121,8 @@ class SubsidyPlanEvent:
     scheme: str
     actor: str
     created_at: str
+    source: str = "manual"
+    bank_row_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +134,10 @@ class CaseSubsidyPlan:
     @property
     def selected_scheme(self) -> str | None:
         return self.events[-1].scheme if self.events else None
+
+    @property
+    def confirmation_source(self) -> str | None:
+        return self.events[-1].source if self.events else None
 
 
 def ongoing_case_completed(fully_received: bool | None, plan: CaseSubsidyPlan | None) -> bool:

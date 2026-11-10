@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 from zoneinfo import ZoneInfo
 
@@ -12,6 +12,7 @@ from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.client_finance.pricing_configuration import (
     CasePricingFacts, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
+    HistoricalAmountFacts, build_historical_repricing_plan,
 )
 
 
@@ -150,6 +151,85 @@ def payroll_tiers(terms):
     return TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule is IdentityRule.SOCIAL)
 
 
+def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None):
+    """Borrow confirmed historical volume, without manufacturing calendar days."""
+    from infrastructure.mysql.order_terms_read_model import select_order
+    from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
+    with connection.cursor() as cursor:
+        order = order if order is not None else select_order(cursor, case_no, lock=lock)
+        if str(order['status']) not in ('歷史訂單－服務完成', '歷史訂單－帳務完成'):
+            return None
+        source = MySqlHistoricalServiceAccountingRepository(connection).load(case_no, for_update=lock)
+        if len(source.assignments) != 1:
+            raise PricingConflict('historical_pricing_unique_assignment_required')
+        cursor.execute('SELECT actual_service_days FROM historical_service_day_items WHERE event_id='
+            '(SELECT MAX(id) FROM historical_service_day_events WHERE case_no=%s)', (case_no,))
+        items = cursor.fetchall()
+        days = sum(int(item['actual_service_days']) for item in items) if items else source.contracted_service_days
+        hours = Decimal(days) * Decimal(source.service_hours_per_day)
+        floor = int((Decimal(source.contractual_floor_fee.amount) * days / source.contracted_service_days).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+        terms = load_case_pricing(cursor, order, lock=lock)
+        if terms is None:
+            rule = {'一般市民':IdentityRule.CITIZEN,'補助市民':IdentityRule.SOCIAL,
+                '社福':IdentityRule.SOCIAL,'低收入戶':IdentityRule.SOCIAL,'中低收入戶':IdentityRule.SOCIAL,
+                '非市民':IdentityRule.NON_CITIZEN}.get(source.client_identity_status)
+            if rule is None:
+                raise ValueError('case_pricing_identity_not_confirmed')
+            cap = Decimal(40 if rule is IdentityRule.CITIZEN else 120 if rule is IdentityRule.SOCIAL else 0)
+            staff_rate = source.assignments[0].rate_snapshot.hourly_rate.amount
+            terms = CasePricingTerms(source.client_identity_status, rule, cap,
+                HourlyRates(source.client_hourly_rate.amount, source.client_hourly_rate.amount), HourlyRates(staff_rate, staff_rate))
+        cursor.execute('SELECT aggregate_version FROM scheduling_aggregates WHERE case_no=%s' + (' FOR UPDATE' if lock else ''), (case_no,))
+        scheduling = cursor.fetchone()
+    return CasePricingFacts(case_no, int(order.get('pricing_revision', 0)),
+        (source.lifecycle_version, source.client_finance_version, source.payroll_version,
+         int(scheduling['aggregate_version']) if scheduling else -1, source.historical_day_revision, source.adoption_receipt_id),
+        terms, 'manual' if order.get('pricing_override_event_id') else 'policy' if order.get('pricing_policy_id') else 'legacy',
+        (), floor, source.assignments[0].effective_adjustment.amount, None, hours)
+
+
+def historical_repricing_plan(connection, facts, terms, *, floor_fee=None, lock=True):
+    """Apply a price delta to evidenced original installments, never regenerate them."""
+    suffix = ' FOR UPDATE' if lock else ''
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT o.obligation_identity,o.obligation_type,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+            'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
+            'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.source_obligation_identity IS NULL "
+            "AND o.obligation_type IN ('deposit','first','second') ORDER BY FIELD(o.obligation_type,'deposit','first','second')" + suffix, (facts.case_no,))
+        client_rows = cursor.fetchall()
+        if not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows):
+            raise PricingConflict('historical_pricing_original_installments_required')
+        cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+            'FROM staff_obligations o JOIN staff_obligation_events e ON e.id=o.current_event_id '
+            'LEFT JOIN payroll_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_kind='service_pay' AND o.direction='payable_to_staff'" + suffix, (facts.case_no,))
+        staff_rows = cursor.fetchall()
+        if len(staff_rows) != 1:
+            raise PricingConflict('historical_pricing_original_payable_required')
+        cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+            'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
+            'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_type='subsidy_return' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
+        subsidy_rows = cursor.fetchall()
+        if len(subsidy_rows) > 1:
+            raise PricingConflict('historical_pricing_original_subsidy_return_required')
+    def amounts(row):
+        computed = int(row['computed_ntd'] if row['computed_ntd'] is not None else row['nominal'])
+        effective = int(row['effective_ntd'] if row['effective_ntd'] is not None else row['nominal'])
+        mode = row['amount_mode'] or 'automatic'
+        return HistoricalAmountFacts(row['obligation_identity'],computed,effective,mode)
+    return build_historical_repricing_plan(facts, terms, tuple(amounts(r) for r in client_rows), amounts(staff_rows[0]),
+        floor_fee=floor_fee, subsidy_source=amounts(subsidy_rows[0]) if subsidy_rows else None)
+
+
+def persist_historical_repricing(connection, plan, actor, reason, key):
+    from infrastructure.mysql.client_difference_repository import persist_historical_source_amounts as client_apply
+    from infrastructure.mysql.payroll_amount_correction_repository import persist_historical_source_amounts as staff_apply
+    client_apply(connection, plan, actor, reason, key)
+    staff_apply(connection, plan, actor, reason, key)
+
+
 class MySqlPricingConfigurationRepository:
     def __init__(self, connection):
         self.connection = connection
@@ -191,6 +271,9 @@ class MySqlPricingConfigurationRepository:
         from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
         with self.connection.cursor() as cursor:
             order = select_order(cursor, case_no, lock=lock)
+            historical = load_historical_pricing_facts(self.connection, case_no, lock=lock, order=order)
+            if historical is not None:
+                return historical
             from infrastructure.mysql.order_terms_read_model import load_locked_facts, load_preview_facts, preflight_staff_ids
             staff_ids = preflight_staff_ids(cursor, case_no)
             payroll_source = (load_locked_facts(cursor, case_no, staff_ids) if lock else load_preview_facts(cursor, case_no)) if staff_ids else None
@@ -262,6 +345,10 @@ class MySqlPricingConfigurationRepository:
                 (event_id, facts.case_no, facts.revision))
             if cursor.rowcount != 1:
                 raise PricingConflict("case_pricing_stale")
+            if facts.historical_service_hours is not None:
+                plan = historical_repricing_plan(self.connection, facts, terms)
+                persist_historical_repricing(self.connection, plan, actor, reason, key)
+                return
             order = select_order(cursor, facts.case_no, lock=True)
             finance, _ = load_calculable_client_finance_facts(cursor, order, lock=True)
             if finance is None:

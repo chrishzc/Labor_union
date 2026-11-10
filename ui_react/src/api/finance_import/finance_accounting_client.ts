@@ -16,9 +16,11 @@ function verifyArrangement(data:CaseArrangement,caseNo:string){
  if(data.case_no!==caseNo||data.version!==data.events.length||data.events.some((event,i)=>event.version!==i+1))throw new ApiDecodeError('案件安排或歷史版本不一致。');
  return data;
 }
-const subsidyPlanSchema=z.strictObject({case_no:z.string(),version:z.number().int().nonnegative(),events:z.array(z.strictObject({version:z.number().int().positive(),scheme:z.enum(['split','advance','direct']),actor:z.string(),created_at:z.string().datetime({offset:true})}))});
+const subsidyPlanSchema=z.strictObject({case_no:z.string(),version:z.number().int().nonnegative(),events:z.array(z.strictObject({version:z.number().int().positive(),scheme:z.enum(['split','advance','direct']),actor:z.string(),created_at:z.string().datetime({offset:true}),source:z.enum(['manual','bank']).optional(),bank_row_identity:z.string().nullable().optional()}))});
 export type CaseSubsidyPlan=z.infer<typeof subsidyPlanSchema>;
-export type SubsidyPlanCommand={scheme:'split'|'advance'|'direct';expected_version:number};
+export type SubsidyPlanCommand={scheme:'split'|'advance'|'direct';expected_version:number;preview_fingerprint?:string};
+const subsidyPlanPreviewSchema=z.strictObject({case_no:z.string(),scheme:z.enum(['split','advance','direct']),plan_version:z.number().int().nonnegative(),subsidy_ntd:exactNtd.nullable(),total_ntd:exactNtd.nullable(),confirmation_only:z.boolean(),payables:z.array(z.strictObject({identity:z.string(),recipient:z.string(),amount_ntd:exactNtd,due_date:z.string().nullable()})),blocker:z.string().nullable(),preview_fingerprint:z.string().regex(/^[0-9a-f]{64}$/)});
+export type SubsidyPlanPreview=z.infer<typeof subsidyPlanPreviewSchema>;
 function verifyPlan(plan:CaseSubsidyPlan,caseNo:string){if(plan.case_no!==caseNo||plan.version!==plan.events.length||plan.events.some((row,index)=>row.version!==index+1))throw new ApiDecodeError('人工方案來源或版本不一致。');return plan;}
 const item = z.strictObject({ funding_portions: z.array(StaffFundingPortionSchema).optional(), identity: z.string(), direction: z.enum(['receivable', 'payable']), label: z.string(), party: z.string(), expected_ntd: money, actual_ntd: money, has_payment: z.boolean(), version: z.string(), due_date: z.string().nullable(), summary_included: z.boolean().optional(), unallocated_surplus_ntd: money.optional(), remaining_ntd: money.nullable().optional(), noncash_ntd: money.optional(), settled: z.boolean().optional(), recognized_ntd: money.optional(), payment_stage: z.enum(['deposit','first','second']).nullable().optional() });
 const warning = z.strictObject({ item_identity: z.string(), kind: z.enum(['over_received', 'over_paid', 'under_paid']), expected_ntd: money, actual_ntd: money, difference_ntd: money, source_version: z.string(), dismissed: z.boolean(), dismissed_by: z.string().nullable(), dismissed_at: z.string().nullable() });
@@ -67,6 +69,7 @@ function verify(data: CaseAccounting, caseNo: string) {
   return data;
 }
 export const financeAccountingClient = {
+  async previewSubsidyPlan(caseNo:string,command:SubsidyPlanCommand,signal?:AbortSignal){const result=decodePayload(envelope(subsidyPlanPreviewSchema),await transport.post(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/accounting/subsidy-plan/preview`,command,options(signal))).data;if(result.case_no!==caseNo||result.scheme!==command.scheme||result.plan_version!==command.expected_version)throw new ApiDecodeError('補助方案預檢與目前案件或版本不一致。');return result;},
   async subsidyPlan(caseNo:string,signal?:AbortSignal){return verifyPlan(decodePayload(envelope(subsidyPlanSchema),await transport.get(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/accounting/subsidy-plan`,options(signal))).data,caseNo);},
   async saveSubsidyPlan(caseNo:string,command:SubsidyPlanCommand,key:string){const result=decodePayload(envelope(z.strictObject({case_no:z.string(),applied_version:z.number().int().positive(),plan:subsidyPlanSchema})),await transport.post(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/accounting/subsidy-plan`,command,{...options(),headers:{'Idempotency-Key':key}})).data;if(result.case_no!==caseNo||result.applied_version!==command.expected_version+1||result.applied_version>result.plan.version)throw new ApiDecodeError('方案儲存結果與原操作不一致。');verifyPlan(result.plan,caseNo);return result;},
 

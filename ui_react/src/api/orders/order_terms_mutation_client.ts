@@ -53,6 +53,7 @@ export const OrderTermsQuerySchema = z.strictObject({
   client_finance_version: VersionSchema.nullable(),
   payroll_version: VersionSchema.nullable(),
   service_data_locked: z.boolean(),
+  floor_fee_correction_available: z.boolean().optional(),
   terms: OrderTermsViewSchema,
   confirmed_service_dates: z.array(DateSchema).optional(),
   confirmed_service_date_version: VersionSchema.nullable().optional(),

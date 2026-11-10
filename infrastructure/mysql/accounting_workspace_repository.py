@@ -16,15 +16,18 @@ def build_accounting_workspace(connection):
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
     from infrastructure.mysql.client_payments_query_repository import query_cancellation_accounting, query_case_accounting, query_case_payment_terms
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
-    from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
+    from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan, apply_manual_subsidy_plan
     state = MySqlAccountingWorkspaceState(connection)
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
-        lambda case_no: MySqlGovernmentSubsidyPeriodRepository(connection).case_coverage(case_no)['amount_ntd'],
+        lambda case_no: query_case_subsidy_amount(connection, case_no).amount_ntd,
         partial(query_case_payment_terms, connection), plan=state.subsidy_plan,
         cancellation=partial(query_cancellation_accounting, connection),
-        bank_memos=partial(query_case_bank_memos, connection))
+        bank_memos=partial(query_case_bank_memos, connection),
+        subsidy_plan_preview=partial(preview_manual_subsidy_plan, connection),
+        subsidy_plan_apply=partial(apply_manual_subsidy_plan, connection))
 
 
 def query_case_bank_memos(connection, case_no):
@@ -77,8 +80,13 @@ class MySqlAccountingWorkspaceState:
 
     def subsidy_plan(self, case_no):
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT version,scheme,actor,UNIX_TIMESTAMP(created_at) created_epoch FROM finance_case_subsidy_plan_events WHERE case_no=%s ORDER BY version", (case_no,))
-            events = tuple(SubsidyPlanEvent(int(row["version"]), row["scheme"], row["actor"], datetime.fromtimestamp(int(row["created_epoch"]), timezone.utc).isoformat()) for row in cursor.fetchall())
+            cursor.execute("SELECT version,scheme,actor,operation_key,UNIX_TIMESTAMP(created_at) created_epoch FROM finance_case_subsidy_plan_events WHERE case_no=%s ORDER BY version", (case_no,))
+            events = tuple(SubsidyPlanEvent(int(row["version"]), row["scheme"], row["actor"],
+                datetime.fromtimestamp(int(row["created_epoch"]), timezone.utc).isoformat(),
+                'bank' if str(row['operation_key']).startswith('bank-subsidy:') else 'manual',
+                'finance-import-row:' + row['operation_key'].split(':')[1]
+                if str(row['operation_key']).startswith('bank-subsidy:') else None)
+                for row in cursor.fetchall())
         return CaseSubsidyPlan(case_no, events[-1].version if events else 0, events)
 
     def subsidy_plan_command(self, key):
@@ -87,7 +95,17 @@ class MySqlAccountingWorkspaceState:
             row = cursor.fetchone()
         return None if row is None else (row["case_no"], int(row["version"])-1, row["scheme"], row["actor"])
 
-    def append_subsidy_plan(self, case_no, version, scheme, actor, key):
+    def append_subsidy_plan(self, case_no, version, scheme, actor, key, *, bank_row_id=None):
+        # The reserved operation namespace binds a bank confirmation to immutable
+        # source evidence using the existing append-only event/uniqueness owner.
+        # Public/manual writers cannot manufacture bank provenance.
+        if bank_row_id is None and key.startswith('bank-subsidy:'):
+            raise ValueError('reserved_subsidy_confirmation_key')
+        if bank_row_id is not None:
+            from hashlib import sha256
+            if not isinstance(bank_row_id, int) or isinstance(bank_row_id, bool) or bank_row_id <= 0:
+                raise ValueError('subsidy_bank_row_invalid')
+            key = f'bank-subsidy:{bank_row_id}:' + sha256(key.encode()).hexdigest()
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("INSERT INTO finance_case_subsidy_plan_events(case_no,version,scheme,actor,operation_key) VALUES (%s,%s,%s,%s,%s)", (case_no,version,scheme,actor,key))
@@ -179,7 +197,7 @@ class MySqlAccountingWorkspaceState:
         self.connection.rollback()
 
 
-def query_subsidy_payable_handoff(connection, case_no):
+def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None):
     """Borrow current Orders, owner money facts and the last saved plan; query only."""
     from domains.staff_payables.subsidy_handoff import SubsidyHandoffFacts, decide_subsidy_handoff
     with connection.cursor() as cursor:
@@ -200,11 +218,12 @@ def query_subsidy_payable_handoff(connection, case_no):
         customer_paid -= cash['RS']
     staff = tuple(item for item in case.staff_items if item.direction == 'payable' and item.summary_included)
     return decide_subsidy_handoff(SubsidyHandoffFacts(
-        case.subsidy_plan.selected_scheme if case.subsidy_plan is not None else None,
+        proposed_scheme if proposed_scheme is not None else case.subsidy_plan.selected_scheme if case.subsidy_plan is not None else None,
         case.scheme, case.scheme_conflict, str(row['status']), total,
         case.subsidy_ntd, case.customer_amount_ntd, customer_paid,
         sum(item.actual_ntd for item in staff) if staff else None,
         None if cash is None else cash['PT'], None if cash is None else cash['RT'],
         None if cash is None else cash['G'], bool(row['has_customer_subsidy_payable']),
         funding.full_subsidy if funding is not None else False,
-        funding is not None and case.staff_receivable_ntd is not None and funding.total_ntd != case.staff_receivable_ntd))
+        funding is not None and case.staff_receivable_ntd is not None and funding.total_ntd != case.staff_receivable_ntd,
+        'bank' if proposed_scheme is not None else case.subsidy_plan.confirmation_source if case.subsidy_plan else None))

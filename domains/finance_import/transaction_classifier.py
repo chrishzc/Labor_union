@@ -101,6 +101,12 @@ def _classify_sinopac_outgoing(
         if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
             return _review("counterparty_account_multiple_matches")
         if memo_staff_ids:
+            reference_key = 'transaction_reference' if row['format_id'] == 'legacy' else '交易參考編號'
+            account = extract_sinopac_account_reference(row['bank_references'].get(reference_key))
+            account_staff = _ids_for_account(staff_accounts, account)
+            if (_ids_for_account(client_refund_accounts, account)
+                    or (account_staff and set(account_staff) != set(memo_staff_ids))):
+                return _review('counterparty_identity_type_conflict')
             return _result(
                 "staff_salary",
                 memo_staff_ids,
@@ -108,6 +114,12 @@ def _classify_sinopac_outgoing(
                 suffix,
             )
         if memo_refund_ids:
+            reference_key = 'transaction_reference' if row['format_id'] == 'legacy' else '交易參考編號'
+            account = extract_sinopac_account_reference(row['bank_references'].get(reference_key))
+            account_clients = _ids_for_account(client_refund_accounts, account)
+            if (_ids_for_account(staff_accounts, account)
+                    or (account_clients and set(account_clients) != set(memo_refund_ids))):
+                return _review('counterparty_identity_type_conflict')
             return _result(
                 "client_refund",
                 memo_refund_ids,
@@ -423,6 +435,7 @@ def classify_finance_transaction(
     staff_name_identities: Mapping[str, Sequence[int]] | None = None,
     client_name_identities: Mapping[str, Sequence[int]] | None = None,
     client_refund_identity_accounts: Mapping[str, Any] | None = None,
+    client_case_suffixes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -579,6 +592,15 @@ def classify_finance_transaction(
                 return _review("counterparty_identity_type_conflict")
             return _result("government_subsidy", [], "taishin_government_return_memo")
 
+        # Identity is independent of an unpaid target, date and amount. The
+        # application preflights subsidy purpose against same-case owner facts.
+        staff_name = extract_name_from_row_text({'memo': memo}, sorted(set(all_staff_names), key=len, reverse=True))
+        if staff_name is not None and staff_name_identities is not None:
+            identities = tuple(staff_name_identities.get(staff_name, ()))
+            if len(identities) != 1:
+                return _review('outgoing_staff_payout_name_ambiguous')
+            return _result('staff_legacy_subsidy', list(identities),
+                'taishin_staff_subsidy_identity_pending_preflight', row.get('counterparty_account'))
         staff_result = _classify_outgoing_by_name_month_fee(
             {**row, "counterparty_name": None, "summary": None, "bank_references": {}},
             all_staff_names, staff_payout_candidates, (), (),
@@ -598,6 +620,21 @@ def classify_finance_transaction(
                 return {**staff_result, "resolved_counterparty_account": row.get("counterparty_account")}
             return staff_result
         if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
+            client_ids = _ids_for_account(client_case_suffixes or {}, suffix)
+            client_name = extract_name_from_row_text({'memo': memo},
+                sorted(client_name_identities or {}, key=len, reverse=True))
+            named_clients = _ids_for_account(client_name_identities or {}, client_name)
+            if named_clients and set(named_clients) != set(client_ids):
+                return _review('counterparty_identity_type_conflict')
+            # Combine purpose with a positively named role or the formal case
+            # customer's identity; do not whitelist complete memo phrases.
+            customer_subsidy = '補助' in memo_text and (
+                any(word in memo_text for word in ('雇主', '客戶')) or len(named_clients) == 1)
+            existing_subsidy = len(client_ids) == 1 and any(
+                item.get('client_id') == client_ids[0] and item.get('obligation_type') == 'subsidy_return'
+                for item in taishin_client_refund_candidates)
+            if (customer_subsidy or existing_subsidy) and len(client_ids) == 1:
+                return _result('client_subsidy_return', client_ids, TAISHIN_CLIENT_SUBSIDY_MEMO_REASON)
             return _review(TAISHIN_CASE_MEMO_REASON)
         return _review("taishin_outgoing_unrecognized")
 

@@ -59,6 +59,17 @@ def test_case_get_preserves_original_memos_as_strict_typed_list():
     ]
 
 from api.dependencies.admin_auth import require_admin
+
+
+def test_historical_collection_progress_uses_existing_periods_without_inventing_zero_stages():
+    from domains.finance_import.statement_archive import CollectionStageSource, current_collection_progress
+    original = CollectionStageSource('first',72000,72000,'2025-02-15')
+    assert not current_collection_progress((original,)).sources_complete
+    complete = current_collection_progress((original,),historical=True)
+    assert complete.sources_complete and complete.stage=='scheme'
+    partial = current_collection_progress((CollectionStageSource('first',72000,70000,'2025-02-15'),),historical=True)
+    assert partial.stage=='first' and partial.remaining_ntd==2000
+    assert not current_collection_progress((),historical=True).sources_complete
 from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application
 from api.routes.finance_statement_workspace import router
 from domains.finance_import.statement_archive import accounting_warning, bank_import_type

@@ -348,7 +348,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
       && currentQuery.assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === Number(draft.serviceDays) : true));
   const savingLocked = status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
-  const locked = currentQuery.service_data_locked || savingLocked;
+  const closedService = currentQuery.service_data_locked || currentQuery.floor_fee_correction_available === true;
+  const locked = closedService || savingLocked;
 
   const calculateReplacement = async () => {
     if (!serviceMode || !draftReady || locked) return;
@@ -438,7 +439,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
 
   const applyTerms = async (calculatedPreview = preview, proposedPayload = proposedTermsPayload()) => {
     const preview = calculatedPreview;
-    if (!preview || (currentQuery.service_data_locked && !proposedPayload.floor_fee_correction)) return;
+    if (!preview || (closedService && !proposedPayload.floor_fee_correction)) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
@@ -526,8 +527,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">預覽與儲存服務條件</h3>
       <p className="order-v2-drawer-note">尚未建立服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
-      {currentQuery.service_data_locked && (
-        <div><p role="status">服務條件已鎖定；漏填或誤填樓層費可正式更正，原服務日期與收付款紀錄保留，差額由帳務承接。</p>
+      {closedService && (
+        <div><p role="status">本案服務已完成；漏填或誤填樓層費可正式更正，原服務日期與收付款紀錄保留，差額由帳務承接。</p>
           {!floorCorrection && <button type="button" disabled={savingLocked} onClick={()=>{setDraft(draftFromQuery(currentQuery));setFloorCorrection(true);}}>更正結案樓層費</button>}
         </div>
       )}

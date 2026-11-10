@@ -25,6 +25,7 @@ class ClientCaseFunding:
 class ClientCasePaymentTerms:
     funding: ClientCaseFunding | None = None
     zero_stages: frozenset[PaymentStage] = frozenset()
+    historical_stages: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,3 +76,5 @@ class ClientAccountingTransaction:
     kind: str
     amount_ntd: int
     bank: str | None
+    bank_amount_ntd: int | None = None
+    transfer_fee_ntd: int | None = None

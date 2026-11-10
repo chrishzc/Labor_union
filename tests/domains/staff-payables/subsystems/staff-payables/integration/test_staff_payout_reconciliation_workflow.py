@@ -223,18 +223,31 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
           'reconciliation_status':'pending','payout_event_id':None,'dedup_fingerprint':'c'*64,
           'resolved_counterparty_account':None,'bank_references':{}}
     before=deepcopy(bank)
-    rows=tuple(dict(obligation_identity=f'obligation:{i}',staff_id=7,amount_due_ntd=a) for i,a in enumerate(amounts))
+    rows=tuple(dict(obligation_identity=f'obligation:{i}',case_no='115000003',staff_id=7,amount_due_ntd=a) for i,a in enumerate(amounts))
     selected=tuple(rows[i] for i in chosen)
     class Cursor:
         def execute(self,sql,params=()):
-            assert sql.startswith('SELECT id,name FROM staff WHERE')
+            assert sql.startswith(('SELECT id,name FROM staff WHERE',
+                'SELECT case_no FROM client_legacy_virtual_accounts WHERE'))
+            self.case_query = 'client_legacy_virtual_accounts' in sql
         def fetchall(self):
+            if self.case_query:
+                return [{'case_no':'115000003'}]
             return [{'id':7,'name':'合成月嫂甲'},{'id':8,'name':'合成月嫂甲' if duplicate_name else '合成月嫂乙'}]
     class Repository(storage.MySqlStaffPayoutRepository):
         def __init__(self):
             super().__init__(object());self.receipts={};self.events=[];self.links=[];self.version=4;self.commits=0;self.outbox=[]
         def load(self,selection,*,for_update):
             return self._assemble_facts(Cursor(),selection,7,self.version,(bank,),selected,for_update)
+        def _prepare_subsidy_split(self,cursor,bank_rows,obligation_rows,obligations,lock):
+            # This owner identity/fee test supplies an already qualified scheme;
+            # the real scheme/money preflight is exercised by the MySQL tests.
+            from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
+            amount = sum(row['amount_due_ntd'] for row in obligation_rows)
+            return StaffSubsidySplit('115000003',obligation_rows[0]['obligation_identity'],1,True,
+                amount,amount,0,amount,False,())
+        def save_subsidy_split(self,split):
+            assert split.plan_already_split and not split.establish_installments
         def find_receipt(self,key):return self.receipts.get(key.value)
         def append_events(self,candidate):self.events.extend(candidate.events)
         def append_obligation_links(self,candidate):self.links.extend(candidate.obligation_links)

@@ -587,7 +587,9 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       expect(commands[0][1]).toEqual(expect.objectContaining({ finance_import_row_id: 101, refund_ledger_entry_id: 52,
         expected_account_version: 3, preview_fingerprint: 'b'.repeat(64) }));
       if (timeout) expect(commands[1]).toEqual(commands[0]);
-      expect(get).toHaveBeenCalledTimes(2);
+      expect(await get.mock.results.at(-1)!.value).toEqual(expect.objectContaining({
+        data:expect.objectContaining({account_version:4,refund_return_targets:[original[0]]}),
+      }));
     } finally { mocks.forEach(mock => mock.mockRestore()); window.location.hash = ''; }
   });
 

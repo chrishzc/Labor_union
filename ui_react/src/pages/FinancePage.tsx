@@ -271,7 +271,7 @@ export const FinancePage: React.FC = () => {
       const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      if (canApplyImportedBatch(preview)) {
+      if (canApplyImportedBatch(preview) && !preview.rows.some(row => row.subsidy_preflight != null)) {
         await applyImportedBatch(preview);
       } else {
         setReload(value => value + 1);

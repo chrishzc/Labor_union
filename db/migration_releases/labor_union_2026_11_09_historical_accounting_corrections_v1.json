@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-accounting-corrections-2026-11-09-v1",
+  "release_metadata": {
+    "release_name": "Historical financial correction receipts",
+    "application_version": "historical-accounting-corrections-v1",
+    "published_at": "2026-11-09",
+    "description": "Append two historical completed statuses to Terms receipts, preserving original enum values and all data."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-hcm-review-status-2026-11-06-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1070_historical_order_terms_receipt_status.sql",
+      "relative_path": "db/schema_parts/1070_historical_order_terms_receipt_status.sql",
+      "sha256": "31e78023dd0fede0f6dea24e4d2a707989cf29687396076fe9465729375d473a",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-added-enum-values-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "historical-terms-receipt-status-exact",
+      "phase": "post-schema",
+      "policy": "Exact append-only historical enum; original receipts and all business rows unchanged.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "historical-accounting-corrections-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "historical-terms-receipt-status-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_09_historical_accounting_corrections_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_09_historical_accounting_corrections_v1.descriptors.json",
+    "sha256": "64aa4249b229c28a55c3d0429b70da7f5d16cbfb0a7c4fad8df8fbd94b21dba2",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

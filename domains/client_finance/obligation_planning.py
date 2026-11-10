@@ -461,7 +461,14 @@ def automatic_subsidy_return_plan(facts: ClientFinanceTermsFacts, *, identity_st
     amount = facts.confirmed_subsidy_amount
     if amount is None or amount.amount <= 0:
         return None
-    return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",
+    return confirmed_subsidy_return_plan(facts.case_no, amount, completed_on)
+
+
+def confirmed_subsidy_return_plan(case_no: str, amount: MoneyNTD, completed_on: date) -> ClientSubsidyReturnPlan:
+    """Schedule a qualified return; qualification remains with the original owner facts."""
+    if amount.amount <= 0:
+        raise ValueError('subsidy_return_amount_missing')
+    return ClientSubsidyReturnPlan(f"client-subsidy-return:{case_no}:terminal",
                                  amount, subsidy_advance_due_date(completed_on))
 
 

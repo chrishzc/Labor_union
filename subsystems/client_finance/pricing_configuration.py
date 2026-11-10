@@ -86,6 +86,7 @@ class CasePricingFacts:
     floor_fee: int
     payroll_adjustment: int = 0
     legacy_client_amount: int | None = None
+    historical_service_hours: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,68 @@ class CasePricingPreview:
     before: PricingImpact
     after: PricingImpact
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class HistoricalAmountFacts:
+    identity: str
+    computed: int
+    effective: int
+    mode: str
+
+
+@dataclass(frozen=True)
+class HistoricalAmountUpdate:
+    identity: str
+    computed: int
+    effective: int
+    before_computed: int
+    before_effective: int
+    mode: str
+
+
+@dataclass(frozen=True)
+class HistoricalRepricingPlan:
+    case_no: str
+    client_version: int
+    payroll_version: int
+    client_updates: tuple[HistoricalAmountUpdate, ...]
+    staff_updates: tuple[HistoricalAmountUpdate, ...]
+    source_versions: tuple[int, ...] = ()
+
+    @property
+    def client_changed(self):
+        return any(i.computed != i.before_computed or i.effective != i.before_effective for i in self.client_updates)
+
+    @property
+    def payroll_changed(self):
+        return any(i.computed != i.before_computed or i.effective != i.before_effective for i in self.staff_updates)
+
+
+def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None, subsidy_source=None):
+    before = pricing_impact(facts.terms, facts)
+    after = pricing_impact(terms, replace(facts, floor_fee=facts.floor_fee if floor_fee is None else floor_fee))
+    def update(source, delta):
+        revised = source.computed + delta
+        if revised < 0:
+            raise PricingConflict('historical_pricing_amount_conflict')
+        return HistoricalAmountUpdate(source.identity, revised,
+            source.effective if source.mode == 'manual' else revised,
+            source.computed, source.effective, source.mode)
+    delta = after.client_amount - before.client_amount
+    updates = []
+    # Keep evidenced installment amounts/dates; apply the price difference to
+    # the final original installment, carrying a larger reduction backwards.
+    for source in reversed(client_sources):
+        applied = max(-source.computed, delta) if delta < 0 else delta
+        updates.append(update(source, applied))
+        delta -= applied
+    if delta:
+        raise PricingConflict('historical_pricing_amount_conflict')
+    if subsidy_source is not None:
+        updates.append(update(subsidy_source, after.subsidy_return_amount - before.subsidy_return_amount))
+    return HistoricalRepricingPlan(facts.case_no, facts.versions[1], facts.versions[2], tuple(updates),
+        (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions)
 
 
 class PricingRepository(Protocol):
@@ -107,6 +170,14 @@ class PricingRepository(Protocol):
 
 
 def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingImpact:
+    if facts.historical_service_hours is not None:
+        hours = facts.historical_service_hours
+        covered, excess = terms.split_hours(hours)
+        staff_covered, staff_excess = price_hours(((hours, False),),
+            TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule.value == "social"))
+        return PricingImpact(covered, excess, terms.client_charge(hours) + facts.floor_fee,
+            staff_covered, staff_excess, staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment,
+            subsidy_claim_amount(hours, terms.subsidy_hours, terms.payroll.covered), terms.subsidy_return(hours))
     consumed = Decimal(0)
     client = 0
     for day in sorted(facts.days, key=lambda item: item.occurred_on):
@@ -123,6 +194,8 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
 
 
 def case_total_amount(facts: CasePricingFacts) -> int:
+    if facts.historical_service_hours is not None:
+        return calculate_case_total_amount(facts.terms, ((facts.historical_service_hours, False),), facts.floor_fee)
     return calculate_case_total_amount(facts.terms,
         tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on)), facts.floor_fee)
 
@@ -176,7 +249,8 @@ class PricingConfigurationApplication:
         fingerprint = _fingerprint({"case_no": facts.case_no, "revision": facts.revision,
             "owner_versions": facts.versions, "candidate": terms, "days": facts.days,
             "floor_fee": facts.floor_fee, "payroll_adjustment":facts.payroll_adjustment,
-            "legacy_client_amount":facts.legacy_client_amount, "before": facts.terms})
+            "legacy_client_amount":facts.legacy_client_amount, "before": facts.terms,
+            "historical_service_hours": facts.historical_service_hours})
         return CasePricingPreview(facts, terms, current_pricing_impact(facts), pricing_impact(terms, facts), fingerprint)
 
     def apply_case(self, case_no, terms, expected_revision, preview_fingerprint, actor, reason, key):

@@ -17,7 +17,7 @@ import {clientReceiptReconciliationClient} from '../../../../../../../api/client
 import type {FinanceBankTransaction} from '../../../../../../../api/finance_import/finance_import_query_schemas';
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
-vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn()}}));
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn(),previewSubsidyPlan:vi.fn()}}));
 vi.mock('../../../../../../../api/line_order_groups/payment_overdue_reminder_client',()=>({paymentOverdueReminderClient:{case:vi.fn(),sendCase:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client',()=>({ordersQueryClient:{getOrderDetail:vi.fn()}}));
 vi.mock('../../../../../../../api/client_registry/client_registry_client',()=>({clientRegistryClient:{query:vi.fn()}}));
@@ -26,12 +26,53 @@ vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()
 vi.mock('../../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn().mockResolvedValue({case_no:'115000701',version:0,items:[],events:[]}),apply:vi.fn()}}));
 const caseNo='115000701';
 const plan={case_no:caseNo,version:0,events:[]};
+it.each([['taishin','台新銀行'],['sinopac','永豐銀行']])('退款回讀分開顯示 %s 實付與內扣手續費，不計為月嫂已核銷',async(bank,bankLabel)=>{
+ const data={...facts(),subsidy_ntd:12000,paid_ntd:12000,
+  staff_items:[{...facts().staff_items[0],expected_ntd:30000,actual_ntd:0,remaining_ntd:30000}],
+  client_items:[{...facts().client_items[0],identity:'refund:1',direction:'payable' as const,
+   label:'補助退款',expected_ntd:12000,actual_ntd:12000,remaining_ntd:0,has_payment:true}],
+  transactions:[{identity:'client-entry:1:refund:1',item_identity:'refund:1',occurred_on:'2026-11-15',
+   kind:'subsidy_return',amount_ntd:12000,bank,bank_amount_ntd:11970,transfer_fee_ntd:30}]};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ expect(await screen.findByText('整筆銀行實付 NT$ 11,970；內扣手續費 NT$ 30')).toBeVisible();
+ expect(screen.getByText(`2026-11-15 · ${bankLabel}`,{exact:true})).toBeVisible();
+ expect(within(screen.getByLabelText('月嫂薪資匯總')).getByText('NT$ 0')).toBeVisible();
+});
+it('未成立補助退款不顯示已結清，也不把自動推算代碼當成已確認方案',async()=>{
+ const data={...facts(),subsidy_ntd:12000,scheme:'advance' as const,
+  client_items:facts().client_items.filter(row=>row.direction!=='payable')};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const section=await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'});
+ expect(section.closest('details')?.querySelector('.finance-refund-summary-bar')).toHaveTextContent('補助歸屬待確認');
+ expect(within(section).queryByText('advance',{exact:true})).not.toBeInTheDocument();
+});
+it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次保存範圍',async()=>{
+ vi.mocked(financeAccountingClient.previewSubsidyPlan).mockResolvedValue({case_no:caseNo,scheme:'advance',plan_version:0,
+  subsidy_ntd:12000,total_ntd:30000,confirmation_only:false,payables:[],blocker:'客戶實際墊款依據不足',preview_fingerprint:'c'.repeat(64)});
+ wrapper(<FinanceSubsidyPlanForm caseNo={caseNo} source={plan} subsidyAmount={12000} onSaved={vi.fn()} onBack={vi.fn()}/>);
+ expect(screen.getByText(/本案補助金額：12,000 元/)).toBeVisible();
+ fireEvent.click(screen.getByRole('radio',{name:/客戶先墊後退/}));
+ await screen.findByRole('alert');
+ expect(screen.getByRole('alert')).toHaveTextContent('只確認方案');
+ expect(screen.getByRole('alert')).toHaveTextContent('不執行這些金融動作');
+ expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
+});
+
+it('已依明細確認的方案直接顯示確認來源，無須再人工選擇',async()=>{
+ const data=facts();data.subsidy_plan={case_no:caseNo,version:1,events:[{version:1,scheme:'advance',actor:'synthetic',created_at:'2026-11-09T00:00:00Z',source:'bank',bank_row_identity:'finance-import-row:11'}]};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ expect(await screen.findByText('依銀行明細確認方案')).toBeVisible();
+ expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
+});
 function facts():CaseAccounting{return {case_no:caseNo,client_name:'合成客戶',receivable_ntd:30000,received_ntd:20000,payable_ntd:30000,paid_ntd:0,pending_warning_count:0,staff_receivable_ntd:30000,subsidy_ntd:12000,customer_amount_ntd:30000,customer_fully_received:false,scheme:'direct',subsidy_plan:plan,ongoing_completed:false,collection_progress:{stage:'first',sources_complete:true,expected_ntd:15000,received_ntd:14000,remaining_ntd:1000,due_date:'2026-11-01'},client_items:([
  ['deposit',6000,6000,0],['first',15000,14000,1000],['second',9000,0,9000]
 ] as const).map(([stage,expected,actual,remaining])=>({identity:stage,direction:'receivable',label:stage,party:'合成客戶',expected_ntd:expected,actual_ntd:actual,remaining_ntd:remaining,payment_stage:stage,has_payment:actual>0,version:'1',due_date:stage==='second'?'2099-11-16':'2026-11-01'})),staff_items:[{identity:'staff',direction:'payable',label:'服務費',party:'合成月嫂',expected_ntd:30000,actual_ntd:0,has_payment:false,version:'1',due_date:null}],transactions:[{identity:'receipt',item_identity:'first',occurred_on:'2026-11-02',kind:'receipt',amount_ntd:14000,bank:'sinopac'}],warnings:[]};}
 function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{return {case_no:caseNo,payment_stage:stage,payment:{case_no:caseNo,payment_stage:stage,obligation_identity:stage,projection_version:1,obligation_event_id:1,due_date:'2099-11-16',remaining_amount_ntd:stage==='deposit'?0:1000},recipient_label:'合成客戶（私人LINE）',can_send:stage!=='deposit',unavailable_reason:stage==='deposit'?'本期已繳齊':null,message:'請繳納剩餘 1,000 元。',history:[]};}
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
-beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
+beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.previewSubsidyPlan).mockImplementation(async(caseNo,command)=>({case_no:caseNo,scheme:command.scheme,plan_version:command.expected_version,subsidy_ntd:12000,total_ntd:30000,confirmation_only:true,payables:[],blocker:null,preview_fingerprint:'b'.repeat(64)}));vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
  it('committed changes replace stale bank candidates and previews before reconciling the same original row',async()=>{
   let version=1,identity='first';
@@ -79,9 +120,10 @@ describe('精簡案件抽屜',()=>{
   expect(within(screen.getByRole('region',{name:'設定補助退款方案'})).getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
   for(const radio of screen.getAllByRole('radio'))expect(radio).not.toBeChecked();
   fireEvent.click(screen.getByRole('radio',{name:/客戶與政府分別入款/}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
   fireEvent.click(screen.getByRole('button',{name:'儲存方案'}));
   await waitFor(()=>expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledOnce());
-  expect(vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls[0][1]).toEqual({scheme:'split',expected_version:0});
+  expect(vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls[0][1]).toEqual({scheme:'split',expected_version:0,preview_fingerprint:'b'.repeat(64)});
   expect(await screen.findByRole('button',{name:'修改補助退款方案'})).toBeVisible();
   expect(screen.getByText('ＨＣ１１５０３２服務人員薪資')).toBeVisible();
   expect(screen.getByText('ＨＣ１１５０９３雇主補助款')).toBeVisible();
@@ -132,9 +174,10 @@ describe('精簡案件抽屜',()=>{
   fireEvent.click(await screen.findByRole('button',{name:'設定補助退款方案'}));
   expect(screen.getAllByRole('radio').every(input=>!(input as HTMLInputElement).checked)).toBe(true);
   fireEvent.click(screen.getByRole('radio',{name:/客戶先墊後退/}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
   fireEvent.click(screen.getByRole('button',{name:'儲存方案'}));
   await waitFor(()=>expect(onChanged).toHaveBeenCalledOnce());
-  expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledWith(caseNo,{scheme:'advance',expected_version:0},expect.any(String));
+  expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledWith(caseNo,{scheme:'advance',expected_version:0,preview_fingerprint:'b'.repeat(64)},expect.any(String));
   await screen.findByLabelText('各期繳款與通知，可左右捲動');
   expect(financeAccountingClient.query).toHaveBeenCalledTimes(2);
  });
@@ -224,15 +267,17 @@ describe('同案通知與方案保存防重',()=>{
   vi.mocked(financeAccountingClient.subsidyPlan).mockResolvedValue({case_no:caseNo,version:1,events:[saved.events[0]]});
   const onSaved=vi.fn();wrapper(<FinanceSubsidyPlanForm caseNo={caseNo} source={plan} onBack={vi.fn()} onSaved={onSaved}/>);
   fireEvent.click(screen.getByRole('radio',{name:/客戶與政府分別入款/}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
   fireEvent.click(screen.getByRole('button',{name:'儲存方案'}));
   fireEvent.click(await screen.findByRole('button',{name:'重新讀取方案'}));
   await waitFor(()=>expect(financeAccountingClient.subsidyPlan).toHaveBeenCalledOnce());
   await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
   expect(screen.getByRole('radio',{name:/客戶與政府分別入款/})).toBeChecked();
+  await waitFor(()=>expect(screen.getByRole('button',{name:'儲存方案'})).toBeEnabled());
   fireEvent.click(screen.getByRole('button',{name:'儲存方案'}));
   fireEvent.click(await screen.findByRole('button',{name:'確認原操作結果'}));
   await waitFor(()=>expect(onSaved).toHaveBeenCalledWith(saved));
   const calls=vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls;
-  expect(calls[1][1]).toEqual({scheme:'split',expected_version:1});expect(calls[2][2]).toBe(calls[1][2]);
+  expect(calls[1][1]).toEqual({scheme:'split',expected_version:1,preview_fingerprint:'b'.repeat(64)});expect(calls[2][2]).toBe(calls[1][2]);
  });
 });

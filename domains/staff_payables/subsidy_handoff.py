@@ -19,6 +19,7 @@ class SubsidyHandoffFacts:
     has_customer_subsidy_payable: bool
     full_subsidy_order: bool = False
     funding_conflict: bool = False
+    confirmation_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,22 +29,24 @@ class SubsidyPayableHandoff:
     service_completed: bool
     subsidy_ntd: int | None
     full_subsidy: bool
-    requires_manual_plan: bool = False
+    confirmation_required: bool = False
     staff_subsidy_reason: str | None = None
     client_subsidy_reason: str | None = None
+    confirmed: bool = False
 
 
 def decide_subsidy_handoff(facts: SubsidyHandoffFacts) -> SubsidyPayableHandoff:
-    manual = facts.manual_scheme in {'split', 'advance', 'direct'}
+    confirmed = facts.manual_scheme in {'split', 'advance', 'direct'}
+    manual = confirmed and facts.confirmation_source != 'bank'
     historical = facts.order_status.startswith('歷史')
     completed = facts.order_status in {'訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'}
-    automatic_full = not manual and not historical and facts.full_subsidy_order
-    scheme = facts.manual_scheme if manual else facts.historical_scheme if historical else 'split' if automatic_full else 'unknown'
+    automatic_full = not confirmed and facts.full_subsidy_order
+    scheme = facts.manual_scheme if confirmed else 'split' if automatic_full else facts.historical_scheme if historical else 'unknown'
     full = facts.full_subsidy_order or (facts.customer_amount_ntd == 0 and facts.total_ntd is not None and facts.total_ntd == facts.subsidy_ntd)
     staff_reason = client_reason = None
-    if not manual and not automatic_full:
+    if not confirmed and not automatic_full:
         if not historical:
-            staff_reason = client_reason = '補助退款方案尚未人工保存，請先確認補助歸屬。'
+            staff_reason = client_reason = '補助方案尚未正式確認，請由人工或銀行明細確認補助歸屬。'
         elif facts.historical_conflict:
             staff_reason = client_reason = '歷史補助方案或金額來源互相衝突，請由原帳務流程核對。'
     elif automatic_full and facts.historical_conflict:
@@ -81,9 +84,9 @@ def decide_subsidy_handoff(facts: SubsidyHandoffFacts) -> SubsidyPayableHandoff:
         client_reason = '政府直付安排與工會已經手的補助金流矛盾，請核對原始依據。'
     if scheme in {'split', 'direct'}:
         client_reason = client_reason or '既有客戶補助退款與案件方案的受款對象不符，請由原帳務流程更正。'
-    elif scheme not in {'advance'} and not (historical and not manual and not facts.historical_conflict):
+    elif scheme not in {'advance'} and not (historical and not confirmed and not facts.historical_conflict):
         client_reason = client_reason or '補助退款方案與對象待核對；既有款項保留。'
-    return SubsidyPayableHandoff(scheme, manual, completed, facts.subsidy_ntd, full, manual or (not historical and not automatic_full), staff_reason, client_reason)
+    return SubsidyPayableHandoff(scheme, manual, completed, facts.subsidy_ntd, full, confirmed or (not historical and not automatic_full), staff_reason, client_reason, confirmed)
 
 
 def subsidy_refund_amount_reason(subsidy_ntd: int | None, remaining_ntd: int, refunded_ntd: int) -> str | None:

@@ -56,11 +56,13 @@ class ClientRefundReversalMySqlUnitOfWork(MySqlUnitOfWork):
 
 
 class MySqlClientRefundReversalRepository:
-    def __init__(self, connection, *, preview_refund_classification: str | None = None) -> None:
+    def __init__(self, connection, *, preview_refund_classification: str | None = None,
+                 proposed_subsidy_return=None) -> None:
         if preview_refund_classification not in {None, "client_refund", "client_subsidy_return"}:
             raise ValueError("invalid_refund_preview_classification")
         self._connection = connection
         self._preview_refund_classification = preview_refund_classification
+        self._proposed_subsidy_return = proposed_subsidy_return
         self._request: ClientRefundReversalApplyRequest | None = None
         self._entry_ids: dict[str, int] = {}
         self._refund_row_metadata: dict[str, tuple[int, date]] = {}
@@ -75,12 +77,15 @@ class MySqlClientRefundReversalRepository:
         self._refund_row_metadata.clear()
 
     def load(self, selection, *, for_update):
-        if for_update and self._preview_refund_classification is not None:
+        if for_update and (self._preview_refund_classification is not None or self._proposed_subsidy_return is not None):
             raise ValueError("preview_only_repository")
         self.refund_account_matches = None
         with _mysql_cursor(self._connection) as cursor:
             if not _case_exists(cursor, selection.case_no):
                 raise ValueError("client_finance_case_not_found")
+            if for_update and selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
+                cursor.execute('SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE', (selection.case_no,))
+                cursor.fetchone()
             version = _load_account_version(
                 cursor,
                 selection.case_no,
@@ -106,6 +111,17 @@ class MySqlClientRefundReversalRepository:
     def append_ledger_entries(self, candidate) -> None:
         request = self._require_request()
         with _mysql_cursor(self._connection) as cursor:
+            if request.selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
+                from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+                cursor.execute('SELECT id,format_id FROM finance_import_rows WHERE id IN ('
+                    + _placeholders(request.selection.bank_fact_identities) + ') ORDER BY id', request.selection.bank_fact_identities)
+                rows = tuple(cursor.fetchall())
+                if rows and all(row['format_id'] == 'taishin' for row in rows):
+                    state = MySqlAccountingWorkspaceState(self._connection)
+                    plan = state.subsidy_plan(request.selection.case_no)
+                    if plan.selected_scheme is None:
+                        state.append_subsidy_plan(request.selection.case_no, plan.version+1, 'advance',
+                            request.actor.actor_id, request.idempotency_key.value, bank_row_id=int(rows[0]['id']))
             for ordinal, entry in enumerate(candidate.entries, start=1):
                 entry_id = _insert_ledger_entry(cursor, request, candidate, entry, ordinal)
                 self._entry_ids[entry.identity] = entry_id
@@ -267,6 +283,19 @@ class MySqlClientRefundReversalRepository:
             # Simulate only the explicit correction's classification; bank facts stay immutable.
             bank_rows = tuple({**row, "effective_classification_type": self._preview_refund_classification} for row in bank_rows)
         obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
+        proposed_rows = None
+        if self._proposed_subsidy_return is not None:
+            proposed = self._proposed_subsidy_return
+            if (selection.refund_purpose not in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
+                    or selection.obligation_identities != (proposed.obligation_identity,) or obligation_rows):
+                raise ValueError('subsidy_proposed_target_conflict')
+            cursor.execute('SELECT COALESCE(actual_end_date,end_date) service_end_date FROM orders WHERE case_no=%s', (selection.case_no,))
+            service = cursor.fetchone()
+            proposed_rows = ({'obligation_identity': proposed.obligation_identity, 'case_no': selection.case_no,
+                'obligation_type': 'subsidy_return', 'amount_due_ntd': proposed.amount.amount,
+                'due_date': proposed.due_date, 'bank_account': None,
+                'service_end_date': service['service_end_date'] if service else None},)
+            obligation_rows = proposed_rows
         from infrastructure.mysql.manual_supplement_evidence import manual_source_matches
         bank_rows = tuple({**row, "manual_confirmed_case_no": selection.case_no}
             if manual_source_matches(cursor, row, case_no=selection.case_no, direction="client_refund",
@@ -304,7 +333,7 @@ class MySqlClientRefundReversalRepository:
                 raise ValueError("client_refund_recipient_account_mismatch")
         funding = {}
         if selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
-            funding['subsidy_payout'] = _load_subsidy_payout_funding(cursor, selection, bank_rows, lock)
+            funding['subsidy_payout'] = _load_subsidy_payout_funding(cursor, selection, bank_rows, lock, proposed_rows=proposed_rows)
         return {
             **funding,
             "bank_facts": _refund_bank_facts(
@@ -451,7 +480,7 @@ def _load_refund_return_bank_rows(cursor, identities, lock):
     return tuple(cursor.fetchall())
 
 
-def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock):
+def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock, *, proposed_rows=None):
     suffix = ' FOR UPDATE' if lock else ''
     cursor.execute(
         'SELECT obligation.obligation_identity,obligation.amount_due_ntd,obligation.due_date,'
@@ -462,6 +491,10 @@ def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock):
         'ORDER BY obligation.obligation_identity' + suffix,
         (*selection.obligation_identities, selection.case_no))
     obligations = tuple(cursor.fetchall())
+    if proposed_rows is not None:
+        if obligations:
+            raise ValueError('subsidy_proposed_target_conflict')
+        obligations = proposed_rows
     if tuple(row['obligation_identity'] for row in obligations) != selection.obligation_identities or not bank_rows:
         raise ValueError('subsidy_advance_settlement_ambiguous')
     amount = sum(_integer_money(row['amount_due_ntd']).amount for row in obligations)

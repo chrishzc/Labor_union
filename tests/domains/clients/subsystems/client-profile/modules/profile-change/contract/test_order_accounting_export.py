@@ -4,6 +4,14 @@ from datetime import date
 from io import BytesIO
 
 from openpyxl import load_workbook
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def subsidy_amount_source(monkeypatch):
+    from subsystems.government_subsidy.reconciliation_register_query import SubsidyReceivableEstimate
+    monkeypatch.setattr('infrastructure.mysql.government_subsidy_period_repository.query_case_subsidy_amount',
+        lambda *_args,**_kwargs:SubsidyReceivableEstimate(36000,None))
 
 from api.routes.client_registry import export_client_registry_order_accounting
 from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
@@ -43,6 +51,7 @@ def _row() -> OrderAccountingExportRow:
         received_total_ntd=18000,
         customer_balance_ntd=75600,
         subsidy_return_amount_ntd=36000,
+        subsidy_amount_ntd=36000,
         planned_start_date=date(2026, 10, 1),
         planned_end_date=date(2026, 10, 31),
         actual_start_date=None,
@@ -248,7 +257,8 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
     assert rows[0].built_in_virtual_account == "99781699115001"
     assert rows[0].is_twins is True
     assert rows[0].customer_payable_total_ntd == 93600
-    assert rows[0].subsidy_return_amount_ntd == 36000
-    assert rows[0].subsidy_return_due_date == date(2026, 12, 15)
+    assert rows[0].subsidy_amount_ntd == 36000
+    assert rows[0].subsidy_return_amount_ntd is None
+    assert rows[0].subsidy_return_due_date is None
     assert rows[0].subsidy_return_status is None
     assert rows[0].staff_payment_due_date == date(2026, 11, 15)

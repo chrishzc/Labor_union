@@ -378,6 +378,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
     "labor_union_2026_11_06_hcm_review_status_v1.json",
+    "labor_union_2026_11_09_historical_accounting_corrections_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2332,6 +2333,9 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        "1070_historical_order_terms_receipt_status.sql": {
+            "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消')", "NO")},
+        },
         "1058_client_refund_overage_receipt.sql": {
             "client_refund_reversal_apply_receipts": {"correction_type": _column_contract("enum('refund','refund_return','reversal')", "NO")},
         },
@@ -3928,6 +3932,9 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        historical_terms = ROOT / "db/schema_parts/1070_historical_order_terms_receipt_status.sql"
+        if normalized.startswith('alter table order_terms_apply_receipts modify column lifecycle_status ') and normalized.rstrip(';') == re.sub(r'\s+', ' ', split_sql(historical_terms.read_text(encoding='utf-8'))[0].strip()).casefold().rstrip(';'):
+            return 'alter_add_only'
         reused_pairing = ROOT / "db/schema_parts/1065_historical_order_reused_pairing_check.sql"
         if normalized.startswith("alter table historical_order_pairing_evidence ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reused_pairing.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
@@ -6303,6 +6310,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
+    if part_name == "1070_historical_order_terms_receipt_status.sql":
+        descriptor["parent_columns"]["order_terms_apply_receipts"] = {
+            "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')", "NO"),
+        }
     if part_name == "1051_candidate_weekly_information.sql":
         descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {
             "event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')", "NO"),
@@ -6692,6 +6703,7 @@ def _release_descriptor_metadata_state(
         "1053_line_order_group_invitation_url.sql",
         "1058_client_refund_overage_receipt.sql",
         "1065_historical_order_reused_pairing_check.sql",
+        "1070_historical_order_terms_receipt_status.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

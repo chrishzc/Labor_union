@@ -98,7 +98,7 @@ def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due
     selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
     import infrastructure.mysql.manual_supplement_evidence as evidence
     monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(module, '_verify_taishin_memo_recipients', lambda _c, rows, _lock: rows)
+    monkeypatch.setattr(module, '_verify_taishin_memo_recipients', lambda _c, rows, _lock, **_kwargs: rows)
     monkeypatch.setattr(module, '_load_bank_accounts', lambda *_: ())
     monkeypatch.setattr(module, '_load_obligation_events', lambda *_: ())
     monkeypatch.setattr(module, '_obligation_facts', lambda *_: (StaffPayableFacts('obligation:1', 7, MoneyNTD(30000)),))
@@ -109,6 +109,15 @@ def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due
     monkeypatch.setattr(module, 'query_staff_funding_portions', lambda *_args, **_kwargs: (
         StaffFundingPortion('client', 18000, date(2026, 10, 15), 0, 18000),
         StaffFundingPortion('subsidy', 12000, date(2026, 10, 15), 0, 12000)))
+    def qualified_split(_cursor, _banks, roots, _obligations, _lock):
+        from domains.payroll.installments import PayrollInstallment
+        from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
+        if not roots[0]['has_installments']:
+            raise ValueError('staff_installment_funding_unconfirmed')
+        return StaffSubsidySplit('SYNTHETIC','obligation:1',1,True,30000,12000,18000,12000,False,
+            (PayrollInstallment('client',18000,date(2026,10,15)),
+             PayrollInstallment('subsidy',12000,date(2026,10,15))))
+    monkeypatch.setattr(repository, '_prepare_subsidy_split', qualified_split)
     facts = repository._assemble_facts(cursor, selection, 7, 1,
         ({'transaction_date': date(2026, 10, 15), 'currency': 'TWD', 'format_id': bank},),
         ({'obligation_identity': 'obligation:1', 'case_no': 'SYNTHETIC', 'has_installments': True},), True)

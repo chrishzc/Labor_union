@@ -229,6 +229,7 @@ def _query_payload(facts) -> dict[str, Any]:
         "client_finance_version": registry.client_finance_version,
         "payroll_version": registry.payroll_version,
         "service_data_locked": registry.order.service_data_locked,
+        "floor_fee_correction_available": registry.order.service_data_locked or registry.order.historical_service_completed,
         "terms": registry.order.terms.canonical_payload(),
         "confirmed_service_dates": list(facts.confirmed_service_dates),
         "confirmed_service_date_version": facts.confirmed_service_date_version,

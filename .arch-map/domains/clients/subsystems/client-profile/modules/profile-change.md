@@ -19,6 +19,7 @@
 - `subsystems/client_profile/case_inspection_export.py` — 案件總覽及固定關聯明細 XLSX，保留明細 grain，不重算 owner facts。
 - `infrastructure/mysql/client_case_inspection_repository.py` — 以名冊篩選取得案件，固定欄位關聯 Query，無 writer。
 - `infrastructure/mysql/client_registry_query_repository.py`
+- 名冊摘要與訂單帳務 XLSX 的「本案補助金額」共用 Government Subsidy 單案 S，獨立於方案與應退義務；「客戶補助待退金額」及退款日期仍讀正式 Client Finance 義務，未知不當零。一般／歷史同用此口徑，不改月付款清冊格式。
 - 名冊帳務摘要重用 Client Finance 的可計價服務日唯讀 facts；歷史訂單與無逐日排班案件依歷史義務或服務天數事實投影，不強制要求常規排班三期切分。尚未排班之正常案件使用既有約定日期，不建立 Scheduling facts 或付款義務。
 - `api/dependencies/client_registry.py`
 - `api/routes/client_registry.py`

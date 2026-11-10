@@ -109,7 +109,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         staff_candidates.setdefault(account, set()).add(staff_id)
 
     receipt_candidates = _client_receipt_candidates(cursor)
-    known_virtual_accounts, known_case_suffixes = _known_case_virtual_accounts(cursor)
+    known_virtual_accounts, known_case_suffixes, client_case_suffixes = _known_case_virtual_accounts(cursor)
 
     cursor.execute(
         """SELECT obligation.case_no, obligation.staff_id
@@ -131,7 +131,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
     cursor.execute(
         """SELECT case_no, staff_id
            FROM case_staff_assignments
-           WHERE staff_id IS NOT NULL AND status='active'"""
+           WHERE staff_id IS NOT NULL AND status IN ('planned','active','completed')"""
     )
     assignment_staff_rows = cursor.fetchall()
 
@@ -212,16 +212,18 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         "staff_payout_candidates": _staff_payout_candidates(cursor),
         "known_virtual_accounts": known_virtual_accounts,
         "known_case_suffixes": known_case_suffixes,
+        "client_case_suffixes": client_case_suffixes,
     }
 
 
 def _known_case_virtual_accounts(
     cursor: Any,
-) -> tuple[frozenset[str] | None, frozenset[str] | None]:
-    cursor.execute("SELECT case_no FROM orders WHERE case_no IS NOT NULL")
+) -> tuple[frozenset[str], frozenset[str], dict[str, list[int]]]:
+    cursor.execute("SELECT case_no,client_id FROM orders WHERE case_no IS NOT NULL")
+    order_rows = tuple(cursor.fetchall())
     existing_cases = {
         str(row["case_no"])
-        for row in cursor.fetchall()
+        for row in order_rows
         if isinstance(row, Mapping) and row.get("case_no")
     }
 
@@ -253,7 +255,14 @@ def _known_case_virtual_accounts(
     known_suffixes = frozenset(
         va[-6:] for va in valid_virtual_accounts if len(va) >= 6
     )
-    return frozenset(valid_virtual_accounts), known_suffixes
+    clients = {str(row['case_no']): row.get('client_id') for row in order_rows}
+    suffix_clients: dict[str, set[int]] = {}
+    for account in valid_virtual_accounts:
+        cases = va_to_cases.get(account) or formula_to_cases.get(account, set())
+        for case in cases:
+            if clients.get(case) is not None:
+                suffix_clients.setdefault(account[-6:], set()).add(int(clients[case]))
+    return frozenset(valid_virtual_accounts), known_suffixes, _stable_map(suffix_clients)
 
 
 def _staff_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:

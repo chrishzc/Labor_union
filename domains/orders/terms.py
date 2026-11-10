@@ -133,6 +133,7 @@ class OrderAggregateFacts:
     terms: OrderTerms
     service_data_locked: bool
     client_identity_status: str
+    historical_service_completed: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -199,7 +200,7 @@ def validate_terms_change(
     *, floor_fee_correction: bool = False,
 ) -> None:
     if floor_fee_correction:
-        if not current.service_data_locked:
+        if not current.service_data_locked and not current.historical_service_completed:
             raise ValueError("floor_fee_correction_requires_closed_service")
         if replace(proposed_terms, floor_fee=current.terms.floor_fee) != current.terms:
             raise ValueError("floor_fee_correction_must_only_change_fee")

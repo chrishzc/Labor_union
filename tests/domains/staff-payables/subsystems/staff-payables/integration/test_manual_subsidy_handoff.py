@@ -43,9 +43,9 @@ def test_last_manual_choice_wins_over_unknown_different_or_conflicted_automatic_
 
 def test_old_direct_arrangement_never_fills_an_unsaved_new_plan_and_historical_case_keeps_its_original_scheme():
     pending = handoff(manual_scheme=None, historical_scheme='direct')
-    assert pending.scheme == 'unknown' and '尚未人工保存' in pending.client_subsidy_reason
+    assert pending.scheme == 'unknown' and '尚未正式確認' in pending.client_subsidy_reason
     old = handoff(manual_scheme=None, historical_scheme='advance', order_status='歷史訂單－服務完成')
-    assert old.scheme == 'advance' and not old.manual and not old.requires_manual_plan
+    assert old.scheme == 'advance' and not old.manual and not old.confirmation_required
 
 
 def test_early_manual_choice_blocks_only_subsidy_portion_until_formal_service_end():
@@ -69,6 +69,22 @@ def test_split_routes_only_formal_remaining_subsidy_within_total_and_never_pays_
 @pytest.mark.parametrize('paid', [None, 0, 18000])
 def test_advance_choice_without_real_customer_advance_cannot_authorize_a_refund(paid):
     assert '墊款依據不足' in handoff(customer_paid_ntd=paid).client_subsidy_reason
+
+
+@pytest.mark.parametrize('status', ['訂單完成', '歷史訂單－服務完成'])
+def test_bank_confirmed_scheme_hands_off_to_the_original_cash_and_export_queries(status):
+    advance = handoff(order_status=status, confirmation_source='bank')
+    assert advance.confirmed and not advance.manual and advance.client_subsidy_reason is None
+    rows = cash_rows(cash_case(confirmed_subsidy_plan=advance.confirmed,
+        confirmed_scheme=advance.scheme, confirmation_required=advance.confirmation_required,
+        subsidy_refund_reason=advance.client_subsidy_reason))
+    assert len(rows) == 1 and rows[0].unpaid_amount_ntd == 12000
+    assert not any('尚未正式確認' in reason for reason in rows[0].pending_reasons)
+    split = handoff(order_status=status, confirmation_source='bank', manual_scheme='split',
+        customer_amount_ntd=18000, customer_paid_ntd=18000, staff_paid_ntd=18000)
+    payable = _staff_fact(_staff_payment_route(staff_row(), split))
+    assert split.confirmed and not split.manual and payable.outgoing_bank == '633'
+    assert payable.amount.amount == 12000 and payable.status is StaffPayableStatus.PARTIALLY_PAID
 
 
 def test_split_existing_customer_subsidy_refund_is_a_local_conflict_not_a_reassignment():
@@ -115,7 +131,7 @@ def test_existing_refund_uses_manual_purpose_and_remains_read_only_with_its_form
 def cash_case(**changes):
     return replace(CashRequirementCase('CASE','測試客戶','訂單完成',True,date(2026,10,31),
         '一般市民',None,None,None,True,False,(),(), subsidy_ntd=12000,
-        manual_plan_required=True, service_completed=True), **changes)
+        confirmation_required=True, service_completed=True), **changes)
 
 
 def cash_rows(case):
@@ -125,16 +141,16 @@ def cash_rows(case):
 def test_missing_manual_plan_and_missing_formal_refund_remain_pending_without_fabricating_payee_or_payable():
     missing = cash_rows(cash_case())
     assert len(missing) == 1 and missing[0].recipient_name is None
-    assert missing[0].unpaid_amount_ntd is None and '尚未人工保存' in missing[0].pending_reasons[0]
-    after_choice = cash_rows(cash_case(manual_subsidy_plan=True, confirmed_scheme='advance'))
+    assert missing[0].unpaid_amount_ntd is None and '尚未正式確認' in missing[0].pending_reasons[0]
+    after_choice = cash_rows(cash_case(confirmed_subsidy_plan=True, confirmed_scheme='advance'))
     assert after_choice[0].certainty == 'estimated'
     assert '尚未建立正式補助退款應付' in ' '.join(after_choice[0].pending_reasons)
-    assert cash_rows(cash_case(manual_subsidy_plan=True, confirmed_scheme='direct')) == ()
+    assert cash_rows(cash_case(confirmed_subsidy_plan=True, confirmed_scheme='direct')) == ()
     assert cash_rows(cash_case(service_completed=False)) == ()
 
 
 def test_confirmed_refund_conflict_remains_visible_while_normal_refund_is_unaffected():
-    case = cash_case(manual_subsidy_plan=True, confirmed_scheme='direct', has_subsidy_return=True,
+    case = cash_case(confirmed_subsidy_plan=True, confirmed_scheme='direct', has_subsidy_return=True,
         subsidy_refund_reason='既有補助退款與人工安排不符', refunds=(
             CashRefundFact('subsidy','client_subsidy_return',8000,date(2026,10,15),'客戶',True),
             CashRefundFact('normal','client_refund',500,date(2026,10,15),'客戶',True)))
@@ -162,7 +178,7 @@ def test_manual_selection_cannot_mask_a_formal_full_subsidy_or_amount_source_con
 def test_handoff_keeps_an_excess_formal_refund_pending_instead_of_silently_exporting_the_old_amount():
     from domains.staff_payables.subsidy_handoff import subsidy_refund_amount_reason
     assert subsidy_refund_amount_reason(12000,8000,4000) is None
-    rows=cash_rows(cash_case(manual_subsidy_plan=True,confirmed_scheme='advance',has_subsidy_return=True,
+    rows=cash_rows(cash_case(confirmed_subsidy_plan=True,confirmed_scheme='advance',has_subsidy_return=True,
         refunds=(CashRefundFact('excess','client_subsidy_return',13000,date(2026,10,15),'客戶',True),)))
     assert rows[0].unpaid_amount_ntd==13000 and '超出本案補助' in rows[0].pending_reasons[0]
     assert handoff(manual_scheme='split',staff_subsidy_paid_ntd=13000).staff_subsidy_reason
@@ -183,7 +199,7 @@ def test_a_manual_choice_does_not_convert_incompatible_formed_customer_charges_o
 @pytest.mark.parametrize('scheme',['unknown','waiting','advance'])
 def test_historical_formal_refund_without_a_new_plan_keeps_its_original_legal_source_eligibility(scheme):
     result=handoff(manual_scheme=None,historical_scheme=scheme,order_status='歷史訂單－服務完成')
-    assert not result.requires_manual_plan and result.client_subsidy_reason is None
+    assert not result.confirmation_required and result.client_subsidy_reason is None
 
 
 def test_historical_source_conflict_is_not_relaxed_by_the_new_manual_handoff():
@@ -207,7 +223,7 @@ def test_formal_full_subsidy_needs_no_manual_plan_or_cash_receipt_to_export_rema
     decision = full_handoff(government_received_ntd=government_paid, customer_paid_ntd=customer_paid)
 
     assert decision.scheme == 'split' and decision.full_subsidy
-    assert not decision.manual and not decision.requires_manual_plan
+    assert not decision.manual and not decision.confirmation_required
     assert decision.staff_subsidy_reason is None
     assert decision.client_subsidy_reason is not None
     rows = aggregate_accounts_payable_rows((_staff_fact(_staff_payment_route(staff_row(), decision)),), ())
@@ -215,7 +231,7 @@ def test_formal_full_subsidy_needs_no_manual_plan_or_cash_receipt_to_export_rema
     assert rows[0].amount.amount == 12000
     assert 18000 + rows[0].amount.amount == 30000
     assert cash_rows(cash_case(confirmed_scheme=decision.scheme, subsidy_ntd=decision.subsidy_ntd,
-        manual_subsidy_plan=decision.manual, manual_plan_required=decision.requires_manual_plan,
+        confirmed_subsidy_plan=decision.confirmed, confirmation_required=decision.confirmation_required,
         subsidy_refund_reason=decision.client_subsidy_reason)) == ()
 
 
@@ -233,7 +249,7 @@ def test_automatic_full_subsidy_keeps_missing_conflicting_or_exhausted_sources_b
 
     assert decision.staff_subsidy_reason is not None
     if changes.get('full_subsidy_order') is not False:
-        assert '尚未人工保存' not in decision.staff_subsidy_reason
+        assert '尚未正式確認' not in decision.staff_subsidy_reason
     assert fact.status is StaffPayableStatus.ANOMALY
     assert aggregate_accounts_payable_rows((fact,), ()) == ()
 
@@ -253,10 +269,12 @@ def test_full_subsidy_handoff_and_original_readers_feed_the_same_list_and_excel_
         staff_items=(SimpleNamespace(direction='payable', summary_included=True, actual_ntd=paid),),
     )
     full_row = {**staff_row(), 'export_amount_ntd': 30000 - paid,
+                'funding_root_total':30000, 'funding_settled_total':paid,
                 'payout_status': 'partially_paid' if paid else 'payable'}
     ordinary = {**staff_row('client'), 'obligation_identity': 'staff:other:1', 'case_no': 'OTHER',
                 'staff_id': 2, 'recipient_name': '一般月嫂', 'amount_due_ntd': 5000,
                 'export_amount_ntd': 5000, 'payout_status': 'payable'}
+    ordinary.update(funding_root_total=5000,funding_settled_total=0)
     staff_rows = (ordinary,) if paid == 30000 else (full_row, ordinary)
     refunds = ({'obligation_identity': 'normal:1', 'case_no': 'CASE', 'obligation_type': 'refund',
         'recipient_name': '一般退款', 'amount_due_ntd': 500, 'net_refunded_ntd': 0,
@@ -283,6 +301,11 @@ def test_full_subsidy_handoff_and_original_readers_feed_the_same_list_and_excel_
         return SimpleNamespace(query=lambda case_no: case)
 
     monkeypatch.setattr(workspace_repository, 'build_accounting_workspace', workspace)
+    from subsystems.staff_payables.case_accounting_query import StaffFundingPortion
+    monkeypatch.setattr('infrastructure.mysql.staff_payout_repository.query_staff_funding_portions',
+        lambda cursor, identity, **kwargs: (
+            StaffFundingPortion('subsidy',30000,target_date,paid,30000-paid),) if identity=='staff:case:1'
+            else (StaffFundingPortion('client',5000,target_date,0,5000),))
 
     def case_query(case_no):
         if case_no == 'OTHER':

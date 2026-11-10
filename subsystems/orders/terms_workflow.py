@@ -5,7 +5,7 @@ Description: 協調 Orders Terms 的 Query／Preview／Apply、跨域影響與�
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
 from typing import Any
@@ -97,6 +97,13 @@ class TermsWorkflowFacts:
     confirmed_service_date_version: int | None = None
     confirmed_service_dates: tuple[Any, ...] = ()
     actual_end_date: date | None = None
+    historical_correction: Any | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalFinancialVersions:
+    account_version: int
+    payroll_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +151,7 @@ class OrderTermsPreview:
     scheduling_replacement_required: bool
     fingerprint: Any
     requires_formal_apply: bool = True
+    historical_correction: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +403,18 @@ class OrderTermsWorkflow:
         validate_terms_change(facts.order, proposed_terms, floor_fee_correction=floor_fee_correction)
         if floor_fee_correction and (replacement_service_dates is not None or replacement_allocations):
             raise ValueError("floor_fee_correction_must_only_change_fee")
+        if facts.historical_correction is not None:
+            if not floor_fee_correction:
+                raise ValueError('historical_closed_service_requires_floor_fee_correction')
+            scheduling = _scheduling_candidate(facts, proposed_terms)
+            lifecycle = build_financial_correction_lifecycle_impact(facts.lifecycle, facts.actual_end_date, self._clock.now())
+            plan = facts.historical_correction
+            return OrderTermsPreview(facts.order.terms, proposed_terms, scheduling, facts.order.version,
+                facts.scheduling.aggregate_version, facts.scheduling.generation_number, plan.client_version, plan.payroll_version,
+                None, None, lifecycle, facts.planned_end_date, None, facts.confirmed_service_date_version, False,
+                fingerprint_payload({'historical_floor_fee_correction': asdict(plan), 'before': facts.order.terms.canonical_payload(),
+                    'after': proposed_terms.canonical_payload(), 'order_version': facts.order.version,
+                    'scheduling_version': facts.scheduling.aggregate_version}), True, plan)
         candidate_facts = _replacement_facts(
             facts, proposed_terms, replacement_service_dates, replacement_allocations
         )
@@ -489,6 +509,8 @@ class OrderTermsWorkflow:
 
     def _persist(self, request, preview, command_fingerprint, receipt):
         event_id = self._repository.append_terms_event(request, preview)
+        if preview.historical_correction is not None:
+            self._repository.persist_historical_correction(preview.historical_correction, request)
         scheduling_receipt_id = None
         if preview.scheduling_replacement_required:
             scheduling_result = self._repository.replace_scheduling_generation(
@@ -820,11 +842,15 @@ def _build_receipt(preview):
         scheduling_version,
         scheduling_generation,
         (
+            preview.historical_correction.client_version + int(preview.historical_correction.client_changed)
+            if preview.historical_correction is not None else
             preview.client_finance_impact.resulting_account_version
             if preview.requires_formal_apply and preview.client_finance_impact is not None
             else preview.client_finance_version
         ),
         (
+            preview.historical_correction.payroll_version + int(preview.historical_correction.payroll_changed)
+            if preview.historical_correction is not None else
             preview.payroll_impact.resulting_payroll_version
             if preview.requires_formal_apply and preview.payroll_impact is not None
             else preview.payroll_version

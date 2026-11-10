@@ -21,6 +21,7 @@
 - `infrastructure/mysql/monthly_accounting_repository.py`
 - `infrastructure/mysql/finance_statement_archive_repository.py`
 - `infrastructure/mysql/accounting_workspace_repository.py`
+- `infrastructure/mysql/subsidy_confirmation_repository.py` — 一般／歷史案件共用補助確認組合：Preview 借用原 Client Refund／Staff Payout 預檢尚未建立的合法款項；原 Apply 鎖定來源後，於同一 outer UoW 確認方案、承接款項與核銷，任一步失敗整筆回滾。未達服務結束條件時只確認方案。
 - `query_case_bank_memos`／typed `CaseBankMemo`：台新備註六碼經 Client Finance 正式帳號對照確認唯一案件，原文逐筆投影至案件 `bank_memos`；不要求有款項、不推用途或計入金流。方案區及既有人工選擇頁顯示原文，沿原方案 metadata writer 明確保存。
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
@@ -32,11 +33,13 @@
 - `ui_react/src/components/FinanceMonthlyAccounting.tsx`、`FinanceMonthlyAccounting.css`
 - `ui_react/src/components/FinanceReceivableItems.tsx` — 按到期月份列出正式應收款，未定日期款分到待確認；同一 typed Query 不建立第二份案件總額。
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
-- `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→人工方案；只有客戶款齊且獨立人工方案已保存才移出。發出提醒共用LINE同案期款來源及原成功紀錄。
+- `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；客戶款齊且人工或銀行明細已正式確認方案才移出。發出提醒共用LINE同案期款來源及原成功紀錄。
 - `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。已確認的案件款項帶原流水直開共用案件抽屜核對，政府款開原整期核對。匯入紀錄從獨立入口查看。
+- 補助確認預檢的批次由 FinancePage 停留於原上傳面板，顯示金額、受款方向與建款／核銷計畫；使用者按「確認套用本次明細」才提交原 Apply，全部受阻時不提供可套用動作。其他來源原自動核銷及原鍵結果未明查回保持。
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
+- 補助退款回讀使用 Client Finance 正式 allocation／ledger 的已核銷、銀行實付及整筆內扣費用；無已成立退款與未確認補助歸屬分開顯示，不因退款清單為空宣告結清。
 - `ui_react/src/components/CancellationSettlementAccounting.tsx` — common cancellation readback and notices for case accounting and registry.
 - `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
 - `subsystems/finance_import/case_manual_supplement.py` — typed人工補登命令與完整內容冪等檢查；不含SQL或金融root writer。
@@ -45,7 +48,7 @@
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`
-- `ui_react/src/components/FinanceSubsidyPlanForm.tsx` — explicit three-choice manual form; early save, CAS conflict, original-key unknown-result recovery and unsaved draft protection.
+- `ui_react/src/components/FinanceSubsidyPlanForm.tsx` — 原三選一表單顯示獨立補助金額及人工／銀行確認來源；保存前呼叫零寫入預檢，顯示可承接款項、原日期與阻擋原因，沿原保存送出 fingerprint。保留提前保存、CAS、原鍵結果未明恢復與草稿保護。
 - `ui_react/src/components/FinanceStatementArchive.tsx`
 - `db/schema_parts/235_finance_statement_workspace.sql`
 - `db/schema_parts/1057_finance_statement_workspace.sql`
@@ -53,8 +56,9 @@
 - `db/schema_parts/241_finance_case_accounting_markers.sql`、`db/schema_parts/1063_finance_case_accounting_markers.sql`
 
 - shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原 owner 退款同步共用 Client Finance 正式繳款來源。僅略過確認為零的缺席期款，工作台與補助交接使用同一應繳、實收結果，既有金融歷史衝突保留。
+- 歷史案件由 Client Finance typed payment terms 明示沿原正式期款 grain 彙總應繳與實收，不套一般訂單三期齊備門檻、不補造缺席期款；完全沒有正式期款仍保持未知。相同金額供明細補助建款預檢與收款進度使用。
 
-- `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — independent append-only manual plan events, not financial mutations or historical arrangement backfill.
+- `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — 沿原 append-only 方案事件；伺服器保留 `bank-subsidy:<row-id>:<command-digest>` operation key 記錄銀行確認來源，人工命令不能使用該命名空間。不新增 schema 或回填歷史資料。
 
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
@@ -65,14 +69,14 @@
 - 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
 - 台新客戶補助的入口依原始備註唯一六碼與正式虛擬帳號對照確認案件，並沿既有姓名擷取排除命中月嫂姓名的來源；不以舊對象辨識欄位或原因碼決定能否開啟。候選限同案補助待退款，可人工選款或顯示缺款；Query 不回填舊欄位，正式 Preview／Apply 仍驗原備註、資金資格、日期及核銷規則。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
-- manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan`; server actor, plan version CAS and same-command replay under the Orders case identity lock, one outer metadata transaction. No collection, bank uniqueness or legacy direct-arrangement prerequisite; no financial/date writer or payable generation.
+- manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan` 與 POST `cases/{case_no}/accounting/subsidy-plan/preview`；沿原 actor、version CAS、Orders identity lock 與同鍵重播。Preview 零寫入，原保存重驗預檢並借用既有 owner 承接已合資格款項；未具金融資格可保存已預檢的方案但不得建款或核銷。無外部付款及日期重算。
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`
 - monthly endpoints: `accounting/monthly`、`accounting/monthly/export`；marker Query/Apply: `cases/{case_no}/accounting/historical-marker`。
 - `accounting/receivables` — readonly 到期月份／全部月份／未定日期清單；沿用分類及歷史標記統計排除。
 - marker Apply fresh-locks current owner versions, preserves an immutable amount snapshot, and supports same-key/same-command replay; one application transaction, no cash or service completion effect.
 - archive command owns its outer transaction and same-command receipt; acknowledgement fresh-locks owner facts and checks existing version/amounts, writing only acknowledgement.
 
-- case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection; absent government money is never direct-arrangement evidence. Direct arrangement facts are explicit append-only confirm_direct/withdraw_direct events, never inferred from missing government cash; same-case GET/POST arrangement is the authenticated metadata writer, with arrangement version, Orders identity lock and original-command replay.
+- case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection；S 由 Government Subsidy 單案共用 Query 提供，不以方案或退款義務存在為前提，未知不轉零。方案事件明示人工／銀行來源；未收到政府款不作直付證據。舊 direct arrangement 仍沿原 append-only confirm_direct/withdraw_direct 與其 writer，不回填或改寫。
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
 - case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and matched obligations or unselected same-case candidates; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
@@ -82,6 +86,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement.py`
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py` — 隔離 MySQL 驗證一般／歷史未確認補助計算、兩種台新受款方案、Preview 零寫入、原 Apply 建款核銷、提前確認、來源過期與失敗整筆回滾。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement_mysql.py` — opt-in isolated MySQL：三方向正式核銷、足額／部分／手續費／超收退款／超付追償、完整回滾及同鍵重送／衝突／並行。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.

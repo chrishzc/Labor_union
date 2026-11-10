@@ -16,7 +16,7 @@ class PayrollInstallment:
 
 def confirmed_subsidy_installments(total: int, subsidy: int, client_due: date | None, completed_on: date) -> tuple[PayrollInstallment, ...]:
     """Schedule a confirmed split of one existing entitlement; never add salary."""
-    if any(not isinstance(v, int) or isinstance(v, bool) for v in (total, subsidy)) or not 0 <= subsidy < total:
+    if any(not isinstance(v, int) or isinstance(v, bool) for v in (total, subsidy)) or total <= 0 or not 0 <= subsidy <= total:
         raise ValueError('staff_subsidy_split_amount_conflict')
     return (PayrollInstallment('client', total - subsidy, client_due),
             PayrollInstallment('subsidy', subsidy, funding_due_date(completed_on, directly_subsidized=True)))

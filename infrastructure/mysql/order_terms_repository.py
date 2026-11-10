@@ -214,6 +214,11 @@ class MySqlOrderTermsRepository:
         with self._connection.cursor() as cursor:
             persist_client_finance_terms_impact(cursor, command)
 
+    def persist_historical_correction(self, plan, request):
+        from infrastructure.mysql.pricing_configuration_repository import persist_historical_repricing
+        persist_historical_repricing(self._connection, plan, request.actor.actor_id, request.reason,
+            request.idempotency_key.value)
+
     def persist_payroll_impact(
         self,
         command: PayrollImpactPersistenceCommand,

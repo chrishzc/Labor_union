@@ -156,6 +156,29 @@ def _amount_event(cursor,identity,action,before,after,computed,key,digest,actor,
         (identity,action,before,after,computed,key,digest,actor,reason,_today()))
 
 
+def persist_historical_source_amounts(connection, plan, actor, reason, key):
+    """Borrow the original correction writer and the caller's outer transaction."""
+    if not plan.client_changed:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE', (plan.case_no,))
+        if int(cursor.fetchone()['aggregate_version']) != plan.client_version:
+            raise ClientDifferenceConflict('client_difference_stale')
+        version = plan.client_version + 1
+        for item in plan.client_updates:
+            if item.computed == item.before_computed and item.effective == item.before_effective:
+                continue
+            child = 'historical-client-source:' + sha256((key + ':' + item.identity).encode()).hexdigest()
+            _set_client_amount(cursor, plan.case_no, item.identity, item.effective, item.before_effective, child, actor, reason, version)
+            _amount_event(cursor, item.identity, 'source_update', item.before_effective, item.effective, item.computed, child, sha256(child.encode()).hexdigest(), actor, reason)
+            cursor.execute('INSERT INTO client_finance_amount_controls(obligation_identity,case_no,amount_mode,computed_ntd,effective_ntd) '
+                'VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE computed_ntd=VALUES(computed_ntd),effective_ntd=VALUES(effective_ntd)',
+                (item.identity,plan.case_no,item.mode,item.computed,item.effective))
+        cursor.execute('UPDATE client_finance_accounts SET aggregate_version=%s WHERE case_no=%s', (version,plan.case_no))
+        cursor.execute("INSERT INTO client_finance_outbox(case_no,intent_type,intent_key,payload_snapshot) VALUES(%s,'projection_refresh',%s,%s)",
+            (plan.case_no,'historical-pricing:'+sha256(key.encode()).hexdigest(),json.dumps({'case_no':plan.case_no,'account_version':version})))
+
+
 def _latest_stage_computations(cursor,case_no):
     # Reuse the owner formula. An incomplete source remains unavailable; it is
     # never interpreted as a new zero amount.

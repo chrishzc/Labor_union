@@ -13,6 +13,7 @@
 - domain: `domains/government_subsidy/period_reconciliation.py`
 - application: `subsystems/government_subsidy/period_reconciliation.py`
 - adapter: `infrastructure/mysql/government_subsidy_period_repository.py`
+- `query_case_subsidy_amount` — 依單案原來源與有效人工金額控制投影 S；不受報表選案狀態、方案或退款義務是否存在影響。Finance workspace、名冊／訂單匯出與 case coverage 共用，零寫入且保留未知。
 - shared source/formula: `subsystems/government_subsidy/reconciliation_register_query.py`
 - API: `api/routes/government_subsidy_periods.py`
 - presentation: `ui_react/src/components/SubsidyPeriodWorkbench.tsx`

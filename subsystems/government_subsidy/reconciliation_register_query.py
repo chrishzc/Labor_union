@@ -102,6 +102,21 @@ def extract_employer_identity_card(survey_details: object) -> str:
     return ""
 
 
+_CASE_PAYROLL_RATE_SQL = """CASE WHEN LEFT(o.status,2)='歷史' THEN COALESCE(
+    (SELECT MAX(rate.hourly_rate_ntd)
+     FROM historical_order_pairing_evidence evidence
+     JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id
+       AND receipt.case_no=o.case_no AND receipt.outcome='adopted'
+     JOIN case_staff_assignments assignment ON assignment.id=evidence.assignment_id
+       AND assignment.case_no=o.case_no AND assignment.staff_id=evidence.staff_id
+       AND assignment.status IN ('planned','active','completed')
+     LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=assignment.id
+     WHERE receipt.id=(SELECT MAX(latest.id) FROM historical_order_adoption_receipts latest
+       WHERE latest.case_no=o.case_no AND latest.outcome='adopted')
+     HAVING COUNT(DISTINCT assignment.id)=1), payroll_policy.hourly_rate_ntd)
+    ELSE payroll_policy.hourly_rate_ntd END"""
+
+
 def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
     conn = connection_factory()
     try:
@@ -115,7 +130,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, s.union_no AS staff_union_no, br.survey_details,
                        correction.effective_values_json AS beclass_effective_values,
-                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+                       {_CASE_PAYROLL_RATE_SQL} AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
                        historical_service.total_actual_service_hours AS historical_actual_service_hours,
                        (SELECT COUNT(DISTINCT schedule.work_date)
@@ -174,11 +189,13 @@ def _select_established_cases(
     period_start: date | None,
     period_end: date | None,
     order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
-    *, lock: bool = False,
+    *, lock: bool = False, case_no: str | None = None,
 ) -> list[dict]:
     if (period_start is None) != (period_end is None):
         raise ValueError("period_start and period_end must both be provided or omitted")
     status_placeholders = ", ".join("%s" for _ in order_statuses)
+    scope_clause = f"o.status IN ({status_placeholders})" if case_no is None else "o.case_no=%s"
+    scope_params = order_statuses if case_no is None else (case_no,)
     period_clause = ""
     period_params: tuple[date, ...] = ()
     if period_start is not None and period_end is not None:
@@ -215,7 +232,7 @@ def _select_established_cases(
                        ) AS staff_name,
                        br.survey_details,
                        correction.effective_values_json AS beclass_effective_values,
-                       payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+                        {_CASE_PAYROLL_RATE_SQL} AS payroll_hourly_rate_ntd,
                        historical_service.total_actual_service_days AS historical_actual_service_days,
                        historical_service.total_actual_service_hours AS historical_actual_service_hours,
                        (SELECT COUNT(DISTINCT schedule.work_date)
@@ -241,13 +258,13 @@ def _select_established_cases(
                     ON payroll_policy.case_no = o.case_no
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
-                WHERE o.status IN ({status_placeholders})
+                WHERE {scope_clause}
                   AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶')) OR pricing.pricing_active=1)
                 {period_clause}
                 ORDER BY o.case_no {"FOR UPDATE" if lock else ""}
                 """,
                 (
-                    *order_statuses,
+                    *scope_params,
                     GENERAL_CITIZEN,
                     SUBSIDIZED_CITIZEN,
                     *period_params,
@@ -474,7 +491,7 @@ def _service_volume(
         return contracted_service_days * daily_hours, source.get("service_days") or 0
     actual_hours = source.get("historical_actual_service_hours")
     if actual_hours is None:
-        return (Decimal(str(source["pricing_subsidy_hours"])) if source.get("pricing_active") and source.get("pricing_subsidy_hours") is not None else _subsidy_hour_limit(source.get("identity_status"))), source.get("service_days") or 0
+        return contracted_service_days * daily_hours, source.get("service_days") or 0
     return (
         Decimal(str(actual_hours)),
         source.get("historical_actual_service_days") or 0,

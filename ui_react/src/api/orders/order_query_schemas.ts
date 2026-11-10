@@ -93,6 +93,7 @@ export const OrderTermsSchema = z.strictObject({
   client_finance_version: z.number().int().nonnegative().nullable(),
   payroll_version: z.number().int().nonnegative().nullable(),
   service_data_locked: z.boolean(),
+  floor_fee_correction_available: z.boolean().optional(),
   terms: OrderTermsDetailSchema,
   confirmed_service_dates: z.array(DateOnlySchema).optional(),
   confirmed_service_date_version: z.number().int().nonnegative().nullable().optional(),

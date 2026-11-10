@@ -11,6 +11,26 @@ def _today():
     return datetime.now(ZoneInfo('Asia/Taipei')).date()
 
 
+def persist_historical_source_amounts(connection, plan, actor, reason, key):
+    """Keep paid roots and cash; let Payroll create linked amount differences."""
+    if not plan.payroll_changed:
+        return
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE',(plan.case_no,))
+        if int(cursor.fetchone()['aggregate_version']) != plan.payroll_version:
+            raise PayrollAmountConflict('payroll_amount_stale')
+        version = plan.payroll_version + 1
+        for item in plan.staff_updates:
+            if item.computed == item.before_computed and item.effective == item.before_effective:
+                continue
+            child = 'historical-payroll-source:' + sha256((key + ':' + item.identity).encode()).hexdigest()
+            _persist_amount(connection,cursor,plan.case_no,item.identity,item.mode,item.computed,item.effective,
+                item.before_effective,'source_update',child,sha256(child.encode()).hexdigest(),actor,reason,version)
+        cursor.execute('UPDATE payroll_case_accounts SET aggregate_version=%s WHERE case_no=%s',(version,plan.case_no))
+        cursor.execute("INSERT INTO payroll_outbox(case_no,intent_key,intent_type,payload_snapshot) VALUES(%s,%s,'staff_obligation_changed',%s)",
+            (plan.case_no,'historical-pricing:'+sha256(key.encode()).hexdigest(),json.dumps({'case_no':plan.case_no,'payroll_version':version})))
+
+
 def _digest(command):
     return sha256(json.dumps({k:getattr(command,k) for k in command.__dataclass_fields__},sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
 

@@ -191,6 +191,8 @@ class SubsidyPlanEventView(_StrictModel):
     scheme: Literal["split", "advance", "direct"]
     actor: str
     created_at: str
+    source: Literal['manual', 'bank'] = 'manual'
+    bank_row_identity: str | None = None
 
 
 class CaseSubsidyPlanView(_StrictModel):
@@ -202,6 +204,26 @@ class CaseSubsidyPlanView(_StrictModel):
 class SubsidyPlanBody(_StrictModel):
     scheme: Literal["split", "advance", "direct"]
     expected_version: int = Field(ge=0, strict=True)
+    preview_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+
+
+class SubsidyPlanPayableView(_StrictModel):
+    identity: str
+    recipient: str
+    amount_ntd: ExactNtd
+    due_date: str | None
+
+
+class SubsidyPlanPreviewView(_StrictModel):
+    case_no: str
+    scheme: Literal['split','advance','direct']
+    plan_version: int
+    subsidy_ntd: ExactNtd | None
+    total_ntd: ExactNtd | None
+    confirmation_only: bool
+    payables: list[SubsidyPlanPayableView]
+    blocker: str | None
+    preview_fingerprint: str
 
 
 class SubsidyPlanApplyView(_StrictModel):
@@ -530,6 +552,21 @@ class FinanceImportDispatchSummaryView(_StrictModel):
     total_amount_ntd: int = Field(ge=0)
 
 
+class SubsidyConfirmationPreflightView(_StrictModel):
+    case_no: str
+    scheme: Literal['split','advance']
+    subsidy_ntd: ExactNtd | None
+    total_ntd: ExactNtd | None
+    confirmation_only: bool
+    payable_amount_ntd: ExactNtd | None
+    payable_due_date: str | None
+    bank_cash_ntd: ExactNtd
+    transfer_fee_ntd: ExactNtd | None
+    settlement_ntd: ExactNtd | None
+    remaining_ntd: ExactNtd | None
+    blocker: str | None
+
+
 class FinanceImportRowView(_StrictModel):
     row_identity: str
     canonical_fact_version: int = Field(ge=0)
@@ -544,6 +581,7 @@ class FinanceImportRowView(_StrictModel):
     formal_reference_conflict: bool
     client_receipt_review: FinanceBankClientReceiptReviewView | None = None
     pending_reason: str | None = None
+    subsidy_preflight: SubsidyConfirmationPreflightView | None = None
 
 
 class FinanceImportBatchPreviewView(_StrictModel):

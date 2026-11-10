@@ -43,6 +43,7 @@ class OrderTermsQueryView(BaseModel):
     client_finance_version: int | None = Field(ge=0)
     payroll_version: int | None = Field(ge=0)
     service_data_locked: bool
+    floor_fee_correction_available: bool = False
     terms: OrderTermsView
     confirmed_service_dates: list[date] = Field(default_factory=list)
     confirmed_service_date_version: int | None = None

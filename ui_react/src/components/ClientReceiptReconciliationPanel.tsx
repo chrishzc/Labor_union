@@ -207,7 +207,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                   <h4>尚未核銷的銀行入款（可複選）</h4>
                 </div>
                 <div className="finance-table-container">
-                  <table className="finance-table finance-recon-table">
+                  <table className="finance-table finance-recon-table" role="table" aria-label="尚未核銷的銀行入款">
                     <thead>
                       <tr>
                         <th>納入</th>
@@ -218,8 +218,8 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                     </thead>
                     <tbody>
                       {facts.bank_facts.map(row => (
-                        <tr key={row.finance_import_row_id} className={selectedBanks.includes(row.finance_import_row_id) ? 'is-selected-row' : ''}>
-                          <td>
+                        <tr role="row" key={row.finance_import_row_id} className={selectedBanks.includes(row.finance_import_row_id) ? 'is-selected-row' : ''}>
+                          <td role="cell" data-label="納入">
                             <input
                               aria-label={`納入銀行款 ${row.finance_import_row_id}`}
                               type="checkbox"
@@ -231,12 +231,12 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                               }}
                             />
                           </td>
-                          <td><strong>{row.transaction_date}</strong></td>
-                          <td>
+                          <td role="cell" data-label="入帳日期"><strong>{row.transaction_date}</strong></td>
+                          <td role="cell" data-label="銀行來源"><div>
                             <span>永豐銀行入款</span>
                             <small className="finance-mono-sub">bank:{row.finance_import_row_id}</small>
-                          </td>
-                          <td className="finance-num"><strong className="finance-paid">{financeMoney(row.amount_ntd)}</strong></td>
+                          </div></td>
+                          <td role="cell" data-label="入款金額" className="finance-num"><strong className="finance-paid">{financeMoney(row.amount_ntd)}</strong></td>
                         </tr>
                       ))}
                     </tbody>
@@ -303,12 +303,12 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                   <small>勾選銀行實收</small>
                   <strong>{financeMoney(bankTotal)}</strong>
                 </div>
-                <span className="finance-recon-calc-operator">−</span>
+                <span className="finance-recon-calc-operator" aria-hidden="true">−</span>
                 <div>
                   <small>對應期款待收</small>
                   <strong>{financeMoney(dueTotal)}</strong>
                 </div>
-                <span className="finance-recon-calc-operator">=</span>
+                <span className="finance-recon-calc-operator" aria-hidden="true">=</span>
                 <div>
                   <small>沖銷差額</small>
                   <strong className={selectionHint ? undefined : diff < 0 ? 'finance-diff-under' : diff > 0 ? 'finance-diff-over' : 'finance-paid'}>
@@ -379,12 +379,12 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                 {preview.candidate.status !== 'review_required' && (
                   <>
                   <div className="finance-table-container">
-                  <table className="finance-table" aria-label="本次期款核銷明細">
+                  <table className="finance-table" role="table" aria-label="本次期款核銷明細">
                     <thead><tr><th>本次期款</th><th>到期日</th><th>核銷金額</th><th>核銷後待收餘額</th></tr></thead>
-                    <tbody>{previewRows?.map(item=><tr key={item.obligation_identity}>
-                      <td>{getObligationLabel(item.obligation_identity,item.payment_stage)}</td>
-                      <td>{item.due_date??'未定到期日'}</td>
-                      <td>{financeMoney(item.allocated)}</td><td>{financeMoney(item.remaining)}</td>
+                    <tbody>{previewRows?.map(item=><tr role="row" key={item.obligation_identity}>
+                      <td role="cell" data-label="本次期款">{getObligationLabel(item.obligation_identity,item.payment_stage)}</td>
+                      <td role="cell" data-label="到期日">{item.due_date??'未定到期日'}</td>
+                      <td role="cell" data-label="核銷金額">{financeMoney(item.allocated)}</td><td role="cell" data-label="核銷後待收餘額">{financeMoney(item.remaining)}</td>
                     </tr>)}</tbody>
                   </table>
                   </div>

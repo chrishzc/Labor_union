@@ -44,7 +44,7 @@ const financeValues = z.strictObject({
   service_hours: z.number().nonnegative(), customer_payable_total_ntd: z.number().int().nonnegative(),
   deposit_amount_ntd: z.number().int().nonnegative(), first_payment_amount_ntd: z.number().int().nonnegative(),
   second_payment_amount_ntd: z.number().int().nonnegative(), received_total_ntd: z.number().int().nonnegative(),
-  customer_balance_ntd: z.number().int(), subsidy_return_amount_ntd: z.number().int().nonnegative().nullable(),
+  customer_balance_ntd: z.number().int(), subsidy_return_amount_ntd: z.number().int().nonnegative().nullable(), subsidy_amount_ntd: z.number().int().nonnegative().nullable().optional(),
   subsidy_return_due_date: nullableText, subsidy_return_status: nullableText,
 });
 const fieldCapabilities = z.record(z.string(), z.strictObject({

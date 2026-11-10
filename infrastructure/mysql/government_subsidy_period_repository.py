@@ -16,6 +16,21 @@ _ACTIVE = "entry.reversal_of_id IS NULL AND NOT EXISTS (SELECT 1 FROM government
 _RECOVERED = "(SELECT COALESCE(SUM(ledger.amount_ntd-COALESCE((SELECT SUM(reversed.amount_ntd) FROM client_ledger_entries reversed WHERE reversed.reversal_of_entry_id=ledger.id),0)),0) FROM government_subsidy_period_members member JOIN client_ledger_entries ledger ON ledger.case_no=member.case_no AND ledger.entry_type='subsidy_advance' WHERE member.receipt_id=entry.id AND ledger.occurred_on<=entry.paid_on)"
 
 
+def query_case_subsidy_amount(connection, case_no, *, lock=False):
+    """S uses the government owner's calculation, independent of scheme/payables."""
+    from subsystems.government_subsidy.reconciliation_register_query import SubsidyReceivableEstimate
+    sources = _select_established_cases(connection, None, None, case_no=case_no, lock=lock)
+    estimate = (project_receivable_estimate(sources[0]) if len(sources) == 1
+                else SubsidyReceivableEstimate(None, 'subsidy_case_source_missing'))
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT amount_mode,effective_ntd FROM government_subsidy_amount_controls WHERE case_no=%s'
+                       + (' FOR UPDATE' if lock else ''), (case_no,))
+        control = cursor.fetchone()
+    if control and control['amount_mode'] == 'manual':
+        return SubsidyReceivableEstimate(int(control['effective_ntd']), None)
+    return estimate
+
+
 class MySqlGovernmentSubsidyPeriodRepository:
     def __init__(self, connection):
         self.connection = connection
@@ -163,8 +178,6 @@ class MySqlGovernmentSubsidyPeriodRepository:
             if row is None:
                 raise PeriodReconciliationConflict('subsidy_case_not_found')
             end = row['service_end_date']
-            view = self.query(SubsidyPeriod('month',end.year,end.month)) if end else None
-            line = next((line for line in view.lines if line.case_no==case_no),None) if view else None
             cursor.execute('SELECT entry.id,entry.period_unit,entry.period_year,entry.period_index,entry.amount_ntd,'+_RECOVERED+' recovered_advance_ntd,member.service_end_date,member.amount_ntd member_amount_ntd '
                 'FROM government_subsidy_period_members member JOIN government_subsidy_period_entries entry ON entry.id=member.receipt_id '
                 'WHERE member.case_no=%s AND '+_ACTIVE+' ORDER BY entry.id',(case_no,))
@@ -177,7 +190,7 @@ class MySqlGovernmentSubsidyPeriodRepository:
             balances,_=period_difference_views(cursor,[c['receipt_id'] for c in coverage])
             originals={b.root_receipt_id:b for b in balances if b.kind=='original'}
             coverage=tuple({**c,'settled':originals[c['receipt_id']].settled if c['receipt_id'] in originals else True} for c in coverage)
-            return {'case_no':case_no,'service_end_date':end,'amount_ntd':line.amount_ntd if line else None,'coverage':coverage}
+            return {'case_no':case_no,'service_end_date':end,'amount_ntd':query_case_subsidy_amount(self.connection, case_no).amount_ntd,'coverage':coverage}
 
     def save(self, view, bank_row_id, key, actor):
         with self.connection.cursor() as cursor:

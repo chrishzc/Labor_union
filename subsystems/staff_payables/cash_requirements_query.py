@@ -44,8 +44,8 @@ class CashRequirementCase:
     subsidy_ntd: int | None = None
     scheme_conflict: bool = False
     subsidy_refund_reason: str | None = None
-    manual_subsidy_plan: bool = False
-    manual_plan_required: bool = False
+    confirmed_subsidy_plan: bool = False
+    confirmation_required: bool = False
     service_completed: bool = False
 
 
@@ -123,7 +123,7 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             reasons.append("退款收款資料待確認")
         if refund.kind == 'client_subsidy_return' and refund.payment_status not in {'paid', 'settled'}:
             amount_reason = (subsidy_refund_amount_reason(case.subsidy_ntd, refund.amount_ntd, refund.settled_amount_ntd)
-                             if case.manual_subsidy_plan else None)
+                             if case.confirmed_subsidy_plan else None)
             if case.subsidy_refund_reason or amount_reason:
                 reasons.append(case.subsidy_refund_reason or amount_reason)
             elif case.scheme_conflict or case.confirmed_scheme in {'split', 'direct'}:
@@ -135,13 +135,13 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             refund.payment_date, False, tuple(reasons), payment_status=refund.payment_status))
     if case.has_subsidy_return or not case.has_arrangement or case.order_status == '訂單取消':
         return tuple(rows)
-    if case.manual_plan_required:
+    if case.confirmation_required:
         if not case.service_completed or case.subsidy_ntd == 0:
             return tuple(rows)
-        if not case.manual_subsidy_plan:
+        if not case.confirmed_subsidy_plan:
             rows.append(CashRequirementRow(f"{case.case_no}:subsidy:pending", case.case_no, None,
                 'client_subsidy_return', 'estimated', 'subsidy_estimate', None, None, None, False,
-                (case.subsidy_refund_reason or '補助退款方案尚未人工保存，請先確認補助歸屬。',)))
+                (case.subsidy_refund_reason or '補助方案尚未正式確認，請由人工或銀行明細確認補助歸屬。',)))
             return tuple(rows)
         if case.confirmed_scheme != 'advance':
             if case.subsidy_refund_reason and case.confirmed_scheme == 'direct' and case.subsidy_refund_reason.startswith('政府直付'):
@@ -154,7 +154,7 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
     if case.subsidy_ntd == 0:
         return tuple(rows)
     reasons = ["補助退款計算資料待確認"]
-    if case.manual_subsidy_plan:
+    if case.confirmed_subsidy_plan:
         reasons.append('尚未建立正式補助退款應付，請由原帳務流程處理')
         if case.subsidy_refund_reason:
             reasons.append(case.subsidy_refund_reason)

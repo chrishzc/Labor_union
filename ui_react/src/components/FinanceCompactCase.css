@@ -138,9 +138,9 @@
 
 /* Reconciliation Deck Styling */
 .finance-recon-deck{margin-top:14px;display:grid;gap:16px}
-.finance-recon-deck-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch}
-@media(max-width:960px){.finance-recon-deck-grid{grid-template-columns:1fr}}
-.finance-recon-col{background:#fff;border:1px solid #ebdcd1;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column}
+.finance-recon-deck-grid{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;align-items:stretch}
+@media(max-width:960px){.finance-recon-deck-grid{grid-template-columns:minmax(0,1fr)}}
+.finance-recon-col{background:#fff;border:1px solid #ebdcd1;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;min-width:0}
 .finance-recon-col-header{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f2e8e1}
 .finance-recon-col-header h4{margin:0;font-size:.9rem;font-weight:700;color:#2d2621}
 .finance-recon-badge-step{font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:4px;background:#ffeedb;color:#a04010}
@@ -181,6 +181,38 @@
 .finance-recon-action-select-row select{padding:6px 12px;border:1px solid #c25e2e;border-radius:6px;font-size:.84rem;background:#fff}
 .finance-recon-confirm-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-top:10px}
 .finance-recon-preview-desc{margin:0;font-size:.84rem;color:#2d2621;font-weight:600}
+/* 手機以逐筆欄位呈現，保留表頭與完整金額，不以裁切隱藏溢出。 */
+@media(max-width:600px){
+  .finance-advanced-reconciliation-card{padding:12px;overflow-wrap:anywhere}
+  .finance-advanced-reconciliation-card .finance-section-heading{flex-wrap:wrap;gap:10px}
+  .finance-recon-deck>*,.finance-recon-calculation-bar>*{min-width:0}
+  .finance-recon-col{padding:10px}
+  .finance-recon-col-header{flex-wrap:wrap}
+  .finance-recon-badge-step{flex-shrink:0}
+  .finance-advanced-reconciliation-card .finance-table{display:block;white-space:normal}
+  .finance-advanced-reconciliation-card .finance-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .finance-advanced-reconciliation-card .finance-table tbody{display:block}
+  .finance-advanced-reconciliation-card .finance-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr);padding:6px 0}
+  .finance-advanced-reconciliation-card .finance-table tbody tr+tr{border-top:1px solid #f2e2dc}
+  .finance-advanced-reconciliation-card .finance-table td{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding:8px 10px;border:0;min-height:44px;box-sizing:border-box}
+  .finance-advanced-reconciliation-card .finance-table td::before{content:attr(data-label);color:#74593f;font-weight:600;text-align:left}
+  .finance-advanced-reconciliation-card .finance-table td>*{min-width:0;max-width:100%}
+  .finance-recon-col-summary{text-align:left;line-height:1.6}
+  .finance-recon-calculation-bar,.finance-recon-preview-box{padding:12px}
+  .finance-recon-calc-metrics{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+  .finance-recon-calc-metrics>div{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 12px;text-align:left}
+  .finance-recon-calc-metrics small{margin:0}
+  .finance-recon-calc-operator{display:none}
+  .finance-recon-calc-explanation{padding:10px;min-width:0}
+  .finance-recon-preview-header{flex-direction:column;align-items:flex-start;gap:8px}
+  .finance-recon-action-select-row label{display:grid;gap:8px;min-width:0;max-width:100%}
+  .finance-recon-action-select-row select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+  .finance-recon-preview-box dl{margin:12px 0}
+  .finance-recon-preview-box dt{line-height:1.5}
+  .finance-recon-preview-box dd{margin:4px 0 12px;font-weight:600}
+  .finance-recon-confirm-row{flex-direction:column;align-items:stretch}
+  .finance-recon-action-row button,.finance-recon-confirm-row button{width:100%;min-height:44px;white-space:normal}
+}
 /* 手動補登工作台樣式 */
 .case-manual-supplement-card{background:#fffaf6;border:1.5px solid #d97746;border-radius:10px;padding:16px 20px;margin-bottom:16px}
 .case-manual-supplement-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;border-bottom:1px solid #ebdcd1;padding-bottom:10px}

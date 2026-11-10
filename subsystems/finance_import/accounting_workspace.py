@@ -2,6 +2,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol
+from domains.client_finance.obligation_planning import ClientSubsidyReturnPlan
+from domains.payroll.installments import PayrollInstallment
+from shared_kernel.fingerprints import PreviewFingerprint
 
 from domains.finance_import.statement_archive import (
     accounting_warning, case_accounting_scheme, direct_arrangement_conflict,
@@ -20,6 +23,30 @@ class SubsidyPlanApplyResult:
     case_no: str
     applied_version: int
     plan: CaseSubsidyPlan
+
+
+@dataclass(frozen=True)
+class SubsidyPlanPayable:
+    identity: str
+    recipient: str
+    amount_ntd: int
+    due_date: str | None
+
+
+@dataclass(frozen=True)
+class SubsidyPlanPreview:
+    case_no: str
+    scheme: str
+    plan_version: int
+    subsidy_ntd: int | None
+    total_ntd: int | None
+    confirmation_only: bool
+    payables: tuple[SubsidyPlanPayable, ...]
+    blocker: str | None
+    fingerprint: PreviewFingerprint
+    refund_plan: ClientSubsidyReturnPlan | None = None
+    staff_identity: str | None = None
+    installments: tuple[PayrollInstallment, ...] = ()
 
 
 class AccountingConflict(ValueError):
@@ -153,7 +180,8 @@ class StaffAccountingPort(Protocol):
 
 class AccountingWorkspace:
     def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort,
-                 bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None):
+                 bank=None, subsidy=None, payment_terms=None, plan=None, cancellation=None, bank_memos=None,
+                 subsidy_plan_preview=None, subsidy_plan_apply=None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
         self.subsidy = subsidy
@@ -161,13 +189,24 @@ class AccountingWorkspace:
         self.plan = plan
         self.cancellation = cancellation
         self.bank_memos = bank_memos
+        self.subsidy_plan_preview = subsidy_plan_preview
+        self.subsidy_plan_apply = subsidy_plan_apply
 
     def subsidy_plan_history(self, case_no: str):
         self.state.case_client(case_no)
         return self.state.subsidy_plan(case_no)
 
-    def save_subsidy_plan(self, case_no: str, scheme: str, expected_version: int, key: str, actor: str):
-        if scheme not in {"split", "advance", "direct"} or expected_version < 0 or not key.strip() or not actor.strip():
+    def preview_subsidy_plan(self, case_no: str, scheme: str, expected_version: int):
+        self.state.case_client(case_no)
+        if scheme not in {'split','advance','direct'} or expected_version < 0:
+            raise ValueError('subsidy_plan_command_invalid')
+        if self.state.subsidy_plan(case_no).version != expected_version:
+            raise AccountingConflict('subsidy_plan_version_changed')
+        return self.subsidy_plan_preview(case_no, scheme, expected_version, for_update=False)
+
+    def save_subsidy_plan(self, case_no: str, scheme: str, expected_version: int, key: str, actor: str,
+                          preview_fingerprint: str | None = None):
+        if scheme not in {"split", "advance", "direct"} or expected_version < 0 or not key.strip() or not actor.strip() or key.startswith('bank-subsidy:'):
             raise ValueError("subsidy_plan_command_invalid")
         command = (case_no, expected_version, scheme, actor)
         self.state.begin()
@@ -182,7 +221,14 @@ class AccountingWorkspace:
                 current = self.state.subsidy_plan(case_no)
                 if current.version != expected_version:
                     raise AccountingConflict("subsidy_plan_version_changed")
+                preview = self.subsidy_plan_preview(case_no, scheme, expected_version, for_update=True) if self.subsidy_plan_preview else None
+                if preview is not None:
+                    if ((preview.payables or preview.blocker or preview_fingerprint is not None)
+                            and preview_fingerprint != preview.fingerprint.value):
+                        raise AccountingConflict('subsidy_plan_preview_changed')
                 self.state.append_subsidy_plan(case_no, expected_version + 1, scheme, actor, key)
+                if preview is not None and self.subsidy_plan_apply is not None:
+                    self.subsidy_plan_apply(preview, actor, key)
                 result = SubsidyPlanApplyResult(case_no, expected_version + 1, self.state.subsidy_plan(case_no))
             self.state.commit()
             return result
@@ -299,7 +345,8 @@ class AccountingWorkspace:
             *(CollectionStageSource(item.payment_stage, item.expected_ntd, item.actual_ntd, item.due_date) for item in stages),
             *(CollectionStageSource(stage.value, 0, 0, None) for stage in terms.zero_stages if stage not in recorded_stages),
         )
-        complete_terms = len(collection_sources) == 3 and {item.stage for item in collection_sources} == {"deposit", "first", "second"}
+        complete_terms = bool(stages) if terms.historical_stages else (
+            len(collection_sources) == 3 and {item.stage for item in collection_sources} == {"deposit", "first", "second"})
         customer_amount = sum(item.expected_ntd for item in collection_sources) if complete_terms else None
         customer_paid = sum(item.received_ntd for item in collection_sources) if complete_terms else None
         fully_received = all(item.received_ntd >= item.expected_ntd for item in collection_sources) if complete_terms else None
@@ -330,6 +377,8 @@ class AccountingWorkspace:
             direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
             full_subsidy=full_subsidy)
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
+        if plan is not None and plan.selected_scheme is not None:
+            scheme = plan.selected_scheme
         return CaseAccounting(
             case_no, client_name,
             sum(item.expected_ntd for item in incoming) if incoming else None,
@@ -345,7 +394,7 @@ class AccountingWorkspace:
             staff_total, customer_amount, fully_received, subsidy, scheme, cash_flows, cash_net,
             staff_total - subsidy if staff_total is not None and subsidy is not None else None,
             arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
-            CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources),
+            CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(collection_sources, historical=terms.historical_stages),
             plan, ongoing_case_completed(fully_received, plan),
             customer_paid_ntd=customer_paid, funding=funding,
             cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,

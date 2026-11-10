@@ -36,6 +36,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
       return;
     }
     if (!caseNo) return;
+    setPricing(null);
     let active = true;
     void accountingPricingClient
       .queryCase(caseNo)
@@ -48,23 +49,23 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
     };
   }, [caseNo, propPricing]);
   const isTwins = multiBirthCount === '雙胞胎' || (pricing?.terms.payroll.excess ?? 0) >= 450;
-  const identityName = pricing?.terms.identity_name || '一般市民';
-  const subsidyHours = pricing?.terms.subsidy_hours ?? 0;
-  const clientCovered = pricing?.terms.client.covered ?? 0;
-  const clientExcess = pricing?.terms.client.excess ?? 300;
-  const staffRate = pricing?.terms.payroll.excess ?? (isTwins ? 450 : 250);
+  const identityName = pricing?.terms.identity_name ?? '待確認';
+  const subsidyHours = pricing?.terms.subsidy_hours;
+  const clientCovered = pricing?.terms.client.covered;
+  const clientExcess = pricing?.terms.client.excess;
+  const staffRate = pricing?.terms.payroll.excess;
 
-  const totalHours = serviceHours || (pricing?.impact ? pricing.impact.covered_hours + pricing.impact.excess_hours : 160);
-  const coveredHours = Math.min(totalHours, subsidyHours);
-  const excessHours = Math.max(0, totalHours - coveredHours);
+  const totalHours = serviceHours ?? (pricing?.impact ? pricing.impact.covered_hours + pricing.impact.excess_hours : null);
+  const coveredHours = pricing?.impact.covered_hours;
+  const excessHours = pricing?.impact.excess_hours;
 
   const displayCustomerAmount = customerAmountNtd != null
     ? customerAmountNtd.toLocaleString()
-    : (pricing?.impact?.client_amount ?? ((coveredHours * clientCovered) + (excessHours * clientExcess))).toLocaleString();
+    : pricing?.impact?.client_amount?.toLocaleString();
 
   const displayStaffAmount = staffAmountNtd != null
     ? staffAmountNtd.toLocaleString()
-    : (pricing?.impact?.staff_total_amount ?? (totalHours * staffRate)).toLocaleString();
+    : pricing?.impact?.staff_total_amount?.toLocaleString();
 
   return (
     <div className="accounting-params-card" aria-label="帳務計價依據與核心參數">
@@ -87,6 +88,8 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
         </button>
       </div>
 
+      {!pricing && <p role="status">計價依據待確認，既有應繳／應付金額仍依正式帳務來源顯示。</p>}
+
       <div className="accounting-params-grid">
         {/* 胎數類別 */}
         <div className="accounting-param-item">
@@ -103,7 +106,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
           <dt>補助身分與上限</dt>
           <dd>
             <span className="chip-subsidy">
-              {identityName} ({subsidyHours}h)
+              {identityName}{subsidyHours == null ? '（補助時數待確認）' : ` (${subsidyHours}h)`}
             </span>
           </dd>
         </div>
@@ -112,9 +115,9 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
         <div className="accounting-param-item">
           <dt>客戶自備 / 超額時薪</dt>
           <dd>
-            <span>補助: <strong className="param-highlight">${clientCovered}</strong></span>
+            <span>補助: <strong className="param-highlight">{clientCovered == null ? '待確認' : `$${clientCovered}`}</strong></span>
             <span style={{ color: '#dec0b6', margin: '0 2px' }}>/</span>
-            <span>超額: <strong className="param-highlight">${clientExcess}</strong></span>
+            <span>超額: <strong className="param-highlight">{clientExcess == null ? '待確認' : `$${clientExcess}`}</strong></span>
           </dd>
         </div>
 
@@ -122,17 +125,17 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
         <div className="accounting-param-item">
           <dt>月嫂服務時薪</dt>
           <dd>
-            <span>每小時 <strong className="param-highlight">${staffRate}</strong> 元</span>
+            <span>{staffRate == null ? '時薪待確認' : <>每小時 <strong className="param-highlight">${staffRate}</strong> 元</>}</span>
           </dd>
         </div>
       </div>
 
       <div className="accounting-params-footer">
         <span>
-          💡 試算依據：服務總時數 {totalHours}h（補助範圍 {coveredHours}h + 超額 {excessHours}h）{isTwins ? '｜ 雙胞胎加成費率' : ''}
+          {totalHours == null || coveredHours == null || excessHours == null ? '服務時數計價依據待確認' : <>💡 計價依據：服務總時數 {totalHours}h（補助範圍 {coveredHours}h + 超額 {excessHours}h）{isTwins ? '｜ 雙胞胎加成費率' : ''}</>}
         </span>
         <span style={{ fontWeight: 600, color: 'var(--md-sys-color-primary)' }}>
-          連動總額：客戶應繳 NT$ {displayCustomerAmount} ｜ 月嫂基準應付 NT$ {displayStaffAmount}
+          連動總額：客戶應繳 {displayCustomerAmount == null ? '待確認' : `NT$ ${displayCustomerAmount}`} ｜ 月嫂基準應付 {displayStaffAmount == null ? '待確認' : `NT$ ${displayStaffAmount}`}
         </span>
       </div>
     </div>

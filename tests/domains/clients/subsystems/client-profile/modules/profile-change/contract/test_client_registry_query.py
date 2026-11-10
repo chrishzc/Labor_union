@@ -5,6 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def subsidy_amount_source(monkeypatch):
+    from subsystems.government_subsidy.reconciliation_register_query import SubsidyReceivableEstimate
+    monkeypatch.setattr('infrastructure.mysql.government_subsidy_period_repository.query_case_subsidy_amount',
+        lambda *_args,**_kwargs:SubsidyReceivableEstimate(None,'subsidy_source_pending'))
+
 from api.routes.client_registry import (
     get_client_registry,
     get_client_registry_change_history,
@@ -226,7 +233,8 @@ def test_registry_rejects_invalid_sort_before_it_reaches_repository_and_custom_s
 
 
 @pytest.mark.parametrize('virtual_account', ['SYNTHETIC-VA', None])
-def test_registry_http_composition_identifies_each_field_owner_and_editability(virtual_account):
+@pytest.mark.parametrize('historical_completed', [False, True])
+def test_registry_http_composition_identifies_each_field_owner_and_editability(virtual_account,historical_completed):
     class _FinanceRepository(_Repository):
         def load_detail(self, case_no):
             return {**super().load_detail(case_no), 'finance_status': 'ready', 'finance_values': {
@@ -238,7 +246,7 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
             }}
     terms = SimpleNamespace(
         order=SimpleNamespace(
-            case_no="CASE-001", version=4, service_data_locked=False,
+            case_no="CASE-001", version=4, service_data_locked=False, historical_service_completed=historical_completed,
             terms=SimpleNamespace(canonical_payload=lambda: {
                 "planned_start_date": "2026-10-01", "service_days": 20,
                 "service_hours_per_day": 8, "requires_cooking": None,
@@ -256,6 +264,7 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
         order_terms=SimpleNamespace(query_registry=lambda _case_no: terms),
     )
     payload = response.data.model_dump()
+    assert payload['order_terms']['data']['floor_fee_correction_available'] is historical_completed
     assert payload['finance']['values']['virtual_account'] == virtual_account
     assert payload['finance']['values']['customer_payable_total_ntd'] == 48000
     assert payload["client"]["field_capabilities"]["phone"] == {
@@ -276,7 +285,7 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
 def test_registry_http_composition_allows_preassignment_terms_without_downstream_roots():
     terms = SimpleNamespace(
         order=SimpleNamespace(
-            case_no="CASE-001", version=4, service_data_locked=False,
+            case_no="CASE-001", version=4, service_data_locked=False, historical_service_completed=False,
             terms=SimpleNamespace(canonical_payload=lambda: {
                 "planned_start_date": "2026-10-01", "service_days": 20,
                 "service_hours_per_day": 8, "requires_cooking": None,

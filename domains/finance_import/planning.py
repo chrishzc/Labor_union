@@ -10,6 +10,7 @@ from enum import StrEnum
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
+from domains.client_finance.obligation_planning import ClientSubsidyReturnPlan
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
@@ -53,6 +54,22 @@ class ClientReceiptReviewDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class SubsidyConfirmationPreflight:
+    case_no: str
+    scheme: str
+    plan_version: int
+    subsidy_ntd: int | None
+    total_ntd: int | None
+    counterparty_identity: str = ''
+    confirmation_only: bool = False
+    proposed_refund: ClientSubsidyReturnPlan | None = None
+    staff_confirm_split: bool = False
+    blocker: str | None = None
+    payable_amount_ntd: int | None = None
+    payable_due_date: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalFinanceImportRow:
     row_identity: str
     canonical_fact_version: int
@@ -68,6 +85,7 @@ class CanonicalFinanceImportRow:
     formal_reference_conflict: bool = False
     client_receipt_review: ClientReceiptReviewDiagnostic | None = None
     pending_reason: str | None = None
+    subsidy_preflight: SubsidyConfirmationPreflight | None = None
 
     def __post_init__(self) -> None:
         _validate_row_identity(self)
@@ -363,6 +381,7 @@ def _row_payload(row):
         "classification_type": row.classification_type.value,
         "disposition": row.disposition.value,
         "decision_facts_fingerprint": row.decision_facts_fingerprint.value,
+        "subsidy_preflight": _subsidy_preflight_payload(row.subsidy_preflight),
         "target_identities": row.target_identities,
         "evidence": row.evidence,
         "available_actions": row.available_actions,
@@ -396,6 +415,15 @@ def _validate_row_identity(row: CanonicalFinanceImportRow) -> None:
     if not isinstance(row.amount, MoneyNTD):
         raise TypeError("canonical bank amount must be MoneyNTD")
     require_positive_integer(row.amount.amount, "canonical bank amount")
+
+
+def _subsidy_preflight_payload(preflight):
+    if preflight is None:
+        return None
+    payload = asdict(preflight)
+    if preflight.proposed_refund is not None:
+        payload['proposed_refund']['due_date'] = preflight.proposed_refund.due_date.isoformat()
+    return payload
 
 
 def _validate_row_state(row: CanonicalFinanceImportRow) -> None:

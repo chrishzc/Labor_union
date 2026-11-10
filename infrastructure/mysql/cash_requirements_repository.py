@@ -49,8 +49,8 @@ class MySqlCashRequirementsRepository:
             current.subsidy_ntd if current is not None else None,
             False,
             current.client_subsidy_reason if current is not None else None,
-            current.manual if current is not None else False,
-            current.requires_manual_plan if current is not None else False,
+            current.confirmed if current is not None else False,
+            current.confirmation_required if current is not None else False,
             current.service_completed if current is not None else False,
         )
 

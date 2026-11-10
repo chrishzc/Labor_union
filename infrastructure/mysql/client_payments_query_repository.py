@@ -39,7 +39,11 @@ def query_case_payment_terms(connection, case_no):
     with connection.cursor() as cursor:
         order = select_order(cursor, case_no, lock=False)
         status = str(order['status'])
-        if status.startswith('歷史') or any(order.get(key) is None for key in
+        if status.startswith('歷史'):
+            # Historical obligations retain their original legal period grain;
+            # do not require or manufacture the normal three-period schedule.
+            return ClientCasePaymentTerms(historical_stages=True)
+        if any(order.get(key) is None for key in
                 ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee', 'client_identity_status')):
             return ClientCasePaymentTerms()
         if (order['pricing_policy_id'] is None and order['pricing_override_event_id'] is None
@@ -457,7 +461,11 @@ def query_case_accounting(connection, case_no, *, for_update=False):
         obligations = cursor.fetchall()
         cursor.execute(
             "SELECT l.id,l.entry_type,l.occurred_on,l.reversal_of_entry_id,"
-            "base.entry_type AS reversed_type,x.obligation_identity,x.amount_ntd,b.format_id,l.reconciliation_reference,b.summary "
+            "base.entry_type AS reversed_type,x.obligation_identity,x.amount_ntd,b.format_id,l.reconciliation_reference,b.summary,"
+            "CASE WHEN l.entry_type IN ('refund','subsidy_return','subsidy_advance') THEN l.amount_ntd ELSE NULL END AS bank_amount_ntd,"
+            "CASE WHEN l.entry_type IN ('refund','subsidy_return','subsidy_advance') THEN GREATEST(0,"
+            "(SELECT SUM(all_allocations.amount_ntd) FROM client_ledger_obligation_allocations all_allocations "
+            "WHERE all_allocations.ledger_entry_id=l.id)-l.amount_ntd) ELSE NULL END AS transfer_fee_ntd "
             "FROM client_ledger_entries l JOIN client_ledger_obligation_allocations x ON x.ledger_entry_id=l.id "
             "LEFT JOIN client_ledger_entries base ON base.id=l.reversal_of_entry_id "
             "LEFT JOIN finance_import_rows b ON b.id=l.finance_import_row_id "
@@ -506,6 +514,8 @@ def query_case_accounting(connection, case_no, *, for_update=False):
         transactions.append(ClientAccountingTransaction(
             f"client-entry:{row['id']}:{identity}", identity, str(row["occurred_on"]), kind,
             amount, bank,
+            None if row.get('bank_amount_ntd') is None else int(row['bank_amount_ntd']),
+            None if row.get('transfer_fee_ntd') is None else int(row['transfer_fee_ntd']),
         ))
     allocated = dict(sums)
     for row in (*overages, *refund_overages):

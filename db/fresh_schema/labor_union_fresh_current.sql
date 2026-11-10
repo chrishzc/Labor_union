@@ -6136,7 +6136,7 @@ CREATE TABLE `order_terms_apply_receipts` (
   `scheduling_generation` int unsigned NOT NULL,
   `client_finance_version` bigint unsigned DEFAULT NULL,
   `payroll_version` bigint unsigned DEFAULT NULL,
-  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成') COLLATE utf8mb4_unicode_ci NOT NULL,
   `service_data_lock_formed` tinyint(1) NOT NULL,
   `correlation_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `result_snapshot` json NOT NULL,

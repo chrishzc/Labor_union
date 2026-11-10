@@ -19,6 +19,7 @@
 - Finance Import 的永豐薪資及台新月嫂補助候選，在宣稱可自動核銷前委派本 owner 的同一 Preview；台新先重新驗證原始備註姓名且不要求帳戶，永豐沿原帳戶規則。正式 Apply 仍重驗原版本、來源及分配，不新增核銷 writer 或 transaction owner。
 
 ## Contracts
+- 台新原始備註的唯一月嫂姓名與正式案件／指派關聯，可於原 Preview 投影方案一分期，選填六碼須與該案一致；Apply 沿原 outer UoW 鎖來源、確認銀行方案及原 Payroll 分期，再核銷原月嫂義務。一般／歷史訂單同用資格，無方案或分期不直接視為無款；未達資格明示阻擋，方案不得使月嫂總應收增加。既有永豐自備款限制保留。
 - `document/架構重整/01_規格基線/05_Staff_Payables_Export_Domain.md` §2–3。
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md`。
 

@@ -336,7 +336,7 @@ def test_historical_register_uses_confirmed_actual_service_volume():
     assert row["補助款金額"] == Decimal("4800")
 
 
-def test_historical_register_defaults_unconfirmed_volume_to_identity_cap():
+def test_historical_register_uses_original_service_volume_before_identity_cap():
     general = register._to_register_row(_order_row(
         order_status="歷史訂單－服務完成",
         service_days=4,
@@ -349,8 +349,9 @@ def test_historical_register_defaults_unconfirmed_volume_to_identity_cap():
         service_hours_per_day=Decimal("4"),
     ))
 
-    assert general["補助時數"] == Decimal("40")
-    assert subsidized["補助時數"] == Decimal("120")
+    assert general["補助時數"] == subsidized["補助時數"] == Decimal("16")
+    assert general["補助款金額"] == Decimal("4800")
+    assert subsidized["補助款金額"] == Decimal("5600")
 
 
 def test_twin_register_uses_450_even_when_legacy_case_snapshot_is_300():

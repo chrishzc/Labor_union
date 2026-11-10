@@ -174,6 +174,7 @@ def classify_row_with_identity_maps(
             staff_name_identities=identity_maps.get("staff_name_identities"),
             client_name_identities=identity_maps.get("client_name_identities"),
             client_refund_identity_accounts=identity_maps.get("client_refund_identity_accounts"),
+            client_case_suffixes=identity_maps.get("client_case_suffixes"),
         )
     except TypeError:
         return classify_finance_transaction(
@@ -203,9 +204,17 @@ def _has_unique_import_case(cursor, row, classification, identity_maps):
                 return code in known_accounts
             return resolve_client_virtual_account(cursor, code)["result"] == "resolved"
     elif (row["direction"] == "outgoing" and sinopac_memo_case_suffixes(row.get("memo"))
-          and not (row["format_id"] == "taishin" and kind == "staff_salary")):
+          and kind not in {"staff_salary", "staff_legacy_subsidy"}):
         suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
-        return resolve_client_virtual_account_suffix(cursor, suffix)["result"] == "resolved"
+        resolved = resolve_client_virtual_account_suffix(cursor, suffix)
+        if resolved['result'] != 'resolved':
+            return False
+        if kind in {'client_refund','client_subsidy_return'}:
+            owners = classification['matched_identity_ids']
+            cursor.execute('SELECT client_id FROM orders WHERE case_no=%s', (resolved['case_no'],))
+            case = cursor.fetchone()
+            return len(owners) == 1 and case is not None and int(case['client_id']) == owners[0]
+        return True
 
     owner_ids = classification["matched_identity_ids"]
     if len(owner_ids) != 1:
@@ -231,16 +240,23 @@ def _has_unique_import_case(cursor, row, classification, identity_maps):
         obligations = [item for item in identity_maps.get("taishin_client_refund_candidates", ())
                        if item["client_id"] == owner_id and item["obligation_type"] in obligation_types]
 
-    month_cases = {item["case_no"] for item in obligations if item.get("case_no")
-                   and _is_same_month(row["transaction_date"], item.get("due_date"))}
-    cases = month_cases or {item["case_no"] for item in obligations if item.get("case_no")}
-    if cases:
-        return len(cases) == 1
+    cases = {item["case_no"] for item in obligations if item.get("case_no")}
     cursor.execute(
-        f"SELECT DISTINCT case_no FROM orders WHERE {owner_column}=%s AND status<>'訂單取消' LIMIT 2",
+        f"SELECT DISTINCT case_no FROM orders WHERE {owner_column}=%s",
         (owner_id,),
     )
-    return len(cursor.fetchall()) == 1
+    cases.update(str(item['case_no']) for item in cursor.fetchall())
+    if owner_column == 'staff_id':
+        cursor.execute("SELECT DISTINCT case_no FROM case_staff_assignments WHERE staff_id=%s "
+                       "AND status IN ('planned','active','completed')", (owner_id,))
+        cases.update(str(item['case_no']) for item in cursor.fetchall())
+    suffixes = sinopac_memo_case_suffixes(row.get('memo'))
+    if suffixes:
+        if len(suffixes) != 1:
+            return False
+        resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+        return resolved['result'] == 'resolved' and resolved['case_no'] in cases
+    return len(cases) == 1
 
 
 def stage_finance_rows(

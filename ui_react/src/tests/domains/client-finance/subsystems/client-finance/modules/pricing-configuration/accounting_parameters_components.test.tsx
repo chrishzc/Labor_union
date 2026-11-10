@@ -47,6 +47,18 @@ beforeEach(() => {
 });
 
 describe('AccountingParametersCard component', () => {
+  it('keeps missing pricing unknown and uses only the supplied formal amounts', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockRejectedValue(new Error('source unavailable'));
+    render(<AccountingParametersCard caseNo="115000088" customerAmountNtd={12000}
+      staffAmountNtd={30000} onOpenEdit={vi.fn()} />);
+    await waitFor(() => expect(accountingPricingClient.queryCase).toHaveBeenCalledWith('115000088'));
+    expect(screen.getByRole('status')).toHaveTextContent('計價依據待確認');
+    expect(screen.getByText('待確認（補助時數待確認）')).toBeVisible();
+    expect(screen.queryByText(/160h|0h|\$250|\$300/)).not.toBeInTheDocument();
+    expect(screen.getByText(/客戶應繳 NT\$ 12,000/)).toBeVisible();
+    expect(screen.getByText(/月嫂基準應付 NT\$ 30,000/)).toBeVisible();
+  });
+
   it('renders twin rates, subsidy identity, hourly rates and triggers onOpenEdit', () => {
     const handleOpenEdit = vi.fn();
     render(

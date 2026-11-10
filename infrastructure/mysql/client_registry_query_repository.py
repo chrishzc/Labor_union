@@ -21,7 +21,6 @@ from domains.client_finance.obligation_planning import build_client_finance_term
 from domains.client_finance.order_amount_calculation import _claim_schedule
 from domains.case_import.refund_account import mask_refund_values, effective_refund_account
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
-from domains.client_finance.subsidy_advance import subsidy_advance_due_date
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.order_terms_read_model import (
     load_calculable_client_finance_facts,
@@ -233,18 +232,10 @@ class MySqlClientRegistryQueryRepository:
         case_no = str(row["case_no"])
         finance_status, _, finance = _finance_values(self._connection, case_no)
         values = finance if finance_status == "ready" and finance is not None else {}
-        subsidy_amount = (
-            int(Decimal(str(subsidy_row["補助款金額"])))
-            if subsidy_row is not None
-            else None
-        )
+        from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
+        subsidy_amount = query_case_subsidy_amount(self._connection, case_no).amount_ntd
         subsidy_service_end = (
             subsidy_row.get("服務結束") if subsidy_row is not None else None
-        )
-        subsidy_due_date = (
-            subsidy_advance_due_date(subsidy_service_end)
-            if isinstance(subsidy_service_end, date)
-            else None
         )
         staff_payment_due_date = row.get("staff_payment_due_date")
         customer_payable = values.get("customer_payable_total_ntd")
@@ -286,7 +277,8 @@ class MySqlClientRegistryQueryRepository:
             second_payment_amount_ntd=values.get("second_payment_amount_ntd"),
             received_total_ntd=values.get("received_total_ntd"),
             customer_balance_ntd=values.get("customer_balance_ntd"),
-            subsidy_return_amount_ntd=subsidy_amount,
+            subsidy_return_amount_ntd=values.get('subsidy_return_amount_ntd'),
+            subsidy_amount_ntd=subsidy_amount,
             planned_start_date=row.get("planned_start_date"),
             planned_end_date=row.get("planned_end_date"),
             actual_start_date=row.get("actual_start_date"),
@@ -295,8 +287,8 @@ class MySqlClientRegistryQueryRepository:
             first_payment_due_date=row.get("first_payment_due_date"),
             second_payment_due_date=row.get("second_payment_due_date"),
             deposit_settled_on=row.get("deposit_settled_on"),
-            subsidy_return_due_date=subsidy_due_date,
-            subsidy_return_status=None,
+            subsidy_return_due_date=values.get('subsidy_return_due_date'),
+            subsidy_return_status=values.get('subsidy_return_status'),
             staff_payment_due_date=staff_payment_due_date,
             claim_application_year=claim["claim_application_year"],
             claim_application_month=claim["claim_application_month"],
@@ -773,6 +765,8 @@ def _finance_values(connection, case_no):
                 1 if row["direction"] == "receivable_from_client" else -1
             ) for row in current_rows)
         subsidy = subsidy_rows[0] if subsidy_rows else None
+        from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
+        subsidy_amount = query_case_subsidy_amount(connection, case_no).amount_ntd
         return "ready", None, {
             "virtual_account": _case_virtual_account(connection, case_no),
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
@@ -783,6 +777,7 @@ def _finance_values(connection, case_no):
             "second_payment_amount_ntd": stage_amounts["second"],
             "received_total_ntd": received_total,
             "customer_balance_ntd": balance,
+            "subsidy_amount_ntd": subsidy_amount,
             "subsidy_return_amount_ntd": (
                 int(subsidy["amount_due_ntd"]) if subsidy is not None else None
             ),
