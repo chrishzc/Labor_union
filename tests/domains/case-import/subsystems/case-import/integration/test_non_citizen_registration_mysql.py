@@ -6,6 +6,7 @@ import os
 import hashlib
 import json
 from pathlib import Path
+from threading import Barrier
 from uuid import uuid4
 
 import pymysql
@@ -170,6 +171,59 @@ def test_approval_downstream_failure_rolls_back_complete_case(nc_database, monke
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM orders WHERE case_no=%s", (issued[0],))
             assert cursor.fetchone()["count"] == 0
+
+
+def test_manual_creation_and_line_approval_share_numbers_with_existing_account_mapping(nc_database):
+    from infrastructure.mysql.non_citizen_case_number_repository import preview_non_citizen_case_number
+    from infrastructure.mysql.provisional_registration_repository import MySqlProvisionalRegistrationRepository
+    from subsystems.case_import.non_citizen_registration_application import create_manual_non_citizen_case
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "name": "合成測試客戶",
+        "phone": "0912345678",
+        "service_start_date": "2026-11-02",
+        "service_days": 10,
+        "service_time": "8小時 08:00-17:00",
+    }
+    with pymysql.connect(**nc_database) as connection:
+        _, registration_id = _submit(connection)
+        existing = create_manual_non_citizen_case(connection, payload, "synthetic-admin")
+        initial_case_no, initial_account = preview_non_citizen_case_number(connection, now)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO client_legacy_virtual_accounts "
+                "(case_no, virtual_account, source_content_digest, source_row, created_by) VALUES (%s,%s,%s,2,%s)",
+                (existing["case_no"], initial_account, "a" * 64, "synthetic-admin"),
+            )
+        connection.commit()
+        expected_case_no, _ = preview_non_citizen_case_number(connection, now)
+        assert int(expected_case_no[-3:]) == int(initial_case_no[-3:]) + 1
+
+    start = Barrier(2, timeout=10)
+
+    def create_manual():
+        with pymysql.connect(**nc_database) as connection:
+            start.wait()
+            result = create_manual_non_citizen_case(connection, {**payload, "mode": "new"}, "synthetic-admin")
+            assert result["virtual_account"] == build_client_virtual_account(result["case_no"])
+            return result["case_no"]
+
+    def approve_line():
+        with pymysql.connect(**nc_database) as connection:
+            repository = MySqlProvisionalRegistrationRepository(connection, now=lambda: now)
+            start.wait()
+            result = repository.approve(registration_id, 1, "synthetic-admin")
+            connection.commit()
+            return result.case_no
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        manual = executor.submit(create_manual)
+        line = executor.submit(approve_line)
+        case_numbers = sorted([manual.result(), line.result()])
+    assert case_numbers[0] == expected_case_no
+    assert int(case_numbers[1][-3:]) == int(expected_case_no[-3:]) + 1
 
 
 def test_concurrent_approval_of_same_application_returns_one_case(nc_database):

@@ -55,6 +55,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **舊帳戶維護端點**：`/api/v1/client-finance/payment-destination`（GET、`/preview`、`/apply`）已自路由與 OpenAPI 移除。
 - **月嫂履歷暫存下載**：`GET /api/v1/matching-confirmation-files/{token}` 回 typed 410 Gone；履歷改由業務線下傳送，LINE 排班確認卡片不嵌入下載連結。
 - **Data Browser 原始資料表端點**：僅依名冊契約保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 之 authenticated bounded archive Query；移除 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 路由。
+- **非市民歷史補登**：移除表單與 `POST /api/v1/admin/registration-applications/manual-non-citizen/check`，手動建案只接受後端正式配號的新案。既有案件及虛擬帳號對照保留。
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
 - **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。

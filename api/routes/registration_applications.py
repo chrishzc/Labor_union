@@ -1,10 +1,12 @@
 """
 File: registration_applications.py
-Description: 非市民需求申請之內部審核與手動新增歷史非市民案件 API。
+Description: 非市民需求申請之內部審核與手動新增非市民新案 API。
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
@@ -52,29 +54,9 @@ class ApprovalRequest(BaseModel):
     expected_version: int = Field(ge=1)
 
 
-class VirtualAccountCheckRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    virtual_account: str = Field(min_length=1, max_length=50)
-    case_no: str | None = None
-
-
-class VirtualAccountCheckView(BaseModel):
-    virtual_account: str
-    conflict: bool
-    conflict_case_no: str | None = None
-    conflict_case_status: str | None = None
-    conflict_case_client_name: str | None = None
-    conflict_case_client_phone: str | None = None
-    has_accounting_details: bool = False
-    received_total_ntd: int = 0
-    accounting_description: str = ""
-    cancel_reason: str | None = None
-
-
 class ManualNonCitizenCaseCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    case_no: str = Field(min_length=1, max_length=50)
-    virtual_account: str = Field(min_length=14, max_length=14)
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["new"] = "new"
     name: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=8, max_length=20)
     gender: str = "女"
@@ -98,15 +80,15 @@ class ManualNonCitizenCaseCreateRequest(BaseModel):
     requires_cooking: bool = False
     refund_bank_code: str | None = None
     refund_account_no: str | None = None
-    override_conflict: bool = False
-    override_case_no: str | None = None
 
 
-class ManualNonCitizenCaseReceiptView(BaseModel):
+class NonCitizenCaseNumberView(BaseModel):
     case_no: str
     virtual_account: str
+
+
+class ManualNonCitizenCaseReceiptView(NonCitizenCaseNumberView):
     client_id: int
-    overridden_case_no: str | None = None
     message: str
 
 
@@ -192,28 +174,19 @@ def reject_application(registration_id: int, body: ApprovalRequest, principal=De
         if snapshot.status == "expired" else "非市民申請已拒絕，問卷內容已清除。"))
 
 
-@router.post("/manual-non-citizen/check", response_model=BaseResponse[VirtualAccountCheckView])
-def check_manual_non_citizen_account(
-    body: VirtualAccountCheckRequest,
-    principal=Depends(require_admin),
-):
+@router.get("/manual-non-citizen/next-number", response_model=BaseResponse[NonCitizenCaseNumberView])
+def get_next_non_citizen_number(principal=Depends(require_admin)):
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.case_import.non_citizen_registration_application import (
-        check_case_number_duplicate,
-        check_virtual_account_conflict,
-    )
+    from infrastructure.mysql.non_citizen_case_number_repository import preview_non_citizen_case_number
+
     connection = get_connection()
     try:
-        with connection.cursor() as cursor:
-            if body.case_no and check_case_number_duplicate(cursor, body.case_no.strip()):
-                raise typed_http_error(
-                    422, "validation", "case_no_duplicate",
-                    f"案件編號「{body.case_no.strip()}」已存在，不能與其他案件重複。", uuid4().hex
-                )
-            result = check_virtual_account_conflict(cursor, body.virtual_account.strip(), body.case_no.strip() if body.case_no else None)
-            return BaseResponse(data=VirtualAccountCheckView(**result))
-    except ValueError as exc:
-        raise typed_http_error(422, "validation", "invalid_input", str(exc), uuid4().hex) from exc
+        case_no, account = preview_non_citizen_case_number(connection, datetime.now(timezone.utc))
+        return BaseResponse(data=NonCitizenCaseNumberView(case_no=case_no, virtual_account=account))
+    except ProvisionalRegistrationConflictError as exc:
+        raise typed_http_error(
+            409, "conflict", "non_citizen_case_sequence_exhausted", "本年度可配案號已用完。", uuid4().hex
+        ) from exc
     finally:
         connection.close()
 
@@ -235,6 +208,10 @@ def create_manual_non_citizen(
         )
     except ValueError as exc:
         raise typed_http_error(422, "validation", "manual_non_citizen_invalid", str(exc), uuid4().hex) from exc
+    except ProvisionalRegistrationConflictError as exc:
+        raise typed_http_error(
+            409, "conflict", "non_citizen_case_sequence_exhausted", "本年度可配案號已用完。", uuid4().hex
+        ) from exc
     except CaseImportWorkflowError as exc:
         raise typed_http_error(
             422, "domain_blocked", exc.error.code, f"建案失敗：{exc.error.message}",

@@ -17,23 +17,8 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
 });
 export type RegistrationApplication = z.infer<typeof view>;
 
-const virtualAccountCheckView = z.strictObject({
-  virtual_account: z.string(),
-  conflict: z.boolean(),
-  conflict_case_no: z.string().nullable(),
-  conflict_case_status: z.string().nullable(),
-  conflict_case_client_name: z.string().nullable(),
-  conflict_case_client_phone: z.string().nullable(),
-  has_accounting_details: z.boolean(),
-  received_total_ntd: z.number().int(),
-  accounting_description: z.string(),
-  cancel_reason: z.string().nullable(),
-});
-export type VirtualAccountCheckResult = z.infer<typeof virtualAccountCheckView>;
-
 export interface ManualNonCitizenCaseInput {
-  case_no: string;
-  virtual_account: string;
+  mode?: 'new';
   name: string;
   phone: string;
   gender?: string;
@@ -57,15 +42,16 @@ export interface ManualNonCitizenCaseInput {
   requires_cooking?: boolean;
   refund_bank_code?: string;
   refund_account_no?: string;
-  override_conflict?: boolean;
-  override_case_no?: string | null;
 }
 
-const manualCaseReceiptView = z.strictObject({
+const caseNumberView = z.strictObject({
   case_no: z.string(),
   virtual_account: z.string(),
+});
+export type NonCitizenCaseNumber = z.infer<typeof caseNumberView>;
+
+const manualCaseReceiptView = caseNumberView.extend({
   client_id: z.number().int(),
-  overridden_case_no: z.string().nullable(),
   message: z.string(),
 });
 export type ManualNonCitizenCaseReceipt = z.infer<typeof manualCaseReceiptView>;
@@ -98,9 +84,8 @@ export const registrationApplicationsClient = {
     if (result.registration_kind === 'non_citizen' && (!result.case_no || !result.approved_at_utc)) throw new Error('正式案件尚未確認，請重新查詢同一筆申請。');
     return result;
   },
-  async checkAccount(virtualAccount: string, caseNo?: string): Promise<VirtualAccountCheckResult> {
-    return decodePayload(envelope(virtualAccountCheckView), await transport.post(`${path}/manual-non-citizen/check`,
-      { virtual_account: virtualAccount, case_no: caseNo || null }, options())).data;
+  async nextNonCitizenNumber(): Promise<NonCitizenCaseNumber> {
+    return decodePayload(envelope(caseNumberView), await transport.get(`${path}/manual-non-citizen/next-number`, options())).data;
   },
   async createManualNonCitizen(input: ManualNonCitizenCaseInput): Promise<ManualNonCitizenCaseReceipt> {
     return decodePayload(envelope(manualCaseReceiptView), await transport.post(`${path}/manual-non-citizen`,

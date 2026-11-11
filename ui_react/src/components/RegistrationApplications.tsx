@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import {
   registrationApplicationsClient as client,
   type ManualNonCitizenCaseInput,
+  type NonCitizenCaseNumber,
   type RegistrationApplication,
-  type VirtualAccountCheckResult,
 } from '../api/registration_applications/client';
 import type { RegistryEditState } from './ClientRegistryDetailEditor';
 import './RegistrationApplications.css';
@@ -15,8 +15,6 @@ const fieldLabels: Record<string, string> = {
 };
 
 const defaultForm: ManualNonCitizenCaseInput = {
-  case_no: '',
-  virtual_account: '',
   name: '',
   phone: '',
   gender: '女',
@@ -36,7 +34,6 @@ const defaultForm: ManualNonCitizenCaseInput = {
   email: '',
   line_id: '',
   notes: '',
-  admin_notes: '手動新增非市民案件（補齊歷史案件）',
   requires_cooking: false,
   refund_bank_code: '',
   refund_account_no: '',
@@ -54,13 +51,30 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
 
   // Manual creation state
   const [showManualModal, setShowManualModal] = useState(false);
-  const [manualForm, setManualForm] = useState<ManualNonCitizenCaseInput>(defaultForm);
+  const [numberPreview, setNumberPreview] = useState<NonCitizenCaseNumber | null>(null);
+  const [manualForm, setManualForm] = useState(defaultForm);
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState('');
-  const [conflictResult, setConflictResult] = useState<VirtualAccountCheckResult | null>(null);
-  const [manualAccountStatus, setManualAccountStatus] = useState<string>('');
 
-  useEffect(() => { onEditStateChange({ dirty: showManualModal, busy }); }, [busy, showManualModal, onEditStateChange]);
+  useEffect(() => { onEditStateChange({ dirty: showManualModal, busy: busy || manualBusy }); }, [busy, manualBusy, showManualModal, onEditStateChange]);
+
+  useEffect(() => {
+    if (!showManualModal) return;
+    let active = true;
+    void client.nextNonCitizenNumber().then(result => {
+      if (active) setNumberPreview(result);
+    }).catch(failure => {
+      if (active) setManualError(failure instanceof Error ? failure.message : '無法取得預估配號。');
+    });
+    return () => { active = false; };
+  }, [showManualModal]);
+
+  const openManual = () => {
+    setManualError('');
+    setNumberPreview(null);
+    setManualForm(defaultForm);
+    setShowManualModal(true);
+  };
 
   const run = async (operation: () => Promise<void>) => {
     setBusy(true); setError(false); setMessage('');
@@ -110,53 +124,8 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     });
   };
 
-  // Auto-generate virtual account when case_no changes if it matches standard A{year}{seq}
-  const handleCaseNoChange = (value: string) => {
-    const trimmed = value.trim();
-    const match = /^A([0-9]{3})([0-9]{3})$/.exec(trimmed);
-    let va = manualForm.virtual_account;
-    if (match) {
-      const year = match[1];
-      const seq = parseInt(match[2], 10);
-      if (seq >= 1 && seq <= 499) {
-        va = `99781699${year}${String(seq + 500).padStart(3, '0')}`;
-      }
-    }
-    setManualForm(prev => ({ ...prev, case_no: trimmed, virtual_account: va }));
-    setManualAccountStatus('');
-    setConflictResult(null);
-  };
-
-  // Pre-check virtual account and case number
-  const handleCheckAccount = async () => {
-    if (!manualForm.virtual_account) {
-      setManualAccountStatus('請先輸入虛擬帳號');
-      return;
-    }
-    setManualBusy(true); setManualError('');
-    try {
-      const result = await client.checkAccount(manualForm.virtual_account, manualForm.case_no);
-      if (result.conflict) {
-        setConflictResult(result);
-        setManualAccountStatus(`⚠️ 此虛擬帳號已被案件【${result.conflict_case_no}】（狀態：${result.conflict_case_status}）使用`);
-      } else {
-        setConflictResult(null);
-        setManualAccountStatus('✅ 虛擬帳號可正常使用（無衝突）');
-      }
-    } catch (caught) {
-      setManualError(caught instanceof Error ? caught.message : '檢查帳號失敗');
-    } finally {
-      setManualBusy(false);
-    }
-  };
-
   // Validate form fields before submitting
   const validateManualForm = (): string | null => {
-    if (!manualForm.case_no.trim()) return '請輸入案件編號。';
-    if (!manualForm.virtual_account.trim()) return '請輸入虛擬帳號。';
-    if (!/^99781699[0-9]{6}$/.test(manualForm.virtual_account.trim())) {
-      return '虛擬帳號格式不正確，必須為 99781699 開頭之 14 碼數字。';
-    }
     if (!manualForm.name.trim()) return '請輸入客戶姓名。';
     if (!manualForm.phone.trim()) return '請輸入連絡電話。';
     if (!manualForm.service_start_date) return '請選擇預計服務開始日。';
@@ -166,7 +135,8 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
   };
 
   // Submit manual creation
-  const handleManualSubmit = async (override = false) => {
+  const handleManualSubmit = async () => {
+    if (manualBusy || !numberPreview) return;
     const validationError = validateManualForm();
     if (validationError) {
       setManualError(validationError);
@@ -174,37 +144,16 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     }
     setManualBusy(true); setManualError('');
 
-    // If not already overriding, pre-check conflict first
-    if (!override) {
-      try {
-        const check = await client.checkAccount(manualForm.virtual_account, manualForm.case_no);
-        if (check.conflict) {
-          setConflictResult(check);
-          setManualBusy(false);
-          return;
-        }
-      } catch (caught) {
-        setManualError(caught instanceof Error ? caught.message : '檢查重複失敗');
-        setManualBusy(false);
-        return;
-      }
-    }
-
     try {
-      const payload: ManualNonCitizenCaseInput = {
+      const receipt = await client.createManualNonCitizen({
         ...manualForm,
-        case_no: manualForm.case_no.trim(),
-        virtual_account: manualForm.virtual_account.trim(),
+        mode: 'new',
         name: manualForm.name.trim(),
         phone: manualForm.phone.trim(),
-        override_conflict: override,
-        override_case_no: override && conflictResult ? conflictResult.conflict_case_no : undefined,
-      };
-      const receipt = await client.createManualNonCitizen(payload);
+      });
       setShowManualModal(false);
-      setConflictResult(null);
       setManualForm(defaultForm);
-      setMessage(receipt.message);
+      setMessage(`${receipt.message} 虛擬帳號 ${receipt.virtual_account}。`);
       setError(false);
       try {
         const next = await client.pending();
@@ -215,7 +164,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
       }
       await onCommitted?.();
     } catch (caught) {
-      setManualError(caught instanceof Error ? caught.message : '新增歷史非市民案件失敗');
+      setManualError(caught instanceof Error ? caught.message : '非市民案件建立失敗');
     } finally {
       setManualBusy(false);
     }
@@ -228,16 +177,16 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     <header className="registration-applications__header">
       <div>
         <h2>非市民申請</h2>
-        <p>查看與核准非市民服務申請，或手動新增歷史非市民案件補齊名冊。</p>
+        <p>查看與核准非市民服務申請，或手動建立非市民新案。</p>
       </div>
       <div className="registration-applications__header-actions">
         <button
           type="button"
           className="registration-applications__manual-btn"
           disabled={busy}
-          onClick={() => { setManualError(''); setConflictResult(null); setManualAccountStatus(''); setShowManualModal(true); }}
+          onClick={openManual}
         >
-          手動新增非市民案件
+          手動新增非市民新案
         </button>
         <button type="button" disabled={busy} onClick={() => void refresh()}>重新查詢</button>
       </div>
@@ -286,7 +235,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
         </footer>
       </section> : <div className="registration-applications__placeholder">
         <h3>查看申請內容</h3>
-        <p>選擇一筆需求申請，確認填寫內容後再核准；或由右上角「手動新增非市民案件」補齊歷史案件。</p>
+        <p>選擇一筆需求申請，確認填寫內容後再核准。</p>
       </div>}
     </div>
 
@@ -294,52 +243,23 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     {showManualModal && <div className="manual-case-overlay" role="dialog" aria-modal="true" aria-labelledby="manual-case-title">
       <div className="manual-case-modal">
         <header className="manual-case-modal__header">
-          <h3 id="manual-case-title">手動新增非市民案件（補齊歷史案件）</h3>
+          <h3 id="manual-case-title">手動新增非市民新案</h3>
           <button type="button" className="manual-case-modal__close" onClick={() => { if (!manualBusy) setShowManualModal(false); }}>✕</button>
         </header>
 
         {manualError && <p className="manual-case-modal__error" role="alert">{manualError}</p>}
 
-        <form onSubmit={e => { e.preventDefault(); void handleManualSubmit(false); }} className="manual-case-form">
+        <form onSubmit={e => { e.preventDefault(); void handleManualSubmit(); }} className="manual-case-form">
           <div className="manual-case-section">
             <h4>1. 基本身分與專屬帳號</h4>
+            {numberPreview ? <>
+              <dl className="manual-case-grid">
+                <div><dt>預估案件編號</dt><dd>{numberPreview.case_no}</dd></div>
+                <div><dt>預估虛擬帳號</dt><dd>{numberPreview.virtual_account}</dd></div>
+              </dl>
+              <p>送出後才正式配號，請以建立結果為準。</p>
+            </> : !manualError && <p role="status">正在取得預估配號…</p>}
             <div className="manual-case-grid">
-              <label>
-                <span className="required">案件編號</span>
-                <input
-                  type="text"
-                  required
-                  placeholder="例如 A113001"
-                  value={manualForm.case_no}
-                  onChange={e => handleCaseNoChange(e.target.value)}
-                  disabled={manualBusy}
-                />
-                <small className="hint">非市民格式通常為 A + 民國年3碼 + 序號3碼</small>
-              </label>
-
-              <label>
-                <span className="required">專屬虛擬帳號（14碼）</span>
-                <div className="virtual-account-input-group">
-                  <input
-                    type="text"
-                    required
-                    maxLength={14}
-                    placeholder="99781699 開頭之 14 碼"
-                    value={manualForm.virtual_account}
-                    onChange={e => {
-                      setManualForm(prev => ({ ...prev, virtual_account: e.target.value.trim() }));
-                      setManualAccountStatus('');
-                      setConflictResult(null);
-                    }}
-                    disabled={manualBusy}
-                  />
-                  <button type="button" className="small-btn" onClick={() => void handleCheckAccount()} disabled={manualBusy}>
-                    檢查重複
-                  </button>
-                </div>
-                {manualAccountStatus && <small className="account-status">{manualAccountStatus}</small>}
-              </label>
-
               <label>
                 <span className="required">客戶姓名</span>
                 <input
@@ -598,7 +518,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
                 <span>案件備註</span>
                 <textarea
                   rows={2}
-                  placeholder="歷史補登或案件註記"
+                  placeholder="案件註記"
                   value={manualForm.notes ?? ''}
                   onChange={e => setManualForm(prev => ({ ...prev, notes: e.target.value }))}
                   disabled={manualBusy}
@@ -611,53 +531,12 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
             <button type="button" onClick={() => setShowManualModal(false)} disabled={manualBusy}>
               取消
             </button>
-            <button type="submit" className="primary-btn" disabled={manualBusy}>
-              {manualBusy ? '處理中…' : '確認建立歷史非市民案件'}
+            <button type="submit" className="primary-btn" disabled={manualBusy || !numberPreview}>
+              {manualBusy ? '處理中…' : '確認建立新案'}
             </button>
           </footer>
         </form>
 
-        {/* Conflict Decision Dialog */}
-        {conflictResult && conflictResult.conflict && <div className="conflict-dialog-backdrop">
-          <div className="conflict-dialog-box" role="alertdialog" aria-labelledby="conflict-dialog-title">
-            <h4 id="conflict-dialog-title">⚠️ 虛擬帳號重複確認</h4>
-            <div className="conflict-dialog-content">
-              <p>虛擬帳號 <strong>{conflictResult.virtual_account}</strong> 目前已被以下案件使用：</p>
-              <ul className="conflict-case-info">
-                <li><strong>案件編號：</strong>{conflictResult.conflict_case_no}</li>
-                <li><strong>客戶姓名：</strong>{conflictResult.conflict_case_client_name || '未填寫'}</li>
-                <li><strong>案件狀態：</strong>{conflictResult.conflict_case_status}</li>
-                <li>
-                  <strong>帳務狀況：</strong>
-                  <span className={conflictResult.has_accounting_details ? 'text-danger' : 'text-safe'}>
-                    {conflictResult.accounting_description}
-                  </span>
-                </li>
-                {conflictResult.cancel_reason && <li><strong>取消原因：</strong>{conflictResult.cancel_reason}</li>}
-              </ul>
-              <div className="conflict-explanation">
-                <p><strong>說明：</strong>歷史案件可能會頂替某個被取消、沒有帳務明細的案件。請手動決定誰要覆蓋誰：</p>
-              </div>
-            </div>
-            <div className="conflict-dialog-actions">
-              <button
-                type="button"
-                className="btn-danger"
-                disabled={manualBusy}
-                onClick={() => void handleManualSubmit(true)}
-              >
-                【由本案件覆蓋原案件】解除原案件綁定並由本歷史案件使用
-              </button>
-              <button
-                type="button"
-                disabled={manualBusy}
-                onClick={() => setConflictResult(null)}
-              >
-                【保留原案件】返回修改本案件虛擬帳號
-              </button>
-            </div>
-          </div>
-        </div>}
       </div>
     </div>}
   </section>;

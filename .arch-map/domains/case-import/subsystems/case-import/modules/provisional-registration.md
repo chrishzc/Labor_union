@@ -14,8 +14,8 @@
 - `api/dependencies/registration_applications.py`、`api/dependencies/registration_runtime.py`、`subsystems/case_import/registration_maintenance.py`、`scripts/registration_maintenance.py`、`docker-compose.registration.yml`、`deploy/registration/` — 內部核准 composition、每分鐘 recovery／expiry 與每小時 AOF maintenance；部署仍需環境驗收。
 - primary:
   - `domains/case_import/non_citizen_registration.py` — 非市民 HCM＋BeClass 合併欄位與必填驗證；原補助規則保持。
-  - `infrastructure/mysql/non_citizen_case_number_repository.py` — 核准 outer UoW 內的年度列鎖配號，無 hidden commit。
-  - `subsystems/case_import/non_citizen_registration_application.py` — 合併欄位轉成既有 Case Import typed intent，重用付款／薪資／排班 bootstrap，並支援歷史非市民案件手動補齊、案號防重與虛擬帳號衝突覆蓋檢查。
+  - `infrastructure/mysql/non_citizen_case_number_repository.py` — 唯讀預估配號，並在手動新案與 LINE 核准各自的 outer UoW 中共用年度列鎖與正式配號。
+  - `subsystems/case_import/non_citizen_registration_application.py` — 重用 Case Import typed intent 與付款／薪資／排班 bootstrap，手動新案取得正式號碼。
   - `db/schema_parts/237_non_citizen_case_sequences.sql`、`db/schema_parts/1059_non_citizen_case_sequences.sql` — byte-identical fresh／preserve 年度計數表。
   - `domains/case_import/provisional_registration.py`
   - `subsystems/case_import/provisional_registration_application.py`
@@ -24,11 +24,11 @@
   - `db/schema_parts/1052_nas_registration_approval.sql`
 - entrypoints:
   - `api/routes/line_identity.py`
-  - `api/routes/registration_applications.py` — 支援非市民申請查詢／核准及手動新增非市民案件與衝突檢驗端點。
+  - `api/routes/registration_applications.py` — 支援非市民申請查詢／核准、手動建案、唯讀預估配號。
   - `ui_react/src/api/registration_applications/client.ts`
-  - `ui_react/src/components/RegistrationApplications.tsx` — 非市民申請清單、明細核准、手動新增歷史案件彈窗與衝突覆蓋決定確認。
-  - `ui_react/src/components/RegistrationApplications.css` — 申請清單、明細、手動補齊表單與衝突覆蓋彈窗樣式。
-  - `ui_react/src/pages/ClientRegistryPage.tsx`（非市民申請分頁，支援手動新增歷史非市民案件與原名冊／虛擬帳號匯入）
+  - `ui_react/src/components/RegistrationApplications.tsx` — 非市民申請清單、明細核准、手動新案預估配號。
+  - `ui_react/src/components/RegistrationApplications.css` — 申請清單、明細、手動建新案表單樣式。
+  - `ui_react/src/pages/ClientRegistryPage.tsx`（非市民申請分頁，支援手動建新案與名冊／虛擬帳號匯入）
   - `line/line_bot.py`（舊SQL問卷入口固定410，不因legacy開關復活）
 
 ## Dependencies
