@@ -14,6 +14,7 @@ import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
 import {notifyCaseAccountingChanged} from '../../../../../../../api/shared/case_accounting_changes';
 import {financeImportQueryClient} from '../../../../../../../api/finance_import/finance_import_query_client';
 import {clientReceiptReconciliationClient} from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
+import {clientRefundReturnClient} from '../../../../../../../api/client_finance/client_settlement_remediation_client';
 import type {FinanceBankTransaction} from '../../../../../../../api/finance_import/finance_import_query_schemas';
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
@@ -188,6 +189,40 @@ describe('精簡案件抽屜',()=>{
   expect(screen.getByTestId('refund-account-display')).toHaveTextContent('****5678');
   expect(screen.getByText('已登錄完整')).toBeVisible();
   expect(screen.getByRole('button',{name:'複製虛擬帳號'})).toBeVisible();
+ });
+ it('帳務摘要和退款區直接顯示經授權的完整退款帳號與戶名',async()=>{
+  const registry=await clientRegistryClient.query(caseNo);
+  vi.mocked(clientRegistryClient.query).mockResolvedValueOnce({
+   ...registry,beclass:{...registry.beclass,full_refund_account_visible:true,
+    values:{...registry.beclass.values!,refund_account_no:'000000009876'}},
+  });
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  expect(await screen.findByTestId('refund-account-display')).toHaveTextContent('000000009876');
+  expect(screen.getByLabelText('銀行對帳與帳戶資訊')).toHaveTextContent('報名客戶');
+  expect(screen.getByText(/\(000000009876\)/)).toBeInTheDocument();
+  expect(clientRegistryClient.query).toHaveBeenLastCalledWith(caseNo,expect.any(AbortSignal),true);
+ });
+ it.each(['client_refund','client_refund_return'])('銀行核對 %s 顯示名冊退款戶名與完整帳號',async(classification)=>{
+  const registry=await clientRegistryClient.query(caseNo);
+  vi.mocked(clientRegistryClient.query).mockResolvedValueOnce({
+   ...registry,beclass:{...registry.beclass,full_refund_account_visible:true,
+    values:{...registry.beclass.values!,refund_account_no:'000000009876'}},
+  });
+  const returnQuery=vi.spyOn(clientRefundReturnClient,'query').mockResolvedValue({
+   case_no:caseNo,account_version:0,refund_obligations:[],subsidy_return_obligations:[],
+   refund_bank_facts:[],subsidy_return_bank_facts:[],reversal_targets:[],refund_return_targets:[],
+  });
+  const row:FinanceBankTransaction={row_id:7,row_identity:'bank:7',bank:'sinopac',direction:classification==='client_refund'?'outgoing':'incoming',
+   transaction_date:'2026-11-09',reference:'original-7',amount_ntd:1000,status:'pending',classification_type:classification,
+   disposition:'pending',review_reason:null,available_actions:[],counterparty_name:null,cases:[caseNo],
+   reconciliation_target:{case_no:caseNo,staff_id:null,obligation_identities:[],requires_selection:false}};
+  vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[row],pending_count:1,next_before_row_id:null});
+  try {
+   wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{row,onPosted:vi.fn(),onBusyChange:vi.fn()}}/>);
+   expect(await screen.findByText('名冊退款戶名：報名客戶 · 名冊退款帳號：000000009876')).toBeVisible();
+  } finally {
+   returnQuery.mockRestore();
+  }
  });
  it('退款帳號缺漏時明確標示待補齊狀態，便於區分是無資料還是流水未配對',async()=>{
   vi.mocked(clientRegistryClient.query).mockResolvedValueOnce({

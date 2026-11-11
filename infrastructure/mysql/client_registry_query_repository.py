@@ -294,7 +294,7 @@ class MySqlClientRegistryQueryRepository:
             claim_application_month=claim["claim_application_month"],
         )
 
-    def load_detail(self, case_no: str) -> Mapping[str, Any] | None:
+    def load_detail(self, case_no: str, *, include_refund_account: bool = False) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
@@ -369,7 +369,8 @@ class MySqlClientRegistryQueryRepository:
             beclass_values["refund_account_status"] = (
                 "complete" if effective_refund_account(beclass_values, {}) else "incomplete"
             )
-            beclass_values = mask_refund_values(beclass_values)
+            if not include_refund_account:
+                beclass_values = mask_refund_values(beclass_values)
         else:
             order_information_values = None
             order_information_issues = {}

@@ -125,7 +125,7 @@ class ClientRegistryRepository(Protocol):
         column_filters: tuple[RegistryColumnFilter, ...] = (),
     ) -> tuple[tuple[Mapping[str, Any], ...], str | None, int | None]: ...
     def filter_options(self, *, field: RegistryFilterField, search: str | None, limit: int, offset: int) -> RegistryFilterOptions: ...
-    def load_detail(self, case_no: str) -> Mapping[str, Any] | None: ...
+    def load_detail(self, case_no: str, *, include_refund_account: bool = False) -> Mapping[str, Any] | None: ...
     def load_change_history(self, case_no: str) -> tuple[Mapping[str, Any], ...]: ...
 
 
@@ -199,9 +199,12 @@ class ClientRegistryQueryApplication:
             raise ValueError("client_registry_offset_invalid")
         return self._repository.filter_options(field=field, search=_optional_text(search, 100), limit=limit, offset=offset)
 
-    def query(self, case_no: str) -> ClientRegistryDetail:
+    def query(self, case_no: str, *, include_refund_account: bool = False) -> ClientRegistryDetail:
         identity = _required_text(case_no, 50, "client_registry_case_no_invalid")
-        row = self._repository.load_detail(identity)
+        row = (
+            self._repository.load_detail(identity, include_refund_account=True)
+            if include_refund_account else self._repository.load_detail(identity)
+        )
         if row is None:
             raise ClientRegistryNotFound("client_registry_not_found")
         if str(row.get("case_no")) != identity:

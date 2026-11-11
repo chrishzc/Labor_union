@@ -51,7 +51,7 @@ from domains.clients.profile import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
-from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.authentication_session import AdminPrincipal, has_required_capability
 from subsystems.case_import.beclass_correction_workflow import (
     BeClassCorrectionBlocked,
     BeClassCorrectionConflict,
@@ -292,15 +292,19 @@ def get_client_registry_change_history(
 
 @router.get("/{case_no}", response_model=BaseResponse[ClientRegistryDetailView])
 def get_client_registry(
+    response: Response,
     case_no: str = Path(..., min_length=1, max_length=50),
+    include_refund_account: bool = False,
     principal: AdminPrincipal = Depends(require_registry_reader),
     application: ClientRegistryQueryApplication = Depends(get_client_registry_query_application),
     order_terms=Depends(get_order_terms_application),
 ):
-    del principal
+    full_account = include_refund_account and has_required_capability(principal, "data_browser.write")
     correlation = uuid4().hex
     try:
-        detail = application.query(case_no)
+        detail = application.query(case_no, include_refund_account=True) if full_account else application.query(case_no)
+        if full_account:
+            response.headers["Cache-Control"] = "no-store"
         payload = {
             "case_no": detail.case_no,
             "order_dates": detail.order_dates,
@@ -316,6 +320,7 @@ def get_client_registry(
                 "record_id": detail.beclass.record_id,
                 "source_kind": detail.beclass.source_kind,
                 "version": detail.beclass.version,
+                "full_refund_account_visible": full_account,
                 "values": detail.beclass.values,
                 "field_capabilities": _beclass_field_capabilities(detail),
             },

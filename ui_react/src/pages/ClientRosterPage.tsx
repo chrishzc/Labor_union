@@ -169,7 +169,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     setCancelling(false); setCancellationRefreshError(false);
     setSelectedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
     try {
-      const result = await clientRegistryClient.query(caseNo);
+      const result = await clientRegistryClient.query(caseNo, undefined, true);
       if (detailRequest.current === request) setDetail(result);
     } catch (caught) {
       if (detailRequest.current === request) setDetailError(caught instanceof Error ? caught.message : '完整客戶資料載入失敗。');
@@ -185,7 +185,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const refreshDetail = async () => {
     if (!selectedCaseNo) throw new Error('未選取案件。');
     const request = ++detailRequest.current;
-    const result = await clientRegistryClient.query(selectedCaseNo);
+    const result = await clientRegistryClient.query(selectedCaseNo, undefined, true);
     if (request !== detailRequest.current) throw new Error('案件已切換，請重新開啟。');
     setDetail(result);
     const listId = ++listRequest.current;

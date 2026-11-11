@@ -35,10 +35,10 @@ const token = () => {
   if (!value) throw new Error('請先登入管理後台。');
   return value;
 };
-const decode = <T>(schema: { safeParse(value: unknown): { success: true; data: { data: T | null } } | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string; code: string }[] } } }, raw: unknown, message: string): T => {
+const decode = <T>(schema: { safeParse(value: unknown): { success: true; data: { data: T | null } } | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string; code: string }[] } } }, raw: unknown, message: string, retainRaw = true): T => {
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ApiDecodeError(message, parsed.error.issues.map((issue) => ({ path: issue.path.join('.') || '(root)', message: issue.message, code: issue.code })), raw);
-  if (parsed.data.data === null) throw new ApiDecodeError(`${message}：缺少資料本體。`, [], raw);
+  if (!parsed.success) throw new ApiDecodeError(message, parsed.error.issues.map((issue) => ({ path: issue.path.join('.') || '(root)', message: issue.message, code: issue.code })), retainRaw ? raw : undefined);
+  if (parsed.data.data === null) throw new ApiDecodeError(`${message}：缺少資料本體。`, [], retainRaw ? raw : undefined);
   return parsed.data.data;
 };
 const key = (scope: string) => `${scope}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -84,9 +84,11 @@ export const clientRegistryClient = {
     });
     return decode(ClientRegistryFilterOptionsResponseSchema, raw, '篩選選項回應結構異常');
   },
-  async query(caseNo: string, signal?: AbortSignal): Promise<ClientRegistryDetail> {
-    const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token(), signal });
-    return decode(ClientRegistryDetailResponseSchema, raw, '客戶名冊詳情回應結構異常');
+  async query(caseNo: string, signal?: AbortSignal, includeRefundAccount = false): Promise<ClientRegistryDetail> {
+    const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, {
+      token: token(), signal, params: includeRefundAccount ? { include_refund_account: true } : undefined,
+    });
+    return decode(ClientRegistryDetailResponseSchema, raw, '客戶名冊詳情回應結構異常', !includeRefundAccount);
   },
   async history(caseNo: string): Promise<ClientRegistryChangeHistoryItem[]> {
     const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}/change-history`, { token: token() });

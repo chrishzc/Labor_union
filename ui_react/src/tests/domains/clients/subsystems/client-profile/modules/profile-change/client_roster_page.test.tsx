@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 import { orderCancellationClient } from '../../../../../../../api/orders/order_cancellation_client';
+import { orderTermsMutationClient, type OrderTermsQuery } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }) } }));
 
@@ -24,8 +25,21 @@ const item = {
   planned_start_date: '2026-10-01', order_status: '洽談中',
 };
 
+const orderTerms: OrderTermsQuery = {
+  case_no: item.case_no, order_version: 1, scheduling_version: 1, scheduling_generation: 1,
+  client_finance_version: 1, payroll_version: 1, service_data_locked: false,
+  terms: {
+    planned_start_date: '2026-10-01', service_days: 26, service_hours_per_day: 8,
+    requires_cooking: true, floor_fee_ntd: 0,
+    service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 },
+  },
+};
+
 describe('ClientRosterPage', () => {
+  let termsQuery: MockInstance<typeof orderTermsMutationClient.query>;
+
   beforeEach(() => {
+    termsQuery = vi.spyOn(orderTermsMutationClient, 'query').mockResolvedValue(orderTerms);
     mocks.list.mockReset();
     mocks.query.mockReset();
     mocks.history.mockReset().mockResolvedValue([]);
@@ -44,7 +58,7 @@ describe('ClientRosterPage', () => {
       beclass: { status: 'ready', record_id: 12, source_kind: 'imported', version: 3, values: { name: '王小明', email: 'client@example.com', phone: '0922222222', tel: '03-1234567', ext: '88', city: '新竹市', zip_code: '300', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '雙胞胎' }, field_capabilities: {} },
       order_information: { status: 'ready', values: { dietary_habits: '不吃牛肉', vegetarian_preference: '可以', alcohol_ratio: '少量', cooking_oil_type: '苦茶油', maternal_allergy: '無', special_care_notes: '留意睡眠', meal_preferences: '少鹽', cooking_tools: '電鍋', bath_water_prep: '家屬準備', breastfeeding_method: '親餵', holiday_pricing_terms: '同意', multi_birth_count: '雙胞胎', stair_floor_fee_mode: '電梯', parking_space_provided: true, other_babies_present: false }, field_issues: {} },
       finance: { status: 'ready', code: null, values: { virtual_account: '99781699115001', service_unit_price_ntd: 450, service_hours: 208, customer_payable_total_ntd: 93600, deposit_amount_ntd: 18000, first_payment_amount_ntd: 75600, second_payment_amount_ntd: 0, received_total_ntd: 18000, customer_balance_ntd: 75600, subsidy_return_amount_ntd: null, subsidy_return_due_date: null, subsidy_return_status: null } },
-      order_terms: { status: 'ready', code: null, data: { case_no: 'CASE-001', order_version: 1, scheduling_version: 1, scheduling_generation: 1, client_finance_version: 1, payroll_version: 1, service_data_locked: false, terms: { planned_start_date: '2026-10-01', service_days: 26, service_hours_per_day: 8, requires_cooking: true, floor_fee_ntd: 0, service_time: { start_time: '09:00:00', end_time: '17:00:00', end_day_offset: 0 } } }, field_capabilities: {} },
+      order_terms: { status: 'ready', code: null, data: orderTerms, field_capabilities: {} },
     });
     mocks.downloadOrderAccounting.mockResolvedValue({ blob: new Blob(['xlsx']), filename: 'client-order-accounting.xlsx' });
     mocks.downloadCaseInspection.mockResolvedValue({ blob: new Blob(['xlsx']), filename: 'client-case-inspection.xlsx' });
@@ -88,6 +102,8 @@ describe('ClientRosterPage', () => {
       preview_fingerprint: 'c'.repeat(64), replayed: false,
     });
   });
+
+  afterEach(() => { termsQuery.mockRestore(); });
 
   it('opens the formal cancellation for a non-root operator from the selected roster case', async () => {
     const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
@@ -209,7 +225,7 @@ describe('ClientRosterPage', () => {
     const orderRow = await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' });
     expect(screen.queryByRole('button', { name: /顯示全部欄位|收合全部欄位/ })).not.toBeInTheDocument();
     fireEvent.click(orderRow);
-    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-001'));
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-001', undefined, true));
     expect(screen.getByRole('dialog', { name: '案件 CASE-001 詳細資料' })).toBeInTheDocument();
     const detail = await screen.findByLabelText('CASE-001 案件資料編輯');
     expect(detail).toHaveTextContent('客戶主檔');
@@ -222,7 +238,7 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('BeClass 照護與特殊計費');
     expect(within(detail).getByLabelText('飲食習慣與中藥接受度')).toHaveValue('不吃牛肉');
     expect(detail).toHaveTextContent('訂單條件');
-    expect(detail).toHaveTextContent('每日服務時數');
+    expect(await within(detail).findByLabelText('每日服務時數')).toHaveValue(8);
     expect(detail).toHaveTextContent('服務方式');
     expect(detail).toHaveTextContent('週休2日');
     expect(within(detail).getByRole('heading', { name: '客戶帳務' })).toBeVisible();
@@ -234,6 +250,23 @@ describe('ClientRosterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
     expect(orderRow).toHaveFocus();
+  });
+
+  it.each([true, false])('only shows the full refund account when the detail grants visibility (%s)', async (visible) => {
+    const fixture = await mocks.query();
+    mocks.query.mockResolvedValue({
+      ...fixture,
+      beclass: {
+        ...fixture.beclass, full_refund_account_visible: visible,
+        values: { ...fixture.beclass.values, refund_account_no: visible ? '000000009876' : '****9876' },
+      },
+    });
+    render(<ClientRosterPage />);
+    fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+    const input = await screen.findByLabelText('退款帳號（文字，保留前導零）');
+    expect(input).toHaveAttribute('type', visible ? 'text' : 'password');
+    expect(input).toHaveValue(visible ? '000000009876' : '****9876');
+    expect(screen.queryByText(/退款帳號顯示末四碼/)).toBe(visible ? null : screen.getByText(/退款帳號顯示末四碼/));
   });
 
   it('clears filters through another unfiltered server request and sorts through the server', async () => {

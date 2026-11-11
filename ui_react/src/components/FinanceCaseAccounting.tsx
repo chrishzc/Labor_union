@@ -355,7 +355,7 @@ function CaseRefundReconciliation({
   );
 }
 
-function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase, pricing, multiBirthCount, onOpenParamsEdit }: {
+function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase, pricing, multiBirthCount, onOpenParamsEdit, refundAccountNo, refundName }: {
   row: FinanceBankTransaction;
   data: CaseAccounting;
   onPosted: () => void;
@@ -364,6 +364,8 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   pricing?: CasePricing | null;
   multiBirthCount?: string | null;
   onOpenParamsEdit?: () => void;
+  refundAccountNo: string | null;
+  refundName: string;
 }) {
   const target = row.reconciliation_target;
   const [chosenIds, setChosenIds] = useState<string[]>([]);
@@ -395,6 +397,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
     <header>
       <h3>{isRefundReturn ? '客戶退匯' : isReceipt ? '客戶繳款' : isStaff ? (row.bank === 'taishin' ? '補助轉交月嫂' : '月嫂薪資') : '客戶退款'} · 核對交易</h3>
       <p>{row.bank === 'sinopac' ? '永豐' : '台新'} · {row.transaction_date ?? '日期未提供'} · {row.reference} · {money(row.amount_ntd)}</p>
+      {!isReceipt && !isStaff && <p>名冊退款戶名：{refundName || '待確認'} · 名冊退款帳號：{refundAccountNo || '待補齊'}</p>}
     </header>
     {onOpenParamsEdit && (
       <AccountingParametersBar
@@ -473,7 +476,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   const [showFullCase, setShowFullCase] = useState(false);
  const[copied,setCopied]=useState(false);
  const section=useRef<HTMLElement>(null),returnScroll=useRef(0),returnFocus=useRef<HTMLElement|null>(null);
- useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal),caseVirtualAccountClient.query(initialCase,controller.signal),accountingPricingClient.queryCase(initialCase)]).then(([accounting,order,notices,registry,accountView,pricing])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,pricing:pricing.status==='fulfilled'?pricing.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
+ useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal,true),caseVirtualAccountClient.query(initialCase,controller.signal),accountingPricingClient.queryCase(initialCase)]).then(([accounting,order,notices,registry,accountView,pricing])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,pricing:pricing.status==='fulfilled'?pricing.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
  useLayoutEffect(()=>{if(view!==null){section.current?.querySelector<HTMLElement>('.finance-case-subview h3')?.focus();return;}if(view===null&&returnFocus.current){const body=section.current?.closest('.drawer-body');if(body)body.scrollTop=returnScroll.current;const trigger=returnFocus.current;const target=trigger.isConnected?trigger:section.current?.querySelector('summary');target?.focus({preventScroll:true});returnFocus.current=null;}},[view,!!state.data]);
  useEffect(()=>{if(state.caseNo===initialCase&&state.data)onIdentity?.(initialCase,state.data.client_name);},[initialCase,state.caseNo,state.data,onIdentity]);
  function refresh(){setRevision(v=>v+1);onChanged?.();}
@@ -529,7 +532,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    </div>}
  </details>}
  {data&&bankReconciliation&&!showFullCase&&<fieldset style={{border:0,padding:0,margin:0,minWidth:0}} disabled={termsEditState.busy||termsEditState.dirty||pricingEditState.busy||pricingEditState.dirty||(pendingAccountingRefresh&&!reconciliationBusy)}>
-   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} onOpenParamsEdit={()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)}/>}
+   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)}/>}
  </fieldset>}
  {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
  {showFullCase&&bankReconciliation&&(
@@ -626,7 +629,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      </div>
    </dl>
    <div className="finance-reconciliation-footer">
-     <small>提示：若銀行對帳單未配對成功，請核對「永豐入帳銷帳編號」是否為此 14 碼虛擬帳號；出款／退款核對客戶上述「退款帳號末四碼」與「戶名」。缺少帳號時請至客戶名冊補齊。</small>
+     <small>銀行對帳單未配對時，可比對永豐入帳銷帳編號與本案虛擬帳號，或核對退款帳號與戶名。缺少帳號時可至客戶名冊補齊。</small>
    </div>
  </section>
  {showSupplement && (
@@ -853,7 +856,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   ) : (
                     <div>
                       <span>{refundBankCode ? formatBankDisplay(refundBankCode) : '未登記退款銀行'}</span>
-                      <small className="finance-mono-text">{refundAccountNo ? `末四碼 ${refundAccountNo.slice(-4)}` : '待補齊帳號'}</small>
+                      <small className="finance-mono-text">{refundAccountNo || '待補齊帳號'}</small>
                     </div>
                   )}
                 </td>
@@ -895,7 +898,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
             </td>
             <td>
               <span>預先登記備查</span>
-              <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo.slice(-4)})` : ''}</small>
+              <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo})` : ''}</small>
             </td>
             <td>
               <span className="finance-paid">免退款</span>

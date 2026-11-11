@@ -125,6 +125,7 @@ class ClientRegistryBeClassView(_StrictModel):
     record_id: int | None = Field(default=None, gt=0)
     source_kind: Literal["imported", "admin_manual"] | None = None
     version: int | None = Field(default=None, ge=0)
+    full_refund_account_visible: bool = False
     values: ClientBeClassValuesView | None = None
     field_capabilities: dict[str, RegistryFieldCapabilityView]
 

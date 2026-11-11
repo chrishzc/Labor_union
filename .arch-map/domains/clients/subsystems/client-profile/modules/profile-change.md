@@ -60,7 +60,7 @@
 ## Entrypoints
 - `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the merged roster uses offset pagination across all supported sorts, with case／field deep links querying the selected detail independently of the current page.
 - `GET /api/v1/admin/registries/clients/filter-options` — authenticated, paginated distinct values for allowlisted roster columns, including saved `clients.identity_status`. Typed column filters share the same server predicate across roster pagination and both exports.
-- `GET /api/v1/admin/registries/clients/{case_no}`
+- `GET /api/v1/admin/registries/clients/{case_no}` — 一般詳情遮蔽客戶退款帳號，案件編輯與帳務抽屜以 `include_refund_account` 要求完整帳號，由既有 `data_browser.write` 驗證後提供。
 - `GET /api/v1/admin/registries/clients/{case_no}/change-history` — 依時間／流程順序讀取主要人工變更事件保存的原因，不重複列出同次操作的衍生 projection events。
 - `GET /api/v1/admin/registries/clients/export/order-accounting` — 依客戶名冊 current filters 匯出每案件一列的 HCM／Orders／Client Finance XLSX。
 - `GET /api/v1/admin/registries/clients/export/case-inspection` — 同名冊 filters 的全部案件；九個工作表分別保存案件摘要、保存資料、派案、排班、客戶義務／流水／分配、月嫂義務／付款分配。authenticated registry reader，固定欄位、不提供 raw table export。

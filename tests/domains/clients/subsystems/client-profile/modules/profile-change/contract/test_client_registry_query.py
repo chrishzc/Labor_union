@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from fastapi import Response
 
 
 @pytest.fixture(autouse=True)
@@ -258,6 +259,7 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
         client_finance_version=6, payroll_version=7,
     )
     response = get_client_registry(
+        response=Response(),
         case_no="CASE-001",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(_FinanceRepository()),
@@ -298,6 +300,7 @@ def test_registry_http_composition_allows_preassignment_terms_without_downstream
     )
 
     response = get_client_registry(
+        response=Response(),
         case_no="CASE-001",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(_Repository()),
@@ -350,6 +353,40 @@ def test_general_skip_history_search_wildcard_survives_mysql_parameter_binding()
     assert 'review.skip_missing_reject_reason' in rendered
 
 
+@pytest.mark.parametrize("may_edit,include,visible", [
+    (True, True, True), (True, False, False), (False, True, False),
+])
+def test_registry_refund_account_requires_edit_capability_and_detail_opt_in(monkeypatch, may_edit, include, visible):
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository._finance_values",
+        lambda *_: ("not_ready", "client_finance_bootstrap_required", None),
+    )
+    connection = _SqlConnection([
+        {"client_id": 7, "case_no": "SYNTH-REFUND", "order_status": "洽談中", "name": "合成測試"},
+        ({"beclass_record_id": 12, "record_origin": "imported", "refund_bank_code": "0001234",
+          "refund_account_no": "000000001111"},),
+        {"aggregate_version": 3, "effective_values_json": '{"refund_account_no":"000000009876"}'},
+    ])
+    capabilities = {"data_browser.read"}
+    if may_edit:
+        capabilities.add("data_browser.write")
+    principal = AdminPrincipal(None, "synthetic", "合成測試", "operator", capabilities=frozenset(capabilities))
+    response = Response()
+
+    def unavailable_terms(_):
+        raise ValueError("order_terms_incomplete")
+
+    result = get_client_registry(
+        response=response, case_no="SYNTH-REFUND", principal=principal, include_refund_account=include,
+        application=ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection)),
+        order_terms=SimpleNamespace(query_registry=unavailable_terms),
+    ).data.beclass
+
+    assert result.full_refund_account_visible is visible
+    assert result.values.refund_account_no == ("000000009876" if visible else "****9876")
+    assert (response.headers.get("Cache-Control") == "no-store") is visible
+
+
 def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity():
     connection = _SqlConnection([
         {
@@ -395,6 +432,7 @@ def test_mysql_detail_to_http_exposes_service_type_for_direct_intake_repair(monk
         raise ValueError("order_terms_incomplete")
 
     response = get_client_registry(
+        response=Response(),
         case_no="SYNTH-REPAIR",
         principal=AdminPrincipal(9, "registry-reader", "Registry Reader", "system_admin"),
         application=ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection)),

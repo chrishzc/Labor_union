@@ -132,6 +132,7 @@ describe('Staff registry owner editing', () => {
     fireEvent.change(within(bank).getByLabelText('銀行代碼'), { target: { value: '812' } });
     fireEvent.change(within(bank).getByLabelText('分行代碼'), { target: { value: '0012' } });
     const account = within(bank).getByLabelText('完整新帳號');
+    expect(account).toHaveAttribute('type', 'text');
     fireEvent.change(account, { target: { value: '1234567890' } });
     fireEvent.change(within(bank).getByLabelText('備註（選填）'), { target: { value: '本人提供新帳戶' } });
     const apply = within(bank).getByRole('button', { name: '儲存' });
