@@ -27,7 +27,7 @@
 
 ## Contracts
 - 既有 Query 以 typed `history` 回傳服務資料鎖所指的原完工事件與 append-only 日期更正事件（時間、操作人、原／新日期及完整原因）；不回傳 raw snapshot，不寫入紀錄或帳務。Preview／Apply 的驗證與 writer 維持原樣。
-- Query 逐項回傳 `monetary_blockers` 的原因與既有核對入口類型；已完工案件的 stale buffer marker 依 Scheduling lifecycle 排除，不屬金額阻擋。真正的特殊薪資／調整／補助退還／薪資快照／雙倍薪／樓層費仍阻擋，fresh Preview／Apply 使用同一判斷。
+- Query 逐項回傳 `monetary_blockers` 的原因與既有核對入口類型；已完工案件的 stale buffer marker 依 Scheduling lifecycle 排除，不屬金額阻擋。薪資調整、補助退還、來源費率快照缺失或歧義、樓層費仍阻擋，fresh Preview／Apply 使用同一判斷。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.3、Issue #346。
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` §7。
 

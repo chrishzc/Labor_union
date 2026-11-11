@@ -17,4 +17,4 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `holiday_date` | `DATE PRIMARY KEY` | 假日日期。 | 系統鍵 | 不計算。 | Admin 寫入。 | 政府機關行事曆。 | 全局唯一。 | Admin API | 無 | 不變 | 無 | 已確認：SSOT 鍵 |
 | `holiday_name` | `VARCHAR(100) NOT NULL` | 假日名稱。 | 來源事實 | 不計算。 | Admin 寫入。 | 政府機關行事曆。 | 無。 | Admin API | 無 | 不變 | 無 | 已確認 |
-| `is_double_pay_default` | `BOOLEAN DEFAULT FALSE` | 該節日是否預設雙倍薪資。 | 來源事實 | 不計算。 | Admin 寫入。 | 勞資約定。 | `staff_schedule.is_double_pay` 計算時的參考預設值。 | Admin API | 無 | 不變 | 無 | 已確認 |
+| `is_double_pay_default` | `BOOLEAN DEFAULT FALSE` | 既有節日計價標記。 | 歷史紀錄 | 查詢可保留原值。 | 既有資料 | 無 | 正式假日維護僅更新日期與名稱。 | 無現行寫入 | 無 | 保留原值 | 無 | 歷史相容欄位 |

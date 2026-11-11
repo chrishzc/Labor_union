@@ -28,11 +28,11 @@ def facts():
 def intent(source=None):
     source = source or facts()
     return LeaveSubstitutionBatchIntent(1, tuple(LeaveSubstitutionItem(row.schedule_id, row.work_date,
-        LeaveResolutionType.SUBSTITUTE, 8, row.is_double_pay) for row in source.official_schedules
+        LeaveResolutionType.SUBSTITUTE, 8) for row in source.official_schedules
         if row.assignment_id == 1 and row.work_date >= TODAY), TODAY)
 
 
-def test_long_handover_forms_one_successor_preserves_past_other_family_and_special_pay():
+def test_long_handover_forms_one_successor_preserves_past_and_other_family_without_copying_legacy_flags():
     before = facts()
     result = build_leave_substitution_candidate(before, intent(before), (TODAY + timedelta(days=1),))
     assert len(result.scheduling.assignments) == 3
@@ -40,7 +40,7 @@ def test_long_handover_forms_one_successor_preserves_past_other_family_and_speci
     assert original.staff_id == 7 and original.service_dates == (TODAY - timedelta(days=2), TODAY - timedelta(days=1))
     assert successor.staff_id == 8 and len(successor.service_dates) == 18
     assert successor.service_dates[0] == TODAY
-    assert successor.double_pay_dates == (TODAY + timedelta(days=1),)
+    assert successor.double_pay_dates == ()
     assert other.service_dates == before.assignment_plan.effective_assignments[1].official_service_dates
     assert sorted(day for item in result.scheduling.assignments for day in item.service_dates) == [row.work_date for row in before.official_schedules]
     assert len(result.outcomes) == 18
@@ -50,7 +50,6 @@ def test_long_handover_forms_one_successor_preserves_past_other_family_and_speci
     (lambda command: replace(command, handover_date=TODAY - timedelta(days=1)), "handover_date_in_past"),
     (lambda command: replace(command, items=command.items[:-1]), "handover_remaining_service_changed"),
     (lambda command: replace(command, items=(replace(command.items[0], substitute_staff_id=10),) + command.items[1:]), "handover_requires_one_successor"),
-    (lambda command: replace(command, items=(replace(command.items[0], is_double_pay=True),) + command.items[1:]), "handover_must_preserve_service_terms"),
 ])
 def test_invalid_handover_is_rejected_by_domain(change, code):
     with pytest.raises(LeaveSubstitutionDomainError, match=code):

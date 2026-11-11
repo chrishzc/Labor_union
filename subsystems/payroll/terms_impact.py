@@ -300,7 +300,7 @@ def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_
     second independently payable bill.
     """
     facts = _impact_facts(source_facts, scheduling, order_terms)
-    payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy, candidate_special_pay=True)
+    payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy)
     return _handover_candidate(facts, payroll, rates, change_identity)
 
 
@@ -419,14 +419,14 @@ def _payroll_terms(order_terms: OrderTerms) -> PayrollTerms:
 
 def _calculate_payroll(facts):
     terms = _source_terms_by_assignment(facts)
-    service_facts = _service_facts(facts, terms)
+    service_facts = _service_facts(facts)
     rates = _carried_rate_snapshots(facts, terms)
     return build_case_payroll_candidate(service_facts, rates, facts.payroll_terms, _carried_adjustments(facts, terms)), rates
 
 
-def _calculate_cancellation_payroll(facts, case_policy, *, candidate_special_pay=False):
+def _calculate_cancellation_payroll(facts, case_policy):
     policies = _cancellation_policies(facts, case_policy)
-    service_facts = _cancellation_service_facts(facts, policies, candidate_special_pay=candidate_special_pay)
+    service_facts = _service_facts(facts)
     rates = _cancellation_rate_snapshots(facts, policies)
     return build_case_payroll_candidate(service_facts, rates, facts.payroll_terms, _cancellation_adjustments(facts, policies)), rates
 
@@ -441,12 +441,11 @@ def _source_terms_by_assignment(facts):
     return result
 
 
-def _service_facts(facts, source_terms):
-    return tuple(OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates, _candidate_double_pay_dates(item, source_terms)) for item in facts.scheduling.assignments)
-
-
-def _candidate_double_pay_dates(assignment, source_terms):
-    return tuple(value for value in source_terms[assignment.source_assignment_id].double_pay_dates if value in assignment.service_dates)
+def _service_facts(facts):
+    return tuple(
+        OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates)
+        for item in facts.scheduling.assignments
+    )
 
 
 def _carried_rate_snapshots(facts, source_terms):
@@ -479,17 +478,6 @@ def _cancellation_policies(facts, case_policy):
             raise ValueError("payroll_rate_policy_not_found")
         policies[assignment.candidate_key] = policy
     return policies
-
-
-def _cancellation_service_facts(facts, policies, *, candidate_special_pay=False):
-    return tuple(OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates,
-        item.double_pay_dates if candidate_special_pay else _cancellation_double_pay_dates(item, policies))
-        for item in facts.scheduling.assignments)
-
-
-def _cancellation_double_pay_dates(assignment, policies):
-    policy = policies[assignment.candidate_key]
-    return tuple(value for value in getattr(policy, "double_pay_dates", ()) if value in assignment.service_dates)
 
 
 def _cancellation_rate_snapshots(facts, policies):
@@ -596,15 +584,6 @@ def _removed_frozen_reversal(facts, existing, change_identity):
 
 
 def _candidate(facts, payroll, rate_snapshots, actions):
-    special_pay_events = tuple(
-        PayrollSpecialPayEventCandidate(
-            item.candidate_key,
-            item.sequence,
-            item.double_pay_dates,
-        )
-        for item in facts.scheduling.assignments
-        if item.double_pay_dates
-    )
     payload = {
         "case_no": facts.case_no,
         "payroll_version": facts.payroll_version,
@@ -613,14 +592,7 @@ def _candidate(facts, payroll, rate_snapshots, actions):
         "rate_sources": tuple((item.candidate_key, getattr(item, "source_assignment_id", None))
                               for item in facts.scheduling.assignments),
         "actions": tuple(_action_payload(item) for item in actions),
-        "special_pay_events": tuple(
-            {
-                "assignment_identity": item.assignment_identity,
-                "assignment_sequence": item.assignment_sequence,
-                "service_dates": tuple(value.isoformat() for value in item.service_dates),
-            }
-            for item in special_pay_events
-        ),
+        "special_pay_events": (),
     }
     return PayrollTermsImpactCandidate(
         facts.case_no,
@@ -631,7 +603,6 @@ def _candidate(facts, payroll, rate_snapshots, actions):
         actions,
         (),
         fingerprint_payload(payload),
-        special_pay_events,
         rate_source_assignments=tuple((item.candidate_key, getattr(item, "source_assignment_id", None))
                                       for item in facts.scheduling.assignments),
     )

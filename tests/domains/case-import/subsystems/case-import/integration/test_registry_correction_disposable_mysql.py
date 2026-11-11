@@ -97,7 +97,7 @@ def test_care_bonus_http_roundtrip_preserves_source_and_has_no_billing_effect(re
         base = f"/api/v1/admin/registries/clients/{case_no}"
         before = client.get(base).json()["data"]
         assert before["order_information"]["values"]["dietary_habits"] == "原始飲食"
-        changes = {"dietary_habits": "不吃花生", "holiday_pricing_terms": "客戶與月嫂協調三節獎金", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True, "meal_preferences": None}
+        changes = {"dietary_habits": "不吃花生", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True, "meal_preferences": None}
         body = {"changes": changes, "expected_version": before["beclass"]["version"]}
         preview = post(client, base + "/beclass/preview", body, case_no + "-preview")
         assert preview["after"] == changes

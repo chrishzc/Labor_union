@@ -53,7 +53,7 @@ ORDER_FACTS = {
     "dietary_habits": "葷食，可接受中藥（範例）", "vegetarian_preference": "可接受蛋奶素（範例）",
     "alcohol_ratio": "不加酒（範例）", "cooking_oil_type": "橄欖油（範例）", "maternal_allergy": "無（範例）",
     "special_care_notes": "依需求確認（範例）", "meal_preferences": "清淡飲食（範例）", "cooking_tools": "瓦斯爐、電鍋（範例）",
-    "bath_water_prep": "家人協助（範例）", "breastfeeding_method": "母乳（範例）", "holiday_pricing_terms": "另行協調（範例）",
+    "bath_water_prep": "家人協助（範例）", "breastfeeding_method": "母乳（範例）",
     "multi_birth_count": 1, "stair_floor_fee_mode": "無（範例）", "parking_space_provided": "有（範例）", "other_babies_present": "無（範例）",
 }
 

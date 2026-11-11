@@ -239,7 +239,6 @@ export async function importOfficialHolidayCandidates(
       action: 'upsert',
       holiday_date: candidate.holiday_date,
       holiday_name: candidate.holiday_name,
-      is_double_pay_default: false,
       ...horizon,
     };
 

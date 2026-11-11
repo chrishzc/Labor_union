@@ -33,7 +33,6 @@ const orderInformationValues = z.strictObject({
   cooking_tools: orderInformationValue,
   bath_water_prep: orderInformationValue,
   breastfeeding_method: orderInformationValue,
-  holiday_pricing_terms: orderInformationValue,
   multi_birth_count: orderInformationValue,
   stair_floor_fee_mode: orderInformationValue,
   parking_space_provided: orderInformationValue,

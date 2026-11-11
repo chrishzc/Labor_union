@@ -41,7 +41,7 @@ from api.schemas.client_registry import (
 )
 from api.schemas.order_terms import OrderTermsQueryView
 from domains.case_import.refund_account import mask_refund_values
-from domains.case_import.beclass_correction import BeClassCorrectionError
+from domains.case_import.beclass_correction import BECLASS_CORRECTION_FIELDS, BeClassCorrectionError
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from domains.clients.profile import (
     ClientProfileValidationError,
@@ -464,7 +464,10 @@ def apply_beclass_correction(
             preview_fingerprint=receipt.preview_fingerprint.value,
             idempotency_key=receipt.idempotency_key.value,
             replayed=receipt.replayed,
-            readback=mask_refund_values(receipt.readback.effective),
+            readback=mask_refund_values({
+                field: value for field, value in receipt.readback.effective.items()
+                if field in BECLASS_CORRECTION_FIELDS
+            }),
         ), message="BeClass 有效資料已修正")
     except Exception as error:
         _raise_owner_error(error, correlation_id, "BeClass 修正失敗。")

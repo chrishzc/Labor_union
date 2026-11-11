@@ -31,7 +31,7 @@ class AdminCommandRepository:
 
     def upsert_holiday(self, holiday_date, holiday_name, double_pay):
         with self._connection.cursor() as cursor:
-            cursor.execute("INSERT INTO holidays (holiday_date, holiday_name, is_double_pay_default) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE holiday_name = VALUES(holiday_name), is_double_pay_default = VALUES(is_double_pay_default)", (holiday_date, holiday_name, double_pay))
+            cursor.execute("INSERT INTO holidays (holiday_date, holiday_name) VALUES (%s, %s) ON DUPLICATE KEY UPDATE holiday_name = VALUES(holiday_name)", (holiday_date, holiday_name))
 
     def delete_holiday(self, holiday_date):
         with self._connection.cursor() as cursor:

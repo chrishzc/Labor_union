@@ -66,7 +66,7 @@
 
 - **Leave／Substitution**：桌面工作台依 server 進行中＋已有排班案納入選單（含已排班未開工）。月嫂本人提交雙方已協調結果（`execution_dates` 採 `leave-v1`；順延可指定明確補班日或依規則順延；無衝突直接單一 UoW 生效，衝突或代班立待辦）。休假同意不再經由已退役獨立 LINE 審核入口。
 - **批次重播與 AutoComplete 競爭**：`batch_key` 加鎖檢查 header／item_count／連續 ordinal／snapshot／fingerprint（同鍵異內容回 `batch_key_request_identity_conflict`）；Apply 與 [Orders AutoComplete](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正) **皆須先鎖定同一 Orders lifecycle aggregate 驗證 expected version**，先提交者勝出、後到者以 stale 失敗零寫入。
-- **服務中換人（`handover-v1`）**：針對已開工、仍有剩餘服務日且未鎖定之案件指定原 segment：選定接任月嫂詢問意願（附全部剩餘日）→ 願意後單人邀請並取得真實入群 membership → 工會填入交接日（`>= 今日` Taipei 時鐘，不得遺漏或改動已服務日與原雙薪／原薪資）→ 委派 `LeaveSubstitutionBatchIntent.handover_date` Preview／Apply 於單一 UoW 更新排班、原月嫂保留已付／匯出段與 Payroll handover 差額（見 [Payroll §3.5](03_Payroll_Domain.md#35-服務中換人付款承接staff-handover)）＋發送無按鈕群組結果表（維持最多 4 個有效 segments）。
+- **服務中換人（`handover-v1`）**：針對已開工、仍有剩餘服務日且未鎖定之案件指定原 segment：選定接任月嫂詢問意願（附全部剩餘日）→ 願意後單人邀請並取得真實入群 membership → 工會填入交接日（`>= 今日` Taipei 時鐘，不得遺漏或改動已服務日與原薪資）→ 委派 `LeaveSubstitutionBatchIntent.handover_date` Preview／Apply 於單一 UoW 更新排班、原月嫂保留已付／匯出段與 Payroll handover 差額（見 [Payroll §3.5](03_Payroll_Domain.md#35-服務中換人付款承接staff-handover)）＋發送無按鈕群組結果表（維持最多 4 個有效 segments）。
 
 ### 3.5 確定性加鎖順序、Durable Job 與 `SCHEDULE` 異常矩陣
 

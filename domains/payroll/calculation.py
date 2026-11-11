@@ -51,11 +51,8 @@ class OfficialAssignmentServiceFacts:
         _validate_identity(self.assignment_identity, "assignment identity")
         require_positive_integer(self.staff_id, "staff id")
         _validate_dates(self.service_dates, "service dates")
-        _validate_dates(self.double_pay_dates, "double-pay dates")
         if self.effective and not self.service_dates:
             raise ValueError("effective_assignment_service_days_required")
-        if not set(self.double_pay_dates).issubset(self.service_dates):
-            raise ValueError("special_pay_terms_invalid")
         if not isinstance(self.effective, bool):
             raise TypeError("effective must be bool")
 
@@ -232,14 +229,13 @@ def _allocate_floor_fee(earned_floor_fee, facts):
 def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, consumed_by_date=None):
     service_day_count = len(facts.service_dates)
     actual_hours = service_day_count * terms.service_hours_per_day
-    double_pay_hours = len(facts.double_pay_dates) * terms.service_hours_per_day
     service_salary = MoneyNTD(_whole_ntd(
-        (actual_hours + double_pay_hours) * rate.hourly_rate.amount
+        actual_hours * rate.hourly_rate.amount
     ))
     covered_salary = excess_salary = 0
     if rate.tiered is not None:
         for day in facts.service_dates:
-            covered, excess = price_hours(((Decimal(str(terms.service_hours_per_day)), day in facts.double_pay_dates),),
+            covered, excess = price_hours(((Decimal(str(terms.service_hours_per_day)), False),),
                 rate.tiered, (consumed_by_date or {}).get(day, Decimal(0)))
             covered_salary += covered
             excess_salary += excess
@@ -250,7 +246,7 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, cons
         staff_id=facts.staff_id,
         official_service_day_count=service_day_count,
         actual_hours=actual_hours,
-        double_pay_hours=double_pay_hours,
+        double_pay_hours=0,
         hourly_rate=rate.hourly_rate,
         service_salary=service_salary,
         floor_fee_allocated=floor_fee,

@@ -487,7 +487,6 @@ export async function previewHolidayCsv(
         action: 'upsert',
         holiday_date: row.holiday_date,
         holiday_name: row.holiday_name,
-        ...(existing ? { is_double_pay_default: existing.is_double_pay_default } : {}),
         from_date: row.holiday_date,
         to_date: row.holiday_date,
       }, options);
@@ -526,12 +525,15 @@ export async function applyHolidayCsv(
         action: 'upsert',
         holiday_date: entry.row.holiday_date,
         holiday_name: entry.row.holiday_name,
-        ...(existing ? { is_double_pay_default: existing.is_double_pay_default } : {}),
         from_date: freshCalendar.planning_horizon.from_date,
         to_date: freshCalendar.planning_horizon.to_date,
       }, options);
       const receipt = await applyHolidayChange({
-        ...freshPreview.command,
+        action: freshPreview.command.action,
+        holiday_date: freshPreview.command.holiday_date,
+        holiday_name: freshPreview.command.holiday_name,
+        from_date: freshPreview.command.from_date,
+        to_date: freshPreview.command.to_date,
         expected_calendar_version: freshPreview.command.expected_calendar_version,
         preview_fingerprint: freshPreview.preview_fingerprint,
         reason,

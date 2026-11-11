@@ -31,7 +31,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `ui_react/src/components/AccountingParameters.css`
 
 ## Contracts
-- Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding, double-pay and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.
+- Reporting borrows read-only `case_total_amount` from complete current `CasePricingFacts`; Domain `calculate_case_total_amount` retains covered service before funding and one fixed floor fee. It does not reuse salary or receipt totals — `15` §15.4 / `04` §0 Reporting 唯讀投影.
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` §0 PRICE-01..09.
 - 同節 IDENTITY-FIX-01..03：正式身分修正與歷史綁定相容；舊版讀取只供仍綁定舊政策的案件，不供新政策發布，待無舊版綁定使用者後才可另評估退役。
 

@@ -181,7 +181,7 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
     consumed = Decimal(0)
     client = 0
     for day in sorted(facts.days, key=lambda item: item.occurred_on):
-        client += terms.client_charge(day.hours, consumed, double_pay=day.double_pay)
+        client += terms.client_charge(day.hours, consumed)
         consumed += day.hours
     covered, excess = terms.split_hours(consumed)
     staff_covered, staff_excess = price_hours(

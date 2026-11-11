@@ -66,7 +66,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
             if not rows:
                 raise ValueError("official_date_completed_assignment_required")
             cursor.execute(
-                "SELECT assignment_id,staff_id,work_date,is_work_day,is_double_pay "
+                "SELECT assignment_id,staff_id,work_date,is_work_day "
                 "FROM staff_schedule WHERE generation_id=%s AND effective_marker=1 "
                 "ORDER BY work_date,assignment_id" + suffix,
                 (generation_id,),
@@ -88,11 +88,6 @@ class MySqlOfficialServiceDateCorrectionRepository:
             actual_end_date = cursor.fetchone()["actual_end_date"]
             ids = tuple(by_assignment)
             placeholders = ",".join("%s" for _ in ids)
-            cursor.execute(
-                "SELECT COUNT(*) AS total FROM payroll_special_pay_events "
-                f"WHERE assignment_id IN ({placeholders})" + suffix, ids,
-            )
-            special_pay = int(cursor.fetchone()["total"])
             cursor.execute(
                 "SELECT COUNT(*) AS total FROM assignment_payroll_rate_snapshots "
                 f"WHERE assignment_id IN ({placeholders})" + suffix, ids,
@@ -122,11 +117,9 @@ class MySqlOfficialServiceDateCorrectionRepository:
         # Completed service has no active buffer under Scheduling lifecycle rules.
         # A stale persistence marker is neither service occupancy nor monetary impact.
         blocker_facts: tuple[tuple[MonetaryBlocker, bool | int], ...] = (
-            ("special_pay", special_pay),
             ("payroll_adjustments", adjustments),
             ("subsidy_return", subsidy_returns),
             ("source_rate_snapshot_missing_or_ambiguous", not complete_source_rates),
-            ("double_pay", any(bool(day["is_double_pay"]) for day in schedule)),
             ("floor_fee", any(int(row["floor_fee_allocated"] or 0) for row in rows)),
         )
         monetary_blockers = tuple(code for code, present in blocker_facts if present)

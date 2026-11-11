@@ -88,7 +88,10 @@ class _Repository:
         }
 
     def upsert_holiday(self, holiday_date, holiday_name, double_pay):
-        self.holidays[holiday_date] = HolidayFact(holiday_date, holiday_name, double_pay)
+        existing = self.holidays.get(holiday_date)
+        self.holidays[holiday_date] = HolidayFact(
+            holiday_date, holiday_name, existing.is_double_pay_default if existing else False,
+        )
 
     def delete_holiday(self, holiday_date):
         self.holidays.pop(holiday_date)

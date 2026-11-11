@@ -112,7 +112,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(save)}>儲存服務天數</button>
     </div>}
     {preview && <div className="import-result-state" role="status">
-      <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
+      <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元。</p>
       <p>重算供比較：客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元，月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
       {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>{staffIdentity.label(item.staff_id, facts?.assignments.find(person => person.staff_id === item.staff_id)?.staff_name)}：{item.actual_service_days} 天，重算 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
     </div>}

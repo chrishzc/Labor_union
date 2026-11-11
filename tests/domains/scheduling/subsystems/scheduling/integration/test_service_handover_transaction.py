@@ -255,17 +255,14 @@ def test_staff_only_handover_preserves_exactly_settled_client_obligations_withou
     assert sum(plan.amount.amount for plan in after.stage_plans) == sum(plan.amount.amount for plan in initial.stage_plans)
 
 
-def test_inconsistent_official_double_pay_and_payroll_facts_block_handover_without_guessing_money():
+def test_legacy_double_pay_marker_does_not_block_handover():
     application, repository, uow = workflow()
     repository.facts = replace(repository.facts, official_schedules=tuple(
         replace(row, is_double_pay=True) if row.work_date == DAYS[0] else row
         for row in repository.facts.official_schedules))
     preview = application.preview(LeaveSubstitutionPreviewRequest("HANDOVER", INTENT, CorrelationId("preview")))
-    assert preview.apply_readiness.blockers == ("payroll_special_pay_lineage_mismatch",)
-    assert preview.accounting is None
-    with pytest.raises(LeaveSubstitutionWorkflowError):
-        application.apply(command(preview))
-    assert repository.state == {}
+    assert preview.apply_readiness.blockers == ()
+    assert preview.accounting is not None
     assert uow.commits == 0
 
 

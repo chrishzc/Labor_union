@@ -147,11 +147,9 @@ def _receipt_payload(receipt) -> dict[str, Any]:
 
 
 _MONETARY_BLOCKERS = {
-    "special_pay": {"message": "已有特殊薪資紀錄，純日期更正尚不能處理其薪資影響。", "repair_target": "payroll"},
     "payroll_adjustments": {"message": "已有薪資調整分攤，純日期更正尚不能處理其金額影響。", "repair_target": "payroll"},
     "subsidy_return": {"message": "已有補助退還義務，純日期更正尚不能處理其補助影響。", "repair_target": "subsidy"},
     "source_rate_snapshot_missing_or_ambiguous": {"message": "原排班的薪資快照缺漏或不唯一，無法確認更正後沿用原薪資。", "repair_target": "case_profile"},
-    "double_pay": {"message": "原正式服務日含雙倍薪，純日期更正尚不能處理其薪資影響。", "repair_target": "payroll"},
     "floor_fee": {"message": "原排班已分配樓層費，純日期更正尚不能處理其費用影響。", "repair_target": "case_profile"},
 }
 

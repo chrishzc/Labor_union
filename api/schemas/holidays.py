@@ -41,7 +41,7 @@ class HolidayPreviewRequest(BaseModel):
     action: Literal["upsert", "delete"]
     holiday_date: date
     holiday_name: str | None = Field(default=None, max_length=100)
-    is_double_pay_default: bool = False
+    is_double_pay_default: Literal[False] = False
     from_date: date | None = None
     to_date: date | None = None
 

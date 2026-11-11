@@ -96,7 +96,6 @@ _ORDER_INFORMATION_SURVEY_FIXTURE = {
     "烹煮工具": "炒鍋、電鍋、微波爐",
     "洗澡水準備": "一般溫水",
     "哺乳方式": "母乳與配方奶混合",
-    "特殊計費:甲方同意需另支付當日薪資1倍予乙方。": "已知悉並同意",
     "特殊計費:胎數": "單胞胎",
     "透天服務樓層方式(會加收樓層費)": "大樓電梯，無樓層費",
     "提供服務人員轎車停車位": "可提供停車位",
@@ -1054,8 +1053,8 @@ def _seed_service_schedule(cursor, scenario: dict[str, object]) -> tuple[int, ..
             if existing_schedule is None:
                 cursor.execute(
                     "INSERT INTO staff_schedule "
-                    "(case_no,staff_id,assignment_id,generation_id,work_date,is_work_day,is_double_pay,effective_marker,notes) "
-                    "VALUES (%s,%s,%s,%s,%s,1,0,1,'ORDER_SCENARIO_FIXTURE')",
+                    "(case_no,staff_id,assignment_id,generation_id,work_date,is_work_day,effective_marker,notes) "
+                    "VALUES (%s,%s,%s,%s,%s,1,1,'ORDER_SCENARIO_FIXTURE')",
                     (case_no, assignment["staff_id"], assignment_id, generation_id, work_date),
                 )
             elif (

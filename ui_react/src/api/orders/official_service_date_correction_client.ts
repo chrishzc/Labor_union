@@ -37,7 +37,7 @@ const QuerySchema = z.object({
   })),
   monetary_change_blocker: z.boolean(),
   monetary_blockers: z.array(z.object({
-    code: z.enum(['special_pay', 'payroll_adjustments', 'subsidy_return', 'source_rate_snapshot_missing_or_ambiguous', 'double_pay', 'floor_fee']),
+    code: z.enum(['payroll_adjustments', 'subsidy_return', 'source_rate_snapshot_missing_or_ambiguous', 'floor_fee']),
     message: z.string(),
     repair_target: z.enum(['payroll', 'subsidy', 'case_profile']),
   })),

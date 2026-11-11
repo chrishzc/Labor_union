@@ -705,7 +705,7 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
 
 
 def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
-    charge_days = _charge_days(service_dates, source_facts.double_pay_dates)
+    charge_days = _charge_days(service_dates)
     client_service_charge_waived = False
     if source_facts.identity_status is not None and source_facts.pricing is None:
         coverage = derive_subsidy_coverage(
@@ -731,13 +731,11 @@ def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
     )
 
 
-def _charge_days(service_dates, double_pay_dates):
+def _charge_days(service_dates):
     if service_dates != tuple(sorted(set(service_dates))):
         raise ValueError("official client service days must be sorted and unique")
-    if not set(double_pay_dates).issubset(service_dates):
-        raise ValueError("client double-pay date is not an official service day")
     return tuple(
-        ClientChargeDay(value, value in double_pay_dates)
+        ClientChargeDay(value, False)
         for value in service_dates
     )
 
@@ -833,20 +831,18 @@ def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
 def _daily_charge(facts, charge_day):
     if facts.pricing is not None:
         consumed = Decimal(facts.charge_days.index(charge_day)) * Decimal(str(facts.service_hours_per_day))
-        return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed, double_pay=charge_day.is_double_pay))
+        return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed))
     if normalize_subsidy_policy_identity(facts.identity_status or '') == '補助市民':
         index = facts.charge_days.index(charge_day)
         remaining = max(0,120-index*facts.service_hours_per_day)
         billed = max(0,facts.service_hours_per_day-remaining)
-        return MoneyNTD(_whole_ntd(billed*facts.payment_terms.client_hourly_rate.amount*(2 if charge_day.is_double_pay else 1)))
+        return MoneyNTD(_whole_ntd(billed*facts.payment_terms.client_hourly_rate.amount))
     if facts.client_service_charge_waived:
         return MoneyNTD(0)
-    multiplier = 2 if charge_day.is_double_pay else 1
     return (
         MoneyNTD(_whole_ntd(
             facts.payment_terms.client_hourly_rate.amount
             * facts.service_hours_per_day
-            * multiplier
         ))
     )
 

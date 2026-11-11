@@ -88,7 +88,6 @@ class MySqlPayrollRebuildRepository:
                 rates,
                 for_update,
             )
-            special_dates = _load_special_dates(cursor, assignments, for_update)
             adjustments = _load_adjustments(cursor, assignments, for_update)
             obligations = _load_obligations(cursor, case_no, for_update)
             from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, payroll_tiers
@@ -98,7 +97,6 @@ class MySqlPayrollRebuildRepository:
             assignments,
             schedules,
             rates,
-            special_dates,
             adjustments,
             obligations,
             pricing,
@@ -245,15 +243,6 @@ def _apply_explicit_case_rate(cursor, case_no, rates, lock):
     )
 
 
-def _load_special_dates(cursor, assignments, lock):
-    return _select_assignment_rows(
-        cursor,
-        _SPECIAL_PAY_SELECT_SQL,
-        assignments,
-        lock,
-    )
-
-
 def _load_adjustments(cursor, assignments, lock):
     if lock and assignments:
         _lock_adjustments(cursor, assignments)
@@ -306,18 +295,15 @@ def _rebuild_facts(
     assignments,
     schedules,
     rates,
-    special_dates,
     adjustments,
     obligations,
     pricing=None,
 ):
     schedules_by_assignment = _schedule_index(assignments, schedules)
-    specials_by_assignment = _date_index(special_dates)
     adjustments_by_assignment = _amount_index(adjustments)
     service_facts = _service_facts(
         assignments,
         schedules_by_assignment,
-        specials_by_assignment,
     )
     return PayrollRebuildFacts(
         case_no=str(root["case_no"]),
@@ -362,15 +348,6 @@ def _schedule_index(assignments, schedules):
     return result
 
 
-def _date_index(rows):
-    result = {}
-    for row in rows:
-        result.setdefault(int(row["assignment_id"]), []).append(
-            row["service_date"]
-        )
-    return {key: tuple(values) for key, values in result.items()}
-
-
 def _amount_index(rows):
     return {
         int(row["assignment_id"]): MoneyNTD(_integer_ntd(row["amount_ntd"]))
@@ -378,7 +355,7 @@ def _amount_index(rows):
     }
 
 
-def _service_facts(assignments, schedules, special_dates):
+def _service_facts(assignments, schedules):
     return tuple(
         OfficialAssignmentServiceFacts(
             assignment_identity=_assignment_identity(row["id"]),
@@ -386,7 +363,6 @@ def _service_facts(assignments, schedules, special_dates):
             service_dates=tuple(
                 item["work_date"] for item in schedules[int(row["id"])]
             ),
-            double_pay_dates=special_dates.get(int(row["id"]), ()),
         )
         for row in sorted(assignments, key=lambda item: _assignment_identity(item["id"]))
     )
@@ -915,10 +891,6 @@ _RATE_SELECT_SQL = (
     "SELECT assignment_id,policy_version,policy_kind,hourly_rate_ntd "
     "FROM assignment_payroll_rate_snapshots WHERE assignment_id IN ({}) "
     "ORDER BY assignment_id"
-)
-_SPECIAL_PAY_SELECT_SQL = (
-    "SELECT assignment_id,service_date FROM payroll_special_pay_events "
-    "WHERE assignment_id IN ({}) ORDER BY assignment_id,service_date"
 )
 _ADJUSTMENT_SELECT_SQL = (
     "SELECT assignment_id,SUM(amount_ntd) AS amount_ntd "

@@ -6,9 +6,9 @@
 
 ## Responsibility
 Calculate assignment salary using case-wide subsidy-hour consumption and four-rate
-pricing. Preserve service ownership, double pay, floor-fee conservation and original
+pricing. Preserve service ownership, floor-fee conservation and original
 payments; customer/subsidy installments use service-end month+1/+2 respectively.
-Preliminary caregiver information may read a quantity-only estimate using these same rates and funding dates; estimates do not create official assignment facts or obligations, and unconfirmed premiums are not promoted to confirmed salary.
+Preliminary caregiver information may read a quantity-only estimate using these same rates and funding dates; estimates do not create official assignment facts or obligations.
 
 ## Implementation
 - `domains/payroll/calculation.py`

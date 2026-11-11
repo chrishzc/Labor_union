@@ -168,7 +168,7 @@ def test_substitute_requires_exact_original_schedule_ownership_and_rate():
     assert "substitute_hourly_rate_mismatch" in {error["code"] for error in rejected["errors"]}
 
 
-def test_substitute_double_pay_is_owned_only_by_substitute_assignment():
+def test_substitute_with_legacy_double_pay_marker_uses_regular_rate():
     day = date(2026, 7, 2)
     assignments = [
         _assignment(1, actual_hours=Decimal("0"), floor_fee_allocated=Decimal("0")),
@@ -181,7 +181,7 @@ def test_substitute_double_pay_is_owned_only_by_substitute_assignment():
     _, result = _run(_order(1), assignments, schedules, events=[_event(90, day)])
     assert result["can_create_staff_payments"] is True
     assert result["assignments"][0]["double_pay_hours"] == Decimal("0")
-    assert result["assignments"][1]["service_salary"] == Decimal("1600.00")
+    assert result["assignments"][1]["service_salary"] == Decimal("800.00")
 
 
 def test_family_floor_fee_rounding_leaves_one_cent_remainder_on_original():

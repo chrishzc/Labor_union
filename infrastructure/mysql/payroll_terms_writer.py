@@ -14,7 +14,6 @@ from infrastructure.mysql.effective_case_service_rate import (
 
 
 def persist_payroll_terms_impact(cursor, command) -> None:
-    _insert_special_pay_events(cursor, command)
     if not command.reuse_existing_assignments:
         _insert_carried_rate_snapshots(cursor, command)
     from infrastructure.mysql.payroll_amount_correction_repository import controlled_payroll_terms,carry_payroll_amount_control
@@ -240,30 +239,6 @@ def persist_historical_restart_arrangement_rates(cursor, policies, result):
     )
 
 
-def _insert_special_pay_events(cursor, command):
-    for event in command.special_pay_events:
-        assignment_id = _resolved_assignment_id(command, event.assignment_identity)
-        for service_date in event.service_dates:
-            cursor.execute(
-                "INSERT INTO payroll_special_pay_events "
-                "(assignment_id,service_date,event_type,source_event_identity,"
-                "actor,reason,idempotency_key) "
-                "VALUES (%s,%s,'double_pay',%s,%s,%s,%s)",
-                (
-                    assignment_id,
-                    service_date,
-                    _special_pay_source_identity(command),
-                    command.actor.actor_id,
-                    command.reason,
-                    _special_pay_child_identity(
-                        command,
-                        event.assignment_sequence,
-                        service_date,
-                    ),
-                ),
-            )
-
-
 def _action_requires_event(action) -> bool:
     return (
         action.action is not PayrollTermsActionKind.KEEP_FROZEN
@@ -461,24 +436,6 @@ def _child_identity(command, purpose, ordinal):
             "domain": "payroll",
             "purpose": purpose,
             "ordinal": ordinal,
-        }
-    ).value
-
-
-def _special_pay_source_identity(command):
-    return "leave-special-pay:" + fingerprint_payload(
-        {"batch_key": command.idempotency_key.value}
-    ).value
-
-
-def _special_pay_child_identity(command, ordinal, service_date):
-    return "child:" + fingerprint_payload(
-        {
-            "outer_key": command.idempotency_key.value,
-            "domain": "scheduling-leave-substitution",
-            "purpose": "special-pay",
-            "ordinal": ordinal,
-            "service_date": service_date.isoformat(),
         }
     ).value
 

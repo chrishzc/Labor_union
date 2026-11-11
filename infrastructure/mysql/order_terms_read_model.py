@@ -148,7 +148,7 @@ def load_contract_client_finance_facts(
     generation_row = _select_generation(cursor, aggregate_row, lock)
     schedule_rows = _select_schedules(cursor, generation_row, lock)
     charge_days = _contract_charge_days(cursor, case_no, schedule_rows, lock)
-    source = _load_client_finance(cursor, order_row, schedule_rows, lock)
+    source = _load_client_finance(cursor, order_row, lock)
     return _materialize_contract_client_finance_facts(order_row, charge_days, source)
 
 
@@ -188,7 +188,7 @@ def _materialize_contract_client_finance_facts(
 
 def _contract_charge_days(cursor, case_no, schedule_rows, lock):
     scheduled_days = tuple(
-        ClientChargeDay(row["work_date"], bool(row["is_double_pay"]))
+        ClientChargeDay(row["work_date"], False)
         for row in schedule_rows
         if bool(row["is_work_day"])
     )
@@ -204,7 +204,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
     generation = _select_generation(cursor, aggregate, lock)
     schedules = _select_schedules(cursor, generation, lock)
     days = (_contract_charge_days(cursor, case_no, schedules, lock) if allow_planned else
-            tuple(ClientChargeDay(row["work_date"], bool(row["is_double_pay"]))
+            tuple(ClientChargeDay(row["work_date"], False)
                   for row in schedules if bool(row["is_work_day"])))
     if not days and not allow_planned:
         return None, None
@@ -213,7 +213,7 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
         if not dates:
             dates = tuple(order_row["start_date"] + timedelta(days=i) for i in range(int(order_row["service_days"])))
         days = tuple(ClientChargeDay(value, False) for value in dates)
-    source = _load_client_finance(cursor, order_row, schedules, lock)
+    source = _load_client_finance(cursor, order_row, lock)
     if order_row.get("actual_start_date") is not None:
         from dataclasses import replace
         source = replace(source, effective_start_date=order_row["actual_start_date"],
@@ -378,13 +378,13 @@ def _assemble_facts(
             allow_client_obligations=payment_inputs_changed,
         )
         client_finance = (
-            _load_client_finance(cursor, order_row, schedule_rows, lock)
+            _load_client_finance(cursor, order_row, lock)
             if finance_present and payment_inputs_changed
             else None
         )
         payroll = None
     else:
-        client_finance = _load_client_finance(cursor, order_row, schedule_rows, lock)
+        client_finance = _load_client_finance(cursor, order_row, lock)
         payroll = (
             _load_actual_start_payroll_version(cursor, str(order_row["case_no"]))
             if omit_payroll_details
@@ -563,7 +563,7 @@ def _select_schedules(cursor: Any, generation_row, lock: bool):
         return ()
     lock_clause = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT id,assignment_id,work_date,is_work_day,is_double_pay "
+        "SELECT id,assignment_id,work_date,is_work_day "
         "FROM staff_schedule "
         "WHERE generation_id=%s AND effective_marker=1 "
         "ORDER BY work_date,id" + lock_clause,
@@ -656,7 +656,7 @@ def _validate_scheduling_aggregate_state(aggregate_row) -> None:
     raise ValueError("scheduling_generation_conflict")
 
 
-def _load_client_finance(cursor, order_row, schedule_rows, lock):
+def _load_client_finance(cursor, order_row, lock):
     terms_row = _select_client_payment_terms(
         cursor,
         str(order_row["case_no"]),
@@ -667,16 +667,11 @@ def _load_client_finance(cursor, order_row, schedule_rows, lock):
         str(order_row["case_no"]),
         lock,
     )
-    double_pay_dates = tuple(
-        row["work_date"]
-        for row in schedule_rows
-        if bool(row["is_work_day"]) and bool(row["is_double_pay"])
-    )
     rate_override = load_explicit_case_service_rate(
         cursor, str(order_row["case_no"]), lock=lock
     )
     source = _client_finance_source(
-        terms_row, obligation_rows, double_pay_dates, rate_override
+        terms_row, obligation_rows, rate_override
     )
     from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
     pricing = load_case_pricing(cursor, order_row, lock=lock)
@@ -706,7 +701,7 @@ def _select_client_obligations(cursor, case_no, lock):
 
 
 def _client_finance_source(
-    terms_row, obligation_rows, double_pay_dates, rate_override=None
+    terms_row, obligation_rows, rate_override=None
 ):
     return ClientFinanceTermsSourceFacts(
         case_no=str(terms_row["case_no"]),
@@ -722,7 +717,7 @@ def _client_finance_source(
             terms_row["first_payment_due_date"],
             terms_row["second_payment_due_date"],
         ),
-        double_pay_dates=double_pay_dates,
+        double_pay_dates=(),
         existing_obligations=tuple(
             _client_obligation(row) for row in obligation_rows
         ),
@@ -769,7 +764,6 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
     assignment_ids = tuple(int(row["id"]) for row in assignment_rows)
     ancestry = _select_payroll_assignment_ancestry(cursor, case_no, assignment_rows, lock)
     rate_rows = _select_assignment_rates(cursor, assignment_ids, lock)
-    special_dates = _select_special_pay_dates(cursor, assignment_ids, lock)
     adjustment_ids = tuple(sorted(set(assignment_ids) | {
         ancestor for same_staff in ancestry.values() for ancestor in same_staff
     }))
@@ -781,7 +775,6 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         account_row,
         assignment_rows,
         rate_rows,
-        special_dates,
         adjustments,
         obligations,
         case_policy,
@@ -895,20 +888,6 @@ def _select_assignment_rates(cursor, assignment_ids, lock):
     )
 
 
-def _select_special_pay_dates(cursor, assignment_ids, lock):
-    rows = _select_for_assignment_ids(
-        cursor,
-        "SELECT assignment_id,service_date FROM payroll_special_pay_events "
-        "WHERE assignment_id IN ({}) ORDER BY assignment_id,service_date",
-        assignment_ids,
-        lock,
-    )
-    result: dict[int, list] = {}
-    for row in rows:
-        result.setdefault(int(row["assignment_id"]), []).append(row["service_date"])
-    return {key: tuple(values) for key, values in result.items()}
-
-
 def _select_payroll_adjustments(cursor, assignment_ids, lock):
     rows = _select_for_assignment_ids(
         cursor,
@@ -948,7 +927,6 @@ def _payroll_source(
     account_row,
     assignment_rows,
     rate_rows,
-    special_dates,
     adjustments,
     obligations,
     case_policy,
@@ -970,7 +948,7 @@ def _payroll_source(
         payroll_version=int(account_row["aggregate_version"]),
         source_terms=tuple(
             _source_assignment_terms(
-                row, rates, special_dates, adjustments, effective_case_policy, ancestry
+                row, rates, adjustments, effective_case_policy, ancestry
             )
             for row in assignment_rows
         ),
@@ -983,7 +961,7 @@ def _payroll_source(
 
 
 def _source_assignment_terms(
-    row, rates, special_dates, adjustments, rate_override=None, ancestry=None
+    row, rates, adjustments, rate_override=None, ancestry=None
 ):
     assignment_id = int(row["id"])
     rate = rates.get(assignment_id)
@@ -1002,7 +980,7 @@ def _source_assignment_terms(
             if rate_override is not None
             else PayrollPolicyKind(str(rate["policy_kind"]))
         ),
-        special_dates.get(assignment_id, ()),
+        (),
         MoneyNTD(sum(adjustments.get(identity, MoneyNTD(0)).amount
                      for identity in (assignment_id,) + (ancestry or {}).get(assignment_id, ()))),
         (ancestry or {}).get(assignment_id, ()),

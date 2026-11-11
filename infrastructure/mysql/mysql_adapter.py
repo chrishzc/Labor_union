@@ -692,7 +692,6 @@ def parse_beclass_survey_details(raw_val) -> dict:
         "cooking_tools": "炒菜鍋、大同電鍋、微波爐、烤箱、熱奶器、消毒鍋",
         "bath_water_prep": "中藥包煮沸",
         "breastfeeding_method": "母乳 + 配方奶混合哺育",
-        "holiday_pricing_terms": "國定三節按合約規定支付 1 倍加班薪資",
         "multi_birth_count": "單胞胎",
         "stair_floor_fee_mode": "大樓電梯公寓 (無額外樓層費)",
         "parking_space_provided": "有提供專用轎車停車位",
@@ -776,10 +775,6 @@ def parse_beclass_survey_details(raw_val) -> dict:
         "哺乳方式:",
         "哺乳方式",
     ], res["breastfeeding_method"])
-
-    res["holiday_pricing_terms"] = _pick([
-        "特殊計費:甲方同意需另支付當日薪資1倍予乙方。",
-    ], res["holiday_pricing_terms"])
 
     res["multi_birth_count"] = _pick([
         "特殊計費:胎數",

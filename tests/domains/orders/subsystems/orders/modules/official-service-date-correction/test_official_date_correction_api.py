@@ -23,6 +23,39 @@ from subsystems.orders.official_service_date_correction_workflow import (
 )
 
 
+def test_repository_ignores_legacy_pay_marker_but_keeps_payroll_adjustment_blocker(monkeypatch):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql import official_service_date_correction_repository as repository
+
+    day = date(2026, 9, 19)
+    monkeypatch.setattr(repository, "select_order", lambda *_args, **_kwargs: {
+        "lifecycle_version": 1, "status": "訂單完成", "actual_start_date": day,
+        "service_data_locked": True, "service_days": 1, "service_hours_per_day": 8,
+    })
+    monkeypatch.setattr(repository, "select_scheduling_aggregate", lambda *_args, **_kwargs: {
+        "effective_generation_id": 11, "aggregate_version": 1,
+    })
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.side_effect = [
+        [{"id": 13, "staff_id": 7, "assignment_sequence": 1, "status": "completed",
+          "floor_fee_allocated": 0, "staff_name": "月嫂"}],
+        [{"assignment_id": 13, "staff_id": 7, "work_date": day,
+          "is_work_day": True, "is_double_pay": True}],
+    ]
+    cursor.fetchone.side_effect = [
+        {"generation_number": 1}, {"actual_end_date": day}, {"total": 1},
+        {"total": 1}, {"total": 0}, None, None,
+    ]
+
+    facts = repository.MySqlOfficialServiceDateCorrectionRepository(connection).load("CASE-1")
+
+    assert facts.monetary_blockers == ("payroll_adjustments",)
+    statements = " ".join(call.args[0] for call in cursor.execute.call_args_list)
+    assert "is_double_pay" not in statements
+    assert "payroll_special_pay_events" not in statements
+
+
 class _Workflow:
     def query(self, case_no):
         return OfficialDateFacts(
@@ -77,11 +110,9 @@ def test_query_exposes_original_completion_and_full_correction_reason_without_ra
 
 
 @pytest.mark.parametrize("code,reason,target", [
-    ("special_pay", "已有特殊薪資紀錄", "payroll"),
     ("payroll_adjustments", "已有薪資調整分攤", "payroll"),
     ("subsidy_return", "已有補助退還義務", "subsidy"),
     ("source_rate_snapshot_missing_or_ambiguous", "薪資快照缺漏或不唯一", "case_profile"),
-    ("double_pay", "原正式服務日含雙倍薪", "payroll"),
     ("floor_fee", "原排班已分配樓層費", "case_profile"),
 ])
 def test_query_and_fresh_preview_explain_the_actual_monetary_blocker(code, reason, target):

@@ -97,7 +97,7 @@ class MySqlServiceStartArrangement:
         if start < SystemBusinessClock().today():
             raise ServiceStartConflict('handover_date_in_past', '交接日不可早於今天。')
         with self.connection.cursor() as c:
-            c.execute('SELECT day.id,day.work_date,day.is_double_pay FROM staff_schedule day '
+            c.execute('SELECT day.id,day.work_date FROM staff_schedule day '
                 'JOIN scheduling_aggregates g ON g.effective_generation_id=day.generation_id '
                 'WHERE g.case_no=%s AND day.assignment_id=%s AND day.staff_id=%s '
                 'AND day.effective_marker=1 AND day.is_work_day=1 AND day.work_date>=%s '
@@ -112,7 +112,7 @@ class MySqlServiceStartArrangement:
         )
         # The formal handover writer owns all remaining days, paid-history preservation and accounting.
         intent = LeaveSubstitutionBatchIntent(request['assignment_id'], tuple(LeaveSubstitutionItem(
-            day['id'],day['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id'],bool(day['is_double_pay']))
+            day['id'],day['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id'])
             for day in days), handover_date=start)
         preview = self.leave.preview(LeaveSubstitutionPreviewRequest(request['case_no'],intent,cid))
         self.leave.apply_in_current_unit_of_work(LeaveSubstitutionApplyRequest(request['case_no'],intent,
@@ -128,7 +128,7 @@ class MySqlServiceStartArrangement:
         if any(day < today for day in originals) or any(day is None or day < today for day in replacements):
             raise ServiceStartConflict('leave_result_past_service', '已完成的服務日不可由請假流程變更，請重新核對日期。')
         with self.connection.cursor() as c:
-            c.execute('SELECT day.id,day.assignment_id,day.work_date,day.is_double_pay FROM staff_schedule day '
+            c.execute('SELECT day.id,day.assignment_id,day.work_date FROM staff_schedule day '
                 'JOIN scheduling_aggregates g ON g.effective_generation_id=day.generation_id '
                 'WHERE g.case_no=%s AND day.staff_id=%s AND day.effective_marker=1 AND day.is_work_day=1 '
                 'AND day.work_date BETWEEN %s AND %s ORDER BY day.work_date FOR UPDATE',
@@ -144,7 +144,7 @@ class MySqlServiceStartArrangement:
             LeaveSubstitutionItem(rows[old]['id'], old,
                 LeaveResolutionType.SUBSTITUTE if candidate else LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
                 candidate['staff_id'] if candidate else None,
-                bool(rows[old]['is_double_pay']) if candidate else False,
+                False,
                 new if new != old else None) for old,new in zip(originals,replacements)))
         preview = self.leave.preview(LeaveSubstitutionPreviewRequest(request['case_no'],intent,cid))
         self.leave.apply_in_current_unit_of_work(LeaveSubstitutionApplyRequest(request['case_no'],intent,
@@ -228,7 +228,7 @@ class MySqlServiceStartArrangement:
 
     def _substitute(self,request,candidate,start,actor,cid,key):
         with self.connection.cursor() as c:
-            c.execute('SELECT day.id,day.work_date,day.is_double_pay FROM staff_schedule day '
+            c.execute('SELECT day.id,day.work_date FROM staff_schedule day '
                 'JOIN scheduling_aggregates g ON g.effective_generation_id=day.generation_id '
                 'WHERE day.assignment_id=%s AND day.effective_marker=1 AND day.is_work_day=1 '
                 'AND day.work_date BETWEEN %s AND %s ORDER BY day.work_date FOR UPDATE',
@@ -237,7 +237,7 @@ class MySqlServiceStartArrangement:
         if not days:
             raise ServiceStartConflict('substitute_dates_missing','指定區段沒有可替代的正式服務日，請重新核對。')
         intent=LeaveSubstitutionBatchIntent(request['assignment_id'],tuple(LeaveSubstitutionItem(
-            row['id'],row['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id'],bool(row['is_double_pay'])) for row in days))
+            row['id'],row['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id']) for row in days))
         preview=self.leave.preview(LeaveSubstitutionPreviewRequest(request['case_no'],intent,cid))
         self.leave.apply_in_current_unit_of_work(LeaveSubstitutionApplyRequest(request['case_no'],intent,
             ExpectedVersion(preview.order_version),ExpectedVersion(preview.scheduling_version),

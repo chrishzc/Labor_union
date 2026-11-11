@@ -35,11 +35,10 @@ def funding_due_date(completed_on: date, *, directly_subsidized: bool) -> date:
 def price_hours(days: tuple[tuple[Decimal, bool], ...], rate: TieredPayrollRate, consumed=Decimal(0)) -> tuple[int, int]:
     covered_amount = Decimal(0)
     excess_amount = Decimal(0)
-    for hours, double_pay in days:
+    for hours, _ in days:
         covered = min(hours, max(Decimal(0), rate.subsidy_hours - consumed))
-        multiplier = 2 if double_pay else 1
-        covered_amount += covered * rate.covered_rate * multiplier
-        excess_amount += (hours - covered) * rate.excess_rate * multiplier
+        covered_amount += covered * rate.covered_rate
+        excess_amount += (hours - covered) * rate.excess_rate
         consumed += hours
     if any(value != value.to_integral_value() for value in (covered_amount, excess_amount)):
         raise ValueError("payroll_tiered_amount_must_be_whole_ntd")

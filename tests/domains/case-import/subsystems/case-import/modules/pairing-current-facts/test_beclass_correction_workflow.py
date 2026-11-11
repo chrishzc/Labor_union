@@ -156,13 +156,13 @@ def test_every_canonical_order_status_allows_manual_beclass_source() -> None:
     assert allows_manual_beclass_source("unknown-status") is False
 
 
-def test_care_and_bonus_corrections_preserve_original_types_without_financial_effect():
+def test_care_corrections_preserve_original_types_without_financial_effect():
     repository = _Repository()
     repository.financial_fields_locked = True
     repository.original.update({"dietary_habits": "原始飲食", "parking_space_provided": False, "alcohol_ratio": 0.5})
     sync = _FinancialSync()
     workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
-    changes = {"dietary_habits": " 不吃花生 ", "holiday_pricing_terms": "三節獎金由客戶與月嫂協調", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True}
+    changes = {"dietary_habits": " 不吃花生 ", "stair_floor_fee_mode": "二樓服務", "other_babies_present": True}
     preview = workflow.preview("CASE-001", changes, ExpectedVersion(0))
     assert preview.before["dietary_habits"] == "原始飲食"
     assert repository.version == 0 and repository.corrections == {}
@@ -189,7 +189,7 @@ def test_effective_care_correction_clears_source_ambiguity_and_preserves_explici
     assert projection.issues["maternal_allergy"] == "invalid_payload"
 
 
-@pytest.mark.parametrize("changes", [{"holiday_pricing_terms": True}, {"stair_floor_fee_mode": 300}, {"meal_preferences": ["牛肉"]}, {"alcohol_ratio": float("nan")}])
+@pytest.mark.parametrize("changes", [{"holiday_pricing_terms": "協調結果"}, {"stair_floor_fee_mode": 300}, {"meal_preferences": ["牛肉"]}, {"alcohol_ratio": float("nan")}])
 def test_care_correction_rejects_non_text_agreements_and_non_scalar_answers(changes):
     workflow = BeClassCorrectionWorkflow(_Repository(), _Uow)
     with pytest.raises(ValueError):

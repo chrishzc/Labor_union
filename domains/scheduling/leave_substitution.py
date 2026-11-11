@@ -209,9 +209,7 @@ def _validate_handover(facts, intent):
         _raise_invalid("handover_remaining_service_changed")
     if len({item.substitute_staff_id for item in intent.items}) != 1:
         _raise_invalid("handover_requires_one_successor")
-    if any(item.resolution_type is not LeaveResolutionType.SUBSTITUTE
-           or item.is_double_pay != row.is_double_pay
-           for item, row in zip(intent.items, remaining)):
+    if any(item.resolution_type is not LeaveResolutionType.SUBSTITUTE for item in intent.items):
         _raise_invalid("handover_must_preserve_service_terms")
 
 
@@ -349,7 +347,7 @@ def _transform_service_ownership(
                 row.staff_id if item is None or item.resolution_type is not LeaveResolutionType.SUBSTITUTE else item.substitute_staff_id,
                 row.assignment_id,
                 row.schedule_id,
-                row.is_double_pay if item is None or item.resolution_type is not LeaveResolutionType.SUBSTITUTE else item.is_double_pay,
+                False,
             )
         )
         if recalculate_existing_dates and (

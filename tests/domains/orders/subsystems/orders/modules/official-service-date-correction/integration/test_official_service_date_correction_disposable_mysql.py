@@ -491,9 +491,13 @@ def test_real_monetary_blockers_remain_explicit_without_changing_existing_obliga
         workflow = OfficialServiceDateCorrectionWorkflow(MySqlOfficialServiceDateCorrectionRepository(connection), lambda: MySqlUnitOfWork(connection))
         monetary_before = _monetary_snapshot(connection)
         selection = (OfficialDateSelection(assignment_id, (date(2026, 9, 19), date(2026, 9, 21))),)
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE staff_schedule SET is_double_pay=1 WHERE generation_id=%s", (generation_id,))
+        assert workflow.query("ISSUE-346").monetary_blockers == ()
+        workflow.preview("ISSUE-346", selection)
+        connection.rollback()
         scenarios = (
             ("floor_fee", "UPDATE case_staff_assignments SET floor_fee_allocated=100 WHERE id=%s", assignment_id),
-            ("double_pay", "UPDATE staff_schedule SET is_double_pay=1 WHERE generation_id=%s", generation_id),
             ("source_rate_snapshot_missing_or_ambiguous", "DELETE FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s", assignment_id),
         )
         for code, sql, identity in scenarios:

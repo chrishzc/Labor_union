@@ -166,7 +166,7 @@ def test_historical_settlement_is_never_treated_as_unpaid_or_reopened_by_handove
         build_payroll_handover_impact(facts, scheduling(), TERMS, "handover-1")
 
 
-def test_successor_keeps_the_original_double_pay_salary_instead_of_losing_the_special_day():
+def test_successor_prices_legacy_double_pay_date_as_regular_service():
     facts = source()
     special_day = date(2026, 10, 22)
     facts = replace(facts, source_terms=(replace(facts.source_terms[0], double_pay_dates=(special_day,)),),
@@ -177,9 +177,9 @@ def test_successor_keeps_the_original_double_pay_salary_instead_of_losing_the_sp
     generation = replace(generation, assignments=generation.assignments + (successor,))
     candidate = build_payroll_handover_impact(facts, generation, TERMS, "handover-1")
     replacement_pay = next(item for item in candidate.payroll.assignments if item.staff_id == 8)
-    assert replacement_pay.service_salary == MoneyNTD(4800)
-    assert replacement_pay.double_pay_hours == 8
-    assert replacement_pay.total_payable == MoneyNTD(5300)
+    assert replacement_pay.service_salary == MoneyNTD(2400)
+    assert replacement_pay.double_pay_hours == 0
+    assert replacement_pay.total_payable == MoneyNTD(2900)
 
 
 def test_negative_adjustment_cannot_turn_reduced_service_into_a_negative_payable():

@@ -60,7 +60,7 @@ const leaveSubstitutionItemFields = {
   work_date: LeaveSubstitutionIsoDateSchema,
   resolution_type: LeaveResolutionTypeSchema,
   substitute_staff_id: z.number().int().positive().nullable(),
-  is_double_pay: z.boolean(),
+  is_double_pay: z.literal(false).optional(),
   replacement_work_date: LeaveSubstitutionIsoDateSchema.nullable().optional(),
 };
 
@@ -83,12 +83,12 @@ export const LeaveSubstitutionItemSchema = z
     }
     if (
       item.resolution_type === 'defer_following_assignments' &&
-      (item.substitute_staff_id !== null || item.is_double_pay)
+      item.substitute_staff_id !== null
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['resolution_type'],
-        message: 'defer resolution cannot carry substitute or double-pay data。',
+        message: 'defer resolution cannot carry substitute staff。',
       });
     }
     if (item.replacement_work_date === item.work_date) {

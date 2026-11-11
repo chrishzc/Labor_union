@@ -16,7 +16,6 @@
 | 每日服務時數 | Orders Terms |
 | actual hours | `正式服務日數 × 每日服務時數` |
 | 月嫂費率 | 版本化 Payroll Rate Policy 於 assignment 建立時凍結的條款快照 |
-| 雙倍薪日 | 明確 special-pay event；不從節假日清單推猜 |
 | 樓層費 | Orders 條款＋實際服務日 ownership 的整數守恆分配 |
 | 調整額 | 不可變 adjustment 及其 assignment allocations |
 | 逐 assignment 應付 | `staff_obligations` current projection（不可變來源為 `staff_obligation_events`；`staff_payments` 僅唯讀相容投影） |
@@ -42,22 +41,21 @@
 
 ```text
 actual_hours     = official_work_day_count × service_hours_per_day
-double_pay_hours = double_pay_work_day_count × service_hours_per_day
-service_salary   = (actual_hours + double_pay_hours) × hourly_rate
+service_salary   = actual_hours × hourly_rate
 total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
-- 雙倍薪工時已在 `actual_hours` 計算一倍後再加上 `double_pay_hours`，合計恰為兩倍。
+- 正式服務日的工時依服務歸屬與適用費率計算，國定假日出勤與其他正式服務日使用相同的工時及費率規則。此計算口徑也適用於改約、取消、代班／換人及應付重建。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
-- **歷史訂單例外**：依 [歷史訂單生命週期與服務天數帳務](27_歷史訂單生命週期與服務天數帳務正式規格.md)，可消費 Orders application 已確認、逐 assignment 且具 provenance 的 `actual_service_days` 建立單薪義務；不接受人工輸入 actual hours，亦不將該天數偽造成正式 `service_dates`。
+- **歷史訂單例外**：依 [歷史訂單生命週期與服務天數帳務](27_歷史訂單生命週期與服務天數帳務正式規格.md)，可消費 Orders application 已確認、逐 assignment 且具 provenance 的 `actual_service_days` 建立薪資義務；不接受人工輸入 actual hours，亦不將該天數偽造成正式 `service_dates`。
 
 ## 3. 公開契約與流程
 
 ### 3.1 候選月嫂唯讀預估
 
 - 訂單候選預覽顯示月嫂薪資單價、預估總薪資與預計付款日，不共用客戶繳款內容。
-- 計算僅唯讀參考 Payroll 政策與 Orders 約定服務量、已知樓層費及預計結束日；明確標示為預估（未含雙倍薪或未來調整，來源缺值標待確認），不建立假 assignment、不保存義務、不遞增 Payroll aggregate version。
+- 計算僅唯讀參考 Payroll 政策與 Orders 約定服務量、已知樓層費及預計結束日；明確標示為預估（未含未來調整，來源缺值標待確認），不建立假 assignment、不保存義務、不遞增 Payroll aggregate version。
 
 ### 3.2 未核銷重建與已核銷追加（`RebuildPayrollForCase`）
 
@@ -94,12 +92,12 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 - **輸入 Ports**：`OfficialServiceFactsPort`、`OrdersTermsPort`、`PayrollTermsPort`、`AdjustmentLedgerPort`。
 - **輸出 Ports**：`StaffObligationRepository`、`PayrollImpactPreviewPort`、`PayrollRootFactsOutboxPort`。
 - **Commands**：`PreviewPayrollImpactForCase`、`RebuildPayrollForCase`、`QueryCasePayroll`、`QueryStaffPayrollObligations`、`PreviewStaffPayrollAdjustment`、`ApplyStaffPayrollAdjustment`。
-- **Stable Errors**：`invalid_payroll_facts`、`official_service_ownership_conflict`、`payroll_rate_policy_not_found`、`special_pay_terms_invalid`、`non_integer_payroll_input`、`floor_fee_allocation_violation`、`staff_obligation_frozen`、`payroll_candidate_stale`、`payroll_handover_settlement_required`、`idempotency_conflict`、`transaction_failed`。
+- **Stable Errors**：`invalid_payroll_facts`、`official_service_ownership_conflict`、`payroll_rate_policy_not_found`、`non_integer_payroll_input`、`floor_fee_allocation_violation`、`staff_obligation_frozen`、`payroll_candidate_stale`、`payroll_handover_settlement_required`、`idempotency_conflict`、`transaction_failed`。
 - **Writer Exit**：`staff_obligations`／`staff_obligation_events`、rate snapshot、floor-fee allocation 與 payroll adjustment 僅限 Payroll persistence adapter 寫入；`services/assignment_payroll_reconciliation_service.py`、`services/multi_caregiver_schedule_*.py`、`services/order_assignment_synchronization.py`、`services/actual_hours_adjustment_confirmation_service.py`、`services/payment_service.py` 與 `services/staff_monthly_settlements.py` 均不得寫入新 Payroll SSOT。
 
 ## 4. 驗收標準
 
 1. `cancelled`、休假與 buffer 日不計薪；actual-hours 快取與正式日數不符時拒絕使用。
-2. 多月嫂同案按各自服務 ownership、凍結費率與 special-pay 獨立計算，合計等於 `T`（`20` 天樓層費 `3,000` 元，中途服務 `5` 天得 `750` 元，再依 `3 / 2` 天按最大餘數法分得 `450 / 300` 元）。
+2. 多月嫂同案按各自服務 ownership、凍結費率 獨立計算，合計等於 `T`（`20` 天樓層費 `3,000` 元，中途服務 `5` 天得 `750` 元，再依 `3 / 2` 天按最大餘數法分得 `450 / 300` 元）。
 3. 完整履約後取消申請被拒絕且薪資不變；未核銷義務重算更新、已付款義務僅追加差額事件，全部新義務為整數 NTD。
 4. 雙胞胎更正、`staff-handover:` 換人差額、兩段時薪與方案一 `T - S`／`S` 分期拆分於同一 UoW 原子成立；0～100 元轉帳手續費由 Staff Payables 核銷結清，不竄改 Payroll 原始義務總額。

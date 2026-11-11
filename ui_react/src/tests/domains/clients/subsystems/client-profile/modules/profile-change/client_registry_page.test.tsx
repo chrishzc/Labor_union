@@ -107,7 +107,7 @@ const detail = {
       dietary_habits: '不吃牛肉', vegetarian_preference: null, alcohol_ratio: null,
       cooking_oil_type: null, maternal_allergy: null, special_care_notes: null,
       meal_preferences: null, cooking_tools: null, bath_water_prep: null,
-      breastfeeding_method: null, holiday_pricing_terms: null, multi_birth_count: '雙胞胎',
+      breastfeeding_method: null, multi_birth_count: '雙胞胎',
       stair_floor_fee_mode: null, parking_space_provided: null, other_babies_present: null,
     },
     field_issues: {},
@@ -655,7 +655,7 @@ describe('Client registry owner editing', () => {
     expect(screen.queryByLabelText('變更歷程案件編號')).not.toBeInTheDocument();
   });
 
-  it('saves only edited care and bonus text while preserving other drafts and invalidating the shared BeClass preview', async () => {
+  it('saves only edited care answers while preserving other drafts and invalidating the shared BeClass preview', async () => {
     window.location.hash = '#clients?case=CASE-001';
     mocks.preview.mockImplementation(async (_case, _owner, changes, version) => ({ owner: 'client_beclass', aggregate_identity: 'CASE-001', current_version: version, before: {}, after: changes, preview_fingerprint: 'b'.repeat(64) }));
     render(<ClientRegistryPage />);
@@ -668,8 +668,8 @@ describe('Client registry owner editing', () => {
     expect(mocks.apply).not.toHaveBeenCalled();
     const care = screen.getByRole('region', { name: 'BeClass 照護與特殊計費' });
     fireEvent.change(within(care).getByLabelText('飲食習慣與中藥接受度'), { target: { value: '不吃花生' } });
-    fireEvent.change(within(care).getByLabelText('三節獎金協調結果'), { target: { value: '客戶另給獎金，金額與月嫂協調' } });
-    const changes = { dietary_habits: '不吃花生', holiday_pricing_terms: '客戶另給獎金，金額與月嫂協調' };
+    expect(within(care).queryByLabelText('三節獎金協調結果')).not.toBeInTheDocument();
+    const changes = { dietary_habits: '不吃花生' };
     mocks.query.mockResolvedValue({ ...detail, beclass: { ...detail.beclass, version: 4 }, order_information: { ...detail.order_information, values: { ...detail.order_information.values, ...changes } } });
     fireEvent.click(within(care).getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', changes, 3));

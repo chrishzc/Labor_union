@@ -5,7 +5,7 @@
 - subsystem: `payroll`
 
 ## Responsibility
-以每位歷史 assignment 的服務天數、每日時數、`assignment_payroll_rate_snapshots` 費率快照與既有 Payroll adjustments 計算固定單薪應付，雙薪為零，樓層費按最大餘數法分配。天數更正只保存比較金額；需入帳的差異由 Payroll／Staff Payables 正式更正處理，保留既有應付及付款證據。
+以每位歷史 assignment 的服務天數、每日時數、`assignment_payroll_rate_snapshots` 費率快照與既有 Payroll adjustments 計算服務薪資應付，樓層費按最大餘數法分配。天數更正只保存比較金額；需入帳的差異由 Payroll／Staff Payables 正式更正處理，保留既有應付及付款證據。
 
 ## Implementation
 - `domains/payroll/historical_calculation.py`

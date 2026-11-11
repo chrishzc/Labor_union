@@ -86,7 +86,7 @@ describe('canonical holiday maintenance CSV', () => {
     expect(malformed.issues.join(' ')).toContain('引號未關閉');
   });
 
-  it('實際 transport 的 preview 零寫入，Apply 每筆 fresh version 並保留既有雙薪事實，部分失敗逐筆回報', async () => {
+  it('實際 transport 的 preview 零寫入，Apply 每筆 fresh version ，部分失敗逐筆回報', async () => {
     const dateOne = '2026-01-01';
     const dateTwo = '2026-02-28';
     const versionOne = 'a'.repeat(64);
@@ -124,7 +124,7 @@ describe('canonical holiday maintenance CSV', () => {
       '/api/v1/holidays/preview',
     ]);
     const firstPreviewBody = JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[1]?.[1]?.body));
-    expect(firstPreviewBody.is_double_pay_default).toBe(true);
+    expect(firstPreviewBody).not.toHaveProperty('is_double_pay_default');
     expect(vi.mocked(globalThis.fetch).mock.calls.some((call) => call[0] === '/api/v1/holidays/apply')).toBe(false);
 
     const result = await client.applyCsv(batch, '官方 CSV canonical test', { idempotencyKey: 'holiday-csv-confirm' });

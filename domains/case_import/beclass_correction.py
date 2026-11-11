@@ -54,7 +54,7 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
                 raise BeClassCorrectionError("beclass_value_cannot_be_empty", field)
             normalized[field] = None
             continue
-        if field in ORDER_INFORMATION_KEYS and field not in {"multi_birth_count", "holiday_pricing_terms", "stair_floor_fee_mode"} and isinstance(raw_value, (bool, int, float)):
+        if field in ORDER_INFORMATION_KEYS and field not in {"multi_birth_count", "stair_floor_fee_mode"} and isinstance(raw_value, (bool, int, float)):
             if isinstance(raw_value, float) and not isfinite(raw_value):
                 raise BeClassCorrectionError("beclass_value_must_be_finite", field)
             normalized[field] = raw_value

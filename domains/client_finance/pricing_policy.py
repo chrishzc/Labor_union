@@ -68,14 +68,14 @@ class CasePricingTerms:
         covered = min(total, self.subsidy_hours)
         return covered, total - covered
 
-    def client_charge(self, hours: Decimal, consumed: Decimal = Decimal(0), *, double_pay=False) -> int:
+    def client_charge(self, hours: Decimal, consumed: Decimal = Decimal(0)) -> int:
         remaining = max(Decimal(0), self.subsidy_hours - consumed)
         covered = min(Decimal(str(hours)), remaining)
         excess = Decimal(str(hours)) - covered
         amount = excess * self.client.excess
         if self.rule is not IdentityRule.SOCIAL:
             amount += covered * self.client.covered
-        return whole_ntd(amount * (2 if double_pay else 1))
+        return whole_ntd(amount)
 
     def subsidy_return(self, total_hours: Decimal) -> int:
         covered, _ = self.split_hours(total_hours)
@@ -155,12 +155,12 @@ def calculate_case_total_amount(terms: CasePricingTerms, service_hours: tuple[tu
         raise ValueError("pricing_floor_fee_invalid")
     consumed = Decimal(0)
     amount = Decimal(floor_fee)
-    for hours, double_pay in service_hours:
+    for hours, _ in service_hours:
         hours = Decimal(str(hours))
         if not hours.is_finite() or hours < 0:
             raise ValueError("pricing_service_hours_invalid")
         covered = min(hours, max(Decimal(0), terms.subsidy_hours - consumed))
-        amount += (covered * terms.client.covered + (hours - covered) * terms.client.excess) * (2 if double_pay else 1)
+        amount += covered * terms.client.covered + (hours - covered) * terms.client.excess
         consumed += hours
     return whole_ntd(amount)
 

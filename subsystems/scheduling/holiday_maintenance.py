@@ -223,11 +223,7 @@ def _preview_from_calendar(
 def _would_change(command: HolidayCommand, before: HolidayFact | None) -> bool:
     if command.action == "delete":
         return True
-    return before != HolidayFact(
-        command.holiday_date,
-        command.holiday_name or "",
-        command.is_double_pay_default,
-    )
+    return before is None or before.holiday_name != command.holiday_name
 
 
 def _command_payload(command: HolidayCommand) -> dict[str, object]:

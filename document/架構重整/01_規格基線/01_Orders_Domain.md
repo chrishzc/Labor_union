@@ -48,7 +48,7 @@
   ```
 - **唯一正式持久化入口**：`AutoCompleteOrderService` 於單一 outer UoW 鎖定 lifecycle aggregate、effective Scheduling generation、assignment-owned 正式服務日、`actual_end_date`、完整時段 tuple 與 active controls，當 `evaluation_at >= completion_instant` 且無 `auto_complete` blocker（與 Scheduling 請假代班原子序列化 CAS Orders version），轉為 `訂單完成` 並立即建立 `order_service_data_locks` 凍結服務日期、時數、服務單價與樓層費（非財務聯絡個資仍可獨立更正）；同時寫出 `line_service_completion_notification=true` outbox 觸發原案件群組單次完工滿意度問卷通知（見 [LINE 客服與月嫂自助服務 §4.4](20_LINE客服與月嫂自助服務正式規格.md)）。
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
-- **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及雙薪、調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
+- **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
 
 ### 3.3 訂金 Reversal 與開工重認
 

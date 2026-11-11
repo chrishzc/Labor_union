@@ -401,13 +401,6 @@ class LeaveSubstitutionWorkflow:
                 candidate.scheduling,
             )
         )
-        if intent.handover_date is not None:
-            for source in facts.impact_facts.payroll.source_terms:
-                official_double_pay = tuple(row.work_date for row in facts.official_schedules
-                                            if row.assignment_id == source.source_assignment_id and row.is_double_pay)
-                if official_double_pay != source.double_pay_dates:
-                    payroll = _blocked_impact("payroll_special_pay_lineage_mismatch")
-                    break
         orders = _preview_impact(
             lambda: self._orders_port.preview_leave_substitution(
                 facts.impact_facts,
@@ -640,7 +633,7 @@ def _domain_workflow_error(correlation_id, exception):
         "handover_remaining_service_missing": "交接日之後沒有這位原月嫂的正式服務日。",
         "handover_remaining_service_changed": "剩餘服務日期已變更，請重新查詢最新資料後再儲存。",
         "handover_requires_one_successor": "請指定同一位接任月嫂承接這次剩餘服務。",
-        "handover_must_preserve_service_terms": "換人必須保留原服務日期、時數與雙薪約定。",
+        "handover_must_preserve_service_terms": "換人必須保留原服務日期與時數。",
     }
     if code in handover_messages:
         return _workflow_error(correlation_id,

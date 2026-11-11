@@ -102,7 +102,6 @@ UI 不自行以 `planned_hours`、姓名或 `orders.staff_id` 補值。
 ## 7. 薪資與費用顯示邊界
 
 - `actual_hours`、特殊薪資日、代班薪資 impact、樓層費與應付結果全部由 Scheduling／Payroll owner 計算；UI 只顯示 typed result。
-- 國定假日與代班日均不得由 UI 自動設為雙倍薪；只有 current formal contract 允許且有明確個案約定時，才可由管理員對指定正式服務日提出 special-pay input 並保留 reason／audit。
 - 代班不得改變 Client Finance 的客戶應收義務；UI 不得用月嫂薪資差額反算或修正客戶付款。
 - 已付款／結算事實若需更正，導向 current adjustment／reversal／re-settlement owner workflow，不提供一般表格直接覆寫。
 

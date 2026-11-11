@@ -97,11 +97,9 @@ class MySqlSchedulingHolidayQuery:
     ) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO holidays (holiday_date,holiday_name,is_double_pay_default) "
-                "VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE "
-                "holiday_name=VALUES(holiday_name),"
-                "is_double_pay_default=VALUES(is_double_pay_default)",
-                (holiday_date, holiday_name, is_double_pay_default),
+                "INSERT INTO holidays (holiday_date,holiday_name) "
+                "VALUES (%s,%s) ON DUPLICATE KEY UPDATE holiday_name=VALUES(holiday_name)",
+                (holiday_date, holiday_name),
             )
 
     def delete_holiday(self, holiday_date: date) -> None:

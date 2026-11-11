@@ -281,7 +281,6 @@ function HolidayPolicyWorkspace() {
   const [action, setAction] = useState<HolidayAction>('upsert');
   const [holidayDate, setHolidayDate] = useState(todayIsoDate());
   const [holidayName, setHolidayName] = useState('');
-  const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('');
   const submittingRef = useRef(false);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
@@ -311,7 +310,6 @@ function HolidayPolicyWorkspace() {
       action,
       holiday_date: holidayDate,
       holiday_name: action === 'upsert' ? holidayName.trim() || null : null,
-      is_double_pay_default: action === 'upsert' ? doublePay : false,
       from_date: fromDate,
       to_date: toDate,
       ...overrides,
@@ -327,7 +325,7 @@ function HolidayPolicyWorkspace() {
     if (!draft?.preview) return;
     const request = buildPreviewRequest();
     if (request) setHolidayDraft(request);
-  }, [action, doublePay, fromDate, holidayDate, holidayName, toDate]);
+  }, [action, fromDate, holidayDate, holidayName, toDate]);
 
   const query = () => {
     if (!fromDate || !toDate || fromDate > toDate || busy) return;
@@ -338,7 +336,6 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(holiday.holiday_date);
     setHolidayName(holiday.holiday_name);
-    setDoublePay(holiday.is_double_pay_default);
     setReason('');
     setHolidayDrawerOpen(true);
   };
@@ -347,7 +344,6 @@ function HolidayPolicyWorkspace() {
     setAction('upsert');
     setHolidayDate(todayIsoDate());
     setHolidayName('');
-    setDoublePay(false);
     setReason('');
     setHolidayDrawerOpen(true);
   };
@@ -640,7 +636,6 @@ function LeaveSubstitutionWorkspace({
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [resolutionType, setResolutionType] = useState<LeaveResolutionType>('substitute');
   const [substituteStaffId, setSubstituteStaffId] = useState<number | null>(null);
-  const [isDoublePay, setIsDoublePay] = useState(false);
   const [replacementWorkDate, setReplacementWorkDate] = useState('');
   const [reason, setReason] = useState('');
   const submittingRef = useRef(false);
@@ -880,7 +875,6 @@ function LeaveSubstitutionWorkspace({
         work_date: selectedSchedule.work_date,
         resolution_type: resolutionType,
         substitute_staff_id: resolutionType === 'substitute' ? substituteStaffId : null,
-        is_double_pay: resolutionType === 'substitute' ? isDoublePay : false,
         replacement_work_date: resolutionType === 'defer_following_assignments' && replacementWorkDate
           ? replacementWorkDate
           : null,
@@ -931,7 +925,7 @@ function LeaveSubstitutionWorkspace({
   const error = draft?.error;
   const errorText = error ? error.message : null;
   const defaultScheduleId = (selectedAssignment ?? assignments[0])?.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null;
-  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '雙倍薪資': false, '補班日': '', '原因': '' }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '補班日': replacementWorkDate, '原因': reason }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '補班日': '', '原因': '' }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
 
 
   return (
@@ -1124,7 +1118,6 @@ function LeaveSubstitutionWorkspace({
                 setResolutionType(next);
                 if (next === 'defer_following_assignments') {
                   setSubstituteStaffId(null);
-                  setIsDoublePay(false);
                 } else {
                   setReplacementWorkDate('');
                 }
@@ -1165,18 +1158,6 @@ function LeaveSubstitutionWorkspace({
                 <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>
               ))}
             </select>
-          </label>}
-          {resolutionType === 'substitute' && <label className="leave-substitution-check">
-            <input
-              type="checkbox"
-              checked={isDoublePay}
-              disabled={busy}
-              onChange={(event) => {
-                setIsDoublePay(event.target.checked);
-                invalidatePreview();
-              }}
-            />
-            此日代班列為假日／緊急雙薪補貼
           </label>}
         </div>
       )}

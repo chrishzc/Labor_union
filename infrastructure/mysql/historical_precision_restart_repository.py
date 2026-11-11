@@ -59,8 +59,6 @@ class MySqlHistoricalPrecisionRestartRepository:
                 (case_no,),
             )
             confirmed_dates = cursor.fetchone()
-            cursor.execute("SELECT holiday_date FROM holidays WHERE is_double_pay_default=1 ORDER BY holiday_date" + lock)
-            holidays = tuple(row["holiday_date"] for row in cursor.fetchall())
         assignments = tuple(
             HistoricalPrecisionRestartAssignmentFacts(
                 f"assignment:{int(row['assignment_id'])}" if row["assignment_id"] is not None else f"pairing:{int(row['pairing_ordinal'])}",
@@ -89,7 +87,7 @@ class MySqlHistoricalPrecisionRestartRepository:
             terms.order.service_data_locked,
             assignments,
             tuple(segment.assignment_id for segment in scheduling.segments),
-            holidays,
+            (),
             terms.client_finance.open_nonstage_obligation_count,
             None if adoption is None else int(adoption["id"]),
             None if adoption is None else str(adoption["source_event_identity"]),

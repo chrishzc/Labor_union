@@ -255,7 +255,7 @@ describe('Scheduling staff leave inbox flow', () => {
     const mode = await screen.findByRole('combobox', { name: '請假代班處理方式' });
     expect(screen.queryByLabelText('指定補班日期')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '代班人員' })).toBeEnabled();
-    expect(screen.getByRole('checkbox', { name: '此日代班列為假日／緊急雙薪補貼' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '此日代班列為假日／緊急雙薪補貼' })).not.toBeInTheDocument();
 
     fireEvent.change(mode, { target: { value: 'defer_following_assignments' } });
     expect(screen.getByLabelText('指定補班日期')).toBeEnabled();
@@ -314,7 +314,6 @@ describe('Scheduling staff leave inbox flow', () => {
       resolution_type: 'defer_following_assignments',
       replacement_work_date: '2026-08-11',
       substitute_staff_id: null,
-      is_double_pay: false,
     });
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     expect(apply.mock.calls[0]?.[1]).toMatchObject({

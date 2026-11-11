@@ -92,7 +92,7 @@ def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
     from domains.payroll.calculation import build_case_payroll_candidate
     facts = mysql_rebuild._service_facts(
         ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18}),
-        {9: ({"work_date": date(2026, 10, 1)},), 10: ({"work_date": date(2026, 10, 2)},)}, {},
+        {9: ({"work_date": date(2026, 10, 1)},), 10: ({"work_date": date(2026, 10, 2)},)},
     )
     result = build_case_payroll_candidate(facts,
         tuple(rate_snapshot(item.assignment_identity, "policy-1", PayrollPolicyKind.CITIZEN) for item in facts),

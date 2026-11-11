@@ -24,8 +24,8 @@ class OfficialAssignmentDates:
 
 
 MonetaryBlocker = Literal[
-    "special_pay", "payroll_adjustments", "subsidy_return",
-    "source_rate_snapshot_missing_or_ambiguous", "double_pay", "floor_fee",
+    "payroll_adjustments", "subsidy_return",
+    "source_rate_snapshot_missing_or_ambiguous", "floor_fee",
 ]
 
 

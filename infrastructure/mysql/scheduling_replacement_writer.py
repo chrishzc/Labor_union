@@ -212,14 +212,13 @@ def _insert_schedules(cursor, command, generation_id, assignment_ids) -> None:
     cursor.executemany(
         "INSERT INTO staff_schedule "
         "(case_no,staff_id,assignment_id,generation_id,work_date,"
-        "is_work_day,is_double_pay,effective_marker) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,NULL)",
+        "is_work_day,effective_marker) "
+        "VALUES (%s,%s,%s,%s,%s,%s,NULL)",
         schedule_rows,
     )
 
 
 def _assignment_schedule_rows(case_no, generation_id, assignment, assignment_id):
-    double_pay_dates = set(assignment.double_pay_dates)
     for schedule_date in assignment.service_dates:
         yield (
             case_no,
@@ -228,7 +227,6 @@ def _assignment_schedule_rows(case_no, generation_id, assignment, assignment_id)
             generation_id,
             schedule_date,
             True,
-            schedule_date in double_pay_dates,
         )
 
 

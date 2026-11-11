@@ -20,7 +20,7 @@ const careLabels: Record<string, string> = {
   dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
   cooking_oil_type: '料理用油', maternal_allergy: '過敏體質', special_care_notes: '特殊照護注意事項',
   meal_preferences: '餐點喜忌', cooking_tools: '現有烹煮工具', bath_water_prep: '洗澡水準備', breastfeeding_method: '哺乳方式',
-  holiday_pricing_terms: '三節獎金協調結果', stair_floor_fee_mode: '服務樓層方式', parking_space_provided: '停車位', other_babies_present: '服務時間內的其他寶寶',
+  stair_floor_fee_mode: '服務樓層方式', parking_space_provided: '停車位', other_babies_present: '服務時間內的其他寶寶',
 };
 const financeLabels: Record<string, string> = {
   virtual_account: '本案專屬虛擬帳號', service_unit_price_ntd: '服務單價', service_hours: '服務總時數',
@@ -189,14 +189,14 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       {section === 'profile' && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div><div><dt>行政註記（客戶主檔，唯讀）</dt><dd>{display(detail.client.values.admin_notes)}</dd></div></dl>}
       {section === 'beclass' && <><p>退款帳戶：{detail.beclass.status !== 'ready' ? '來源待確認' : detail.beclass.values?.refund_account_status === 'complete' ? '已登錄' : '待補齊'}</p>{!detail.beclass.full_refund_account_visible && <p>目前帳號：{detail.beclass.values?.refund_account_no ?? '待補齊'}</p>}<p>{!detail.beclass.full_refund_account_visible && '退款帳號顯示末四碼；更正時請完整輸入。'}缺少銀行或帳號時為待補，儲存不會更動既有退款快照。</p><p>生日（唯讀）：{display(detail.beclass.values?.birth_date)}</p></>}
       {unavailable ? <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，請先處理綁定異常。' : '此案件尚無可編輯的 BeClass 資料。'}</p> : <>
-        {section === 'care' && <p className="registry-section-note">三節欄位記錄客戶給月嫂的獎金協調結果；樓層費總額請在下方訂單條件登錄。</p>}
+        {section === 'care' && <p className="registry-section-note">樓層費總額請在下方訂單條件登錄。</p>}
         <div className="registry-fields">{Object.entries(labels[section]).map(([field, label]) => {
           const value = drafts[section][field] ?? '';
           const capability = capabilities[field];
           const options = capability?.options;
           const disabled = pending || termsState.busy || capability?.editable === false;
           const id = `registry-${section === 'care' ? 'care' : owner(section)}-${field}`;
-          const textAgreement = field === 'holiday_pricing_terms' || field === 'stair_floor_fee_mode';
+          const textAgreement = field === 'stair_floor_fee_mode';
           const control = options ? <select id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value)}>
             <option value="" disabled>請選擇</option>{value && !options.includes(String(value)) && <option value={String(value)} disabled>{String(value)}（既有值，待修正）</option>}{options.map((option) => <option key={option}>{option}</option>)}
           </select> : typeof source(detail, section)[field] === 'boolean' && !textAgreement ? <select id={id} value={value === '' || value === null ? '' : String(value)} disabled={disabled} onChange={(event) => update(section, field, event.target.value === '' ? null : event.target.value === 'true')}><option value="">未登錄</option><option value="true">是</option><option value="false">否</option></select>

@@ -537,7 +537,6 @@ _CASE_IMPORT_FACT_KEYS = (
     "cooking_tools",
     "bath_water_prep",
     "breastfeeding_method",
-    "holiday_pricing_terms",
     "multi_birth_count",
     "stair_floor_fee_mode",
     "parking_space_provided",

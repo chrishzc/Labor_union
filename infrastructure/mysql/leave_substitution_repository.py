@@ -775,7 +775,6 @@ def _insert_outcome(cursor, request, outcome, scheduling_result):
             assignment_id,
             outcome.resulting_staff_id,
             outcome.resulting_service_date,
-            outcome.is_double_pay,
             result_fingerprint.value,
             _canonical_json(snapshot),
         ),
@@ -795,7 +794,6 @@ def _outcome_snapshot(outcome, assignment_id):
         "resulting_assignment_id": assignment_id,
         "resulting_staff_id": outcome.resulting_staff_id,
         "resulting_service_date": outcome.resulting_service_date.isoformat(),
-        "is_double_pay": outcome.is_double_pay,
     }
 
 
@@ -1031,9 +1029,9 @@ _OUTCOME_INSERT_SQL = (
     "(batch_key,item_index,event_key,original_assignment_id,"
     "original_schedule_id,original_staff_id,original_work_date,"
     "resolution_type,leave_occupancy_date,resulting_assignment_id,"
-    "resulting_staff_id,resulting_service_date,is_double_pay,"
+    "resulting_staff_id,resulting_service_date,"
     "result_fingerprint,outcome_snapshot) "
-    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 
 _RECEIPT_INSERT_SQL = (

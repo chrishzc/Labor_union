@@ -141,7 +141,6 @@ class ClientOrderInformationValuesView(_StrictModel):
     cooking_tools: str | bool | int | float | None = None
     bath_water_prep: str | bool | int | float | None = None
     breastfeeding_method: str | bool | int | float | None = None
-    holiday_pricing_terms: str | bool | int | float | None = None
     multi_birth_count: str | bool | int | float | None = None
     stair_floor_fee_mode: str | bool | int | float | None = None
     parking_space_provided: str | bool | int | float | None = None
@@ -240,7 +239,6 @@ class BeClassChangeSet(_StrictModel):
     cooking_tools: str | bool | int | float | None = None
     bath_water_prep: str | bool | int | float | None = None
     breastfeeding_method: str | bool | int | float | None = None
-    holiday_pricing_terms: str | None = None
     stair_floor_fee_mode: str | None = None
     parking_space_provided: str | bool | int | float | None = None
     other_babies_present: str | bool | int | float | None = None

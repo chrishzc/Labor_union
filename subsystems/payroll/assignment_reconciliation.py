@@ -229,7 +229,7 @@ def reconcile_assignment_payroll_with_cursor(
     )
     schedules = _q(
         cursor,
-        """SELECT id, case_no, staff_id, assignment_id, work_date, is_work_day, is_double_pay
+        """SELECT id, case_no, staff_id, assignment_id, work_date, is_work_day
              FROM staff_schedule WHERE case_no = %s FOR UPDATE""",
         (case_no,), "schedules",
     )
@@ -295,7 +295,6 @@ def reconcile_assignment_payroll_with_cursor(
     schedules_by_id: dict[int, tuple[int | None, date, str | None]] = {}
     schedule_owner_by_day: dict[tuple[int, date], int] = {}
     days_by_assignment: defaultdict[int, set[date]] = defaultdict(set)
-    double_by_assignment: defaultdict[int, int] = defaultdict(int)
     for schedule in schedules:
         assignment_id = schedule.get("assignment_id")
         try:
@@ -322,7 +321,6 @@ def reconcile_assignment_payroll_with_cursor(
             if (
                 schedule.get("case_no") != case_no
                 or schedule.get("is_work_day") is not False
-                or schedule.get("is_double_pay") is not False
             ):
                 errors.append(_error("cancelled_original_schedule_invalid", assignment_id, day))
             continue
@@ -333,11 +331,9 @@ def reconcile_assignment_payroll_with_cursor(
         if schedule.get("case_no") != case_no or schedule.get("staff_id") != detail["staff_id"]:
             errors.append(_error("schedule_ownership_mismatch", assignment_id, day))
             continue
-        if not isinstance(schedule.get("is_work_day"), bool) or not isinstance(schedule.get("is_double_pay"), bool):
+        if not isinstance(schedule.get("is_work_day"), bool):
             errors.append(_error("schedule_flag_invalid", assignment_id, day))
             continue
-        if schedule["is_double_pay"] and not schedule["is_work_day"]:
-            errors.append(_error("double_pay_non_work_day", assignment_id, day))
         if schedule["is_work_day"]:
             owner_key = (detail["staff_id"], day)
             existing_owner = schedule_owner_by_day.get(owner_key)
@@ -347,8 +343,6 @@ def reconcile_assignment_payroll_with_cursor(
             if day in days_by_assignment[assignment_id]:
                 errors.append(_error("duplicate_assignment_date", assignment_id, day))
             days_by_assignment[assignment_id].add(day)
-            if schedule["is_double_pay"]:
-                double_by_assignment[assignment_id] += 1
 
     for review in reviews:
         if review.get("review_status") == "review_required" and review.get("schedule_id") in schedule_ids:
@@ -458,12 +452,8 @@ def reconcile_assignment_payroll_with_cursor(
         expected_hours = service_hours_per_day * service_days_count
         if detail["actual_hours"] != expected_hours:
             errors.append(_error("actual_hours_mismatch", assignment_id))
-        double_hours = service_hours_per_day * double_by_assignment[assignment_id]
-        detail["double_pay_hours"] = double_hours
-        if double_hours > detail["actual_hours"]:
-            errors.append(_error("double_pay_hours_exceed_actual", assignment_id))
         detail["service_salary"] = (
-            (detail["actual_hours"] + double_hours) * detail["hourly_rate"]
+            detail["actual_hours"] * detail["hourly_rate"]
         ).quantize(_CENT, rounding=ROUND_HALF_UP)
 
     families: defaultdict[int, set[int]] = defaultdict(set)
