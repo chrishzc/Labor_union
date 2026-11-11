@@ -137,10 +137,10 @@ describe('React entrypoint registry', () => {
     expect(screen.queryByText(/15 分鐘.*Token/)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-token/)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toBeInTheDocument());
-    expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '已申請市府平台' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '未申請市府平台' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '非市民服務申請' })).toBeDisabled();
+    expect(screen.getByTitle('服務申請導流互動預覽')).toHaveAttribute(
+      'src',
+      '/api/v1/line/identity/studio-preview/gateway?studio_preview=1',
+    );
     expect(screen.queryByText('開始身分驗證與服務分流')).not.toBeInTheDocument();
     expect(screen.queryByText(/重新渲染 \d+ 次/)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '實機驗收入口' })).not.toBeInTheDocument();

@@ -341,3 +341,64 @@ def test_new_staff_page_routes_serve_split_assets() -> None:
     with pytest.raises(HTTPException) as captured:
         line_identity.staff_baby_log_page()
     assert captured.value.status_code == 410
+
+
+def test_studio_preview_routes_serve_gateway_and_non_citizen_registration() -> None:
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(line_identity.public_router)
+    with TestClient(app) as client:
+        gateway = client.get("/api/v1/line/identity/studio-preview/gateway?studio_preview=1")
+        assert gateway.status_code == 200
+        assert "服務確認入口" in gateway.text
+
+        non_citizen = client.get(
+            "/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1"
+        )
+        assert non_citizen.status_code == 200
+        assert '<body data-registration-kind="non_citizen">' in non_citizen.text
+
+
+def test_studio_preview_pages_resolve_runtime_config_under_prefix() -> None:
+    for filename, script_index, pathname, expected in (
+        ("gateway.html", 1, "/test/api/v1/line/identity/studio-preview/gateway", "/test/api/config/liff/runtime?page=gateway"),
+        ("gateway.html", 1, "/line-gateway", "/api/config/liff/runtime?page=gateway"),
+        ("register.html", 1, "/test/api/v1/line/identity/studio-preview/non-citizen-registration", "/test/api/config/liff/runtime?page=non_citizen_registration"),
+        ("register.html", 1, "/line-non-citizen-registration", "/api/config/liff/runtime?page=non_citizen_registration"),
+    ):
+        source = (ROOT / "line" / "static" / filename).read_text(encoding="utf-8")
+        assert "studio-preview" in source
+        fetched_urls: str = expected
+        runner = f"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const calls = [];
+const context = vm.createContext({{
+  URLSearchParams,
+  URL,
+  crypto: {{ randomUUID: () => 'uuid-test' }},
+  sessionStorage: {{ getItem: () => '', setItem: () => undefined }},
+  fetch: async (url) => {{ calls.push(url); return {{ ok: false, status: 500, json: async () => ({{}}) }}; }},
+  document: {{
+    body: {{ dataset: {{ registrationKind: 'non_citizen' }}, style: {{}}, classList: {{ add: () => undefined }} }},
+    documentElement: {{ style: {{ setProperty: () => undefined }} }},
+    addEventListener: () => undefined,
+    getElementById: () => ({{ style: {{}}, textContent: '', hidden: false, disabled: false, value: '', addEventListener: () => undefined, replaceChildren: () => undefined, previousElementSibling: {{ textContent: '' }} }}),
+    querySelectorAll: () => [],
+  }},
+  window: {{
+    location: {{ pathname: {json.dumps(pathname)}, search: '?studio_preview=1', href: {json.dumps(pathname + '?studio_preview=1')} }},
+    addEventListener: () => undefined,
+  }},
+  location: {{ pathname: {json.dumps(pathname)}, search: '?studio_preview=1', href: {json.dumps(pathname + '?studio_preview=1')} }},
+  console: {{ error: () => undefined, warn: () => undefined }},
+}});
+vm.runInContext({json.dumps(source.split('<script>')[script_index].split('</script>', 1)[0])}, context);
+(async () => {{
+  await (typeof context.initLiff === 'function' ? context.initLiff() : context.initializeLiff());
+  assert.equal(calls[0], {json.dumps(fetched_urls)});
+}})().catch((error) => {{ console.error(error); process.exit(1); }});
+"""
+        subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)

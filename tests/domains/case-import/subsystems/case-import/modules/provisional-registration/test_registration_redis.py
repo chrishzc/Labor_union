@@ -1,4 +1,7 @@
-"""Real dedicated Redis evidence; only a newly provisioned disposable instance is allowed."""
+"""
+File: test_registration_redis.py
+Description: 驗證專用 Redis 待審問卷儲存與並發冪等契約。
+"""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -43,7 +46,7 @@ def candidate():
         expected_date="2026-11-20", service_days=10, address="合成地址", gender=None,
         email=None, birth_date=None, tel=None, ext=None, city=None, zip_code=None,
         id_number=None, liff_config_revision=None,
-        survey_details={"銀行帳號": "000012345678", "補助款退款:銀行代號+分行代號": "0000000"}))
+        survey_details={"特殊計費:胎數": "單胞胎", "銀行帳號": "000012345678", "補助款退款:銀行代號+分行代號": "0000000"}))
 
 
 def receipt():

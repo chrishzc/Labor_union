@@ -1,4 +1,7 @@
-"""Real isolated MySQL evidence for annual issuance and registration approval."""
+"""
+File: test_non_citizen_registration_mysql.py
+Description: 驗證非市民年度配號、LINE 核准建案、雙胞胎／財務投影與 preserve upgrade。
+"""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -115,9 +118,9 @@ def _registration_intent():
         expected_date="2026-11-01", service_days=10, address="合成測試地址", gender="女",
         email="synthetic@example.test", birth_date="1990-01-01", tel=None, ext=None, city="新竹縣",
         zip_code=None, id_number=None, liff_config_revision=None,
-        registration_kind="non_citizen", service_start_date="2026-11-02", service_time="8小時 08:00-17:00",
-        residence_type="公寓", delivery_type="自然產", notes="無", line_id="無", service_type="連續服務", baby_info="合成測試寶寶",
-        survey_details={"服務時間內是否有其他寶寶":"無", "是否需要下廚":"需要下廚",
+        registration_kind="non_citizen", service_start_date="2026-11-02", service_time="08:30-16:30 (8小時)",
+        residence_type="公寓", delivery_type="自然產", notes="無", line_id=None, service_type="連續服務", baby_info="單胞胎",
+        survey_details={"特殊計費:胎數": "單胞胎", "服務時間內是否有其他寶寶":"無", "是否需要下廚":"需要下廚",
                         "補助款退款:銀行代號+分行代號":"0000000", "銀行帳號":"000000000000"},
     )
 
@@ -189,7 +192,7 @@ def test_manual_creation_and_line_approval_share_numbers_with_existing_account_m
         "phone": "0912345678",
         "service_start_date": "2026-11-02",
         "service_days": 10,
-        "service_time": "8小時 08:00-17:00",
+        "service_time": "08:30-16:30 (8小時)",
     }
     with pymysql.connect(**nc_database) as connection:
         _, registration_id = _submit(connection)

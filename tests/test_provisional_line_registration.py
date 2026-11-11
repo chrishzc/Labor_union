@@ -1,4 +1,7 @@
-"""Regression coverage for the typed provisional LINE registration owner."""
+"""
+File: test_provisional_line_registration.py
+Description: 驗證 LINE 臨時登記核准前隔離、重送冪等與衝突防呆契約。
+"""
 
 from __future__ import annotations
 
@@ -40,7 +43,7 @@ def _intent(*, name="王小美"):
         zip_code="104",
         id_number="A123456789",
         liff_config_revision="revision-1",
-        survey_details={"餐點": "一般"},
+        survey_details={"特殊計費:胎數": "單胞胎", "餐點": "一般"},
     )
 
 

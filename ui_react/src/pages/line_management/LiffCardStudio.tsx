@@ -1,16 +1,16 @@
 /**
  * File: LiffCardStudio.tsx
- * Description: 依用途分組呈現 LIFF 表單預覽，保留既有正式入口與身分驗證流程。
+ * Description: 依用途呈現 LIFF 表單預覽，支援同源前綴互動預覽並保留正式入口。
  */
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { CheckSquare, ChevronRight, FileText, Maximize2, PanelTop, Search, Smartphone, X } from 'lucide-react';
+import { applicationUrl } from '../../api/shared/application_fetch';
 import {
   lineIdentityRuntimeConfigClient,
   type LineIdentityRuntimeConfigClient,
 } from '../../api/line_identity/line_identity_runtime_config_client';
 import '../LineManagementPage.css';
 import './LiffCardStudio.css';
-import { NonCitizenLiffSettingsPanel } from './NonCitizenLiffSettingsPanel';
 
 import {
   ASSET_ITEMS,
@@ -38,14 +38,14 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <p>請填寫基本資料，以完成 LINE 帳號與最新訂單的綁定：</p>
         <label>您的真實姓名</label>
         <input type="text" placeholder="請輸入姓名" readOnly />
-        <label>您的聯絡電話</label>
+        <label>聯絡電話</label>
         <input type="tel" placeholder="請輸入聯絡電話（例 0912345678）" readOnly />
         <button type="button" className="mock-primary-btn" disabled>確認綁定</button>
       </div>
     );
   }
 
-  if (item.id === 'register' || item.id === 'non_citizen_registration') {
+  if (item.id === 'register') {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">需求調查表單</div>
@@ -54,22 +54,13 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>身分證字號（選填）</label><input type="text" placeholder="例如：A123456789" readOnly />
         <label>行動電話 *</label><input type="text" placeholder="例如：0912345678" readOnly />
         <label>服務地址 *</label><input type="text" placeholder="請填寫完整地址（含巷弄樓層）" readOnly />
-        {item.id === 'non_citizen_registration' && <>
-          <label>出生日期 *</label><input type="date" readOnly />
-          <label>性別 *</label><input placeholder="請選擇性別" readOnly />
-          <label>Email *</label><input type="email" readOnly />
-          <label>縣市 *</label><input readOnly />
-        </>}
         <strong>2. 照護與環境</strong>
         <label>預產期（或已生產日期） *</label><input type="date" readOnly />
         <label>預計服務天數 *</label><input type="number" readOnly />
-        {item.id === 'non_citizen_registration' && <>
-          <strong>服務條件（必填）</strong>
-          <label>預計服務開始日 *</label><input type="date" readOnly />
-          <label>服務時間 *</label><input placeholder="8小時 08:00-17:00" readOnly />
-          <label>居住型態／生產方式／服務方式／寶寶資訊 *</label><textarea readOnly />
-          <label>其他事項及 LINE ID（無則填「無」）*</label><input readOnly />
-        </>}
+        <fieldset><legend>胎數</legend>
+          <label><input type="radio" disabled /> 單胞胎</label>
+          <label><input type="radio" disabled /> 雙胞胎</label>
+        </fieldset>
         <strong>3. 飲食偏好</strong>
         <label><input type="radio" disabled /> 葷食</label>
         <label><input type="radio" disabled /> 素食</label>
@@ -77,7 +68,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label><input type="checkbox" disabled /> 大同電鍋</label>
         <label><input type="checkbox" disabled /> 奶瓶消毒鍋</label>
         <strong>5. 費用與同意條款</strong>
-        {item.id === 'non_citizen_registration' && <><label>退款銀行／分行及帳戶 *</label><input readOnly /><small>送出後待工會核准才建立正式案件及配發 A 編號。</small></>}
         <label><input type="checkbox" disabled /> 已詳閱退費原則</label>
         <button type="button" className="mock-primary-btn" disabled>送出完整服務登記表單</button>
       </div>
@@ -113,7 +103,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>欲異動項目</label>
         <div className="mock-change-options">
           <span><CheckSquare aria-hidden="true" /> 聯絡電話</span>
-          <span><CheckSquare aria-hidden="true" /> 寶寶資訊</span>
           <span><CheckSquare aria-hidden="true" /> 生產方式</span>
         </div>
         <label>填寫異動內容</label>
@@ -198,7 +187,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">薪資請款明細</div>
-        <label>目標付款月份</label><input type="month" readOnly />
+        <label>預計付款月份</label><input type="month" readOnly />
         <button type="button" className="mock-primary-btn" disabled>查詢薪資明細</button>
         <div className="mock-placeholder-box">
           <strong>案件編號｜應付金額｜付款狀態</strong>
@@ -391,11 +380,17 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
     }
   }, [filterRole, searchQuery, selectedId]);
 
-  const visualPreview = selectedItem?.id === 'gateway' ? runtimeConfig.status === 'ready' && (
+  const gatewayPreview = selectedItem?.id === 'gateway';
+  const registrationPreview = selectedItem?.id === 'non_citizen_registration';
+  const visualPreview = gatewayPreview || registrationPreview ? (
     <iframe
       className="liff-studio-device liff-studio-gateway-preview"
-      src={canonicalLiffUrl('/line-gateway?studio_preview=1', runtimeConfig.origin)}
-      title="服務申請導流互動預覽"
+      src={applicationUrl(
+        gatewayPreview
+          ? '/api/v1/line/identity/studio-preview/gateway?studio_preview=1'
+          : '/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1',
+      )}
+      title={gatewayPreview ? '服務申請導流互動預覽' : '非市民服務申請互動預覽'}
       referrerPolicy="no-referrer"
       sandbox="allow-scripts allow-same-origin"
     />
@@ -421,7 +416,6 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
             <div>
               <p className="line-hub-eyebrow">LINE 專區</p>
               <h1>LINE 表單</h1>
-              <p>找到需要的功能，查看 LINE 上的使用畫面。</p>
             </div>
           </div>
         </header>
@@ -538,7 +532,6 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           ) : (
             <div className="liff-studio-detail-empty" role="status"><Search aria-hidden="true" /><strong>找不到符合條件的內容</strong><p>調整搜尋或使用對象後，再查看預覽。</p></div>
           )}
-          <NonCitizenLiffSettingsPanel active={selectedItem?.id === 'non_citizen_registration'} />
         </section>
       </div>
     </div>

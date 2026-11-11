@@ -135,7 +135,7 @@ def _intent() -> ProvisionalRegistrationIntent:
         zip_code=None,
         id_number=None,
         liff_config_revision="sandbox",
-        survey_details={},
+        survey_details={"特殊計費:胎數": "單胞胎"},
     )
 
 

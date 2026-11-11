@@ -1,4 +1,7 @@
-"""Focused coverage for the shared provisional registration ID owner."""
+"""
+File: test_provisional_registration.py
+Description: 驗證 LINE 客戶臨時登記之身分證格式、非市民必填與單雙胞胎閉鎖規則。
+"""
 
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ def _intent(*, id_number: str | None) -> ProvisionalRegistrationIntent:
         zip_code=None,
         id_number=id_number,
         liff_config_revision=None,
-        survey_details={},
+        survey_details={"特殊計費:胎數": "單胞胎"},
     )
 
 
@@ -61,9 +64,9 @@ def _non_citizen_intent(**changes):
     values = dict(
         registration_kind="non_citizen", gender="女", email="synthetic@example.test",
         city="新竹縣", birth_date="1990-01-01", service_start_date="2026-11-01",
-        service_time="8小時 08:00-17:00", residence_type="公寓", delivery_type="自然產",
-        notes="無", line_id="無", service_type="連續服務", baby_info="合成測試資料",
-        survey_details={"服務時間內是否有其他寶寶": "無", "是否需要下廚": "需要下廚",
+        service_time="08:30-16:30 (8小時)", residence_type="公寓", delivery_type="自然產",
+        notes="無", line_id=None, service_type="連續服務", baby_info="單胞胎",
+        survey_details={"特殊計費:胎數": "單胞胎", "服務時間內是否有其他寶寶": "無", "是否需要下廚": "需要下廚",
                         "補助款退款:銀行代號+分行代號": "0000000", "銀行帳號": "000000000000"},
     )
     values.update(changes)
@@ -74,17 +77,62 @@ def test_non_citizen_candidate_keeps_merged_fields_and_refund_account_without_is
     candidate = build_provisional_registration_candidate(_non_citizen_intent())
     assert candidate.registration_kind == "non_citizen"
     assert candidate.client_payload["identity_status"] == "非市民"
-    assert candidate.client_payload["service_time"] == "8小時 08:00-17:00"
+    assert candidate.client_payload["service_time"] == "08:30-16:30 (8小時)"
     assert candidate.beclass_payload["survey_details"]["銀行帳號"] == "000000000000"
     assert "case_no" not in candidate.client_payload
     assert build_provisional_registration_candidate(_intent(id_number=None)).registration_kind == "subsidy"
 
 
+@pytest.mark.parametrize("non_citizen", [False, True])
+@pytest.mark.parametrize("answer", [None, "是", "否"])
+def test_holiday_double_pay_preference_is_optional_and_preserved(non_citizen, answer):
+    from dataclasses import replace
+
+    intent = _non_citizen_intent() if non_citizen else _intent(id_number=None)
+    key = "三節假日是否願意支付雙倍薪水"
+    if answer is not None:
+        intent = replace(intent, survey_details={**intent.survey_details, key: answer})
+    survey = build_provisional_registration_candidate(intent).beclass_payload["survey_details"]
+    if answer is None:
+        assert key not in survey
+    else:
+        assert survey[key] == answer
+
+
+@pytest.mark.parametrize("service_time", [
+    "08:30-12:30 (4小時)", "08:30-16:30 (8小時)", "09:00-17:00 (8小時)", "13:00-17:00 (4小時)",
+])
+def test_non_citizen_liff_accepts_each_fixed_service_time(service_time):
+    candidate = build_provisional_registration_candidate(_non_citizen_intent(service_time=service_time))
+    assert candidate.client_payload["service_time"] == service_time
+
+
+@pytest.mark.parametrize("service_time", [
+    "08:45-12:45 (4小時)", "09:15-17:15 (8小時)", "08:30-17:00 (8小時)", "08:30-12:30 (8小時)",
+])
+def test_non_citizen_liff_rejects_custom_service_times(service_time):
+    with pytest.raises(ProvisionalRegistrationDomainError, match="四個服務時段"):
+        build_provisional_registration_candidate(_non_citizen_intent(service_time=service_time))
+
+
 @pytest.mark.parametrize("field", ["gender", "email", "city", "service_start_date", "service_time",
-                                   "residence_type", "delivery_type", "service_type", "baby_info", "birth_date", "notes", "line_id"])
+                                   "residence_type", "delivery_type", "service_type", "baby_info", "birth_date", "notes"])
 def test_non_citizen_hcm_and_beclass_required_fields_are_enforced_by_owner(field):
     with pytest.raises(ProvisionalRegistrationDomainError):
         build_provisional_registration_candidate(_non_citizen_intent(**{field: None}))
+
+
+@pytest.mark.parametrize("line_id_value", [None, "", "   "])
+def test_non_citizen_allows_empty_line_id_while_preserving_db_column(line_id_value) -> None:
+    candidate = build_provisional_registration_candidate(_non_citizen_intent(line_id=line_id_value))
+    assert "line_id" not in candidate.client_payload
+
+
+def test_non_citizen_keeps_valid_optional_line_id_and_rejects_oversized() -> None:
+    candidate = build_provisional_registration_candidate(_non_citizen_intent(line_id=" @handle "))
+    assert candidate.client_payload["line_id"] == "@handle"
+    with pytest.raises(ProvisionalRegistrationDomainError, match="LINE ID is too long"):
+        build_provisional_registration_candidate(_non_citizen_intent(line_id="x" * 51))
 
 
 @pytest.mark.parametrize("residence_type", ["電梯大樓", "公寓", "透天", "其他", "大樓", "公寓大廈"])
@@ -118,6 +166,45 @@ def test_non_citizen_accepts_the_existing_liff_cooking_question_name():
     survey = dict(intent.survey_details)
     survey['是否需要下廚：'] = survey.pop('是否需要下廚')
     assert build_provisional_registration_candidate(replace(intent, survey_details=survey)).registration_kind == 'non_citizen'
+
+
+@pytest.mark.parametrize("kind", ["subsidy", "non_citizen"])
+@pytest.mark.parametrize("bad_value", [None, "", "  ", "第一胎", "第二胎", "三胞胎", 1])
+def test_registration_requires_closed_multi_birth_count_for_both_forms(kind: str, bad_value) -> None:
+    from dataclasses import replace
+    base = _non_citizen_intent() if kind == "non_citizen" else _intent(id_number=None)
+    survey = dict(base.survey_details)
+    if bad_value is None:
+        survey.pop("特殊計費:胎數", None)
+    else:
+        survey["特殊計費:胎數"] = bad_value
+    with pytest.raises(ProvisionalRegistrationDomainError, match="multi_birth_count"):
+        build_provisional_registration_candidate(replace(base, survey_details=survey))
+
+
+@pytest.mark.parametrize("kind", ["subsidy", "non_citizen"])
+@pytest.mark.parametrize(("raw", "expected"), [("單胞胎", "單胞胎"), (" 雙胞胎 ", "雙胞胎")])
+def test_registration_normalizes_valid_multi_birth_count_for_both_forms(kind: str, raw: str, expected: str) -> None:
+    from dataclasses import replace
+    from domains.bootstrap.case_architecture import is_twin_case
+    from domains.case_import.order_information import project_order_information
+    base = _non_citizen_intent(baby_info=expected) if kind == "non_citizen" else _intent(id_number=None)
+    candidate = build_provisional_registration_candidate(
+        replace(base, survey_details={**base.survey_details, "特殊計費:胎數": raw})
+    )
+    projected = project_order_information(candidate.beclass_payload["survey_details"])
+    assert candidate.beclass_payload["survey_details"]["特殊計費:胎數"] == expected
+    if kind == "non_citizen":
+        assert candidate.client_payload["baby_info"] == expected
+    assert projected.values["multi_birth_count"] == expected
+    assert is_twin_case(projected.values["multi_birth_count"]) is (expected == "雙胞胎")
+
+
+@pytest.mark.parametrize("bad_baby_info", ["合成測試寶寶", "第一胎", "雙胞胎"])
+def test_non_citizen_rejects_free_text_or_mismatched_baby_info(bad_baby_info: str) -> None:
+    intent = _non_citizen_intent(baby_info=bad_baby_info)
+    with pytest.raises(ProvisionalRegistrationDomainError):
+        build_provisional_registration_candidate(intent)
 
 
 def test_registration_validation_is_not_misreported_as_expired_identity_flow():

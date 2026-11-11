@@ -5,7 +5,7 @@
 - subsystem: `case-import`
 
 ## Responsibility
-擁有 LINE provisional registration candidate 的共用欄位規格及申請保存／核准建檔；非空身分證值在進入 persistence 前正規化為 ASCII 大寫字母加九碼數字，空值維持 optional。外部 Apply 只保存申請，工會核准才建立 Client／BeClass；LINE binding coordination 沿用同一 outer transaction。
+擁有 LINE provisional registration candidate 的共用欄位規格（含 `特殊計費:胎數` 強制僅收 `單胞胎` 或 `雙胞胎`、非市民 `baby_info` 同步限值驗證與 `line_id` 選填保留 DB 欄位）及申請保存／核准建檔；非空身分證值在進入 persistence 前正規化為 ASCII 大寫字母加九碼數字，空值維持 optional。外部 Apply 只保存申請，工會核准才建立 Client／BeClass；LINE binding coordination 沿用同一 outer transaction。
 
 ## Implementation
 - `subsystems/case_import/registration_staging.py` — Redis 待審、核准／拒絕／到期與原正式 writer 協調。

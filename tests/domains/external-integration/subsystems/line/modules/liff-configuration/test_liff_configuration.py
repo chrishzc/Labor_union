@@ -1,5 +1,6 @@
 """LIFF runtime, edits and rollback share one versioned owner, with zero file effects."""
 from copy import deepcopy
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -73,9 +74,14 @@ class Unit:
 
 @pytest.fixture
 def context(monkeypatch):
+    from infrastructure.mysql import mysql_adapter, pricing_configuration_repository
+
     repo = Repository(); unit = Unit(repo)
     owner = LineConfigurationApplication(lambda: unit)
     monkeypatch.setattr(routes, 'get_line_configuration_application', lambda: owner)
+    connection = SimpleNamespace(cursor=lambda: nullcontext(object()), close=lambda: None)
+    monkeypatch.setattr(mysql_adapter, "get_connection", lambda: connection)
+    monkeypatch.setattr(pricing_configuration_repository, "select_initial_pricing", lambda _: None)
     def no_file(*args, **kwargs): raise AssertionError('LIFF must not use file configuration')
     for name in ('read_config', 'write_config', 'config_revision'):
         monkeypatch.setattr(routes, name, no_file)
@@ -90,6 +96,43 @@ def context(monkeypatch):
     app.include_router(routes.public_router); app.include_router(routes.router)
     with TestClient(app) as http:
         yield http, repo, unit, owner
+
+
+def test_registration_runtime_projects_current_customer_rates(context, monkeypatch):
+    from infrastructure.mysql import pricing_configuration_repository
+
+    http, _, unit, _ = context
+    def rates(covered, excess):
+        return {"covered": covered, "excess": excess}
+
+    def terms(name, rule, hours, covered, excess):
+        return {
+            "identity_name": name, "rule": rule, "subsidy_hours": hours,
+            "client": rates(covered, excess), "payroll": rates(covered, excess),
+        }
+    policy = {
+        "effective_on": "2026-01-01",
+        "identities": [
+            terms("一般市民", "citizen", 40, 300, 340),
+            terms("補助市民", "social", 120, 350, 360),
+            terms("非市民", "non_citizen", 0, 0, 380),
+        ],
+        "twins_client": rates(450, 480), "twins_payroll": rates(450, 470),
+    }
+    monkeypatch.setattr(pricing_configuration_repository, "select_initial_pricing", lambda _: {"policy_json": policy})
+
+    for page, expected in (
+        ("registration", {
+            "single": {"covered": 300, "self_pay": 340}, "twins": {"covered": 450, "self_pay": 480},
+        }),
+        ("non_citizen_registration", {
+            "single": {"covered": None, "self_pay": 380}, "twins": {"covered": None, "self_pay": 480},
+        }),
+    ):
+        response = http.get(f"/api/config/liff/runtime?page={page}")
+        assert response.status_code == 200
+        assert response.json()["registration_hourly_rates"] == expected
+    assert unit.commits == 0
 
 
 def test_runtime_and_management_read_database_without_file_fallback(context):

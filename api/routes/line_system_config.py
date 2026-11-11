@@ -539,13 +539,46 @@ def get_liff_runtime(response: Response, page: str | None = None):
             [action for action in runtime_page.actions if action.enabled],
             key=lambda action: action.order,
         )
-        return {
+        runtime = {
             "revision": revision,
             "theme": config.theme,
             "page_id": page,
             "page": runtime_page,
         }
+        if page in {"registration", "non_citizen_registration"}:
+            runtime["registration_hourly_rates"] = _registration_hourly_rates(
+                non_citizen=page == "non_citizen_registration"
+            )
+        return runtime
     return {"revision": revision, "config": config}
+
+
+def _registration_hourly_rates(*, non_citizen: bool) -> dict[str, dict[str, int | None]] | None:
+    from pymysql import MySQLError
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.pricing_configuration_repository import policy_from_payload, select_initial_pricing
+
+    try:
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                row = select_initial_pricing(cursor)
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        policy = policy_from_payload(row["policy_json"])
+        identity = "非市民" if non_citizen else "一般市民"
+        return {
+            label: {
+                "covered": terms.client.covered if terms.subsidy_hours > 0 else None,
+                "self_pay": terms.client.excess,
+            }
+            for label, twins in (("single", False), ("twins", True))
+            for terms in (policy.for_case(identity, twins=twins),)
+        }
+    except (MySQLError, ValueError):
+        return None
 
 
 @router.get("/liff/state")

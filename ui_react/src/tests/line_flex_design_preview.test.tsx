@@ -12,7 +12,6 @@ import type {
 } from '../api/line_identity/line_identity_runtime_config_client';
 import { LineFlexDesignPreview } from '../components/LineFlexDesignPreview';
 import { lineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
-import { nonCitizenLiffClient } from '../api/line_configuration/non_citizen_liff_client';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 describe('LINE studio public preview', () => {
@@ -65,7 +64,14 @@ describe('LINE studio public preview', () => {
 
     expect(await screen.findByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute('href', 'https://line.example.test/line-gateway');
     expect(screen.getByTitle('服務申請導流互動預覽')).toHaveAttribute(
-      'src', 'https://line.example.test/line-gateway?studio_preview=1',
+      'src', '/api/v1/line/identity/studio-preview/gateway?studio_preview=1',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /非市民服務申請 填寫非市民服務需求/ }));
+    expect(screen.getByTitle('非市民服務申請互動預覽')).toHaveAttribute(
+      'src', '/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1',
+    );
+    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href', 'https://line.example.test/line-non-citizen-registration',
     );
     fireEvent.click(screen.getByRole('button', { name: /修改個人資料 申請變更/ }));
     const officialLink = screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
@@ -116,35 +122,29 @@ describe('LINE studio public preview', () => {
     const dialog = screen.getByRole('dialog', { name: '服務申請入口' });
     expect(document.body.style.overflow).toBe('hidden');
     expect(within(dialog).getByTitle('服務申請導流互動預覽')).toHaveAttribute(
-      'src', 'https://line.example.test/line-gateway?studio_preview=1',
+      'src', '/api/v1/line/identity/studio-preview/gateway?studio_preview=1',
     );
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉放大預覽' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(document.body.style.overflow).toBe('');
   });
 
-  it('非市民設定只儲存當前申請頁', async () => {
-    const page = {
-      page_type: 'registration' as const, enabled: true, title: '自訂非市民申請',
-      subtitle: '', submit_button: '', success_title: '', success_description: '',
-      loading_text: '', content: {}, actions: [], fields: [],
-    };
-    const query = vi.spyOn(nonCitizenLiffClient, 'query').mockResolvedValue({ revision: '7', page });
-    const savedPage = { ...page, title: '更新非市民申請' };
-    const save = vi.spyOn(nonCitizenLiffClient, 'save').mockResolvedValue({ revision: '8', page: savedPage });
+  it('非市民服務申請僅顯示互動預覽並支援遠端前綴，移除下方過期設定面板', async () => {
+    vi.stubEnv('VITE_PUBLIC_PATH_PREFIX', '/test');
     const runtimeConfigClient: LineIdentityRuntimeConfigClient = { get: vi.fn().mockResolvedValue({ liff_id: 'test' }) };
     try {
       render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
       fireEvent.click(screen.getByRole('button', { name: /非市民服務申請 填寫/ }));
-      const title = await screen.findByLabelText('頁面標題');
-      expect(screen.queryByRole('button', { name: '套用兩步導流' })).not.toBeInTheDocument();
-      fireEvent.change(title, { target: { value: savedPage.title } });
-      fireEvent.click(screen.getByRole('button', { name: '儲存頁面設定' }));
-      expect(await screen.findByText('非市民申請頁面設定已儲存。')).toBeInTheDocument();
-      expect(save).toHaveBeenCalledWith('7', savedPage);
+      expect(await screen.findByTitle('非市民服務申請互動預覽')).toHaveAttribute(
+        'src', '/test/api/v1/line/identity/studio-preview/non-citizen-registration?studio_preview=1',
+      );
+      expect(screen.queryByRole('region', { name: '非市民申請頁面設定' })).not.toBeInTheDocument();
+      expect(screen.queryByText('非市民申請頁面設定')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '重新查詢設定' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '儲存頁面設定' })).not.toBeInTheDocument();
+      expect(screen.queryByText('欄位名稱與提示')).not.toBeInTheDocument();
     } finally {
-      query.mockRestore();
-      save.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 

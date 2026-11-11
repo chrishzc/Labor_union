@@ -1,8 +1,6 @@
-"""Opt-in real MySQL oracles; only a previously owned isolated qualification DB.
-
-NAS_PERMISSION_TEST_SETTINGS names an ignored JSON file with connection file
-paths and an owned lu_test_nas_security_* database. No application .env is read.
-Fixtures remain in that disposable database for diagnosis; no reset/drop occurs.
+"""
+File: test_nas_permissions_mysql.py
+Description: 驗證 NAS MySQL 受限帳號權限邊界、預存程序 P01–P10 與臨時登記寫入隔離。
 """
 from contextlib import contextmanager
 from datetime import datetime
@@ -262,7 +260,7 @@ def test_line_questionnaire_sql_is_denied_and_internal_approval_uses_real_profil
     intent=ProvisionalRegistrationIntent(line_user_id=key,name='synthetic test',phone='0900000000',
         expected_date='2030-01-01',service_days=1,address='synthetic fixture',gender=None,email=None,
         birth_date=None,tel=None,ext=None,city=None,zip_code=None,id_number=None,
-        liff_config_revision=None,survey_details={})
+        liff_config_revision=None,survey_details={"特殊計費:胎數":"單胞胎"})
     candidate=build_provisional_registration_candidate(intent)
     now=datetime.now(timezone.utc)
     staged=StagedRegistration(100000+int(uuid4().hex[:7],16),2,'approving',now,now+timedelta(days=14),

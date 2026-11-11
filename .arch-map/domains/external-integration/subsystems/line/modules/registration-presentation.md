@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-提供 LINE LIFF 客戶需求調查頁面的呈現與零寫入本地輸入驗證；表單只透過既有 registration Preview／Apply typed endpoint 送出資料，不擁有 provisional registration、案件、補助或銀行資料的業務事實。
+提供 LINE LIFF 客戶需求調查頁面的呈現與零寫入本地輸入驗證（含一般與非市民共用之 `單胞胎／雙胞胎` 必填閉鎖單選，非市民移除舊「寶寶資訊」文字欄與 `LINE ID` 輸入並同步帶入 `baby_info`）；表單只透過既有 registration Preview／Apply typed endpoint 送出資料，不擁有 provisional registration、案件、補助或銀行資料的業務事實。
 
 ## Implementation
 - primary: `line/static/register.html`
@@ -13,6 +13,8 @@
 - entrypoints:
   - `/line-registration`
   - `/line-non-citizen-registration`
+  - `/api/v1/line/identity/studio-preview/gateway`
+  - `/api/v1/line/identity/studio-preview/non-citizen-registration`
   - `/api/v1/line/identity/registration/preview`
   - `/api/v1/line/identity/registration/apply`
 

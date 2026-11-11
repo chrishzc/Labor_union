@@ -1,6 +1,6 @@
 """
 File: line_identity.py
-Description: 提供 canonical LIFF flow、身分綁定、登記與 review 的 typed API。
+Description: 提供 canonical LIFF flow、身分綁定、登記、review 與同源工作區互動預覽端點。
 """
 
 from __future__ import annotations
@@ -144,6 +144,18 @@ def non_citizen_registration_page():
         "<body>", '<body data-registration-kind="non_citizen">', 1
     )
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
+
+
+@public_router.get("/studio-preview/gateway", include_in_schema=False)
+def studio_preview_gateway_page():
+    """Serve read-only gateway HTML under /api/ for same-origin studio iframe preview."""
+    return gateway_page()
+
+
+@public_router.get("/studio-preview/non-citizen-registration", include_in_schema=False)
+def studio_preview_non_citizen_registration_page():
+    """Serve read-only non-citizen HTML under /api/ for same-origin studio iframe preview."""
+    return non_citizen_registration_page()
 
 
 @page_router.get("/line-profile-guard")

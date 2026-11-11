@@ -1,4 +1,4 @@
-<!-- File: gateway.html | Description: 依 LIFF target 導向客戶登記、資料異動與月嫂服務頁。 -->
+<!-- File: gateway.html | Description: 依 LIFF target 導向客戶登記、資料異動與月嫂服務頁，支援前綴預覽。 -->
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
@@ -175,8 +175,8 @@
 <div class="container">
     <div class="header">
         <div class="logo" id="pageLogo">新竹市月子工會</div>
-        <div class="title" id="pageTitle">服務確認與身分導流</div>
-        <div class="subtitle" id="pageSubtitle">請確認您是否已於新竹市政府平台完成申請登記？</div>
+        <div class="title" id="pageTitle">服務入口</div>
+        <div class="subtitle" id="pageSubtitle">已在新竹市政府平台完成申請登記嗎？</div>
     </div>
 
     <div id="actionsContainer"></div>
@@ -276,8 +276,10 @@
 
     async function initLiff() {
         try {
-            const pageResponse = await fetch('/api/config/liff/runtime?page=gateway');
-            if (!pageResponse.ok) throw new Error('無法取得目前的服務入口，請稍後重試。');
+            const studioPreviewMatch = (window.location?.pathname || '').match(/^(.*)\/api\/v1\/line\/identity\/studio-preview(?:\/|$)/);
+            const studioApiPrefix = studioPreviewMatch ? studioPreviewMatch[1] : '';
+            const pageResponse = await fetch(`${studioApiPrefix}/api/config/liff/runtime?page=gateway`);
+            if (!pageResponse.ok) throw new Error('暫時無法開啟服務，請稍後再試。');
             const runtime = await pageResponse.json();
             const root = document.documentElement.style;
             root.setProperty('--primary', runtime.theme.primary_color);

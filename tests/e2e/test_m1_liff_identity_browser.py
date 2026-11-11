@@ -389,6 +389,7 @@ def _fill_registration_form(page, config: _SandboxConfig) -> None:
     page.locator("#address").fill(config.registration_address)
     page.locator("#expected_date").fill((date.today() + timedelta(days=30)).isoformat())
     page.locator("#service_days").fill("1")
+    page.locator("#multi_birth_single").check()
     page.locator("#agree1").click()
     page.locator("#refundPolicyAccept").click()
     page.locator("#agree2").check()

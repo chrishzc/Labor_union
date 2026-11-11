@@ -1,4 +1,7 @@
-"""Pure root-fact rules for a LINE customer registration before case issuance."""
+"""
+File: provisional_registration.py
+Description: 定義 LINE 客戶臨時登記根事實與閉鎖驗證規則，強制胎數僅收單胞胎或雙胞胎。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ from enum import StrEnum
 import re
 from typing import Any, Literal, Mapping
 
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from domains.case_import.refund_account import refund_fields_from_survey
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -15,6 +19,7 @@ from shared_kernel.validation import require_canonical_text, require_positive_in
 _FULLWIDTH_ASCII_TRANSLATION = str.maketrans(
     {chr(codepoint): chr(codepoint - 0xFEE0) for codepoint in range(0xFF01, 0xFF5F)}
 )
+HOLIDAY_DOUBLE_PAY_SURVEY_FIELD = "三節假日是否願意支付雙倍薪水"
 
 
 class ProvisionalRegistrationIssue(StrEnum):
@@ -79,7 +84,15 @@ def build_provisional_registration_candidate(
     address = _required(intent.address, "address", 255)
     service_days = _service_days(intent.service_days)
     optional = _optional_payload(intent)
-    survey_details = _survey_details(intent.survey_details)
+    survey_details = dict(_survey_details(intent.survey_details))
+    survey_details["特殊計費:胎數"] = _required_multi_birth_count(survey_details)
+    if (
+        HOLIDAY_DOUBLE_PAY_SURVEY_FIELD in survey_details
+        and survey_details[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] not in ("是", "否")
+    ):
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "三節假日雙倍薪水意願須選擇是或否。"
+        )
     client = {
         "name": name,
         "phone": phone,
@@ -125,6 +138,11 @@ def build_provisional_registration_candidate(
             raise ProvisionalRegistrationDomainError(
                 ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, str(error)
             ) from error
+        if client["baby_info"] != survey_details["特殊計費:胎數"]:
+            raise ProvisionalRegistrationDomainError(
+                ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
+                "baby_info must match multi_birth_count",
+            )
         beclass["survey_details"]["_liff_meta"].update(
             page="non_citizen_registration", registration_kind="non_citizen"
         )
@@ -207,6 +225,22 @@ def _optional(value: str | None, field_name: str) -> str | None:
         raise ProvisionalRegistrationDomainError(
             ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
             f"{field_name} exceeds maximum length",
+        )
+    return normalized
+
+
+def _required_multi_birth_count(survey_details: Mapping[str, Any]) -> str:
+    value = survey_details.get("特殊計費:胎數")
+    if not isinstance(value, str) or not value.strip():
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
+            "multi_birth_count is required",
+        )
+    normalized = value.strip()
+    if normalized not in VALID_MULTI_BIRTH_COUNTS:
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
+            "multi_birth_count is invalid",
         )
     return normalized
 

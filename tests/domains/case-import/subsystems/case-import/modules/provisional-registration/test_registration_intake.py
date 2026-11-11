@@ -1,4 +1,7 @@
-"""The public boundary has no SQL imports or approval endpoints, even on malformed input."""
+"""
+File: test_registration_intake.py
+Description: 驗證公開登記收件容器邊界與胎數閉鎖輸入之 422 拒收行為。
+"""
 import ast
 from pathlib import Path
 import subprocess
@@ -50,9 +53,15 @@ def test_preview_uses_verified_subject_and_never_opens_staging_or_sql():
         with TestClient(app) as client:
             response = client.post("/api/v1/line/identity/registration/preview", json={
                 "line_id_token": "synthetic-token", "name": "合成申請", "phone": "0900000000",
-                "address": "合成地址", "service_days": 10, "expected_date": "2026-11-20"})
-        assert response.status_code == 200
-        assert response.json()["data"]["expected_binding_version"] == 0
+                "address": "合成地址", "service_days": 10, "expected_date": "2026-11-20",
+                "survey_details": {"特殊計費:胎數": "單胞胎"}})
+            assert response.status_code == 200
+            assert response.json()["data"]["expected_binding_version"] == 0
+            bad = client.post("/api/v1/line/identity/registration/preview", json={
+                "line_id_token": "synthetic-token", "name": "合成申請", "phone": "0900000000",
+                "address": "合成地址", "service_days": 10, "expected_date": "2026-11-20",
+                "survey_details": {"特殊計費:胎數": "第一胎"}})
+            assert bad.status_code == 422
     finally:
         app.dependency_overrides.clear()
 

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
 File: register.html
-Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化失敗時停用完整表單。
+Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入，初始化失敗時停用表單。
 -->
 <html lang="zh-Hant-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>新竹市月子工會 - 需求調查表單</title>
+    <title>新竹市月子工會 - 需求調查</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -98,11 +98,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         .field-error.visible { display: block; }
         textarea.form-input { resize: vertical; min-height: 80px; }
-        .service-time-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
-        .service-time-presets button {
-            padding: 8px 12px; border: 1px solid var(--primary); border-radius: 8px;
-            background: #fff; color: var(--text-dark); font: inherit; cursor: pointer;
-        }
 
         .checkbox-group, .radio-group {
             display: flex; flex-direction: column; gap: 10px;
@@ -251,13 +246,14 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 <div class="container" id="mainContainer">
     <div class="header" id="formHeader">
         <div class="logo" id="pageLogo">新竹市月子工會</div>
-        <div class="title">需求調查表單</div>
+        <div class="title">需求調查</div>
         <div class="subtitle">請填寫服務需求，送出後由工會審核。</div>
     </div>
 
     <div id="statusMessage" class="status-message"></div>
     <a id="registrationRestart" href="/line-gateway" hidden>重新開啟客戶登記與綁定</a>
 
+    <p id="studioPreviewNotice" hidden>表單預覽，可試選服務條件。請使用測試資料。</p>
     <form id="registerForm" novalidate>
         <!-- Section 1: 基本資料 -->
         <div class="section-title">👩 1. 基本資料</div>
@@ -316,7 +312,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         <div class="section-title">🍼 2. 照護與環境</div>
         <div class="grid-2">
             <div class="form-group">
-                <label class="form-label required">預產期 (或已生產日期)</label>
+                <label class="form-label required">預產期或實際生產日</label>
                 <input type="date" class="form-input" id="expected_date" required>
             </div>
             <div class="form-group">
@@ -331,16 +327,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
             <div class="form-group">
                 <label class="form-label required" for="service_time">服務時段</label>
-                <small id="serviceTimeHelp">選擇常用時段，或自行輸入開始時間、結束時間和每日服務時數。跨夜請加上「次日」。</small>
-                <div class="service-time-presets" id="serviceTimePresets" role="group" aria-label="常用服務時段">
-                    <button type="button" data-service-time="09:00-18:00 (8小時)">09:00–18:00（8 小時）</button>
-                    <button type="button" data-service-time="08:00-17:00 (8小時)">08:00–17:00（8 小時）</button>
-                    <button type="button" data-service-time="09:00-13:00 (4小時)">09:00–13:00（4 小時）</button>
-                    <button type="button" data-service-time="13:00-17:00 (4小時)">13:00–17:00（4 小時）</button>
-                    <button type="button" data-service-time="20:00-08:00 (9小時次日)">20:00–次日 08:00（9 小時）</button>
-                </div>
-                <input type="text" class="form-input" id="service_time" maxlength="100"
-                    aria-describedby="serviceTimeHelp" placeholder="例如：09:00-18:00 (8小時)">
+                <select class="form-select" id="service_time">
+                    <option value="">請選擇服務時段</option>
+                    <option value="08:30-12:30 (4小時)">08:30–12:30（4 小時）</option>
+                    <option value="08:30-16:30 (8小時)">08:30–16:30（8 小時）</option>
+                    <option value="09:00-17:00 (8小時)">09:00–17:00（8 小時）</option>
+                    <option value="13:00-17:00 (4小時)">13:00–17:00（4 小時）</option>
+                </select>
             </div>
             <div class="grid-2">
                 <div class="form-group">
@@ -371,13 +364,15 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                     <option value="週休2日">週休 2 日（週六、週日休息）</option>
                 </select>
             </div>
-            <div class="form-group"><label class="form-label required" for="baby_info">寶寶資訊</label><textarea class="form-input" id="baby_info" maxlength="255" placeholder="請填寫寶寶資訊"></textarea></div>
             <div class="form-group"><label class="form-label required" for="notes">其他事項</label><textarea class="form-input" id="notes" maxlength="1000" placeholder="無其他事項請填「無」"></textarea></div>
-            <div class="form-group"><label class="form-label required" for="line_id">LINE ID</label><input class="form-input" id="line_id" maxlength="50" placeholder="尚未設定 LINE ID 請填「無」"></div>
         </section>
         <div class="form-group">
-            <label class="form-label">胎數 (第一胎、第二胎...)</label>
-            <input type="text" class="form-input" data-survey="特殊計費:胎數" placeholder="例如: 第一胎">
+            <label class="form-label required">胎數（單胞胎／雙胞胎）</label>
+            <div class="form-hint" id="registrationRateHint">請依本次照顧的寶寶人數選擇。</div>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="multi_birth_count" value="單胞胎" id="multi_birth_single" required><label for="multi_birth_single">單胞胎<span id="registrationSingleRate"></span></label></div>
+                <div class="radio-item"><input type="radio" name="multi_birth_count" value="雙胞胎" id="multi_birth_twins"><label for="multi_birth_twins">雙胞胎<span id="registrationTwinsRate"></span></label></div>
+            </div>
         </div>
         <div class="form-group">
             <label class="form-label required">服務時間內是否有其他大寶/寶寶</label>
@@ -407,7 +402,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             <textarea class="form-input" data-survey="5媽咪有無過敏體質：" placeholder="若無請填無"></textarea>
         </div>
         <div class="form-group">
-            <label class="form-label">特殊照護時應注意事項</label>
+            <label class="form-label">特殊照護注意事項</label>
             <textarea class="form-input" data-survey="特殊照護時應注意事項：" placeholder="例如: 剖腹產、有妊娠糖尿病等"></textarea>
         </div>
 
@@ -500,6 +495,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         <!-- Section 5: 費用與同意條款 -->
         <div class="section-title">💰 5. 費用與同意條款</div>
+        <div class="form-group" role="group" aria-labelledby="holidayDoublePayLabel">
+            <div class="form-label" id="holidayDoublePayLabel">若服務期間遇到三節假日（端午、中秋、除夕、初一、初二），是否願意支付雙倍薪水？（選填）</div>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="holiday_double_pay" value="是" id="holidayDoublePayYes"><label for="holidayDoublePayYes">是</label></div>
+                <div class="radio-item"><input type="radio" name="holiday_double_pay" value="否" id="holidayDoublePayNo"><label for="holidayDoublePayNo">否</label></div>
+            </div>
+        </div>
         <div class="form-group">
             <label class="form-label required">補助款退款銀行代號加分行</label>
             <input type="text" class="form-input" id="refund_bank_code" inputmode="numeric" maxlength="7" data-survey="補助款退款:銀行代號+分行代號" required placeholder="請輸入 7 位數字">
@@ -511,7 +513,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         </div>
         <div class="form-group">
             <label class="form-label">確認條款</label>
-            <div class="form-hint">請先點選「已確實詳閱退費原則」閱讀內容，並在彈窗按下「已閱讀並同意」後，才能完成勾選及送出。</div>
+            <div class="form-hint">點選「已確實詳閱退費原則」，讀完後按「已閱讀並同意」，即可勾選並送出。</div>
             <div class="checkbox-group">
                 <div class="checkbox-item"><input type="checkbox" id="agree1" required><label for="agree1" class="required">※已確實詳閱退費原則</label></div>
                 <div class="checkbox-item"><input type="checkbox" id="agree2" required><label for="agree2" class="required">我確實了解並願意遵照辦理以上相關規定，說明及退費原則 (勾選後等同簽名確認)</label></div>
@@ -571,21 +573,24 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     </div>
 </div>
 
-<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
     let currentIdToken = "";
     let liffConfigRevision = "";
     let runtimePage = null;
     const isNonCitizen = document.body.dataset.registrationKind === 'non_citizen';
-    const nonCitizenFields = ['service_start_date', 'service_time', 'residence_type', 'delivery_type', 'service_type', 'baby_info', 'notes', 'line_id'];
+    const studioPreview = isNonCitizen && new URLSearchParams(location.search).get('studio_preview') === '1';
+    const nonCitizenFields = ['service_start_date', 'service_time', 'residence_type', 'delivery_type', 'service_type', 'notes'];
     let refundPolicyAccepted = false;
     let pendingRegistrationPreview = null;
     let registrationSubmissionPending = false;
     let registrationResultUnknown = false;
     const submissionStorageKey = `registration-submission:${isNonCitizen ? 'non-citizen' : 'subsidy'}`;
-    const hadSubmission = Boolean(sessionStorage.getItem(submissionStorageKey));
-    let registrationSubmissionId = sessionStorage.getItem(submissionStorageKey) || crypto.randomUUID();
-    sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
+    let registrationSubmissionId = studioPreview ? '' : sessionStorage.getItem(submissionStorageKey);
+    const hadSubmission = Boolean(registrationSubmissionId);
+    if (!studioPreview && !hadSubmission) {
+        registrationSubmissionId = crypto.randomUUID();
+        sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
+    }
 
 
     function liffStateParameters(parameters) {
@@ -611,13 +616,31 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     async function initializeLiff() {
         try {
             if (!isNonCitizen && redirectIdentityEntryIfNeeded()) return;
-            const configRes = await fetch(isNonCitizen ? '/api/config/liff/runtime?page=non_citizen_registration' : '/api/config/liff/runtime?page=registration');
+            const studioPreviewMatch = (window.location?.pathname || '').match(/^(.*)\/api\/v1\/line\/identity\/studio-preview(?:\/|$)/);
+            const studioApiPrefix = studioPreviewMatch ? studioPreviewMatch[1] : '';
+            const configRes = await fetch(
+                `${studioApiPrefix}${isNonCitizen ? '/api/config/liff/runtime?page=non_citizen_registration' : '/api/config/liff/runtime?page=registration'}`
+            );
             if (!configRes.ok) throw new Error('無法取得 LIFF 頁面設定');
             const appConfig = await configRes.json();
             liffConfigRevision = appConfig.revision || '';
             runtimePage = appConfig.page;
             applyRuntime(appConfig);
+            renderRegistrationHourlyRates(appConfig.registration_hourly_rates);
+            if (studioPreview) {
+                document.getElementById('registrationPreviewButton').textContent = '預覽模式';
+                return;
+            }
             const liffId = await loadLiffId();
+            if (!window.liff) {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('目前無法載入 LINE 登入功能，請稍後重試。'));
+                    document.head.append(script);
+                });
+            }
             await liff.init({liffId});
             if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
             currentIdToken = liff.getIDToken() || '';
@@ -627,6 +650,20 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             console.error("初始化失敗", error);
             showInitializationError(error);
         }
+    }
+
+    function renderRegistrationHourlyRates(rates) {
+        const hint = document.getElementById('registrationRateHint');
+        if (!rates) {
+            hint.textContent = '目前無法顯示服務時薪，請向工會確認。';
+            return;
+        }
+        const format = ({ covered, self_pay }) => covered === null || covered === self_pay
+            ? `（${self_pay} 元／小時）`
+            : `（補助內 ${covered} 元／小時，補助用盡後 ${self_pay} 元／小時）`;
+        document.getElementById('registrationSingleRate').textContent = format(rates.single);
+        document.getElementById('registrationTwinsRate').textContent = format(rates.twins);
+        hint.textContent = isNonCitizen ? '顯示非市民自費服務時薪。' : '顯示一般市民服務時薪，實際費用依補助資格及工會確認結果為準。';
     }
 
     async function loadLiffId() {
@@ -710,15 +747,12 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+        if (studioPreview) {
+            document.getElementById('studioPreviewNotice').hidden = false;
+            document.getElementById('registrationPreviewButton').disabled = true;
+        }
         if (isNonCitizen) {
             document.getElementById('nonCitizenServiceFields').hidden = false;
-            const serviceTime = document.getElementById('service_time');
-            document.getElementById('serviceTimePresets').addEventListener('click', event => {
-                const preset = event.target.closest('button[data-service-time]');
-                if (!preset) return;
-                serviceTime.value = preset.dataset.serviceTime;
-                serviceTime.dispatchEvent(new Event('input', { bubbles: true }));
-            });
             for (const id of [...nonCitizenFields, 'city', 'gender', 'birth_date']) document.getElementById(id).required = true;
             document.getElementById('service_days').removeAttribute('max');
             document.getElementById('refund_bank_code').previousElementSibling.textContent = '退款銀行與分行代號';
@@ -726,7 +760,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         initializeLiff();
         setupRefundPolicyAgreement();
-        autofillFromQueryParams();
+        if (!studioPreview) autofillFromQueryParams();
         setupIdNumberAutoUppercase();
         setupEmailTypoHint();
         setupServiceDaysIntegerInput();
@@ -817,8 +851,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     }
 
     function applySystemField(field, inputId) {
-        if (!field) return;
         const input = document.getElementById(inputId);
+        if (!field || !input) return;
         const group = input.closest('.form-group');
         const label = group ? group.querySelector('.form-label') : null;
         if (label) { label.textContent = field.label; label.classList.toggle('required', Boolean(field.required)); }
@@ -1099,6 +1133,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const address = document.getElementById('address');
         const expectedDate = document.getElementById('expected_date');
         const serviceDays = document.getElementById('service_days');
+        const multiBirthCount = document.querySelector('input[name="multi_birth_count"]:checked');
         const needsCooking = document.querySelector('input[name="needs_cooking"]:checked');
         const refundBankCode = document.getElementById('refund_bank_code');
         const refundBankAccount = document.getElementById('refund_bank_account');
@@ -1170,6 +1205,10 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const days = Number(serviceDays.value);
         if (!Number.isInteger(days)) addError(errors, serviceDays, '請填寫預計服務天數。');
         else if (days < 1 || (!isNonCitizen && days > 60)) addError(errors, serviceDays, isNonCitizen ? '預計服務天數需為正整數。' : '預計服務天數需介於 1 至 60 天。');
+
+        if (!multiBirthCount) {
+            addError(errors, document.getElementById('multi_birth_single'), '請選擇胎數（單胞胎／雙胞胎）。');
+        }
 
         if (!needsCooking) {
             addError(errors, document.getElementById('needs_cooking_yes'), '請選擇是否需要下廚。');
@@ -1256,7 +1295,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
-        if (registrationSubmissionPending || registrationResultUnknown) return;
+        if (studioPreview || registrationSubmissionPending || registrationResultUnknown) return;
         const validation = validateRegistrationForm();
         if (!validation.ok || !validateCustomFields()) {
             const requiredMessage = document.getElementById("statusMessage");
@@ -1287,8 +1326,10 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             });
 
             // 處理單選 Radio 的 survey 資料 (透過 name)
-            const radioGroups = ['breastfeed', 'needs_cooking', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
+            const radioGroups = ['multi_birth_count', 'holiday_double_pay', 'breastfeed', 'needs_cooking', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
             const radioKeys = {
+                'multi_birth_count': '特殊計費:胎數',
+                'holiday_double_pay': '三節假日是否願意支付雙倍薪水',
                 'breastfeed': '哺乳方式：',
                 'needs_cooking': '是否需要下廚：',
                 'diet': '月子餐點調理喜好/飲食習慣：',
@@ -1345,6 +1386,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                 payload.registration_kind = 'non_citizen';
                 payload.service_days = Number(document.getElementById('service_days').value);
                 for (const id of nonCitizenFields) payload[id] = document.getElementById(id).value.trim();
+                payload.baby_info = surveyDetails['特殊計費:胎數'];
             }
 
             loader.style.display = "flex";

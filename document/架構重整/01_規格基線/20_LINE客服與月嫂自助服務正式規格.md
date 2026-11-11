@@ -54,6 +54,8 @@ LINE 官方帳號回應依是否具備有效一次性 `replyToken` 嚴格區分�
 
 ### 3.3 `line_push_worker` 保留範圍
 
+LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「只在聊天室回覆」。沒有公版可預覽的實際訊息仍顯示觸發條件。取消結算的人工發送及人工升級客服結案通知各有節點，一般客服工單結案則呈現為內部操作。
+
 主動通知、定時提醒、LIFF 送出後跨請求確認、卡片主體與多氣泡組合仍維持 durable outbox → `line_push_worker`：含 Flex 媒合／推薦／請假／完工卡片、開工當天群組詢問卡本體（`LINE-ORDER-SERVICE-START-DAY-CARD-V1`）、`order.service_start_day` 群組訊息、`second_payment_due` / `second_payment_settled`（第二期入帳沿現行 rule ID `LINE-SECOND-PAYMENT-SETTLED-TEXT-V1` 維護）、簽約與訂金催繳、繳款收據、人工客服回覆與取消／退款／追償通知。
 
 ## 4. 月嫂端 LINE 自助服務
@@ -95,7 +97,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
   - **React 客服六欄表規格**：呼叫 `GET /api/v1/customer-service/tickets/reminders`（單批個人資料補水上限 100 筆、最高 4 並行請求、總預算 2 秒），固定只渲染六欄摘要欄位；不設額外狀態分頁籤、右側明細抽屜、行內回覆框或刪除按鈕。
 - **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；M4 重大升級與繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
 - **`#line-interface`（LINE 介面設定）** 與 **`#line-ai-events`（AI 客服工作室）**：
-  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 17 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與四個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），並提供 `NonCitizenLiffSettingsPanel` 非市民設定面板。
+  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 17 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與四個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
   - `#line-ai-events` 維護 AI/FAQ 知識庫、引導動作、回答測試、回饋分析與模型設定。
 
 ### 5.2 手機審核中心、DB 版控 LIFF 設定與非市民入口契約
@@ -104,10 +106,10 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - **LIFF 設定唯一來源與 DB 版本控管**：
   - 服務申請入口（`gateway.html`）、需求調查（`register.html`）、帳號綁定（`bind.html`）、非市民申請頁（`/line-non-citizen-registration`）及管理端設定統一讀寫 MySQL 之版本化 `LIFF` 設定（`LineConfigurationKind.LIFF`）。[`config/liff_settings.json`](../../../config/liff_settings.json) 僅於資料庫尚未建立 LIFF 設定（`revision = 0`）時供明確 fresh bootstrap，執行中禁止 fallback 讀檔；設定缺失、格式錯誤或資料庫不可用回 `503`，頁面不存在或停用回 `404`。
   - 公開與管理端沿用既有 `/api/config/liff`、`/api/config/liff/runtime`、`/api/config/liff/state`、主題／頁面／欄位設定（`/api/config/liff/theme`、`/api/config/liff/pages/{page_id}` 與欄位新增／修改／刪除）、版本歷史（`GET /api/config/liff/history`）與還原（`POST /api/config/liff/rollback/{revision}`），並共用 `LiffSettingsConfig` typed validation。`ETag`／`If-Match` 採資料庫 revision 執行樂觀併發檢查，讀取後遭並行更新回 `409`；還原於目前 revision 新增一版且不覆寫或刪除既有版本，所有設定異動僅留存版本與稽核，不建立訊息投遞或選單發布工作。
-- **入口分流與非市民 LIFF 頁面設定（`NonCitizenLiffSettingsPanel`）**：
-  - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟。
-  - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留與新版相容的自訂文案、其他設定及歷史版本。非市民申請表沿用 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 維護。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
-  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
+- **入口分流與非市民 LIFF 設定契約**：
+  - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟，管理端表單工作室則透過同源 `/api/v1/line/identity/studio-preview/gateway` 與 `/api/v1/line/identity/studio-preview/non-citizen-registration` 渲染唯讀預覽，且頁面內執行期設定查詢依當前預覽前綴解析 `/api/config/liff/runtime`。
+  - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留相容自訂文案、其他設定及歷史版本。後端非市民申請設定 API 維持提供 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 供版本化查詢與寫入；前台 `#line-interface` 之「非市民服務申請」僅顯示唯讀互動預覽，不內嵌頁面欄位編輯表單。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
+  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
 
 ### 5.3 資料異動審核（`profile_update` / `order_update`）
 

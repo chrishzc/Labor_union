@@ -1,9 +1,14 @@
-"""Verify the LINE LIFF customer registration presentation contract."""
+"""
+File: test_line_registration_presentation.py
+Description: 驗證 LINE LIFF 客戶登記頁呈現、胎數必填與預覽送出契約。
+"""
 
 import json
 from pathlib import Path
 import re
 import subprocess
+
+from domains.case_import.non_citizen_registration import LIFF_SERVICE_TIME_OPTIONS
 
 
 ROOT = next(
@@ -17,15 +22,25 @@ def test_non_citizen_service_choices_match_manual_case_form():
     liff = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
     manual = (ROOT / "ui_react/src/components/RegistrationApplications.tsx").read_text(encoding="utf-8")
 
-    for field in ("service_type", "delivery_type", "residence_type"):
+    for field in ("service_type", "delivery_type", "residence_type", "service_time"):
         liff_select = liff.split(f'id="{field}">', 1)[1].split("</select>", 1)[0]
         manual_select = manual.split(f"value={{manualForm.{field}}}", 1)[1].split("</select>", 1)[0]
         assert re.findall(r'<option value="([^"]+)">', liff_select) == re.findall(
             r'<option value="([^"]+)">', manual_select
         )
-    assert re.findall(r'data-service-time="([^"]+)"', liff) == re.findall(
-        r"service_time: '([^']+)' \}\)\)", manual
-    )
+    assert tuple(re.findall(
+        r'<option value="([^"]+)">', liff.split('id="service_time">', 1)[1].split("</select>", 1)[0]
+    )) == LIFF_SERVICE_TIME_OPTIONS
+    assert 'type="time"' not in liff
+
+
+def test_optional_holiday_preference_is_in_registration_fees_section():
+    source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
+    before, fees = source.split("💰 5. 費用與同意條款", 1)
+    assert 'name="holiday_double_pay"' not in before
+    options = re.findall(r'<input[^>]*name="holiday_double_pay"[^>]*>', fees)
+    assert [re.search(r'value="([^"]+)"', option)[1] for option in options] == ["是", "否"]
+    assert all("required" not in option for option in options)
 
 
 def test_runtime_copy_describes_review_instead_of_promising_matching():
@@ -191,8 +206,8 @@ def test_registration_bank_code_help_links_to_the_official_lookup_without_changi
 def test_registration_refund_confirmation_requires_visible_reading_guidance() -> None:
     source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
 
-    assert "請先點選「已確實詳閱退費原則」閱讀內容" in source
-    assert "並在彈窗按下「已閱讀並同意」後，才能完成勾選及送出。" in source
+    assert "點選「已確實詳閱退費原則」" in source
+    assert "讀完後按「已閱讀並同意」，即可勾選並送出。" in source
     assert "if (!refundPolicyAccepted)" in source
     assert "refundPolicyAccepted = true;" in source
     assert "if (!agree1.checked || !refundPolicyAccepted)" in source
@@ -254,3 +269,114 @@ console.log('integer service day input contract passed');
     result = subprocess.run(["node"], input=script, capture_output=True, text=True,
                             encoding="utf-8", timeout=10, check=True)
     assert "integer service day input contract passed" in result.stdout
+
+
+def test_registration_form_requires_closed_single_or_twins_choice_shared_by_both_forms() -> None:
+    source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
+
+    assert "胎數 (第一胎、第二胎...)" not in source
+    assert 'placeholder="例如: 第一胎"' not in source
+    assert 'data-survey="特殊計費:胎數"' not in source
+    assert 'id="baby_info"' not in source
+    assert "請填寫寶寶資訊" not in source
+    assert 'id="line_id"' not in source
+    assert "尚未設定 LINE ID" not in source
+    assert "'baby_info'" not in source.split("const nonCitizenFields = [", 1)[1].split("]", 1)[0]
+    assert "'line_id'" not in source.split("const nonCitizenFields = [", 1)[1].split("]", 1)[0]
+    assert "payload.baby_info = surveyDetails['特殊計費:胎數'];" in source
+    non_citizen_section = source.split('<section id="nonCitizenServiceFields"', 1)[1].split("</section>", 1)[0]
+    assert 'name="multi_birth_count"' not in non_citizen_section
+    after_non_citizen = source.split("</section>", 1)[1]
+    assert 'name="multi_birth_count"' in after_non_citizen
+    assert 'id="multi_birth_single"' in after_non_citizen
+    assert 'value="單胞胎"' in after_non_citizen
+    assert 'value="雙胞胎"' in after_non_citizen
+    assert '<label for="multi_birth_single">單胞胎<span id="registrationSingleRate">' in after_non_citizen
+    assert '<label for="multi_birth_twins">雙胞胎<span id="registrationTwinsRate">' in after_non_citizen
+    assert "請選擇胎數（單胞胎／雙胞胎）。" in source
+    assert "'multi_birth_count': '特殊計費:胎數'" in source
+    assert "'multi_birth_count'" in source.split("const radioGroups = [", 1)[1].split("]", 1)[0]
+
+    validation_fn = "function validateRegistrationForm()" + source.split(
+        "function validateRegistrationForm()", 1
+    )[1].split('document.getElementById("registerForm")', 1)[0]
+    helper_fn = "function normalizePhone(value)" + (
+        source.split("function normalizePhone(value)", 1)[1].split("function validateRegistrationForm()", 1)[0]
+    )
+    script = r'''
+const assert = require('node:assert/strict');
+let birthSelected = null;
+const byId = new Map();
+function makeControl(id, value='') {
+  const err = { textContent: '', classList: { toggle() {}, remove() {} } };
+  const ctrl = {
+    id, value, checked: false,
+    classList: { toggle() {}, remove() {} },
+    scrollIntoView() {}, focus() {},
+    closest() { return { querySelector(sel) { return sel === '.field-error' ? err : { textContent: id }; }, appendChild() {} }; }
+  };
+  byId.set(id, ctrl);
+  return ctrl;
+}
+['name','id_number','birth_date','phone','tel','email','city','zip_code','address','expected_date','service_days','refund_bank_code','refund_bank_account','multi_birth_single','needs_cooking_yes'].forEach(id => makeControl(id));
+['service_start_date','service_time','residence_type','delivery_type','service_type','notes','gender','city'].forEach(id => makeControl(id, '已填寫'));
+byId.get('service_time').value = '09:00-17:00 (8小時)';
+byId.get('birth_date').value = '1990-01-01';
+byId.get('name').value = '測試';
+byId.get('phone').value = '0912345678';
+byId.get('email').value = 'ok@example.com';
+byId.get('address').value = '新竹市';
+byId.get('expected_date').value = new Date().toISOString().slice(0, 10);
+byId.get('service_days').value = '10';
+byId.get('refund_bank_code').value = '0000000';
+byId.get('refund_bank_account').value = '00000001';
+const agree1 = makeControl('agree1'); agree1.checked = true;
+const agree2 = makeControl('agree2'); agree2.checked = true;
+const agree3 = makeControl('agree3'); agree3.checked = true;
+const otherBabies = makeControl('other_babies', '無');
+const needsCooking = makeControl('needs_cooking_checked', '需要下廚'); needsCooking.checked = true;
+let refundPolicyAccepted = true;
+let isNonCitizen = false;
+let nonCitizenFields = ['service_start_date', 'service_time', 'residence_type', 'delivery_type', 'service_type', 'notes'];
+let runtimePage = null;
+const document = {
+  getElementById: id => byId.get(id),
+  querySelector(sel) {
+    if (sel === 'input[name="multi_birth_count"]:checked') return birthSelected;
+    if (sel === 'input[name="needs_cooking"]:checked') return needsCooking;
+    if (sel === '[data-survey="服務時間內是否有其他寶寶"]') return otherBabies;
+    return null;
+  },
+  querySelectorAll() { return []; },
+  createElement() { return { className: '', textContent: '', classList: { toggle() {} } }; }
+};
+''' + helper_fn + "\n" + validation_fn + r'''
+for (const nonCitizenFlag of [false, true]) {
+  isNonCitizen = nonCitizenFlag;
+  birthSelected = null;
+  const invalid = validateRegistrationForm();
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.message, '請選擇胎數（單胞胎／雙胞胎）。');
+  birthSelected = { value: nonCitizenFlag ? '雙胞胎' : '單胞胎', checked: true };
+  const valid = validateRegistrationForm();
+  assert.equal(valid.ok, true);
+}
+console.log('multi_birth_count validation contract passed');
+'''
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True,
+                            encoding="utf-8", timeout=10, check=True)
+    assert "multi_birth_count validation contract passed" in result.stdout
+
+    apply_fn = "function applySystemField(field, inputId)" + source.split(
+        "function applySystemField(field, inputId)", 1
+    )[1].split("function renderCustomFields(", 1)[0]
+    runtime_script = apply_fn + r'''
+let isNonCitizen = true;
+const document = { getElementById: () => null };
+applySystemField({ id: 'baby_info', label: '寶寶資訊', required: true, placeholder: 'ignored' }, 'baby_info');
+applySystemField({ id: 'line_id', label: 'LINE ID', required: true, placeholder: 'ignored' }, 'line_id');
+console.log('missing dom system field safely skipped');
+'''
+    runtime_res = subprocess.run(["node"], input=runtime_script, capture_output=True, text=True,
+                                 encoding="utf-8", timeout=10, check=True)
+    assert "missing dom system field safely skipped" in runtime_res.stdout
