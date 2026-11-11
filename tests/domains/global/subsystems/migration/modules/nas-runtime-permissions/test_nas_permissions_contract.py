@@ -197,8 +197,8 @@ def test_ensure_nas_procedures_creates_missing_and_respects_existing():
     created = ensure_nas_procedures(connection)
 
     assert created == [missing_name]
-    assert cursor.execute.call_count == 2
-    create_sql = cursor.execute.call_args_list[1][0][0]
+    assert cursor.execute.call_count == 3
+    create_sql = cursor.execute.call_args_list[2][0][0]
     assert f"CREATE PROCEDURE `{missing_name}`" in create_sql
     assert "SQL SECURITY DEFINER" in create_sql
     assert "MODIFIES SQL DATA" in create_sql
@@ -207,7 +207,24 @@ def test_ensure_nas_procedures_creates_missing_and_respects_existing():
     cursor.fetchall.return_value = [{"routine_name": n} for n in all_names]
     none_created = ensure_nas_procedures(connection)
     assert none_created == []
-    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_count == 2
+
+def test_ensure_nas_procedures_rebuilds_procedures_with_stale_collation():
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures, PROCEDURES
+
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+    stale = "lu_nas_cancel_occupancy_v1"
+    cursor.fetchall.side_effect = [
+        [{"routine_name": n} for n in sorted(PROCEDURES)],
+        [{"name": stale}],
+    ]
+
+    assert ensure_nas_procedures(connection) == [stale]
+    create_sql = cursor.execute.call_args_list[-1][0][0]
+    assert "p_case VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in create_sql
 
 
 def test_ensure_nas_procedures_cli_dry_run(capsys, monkeypatch):

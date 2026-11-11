@@ -11,7 +11,7 @@ import re
 
 import pymysql
 
-from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS
+from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS, collated_signature
 from infrastructure.mysql.registry_case_deletion import CASE_CYCLE_LINKS, case_deletion_statements
 
 
@@ -155,7 +155,7 @@ def _grant_targets_database(grant: str, database: str, locking_scope: str) -> bo
 def procedure_sql(name: str, definer: str) -> str:
     parameters, body, _ = PROCEDURES[name]
     _identifier(definer)
-    return (f"CREATE DEFINER='{definer}'@'%' PROCEDURE {_identifier(name)}({parameters})\n"
+    return (f"CREATE DEFINER='{definer}'@'%' PROCEDURE {_identifier(name)}({collated_signature(parameters)})\n"
             f"SQL SECURITY DEFINER MODIFIES SQL DATA\nBEGIN\n{body.strip()}\nEND")
 
 

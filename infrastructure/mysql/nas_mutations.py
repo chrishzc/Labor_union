@@ -5,6 +5,7 @@ Description: 定義與調用受控 NAS 刪除與替換預存程序，並提供�
 from __future__ import annotations
 
 import json
+import re
 
 from infrastructure.mysql.registry_case_deletion import nas_case_deletion_body
 
@@ -193,6 +194,11 @@ PROCEDURES["lu_nas_replace_staff_banks_v1"] = (
     """, ("management",))
 
 
+def collated_signature(signature: str) -> str:
+    """Pin string parameters to the table collation, independent of the database default."""
+    return re.sub(r"\b((?:VAR)?CHAR\(\d+\))", r"\1 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", signature)
+
+
 def call_mutation(cursor, name: str, *arguments) -> None:
     if name not in PROCEDURES:
         raise ValueError("unknown NAS mutation")
@@ -225,13 +231,25 @@ def ensure_nas_procedures(connection, *, force: bool = False) -> list[str]:
             for row in cursor.fetchall()
             if isinstance(row, dict)
         }
+        # Rebuild routines created while the database default collation differed
+        # from the tables (e.g. a restored utf8mb4_0900_ai_ci database).
+        cursor.execute(
+            "SELECT DISTINCT specific_name AS name FROM information_schema.parameters "
+            "WHERE specific_schema = DATABASE() AND collation_name IS NOT NULL "
+            "AND collation_name <> 'utf8mb4_unicode_ci'"
+        )
+        stale_collation = {
+            row.get("name") or row.get("NAME") or row.get("specific_name") or row.get("SPECIFIC_NAME")
+            for row in cursor.fetchall()
+            if isinstance(row, dict)
+        }
         modified = []
         for name, (signature, body, _) in sorted(PROCEDURES.items()):
-            if force or name not in existing:
+            if force or name not in existing or name in stale_collation:
                 if name in existing:
                     cursor.execute(f"DROP PROCEDURE IF EXISTS `{name}`")
                 sql = (
-                    f"CREATE PROCEDURE `{name}`({signature})\n"
+                    f"CREATE PROCEDURE `{name}`({collated_signature(signature)})\n"
                     f"SQL SECURITY DEFINER\n"
                     f"MODIFIES SQL DATA\n"
                     f"BEGIN\n{body.strip()}\nEND"
