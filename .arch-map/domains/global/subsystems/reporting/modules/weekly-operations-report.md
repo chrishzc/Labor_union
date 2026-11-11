@@ -51,6 +51,8 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
 - test_root: `tests/test_weekly_operations_report_contract.py`
+- test_root: `tests/test_weekly_operations_report_api_versions.py`
+- integration_root: `tests/test_weekly_operations_report_mysql.py`
 - integration_root: `ui_react/src/tests/reports_query_page.test.tsx`
 - integration_root: `ui_react/src/tests/reports_weekly_totals.test.tsx`
 - integration_root: `ui_react/src/tests/reports_weekly_api_versions.test.tsx`

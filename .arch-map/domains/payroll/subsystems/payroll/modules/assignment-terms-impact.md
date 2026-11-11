@@ -14,6 +14,7 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 - primary:
   - `domains/payroll/payment_due_date.py` — 既有 assignment／歷史帳務共同使用的純付款日與社福資格規則；新分段資金來源期程由 tiered-payroll 擁有。
   - `subsystems/payroll/terms_impact.py`
+  - `subsystems/payroll/assignment_reconciliation.py` — 唯讀核對指派、正式服務日與薪資事實，由呼叫方持有 cursor 與交易。
   - `infrastructure/mysql/payroll_terms_writer.py`
 
 ## Dependencies

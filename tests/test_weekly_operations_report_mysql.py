@@ -1,4 +1,6 @@
-"""真實 MySQL、Session、Reporting dependencies 與 XLSX 的週報驗證。
+"""
+File: test_weekly_operations_report_mysql.py
+Description: 驗證真實 MySQL、Session 與 XLSX 的營運週報端到端查詢及匯出。
 
 只建立明確指定且尚不存在的 localhost lu_test_* database；不覆寫既有資料庫。
 此處直接 seed 合成 root facts 以覆蓋查詢狀態，並非訂單轉態流程驗收。
@@ -73,10 +75,12 @@ def api():
                 case_no = f"115000{serial:03d}"
                 cursor.execute(
                     """INSERT INTO clients
-                       (seq_num, case_no, created_at, name, identity_status, city, address, reject_reason)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       (seq_num, case_no, created_at, name, identity_status, city, address, reject_reason,
+                        hcm_review_status)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (serial, case_no, created_at, f"週報合成案例{serial}", "一般市民",
-                     "新竹市", "新竹市東區測試地址", "測試審核不符" if status == OrderLifecycleStatus.CANCELLED else None),
+                     "新竹市", "新竹市東區測試地址", "測試審核不符" if status == OrderLifecycleStatus.CANCELLED else None,
+                     "不符合" if status is None else None),
                 )
                 client_id = cursor.lastrowid
                 if status is not None:
@@ -138,12 +142,23 @@ def test_real_mysql_counts_and_both_wire_versions(api):
     assert (annual["application_count"], august["application_count"], september["application_count"]) == (12, 5, 6)
     assert [(t["month"], t["promotion_count"], t["inquiry_count"]) for t in (august, september)] == [(8, 12, 34), (9, 5, 0)]
     assert (annual["promotion_count"], annual["inquiry_count"]) == (24, 43)
-    for status in OrderLifecycleStatus:
-        assert annual["order_status_counts"][status.value] == (2 if status == OrderLifecycleStatus.ESTABLISHED else 1)
+    assert annual["order_status_counts"] == {
+        "待補件": 1,
+        "洽談中": 1,
+        "訂單成立": 3,  # 含一件歷史未服務
+        "服務中": 2,  # 含一件歷史服務中
+        "訂單完成": 3,  # 含歷史服務完成與歷史帳務完成
+        "訂單取消": 1,
+        "無訂單／狀態缺值": 1,
+    }
     for total in (annual, august, september):
         assert sum(total["order_status_counts"].values()) == total["application_count"]
     assert september["order_status_counts"]["無訂單／狀態缺值"] == 1
-    assert september["order_status_counts"]["訂單取消"] == september["review_rejected_count"] == 1
+    assert september["order_status_counts"]["訂單取消"] == september["cancelled_count"] == 1
+    assert september["review_rejected_count"] == 1
+    rows_by_status = {row["order_status"]: row for row in current["case_rows"]}
+    assert rows_by_status["訂單取消"]["review_rejected"] == 0
+    assert rows_by_status[None]["review_rejected"] == 1
 
 
 def test_real_metric_writer_reload_preserves_null_and_zero(api):
@@ -182,9 +197,20 @@ def test_real_export_matches_api_totals_without_mutating_business_rows(api):
     annual, = data["annual_totals"]
     assert sheet.cell(4, 1).value == "115年度累計"
     assert sheet.cell(4, 8).value == annual["application_count"]
-    for column, status in enumerate((*[s.value for s in OrderLifecycleStatus], "無訂單／狀態缺值"), 13):
-        assert sheet.cell(3, column).value == status
-        assert sheet.cell(4, column).value == annual["order_status_counts"][status]
+    status_columns = (
+        ("訂單成立", "order_established_count"),
+        ("洽談中", "negotiating_count"),
+        ("取消", "cancelled_count"),
+        ("審核不符合", "review_rejected_count"),
+    )
+    groups = [cell.value for cell in sheet[2]]
+    first_status_column = groups.index("申請案件狀況") + 1
+    next_group_column = groups.index("服務天數") + 1
+    assert tuple(sheet.cell(3, column).value for column in range(first_status_column, next_group_column)) == tuple(
+        label for label, _ in status_columns
+    )
+    for column, (_, total_field) in enumerate(status_columns, first_status_column):
+        assert sheet.cell(4, column).value == annual[total_field]
     labels = [(row, sheet.cell(row, 1).value) for row in range(5, sheet.max_row + 1)]
     august_row = next(row for row, label in labels if label == "115年8月小計")
     september_row = next(row for row, label in labels if label == "115年9月小計")
