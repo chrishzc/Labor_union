@@ -136,7 +136,7 @@ export const RealLlmSemanticTestPanel: React.FC<{
     <div className="ai-editor-card real-llm-panel">
       <div className="studio-test-content">
         <div className="ai-editor-header real-llm-header"><h2>試試客服怎麼回答</h2><span className="studio-muted-badge">真實 AI 測試</span></div>
-        <p className="studio-description">輸入民眾可能提出的問題，檢視答案是否清楚、合適。</p>
+        <p className="studio-description">輸入常見或可能遇到的問題，檢查回答是否清楚、合適。</p>
         <label className="studio-field-label" htmlFor="semantic-test-question">測試問題</label>
         <textarea id="semantic-test-question" aria-label="測試問題" placeholder="請從已發布題目選擇，或輸入民眾的測試提問" value={question} disabled={running} onChange={(event) => setQuestion(event.target.value)} rows={4} className="real-llm-input" />
         <div className="studio-test-actions"><p className="studio-description"><CircleHelp aria-hidden="true" />使用目前模型設定與核准知識庫；執行會呼叫 AI，不代表 LINE 已送達。</p><button type="button" className="line-primary-btn" onClick={() => void run()} disabled={running || !question.trim()}><Send aria-hidden="true" />{running ? '測試中…' : '測試回答'}</button></div>

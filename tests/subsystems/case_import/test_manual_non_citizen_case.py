@@ -94,8 +94,9 @@ def manual_case_client():
     ("birth_date", "stored_birth_date", "requires_cooking", "survey_answer"),
     [("2000-01-01", "2000-01-01", True, "是"), ("", None, False, "否")],
 )
-def test_manual_case_api_preserves_birth_date_and_cooking(
-    monkeypatch, manual_case_client, birth_date, stored_birth_date, requires_cooking, survey_answer
+@pytest.mark.parametrize("holiday_answer", [None, "是", "否"])
+def test_manual_case_api_preserves_birth_date_cooking_and_holiday_preference(
+    monkeypatch, manual_case_client, birth_date, stored_birth_date, requires_cooking, survey_answer, holiday_answer
 ):
     cursor = _FakeCursor(fetchone_results=[{"next_sequence": 1}])
     conn = _FakeConnection(cursor)
@@ -112,9 +113,10 @@ def test_manual_case_api_preserves_birth_date_and_cooking(
         "phone": "0900000000",
         "service_start_date": "2024-05-01",
         "service_days": 10,
-        "service_time": "09:00-18:00 (8小時)",
+        "service_time": "09:00-17:00 (8小時)",
         "birth_date": birth_date,
         "requires_cooking": requires_cooking,
+        **({"holiday_double_pay": holiday_answer} if holiday_answer is not None else {}),
     })
 
     assert response.status_code == 200
@@ -124,7 +126,11 @@ def test_manual_case_api_preserves_birth_date_and_cooking(
     assert intent.order.requires_cooking is requires_cooking
     beclass_params = next(params for sql, params in cursor.executed_queries if sql.startswith("INSERT INTO beclass_records"))
     assert beclass_params[2] == stored_birth_date
-    assert json.loads(beclass_params[-1])["是否需要下廚"] == survey_answer
+    survey = json.loads(beclass_params[-1])
+    assert survey["是否需要下廚"] == survey_answer
+    holiday_field = "三節假日是否願意支付雙倍薪水"
+    assert (holiday_field in survey) is (holiday_answer is not None)
+    assert survey.get(holiday_field) == holiday_answer
     assert receipt["client_id"] == 101
     assert conn.committed
     assert receipt["virtual_account"].endswith("501")
@@ -134,6 +140,10 @@ def test_manual_case_api_preserves_birth_date_and_cooking(
     ("service_time", "29:00-18:00 (8小時)", "服務時段"),
     ("service_time", "09:00-18:00 (108小時)", "服務時段"),
     ("service_time", "09:00-18:00 (1.2小時)", "服務時段"),
+    ("service_time", "08:30-17:00 (8小時)", "服務時段"),
+    ("service_time", "08:30-16:30 (4小時)", "服務時段"),
+    ("service_time", "20:00-04:00 (8小時)", "服務時段"),
+    ("baby_info", "第一胎", "胎數"),
     ("email", "name@example", "電子郵件"),
     ("refund_bank_code", "123", "退款銀行代號"),
     ("refund_bank_code", "00000001", "退款銀行代號"),
@@ -152,7 +162,7 @@ def test_manual_case_rejects_invalid_format_before_writing(
         "phone": "0900000000",
         "service_start_date": "2026-12-01",
         "service_days": 10,
-        "service_time": "09:00-18:00 (8小時)",
+        "service_time": "09:00-17:00 (8小時)",
     }
     response = manual_case_client.post(
         "/api/v1/admin/registration-applications/manual-non-citizen",
@@ -180,7 +190,7 @@ def test_manual_case_rejects_missing_details_before_writing(
         "phone": "0900000000",
         "service_start_date": "2026-12-01",
         "service_days": 10,
-        "service_time": "09:00-18:00 (8小時)",
+        "service_time": "09:00-17:00 (8小時)",
     }
     if value is None:
         del payload[field]
@@ -232,7 +242,7 @@ def test_manual_new_case_uses_server_number_without_legacy_mapping(monkeypatch, 
         "phone": "0900000000",
         "service_start_date": "2026-12-01",
         "service_days": 10,
-        "service_time": "09:00-18:00 (8小時)",
+        "service_time": "09:00-17:00 (8小時)",
     })
 
     assert response.status_code == 200
@@ -251,7 +261,7 @@ def test_historical_manual_creation_and_duplicate_check_are_retired(manual_case_
         "phone": "0900000000",
         "service_start_date": "2026-12-01",
         "service_days": 10,
-        "service_time": "09:00-18:00 (8小時)",
+        "service_time": "09:00-17:00 (8小時)",
     }
     assert manual_case_client.post(path, json={**payload, "mode": "historical"}).status_code == 422
     assert manual_case_client.post(path, json={**payload, "case_no": "A115001"}).status_code == 422

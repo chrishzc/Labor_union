@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from math import isfinite
 
-from domains.case_import.order_information import ORDER_INFORMATION_KEYS
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS, VALID_MULTI_BIRTH_COUNTS
 from domains.case_import.refund_account import REFUND_FIELDS, normalize_refund_field
 
 
@@ -26,7 +26,6 @@ _MAXIMUMS = {
     "multi_birth_count": 4,
 }
 _MAXIMUMS.update({field: 2000 for field in ORDER_INFORMATION_KEYS if field != "multi_birth_count"})
-VALID_MULTI_BIRTH_COUNTS = frozenset({"單胞胎", "雙胞胎"})
 
 
 class BeClassCorrectionError(ValueError):

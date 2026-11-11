@@ -116,7 +116,7 @@ export function NotificationTasksPage() {
   const emptyLoading=tab==='records'?recordLoading:loading;
   const emptyError=tab==='records'?recordError:queryError || (failedSources.length?'目前分類仍有來源無法讀取，請使用來源旁的重試按鈕。':'');
   const emptyTitle=emptyLoading?'讀取中':emptyError?'目前無法完整讀取事項':tab==='tasks' && pendingMore.length?'尚有事項待載入':search.trim()?'沒有符合搜尋條件的事項':tab==='tasks'?'目前沒有待辦事項':'沒有符合條件的事項';
-  const emptyMessage=emptyLoading?'正在確認目前事項，請稍候。':emptyError?'目前無法確認是否還有待辦，請重新讀取；已成功載入的資料仍可使用。':tab==='tasks' && pendingMore.length?'目前這批沒有符合的事項，請載入更多後再確認。':search.trim()?'搜尋只涵蓋已載入事項，可清除搜尋條件後查看。':'目前分類已查詢完成；有新事項時，請按重新整理。';
+  const emptyMessage=emptyLoading?'正在確認目前事項，請稍候。':emptyError?'無法確認是否還有待辦。已載入的事項仍可使用，請重新整理。':tab==='tasks' && pendingMore.length?'目前這批沒有符合的事項，請載入更多後再確認。':search.trim()?'搜尋只涵蓋已載入事項，可清除搜尋條件後查看。':'此分類目前沒有新事項。可重新整理查看最新結果。';
   const reset=()=>{setSearch('');setGroup('all');setDeliveryFilter('all');setPage(1);setRecordPage(1);setNotice('');setExpanded('');};
   const changeTab=(next:typeof tab)=>requestLeave(()=>{setTab(next);reset();});
   const select=(item:Row)=>requestLeave(()=>{setSelectedId(item.id);setNotice('');setExpanded('');if(window.matchMedia('(max-width: 1000px)').matches)window.requestAnimationFrame(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));});
@@ -193,7 +193,7 @@ export function NotificationTasksPage() {
           <h2>{selected.title}</h2>
           <p className="notification-preview-detail-summary">{selected.summary}</p>
           <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></dl>
-          <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />{selected.delivery ? '寄送狀況' : '為什麼需要處理'}</h3><p>{selected.reason}</p>{selected.delivery && <p className="notification-preview-delivery-state">目前狀態：{DELIVERY_LABELS[selected.delivery]}</p>}</section>
+          <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />{selected.delivery ? '寄送狀況' : '處理原因'}</h3><p>{selected.reason}</p>{selected.delivery && <p className="notification-preview-delivery-state">目前狀態：{DELIVERY_LABELS[selected.delivery]}</p>}</section>
           {selected.recipient && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
             <div className="notification-preview-message-bubble">{selected.message ?? '請在下方原流程查看通知內容與寄送結果。'}</div>
           </section>}
@@ -207,9 +207,9 @@ export function NotificationTasksPage() {
             {selected.secondary && <button type="button" className="np-button" disabled={busy} onClick={()=>secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>
           {expanded===selected.id && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} sourceReadError={failures[selected.source]} onCommitted={refreshAfterCommit} /></div>}
-          <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />沿用原流程處理，結果更新後同步待辦。</p>
+          <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />處理完成後，待辦會自動更新。</p>
           {notice && <div className="notification-preview-notice" role="status"><MessageCircle size={17} aria-hidden="true" /><p>{notice}</p><button type="button" aria-label="關閉操作訊息" onClick={() => setNotice('')}><X size={15} aria-hidden="true" /></button></div>}
-        </> : <div className="notification-preview-empty detail-empty"><Check size={28} aria-hidden="true" /><p>選擇事項後，在這裡查看詳細內容。</p></div>}
+        </> : <div className="notification-preview-empty detail-empty"><Check size={28} aria-hidden="true" /><p>選擇事項即可查看明細。</p></div>}
       </aside>
     </div>
   </div></>;

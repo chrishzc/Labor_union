@@ -211,7 +211,13 @@ def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow
     if not days:
         _, dates = _select_confirmed_service_dates(cursor, case_no, lock)
         if not dates:
-            dates = tuple(order_row["start_date"] + timedelta(days=i) for i in range(int(order_row["service_days"])))
+            start_date = order_row.get("start_date")
+            service_days = order_row.get("service_days")
+            if start_date is None:
+                raise ValueError("order_terms_start_date_required")
+            if service_days is None:
+                raise ValueError("order_terms_service_days_required")
+            dates = tuple(start_date + timedelta(days=i) for i in range(int(service_days)))
         days = tuple(ClientChargeDay(value, False) for value in dates)
     source = _load_client_finance(cursor, order_row, lock)
     if order_row.get("actual_start_date") is not None:
@@ -668,7 +674,7 @@ def _load_client_finance(cursor, order_row, lock):
         lock,
     )
     rate_override = load_explicit_case_service_rate(
-        cursor, str(order_row["case_no"]), lock=lock
+        cursor, str(order_row["case_no"]), lock=lock, use_bound_policy_without_start=True,
     )
     source = _client_finance_source(
         terms_row, obligation_rows, rate_override

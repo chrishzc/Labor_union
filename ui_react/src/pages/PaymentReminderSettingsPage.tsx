@@ -39,7 +39,7 @@ export const PaymentReminderSettingsPage: React.FC = () => {
 
   return (
     <div data-surface-id="finance.payment-reminder-settings.page">
-      <ManagementPageHeader title="帳務通知設定" description="維護客戶各期繳款排程提醒條件、逾期補寄門檻與帳務 LINE 訊息範本。">
+      <ManagementPageHeader title="帳務通知設定" description="設定繳款提醒、逾期補寄與 LINE 訊息範本。">
         <span className="reminder-badge"><Bell size={14} /> 帳務專區</span>
       </ManagementPageHeader>
       <div className="payment-reminder-page-container">

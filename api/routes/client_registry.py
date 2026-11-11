@@ -305,6 +305,11 @@ def get_client_registry(
         detail = application.query(case_no, include_refund_account=True) if full_account else application.query(case_no)
         if full_account:
             response.headers["Cache-Control"] = "no-store"
+        client_capabilities = _field_capabilities(detail.client.values, "client_profile", True)
+        if detail.identity_change_available and has_required_capability(principal, "data_browser.write"):
+            client_capabilities["identity_status"] = {
+                "owner": "client_profile", "editable": True, "reason": None, "options": ["一般市民"],
+            }
         payload = {
             "case_no": detail.case_no,
             "order_dates": detail.order_dates,
@@ -313,7 +318,7 @@ def get_client_registry(
                 "client_id": detail.client.client_id,
                 "version": detail.client.version,
                 "values": detail.client.values,
-                "field_capabilities": _field_capabilities(detail.client.values, "client_profile", True),
+                "field_capabilities": client_capabilities,
             },
             "beclass": {
                 "status": detail.beclass.status,
@@ -523,7 +528,7 @@ def _field_capabilities(
 
 
 def _readonly_fields(owner):
-    return {"identity_status", "admin_notes"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
+    return {"identity_status"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
 
 
 def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:
@@ -549,6 +554,8 @@ def _registry_error(error: Exception, correlation: str) -> HTTPException:
 
 def _raise_owner_error(error: Exception, correlation: str, message: str) -> None:
     code = str(error) or "registry_mutation_failed"
+    if code == "profile_identity_change_unavailable":
+        message = "只有尚未開始服務的補助市民或原住民案件可改為一般市民。"
     if isinstance(error, (ClientProfileNotFoundError, BeClassCorrectionNotFound)):
         status, category = 404, "not_found"
     elif isinstance(error, (ClientProfileStaleError, ClientProfileRequestConflictError, BeClassCorrectionConflict, BeClassCorrectionBlocked)) or "stale" in code or "idempotency" in code or "collision" in code:

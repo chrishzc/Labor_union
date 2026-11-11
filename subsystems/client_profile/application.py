@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping, Protocol
 from domains.clients.profile import (
     CLIENT_PROFILE_APPLICANT_FIELDS,
     ClientProfileValidationError,
+    can_reclassify_client,
     requested_before_values,
     validate_changes,
 )
@@ -28,6 +29,8 @@ from .contracts import (
 
 
 class ClientProfileRepository(Protocol):
+    def prepare_identity_change(self, case_no: str, client_id: int, *, lock: bool): ...
+    def apply_identity_pricing(self, prepared, *, actor_id: str, reason: str, key: str) -> None: ...
     def load_email_fill_target(self, case_no: str, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
     def load_profile(self, client_id: int, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
     def load_request(self, request_id: int, *, for_update: bool = False) -> Mapping[str, Any] | None: ...
@@ -126,9 +129,12 @@ class ClientProfileApplication:
         case_identity = _case_no(case_no)
         normalized = validate_changes(changes)
         with self._unit_of_work_factory() as unit_of_work:
-            profile = _require_profile(
-                unit_of_work.client_profiles.load_profile_by_case_no(case_identity)
-            )
+            repository = unit_of_work.client_profiles
+            row = repository.load_profile_by_case_no(case_identity)
+            profile = _require_profile(row)
+            if "identity_status" in normalized:
+                _require_identity_change(row)
+                repository.prepare_identity_change(case_identity, profile.client_id, lock=False)
         return _preview(profile, normalized, expected_version)
 
     def apply_admin(
@@ -180,11 +186,13 @@ class ClientProfileApplication:
                     True,
                     current,
                 )
-            profile = _require_profile(
-                repository.load_profile_by_case_no(case_identity, for_update=True)
-            )
+            row = repository.load_profile_by_case_no(case_identity, for_update=True)
+            profile = _require_profile(row)
             preview = _preview(profile, normalized, expected_version)
             _require_preview(preview.preview_fingerprint, preview_fingerprint)
+            if "identity_status" in normalized:
+                _require_identity_change(row)
+                prepared_pricing = repository.prepare_identity_change(case_identity, profile.client_id, lock=True)
             resulting_version = repository.apply_admin_change(
                 client_id=profile.client_id,
                 expected_version=expected_version.value,
@@ -195,6 +203,11 @@ class ClientProfileApplication:
                 idempotency_key=idempotency_key.value,
                 correlation_id=correlation_id.value,
             )
+            if "identity_status" in normalized:
+                repository.apply_identity_pricing(
+                    prepared_pricing, actor_id=actor.actor_id,
+                    reason=clean_reason or "補助資格更正為一般市民", key=idempotency_key.value,
+                )
             result = {
                 "case_no": case_identity,
                 "client_id": profile.client_id,
@@ -429,11 +442,17 @@ class ClientProfileApplication:
         return _rejection_preview(request, profile, reason)
 
 
+def _require_identity_change(row: Mapping[str, Any]) -> None:
+    if not can_reclassify_client(row.get("identity_status"), row.get("order_status"),
+                                  row.get("actual_start_date"), row.get("actual_end_date")):
+        raise ClientProfileRequestConflictError("profile_identity_change_unavailable")
+
+
 def _require_profile(row: Mapping[str, Any] | None) -> ClientProfileView:
     if not row:
         raise ClientProfileNotFoundError("client_profile_not_found")
     values = {field: str(row.get(field) or "") for field in (
-        "name", "gender", "phone", "email", "city", "address", "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
+        "name", "gender", "phone", "email", "city", "address", "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type", "admin_notes", "identity_status",
     )}
     return ClientProfileView(int(row["client_id"] if "client_id" in row else row["id"]), int(row.get("client_profile_version", row.get("version", 0))), values)
 
@@ -457,7 +476,7 @@ def _profile_view(profile: ClientProfileView, *, include_admin_fields: bool = Fa
         return profile
     return ClientProfileView(profile.client_id, profile.version,
                              {field: value for field, value in profile.values.items()
-                              if field not in {"due_month", "reject_reason", "service_type", "email"}})
+                              if field not in {"due_month", "reject_reason", "service_type", "email", "admin_notes", "identity_status"}})
 
 
 def _read_binding(

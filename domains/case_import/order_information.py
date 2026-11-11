@@ -13,6 +13,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 
+VALID_MULTI_BIRTH_COUNTS = frozenset({"單胞胎", "雙胞胎"})
+
+
 ORDER_INFORMATION_KEYS = (
     "dietary_habits",
     "vegetarian_preference",
@@ -102,6 +105,9 @@ def project_order_information(raw_payload: object, corrections: object = None) -
         if len({_comparison_value(value) for value in clean}) != 1:
             issues[canonical_key] = "ambiguous"
             continue
+        if canonical_key == "multi_birth_count" and clean[0] not in VALID_MULTI_BIRTH_COUNTS:
+            issues[canonical_key] = "invalid"
+            continue
         values[canonical_key] = clean[0]
     return _with_corrections(OrderInformationProjection(values=values, issues=issues), corrections)
 
@@ -115,6 +121,10 @@ def _with_corrections(projection: OrderInformationProjection, corrections: objec
         if field not in effective:
             continue
         value = effective[field]
+        if field == "multi_birth_count" and (not isinstance(value, str) or value not in VALID_MULTI_BIRTH_COUNTS):
+            values[field] = None
+            issues[field] = "invalid"
+            continue
         if value is None or isinstance(value, (str, bool, int, float)):
             values[field] = value
             issues.pop(field, None)

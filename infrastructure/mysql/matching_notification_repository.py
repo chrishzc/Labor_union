@@ -5,6 +5,8 @@ Description: 持久化媒合通知、互動與回覆，拒絕退休人員的新�
 
 from __future__ import annotations
 
+from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
+
 import json
 from hashlib import sha256
 from datetime import datetime, date, timedelta
@@ -971,12 +973,14 @@ _CONSUME_INTERACTION_SQL = """UPDATE matching_line_interactions SET
 interaction_status='consumed',consumed_at_utc=%s,consumed_by_line_user_id=%s
 WHERE token_hash=%s AND (interaction_status='active'
 OR (interaction_status='expired' AND action_scope='customer_decision'))"""
-_CAREGIVER_CARD_FACTS_SQL = """SELECT p.case_no,s.assigned_start_date AS start_date,
-s.assigned_end_date AS end_date,c.city,c.service_type,c.service_time,c.baby_info,
-c.residence_type FROM caregiver_matching_plans p
-JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id
-JOIN orders o ON o.case_no=p.case_no JOIN clients c ON c.id=o.client_id
-WHERE p.id=%s AND s.id=%s"""
+_CAREGIVER_CARD_FACTS_SQL = (
+    "SELECT p.case_no,s.assigned_start_date AS start_date,s.assigned_end_date AS end_date,"
+    "c.city,c.service_type,c.service_time," + BIRTH_COUNT_SQL + " AS multi_birth_count,"
+    "c.residence_type FROM caregiver_matching_plans p "
+    "JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "
+    "JOIN orders o ON o.case_no=p.case_no JOIN clients c ON c.id=o.client_id"
+    + BIRTH_COUNT_JOINS + "WHERE p.id=%s AND s.id=%s"
+)
 _CUSTOMER_PROFILE_FACTS_SQL = """SELECT st.id,st.name,st.city,st.has_massage_cert,
 st.care_babies,st.service_regions,st.special_skills
 FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id

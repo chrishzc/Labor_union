@@ -433,7 +433,7 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
   return (
     <section className="matching-coordination-workbench" data-surface-id="orders.matching.m3-coordination">
       <header className="matching-coordination-header">
-        <div><h2>{embeddedInOrderWorkflow ? '先核對本案媒合條件' : '建立媒合條件與確認決定'}</h2><p>{embeddedInOrderWorkflow ? '先依訂單、服務日期與篩選規則核對；確認後再到下一步查詢可聯繫的月嫂。' : '依目前案件資料試算；確認提交前會再次核對資料版本。'}</p></div>
+        <div><h2>{embeddedInOrderWorkflow ? '先核對本案媒合條件' : '建立媒合條件與確認決定'}</h2><p>{embeddedInOrderWorkflow ? '核對訂單、服務日期與篩選條件後，再查詢可聯繫的月嫂。' : '依目前案件資料試算；確認提交前會再次核對資料版本。'}</p></div>
       </header>
       <div className="matching-coordination-query-row">
         {embeddedInOrderWorkflow ? <p className="matching-coordination-case-context">案件 {caseNo}</p> : <label htmlFor="matching-case-no">案件編號<input id="matching-case-no" disabled={busy || outcomeUnknown} value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); setPreviewPackage(null); setInitialPreviewSourceVersions(null); invalidateZeroCandidateConfirmationAttempt(); }} /></label>}

@@ -79,7 +79,7 @@ describe('正式 Knowledge QA 管理 panel', () => {
     fireEvent.click(screen.getByText('QA-001 的標準問題'));
     fireEvent.click(screen.getAllByRole('button', { name: '發布' })[0]);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify({ expected_version: 1, reason: 'AI 客服工作室：publish QA-001' }) })));
-    expect(await screen.findByText('新答案已發布，問答搜尋資料更新完成後才會啟用。')).toBeInTheDocument();
+    expect(await screen.findByText('新答案已發布，搜尋資料更新後才會生效。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('QA-003 的標準問題'));
     fireEvent.click(screen.getByRole('button', { name: '停用' }));

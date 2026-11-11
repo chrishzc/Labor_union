@@ -15,4 +15,6 @@ def test_service_location_fields_are_routed_to_order_change_liff() -> None:
     assert '"city", "縣市"' not in field_definition
     assert '"address", "地址"' not in field_definition
     assert '"residence_type", "居住型態"' not in field_definition
-    assert "服務縣市、服務地址及居住型態請由「修改訂單資訊」提出申請" in page
+    order_page = (PROJECT_ROOT / "line/static/order_update.html").read_text(encoding="utf-8")
+    assert "服務縣市、地址及居住型態請到「申請修改訂單」辦理" in page
+    assert "<h1>申請修改訂單</h1>" in order_page

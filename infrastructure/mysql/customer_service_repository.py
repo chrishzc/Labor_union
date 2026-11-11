@@ -5,6 +5,8 @@ Description: 保存客服需求，並僅依 canonical LINE binding 查詢客戶�
 
 from __future__ import annotations
 
+from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
+
 from typing import Any
 from datetime import datetime, timezone
 
@@ -482,7 +484,16 @@ _STAFF_SUBJECT_SQL = (
     "WHERE b.line_user_id=%s AND b.subject_type='staff' AND b.binding_status='bound' "
     "LIMIT 1"
 )
-_STAFF_ORDER_SQL = "SELECT o.case_no,c.name client_name,c.phone client_phone,c.city,c.address,o.status order_status,o.start_date,o.end_date,o.service_days,o.service_hours_per_day,c.due_month,c.service_start_date,c.service_time,c.residence_type,c.delivery_type,c.service_type,c.baby_info,c.notes FROM case_staff_assignments a JOIN orders o ON o.case_no=a.case_no JOIN clients c ON c.id=o.client_id WHERE a.staff_id=%s AND (a.status IS NULL OR a.status<>'cancelled') AND (o.case_no LIKE %s OR c.name LIKE %s) ORDER BY o.start_date DESC,o.case_no DESC LIMIT 20"
+_STAFF_ORDER_SQL = (
+    "SELECT o.case_no,c.name client_name,c.phone client_phone,c.city,c.address,"
+    "o.status order_status,o.start_date,o.end_date,o.service_days,o.service_hours_per_day,"
+    "c.due_month,c.service_start_date,c.service_time,c.residence_type,c.delivery_type,c.service_type,"
+    + BIRTH_COUNT_SQL + " AS multi_birth_count,c.notes "
+    "FROM case_staff_assignments a JOIN orders o ON o.case_no=a.case_no JOIN clients c ON c.id=o.client_id"
+    + BIRTH_COUNT_JOINS
+    + "WHERE a.staff_id=%s AND (a.status IS NULL OR a.status<>'cancelled') "
+    "AND (o.case_no LIKE %s OR c.name LIKE %s) ORDER BY o.start_date DESC,o.case_no DESC LIMIT 20"
+)
 
 
 __all__ = ["CustomerServiceTicketNotFoundError", "CustomerServiceVersionConflictError", "MySqlCustomerServiceRepository"]

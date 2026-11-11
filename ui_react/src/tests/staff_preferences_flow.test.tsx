@@ -77,7 +77,7 @@ describe('Staff current six-relation preference flow', () => {
     expect(screen.getByLabelText('接案條件備註（選填）')).toHaveValue('');
     fireEvent.click(preferenceEditor().getByRole('button', { name: '儲存服務偏好' }));
     expect(preferenceEditor().queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
     expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(1);
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(
       11,
@@ -105,7 +105,7 @@ describe('Staff current six-relation preference flow', () => {
       preview_fingerprint: 'b'.repeat(64), idempotency_key: 'staff-current-preference', replayed: false,
     });
     fireEvent.click(preferenceEditor().getByRole('button', { name: '儲存服務偏好' }));
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
     expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledExactlyOnceWith(
       11, expect.objectContaining({ service_regions: [{ value: '竹北市', detail: null }] }), expect.any(Object),
     );
@@ -124,6 +124,6 @@ describe('Staff current six-relation preference flow', () => {
     expect(preferenceEditor().queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
     expect(await screen.findByText('stale_snapshot')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新查詢' })).toBeInTheDocument();
-    expect(screen.queryByText('已儲存並重新查詢服務偏好。')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務偏好已儲存。')).not.toBeInTheDocument();
   });
 });

@@ -338,9 +338,10 @@ def build_client_finance_rate_correction_candidate(
             "change_identity": change_identity,
             "case_no": facts.case_no,
             "account_version": facts.account_version,
-            "client_hourly_rate_ntd": facts.payment_terms.client_hourly_rate.amount,
+            "payment_terms": _payment_terms_payload(facts.payment_terms),
             "settlement": settlement.fingerprint.value,
         }),
+        payment_terms=facts.payment_terms,
     )
 
 

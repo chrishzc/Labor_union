@@ -177,6 +177,23 @@ def payroll_tiers(terms):
     return TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule is IdentityRule.SOCIAL)
 
 
+def citizen_reclassification_terms(cursor, order_row, *, lock=False):
+    from domains.client_finance.subsidy_coverage import default_subsidy_hour_cap, derive_subsidy_coverage
+
+    citizen = "一般市民"
+    terms = load_case_pricing(
+        cursor,
+        {**order_row, "client_identity_status": citizen, "pricing_override_event_id": None},
+        lock=lock,
+    )
+    if terms is not None:
+        return replace(terms, identity_name=citizen)
+    coverage = derive_subsidy_coverage(citizen, Decimal(0), Decimal(0))
+    hourly = 450 if _is_twins(cursor, order_row["case_no"], lock) else int(coverage.subsidy_claim_hourly_rate)
+    rates = HourlyRates(hourly, hourly)
+    return CasePricingTerms(citizen, IdentityRule.CITIZEN, default_subsidy_hour_cap(citizen), rates, rates, 5)
+
+
 def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None):
     """Borrow confirmed historical volume, without manufacturing calendar days."""
     from infrastructure.mysql.order_terms_read_model import select_order
@@ -333,14 +350,14 @@ class MySqlPricingConfigurationRepository:
         client_rate = finance.payment_terms.client_hourly_rate.amount
         return CasePricingTerms(identity, rule, cap, HourlyRates(client_rate, client_rate), HourlyRates(salary_rate, salary_rate))
 
-    def save_case(self, facts, terms, actor, reason, key):
+    def save_case(self, facts, terms, actor, reason, key, *, identity_reclassification=False):
         from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
         from infrastructure.mysql.client_finance_terms_writer import persist_client_finance_terms_impact
         from infrastructure.mysql.order_terms_read_model import load_calculable_client_finance_facts, select_order
         from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceCommand
         before, after = pricing_impact(facts.terms, facts), pricing_impact(terms, facts)
         with self.connection.cursor() as cursor:
-            if before.subsidy_amount != after.subsidy_amount:
+            if not identity_reclassification and before.subsidy_amount != after.subsidy_amount:
                 cursor.execute("SELECT m.receipt_id FROM government_subsidy_period_members m "
                     "JOIN government_subsidy_period_entries e ON e.id=m.receipt_id "
                     "WHERE m.case_no=%s AND e.reversal_of_id IS NULL AND NOT EXISTS "
@@ -366,12 +383,24 @@ class MySqlPricingConfigurationRepository:
                 persist_historical_repricing(self.connection, plan, actor, reason, key)
                 return
             order = select_order(cursor, facts.case_no, lock=True)
+            if identity_reclassification and order["status"] == "訂單取消":
+                return
             finance, _ = load_calculable_client_finance_facts(cursor, order, lock=True)
             if finance is None:
                 raise ValueError("case_pricing_service_facts_required")
+            if identity_reclassification:
+                deposit_days = terms.deposit_service_days if terms.deposit_service_days is not None else 5
+                finance = replace(finance, payment_terms=replace(
+                    finance.payment_terms, deposit_service_days=min(deposit_days, len(finance.charge_days)),
+                ))
             candidate = build_client_finance_terms_candidate(finance, f"case-pricing:{event_id}")
             if candidate.blockers:
                 raise PricingConflict('full_subsidy_existing_financial_history_conflict')
+            if identity_reclassification:
+                second = next(stage for stage in candidate.stage_plans if stage.payment_stage.value == "second")
+                candidate = replace(candidate, payment_terms=replace(
+                    finance.payment_terms, second_payment_due_date=second.due_date,
+                ))
             persist_client_finance_terms_impact(cursor, ClientFinanceImpactPersistenceCommand(candidate,
                 IdempotencyKey(key), ActorContext(actor), reason, CorrelationId(key), "case-pricing", event_id))
         self._synchronize_payroll(facts.case_no, event_id, actor, reason, key)

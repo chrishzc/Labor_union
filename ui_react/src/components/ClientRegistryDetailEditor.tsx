@@ -14,7 +14,7 @@ import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
 import '../pages/ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '客戶備註（主檔）', service_type: '服務方式（排班參考）' };
+const profileLabels: Record<string, string> = { identity_status: '補助身分', name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', notes: '客戶備註（主檔）', admin_notes: '行政註記（客戶主檔）', service_type: '服務方式（排班參考）' };
 const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', refund_bank_code: '退款銀行及分行代碼（7碼）', refund_account_no: '退款帳號（文字，保留前導零）', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const careLabels: Record<string, string> = {
   dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
@@ -186,25 +186,26 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     return <section className="registry-editor" aria-label={title[section]}>
       <h3>{title[section]}</h3>
       <small>資料來源：{section === 'profile' ? '客戶主檔' : detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（無 BeClass 匯入紀錄）' : 'BeClass 有效修正資料；保留原始匯入內容'}</small>
-      {section === 'profile' && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div><div><dt>行政註記（客戶主檔，唯讀）</dt><dd>{display(detail.client.values.admin_notes)}</dd></div></dl>}
+      {section === 'profile' && !detail.client.field_capabilities.identity_status?.editable && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div></dl>}
       {section === 'beclass' && <><p>退款帳戶：{detail.beclass.status !== 'ready' ? '來源待確認' : detail.beclass.values?.refund_account_status === 'complete' ? '已登錄' : '待補齊'}</p>{!detail.beclass.full_refund_account_visible && <p>目前帳號：{detail.beclass.values?.refund_account_no ?? '待補齊'}</p>}<p>{!detail.beclass.full_refund_account_visible && '退款帳號顯示末四碼；更正時請完整輸入。'}缺少銀行或帳號時為待補，儲存不會更動既有退款快照。</p><p>生日（唯讀）：{display(detail.beclass.values?.birth_date)}</p></>}
       {unavailable ? <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，請先處理綁定異常。' : '此案件尚無可編輯的 BeClass 資料。'}</p> : <>
         {section === 'care' && <p className="registry-section-note">樓層費總額請在下方訂單條件登錄。</p>}
         <div className="registry-fields">{Object.entries(labels[section]).map(([field, label]) => {
           const value = drafts[section][field] ?? '';
           const capability = capabilities[field];
+          if (field === 'identity_status' && !capability?.editable) return null;
           const options = capability?.options;
           const disabled = pending || termsState.busy || capability?.editable === false;
           const id = `registry-${section === 'care' ? 'care' : owner(section)}-${field}`;
           const textAgreement = field === 'stair_floor_fee_mode';
           const control = options ? <select id={id} disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value)}>
-            <option value="" disabled>請選擇</option>{value && !options.includes(String(value)) && <option value={String(value)} disabled>{String(value)}（既有值，待修正）</option>}{options.map((option) => <option key={option}>{option}</option>)}
+            <option value="" disabled>請選擇</option>{value && !options.includes(String(value)) && <option value={String(value)} disabled>{String(value)}{field !== 'identity_status' && '（既有值，待修正）'}</option>}{options.map((option) => <option key={option}>{option}</option>)}
           </select> : typeof source(detail, section)[field] === 'boolean' && !textAgreement ? <select id={id} value={value === '' || value === null ? '' : String(value)} disabled={disabled} onChange={(event) => update(section, field, event.target.value === '' ? null : event.target.value === 'true')}><option value="">未登錄</option><option value="true">是</option><option value="false">否</option></select>
             : typeof source(detail, section)[field] === 'number' && !textAgreement ? <input id={id} type="number" disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value === '' ? null : Number(event.target.value))} />
-            : section === 'care' || ['notes', 'baby_info', 'admin_notes', 'reject_reason'].includes(field)
+            : section === 'care' || ['notes', 'admin_notes', 'reject_reason'].includes(field)
               ? <textarea id={id} disabled={disabled} rows={2} maxLength={field === 'reject_reason' ? 500 : 2000} value={textAgreement && typeof value !== 'string' ? display(value) : String(value)} onChange={(event) => update(section, field, event.target.value)} />
               : <input id={id} disabled={disabled} autoComplete={field === 'refund_account_no' ? 'off' : undefined} type={field === 'refund_account_no' && !detail.beclass.full_refund_account_visible ? 'password' : field === 'email' ? 'email' : field === 'due_month' ? 'date' : 'text'} maxLength={field === 'email' || field === 'service_type' ? 100 : undefined} value={String(value)} onChange={(event) => update(section, field, event.target.value)} />;
-          return <label key={field} htmlFor={id}>{label}{control}{capability?.editable === false && <small>{capability.reason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}{section === 'care' && detail.order_information.field_issues[field] && <small className="source-issue">來源內容無法判定，請核對後補登。</small>}</label>;
+          return <label key={field} htmlFor={id}>{label}{control}{capability?.editable === false && <small>{capability.reason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}{section === 'care' && detail.order_information.field_issues[field] && <small className="source-issue">來源內容無法判定，請核對後補登。</small>}{field === 'identity_status' && <small>儲存後會依一般市民身分重算客戶應付、月嫂薪資及補助。</small>}</label>;
         })}</div>
         <div className="registry-actions">
           <button type="button" disabled={pending || termsState.busy} onClick={() => { setDrafts((current) => ({ ...current, [section]: { ...source(detail, section) } })); setActions((current) => ({ ...current, [section]: idle() })); }}>取消變更</button>

@@ -24,7 +24,7 @@ class MySqlClientProfileRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id AS client_id,client_profile_version,name,gender,phone,email,city,address,"
-                "residence_type,delivery_type,baby_info,notes,due_month,reject_reason,service_type FROM clients WHERE id=%s" + suffix,
+                "residence_type,delivery_type,baby_info,notes,due_month,reject_reason,service_type,admin_notes,identity_status FROM clients WHERE id=%s" + suffix,
                 (client_id,),
             )
             return cursor.fetchone()
@@ -34,11 +34,45 @@ class MySqlClientProfileRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,c.client_profile_version,c.name,c.gender,c.phone,c.email,c.city,c.address,"
-                "c.residence_type,c.delivery_type,c.baby_info,c.notes,c.due_month,c.reject_reason,c.service_type FROM orders o "
+                "c.residence_type,c.delivery_type,c.baby_info,c.notes,c.due_month,c.reject_reason,c.service_type,c.admin_notes,"
+                "c.identity_status,o.status AS order_status,o.actual_start_date,o.actual_end_date FROM orders o "
                 "JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s" + suffix,
                 (case_no,),
             )
             return cursor.fetchone()
+
+    def prepare_identity_change(self, case_no: str, client_id: int, *, lock: bool):
+        from infrastructure.mysql.order_terms_read_model import select_order
+        from infrastructure.mysql.pricing_configuration_repository import (
+            MySqlPricingConfigurationRepository, citizen_reclassification_terms,
+        )
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT case_no FROM orders WHERE client_id=%s ORDER BY case_no LIMIT 2"
+                + (" FOR UPDATE" if lock else ""), (client_id,),
+            )
+            if len(cursor.fetchall()) != 1:
+                raise ValueError("profile_identity_shared_client_conflict")
+            order = select_order(cursor, case_no, lock=lock)
+            cursor.execute(
+                "SELECT case_no FROM client_payment_terms WHERE case_no=%s"
+                + (" FOR UPDATE" if lock else ""), (case_no,),
+            )
+            if cursor.fetchone() is None and order["pricing_override_event_id"] is None:
+                return None
+            terms = citizen_reclassification_terms(cursor, order, lock=lock)
+        pricing = MySqlPricingConfigurationRepository(self._connection)
+        return pricing.case(case_no, lock=lock), terms
+
+    def apply_identity_pricing(self, prepared, *, actor_id: str, reason: str, key: str):
+        from infrastructure.mysql.pricing_configuration_repository import MySqlPricingConfigurationRepository
+
+        if prepared is not None:
+            facts, terms = prepared
+            MySqlPricingConfigurationRepository(self._connection).save_case(
+                facts, terms, actor_id, reason, key, identity_reclassification=True,
+            )
 
     def load_request(self, request_id: int, *, for_update: bool = False) -> dict[str, Any] | None:
         suffix = " FOR UPDATE" if for_update else ""

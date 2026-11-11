@@ -128,7 +128,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
   </style>
 </head>
 <body>
-<div id="authLoading" class="loading-shell" role="status" aria-live="polite">正在確認工會人員身分與內部登入狀態…</div>
+<div id="authLoading" class="loading-shell" role="status" aria-live="polite">正在確認工會登入身分…</div>
 <main id="mobileAdminContent" class="hidden">
   <h1 id="title">工會手機管理</h1>
   <div class="surface-heading">
@@ -252,7 +252,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
         <section id="matchingOperation" class="hidden" aria-live="polite">
           <article class="card step-card">
             <div class="row"><strong id="matchingOperationTitle">媒合條件處理</strong><span class="pill">步驟 1 / 2</span></div>
-            <p class="muted">核對客戶更新後的條件並填入下列正式欄位。審核通過後，系統直接更新案件資料。</p>
+            <p class="muted">核對客戶提出的變更並填入下方欄位。審核通過後會直接更新案件。</p>
             <p id="matchingCustomerConditions"></p>
             <div id="matchingIssues"></div>
             <div class="field-grid">
@@ -303,7 +303,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     <div class="section-heading">
       <div>
         <h2>未完成訂單</h2>
-        <p class="muted">唯讀顯示目前階段與下一步。</p>
       </div>
       <button id="refreshOrderStatuses" class="quiet" type="button">重新整理</button>
     </div>

@@ -68,7 +68,7 @@
       "page_type": "bind",
       "enabled": true,
       "title": "客戶登記與身分綁定",
-      "subtitle": "請核對姓名與電話。已有完整登記資料者可綁定；尚未完成者將前往需求調查表單，送出後由工會審核。",
+      "subtitle": "請核對姓名與電話。已完成登記即可綁定；尚未完成者，請填寫需求調查，送出後由工會審核。",
       "submit_button": "確認綁定",
       "success_title": "綁定成功",
       "success_description": "綁定成功，專屬選單將稍後更新。",
@@ -101,7 +101,7 @@
         },
         {
           "id": "phone",
-          "label": "您的聯絡電話",
+          "label": "聯絡電話",
           "type": "phone",
           "required": true,
           "enabled": true,
@@ -155,7 +155,7 @@
         },
         {
           "id": "expected_date",
-          "label": "預產期（或已生產日期）",
+          "label": "預產期或實際生產日",
           "type": "date",
           "required": true,
           "enabled": true,
@@ -233,7 +233,7 @@
         },
         {
           "id": "expected_date",
-          "label": "預產期（或已生產日期）",
+          "label": "預產期或實際生產日",
           "type": "date",
           "required": true,
           "enabled": true,

@@ -68,6 +68,26 @@ def test_missing_explicit_birth_count_keeps_the_existing_rate_snapshot():
     assert len(cursor.statements) == 1
 
 
+def test_undated_client_rate_resolves_only_the_cases_bound_policy_version():
+    source = {
+        "identity_status": "補助市民", "start_date": None,
+        "effective_values_json": '{"multi_birth_count":"雙胞胎"}',
+    }
+    with pytest.raises(ValueError, match="planned_service_start_date_required"):
+        load_explicit_case_service_rate(_Cursor([source]), "CASE-NO-DATE")
+    cursor = _Cursor([source, ({
+        "policy_version": "bound-v1", "policy_kind": "twins", "hourly_rate_ntd": 450,
+    },)])
+    rate = load_explicit_case_service_rate(
+        cursor, "CASE-NO-DATE", lock=True, use_bound_policy_without_start=True,
+    )
+    assert (rate.policy_version, rate.hourly_rate_ntd) == ("bound-v1", 450)
+    statement, parameters = cursor.statements[1]
+    assert "policy.policy_version=snapshot.policy_version" in statement
+    assert "FOR UPDATE" in statement
+    assert parameters == ("CASE-NO-DATE", "twins")
+
+
 def test_overlapping_effective_rate_policies_fail_closed():
     cursor = _Cursor(
         [

@@ -31,7 +31,7 @@ describe('Account Management public mutation contract', () => {
     render(<AccountManagementPage />);
     await screen.findByText('root-user');
     fireEvent.click(screen.getByRole('button', { name: /強制登出/ }));
-    await waitFor(() => expect(screen.getByText('帳號操作已完成，清冊已重新整理。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳號已更新。')).toBeInTheDocument());
     expect(command).toHaveBeenCalledWith(2, expect.objectContaining({
       reason: '', expected_version: 2, idempotency_key: expect.stringMatching(/^account-/),
     }));

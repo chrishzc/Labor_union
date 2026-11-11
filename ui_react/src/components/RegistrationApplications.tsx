@@ -9,12 +9,21 @@ import type { RegistryEditState } from './ClientRegistryDetailEditor';
 import './RegistrationApplications.css';
 
 const fieldLabels: Record<string, string> = {
-  notes: '備註', line_id: 'LINE ID', baby_info: '寶寶資訊', service_time: '服務時段',
+  notes: '備註', line_id: 'LINE ID', baby_info: '胎數', service_time: '服務時段',
   service_type: '服務方式', delivery_type: '生產方式', residence_type: '居住型態',
   identity_status: '身分類別', service_start_date: '預計服務開始日',
 };
 
-type ManualCaseForm = Omit<ManualNonCitizenCaseInput, 'service_days'> & { service_days: number | '' };
+type ManualCaseForm = Omit<ManualNonCitizenCaseInput, 'service_days'> & {
+  service_days: number | '';
+  startTime: string;
+  endTime: string;
+};
+
+function clockMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
+}
 
 const defaultForm: ManualCaseForm = {
   name: '',
@@ -24,7 +33,9 @@ const defaultForm: ManualCaseForm = {
   service_start_date: '',
   service_end_date: '',
   service_days: 10,
-  service_time: '09:00-18:00 (8小時)',
+  service_time: '',
+  startTime: '',
+  endTime: '',
   service_type: '連續服務',
   delivery_type: '自然產',
   residence_type: '電梯大樓',
@@ -126,14 +137,19 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     });
   };
 
+  const serviceHours = Number(manualForm.service_time.match(/\(([48])小時\)$/)?.[1]);
+
   // Validate form fields before submitting
   const validateManualForm = (): string | null => {
     if (!manualForm.name.trim()) return '請輸入客戶姓名。';
     if (!manualForm.phone.trim()) return '請輸入連絡電話。';
     if (!manualForm.service_start_date) return '請選擇預計服務開始日。';
     if (!Number.isInteger(manualForm.service_days) || Number(manualForm.service_days) <= 0) return '服務天數必須為大於 0 的整數。';
-    if (!manualForm.service_time.trim()) return '請輸入服務時段。';
-    if (!manualForm.baby_info.trim()) return '請輸入寶寶資訊。';
+    if (!manualForm.service_time) return '請選擇服務時段。';
+    if (clockMinutes(manualForm.endTime) - clockMinutes(manualForm.startTime) !== serviceHours * 60) {
+      return `起訖時間差須等於所選的 ${serviceHours} 小時。`;
+    }
+    if (!manualForm.baby_info) return '請選擇胎數。';
     if (!manualForm.email.trim()) return '請輸入電子郵件。';
     if (!manualForm.refund_bank_code.trim()) return '請輸入退款銀行代號。';
     if (!manualForm.refund_account_no.trim()) return '請輸入退款銀行帳號。';
@@ -151,12 +167,14 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     setManualBusy(true); setManualError('');
 
     try {
+      const { startTime, endTime, ...fields } = manualForm;
       const receipt = await client.createManualNonCitizen({
-        ...manualForm,
+        ...fields,
         mode: 'new',
         name: manualForm.name.trim(),
         phone: manualForm.phone.trim(),
         service_days: Number(manualForm.service_days),
+        service_time: `${startTime}-${endTime} (${serviceHours}小時)`,
       });
       setShowManualModal(false);
       setManualForm(defaultForm);
@@ -193,7 +211,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
           disabled={busy}
           onClick={openManual}
         >
-          手動新增非市民新案
+          新增非市民案件
         </button>
         <button type="button" disabled={busy} onClick={() => void refresh()}>重新查詢</button>
       </div>
@@ -250,7 +268,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     {showManualModal && <div className="manual-case-overlay" role="dialog" aria-modal="true" aria-labelledby="manual-case-title">
       <div className="manual-case-modal">
         <header className="manual-case-modal__header">
-          <h3 id="manual-case-title">手動新增非市民新案</h3>
+          <h3 id="manual-case-title">新增非市民案件</h3>
           <button type="button" className="manual-case-modal__close" onClick={() => { if (!manualBusy) setShowManualModal(false); }}>✕</button>
         </header>
 
@@ -341,22 +359,35 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
 
               <label className="full-width">
                 <span className="required">服務時段</span>
-                <input
-                  type="text"
+                <select
                   required
-                  placeholder="例如 09:00-18:00 (8小時)"
                   value={manualForm.service_time}
-                  onChange={e => setManualForm(prev => ({ ...prev, service_time: e.target.value }))}
+                  onChange={e => {
+                    const serviceTime = e.currentTarget.value;
+                    setManualForm(prev => ({
+                      ...prev, service_time: serviceTime,
+                      startTime: serviceTime.slice(0, 5), endTime: serviceTime.slice(6, 11),
+                    }));
+                  }}
                   disabled={manualBusy}
-                />
-                <div className="preset-buttons">
-                  <span>常用範本：</span>
-                  <button type="button" onClick={() => setManualForm(prev => ({ ...prev, service_time: '09:00-18:00 (8小時)' }))}>8小時 (09-18)</button>
-                  <button type="button" onClick={() => setManualForm(prev => ({ ...prev, service_time: '08:00-17:00 (8小時)' }))}>8小時 (08-17)</button>
-                  <button type="button" onClick={() => setManualForm(prev => ({ ...prev, service_time: '09:00-13:00 (4小時)' }))}>4小時上午</button>
-                  <button type="button" onClick={() => setManualForm(prev => ({ ...prev, service_time: '13:00-17:00 (4小時)' }))}>4小時下午</button>
-                  <button type="button" onClick={() => setManualForm(prev => ({ ...prev, service_time: '20:00-08:00 (9小時次日)' }))}>9小時夜間</button>
-                </div>
+                >
+                  <option value="">請選擇服務時段</option>
+                  <option value="08:30-12:30 (4小時)">08:30–12:30（4 小時）</option>
+                  <option value="08:30-16:30 (8小時)">08:30–16:30（8 小時）</option>
+                  <option value="09:00-17:00 (8小時)">09:00–17:00（8 小時）</option>
+                  <option value="13:00-17:00 (4小時)">13:00–17:00（4 小時）</option>
+                </select>
+                <small className="hint">可調整起訖時間，時間差須等於所選時數。</small>
+              </label>
+              <label>
+                <span className="required">每日開始時間</span>
+                <input type="time" required value={manualForm.startTime} disabled={manualBusy || !manualForm.service_time}
+                  onChange={e => setManualForm(prev => ({ ...prev, startTime: e.target.value }))} />
+              </label>
+              <label>
+                <span className="required">每日結束時間</span>
+                <input type="time" required value={manualForm.endTime} disabled={manualBusy || !manualForm.service_time}
+                  onChange={e => setManualForm(prev => ({ ...prev, endTime: e.target.value }))} />
               </label>
 
               <label>
@@ -450,15 +481,17 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
             <h4>3. 其他資料</h4>
             <div className="manual-case-grid">
               <label>
-                <span className="required">寶寶資訊</span>
-                <input
-                  type="text"
+                <span className="required">胎數</span>
+                <select
                   required
-                  placeholder="例如 單胞胎"
-                  value={manualForm.baby_info ?? ''}
+                  value={manualForm.baby_info}
                   onChange={e => setManualForm(prev => ({ ...prev, baby_info: e.target.value }))}
                   disabled={manualBusy}
-                />
+                >
+                  <option value="">請選擇胎數</option>
+                  <option value="單胞胎">單胞胎</option>
+                  <option value="雙胞胎">雙胞胎</option>
+                </select>
               </label>
 
               <label>
@@ -529,6 +562,22 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
                   onChange={e => setManualForm(prev => ({ ...prev, refund_account_no: e.target.value }))}
                   disabled={manualBusy}
                 />
+              </label>
+
+              <label className="full-width">
+                <span>若服務期間遇到三節假日（端午、中秋、除夕、初一、初二），是否願意支付雙倍薪水？（選填）</span>
+                <select
+                  value={manualForm.holiday_double_pay ?? ''}
+                  onChange={e => {
+                    const answer = e.currentTarget.value;
+                    setManualForm(prev => ({ ...prev, holiday_double_pay: answer === '是' || answer === '否' ? answer : undefined }));
+                  }}
+                  disabled={manualBusy}
+                >
+                  <option value="">未填</option>
+                  <option value="是">是</option>
+                  <option value="否">否</option>
+                </select>
               </label>
 
               <label className="full-width">

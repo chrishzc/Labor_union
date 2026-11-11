@@ -33,7 +33,7 @@ function errorMessage(error: unknown, fallback: string): string {
   if (code.includes('UNAUTHENTICATED')) return '請先完成管理員登入後再操作。';
   if (code.includes('FORBIDDEN')) return '僅限最高權限管理員使用。請以具此權限的帳號登入。';
   if (code.includes('STALE') || code.includes('CONFLICT')) return '資料已更新，請重新整理後再操作。';
-  if (code.includes('UNAVAILABLE') || code.includes('NETWORK') || code.includes('TIMEOUT')) return '服務目前暫時無法使用，請稍後重試。';
+  if (code.includes('UNAVAILABLE') || code.includes('NETWORK') || code.includes('TIMEOUT')) return '服務暫時無法使用，請稍後再試。';
   return fallback;
 }
 
@@ -101,7 +101,7 @@ export const AccountManagementPage: React.FC = () => {
       setUsersState({ status: rows.length > 0 ? 'ready' : 'empty', data: rows, error: null });
     } catch (error) {
       if (generation !== usersGeneration.current || isAbortError(error)) return;
-      setUsersState({ status: 'error', data: null, error: errorMessage(error, '帳號清冊暫時無法取得，請稍後重試。') });
+      setUsersState({ status: 'error', data: null, error: errorMessage(error, '帳號列表暫時無法取得，請稍後重試。') });
     }
   }, []);
 
@@ -186,7 +186,7 @@ export const AccountManagementPage: React.FC = () => {
           className={`account-tab-btn ${activeTab === 'users' ? 'active' : ''}`}
           onClick={() => setActiveTab('users')}
         >
-          👥 1. 內部人員帳號清冊 {usersState.data ? `(${userRows.length})` : ''}
+          👥 1. 內部人員帳號列表 {usersState.data ? `(${userRows.length})` : ''}
         </button>
         <button
           type="button"
@@ -201,9 +201,9 @@ export const AccountManagementPage: React.FC = () => {
       </div>
 
       {activeTab === 'users' && (
-        <section aria-label="帳號清冊" data-surface-id="account.users.list">
+        <section aria-label="帳號列表" data-surface-id="account.users.list">
           <div className="account-query-panel">
-            <span>💡 帳號清冊顯示工作人員帳號、啟用狀態與管理權限；安全操作皆須填寫原因。</span>
+            <span>💡 帳號列表顯示工作人員帳號、啟用狀態與管理權限；安全操作皆須填寫原因。</span>
             <button
               type="button"
               className="account-secondary-btn"
@@ -302,22 +302,22 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {commandState.status === 'ready' && commandState.data && (
             <div className="account-query-panel" data-surface-id="account.command.receipt">
-              帳號操作已完成，清冊已重新整理。
+              帳號已更新。
             </div>
           )}
           {usersState.status === 'loading' && (
             <div className="account-query-state" data-surface-id="account.users.loading">
-              載入帳號清冊中…
+              載入帳號列表中…
             </div>
           )}
           {usersState.status === 'error' && (
             <div data-surface-id="account.users.error">
-              <QueryError message={usersState.error ?? '帳號清冊查詢失敗。'} onRetry={() => void loadUsers()} />
+              <QueryError message={usersState.error ?? '帳號列表查詢失敗。'} onRetry={() => void loadUsers()} />
             </div>
           )}
           {usersState.status === 'empty' && (
             <div className="account-query-state" data-surface-id="account.users.empty">
-              目前沒有可顯示的帳號清冊。
+              目前沒有可顯示的帳號列表。
             </div>
           )}
           {usersState.status === 'ready' && (
@@ -386,7 +386,7 @@ export const AccountManagementPage: React.FC = () => {
           <div className="account-step-grid">
             <div><strong>步驟 1</strong><span>輸入帳號與密碼。</span></div>
             <div><strong>步驟 2</strong><span>輸入手機驗證器產生的六位數動態碼。</span></div>
-            <div><strong>管理方式</strong><span>首次登入時依畫面完成設定；需要重設時，請回帳號清冊使用「重設 MFA」。</span></div>
+            <div><strong>管理方式</strong><span>首次登入時依畫面完成設定；需要重設時，請回帳號列表使用「重設 MFA」。</span></div>
           </div>
         </section>
       )}

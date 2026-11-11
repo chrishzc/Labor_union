@@ -80,7 +80,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     expect(screen.getByLabelText('帳號 (Username)')).toBeInTheDocument();
     expect(screen.getByLabelText('密碼 (Password)')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /下一步：進行雙重驗證/ })
+      screen.getByRole('button', { name: /下一步：雙重驗證/ })
     ).toBeInTheDocument();
     expect(screen.getByText(/記住帳號/)).toBeInTheDocument();
     expect(screen.queryByText(/忘記密碼？/)).not.toBeInTheDocument();
@@ -95,7 +95,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     const usernameInput = screen.getByLabelText('帳號 (Username)');
     fireEvent.change(usernameInput, { target: { value: '' } });
 
-    const submitBtn = screen.getByRole('button', { name: /下一步：進行雙重驗證/ });
+    const submitBtn = screen.getByRole('button', { name: /下一步：雙重驗證/ });
     fireEvent.click(submitBtn);
 
     expect(screen.getByText(/請輸入帳號/)).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(usernameInput, { target: { value: 'admin_user' } });
     fireEvent.change(passwordInput, { target: { value: '' } });
 
-    const submitBtn = screen.getByRole('button', { name: /下一步：進行雙重驗證/ });
+    const submitBtn = screen.getByRole('button', { name: /下一步：雙重驗證/ });
     fireEvent.click(submitBtn);
 
     expect(screen.getByText(/請輸入密碼/)).toBeInTheDocument();
@@ -135,7 +135,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(usernameInput, { target: { value: '   ' } });
     fireEvent.change(passwordInput, { target: { value: '   ' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     expect(screen.getByText(/請輸入帳號/)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -157,16 +157,16 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(usernameInput, { target: { value: 'admin_test' } });
     fireEvent.change(passwordInput, { target: { value: 'ValidPassword123!' } });
 
-    const submitBtn = screen.getByRole('button', { name: /下一步：進行雙重驗證/ });
+    const submitBtn = screen.getByRole('button', { name: /下一步：雙重驗證/ });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證 \(2FA\)/ })).toBeInTheDocument();
     });
 
-    expect(screen.getByText('請開啟 Authenticator 隨身驗證器，輸入 6 位動態碼')).toBeInTheDocument();
+    expect(screen.getByText('開啟驗證器，輸入 6 位動態碼。')).toBeInTheDocument();
     expect(document.getElementById('totp-code')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /驗證並登入系統/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /驗證並登入/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /返回重新輸入帳密/ })).toBeInTheDocument();
 
     // Verify Stage 1 request was sent to correct endpoint
@@ -195,7 +195,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'secret' } });
 
-    const submitBtn = screen.getByRole('button', { name: /下一步：進行雙重驗證/ });
+    const submitBtn = screen.getByRole('button', { name: /下一步：雙重驗證/ });
     fireEvent.click(submitBtn);
 
     expect(screen.getByRole('button', { name: '處理中...' })).toBeDisabled();
@@ -229,7 +229,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'wrong_user' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'wrong_pass' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/帳號或密碼錯誤/)).toBeInTheDocument();
@@ -256,7 +256,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'unbound_admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass123' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(
@@ -293,7 +293,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'rate_limited_user' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass123' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/登入嘗試過於頻繁，請稍後再試/)).toBeInTheDocument();
@@ -317,7 +317,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/系統驗證服務暫時無法使用，請稍後再試/)).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/網路連線異常，請檢查網路後重試/)).toBeInTheDocument();
@@ -351,7 +351,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -363,7 +363,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy;
 
-    const verifyBtn = screen.getByRole('button', { name: /驗證並登入系統/ });
+    const verifyBtn = screen.getByRole('button', { name: /驗證並登入/ });
     fireEvent.click(verifyBtn);
 
     expect(screen.getByText(/請完整輸入 6 位數 TOTP 動態安全碼/)).toBeInTheDocument();
@@ -375,7 +375,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     const verify = vi.spyOn(sessionClient, 'verifyPasswordChallenge');
     render(<LoginPage />);
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
     const input = await screen.findByLabelText('六位數驗證碼');
     expect(screen.getAllByRole('textbox', { name: '六位數驗證碼' })).toHaveLength(1);
     input.focus();
@@ -403,7 +403,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -445,7 +445,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     // Stage 1
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin_test' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'ValidPassword123!' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -454,7 +454,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     // Stage 2: Fill 6 digits
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
 
-    const verifyBtn = screen.getByRole('button', { name: /驗證並登入系統/ });
+    const verifyBtn = screen.getByRole('button', { name: /驗證並登入/ });
     fireEvent.click(verifyBtn);
 
     await waitFor(() => {
@@ -490,7 +490,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -498,7 +498,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '111111' } });
 
-    const verifyBtn = screen.getByRole('button', { name: /驗證並登入系統/ });
+    const verifyBtn = screen.getByRole('button', { name: /驗證並登入/ });
     fireEvent.click(verifyBtn);
 
     expect(screen.getByRole('button', { name: '驗證中...' })).toBeDisabled();
@@ -541,7 +541,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -549,7 +549,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '888888' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/驗證碼錯誤或無效/)).toBeInTheDocument();
@@ -562,7 +562,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     expect(screen.getByLabelText('六位數驗證碼')).toHaveValue('');
   });
 
-  it('Stage 2 錯誤處理：Challenge 逾期應自動退回 Stage 1 並提示「驗證階段已過期，請重新輸入帳號密碼」', async () => {
+  it('Stage 2 錯誤處理：Challenge 逾期應自動退回 Stage 1 並提示「驗證已逾時，請重新輸入帳號密碼」', async () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('/verify')) {
@@ -592,7 +592,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin_expired' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -600,11 +600,11 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '111111' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: '月子工會管理系統' })).toBeInTheDocument();
-      expect(screen.getByText(/驗證階段已過期，請重新輸入帳號密碼/)).toBeInTheDocument();
+      expect(screen.getByText(/驗證已逾時，請重新輸入帳號密碼/)).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText('帳號 (Username)') as HTMLInputElement;
@@ -633,7 +633,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -644,10 +644,10 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy;
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     expect(screen.getByRole('heading', { name: '月子工會管理系統' })).toBeInTheDocument();
-    expect(screen.getByText(/驗證階段已過期，請重新輸入帳號密碼/)).toBeInTheDocument();
+    expect(screen.getByText(/驗證已逾時，請重新輸入帳號密碼/)).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -675,7 +675,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -683,7 +683,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '555555' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/驗證嘗試過於頻繁，請稍後再試/)).toBeInTheDocument();
@@ -704,7 +704,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
 
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'custom_admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'secret' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -746,7 +746,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     // Stage 1
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin_test' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'ValidPassword123!' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
@@ -755,7 +755,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     // Stage 2
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     await waitFor(() => {
       expect(sessionClient.isAuthenticated()).toBe(true);

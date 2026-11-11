@@ -55,7 +55,7 @@ export const LegacyVirtualAccountImport: React.FC = () => {
 
 
   return <section className="registry-editor legacy-va-import">
-    <h2>匯入舊流程虛擬帳號</h2>
+    <h2>匯入舊虛擬帳號</h2>
     <p>只匯入能依市府訂單號碼找到既有案件的標準虛擬帳號；其餘資料直接略過。</p>
     <label className="legacy-va-file">選擇虛擬帳號對照表
       <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={(event) => selectFile(event.target.files?.[0] ?? null)} />

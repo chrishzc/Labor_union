@@ -94,12 +94,12 @@ it.each(['case','person','request'] as const)('完成回應的 %s 不符時不�
  const command=installCommand(result);const onCompleted=vi.fn().mockResolvedValue(undefined);
  render(<ServiceStartSubstituteWorkbench caseNo='CASE' onCompleted={onCompleted}/>);
  fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
- expect(await screen.findByRole('alert')).toHaveTextContent('排班結果尚未完成正式回讀。');
+ expect(await screen.findByRole('alert')).toHaveTextContent('尚未確認最新排班結果。');
  expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();
  expect(onCompleted).not.toHaveBeenCalled();expect(command).toHaveBeenCalledOnce();
  expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
- expect(screen.getByRole('button',{name:'重新讀取排班結果'})).toBeEnabled();
+ expect(screen.getByRole('button',{name:'查詢排班結果'})).toBeEnabled();
 });
 it.each(['person','date','version'] as const)('正式 owner 的 %s 與完成回應不同時不可宣告完成',async(kind)=>{
  const plan=await ordersQueryClient.getAssignmentPlan('CASE');vi.mocked(ordersQueryClient.getAssignmentPlan).mockClear();
@@ -110,7 +110,7 @@ it.each(['person','date','version'] as const)('正式 owner 的 %s 與完成回�
  installCommand();const onCompleted=vi.fn().mockResolvedValue(undefined);
  render(<ServiceStartSubstituteWorkbench onCompleted={onCompleted}/>);
  fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
- expect(await screen.findByRole('alert')).toHaveTextContent('排班結果尚未完成正式回讀。');
+ expect(await screen.findByRole('alert')).toHaveTextContent('尚未確認最新排班結果。');
  expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();expect(onCompleted).not.toHaveBeenCalled();
  expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledOnce();
 });
@@ -123,7 +123,7 @@ it.each([false,true])('收據後回讀失敗，重新開頁 %s 也只重新讀�
  fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
  await screen.findByRole('alert');expect(onCompleted).not.toHaveBeenCalled();
  if(remount){view.unmount();vi.mocked(serviceStartClient.todos).mockResolvedValue({items:[],total:0,page:1,page_size:25});view=render(<ServiceStartSubstituteWorkbench caseNo='CASE' onCompleted={onCompleted}/>);}
- const retry=await screen.findByRole('button',{name:'重新讀取排班結果'});fireEvent.click(retry);
+ const retry=await screen.findByRole('button',{name:'查詢排班結果'});fireEvent.click(retry);
  await waitFor(()=>expect(onCompleted).toHaveBeenCalledOnce());
  expect(await screen.findByText('正式排班已完成')).toBeInTheDocument();
  expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledTimes(remount?2:1);
@@ -151,10 +151,10 @@ it('結果未明後一般查詢讀到完成結果，即使正式回讀失敗也�
  fireEvent.click(await screen.findByRole('button',{name:'儲存並更新排班'}));
  await screen.findByRole('button',{name:'確認原操作結果'});
  fireEvent.click(screen.getByRole('button',{name:'重新查詢加入狀態'}));
- await screen.findByText('排班結果尚未完成正式回讀。');
+ await screen.findByText('尚未確認最新排班結果。');
  expect(onCompleted).not.toHaveBeenCalled();
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'重新讀取排班結果'}));
+ fireEvent.click(screen.getByRole('button',{name:'查詢排班結果'}));
  await screen.findByText('正式排班已完成');
  expect(command).toHaveBeenCalledOnce();expect(detail).toHaveBeenCalledTimes(2);
  expect(onCompleted).toHaveBeenCalledOnce();
@@ -169,9 +169,9 @@ it('重新開頁查到完成結果時將原未明命令轉為只讀恢復',async
  const command=vi.spyOn(serviceStartClient,'command').mockRejectedValue(new Error('must not repeat'));
  vi.mocked(ordersQueryClient.getAssignmentPlan).mockRejectedValue(new Error('readback unavailable'));
  render(<ServiceStartSubstituteWorkbench/>);
- await screen.findByText('排班結果尚未完成正式回讀。');
+ await screen.findByText('尚未確認最新排班結果。');
  expect(JSON.parse(sessionStorage.getItem('service-start-command:8')!).observeOnly).toBe(true);
- expect(screen.getByRole('button',{name:'重新讀取排班結果'})).toBeEnabled();
+ expect(screen.getByRole('button',{name:'查詢排班結果'})).toBeEnabled();
  expect(screen.queryByRole('button',{name:'確認原操作結果'})).not.toBeInTheDocument();
  expect(command).not.toHaveBeenCalled();
 });

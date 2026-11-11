@@ -643,6 +643,32 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
     assert values["virtual_account"] == "99781699114999"
 
 
+@pytest.mark.parametrize(("start_date", "service_days", "code"), [
+    (None, 8, "order_terms_start_date_required"),
+    (date(2026, 10, 1), None, "order_terms_service_days_required"),
+])
+def test_registry_finance_reports_missing_planned_terms_without_failing_detail(
+    monkeypatch, start_date, service_days, code,
+):
+    from infrastructure.mysql import order_terms_read_model
+
+    order = {
+        "case_no": "CASE-001", "status": "待補件",
+        "start_date": start_date, "service_days": service_days,
+    }
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.select_order",
+        lambda *_args, **_kwargs: order,
+    )
+    monkeypatch.setattr(order_terms_read_model, "select_scheduling_aggregate", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(order_terms_read_model, "_select_generation", lambda *_args: None)
+    monkeypatch.setattr(order_terms_read_model, "_select_schedules", lambda *_args: ())
+    monkeypatch.setattr(order_terms_read_model, "_contract_charge_days", lambda *_args: ())
+    monkeypatch.setattr(order_terms_read_model, "_select_confirmed_service_dates", lambda *_args: (None, ()))
+
+    assert _finance_values(_SqlConnection([]), "CASE-001") == ("not_ready", code, None)
+
+
 def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch):
     facts = ClientFinanceTermsFacts(
         case_no="A115001", account_version=0, service_hours_per_day=8,

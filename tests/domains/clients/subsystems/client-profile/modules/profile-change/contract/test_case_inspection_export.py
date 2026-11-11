@@ -23,7 +23,7 @@ from subsystems.client_profile.order_accounting_export import OrderAccountingExp
 
 def overview(case_no="00115000001"):
     values = {field.name: None for field in fields(OrderAccountingExportRow)}
-    values.update(case_no=case_no, name="=1+1", is_twins=False, imported_virtual_accounts=(),
+    values.update(case_no=case_no, name="=1+1", multi_birth_count=None, imported_virtual_accounts=(),
                   received_total_ntd=300, planned_start_date=date(2026, 10, 1))
     return OrderAccountingExportRow(**values)
 

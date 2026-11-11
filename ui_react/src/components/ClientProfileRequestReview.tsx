@@ -6,7 +6,7 @@ import { useUnsavedDraft } from './UnsavedChanges';
 import './TaskOperation.css';
 export const profileSchema=z.object({request_id:z.number(),client_id:z.number(),status:z.string(),request_version:z.number(),profile_version:z.number(),
   before:z.record(z.string(),z.string()),requested:z.record(z.string(),z.string()),reason:z.string()}).strict();
-const profileLabels:Record<string,string>={name:'姓名',gender:'性別',phone:'電話',email:'電子郵件',city:'縣市',address:'地址',residence_type:'居住型態',delivery_type:'生產方式',baby_info:'寶寶資訊',notes:'備註',due_month:'預計日期',reject_reason:'不適合原因',service_type:'服務方式'};
+const profileLabels:Record<string,string>={name:'姓名',gender:'性別',phone:'電話',email:'電子郵件',city:'縣市',address:'地址',residence_type:'居住型態',delivery_type:'生產方式',baby_info:'寶寶資訊（歷史欄位）',notes:'備註',due_month:'預計日期',reject_reason:'不適合原因',service_type:'服務方式'};
 export function ClientProfileRequestReview({id,onCommitted}:{id:number;onCommitted:()=>Promise<void>}) {
   const [view,setView]=useState<z.infer<typeof profileSchema>|null>(null);
   const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');

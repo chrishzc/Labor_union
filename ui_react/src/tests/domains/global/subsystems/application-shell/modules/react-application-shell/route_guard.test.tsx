@@ -131,7 +131,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     // Stage 1
     fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'secret' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    fireEvent.click(screen.getByRole('button', { name: /下一步：雙重驗證/ }));
 
     // Stage 2
     await waitFor(() => {
@@ -140,7 +140,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '999999' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
+    fireEvent.click(screen.getByRole('button', { name: /驗證並登入/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '營運作業' })).toBeInTheDocument();
@@ -272,7 +272,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     await act(async () => {
       fireEvent.click(logoutBtn);
     });
-    expect(screen.getByRole('dialog', { name: '確定要登出系統嗎？' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '要登出嗎？' })).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '確認登出' }));
     });

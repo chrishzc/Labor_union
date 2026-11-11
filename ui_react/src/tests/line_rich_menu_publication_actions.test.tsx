@@ -90,7 +90,7 @@ describe('Rich Menu publication actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '發布至 LINE' }));
 
     await screen.findByText('選單發布：已排入');
-    expect(screen.getByText(/尚未代表 LINE 平台已完成發布/)).toBeInTheDocument();
+    expect(screen.getByText(/已送出發布，等待 LINE 完成/)).toBeInTheDocument();
     expect(publish).toHaveBeenCalledTimes(1);
     const payload = publish.mock.calls[0][1];
     expect(payload).toMatchObject({
@@ -178,7 +178,7 @@ describe('Rich Menu publication actions', () => {
         client={client}
       />
     );
-    expect(screen.queryByRole('button', { name: '重新排入發布' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重試發布' })).not.toBeInTheDocument();
 
     rerender(
       <LineRichMenuPublicationActions
@@ -197,12 +197,12 @@ describe('Rich Menu publication actions', () => {
     expect(screen.queryByText(/發布紀錄 #23/)).not.toBeInTheDocument();
     expect(screen.queryByText(/customer-menu/)).not.toBeInTheDocument();
     expect(retry).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '重新排入發布' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重試發布' })).toBeEnabled();
     fireEvent.change(screen.getByRole('textbox', { name: '重試原因（選填）' }), {
       target: { value: '確認 provider 暫時性失敗已排除' },
     });
     expect(screen.queryByRole('checkbox', { name: '我已確認此紀錄為發布可重試失敗' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重新排入發布' }));
+    fireEvent.click(screen.getByRole('button', { name: '重試發布' }));
 
     await screen.findByText('選單發布：已排入');
     expect(retry).toHaveBeenCalledTimes(1);

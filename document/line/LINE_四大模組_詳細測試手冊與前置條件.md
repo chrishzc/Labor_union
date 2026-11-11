@@ -368,14 +368,14 @@ LIFF 使用 `liff.getIDToken()`；不得由前端任意指定真實 LINE User ID
 
 ### Agent 前置
 
-- 確認 `register.html` 支援 Email、姓名、電話、地址、服務天數等必填防呆檢核。
+- 確認 `register.html`（含 `/line-registration` 與 `/line-non-citizen-registration`）支援 Email、姓名、電話、地址、服務天數、**胎數（單胞胎／雙胞胎必填二選一）**等防呆檢核。
 - 支援一鍵直接送出（背景自動完成 Preview ➔ Apply，免去手動二段確認）。
 
 ### 手機操作
 
-1. 從 M1-01 分支進入 `/line-registration`。
-2. **防呆檢核測試**：故意留空 Email 或輸入錯誤手機/Email 格式 ➔ 確認 UI 即時紅字提示阻擋。
-3. **正確填寫**：填寫完整資料（Email 必填、姓名、電話、地址等）並完成需求調查。
+1. 從 M1-01 分支進入 `/line-registration`（或非市民入口 `/line-non-citizen-registration`）。
+2. **防呆檢核測試**：故意留空 Email、未選胎數（單胞胎／雙胞胎），或輸入錯誤手機/Email 格式 ➔ 確認 UI 即時紅字提示阻擋。
+3. **正確填寫**：填寫完整資料（Email 必填、姓名、電話、地址、必選單胞胎或雙胞胎等）並完成需求調查。
 4. **一鍵送出**：點擊「送出需求調查表」➔ 系統背景自動完成 Preview ➔ Apply 交易，直接顯示成功畫面！
 
 ### Current API

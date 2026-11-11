@@ -43,7 +43,7 @@ def test_candidate_information_works_without_assignment_or_beclass_and_binds_con
         "服務方式",
         "希望服務天數",
         "下廚需求",
-        "寶寶資訊",
+        "胎數",
     ]
     assert first_rows["每日服務時數"] == "8"
     assert first_rows["下廚需求"] == "不需要下廚"

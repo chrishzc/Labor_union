@@ -87,7 +87,7 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
           {required === null ? <button className="login-submit-btn" onClick={() => {
             setChecking(true); setError(''); setRetry(value => value + 1);
           }}>重新確認</button> : <>
-            <p className="login-desc-subtitle">請設定帳號與密碼，接著立即綁定 TOTP 驗證器。完成綁定並保存復原碼後，再重新登入。</p>
+            <p className="login-desc-subtitle">建立帳號後，請綁定 TOTP 驗證器並保存復原碼，再重新登入。</p>
             <form onSubmit={submit}>
               <fieldset disabled={saving}>
                 <div className="login-input-group">

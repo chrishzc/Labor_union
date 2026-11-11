@@ -85,7 +85,7 @@ export function RegistryDeletionPanel({ kind, identity, label, disabled = false,
     {phase === 'checking' && <p role="status">正在檢查簽約狀態…</p>}
     {phase === 'ready' && preview && <>
       {preview.blockers.length > 0 ? <><p role="alert">此筆資料不可刪除：</p><ul>{preview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></>
-        : <><p>目前尚無月嫂或客戶簽回。確認連同關聯資料永久刪除「{label}」？</p><button type="button" disabled={disabled} onClick={() => requestLeave(() => { void apply(); })}>確認永久刪除</button></>}
+        : <><p>月嫂與客戶均未簽回。要永久刪除「{label}」及其關聯資料嗎？</p><button type="button" disabled={disabled} onClick={() => requestLeave(() => { void apply(); })}>確認永久刪除</button></>}
       <button type="button" disabled={disabled} onClick={() => { setPreview(null); setPhase('idle'); }}>取消</button>
     </>}
     {phase === 'pending' && <p role="status">正在確認刪除結果…</p>}

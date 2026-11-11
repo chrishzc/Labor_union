@@ -69,7 +69,7 @@ export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommi
 
   return <section className="registry-editor" aria-label="服務安排與月嫂">
     <h3>服務安排與月嫂</h3>
-    <small>{historicalOrder ? '已保存的歷史服務指派' : '目前正式指派'}</small>
+    <small>{historicalOrder ? '已保存的歷史服務指派' : '已指派月嫂'}</small>
     {loading && <p role="status">正在讀取服務月嫂…</p>}
     {error && <p role="alert">服務月嫂資料暫時無法讀取：{error}</p>}
     {plan && (plan.assignments.length === 0 ? <p>尚未建立正式指派。</p> : <div className="registry-staff-segments">{plan.assignments.map((segment) => {

@@ -301,7 +301,7 @@ export const FinancePage: React.FC = () => {
         previewFingerprint: checked.preview_fingerprint,
       });
     } catch (error) {
-      setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認，請按「以原操作確認匯入結果」。') });
+      setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認。請按「以原操作確認匯入結果」。') });
       setReload(value => value + 1);
     }
   };
@@ -341,12 +341,12 @@ export const FinancePage: React.FC = () => {
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
       }
       if (current('batch-outcome', request.sequence, request.controller)) {
-        setBatchOutcome({ kind: 'error', message: '正式銷帳仍在處理中；可重新查詢結果，不需重複上傳。' });
+        setBatchOutcome({ kind: 'error', message: '核銷中，請稍後查詢結果。請勿重複上傳。' });
         setReload((value) => value + 1);
       }
     } catch (error) {
       if (current('batch-outcome', request.sequence, request.controller)) {
-        setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
+        setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '無法查詢匯入結果，請稍後再查。') });
         setReload((value) => value + 1);
       }
     }
@@ -374,8 +374,8 @@ export const FinancePage: React.FC = () => {
     <div data-surface-id="finance.page">
       <ManagementPageHeader
         className="finance-page-header"
-        title="帳務工作台"
-        description="四大核心工作區：案件帳務、銀行對帳、政府補助清單、每月帳務。"
+        title="帳務中心"
+        description="查看案件帳務、銀行對帳、政府補助及每月帳務。"
       >
         {entry.fromWorkbench && entry.caseNo && (
           <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>

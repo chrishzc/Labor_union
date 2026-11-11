@@ -583,7 +583,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(await screen.findByText('目前沒有已正式排班且尚未服務完成的案件。')).toBeInTheDocument();
+    expect(await screen.findByText('目前沒有已排班且服務未完成的案件。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());

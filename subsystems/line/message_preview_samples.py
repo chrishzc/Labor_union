@@ -32,7 +32,7 @@ VALUES = {
 LABELS = {
     "case_no": "案件編號", "name": "客戶姓名", "client_name": "客戶姓名", "start_date": "服務開始日",
     "end_date": "服務結束日", "planned_start_date": "預計服務開始日", "city": "服務縣市",
-    "service_type": "服務方式", "service_time": "服務時段", "baby_info": "寶寶資訊", "residence_type": "居住型態",
+    "service_type": "服務方式", "service_time": "服務時段", "multi_birth_count": "胎數", "residence_type": "居住型態",
     "staff_name": "月嫂姓名", "caregiver_name": "月嫂姓名", "service_date": "服務日期",
     "url": "服務申請連結", "bind_url": "身分綁定連結", "first_payment_amount": "第一期款金額",
     "first_payment_status": "第一期款狀態", "first_payment_due_date": "第一期款期限",
@@ -57,7 +57,7 @@ ORDER_FACTS = {
     "alcohol_ratio": "不加酒（範例）", "cooking_oil_type": "橄欖油（範例）", "maternal_allergy": "無（範例）",
     "special_care_notes": "依需求確認（範例）", "meal_preferences": "清淡飲食（範例）", "cooking_tools": "瓦斯爐、電鍋（範例）",
     "bath_water_prep": "家人協助（範例）", "breastfeeding_method": "母乳（範例）",
-    "multi_birth_count": 1, "stair_floor_fee_mode": "無（範例）", "parking_space_provided": "有（範例）", "other_babies_present": "無（範例）",
+    "multi_birth_count": "單胞胎", "stair_floor_fee_mode": "無（範例）", "parking_space_provided": "有（範例）", "other_babies_present": "無（範例）",
 }
 
 
@@ -135,7 +135,7 @@ def sample_bindings(descriptor, template, content, rendered_text):
             keys.extend((*WEEKLY, "resume"))
             values["resume"] = "範例履歷 PDF（僅顯示按鈕，不提供檔案或下載連結）"
     elif key in {"card-caregiver-information", "card-caregiver-information-2"}:
-        keys.extend(INFO_1 if key == "card-caregiver-information" else ("case_no", "start_date", "end_date", "city", "service_time", "baby_info", "residence_type"))
+        keys.extend(INFO_1 if key == "card-caregiver-information" else ("case_no", "start_date", "end_date", "city", "service_time", "multi_birth_count", "residence_type"))
     elif key.startswith("card-candidate-information-"):
         keys.append("case_no")
     elif descriptor.allows_draft:

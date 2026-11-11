@@ -22,7 +22,7 @@ export function ClientProfileRequestWorkbench({requestId}:{requestId?:string}) {
       .catch(e=>{if(!abort.signal.aborted)setError(notificationFailure(e));});return()=>abort.abort();
   },[page,reload]);
   return <section className="task-operation-workspace" aria-label="客戶資料異動作業">
-    <header><h2>客戶資料異動審核</h2><button className="np-button" onClick={()=>requestLeave(()=>{void refresh();})}>重新查詢</button></header>
+    <header><h2>客戶資料修改審核</h2><button className="np-button" onClick={()=>requestLeave(()=>{void refresh();})}>重新查詢</button></header>
     {invalid?<p role="alert">申請編號無效，請從通知事項重新開啟。</p>:<>
       {error && <p role="alert">{error}</p>}{!result && !error && <p role="status">正在查詢資料異動…</p>}
       {result && <><p>{result.total} 筆待審核申請</p><div className="task-operation-selector">{result.items.map(item=><button className="np-button" key={item.request_id} aria-pressed={selected===item.request_id} onClick={()=>requestLeave(()=>{setSelected(item.request_id);const params=new URLSearchParams(window.location.hash.split('?')[1]);params.set('request',String(item.request_id));window.history.replaceState(null,'',`#clients?${params}`);})}>申請 #{item.request_id} · 客戶 #{item.client_id}</button>)}</div>

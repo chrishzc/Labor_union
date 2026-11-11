@@ -6,7 +6,7 @@
 
 ## Implementation
 - `ui_react/src/components/ClientRegistryAccountingSummary.tsx` — 唯讀組合原 finance typed case Query，歷史辨識與人工設定分開。
-- 客戶身分及行政註記／BeClass 生日／整案日期為唯讀；退款欄位沿 BeClass correction writer，名冊表格使用可聚焦的有界捲動區。
+- 客戶補助身分限服務開始前由補助市民或原住民改一般市民，沿既有帳務計價 writer 同交易重算；BeClass 生日／整案日期為唯讀；客戶主檔行政註記沿管理端 Client Profile Preview／Apply，可清空；退款欄位沿 BeClass correction writer，名冊表格使用可聚焦的有界捲動區。
 - `ui_react/src/components/ClientProfileRequestWorkbench.tsx`、`ui_react/src/components/ClientProfileRequestReview.tsx` — 待審核清單與獨立單筆 Query；核准／退回仍用原 Preview／Apply、版本及冪等識別。名冊 `tab=applications&registration=<id>` 開啟指定需求申請，`tab=profile-requests&request=<id>` 開啟資料異動；不依賴清單第一頁，通知頁不再提供審核操作。
 - `domains/clients/profile.py`
 - `subsystems/client_profile/`

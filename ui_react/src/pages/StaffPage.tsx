@@ -269,7 +269,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
         reason: reason.trim(),
       }, { idempotencyKey: nextIntentKey('staff-case-preference-manual'), signal: controller.signal });
       if (epoch !== loadEpoch.current) return;
-      if (await load()) { setStatus('已儲存並重新查詢服務偏好。'); await onUpdated?.(); }
+      if (await load()) { setStatus('服務偏好已儲存。'); await onUpdated?.(); }
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
@@ -293,7 +293,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     <p>原登錄內容保留，供查閱，不列入配對條件。</p>
     {snapshot ? <dl className="staff-imported-service-grid">{IMPORTED_SERVICE_KEYS.map(key => <div key={key}>
       <dt>{MANUAL_RELATION_LABELS[key]}</dt><dd>{displayRelations(snapshot.after[key])}</dd>
-    </div>)}</dl> : <p>{phase === 'loading' ? '正在載入匯入服務資訊…' : '匯入服務資訊尚未取得，請重新查詢。'}</p>}
+    </div>)}</dl> : <p>{phase === 'loading' ? '正在載入匯入服務資訊…' : '無法載入匯入的服務資料，請重新查詢。'}</p>}
   </section>;
 
   return <>
@@ -783,7 +783,7 @@ export const StaffPage: React.FC = () => {
             phase: observedClosedPause ? 'observed' : 'observation_failed',
             message: observedClosedPause
               ? '已觀察 server 封閉暫停期間'
-              : '變更已受理，但重新查詢尚未看到同一筆暫停期間已結束。',
+              : '已受理，尚未確認暫停接案已結束。',
           }));
           if (observedClosedPause) void refreshQualificationSummary(currentStaffId, controller.signal, generation);
           return;
@@ -1345,7 +1345,7 @@ export const StaffPage: React.FC = () => {
             {/* 完整資格主檔：個資、履歷、銀行與接案條件 */}
               <section className="staff-drawer-section" data-surface-id="staff.qualification-master" aria-label="完整資格主檔">
                 <h2 className="staff-management-title">📋 完整資格主檔</h2>
-                <p>各區分別儲存。請先儲存本區變更，再修改下一區。</p>
+                <p>每區須單獨儲存。存好本區再修改下一區。</p>
                 {/* 基本資料摘要卡片 */}
                 <div style={{ background: '#fffdfc', border: '1px solid #dec0b6', borderRadius: '12px', padding: '16px', marginBottom: '18px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1446,7 +1446,7 @@ export const StaffPage: React.FC = () => {
                     <div>
                       <p className="staff-workbench-kicker">查詢 → 儲存</p>
                       <h2 className="staff-workbench-title">📇 人事任職狀態與異動辦理</h2>
-                      <p className="staff-workbench-desc">任職狀態與生效時間以正式人事資料為準，點擊「辦理異動」進行退役或復職登記。</p>
+                      <p className="staff-workbench-desc">選擇退役或復職，再填生效日。</p>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                       <span className={`staff-unavailable-pill ${lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? 'retired' : 'active'}`}>
@@ -1476,13 +1476,12 @@ export const StaffPage: React.FC = () => {
                   )}
                   {lifecycle.status === 'idle' && <p>請先選擇服務人員。</p>}
 
-                  {/* 目前任職狀態卡片 (Item list) */}
                   {lifecycle.status === 'ready' && (
                     <ul className="staff-holiday-list">
                       <li className="staff-holiday-item">
                         <div className="staff-item-left">
                           <span className="staff-item-date-badge">📅 {lifecycle.data.displayEffectiveAt} 起生效</span>
-                          <span className="staff-item-title">{staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName)}目前任職狀態</span>
+                          <span className="staff-item-title">{staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName)}任職狀態</span>
                           <span className={`staff-item-tag ${lifecycle.data.state === 'retired' ? 'retired' : ''}`}>
                             {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役（暫停派工）' : '🟢 正常在職中'}
                           </span>
@@ -1574,7 +1573,6 @@ export const StaffPage: React.FC = () => {
                     </p>
 
                     <div className="staff-op-actions">
-                      {/* 退役按鈕組 */}
                       {(lifecycleAction.action === 'retirement' || (!lifecycleAction.action && lifecycle.status === 'ready' && lifecycle.data.canRetire)) && (
                         <>
                           <button
@@ -1591,7 +1589,6 @@ export const StaffPage: React.FC = () => {
                         </>
                       )}
 
-                      {/* 復職按鈕組 */}
                       {(lifecycleAction.action === 'reactivation' || (!lifecycleAction.action && lifecycle.status === 'ready' && lifecycle.data.canReactivate)) && (
                         <>
                           <button

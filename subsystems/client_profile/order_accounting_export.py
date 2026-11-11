@@ -25,7 +25,7 @@ XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 HEADERS = (
     "項次", "案件編號", "姓名", "身分資格", "服務時間",
-    "預產期／預計服務開始月份", "預計服務日期", "雙胞胎",
+    "預產期／預計服務開始月份", "預計服務日期", "胎數",
     "目前訂單狀態", "匯入虛擬帳號", "內建虛擬帳號", "服務天數", "每日服務時數", "總服務時數",
     "是否需要下廚", "樓層費", "每小時服務單價", "客戶應付總額", "訂金金額",
     "第一期金額", "第二期金額", "已收總額", "客戶未收餘額", "本案補助金額",
@@ -56,7 +56,7 @@ class OrderAccountingExportRow:
     service_time: str | None
     due_month: str | None
     hcm_service_start_date: str | None
-    is_twins: bool
+    multi_birth_count: str | None
     order_status: str | None
     imported_virtual_accounts: tuple[str, ...]
     built_in_virtual_account: str | None
@@ -122,7 +122,7 @@ def build_order_accounting_workbook(
             row.service_time,
             row.due_month,
             row.hcm_service_start_date,
-            "是" if row.is_twins else "否",
+            row.multi_birth_count,
             row.order_status,
             "\n".join(row.imported_virtual_accounts) or None,
             row.built_in_virtual_account,

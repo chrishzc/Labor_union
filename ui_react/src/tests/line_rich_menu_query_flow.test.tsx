@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe('LINE Rich Menu query 接線', () => {
-  it('將 LIFF 草稿參數解析成實際開啟路由', () => {
+  it('將 LIFF 草稿參數解析成開啟網址', () => {
     expect(resolveRichMenuUri('?target=staff_schedule')).toBe('/line-staff-schedule');
     expect(resolveRichMenuUri('?target=staff_payout')).toBe('/line-staff-payout');
     expect(resolveRichMenuUri('?target=staff_verification')).toBe('/line-identity?target=staff_verification');
@@ -178,7 +178,7 @@ describe('LINE Rich Menu query 接線', () => {
     if (terminalStatus === 'publish_retryable_failed') {
       fireEvent.change(screen.getByRole('textbox', { name: '重試原因（選填）' }), { target: { value: '確認後重新排入' } });
       expect(screen.queryByRole('checkbox', { name: /我已確認此紀錄為發布可重試失敗/ })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: '重新排入發布' }));
+      fireEvent.click(screen.getByRole('button', { name: '重試發布' }));
       await waitFor(() => expect(publication.retry).toHaveBeenCalledWith(19, expect.objectContaining({ reason: '確認後重新排入' }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
       await screen.findByRole('heading', { name: '發布未完成' });
     }

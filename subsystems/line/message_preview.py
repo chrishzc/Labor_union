@@ -37,7 +37,7 @@ class PreviewCase:
     city: str
     service_type: str
     service_time: str
-    baby_info: str = ""
+    multi_birth_count: str = ""
     residence_type: str = ""
 
 

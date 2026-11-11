@@ -56,7 +56,6 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
 <body>
 <main>
   <h1>排班資訊</h1>
-  <p>您可以查詢個人班表月曆。</p>
 
   <section id="calendarPanel" class="panel">
     <div class="toolbar">
@@ -81,10 +80,10 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
 
   <section class="panel" aria-labelledby="leaveTitle">
     <h2 id="leaveTitle" class="section-title">請假、順延與代班</h2>
-    <p>請先在案件群組與客戶協調，再送出結果。順延無衝突會直接更新；需要代班或排程衝突才交工會處理。</p>
+    <p>先在案件群組與客戶協調，再送出。順延無衝突時會直接更新；需要代班或有排程衝突時，由工會處理。</p>
     <div id="leaveCases"></div>
     <p id="leaveStatus" role="status"></p>
-    <button type="button" id="reloadLeaveCases">重新查詢請假與排班</button>
+    <button type="button" id="reloadLeaveCases">更新請假與排班</button>
   </section>
 <section class="panel" aria-label="回報服務開始安排"><h2>回報服務開始安排</h2><p id="serviceStartStatus" role="status"></p><div id="serviceStartCases"></div><button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button></section>
 </main>

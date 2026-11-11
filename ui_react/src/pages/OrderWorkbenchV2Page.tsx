@@ -46,7 +46,7 @@ import {
 
 function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
   if (summaryLoading) return '正式案件摘要載入中。';
-  if (summaryQueryFailed) return '正式案件摘要查詢失敗；目前只顯示十三階段投影。';
+  if (summaryQueryFailed) return '案件摘要暫時無法載入，仍可查看辦理階段。';
   return '未取得與此案件編號相符的正式摘要。';
 }
 
@@ -105,7 +105,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
       .then((page) => {
         if (controller.signal.aborted) return;
         const exact = page.items.filter((item) => item.case_no === requestedCase);
-        if (exact.length !== 1) throw new Error('找不到可唯一確認的案件，請重新查詢。');
+        if (exact.length !== 1) throw new Error('無法確認要開啟的案件，請重新查詢。');
         setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type });
       })
       .catch((error) => { if (!controller.signal.aborted) setCaseLinkError(error instanceof Error ? error.message : '案件讀取失敗。'); });
@@ -241,7 +241,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
   return (
     <div className="order-v2-page">
-      <ManagementPageHeader className="orders-page-header" title="待辦看板" description="找到需要處理的案件，從目前步驟接著完成。" />
+      <ManagementPageHeader className="orders-page-header" title="待辦看板" />
       {caseLinkError && <p role="alert">{caseLinkError}</p>}
 
       <details className="order-v2-overview-details">
@@ -302,14 +302,14 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
-          案件摘要查詢失敗；案件分類仍可查閱，但客戶、日期與月嫂摘要暫時不可用。
+          仍可查看案件分類。客戶、日期與月嫂資料暫時無法載入。
         </div>
       )}
 
       {loading && <div className="order-v2-empty">正在查詢訂單資料…</div>}
       {error && <div className="order-v2-error" role="alert">{error}</div>}
       {!loading && view !== null && (refreshing || error !== null) && (
-        <div className="order-v2-summary-warning" role="status">清單更新尚未完成；目前顯示上次內容，案件操作暫停。</div>
+        <div className="order-v2-summary-warning" role="status">清單更新中，暫時無法操作案件。</div>
       )}
       {!loading && !error && displayedCount === 0 && (
         <div className="stage-empty-state">

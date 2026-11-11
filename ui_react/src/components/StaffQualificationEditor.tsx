@@ -45,7 +45,7 @@ export function StaffQualificationEditor({ staffId, onUpdated, importedServiceIn
       if (current !== epoch.current) return;
       const intent = key ?? `staff-qualification-${crypto.randomUUID()}`;
       setPreview(approved); setKey(intent);
-      await staffQualificationEditingClient.apply(staffId, submitted, approved, reason.trim(), intent, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存並重新查詢。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
+      await staffQualificationEditingClient.apply(staffId, submitted, approved, reason.trim(), intent, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
     catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };

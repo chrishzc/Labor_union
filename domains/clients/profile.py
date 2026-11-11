@@ -11,11 +11,27 @@ from typing import Mapping
 CLIENT_PROFILE_FIELDS = (
     "name", "gender", "phone", "email", "city", "address",
     "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
+    "admin_notes",
+    "identity_status",
 )
 CLIENT_PROFILE_FIELD_SET = frozenset(CLIENT_PROFILE_FIELDS)
 CLIENT_PROFILE_APPLICANT_FIELDS = frozenset(
     {"name", "gender", "phone", "delivery_type", "baby_info", "notes"}
 )
+RECLASSIFIABLE_CLIENT_IDENTITIES = frozenset({"補助市民", "原住民"})
+_SERVICE_STARTED_STATES = frozenset({
+    "服務中", "訂單完成", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+})
+
+
+def can_reclassify_client(identity, status, actual_start_date, actual_end_date) -> bool:
+    return (
+        identity in RECLASSIFIABLE_CLIENT_IDENTITIES
+        and status is not None
+        and status not in _SERVICE_STARTED_STATES
+        and actual_start_date is None
+        and actual_end_date is None
+    )
 VALID_GENDERS = frozenset({"女", "男"})
 VALID_RESIDENCE_TYPES = frozenset({"電梯大樓", "公寓", "透天", "其他"})
 VALID_DELIVERY_TYPES = frozenset({"自然產", "剖腹產", "未定"})
@@ -54,21 +70,26 @@ def validate_changes(
     for field, value in changes.items():
         if field not in effective_fields:
             raise ClientProfileValidationError("profile_field_not_allowed", str(field))
+        if field == "admin_notes" and value is None:
+            value = ""
         if not isinstance(value, str):
             raise ClientProfileValidationError("profile_value_must_be_text", field)
         value = value.strip()
         if field == "phone":
             value = normalize_client_phone(value)
-        if not value:
+        if not value and field != "admin_notes":
             raise ClientProfileValidationError("profile_value_cannot_be_empty", field)
         maximum = {
             "name": 100, "phone": 10, "email": 100, "city": 20, "address": 255,
             "baby_info": 255, "notes": 1000, "gender": 2,
             "residence_type": 10, "delivery_type": 10,
-            "due_month": 10, "reject_reason": 500, "service_type": 100,
+            "due_month": 10, "reject_reason": 500, "service_type": 100, "admin_notes": 2000,
+            "identity_status": 10,
         }[field]
         if len(value) > maximum:
             raise ClientProfileValidationError("profile_value_too_long", field)
+        if field == "identity_status" and value != "一般市民":
+            raise ClientProfileValidationError("profile_identity_status_invalid", field)
         if field == "gender" and value not in VALID_GENDERS:
             raise ClientProfileValidationError("profile_gender_invalid", field)
         if field == "phone" and not CLIENT_PHONE_PATTERN.fullmatch(value):

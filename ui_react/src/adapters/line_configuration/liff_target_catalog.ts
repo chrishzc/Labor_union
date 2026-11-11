@@ -100,7 +100,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'profile_update',
     displayTitle: "修改個人資料",
-    purpose: "申請變更聯絡方式與寶寶資訊。",
+    purpose: "申請變更聯絡方式等登記資料。",
     group: "客戶服務",
     type: 'liff',
     title: '5. profile_update.html',
@@ -109,7 +109,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-profile-update',
     launchPath: '/line-profile-guard',
     authLevel: '必須驗證 LINE 登入憑證與正式客戶綁定',
-    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話或寶寶資訊等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
+    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
     apiMapping: '客戶資料異動之查詢、預覽與申請流程示意',
     audienceRoles: ['customer'],
   },

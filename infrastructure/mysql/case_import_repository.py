@@ -317,7 +317,7 @@ def _load_provisional_registration(cursor, intent, *, lock):
 
 def _load_multi_birth_count(cursor, intent, *, lock) -> str | None:
     if intent.provisional_registration_id is None:
-        return None
+        return intent.multi_birth_count
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT record.survey_details FROM provisional_client_registrations registration "

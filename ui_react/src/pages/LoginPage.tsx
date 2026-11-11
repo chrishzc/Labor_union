@@ -80,7 +80,7 @@ function getStage2ErrorMessage(
   isClientExpired: boolean
 ): { message: string; expired: boolean } {
   if (isClientExpired) {
-    return { message: '驗證階段已過期，請重新輸入帳號密碼', expired: true };
+    return { message: '驗證已逾時，請重新輸入帳號密碼', expired: true };
   }
   if (err instanceof ApiHttpError) {
     if (err.code === 'mfa_secret_unavailable') return { message: err.message, expired: false };
@@ -91,7 +91,7 @@ function getStage2ErrorMessage(
       err.message.includes('expired') ||
       err.message.includes('逾期')
     ) {
-      return { message: '驗證階段已過期，請重新輸入帳號密碼', expired: true };
+      return { message: '驗證已逾時，請重新輸入帳號密碼', expired: true };
     }
     if (err.status === 429 || err.code === 'login_rate_limited') {
       return { message: '驗證嘗試過於頻繁，請稍後再試', expired: false };
@@ -120,7 +120,7 @@ function getStage2ErrorMessage(
     msg.includes('逾期') ||
     msg.includes('challenge_expired')
   ) {
-    return { message: '驗證階段已過期，請重新輸入帳號密碼', expired: true };
+    return { message: '驗證已逾時，請重新輸入帳號密碼', expired: true };
   }
   if (msg.includes('429') || msg.includes('login_rate_limited')) {
     return { message: '驗證嘗試過於頻繁，請稍後再試', expired: false };
@@ -271,7 +271,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
       setChallengeExpiresAt(null);
       setProvisioningUri(null);
       setAuthStage(initialEnrollment ? 'setup-expired' : 'stage1');
-      setErrorMessage('驗證階段已過期，請重新輸入帳號密碼');
+      setErrorMessage('驗證已逾時，請重新輸入帳號密碼');
       return;
     }
 
@@ -422,7 +422,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>
-                {isLoading ? '處理中...' : '下一步：進行雙重驗證 ➔ (Next: 2FA)'}
+                {isLoading ? '處理中...' : '下一步：雙重驗證'}
               </button>
             </form>
           </>
@@ -462,7 +462,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
               <input id="totp-setup-key" className="login-text-input" readOnly value={new URL(provisioningUri).searchParams.get('secret') || ''} />
               </details>
             </section>}
-            <p className="login-desc-subtitle">請開啟 Authenticator 隨身驗證器，輸入 6 位動態碼</p>
+            <p className="login-desc-subtitle">開啟驗證器，輸入 6 位動態碼。</p>
 
             {errorMessage && (
               <div
@@ -511,7 +511,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>
-                {isLoading ? '驗證中...' : provisioningUri ? '確認綁定驗證器' : '驗證並登入系統 (Verify & Login)'}
+                {isLoading ? '驗證中...' : provisioningUri ? '確認綁定驗證器' : '驗證並登入'}
               </button>
 
               {!initialEnrollment && <button

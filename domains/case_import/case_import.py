@@ -5,7 +5,7 @@ Description: 定義 Case Import 根事實、來源指紋與候選不變量。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from enum import StrEnum
 
@@ -18,7 +18,9 @@ from domains.bootstrap.case_architecture import (
     CaseRootFacts,
     RatePolicyFacts,
     build_case_architecture_bootstrap_candidate,
+    is_twin_case,
 )
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from domains.client_finance.pricing_policy import CasePricingTerms
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
@@ -163,6 +165,7 @@ class CaseImportIntent:
     provisional_registration_id: int | None = None
     partial_service_time: ImportedOrderServiceTime | None = None
     pricing_identity_rule: str | None = None
+    multi_birth_count: str | None = None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -179,6 +182,13 @@ class CaseImportIntent:
             _raise_invalid("partial service time belongs to incomplete intake only")
         if self.provisional_registration_id is not None:
             require_positive_integer(self.provisional_registration_id, "provisional registration id")
+        if self.multi_birth_count is not None and (
+            not isinstance(self.multi_birth_count, str)
+            or self.multi_birth_count not in VALID_MULTI_BIRTH_COUNTS
+            or not self.is_complete
+            or self.provisional_registration_id is not None
+        ):
+            _raise_invalid("explicit birth count requires a complete case without provisional registration")
 
     @property
     def is_complete(self) -> bool:
@@ -339,10 +349,19 @@ def _build_bootstrap_candidate(facts, intent):
         facts.payroll_rate_policy,
         BootstrapPresence(),
     )
+    bootstrap_intent = intent.bootstrap
+    if is_twin_case(facts.multi_birth_count) and facts.payroll_rate_policy is not None:
+        bootstrap_intent = replace(
+            bootstrap_intent,
+            client_payment_terms=replace(
+                bootstrap_intent.client_payment_terms,
+                client_hourly_rate=facts.payroll_rate_policy.hourly_rate,
+            ),
+        )
     try:
         return build_case_architecture_bootstrap_candidate(
             bootstrap_facts,
-            intent.bootstrap,
+            bootstrap_intent,
         )
     except BootstrapDomainError as error:
         raise CaseImportDomainError(
@@ -383,6 +402,8 @@ def _source_payload(intent):
         "bootstrap": None if intent.bootstrap is None else _bootstrap_payload(intent.bootstrap),
         "provisional_registration_id": intent.provisional_registration_id,
     }
+    if intent.multi_birth_count is not None:
+        payload["multi_birth_count"] = intent.multi_birth_count
     if intent.partial_service_time is not None:
         terms = intent.partial_service_time
         payload["partial_service_time"] = {

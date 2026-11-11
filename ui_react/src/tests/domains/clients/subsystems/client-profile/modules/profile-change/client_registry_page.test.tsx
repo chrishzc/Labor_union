@@ -630,7 +630,7 @@ describe('Client registry owner editing', () => {
     fireEvent.click(screen.getByRole('tab', { name: '虛擬帳號匯入' }));
 
     expect(screen.getByRole('tabpanel', { name: '虛擬帳號匯入' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '匯入舊流程虛擬帳號' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '匯入舊虛擬帳號' })).toBeInTheDocument();
   });
 
   it('shows saved change reasons in chronological step order', async () => {

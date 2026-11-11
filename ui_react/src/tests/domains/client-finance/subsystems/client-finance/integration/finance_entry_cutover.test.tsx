@@ -241,7 +241,7 @@ describe('Finance #finance entry static subgate', () => {
 
     await screen.findByRole('button', { name: '收款明細' });
     expect(window.location.hash).toBe('#finance');
-    expect(screen.getByRole('heading', { name: '帳務工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '帳務中心' })).toBeInTheDocument();
     expect(Array.from(screen.getByRole('navigation', { name: '帳務工作區' }).querySelectorAll('button')).map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
     expect(countPath(requests, '/api/v1/client-payments')).toBe(1);
     expect(countPath(requests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);

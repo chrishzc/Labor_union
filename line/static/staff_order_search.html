@@ -31,7 +31,7 @@
 <body>
 <main>
   <h1>訂單查詢</h1>
-  <p>系統會顯示您已配對的訂單；也可輸入案件編號或客戶姓名縮小結果範圍。</p>
+  <p>查看已配對的訂單，可用案件編號或客戶姓名篩選。</p>
   <section class="panel">
     <label for="keyword">篩選案件編號或客戶姓名（選填）</label>
     <input id="keyword" autocomplete="off" placeholder="例如：115000035 或 王小美">
@@ -40,7 +40,7 @@
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
   <section id="results"></section>
-<section class="panel" aria-label="回報服務開始安排"><h2>回報服務開始安排</h2><p id="serviceStartStatus" role="status"></p><div id="serviceStartCases"></div><button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button></section>
+<section class="panel" aria-label="回報服務開始"><h2>回報服務開始</h2><p id="serviceStartStatus" role="status"></p><div id="serviceStartCases"></div><button type="button" onclick="loadServiceStartCases()">查詢服務開始安排</button></section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
@@ -124,7 +124,7 @@ function renderResults(items) {
       ["居住型態", item.residence_type],
       ["生產方式", item.delivery_type],
       ["服務方式", item.service_type],
-      ["寶寶資訊", item.baby_info],
+      ["胎數", item.multi_birth_count],
       ["其他事項", item.notes],
     ];
     const card = document.createElement("article");

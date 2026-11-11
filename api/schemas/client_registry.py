@@ -201,6 +201,8 @@ class ClientRegistryDetailView(_StrictModel):
 
 
 class ClientProfileChangeSet(_StrictModel):
+    identity_status: Literal["一般市民"] | None = None
+    admin_notes: str | None = None
     email: str | None = None
     service_type: str | None = None
     due_month: str | None = None

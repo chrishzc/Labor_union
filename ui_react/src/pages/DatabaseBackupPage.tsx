@@ -52,7 +52,7 @@ export function DatabaseBackupPage() {
       <section className="backup-card" aria-labelledby="backup-schedule-title">
         <h2 id="backup-schedule-title">每日備份時間</h2>
         {!status.configured && <p className="backup-message">尚未完成正式電腦的 NAS 備份設定，請由維護人員設定一次後再啟用。</p>}
-        <p>請選擇工會電腦通常還在開機、並已登入 Windows 的時間。電腦關機時無法備份，重新登入後會補執行。</p>
+        <p>請選電腦開機且已登入 Windows 的時段。若因關機錯過備份，下次登入後會補做。</p>
         <form onSubmit={event => { event.preventDefault(); void save(); }}>
           <label htmlFor="daily-backup-time">每天執行時間</label>
           <div className="backup-time-row"><input id="daily-backup-time" type="time" required value={time} disabled={busy || !status.configured || !status.storage_ready} onChange={event => setTime(event.target.value)} />

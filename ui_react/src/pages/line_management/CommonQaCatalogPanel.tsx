@@ -195,7 +195,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
 
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
-    const success = action === 'publish' ? '新答案已發布，問答搜尋資料更新完成後才會啟用。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
+    const success = action === 'publish' ? '新答案已發布，搜尋資料更新後才會生效。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
     return runMutation(() => applicationFetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
@@ -302,7 +302,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
           <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
           {readStatus === 'ready' && <span className="studio-count">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
         </div>
-        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>編輯後需發布新答案；問答搜尋資料更新完成後才會啟用。停用會保留歷程，並更新搜尋資料以移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
+        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>發布後，新答案會在搜尋資料更新時生效。停用會保留歷程，並從搜尋資料移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
       </div>
       {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'studio-description'} role="status">{notice}</div>}
 

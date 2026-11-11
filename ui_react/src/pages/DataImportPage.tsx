@@ -365,7 +365,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
           </table></div>}
         </section>}
       </section>}
-      {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。可以切換至其他頁面；離開匯入頁後，自動確認會停止，需重新選取原檔案查詢結果。請勿重複上傳或重新整理。</p>}
+      {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料多或連線慢時可能較久。可切換頁面，離開後會停止自動查詢。返回時請選原檔案查詢結果，請勿重複上傳或重新整理。</p>}
       {ready && !waiting && (!manual || done || unknown) && <footer className="import-simple-actions">
         {done ? <><p role="status">本次檔案已處理完成。</p>{result?.requiresRepreview &&
           <button type="button" className="import-simple-secondary" onClick={() => void onPreview()}>重新預覽</button>}
@@ -376,7 +376,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
       </footer>}
       {!ready && <p className="import-control-guidance">選擇檔案後即可匯入。</p>}
       {applyState.kind === 'error' && !applyState.outcomeUnknown && <WorkbookErrorAlert message={applyState.message} details={applyState.details} />}
-      {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} {historicalOrders ? '請查核目前訂單狀態及異動紀錄。重新匯入會重新判定整份檔案。' : '目前尚未取得最終結果，這不代表匯入失敗。可以切換至其他頁面，或稍後點選「查詢這次匯入結果」。離開匯入頁後需重新選取原檔案查詢。'}</p>}
+      {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} {historicalOrders ? '請查看訂單狀態與變更紀錄。重新匯入會再次檢查整份檔案。' : '匯入結果尚未確認，請稍後查詢。離開後請用原檔查詢。'}</p>}
     </section>
   );
 };

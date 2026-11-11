@@ -39,7 +39,7 @@ export function OrderCandidateInformationPanel({ caseNo, initialKind = 1, onClos
   }, [caseNo]);
   const close = () => {
     if (dateState.busy) return;
-    if (!dateState.dirty || window.confirm('預計日期尚未保存，要放棄這次試算並關閉嗎？')) onClose();
+    if (!dateState.dirty || window.confirm('預計日期尚未儲存。要放棄這次試算並關閉嗎？')) onClose();
   };
   return <CandidateInquiryDialog title="訂單共用資訊" wide busy={dateState.busy} onClose={close}>
     <p className="candidate-inquiry-intro">所有候選月嫂共用這三份訂單內容。寄送請回到候選清單操作。</p>

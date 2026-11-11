@@ -15,13 +15,15 @@ from infrastructure.mysql.client_receipt_reconciliation_repository import _inser
 def test_refund_normalization_preserves_leading_zero_and_readonly_allowlists():
     values = normalize_beclass_changes({"refund_bank_code": "０００-１２３４", "refund_account_no": "０００１２３４５６７８９"})
     assert values == {"refund_bank_code": "0001234", "refund_account_no": "000123456789"}
-    for field in ("identity_status", "admin_notes"):
-        with pytest.raises(ValidationError): ClientProfileChangeSet.model_validate({field: "unauthorized"})
+    with pytest.raises(ValidationError):
+        ClientProfileChangeSet.model_validate({"identity_status": "unauthorized"})
+    assert ClientProfileChangeSet.model_validate({"admin_notes": "合成"}).admin_notes == "合成"
     with pytest.raises(ValidationError): BeClassChangeSet.model_validate({"birth_date": "2000-01-01"})
     for field in ("identity_status", "birth_date"):
         with pytest.raises(BeClassCorrectionError): normalize_beclass_changes({field: "unauthorized"})
     capabilities = _field_capabilities({"identity_status": "原住民", "admin_notes": "合成", "name": "合成"}, "client_profile", True)
-    assert not capabilities["identity_status"]["editable"] and not capabilities["admin_notes"]["editable"]
+    assert not capabilities["identity_status"]["editable"]
+    assert capabilities["admin_notes"]["editable"]
     assert capabilities["name"]["editable"]
 
 

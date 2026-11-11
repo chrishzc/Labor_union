@@ -7,7 +7,7 @@ Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶�
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>修改登記資料 ｜ 身分資格驗證</title>
+    <title>修改登記資料｜身分查驗</title>
     <style>
         :root {
             --primary: #ff7f50;
@@ -164,12 +164,12 @@ Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶�
 <body>
 <div class="container">
     <div class="logo">🌸 新竹市到宅月子工會</div>
-    <h1>修改登記資料 ｜ 身分查驗</h1>
+    <h1>修改登記資料｜身分查驗</h1>
     <div class="subtitle">為保護產婦個資與服務安全，進入資料異動前需由伺服器驗證您的 LINE 客戶綁定資格。</div>
 
     <div id="stateChecking" class="guard-card checking">
         <div class="spinner"></div>
-        <div style="font-weight: 700; color: #a43c12; margin-bottom: 4px;">正在驗證您的身分資格…</div>
+        <div style="font-weight: 700; color: #a43c12; margin-bottom: 4px;">正在確認身分…</div>
         <small style="color: var(--text-muted);">正在確認 LINE 登入憑證與工會名冊綁定狀態</small>
     </div>
 
@@ -186,7 +186,6 @@ Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶�
             很抱歉，【修改登記資料】功能僅開放給<strong>已在工會完成登記或服務綁定</strong>之產婦使用。<br><br>
             系統目前查無您此 LINE 帳號的客戶綁定紀錄，因此無法直接開啟資料修改。
         </p>
-        <div style="font-size: 13px; font-weight: 700; color: var(--text-dark); margin-bottom: 8px;">您可以透過以下方式進行：</div>
         <a href="/line-bind" class="btn btn-primary">📝 前往服務綁定 (/line-bind)</a>
         <small style="display: block; color: var(--text-muted); font-size: 12px; margin: 4px 0 12px;">已在市府平台登記或已有案件編號者，請先在此完成身分綁定。</small>
         
@@ -197,7 +196,7 @@ Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶�
     <div id="stateExpired" class="guard-card expired" style="display: none;">
         <span class="status-icon">⚠️</span>
         <div class="card-title" style="justify-content: center; color: #e65100;">LINE 登入狀態已過期</div>
-        <p class="card-desc" id="expiredMsg">LINE 授權憑證已過期或與伺服器不一致。請點擊下方按鈕重新登入以刷新憑證。</p>
+        <p class="card-desc" id="expiredMsg">LINE 登入已過期或驗證失敗，請重新登入。</p>
         <button type="button" class="btn btn-primary" onclick="relogin()">🔄 重新登入 LINE</button>
     </div>
 

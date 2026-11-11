@@ -34,7 +34,7 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
   <p id="description">正在確認登入狀態…</p>
   <div id="customer-choice" hidden>
     <button id="register-new" type="button"><strong>📝 已申請市府平台</strong><span>我已在市府媒合服務平台完成登記，要核對客戶資料並繼續填寫工會需求調查表單。</span></button>
-    <button id="goto-gov" type="button"><strong>🏛️ 未申請市府平台</strong><span>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</span></button>
+    <button id="goto-gov" type="button"><strong>🏛️ 尚未向市府申請</strong><span>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</span></button>
     <button id="register-non-citizen" type="button"><strong>非市民服務申請</strong><span>填寫非市民服務需求，送工會核准建案。</span></button>
   </div>
   <form id="form" hidden></form>
@@ -152,7 +152,7 @@ function showIdentityEntry(definition, purpose) {
     document.getElementById("form").hidden = false;
     return;
   }
-  document.getElementById("description").textContent = "請確認您是否已於新竹市政府平台完成申請登記？";
+  document.getElementById("description").textContent = "已在新竹市政府平台完成申請登記嗎？";
   document.getElementById("customer-choice").hidden = false;
 }
 
@@ -498,7 +498,7 @@ function hasSensitiveFlowContext() {
 function showRegistrationEntry() {
   const definition = definitions.customer_binding;
   document.getElementById("title").textContent = "服務確認與導流";
-  document.getElementById("description").textContent = "請確認您是否已於新竹市政府平台完成申請登記？";
+  document.getElementById("description").textContent = "已在新竹市政府平台完成申請登記嗎？";
   configureCustomerChoice(definition);
   buildForm(definition);
   document.getElementById("customer-choice").hidden = false;
@@ -523,6 +523,10 @@ async function validateIdentityFlow(purpose) {
 }
 
 async function initialize() {
+  if (!location.search && !location.hash) {
+    location.replace("/line-gateway");
+    return;
+  }
   const standalonePage = requestedStandalonePage();
   if (standalonePage) { location.replace(standalonePage); return; }
   const liffId = await loadLiffId();

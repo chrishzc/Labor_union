@@ -43,7 +43,7 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
     setError(null);
     try {
       const result = await previewReopenFlow(caseNo, { signal: controller.signal });
-      if (result.case_no !== caseNo) throw new Error('受控重開預覽案件識別不一致。');
+      if (result.case_no !== caseNo) throw new Error('重開檢查結果與本案不符。');
       if (controller.signal.aborted || !mounted.current) return;
       updateReopenReason(caseNo, reason.trim());
       await apply();
@@ -51,7 +51,7 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
       if (!controller.signal.aborted) {
         setError(caught instanceof OrderMutationError && caught.code === 'order_reopen_financial_history_exists'
           ? '此案件已有取消相關的退款、沖正或結算紀錄，無法重開。請另建新案。'
-          : caught instanceof Error ? caught.message : '受控重開預覽失敗。');
+          : caught instanceof Error ? caught.message : '無法檢查重開條件。');
       }
     }
   };
@@ -60,11 +60,11 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
     const current = orderMutationFlowStore.getReopenDraft(caseNo);
     const receipt = current?.receiptView;
     if (!receipt || receipt.case_no !== caseNo || receipt.preview_fingerprint !== current?.previewView?.preview_fingerprint) {
-      throw new Error('受控重開收據案件識別或 fingerprint 不一致。');
+      throw new Error('重開結果與本案或本次檢查不符。');
     }
     const detail = await ordersQueryClient.getOrderDetail(caseNo);
     if (detail.case_no !== caseNo || detail.order_status !== receipt.lifecycle_status) {
-      throw new Error('重開已回傳收據，但正式案件尚未觀察到收據狀態；只重試回讀，不重送重開。');
+      throw new Error('已收到重開結果，但案件狀態尚未更新。請查詢結果，勿再次提交。');
     }
   };
 
@@ -86,7 +86,7 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
       else await applyReopenFlow(caseNo, observe);
       if (mounted.current) onObserved?.();
     } catch (caught) {
-      if (mounted.current) setError(caught instanceof Error ? caught.message : '受控重開未完成。');
+      if (mounted.current) setError(caught instanceof Error ? caught.message : '重開未完成。');
     } finally {
       actionInFlight.current = false;
       if (mounted.current) {
@@ -95,16 +95,16 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
       }
     }
   };
-  useUnsavedDraft('受控重開案件', { '重開原因': reason }, { baseline: { '重開原因': '' }, enabled: status !== 'observed', busy: unresolved });
+  useUnsavedDraft('重開案件', { '重開原因': reason }, { baseline: { '重開原因': '' }, enabled: status !== 'observed', busy: unresolved });
 
 
   return (
-    <section aria-label={`案件 ${caseNo} 受控重開`}>
-      <h4>受控重開取消案件</h4>
-      <p>只重開正式案件狀態；不恢復舊指派、舊排班或舊檔期鎖，必須重新完成 Scheduling 預覽。</p>
-      <label>重開原因（選填）<textarea aria-label="Beta 受控重開原因" maxLength={500} value={reason} disabled={startDisabled || unresolved || status === 'preview_loading'} onChange={event => setReason(event.target.value)} /></label>
+    <section aria-label={`案件 ${caseNo} 重開取消案件`}>
+      <h4>重開取消案件</h4>
+      <p>重開後須重新確認月嫂與排班。原指派、排班及檔期鎖不會恢復。</p>
+      <label>重開原因（選填）<textarea aria-label="重開原因（選填）" maxLength={500} value={reason} disabled={startDisabled || unresolved || status === 'preview_loading'} onChange={event => setReason(event.target.value)} /></label>
       <button type="button" disabled={startDisabled || unresolved || status === 'preview_loading'} onClick={() => void preview()}>重開訂單</button>
-      {status === 'preview_loading' && <p role="status">檢查受控重開中…</p>}
+      {status === 'preview_loading' && <p role="status">正在檢查重開條件…</p>}
       {draft?.previewView && (
         <>
           <p>{draft.previewView.before_status} → {draft.previewView.after_status}</p>
@@ -112,18 +112,18 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
 
         </>
       )}
-      {inFlight && <p role="status">受控重開／正式回讀中，請勿切換操作。</p>}
+      {inFlight && <p role="status">正在重開並確認結果，請留在此頁。</p>}
       {status === 'outcome_unknown' && (
-        <div role="alert"><p>重開結果未明；保留原內容與原冪等鍵，不建立新操作。</p>
-          <button type="button" onClick={() => void apply('apply')}>以原操作重新確認重開結果</button>
+        <div role="alert"><p>重開結果尚未確認。重試會使用同一筆操作。</p>
+          <button type="button" onClick={() => void apply('apply')}>重試重開</button>
         </div>
       )}
       {status === 'observation_failed' && (
-        <div role="alert"><p>已收到重開收據，但正式回讀未完成。</p>
-          <button type="button" onClick={() => void apply('observation')}>只重新讀取重開結果</button>
+        <div role="alert"><p>已收到重開結果，尚未確認最新狀態。</p>
+          <button type="button" onClick={() => void apply('observation')}>查詢重開結果</button>
         </div>
       )}
-      {status === 'observed' && <p role="status">受控重開已完成正式回讀：{draft?.receiptView?.lifecycle_status}。請重新確認服務日期與排班。</p>}
+      {status === 'observed' && <p role="status">訂單已重開為「{draft?.receiptView?.lifecycle_status}」。請重新確認服務日期與排班。</p>}
       {(error || draft?.error) && <p role="alert">{error ?? draft?.error?.message}</p>}
     </section>
   );

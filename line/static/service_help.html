@@ -580,7 +580,6 @@
 </header>
 
 <main>
-  <!-- TAB 1: 常見問答 -->
   <section class="tab-content active" id="tabFaq">
     <div class="search-wrap">
       <span class="search-icon">🔍</span>
@@ -610,7 +609,6 @@
     </div>
   </section>
 
-  <!-- TAB 2: AI 智慧問答 -->
   <section class="tab-content" id="tabAi">
     <div class="ai-intro-card">
       <div class="ai-intro-header">
@@ -634,7 +632,7 @@
     <div class="qa-flow" id="qaFlow">
       <div class="message-card message-ai">
         <div class="ai-badge">✨ 智慧助理在線</div>
-        <div>您好！我是新竹市月子工會的 AI 諮詢助理。請問今天想了解到宅月子服務、補助申請、時數規劃還是預約流程呢？</div>
+        <div>我是新竹市月子工會的 AI 助理。您可以詢問到宅月子服務、補助、服務時數或預約流程。</div>
       </div>
     </div>
 
@@ -830,7 +828,7 @@
   function appendQueryUnavailable(flow) {
     const errCard = document.createElement('div');
     errCard.className = 'message-card message-ai';
-    errCard.textContent = '系統目前無法完成知識庫查詢，請稍後再試或直接在聊天室留言。';
+    errCard.textContent = '目前無法查詢答案。請稍後再試，或在 LINE 聊天室留言。';
     flow.appendChild(errCard);
     errCard.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
@@ -942,13 +940,11 @@
     const flow = document.getElementById('qaFlow');
     const btn = document.getElementById('askBtn');
 
-    // 渲染使用者問題
     const userMsg = document.createElement('div');
     userMsg.className = 'message-card message-user';
     userMsg.textContent = question;
     flow.appendChild(userMsg);
 
-    // 渲染載入中卡片
     const loadingCard = document.createElement('div');
     loadingCard.className = 'message-card message-ai';
     loadingCard.innerHTML = '<div style="display: flex; align-items: center; gap: 8px; color: var(--text-muted);"><span class="loading-spinner" style="border-color: var(--primary); border-top-color: transparent;"></span> AI 助理正在檢索工會知識庫...</div>';

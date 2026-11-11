@@ -80,6 +80,7 @@ class ManualNonCitizenCaseCreateRequest(BaseModel):
     requires_cooking: bool = False
     refund_bank_code: str
     refund_account_no: str
+    holiday_double_pay: Literal["是", "否"] | None = None
 
 
 class NonCitizenCaseNumberView(BaseModel):

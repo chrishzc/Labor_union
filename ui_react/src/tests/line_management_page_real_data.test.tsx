@@ -115,7 +115,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
       target: { value: 'ticket-referral-31' },
     });
-    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能建立。')).toBeVisible();
+    expect(screen.getByText('請先核對來源並補齊資料。')).toBeVisible();
     const createButton = screen.getByRole('button', { name: '建立人工客服升級' });
     expect(createButton).toBeDisabled();
     fireEvent.click(createButton);
@@ -128,7 +128,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(createButton).toBeEnabled();
     fireEvent.change(screen.getByLabelText('自動化暫停範圍'), { target: { value: '   ' } });
     expect(createButton).toBeDisabled();
-    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能建立。')).toBeVisible();
+    expect(screen.getByText('請先核對來源並補齊資料。')).toBeVisible();
     fireEvent.click(createButton);
     expect(escalation.previewCreate).not.toHaveBeenCalled();
     expect(escalation.create).not.toHaveBeenCalled();

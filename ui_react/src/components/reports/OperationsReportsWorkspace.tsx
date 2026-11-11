@@ -491,7 +491,7 @@ export const OperationsReportsWorkspace: React.FC<{ mode: 'operations' | 'subsid
 
       {state.kind === 'weekly-ready' && <>
         {!state.data.totalsAvailable && <div className="reports-state" role="status">
-          週報 API 尚未更新至新版統計；目前保留原有週資料，年度累計、月小計及新版 XLSX 暫不提供。後端更新後請重新載入。
+          目前僅提供舊版週報。年度累計、月小計與新版 Excel 暫不可用。系統更新後請重新載入。
         </div>}
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} onCase={onCase} />}

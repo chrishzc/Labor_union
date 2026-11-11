@@ -97,6 +97,7 @@ class ClientRegistryDetail:
     finance: ClientRegistryFinance
     service_type: str | None = None
     order_dates: Mapping[str, object] | None = None
+    identity_change_available: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +270,7 @@ class ClientRegistryQueryApplication:
             ),
             service_type=_nullable_text(row.get("service_type")),
             order_dates=row.get("order_dates"),
+            identity_change_available=bool(row.get("identity_change_available")),
         )
 
     def history(self, case_no: str) -> tuple[ClientRegistryChangeHistoryItem, ...]:

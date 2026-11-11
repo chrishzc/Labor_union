@@ -15,6 +15,8 @@ from subsystems.client_profile.registry_filters import (
 )
 
 from domains.case_import.order_information import project_order_information
+from domains.clients.profile import can_reclassify_client
+from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
 from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account, resolve_case_virtual_account
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
@@ -49,13 +51,6 @@ _SORT_COLUMNS = {
     "service_days": "o.service_days",
     "expected_start_date": "o.start_date",
 }
-_BIRTH_COUNT_SQL = (
-    "COALESCE("
-    "CASE WHEN JSON_VALID(bcs.effective_values_json) THEN "
-    "JSON_UNQUOTE(JSON_EXTRACT(bcs.effective_values_json, '$.multi_birth_count')) END,"
-    "CASE WHEN JSON_VALID(br.survey_details) THEN "
-    "JSON_UNQUOTE(JSON_EXTRACT(br.survey_details, '$.\"特殊計費:胎數\"')) END)"
-)
 _SUPPORTED_DISTRICTS = (
     "香山區", "東區", "北區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮",
     "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉",
@@ -104,15 +99,12 @@ class MySqlClientRegistryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,c.name,c.phone,c.city,c.address,"
-                + _BIRTH_COUNT_SQL + " AS multi_birth_count,"
+                + BIRTH_COUNT_SQL + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,c.service_type,"
                 "o.start_date AS planned_start_date,o.status AS order_status,"
                 "o.staff_payment_due_date,o.actual_end_date,c.identity_status "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
-                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
-                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
-                "ON br.bound_case_no=o.case_no "
-                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id WHERE "
+                + BIRTH_COUNT_JOINS + "WHERE "
                 + " AND ".join(where)
                 + " ORDER BY " + order_by + " LIMIT %s OFFSET %s",
                 tuple(parameters),
@@ -149,10 +141,7 @@ class MySqlClientRegistryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT DISTINCT " + value_sql + " AS value FROM orders o JOIN clients c ON c.id=o.client_id "
-                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
-                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
-                "ON br.bound_case_no=o.case_no "
-                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id "
+                + BIRTH_COUNT_JOINS
                 + extra_join + " WHERE o.case_no IS NOT NULL" + search_sql
                 + " ORDER BY value IS NOT NULL,value ASC LIMIT %s OFFSET %s",
                 tuple(parameters),
@@ -186,7 +175,7 @@ class MySqlClientRegistryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.seq_num,o.case_no,c.name,c.identity_status,c.service_time,"
-                "c.due_month,c.service_start_date,c.baby_info,o.status AS order_status,"
+                "c.due_month,c.service_start_date," + BIRTH_COUNT_SQL + " AS multi_birth_count,o.status AS order_status,"
                 "o.service_days,o.service_hours_per_day,o.requires_cooking,o.floor_fee,"
                 "o.start_date AS planned_start_date,o.end_date AS planned_end_date,"
                 "o.actual_start_date,o.actual_end_date,o.staff_payment_due_date,"
@@ -198,10 +187,7 @@ class MySqlClientRegistryQueryRepository:
                 "ON deposit_projection.case_no=o.case_no "
                 "LEFT JOIN client_ledger_entries deposit_ledger "
                 "ON deposit_ledger.id=deposit_projection.latest_ledger_entry_id "
-                "LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
-                "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
-                "ON br.bound_case_no=o.case_no "
-                "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id WHERE "
+                + BIRTH_COUNT_JOINS + "WHERE "
                 + " AND ".join(where)
                 + " ORDER BY " + order_by,
                 tuple(parameters),
@@ -252,7 +238,6 @@ class MySqlClientRegistryQueryRepository:
                 ) == "補助市民" and Decimal(str(customer_payable)) == 0,
             )
         claim = _claim_application_month(row)
-        baby_info = str(row.get("baby_info") or "")
         return OrderAccountingExportRow(
             seq_num=row.get("seq_num"),
             case_no=case_no,
@@ -261,7 +246,7 @@ class MySqlClientRegistryQueryRepository:
             service_time=row.get("service_time"),
             due_month=row.get("due_month"),
             hcm_service_start_date=row.get("service_start_date"),
-            is_twins="雙胞胎" in baby_info or "2" in baby_info,
+            multi_birth_count=row.get("multi_birth_count"),
             order_status=row.get("order_status"),
             imported_virtual_accounts=imported_virtual_accounts,
             built_in_virtual_account=build_client_virtual_account(case_no),
@@ -382,6 +367,10 @@ class MySqlClientRegistryQueryRepository:
             "service_type": client.get("service_type"),
             "client_id": int(client["client_id"]),
             "client_profile_version": int(client.get("client_profile_version") or 0),
+            "identity_change_available": can_reclassify_client(
+                client.get("identity_status"), client.get("order_status"),
+                client.get("actual_start_date"), client.get("actual_end_date"),
+            ),
             "client_values": {field: client.get(field) for field in _CLIENT_FIELDS},
             "order_dates": {key: client.get(key) for key in ("planned_start_date", "planned_end_date", "actual_start_date", "actual_end_date")},
             "beclass_status": beclass_status,
@@ -481,7 +470,7 @@ def _registry_filters(
         where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
         parameters.append(f"%{query}%")
     if multi_birth_count is not None:
-        where.append(f"{_BIRTH_COUNT_SQL} = %s")
+        where.append(f"{BIRTH_COUNT_SQL} = %s")
         parameters.append(multi_birth_count)
     if order_status is not None:
         where.append("o.status = %s")
@@ -506,7 +495,7 @@ def _scalar_filter_expression(field: str) -> str:
     columns = {
         "case_no": "o.case_no", "name": "c.name", "identity_status": "c.identity_status", "phone": "c.phone",
         "order_status": "o.status", "service_type": "c.service_type",
-        "multi_birth_count": _BIRTH_COUNT_SQL, "service_days": "o.service_days",
+        "multi_birth_count": BIRTH_COUNT_SQL, "service_days": "o.service_days",
         "planned_start_date": "o.start_date", "staff_payment_due_date": "o.staff_payment_due_date",
         "requires_cooking": "CASE WHEN o.requires_cooking=1 THEN 'true' WHEN o.requires_cooking=0 THEN 'false' END",
         "district": "CASE " + " ".join(

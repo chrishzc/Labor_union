@@ -366,7 +366,7 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             aria-labelledby="logout-dialog-title"
           >
             <div className="logout-modal-icon"><LogOut aria-hidden="true" /></div>
-            <h2 id="logout-dialog-title" className="logout-modal-title">確定要登出系統嗎？</h2>
+            <h2 id="logout-dialog-title" className="logout-modal-title">要登出嗎？</h2>
             <p className="logout-modal-desc">
               登出後將清除當前工作會話，下次進入需重新進行雙重身分驗證。
             </p>

@@ -192,7 +192,7 @@ describe('Scheduling staff leave inbox flow', () => {
   it('沒有正式排班時顯示空清單提示並停用指派查詢', async () => {
     vi.mocked(leaveSubstitutionClient.listAssignments).mockResolvedValue([]);
     renderLeaveWorkspace();
-    expect(await screen.findByText('目前沒有已正式排班且尚未服務完成的案件。')).toBeInTheDocument();
+    expect(await screen.findByText('目前沒有已排班且服務未完成的案件。')).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
   });
@@ -327,7 +327,7 @@ describe('Scheduling staff leave inbox flow', () => {
       reason: '',
     });
     expect(preview.mock.invocationCallOrder[0]).toBeLessThan(apply.mock.invocationCallOrder[0]);
-    expect(await screen.findByText('已重新查詢並確認最新指派。')).toBeInTheDocument();
+    expect(await screen.findByText('已確認最新指派。')).toBeInTheDocument();
     expect(vi.mocked(leaveSubstitutionClient.listAssignments).mock.invocationCallOrder.at(-1))
       .toBeGreaterThan(apply.mock.invocationCallOrder[0]);
     expect(leaveSubstitutionFlowStore.get(LEAVE_CASE_NO)?.assignments?.[0].official_schedules[0].work_date)

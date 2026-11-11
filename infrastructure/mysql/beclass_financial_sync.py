@@ -71,14 +71,6 @@ class MySqlBeClassFinancialSync:
                     cursor, order_row, lock=True
                 )
             change_identity = f"beclass-rate-correction:{correction_event_id}"
-            _persist_effective_client_rate(
-                cursor,
-                finance_facts,
-                correction_event_id,
-                actor,
-                reason,
-                _child_key(idempotency_key, "client-payment-terms"),
-            )
             finance_candidate = build_client_finance_rate_correction_candidate(
                 finance_facts, change_identity
             )
@@ -204,56 +196,6 @@ def _load_rate_correction_presence(cursor, case_no):
     if not assignments and (present["staff_obligations"] or present["staff_obligation_events"]):
         raise ValueError("beclass_rate_correction_payroll_facts_inconsistent")
     return bool(assignments), finance
-
-
-def _persist_effective_client_rate(
-    cursor,
-    finance_facts,
-    correction_event_id,
-    actor,
-    reason,
-    key,
-):
-    terms = finance_facts.payment_terms
-    cursor.execute(
-        "SELECT policy_version,client_hourly_rate_ntd FROM client_payment_terms "
-        "WHERE case_no=%s FOR UPDATE",
-        (finance_facts.case_no,),
-    )
-    current = cursor.fetchone()
-    if current is None:
-        raise ValueError("client_finance_bootstrap_required")
-    if int(current["client_hourly_rate_ntd"]) == terms.client_hourly_rate.amount:
-        return
-    cursor.execute(
-        "INSERT INTO client_payment_terms_events "
-        "(case_no,policy_version,client_hourly_rate_ntd,deposit_service_days,"
-        "deposit_due_date,first_payment_due_date,second_payment_due_date,"
-        "expected_account_version,source_event_identity,idempotency_key,actor,reason) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (
-            finance_facts.case_no,
-            str(current["policy_version"]),
-            terms.client_hourly_rate.amount,
-            terms.deposit_service_days,
-            terms.deposit_due_date,
-            terms.first_payment_due_date,
-            terms.second_payment_due_date,
-            finance_facts.account_version,
-            f"beclass-correction:{correction_event_id}",
-            key.value,
-            actor.actor_id,
-            reason,
-        ),
-    )
-    event_id = int(cursor.lastrowid)
-    cursor.execute(
-        "UPDATE client_payment_terms SET client_hourly_rate_ntd=%s,current_event_id=%s "
-        "WHERE case_no=%s",
-        (terms.client_hourly_rate.amount, event_id, finance_facts.case_no),
-    )
-    if cursor.rowcount != 1:
-        raise RuntimeError("client_payment_terms_not_found")
 
 
 def _child_key(parent: IdempotencyKey, purpose: str) -> IdempotencyKey:

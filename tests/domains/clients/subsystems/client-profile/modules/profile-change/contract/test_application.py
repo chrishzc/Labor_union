@@ -323,6 +323,53 @@ def test_profile_validation_is_closed_and_accepts_free_text_city():
         assert raised.value.code == code
 
 
+def test_admin_notes_can_be_edited_and_cleared_without_exposing_them_to_line():
+    repository = _Repository()
+    repository.profile["admin_notes"] = "原行政註記"
+    application = _application(repository)
+    for version, value, expected in ((0, "更新行政註記", "更新行政註記"), (1, None, "")):
+        changes = {"admin_notes": value}
+        preview = application.preview_admin("CASE-001", changes, ExpectedVersion(version))
+        application.apply_admin(
+            "CASE-001", changes, ExpectedVersion(version), ActorContext("admin"),
+            "", preview.preview_fingerprint, IdempotencyKey(f"admin-notes-{version}"),
+            CorrelationId(f"admin-notes-{version}"),
+        )
+        assert application.query_admin("CASE-001").values["admin_notes"] == expected
+        assert "admin_notes" not in application.query_applicant("line-user-7", 7).values
+    with pytest.raises(ClientProfileValidationError, match="profile_field_not_allowed"):
+        application.preview_applicant("line-user-7", 7, {"admin_notes": "不可寫入"}, ExpectedVersion(2))
+
+
+@pytest.mark.parametrize("identity", ["補助市民", "原住民"])
+def test_identity_reclassification_rechecks_service_start_and_reprices(identity, monkeypatch):
+    repository = _Repository()
+    repository.profile.update(identity_status=identity, order_status="訂單成立", actual_start_date=None)
+    calls = []
+    monkeypatch.setattr(repository, "prepare_identity_change",
+        lambda case, client_id, *, lock: calls.append(lock) or "pricing", raising=False)
+    monkeypatch.setattr(repository, "apply_identity_pricing",
+        lambda pricing, **kwargs: calls.append(pricing), raising=False)
+    application = _application(repository)
+    changes = {"identity_status": "一般市民"}
+    preview = application.preview_admin("CASE-001", changes, ExpectedVersion(0))
+    repository.profile["actual_start_date"] = "2026-11-11"
+    with pytest.raises(ClientProfileRequestConflictError, match="profile_identity_change_unavailable"):
+        application.apply_admin(
+            "CASE-001", changes, ExpectedVersion(0), ActorContext("admin"), "",
+            preview.preview_fingerprint, IdempotencyKey("started"), CorrelationId("started"),
+        )
+    assert repository.profile["identity_status"] == identity
+    assert calls == [False]
+    repository.profile["actual_start_date"] = None
+    application.apply_admin(
+        "CASE-001", changes, ExpectedVersion(0), ActorContext("admin"), "",
+        preview.preview_fingerprint, IdempotencyKey("unstarted"), CorrelationId("unstarted"),
+    )
+    assert repository.profile["identity_status"] == "一般市民"
+    assert calls == [False, True, "pricing"]
+
+
 @pytest.mark.parametrize("city", ["東區", "新竹市香山區", "123"])
 def test_admin_can_preview_apply_and_read_back_free_text_city(city):
     repository = _Repository()

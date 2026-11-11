@@ -33,6 +33,11 @@ class _Cursor:
             self.current = {
                 "policy_version": "citizen-v1",
                 "client_hourly_rate_ntd": 300,
+                "deposit_service_days": 5,
+                "deposit_due_date": date(2026, 9, 1),
+                "first_payment_due_date": date(2026, 10, 1),
+                "second_payment_due_date": None,
+                "current_event_id": 30,
             }
         elif statement.startswith("SELECT case_no FROM client_finance_accounts"):
             self.current = {"case_no": parameters[0]}
@@ -44,9 +49,14 @@ class _Cursor:
         elif "UPDATE client_payment_terms" in statement:
             self.rowcount = 1
             self.current = None
+        elif "UPDATE client_finance_accounts" in statement:
+            self.rowcount = 1
 
     def fetchone(self):
         return self.current
+
+    def fetchall(self):
+        return ()
 
 
 class _Connection:
@@ -57,7 +67,7 @@ class _Connection:
         return self.cursor_value
 
 
-def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypatch):
+def test_financial_sync_delegates_calculable_case_to_finance_writer(monkeypatch):
     connection = _Connection()
     finance_facts = SimpleNamespace(
         case_no="CASE-450",
@@ -107,14 +117,6 @@ def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypa
         correlation_id=CorrelationId("beclass-correction-test"),
     )
 
-    statements = connection.cursor_value.statements
-    event_values = next(
-        values
-        for statement, values in statements
-        if "INSERT INTO client_payment_terms_events" in statement
-    )
-    assert event_values[2] == 450
-    assert any("UPDATE client_payment_terms" in statement for statement, _ in statements)
     assert persisted[0].candidate is finance_candidate
     assert persisted[0].source_event_id == 9
 
@@ -232,7 +234,6 @@ def test_existing_assignment_still_updates_both_financial_owners(monkeypatch):
     facts = SimpleNamespace(scheduling="schedule", payroll="payroll", order=SimpleNamespace(terms="terms"), planned_service_dates=())
     monkeypatch.setattr(module, "load_locked_facts", lambda *_: facts)
     monkeypatch.setattr(module, "load_contract_client_finance_facts", lambda *_args, **_kwargs: "finance")
-    monkeypatch.setattr(module, "_persist_effective_client_rate", lambda *_: None)
     monkeypatch.setattr(module, "build_client_finance_rate_correction_candidate", lambda *_: "client-impact")
     calls = []
     monkeypatch.setattr(module, "persist_client_finance_terms_impact", lambda *_: calls.append("finance"))

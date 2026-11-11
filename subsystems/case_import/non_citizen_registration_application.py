@@ -9,9 +9,14 @@ from datetime import date, datetime, timedelta, timezone
 import json
 from typing import Any, Mapping
 
-from domains.case_import.client_import_validation import EMAIL_PATTERN, _is_valid_service_time
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from domains.case_import.client_import_validation import EMAIL_PATTERN
 from domains.case_import.cooking_requirement import normalize_cooking_requirement
-from domains.case_import.provisional_registration import ProvisionalRegistrationCandidate
+from domains.case_import.non_citizen_registration import validate_non_citizen_service_time
+from domains.case_import.provisional_registration import (
+    HOLIDAY_DOUBLE_PAY_SURVEY_FIELD,
+    ProvisionalRegistrationCandidate,
+)
 from domains.case_import.refund_account import normalize_refund_field
 from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
 from infrastructure.mysql.case_import_repository import (
@@ -102,12 +107,11 @@ def create_manual_non_citizen_case(
         raise ValueError("服務天數必須為大於 0 的整數。")
 
     service_time = str(payload.get("service_time") or "").strip()
-    if not service_time or not _is_valid_service_time(service_time):
-        raise ValueError("服務時段格式不正確，需包含每日時數（如 8小時）與起訖時間（如 09:00-18:00）。")
+    validate_non_citizen_service_time(service_time)
 
-    baby_info = str(payload.get("baby_info") or "").strip()
-    if not baby_info:
-        raise ValueError("請輸入寶寶資訊。")
+    multi_birth_count = str(payload.get("baby_info") or "").strip()
+    if multi_birth_count not in VALID_MULTI_BIRTH_COUNTS:
+        raise ValueError("胎數須選擇單胞胎或雙胞胎。")
 
     email = str(payload.get("email") or "").strip()
     if not email:
@@ -127,6 +131,9 @@ def create_manual_non_citizen_case(
         raise ValueError("退款銀行帳號須為 1 至 50 碼數字。") from exc
     if refund_account_no is None:
         raise ValueError("請輸入退款銀行帳號。")
+    holiday_double_pay = payload.get("holiday_double_pay")
+    if holiday_double_pay is not None and holiday_double_pay not in ("是", "否"):
+        raise ValueError("三節假日雙倍薪水意願須選擇是或否。")
 
     created_at_utc = datetime.now(timezone.utc)
     with CaseImportMySqlUnitOfWork(connection) as uow:
@@ -172,7 +179,7 @@ def create_manual_non_citizen_case(
                 "service_type": service_type,
                 "delivery_type": str(payload.get("delivery_type") or "自然產").strip(),
                 "residence_type": str(payload.get("residence_type") or "電梯大樓").strip(),
-                "baby_info": baby_info,
+                "baby_info": multi_birth_count,
                 "city": str(payload.get("city") or "").strip(),
                 "address": str(payload.get("address") or "").strip(),
                 "due_month": due_month,
@@ -189,6 +196,7 @@ def create_manual_non_citizen_case(
                 requires_cooking=requires_cooking,
                 provisional_registration_id=None,
                 pricing_identity_rule="non_citizen",
+                multi_birth_count=multi_birth_count,
             )
 
             workflow = CaseImportWorkflow(MySqlCaseImportRepository(connection), lambda: None)
@@ -205,6 +213,7 @@ def create_manual_non_citizen_case(
             ))
 
             survey = {
+                "特殊計費:胎數": multi_birth_count,
                 "服務時間內是否有其他寶寶": "否",
                 "是否需要下廚": "是" if requires_cooking else "否",
                 "補助款退款:銀行代號+分行代號": refund_bank_code,
@@ -212,6 +221,8 @@ def create_manual_non_citizen_case(
                 "_source": "manual_non_citizen_creation",
                 "_created_at": created_at.isoformat(),
             }
+            if holiday_double_pay is not None:
+                survey[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] = holiday_double_pay
             cursor.execute(
                 "INSERT INTO beclass_records (name, email, birth_date, phone, city, address, "
                 "refund_bank_code, refund_account_no, created_at, query_no, bound_case_no, client_id, survey_details) "

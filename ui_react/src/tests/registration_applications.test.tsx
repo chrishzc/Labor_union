@@ -77,9 +77,9 @@ describe('saved demand application review', () => {
       message: '非市民新案「A115002」建立成功。',
     });
     render(<RegistrationApplications onEditStateChange={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: '手動新增非市民新案' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '新增非市民案件' })).toBeEnabled());
     expect(screen.queryByRole('button', { name: '補登歷史非市民案件' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '手動新增非市民新案' }));
+    fireEvent.click(screen.getByRole('button', { name: '新增非市民案件' }));
     expect(await screen.findByText('A115001')).toBeInTheDocument();
     expect(screen.getByText('99781699115501')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('例如 A113001')).not.toBeInTheDocument();
@@ -87,8 +87,17 @@ describe('saved demand application review', () => {
     fireEvent.change(screen.getByPlaceholderText('姓名'), { target: { value: '測試客戶' } });
     fireEvent.change(screen.getByPlaceholderText('手機或市話'), { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText(/預計服務開始日/), { target: { value: '2026-12-01' } });
+    fireEvent.change(screen.getByLabelText(/服務時段/), { target: { value: '08:30-16:30 (8小時)' } });
+    const babyInfo = screen.getByRole('combobox', { name: '胎數' });
+    expect(babyInfo).toBeRequired();
+    expect(babyInfo).toHaveValue('');
+    const holidayPreference = screen.getByRole('combobox', { name: /三節假日.*雙倍薪水/ });
+    expect(holidayPreference).not.toBeRequired();
+    expect(holidayPreference).toHaveValue('');
+    fireEvent.change(holidayPreference, { target: { value: '否' } });
+    expect(Array.from((babyInfo as HTMLSelectElement).options, option => option.value)).toEqual(['', '單胞胎', '雙胞胎']);
+    fireEvent.change(babyInfo, { target: { value: '雙胞胎' } });
     for (const [label, value] of [
-      ['寶寶資訊', '單胞胎'],
       ['電子郵件', 'synthetic@example.test'],
       ['退款銀行代號（7碼）', '0000001'],
       ['退款銀行帳號', '000000000001'],
@@ -98,10 +107,17 @@ describe('saved demand application review', () => {
       expect(field).toHaveValue('');
       fireEvent.change(field, { target: { value } });
     }
+    fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: '08:45' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
+    expect(await screen.findByText('起訖時間差須等於所選的 8 小時。')).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '16:45' } });
     fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
 
     expect(await screen.findByText(/A115002.*99781699115502/)).toBeInTheDocument();
-    expect(create.mock.calls[0][0]).toMatchObject({ mode: 'new' });
+    expect(create.mock.calls[0][0]).toMatchObject({
+      mode: 'new', service_time: '08:45-16:45 (8小時)', baby_info: '雙胞胎', holiday_double_pay: '否',
+    });
     expect(create.mock.calls[0][0]).not.toHaveProperty('case_no');
     expect(create.mock.calls[0][0]).not.toHaveProperty('virtual_account');
   });

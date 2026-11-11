@@ -87,7 +87,7 @@ def test_staff_payout_page_is_safe_and_shows_required_payment_fields() -> None:
     source = (ROOT / "line" / "static" / "staff_payout.html").read_text(encoding="utf-8")
 
     assert "/api/v1/line/staff-self-service/payouts" in source
-    assert "目標付款月份" in source
+    assert "預計付款月份" in source
     assert "目標付款日" in source
     assert "實際付款日" in source
     assert "已付金額" in source

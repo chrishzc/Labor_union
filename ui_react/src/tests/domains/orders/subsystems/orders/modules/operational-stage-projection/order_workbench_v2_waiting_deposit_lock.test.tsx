@@ -193,7 +193,7 @@ describe('待辦看板目前自動等待訂金鎖及正式排班', () => {
   it.each([{ case_no: CASE, assignments: [] }, { case_no: 'OTHER-CASE', assignments: [{ staff_id: 8892 }] }])('自動工作宣稱完成但 owner 回讀不一致，不報成功、不通知父頁或重送：%j', async readback => {
     mocks.assignment.mockResolvedValue(readback);
     const onObserved = await open(); await openDates(); await saveDates();
-    expect(await screen.findByRole('alert')).toHaveTextContent('排班結果尚未完成正式回讀。');
+    expect(await screen.findByRole('alert')).toHaveTextContent('尚未確認最新排班結果。');
     expect(onObserved).not.toHaveBeenCalled();
     expect(screen.queryByText('正式排班已完成')).not.toBeInTheDocument();
     expect(screen.queryByText('排班已完成並回讀一致。')).not.toBeInTheDocument();

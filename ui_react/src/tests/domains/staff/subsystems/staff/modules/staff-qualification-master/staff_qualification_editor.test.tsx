@@ -36,7 +36,7 @@ describe('Staff professional qualification editing', () => {
     const after = { special_skills: ['照護', '哺乳協助'], certifications: ['急救證書'], transportation: ['汽車'], has_massage_cert: true, care_babies: 2 };
     vi.mocked(staffQualificationEditingClient.query).mockResolvedValue({ ...snapshot, before: after, after });
     fireEvent.click(screen.getByRole('button', { name: '儲存' }));
-    await screen.findByText('專業資格與服務資料已儲存並重新查詢。');
+    await screen.findByText('專業資格與服務資料已儲存。');
     expect(staffQualificationEditingClient.apply).toHaveBeenCalledWith(11, after, expect.objectContaining({ preview_fingerprint: 'b'.repeat(64) }), note.trim(), expect.any(String), expect.any(AbortSignal));
     expect(screen.getByLabelText('一般證照')).toHaveValue('急救證書');
     expect(window.alert).not.toHaveBeenCalled();

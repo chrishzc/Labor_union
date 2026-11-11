@@ -225,8 +225,8 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
 ];
 
 const SCOPE_VIEWS: Record<LineScope, { title: string; subtitle: string; tabs: readonly LineTab[]; fallback: LineTab }> = {
-  service: { title: '客服與營運工作台', subtitle: '處理客服案件、身分授權與案件群組。', tabs: ['tickets', 'binding', 'order_groups'], fallback: 'tickets' },
-  notifications: { title: '通知與寄送', subtitle: '管理通知規則與發送佇列，追蹤寄送任務與異常。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
+  service: { title: '客服與營運', subtitle: '處理客服案件、身分授權與案件群組。', tabs: ['tickets', 'binding', 'order_groups'], fallback: 'tickets' },
+  notifications: { title: '通知與寄送', subtitle: '設定通知規則，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
   interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單與 LINE 訊息流程。', tabs: ['richmenu', 'liff', 'message_flow'], fallback: 'richmenu' },
 };
 
@@ -1010,12 +1010,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               const resolvedUri = resolveRichMenuUri(act.uri);
                               setSimChatMessages([]);
                               setActiveSimLiff({
-                                title: 'LIFF／網址動作本機預覽',
+                                title: '連結預覽',
                                 subtitle: '僅顯示草稿中的目標；不開啟網址、不送出請求。',
                                 badge: '零寫入預覽',
                                 fields: [
                                   { label: '草稿參數', value: act.uri ?? '未設定' },
-                                  { label: '實際開啟路由', value: resolvedUri ?? '未設定' },
+                                  { label: '開啟網址', value: resolvedUri ?? '未設定' },
                                 ],
                                 actionButtons: [],
                               });
@@ -1075,7 +1075,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       : <LineRichMenuDraftActionEditor draft={richMenuDraftSnapshot} menuId={activeMenu.id}
                         definition={localDefinition} onDefinitionChange={setRichMenuLocalDefinition} />}
                   </fieldset>
-                  <p className="richmenu-edit-help">修改會即時顯示在手機預覽。儲存後，點選下方「發布至 LINE」。</p>
+                  <p className="richmenu-edit-help">儲存後即可點選「發布至 LINE」。</p>
                 </>}
               </div>
             </div>
@@ -1211,7 +1211,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     ) : (
                       <>
                         <h4 className="richmenu-editor-title">目前無法判定發布資格</h4>
-                        <p>缺少此選單目前版本的發布狀態，系統已停止發布操作；請重新整理後再試。</p>
+                        <p>無法確認目前選單的發布狀態。請重新整理後再發布。</p>
                       </>
                     )}
                   </section>
@@ -1492,7 +1492,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               <div className="line-grid-full">
                 {escalationSourceIdentity.trim() && (!/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim()) && (
                   <div className="line-scope-note line-bottom-spacing" role="status">
-                    需先完成來源事件核對並補齊進階來源資料，才能建立。
+                    請先核對來源並補齊資料。
                   </div>
                 )}
                 <button

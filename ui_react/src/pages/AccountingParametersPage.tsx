@@ -61,7 +61,7 @@ export function AccountingParametersPage() {
     } catch (error) {
       if (!applied && error instanceof ApiHttpError && error.status < 500) {
         setPending(null); setStatus('error'); setMessage(error.status === 409 ? '政策已被其他人更新，請重新載入後核對草稿。' : '儲存未完成，請確認欄位與權限。');
-      } else { setStatus('unknown'); setMessage('儲存結果待確認。可重試原操作；會沿用相同識別，不重複新增版本。'); }
+      } else { setStatus('unknown'); setMessage('儲存結果尚未確認。重試會沿用同一筆操作。'); }
     }
   };
   const historyPolicy = catalog?.versions.find(item => item.revision === viewVersion)?.policy;
@@ -89,7 +89,7 @@ export function AccountingParametersPage() {
   </ManagementPageHeader>
   <div className="pricing-page">
     <nav className="pricing-tabs" aria-label="帳務參數分頁" role="tablist">{(['pricing', 'history'] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} disabled={busy} onClick={() => setTab(value)}>{value === 'pricing' ? '計價與補助' : '版本紀錄'}</button>)}</nav>
-    <div className="pricing-notice">依案件首次建立時間套用；生效日當天 00:00 起適用（台灣時間）。補件、改期與新政策發布不更換既有案件版本。</div>
+    <div className="pricing-notice">新案件自生效日 00:00 起適用（台灣時間）。既有案件沿用原版本。</div>
     {tab === 'pricing' && catalog?.versions[0]?.policy.identities.some(item => pricingIdentityLabel(item) !== item.identity_name) &&
       <p className="pricing-notice">已依一般市民／補助市民名稱建立新稿，原時數與費率保留。請儲存新版本供新案件使用；既有版本與案件設定維持原紀錄。</p>}
     {message && <p className="pricing-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'}>{message}</p>}
@@ -99,8 +99,8 @@ export function AccountingParametersPage() {
     {shown && catalog && <><label className="pricing-field">生效日期<input type="date" required value={shown.effective_on} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, effective_on: event.target.value }))} /></label>
       <section className="pricing-section"><div className="pricing-section-heading"><h2>補助身分與分段時薪</h2></div>{renderRows(shown, busy || status === 'loading' || tab === 'history')}
         <p className="pricing-note">補助範圍內客戶與月嫂時薪須相等，用盡後可分別調整。非市民補助時數與補助內時薪均為 0，自費時薪維持用盡後設定。</p>
-        <p id="pricing-deposit-help" className="pricing-note">未填時顯示預設天數，填 0 免收訂金服務費。全額補助免自備時，各期皆免繳。</p>
-        <p className="pricing-note">個案補助款歸屬請至帳務中心的案件抽屜設定。</p>
+        <p id="pricing-deposit-help" className="pricing-note">留空顯示預設天數。填 0 免收訂金服務費。全額補助且免自備時，各期免繳。</p>
+        <p className="pricing-note">請到「帳務中心」開啟案件明細，設定補助款歸屬。</p>
       </section>
       <section className="pricing-section"><h2>雙胞胎費率</h2><div className="pricing-table-wrap"><table className="pricing-table"><thead><tr><th>客戶補助內時薪</th><th>客戶用盡後時薪</th><th>月嫂補助內時薪</th><th>月嫂用盡後時薪</th></tr></thead><tbody><tr>{(['twins_client', 'twins_payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`雙胞胎${owner === 'twins_client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min="1" step="1" value={shown[owner][tier]} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, [owner]: { ...current[owner], [tier]: Number(event.target.value) } }))} /></td>))}</tr></tbody></table></div><p className="pricing-note">單胞胎依身分設定；雙胞胎優先套用此處費率，補助上限仍依身分。</p></section>
       {tab === 'pricing' && <><section className="pricing-section"><label className="pricing-field">變更說明（選填）<textarea maxLength={500} value={reason} disabled={busy || status === 'loading'} onChange={event => setReason(event.target.value)} /></label></section><div className="pricing-actions"><button disabled={busy} onClick={() => requestLeave(() => { setDraft(copy(baseline)); setReason(''); })}>取消修改</button><button className="pricing-primary" disabled={status === 'saving' || (!pending && !!subsidyError)} onClick={() => void save()}>{status === 'saving' ? '儲存中…' : pending ? '重試原儲存' : '儲存新版本'}</button></div></>}

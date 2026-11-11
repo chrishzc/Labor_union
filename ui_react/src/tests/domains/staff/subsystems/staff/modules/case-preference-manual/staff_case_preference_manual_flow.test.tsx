@@ -48,7 +48,7 @@ describe('two informational service preferences and preserved imported facts', (
     fireEvent.click(screen.getByRole('button', { name: '移除可承接區域第2項' }));
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
     await waitFor(() => expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(531, expect.objectContaining(existing), expect.anything()));
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
   });
 
   it('renders concrete before/after values and preserves source details', () => {
@@ -68,7 +68,7 @@ describe('two informational service preferences and preserved imported facts', (
       expected_snapshot_fingerprint: snapshot.snapshot_fingerprint, preview_fingerprint: preview.preview_fingerprint,
     }), expect.objectContaining({ idempotencyKey: expect.stringContaining('staff-case-preference-'), signal: expect.any(AbortSignal) })));
     expect(vi.mocked(staffCasePreferenceManualClient.preview).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(staffCasePreferenceManualClient.apply).mock.invocationCallOrder[0]!);
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
   });
 
   it('does not apply on preview failure and surfaces stale rejection without success', async () => {
@@ -78,7 +78,7 @@ describe('two informational service preferences and preserved imported facts', (
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
     await screen.findByText('stale_snapshot');
     expect(staffCasePreferenceManualClient.apply).not.toHaveBeenCalled();
-    expect(screen.queryByText('已儲存並重新查詢服務偏好。')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務偏好已儲存。')).not.toBeInTheDocument();
   });
 
   it('preserves unchanged details and comma-containing values while editing rows', () => {

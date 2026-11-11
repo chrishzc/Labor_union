@@ -42,6 +42,7 @@ export interface ManualNonCitizenCaseInput {
   requires_cooking?: boolean;
   refund_bank_code: string;
   refund_account_no: string;
+  holiday_double_pay?: '是' | '否';
 }
 
 const caseNumberView = z.strictObject({

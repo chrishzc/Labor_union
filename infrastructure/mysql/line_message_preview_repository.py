@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
+
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -58,8 +60,10 @@ class MySqlLineMessagePreviewReader:
 
     def case(self, case_no):
         row = self._one(
-            "SELECT o.case_no,c.name AS client_name,o.start_date,o.end_date,c.city,c.service_type,c.service_time,c.baby_info,c.residence_type "
-            "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
+            "SELECT o.case_no,c.name AS client_name,o.start_date,o.end_date,c.city,c.service_type,c.service_time,"
+            + BIRTH_COUNT_SQL + " AS multi_birth_count,c.residence_type "
+            "FROM orders o JOIN clients c ON c.id=o.client_id"
+            + BIRTH_COUNT_JOINS + "WHERE o.case_no=%s", (case_no,))
         return PreviewCase(**{k: _text(row[k]) for k in PreviewCase.__dataclass_fields__}) if row else None
 
     def staff(self, staff_id):

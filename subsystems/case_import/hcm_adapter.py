@@ -48,6 +48,7 @@ def build_hcm_case_import_intent(
     requires_cooking: bool | None = None,
     provisional_registration_id: int | None = None,
     pricing_identity_rule: str | None = None,
+    multi_birth_count: str | None = None,
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")
@@ -66,6 +67,7 @@ def build_hcm_case_import_intent(
         bootstrap,
         provisional_registration_id=provisional_registration_id,
         pricing_identity_rule=pricing_identity_rule,
+        multi_birth_count=multi_birth_count,
     )
 
 

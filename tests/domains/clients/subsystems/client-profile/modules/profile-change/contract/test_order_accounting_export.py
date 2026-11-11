@@ -34,7 +34,7 @@ def _row() -> OrderAccountingExportRow:
         service_time="09:00-17:00 8小時",
         due_month="2026/10",
         hcm_service_start_date="2026/10/01",
-        is_twins=True,
+        multi_birth_count="雙胞胎",
         order_status="訂單成立",
         imported_virtual_accounts=("009978160011500001", "009978160011500009"),
         built_in_virtual_account="99781699115001",
@@ -134,11 +134,11 @@ def test_export_keeps_fixed_hcm_columns_and_native_excel_value_types():
     assert tuple(cell.value for cell in worksheet[1]) == HEADERS
     assert tuple(cell.value for cell in worksheet[1][:8]) == (
         "項次", "案件編號", "姓名", "身分資格", "服務時間",
-        "預產期／預計服務開始月份", "預計服務日期", "雙胞胎",
+        "預產期／預計服務開始月份", "預計服務日期", "胎數",
     )
     assert worksheet["B2"].value == "00115000001"
     assert worksheet["B2"].number_format == "@"
-    assert worksheet["H2"].value == "是"
+    assert worksheet["H2"].value == "雙胞胎"
     assert worksheet["J2"].value == "009978160011500001\n009978160011500009"
     assert worksheet["J2"].number_format == "@"
     assert worksheet["K2"].value == "99781699115001"
@@ -180,7 +180,7 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
         "service_time": "09:00-17:00 8小時",
         "due_month": "2026/10",
         "service_start_date": "2026/10/01",
-        "baby_info": "雙胞胎",
+        "multi_birth_count": "雙胞胎",
         "order_status": "訂單成立",
         "service_days": 26,
         "service_hours_per_day": 8,
@@ -255,7 +255,7 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
         "009978160011500001", "009978160011500009",
     )
     assert rows[0].built_in_virtual_account == "99781699115001"
-    assert rows[0].is_twins is True
+    assert rows[0].multi_birth_count == "雙胞胎"
     assert rows[0].customer_payable_total_ntd == 93600
     assert rows[0].subsidy_amount_ntd == 36000
     assert rows[0].subsidy_return_amount_ntd is None

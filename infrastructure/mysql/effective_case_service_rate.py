@@ -11,6 +11,25 @@ from typing import Any
 from domains.bootstrap.case_architecture import payroll_policy_kind_for_case
 
 
+# These aliases are shared by read models that join the unique BeClass record.
+BIRTH_COUNT_JOINS = (
+    " LEFT JOIN (SELECT bound_case_no,MAX(id) AS id,MAX(survey_details) AS survey_details "
+    "FROM beclass_records WHERE bound_case_no IS NOT NULL GROUP BY bound_case_no HAVING COUNT(*)=1) br "
+    "ON br.bound_case_no=o.case_no "
+    "LEFT JOIN beclass_record_correction_states bcs ON bcs.beclass_record_id=br.id "
+)
+_CORRECTED_BIRTH_COUNT = "JSON_UNQUOTE(JSON_EXTRACT(bcs.effective_values_json, '$.multi_birth_count'))"
+_SOURCE_BIRTH_COUNT = """TRIM(JSON_UNQUOTE(JSON_EXTRACT(br.survey_details, '$."特殊計費:胎數"')))"""
+_BIRTH_COUNT_VALUE = (
+    "COALESCE("
+    f"CASE WHEN JSON_VALID(bcs.effective_values_json) THEN {_CORRECTED_BIRTH_COUNT} END,"
+    f"CASE WHEN JSON_VALID(br.survey_details) THEN {_SOURCE_BIRTH_COUNT} END)"
+)
+BIRTH_COUNT_SQL = (
+    f"CASE WHEN {_BIRTH_COUNT_VALUE} IN ('單胞胎','雙胞胎') THEN {_BIRTH_COUNT_VALUE} END"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class EffectiveCaseServiceRate:
     policy_version: str
@@ -24,6 +43,7 @@ def load_explicit_case_service_rate(
     case_no: str,
     *,
     lock: bool = False,
+    use_bound_policy_without_start: bool = False,
 ) -> EffectiveCaseServiceRate | None:
     """Return a rate only when an administrator explicitly corrected birth count."""
 
@@ -50,15 +70,26 @@ def load_explicit_case_service_rate(
         str(birth_count),
     ).value
     service_start = row.get("start_date")
-    if not isinstance(service_start, date):
+    if isinstance(service_start, date):
+        cursor.execute(
+            "SELECT policy_version,policy_kind,hourly_rate_ntd "
+            "FROM payroll_rate_policies WHERE policy_kind=%s AND effective_from<=%s "
+            "AND (effective_until IS NULL OR effective_until>=%s) "
+            "ORDER BY effective_from DESC,policy_version DESC LIMIT 2" + lock_clause,
+            (policy_kind, service_start, service_start),
+        )
+    elif use_bound_policy_without_start:
+        # Client Finance can correct the rate against the case's recorded policy
+        # version without inferring a service date or choosing a new policy.
+        cursor.execute(
+            "SELECT policy.policy_version,policy.policy_kind,policy.hourly_rate_ntd "
+            "FROM case_payroll_rate_policy_snapshots snapshot "
+            "JOIN payroll_rate_policies policy ON policy.policy_version=snapshot.policy_version "
+            "WHERE snapshot.case_no=%s AND policy.policy_kind=%s" + lock_clause,
+            (case_no, policy_kind),
+        )
+    else:
         raise ValueError("planned_service_start_date_required")
-    cursor.execute(
-        "SELECT policy_version,policy_kind,hourly_rate_ntd "
-        "FROM payroll_rate_policies WHERE policy_kind=%s AND effective_from<=%s "
-        "AND (effective_until IS NULL OR effective_until>=%s) "
-        "ORDER BY effective_from DESC,policy_version DESC LIMIT 2" + lock_clause,
-        (policy_kind, service_start, service_start),
-    )
     policies = tuple(cursor.fetchall() or ())
     if len(policies) != 1:
         raise ValueError("payroll_rate_policy_not_found")

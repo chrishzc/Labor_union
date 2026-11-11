@@ -86,7 +86,7 @@ describe('Staff case preference summary flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: '編輯服務偏好' }));
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
     expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledWith(11, changed, expect.anything());
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(11, expect.objectContaining(changed), expect.anything());
     expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('東區');
@@ -97,7 +97,7 @@ describe('Staff case preference summary flow', () => {
     render(<StaffCasePreferenceManualEditor staffId={11} directEditing />);
     await screen.findByLabelText('可承接區域值1');
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
-    await screen.findByText('已儲存並重新查詢服務偏好。');
+    await screen.findByText('服務偏好已儲存。');
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
     await waitFor(() => expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledTimes(2));
@@ -112,6 +112,6 @@ describe('Staff case preference summary flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
     await screen.findByText('重新查詢失敗');
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('已儲存並重新查詢服務偏好。')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務偏好已儲存。')).not.toBeInTheDocument();
   });
 });

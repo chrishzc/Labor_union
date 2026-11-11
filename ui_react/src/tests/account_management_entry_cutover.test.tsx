@@ -96,7 +96,7 @@ describe('Account Management Phase5 entry candidate', () => {
     expect(screen.queryByRole('tab', { name: /安全操作與登入稽核/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /驗證器動態碼/ }));
     expect(screen.getByRole('heading', { name: /驗證器動態碼登入說明/ })).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: /內部人員帳號清冊/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /內部人員帳號列表/ }));
     expect(document.querySelector('.account-card-name')).toHaveTextContent('根帳號');
     expect(count(requests, ACCOUNTS_ENDPOINT)).toBe(1);
     expect(requests.some(({ path }) => path === AUDIT_ENDPOINT || path.startsWith(`${AUDIT_ENDPOINT}/`))).toBe(false);
@@ -116,7 +116,7 @@ describe('Account Management Phase5 entry candidate', () => {
     vi.spyOn(accountDirectoryClient, 'query').mockRejectedValue(new Error('帳號中心暫時無法使用'));
     render(<App />);
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('帳號清冊暫時無法取得'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('帳號列表暫時無法取得'));
     expect(document.querySelector('.account-card-name')).toBeNull();
     expect(screen.queryByText(/已成功載入帳號/)).not.toBeInTheDocument();
   });

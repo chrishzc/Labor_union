@@ -39,7 +39,7 @@ class StaffOrderView(BaseModel):
     residence_type: str | None = None
     delivery_type: str | None = None
     service_type: str | None = None
-    baby_info: str | None = None
+    multi_birth_count: str | None = None
     notes: str | None = None
 
 

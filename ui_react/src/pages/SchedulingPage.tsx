@@ -92,7 +92,7 @@ interface MonthSelection {
 const STAFF_PAGE_SIZE = 20;
 
 const PAYABLES_BLOCKER_MESSAGES: Record<string, string> = {
-  staff_payables_projection_missing: '代班薪資已建立，但月嫂應付款查詢資料尚未更新；請重新查詢，若持續未更新請到本案應付款核對',
+  staff_payables_projection_missing: '代班薪資已建立，應付款尚未更新。請重新查詢，或到本案應付款核對。',
   payroll_obligation_event_missing: '找不到本次代班對應的薪資義務紀錄',
   payroll_obligation_event_ambiguous: '本次代班對應到多筆薪資義務紀錄，尚無法唯一確認',
   payroll_obligation_version_mismatch: '代班與薪資義務的版本不一致',
@@ -769,7 +769,7 @@ function LeaveSubstitutionWorkspace({
     } catch {
       if (generation === payablesQueryGenerationRef.current) {
         setPayablesReadback(null);
-        setPayablesError('代班變更已完成，但薪資／應付款回讀失敗；可重新查詢，不會重送代班變更。');
+        setPayablesError('代班已更新，暫時無法查詢薪資和應付款。請重新查詢，勿重送代班。');
       }
     } finally {
       if (generation === payablesQueryGenerationRef.current) {
@@ -1019,7 +1019,7 @@ function LeaveSubstitutionWorkspace({
           )}
           {!caseOptionsLoading && !caseOptionsError && caseOptions.length === 0 && (
             <small className="leave-substitution-notice" role="status">
-              目前沒有已正式排班且尚未服務完成的案件。
+              目前沒有已排班且服務未完成的案件。
             </small>
           )}
           {!normalizedCaseNo && !caseOptionsLoading && !caseOptionsError && caseOptions.length > 0 && (
@@ -1140,7 +1140,7 @@ function LeaveSubstitutionWorkspace({
                 invalidatePreview();
               }}
             />
-            <small>指定日期時，僅將原服務日移至補班日，其他服務日不變；留空則依案件週休與假日條件自動順延後續日期。</small>
+            <small>填寫補班日，只移動這一天。留空則依案件週休與假日條件順延後續服務日。</small>
           </label>}
           {resolutionType === 'substitute' && <label>
             指派代班月嫂
@@ -1209,7 +1209,7 @@ function LeaveSubstitutionWorkspace({
           ) : (
             <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
           )}
-          <p>{machine.type === 'observed' ? '已重新查詢並確認最新指派。' : '變更已受理，正在確認最新指派。'}</p>
+          <p>{machine.type === 'observed' ? '已確認最新指派。' : '變更已受理，正在確認最新指派。'}</p>
         </section>
       )}
 
@@ -1271,7 +1271,7 @@ function LeaveSubstitutionWorkspace({
       )}
       {machine.type === 'observation_failed' && (
         <button type="button" onClick={() => void retryLeaveSubstitutionObservationFlow(normalizedCaseNo).catch(() => undefined)}>
-          重新查詢最新指派
+          查詢最新指派
         </button>
       )}
       {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}

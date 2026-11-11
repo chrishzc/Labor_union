@@ -174,7 +174,7 @@ def _caregiver_fact_rows(kind, facts):
     return (
         *common,
         ("服務時段", facts.get("service_time") or "未提供"),
-        ("寶寶資訊", facts.get("baby_info") or "未提供"),
+        ("胎數", facts.get("multi_birth_count") or "未提供"),
         ("居住型態", facts.get("residence_type") or "未提供"),
     )
 

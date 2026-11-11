@@ -84,7 +84,7 @@ def _card_defaults():
         caregiver_information_card, candidate_contact_information_card, customer_profiles_card,
         customer_confirmation_card, candidate_customer_question_card, candidate_caregiver_answer_card,
     )
-    facts = {key: "{business_value}" for key in ("case_no", "start_date", "end_date", "city", "service_type", "service_time", "baby_info", "residence_type")}
+    facts = {key: "{business_value}" for key in ("case_no", "start_date", "end_date", "city", "service_type", "service_time", "multi_birth_count", "residence_type")}
     for number in (1, 2):
         kind = MatchingNotificationKind.CAREGIVER_INFO_1 if number == 1 else MatchingNotificationKind.CAREGIVER_INFO_2
         result["card-caregiver-information" + ("-2" if number == 2 else "")] = json.loads(caregiver_information_card(kind, facts, "not-a-token"))

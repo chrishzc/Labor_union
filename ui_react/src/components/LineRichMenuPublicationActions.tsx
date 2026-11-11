@@ -180,7 +180,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
             <Rocket aria-hidden="true" />{selectedMenu ? '發布選單' : '重新發布'}
           </h4>
           <p className="richmenu-editor-description">
-             {selectedMenu ? `目前選單：${selectedMenu.name}` : '確認此筆失敗紀錄後重新排入發布。'}
+             {selectedMenu ? `目前選單：${selectedMenu.name}` : '確認此筆失敗紀錄後重試發布。'}
           </p>
         </div>
       </div>
@@ -221,18 +221,18 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
             disabled={busy || Boolean(publicationAccess)}
             onClick={() => void retryPublication()}
           >
-            <RefreshCw aria-hidden="true" />重新排入發布
+            <RefreshCw aria-hidden="true" />重試發布
           </button>
         </div>
       )}
 
       {(publishState === 'loading' || retryState === 'loading') && (
-        <div className="line-loading" role="status">正在排入發布工作…</div>
+        <div className="line-loading" role="status">正在送出發布…</div>
       )}
       {receipt && (
         <div className="line-success richmenu-publish-message" role="status">
           <strong>選單發布：{receipt.statusLabel}</strong>
-          <p className="richmenu-publish-receipt-help">已排入發布工作；尚未代表 LINE 平台已完成發布。</p>
+          <p className="richmenu-publish-receipt-help">已送出發布，等待 LINE 完成。</p>
         </div>
       )}
       {errorMessage && <div className="line-error richmenu-publish-message" role="alert">{errorMessage}</div>}

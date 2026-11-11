@@ -58,7 +58,7 @@ describe('ContractTemplatesPage', () => {
     vi.mocked(client.activate).mockResolvedValue({ catalog: { ...savedCatalog, catalog_version: 2, active_version_id: nextVersion.version_id }, version_id: nextVersion.version_id, replayed: false });
     fireEvent.click(screen.getByRole('button', { name: '啟用此版本' }));
     const dialog = screen.getByRole('dialog', { name: '啟用此模板版本？' });
-    expect(within(dialog).getByText(/已保存的契約、PDF 及簽回文件保留原版本/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/已儲存的契約、PDF 及簽回文件保留原版本/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '確認啟用' }));
     await screen.findByText('指定模板已啟用，後續產製使用此版本；既有契約保留原版本。');
     expect(client.activate).toHaveBeenCalledWith(key, nextVersion.version_id, 1, expect.any(String));
