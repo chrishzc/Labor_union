@@ -239,7 +239,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
     const example = '您的請假申請已完成正式排班處理。';
     vi.mocked(previews.render).mockResolvedValue({
-      status: 'ready', format: 'text', message: '公版預覽', text: example, bubbles: [], facts: [],
+      status: 'ready', format: 'text', note: '公版預覽', text: example, bubbles: [], facts: [],
     });
     window.history.replaceState(null, '', '#line-interface?tab=message_flow');
     const flow = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
