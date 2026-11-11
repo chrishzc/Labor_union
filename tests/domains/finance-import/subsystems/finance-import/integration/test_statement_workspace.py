@@ -7,6 +7,35 @@ from openpyxl import load_workbook
 import pytest
 
 
+@pytest.mark.parametrize("scheme,recipient", [("split", "staff"), ("advance", "client")])
+def test_subsidy_payment_estimate_and_formal_precedence(scheme, recipient):
+    from datetime import date
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    from subsystems.finance_import.accounting_workspace import SubsidyPayment, _subsidy_payments
+    from subsystems.staff_payables.case_accounting_query import StaffAccountingItem, StaffFundingPortion
+
+    service_end = date(2026, 11, 12)
+    assert _subsidy_payments(scheme, 0, service_end, "測試客戶", (), ()) == ()
+    assert _subsidy_payments(scheme, 3200, service_end, "測試客戶", (), ()) == (
+        SubsidyPayment(recipient, "測試客戶" if recipient == "client" else "", 3200, "2027-01-15", "estimate"),
+    )
+
+    client_items = staff_items = ()
+    if recipient == "client":
+        client_items = (ClientAccountingItem(
+            "refund", "payable", "補助退款", "測試客戶", 1800, 0, False, "1",
+            "2027-02-15", obligation_type="subsidy_return",
+        ),)
+    else:
+        staff_items = (StaffAccountingItem(
+            "payout", "payable", "月嫂服務費", "測試月嫂", 2400, 0, False, "1", "2026-12-15",
+            funding_portions=(StaffFundingPortion("subsidy", 1800, date(2027, 2, 15), 0, 1800),),
+        ),)
+    assert _subsidy_payments(scheme, 3200, service_end, "測試客戶", client_items, staff_items) == (
+        SubsidyPayment(recipient, "測試客戶" if recipient == "client" else "測試月嫂", 1800, "2027-02-15", "formal"),
+    )
+
+
 @pytest.mark.parametrize('suffix,memo', [
     ('115032', '  ＨＣ１１５０３２服務人員薪資\n'),
     ('115093', 'ＨＣ１１５０９３雇主補助款'),

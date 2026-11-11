@@ -26,6 +26,7 @@ class ClientCasePaymentTerms:
     funding: ClientCaseFunding | None = None
     zero_stages: frozenset[PaymentStage] = frozenset()
     historical_stages: bool = False
+    service_end_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class ClientAccountingItem:
     settled: bool = False
     recognized_ntd: int = 0
     payment_stage: str | None = None
+    obligation_type: str | None = None
 
     @property
     def remaining_ntd(self):

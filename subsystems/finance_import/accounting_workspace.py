@@ -96,6 +96,36 @@ class CaseBankMemo:
 
 
 @dataclass(frozen=True)
+class SubsidyPayment:
+    recipient: str
+    party: str
+    amount_ntd: int
+    due_date: str | None
+    source: str
+
+
+def _subsidy_payments(scheme, subsidy, service_end, client_name, client_items, staff_items):
+    from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+
+    formal = (
+        *(SubsidyPayment("staff", item.party, portion.amount_ntd,
+                         portion.due_date.isoformat() if portion.due_date else None, "formal")
+          for item in staff_items for portion in item.funding_portions if portion.funding_kind == "subsidy"),
+        *(SubsidyPayment("client", item.party, item.expected_ntd, item.due_date, "formal")
+          for item in client_items if item.obligation_type == "subsidy_return" and item.direction == "payable"),
+    )
+    if formal:
+        return formal
+    if scheme not in {"split", "advance"} or subsidy is None or subsidy <= 0:
+        return ()
+    date = subsidy_advance_due_date(service_end).isoformat() if service_end else None
+    if scheme == "advance":
+        return (SubsidyPayment("client", client_name, subsidy, date, "estimate"),)
+    staff = "、".join(dict.fromkeys(item.party for item in staff_items if item.party))
+    return (SubsidyPayment("staff", staff, subsidy, date, "estimate"),)
+
+
+@dataclass(frozen=True)
 class CaseAccounting:
     case_no: str
     client_name: str
@@ -130,6 +160,7 @@ class CaseAccounting:
     funding: ClientCaseFunding | None = None
     cancellation_settlement: ClientCancellationAccounting | None = None
     bank_memos: tuple[CaseBankMemo, ...] = ()
+    subsidy_payments: tuple[SubsidyPayment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -399,6 +430,9 @@ class AccountingWorkspace:
             customer_paid_ntd=customer_paid, funding=funding,
             cancellation_settlement=self.cancellation(case_no) if include_sources and self.cancellation else None,
             bank_memos=self.bank_memos(case_no) if include_sources and self.bank_memos else (),
+            subsidy_payments=_subsidy_payments(
+                scheme, subsidy, terms.service_end_date, client_name, client_items, staff_due,
+            ) if include_sources else (),
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

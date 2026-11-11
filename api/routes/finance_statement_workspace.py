@@ -80,13 +80,15 @@ def _case_view(case):
     payload = asdict(case)
     payload.pop("funding")
     payload.pop("customer_paid_ntd")
-    for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos"):
+    for field in ("client_items", "staff_items", "transactions", "warnings", "bank_memos", "subsidy_payments"):
         payload[field] = list(payload[field])
     for field in ("client_items", "staff_items"):
         for item, projected in zip(getattr(case, field), payload[field]):
             projected.update(remaining_ntd=item.remaining_ntd, noncash_ntd=item.noncash_ntd)
             if field == 'staff_items':
                 projected['funding_portions'] = list(projected['funding_portions'])
+            else:
+                projected.pop("obligation_type")
     payload["bank_facts"] = [
         {**bank, "cases": list(bank["cases"])} for bank in payload["bank_facts"]
     ]

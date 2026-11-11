@@ -502,6 +502,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  },0n);
 
  const subsidyKnown=data?.subsidy_ntd!=null;
+ const subsidyPayments = data?.subsidy_payments ?? [];
+ const subsidyPaymentNotApplicable = state.order?.identity_status === '非市民' || data?.subsidy_ntd === 0;
  const subsidyTotal=data?.subsidy_ntd??0;
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
  const govReceivedNtd=data?.cash_by_flow?.G??govBankFacts.reduce((s,b)=>s+b.amount_ntd,0);
@@ -802,6 +804,21 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
+  <div className="finance-table-container" role="region" aria-label="補助款預計給付">
+    <table className="finance-table finance-case-periods">
+      <caption>補助款預計給付</caption>
+      <thead><tr><th>收款對象</th><th>補助金額</th><th>預計給付日</th><th>狀態</th></tr></thead>
+      <tbody>{subsidyPayments.length ? subsidyPayments.map((payment, index) => (
+        <tr key={index}>
+          <td>{payment.recipient === 'staff' ? '轉付月嫂' : '退還客戶'}{payment.party && <small>{payment.party}</small>}</td>
+          <td>{money(payment.amount_ntd)}</td>
+          <td>{payment.due_date ?? '日期待確認'}</td>
+          <td>{payment.source === 'formal' ? '已成立正式款項' : '預估 · 尚未成立正式款項'}</td>
+        </tr>
+      )) : <tr><td colSpan={4}>{subsidyPaymentNotApplicable || data.scheme === 'direct' ? '不適用'
+        : !subsidyKnown ? '補助金額待確認' : '補助給付方案待確認'}</td></tr>}</tbody>
+    </table>
+  </div>
   <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : selected === 'advance' && subsidyTotal > 0 && !refundClientItems.length ? '補助退款待成立' : refundClientItems.length ? '已結清' : '無已成立退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
@@ -888,9 +905,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           <tr>
             <td>
               <strong>客戶退款</strong>
-              <small>正常履約無扣減</small>
+              <small>{(selected ?? data.scheme) === 'advance' && subsidyTotal > 0 ? '補助退款待成立' : '無已成立退款'}</small>
             </td>
-            <td>不需退款</td>
+            <td>{(selected ?? data.scheme) === 'advance' && subsidyTotal > 0 ? '待成立' : '—'}</td>
             <td>NT$ 0</td>
             <td>
               <span>已退 NT$ 0</span>
@@ -901,7 +918,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
               <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo})` : ''}</small>
             </td>
             <td>
-              <span className="finance-paid">免退款</span>
+              <span>無正式退款單</span>
             </td>
             <td>
               <div className="finance-case-period-actions">

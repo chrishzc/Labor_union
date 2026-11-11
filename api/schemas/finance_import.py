@@ -272,6 +272,14 @@ class ManualSupplementReceiptView(_StrictModel):
     reconciled: bool
 
 
+class SubsidyPaymentView(_StrictModel):
+    recipient: Literal["staff", "client"]
+    party: str
+    amount_ntd: ExactNtd
+    due_date: str | None
+    source: Literal["estimate", "formal"]
+
+
 class CaseAccountingView(_StrictModel):
     manual_supplement_receipt: ManualSupplementReceiptView | None = None
     case_no: str
@@ -303,6 +311,7 @@ class CaseAccountingView(_StrictModel):
     collection_progress: CollectionProgressView | None = None
     subsidy_plan: CaseSubsidyPlanView | None = None
     bank_memos: list[CaseBankMemoView] = Field(default_factory=list)
+    subsidy_payments: list[SubsidyPaymentView] = Field(default_factory=list)
     ongoing_completed: bool = False
     cancellation_settlement: CaseCancellationSettlementView | None = None
 

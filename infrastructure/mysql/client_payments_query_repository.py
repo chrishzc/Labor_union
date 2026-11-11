@@ -39,24 +39,25 @@ def query_case_payment_terms(connection, case_no):
     with connection.cursor() as cursor:
         order = select_order(cursor, case_no, lock=False)
         status = str(order['status'])
+        service_end_date = order["actual_end_date"] or order["end_date"]
         if status.startswith('歷史'):
             # Historical obligations retain their original legal period grain;
             # do not require or manufacture the normal three-period schedule.
-            return ClientCasePaymentTerms(historical_stages=True)
+            return ClientCasePaymentTerms(historical_stages=True, service_end_date=service_end_date)
         if any(order.get(key) is None for key in
                 ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee', 'client_identity_status')):
-            return ClientCasePaymentTerms()
+            return ClientCasePaymentTerms(service_end_date=service_end_date)
         if (order['pricing_policy_id'] is None and order['pricing_override_event_id'] is None
                 and order['client_identity_status'] not in {'一般市民', '非市民'}):
-            return ClientCasePaymentTerms()
+            return ClientCasePaymentTerms(service_end_date=service_end_date)
         cursor.execute('SELECT 1 FROM client_finance_accounts a JOIN client_payment_terms t ON t.case_no=a.case_no '
             'JOIN client_payment_terms_events e ON e.id=t.current_event_id WHERE a.case_no=%s', (case_no,))
         if cursor.fetchone() is None:
-            return ClientCasePaymentTerms()
+            return ClientCasePaymentTerms(service_end_date=service_end_date)
         facts, _ = load_calculable_client_finance_facts(cursor, order, lock=False,
             allow_planned=status not in ('訂單完成', '訂單取消'))
     if facts is None or not facts.charge_days:
-        return ClientCasePaymentTerms()
+        return ClientCasePaymentTerms(service_end_date=service_end_date)
     pricing = facts.pricing
     funding = None
     if pricing is not None:
@@ -69,8 +70,8 @@ def query_case_payment_terms(connection, case_no):
     # Cancellation has separate actual-service terms. An incomplete service
     # schedule or inconsistent amounts cannot establish a zero stage.
     if status == '訂單取消' or len(facts.charge_days) != int(order['service_days']):
-        return ClientCasePaymentTerms(funding)
-    return ClientCasePaymentTerms(funding, confirmed_zero_payment_stages(facts))
+        return ClientCasePaymentTerms(funding, service_end_date=service_end_date)
+    return ClientCasePaymentTerms(funding, confirmed_zero_payment_stages(facts), service_end_date=service_end_date)
 
 
 class MySqlClientFinanceQueryRepository:
@@ -547,6 +548,7 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             settled=row["confirmation_kind"] == "settled" or row["status"] == "settled",
             recognized_ntd=recognized,
             payment_stage=row["obligation_type"] if row["obligation_type"] in {"deposit", "first", "second"} else None,
+            obligation_type=row["obligation_type"],
         ))
     valid = {item.identity for item in items}
     for row in recovery_rows:
