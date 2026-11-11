@@ -5,6 +5,14 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, model_validator
 
 
+TWO_STEP_GATEWAY_DESTINATIONS = {
+    "registered_city": "/line-bind",
+    "apply_city": "https://hsinchu-nanny.hccg.gov.tw/home",
+    "non_citizen_binding": "/line-bind?entry=existing_case",
+    "non_citizen_registration": "/line-non-citizen-registration",
+}
+
+
 class LiffOption(BaseModel):
     value: str = Field(min_length=1, max_length=200)
     label: str = Field(min_length=1, max_length=200)
@@ -74,6 +82,10 @@ class LiffPage(BaseModel):
             raise ValueError("LIFF action ids must be unique")
         if self.page_type == "navigation" and not self.actions:
             raise ValueError("navigation page requires at least one action")
+        if self.content.get("navigation_layout") == "two_step":
+            enabled_actions = {action.id: action.path for action in self.actions if action.enabled}
+            if any(enabled_actions.get(action_id) != path for action_id, path in TWO_STEP_GATEWAY_DESTINATIONS.items()):
+                raise ValueError("two-step gateway requires the four canonical destinations")
         return self
 
 
@@ -113,6 +125,10 @@ class LiffSettingsConfig(BaseModel):
         for page_id, page_type in required_pages.items():
             if self.pages[page_id].page_type != page_type:
                 raise ValueError(f"{page_id} must use page_type={page_type}")
+
+        gateway = self.pages["gateway"]
+        if gateway.content.get("navigation_layout") == "two_step" and "non_citizen_registration" not in self.pages:
+            raise ValueError("two-step gateway requires the non-citizen registration page")
 
         required_fields = {
             "bind": {"name": "text", "phone": "phone"},

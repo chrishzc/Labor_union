@@ -186,7 +186,7 @@ def test_pending_manual_replay_is_a_typed_state_conflict(monkeypatch):
     assert conflict.value.detail['error']['code']=='notification_replay_in_progress'
 
 
-@pytest.mark.parametrize('source',[source for source in NotificationSource if source != NotificationSource.LEAVE])
+@pytest.mark.parametrize('source',[source for source in NotificationSource if source not in {NotificationSource.LEAVE, NotificationSource.LOG}])
 def test_desktop_and_verified_liff_use_same_projection_and_cursor(monkeypatch,source):
     cursor='original-owner-cursor' if source == NotificationSource.NOTIFICATION_FAILURE else 1
     calls=[]
@@ -393,6 +393,19 @@ def test_legacy_leave_is_not_a_current_source_and_both_queries_are_retired(monke
     with pytest.raises(HTTPException) as review:
         staff_leave_management.review_staff_leave_request(7,staff_leave_management.ReviewBody(expected_version=1,action='accept',reason=''), 'synthetic',PRINCIPAL)
     assert review.value.status_code==410
+
+
+def test_service_day_log_reminder_is_not_a_current_source_and_both_queries_are_retired(monkeypatch):
+    assert NotificationSource.LOG not in {row.source for row in query._catalog(PRINCIPAL)}
+    monkeypatch.setattr(query,'_read_source',lambda *args:pytest.fail('retired source must not read owners'))
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda *args:(PRINCIPAL,None))
+    with pytest.raises(HTTPException) as desktop:
+        query.source_page(NotificationSource.LOG,0,PRINCIPAL)
+    with pytest.raises(HTTPException) as mobile:
+        query.mobile_source_page(NotificationSource.LOG,query.MobileNotificationQuery(line_id_token='synthetic'))
+    assert desktop.value.status_code==mobile.value.status_code==410
+    assert desktop.value.detail['error']['code']=='service_day_log_reminder_retired'
+    assert mobile.value.detail['error']['code']=='service_day_log_reminder_retired'
 
 
 def test_mobile_identity_focus_uses_original_single_item_reader_and_current_auth(monkeypatch):

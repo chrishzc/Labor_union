@@ -1,4 +1,7 @@
-"""Canonical message intents for per-user LINE Rich Menu selection."""
+"""
+File: menu_command_application.py
+Description: 處理使用者切換個人 LINE 圖文選單角色之訊息意圖，支援新舊選單名稱相容。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 
 _CUSTOMER_MENU_COMMANDS = {"客戶選單", "客戶專區", "切換客戶"}
-_VISITOR_MENU_COMMANDS = {"訪客選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般"}
+_VISITOR_MENU_COMMANDS = {"訪客選單", "服務選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般"}
 _STAFF_MENU_COMMANDS = {"月嫂選單", "月嫂專區", "切換月嫂"}
 _UNION_MENU_COMMANDS = {"工會選單", "工會客服", "切換工會"}
 _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}

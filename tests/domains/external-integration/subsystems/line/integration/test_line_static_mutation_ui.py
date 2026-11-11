@@ -93,7 +93,10 @@ def test_mobile_review_terminal_states_are_explicitly_read_only() -> None:
 def test_registration_ui_uses_preview_confirmation_apply_and_typed_readback() -> None:
     source = _source("register.html")
     submit = source.split('document.getElementById("registerForm").addEventListener("submit"', 1)[1]
-    success_render = source.split("successDescription.textContent = [", 1)[1].split(
+    success_fn = source.split("function renderRegistrationSuccess(receipt) {", 1)[1].split(
+        "async function queryRegistrationStatus()", 1
+    )[0]
+    success_render = success_fn.split("successDescription.textContent = [", 1)[1].split(
         "].join('\\n')", 1
     )[0]
 
@@ -103,9 +106,10 @@ def test_registration_ui_uses_preview_confirmation_apply_and_typed_readback() ->
     assert "expected_binding_version" in submit
     assert "preview_fingerprint" in submit
     assert "identity_status" in submit
-    assert "登記編號：" not in success_render
-    assert "客戶識別：" not in success_render
-    assert "申請已送出，待工會核准。" in success_render
+    assert "登記編號：" not in success_fn
+    assert "客戶識別：" not in success_fn
+    assert "pending_approval: '申請已送出，待工會核准。'" in success_fn
+    assert "lifecycle[receipt.identity_status]" in success_render
     assert "申請編號：" in success_render
     assert "renderRegistrationSuccess(applyResult.data)" in submit
 
@@ -160,7 +164,6 @@ def test_all_active_line_pages_reject_query_string_user_identity() -> None:
         "register.html",
         "staff_order_search.html",
         "staff_schedule.html",
-        "staff_baby_log.html",
         "staff_payout.html",
         "mobile_admin.html",
     ):

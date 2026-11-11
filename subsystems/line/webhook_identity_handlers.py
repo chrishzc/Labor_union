@@ -1,4 +1,7 @@
-"""Canonical LINE webhook handlers for friend state and identity-flow entry points."""
+"""
+File: webhook_identity_handlers.py
+Description: 處理 LINE 好友狀態事件與客戶／月嫂／工會身分認證流程入口，並同步選單按鈕導覽。
+"""
 
 from __future__ import annotations
 
@@ -18,11 +21,6 @@ from domains.line.delivery import (
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.platform_user import LineFriendEvent, LineFriendEventType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
-from domains.line.configuration import LineConfigurationKind
-from subsystems.line.message_configuration import (
-    configuration_definition,
-    render_message_template,
-)
 from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
@@ -103,18 +101,9 @@ class LineWebhookIdentityHandlers:
 
     def handle_follow(self, inbox, unit_of_work):
         line_user_id = _required_user_id(inbox)
-        current = unit_of_work.platform_users.apply_friend_event(
+        # 加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統僅維護好友狀態。
+        unit_of_work.platform_users.apply_friend_event(
             _friend_event(inbox, line_user_id, LineFriendEventType.FOLLOW)
-        )
-        if current.last_event_at != inbox.event.occurred_at:
-            return
-        if self._follow_scheduler is not None:
-            self._follow_scheduler(inbox, unit_of_work, line_user_id)
-        self._open_and_notify(
-            inbox,
-            unit_of_work,
-            line_user_id,
-            LineIdentityFlowPurpose.CUSTOMER_BINDING,
         )
 
     def handle_unfollow(self, inbox, unit_of_work):
@@ -477,46 +466,21 @@ def _liff_url(query):
     return f"https://liff.line.me/{liff_id}/{query}"
 
 
-DEFAULT_ONBOARDING_WELCOME_MESSAGE = (
-    "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n"
-    "我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n"
-    "📱【新手快速導覽・三步驟開始使用】\n\n"
-    "1️⃣ 準爸媽／產婦專區：\n"
-    "👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n"
-    "{url}\n"
-    "（此安全登記連結將於 15 分鐘後失效）\n\n"
-    "2️⃣ 專業月嫂服務人員：\n"
-    "👉 請點擊下方選單【月嫂身分綁定】或直接在對話框輸入「我是月嫂」進行身分認證。\n\n"
-    "3️⃣ 服務說明與專人諮詢：\n"
-    "👉 請點擊下方選單【AI 智慧問答】使用 AI 問答或瀏覽常見問答。\n\n"
-    "---\n"
-    "📌 本帳號採自助服務，一般留言不會有專員回覆。如需協助，請點選【聯絡專人服務】或輸入「聯絡專人服務」，專員才會在聊天室回覆您。\n\n"
-    "👇 請點擊下方圖文選單，開啟您的專屬服務！"
-)
-
-
 def _identity_link_message(purpose, url, unit_of_work=None):
-    if purpose == LineIdentityFlowPurpose.CUSTOMER_BINDING:
-        if unit_of_work is not None:
-            try:
-                snapshot = unit_of_work.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES)
-                templates = configuration_definition(snapshot)
-                rendered = render_message_template(templates, "customer_onboarding_welcome", {"url": url})
-                payload = json.loads(rendered.payload_json)
-                if isinstance(payload, dict) and isinstance(payload.get("text"), str):
-                    return payload["text"]
-            except Exception:
-                pass
-        return DEFAULT_ONBOARDING_WELCOME_MESSAGE.format(url=url)
     introductions = {
+        LineIdentityFlowPurpose.CUSTOMER_BINDING: "請開啟以下頁面完成客戶身分綁定或服務登記：",
         LineIdentityFlowPurpose.STAFF_VERIFICATION: "請開啟以下頁面填寫月嫂身分資料：",
         LineIdentityFlowPurpose.ADMIN_BINDING: "請開啟以下頁面登入並綁定工會後台帳號：",
     }
+    keys = {
+        LineIdentityFlowPurpose.CUSTOMER_BINDING: "identity-customer-link",
+        LineIdentityFlowPurpose.STAFF_VERIFICATION: "identity-staff-link",
+        LineIdentityFlowPurpose.ADMIN_BINDING: "identity-admin-link",
+    }
     intro = introductions.get(purpose, "請開啟以下頁面完成身分綁定：")
     text = f"{intro}\n\n{url}\n\n此連結將於 15 分鐘後失效。"
-    if unit_of_work is not None and purpose in introductions:
-        key = "identity-staff-link" if purpose is LineIdentityFlowPurpose.STAFF_VERIFICATION else "identity-admin-link"
-        return configured_payload(unit_of_work, key, {"type": "text", "text": text}, {"identity_url": url})["text"]
+    if unit_of_work is not None and purpose in keys:
+        return configured_payload(unit_of_work, keys[purpose], {"type": "text", "text": text}, {"identity_url": url})["text"]
     return text
 
 

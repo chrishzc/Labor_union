@@ -27,7 +27,7 @@ const LIFF_ASSETS = [
   ['bind.html', '連結客戶資料'], ['profile_guard.html', '修改資料前的身分確認'],
   ['profile_update.html', '修改個人資料'], ['order_update.html', '申請訂單異動'],
   ['candidate_contact_customer.html', '媒合條件協調'], ['staff_order_search.html', '我的案件'],
-  ['staff_schedule.html', '班表與請假'], ['staff_baby_log.html', '寶寶日誌與餐食照片'],
+  ['staff_schedule.html', '班表與請假'],
   ['staff_payout.html', '薪資與付款紀錄'], ['candidate_contact.html', '接案回覆'],
   ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],
   ['mobile_admin.html · 客服中心', '客服中心'], ['mobile_admin.html · 狀態追蹤', '訂單進度'],
@@ -126,7 +126,6 @@ describe('React entrypoint registry', () => {
         'candidate_contact_customer.html',
         'staff_order_search.html',
         'staff_schedule.html',
-        'staff_baby_log.html',
         'staff_payout.html',
         'candidate_contact.html',
         'identity.html',
@@ -141,6 +140,7 @@ describe('React entrypoint registry', () => {
     expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '已申請市府平台' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '未申請市府平台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '非市民服務申請' })).toBeDisabled();
     expect(screen.queryByText('開始身分驗證與服務分流')).not.toBeInTheDocument();
     expect(screen.queryByText(/重新渲染 \d+ 次/)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '實機驗收入口' })).not.toBeInTheDocument();
@@ -264,7 +264,7 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'staff_order_search.html', 'staff_schedule.html', 'staff_baby_log.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
+      'staff_order_search.html', 'staff_schedule.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
     ].sort()));
   });
 

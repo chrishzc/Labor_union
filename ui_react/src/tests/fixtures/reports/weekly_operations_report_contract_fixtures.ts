@@ -25,6 +25,8 @@ const SUMMARY = {
   general_ineligible_count: null,
   subsidized_eligible_count: 0,
   subsidized_ineligible_count: null,
+  indigenous_eligible_count: 0,
+  indigenous_ineligible_count: null,
   rejection_unpartitioned_count: 1,
   order_established_count: 1,
   negotiating_count: 0,
@@ -48,6 +50,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       case_no: 'CASE-WEEK-001',
       serial_number: 101, month_label: '8月', application_date_roc: '115/08/20',
       general_eligible: 1, general_ineligible: 0, subsidized_eligible: 0, subsidized_ineligible: 0,
+      indigenous_eligible: 0, indigenous_ineligible: 0,
       order_established: 1, negotiating: 0, cancelled: 0, review_rejected: 0,
       service_status: '服務中', notes: '',
       applicant_name: '王**',
@@ -69,6 +72,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       case_no: 'CASE-WEEK-LEGACY',
       serial_number: 102, month_label: '', application_date_roc: '115/08/24',
       general_eligible: 0, general_ineligible: 0, subsidized_eligible: 0, subsidized_ineligible: 0,
+      indigenous_eligible: 0, indigenous_ineligible: 0,
       order_established: 0, negotiating: 0, cancelled: 0, review_rejected: 1,
       service_status: '', notes: '',
       applicant_name: '李**',
@@ -87,16 +91,24 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
       week_label: '2026-08-24 ~ 2026-08-30',
     },
   ],
-  subsidy_partitions: SUBSIDY_REPORT_RESPONSE.data.partitions.map((partition) => ({
-    ...partition,
-    rows: partition.rows.map((row) => ({
-      ...row,
-      application_roc_year: 114,
-      claim_period_label: '2026年第三季',
-      reconciliation_status: '結案',
-      notes: '',
+  subsidy_partitions: [
+    ...SUBSIDY_REPORT_RESPONSE.data.partitions.map((partition) => ({
+      ...partition,
+      rows: partition.rows.map((row) => ({
+        ...row,
+        application_roc_year: 114,
+        claim_period_label: '2026年第三季',
+        reconciliation_status: '結案',
+        notes: '',
+      })),
     })),
-  })),
+    {
+      citizen_kind: 'indigenous' as const,
+      row_count: 0,
+      total_amount_ntd: 0,
+      rows: [],
+    },
+  ],
   service_rows: [{
     assignment_id: 701,
     case_no: 'CASE-WEEK-001',

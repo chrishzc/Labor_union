@@ -13,7 +13,8 @@ from domains.case_import.client_import_validation import (
     RESIDENCE_TYPE_VALUES,
     _is_valid_service_time,
 )
-from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
+from domains.case_import.refund_account import normalize_refund_field
+from domains.clients.profile import CLIENT_PHONE_PATTERN, VALID_RESIDENCE_TYPES, normalize_client_phone
 from domains.case_import.cooking_requirement import normalize_cooking_requirement
 
 
@@ -41,7 +42,7 @@ def non_citizen_client_fields(intent) -> dict[str, str]:
     if len(values["line_id"]) > 50 or len(values["notes"]) > 1000:
         raise ValueError("notes or LINE ID is too long")
     for name, allowed in (
-        ("gender", GENDER_VALUES), ("residence_type", RESIDENCE_TYPE_VALUES),
+        ("gender", GENDER_VALUES), ("residence_type", RESIDENCE_TYPE_VALUES | VALID_RESIDENCE_TYPES),
         ("delivery_type", DELIVERY_TYPE_VALUES),
     ):
         if values[name] not in allowed:
@@ -63,6 +64,8 @@ def non_citizen_client_fields(intent) -> dict[str, str]:
     bank_code = survey["補助款退款:銀行代號+分行代號"].strip()
     if len(bank_code) != 7 or not bank_code.isascii() or not bank_code.isdigit():
         raise ValueError("refund bank code is invalid")
+    if normalize_refund_field(survey["銀行帳號"], bank=False) is None:
+        raise ValueError("refund account number is required")
     if not any(survey.get(key) for key in ("是否需要下廚", "是否需要下廚：")):
         raise ValueError("cooking requirement is required")
     normalize_cooking_requirement(survey)

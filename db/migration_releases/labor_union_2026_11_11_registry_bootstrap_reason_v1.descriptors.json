@@ -1,0 +1,44 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-registry-bootstrap-reason-2026-11-11-v1",
+  "descriptors": {
+    "1072_case_architecture_bootstrap_reason_optional.sql": {
+      "tables": {},
+      "parent_columns": {
+        "case_architecture_bootstrap_events": {
+          "source_identity_status": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "correlation_id": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "case_architecture_bootstrap_events.chk_case_architecture_bootstrap_text": "and(atom(char_length(trim(source_identity_status))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(correlation_id))>0))"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

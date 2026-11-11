@@ -6,7 +6,7 @@
 
 ## Responsibility
 2026-10-30 最新人工補充：原「通知與發送」完整工作台維持 LINE push_queue；訂金首次提醒、第一期繳款提醒／結清問候、第二期到期提醒與三期逾期提醒以及訂金／第一期／第二期入帳通知共十則，獨立由帳務警示「提醒內容」組裝。共用編輯元件以封閉 scope 分離目錄，帳務不查其他通知規則或歡迎訊息；沿用原文案、公版預覽、revision／writer 與草稿。只有這些款項內容的 LINE 深連結與流程選取導向帳務，其餘仍在 LINE。帳務組裝入口由 payment-overdue-reminders module 擁有，本 module 繼續擁有既有通知內容編輯及預覽。
-統一歡迎訊息與LINE-owned通知內容維護，直接編輯各則文字並預覽；既有規則欄位收在發送設定，依 Global §2.4 一次點擊送出、原因選填，內部仍沿用zero-write Preview與同一候選的Save／Delete及closed結果，不設人工再次確認。卡片說明文字由新通知組裝時讀取目前訊息設定，案件欄位／回覆操作仍由原流程決定。一般畫面不得顯示typed error code、raw backend／provider detail；不得改寫revision、fingerprint、idempotency、已提交通知或工作快照。
+統一 LINE-owned 通知與卡片內容維護，直接編輯各則文字並預覽；既有規則欄位收在發送設定，依 Global §2.4 一次點擊送出、原因選填，內部仍沿用zero-write Preview與同一候選的Save／Delete及closed結果，不設人工再次確認。加入好友歡迎訊息已退役（改由 LINE 官方帳號設定，`/api/v1/line/onboarding` 回傳 410），通知工作台與公版目錄不再查詢或列出歡迎詞，並於目錄補入 `identity-customer-link`。卡片說明文字由新通知組裝時讀取目前訊息設定，案件欄位／回覆操作仍由原流程決定。一般畫面不得顯示typed error code、raw backend／provider detail；不得改寫revision、fingerprint、idempotency、已提交通知或工作快照。
 
 「通知與發送」採清單、inline 編輯與手機預覽整合工作台。依 2026-10-22 最新人工裁決，工作台改用明確標示的公版範例，以無業務 DB 能力的 typed sample port 重用原純組裝函式；欄位表列出中文名稱、變數／路徑與帶入值。移除真實案件／月嫂選取與資格限制，不建立投遞任務、操作憑證、異動稽核或 provider effect。既有 record API 保留原 readonly 契約，工作台不再呼叫。
 
@@ -43,7 +43,7 @@
   - `ui_react/src/api/line_notification_rules/line_notification_template_client.ts`
   - `api/routes/line_notification_rules.py`
   - `api/schemas/line_notification_rules.py`
-  - `ui_react/src/api/line_onboarding/line_onboarding_client.ts`
+  - `api/routes/line_onboarding.py` — [RETIRED] 加入好友歡迎訊息 API，回傳 410 Gone。
   - `subsystems/line/message_configuration.py` — notification_description 消費同一版本化文字設定；genesis 沿用既有設定檔。
   - `subsystems/line/staff_leave_customer_coordination.py` — 新請假確認卡片只替換說明文字，不變更日期、對象或 postback。
 
@@ -70,7 +70,7 @@
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/notification-rules-presentation.md`
 
 ## Change triggers
-Reconcile when unified notification content presentation、welcome composition、configured card copy、Preview／Confirm／Save／Delete gating、closed result/error或focused test location changes。
+Reconcile when unified notification content presentation、configured card copy、Preview／Confirm／Save／Delete gating、closed result/error或focused test location changes。
 
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py`
 

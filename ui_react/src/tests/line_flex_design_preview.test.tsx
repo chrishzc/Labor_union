@@ -12,6 +12,7 @@ import type {
 } from '../api/line_identity/line_identity_runtime_config_client';
 import { LineFlexDesignPreview } from '../components/LineFlexDesignPreview';
 import { lineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
+import { nonCitizenLiffClient } from '../api/line_configuration/non_citizen_liff_client';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 describe('LINE studio public preview', () => {
@@ -26,7 +27,7 @@ describe('LINE studio public preview', () => {
     expect(screen.getByRole('heading', { name: 'LINE 表單' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /訊息卡片/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /接案意願詢問|服務日期表|重大異常通知/ })).not.toBeInTheDocument();
-    expect(screen.getByText('18 個項目')).toBeInTheDocument();
+    expect(screen.getByText('17 個項目')).toBeInTheDocument();
     await screen.findByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
     expect(lineMessagePreviewClient.catalog).not.toHaveBeenCalled();
   });
@@ -35,13 +36,11 @@ describe('LINE studio public preview', () => {
     window.history.replaceState(null, '', '/#line-liff-studio?type=flex_card&asset=flex_dispatch');
     const runtimeConfigClient: LineIdentityRuntimeConfigClient = { get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)) };
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
-    expect(screen.getByRole('button', { name: /服務申請入口 確認/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /服務申請入口 選擇身分/ })).toHaveAttribute('aria-pressed', 'true');
     expect(window.location.hash).toBe('#line-liff-studio');
     fireEvent.click(screen.getByRole('button', { name: /申請訂單異動 提出/ }));
     expect(screen.queryByText('服務日期／天數')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /寶寶日誌與餐食照片 依服務日/ }));
-    expect(screen.getByRole('button', { name: '送出日誌' })).toBeDisabled();
-    expect(screen.queryByText('預覽寶寶日誌')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /寶寶日誌/ })).not.toBeInTheDocument();
   });
 
   it('拒絕額外 provider 欄位且不把來源內容穿透畫面', () => {
@@ -65,6 +64,9 @@ describe('LINE studio public preview', () => {
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
 
     expect(await screen.findByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute('href', 'https://line.example.test/line-gateway');
+    expect(screen.getByTitle('服務申請導流互動預覽')).toHaveAttribute(
+      'src', 'https://line.example.test/line-gateway?studio_preview=1',
+    );
     fireEvent.click(screen.getByRole('button', { name: /修改個人資料 申請變更/ }));
     const officialLink = screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
     expect(officialLink).toHaveAttribute('href', 'https://line.example.test/line-profile-guard');
@@ -98,24 +100,52 @@ describe('LINE studio public preview', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-    expect(screen.getByText('18 個項目')).toBeInTheDocument();
+    expect(screen.getByText('17 個項目')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單' }), { target: { value: 'register.html' } });
     expect(screen.getByText('1 個項目')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /需求調查 填寫基本資料/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('放大檢視仍為唯讀設計預覽，關閉後恢復捲動', () => {
+  it('放大檢視仍為唯讀設計預覽，關閉後恢復捲動', async () => {
     const runtimeConfigClient: LineIdentityRuntimeConfigClient = {
-      get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)),
+      get: vi.fn().mockResolvedValue({ liff_id: 'test', public_base_url: 'https://line.example.test' }),
     };
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
+    await screen.findByTitle('服務申請導流互動預覽');
     fireEvent.click(screen.getByRole('button', { name: '放大預覽' }));
     const dialog = screen.getByRole('dialog', { name: '服務申請入口' });
     expect(document.body.style.overflow).toBe('hidden');
-    expect(within(dialog).getByRole('button', { name: '已申請市府平台' })).toBeDisabled();
+    expect(within(dialog).getByTitle('服務申請導流互動預覽')).toHaveAttribute(
+      'src', 'https://line.example.test/line-gateway?studio_preview=1',
+    );
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉放大預覽' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(document.body.style.overflow).toBe('');
+  });
+
+  it('非市民設定只儲存當前申請頁', async () => {
+    const page = {
+      page_type: 'registration' as const, enabled: true, title: '自訂非市民申請',
+      subtitle: '', submit_button: '', success_title: '', success_description: '',
+      loading_text: '', content: {}, actions: [], fields: [],
+    };
+    const query = vi.spyOn(nonCitizenLiffClient, 'query').mockResolvedValue({ revision: '7', page });
+    const savedPage = { ...page, title: '更新非市民申請' };
+    const save = vi.spyOn(nonCitizenLiffClient, 'save').mockResolvedValue({ revision: '8', page: savedPage });
+    const runtimeConfigClient: LineIdentityRuntimeConfigClient = { get: vi.fn().mockResolvedValue({ liff_id: 'test' }) };
+    try {
+      render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
+      fireEvent.click(screen.getByRole('button', { name: /非市民服務申請 填寫/ }));
+      const title = await screen.findByLabelText('頁面標題');
+      expect(screen.queryByRole('button', { name: '套用兩步導流' })).not.toBeInTheDocument();
+      fireEvent.change(title, { target: { value: savedPage.title } });
+      fireEvent.click(screen.getByRole('button', { name: '儲存頁面設定' }));
+      expect(await screen.findByText('非市民申請頁面設定已儲存。')).toBeInTheDocument();
+      expect(save).toHaveBeenCalledWith('7', savedPage);
+    } finally {
+      query.mockRestore();
+      save.mockRestore();
+    }
   });
 
   it('身分認證顯示自身登入預覽，入口讀取失敗不顯示原始錯誤', async () => {
@@ -128,5 +158,6 @@ describe('LINE studio public preview', () => {
     fireEvent.click(screen.getByRole('button', { name: /身分認證 登入 LINE/ }));
     expect(screen.getByRole('button', { name: 'LINE 快速登入驗證' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '已申請市府平台' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '非市民服務申請' })).not.toBeInTheDocument();
   });
 });

@@ -3,7 +3,6 @@ File: main.py
 Description: 掛載 FastAPI 管理、業務、LINE 與 Access Control API router。
 """
 
-import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -162,10 +161,7 @@ from api.routes import (
 
 from api.schemas.base import BaseResponse
 from api.schemas.runtime_health import ApiHealthView
-from api.dependencies.admin_auth import (
-    ensure_development_line_configuration,
-    get_access_control_connection_factory,
-)
+from api.dependencies.admin_auth import ensure_development_line_configuration
 from api.dependencies.line_runtime import line_webhook_runtime_mode
 from infrastructure.runtime.react_admin_artifact import (
     ReactAdminArtifactRuntime,
@@ -173,7 +169,6 @@ from infrastructure.runtime.react_admin_artifact import (
     load_react_admin_runtime_from_environment,
 )
 from line.line_bot import router as line_router
-from subsystems.access.authentication_session import record_admin_audit
 
 
 REACT_ADMIN_RUNTIME = load_react_admin_runtime_from_environment(
@@ -430,44 +425,6 @@ app.include_router(operational_retention.router)
 app.include_router(private_operations.router)
 app.include_router(admin_entry_targets.router)
 
-
-
-@app.middleware("http")
-async def audit_authenticated_mutations(request: Request, call_next):
-    """Persist authenticated management changes without storing request secrets."""
-    response = await call_next(request)
-    principal = getattr(request.state, "admin_principal", None)
-    is_preview = request.url.path.endswith("/preview")
-    is_entry_target_apply = (
-        request.method == "POST" and request.url.path == "/api/v1/admin/entry-targets/apply"
-    )
-    uses_control_plane_receipt = is_entry_target_apply and (
-        getattr(request.state, "audit_persistence", None) == "admin_entry_target_control_plane"
-        or response.status_code >= 400
-    )
-    if (
-        principal
-        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        and not is_preview
-        and not uses_control_plane_receipt
-    ):
-        try:
-            await asyncio.to_thread(
-                record_admin_audit,
-                connection_factory=get_access_control_connection_factory(),
-                principal=principal,
-                action=getattr(request.state, "audit_action", "api.mutation"),
-                request_path=request.url.path,
-                http_method=request.method,
-                result_status=response.status_code,
-                ip_address=request.client.host if request.client else None,
-                resource_type=getattr(request.state, "audit_resource_type", None),
-                resource_id=getattr(request.state, "audit_resource_id", None),
-                details=getattr(request.state, "audit_details", None),
-            )
-        except Exception:
-            print("[Admin Audit] Failed to record request")
-    return response
 
 
 @app.get("/health", response_model=BaseResponse[ApiHealthView], tags=["Health"])

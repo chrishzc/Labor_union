@@ -19,6 +19,7 @@ import type { OrderTerms } from '../api/orders/order_query_schemas';
 interface OrderTermsMutationPanelProps {
   caseNo: string;
   query: OrderTerms;
+  fromRegistry?: boolean;
   onObserved?: () => void;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
@@ -178,7 +179,40 @@ function conflictMessage(error: unknown): string | null {
   return null;
 }
 
-export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved, onEditStateChange }) => {
+export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = (props) => {
+  if (!props.fromRegistry) return <OrderTermsEditor {...props} />;
+  const { caseNo, query } = props;
+  const revision = [caseNo, query.order_version, query.scheduling_version, query.scheduling_generation,
+    query.client_finance_version, query.payroll_version].join(':');
+  return <RegistryOrderTermsEditor key={revision} {...props} />;
+};
+
+const RegistryOrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, onObserved, onEditStateChange }) => {
+  const [query, setQuery] = useState<OrderTerms | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void orderTermsMutationClient.query(caseNo, { signal: controller.signal }).then((result) => {
+      if (!controller.signal.aborted) setQuery(result);
+    }).catch((caught) => {
+      if (!controller.signal.aborted) setError(errorMessage(caught, '無法讀取完整服務條件。'));
+    });
+    return () => controller.abort();
+  }, [caseNo, attempt]);
+
+  if (error) {
+    return <div>
+      <p role="alert">{error}</p>
+      <button type="button" onClick={() => { setError(null); setAttempt((current) => current + 1); }}>重新讀取服務條件</button>
+    </div>;
+  }
+  if (!query) return <p role="status">正在讀取服務條件…</p>;
+  return <OrderTermsEditor caseNo={caseNo} query={query} onObserved={onObserved} onEditStateChange={onEditStateChange} />;
+};
+
+const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved, onEditStateChange }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);

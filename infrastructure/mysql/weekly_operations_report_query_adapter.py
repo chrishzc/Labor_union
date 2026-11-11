@@ -130,6 +130,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
         return SubsidyFacts(
             general=tuple(_subsidy_fact(row) for row in report["general_citizen_rows"]),
             subsidized=tuple(_subsidy_fact(row) for row in report["subsidized_citizen_rows"]),
+            indigenous=tuple(_subsidy_fact(row) for row in report.get("indigenous_citizen_rows", ())),
         )
 
     def list_weekly_metrics(self, start_date: date, end_date: date) -> list[WeeklyReportMetric]:

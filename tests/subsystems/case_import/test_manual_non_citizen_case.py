@@ -16,6 +16,16 @@ from infrastructure.mysql.non_citizen_case_number_repository import (
     preview_non_citizen_case_number,
 )
 from subsystems.case_import import non_citizen_registration_application
+
+
+_REQUIRED_DETAILS = {
+    "baby_info": "單胞胎",
+    "email": "synthetic@example.test",
+    "refund_bank_code": "0000001",
+    "refund_account_no": "000000000001",
+}
+
+
 class _FakeCursor:
     def __init__(self, fetchone_results=None, fetchall_results=None):
         self._fetchone_results = list(fetchone_results or [])
@@ -96,6 +106,7 @@ def test_manual_case_api_preserves_birth_date_and_cooking(
     monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
 
     response = manual_case_client.post("/api/v1/admin/registration-applications/manual-non-citizen", json={
+        **_REQUIRED_DETAILS,
         "mode": "new",
         "name": "測試客戶",
         "phone": "0900000000",
@@ -117,6 +128,70 @@ def test_manual_case_api_preserves_birth_date_and_cooking(
     assert receipt["client_id"] == 101
     assert conn.committed
     assert receipt["virtual_account"].endswith("501")
+
+
+@pytest.mark.parametrize(("field", "value", "error_field"), [
+    ("service_time", "29:00-18:00 (8小時)", "服務時段"),
+    ("service_time", "09:00-18:00 (108小時)", "服務時段"),
+    ("service_time", "09:00-18:00 (1.2小時)", "服務時段"),
+    ("email", "name@example", "電子郵件"),
+    ("refund_bank_code", "123", "退款銀行代號"),
+    ("refund_bank_code", "00000001", "退款銀行代號"),
+    ("refund_account_no", "abc", "退款銀行帳號"),
+])
+def test_manual_case_rejects_invalid_format_before_writing(
+    monkeypatch, manual_case_client, field, value, error_field
+):
+    cursor = _FakeCursor()
+    conn = _FakeConnection(cursor)
+    monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
+
+    payload = {
+        **_REQUIRED_DETAILS,
+        "name": "測試客戶",
+        "phone": "0900000000",
+        "service_start_date": "2026-12-01",
+        "service_days": 10,
+        "service_time": "09:00-18:00 (8小時)",
+    }
+    response = manual_case_client.post(
+        "/api/v1/admin/registration-applications/manual-non-citizen",
+        json={**payload, field: value},
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "manual_non_citizen_invalid"
+    assert error_field in error["message"]
+    assert not cursor.executed_queries
+    assert not conn.committed
+
+
+@pytest.mark.parametrize("field", _REQUIRED_DETAILS)
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_manual_case_rejects_missing_details_before_writing(
+    monkeypatch, manual_case_client, field, value
+):
+    conn = _FakeConnection(_FakeCursor())
+    monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
+    payload = {
+        **_REQUIRED_DETAILS,
+        "name": "測試客戶",
+        "phone": "0900000000",
+        "service_start_date": "2026-12-01",
+        "service_days": 10,
+        "service_time": "09:00-18:00 (8小時)",
+    }
+    if value is None:
+        del payload[field]
+    else:
+        payload[field] = value
+    response = manual_case_client.post(
+        "/api/v1/admin/registration-applications/manual-non-citizen", json=payload
+    )
+    assert response.status_code == 422
+    assert not conn.began
+    assert not conn._cursor.executed_queries
 
 
 def test_number_preview_and_allocation_skip_existing_case_and_account():
@@ -151,6 +226,7 @@ def test_manual_new_case_uses_server_number_without_legacy_mapping(monkeypatch, 
     assert not preview_conn.committed
 
     response = manual_case_client.post(path, json={
+        **_REQUIRED_DETAILS,
         "mode": "new",
         "name": "測試客戶",
         "phone": "0900000000",
@@ -170,6 +246,7 @@ def test_manual_new_case_uses_server_number_without_legacy_mapping(monkeypatch, 
 def test_historical_manual_creation_and_duplicate_check_are_retired(manual_case_client):
     path = "/api/v1/admin/registration-applications/manual-non-citizen"
     payload = {
+        **_REQUIRED_DETAILS,
         "name": "測試客戶",
         "phone": "0900000000",
         "service_start_date": "2026-12-01",

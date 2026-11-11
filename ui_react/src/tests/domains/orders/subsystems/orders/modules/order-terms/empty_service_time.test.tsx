@@ -10,6 +10,7 @@ import {
   orderTermsMutationClient,
 } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { OrderTermsMutationPanel } from '../../../../../../../components/OrderTermsMutationPanel';
+import { schedulePrecisionClient } from '../../../../../../../api/scheduling/schedule_precision_client';
 
 vi.mock('../../../../../../../api/orders/order_terms_mutation_client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../../../../api/orders/order_terms_mutation_client')>();
@@ -67,7 +68,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const previewButton = () => screen.getByRole('button', { name: '儲存服務條件' });
 
@@ -75,6 +79,78 @@ async function submittedTerms() {
   await waitFor(() => expect(orderTermsMutationClient.preview).toHaveBeenCalledTimes(1));
   return vi.mocked(orderTermsMutationClient.preview).mock.calls[0][1].proposed_terms;
 }
+
+it('saves 15 to 10 service days from the registry and reads back the replacement', async () => {
+  const fixture = queryFixture();
+  const registry = { ...fixture, terms: { ...fixture.terms, service_days: 15 } };
+  const originalDates = Array.from({ length: 15 }, (_, index) => `2026-10-${String(index + 1).padStart(2, '0')}`);
+  const dates = originalDates.slice(0, 10);
+  const current = {
+    ...registry,
+    confirmed_service_dates: originalDates,
+    confirmed_service_date_version: 1,
+    assignments: [{ assignment_id: 42, staff_id: 7, service_days: 15 }],
+  };
+  const refreshed = {
+    ...current,
+    order_version: 4,
+    scheduling_version: 3,
+    scheduling_generation: 2,
+    terms: { ...current.terms, service_days: 10 },
+    confirmed_service_dates: dates,
+    confirmed_service_date_version: 2,
+    assignments: [{ assignment_id: 43, staff_id: 7, service_days: 10 }],
+  };
+  vi.mocked(orderTermsMutationClient.query).mockResolvedValueOnce(current).mockResolvedValueOnce(refreshed);
+  const ordinaryPreview = vi.mocked(orderTermsMutationClient.preview).getMockImplementation()!;
+  vi.mocked(orderTermsMutationClient.preview).mockImplementation(async (...args) => ({
+    ...await ordinaryPreview(...args),
+    before: current.terms,
+    requires_formal_apply: true,
+  }));
+  vi.mocked(orderTermsMutationClient.apply).mockResolvedValue(OrderTermsReceiptSchema.parse({
+    case_no: current.case_no, order_version: 4, scheduling_version: 3, scheduling_generation: 2,
+    client_finance_version: 4, payroll_version: 5, lifecycle_status: '洽談中',
+    service_data_lock_formed: false, cancelled_assignment_ids: [42], created_assignment_keys: ['replacement'],
+    official_service_day_count: 10, official_service_hours: 80, preview_fingerprint: 'a'.repeat(64),
+  }));
+  const calculate = vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue({
+    actual_start_date: dates[0], actual_end_date: dates[9], target_service_days: 10, total_calendar_days: 10,
+    actual_work_days_count: 10, rest_days_count: 0, national_holidays_found: [], total_estimated_salary: null,
+    weekly_stats: [],
+    day_by_day: dates.map((date, index) => ({ date, day_num: index + 1, is_work_day: true, is_rest_day: false, holiday_name: null })),
+  });
+
+  render(<OrderTermsMutationPanel caseNo={registry.case_no} query={registry} fromRegistry />);
+  expect(screen.queryByLabelText('服務天數')).not.toBeInTheDocument();
+  const days = await screen.findByLabelText('服務天數');
+  expect(days).toHaveValue(15);
+  fireEvent.change(days, { target: { value: '10' } });
+
+  expect(screen.getByRole('group', { name: '新天數的替代服務安排' })).toBeInTheDocument();
+  expect(previewButton()).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('替代日期排休方式'), { target: { value: '連續服務' } });
+  expect(previewButton()).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('指派 42 新服務天數'), { target: { value: '10' } });
+  expect(previewButton()).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '試算替代日期（選用）' }));
+  await screen.findByText(/替代服務日期（10 天）/);
+  expect(calculate).toHaveBeenCalledWith({ case_no: registry.case_no, actual_start_date: dates[0],
+    target_service_days: 10, service_mode: '連續服務' });
+  fireEvent.click(previewButton());
+
+  await screen.findByText('服務條件已儲存並重新讀取確認；合約服務 10 日。');
+  const replacement = {
+    proposed_terms: refreshed.terms,
+    replacement_service_dates: dates,
+    replacement_allocations: [{ assignment_id: 42, service_days: 10 }],
+  };
+  expect(orderTermsMutationClient.preview).toHaveBeenCalledWith(registry.case_no, replacement, expect.anything());
+  expect(orderTermsMutationClient.apply).toHaveBeenCalledExactlyOnceWith(registry.case_no, expect.objectContaining({
+    ...replacement, expected_order_version: 3, expected_scheduling_version: 2, requires_formal_apply: true,
+  }), { idempotencyKey: expect.any(String) });
+  expect(orderTermsMutationClient.query).toHaveBeenCalledTimes(2);
+});
 
 describe('Issue #337 empty service time', () => {
   it.each([

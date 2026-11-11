@@ -1,22 +1,23 @@
 # Module: service-day-reminder
 
+> **Status: Retired (2026-11-10)**
+> 依據 2026-11-10 最新人工裁決，月嫂寶寶日誌與餐食照片改為直接於 LINE 案件群組相簿新增，系統端基於日誌資料庫記錄之「連續缺漏提醒」機制全數退役。工會端案件群組工作區（`LineOrderGroupWorkbench.tsx`）與手機審核中心（`mobile_admin.html`）已移除「日誌連續缺漏」待辦與催繳發送功能；後端 `/log-reminders` 與 `/log-reminders/send` API 端點依規格 19 退役回傳 HTTP 410 GONE。
+
 ## Parent
 - domain: `external-integration`
 - subsystem: `line`
 
 ## Responsibility
-以 Scheduling current 正式服務日及日誌投影連續缺漏至少四日的工會內部清單；人員點發送提醒才建立原案件群組 durable task。Query 零寫入，發送前複核缺漏區間及群組版本。舊每日自動私訊規則與 provider 發送停用，保留既有完成／重建 outbox 取消處理及歷史查閱。
+[RETIRED] 原以 Scheduling current 正式服務日及日誌投影連續缺漏至少四日的工會內部清單，供人員點發送提醒。退役後群組相簿照片由工會人員巡群直接關懷，不再以機器人催繳。
 
 ## Implementation
-- primary:
-  - `subsystems/line/service_day_log_reminders.py`
-  - `infrastructure/mysql/service_day_log_reminder_repository.py`
-  - `api/dependencies/service_day_log_reminders.py`
-  - `api/routes/line_order_groups.py` — `/log-reminders` Query 及 `/log-reminders/send` 工會人工寄送。
-  - `ui_react/src/components/ServiceDayLogReminderWorkbench.tsx` — 依案件編號分組缺漏，於案件群組列與群組明細內顯示並由工會逐筆發送。
-  - `ui_react/src/api/line_order_groups/service_day_log_reminder_client.ts`
-  - `ui_react/src/pages/LineManagementPage.tsx` — 案件群組頁（客服與營運）組裝提醒 client。
+- primary (retired to 410):
+  - `api/routes/line_order_groups.py` — `/log-reminders` 與 `/log-reminders/send`（HTTP 410 GONE）。
+  - `api/routes/line_mobile_admin.py` — `/log-reminders` 與 `/log-reminders/send`（HTTP 410 GONE）。
+  - `line/static/mobile_admin.html` — 已移除日誌連續缺漏工作流按鈕與載入邏輯。
+  - `ui_react/src/components/LineOrderGroupWorkbench.tsx` — 已移除缺漏標籤與發送提醒介面。
 - retained history/cancellation:
+  - 歷史通知任務與資料庫既有 outbox/checkpoint 記錄完整保留存查。
   - `subsystems/line/scheduling_checkpoint_notification_source.py`
   - `subsystems/line/service_day_log_notification_stop.py`
   - `subsystems/line/scheduling_rebuild_notification_invalidation.py`

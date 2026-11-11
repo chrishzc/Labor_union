@@ -35,6 +35,7 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
   <div id="customer-choice" hidden>
     <button id="register-new" type="button"><strong>📝 已申請市府平台</strong><span>我已在市府媒合服務平台完成登記，要核對客戶資料並繼續填寫工會需求調查表單。</span></button>
     <button id="goto-gov" type="button"><strong>🏛️ 未申請市府平台</strong><span>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</span></button>
+    <button id="register-non-citizen" type="button"><strong>非市民服務申請</strong><span>填寫非市民服務需求，送工會核准建案。</span></button>
   </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
@@ -195,6 +196,7 @@ async function openIdentityFlow(purpose) {
 function configureCustomerChoice(definition) {
   const registerBtn = document.getElementById("register-new");
   const gotoGovBtn = document.getElementById("goto-gov");
+  const registerNonCitizenBtn = document.getElementById("register-non-citizen");
 
   if (registerBtn) {
     registerBtn.addEventListener("click", async () => {
@@ -211,6 +213,12 @@ function configureCustomerChoice(definition) {
   if (gotoGovBtn) {
     gotoGovBtn.addEventListener("click", () => {
       location.assign("https://hsinchu-nanny.hccg.gov.tw/home");
+    });
+  }
+
+  if (registerNonCitizenBtn) {
+    registerNonCitizenBtn.addEventListener("click", () => {
+      location.assign("/line-non-citizen-registration");
     });
   }
 }
@@ -443,7 +451,6 @@ function requestedStaffPage() {
     staff_order_search: "/line-staff-orders",
     staff_schedule: "/line-staff-schedule",
     staff_leave_apply: "/line-staff-schedule",
-    staff_baby_log: "/line-staff-baby-log",
     staff_payout: "/line-staff-payout"
   }[target] || "";
 }

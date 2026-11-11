@@ -1,8 +1,8 @@
-import { CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE } from './fixtures/customer_service_reminder_fixtures';
 /**
  * File: line_management_no_fake_mutation.test.tsx
  * Description: 驗證 LINE successor 不暴露未授權控制項，且未觸發 Preview／Apply 或 provider 請求。
  */
+import { CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE } from './fixtures/customer_service_reminder_fixtures';
 import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,6 @@ import { CustomerServiceClientError } from '../../../../../../api/customer_servi
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
-import type { LineOnboardingClient } from '../../../../../../api/line_onboarding/line_onboarding_client';
 import { lineMessagePreviewClient } from '../../../../../../api/line_notification_rules/line_message_preview_client';
 import { LineManagementPage, type LineScope } from '../../../../../../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
@@ -87,37 +86,13 @@ describe('LINE 管理頁禁止假 mutation', () => {
       apply: vi.fn().mockRejectedValue(new Error('not used')),
     };
 
-    const onboardingClient: LineOnboardingClient = {
-      get: vi.fn().mockResolvedValue({
-        template_id: 'customer_onboarding_welcome',
-        content: '歡迎加入工會！請至 {url} 登記。',
-        revision: 1,
-        sample_preview: '歡迎加入工會！請至 https://liff.line.me/123/gateway 登記。',
-        variables: ['url'],
-      }),
-      preview: vi.fn().mockResolvedValue({
-        sample_preview: '預覽',
-        variables: ['url'],
-      }),
-      update: vi.fn().mockResolvedValue({
-        template_id: 'customer_onboarding_welcome',
-        content: '更新',
-        revision: 2,
-        sample_preview: '更新',
-        variables: ['url'],
-      }),
-    };
-
-    const emptyReminders = { list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 }), send: vi.fn() };
     const page = (scope: LineScope) => (
       <LineManagementPage
         scope={scope}
-        serviceDayLogReminder={emptyReminders}
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}
-        onboardingClient={onboardingClient}
         notificationTemplateClient={{ get: vi.fn(async (ruleId: string) => ({ rule_id: ruleId, template_id: 'deposit_template', name: '訂金確認通知', content: '正式訂金通知內容', revision: 1, variables: [], sample_preview: '正式訂金通知內容' })), update: vi.fn() }}
       />
     );
@@ -151,7 +126,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     const ruleWorkspace = (await screen.findByRole('heading', { name: '通知與發送' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
-    await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯新好友歡迎訊息內容' });
+    expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/多日排程關懷設定/)).not.toBeInTheDocument();
     fireEvent.click(await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯訂金確認通知內容' }));
@@ -165,7 +140,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(catalogQuery).toHaveBeenCalledTimes(1);
     expect(richMenuDraft.preview).not.toHaveBeenCalled();
     expect(richMenuDraft.apply).not.toHaveBeenCalled();
-    expect(onboardingClient.update).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -32,6 +32,7 @@
   - `service_type` 使用文字輸入與 Client Profile writer 保存非空原文（最多 100 字），不提供固定選單、不轉換別名，不重算 Orders 結束日。
 - `ui_react/src/components/HcmIntakeProfileRepairPanel.tsx` — 由 current HCM review 指定本案可編輯欄位，組合既有 Client Profile Preview／Apply，正式回讀後才刷新警示。
 - `ui_react/src/pages/ClientRosterPage.tsx`
+  - 具 Orders 管理權限者從已取消案件詳情進入 `ui_react/src/components/OrderControlledReopenPanel.tsx`，沿用原 Preview／Apply 並回讀詳情、變更歷程與清單。
   - 名冊案件詳情提供既有 Orders 取消權限的「取消訂單」入口，組合相同正式取消面板與回讀，永久刪除仍由原 root-only 面板承接。
 - `ui_react/src/components/ClientRegistryDetailEditor.tsx` — 單一客戶清單 Drawer 直接組合主檔、報名、照護、Orders Terms 與唯讀帳務；各區 Preview／Apply、異步結果 guard、草稿保持及 mutation／回讀關閉鎖。報名／照護共用 BeClass version，保存後舊預覽失效。樓層費金額由既有 Orders Terms writer 保存。
   - 虛擬帳號設定借用 Client Finance 單案帳號 Query／Apply 直接儲存，無原因或預覽；名冊不直接寫對照。帳號草稿／結果未明／回讀失敗納入 Drawer 關閉鎖，正式回讀等候名冊詳情與清單完成。

@@ -1,4 +1,7 @@
-"""Pure customer-service ticket categories and transitions."""
+"""
+File: ticket.py
+Description: 定義客服工單分類、不可逆狀態機與領域例外，已結案工單永不重開。
+"""
 
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ class CustomerServiceStatus(StrEnum):
 _ALLOWED_TRANSITIONS = {
     CustomerServiceStatus.WAITING: {CustomerServiceStatus.HANDLING, CustomerServiceStatus.RESOLVED},
     CustomerServiceStatus.HANDLING: {CustomerServiceStatus.RESOLVED},
-    CustomerServiceStatus.RESOLVED: {CustomerServiceStatus.HANDLING},
+    CustomerServiceStatus.RESOLVED: set(),
 }
 
 

@@ -5,7 +5,7 @@ import { ApiHttpError } from '../shared/typed_errors';
 import { sessionClient } from '../auth/session_client';
 
 export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','profile','information','followup','recommendation',
-  'service_start','deposit','payment_receipt','group','overdue','log','customer_service','delivery','notification_failure','runtime']);
+  'service_start','deposit','payment_receipt','group','overdue','customer_service','delivery','notification_failure','runtime']);
 export type NotificationSource = z.infer<typeof sourceSchema>;
 const groupSchema = z.enum(['review','reminder','support']);
 const paymentSchema = z.object({case_no:z.string(),payment_stage:z.enum(['deposit','first','second']),obligation_identity:z.string(),
@@ -45,10 +45,8 @@ export const notificationTasksClient = {
   async send(item:NotificationItem,key:string) {
     if(item.source==='payment_receipt')throw new Error('請前往帳務頁面確認後發送入帳通知。');
     const path = item.source === 'overdue' ? '/api/v1/line/payment-overdue-reminders/send'
-      : item.source === 'log' ? '/api/v1/line/order-groups/log-reminders/send'
       : '/api/v1/line/notification-task-actions/deposit-reminder';
     const body = item.source === 'overdue' ? {...item.payment,idempotency_key:key}
-      : item.source === 'log' ? {...item.log,idempotency_key:key}
       : {case_no:item.case_no,expected_version:item.expected_version,idempotency_key:key};
     const raw = await transport.post<{data:unknown}>(path,body,notificationOptions());
     const result = z.union([z.object({task_id:z.number().int().positive(),status:z.string()}).strict(),

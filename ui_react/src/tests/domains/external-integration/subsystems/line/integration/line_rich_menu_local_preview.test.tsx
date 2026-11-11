@@ -71,13 +71,15 @@ describe('Rich Menu 本機互動預覽', () => {
     let phoneMenu = container.querySelector('[data-control-id="line.richmenu.local-preview"]');
     expect(phoneMenu).not.toBeNull();
     expect(screen.getByText(/下方 1 個按鈕測試互動反應/)).toBeInTheDocument();
-    expect(within(phoneMenu as HTMLElement).getByRole('button', { name: /案件進度/ })).toHaveStyle({
+    const previewButton = within(phoneMenu as HTMLElement).getByRole('button', { name: /案件進度/ });
+    expect(previewButton).toHaveStyle({
       position: 'absolute',
       left: '0%',
       top: '0%',
       width: '100%',
       height: '100%',
     });
+    expect(previewButton.style.getPropertyValue('--richmenu-btn-accent')).toBe('#4A90E2');
     expect(screen.queryByText('合規可發布')).not.toBeInTheDocument();
     expect(screen.queryByText(/熱區路由合格/)).not.toBeInTheDocument();
 

@@ -12,7 +12,6 @@ from api.dependencies.line_runtime import get_line_order_group_query_application
 from api.dependencies.service_start import get_service_start_application
 from api.dependencies.line_deposit import get_deposit_notifications
 from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
-from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.notification_tasks import NotificationSource as Source, NotificationItem as Item, NotificationPage, NotificationSourceView, MobileNotificationQuery, NotificationCursor
@@ -55,7 +54,6 @@ SOURCES = {
     Source.RECEIPT: ('帳款已入帳，待人員確認通知', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
     Source.GROUP: ('訂金已付尚未建群', 'reminder', Cap.ORDER_GROUP_READ),
     Source.OVERDUE: ('各期款項逾期', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
-    Source.LOG: ('連續缺漏日誌', 'reminder', Cap.ORDER_GROUP_READ),
     Source.CUSTOMER_SERVICE: ('客服與服務協助', 'support', Cap.CUSTOMER_SERVICE_READ),
     Source.DELIVERY: ('LINE 寄送異常', 'support', Cap.TASK_READ),
     Source.NOTIFICATION_FAILURE: ('LINE 通知建立異常', 'support', Cap.MONITOR_READ),
@@ -82,6 +80,9 @@ def query_source(source, cursor, principal):
     if source == Source.LEAVE:
         raise typed_http_error(410, 'conflict', 'legacy_leave_todo_retired',
                                '舊請假申請僅供歷史查閱；現行例外請使用開工、順延與代班待辦。', 'notification-workbench')
+    if source == Source.LOG:
+        raise typed_http_error(410, 'conflict', 'service_day_log_reminder_retired',
+                               '服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。', 'notification-workbench')
     if not _allowed(principal, source):
         raise typed_http_error(403, 'forbidden', 'notification_source_forbidden',
                                '目前帳號沒有查看此類事項的權限。', 'notification-workbench')
@@ -217,17 +218,6 @@ def _read_source(source, cursor, principal):
                        recipient=r.recipient_label, message=payment_text(r.payment), payment=asdict(r.payment),
                        unavailable_reason=r.unavailable_reason, delivery_status=r.last_reminder.status if r.last_reminder else None,
                        time=str(r.payment.due_date)) for r in rows]
-    elif source == Source.LOG:
-        dependency = get_service_day_log_reminders()
-        try:
-            rows, total = next(dependency).list(page, SIZE)
-        finally:
-            dependency.close()
-        items = [_item(source, f'{r.gap.case_no}:{r.gap.staff_id}:{r.gap.missing_from}', '服務日誌連續缺漏',
-                       f'{r.group_label}，連續缺漏 {r.gap.consecutive_days} 天。',
-                       f'{r.gap.missing_from} ～ {r.gap.missing_through} 未填日誌，由人員決定是否提醒。', case_no=r.gap.case_no,
-                       recipient=r.group_label, message=r.message, unavailable_reason=None if r.can_send else '尚未綁定可用案件群組。',
-                       log={k:v for k,v in asdict(r.gap).items() if k != 'consecutive_days'}) for r in rows]
     elif source == Source.CUSTOMER_SERVICE:
         result = CustomerServiceApplication(open_line_unit_of_work).reminders(CustomerServiceReminderQuery(page=page, page_size=SIZE))
         total = result.total
@@ -274,7 +264,8 @@ def source_page(source: Source, cursor: NotificationCursor=0, principal=Depends(
 @router.post('/api/v1/line/mobile-admin/notification-tasks/{source}', response_model=BaseResponse[NotificationPage])
 def mobile_source_page(source: Source, body: MobileNotificationQuery):
     from api.routes.line_mobile_admin import _mobile_admin_context
-    principal, _ = _mobile_admin_context(body.line_id_token, Cap.REVIEW_READ if source == Source.LEAVE else SOURCES[source][2])
+    cap = Cap.REVIEW_READ if source == Source.LEAVE else (Cap.ORDER_GROUP_READ if source == Source.LOG else SOURCES[source][2])
+    principal, _ = _mobile_admin_context(body.line_id_token, cap)
     return BaseResponse(data=query_source(source, body.cursor, principal))
 
 

@@ -1,6 +1,6 @@
-"""New informational replies use Reply; business results and old queues keep Push.
-
-All delivery and webhook ports are synthetic; no database or LINE API is used.
+"""
+File: test_informational_reply_only.py
+Description: 驗證 LINE Reply-only（第一、二批）不退回 Push 與舊工作維持 Push。
 """
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -159,16 +159,21 @@ def test_business_intake_acknowledgements_still_use_push(text):
     sender.reply.assert_not_called()
 
 
-@pytest.mark.parametrize("kind,text", [("follow", ""), ("message", "綁定訂單"), ("message", "我是月嫂"), ("message", "綁定後台帳號")])
-def test_welcome_and_binding_entries_use_reply_without_changing_flow(kind, text):
+@pytest.mark.parametrize("text", ["綁定訂單", "我是月嫂", "綁定後台帳號"])
+def test_binding_entries_use_reply_without_changing_flow(text):
     unit = Unit()
     handlers = LineWebhookIdentityHandlers(lambda: NOW, lambda purpose, flow: "https://example.invalid/identity")
-    if kind == "follow":
-        handlers.handle_follow(inbox(kind=kind), unit)
-    else:
-        handlers.handle_message(inbox(text), unit)
+    handlers.handle_message(inbox(text), unit)
     assert unit.identity_flows.open.call_count == 1
     assert unit.delivery_tasks.tasks[1].request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+
+
+def test_follow_updates_friend_state_without_opening_flow_or_sending_welcome():
+    unit = Unit()
+    handlers = LineWebhookIdentityHandlers(lambda: NOW, lambda purpose, flow: "https://example.invalid/identity")
+    handlers.handle_follow(inbox(kind="follow"), unit)
+    unit.identity_flows.open.assert_not_called()
+    assert not unit.delivery_tasks.tasks
 
 
 def test_menu_help_uses_reply():
@@ -437,3 +442,143 @@ def test_early_delivery_ignores_business_results_and_already_claimed_tasks():
     sender.send.assert_not_called()
     sender.reply.assert_not_called()
     assert unit.delivery_tasks.tasks[business_id.value].status is LineDeliveryStatus.PENDING
+
+
+def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
+    from domains.scheduling.matching_communication import CaregiverWillingness, CustomerMatchingDecision, MatchingPlanReference
+    from subsystems.line.candidate_contact_postback_application import LineCandidateContactPostbackApplication
+    from subsystems.line.deposit_notifications import handle_deposit_assistance
+    from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
+    from subsystems.line.service_start_day import (
+        ServiceStartDayCandidate, ServiceStartDayPostbackApplication, StartDayCaregiver, start_day_delivery_is_current,
+    )
+    from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
+    from subsystems.scheduling.matching_notification_contracts import (
+        MatchingContactState, MatchingResponseResult, MatchingSegmentContact,
+    )
+
+    unit = Unit()
+    monkeypatch.setattr(unit, "receipts", SimpleNamespace(get=lambda *args, **kwargs: None, append=lambda *args, **kwargs: None), raising=False)
+    monkeypatch.setattr(unit, "candidate_contact_pool_replies", SimpleNamespace(record_willingness=lambda *args, **kwargs: 91), raising=False)
+    candidate = ServiceStartDayCandidate("CASE-1", NOW.date(), GROUP.value, 7, 12000, (StartDayCaregiver(1, "測試月嫂"),))
+    monkeypatch.setattr(unit, "service_start_days", SimpleNamespace(
+        response_context=lambda token, group, user: candidate,
+        delivery_is_current=lambda task, now: False,
+    ), raising=False)
+    monkeypatch.setattr(unit, "deposit_notifications", SimpleNamespace(customer_line_user_id=lambda case_no, lock=False: USER.value), raising=False)
+    monkeypatch.setattr(unit, "deposit_payments", SimpleNamespace(get=lambda case_no, lock=False: SimpleNamespace(case_no=case_no)), raising=False)
+
+    def postback_inbox(data, *, group=False, event_id="synthetic-event"):
+        src = SimpleNamespace(
+            source_type=LineSourceType.GROUP if group else LineSourceType.USER,
+            user_id=USER,
+            group_id=GROUP if group else None,
+            source_id=GROUP.value if group else USER.value,
+        )
+        return SimpleNamespace(event=SimpleNamespace(
+            event_id=LineWebhookEventId(event_id),
+            source=src,
+            event_type="postback",
+            occurred_at=NOW,
+            payload_json=json.dumps({"postback": {"data": data}}),
+        ))
+
+    # 1) Candidate contact willingness ack
+    assert LineCandidateContactPostbackApplication().handle(postback_inbox(f"candidate-contact:{'a' * 64}:willing", event_id="ev-cand"), unit)
+    # 2) Formal matching caregiver willingness & customer acceptance/help acks
+    repo = SimpleNamespace(
+        interaction=lambda _token: {"case_no": "CASE-1", "plan_id": 10, "segment_id": None, "recipient_line_user_id": USER.value,
+                                    "interaction_status": "active", "expires_at_utc": NOW + timedelta(days=1), "action_scope": "customer_decision"},
+        get_contact_state=lambda *_a, **_kw: MatchingContactState(
+            MatchingPlanReference("CASE-1", 10, 0), "proposed", True, "洽談中",
+            USER, CustomerMatchingDecision.PENDING, None,
+            (MatchingSegmentContact(20, 1, 30, "測試月嫂", USER, "2026-11-01", "2026-11-10", CaregiverWillingness.WILLING),),
+        ),
+        append_response=lambda **kw: MatchingResponseResult(
+            len(unit.delivery_tasks.tasks) + 1, MatchingPlanReference("CASE-1", 10, 1),
+            kw["source"], customer_decision=CustomerMatchingDecision(kw["response_value"]),
+            idempotency_key=kw["idempotency_key"],
+        ),
+    )
+    unit.matching_notifications = repo
+    matching_app = MatchingNotificationApplication(lambda: unit, lambda: NOW, availability_validator=lambda _s: None)
+    LineMatchingPostbackApplication(matching_app).handle(postback_inbox("matching:safe-token-12345678901234567890:accepted", event_id="ev-match"), unit)
+    # 2b) Formal matching caregiver willingness postback ack
+    repo_cg = SimpleNamespace(
+        interaction=lambda _token: {"case_no": "CASE-1", "plan_id": 10, "segment_id": 20, "recipient_line_user_id": USER.value,
+                                    "interaction_status": "active", "expires_at_utc": NOW + timedelta(days=1), "action_scope": "caregiver_willingness"},
+        get_contact_state=lambda *_a, **_kw: MatchingContactState(
+            MatchingPlanReference("CASE-1", 10, 0), "proposed", True, "洽談中",
+            USER, CustomerMatchingDecision.PENDING, None,
+            (MatchingSegmentContact(20, 1, 30, "測試月嫂", USER, "2026-11-01", "2026-11-10", CaregiverWillingness.PENDING),),
+        ),
+        append_response=lambda **kw: MatchingResponseResult(
+            len(unit.delivery_tasks.tasks) + 1, MatchingPlanReference("CASE-1", 10, 1),
+            kw["source"], caregiver_willingness=CaregiverWillingness(kw["response_value"]),
+            segment_id=20, idempotency_key=kw["idempotency_key"],
+        ),
+    )
+    unit.matching_notifications = repo_cg
+    LineMatchingPostbackApplication(matching_app).handle(postback_inbox("matching:safe-token-12345678901234567890:willing", event_id="ev-match-cg"), unit)
+    # 3) Start-day group postback ack
+    assert ServiceStartDayPostbackApplication().handle(postback_inbox(f"start-day:{candidate.token}:help", group=True, event_id="ev-sday"), unit)
+    # 4) Deposit assistance postback ack
+    assert handle_deposit_assistance("deposit-assistance:CASE-1", postback_inbox("deposit-assistance:CASE-1", event_id="ev-dep").event, unit)
+
+    expected_events = ["ev-cand", "ev-match", "ev-match-cg", "ev-sday", "ev-dep"]
+    assert [t.request.source_aggregate_type for t in unit.delivery_tasks.tasks.values()] == [REPLY_ONLY_WEBHOOK_SOURCE] * 5
+    assert [t.request.source_aggregate_identity for t in unit.delivery_tasks.tasks.values()] == expected_events
+    assert [t.request.correlation_id.value for t in unit.delivery_tasks.tasks.values()] == [f"line-event:{eid}" for eid in expected_events]
+    assert len(unit.delivery_tasks.new_reply_task_ids()) == 5
+
+    # Preserved stale guard on start-day reply-only ack
+    cancelled = []
+    orig_cancel = unit.delivery_tasks.cancel
+    unit.delivery_tasks.cancel = cancelled.append
+    start_day_task = unit.delivery_tasks.tasks[4]
+    assert start_day_delivery_is_current(unit, start_day_task, NOW) is False
+    assert len(cancelled) == 1
+    unit.delivery_tasks.cancel = orig_cancel
+    unit.service_start_days.delivery_is_current = lambda task, now: True
+
+    # Reply worker uses reply() only and never falls back to send() on expired token
+    unit.delivery_tasks.opportunity = None
+    sender = provider()
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 5
+    sender.send.assert_not_called()
+    assert all(t.status is LineDeliveryStatus.FAILED for t in unit.delivery_tasks.tasks.values())
+
+
+def test_substitute_willingness_postback_uses_reply_only():
+    from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
+
+    class FakeCursor:
+        def __init__(self):
+            self.rows = [
+                {"id": 9, "request_id": 4, "staff_id": 12, "willingness": "pending",
+                 "case_no": "CASE-1", "status": "substitute_required", "selected_candidate_id": 9},
+                {"id": 4, "case_no": "CASE-1", "status": "substitute_required", "created_by": "admin:1",
+                 "request_type": "substitute", "request_kind": "leave", "confirmed_version_id": None, "execution_dates": "{}"},
+                {"ok": 1},
+            ]
+            self.i = 0
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, *_args): pass
+        def fetchone(self):
+            if self.i < len(self.rows):
+                r = self.rows[self.i]; self.i += 1; return r
+            return None
+
+    class FakeRepo(MySqlServiceStartRepository):
+        def is_current_request(self, request):
+            return True
+
+    unit = Unit()
+    repo = FakeRepo(SimpleNamespace(cursor=lambda: FakeCursor()))
+    repo.deliveries = unit.delivery_tasks
+    assert repo.record_willingness("tok-12345678901234567890", USER.value, "willing", "service-start-reply:ev-sub-1") is True
+    task = unit.delivery_tasks.tasks[1]
+    assert task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+    assert task.request.source_aggregate_identity == "ev-sub-1"
+    assert task.request.correlation_id.value == "line-event:ev-sub-1"

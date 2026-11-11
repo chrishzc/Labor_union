@@ -158,7 +158,7 @@ def _event_consumer(worker_identity: str, now, on_new_reply_tasks=None) -> LineW
     identity_handlers = LineWebhookIdentityHandlers(
         now,
         _identity_flow_url,
-        # D+N onboarding was retired; immediate welcomes must not depend on it.
+        # 加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統不另行排程或發送。
         follow_scheduler=None,
         media_scheduler=schedule_line_media_archive,
         group_application=LineOrderGroupApplication(now, alert_group_registrar=register_group_alert_target),

@@ -88,26 +88,8 @@ class MySqlHistoricalPendingDepositMatchingRepository:
                 )
 
             version = max((int(row["version"]) for row in plans), default=0) + 1
-            cursor.execute(
-                "INSERT INTO caregiver_matching_plans "
-                "(case_no,version,status,is_active,start_date,end_date,created_by) "
-                "VALUES (%s,%s,'proposed',1,%s,%s,%s)",
-                (
-                    command.case_no,
-                    version,
-                    planned_start,
-                    planned_end,
-                    command.actor,
-                ),
-            )
-            plan_id = cursor.lastrowid
-            if isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0:
-                raise RuntimeError("historical_matching_plan_insert_failed")
-            cursor.execute(
-                "INSERT INTO caregiver_matching_plan_segments "
-                "(plan_id,segment_order,staff_id,assigned_start_date,assigned_end_date) "
-                "VALUES (%s,1,%s,%s,%s)",
-                (plan_id, command.staff_id, planned_start, planned_end),
+            plan_id, _ = insert_historical_proposed_plan(
+                cursor, command.case_no, command.staff_id, version, planned_start, planned_end, command.actor,
             )
             return HistoricalPendingDepositMatchReceipt(
                 command.case_no,
@@ -116,6 +98,25 @@ class MySqlHistoricalPendingDepositMatchingRepository:
                 command.staff_id,
                 True,
             )
+
+
+def insert_historical_proposed_plan(cursor, case_no, staff_id, version, start, end, actor):
+    cursor.execute(
+        "INSERT INTO caregiver_matching_plans "
+        "(case_no,version,status,is_active,start_date,end_date,created_by) "
+        "VALUES (%s,%s,'proposed',1,%s,%s,%s)",
+        (case_no, version, start, end, actor),
+    )
+    plan_id = cursor.lastrowid
+    if isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0:
+        raise RuntimeError("historical_matching_plan_insert_failed")
+    cursor.execute(
+        "INSERT INTO caregiver_matching_plan_segments "
+        "(plan_id,segment_order,staff_id,assigned_start_date,assigned_end_date) "
+        "VALUES (%s,1,%s,%s,%s)",
+        (plan_id, staff_id, start, end),
+    )
+    return plan_id, int(cursor.lastrowid)
 
 
 def _is_exact_pending_plan(

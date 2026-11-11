@@ -151,14 +151,15 @@ def _assemble_cancellation_facts(
             raise ValueError("cancellation_scheduling_facts_inconsistent")
     generation = _select_generation(cursor, aggregate_row, lock) if aggregate_row else None
     assignment_rows = _select_assignments(cursor, generation, lock)
-    schedule_rows = _select_schedules(cursor, generation, lock)
+    if lock:
+        _select_schedules(cursor, generation, lock)
     assignments = _load_cancellation_assignments(cursor, aggregate_row, lock=lock) if aggregate_row else ()
     finance_present, payroll_present = _validate_cancellation_owner_presence(cursor, case_no, lock)
     if assignments and not (finance_present and payroll_present):
         raise ValueError("cancellation_financial_roots_inconsistent")
     if aggregate_row is None and payroll_present:
         raise ValueError("cancellation_scheduling_facts_inconsistent")
-    finance = _load_client_finance(cursor, order_row, schedule_rows, lock) if finance_present else None
+    finance = _load_client_finance(cursor, order_row, lock) if finance_present else None
     net_cash_received = MoneyNTD(query_case_net_cash(cursor, case_no)) if finance is not None else None
     payroll = _load_payroll(cursor, order_row, assignment_rows, lock) if payroll_present else None
     lifecycle = _load_lifecycle(cursor, order_row, lock)

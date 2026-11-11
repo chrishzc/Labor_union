@@ -23,12 +23,18 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "PACKAGE_OMISSION",
         "SPEC_GAP",
     ),
+    "document/架構重整/00_規格書撰寫與生命週期規範.md": (
+        "Living Current Truth",
+        "scripts/validate_spec_hygiene.py",
+        "01_規格基線/",
+    ),
     "document/架構重整/00_開發者與Agent導覽.md": (
         "00_Agent任務分級與交付規範.md",
     ),
     "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md": (
-        "## 9. Agent 與開發者 DB 變更執行門",
-        "PASS | BLOCKED | NOT_RUN",
+        "## 6. Agent 與開發者 DB 變更執行門（§9）",
+        "9-agent-與開發者-db-變更執行門",
+        "`pass` / `blocked` / `not_run`",
         "DB_CHANGE_NOT_READY",
     ),
     "document/架構重整/02_決策與退役執行記錄/README.md": (

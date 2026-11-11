@@ -1,14 +1,13 @@
-"""Read current Orders/Scheduling/Finance facts for group start-day notifications.
-
-No business facts or provider effects are written here. The source worker and
-webhook consumer respectively own their existing outer transactions.
+"""
+File: service_start_day_repository.py
+Description: 唯讀讀取開工詢問群組／班表事實並驗證 Reply-only 回覆現行性。
 """
 from datetime import date, datetime
 import json
 
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.line.service_start_day import (
-    EVENT_CODE, EVENT_PREFIX, SOURCE_TYPE, ServiceStartDayCandidate, StartDayCaregiver,
+    EVENT_CODE, EVENT_PREFIX, SOURCE_TYPE, ServiceStartDayCandidate, StartDayCaregiver, start_day_reply_token,
 )
 
 
@@ -88,7 +87,10 @@ class MySqlServiceStartDayRepository:
         return current
 
     def delivery_is_current(self, task, now: datetime):
-        token = (task.request.source_aggregate_identity if task.request.source_aggregate_type != SOURCE_TYPE
+        reply_token = start_day_reply_token(task)
+        is_response_ack = reply_token is not None or task.request.source_aggregate_type == 'order_service_start_day_response'
+        token = (reply_token if reply_token is not None
+                 else task.request.source_aggregate_identity if task.request.source_aggregate_type != SOURCE_TYPE
                  else task.request.correlation_id.value.removeprefix('line-notification:' + EVENT_PREFIX))
         source = self._source(token)
         if source is None or task.request.recipient.recipient_type.value != 'group':
@@ -97,7 +99,7 @@ class MySqlServiceStartDayRepository:
         current = self.current(source['case_no'], day, lock=True)
         if current is None or current.group_id != task.request.recipient.identity.value:
             return False
-        if task.request.source_aggregate_type == 'order_service_start_day_response':
+        if is_response_ack:
             return current.generation_id == source['generation_id']
         return now.astimezone(TAIPEI_TIME_ZONE).date() == day and current.facts() == {
             key: source[key] for key in current.facts()

@@ -477,8 +477,13 @@
         return urlParams.get(name);
     }
 
+    const existingCaseEntry = getQueryParam('entry') === 'existing_case';
+
     // 初始化頁面
     window.addEventListener('DOMContentLoaded', async () => {
+        if (existingCaseEntry) {
+            document.getElementById('restartBinding').href = '/line-bind?entry=existing_case';
+        }
         try {
             // 1. 取得現行標準 LIFF runtime 配置
             let liffId = '';
@@ -548,7 +553,9 @@
         document.body.style.fontFamily = theme.font_family;
         document.getElementById('pageLogo').textContent = page.content.logo || '';
         document.getElementById('formTitle').textContent = page.title;
-        document.getElementById('formSubtitle').textContent = page.subtitle;
+        document.getElementById('formSubtitle').textContent = existingCaseEntry
+            ? '請輸入建案時使用的姓名及手機號碼，以綁定 LINE 帳號。'
+            : page.subtitle;
         document.getElementById('btnSubmit').textContent = page.submit_button;
         document.getElementById('successTitle').textContent = page.success_title;
         successDesc.textContent = page.success_description;
@@ -637,9 +644,10 @@
         formContent.style.display = 'none';
         rebindContent.style.display = 'none';
         successContent.style.display = 'block';
-        document.getElementById('successTitle').textContent = runtimePage?.success_title || title;
+        const isNewBinding = title === '綁定成功';
+        document.getElementById('successTitle').textContent = (isNewBinding && runtimePage?.success_title) || title;
         successDesc.style.whiteSpace = 'pre-line';
-        successDesc.textContent = [...new Set([runtimePage?.success_description || '', description,
+        successDesc.textContent = [...new Set([isNewBinding ? runtimePage?.success_description : '', description,
             caseNo ? `案件編號：${caseNo}` : ''])].filter(Boolean).join('\n');
     }
 
@@ -727,6 +735,9 @@
                 || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint || '')
                 || (preview.status !== 'not_found' && (!preview.candidate || typeof preview.candidate.currently_bound !== 'boolean'))) {
                 throw new Error('資料核對結果不完整，請重新開啟頁面或聯絡工會確認。');
+            }
+            if (existingCaseEntry && (!preview.candidate?.case_no || !preview.candidate.has_completed_survey)) {
+                throw new Error('無法核對案件資料。請確認姓名及手機號碼，或聯絡工會協助。');
             }
             if (preview.status === 'already_bound') {
                 showBindingResult('您已完成綁定', '您已完成綁定，可直接返回 LINE 使用。', preview.candidate?.case_no);

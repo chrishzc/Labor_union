@@ -38,7 +38,7 @@ LINE 官方帳號回應依是否具備有效一次性 `replyToken` 嚴格區分�
 
 下列兩類互動固定走純 `line_webhook_reply` 同步回覆通路，**禁止 fallback 改走 Push API**：
 
-1. **第一批 — 一般文字、綁定引導與選單回覆（15 類靜態回覆）**：歡迎詞／操作引導、未綁定提示、客戶／月嫂身分綁定回覆、群組設定指令格式錯誤與未註冊提示、人工客服受理／進行中追問回覆、已停用 AI 按鈕提醒、以及預設未知文字引導文案。
+1. **第一批 — 一般文字、綁定引導與選單回覆（靜態回覆）**：操作引導、未綁定提示、客戶／月嫂／工會身分綁定入口回覆、群組設定指令格式錯誤與未註冊提示、人工客服受理／進行中追問回覆、已停用 AI 按鈕提醒、以及預設未知文字引導文案（加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統不針對 `follow` 事件發送）。
 2. **第二批 — 五項 Postback 互動按鈕即時確認（Batch 2）**：
    - 媒合階段月嫂意願按鈕 ack（願意／詢問回應）；
    - 媒合推薦客戶端 Postback 按鈕 ack（接受配對／專人協助／已回應）；
@@ -105,8 +105,8 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
   - 服務申請入口（`gateway.html`）、需求調查（`register.html`）、帳號綁定（`bind.html`）、非市民申請頁（`/line-non-citizen-registration`）及管理端設定統一讀寫 MySQL 之版本化 `LIFF` 設定（`LineConfigurationKind.LIFF`）。[`config/liff_settings.json`](../../../config/liff_settings.json) 僅於資料庫尚未建立 LIFF 設定（`revision = 0`）時供明確 fresh bootstrap，執行中禁止 fallback 讀檔；設定缺失、格式錯誤或資料庫不可用回 `503`，頁面不存在或停用回 `404`。
   - 公開與管理端沿用既有 `/api/config/liff`、`/api/config/liff/runtime`、`/api/config/liff/state`、主題／頁面／欄位設定（`/api/config/liff/theme`、`/api/config/liff/pages/{page_id}` 與欄位新增／修改／刪除）、版本歷史（`GET /api/config/liff/history`）與還原（`POST /api/config/liff/rollback/{revision}`），並共用 `LiffSettingsConfig` typed validation。`ETag`／`If-Match` 採資料庫 revision 執行樂觀併發檢查，讀取後遭並行更新回 `409`；還原於目前 revision 新增一版且不覆寫或刪除既有版本，所有設定異動僅留存版本與稽核，不建立訊息投遞或選單發布工作。
 - **入口分流與非市民 LIFF 頁面設定（`NonCitizenLiffSettingsPanel`）**：
-  - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway登記入口與歡迎詞規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟。
-  - 非市民設定由 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（明確初始化建立）與 `PUT /api/config/liff/non-citizen` 維護，共用上述版本化 `LIFF` 設定與 `If-Match` 衝突控制。既有站台須透過同一設定服務保存新版導流，保留與新版相容的自訂文案、其他設定及歷史版本。新站台的初始設定應包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
+  - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟。
+  - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留與新版相容的自訂文案、其他設定及歷史版本。非市民申請表沿用 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 維護。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
   - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
 
 ### 5.3 資料異動審核（`profile_update` / `order_update`）

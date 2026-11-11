@@ -1,6 +1,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import {
   applyReopenFlow, previewReopenFlow, retryReopenApplyFlow,
@@ -47,7 +48,11 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = 
       updateReopenReason(caseNo, reason.trim());
       await apply();
     } catch (caught) {
-      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : '受控重開預覽失敗。');
+      if (!controller.signal.aborted) {
+        setError(caught instanceof OrderMutationError && caught.code === 'order_reopen_financial_history_exists'
+          ? '此案件已有取消相關的退款、沖正或結算紀錄，無法重開。請另建新案。'
+          : caught instanceof Error ? caught.message : '受控重開預覽失敗。');
+      }
     }
   };
 

@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-以 Query／Preview／fresh-lock Apply 保存人工確認的事前服務日期。一般案件與完成 Precision Restart、current Scheduling generation 仍是空 tombstone 的歷史案件都只建立 confirmed-date root；歷史 Query 仍回傳 pairing evidence 中的既定服務人員，後續由明確的正式安排 Preview／Apply 建立 canonical schedule。日期保存本身不得建立 assignment、staff schedule、buffer、rate snapshot 或增加 Scheduling version。
+以 Query／Preview／fresh-lock Apply 保存人工確認的事前服務日期。一般案件與完成 Precision Restart、current Scheduling generation 仍是空 tombstone 的歷史案件都只建立 confirmed-date root；歷史 Query 與正式安排共讀 current restart 綁定的有效媒合方案分段，後續由明確的正式安排 Preview／Apply 建立 canonical schedule。日期保存本身不得建立 assignment、staff schedule、buffer、rate snapshot 或增加 Scheduling version。
 
 ## Implementation
 - primary:
@@ -38,7 +38,7 @@
 - outbound: `orders/lifecycle-authoritative-facts` — 歷史正式安排以 typed lifecycle candidate 委派現有 Orders writer 保存事件、projection 與 outbox；尚未確認或未來開始日維持訂單成立。
 - outbound: `scheduling/scheduling` — 日期保存不再重建 restart tombstone；後續明確正式安排才呼叫 canonical generation replacement writer。
 - outbound: `staff-payables/payroll` — 日期保存不寫 rate snapshot；後續真正建立安排時才沿 source frozen rate，或在歷史 pairing 無 source snapshot 時使用既有 case payroll policy。
-- inbound: `orders/historical-precision-restart` — completed restart、空 effective generation 與 immutable historical pairing evidence；source assignment identity 可不存在。
+- inbound: `orders/historical-precision-restart` — 空 effective generation 與重啟事件中的媒合方案、分段及歷史來源。舊版重啟事件沿用原歷史配對證據。
 
 ## Contracts
 - `GET／POST /api/v1/orders/{case_no}/service-dates` — confirmed-date Query／Preview／Apply。

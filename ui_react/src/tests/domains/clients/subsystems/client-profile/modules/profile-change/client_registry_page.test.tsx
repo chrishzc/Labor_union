@@ -9,6 +9,7 @@ import { ApiTimeoutError, ApiHttpError } from '../../../../../../../api/shared/t
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { historicalAdoptionEvidenceClient } from '../../../../../../../api/orders/historical_adoption_evidence_client';
+import { accountingPricingClient } from '../../../../../../../api/client_finance/accounting_pricing_client';
 
 vi.mock('../../../../../../../components/CaseArchitectureBootstrapRepairPanel', () => ({
   CaseArchitectureBootstrapRepairPanel: ({ caseNo }: { caseNo: string }) => <div aria-label="案件初始資料修復">{caseNo}</div>,
@@ -127,9 +128,11 @@ describe('Client registry owner editing', () => {
     Object.values(staffMocks).forEach((mock) => mock.mockReset());
     Object.values(candidateMocks).forEach((mock) => mock.mockReset());
     orderMutationFlowStore.clearAll();
-    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'registry-operator' } as never);
+    const operator = { id: 1, username: 'registry-operator', display_name: 'Operator', role: 'system_admin' as const, is_root: false, capabilities: [], access_control_version: 1 };
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue(operator);
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
-    vi.spyOn(sessionClient, 'fetchCurrentUser').mockResolvedValue({ id: 1, username: 'registry-operator', display_name: 'Operator', role: 'system_admin', is_root: false, capabilities: [], access_control_version: 1 });
+    vi.spyOn(sessionClient, 'fetchCurrentUser').mockResolvedValue(operator);
+    vi.spyOn(accountingPricingClient, 'queryCase').mockRejectedValue(new ApiHttpError(404, 'not_found', '測試案件無個案計價資料'));
     candidateMocks.confirmationPreview.mockRejectedValue(new ApiHttpError(503, 'confirmation_preview_unavailable', '測試情境只驗證已人工送達後的客戶決定。'));
     candidateMocks.pool.mockResolvedValue({ pool_id: null, case_no: 'CASE-001', candidates: [] });
     candidateMocks.activePlan.mockRejectedValue(new ApiHttpError(404, 'not_found', 'no active plan'));
@@ -348,7 +351,7 @@ describe('Client registry owner editing', () => {
     render(<ClientRegistryPage />);
     const due = await screen.findByLabelText('預產期／預計服務開始月份');
     expect(screen.getByRole('tab', { name: '客戶清單' })).toHaveAttribute('aria-selected', 'true');
-    expect(mocks.query).toHaveBeenCalledWith('CASE-001');
+    expect(mocks.query).toHaveBeenCalledWith('CASE-001', undefined, true);
     await waitFor(() => expect(due).toHaveFocus());
     fireEvent.change(due, { target: { value: '2026-10-15' } });
     fireEvent.change(screen.getByLabelText('不符合原因'), { target: { value: '服務地區不符' } });
@@ -617,7 +620,7 @@ describe('Client registry owner editing', () => {
     render(<ClientRegistryPage />);
     expect(await screen.findByRole('dialog', { name: '案件 CASE-108 詳細資料' })).toBeInTheDocument();
     expect(await screen.findByLabelText('HCM Email')).toHaveValue('hcm@example.com');
-    expect(mocks.query).toHaveBeenCalledWith('CASE-108');
+    expect(mocks.query).toHaveBeenCalledWith('CASE-108', undefined, true);
     expect(screen.queryByRole('tab', { name: '名冊資料' })).not.toBeInTheDocument();
   });
 
@@ -698,8 +701,11 @@ describe('Client registry owner editing', () => {
     fireEvent.click(within(warning()).getByRole('button', { name: '繼續編輯' }));
     expect(screen.getByLabelText('客戶備註（主檔）')).toHaveValue('尚未儲存');
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
-    fireEvent.click(within(warning()).getByRole('button', { name: '捨棄變更並離開' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const discard = within(warning()).getByRole('button', { name: '捨棄變更並離開' });
+    await waitFor(() => expect(discard).toBeEnabled());
+    fireEvent.click(discard);
+    expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
@@ -724,7 +730,10 @@ describe('Client registry owner editing', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變更' });
-    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    const save = within(warning()).getByRole('button', { name: '儲存變更並離開' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.apply).toHaveBeenCalledOnce());
     expect(phone).toBeInTheDocument();
     expect(mocks.query).toHaveBeenCalledOnce();
     await act(async () => { acknowledge(); await receipt; });
@@ -748,7 +757,9 @@ describe('Client registry owner editing', () => {
     fireEvent.change(phone, { target: { value: '0933333333' } });
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
-    fireEvent.click(within(warning).getByRole('button', { name: '儲存變更並離開' }));
+    const save = within(warning).getByRole('button', { name: '儲存變更並離開' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
     await screen.findByText(/電話格式不符/);
     expect(mocks.apply).not.toHaveBeenCalled();
     expect(phone).toHaveValue('0933333333');
@@ -773,8 +784,12 @@ describe('Client registry owner editing', () => {
     fireEvent.change(await screen.findByLabelText('BeClass Email'), { target: { value: 'synthetic@example.test' } });
     fireEvent.change(screen.getByLabelText('飲食習慣與中藥接受度'), { target: { value: '合成測試變更' } });
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
-    fireEvent.click(within(screen.getByRole('dialog', { name: '尚有未儲存的變更' })).getByRole('button', { name: '儲存變更並離開' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    const save = within(warning).getByRole('button', { name: '儲存變更並離開' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument());
+    expect(warning).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(2);
     expect(mocks.preview.mock.calls.map(call => call[3])).toEqual([3, 4]);
     expect(mocks.apply.mock.calls.map(call => call[3])).toEqual([3, 4]);

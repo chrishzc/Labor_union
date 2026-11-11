@@ -68,18 +68,18 @@ class ManualNonCitizenCaseCreateRequest(BaseModel):
     service_type: str = "連續服務"
     delivery_type: str = "自然產"
     residence_type: str = "電梯大樓"
-    baby_info: str = "單胞胎"
+    baby_info: str
     city: str | None = None
     address: str | None = None
     due_month: str | None = None
     birth_date: str | None = None
-    email: str | None = None
+    email: str
     line_id: str | None = None
     notes: str | None = None
     admin_notes: str | None = None
     requires_cooking: bool = False
-    refund_bank_code: str | None = None
-    refund_account_no: str | None = None
+    refund_bank_code: str
+    refund_account_no: str
 
 
 class NonCitizenCaseNumberView(BaseModel):

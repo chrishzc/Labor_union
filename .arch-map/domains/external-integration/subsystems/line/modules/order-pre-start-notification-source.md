@@ -9,7 +9,8 @@ for formal start-day group caregiver-status inquiries. Committed second-payment 
 worker also projects explicitly marked committed normal service completions into one original-case-group survey invitation. The
 worker owns its outer unit of work only when new source events are persisted;
 it does not mutate Orders or Client Finance facts and does not call the LINE
-provider directly. Verified group postbacks record replies in existing LINE receipts
+provider directly. Verified group postbacks record replies in existing LINE receipts,
+enqueue `line_webhook_reply` Reply-only acks (preserving `delivery_is_current` checks on `start-day:` ack tokens without Push fallback),
 and create Customer Service service-progress todos only when assistance is requested.
 
 ## Implementation

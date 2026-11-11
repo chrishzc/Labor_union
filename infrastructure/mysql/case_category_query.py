@@ -1,15 +1,16 @@
-"""Read-only classification from the bound pricing rule, then legacy identity.
-
-The aliases are fixed by the three consuming owner queries (orders o, clients c).
-No classification depends on the spelling of a case number.
+"""
+File: case_category_query.py
+Description: 依已綁定定價規則與身分分類別名提供唯讀案件類別 SQL 表達式。
 """
 
 BOUND_POLICY_IDENTITY_SQL = """CASE
  WHEN JSON_SEARCH(p.policy_json,'one','一般市民',NULL,'$.identities[*].identity_name') IS NOT NULL
  THEN CASE c.identity_status WHEN '社福' THEN '補助市民' WHEN '低收入戶' THEN '補助市民'
-      WHEN '中低收入戶' THEN '補助市民' ELSE c.identity_status END
+      WHEN '中低收入戶' THEN '補助市民' WHEN '原民' THEN '原住民' WHEN '原住民市民' THEN '原住民'
+      ELSE c.identity_status END
  ELSE CASE c.identity_status WHEN '一般市民' THEN '補助市民' WHEN '低收入戶' THEN '社福'
-      WHEN '中低收入戶' THEN '社福' ELSE c.identity_status END END"""
+      WHEN '中低收入戶' THEN '社福' WHEN '原民' THEN '原住民' WHEN '原住民市民' THEN '原住民'
+      ELSE c.identity_status END END"""
 
 CASE_CATEGORY_SQL = f"""CASE WHEN COALESCE(
  (SELECT JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.rule'))

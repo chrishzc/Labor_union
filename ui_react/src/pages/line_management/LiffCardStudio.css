@@ -281,6 +281,11 @@
   box-shadow: var(--shadow-sm);
 }
 
+.liff-studio-gateway-preview {
+  display: block;
+  height: 35rem;
+}
+
 .liff-studio-device-brand {
   padding: 14px 18px;
   border-bottom: 1px solid var(--line-color-border-subtle);

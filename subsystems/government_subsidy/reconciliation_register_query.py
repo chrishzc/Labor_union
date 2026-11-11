@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from domains.case_import.order_information import project_order_information
-from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.client_finance.subsidy_coverage import default_subsidy_hour_cap, normalize_subsidy_policy_identity
 from infrastructure.mysql.pricing_configuration_repository import CASE_PRICING_FACTS_SQL
 
 QUARTERLY_HEADERS = (
@@ -31,6 +31,7 @@ ANNUAL_HEADERS = (
 
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
+INDIGENOUS_CITIZEN = "原住民"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
 ESTABLISHED_ORDER_STATUSES = (
@@ -156,7 +157,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
-                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶')) OR pricing.pricing_active=1)
+                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶','原住民','原民','原住民市民')) OR pricing.pricing_active=1)
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
@@ -259,7 +260,7 @@ def _select_established_cases(
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE {scope_clause}
-                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶')) OR pricing.pricing_active=1)
+                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶','原住民','原民','原住民市民')) OR pricing.pricing_active=1)
                 {period_clause}
                 ORDER BY o.case_no {"FOR UPDATE" if lock else ""}
                 """,
@@ -340,7 +341,7 @@ def _fetch_claim_submission_period_cases(
                         AND latest.quarter = batch.quarter
                         AND latest.status IN (%s, %s, %s, %s)
                   )
-                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶'))
+                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶','原住民','原民','原住民市民'))
                 ORDER BY o.case_no, item.id
                 """,
                 (
@@ -396,7 +397,7 @@ def _fetch_claim_batch_cases(
                         AND latest.quarter = batch.quarter
                         AND latest.status IN (%s, %s, %s, %s)
                   )
-                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶'))
+                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶','原住民','原民','原住民市民'))
                 ORDER BY batch.quarter, o.case_no, item.id
                 """,
                 (
@@ -447,7 +448,9 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
         return SubsidyReceivableEstimate(0, None)
     if source.get("pricing_active") and source.get("pricing_subsidy_hours") is None:
         return SubsidyReceivableEstimate(None, "pricing_policy_source_missing")
-    if not source.get("pricing_active") and normalize_subsidy_policy_identity(source.get("identity_status") or "") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
+    if not source.get("pricing_active") and normalize_subsidy_policy_identity(source.get("identity_status") or "") not in {
+        GENERAL_CITIZEN, SUBSIDIZED_CITIZEN, INDIGENOUS_CITIZEN,
+    }:
         return SubsidyReceivableEstimate(None, "eligibility_pending")
     days = source.get("service_days")
     hours = source.get("service_hours_per_day")
@@ -471,12 +474,7 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
 
 
 def _subsidy_hour_limit(eligibility: object) -> Decimal:
-    eligibility = normalize_subsidy_policy_identity(str(eligibility or ""))
-    if eligibility == GENERAL_CITIZEN:
-        return Decimal("40")
-    if eligibility == SUBSIDIZED_CITIZEN:
-        return Decimal("120")
-    return Decimal("0")
+    return default_subsidy_hour_cap(str(eligibility or ""))
 
 
 def _service_volume(
@@ -640,6 +638,18 @@ def _partition_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     for row in rows:
         (subsidized if row["補助資格"] == SUBSIDIZED_CITIZEN else general).append(row)
     return general, subsidized
+
+
+def _partition_operations_report_rows(rows: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    general, subsidized, indigenous = [], [], []
+    for row in rows:
+        if row["補助資格"] == SUBSIDIZED_CITIZEN:
+            subsidized.append(row)
+        elif row["補助資格"] == INDIGENOUS_CITIZEN:
+            indigenous.append(row)
+        else:
+            general.append(row)
+    return general, subsidized, indigenous
 
 
 def _with_serials(rows: list[dict]) -> list[dict]:
@@ -813,20 +823,21 @@ def build_operations_report_annual_subsidy_rows(
     """Return the operations-report annual candidate in its dedicated row format."""
     if not isinstance(report_year, int) or report_year < 1912:
         raise ValueError("report_year must be a Gregorian year")
-    general_rows, subsidized_rows = _operations_report_order_rows(
+    general_rows, subsidized_rows, indigenous_rows = _operations_report_order_rows(
         report_year, connection_factory
     )
 
     return {
         "general_citizen_rows": general_rows,
         "subsidized_citizen_rows": subsidized_rows,
+        "indigenous_citizen_rows": indigenous_rows,
     }
 
 
 def _operations_report_order_rows(
     report_year: int,
     connection_factory: Callable[[], Any],
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Select the operations-report's annual cases by application and reconciliation year."""
     report_roc_year = report_year - 1911
     rows = []
@@ -862,8 +873,8 @@ def _operations_report_order_rows(
         )
         rows.append(row)
     rows.sort(key=lambda row: row["市府訂單號碼"])
-    general, subsidized = _partition_rows(rows)
-    return _with_serials(general), _with_serials(subsidized)
+    general, subsidized, indigenous = _partition_operations_report_rows(rows)
+    return _with_serials(general), _with_serials(subsidized), _with_serials(indigenous)
 
 
 def _case_application_roc_year(case_no: str) -> int | None:

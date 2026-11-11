@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-registry-save-receipts-2026-11-11-v1",
+  "release_metadata": {
+    "release_name": "Registry save receipts",
+    "application_version": "registry-save-receipts-v1",
+    "published_at": "2026-11-11",
+    "description": "Append the existing pending order status to Terms receipts without changing existing values."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-historical-accounting-corrections-2026-11-09-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1071_pending_order_terms_receipt_status.sql",
+      "relative_path": "db/schema_parts/1071_pending_order_terms_receipt_status.sql",
+      "sha256": "73f1bb3ff05c505567171a33d1a7ba633bf9cbb9e2221beaa56e625fbaa1881e",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-compatible-constraint-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "registry-save-receipts-exact",
+      "phase": "post-schema",
+      "policy": "Append the pending state while preserving the preceding enum ordinals and receipts.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "registry-save-receipts-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "registry-save-receipts-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_11_registry_save_receipts_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_11_registry_save_receipts_v1.descriptors.json",
+    "sha256": "0a80d530af6f5ddeb23e7d8f28cbea914cf4a05681138fb7e791776c94f364ec",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

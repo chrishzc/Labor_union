@@ -3,7 +3,9 @@ File: test_line_liff_entrypoint.py
 Description: 驗證 LIFF 身分入口、Rich Menu 導向與月嫂自助服務靜態契約。
 """
 
+import json
 from pathlib import Path
+import subprocess
 
 import pytest
 from fastapi import HTTPException
@@ -135,6 +137,52 @@ def test_flow_validation_route_translates_expired_flow_to_http_410(monkeypatch) 
     assert captured.value.status_code == 410
 
 
+def test_gateway_restores_choices_after_cached_browser_back() -> None:
+    source = (ROOT / "line/static/gateway.html").read_text(encoding="utf-8")
+    script = source.split("<script>", 1)[1].split("</script>", 1)[0]
+    runner = """
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+let restore;
+let hasChoices = true;
+let renderCount = 0;
+const overlay = {style: {display: 'flex'}};
+const nodes = {
+  loaderOverlay: overlay,
+  loaderText: {textContent: 'initializing'},
+  actionsContainer: {hasChildNodes: () => hasChoices},
+};
+const context = vm.createContext({
+  URLSearchParams,
+  window: {
+    location: {search: '', href: '/line-gateway'},
+    addEventListener: (name, fn) => { if (name === 'pageshow') restore = fn; },
+  },
+  document: {getElementById: id => nodes[id]},
+});
+vm.runInContext(SOURCE, context);
+vm.runInContext('renderActions = () => onRender()', context);
+context.onRender = () => { renderCount++; };
+
+restore({persisted: true});
+assert.equal(overlay.style.display, 'flex');  // Initialization still owns its loading state.
+vm.runInContext("navigateTo('/line-bind?entry=existing_case')", context);
+assert.equal(nodes.loaderText.textContent, '正在為您跳轉...');
+restore({persisted: false});
+assert.equal(overlay.style.display, 'flex');
+restore({persisted: true});
+assert.equal(overlay.style.display, 'none');
+assert.equal(renderCount, 0);  // Keep the previously selected branch.
+
+hasChoices = false;
+vm.runInContext("navigateTo('/line-bind')", context);
+restore({persisted: true});
+assert.equal(overlay.style.display, 'none');
+assert.equal(renderCount, 1);  // A direct-entry redirect had no rendered choices yet.
+""".replace("SOURCE", json.dumps(script))
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
 def test_gateway_and_mobile_admin_use_canonical_liff_config_without_url_identity_bypass() -> None:
     gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
     mobile_admin = (ROOT / "line" / "static" / "mobile_admin.html").read_text(encoding="utf-8")
@@ -181,12 +229,15 @@ def test_liff_targets_route_to_existing_pages() -> None:
     )[0]
 
     assert "staff_leave_apply: '/line-identity?target=staff_leave_apply'" in gateway
+    assert "non_citizen_registration: '/line-non-citizen-registration'" in gateway
+    assert 'id="register-non-citizen"' in identity
+    assert 'location.assign("/line-non-citizen-registration")' in identity
     assert "profile_update: '/line-profile-guard'" in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
     assert 'profile_update: "/line-profile-guard"' in standalone_route
-    assert 'staff_baby_log: "/line-staff-baby-log"' in staff_route
+    assert 'staff_baby_log' not in staff_route
     assert 'staff_payout: "/line-staff-payout"' in staff_route
-    assert "staff_baby_log: '/line-identity?target=staff_baby_log'" in gateway
+    assert 'staff_baby_log' not in gateway
     assert "staff_payout: '/line-identity?target=staff_payout'" in gateway
     assert 'faq: "/line-service-help?tab=faq"' in standalone_route
     assert 'ai_assistant: "/line-service-help?tab=ai"' in standalone_route
@@ -202,7 +253,6 @@ def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
         "register.html",
         "staff_order_search.html",
         "staff_schedule.html",
-        "staff_baby_log.html",
         "staff_payout.html",
         "mobile_admin.html",
     ):
@@ -224,18 +274,12 @@ def test_staff_schedule_page_uses_strict_leave_flow() -> None:
     assert 'liff.login({redirectUri: redirect.toString()})' in source
 
 
-def test_staff_baby_log_page_uses_strict_service_day_log_flow() -> None:
-    source = (ROOT / "line" / "static" / "staff_baby_log.html").read_text(encoding="utf-8")
-
-    assert "/api/v1/line/staff-self-service/schedule" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
-    assert "/api/v1/line/staff-self-service/service-day-media" in source
-    assert "staging_id" in source
-    assert 'id="previewLog"' not in source
-    assert "送出日誌" in source
-    assert 'development_line_user_id: ""' in source
-    assert 'redirect.searchParams.set("target", "staff_baby_log")' in source
+def test_staff_baby_log_page_is_retired() -> None:
+    assert not (ROOT / "line" / "static" / "staff_baby_log.html").exists()
+    with pytest.raises(HTTPException) as captured:
+        line_identity.staff_baby_log_page()
+    assert captured.value.status_code == 410
+    assert captured.value.detail["code"] == "staff_baby_log_retired"
 
 
 def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() -> None:
@@ -248,7 +292,6 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     targets = {
         "staff_order_search.html": "staff_order_search",
         "staff_schedule.html": "staff_schedule",
-        "staff_baby_log.html": "staff_baby_log",
         "staff_payout.html": "staff_payout",
     }
     for name, target in targets.items():
@@ -291,10 +334,10 @@ def test_line_profile_guard_page_route_serves_profile_guard_html() -> None:
 
 
 def test_new_staff_page_routes_serve_split_assets() -> None:
-    baby_log = line_identity.staff_baby_log_page()
     payout = line_identity.staff_payout_page()
-
-    assert baby_log.status_code == 200
-    assert baby_log.path.name == "staff_baby_log.html"
     assert payout.status_code == 200
     assert payout.path.name == "staff_payout.html"
+
+    with pytest.raises(HTTPException) as captured:
+        line_identity.staff_baby_log_page()
+    assert captured.value.status_code == 410

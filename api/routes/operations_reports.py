@@ -165,6 +165,8 @@ def _case_row_view_dict(row) -> dict[str, object]:
         "general_ineligible": row.general_ineligible,
         "subsidized_eligible": row.subsidized_eligible,
         "subsidized_ineligible": row.subsidized_ineligible,
+        "indigenous_eligible": row.indigenous_eligible,
+        "indigenous_ineligible": row.indigenous_ineligible,
         "order_established": row.order_established,
         "negotiating": row.negotiating,
         "cancelled": row.cancelled,

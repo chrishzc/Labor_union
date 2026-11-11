@@ -1,22 +1,19 @@
 import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 /**
  * File: LineOrderGroupWorkbench.tsx
- * Description: 案件群組工作區，呈現加入狀況與歷程，並於各群組明細提供服務日誌缺漏提醒。
+ * Description: 案件群組工作區，呈現加入狀況與歷程。
  */
 import { useEffect, useRef, useState, type FC } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { Drawer } from './Drawer';
 import { lineOrderGroupQueryClient, type LineOrderGroupWorkspaceClient } from '../api/line_order_groups/line_order_group_query_client';
 import { LineOrderGroupQueryError } from '../api/line_order_groups/line_order_group_query_errors';
-import type { ServiceDayLogReminderClient } from '../api/line_order_groups/service_day_log_reminder_client';
-import { ServiceDayLogCaseReminders, useServiceDayLogReminders } from './ServiceDayLogReminderWorkbench';
 import type { LineOrderGroupStatus, LineOrderGroupWorkspacePage, LineOrderGroupWorkspaceRecord, LineOrderGroupWorkspaceEventPage } from '../api/line_order_groups/line_order_group_query_schemas';
 import { lineOrderGroupEventLabel, lineOrderGroupReason, lineOrderGroupStatusLabel } from '../adapters/line_order_groups/line_order_group_query_adapter';
 import './LineOrderGroupWorkbench.css';
 
 interface Props {
   client?: LineOrderGroupWorkspaceClient;
-  reminderClient?: ServiceDayLogReminderClient;
   search: string;
   status: LineOrderGroupStatus | 'all';
   page: number;
@@ -45,8 +42,7 @@ function Status({ value }: { value: LineOrderGroupStatus }) {
   return <span className={`order-group-status order-group-status-${value}`}>{lineOrderGroupStatusLabel(value)}</span>;
 }
 
-export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQueryClient, reminderClient, search, status, page, onSearchChange, onStatusChange, onPageChange }) => {
-  const reminders = useServiceDayLogReminders(reminderClient);
+export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQueryClient, search, status, page, onSearchChange, onStatusChange, onPageChange }) => {
   const [list, setList] = useState<QueryState<LineOrderGroupWorkspacePage>>(pending);
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -112,7 +108,6 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
 
   return <section className="order-group-workbench">
     <div className="order-group-heading"><div><h2>案件群組</h2><p>查看群組與成員加入狀況。</p></div><button type="button" className="order-group-button" disabled={list.loading} onClick={() => setReload(value => value + 1)}><RefreshCw aria-hidden="true" />重新整理</button></div>
-    {reminders.error && <p className="order-group-empty" role="alert">{reminders.error}</p>}
     <div className="order-group-card">
       <div className="order-group-filters">
         <label className="order-group-search"><span className="sr-only">搜尋案件編號</span><Search aria-hidden="true" /><input type="search" aria-label="搜尋案件編號" placeholder="搜尋案件編號" maxLength={50} value={search} onChange={event => { onSearchChange(event.target.value); onPageChange(1); }} /></label>
@@ -121,7 +116,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
       {list.loading && <p className="order-group-empty" role="status">正在載入案件群組…</p>}
       {list.error && <div className="order-group-empty" role="alert"><p>{list.error}</p><button className="order-group-button" type="button" onClick={() => setReload(value => value + 1)}>重試查詢</button></div>}
       {list.value && <>
-        {list.value.items.length === 0 ? <div className="order-group-empty"><h3>{search.trim() || status !== 'all' ? '沒有符合條件的群組' : '目前沒有案件群組綁定紀錄'}</h3><p>{search.trim() || status !== 'all' ? '可調整案件編號或群組狀態再查詢。' : '由工會人員在 LINE 群組內綁定案件後，會顯示在這裡。'}</p>{(search.trim() || status !== 'all') && <button type="button" className="order-group-button" onClick={clear}>清除條件</button>}</div> : <table className="order-group-table" data-control-id="line.order-groups.table"><caption className="sr-only">案件的案件群組與加入狀況</caption><thead><tr><th scope="col">案件</th><th scope="col">群組狀態</th><th scope="col">最近動態</th></tr></thead><tbody>{list.value.items.map(item => <tr key={item.case_no} data-attention={item.status === 'attention'}><td><button type="button" className="order-group-case" data-group-case={item.case_no} aria-label={`查看案件 ${item.case_no} 群組明細`} onClick={() => open(item.case_no)}>{item.case_no}</button><span className="order-group-person">{item.customer_name || '客戶資料待確認'}</span></td><td><Status value={item.status} /><span className={`order-group-secondary ${item.status === 'attention' ? 'order-group-attention' : ''}`}>{lineOrderGroupReason(item)}</span>{reminders.byCase[item.case_no] && <span className="order-group-secondary order-group-attention">日誌連續缺漏 {Math.max(...reminders.byCase[item.case_no].map(entry => entry.consecutive_days))} 日</span>}</td><td><span>{item.latest_event ? lineOrderGroupEventLabel(item.latest_event) : '尚無群組動態紀錄'}</span>{item.latest_event && <time className="order-group-secondary" dateTime={item.latest_event.occurred_at}>{time(item.latest_event.occurred_at)}</time>}</td></tr>)}</tbody></table>}
+        {list.value.items.length === 0 ? <div className="order-group-empty"><h3>{search.trim() || status !== 'all' ? '沒有符合條件的群組' : '目前沒有案件群組綁定紀錄'}</h3><p>{search.trim() || status !== 'all' ? '可調整案件編號或群組狀態再查詢。' : '由工會人員在 LINE 群組內綁定案件後，會顯示在這裡。'}</p>{(search.trim() || status !== 'all') && <button type="button" className="order-group-button" onClick={clear}>清除條件</button>}</div> : <table className="order-group-table" data-control-id="line.order-groups.table"><caption className="sr-only">案件的案件群組與加入狀況</caption><thead><tr><th scope="col">案件</th><th scope="col">群組狀態</th><th scope="col">最近動態</th></tr></thead><tbody>{list.value.items.map(item => <tr key={item.case_no} data-attention={item.status === 'attention'}><td><button type="button" className="order-group-case" data-group-case={item.case_no} aria-label={`查看案件 ${item.case_no} 群組明細`} onClick={() => open(item.case_no)}>{item.case_no}</button><span className="order-group-person">{item.customer_name || '客戶資料待確認'}</span></td><td><Status value={item.status} /><span className={`order-group-secondary ${item.status === 'attention' ? 'order-group-attention' : ''}`}>{lineOrderGroupReason(item)}</span></td><td><span>{item.latest_event ? lineOrderGroupEventLabel(item.latest_event) : '尚無群組動態紀錄'}</span>{item.latest_event && <time className="order-group-secondary" dateTime={item.latest_event.occurred_at}>{time(item.latest_event.occurred_at)}</time>}</td></tr>)}</tbody></table>}
         {list.value.total > 0 && <div className="order-group-pagination"><span>共 {list.value.total} 筆群組</span>{list.value.total_pages > 1 && <div><button type="button" className="order-group-button" aria-label="上一頁案件群組" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>‹</button><span>第 {list.value.page} / {list.value.total_pages} 頁</span><button type="button" className="order-group-button" aria-label="下一頁案件群組" disabled={page >= list.value.total_pages} onClick={() => onPageChange(page + 1)}>›</button></div>}</div>}
       </>}
     </div>
@@ -132,7 +127,6 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
         <section className="order-group-current" aria-label="目前群組狀況"><Status value={record.status} /><p className={record.status === 'attention' ? 'order-group-attention' : ''}>{lineOrderGroupReason(record)}。</p></section>
         <dl className="order-group-facts"><div><dt>客戶</dt><dd>{record.customer_name || '資料待確認'}</dd></div><div><dt>最近動態</dt><dd>{time(record.latest_event?.occurred_at)}</dd></div><div><dt>群組綁定時間</dt><dd>{time(record.bound_at, true)}</dd></div><div><dt>最近邀請時間</dt><dd>{record.last_invitation_at ? time(record.last_invitation_at, true) : '尚無本次邀請紀錄'}</dd></div></dl>
         <section className="order-group-members"><h3>客戶與月嫂</h3><p>依本次綁定後收到的群組加入／離開紀錄顯示。</p>{record.members.length === 0 ? <p>目前無法確認本案成員資料。</p> : <ul>{record.members.map((member, index) => <li key={`${member.role}-${index}`}><div><strong>{member.role === 'staff' ? staffDisplayLabel(member.staff_union_no, member.name || '姓名未設定') : member.name || '客戶資料待確認'}</strong><span>{member.role === 'customer' ? '客戶' : '月嫂'}</span></div><span className={`order-group-member-${member.membership_status}`}>{memberLabels[member.membership_status]}</span></li>)}</ul>}<p className="order-group-note">工會人員於 LINE 群組內管理；此處不代表完整群組成員名單。邀請排入發送不代表已送達或已加入。</p></section>
-        <ServiceDayLogCaseReminders items={reminders.byCase[record.case_no] ?? []} client={reminderClient} onRefresh={reminders.reload} />
         <details className="order-group-history" open={historyOpen} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>群組歷程</summary>{historyOpen && <>
           {events.loading && <p role="status">正在載入群組歷程…</p>}
           {events.error && <div role="alert"><p>{events.error}</p><button className="order-group-button" type="button" onClick={() => setEventReload(value => value + 1)}>重試歷程</button></div>}

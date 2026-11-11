@@ -14,7 +14,9 @@ const fieldLabels: Record<string, string> = {
   identity_status: '身分類別', service_start_date: '預計服務開始日',
 };
 
-const defaultForm: ManualNonCitizenCaseInput = {
+type ManualCaseForm = Omit<ManualNonCitizenCaseInput, 'service_days'> & { service_days: number | '' };
+
+const defaultForm: ManualCaseForm = {
   name: '',
   phone: '',
   gender: '女',
@@ -26,7 +28,7 @@ const defaultForm: ManualNonCitizenCaseInput = {
   service_type: '連續服務',
   delivery_type: '自然產',
   residence_type: '電梯大樓',
-  baby_info: '單胞胎',
+  baby_info: '',
   city: '',
   address: '',
   due_month: '',
@@ -129,8 +131,12 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     if (!manualForm.name.trim()) return '請輸入客戶姓名。';
     if (!manualForm.phone.trim()) return '請輸入連絡電話。';
     if (!manualForm.service_start_date) return '請選擇預計服務開始日。';
-    if (!manualForm.service_days || manualForm.service_days <= 0) return '服務天數必須大於 0。';
+    if (!Number.isInteger(manualForm.service_days) || Number(manualForm.service_days) <= 0) return '服務天數必須為大於 0 的整數。';
     if (!manualForm.service_time.trim()) return '請輸入服務時段。';
+    if (!manualForm.baby_info.trim()) return '請輸入寶寶資訊。';
+    if (!manualForm.email.trim()) return '請輸入電子郵件。';
+    if (!manualForm.refund_bank_code.trim()) return '請輸入退款銀行代號。';
+    if (!manualForm.refund_account_no.trim()) return '請輸入退款銀行帳號。';
     return null;
   };
 
@@ -150,6 +156,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
         mode: 'new',
         name: manualForm.name.trim(),
         phone: manualForm.phone.trim(),
+        service_days: Number(manualForm.service_days),
       });
       setShowManualModal(false);
       setManualForm(defaultForm);
@@ -324,7 +331,10 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
                   required
                   min={1}
                   value={manualForm.service_days}
-                  onChange={e => setManualForm(prev => ({ ...prev, service_days: parseInt(e.target.value, 10) || 1 }))}
+                  onChange={e => {
+                    const days = e.currentTarget.valueAsNumber;
+                    setManualForm(prev => ({ ...prev, service_days: Number.isNaN(days) ? '' : days }));
+                  }}
                   disabled={manualBusy}
                 />
               </label>
@@ -422,25 +432,28 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
                 />
               </label>
 
-              <label className="checkbox-label full-width">
-                <input
-                  type="checkbox"
-                  checked={manualForm.requires_cooking ?? false}
-                  onChange={e => setManualForm(prev => ({ ...prev, requires_cooking: e.target.checked }))}
-                  disabled={manualBusy}
-                />
+              <label>
                 <span>是否需要下廚</span>
+                <select
+                  value={manualForm.requires_cooking ? 'yes' : 'no'}
+                  onChange={e => setManualForm(prev => ({ ...prev, requires_cooking: e.target.value === 'yes' }))}
+                  disabled={manualBusy}
+                >
+                  <option value="yes">是</option>
+                  <option value="no">否</option>
+                </select>
               </label>
             </div>
           </div>
 
           <div className="manual-case-section">
-            <h4>3. 其他自訂欄位（選填）</h4>
+            <h4>3. 其他資料</h4>
             <div className="manual-case-grid">
               <label>
-                <span>寶寶資訊</span>
+                <span className="required">寶寶資訊</span>
                 <input
                   type="text"
+                  required
                   placeholder="例如 單胞胎"
                   value={manualForm.baby_info ?? ''}
                   onChange={e => setManualForm(prev => ({ ...prev, baby_info: e.target.value }))}
@@ -470,9 +483,10 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
               </label>
 
               <label>
-                <span>電子郵件</span>
+                <span className="required">電子郵件</span>
                 <input
                   type="email"
+                  required
                   placeholder="Email"
                   value={manualForm.email ?? ''}
                   onChange={e => setManualForm(prev => ({ ...prev, email: e.target.value }))}
@@ -492,10 +506,11 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
               </label>
 
               <label>
-                <span>退款銀行代號（7碼）</span>
+                <span className="required">退款銀行代號（7碼）</span>
                 <input
                   type="text"
-                  maxLength={7}
+                  required
+                  inputMode="numeric"
                   placeholder="0000000"
                   value={manualForm.refund_bank_code ?? ''}
                   onChange={e => setManualForm(prev => ({ ...prev, refund_bank_code: e.target.value }))}
@@ -504,9 +519,11 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
               </label>
 
               <label>
-                <span>退款銀行帳號</span>
+                <span className="required">退款銀行帳號</span>
                 <input
                   type="text"
+                  required
+                  inputMode="numeric"
                   placeholder="銀行帳號"
                   value={manualForm.refund_account_no ?? ''}
                   onChange={e => setManualForm(prev => ({ ...prev, refund_account_no: e.target.value }))}

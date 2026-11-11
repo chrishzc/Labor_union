@@ -1,7 +1,7 @@
 """Issue #337 real HTTP/Application/MySQL acceptance for empty service time."""
 
 from argparse import Namespace
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import os
 from types import SimpleNamespace
 
@@ -14,6 +14,7 @@ from api.dependencies.admin_auth import require_persisted_admin
 from api.dependencies.order_intake_terms_bootstrap import get_order_intake_terms_bootstrap_application
 from api.dependencies.order_terms import OrderTermsApplication, get_order_terms_application
 from api.routes.order_intake_terms_bootstrap import router as intake_terms_router
+from api.routes.order_schedule_calculation import router as schedule_calculation_router
 from api.routes.order_terms import router
 from domains.bootstrap.case_architecture import CaseArchitectureBootstrapIntent, ClientPaymentTermsRootFacts
 from domains.case_import.case_import import (
@@ -22,7 +23,9 @@ from domains.case_import.case_import import (
     ImportedOrderRootFacts,
 )
 from infrastructure.mysql.case_import_repository import CaseImportMySqlUnitOfWork, MySqlCaseImportRepository
+from infrastructure.mysql import mysql_adapter
 from infrastructure.mysql.mysql_adapter import DB_CONFIG
+from infrastructure.mysql.nas_mutations import ensure_nas_procedures
 from infrastructure.mysql.order_intake_terms_bootstrap_repository import MySqlOrderIntakeTermsBootstrapRepository
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -81,7 +84,7 @@ def _drop_database() -> None:
         connection.close()
 
 
-def _intent() -> CaseImportIntent:
+def _intent(service_days: int = 5) -> CaseImportIntent:
     start_date = date(2026, 10, 1)
     payment_terms = ClientPaymentTermsRootFacts(
         "issue337-client-policy-v1",
@@ -102,10 +105,10 @@ def _intent() -> CaseImportIntent:
     ))
     order = ImportedOrderRootFacts(
         _CASE_NO,
-        5,
+        service_days,
         8,
         start_date,
-        date(2026, 10, 5),
+        start_date + timedelta(days=service_days - 1),
         time(9),
         time(17),
         0,
@@ -123,7 +126,7 @@ def _intent() -> CaseImportIntent:
     )
 
 
-def _seed(connection) -> None:
+def _seed(connection, service_days: int = 5, *, empty_service_time: bool = True) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO payroll_rate_policies "
@@ -131,7 +134,7 @@ def _seed(connection) -> None:
             "VALUES ('issue337-approved-rates-v1','citizen',300,'2026-01-01')"
         )
     connection.commit()
-    intent = _intent()
+    intent = _intent(service_days)
     workflow = CaseImportWorkflow(
         MySqlCaseImportRepository(connection),
         lambda: CaseImportMySqlUnitOfWork(connection),
@@ -146,6 +149,8 @@ def _seed(connection) -> None:
         "create isolated acceptance roots",
         CorrelationId("issue337-import"),
     ))
+    if not empty_service_time:
+        return
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE orders SET service_start_time=NULL,service_end_time=NULL,"
@@ -156,8 +161,8 @@ def _seed(connection) -> None:
     connection.commit()
 
 
-def _seed_effective_assignment(connection) -> int:
-    service_dates = tuple(date(2026, 10, day) for day in range(1, 6))
+def _seed_effective_assignment(connection, service_days: int = 5) -> int:
+    service_dates = tuple(date(2026, 10, 1) + timedelta(days=day) for day in range(service_days))
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO staff(name,status) VALUES (%s,'active')",
@@ -205,8 +210,8 @@ def _seed_effective_assignment(connection) -> int:
                 "VALUES (%s,%s,%s,%s,'assignment_interval')",
                 (staff_id, service_date, generation_id, assignment_id),
             )
-        for day in range(6, 13):
-            buffer_date = date(2026, 10, day)
+        for day in range(1, 8):
+            buffer_date = service_dates[-1] + timedelta(days=day)
             cursor.execute(
                 "INSERT INTO scheduling_buffer_days "
                 "(generation_id,assignment_id,staff_id,buffer_date,status,active_marker) "
@@ -332,6 +337,7 @@ def _client(connection) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.include_router(intake_terms_router)
+    app.include_router(schedule_calculation_router)
     app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="issue337-admin")
     app.dependency_overrides[require_persisted_admin] = lambda: SimpleNamespace(username="issue337-admin")
     app.dependency_overrides[get_order_terms_application] = lambda: application
@@ -350,20 +356,21 @@ def _data(response, expected_status=200):
     return response.json()["data"]
 
 
-def _preview(client, terms):
+def _preview(client, terms, **replacement):
     return _data(client.post(
         f"/api/v1/orders/{_CASE_NO}/terms/preview",
-        json={"proposed_terms": terms},
+        json={"proposed_terms": terms, **replacement},
         headers={"X-Correlation-ID": "issue337-preview"},
     ))
 
 
-def _apply(client, query, preview, terms, key):
+def _apply(client, query, preview, terms, key, **replacement):
     requires_formal_apply = preview["requires_formal_apply"]
     return client.post(
         f"/api/v1/orders/{_CASE_NO}/terms/apply",
         json={
             "proposed_terms": terms,
+            **replacement,
             "expected_order_version": query["order_version"],
             "expected_scheduling_version": query["scheduling_version"],
             # Query also exposes roots outside this Preview's actual read set.
@@ -620,6 +627,52 @@ def test_general_terms_date_change_round_trips_without_downstream_roots():
                     (_CASE_NO,),
                 )
                 assert int(cursor.fetchone()["total"]) == 0
+    finally:
+        connection.close()
+        _drop_database()
+
+
+def test_assigned_service_days_change_from_15_to_10_and_round_trip(monkeypatch):
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        ensure_nas_procedures(connection)
+        monkeypatch.setattr(mysql_adapter, "get_connection", _connect)
+        _seed(connection, service_days=15, empty_service_time=False)
+        assignment_id = _seed_effective_assignment(connection, service_days=15)
+        endpoint = f"/api/v1/orders/{_CASE_NO}/terms"
+        with _client(connection) as client:
+            before = _data(client.get(endpoint))
+            assert before["terms"]["service_days"] == 15
+            assert before["terms"]["service_time"]["start_time"] == "09:00:00"
+            assert before["assignments"][0]["service_days"] == 15
+            schedule = _data(client.post("/api/v1/orders/calculate-schedule", json={
+                "case_no": _CASE_NO,
+                "actual_start_date": before["terms"]["planned_start_date"],
+                "target_service_days": 10,
+                "service_mode": "連續服務",
+            }))
+            dates = [day["date"] for day in schedule["day_by_day"] if day["is_work_day"]]
+            assert len(dates) == 10
+            terms = {**before["terms"], "service_days": 10}
+            replacement = {
+                "replacement_service_dates": dates,
+                "replacement_allocations": [{"assignment_id": assignment_id, "service_days": 10}],
+            }
+            preview = _preview(client, terms, **replacement)
+            assert preview["requires_formal_apply"] is True
+            assert _data(client.get(endpoint)) == before
+            receipt = _data(_apply(client, before, preview, terms, "terms-days-15-to-10", **replacement))
+        with _connect() as read_connection, _client(read_connection) as reader:
+            after = _data(reader.get(endpoint))
+        assert receipt["order_version"] == after["order_version"] == before["order_version"] + 1
+        assert receipt["scheduling_version"] == after["scheduling_version"] == before["scheduling_version"] + 1
+        assert receipt["cancelled_assignment_ids"] == [assignment_id]
+        assert after["terms"]["service_days"] == 10
+        assert after["confirmed_service_dates"] == dates
+        assert len(after["assignments"]) == 1
+        assert after["assignments"][0]["staff_id"] == before["assignments"][0]["staff_id"]
+        assert after["assignments"][0]["service_days"] == 10
     finally:
         connection.close()
         _drop_database()

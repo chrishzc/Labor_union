@@ -40,19 +40,6 @@ SCRYPT_P = 1
 ADMIN_SESSION_MAXIMUM_MINUTES = 8 * 60
 LOGIN_ATTEMPT_WINDOW_MINUTES = 15
 LOGIN_ATTEMPT_MAXIMUM = 5
-SECURITY_ALERT_ACTION_CODES = {
-    "admin.root.bootstrap": "access_root_bootstrapped",
-    "admin.account.created": "access_account_created",
-    "admin.account.enabled_changed": "access_account_state_changed",
-    "admin.account.password_reset": "access_password_reset",
-    "admin.account.sessions_revoked": "access_sessions_revoked",
-    "admin.account.mfa_reset": "access_mfa_reset",
-    "admin.login.disabled_account": "access_disabled_account_usage",
-    "admin.mfa.enrollment_issued": "access_mfa_enrollment_issued",
-    "admin.mfa.enrollment_completed": "access_mfa_enrollment_completed",
-    "admin.login.rate_limited": "access_login_rate_limited",
-    "admin.login.mfa_replay": "access_mfa_replay",
-}
 REQUIRED_ADMIN_SESSION_COLUMNS = frozenset(
     {
         "admin_user_id",
@@ -403,10 +390,6 @@ def bootstrap_root_admin(
                 "INSERT INTO admin_root_account (singleton_key,admin_user_id) VALUES (1,%s)",
                 (admin_id,),
             )
-            _record_admin_audit_with_cursor(
-                cursor, principal=None, action="admin.root.bootstrap", result_status=201,
-                details={"account_id": admin_id},
-            )
             enrollment = _issue_mfa_enrollment(cursor, {"id": admin_id, "username": normalized_username})
         unit_of_work.commit()
         return RootBootstrapResult(admin_id, enrollment)
@@ -609,10 +592,6 @@ def create_account_center_user_with_receipt(
             )
             account_id = int(cursor.lastrowid)
             principal = AdminPrincipal(account_id, normalized_username, normalized_name, "system_admin")
-            _record_admin_audit_with_cursor(
-                cursor, principal=actor, action="admin.account.created", result_status=201,
-                details={"account_id": account_id, "reason": reason.strip()},
-            )
             _save_account_command_receipt(
                 cursor, "account-create", idempotency_key, actor, 0, 1, reason, command_payload,
                 result_snapshot={
@@ -674,10 +653,6 @@ def set_account_center_enabled(*, connection_factory: ConnectionFactory, actor: 
                     "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
                     (account_id,),
                 )
-            _record_admin_audit_with_cursor(
-                cursor, principal=actor, action="admin.account.enabled_changed", result_status=200,
-                details={"account_id": account_id, "enabled": enabled, "reason": reason.strip()},
-            )
             _save_account_command_receipt(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled})
         unit_of_work.commit()
         return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=False)
@@ -706,10 +681,6 @@ def reset_account_center_password(*, connection_factory: ConnectionFactory, acto
                 "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
                 (account_id,),
             )
-            _record_admin_audit_with_cursor(
-                cursor, principal=actor, action="admin.account.password_reset", result_status=200,
-                details={"account_id": account_id, "reason": reason.strip()},
-            )
             _save_account_command_receipt(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload)
         unit_of_work.commit()
         return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
@@ -736,10 +707,6 @@ def revoke_account_center_sessions(*, connection_factory: ConnectionFactory, act
             cursor.execute(
                 "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
                 (account_id,),
-            )
-            _record_admin_audit_with_cursor(
-                cursor, principal=actor, action="admin.account.sessions_revoked", result_status=200,
-                details={"account_id": account_id, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {})
         unit_of_work.commit()
@@ -772,10 +739,6 @@ def reset_account_center_mfa(*, connection_factory: ConnectionFactory, actor: Ad
             cursor.execute(
                 "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
                 (account_id,),
-            )
-            _record_admin_audit_with_cursor(
-                cursor, principal=actor, action="admin.account.mfa_reset", result_status=200,
-                details={"account_id": account_id, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {})
         unit_of_work.commit()
@@ -946,19 +909,12 @@ def authenticate_admin(
                 raise AdminLoginRateLimitedError()
             if not row or not row["enabled"] or not verify_admin_password(password, row["password_hash"]):
                 _record_login_attempt(cursor, username, source_identifier, "failed")
-                if row is not None and not row["enabled"]:
-                    _record_disabled_account_login_attempt(cursor, username)
                 unit_of_work.commit()
                 return None
 
             factor = _active_factor_for_user(cursor, int(row["id"]))
             if factor is None:
                 enrollment = _issue_mfa_enrollment(cursor, row)
-                _record_login_attempt(cursor, username, source_identifier, "succeeded")
-                _record_admin_audit_with_cursor(
-                    cursor, principal=_principal_from_row(cursor, row),
-                    action="admin.mfa.enrollment_issued", result_status=403,
-                )
                 unit_of_work.commit()
                 return enrollment
             if not totp_code:
@@ -995,14 +951,6 @@ def authenticate_admin(
                 (now, row["id"]),
             )
             principal = _principal_from_row(cursor, row)
-            _record_admin_audit_with_cursor(
-                cursor,
-                principal=principal,
-                action="admin.login.success",
-                result_status=200,
-                details={"mfa_method": verification},
-            )
-            _record_login_attempt(cursor, username, source_identifier, "succeeded")
         unit_of_work.commit()
         return token, expires_at, principal
     except (AdminSessionSchemaError, AdminMfaConfigurationError):
@@ -1047,15 +995,11 @@ def issue_password_login_challenge(
                 raise AdminLoginRateLimitedError()
             if not row or not row["enabled"] or not verify_admin_password(password, row["password_hash"]):
                 _record_login_attempt(cursor, normalized_username, source_identifier, "failed")
-                if row is not None and not row["enabled"]:
-                    _record_disabled_account_login_attempt(cursor, normalized_username)
                 unit_of_work.commit()
                 return None
             factor = _active_factor_for_user(cursor, int(row["id"]))
             if factor is None:
                 enrollment = _issue_mfa_enrollment(cursor, row)
-                _record_login_attempt(cursor, normalized_username, source_identifier, "succeeded")
-                _record_admin_audit_with_cursor(cursor, principal=_principal_from_row(cursor, row), action="admin.mfa.enrollment_issued", result_status=403)
                 unit_of_work.commit()
                 return enrollment
             challenge_id = str(uuid.uuid4())
@@ -1068,8 +1012,6 @@ def issue_password_login_challenge(
                 (challenge_id, row["id"], row["access_control_version"], factor["id"],
                  _token_hash(challenge_token), _attempt_subject_hash(source_identifier), expires_at),
             )
-            _record_login_attempt(cursor, normalized_username, source_identifier, "succeeded")
-            _record_admin_audit_with_cursor(cursor, principal=_principal_from_row(cursor, row), action="admin.password_challenge_issued", result_status=202)
         unit_of_work.commit()
         return PasswordLoginChallenge(challenge_id, challenge_token, expires_at)
     except AdminLoginRateLimitedError:
@@ -1141,8 +1083,6 @@ def complete_password_login_challenge(
                               VALUES (%s,%s,%s,%s,%s)""", (challenge["user_id"], _token_hash(token), expires_at, absolute_expires_at, now))
             cursor.execute("UPDATE admin_users SET last_login_at=%s WHERE id=%s", (now, challenge["user_id"]))
             principal = _principal_from_row(cursor, row)
-            _record_admin_audit_with_cursor(cursor, principal=principal, action="admin.login.success", result_status=200, details={"mfa_method": method})
-            _record_login_attempt(cursor, str(challenge["username"]), source_identifier, "succeeded")
         unit_of_work.commit()
         return token, expires_at, principal
     except pymysql.MySQLError as error:
@@ -1195,10 +1135,6 @@ def authenticate_local_developer_root(
             )
             cursor.execute("UPDATE admin_users SET last_login_at=%s WHERE id=%s", (now, row["id"]))
             principal = _principal_from_row(cursor, row)
-            _record_admin_audit_with_cursor(
-                cursor, principal=principal, action="admin.development_session_issued", result_status=200,
-                details={"source": source_identifier},
-            )
         unit_of_work.commit()
         return token, expires_at, principal
     except AdminSessionSchemaError:
@@ -1262,16 +1198,6 @@ def complete_mfa_enrollment(
             cursor.executemany(
                 "INSERT INTO admin_totp_recovery_codes (factor_id, code_hash) VALUES (%s,%s)",
                 [(factor["id"], hash_recovery_code(code)) for code in codes],
-            )
-            cursor.execute(
-                "SELECT id, username, display_name, role, linked_line_user_id, enabled, access_control_version, "
-                "EXISTS(SELECT 1 FROM admin_root_account r WHERE r.admin_user_id=u.id) AS is_root "
-                "FROM admin_users u WHERE id=%s",
-                (challenge["admin_user_id"],),
-            )
-            principal = _principal_from_row(cursor, cursor.fetchone())
-            _record_admin_audit_with_cursor(
-                cursor, principal=principal, action="admin.mfa.enrollment_completed", result_status=200,
             )
         unit_of_work.commit()
         return codes
@@ -1554,29 +1480,11 @@ def _is_rate_limited(
 def _record_login_attempt(
     cursor: Any, username: str, source_identifier: str, outcome: str, *, now: datetime | None = None
 ) -> None:
+    """Persist the hashed failure state used by the login rate limiter."""
     cursor.execute(
         """INSERT INTO admin_login_attempts (username_hash, source_hash, outcome, occurred_at)
         VALUES (%s,%s,%s,%s)""",
         (_attempt_subject_hash(username), _attempt_subject_hash(source_identifier), outcome, now or _utc_now_naive()),
-    )
-    if outcome in {"rate_limited", "mfa_replay"}:
-        _record_admin_audit_with_cursor(
-            cursor,
-            principal=None,
-            action=f"admin.login.{outcome}",
-            result_status=429 if outcome == "rate_limited" else 401,
-            details={"subject_hash": _attempt_subject_hash(username)},
-        )
-
-
-def _record_disabled_account_login_attempt(cursor: Any, username: str) -> None:
-    """Record the security fact without changing the generic public login response."""
-    _record_admin_audit_with_cursor(
-        cursor,
-        principal=None,
-        action="admin.login.disabled_account",
-        result_status=401,
-        details={"subject_hash": _attempt_subject_hash(username)},
     )
 
 
@@ -1618,11 +1526,8 @@ def _append_security_alert_outbox(
     result_status: int | None,
     details: dict[str, Any] | None,
 ) -> None:
-    """Persist only high-risk alert intents in the same transaction as their audit fact."""
-    alert_code = SECURITY_ALERT_ACTION_CODES.get(action)
-    if action == "admin.login.success" and details and details.get("mfa_method") == "recovery_code":
-        alert_code = "access_recovery_code_used"
-    if alert_code is None:
+    """Keep the existing alert for the dedicated offline root MFA reset."""
+    if action != "admin.account.mfa_reset":
         return
     alert_identity = hashlib.sha256(f"audit:{source_audit_id}".encode("ascii")).hexdigest()
     payload = {
@@ -1636,7 +1541,7 @@ def _append_security_alert_outbox(
         """INSERT INTO admin_security_alert_outbox (
             source_audit_id,alert_code,alert_identity,payload_snapshot
         ) VALUES (%s,%s,%s,%s)""",
-        (source_audit_id, alert_code, alert_identity, json.dumps(payload, ensure_ascii=False)),
+        (source_audit_id, "access_mfa_reset", alert_identity, json.dumps(payload, ensure_ascii=False)),
     )
 
 

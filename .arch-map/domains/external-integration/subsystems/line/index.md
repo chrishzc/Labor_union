@@ -33,8 +33,8 @@
 - `mobile-assignment-review` — persisted-human、target-isolated mobile transport，轉接既有 Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
 - `safe-review-link` — 短效一次性review-link transport、runtime owner 版本重驗、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
 - `staff-order-view` — 已驗證月嫂查看自己有效指派的訂單摘要與可選篩選；path: `modules/staff-order-view.md`
-- `staff-service-day-media` — 已驗證月嫂餐食照片 controlled-file staging；path: `modules/staff-service-day-media.md`
-- `service-day-reminder` — Scheduling current 連續缺漏清單、工會人工案件群組提醒、完成／重建停催及發送前複核；path: `modules/service-day-reminder.md`
+- `staff-service-day-media` — [RETIRED] 月嫂寶寶日誌與餐食照片改維持於 LINE 案件群組相簿，LIFF 頁面與受控 media API 退役回傳 410 GONE；path: `modules/staff-service-day-media.md`
+- `service-day-reminder` — [RETIRED] 服務日誌缺漏提醒已隨日誌回歸群組相簿而退役，API 回傳 410 GONE；path: `modules/service-day-reminder.md`
 - `staff-payout-view` — 已驗證月嫂依本人綁定與目標付款月份查詢逐案薪資明細；path: `modules/staff-payout-view.md`
 - `rich-menu-management` — Rich Menu typed draft editing, publication preparation and role-scoped management presentation; path: `modules/rich-menu-management.md`
 
@@ -54,19 +54,19 @@
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — self-service contract
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — identity contract
 - `document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` — required direct-flow acceptance；source存在或局部測試通過不取代流程驗收。
-- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` §4.1、§10.14 — 加好友只保留即時歡迎的 current contract 與驗收；三日引導不再是需求或 implementation gap。
+- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` — 加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統僅維護好友狀態、不於 follow 建立身分流程或發送歡迎訊息；聊天室主動輸入綁定關鍵字仍依 `line_webhook_reply` 回覆。
 
 ### 第一批資訊回覆（2026-10-30 人工核准）
 
-歡迎／綁定入口、服務導覽說明查詢、選單說明、停用及群組錯誤提示的新工作使用 `line_webhook_reply`；由原 committed delivery worker 讀取同事件、同聊天室的短效 Reply 機會，失敗不補 Push、不自動重試。`delivery_contracts.py` 定義來源標記，`ports.py`／`infrastructure/mysql/line_delivery_task_repository.py` 的 Reply 查詢可核對原收件者。`infrastructure/mysql/line_notification_repository.py` 的近期導覽回覆 Query 同時辨識新舊來源並保留原收件者隔離。業務結果確認仍 Push，既有排隊工作不轉換／取消。正式語意由規格 20 §3.2A 擁有。
+綁定入口、服務導覽說明查詢、選單說明、停用及群組錯誤提示的新工作使用 `line_webhook_reply`；由原 committed delivery worker 讀取同事件、同聊天室的短效 Reply 機會，失敗不補 Push、不自動重試。`delivery_contracts.py` 定義來源標記，`ports.py`／`infrastructure/mysql/line_delivery_task_repository.py` 的 Reply 查詢可核對原收件者。`infrastructure/mysql/line_notification_repository.py` 的近期導覽回覆 Query 同時辨識新舊來源並保留原收件者隔離。業務結果確認仍 Push，既有排隊工作不轉換／取消。正式語意由規格 20 §3.2A 擁有。
 
 `infrastructure/mysql/line_delivery_task_repository.py::new_reply_task_ids` 只回傳本次 UoW 新 insert 的資訊工作，排除重複 enqueue 回讀的既有工作。`webhook_event_consumer.py` 在 commit 後交由 `delivery_worker.py::run_new_reply_tasks` 逐筆取得新租約並投遞；`api/dependencies/line_worker_operation.py` 負責接線。快速路徑最多使用每輪 batch 的一半，其餘保留原佇列與原排序，總量及 heartbeat 計數仍沿原上限。資訊 Token 查詢支援 user follow 與 user／group／room message／postback，舊 Knowledge 查詢條件不變。
 
 - integration_test: `tests/domains/external-integration/subsystems/line/integration/test_informational_reply_only.py` — 新舊工作分流、保留業務確認、實際 SQL 事件／來源條件、Token／聊天室核對、commit 後快速投遞與原佇列預算及失敗零 Push。
 
-### 加好友歡迎（2026-09-16 使用者裁決）
+### 加好友歡迎訊息退役（2026-11-11 人工核准）
 
-首次與封鎖後重新加好友，只接續既有即時歡迎訊息及身分入口，語意以 `29` §4.1 為準。canonical 組裝不掛入退役的 follow scheduler；舊 D+N 設定／模組不構成恢復功能或三日推送驗收的依據。現有好友事件時間判定、歡迎去重、保存／投遞失敗回讀仍沿用原 owner；source 修正不代表已部署或手機送達通過。付款、服務日與日誌通知不受此裁決影響。
+加入好友（`follow`）歡迎訊息已移除，改由 LINE Official Account Manager 官方後台設定。`webhook_identity_handlers.py::handle_follow` 僅透過 `platform_users.apply_friend_event` 維護好友狀態（含時間保序），不建立 `identity_flows`、不掛入 `follow_scheduler`，亦不入列歡迎推播或回覆；`/api/v1/line/onboarding` 端點已退役並回傳 `410 Gone`。聊天室主動輸入客戶綁定指令仍開啟 `CUSTOMER_BINDING` 流程並以 `line_webhook_reply` 回覆入口連結。付款、服務日與通知不受影響。
 
 ### 告警對象
 
@@ -79,7 +79,7 @@
 
 `infrastructure/mysql/line_platform_identity_repository.py`保存晚到的好友事件與版本紀錄，
 同一 adapter 內的 canonical 狀態與 legacy `line_users` 投影都不倒退；
-`webhook_identity_handlers.py`的舊follow不新建歡迎訊息／flow，舊unfollow不取消目前通知，
+`webhook_identity_handlers.py`的follow不建立歡迎訊息／flow，舊unfollow不取消目前通知，
 一般message仍處理。文字「未解決」建單失敗須傳回consumer rollback／retry，不能排入
 成功通報；這不改變Feedback owner的root／receipt契約。
 

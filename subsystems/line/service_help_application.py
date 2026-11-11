@@ -45,8 +45,8 @@ _CATEGORY_ALIASES = {
     CustomerServiceCategory.SERVICE_FLOW: {"服務流程", "流程", "怎麼申請", "如何登記", "怎麼媒合", "1"},
     CustomerServiceCategory.PAYMENT_SUBSIDY: {"收費與補助", "收費", "費用", "價格", "補助", "政府補助", "要付多少", "2"},
     CustomerServiceCategory.SERVICE_PROGRESS: {"查詢服務進度", "查詢進度", "服務進度", "案件進度", "訂單進度", "目前狀態", "3"},
-    CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
-    CustomerServiceCategory.OTHER: {"聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人"},
+    CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "改個人資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
+    CustomerServiceCategory.OTHER: {"聯絡工會人員", "聯絡工會", "聯絡專人", "找人", "找專員", "人工客服", "我要問人"},
 }
 _HANDOFF_CONFIRM_POSTBACK = "customer-service:handoff:confirm"
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"

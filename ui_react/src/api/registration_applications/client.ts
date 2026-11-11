@@ -30,18 +30,18 @@ export interface ManualNonCitizenCaseInput {
   service_type?: string;
   delivery_type?: string;
   residence_type?: string;
-  baby_info?: string;
+  baby_info: string;
   city?: string;
   address?: string;
   due_month?: string;
   birth_date?: string;
-  email?: string;
+  email: string;
   line_id?: string;
   notes?: string;
   admin_notes?: string;
   requires_cooking?: boolean;
-  refund_bank_code?: string;
-  refund_account_no?: string;
+  refund_bank_code: string;
+  refund_account_no: string;
 }
 
 const caseNumberView = z.strictObject({

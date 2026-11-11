@@ -33,7 +33,6 @@ _LIFF_TARGETS = frozenset(
         "?target=order_update",
         "?target=order_tracking",
         "?target=profile_update",
-        "?target=staff_baby_log",
         "?target=staff_leave_apply",
         "?target=staff_order_search",
         "?target=staff_payout",
@@ -63,7 +62,6 @@ _LIFF_TARGETS_BY_AUDIENCE = {
     ),
     "staff": frozenset(
         {
-            "?target=staff_baby_log",
             "?target=staff_leave_apply",
             "?target=staff_order_search",
             "?target=staff_payout",

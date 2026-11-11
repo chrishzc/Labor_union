@@ -23,6 +23,8 @@ export const WeeklyOperationsReportSummarySchema = z.strictObject({
   general_ineligible_count: NonNegativeNullableIntegerSchema,
   subsidized_eligible_count: z.number().int().nonnegative(),
   subsidized_ineligible_count: NonNegativeNullableIntegerSchema,
+  indigenous_eligible_count: z.number().int().nonnegative(),
+  indigenous_ineligible_count: NonNegativeNullableIntegerSchema,
   rejection_unpartitioned_count: z.number().int().nonnegative(),
   order_established_count: z.number().int().nonnegative(),
   negotiating_count: z.number().int().nonnegative(),
@@ -50,6 +52,8 @@ export const WeeklyOperationsCaseRowSchema = z.strictObject({
   general_ineligible: z.number().int().min(0).max(1),
   subsidized_eligible: z.number().int().min(0).max(1),
   subsidized_ineligible: z.number().int().min(0).max(1),
+  indigenous_eligible: z.number().int().min(0).max(1),
+  indigenous_ineligible: z.number().int().min(0).max(1),
   order_established: z.number().int().min(0).max(1),
   negotiating: z.number().int().min(0).max(1),
   cancelled: z.number().int().min(0).max(1),
@@ -60,7 +64,7 @@ export const WeeklyOperationsCaseRowSchema = z.strictObject({
   applicant_name: z.string().min(1),
   application_date: DateSchema.nullable(),
   identity_status: z.string().nullable(),
-  review_result: z.enum(['general_eligible', 'subsidized_eligible', 'rejected_unpartitioned', 'pending']),
+  review_result: z.enum(['general_eligible', 'subsidized_eligible', 'indigenous_eligible', 'rejected_unpartitioned', 'pending']),
   order_status: z.string().nullable(),
   service_days: z.number().int().nonnegative().nullable(),
   service_hours_per_day: z.number().nonnegative().nullable(),
@@ -107,7 +111,7 @@ export const WeeklyOperationsSubsidyRowSchema = z.strictObject({
 });
 
 export const WeeklyOperationsSubsidyPartitionSchema = z.strictObject({
-  citizen_kind: z.enum(['general', 'subsidized']),
+  citizen_kind: z.enum(['general', 'subsidized', 'indigenous']),
   row_count: z.number().int().nonnegative(),
   total_amount_ntd: z.number().int().nonnegative(),
   rows: z.array(WeeklyOperationsSubsidyRowSchema),
@@ -128,7 +132,7 @@ export const WeeklyOperationsReportSchema = z.strictObject({
   source_revision: z.string().min(1),
   summary: WeeklyOperationsReportSummarySchema,
   case_rows: z.array(WeeklyOperationsCaseRowSchema),
-  subsidy_partitions: z.array(WeeklyOperationsSubsidyPartitionSchema).length(2),
+  subsidy_partitions: z.array(WeeklyOperationsSubsidyPartitionSchema).length(3),
   service_rows: z.array(WeeklyOperationsServiceRowSchema),
   weekly_metrics: z.array(WeeklyReportMetricSchema),
   annual_totals: z.array(WeeklyReportCaseTotalsSchema),
@@ -166,6 +170,8 @@ const CaseStatisticsSummarySchema = z.strictObject({
   general_ineligible_count: z.number().int().nonnegative().nullable(),
   subsidized_eligible_count: z.number().int().nonnegative(),
   subsidized_ineligible_count: z.number().int().nonnegative().nullable(),
+  indigenous_eligible_count: z.number().int().nonnegative(),
+  indigenous_ineligible_count: z.number().int().nonnegative().nullable(),
   order_status_counts: z.strictObject({
     '待補件': z.number().int().nonnegative(), '洽談中': z.number().int().nonnegative(),
     '訂單成立': z.number().int().nonnegative(), '服務中': z.number().int().nonnegative(),

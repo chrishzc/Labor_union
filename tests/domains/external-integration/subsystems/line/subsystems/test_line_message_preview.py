@@ -1,4 +1,7 @@
-"""Real-fact projections, closed action output and zero-effect preview boundaries."""
+"""
+File: test_line_message_preview.py
+Description: 驗證 LINE 訊息唯讀公版目錄、主體查詢、退役模板排除與零副作用預覽。
+"""
 
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -345,15 +348,17 @@ def test_confirmation_uses_read_only_owner_projection_without_generating_resume_
     assert "preview.invalid" not in display and "preview-only" not in display
 
 
-def test_bootstrap_copy_matches_current_registration_binding_and_welcome_semantics():
+def test_bootstrap_copy_matches_current_registration_binding_and_welcome_retirement():
     from subsystems.line.configuration_store import read_raw_config
-    from subsystems.line.webhook_identity_handlers import DEFAULT_ONBOARDING_WELCOME_MESSAGE
     templates = {t["id"]: t for t in read_raw_config("message_templates")["templates"]}
-    assert templates["customer_onboarding_welcome"]["content"] == DEFAULT_ONBOARDING_WELCOME_MESSAGE
-    assert "一般留言不會有專員回覆" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
-    assert "【AI 智慧問答】" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
-    assert "【聯絡專人服務】" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
-    assert "瀏覽常見問答" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
+    catalog_ids = {item.id for item in app().catalog(actor())}
+    assert "welcome" not in catalog_ids
+    assert "identity-customer-link" in catalog_ids
+    with pytest.raises(MessagePreviewNotFound):
+        app().render("welcome", None, None, None, actor(), sample=True)
+    customer_link = app().render("identity-customer-link", None, None, None, actor(), sample=True)
+    assert customer_link.status == "ready"
+    assert "歡迎加入" not in customer_link.text
     assert templates["register_success"]["content"] == "申請已送出，待工會核准。"
     assert templates["bind_success_new_order"]["content"] == "綁定成功，專屬選單將稍後更新。"
     assert "status_code" not in templates["staff_switch_fail"]["content"]

@@ -14,7 +14,10 @@ import pandas as pd
 from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
 
 GENDER_VALUES = {"男", "女"}
-IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶", "非市民"}
+IDENTITY_STATUS_VALUES = {
+    "一般市民", "補助市民", "社福", "低收入戶", "中低收入戶",
+    "原住民", "原民", "原住民市民", "非市民",
+}
 RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
 DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
 SERVICE_TYPE_VALUES = {
@@ -94,8 +97,8 @@ def _is_valid_integer(value):
 
 def _is_valid_service_time(value):
     text = str(value).strip()
-    hours_match = re.search(r"(?P<hours>\d{1,2}(?:\.5)?)\s*小時", text)
-    clocks = tuple(re.finditer(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)", text))
+    hours_match = re.search(r"(?<![\d.])(?P<hours>\d{1,2}(?:\.5)?)\s*小時", text)
+    clocks = tuple(re.finditer(r"(?<![\d:])(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)(?![\d:])", text))
     if hours_match is None or len(clocks) != 2 or not 0 < float(hours_match.group("hours")) <= 24:
         return False
     minutes = tuple(int(clock.group("hour")) * 60 + int(clock.group("minute")) for clock in clocks)
@@ -183,7 +186,7 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
         errors["身分資格"] = "不可空值"
     elif str(identity_status).strip() not in IDENTITY_STATUS_VALUES:
         errors["身分資格"] = (
-            f"值不在允許範圍內（低收入戶,一般市民,非市民,中低收入戶）：{identity_status}"
+            f"值不在允許範圍內（一般市民,補助市民,低收入戶,中低收入戶,原住民,非市民）：{identity_status}"
         )
 
     service_time = row.get("服務時間")

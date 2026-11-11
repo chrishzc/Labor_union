@@ -98,6 +98,11 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         .field-error.visible { display: block; }
         textarea.form-input { resize: vertical; min-height: 80px; }
+        .service-time-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+        .service-time-presets button {
+            padding: 8px 12px; border: 1px solid var(--primary); border-radius: 8px;
+            background: #fff; color: var(--text-dark); font: inherit; cursor: pointer;
+        }
 
         .checkbox-group, .radio-group {
             display: flex; flex-direction: column; gap: 10px;
@@ -323,13 +328,49 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             <div class="section-title">服務條件</div>
             <div class="grid-2">
                 <div class="form-group"><label class="form-label required" for="service_start_date">預計服務開始日</label><input type="date" class="form-input" id="service_start_date"></div>
-                <div class="form-group"><label class="form-label required" for="service_time">服務時間</label><input type="text" class="form-input" id="service_time" maxlength="100" placeholder="例如：8小時 08:00-17:00"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label required" for="service_time">服務時段</label>
+                <small id="serviceTimeHelp">選擇常用時段，或自行輸入開始時間、結束時間和每日服務時數。跨夜請加上「次日」。</small>
+                <div class="service-time-presets" id="serviceTimePresets" role="group" aria-label="常用服務時段">
+                    <button type="button" data-service-time="09:00-18:00 (8小時)">09:00–18:00（8 小時）</button>
+                    <button type="button" data-service-time="08:00-17:00 (8小時)">08:00–17:00（8 小時）</button>
+                    <button type="button" data-service-time="09:00-13:00 (4小時)">09:00–13:00（4 小時）</button>
+                    <button type="button" data-service-time="13:00-17:00 (4小時)">13:00–17:00（4 小時）</button>
+                    <button type="button" data-service-time="20:00-08:00 (9小時次日)">20:00–次日 08:00（9 小時）</button>
+                </div>
+                <input type="text" class="form-input" id="service_time" maxlength="100"
+                    aria-describedby="serviceTimeHelp" placeholder="例如：09:00-18:00 (8小時)">
             </div>
             <div class="grid-2">
-                <div class="form-group"><label class="form-label required" for="residence_type">居住型態</label><input type="text" class="form-input" id="residence_type" list="residenceTypes" placeholder="請選擇居住型態"><datalist id="residenceTypes"><option value="公寓"><option value="透天"><option value="大樓"><option value="公寓大廈"></datalist></div>
-                <div class="form-group"><label class="form-label required" for="delivery_type">生產方式</label><input type="text" class="form-input" id="delivery_type" list="deliveryTypes" placeholder="自然產或剖腹產"><datalist id="deliveryTypes"><option value="自然產"><option value="剖腹產"></datalist></div>
+                <div class="form-group">
+                    <label class="form-label required" for="residence_type">居住型態</label>
+                    <select class="form-select" id="residence_type">
+                        <option value="">請選擇居住型態</option>
+                        <option value="電梯大樓">電梯大樓</option>
+                        <option value="公寓">公寓</option>
+                        <option value="透天">透天</option>
+                        <option value="其他">其他</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label required" for="delivery_type">生產方式</label>
+                    <select class="form-select" id="delivery_type">
+                        <option value="">請選擇生產方式</option>
+                        <option value="自然產">自然產</option>
+                        <option value="剖腹產">剖腹產</option>
+                    </select>
+                </div>
             </div>
-            <div class="form-group"><label class="form-label required" for="service_type">服務方式</label><input type="text" class="form-input" id="service_type" list="serviceTypes" placeholder="例如：連續服務、週休2日"><datalist id="serviceTypes"><option value="連續服務"><option value="休周六"><option value="休周日"><option value="週休1日"><option value="週休2日"></datalist></div>
+            <div class="form-group">
+                <label class="form-label required" for="service_type">服務方式</label>
+                <select class="form-select" id="service_type">
+                    <option value="">請選擇服務方式</option>
+                    <option value="連續服務">連續服務（不排固定週休）</option>
+                    <option value="週休1日">週休 1 日（週日休息）</option>
+                    <option value="週休2日">週休 2 日（週六、週日休息）</option>
+                </select>
+            </div>
             <div class="form-group"><label class="form-label required" for="baby_info">寶寶資訊</label><textarea class="form-input" id="baby_info" maxlength="255" placeholder="請填寫寶寶資訊"></textarea></div>
             <div class="form-group"><label class="form-label required" for="notes">其他事項</label><textarea class="form-input" id="notes" maxlength="1000" placeholder="無其他事項請填「無」"></textarea></div>
             <div class="form-group"><label class="form-label required" for="line_id">LINE ID</label><input class="form-input" id="line_id" maxlength="50" placeholder="尚未設定 LINE ID 請填「無」"></div>
@@ -671,6 +712,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     document.addEventListener("DOMContentLoaded", () => {
         if (isNonCitizen) {
             document.getElementById('nonCitizenServiceFields').hidden = false;
+            const serviceTime = document.getElementById('service_time');
+            document.getElementById('serviceTimePresets').addEventListener('click', event => {
+                const preset = event.target.closest('button[data-service-time]');
+                if (!preset) return;
+                serviceTime.value = preset.dataset.serviceTime;
+                serviceTime.dispatchEvent(new Event('input', { bubbles: true }));
+            });
             for (const id of [...nonCitizenFields, 'city', 'gender', 'birth_date']) document.getElementById(id).required = true;
             document.getElementById('service_days').removeAttribute('max');
             document.getElementById('refund_bank_code').previousElementSibling.textContent = '退款銀行與分行代號';
@@ -774,7 +822,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const group = input.closest('.form-group');
         const label = group ? group.querySelector('.form-label') : null;
         if (label) { label.textContent = field.label; label.classList.toggle('required', Boolean(field.required)); }
-        input.placeholder = field.placeholder || '';
+        input.placeholder = field.placeholder || (isNonCitizen ? input.placeholder : '');
         input.required = Boolean(field.required);
     }
 
@@ -1140,6 +1188,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         if (!refundBankAccount.value.trim()) {
             addError(errors, refundBankAccount, '請輸入銀行帳號。');
+        } else if (isNonCitizen && !/^[0-9０-９]{1,50}$/.test(refundBankAccount.value.replace(/[\s-]/g, ''))) {
+            addError(errors, refundBankAccount, '退款帳戶請輸入 1 至 50 碼數字。');
         }
 
         if (isNonCitizen) {

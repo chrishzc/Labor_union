@@ -39,7 +39,7 @@ bound
 2. 所有角色共用一套 typed Query／Preview／Apply／receipt／fresh readback，差異只由 `subject_type` 與既有 owner projection port 表達；不得依角色拆建平行 repository 或 event type。
 3. 每個 role binding 擁有獨立 version、status、subject reference 與 event lineage；查詢同一 LINE User ID 必須回傳全部 role bindings。
 4. 月嫂身分證明只有在唯一配對且該 staff subject 尚無其他有效 LINE binding 時，才可在同一 outer UoW 直接建立 `bound` binding 與 owner projection（不另設人工審核）；若已綁定其他 LINE 帳號則 fail closed 回 typed conflict。
-5. 客戶於 `/line-bind` 核對姓名與電話後：未綁定者完成綁定；已綁定同一帳號者顯示「您已完成綁定，可直接返回 LINE 使用」；需改綁者點選「申請重新綁定」建立 pending review，核准前保留原綁定。月嫂選單與歡迎詞統一使用「月嫂身分綁定」及「我是月嫂」。
+5. 客戶於 `/line-bind` 核對姓名與電話後：未綁定者完成綁定；已綁定同一帳號者顯示「您已完成綁定，可直接返回 LINE 使用」；需改綁者點選「申請重新綁定」建立 pending review，核准前保留原綁定。月嫂選單與對話指令統一使用「月嫂認證／月嫂身分綁定」及「我是月嫂」（加入好友歡迎訊息改由 LINE 官方帳號設定，系統不另發送）。
 
 ### 4.2 目前選定角色與聊天室切換
 

@@ -1,10 +1,10 @@
+/**
+ * File: LineNotificationWorkbench.tsx
+ * Description: 統一 LINE 通知與卡片內容維護，沿用版本化儲存及規則影響確認。
+ */
 import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
-/**
- * File: LineNotificationWorkbench.tsx
- * Description: 統一歡迎訊息與通知內容維護，沿用版本化儲存及既有規則影響確認。
- */
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { ArrowLeft, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
@@ -19,7 +19,6 @@ import {
 } from '../adapters/line_configuration/line_configuration_query_adapter';
 import { lineConfigurationQueryClient, type LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
-import { lineOnboardingClient, type LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import {
   lineNotificationTemplateClient,
   type LineNotificationTemplateClient,
@@ -42,7 +41,6 @@ const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }
   'cancellation-notice-refund': { recipient: '客戶私人聊天室', trigger: '退款全額核銷後，由人員預覽並發送' },
   'cancellation-notice-collection': { recipient: '客戶私人聊天室', trigger: '補收全額核銷後，由人員預覽並發送' },
   'payment-second-reminder': { recipient: '客戶私人聊天室', trigger: '正式第二期到期當天仍有餘額，依帳務提醒排程自動寄送' },
-  'service-day-log-reminder': { recipient: '案件群組', trigger: '由工會逐次決定，點「發送提醒」後建立寄送工作' },
 };
 
 interface NotificationContent {
@@ -74,7 +72,7 @@ interface NotificationEntry {
   id: string;
   name: string;
   recipient: string;
-  kind: 'welcome' | 'rule' | 'card';
+  kind: 'rule' | 'card';
   rule?: LineNotificationRuleModel;
   data: NotificationContent | null;
   error: string | null;
@@ -84,7 +82,6 @@ interface NotificationEntry {
 interface LineNotificationWorkbenchProps {
   scope?: 'notifications' | 'payment-reminders';
   configuration?: LineConfigurationQueryClient;
-  onboarding?: LineOnboardingClient;
   templates?: LineNotificationTemplateClient;
   previews?: LineMessagePreviewClient;
   search: string;
@@ -116,7 +113,6 @@ function readableRuleName(rule: LineNotificationRuleModel): string {
 export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   scope = 'notifications',
   configuration = lineConfigurationQueryClient,
-  onboarding = lineOnboardingClient,
   templates = lineNotificationTemplateClient,
   previews = lineMessagePreviewClient,
   search,
@@ -186,28 +182,13 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setCatalogError(null);
     setEntries([]);
     setCatalog(null);
-    void Promise.allSettled([
-      configuration.getNotificationRules({ signal: controller.signal }),
-      paymentOnly ? Promise.resolve(null) : onboarding.get({ signal: controller.signal }),
-    ]).then(async ([rulesResult, welcomeResult]) => {
+    void configuration.getNotificationRules({ signal: controller.signal }).then(async (snapshot) => {
       if (controller.signal.aborted || generation.current !== request) return;
-      const welcome: NotificationEntry = {
-        id: 'welcome', name: '新好友歡迎訊息', recipient: '新加入的好友', kind: 'welcome',
-        data: welcomeResult.status === 'fulfilled' ? welcomeResult.value : null,
-        error: welcomeResult.status === 'rejected' ? contentError(welcomeResult.reason) : null,
-      };
-      if (rulesResult.status === 'rejected') {
-        setCatalogError('通知清單讀取失敗，請重新整理。');
-        setEntries(paymentOnly?[]:[welcome]);
-        setLoading(false);
-        return;
-      }
-      const snapshot = rulesResult.value;
       const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => (rule.templateId===RECEIPT_TEMPLATE)===paymentOnly && !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3', 'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1', 'LINE-SECOND-PAYMENT-DUE-TEXT-V1'].includes(rule.templateId));
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);
-      setEntries([...(paymentOnly?[]:[welcome]), ...rules.map((rule, index): NotificationEntry => {
+      setEntries(rules.map((rule, index): NotificationEntry => {
         const result = contents[index];
         return {
           id: rule.id,
@@ -219,11 +200,16 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
           // This GET returns 409 when a structured template has no text editor.
           textEditingUnsupported: result.status === 'rejected' && result.reason instanceof ApiHttpError && result.reason.status === 409,
         };
-      })]);
+      }));
+      setLoading(false);
+    }).catch(() => {
+      if (controller.signal.aborted || generation.current !== request) return;
+      setCatalogError('通知清單讀取失敗，請重新整理。');
+      setEntries([]);
       setLoading(false);
     });
     return () => controller.abort();
-  }, [configuration, onboarding, templates, reload, paymentOnly]);
+  }, [configuration, templates, reload, paymentOnly]);
 
   useEffect(() => () => { saveController.current?.abort(); }, []);
 
@@ -316,9 +302,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setSaveError(null);
     try {
       const payload = { content, expected_revision: target.data!.revision };
-      await (target.kind === 'welcome'
-        ? onboarding.update(payload, { signal: controller.signal })
-        : templates.update(target.id, payload, { signal: controller.signal }));
+      await templates.update(target.id, payload, { signal: controller.signal });
       if (controller.signal.aborted) return;
       // MESSAGE_TEMPLATES revision is shared. Invalidate it by reading all entries again.
       setSelected(null);
@@ -412,7 +396,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
             {!paymentOnly && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
             {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); onSelectedEntryChange?.(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
-              <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : selected.kind === 'welcome' ? '加入或重新加入好友時' : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
+              <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
               {selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}
               {(managed || !selected.rule) && <p className="notification-help">由業務流程控制，沒有獨立啟用開關。</p>}
               {contentDirty && <p className="notification-help">請先儲存或取消內容修改，再調整發送設定。</p>}

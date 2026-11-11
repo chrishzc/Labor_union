@@ -1,7 +1,11 @@
-"""Recipient-bound LINE postback adapter for the candidate contact pool."""
+"""
+File: candidate_contact_postback_application.py
+Description: 轉送候選月嫂 LINE 意願 Postback，並建立 Reply-only 確認回覆。
+"""
 
 from __future__ import annotations
 
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.message_copy import CANDIDATE_WILLING_RECEIVED
 from subsystems.line.message_copy_catalog import configured_payload
 
@@ -54,8 +58,8 @@ class LineCandidateContactPostbackApplication:
                 IdempotencyKey("candidate-willing-ack:" + hashlib.sha256(
                     event.event_id.value.encode("utf-8")
                 ).hexdigest()),
-                CorrelationId("candidate-willing-ack:" + event.event_id.value),
-                "line_webhook_event",
+                CorrelationId("line-event:" + event.event_id.value),
+                REPLY_ONLY_WEBHOOK_SOURCE,
                 event.event_id.value,
             ))
         return True

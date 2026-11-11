@@ -1,3 +1,7 @@
+/**
+ * File: accounting_parameters_components.test.tsx
+ * Description: 驗證帳務參數卡、內嵌列與右側調整抽屜（含原住民 80h／350 元預設）行為。
+ */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountingParametersCard } from '../../../../../../../components/AccountingParametersCard';
@@ -143,5 +147,24 @@ describe('AccountingParametersDrawer component', () => {
       expect(handleCommitted).toHaveBeenCalledTimes(1);
       expect(handleClose).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('switches indigenous identity preset to 80h cap and 350 covered rate', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(structuredClone(mockPricing));
+    render(
+      <AccountingParametersDrawer
+        caseNo="115000088"
+        isOpen={true}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+        initialPricing={mockPricing}
+        initialMultiBirthCount={null}
+      />
+    );
+    const select = await screen.findByLabelText(/補助身分等級/);
+    fireEvent.change(select, { target: { value: 'indigenous' } });
+    expect(screen.getByLabelText(/補助時數上限/)).toHaveValue(80);
+    expect(screen.getByLabelText('補助範圍內客戶時薪')).toHaveValue(350);
+    expect(screen.getByText(/原住民市民（預設上限 80h · 350 元）/)).toBeInTheDocument();
   });
 });

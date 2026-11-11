@@ -31,19 +31,6 @@ function liffHashParams(): URLSearchParams {
 }
 
 function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
-  if (item.id === 'gateway') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">服務確認與導流</div>
-        <p>請確認您是否已於新竹市政府平台完成申請登記：</p>
-        <button type="button" className="mock-primary-btn" disabled>已申請市府平台</button>
-        <small>我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。</small>
-        <button type="button" className="mock-primary-btn" disabled>未申請市府平台</button>
-        <small>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</small>
-      </div>
-    );
-  }
-
   if (item.id === 'bind') {
     return (
       <div className="mock-form-inputs">
@@ -206,17 +193,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
-  if (item.id === 'staff_baby_log') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">寶寶日誌</div>
-        <label>服務月份</label><input type="month" readOnly />
-        <label>服務日</label><input type="text" value="請先載入服務日" readOnly />
-        <label>寶寶日誌</label><textarea rows={2} placeholder="選擇服務日後填寫" readOnly />
-        <button type="button" className="mock-primary-btn" disabled>送出日誌</button>
-      </div>
-    );
-  }
 
   if (item.id === 'staff_payout') {
     return (
@@ -415,7 +391,15 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
     }
   }, [filterRole, searchQuery, selectedId]);
 
-  const visualPreview = selectedItem && (
+  const visualPreview = selectedItem?.id === 'gateway' ? runtimeConfig.status === 'ready' && (
+    <iframe
+      className="liff-studio-device liff-studio-gateway-preview"
+      src={canonicalLiffUrl('/line-gateway?studio_preview=1', runtimeConfig.origin)}
+      title="服務申請導流互動預覽"
+      referrerPolicy="no-referrer"
+      sandbox="allow-scripts allow-same-origin"
+    />
+  ) : selectedItem && (
     <div className="liff-studio-device" key={selectedItem.id}>
       <div className="liff-studio-device-brand">新竹市到宅月子工會</div>
       <div className="liff-studio-device-content">

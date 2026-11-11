@@ -48,6 +48,7 @@ _SERVICE_ALIASES = {
     "問答": (None, "service_help_menu"),
     "FAQ": (None, "service_help_menu"),
     "修改訂單資訊": (None, "order_update_menu"),
+    "改訂單內容": (None, "order_update_menu"),
     "修改服務地址": (CustomerServiceCategory.OTHER, "order_update_request"),
     "修改下廚需求": (CustomerServiceCategory.OTHER, "order_update_request"),
     "修改服務天數": (CustomerServiceCategory.OTHER, "order_update_request"),
@@ -67,8 +68,8 @@ _SERVICE_ALIASES = {
     "政府補助": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "要付多少": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "2": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
-    "補助市民（最高40小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
-    "社福（最高120小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
+    "一般市民（最高40小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
+    "補助市民（最高120小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "查詢服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "查詢進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
@@ -77,6 +78,7 @@ _SERVICE_ALIASES = {
     "目前狀態": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "3": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "修改登記資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
+    "改個人資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "修改資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "改資料": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "電話錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
@@ -94,10 +96,19 @@ _SERVICE_ALIASES = {
 _SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
 _CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
 _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
-    "補助市民（最高40小時）",
-    "社福（最高120小時）",
+    "一般市民（最高40小時）",
+    "補助市民（最高120小時）",
 )
-_CONFIRMED_HUMAN_ALIASES = {"聯絡專人服務", "呼叫專員", "聯絡工會專員", "專人客服", "轉接真人客服", "轉真人客服"}
+_CONFIRMED_HUMAN_ALIASES = {
+    "聯絡專人",
+    "聯絡專人服務",
+    "聯絡工會人員",
+    "呼叫專員",
+    "聯絡工會專員",
+    "專人客服",
+    "轉接真人客服",
+    "轉真人客服",
+}
 
 _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
     "registration": None,

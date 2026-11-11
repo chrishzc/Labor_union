@@ -182,6 +182,10 @@ def test_manual_creation_and_line_approval_share_numbers_with_existing_account_m
     now = datetime.now(timezone.utc)
     payload = {
         "name": "合成測試客戶",
+        "baby_info": "單胞胎",
+        "email": "synthetic@example.test",
+        "refund_bank_code": "0000001",
+        "refund_account_no": "000000000001",
         "phone": "0912345678",
         "service_start_date": "2026-11-02",
         "service_days": 10,

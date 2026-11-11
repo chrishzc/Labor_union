@@ -1,6 +1,10 @@
-"""Scheduling-owned service-start facts; delivery is only committed work, never a provider call."""
+"""
+File: service_start_repository.py
+Description: 保存服務開始與代班協調結果，並透過 LINE durable intent 回覆意願確認。
+"""
 
 from infrastructure.mysql.line_message_copy import configured_message_payload
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 from dataclasses import asdict
 from datetime import date, datetime, timezone
@@ -315,7 +319,20 @@ class MySqlServiceStartRepository:
             c.execute('UPDATE scheduling_service_start_candidates SET willingness=%s,response_event_key=%s WHERE id=%s', (willingness,event_key,row['id']))
             c.execute('UPDATE scheduling_service_start_requests SET aggregate_version=aggregate_version+1 WHERE id=%s',(row['request_id'],))
         text = '已收到您願意承接的回覆，後續由工會安排媒合。' if willingness=='willing' else '已收到您無法代班的回覆，謝謝您。'
-        self._enqueue(LineRecipientType.USER,line_user_id,{'type':'text','text':text},'service_start_receipt',str(row['id']),'reply:'+event_key)
+        line_event_id = event_key.removeprefix('service-start-reply:').strip() if event_key.startswith('service-start-reply:') else ''
+        if line_event_id:
+            self.deliveries.enqueue(LineDeliveryRequest(
+                LineRecipient(LineRecipientType.USER, LineUserId(line_user_id)),
+                LineMessageKind.TEXT,
+                _json({'type': 'text', 'text': text}),
+                datetime.now(timezone.utc),
+                IdempotencyKey('reply:' + event_key),
+                CorrelationId(f'line-event:{line_event_id}'),
+                REPLY_ONLY_WEBHOOK_SOURCE,
+                line_event_id,
+            ))
+        else:
+            self._enqueue(LineRecipientType.USER, line_user_id, {'type': 'text', 'text': text}, 'service_start_receipt', str(row['id']), 'reply:' + event_key)
         return True
 
     def invite(self, request_id, version, actor, key):

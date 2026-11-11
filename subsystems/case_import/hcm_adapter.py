@@ -25,7 +25,17 @@ from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_ide
 
 CLIENT_PAYMENT_POLICY_VERSION = "client-approved-v1"
 PAYROLL_POLICY_VERSION = "approved-rates-v1"
-_CLIENT_RATE_BY_IDENTITY = {"一般市民": 300, "補助市民": 350, "社福": 350, "低收入戶": 350, "中低收入戶": 350, "非市民": 320}
+_CLIENT_RATE_BY_IDENTITY = {
+    "一般市民": 300,
+    "補助市民": 350,
+    "社福": 350,
+    "低收入戶": 350,
+    "中低收入戶": 350,
+    "原住民": 350,
+    "原民": 350,
+    "原住民市民": 350,
+    "非市民": 320,
+}
 _SUBSIDIZED_IDENTITIES = frozenset({"補助市民", "中低收入戶", "低收入戶", "社福"})
 _EXPLICIT_HOURS_PATTERN = re.compile(r"(?P<hours>\d{1,2}(?:\.5)?)\s*小時")
 _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
@@ -103,7 +113,12 @@ def _order_root_facts(
 def build_approved_case_architecture_bootstrap_intent(
     case_no, identity_status, created_at, start_date, pricing_identity_rule=None
 ) -> CaseArchitectureBootstrapIntent:
-    base_identity = {"citizen": "一般市民", "social": "補助市民", "non_citizen": "非市民"}.get(pricing_identity_rule, identity_status)
+    normalized = normalize_subsidy_policy_identity(identity_status)
+    base_identity = (
+        "原住民"
+        if normalized == "原住民" and pricing_identity_rule != "non_citizen"
+        else {"citizen": "一般市民", "social": "補助市民", "non_citizen": "非市民"}.get(pricing_identity_rule, normalized)
+    )
     rate = _CLIENT_RATE_BY_IDENTITY.get(base_identity)
     if rate is None:
         raise ValueError("invalid_case_import_identity_policy")

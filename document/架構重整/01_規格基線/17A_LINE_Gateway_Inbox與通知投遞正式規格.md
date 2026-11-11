@@ -10,7 +10,7 @@
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
 
 - **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_bindings`／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
-- **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態或重開歡迎通知。
+- **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
 - **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）；明確人工／誤判標記優先於自動比對；Service Help 僅寫入 committed delivery task 而不在 webhook 交易直呼 provider。
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。

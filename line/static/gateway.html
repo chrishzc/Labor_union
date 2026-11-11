@@ -80,6 +80,8 @@
 
         /* 選擇按鈕區域 */
         .option-card {
+            width: 100%;
+            font: inherit;
             background: rgba(255, 255, 255, 0.85);
             border: 1px solid var(--glass-border);
             border-radius: 15px;
@@ -118,6 +120,35 @@
             color: var(--text-muted);
         }
 
+        .step-heading {
+            margin-bottom: 16px;
+            font-size: 16px;
+        }
+
+        .pending-hint, .preview-destination:not(:empty) {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.75);
+            font-size: 14px;
+            text-align: start;
+            overflow-wrap: anywhere;
+        }
+
+        .back-button {
+            margin-top: 12px;
+            min-height: 44px;
+            padding: 8px 14px;
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            background: white;
+            color: var(--text-dark);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .studio-preview { align-items: flex-start; }
+
         /* 載入遮罩 */
         .loader-overlay {
             position: absolute; top: 0; left: 0; right: 0; bottom: 0;
@@ -149,6 +180,7 @@
     </div>
 
     <div id="actionsContainer"></div>
+    <div id="previewDestination" class="preview-destination" role="status"></div>
 
     <!-- 載入中遮罩 -->
     <div class="loader-overlay" id="loaderOverlay">
@@ -157,9 +189,9 @@
     </div>
 </div>
 
-<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
     const urlParams = new URLSearchParams(window.location.search);
+    const studioPreview = urlParams.get('studio_preview') === '1';
     function parseLiffStateParams() {
         const rawState = urlParams.get('liff.state') || '';
         if (!rawState) return new URLSearchParams();
@@ -192,7 +224,6 @@
         staff_order_search: '/line-identity?target=staff_order_search',
         staff_schedule: '/line-identity?target=staff_schedule',
         staff_leave_apply: '/line-identity?target=staff_leave_apply',
-        staff_baby_log: '/line-identity?target=staff_baby_log',
         profile_update: '/line-profile-guard',
         order_update: '/line-order-update',
         customer_service: '/line-mobile-admin?target=customer_service',
@@ -217,13 +248,34 @@
         targetPaths.deposit_payment = `/line-deposit-payment?case_no=${encodeURIComponent(depositCaseNo)}`;
     }
     let actions = [];
+    let twoStep = false;
+    let navigationPending = false;
+    const registrationGroups = {
+        citizen: {
+            label: '新竹市民',
+            heading: '新竹市民｜市府平台登記狀態',
+            actions: ['registered_city', 'apply_city'],
+        },
+        nonCitizen: {
+            label: '非新竹市民',
+            heading: '非新竹市民｜工會申請狀態',
+            actions: ['non_citizen_binding', 'non_citizen_registration'],
+        },
+    };
+
+    function loadLiff() {
+        if (window.liff) return Promise.resolve(window.liff);
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+            script.onload = () => resolve(window.liff);
+            script.onerror = () => reject(new Error('目前無法載入 LINE 登入功能，請稍後重試。'));
+            document.head.append(script);
+        });
+    }
 
     async function initLiff() {
         try {
-            const response = await fetch('/api/v1/line/identity/runtime-config');
-            const result = await response.json();
-            const liffId = result.data?.liff_id;
-            if (!response.ok || !liffId) throw new Error('LIFF 尚未完成設定，請聯絡工會人員。');
             const pageResponse = await fetch('/api/config/liff/runtime?page=gateway');
             if (!pageResponse.ok) throw new Error('無法取得目前的服務入口，請稍後重試。');
             const runtime = await pageResponse.json();
@@ -237,7 +289,19 @@
             document.getElementById('pageLogo').textContent = runtime.page.content.logo || '';
             document.getElementById('pageTitle').textContent = runtime.page.title;
             document.getElementById('pageSubtitle').textContent = runtime.page.subtitle;
-            actions = runtime.page.actions.map(action => ({...action, isExternal: action.path.startsWith('https://')}));
+            actions = runtime.page.actions;
+            twoStep = runtime.page.content.navigation_layout === 'two_step';
+            if (studioPreview) {
+                document.body.classList.add('studio-preview');
+                renderActions();
+                document.getElementById('loaderOverlay').style.display = 'none';
+                return;
+            }
+            const response = await fetch('/api/v1/line/identity/runtime-config');
+            const result = await response.json();
+            const liffId = result.data?.liff_id;
+            if (!response.ok || !liffId) throw new Error('LIFF 尚未完成設定，請聯絡工會人員。');
+            const liff = await loadLiff();
             await liff.init({ liffId });
             
             if (!liff.isLoggedIn()) {
@@ -266,29 +330,79 @@
         }
     }
 
-    function renderActions() {
+    function renderActions(group, focusHeading = false) {
         const container = document.getElementById('actionsContainer');
         container.replaceChildren();
-        actions.forEach(action => {
-            const card = document.createElement('a');
-            card.href = action.path;
-            card.className = 'option-card';
-            card.addEventListener('click', event => {
-                event.preventDefault();
-                navigateTo(action.path, action.isExternal);
-            });
-            const icon = document.createElement('div');
-            icon.className = 'option-icon';
-            icon.textContent = action.icon;
-            const title = document.createElement('div');
-            title.className = 'option-title';
-            title.textContent = action.label;
-            const description = document.createElement('div');
-            description.className = 'option-desc';
-            description.textContent = action.description;
-            card.append(icon, title, description);
-            container.appendChild(card);
+        document.getElementById('previewDestination').textContent = '';
+        if (!twoStep) {
+            for (const action of actions) container.append(createAction(action));
+            return;
+        }
+
+        const selected = registrationGroups[group];
+        const heading = document.createElement('h2');
+        heading.className = 'step-heading';
+        heading.tabIndex = -1;
+        heading.textContent = selected ? selected.heading : '請選擇您的身分';
+        container.append(heading);
+        if (!selected) {
+            for (const [key, option] of Object.entries(registrationGroups)) {
+                const choice = document.createElement('button');
+                choice.type = 'button';
+                choice.className = 'option-card option-title';
+                choice.textContent = option.label;
+                choice.addEventListener('click', () => renderActions(key, true));
+                container.append(choice);
+            }
+        } else {
+            for (const id of selected.actions) {
+                const action = actions.find(item => item.id === id);
+                if (action) container.append(createAction(action));
+            }
+            if (group === 'nonCitizen') {
+                const hint = document.createElement('p');
+                hint.className = 'pending-hint';
+                hint.textContent = '已送出申請，還在等工會審核？請等候審核結果，無須重複填寫。';
+                container.append(hint);
+            }
+            const back = document.createElement('button');
+            back.type = 'button';
+            back.className = 'back-button';
+            back.textContent = '返回選擇身分';
+            back.addEventListener('click', () => renderActions(undefined, true));
+            container.append(back);
+        }
+        if (focusHeading) heading.focus();
+    }
+
+    function createAction(action) {
+        const card = document.createElement(studioPreview ? 'button' : 'a');
+        if (studioPreview) card.type = 'button';
+        else card.href = action.path;
+        card.className = 'option-card';
+        card.addEventListener('click', event => {
+            event.preventDefault();
+            if (studioPreview) {
+                document.getElementById('previewDestination').textContent = `目的地：${action.path}`;
+            } else {
+                navigateTo(action.path, action.path.startsWith('https://'));
+            }
         });
+        if (action.icon) {
+            const icon = document.createElement('span');
+            icon.className = 'option-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = action.icon;
+            card.append(icon);
+        }
+        const title = document.createElement('span');
+        title.className = 'option-title';
+        title.textContent = action.label;
+        const description = document.createElement('span');
+        description.className = 'option-desc';
+        description.textContent = action.description;
+        card.append(title, description);
+        return card;
     }
 
     function navigateTo(path, isExternal = false) {
@@ -296,10 +410,18 @@
             window.location.href = path;
             return;
         }
+        navigationPending = true;
         document.getElementById('loaderOverlay').style.display = 'flex';
         document.getElementById('loaderText').textContent = '正在為您跳轉...';
         window.location.href = path;
     }
+
+    window.addEventListener('pageshow', event => {
+        if (!event.persisted || !navigationPending) return;
+        navigationPending = false;
+        if (!document.getElementById('actionsContainer').hasChildNodes()) renderActions();
+        document.getElementById('loaderOverlay').style.display = 'none';
+    });
 
     window.onload = initLiff;
 </script>

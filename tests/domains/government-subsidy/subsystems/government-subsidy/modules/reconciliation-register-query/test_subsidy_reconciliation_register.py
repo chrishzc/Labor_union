@@ -1,3 +1,7 @@
+"""
+File: test_subsidy_reconciliation_register.py
+Description: 驗證政府補助季度、年度核銷與營運報表三軌分區之唯讀公式契約。
+"""
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -420,3 +424,24 @@ def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():
     assert annual_ws.max_row >= 3
     assert "hc_case_no" not in result["quarterly_general_rows"][0]
     assert "115000001" in [str(c.value) for row in quarter_ws.iter_rows() for c in row if c.value]
+
+
+def test_operations_report_splits_indigenous_partition_with_80h_350_defaults():
+    for alias in ("原住民", "原民", "原住民市民"):
+        est = register.project_receivable_estimate({
+            "identity_status": alias, "order_status": "服務中",
+            "service_days": 20, "service_hours_per_day": 8, "payroll_hourly_rate_ntd": 350,
+        })
+        assert est.amount_ntd == 28000 and est.unavailable_reason is None
+    connection = FakeConnection([
+        _order_row(case_no="115000001", identity_status="一般市民", payroll_hourly_rate_ntd=Decimal("300")),
+        _order_row(case_no="115000002", identity_status="補助市民", payroll_hourly_rate_ntd=Decimal("350")),
+        _order_row(case_no="115000003", identity_status="原民", payroll_hourly_rate_ntd=Decimal("350")),
+    ])
+    result = register.build_operations_report_annual_subsidy_rows(2026, lambda: connection)
+    assert [row["市府訂單號碼"] for row in result["general_citizen_rows"]] == ["115000001"]
+    assert [row["市府訂單號碼"] for row in result["subsidized_citizen_rows"]] == ["115000002"]
+    assert [row["市府訂單號碼"] for row in result["indigenous_citizen_rows"]] == ["115000003"]
+    assert result["indigenous_citizen_rows"][0]["補助資格"] == "原住民"
+    assert result["indigenous_citizen_rows"][0]["補助時數"] == Decimal("80")
+    assert result["indigenous_citizen_rows"][0]["補助款金額"] == Decimal("28000")

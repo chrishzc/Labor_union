@@ -58,7 +58,7 @@ def test_routes_are_mounted_and_apply_uses_file_receipt_not_db_audit(monkeypatch
 
     app.dependency_overrides[require_admin] = principal
     audit_calls = []
-    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs))
+    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs), raising=False)
     try:
         with TestClient(app) as client:
             queried = client.get("/api/v1/admin/entry-targets")
@@ -125,7 +125,7 @@ def test_apply_success_sets_file_receipt_marker_without_spoofed_actor(monkeypatc
 
     app.dependency_overrides[require_admin] = principal
     audit_calls = []
-    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs))
+    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs), raising=False)
     try:
         with TestClient(app) as client:
             response = client.post(
@@ -162,7 +162,7 @@ def test_invalid_apply_does_not_fall_through_to_db_audit(monkeypatch) -> None:
     app.dependency_overrides[get_admin_entry_target_control] = lambda: AdminEntryTargetControl(MemoryStore())
     app.dependency_overrides[require_admin] = principal
     audit_calls = []
-    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs))
+    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs), raising=False)
     try:
         with TestClient(app) as client:
             response = client.post(
@@ -177,7 +177,7 @@ def test_invalid_apply_does_not_fall_through_to_db_audit(monkeypatch) -> None:
     assert audit_calls == []
 
 
-def test_unrelated_authenticated_mutation_keeps_existing_db_audit(monkeypatch) -> None:
+def test_authenticated_mutation_does_not_write_generic_db_audit(monkeypatch) -> None:
     path = "/api/v1/_test/unrelated-audit-contract"
     if not any(getattr(route, "path", None) == path for route in app.routes):
         @app.post(path)
@@ -186,14 +186,16 @@ def test_unrelated_authenticated_mutation_keeps_existing_db_audit(monkeypatch) -
             return {"status": "ok"}
 
     audit_calls = []
-    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs))
+    monkeypatch.setattr(main_module, "record_admin_audit", lambda **kwargs: audit_calls.append(kwargs), raising=False)
 
-    with TestClient(app) as client:
+    client = TestClient(app)
+    try:
         response = client.post(path)
+    finally:
+        client.close()
 
     assert response.status_code == 200
-    assert len(audit_calls) == 1
-    assert audit_calls[0]["request_path"] == path
+    assert audit_calls == []
 
 
 def test_react_switch_without_host_health_returns_typed_503() -> None:

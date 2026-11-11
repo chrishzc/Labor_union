@@ -18,7 +18,7 @@
 1. **Webhook Reply-Only vs Push 分工**：互動文字引導與五項互動 Postback 按鈕確認固定走純 `line_webhook_reply`（45 秒時窗、1 次嘗試、同事件／同聊天室檢核，禁止 fallback Push）；主動通知、卡片本體與定時排程走 `line_push_worker`（詳見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §3）。
 2. **現行可配置通知與退役項目**：
    - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組）、`order.service_start_day` 服務開始當天原群組詢問、`second_payment_due`／`second_payment_settled`、正常完工通知（`LINE-SERVICE-COMPLETION-TEXT-V1`），以及獨立管理契約下的訂金／一期／二期人工逾期提醒與人工收據（`LINE-PAY-01`～`08`）。
-   - 已全面退役項目：群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（改回 LINE 群組相簿人工查閱）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播，以及銀行核銷後自動代發收據。
+   - 已全面退役項目：加入好友即時歡迎訊息（改由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（改回 LINE 群組相簿人工查閱）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播，以及銀行核銷後自動代發收據。
 3. **群組設定與合成 Fixture 驗收原則**：服務群組綁定指令（`綁定訂單 案件編號 邀請網址` 與 `發送邀請`）依 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；`development` 環境得依 [`10_Global_保留資料Migration與Cutover_Subsystem.md`](10_Global_保留資料Migration與Cutover_Subsystem.md) 於本機受控資料庫使用 owner typed fixture producer 建立含 canonical IDs 之測試實例，嚴禁由 Notification 端偽造媒合、請假或薪資業務決策。
 
 ## 2. 逐節點驗收欄位與通過基準

@@ -64,6 +64,8 @@ def test_retired_explanation_templates_cannot_be_read_or_edited_even_if_saved(mo
         assert client.put(endpoint, json={'content': '不得覆寫', 'expected_revision': 7}).status_code == 404
         assert saved_template['content'] == '舊說明內容'
     assert application.revision == 7
+    assert client.get("/api/v1/line/notification-rules/welcome/message-template").status_code == 404
+    assert client.put("/api/v1/line/notification-rules/welcome/message-template", json={"content": "不得覆寫", "expected_revision": 7}).status_code == 404
     for key in ('service-profile-update', 'service-order-update'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
 
@@ -72,9 +74,8 @@ def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monk
     from subsystems.line.message_preview import LineMessagePreviewApplication
     client, application = _copy_client(monkeypatch)
     catalog = LineMessagePreviewApplication._catalog(application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES], application.definitions[LineConfigurationKind.NOTIFICATION_RULES])
+    assert all(entry.id != "welcome" for entry in catalog)
     for entry in catalog:
-        if entry.id == "welcome":
-            continue
         response = client.get(f"/api/v1/line/notification-rules/{entry.id}/message-template")
         if entry.id == 'card-candidate-information-3':
             assert response.status_code == 404  # System-generated picture has no editable copy.

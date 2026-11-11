@@ -1,4 +1,7 @@
-"""Pure subsidy-entitlement facts used by Client Finance and Payroll."""
+"""
+File: subsidy_coverage.py
+Description: 定義補助政策身分別正規化與預設時數上限及費率對照。
+"""
 
 from __future__ import annotations
 
@@ -10,17 +13,21 @@ _ZERO = Decimal("0")
 _SUBSIDY_HOUR_CAPS = {
     "一般市民": Decimal("40"),
     "補助市民": Decimal("120"),
+    "原住民": Decimal("80"),
     "非市民": _ZERO,
 }
 _SUBSIDY_CLAIM_HOURLY_RATES = {
     "一般市民": Decimal("300"),
     "補助市民": Decimal("350"),
+    "原住民": Decimal("350"),
     "非市民": _ZERO,
 }
 _POLICY_IDENTITY_BY_SOURCE_IDENTITY = {
     "社福": "補助市民",
     "低收入戶": "補助市民",
     "中低收入戶": "補助市民",
+    "原民": "原住民",
+    "原住民市民": "原住民",
 }
 
 
@@ -76,6 +83,11 @@ def normalize_subsidy_policy_identity(identity_status: str) -> str:
     return _POLICY_IDENTITY_BY_SOURCE_IDENTITY.get(identity_status, identity_status)
 
 
+def default_subsidy_hour_cap(identity_status: str) -> Decimal:
+    """Return the default statutory subsidy hour cap for a normalized identity."""
+    return _SUBSIDY_HOUR_CAPS.get(normalize_subsidy_policy_identity(identity_status), _ZERO)
+
+
 def is_full_subsidy_case(identity_status: str | None, service_hours: Decimal | None,
                          subsidy_limit: Decimal | None) -> bool | None:
     """FULL-01: use the case's effective limit, never a fixed identity threshold."""
@@ -93,6 +105,7 @@ def is_full_subsidy_case(identity_status: str | None, service_hours: Decimal | N
 
 __all__ = [
     "SubsidyCoverage",
+    "default_subsidy_hour_cap",
     "derive_subsidy_coverage",
     "normalize_subsidy_policy_identity",
     "is_full_subsidy_case",

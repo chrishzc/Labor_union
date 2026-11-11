@@ -1,6 +1,6 @@
 """
 File: line_notification_rules.py
-Description: 提供 LINE 通知規則矩陣、預覽、儲存啟用與安全刪除 API。
+Description: 提供 LINE 通知規則矩陣、文案預覽、儲存啟用與退役項目保護 API。
 """
 
 import json
@@ -438,6 +438,8 @@ def _message_template_view(
     rule_id = "service-menu" if rule_id == "service-other" else rule_id
     rule = next((item for item in rules.rules if item.id == rule_id), None)
     if rule is not None:
+        if rule.template_id == "customer_onboarding_welcome":
+            raise HTTPException(status_code=404, detail="加入好友歡迎訊息已改由 LINE 官方帳號設定。")
         if rule.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS or rule.template_id in {
             "LU96-M4-SAFE-ALERT-CARD-V1", "LU96-M4-COMPLAINT-HIGH-CARD-V1",
         }:

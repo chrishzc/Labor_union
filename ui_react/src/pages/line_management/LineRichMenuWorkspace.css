@@ -1,4 +1,4 @@
-/* Rich Menu workbench: shared draft, one save action, existing LINE tokens. */
+/* File: LineRichMenuWorkspace.css — Rich Menu 編輯與手機預覽大字易讀樣式。 */
 .richmenu-clean-workspace{overflow:clip;padding-bottom:0}
 .richmenu-clean-workspace .line-section-heading{border:0;margin-bottom:14px;padding-bottom:0}
 .richmenu-clean-workspace .line-section-heading h2{font-size:1.65rem;margin:0}
@@ -24,11 +24,11 @@
 .richmenu-clean-workspace .richmenu-bot-avatar svg{width:16px;height:16px}
 .richmenu-clean-workspace .richmenu-chat-bar-hint{font-size:.7rem;padding:7px;background:#fff;color:var(--line-color-text-muted)}
 .richmenu-clean-workspace .richmenu-buttons-grid{position:relative;display:block;aspect-ratio:var(--richmenu-aspect,2500/1686);height:auto;min-height:0;border:0;border-radius:0;overflow:hidden}
-.richmenu-clean-workspace .richmenu-grid-btn{background:#fff;color:var(--line-color-text);border:4px solid transparent;background-clip:padding-box;border-radius:12px;gap:7px;padding:10px 5px;box-shadow:none;transform:none;min-height:0}
+.richmenu-clean-workspace .richmenu-grid-btn{position:relative;background:#fff;color:var(--line-color-text);border:4px solid transparent;background-clip:padding-box;border-radius:12px;gap:8px;padding:12px 6px 8px;box-shadow:inset 0 4px 0 var(--richmenu-btn-accent,var(--line-color-primary));transform:none;min-height:0}
 .richmenu-clean-workspace .richmenu-grid-btn:hover{background-color:var(--line-color-page);transform:none}
-.richmenu-clean-workspace .richmenu-btn-icon{color:var(--line-color-primary);background:none;width:auto;height:auto;box-shadow:none}
-.richmenu-clean-workspace .richmenu-btn-icon svg{width:24px;height:24px}
-.richmenu-clean-workspace .richmenu-btn-text{font-size:.7rem;color:var(--line-color-text);white-space:normal;line-height:1.5}
+.richmenu-clean-workspace .richmenu-btn-icon{color:var(--richmenu-btn-accent,var(--line-color-primary));background:none;width:auto;height:auto;box-shadow:none}
+.richmenu-clean-workspace .richmenu-btn-icon svg{width:28px;height:28px}
+.richmenu-clean-workspace .richmenu-btn-text{font-size:.95rem;font-weight:700;color:#1f1916;white-space:normal;line-height:1.25}
 .richmenu-clean-workspace .richmenu-card{padding:0;background:transparent;border:0;box-shadow:none;border-radius:0}
 .richmenu-editor-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .richmenu-editor-heading h3{margin:0;font-size:.95rem}.richmenu-editor-heading>span{font-size:.75rem;color:var(--line-color-text-muted)}

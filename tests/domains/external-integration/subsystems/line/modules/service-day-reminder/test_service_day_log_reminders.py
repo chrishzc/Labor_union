@@ -144,8 +144,8 @@ def test_admin_transport_requires_union_permission_and_rejects_supplied_recipien
         assert client.post('/api/v1/line/order-groups/log-reminders/send',json=body).status_code==403
         application.send.assert_not_called();application.list.assert_not_called()
         app.dependency_overrides[require_customer_service_handler]=lambda:object()
-        assert client.post('/api/v1/line/order-groups/log-reminders/send',json={**body,'group_id':'C-forged'}).status_code==422
-        application.send.assert_not_called()
-        application.send.side_effect=ValueError('service_day_log_reminder_no_longer_applicable')
+        app.dependency_overrides[require_line_order_group_reader]=lambda:object()
+        get_response=client.get('/api/v1/line/order-groups/log-reminders')
+        assert get_response.status_code==410 and get_response.json()['detail']['error']['code']=='service_day_log_reminder_retired'
         response=client.post('/api/v1/line/order-groups/log-reminders/send',json=body)
-        assert response.status_code==409 and response.json()['detail']['error']['category']=='conflict'
+        assert response.status_code==410 and response.json()['detail']['error']['code']=='service_day_log_reminder_retired'

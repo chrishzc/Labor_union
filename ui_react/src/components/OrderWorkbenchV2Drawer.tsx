@@ -39,7 +39,6 @@ import { OrderServiceDatesPanel } from './OrderServiceDatesPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { serviceHandoverHref } from '../adapters/scheduling/service_handover_navigation';
 import { isCancellationTerminalStatus, OrderCancellationPanel } from './OrderCancellationPanel';
-import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
 import { CandidateInquiryDialog } from './CandidateInquiryDialog';
 
@@ -172,6 +171,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [focusedCandidateId, setFocusedCandidateId] = useState<number | undefined>();
   const [selectedServiceView, setServiceView] = useState<ServiceWorkView | null>(null);
   const [historicalArrangementPending, setHistoricalArrangementPending] = useState(false);
+  const [boundStaff, setBoundStaff] = useState<{ staff_id: number; staff_name: string }[]>([]);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => { pageHeadingRef.current?.focus(); }, [caseNo]);
   const [replacementRequest, setReplacementRequest] = useState(0);
@@ -336,6 +336,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const completionStage = timeline.status === 'ready' ? timeline.data.core_stages.find(stage => stage.code === 'service_completion') : undefined;
   const contractStage = timeline.status === 'ready' ? timeline.data.core_stages.find(stage => stage.code === 'external_signing_completion') : undefined;
   const depositStage = timeline.status === 'ready' ? timeline.data.core_stages.find(stage => stage.code === 'deposit_settlement') : undefined;
+  const historicalBinding = timeline.status === 'ready' && timeline.data.core_stages.some(stage =>
+    stage.code === 'formal_recommendation' && stage.source.identity?.startsWith('historical-binding-receipt:'));
   const actualStartActionLabel = assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.some((assignment) => assignment.assignment_id !== null)
     ? '更正開始日並重排' : '確認／更正實際開始日';
   const currentBranch = timeline.status === 'ready' ? timeline.data.branch_type : branchType;
@@ -387,7 +389,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? `${detail.data.service_days} 日 · 每日 ${detail.data.service_hours_per_day} 小時`
     : currentSummary ? currentSummary.serviceDays === null ? '待補服務天數' : `${currentSummary.serviceDays} 日` : summaryReadError;
   const assignedStaff = assignmentPlan.status === 'ready'
-    ? assignmentPlan.data.assignments.length === 0 ? '尚未正式指派'
+    ? assignmentPlan.data.assignments.length === 0
+      ? historicalBinding
+        ? boundStaff.length === 1 ? `${staffIdentity.label(boundStaff[0].staff_id, boundStaff[0].staff_name)}（待建立正式排班）`
+          : '請在設定服務日期核對原月嫂'
+        : '尚未正式指派'
       : assignmentPlan.data.assignments.map(segment => staffIdentity.label(segment.staff_id, detail.status === 'ready' && (detail.data.staff_id === segment.staff_id || assignmentPlan.data.assignments.length === 1) ? detail.data.staff_name : undefined)).join('、')
     : assignmentPlan.status === 'loading' ? '讀取服務指派中…' : '正式指派暫時無法取得';
 
@@ -400,11 +406,12 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
                   completedCorrection={completedService}
-                  coordinatedStart={currentBranch === 'normal'}
+                  coordinatedStart={currentBranch === 'normal' && !historicalBinding}
                   view={serviceView === 'assignment' ? 'arrangement' : 'dates'}
                   onOpenArrangement={() => setServiceView('assignment')}
                   onOpenDates={() => setServiceView('dates')}
                   onArrangementPendingChange={setHistoricalArrangementPending}
+                  onBoundStaffChange={setBoundStaff}
                   calculationRevision={serviceDatesCalculationRevision}
                   projectionRevision={refreshRevision}
                   currentAssignmentPlan={assignmentPlan.status === 'ready' ? assignmentPlan.data : null}
@@ -425,9 +432,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>案件處理</h1></div>
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
-            {timeline.status === 'ready' && currentBranch === 'cancelled'
-              ? <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} startDisabled={navigationLocked || factsRefreshing || operation !== null} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />
-              : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
+            {timeline.status === 'ready' && currentBranch !== 'cancelled' && !terminalStatus &&
+              <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
           </div>
         </div>
         <p className="order-case-purpose">依目前進度接續工作；需要的訂單與服務資料會顯示在各辦理事項中。</p>
@@ -555,7 +561,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <div hidden={serviceView !== 'assignment'}>
                 {datesPending && <p role="status">服務日期尚未完成保存或回讀，請先到「設定服務日期」接續；目前不能以舊日期辦理自動排班。</p>}
                 <fieldset disabled={datesPending}>
-                <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalArrangementPending={historicalArrangementPending} onObserved={refreshFacts} onEditStateChange={setServiceConfirmationState}
+                <OrderAssignmentPlanPanel caseNo={caseNo} revision={refreshRevision} historicalBinding={historicalBinding} historicalArrangementPending={historicalArrangementPending} onObserved={refreshFacts} onEditStateChange={setServiceConfirmationState}
                   contractReady={contractStage && contractStage.status !== 'unavailable' ? contractStage.status === 'completed' : undefined}
                   depositReady={depositStage && depositStage.status !== 'unavailable' ? depositStage.status === 'completed' : undefined}
                   onOpenDates={() => setServiceView('dates')} onOpenRecommendation={() => openGroup('recommendation')} />

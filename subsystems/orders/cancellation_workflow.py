@@ -46,7 +46,7 @@ from subsystems.payroll.terms_impact import (
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
-_CANCELLATION_SOURCE_EVENT_FAMILY = "orders_cancellation"
+ORDER_CANCELLATION_SOURCE_EVENT_FAMILY = "orders_cancellation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,7 +380,7 @@ def _persist_finance_and_payroll(repository, request, preview, event_id, schedul
 
 
 def _persist_client_finance(repository, request, preview, event_id):
-    repository.persist_client_finance_impact(ClientFinanceImpactPersistenceCommand(preview.client_finance_impact, request.idempotency_key, request.actor, request.reason, request.correlation_id, _CANCELLATION_SOURCE_EVENT_FAMILY, event_id))
+    repository.persist_client_finance_impact(ClientFinanceImpactPersistenceCommand(preview.client_finance_impact, request.idempotency_key, request.actor, request.reason, request.correlation_id, ORDER_CANCELLATION_SOURCE_EVENT_FAMILY, event_id))
 
 
 def _persist_payroll(repository, request, preview, event_id, scheduling):

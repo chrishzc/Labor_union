@@ -224,6 +224,23 @@ def test_customer_menu_rejects_staff_liff_target() -> None:
         normalize_rich_menu_draft(definition)
 
 
+def test_staff_menu_rejects_retired_baby_log_liff_target() -> None:
+    definition = _definition(
+        {"type": "uri", "uri_source": "liff", "uri": "?target=staff_baby_log"}
+    )
+    definition["menus"][0].update(
+        {
+            "id": "staff_menu",
+            "name": "月嫂選單",
+            "audience_role": "staff",
+            "set_as_default": False,
+        }
+    )
+
+    with pytest.raises(RichMenuDraftValidationError):
+        normalize_rich_menu_draft(definition)
+
+
 def test_customer_menu_rejects_switch_to_staff_menu() -> None:
     definition = _definition(
         {
@@ -644,10 +661,45 @@ def test_bootstrap_menu_has_merged_ai_faq_and_direct_human_contact_at_bottom(men
     definition = normalize_rich_menu_draft(json.loads(Path("config/line_menu.json").read_text(encoding="utf-8")))
     menu = next(menu for menu in definition["menus"] if menu["id"] == menu_id)
     lower = sorted((button for button in menu["buttons"] if button["bounds"]["y"] > 0), key=lambda b:b["bounds"]["x"])
-    assert [button["label"] for button in lower] == ["AI 智慧問答", "聯絡專人服務"]
+    assert [button["label"] for button in lower] == ["常見問答", "聯絡專人"]
     assert lower[0]["action"] == {"type":"uri", "uri":"?target=ai_assistant", "uri_source":"liff"}
     assert lower[1]["action"] == {
         "type": "postback",
         "data": "customer-service:handoff:confirm",
-        "displayText": "聯絡專人服務",
+        "displayText": "聯絡專人",
     }
+
+
+def test_all_bootstrap_menus_use_concise_labels_and_large_accessible_image_rendering(monkeypatch):
+    from infrastructure.line import rich_menu_image_store as store
+
+    raw = json.loads(Path("config/line_menu.json").read_text(encoding="utf-8"))
+    for menu in raw["menus"]:
+        assert all(len(button["label"]) <= 6 for button in menu["buttons"]), menu["id"]
+        assert len(menu["chat_bar_text"]) <= 6, menu["id"]
+
+    recorded_sizes: list[int] = []
+    real_find_text_font = store._find_text_font
+
+    def spy_font(size: int = 76):
+        recorded_sizes.append(size)
+        return real_find_text_font(size)
+
+    monkeypatch.setattr(store, "_find_text_font", spy_font)
+    staff_menu = next(menu for menu in raw["menus"] if menu["id"] == "staff_menu")
+    assert [b["label"] for b in staff_menu["buttons"]] == ["我的案件", "班表與請假", "聯絡工會人員", "薪資明細"]
+    assert store._get_icon_for_label("聯絡工會人員") == "💬"
+    assert store._get_icon_for_label("月嫂認證") == "🤱"
+    assert store._get_icon_for_label("改個人資料") == "👤"
+    assert store._get_icon_for_label("改訂單內容") == "📝"
+    assert store._action_hint_text({"type": "uri"}) == "點此開啟 ›"
+    assert store._action_hint_text({"type": "postback"}) == "點此聯絡 ›"
+
+    rendered = store.render_rich_menu_image(staff_menu)
+    assert 0 < len(rendered) <= store.MAX_LINE_IMAGE_BYTES
+    assert max(recorded_sizes) >= 128
+    assert min(recorded_sizes) >= 48
+
+    for menu in raw["menus"]:
+        static_path = Path(menu["appearance"]["image_path"])
+        assert static_path.read_bytes() == store.render_rich_menu_image(menu)

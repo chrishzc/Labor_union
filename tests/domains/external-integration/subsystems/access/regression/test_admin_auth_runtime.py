@@ -183,15 +183,19 @@ def test_password_challenge_route_returns_typed_rate_limit(monkeypatch):
     assert raised.value.detail["code"] == "login_rate_limited"
 
 
-def test_login_attempt_window_uses_injected_clock_boundary():
+@pytest.mark.parametrize("outcome", ["failed", "rate_limited", "mfa_replay"])
+def test_login_attempt_window_uses_injected_clock_without_audit(outcome):
     cursor = _AttemptCursor(attempt_count=5)
     now = datetime(2026, 8, 16, 12, 0, 0)
 
     assert authentication_session._is_rate_limited(cursor, "admin", "127.0.0.1", now=now)
     assert cursor.parameters[-1] == now - timedelta(minutes=15)
 
-    authentication_session._record_login_attempt(cursor, "admin", "127.0.0.1", "failed", now=now)
+    authentication_session._record_login_attempt(cursor, "admin", "127.0.0.1", outcome, now=now)
     assert cursor.parameters[-1] == now
+    assert cursor.parameters[-2] == outcome
+    assert len(cursor.statements) == 2
+    assert "INSERT INTO admin_login_attempts" in cursor.statements[-1]
 
 
 def test_retired_bypass_profile_rejects_missing_bearer_token(monkeypatch):
@@ -276,8 +280,10 @@ class _AttemptCursor:
     def __init__(self, attempt_count: int):
         self.attempt_count = attempt_count
         self.parameters = ()
+        self.statements = []
 
-    def execute(self, _query, parameters):
+    def execute(self, query, parameters):
+        self.statements.append(query)
         self.parameters = parameters
 
     def fetchone(self):

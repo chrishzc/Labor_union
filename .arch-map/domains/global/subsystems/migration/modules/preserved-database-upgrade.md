@@ -10,6 +10,7 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- `db/migration_releases/labor_union_2026_11_11_registry_save_receipts_v1.json` 以 `db/schema_parts/1071_pending_order_terms_receipt_status.sql` 在 Terms 回執列舉尾端追加待補件。接續的 `db/migration_releases/labor_union_2026_11_11_registry_bootstrap_reason_v1.json` 以 `db/schema_parts/1072_case_architecture_bootstrap_reason_optional.sql` 允許初始資料事件保存空白備註。兩版各有同名 descriptors，沿 canonical chain 同步保留資料升級、compact fresh 及 `db/releases/labor_union_validation_schema_registry_save_receipts_v1.sql`，無業務資料回填。
 - `db/releases/labor_union_validation_schema_historical_accounting_corrections_v1.sql` — 1070 的 full validation assembly，沿既有產生器組裝，不修改已發布 predecessor。
 - `db/schema_parts/1070_historical_order_terms_receipt_status.sql` 與 `db/migration_releases/labor_union_2026_11_09_historical_accounting_corrections_v1.json`／同名 descriptors：原 Terms 收據 enum 尾端追加歷史服務／帳務完成，保留原順序與全部資料；fresh／preserve 共用，canonical chain、compact fresh 及 full validation release 同步。資格 `validation/receipts/PROV-HISTORICAL-ACCOUNTING-local-additive-qualification-20261109.json`；靜態 contract `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_historical_terms_receipt_status.py`。
 - The HCM review status release uses `db/migration_releases/labor_union_2026_11_06_hcm_review_status_v1.json` and its descriptors, with shared fresh/preserve `db/schema_parts/1069_hcm_review_status.sql` and full validation assembly `db/releases/labor_union_validation_schema_hcm_review_status_v1.sql`. The additive release initializes existing cases to NULL. `scripts/backfill_hcm_review_status.py` is the opt-in Excel preview/apply entry point that fills missing decisions only.
@@ -183,6 +184,7 @@
 - layout_status: `custom_current`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_staff_union_number_schema.py`
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
+- test_root: `tests/test_preserve_data_external_boundary.py` — 既有規格驗證依檔案位置定位 repository root。
 - integration_root: `tests/test_collect_local_additive_engine_evidence.py`
 - integration_root: `tests/test_local_database_maintenance.py`
 - integration_root: `tests/test_schema_assembly.py` — 既有 fresh assembly 版本與分類驗證，沿原測試入口保存；新增 migration contract 使用 canonical module root。

@@ -42,7 +42,6 @@ afterEach(() => {
 describe('LINE Rich Menu query 接線', () => {
   it('將 LIFF 草稿參數解析成實際開啟路由', () => {
     expect(resolveRichMenuUri('?target=staff_schedule')).toBe('/line-staff-schedule');
-    expect(resolveRichMenuUri('?target=staff_baby_log')).toBe('/line-staff-baby-log');
     expect(resolveRichMenuUri('?target=staff_payout')).toBe('/line-staff-payout');
     expect(resolveRichMenuUri('?target=staff_verification')).toBe('/line-identity?target=staff_verification');
     expect(resolveRichMenuUri('?target=order_update')).toBe('/line-order-update');

@@ -63,3 +63,14 @@ def test_union_menu_rejects_a_non_admin_and_esc_resets_every_user_to_default_men
     assert application.handle(_inbox("event-2"), unit_of_work, LineUserId("U-customer"), "esc") is True
     assert json.loads(unit_of_work.outbox.items[0].payload_json)["menu_definition_id"] == "default_menu"
     assert unit_of_work.outbox.items[0].idempotency_identity == "line-menu-command:esc:event-2"
+
+
+def test_visitor_service_menu_command_switches_back_to_default_menu():
+    binding = LineIdentityBindingSnapshot(
+        LineUserId("U-customer"), LineIdentityBindingStatus.BOUND, ExpectedVersion(2),
+        LineBindingSubjectType.CUSTOMER, "client-7",
+    )
+    unit_of_work = _uow(binding)
+    assert LineMenuCommandApplication().handle(_inbox("event-3"), unit_of_work, LineUserId("U-customer"), "服務選單") is True
+    assert json.loads(unit_of_work.outbox.items[0].payload_json)["menu_definition_id"] == "default_menu"
+    assert unit_of_work.outbox.items[0].idempotency_identity == "line-menu-command:visitor-menu:event-3"

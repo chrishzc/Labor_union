@@ -1,8 +1,8 @@
-import { staffDisplayLabel } from '../../adapters/staff/staff_directory_adapter';
 /**
  * File: OperationsReportsWorkspace.tsx
  * Description: 沿用既有週報及補助欄位與 XLSX，提供營運及帳務唯一補助入口兩種既定畫面。
  */
+import { staffDisplayLabel } from '../../adapters/staff/staff_directory_adapter';
 import React, { useEffect, useRef, useState } from 'react';
 import '../../pages/ReportsPage.css';
 import { WorkbenchCaseStatistics } from '../WorkbenchCaseStatistics';
@@ -58,31 +58,39 @@ function annualSubsidyPeriod(endDate: string): string {
   return `${year}-01-01～${year}-12-31`;
 }
 
+const PARTITION_KIND_LABELS = {
+  general: '一般市民',
+  subsidized: '補助市民',
+  indigenous: '原住民',
+} as const;
+
 const SubsidyPartitionsView: React.FC<{
   partitions: SubsidyPartitions | WeeklySubsidyPartitions;
   kind?: 'weekly' | 'quarterly' | 'annual';
   onCase?: (caseNo: string) => void;
 }> = ({ partitions, kind = 'weekly', onCase }) => <>
-  {partitions.map((partition) => <section key={partition.kind} className="reports-partition">
+  {partitions.map((partition) => {
+    const partitionLabel = PARTITION_KIND_LABELS[partition.kind];
+    return <section key={partition.kind} className="reports-partition">
     <div className="reports-partition-heading">
-      <h3>{partition.kind === 'general' ? '一般市民' : '補助市民'}</h3>
+      <h3>{partitionLabel}</h3>
       <span>{partition.rowCount}筆｜{partition.totalAmount}</span>
     </div>
-    {partition.rows.length === 0 ? <p>此類別目前沒有資料。</p> : <div className="reports-table-container" tabIndex={0} role="region" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}補助明細，可左右捲動`}>
-      {kind === 'quarterly' ? <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}季度補助明細`}>
+    {partition.rows.length === 0 ? <p>此類別目前沒有資料。</p> : <div className="reports-table-container" tabIndex={0} role="region" aria-label={`${partitionLabel}補助明細，可左右捲動`}>
+      {kind === 'quarterly' ? <table className="reports-table" aria-label={`${partitionLabel}季度補助明細`}>
         <thead><tr><th>序號</th><th>市府訂單號碼</th><th>補助資格</th><th>服務開始</th><th>服務結束</th><th>補助時數</th><th>補助天數</th><th>服務天數</th><th>補助款金額</th><th>單價</th><th>雇主</th><th>服務人員</th><th>身分證字號</th><th>地址</th><th>簽領</th></tr></thead>
         <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
           <td>{row.serial}</td><td><ReportCase caseNo={row.caseNo} onCase={onCase} /></td><td>{row.eligibility}</td><td>{row.serviceStart}</td><td>{row.serviceEnd}</td>
           <td>{row.subsidyHours}</td><td>{row.subsidyDays}</td><td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td>
           <td>{row.employer}</td><td>{row.staff}</td><td>{row.identity}</td><td>{row.address}</td><td />
         </tr>)}</tbody>
-      </table> : kind === 'annual' ? <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}年度補助明細`}>
+      </table> : kind === 'annual' ? <table className="reports-table" aria-label={`${partitionLabel}年度補助明細`}>
         <thead><tr><th>序號</th><th>市府訂單號碼</th><th>補助資格</th><th>服務開始</th><th>服務結束</th><th>服務天數</th><th>補助款金額</th><th>單價</th><th>雇主</th><th>服務人員</th></tr></thead>
         <tbody>{partition.rows.map((row) => <tr key={`${partition.kind}-${row.serial}-${row.caseNo}`}>
           <td>{row.serial}</td><td><ReportCase caseNo={row.caseNo} onCase={onCase} /></td><td>{row.eligibility}</td><td>{row.serviceStart}</td><td>{row.serviceEnd}</td>
           <td>{row.serviceDays}</td><td>{row.amount}</td><td>{row.unitPrice}</td><td>{row.employer}</td><td>{row.staff}</td>
         </tr>)}</tbody>
-      </table> : <table className="reports-table" aria-label={`${partition.kind === 'general' ? '一般市民' : '補助市民'}補助案件統計明細`}>
+      </table> : <table className="reports-table" aria-label={`${partitionLabel}補助案件統計明細`}>
         <thead><tr><th>序號</th><th>案件編號</th><th>年度與身分</th><th>年度接案</th><th>訂單號碼</th><th>起日</th><th>訖日</th><th>補助時數</th><th>補助天數</th><th>備註</th><th>補助款金額</th><th>單價</th><th>結案/核銷</th><th>年度季度</th></tr></thead>
         <tbody>{partition.rows.map((row) => {
           if (!('annualIdentity' in row)) throw new Error('Weekly subsidy row is missing workbook fields.');
@@ -94,7 +102,8 @@ const SubsidyPartitionsView: React.FC<{
         })}</tbody>
       </table>}
     </div>}
-  </section>)}
+  </section>;
+  })}
 </>;
 
 const WeeklyCaseTotalsRow: React.FC<{
@@ -111,6 +120,8 @@ const WeeklyCaseTotalsRow: React.FC<{
     ['一般市民不符合', total.general_ineligible_count],
     ['補助市民符合', total.subsidized_eligible_count],
     ['補助市民不符合', total.subsidized_ineligible_count],
+    ['原住民符合', total.indigenous_eligible_count],
+    ['原住民不符合', total.indigenous_ineligible_count],
     ['訂單成立', total.order_established_count],
     ['洽談中', total.negotiating_count],
     ['取消', total.cancelled_count],
@@ -152,6 +163,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
       </>}
       <td>{row ? 1 : ''}</td>
       {(['general_eligible', 'general_ineligible', 'subsidized_eligible', 'subsidized_ineligible',
+        'indigenous_eligible', 'indigenous_ineligible',
         'order_established', 'negotiating', 'cancelled', 'review_rejected'] as const)
         .map((field) => <td key={field}>{row?.[field] || ''}</td>)}
       <td>{row ? displayWeeklyValue(row.service_days) : ''}</td>
@@ -167,6 +179,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
       <article><span>案件申請</span><strong>{displayWeeklyMetric(report.summary.application_count)}</strong></article>
       <article><span>一般符合</span><strong>{displayWeeklyMetric(report.summary.general_eligible_count)}</strong></article>
       <article><span>補助符合</span><strong>{displayWeeklyMetric(report.summary.subsidized_eligible_count)}</strong></article>
+      <article><span>原住民符合</span><strong>{displayWeeklyMetric(report.summary.indigenous_eligible_count)}</strong></article>
       <article><span>不符合（待分流）</span><strong>{displayWeeklyMetric(report.summary.rejection_unpartitioned_count)}</strong></article>
       <article><span>已成立訂單</span><strong>{displayWeeklyMetric(report.summary.order_established_count)}</strong></article>
       <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
@@ -181,12 +194,12 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
             <th rowSpan={2} scope="col">週報週數</th><th rowSpan={2} scope="col">申請人</th>
             <th rowSpan={2} scope="col">推廣次數</th><th rowSpan={2} scope="col">詢問人次</th>
             <th rowSpan={2} scope="col">平台案件申請數</th>
-            <th colSpan={2} scope="colgroup">市民案件審核</th><th colSpan={2} scope="colgroup">社福案件審核</th>
+            <th colSpan={2} scope="colgroup">市民案件審核</th><th colSpan={2} scope="colgroup">社福案件審核</th><th colSpan={2} scope="colgroup">原住民案件審核</th>
             <th colSpan={4} scope="colgroup">申請案件狀況</th>
             {['服務天數', '每日服務時數', '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '備註']
               .map((label) => <th key={label} rowSpan={2} scope="col">{label}</th>)}
           </tr>
-          <tr>{['一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合', '訂單成立', '洽談中', '取消', '審核不符合']
+          <tr>{['一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合', '原住民符合', '原住民不符合', '訂單成立', '洽談中', '取消', '審核不符合']
             .map((label) => <th key={label} scope="col">{label}</th>)}</tr>
         </thead>
         <tbody>

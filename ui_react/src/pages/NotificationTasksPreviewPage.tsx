@@ -30,7 +30,7 @@ const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',profile:'審核資料異動',information:'處理確認與條件',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
-  deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',log:'發送提醒',
+  deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',
   customer_service:'前往客服案件',delivery:'查看寄送工作',runtime:'前往通知對象設定',
   notification_failure:'處理通知建立異常',
 };
@@ -130,9 +130,9 @@ export function NotificationTasksPage() {
   };
   const act=async(item:Row)=>{
     if(locked.current)return;
-    if(item.unavailable_reason && ['overdue','log','deposit'].includes(item.source) && item.tag!=='已核銷待通知')return;
+    if(item.unavailable_reason && ['overdue','deposit'].includes(item.source) && item.tag!=='已核銷待通知')return;
     const href=notificationHref(item);if(href){window.location.hash=href;return;}
-    if(['overdue','log'].includes(item.source) || (item.source==='deposit' && item.tag!=='已核銷待通知')) {
+    if(item.source==='overdue' || (item.source==='deposit' && item.tag!=='已核銷待通知')) {
       locked.current=true;setBusy(true);setNotice('');intents.current[item.id] ??= crypto.randomUUID();
       try {const id=await client.send(item,intents.current[item.id]);setNotice(`已建立寄送工作 #${id}，尚未證明送達。`);delete intents.current[item.id];await refreshAfterCommit();}
       catch(error){setNotice(notificationFailure(error));}finally{locked.current=false;setBusy(false);}
@@ -141,7 +141,7 @@ export function NotificationTasksPage() {
   };
   const secondary=(item:Row)=>{
     window.location.hash=item.secondary==='前往核對款項'?`#finance?tab=client-receipts&case_no=${encodeURIComponent(item.case_no!)}`
-      : item.source==='log' || item.payment?.payment_stage!=='deposit' && item.source==='overdue'
+      : item.payment?.payment_stage!=='deposit' && item.source==='overdue'
         ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no ?? '')}`:'#line-management?tab=binding';
   };
   return <>
@@ -198,8 +198,8 @@ export function NotificationTasksPage() {
             <div className="notification-preview-message-bubble">{selected.message ?? '請在下方原流程查看通知內容與寄送結果。'}</div>
           </section>}
           {selected.unavailable_reason && <div className="notification-preview-blocker" role="note"><p>{selected.unavailable_reason}</p>
-            <p>{selected.source==='log' || selected.payment && selected.payment.payment_stage!=='deposit'?'請先核對本案案件群組，完成綁定後按重新整理。':selected.source==='deposit'?'請依下方入口補齊綁定與繳費資料，再按重新整理。':'請先聯絡客戶完成 LINE 綁定，再按重新核對；仍可接續其他可用操作。'}</p>
-            <a href={selected.source==='log' || selected.payment && selected.payment.payment_stage!=='deposit' ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(selected.case_no ?? '')}`:'#line-management?tab=binding'}>{selected.source==='log' || selected.payment && selected.payment.payment_stage!=='deposit'?'前往案件群組設定':'前往 LINE 身分綁定'}</a>
+            <p>{selected.payment && selected.payment.payment_stage!=='deposit'?'請先核對本案案件群組，完成綁定後按重新整理。':selected.source==='deposit'?'請依下方入口補齊綁定與繳費資料，再按重新整理。':'請先聯絡客戶完成 LINE 綁定，再按重新核對；仍可接續其他可用操作。'}</p>
+            <a href={selected.payment && selected.payment.payment_stage!=='deposit' ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(selected.case_no ?? '')}`:'#line-management?tab=binding'}>{selected.payment && selected.payment.payment_stage!=='deposit'?'前往案件群組設定':'前往 LINE 身分綁定'}</a>
             {selected.source==='deposit' && <><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(selected.case_no ?? '')}`}>核對繳費資料與到期日</a><a href="#line-management?tab=push_queue">核對通知及繳費頁面設定</a><p>銀行代碼需由系統設定補齊；案件專屬虛擬帳號沿原規則產生。</p></>}
           </div>}
           {selected.delivery_status && !selected.delivery && <p>最近寄送狀態：{DELIVERY_LABELS[selected.delivery_status] ?? selected.delivery_status}</p>}

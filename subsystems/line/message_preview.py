@@ -1,4 +1,7 @@
-"""Authenticated, zero-effect LINE message rendering from typed owner read models."""
+"""
+File: message_preview.py
+Description: 協調 LINE 訊息與互動卡片的唯讀公版目錄與安全預覽渲染。
+"""
 
 from __future__ import annotations
 
@@ -121,7 +124,8 @@ _CASE_VARIABLES = {"name", "client_name", "case_no", "planned_start_date", "serv
 
 _RETIRED = {"LU96-M4-SAFE-ALERT-CARD-V1", "LU96-M4-COMPLAINT-HIGH-CARD-V1", "LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1", "LU96-M3-LEAVE-DISAGREE-CARD-V1","new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1",
             "LU96-ORDER-PRE-START-REMINDER-CARD-V1", "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
-            "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1"}
+            "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1", "service-day-log-reminder",
+            "customer_onboarding_welcome", "welcome"}
 _UNLISTED_RULE_TEMPLATES = {"LINE-SECOND-PAYMENT-DUE-TEXT-V1"}
 _IDENTITY_TEMPLATES = (
     "staff_switch_success", "bind_success_new_order", "client_rebind_rejected",
@@ -140,7 +144,6 @@ _CURRENT_FLOW_PREVIEWS = (
     ("cancellation-notice-refund", "取消結算退款完成通知", "text"),
     ("cancellation-notice-collection", "取消結算補收入帳通知", "text"),
     ("payment-second-reminder", "第二期款－到期日客戶私訊", "text"),
-    ("service-day-log-reminder", "服務日誌－工會發送案件群組提醒", "text"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
     ("deposit-settled", "訂金已確認入帳卡", "flex"),
     ("deposit-assistance", "訂金專人協助－受理回覆", "text"),
@@ -159,6 +162,7 @@ _CURRENT_FLOW_PREVIEWS = (
     ("service-progress-unbound", "服務進度－未綁定提示", "text"),
     ("service-registration", "服務登記入口訊息", "text"),
     ("service-registration-unavailable", "服務登記入口尚未設定", "text"),
+    ("identity-customer-link", "客戶身分綁定入口", "text"),
     ("identity-staff-link", "月嫂身分資料填寫入口", "text"),
     ("identity-admin-link", "工會帳號綁定入口", "text"),
 )
@@ -211,10 +215,11 @@ class LineMessagePreviewApplication:
     @staticmethod
     def _catalog(templates, rules, *, include_unlisted=False):
         by_id = {t["id"]: t for t in templates.get("templates", [])}
-        references = [("welcome", "customer_onboarding_welcome")]
-        references += [(r["id"], r["template_id"]) for r in rules.get("rules", [])
-                       if r["template_id"] != "customer_onboarding_welcome" and r["template_id"] not in _RETIRED
-                       and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)]
+        references = [
+            (r["id"], r["template_id"]) for r in rules.get("rules", [])
+            if r["template_id"] not in _RETIRED
+            and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)
+        ]
         referenced = {template_id for _, template_id in references}
         references += [("template-" + key, key) for key in _IDENTITY_TEMPLATES if key not in referenced and key not in {"bind_success_new_order", "staff_switch_success"}]
         descriptors = []

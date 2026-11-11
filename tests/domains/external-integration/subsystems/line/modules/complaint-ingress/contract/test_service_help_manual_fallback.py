@@ -118,8 +118,8 @@ def test_unscoped_subsidy_amount_asks_which_program_the_customer_means() -> None
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert payload["text"] == "為了正確協助您，請選擇較接近的項目。"
     assert [item["action"]["label"] for item in payload["quickReply"]["items"]] == [
-        "補助市民（最高40小時）",
-        "社福（最高120小時）",
+        "一般市民（最高40小時）",
+        "補助市民（最高120小時）",
     ]
 
 
@@ -158,7 +158,7 @@ def test_general_question_during_active_ticket_is_appended_without_auto_reply(me
 @pytest.mark.parametrize('message', [
     '服務流程', '流程', '怎麼申請', '如何登記', '怎麼媒合', '1',
     '收費與補助', '收費', '費用', '價格', '補助', '政府補助', '要付多少', '2',
-    '補助市民（最高40小時）', '社福（最高120小時）',
+    '一般市民（最高40小時）', '補助市民（最高120小時）',
 ])
 def test_explanatory_commands_open_ai_liff_without_ticket_or_old_copy(message, monkeypatch):
     monkeypatch.setenv('LINE_LIFF_ID', '1234567890-service-help')

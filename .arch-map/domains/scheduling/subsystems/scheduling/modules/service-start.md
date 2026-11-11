@@ -10,7 +10,7 @@
 ## Implementation
 - `domains/scheduling/service_start.py`
 - `subsystems/scheduling/service_start_workflow.py`
-- `infrastructure/mysql/service_start_repository.py`
+- `infrastructure/mysql/service_start_repository.py` — 代班意願 LINE webhook 回覆（`service-start-reply:`）透過 `line_webhook_reply` Reply-only 建立確認回覆，禁止 fallback Push。
 - `infrastructure/mysql/service_start_arrangement.py`
 - `subsystems/line/service_start_messages.py` — 共用零副作用訊息格式。
 - `api/dependencies/service_start.py`

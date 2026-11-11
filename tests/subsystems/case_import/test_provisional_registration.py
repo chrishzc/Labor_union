@@ -87,6 +87,21 @@ def test_non_citizen_hcm_and_beclass_required_fields_are_enforced_by_owner(field
         build_provisional_registration_candidate(_non_citizen_intent(**{field: None}))
 
 
+@pytest.mark.parametrize("residence_type", ["電梯大樓", "公寓", "透天", "其他", "大樓", "公寓大廈"])
+def test_non_citizen_accepts_manual_form_and_existing_residence_types(residence_type):
+    candidate = build_provisional_registration_candidate(_non_citizen_intent(residence_type=residence_type))
+    assert candidate.client_payload["residence_type"] == residence_type
+
+
+def test_non_citizen_refund_account_requires_digits_after_normalization():
+    from dataclasses import replace
+    intent = _non_citizen_intent()
+    with pytest.raises(ProvisionalRegistrationDomainError, match="refund account number is required"):
+        build_provisional_registration_candidate(
+            replace(intent, survey_details={**intent.survey_details, "銀行帳號": " -- "})
+        )
+
+
 @pytest.mark.parametrize("field", ["服務時間內是否有其他寶寶", "是否需要下廚", "補助款退款:銀行代號+分行代號", "銀行帳號"])
 def test_non_citizen_keeps_original_survey_required_fields(field):
     intent = _non_citizen_intent()

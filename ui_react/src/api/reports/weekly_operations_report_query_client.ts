@@ -58,7 +58,8 @@ export const caseStatisticsQueryClient = {
     const summary = data.summary;
     if (Object.values(summary.order_status_counts).reduce((sum, value) => sum + value, 0) + summary.other_status_count !== summary.application_count
       || (data.case_category === 'subsidy' && summary.general_eligible_count + (summary.general_ineligible_count ?? 0) + summary.subsidized_eligible_count
-        + (summary.subsidized_ineligible_count ?? 0) + summary.unclassified_qualification_count !== summary.application_count)
+        + (summary.subsidized_ineligible_count ?? 0) + summary.indigenous_eligible_count + (summary.indigenous_ineligible_count ?? 0)
+        + summary.unclassified_qualification_count !== summary.application_count)
       || summary.application_count > data.annual_application_count) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '案件統計合計不一致。');
     }
@@ -77,16 +78,20 @@ function assertWeeklyView(view: WeeklyOperationsReportData, startDate: string, e
   const reviewCounts = view.case_rows.reduce((counts, row) => {
     counts[row.review_result] += 1;
     return counts;
-  }, { general_eligible: 0, subsidized_eligible: 0, rejected_unpartitioned: 0, pending: 0 });
+  }, { general_eligible: 0, subsidized_eligible: 0, indigenous_eligible: 0, rejected_unpartitioned: 0, pending: 0 });
+  const unpartitionedRejectionCount = view.case_rows.filter(
+    (row) => row.review_rejected === 1 && row.general_ineligible === 0 && row.indigenous_ineligible === 0,
+  ).length;
   if (
     view.summary.general_eligible_count !== reviewCounts.general_eligible
     || view.summary.subsidized_eligible_count !== reviewCounts.subsidized_eligible
-    || view.summary.rejection_unpartitioned_count !== reviewCounts.rejected_unpartitioned
+    || view.summary.indigenous_eligible_count !== reviewCounts.indigenous_eligible
+    || view.summary.rejection_unpartitioned_count !== unpartitionedRejectionCount
   ) {
     throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '案件審核 aggregate 不一致。');
   }
   const partitionKinds = new Set(view.subsidy_partitions.map((partition) => partition.citizen_kind));
-  if (partitionKinds.size !== 2 || !partitionKinds.has('general') || !partitionKinds.has('subsidized')) {
+  if (partitionKinds.size !== 3 || !partitionKinds.has('general') || !partitionKinds.has('subsidized') || !partitionKinds.has('indigenous')) {
     throw new WeeklyOperationsReportError('WEEKLY_REPORT_PARTITION_MISMATCH', '週報缺少必要補助 partition。');
   }
   for (const partition of view.subsidy_partitions) {

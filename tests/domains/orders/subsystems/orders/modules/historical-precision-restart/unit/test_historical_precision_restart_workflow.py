@@ -146,7 +146,8 @@ def test_preview_fails_closed_when_historical_accounting_already_exists():
     )
 
 
-def test_apply_fails_stale_when_confirmed_service_date_root_changed_after_preview():
+@pytest.mark.parametrize("change", ["confirmed_dates", "matching_conflict"])
+def test_apply_fails_stale_when_restart_facts_change_after_preview(change):
     repository = _Repository()
     repository.context = replace(
         repository.context,
@@ -162,14 +163,20 @@ def test_apply_fails_stale_when_confirmed_service_date_root_changed_after_previe
         lambda: datetime(2026, 9, 1, tzinfo=ZoneInfo("Asia/Taipei")),
     )
     preview = workflow.preview(HistoricalPrecisionRestartIntent("CASE-1"))
-    repository.context = replace(
-        repository.context,
-        facts=replace(
-            repository.context.facts,
-            confirmed_service_date_version=2,
-            confirmed_service_date_fingerprint="b" * 64,
-        ),
-    )
+    if change == "confirmed_dates":
+        repository.context = replace(
+            repository.context,
+            facts=replace(
+                repository.context.facts,
+                confirmed_service_date_version=2,
+                confirmed_service_date_fingerprint="b" * 64,
+            ),
+        )
+    else:
+        repository.context = replace(
+            repository.context,
+            matching_conflicts=("方案 19：分段、月嫂或期間不符",),
+        )
     request = ApplyHistoricalPrecisionRestart(
         HistoricalPrecisionRestartIntent("CASE-1"),
         1, 2, 0, 1,

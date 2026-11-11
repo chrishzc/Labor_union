@@ -1,6 +1,10 @@
-"""Staff-initiated payment reminders and committed settlement notifications."""
+"""
+File: deposit_notifications.py
+Description: 協調訂金提醒通知與「專人協助」Postback 的 Reply-only 受理回覆。
+"""
 from __future__ import annotations
 
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.message_copy_catalog import configured_payload
 
 import json
@@ -204,7 +208,7 @@ def handle_deposit_assistance(data, event, uow) -> bool:
         LineRecipient(LineRecipientType.USER, line_user_id), LineMessageKind.TEXT,
         canonical_line_payload_json(configured_payload(uow, 'deposit-assistance', {'type': 'text', 'text': ASSISTANCE_ACK})),
         event.occurred_at, key, CorrelationId(f'line-event:{event.event_id.value}'),
-        'customer_service_assistance_ack', str(ticket.ticket_id),
+        REPLY_ONLY_WEBHOOK_SOURCE, event.event_id.value,
     ))
     return True
 

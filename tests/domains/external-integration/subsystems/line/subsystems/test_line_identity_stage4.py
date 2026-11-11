@@ -269,10 +269,10 @@ def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
 
     assert purpose in deliveries.items[0].payload_json
     if purpose == "customer_binding":
-        welcome = json.loads(deliveries.items[0].payload_json)["text"]
-        assert "本帳號採自助服務，一般留言不會有專員回覆" in welcome
-        assert "聯絡專人服務" in welcome
-        assert "AI 智慧問答" in welcome
+        reply_text = json.loads(deliveries.items[0].payload_json)["text"]
+        assert "請開啟以下頁面完成客戶身分綁定或服務登記" in reply_text
+        assert "此連結將於 15 分鐘後失效" in reply_text
+        assert "歡迎加入" not in reply_text
 
 
 def test_staff_apply_binds_exact_unclaimed_match_without_manual_review() -> None:

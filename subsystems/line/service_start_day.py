@@ -1,4 +1,7 @@
-"""Group-only start-day inquiry; the webhook consumer owns the transaction."""
+"""
+File: service_start_day.py
+Description: 處理開工當天群組詢問 Postback（Reply-only）與投遞前現行性檢查。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +18,7 @@ from domains.line.identities import LineSourceType
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.message_copy_catalog import configured_payload
 
 EVENT_CODE = 'order.service_start_day'
@@ -98,8 +102,8 @@ class ServiceStartDayPostbackApplication:
         unit.delivery_tasks.enqueue(LineDeliveryRequest(
             LineRecipient(LineRecipientType.GROUP, source.group_id), LineMessageKind.TEXT,
             canonical_line_payload_json(configured_payload(unit, 'service-start-normal-received' if decision == 'normal' else 'service-start-help-received', {'type': 'text', 'text': message})), event.occurred_at,
-            IdempotencyKey('ack:' + key.value), CorrelationId('start-day:' + event.event_id.value),
-            'order_service_start_day_response', token,
+            IdempotencyKey('ack:' + key.value), CorrelationId(f'line-event:{event.event_id.value}'),
+            REPLY_ONLY_WEBHOOK_SOURCE, event.event_id.value,
         ))
         unit.receipts.append(IdempotencyReceipt(key, fingerprint_payload({
             'token': token, 'line_user_id': source.user_id.value, 'decision': decision,
@@ -107,12 +111,23 @@ class ServiceStartDayPostbackApplication:
         return True
 
 
+def start_day_reply_token(task) -> str | None:
+    if task.request.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE:
+        return None
+    key = getattr(getattr(task.request, 'idempotency_key', None), 'value', '')
+    if not key.startswith('ack:start-day-response:'):
+        return None
+    token = key.removeprefix('ack:start-day-response:').split(':', 1)[0].strip()
+    return token or None
+
+
 def start_day_delivery_is_current(unit, task, now):
     from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
     from shared_kernel.identities import ActorContext
 
     retired = task.request.correlation_id.value.startswith('line-notification:order-pre-start-reminder:')
-    if not retired and task.request.source_aggregate_type not in {SOURCE_TYPE, 'order_service_start_day_response'}:
+    is_reply_ack = start_day_reply_token(task) is not None
+    if not retired and not is_reply_ack and task.request.source_aggregate_type not in {SOURCE_TYPE, 'order_service_start_day_response'}:
         return True
     if not retired and unit.service_start_days.delivery_is_current(task, now):
         return True

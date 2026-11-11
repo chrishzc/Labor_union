@@ -621,20 +621,28 @@ def mobile_send_payment_overdue_reminder(payload: _MobileOverdueReminderSend,
     return overdue_reminder_routes.send_reminder(body, principal, application)
 
 
-@router.post('/log-reminders', response_model=BaseResponse[order_group_routes.LogReminderPage])
-def mobile_log_reminders(payload: _MobileTodoPageRequest,
-                         application=Depends(get_service_day_log_reminders)):
+@router.post('/log-reminders')
+def mobile_log_reminders(payload: _MobileTodoPageRequest):
     principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.ORDER_GROUP_READ)
-    return order_group_routes.list_log_reminders(payload.page, payload.page_size, principal, application)
+    raise typed_http_error(
+        410,
+        "gone",
+        "service_day_log_reminder_retired",
+        "服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。",
+        "line-mobile-admin",
+    )
 
 
-@router.post('/log-reminders/send', response_model=BaseResponse[order_group_routes.LogReminderReceipt])
-def mobile_send_log_reminder(payload: _MobileLogReminderSend,
-                             application=Depends(get_service_day_log_reminders)):
+@router.post('/log-reminders/send')
+def mobile_send_log_reminder(payload: _MobileLogReminderSend):
     principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
-    body = order_group_routes.LogReminderSendRequest.model_validate(payload.model_dump(exclude={'line_id_token'}))
-    return order_group_routes.send_log_reminder(body, principal, application)
-
+    raise typed_http_error(
+        410,
+        "gone",
+        "service_day_log_reminder_retired",
+        "服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。",
+        "line-mobile-admin",
+    )
 
 @router.post("/candidate-information/{question_id}/send", response_model=BaseResponse[CandidateInformationStaffSendView])
 def candidate_information_send(question_id: int, payload: CandidateInformationStaffSendRequest):

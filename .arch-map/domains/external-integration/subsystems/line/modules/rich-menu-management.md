@@ -14,7 +14,7 @@
   - `subsystems/line/configuration_application.py`
   - `subsystems/line/configuration_store.py` — 既有配置檔案入口，NAS 可用 LINE_CONFIG_ROOT 指定初始化後的持久化位置，不改 published draft owner。
   - `subsystems/line/configuration_contracts.py`
-  - `domains/line/rich_menu_draft.py`
+  - `domains/line/rich_menu_draft.py` — 草稿 Action 驗證拒絕已退役 `?target=staff_baby_log`。
   - `subsystems/line/rich_menu_publication_workflow.py`
   - `api/routes/line_rich_menus.py`
   - `api/schemas/line_rich_menu_drafts.py` — 草稿專用 typed Q/P/A、選填備註與版本／receipt 公開契約。

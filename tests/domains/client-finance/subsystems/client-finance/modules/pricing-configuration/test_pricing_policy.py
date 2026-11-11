@@ -56,6 +56,20 @@ def test_citizen_identities_are_distinct_through_import_subsidy_and_payment_rule
         assert normalize_subsidy_policy_identity(alias) == '補助市民'
 
 
+def test_indigenous_identity_aliases_use_80h_350_rate_defaults():
+    from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, normalize_subsidy_policy_identity
+    from subsystems.case_import.hcm_adapter import _client_attributes, build_approved_case_architecture_bootstrap_intent
+    from subsystems.government_subsidy.reconciliation_register_query import _subsidy_terms
+    for raw in ('原住民', '原民', '原住民市民'):
+        assert normalize_subsidy_policy_identity(raw) == '原住民'
+        assert _client_attributes({'identity_status': raw})[0].value == '原住民'
+        coverage = derive_subsidy_coverage(raw, Decimal(160), Decimal(0))
+        assert (coverage.identity_status, coverage.subsidy_hours, coverage.subsidy_claim_hourly_rate) == ('原住民', 80, 350)
+        assert _subsidy_terms(raw, Decimal(160), 350) == (Decimal(80), Decimal(350))
+        candidate = build_approved_case_architecture_bootstrap_intent('synthetic', raw, datetime(2026, 11, 3), date(2026, 12, 1))
+        assert candidate.client_payment_terms.client_hourly_rate.amount == 350
+
+
 def test_current_policy_selects_40_and_120_without_merging_names():
     policy = PricingPolicy(date(2026, 11, 3), (
         CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),

@@ -115,7 +115,7 @@ const EVENT_LABELS: Record<string, string> = {
   'complaint.ingress.hold_high_ticket': '重大客訴觸發急件工單',
   'payroll.substitute.obligation_projected': '代班出勤薪資拆帳結算',
   'order_lifecycle_transition': '訂單生命週期變更',
-  'service_time_checkpoint': '提醒上傳寶寶日誌',
+  'service_time_checkpoint': '服務時間檢查點',
   'beclass_completion_changed': 'BeClass 完成狀態變更',
   'deposit_confirmed': '訂金確認',
   'order.service_start_day': '服務當天群組繳款與服務狀況',

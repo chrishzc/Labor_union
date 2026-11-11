@@ -10,9 +10,11 @@
 ## Implementation
 - primary: `subsystems/access/security_audit_query.py`
 - API: `api/routes/admin_audit.py`
+- client: `ui_react/src/api/access/audit_query_client.ts`
 - schema: `db/schema_parts/151_admin_security_audit_retention.sql`
 
 ## Contracts
+- 管理員登入、線上帳號與 MFA 管理、一般管理 API 操作停止追加稽核。既有歷史資料仍供唯讀查詢與歸檔。
 - 既有 authenticated、enabled 工會人員可看去識別紀錄，不新增人員業務角色差異。
 - 逾兩年才由 maintenance profile 執行 archive 程序；不清除 archive，不自行改 transaction owner。
 - 正式規格：17 的 NAS-AUTH-01、NAS-DB-01/02 及既有 audit contract。

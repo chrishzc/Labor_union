@@ -77,7 +77,7 @@
   - Preview 鎖定 Taipei 業務日，對已開始服務者預填截至當日之實際排定日＋月嫂（供確認增減並允許 0 日完全未履約取消），並由具權限工會人員逐案輸入取消違約金（不收為 `0`，收取輸入正整數 NTD＋必填原因；一般取消原因選填）。
   - Preview 明確列示服務應付 `S`、違約金 `F`、淨實收 `R`、應退／應補收與 Client Finance 必填 `direction`（`refund_due | additional_charge_due | no_finance_change`）＋ `direction_amount_ntd`。
   - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務，正式提交與全額結清後依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md) 提供 LINE 私訊通知客戶按鈕。
-- **Controlled Reopen**：僅受理尚未發生取消正式退款、reversal 或結算之取消案；備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期（已有退款／結算須另建新案）。
+- **Controlled Reopen**：管理端入口位於客戶名冊的「訂單取消」案件詳情上方。僅受理尚未發生取消正式退款、沖正或結算之取消案；備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期（已有退款、沖正或結算須另建新案）。
 
 ### 3.7 Typed Endpoints、Errors、純函式 Modules 與 Writer Exit
 

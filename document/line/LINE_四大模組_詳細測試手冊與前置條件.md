@@ -52,7 +52,7 @@
 
 | 人測代碼 | 真人操作 | 人工可見通過條件 |
 |---|---|---|
-| `H313-01` | 在測試版本以新帳號首次加好友；再封鎖後重新加好友 | 兩次有效 follow 都能立即看到現行歡迎訊息與可用身分／服務入口。不要等待或驗收已取消的 D+1／D+2／D+3。 |
+| `H313-01` | 在測試版本以新帳號首次加好友；再封鎖後重新加好友 | 兩次有效 follow 都能立即看到 LINE Official Account Manager 官方後台設定的歡迎訊息與 default Rich Menu（系統端不建立歡迎訊息 delivery task、不發送系統歡迎詞，僅維護好友狀態）。不要等待或驗收已取消的 D+1／D+2／D+3 或系統自建歡迎詞。 |
 | `H313-02` | 在程式測試已證明訂金確認通知 task 可達後，以測試案件完成一次正式訂金確認 | 目標 LINE 帳號實際收到目前有效的訂金確認通知，內容與對象正確；是否去重與 task lineage 不由肉眼判定。 |
 | `H313-03` | 僅在 current rule/config 明確啟用訂單生命週期或服務完成通知時執行 | 真人只確認實際送達與顯示內容。若 current disposition 為停用／無 rule，**不為驗收自行啟用**。 |
 | `H313-04` | 將測試客戶最後一個 active case 走到 terminal，再重新開啟 LINE OA | 使用者看到恢復後應有的身分／Rich Menu 狀態；此流程不要求額外文字訊息。 |
@@ -296,7 +296,7 @@ LINE 官方帳號在生產環境中依「每月主動發送的 Push 訊息則數
 
 ---
 
-# 3. 模組零：新好友 Onboarding（前導，不列入四大模組核心分數）
+# 3. 模組零：新好友加入（前導，由 LINE 官方帳號設定）
 
 ## M0-01 新好友加入
 
@@ -304,19 +304,20 @@ LINE 官方帳號在生產環境中依「每月主動發送的 Push 訊息則數
 
 - 確認 webhook runtime 啟用。
 - 確認 public HTTPS URL 可由 LINE 連線。
+- 確認 LINE Official Account Manager 官方後台已啟用並設定「加入好友的歡迎訊息」。
 - 確認 default Rich Menu publication/readback 存在；若未發布，回 `BLOCKED: default_menu_not_published`。
 - 不需要建立訂單。
 
 ### 手機操作
 
 1. 封鎖後解除封鎖，或用尚未加入的測試帳號加入官方帳號。
-2. 檢查歡迎訊息。
+2. 檢查收到 LINE 官方帳號後台設定的歡迎訊息（且未收到系統額外重複發送的歡迎訊息）。
 3. 檢查 default Rich Menu。
 
 ### 驗收
 
-- Follow webhook 有 ingress evidence。
-- 歡迎訊息 delivery 有 durable task/readback。
+- Follow webhook 有 ingress evidence，且好友狀態維持／更新為 `active`。
+- 系統不對 `follow` 建立歡迎訊息 `delivery task` 或 `identity flow`（無系統歡迎詞 delivery／readback）。
 - Rich Menu 顯示 default menu。
 
 ---

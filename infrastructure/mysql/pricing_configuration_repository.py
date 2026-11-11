@@ -1,4 +1,7 @@
-"""MySQL pricing persistence; all mutations borrow the caller's transaction."""
+"""
+File: pricing_configuration_repository.py
+Description: 管理 MySQL 帳務計價政策、個案覆寫與歷史案件重算計畫持久化。
+"""
 
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -7,6 +10,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.payroll.tiered_rates import TieredPayrollRate
 from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -79,7 +83,9 @@ def bind_initial_pricing(cursor, case_no, *, policy_id=None):
         if policy.uses_legacy_identity_names:
             cursor.execute("SELECT c.identity_status FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
             case = cursor.fetchone()
-            if case and case["identity_status"] in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶"}:
+            if case and case["identity_status"] in {
+                "一般市民", "補助市民", "社福", "低收入戶", "中低收入戶", "原住民", "原民", "原住民市民",
+            }:
                 from domains.case_import.case_import import CaseImportDomainError, CaseImportIssue
                 raise CaseImportDomainError(CaseImportIssue.BOOTSTRAP_BLOCKED,
                     "pricing_policy_identity_names_outdated: 請先在帳務參數設定儲存一般市民／補助市民的新政策版本。")
@@ -90,6 +96,7 @@ def initial_identity_rule(cursor, identity, case_no=None):
     """Resolve only declared new identities; a pre-existing binding wins over today."""
     if not identity or identity in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶", "非市民"}:
         return None
+    normalized_identity = normalize_subsidy_policy_identity(identity)
     if case_no is not None:
         cursor.execute("SELECT pricing_policy_id FROM orders WHERE case_no=%s", (case_no,))
         case = cursor.fetchone()
@@ -98,15 +105,34 @@ def initial_identity_rule(cursor, identity, case_no=None):
                 return None
             cursor.execute("SELECT policy_json FROM accounting_pricing_policies WHERE id=%s", (case["pricing_policy_id"],))
             row = cursor.fetchone()
-            return policy_from_payload(row["policy_json"]).for_case(identity).rule.value if row else None
+            if not row:
+                return None
+            policy = policy_from_payload(row["policy_json"])
+            return policy.for_case(normalized_identity).rule.value if any(
+                item.identity_name == normalized_identity for item in policy.identities
+            ) else None
     today = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Taipei")).date()
     cursor.execute("SELECT policy_json FROM accounting_pricing_policies WHERE effective_on<=%s ORDER BY effective_on DESC,id DESC LIMIT 1", (today,))
     row = cursor.fetchone()
     if row is None:
         return None
     policy = policy_from_payload(row["policy_json"])
-    item = next((item for item in policy.identities if item.identity_name == identity), None)
+    item = next((item for item in policy.identities if item.identity_name == normalized_identity), None)
     return item.rule.value if item else None
+
+
+def _legacy_rule_and_cap(identity_status: str) -> tuple[IdentityRule, Decimal]:
+    canonical = normalize_subsidy_policy_identity(identity_status)
+    mapping = {
+        "一般市民": (IdentityRule.CITIZEN, Decimal(40)),
+        "補助市民": (IdentityRule.SOCIAL, Decimal(120)),
+        "原住民": (IdentityRule.CITIZEN, Decimal(80)),
+        "非市民": (IdentityRule.NON_CITIZEN, Decimal(0)),
+    }
+    resolved = mapping.get(canonical)
+    if resolved is None:
+        raise ValueError("case_pricing_identity_not_confirmed")
+    return resolved
 
 
 def _is_twins(cursor, case_no, lock):
@@ -170,12 +196,7 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
         floor = int((Decimal(source.contractual_floor_fee.amount) * days / source.contracted_service_days).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         terms = load_case_pricing(cursor, order, lock=lock)
         if terms is None:
-            rule = {'一般市民':IdentityRule.CITIZEN,'補助市民':IdentityRule.SOCIAL,
-                '社福':IdentityRule.SOCIAL,'低收入戶':IdentityRule.SOCIAL,'中低收入戶':IdentityRule.SOCIAL,
-                '非市民':IdentityRule.NON_CITIZEN}.get(source.client_identity_status)
-            if rule is None:
-                raise ValueError('case_pricing_identity_not_confirmed')
-            cap = Decimal(40 if rule is IdentityRule.CITIZEN else 120 if rule is IdentityRule.SOCIAL else 0)
+            rule, cap = _legacy_rule_and_cap(source.client_identity_status)
             staff_rate = source.assignments[0].rate_snapshot.hourly_rate.amount
             terms = CasePricingTerms(source.client_identity_status, rule, cap,
                 HourlyRates(source.client_hourly_rate.amount, source.client_hourly_rate.amount), HourlyRates(staff_rate, staff_rate))
@@ -302,18 +323,13 @@ class MySqlPricingConfigurationRepository:
     def _legacy_terms(self, cursor, order, finance):
         from infrastructure.mysql.effective_case_service_rate import load_explicit_case_service_rate
         identity = str(order["client_identity_status"])
-        rule = {"一般市民": IdentityRule.CITIZEN, "補助市民": IdentityRule.SOCIAL,
-            "社福": IdentityRule.SOCIAL, "低收入戶": IdentityRule.SOCIAL,
-            "中低收入戶": IdentityRule.SOCIAL, "非市民": IdentityRule.NON_CITIZEN}.get(identity)
-        if rule is None:
-            raise ValueError("case_pricing_identity_not_confirmed")
+        rule, cap = _legacy_rule_and_cap(identity)
         cursor.execute("SELECT hourly_rate_ntd FROM case_payroll_rate_policy_snapshots WHERE case_no=%s", (order["case_no"],))
         salary = cursor.fetchone()
         if salary is None:
             raise ValueError("case_pricing_payroll_snapshot_required")
         correction = load_explicit_case_service_rate(cursor, order["case_no"])
         salary_rate = correction.hourly_rate_ntd if correction else int(salary["hourly_rate_ntd"])
-        cap = Decimal(120 if rule is IdentityRule.SOCIAL else 40 if rule is IdentityRule.CITIZEN else 0)
         client_rate = finance.payment_terms.client_hourly_rate.amount
         return CasePricingTerms(identity, rule, cap, HourlyRates(client_rate, client_rate), HourlyRates(salary_rate, salary_rate))
 

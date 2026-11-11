@@ -334,12 +334,18 @@ class MySqlServiceDateConfirmationRepository:
     def _restart_scheduling_source(cursor, case_no, contracted_days, *, lock=False):
         lock_clause = " FOR UPDATE" if lock else ""
         cursor.execute(
-            "SELECT generation.generation_number FROM scheduling_aggregates aggregate "
+            "SELECT generation.generation_number, "
+            "JSON_EXTRACT(restart_event.facts_snapshot,'$.matching_binding') AS matching_binding "
+            "FROM scheduling_aggregates aggregate "
             "JOIN scheduling_generations generation ON generation.id=aggregate.effective_generation_id "
             "JOIN scheduling_command_receipts restart_receipt "
             "ON restart_receipt.resulting_generation_id=generation.id "
             "AND restart_receipt.case_no=aggregate.case_no "
             "AND restart_receipt.command_family='orders_historical_precision_restart' "
+            "LEFT JOIN order_lifecycle_state_events restart_event "
+            "ON restart_event.case_no=aggregate.case_no "
+            "AND restart_event.idempotency_key=restart_receipt.idempotency_key "
+            "AND restart_event.trigger_event='orders_historical_precision_restart' "
             "WHERE aggregate.case_no=%s AND generation.status='effective' "
             "AND generation.effective_marker=1 "
             "AND NOT EXISTS (SELECT 1 FROM case_staff_assignments current_assignment "
@@ -349,6 +355,28 @@ class MySqlServiceDateConfirmationRepository:
         generation = cursor.fetchone()
         if generation is None:
             return None, ()
+        if generation.get("matching_binding") is not None:
+            binding = json.loads(generation["matching_binding"])
+            cursor.execute(
+                "SELECT segment.id,segment.staff_id,staff.name AS staff_name "
+                "FROM caregiver_matching_plans plan "
+                "JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id "
+                "JOIN staff ON staff.id=segment.staff_id "
+                "WHERE plan.case_no=%s AND plan.id=%s AND plan.version=%s "
+                "AND plan.is_active=1 AND plan.status='proposed' "
+                "ORDER BY segment.segment_order" + lock_clause,
+                (case_no, binding["plan_id"], binding["plan_version"]),
+            )
+            segments = tuple(cursor.fetchall())
+            if (len(segments) != 1 or segments[0]["id"] != binding["segment_id"]
+                or segments[0]["staff_id"] != binding["staff_id"]):
+                raise ValueError("historical_arrangement_matching_plan_conflict")
+            assignment = RestartSchedulingAssignmentFacts(
+                binding["source_assignment_id"], segments[0]["staff_id"], 1,
+                contracted_days, segments[0]["staff_name"],
+            )
+            return int(generation["generation_number"]), (assignment,)
+        # Receipts committed before matching plans were bound retain their original source.
         cursor.execute(
             "SELECT evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal,"
             "staff.name AS staff_name,"

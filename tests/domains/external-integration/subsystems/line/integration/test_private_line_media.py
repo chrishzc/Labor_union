@@ -164,6 +164,7 @@ def _write_test_tls_bundle(ca_dir: Path, tls_dir: Path, sans: list | None = None
     )
 
 
+@unittest.skip("staff-service-day-media module retired per 2026-11-10 decision; photos maintain in LINE group album")
 class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()

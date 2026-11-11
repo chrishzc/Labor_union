@@ -1,4 +1,7 @@
-"""Explicit public examples for display-only previews; no database or delivery access."""
+"""
+File: message_preview_samples.py
+Description: 提供 LINE 公版預覽的明列範例資料與流程訊息組裝，不查詢真實資料庫。
+"""
 
 import json
 import re
@@ -325,10 +328,14 @@ def current_message_sample(key):
         from subsystems.line.service_help_application import _registration_reply
         entry = field("服務登記入口", "registration_url", VALUES["url"]) if key == "service-registration" else None
         payload = text(_registration_reply(entry))
-    elif key in {"identity-staff-link", "identity-admin-link"}:
+    elif key in {"identity-customer-link", "identity-staff-link", "identity-admin-link"}:
         from domains.line.identity_flow import LineIdentityFlowPurpose
         from subsystems.line.webhook_identity_handlers import _identity_link_message
-        purpose = LineIdentityFlowPurpose.STAFF_VERIFICATION if key == "identity-staff-link" else LineIdentityFlowPurpose.ADMIN_BINDING
+        purpose = {
+            "identity-customer-link": LineIdentityFlowPurpose.CUSTOMER_BINDING,
+            "identity-staff-link": LineIdentityFlowPurpose.STAFF_VERIFICATION,
+            "identity-admin-link": LineIdentityFlowPurpose.ADMIN_BINDING,
+        }[key]
         entry = field("身分入口", "identity_url", VALUES["bind_url"])
         payload = text(_identity_link_message(purpose, entry))
     elif key == "runtime-system-health":

@@ -1,7 +1,6 @@
-"""Cross-owner LINE/customer-service SQL and delivery regressions without network effects.
-
-SQLite executes the ticket/target adapter SQL after placeholder conversion and
-removal of MySQL's FOR UPDATE suffix. It does not prove MySQL locking behavior.
+"""
+File: test_line_m4_continuation_regressions.py
+Description: 驗證客服 M4 工單不重開、escalation 與安全連結 SQL 回歸。
 """
 
 from __future__ import annotations
@@ -16,7 +15,12 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus, CustomerServiceVersionConflictError
+from domains.customer_service.ticket import (
+    CustomerServiceCategory,
+    CustomerServiceStatus,
+    CustomerServiceTransitionError,
+    CustomerServiceVersionConflictError,
+)
 from domains.line.delivery import LineDeliveryLease, LineDeliveryStatus, LineDeliveryTaskSnapshot
 from domains.line.identities import LineDeliveryTaskId, LineProviderMessageId
 from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
@@ -142,6 +146,19 @@ class TicketSqlTests(unittest.TestCase):
         with self.assertRaises(CustomerServiceVersionConflictError):
             self.repo.start_handling_for_escalation(31, 2, "admin:7")
         self.assertIs(self.repo.get(31).status, CustomerServiceStatus.RESOLVED)
+
+    def test_append_event_refuses_to_reopen_resolved_ticket(self):
+        with self.assertRaises(CustomerServiceTransitionError):
+            self.repo._append_event(
+                31,
+                CreateCustomerServiceMessage(
+                    "U-m4", CustomerServiceCategory.OTHER, "blocked append", "message:m4:blocked"
+                ),
+            )
+        row = self.connection.db.execute(
+            "SELECT status, resolved_at_utc, version FROM customer_service_tickets WHERE id=31"
+        ).fetchone()
+        self.assertEqual((row["status"], row["resolved_at_utc"], row["version"]), ("resolved", "2026-09-01", 2))
 
 
 class TargetSqlTests(unittest.TestCase):

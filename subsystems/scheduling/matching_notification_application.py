@@ -5,6 +5,7 @@ Description: 協調媒合通知、人工回覆與 assignment conversion 後的�
 
 from __future__ import annotations
 
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.message_copy_catalog import configured_payload
 
 import hashlib
@@ -854,6 +855,9 @@ def _matching_delivery(command, recipient, payload_json, intent_id, scheduled_at
 def _response_confirmation(result, recipient, correlation_id, scheduled_at, unit=None):
     text = matching_response_text(result.caregiver_willingness, result.customer_decision)
     from domains.line.canonical_payload import canonical_line_payload_json
+    event_identity = correlation_id.value.removeprefix("line-event:").strip() if correlation_id.value.startswith("line-event:") else ""
+    source_type = REPLY_ONLY_WEBHOOK_SOURCE if event_identity else "matching_response_event"
+    source_identity = event_identity or str(result.event_id)
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
@@ -861,8 +865,8 @@ def _response_confirmation(result, recipient, correlation_id, scheduled_at, unit
         scheduled_at,
         IdempotencyKey(f"matching-response-confirmation:{result.event_id}"),
         correlation_id,
-        "matching_response_event",
-        str(result.event_id),
+        source_type,
+        source_identity,
     )
 
 

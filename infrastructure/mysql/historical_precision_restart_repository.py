@@ -59,6 +59,7 @@ class MySqlHistoricalPrecisionRestartRepository:
                 (case_no,),
             )
             confirmed_dates = cursor.fetchone()
+            matching_plan, matching_conflicts = _restart_matching_plan(cursor, case_no, rows, lock)
         assignments = tuple(
             HistoricalPrecisionRestartAssignmentFacts(
                 f"assignment:{int(row['assignment_id'])}" if row["assignment_id"] is not None else f"pairing:{int(row['pairing_ordinal'])}",
@@ -95,7 +96,7 @@ class MySqlHistoricalPrecisionRestartRepository:
             None if confirmed_dates is None else str(confirmed_dates["service_date_fingerprint"]),
             len(terms.payroll.existing_obligations),
         )
-        return HistoricalPrecisionRestartContext(facts, terms)
+        return HistoricalPrecisionRestartContext(facts, terms, matching_plan, matching_conflicts)
 
     def find_receipt(self, key):
         with _cursor(self._connection) as cursor:
@@ -173,6 +174,22 @@ class MySqlHistoricalPrecisionRestartRepository:
             "precision_restart_receipt": _receipt_payload(receipt),
         }
         with _cursor(self._connection) as cursor:
+            from .historical_pending_deposit_matching_repository import insert_historical_proposed_plan
+
+            plan = preview.matching_plan
+            assert plan is not None
+            staff = domain.facts.assignments[0]
+            if plan["plan_id"] is None:
+                plan_id, segment_id = insert_historical_proposed_plan(
+                    cursor, domain.facts.case_no, staff.staff_id, plan["version"],
+                    plan["start"], plan["end"], request.actor.actor_id,
+                )
+            else:
+                plan_id, segment_id = plan["plan_id"], plan["segment_id"]
+            snapshot["matching_binding"] = {
+                "plan_id": plan_id, "segment_id": segment_id, "plan_version": plan["version"],
+                "staff_id": staff.staff_id, "source_assignment_id": staff.source_assignment_id,
+            }
             cursor.execute(
                 "INSERT INTO order_lifecycle_state_events (case_no,trigger_event,before_status,after_status,actor,business_date,expected_version,idempotency_key,facts_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (domain.facts.case_no, _FAMILY, lifecycle.before_status.value, lifecycle.after_status.value, request.actor.actor_id, lifecycle.business_date, domain.facts.order_version, request.idempotency_key.value, _json(snapshot)),
@@ -195,6 +212,60 @@ class MySqlHistoricalPrecisionRestartRepository:
                 (domain.facts.case_no, lifecycle_event_id, f"{request.idempotency_key.value}:orders", _json(snapshot)),
             )
         return receipt
+
+
+def _restart_matching_plan(cursor, case_no, pairing, lock):
+    cursor.execute("SELECT start_date,end_date FROM orders WHERE case_no=%s" + lock, (case_no,))
+    order = cursor.fetchone()
+    cursor.execute(
+        "SELECT id,version,status,is_active,start_date,end_date FROM caregiver_matching_plans "
+        "WHERE case_no=%s ORDER BY version DESC" + lock, (case_no,),
+    )
+    plans = tuple(cursor.fetchall())
+    active = tuple(plan for plan in plans if plan["is_active"] == 1)
+    if len(active) > 1:
+        return None, ("多筆有效方案 " + "、".join(str(plan["id"]) for plan in active),)
+    start, end = order["start_date"], order["end_date"]
+    if start is None or end is None or start > end:
+        return None, ("訂單預定期間無效",)
+    if not active:
+        return {"plan_id": None, "version": int(plans[0]["version"]) + 1 if plans else 1,
+                "start": start.isoformat(), "end": end.isoformat()}, ()
+
+    plan = active[0]
+    plan_id = int(plan["id"])
+    cursor.execute(
+        "SELECT id,segment_order,staff_id,assigned_start_date,assigned_end_date "
+        "FROM caregiver_matching_plan_segments WHERE plan_id=%s ORDER BY segment_order" + lock,
+        (plan_id,),
+    )
+    segments = tuple(cursor.fetchall())
+    reasons = []
+    if plan["status"] != "proposed":
+        reasons.append("方案狀態不是 proposed")
+    if (plan["start_date"], plan["end_date"]) != (start, end):
+        reasons.append("方案預定期間不同")
+    if (len(segments) != 1 or len(pairing) != 1 or segments[0]["segment_order"] != 1
+        or segments[0]["staff_id"] != pairing[0]["staff_id"]
+        or (segments[0]["assigned_start_date"], segments[0]["assigned_end_date"]) != (start, end)):
+        reasons.append("分段、月嫂或期間不符")
+    for statement, parameters, reason in (
+        ("SELECT id FROM matching_response_events WHERE plan_id=%s AND response_type='customer_decision'",
+         (plan_id,), "已有客戶決定"),
+        ("SELECT event.id FROM contract_signing_events event JOIN contract_document_versions document "
+         "ON document.id=event.document_version_id WHERE event.case_no=%s AND event.matching_plan_id=%s "
+         "AND event.event_type='signed_received' AND document.document_scope='client_contract'",
+         (case_no, plan_id), "已有收回契約"),
+        ("SELECT id FROM caregiver_availability_locks WHERE plan_id=%s AND status='active' AND is_active=1",
+         (plan_id,), "已有有效等待訂金鎖"),
+    ):
+        cursor.execute(statement + " LIMIT 1" + lock, parameters)
+        if cursor.fetchone() is not None:
+            reasons.append(reason)
+    if reasons:
+        return None, tuple(f"方案 {plan_id}：{reason}" for reason in reasons)
+    return {"plan_id": plan_id, "segment_id": int(segments[0]["id"]), "version": int(plan["version"]),
+            "start": start.isoformat(), "end": end.isoformat()}, ()
 
 
 def _invalidate_confirmed_dates(cursor, case_no):

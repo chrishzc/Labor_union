@@ -66,8 +66,8 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
 
 
 def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
-    # 固定沿用原模板 A:W；四欄指標與生命週期逐項計數分開。
-    last_col = 23
+    # 固定沿用擴充雙層表頭 A:Y；六項資格與生命週期逐項計數分開。
+    last_col = 25
     # R1: 報表期間註記
     ws.append(("報表期間", report.period_label))
     ws.cell(row=1, column=1).font = Font(bold=True)
@@ -79,6 +79,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         "推廣次數", "詢問人次", "平台案件申請數",
         "市民案件審核", None,
         "社福案件審核", None,
+        "原住民案件審核", None,
         "申請案件狀況", None, None, None,
         "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "備註",
     ]
@@ -90,6 +91,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         None, None, None,
         "一般市民符合", "一般市民不符合",
         "補助市民符合", "補助市民不符合",
+        "原住民符合", "原住民不符合",
         "訂單成立", "洽談中", "取消", "審核不符合",
         None, None, None, None, None, None, None,
     ]
@@ -97,12 +99,13 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
 
     # 合併雙層表頭單元格
     for col_letter in ["A", "D", "E", "F", "G", "H",
-                       *(get_column_letter(c) for c in range(17, last_col + 1))]:
+                       *(get_column_letter(c) for c in range(19, last_col + 1))]:
         ws.merge_cells(f"{col_letter}2:{col_letter}3")
     ws.merge_cells("B2:C3")
     ws.merge_cells("I2:J2")
     ws.merge_cells("K2:L2")
-    ws.merge_cells("M2:P2")
+    ws.merge_cells("M2:N2")
+    ws.merge_cells("O2:R2")
 
     # 樣式表頭
     for r in (2, 3):
@@ -157,6 +160,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 p_cell_val, i_cell_val, 1 if row else "",
                 row.general_eligible or "" if row else "", row.general_ineligible or "" if row else "",
                 row.subsidized_eligible or "" if row else "", row.subsidized_ineligible or "" if row else "",
+                row.indigenous_eligible or "" if row else "", row.indigenous_ineligible or "" if row else "",
                 row.order_established or "" if row else "",
                 row.negotiating or "" if row else "",
                 row.cancelled or "" if row else "",
@@ -200,7 +204,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
 
 
 def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
-    last_col = 23
+    last_col = 25
     label = (
         f"{total.year - 1911}年度累計" if total.month is None
         else f"{total.year - 1911}年{total.month}月小計"
@@ -212,6 +216,7 @@ def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
         total.application_count,
         total.general_eligible_count, total.general_ineligible_count,
         total.subsidized_eligible_count, total.subsidized_ineligible_count,
+        total.indigenous_eligible_count, total.indigenous_ineligible_count,
         total.order_established_count, total.negotiating_count, total.cancelled_count,
         total.review_rejected_count,
     ])
@@ -231,130 +236,113 @@ def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
         cell.border = _BORDER_THIN
 
 
+def _append_subsidy_partition_rows(ws, rows: list[WeeklySubsidyRow], identity_label: str) -> None:
+    for idx, row in enumerate(rows, start=1):
+        ws.append([
+            idx,
+            row.case_no,
+            f"({row.application_roc_year if row.application_roc_year is not None else '—'}){identity_label}",
+            idx,
+            row.case_no,
+            row.service_start.isoformat() if row.service_start else "",
+            row.service_end.isoformat() if row.service_end else "",
+            row.subsidy_hours,
+            row.subsidy_days,
+            "",  # 備註留空
+            row.subsidy_amount_ntd,
+            row.unit_price_ntd,
+            row.reconciliation_status or "結案",
+            row.claim_period_label or "",
+        ])
+        curr_r = ws.max_row
+        for c in range(1, 15):
+            cell = ws.cell(row=curr_r, column=c)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = _BORDER_THIN
+        ws.cell(row=curr_r, column=2).number_format = "@"
+        ws.cell(row=curr_r, column=5).number_format = "@"
+
+
+def _append_subsidy_partition_section(
+    ws,
+    section_title: str,
+    rows: list[WeeklySubsidyRow],
+    identity_label: str,
+) -> None:
+    total_count = len(rows)
+    ws.append([None, None, f"{section_title}: {total_count}案", None, None, f"{section_title}:", total_count, "案", "合計", None, None, None, "結案/核銷", "年度季度"])
+    sep_row = ws.max_row
+    ws.merge_cells(f"I{sep_row}:J{sep_row}")
+    for c in range(1, 15):
+        cell = ws.cell(row=sep_row, column=c)
+        cell.font = Font(bold=True)
+        cell.fill = _YELLOW_FILL
+        cell.border = _BORDER_THIN
+    rows_start = ws.max_row + 1
+    _append_subsidy_partition_rows(ws, rows, identity_label)
+    rows_end = ws.max_row
+    ws.cell(row=sep_row, column=11, value=f"=SUM(K{rows_start}:K{rows_end})" if rows_end >= rows_start else 0)
+
+
 def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
     roc_year = report.end_date.year - 1911
 
-    general_rows = []
-    subsidized_rows = []
+    by_kind: dict[str, list[WeeklySubsidyRow]] = {"general": [], "subsidized": [], "indigenous": []}
     for partition in report.subsidy_partitions:
-        if partition.citizen_kind == "subsidized":
-            subsidized_rows.extend(partition.rows)
-        else:
-            general_rows.extend(partition.rows)
+        by_kind.setdefault(partition.citizen_kind, []).extend(partition.rows)
+    general_rows = by_kind["general"]
+    subsidized_rows = by_kind["subsidized"]
+    indigenous_rows = by_kind["indigenous"]
 
-    total_sub = len(subsidized_rows)
     previous_gen_count, previous_gen_amount = _subsidy_year_totals(general_rows, roc_year - 1)
     current_gen_count, current_gen_amount = _subsidy_year_totals(general_rows, roc_year)
     previous_sub_count, previous_sub_amount = _subsidy_year_totals(subsidized_rows, roc_year - 1)
     current_sub_count, current_sub_amount = _subsidy_year_totals(subsidized_rows, roc_year)
+    previous_ind_count, previous_ind_amount = _subsidy_year_totals(indigenous_rows, roc_year - 1)
+    current_ind_count, current_ind_amount = _subsidy_year_totals(indigenous_rows, roc_year)
 
-    # R1~R4: 看板區
+    # R1~R6: 三軌兩年度看板區
     ws.append([None, None, None, None, None, f"{roc_year - 1}市民總計:", previous_gen_count, "案", "合計", None, previous_gen_amount])
     ws.append([f"{roc_year}年度 服務補助案件暨經費 統計明細", None, None, None, None, f"{roc_year}市民總計:", current_gen_count, "案", "合計", None, current_gen_amount])
     ws.append([None, None, None, None, None, f"{roc_year - 1}社福總計:", previous_sub_count, "案", "合計", None, previous_sub_amount])
     ws.append([None, None, None, None, None, f"{roc_year}社福總計:", current_sub_count, "案", "合計", None, current_sub_amount])
+    ws.append([None, None, None, None, None, f"{roc_year - 1}原住民總計:", previous_ind_count, "案", "合計", None, previous_ind_amount])
+    ws.append([None, None, None, None, None, f"{roc_year}原住民總計:", current_ind_count, "案", "合計", None, current_ind_amount])
 
     ws.merge_cells("A2:E2")
-    ws.merge_cells("I1:J1")
-    ws.merge_cells("I2:J2")
-    ws.merge_cells("I3:J3")
-    ws.merge_cells("I4:J4")
+    for row_number in range(1, 7):
+        ws.merge_cells(f"I{row_number}:J{row_number}")
+        ws.cell(row=row_number, column=11).font = Font(bold=True)
 
     ws.cell(row=2, column=1).font = Font(bold=True, size=14)
     ws.cell(row=2, column=1).alignment = Alignment(horizontal="center", vertical="center")
 
-    # R5: 表頭
+    # R7: 表頭
     headers = (
         "序號", "  ", " ", "年度接案", "訂單號碼",
         "起日", "訖日", "補助時數", "補助天數", "備註",
         "補助款金額", "單價", "結案/核銷", "年度季度",
     )
     ws.append(headers)
+    header_row = ws.max_row
     for c in range(1, 15):
-        cell = ws.cell(row=5, column=c)
+        cell = ws.cell(row=header_row, column=c)
         cell.font = Font(bold=True)
         cell.fill = _HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = _BORDER_THIN
 
-    # 一般市民明細 (從 R6 起)
-    for idx, r in enumerate(general_rows, start=1):
-        ws.append([
-            idx,
-            r.case_no,
-            f"({r.application_roc_year if r.application_roc_year is not None else '—'})一般市民",
-            idx,
-            r.case_no,
-            r.service_start.isoformat() if r.service_start else "",
-            r.service_end.isoformat() if r.service_end else "",
-            r.subsidy_hours,
-            r.subsidy_days,
-            "",  # 備註留空
-            r.subsidy_amount_ntd,
-            r.unit_price_ntd,
-            r.reconciliation_status or "結案",
-            r.claim_period_label or "",
-        ])
-        curr_r = ws.max_row
-        for c in range(1, 15):
-            cell = ws.cell(row=curr_r, column=c)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = _BORDER_THIN
-        ws.cell(row=curr_r, column=2).number_format = "@"
-        ws.cell(row=curr_r, column=5).number_format = "@"
-
-    for row_number in range(1, 5):
-        ws.cell(row=row_number, column=11).font = Font(bold=True)
-
-    # 社福市民區塊
-    sub_start = ws.max_row + 2
-    ws.append([None, None, f"社福市民總計: {total_sub}案", None, None, "社福市民總計:", total_sub, "案", "合計", None, None, None, "結案/核銷", "年度季度"])
-    ws.merge_cells(f"I{ws.max_row}:J{ws.max_row}")
-    sep_row = ws.max_row
-    for c in range(1, 15):
-        cell = ws.cell(row=sep_row, column=c)
-        cell.font = Font(bold=True)
-        cell.fill = _YELLOW_FILL
-        cell.border = _BORDER_THIN
-
-    sub_rows_start = ws.max_row + 1
-    for idx, r in enumerate(subsidized_rows, start=1):
-        ws.append([
-            idx,
-            r.case_no,
-            f"({r.application_roc_year if r.application_roc_year is not None else '—'})社福補助",
-            idx,
-            r.case_no,
-            r.service_start.isoformat() if r.service_start else "",
-            r.service_end.isoformat() if r.service_end else "",
-            r.subsidy_hours,
-            r.subsidy_days,
-            "",  # 備註留空
-            r.subsidy_amount_ntd,
-            r.unit_price_ntd,
-            r.reconciliation_status or "結案",
-            r.claim_period_label or "",
-        ])
-        curr_r = ws.max_row
-        for c in range(1, 15):
-            cell = ws.cell(row=curr_r, column=c)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = _BORDER_THIN
-        ws.cell(row=curr_r, column=2).number_format = "@"
-        ws.cell(row=curr_r, column=5).number_format = "@"
-
-    sub_rows_end = ws.max_row
-    if sub_rows_end >= sub_rows_start:
-        ws.cell(row=sep_row, column=11, value=f"=SUM(K{sub_rows_start}:K{sub_rows_end})")
-    else:
-        ws.cell(row=sep_row, column=11, value=0)
+    _append_subsidy_partition_rows(ws, general_rows, "一般市民")
+    _append_subsidy_partition_section(ws, "社福市民總計", subsidized_rows, "社福補助")
+    ws.append([])
+    _append_subsidy_partition_section(ws, "原住民總計", indigenous_rows, "原住民")
 
     ws.append([])
     ws.append(["季度金額統計"])
     summary_title_row = ws.max_row
     ws.cell(row=summary_title_row, column=1).font = Font(bold=True)
     for reconciliation_year, quarter, amount in _subsidy_quarter_totals(
-        general_rows + subsidized_rows, roc_year
+        general_rows + subsidized_rows + indigenous_rows, roc_year
     ):
         ws.append([f"{reconciliation_year - 1911}年第{quarter}季"])
         summary_row = ws.max_row
@@ -365,7 +353,7 @@ def _build_subsidy_sheet(ws, report: WeeklyOperationsReport) -> None:
             cell.border = _BORDER_THIN
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    ws.freeze_panes = "A6"
+    ws.freeze_panes = "A8"
     _auto_fit_columns(ws, min_col=1, max_col=14)
 
 

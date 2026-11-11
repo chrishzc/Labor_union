@@ -28,6 +28,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 - `ui_react/src/pages/FirstRootSetup.tsx`、`ui_react/src/pages/FirstRootSetup.css` — one setup gate/form mounted by `main.tsx` before the application and session handling; no environment-based account creation.
 
 ## Current contract
+- 登入與線上帳號管理不追加管理稽核。限流沿用雜湊失敗計數，帳號命令沿用冪等收據，離線 root 維護沿用專用稽核。
 - `/me` 回應僅可更新發出請求的同一 token 所屬快取；晚到回應不得覆寫已登出或換人的 Session。Registry deletion UI 借用此既有 read boundary 即時確認 root。
 
 - Session expiry is bounded by the existing absolute deadline (maximum eight hours from issuance).

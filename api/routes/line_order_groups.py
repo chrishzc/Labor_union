@@ -67,30 +67,28 @@ class LogReminderReceipt(BaseModel):
     status: str
 
 
-@router.get("/log-reminders", response_model=BaseResponse[LogReminderPage])
+@router.get("/log-reminders")
 def list_log_reminders(page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
-                       principal: AdminPrincipal = Depends(require_line_order_group_reader),
-                       application=Depends(get_service_day_log_reminders)):
-    items, total = application.list(page, page_size)
-    return BaseResponse(data={"items": [{**asdict(item.gap), "group_label": item.group_label,
-                                         "can_send": item.can_send} for item in items],
-                              "total": total, "page": page, "page_size": page_size})
+                       principal: AdminPrincipal = Depends(require_line_order_group_reader)):
+    raise typed_http_error(
+        410,
+        "gone",
+        "service_day_log_reminder_retired",
+        "服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。",
+        "line-order-groups",
+    )
 
 
-@router.post("/log-reminders/send", response_model=BaseResponse[LogReminderReceipt])
+@router.post("/log-reminders/send")
 def send_log_reminder(body: LogReminderSendRequest,
-                      principal: AdminPrincipal = Depends(require_customer_service_handler),
-                      application=Depends(get_service_day_log_reminders)):
-    try:
-        result = application.send(SendServiceDayLogReminder(**body.model_dump()))
-    except (ValueError, RuntimeError) as error:
-        if str(error) not in {"service_day_log_reminder_date_invalid", "service_day_log_reminder_no_longer_applicable",
-                              "line_delivery_idempotency_conflict"}:
-            raise
-        raise typed_http_error(409, "conflict", str(error),
-                               "缺漏或案件群組已更新，請重新整理後再操作。", "service-day-log-reminder") from error
-    return BaseResponse(data={"task_id": result.task_id.value, "status": result.status.value})
-
+                      principal: AdminPrincipal = Depends(require_customer_service_handler)):
+    raise typed_http_error(
+        410,
+        "gone",
+        "service_day_log_reminder_retired",
+        "服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。",
+        "line-order-groups",
+    )
 
 @router.get("", response_model=LineOrderGroupPageResponse)
 def list_order_groups(

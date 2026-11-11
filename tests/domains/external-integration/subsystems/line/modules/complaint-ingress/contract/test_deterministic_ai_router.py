@@ -37,7 +37,7 @@ def test_human_marker_precedes_service_registration() -> None:
     assert isinstance(outcome, TicketReferral)
 
 
-@pytest.mark.parametrize("command", ["專人客服", "呼叫專員", "聯絡專人服務"])
+@pytest.mark.parametrize("command", ["專人客服", "呼叫專員", "聯絡專人服務", "聯絡專人", "聯絡工會人員"])
 def test_explicit_confirmation_alias_creates_ticket_referral(command) -> None:
     from subsystems.line.ai_router_contracts import TicketReferral
 
@@ -92,7 +92,7 @@ def test_unscoped_subsidy_amount_question_requires_program_clarification() -> No
 
     assert isinstance(outcome, Clarification)
     assert outcome.question_key == "subsidy_scope"
-    assert outcome.options == ("補助市民（最高40小時）", "社福（最高120小時）")
+    assert outcome.options == ("一般市民（最高40小時）", "補助市民（最高120小時）")
     assert outcome.reason_code == "subsidy_scope_ambiguous"
 
 

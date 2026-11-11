@@ -24,6 +24,14 @@ def definition():
     return json.loads(Path('config/liff_settings.json').read_text(encoding='utf-8'))
 
 
+def legacy_definition():
+    config = definition()
+    gateway = config['pages']['gateway']
+    gateway['content'].pop('navigation_layout')
+    gateway['actions'] = [action for action in gateway['actions'] if action['id'] != 'non_citizen_binding']
+    return config
+
+
 class Repository:
     def __init__(self):
         self.versions = {1: canonical_line_payload_json(definition())}
@@ -186,9 +194,9 @@ def test_system_fields_remain_protected(context):
     assert repo.revision == 1 and unit.commits == 0
 
 
-def test_non_citizen_page_and_gateway_are_created_in_one_configuration_version(context):
+def test_non_citizen_page_initialization_preserves_the_legacy_gateway(context):
     http, repo, unit, _ = context
-    old = definition()
+    old = legacy_definition()
     old['pages'].pop('non_citizen_registration', None)
     old['pages']['gateway']['actions'] = [a for a in old['pages']['gateway']['actions'] if a['id'] != 'non_citizen_registration']
     repo.versions[1] = canonical_line_payload_json(old)
@@ -198,11 +206,69 @@ def test_non_citizen_page_and_gateway_are_created_in_one_configuration_version(c
     assert result.json()['revision'] == '2' and unit.commits == 1
     saved = json.loads(repo.versions[2])
     assert saved['pages']['registration'] == old['pages']['registration']
-    assert saved['pages']['gateway']['actions'][:-1] == old['pages']['gateway']['actions']
-    assert saved['pages']['gateway']['actions'][-1]['path'] == '/line-non-citizen-registration'
+    assert saved['pages']['gateway']['actions'][:2] == old['pages']['gateway']['actions']
+    assert saved['pages']['gateway']['actions'][2]['path'] == '/line-non-citizen-registration'
+    assert 'navigation_layout' not in saved['pages']['gateway']['content']
     assert all(field['required'] for field in saved['pages']['non_citizen_registration']['fields'] if field['system_field'])
     assert http.post('/api/config/liff/non-citizen', headers={'If-Match':'2'}).json()['revision'] == '2'
     assert unit.commits == 1
+
+
+def test_update_only_the_gateway_and_restore_legacy_revision(context):
+    http, repo, unit, _ = context
+    old = legacy_definition()
+    old['pages']['gateway']['title'] = '自訂服務入口'
+    old['pages']['gateway']['actions'][1]['description'] = '請先完成市府補助申請。'
+    old['pages']['non_citizen_registration']['title'] = '自訂非市民申請'
+    repo.versions[1] = canonical_line_payload_json(old)
+
+    assert http.post('/api/config/liff/non-citizen', headers={'If-Match': '1'}).json()['revision'] == '1'
+    assert unit.commits == 0
+    gateway = deepcopy(old['pages']['gateway'])
+    gateway['content']['navigation_layout'] = 'two_step'
+    gateway['actions'] = definition()['pages']['gateway']['actions']
+    gateway['actions'][1]['description'] = old['pages']['gateway']['actions'][1]['description']
+    route = '/api/config/liff/pages/gateway'
+    response = http.put(route, json=gateway, headers={'If-Match': '1'})
+    assert response.status_code == 200, response.text
+    saved = json.loads(repo.versions[2])
+    assert saved['theme'] == old['theme']
+    assert {key: page for key, page in saved['pages'].items() if key != 'gateway'} == {
+        key: page for key, page in old['pages'].items() if key != 'gateway'
+    }
+    runtime = http.get('/api/config/liff/runtime?page=gateway').json()
+    assert runtime['page']['title'] == '自訂服務入口'
+    assert runtime['page']['content']['navigation_layout'] == 'two_step'
+    assert {action['label']: action['path'] for action in runtime['page']['actions']} == {
+        '已在市府平台登記': '/line-bind',
+        '尚未在市府平台登記': 'https://hsinchu-nanny.hccg.gov.tw/home',
+        '工會已建案，綁定 LINE': '/line-bind?entry=existing_case',
+        '尚未申請': '/line-non-citizen-registration',
+    }
+    assert runtime['page']['actions'][1]['description'] == '請先完成市府補助申請。'
+    assert http.put(route, json=gateway, headers={'If-Match': '1'}).status_code == 409
+    assert http.put(route, json=gateway, headers={'If-Match': '2'}).status_code == 200
+    assert http.get('/api/config/liff/runtime?page=gateway').json()['page']['actions'] == runtime['page']['actions']
+
+    assert http.post('/api/config/liff/rollback/1', json={}, headers={'If-Match': '3'}).status_code == 200
+    restored = http.get('/api/config/liff/runtime?page=gateway').json()
+    assert restored['revision'] == '4'
+    assert restored['page'] == old['pages']['gateway']
+
+
+def test_two_step_gateway_rejects_a_missing_destination(context):
+    http, repo, unit, _ = context
+    gateway = definition()['pages']['gateway']
+    next(action for action in gateway['actions'] if action['id'] == 'non_citizen_binding')['enabled'] = False
+    assert http.put('/api/config/liff/pages/gateway', json=gateway, headers={'If-Match': '1'}).status_code == 422
+    assert repo.revision == 1 and unit.commits == 0
+
+    legacy = legacy_definition()
+    legacy['pages'].pop('non_citizen_registration')
+    repo.versions[1] = canonical_line_payload_json(legacy)
+    assert http.put('/api/config/liff/pages/gateway', json=definition()['pages']['gateway'],
+                    headers={'If-Match': '1'}).status_code == 422
+    assert repo.revision == 1 and unit.commits == 0
 
 
 def test_non_citizen_settings_use_revision_and_cannot_disable_required_fields(context):

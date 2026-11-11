@@ -567,17 +567,18 @@ def get_non_citizen_liff_page():
 
 @router.post("/liff/non-citizen", response_model=NonCitizenLiffPageView, dependencies=[Depends(require_line_manager)])
 def initialize_non_citizen_liff_page(request: Request, if_match: str | None = Header(default=None, alias="If-Match")):
-    from subsystems.line.liff_models import non_citizen_registration_page
-    from subsystems.line.liff_models import LiffNavigationAction
+    from subsystems.line.liff_models import LiffNavigationAction, non_citizen_registration_page
     with LIFF_CONFIG_LOCK:
         snapshot, config = _require_liff_revision(if_match)
         if "non_citizen_registration" in config.pages:
             return NonCitizenLiffPageView(revision=str(snapshot.revision.value), page=config.pages["non_citizen_registration"])
         config.pages["non_citizen_registration"] = non_citizen_registration_page(config.pages["registration"])
-        config.pages["gateway"].actions.append(LiffNavigationAction(
-            id="non_citizen_registration", label="非市民服務申請", description="直接填寫非市民服務需求，由工會核准建案。",
-            path="/line-non-citizen-registration", order=max((a.order for a in config.pages["gateway"].actions), default=0)+1,
-        ))
+        actions = config.pages["gateway"].actions
+        if not any(action.id == "non_citizen_registration" for action in actions):
+            actions.append(LiffNavigationAction(
+                id="non_citizen_registration", label="非市民服務申請", description="直接填寫非市民服務需求，由工會核准建案。",
+                path="/line-non-citizen-registration", order=max((action.order for action in actions), default=0) + 1,
+            ))
         config = LiffSettingsConfig.model_validate(config)
         result = _save_liff(config, request, reason="啟用非市民服務申請頁面及入口", expected_revision=snapshot.revision)
     return NonCitizenLiffPageView(revision=str(result.revision.value), page=config.pages["non_citizen_registration"])
@@ -690,7 +691,10 @@ def update_liff_page(
         if page_id not in config.pages:
             raise HTTPException(status_code=404, detail="LIFF page not found")
         config.pages[page_id] = payload
-        validated = LiffSettingsConfig.model_validate(config)
+        try:
+            validated = LiffSettingsConfig.model_validate(config)
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="LIFF 頁面設定與現有設定不相容。") from None
         _save_liff(validated, request, reason=f"update page {page_id}", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.page.update"
     request.state.audit_resource_type = "line_liff_page"

@@ -19,7 +19,7 @@
 - `current-anomaly-facts` — retired anomaly validation／migration readback only；path: `modules/current-anomaly-facts.md`
 - `current-service-projection` — effective assignment service-period status projection；path: `modules/current-service-projection.md`
 - `waiting-deposit-lock` — waiting-deposit 檔期鎖的取得、釋放與訂單取消收斂；path: `modules/waiting-deposit-lock.md`
-- `service-day-log` — 月嫂服務日日誌與受控餐食照片的 Query／Preview／Apply；path: `modules/service-day-log.md`
+- `service-day-log` — [RETIRED] 月嫂日誌與餐食照片改維持於 LINE 案件群組相簿，API 退役回傳 410 GONE，保留資料庫歷史紀錄；path: `modules/service-day-log.md`
 - `staff-availability` — 月嫂長假、暫停接案與不可服務期間 Query／Preview／Apply；path: `modules/staff-availability.md`
 - holiday-maintenance — 官方國定假日 CSV parser 與逐筆 Query／Preview／Apply；path: modules/holiday-maintenance.md
 

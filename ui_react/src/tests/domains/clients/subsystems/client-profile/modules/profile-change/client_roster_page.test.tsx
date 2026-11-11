@@ -4,7 +4,10 @@ import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
 import { orderCancellationClient } from '../../../../../../../api/orders/order_cancellation_client';
 import { orderTermsMutationClient, type OrderTermsQuery } from '../../../../../../../api/orders/order_terms_mutation_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
-vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }) } }));
+vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
+  getAssignmentPlan: vi.fn().mockResolvedValue({ case_no: 'CASE-001', assignments: [] }),
+  getOrderDetail: vi.fn().mockResolvedValue({ case_no: 'CASE-001', order_status: '訂單取消' }),
+} }));
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), query: vi.fn(), history: vi.fn(), filterOptions: vi.fn(), downloadOrderAccounting: vi.fn(), downloadCaseInspection: vi.fn() }));
 const bootstrapMocks = vi.hoisted(() => ({ status: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
@@ -126,6 +129,23 @@ describe('ClientRosterPage', () => {
       expect(await screen.findByLabelText('CASE-001 案件資料編輯')).toBeVisible();
     } finally {
       query.mockRestore();
+      user.mockRestore();
+    }
+  });
+
+  it.each([true, false])('opens controlled reopen from cancelled roster detail when the row is listed: %s', async (listed) => {
+    const user = vi.spyOn(sessionClient, 'getUser').mockReturnValue({
+      id: 7, username: 'operator', display_name: '測試人員', role: 'system_admin',
+      is_root: false, access_control_version: 1, capabilities: ['system.administration'],
+    });
+    mocks.list.mockResolvedValue({ items: listed ? [{ ...item, order_status: '訂單取消' }] : [], next_cursor: null, next_offset: null });
+    try {
+      render(<ClientRosterPage initialCaseNo={item.case_no} />);
+      fireEvent.click(await screen.findByRole('button', { name: '重開訂單', exact: true }));
+      const panel = await screen.findByRole('region', { name: '案件 CASE-001 受控重開' });
+      expect(within(panel).getByRole('button', { name: '重開訂單', exact: true })).toBeVisible();
+      expect(screen.queryByRole('button', { name: '取消訂單', exact: true })).not.toBeInTheDocument();
+    } finally {
       user.mockRestore();
     }
   });

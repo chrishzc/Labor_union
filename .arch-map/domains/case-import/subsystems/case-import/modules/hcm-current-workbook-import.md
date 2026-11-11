@@ -41,7 +41,7 @@
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 
 ## Contracts
-- HCM 來源「案件狀態」只保存明確「符合／不符合」至 `clients.hcm_review_status`，與 Orders 生命週期獨立。既有案件可由 preserved-database-upgrade 的原始 Excel 補登入口填空。
+- HCM 來源「身分資格」接受一般市民、補助市民／社福／低收入戶／中低收入戶、原住民（含別名 `原民`、`原住民市民`，正規化為 `原住民`）與非市民；「案件狀態」只保存明確「符合／不符合」至 `clients.hcm_review_status`，與 Orders 生命週期獨立。既有案件可由 preserved-database-upgrade 的原始 Excel 補登入口填空。
 - 非市民新案由 LIFF 核准建案；HCM 新進件識別為非市民／保留的 A 編號時只列待確認，不呼叫新建案件 writer。既有案件 replay／email 空白補入保留原邊界。
 - Partial intake 逐欄保存合法開始日、天數與 typed 服務時數／完整時段；其他重要欄位錯誤不清空合法 Orders 條款。`regression/test_hcm_partial_order_terms.py` 以實際 INSERT 保存值驗證 Orders 條款 reader 與補件 Query。
 - Current review adapter 將 MySQL 日期／日期時間／TIME 值序列化後計算 root fingerprint，保留原始 typed values 供解除警示判定；補正日期或時段後，警示 Query 不得因非 JSON scalar 回傳 500。

@@ -1,6 +1,6 @@
 /**
  * File: account_management_entry_cutover.test.tsx
- * Description: 驗證 Account entry 的 StrictMode GET 預算、lazy query、typed state 與原生 disabled 邊界。
+ * Description: 驗證 Account entry 的 StrictMode GET 預算、分頁與 typed state。
  */
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -9,15 +9,10 @@ import { App } from '../App';
 import { accountDirectoryClient } from '../api/access/account_directory_client';
 import { sessionClient } from '../api/auth/session_client';
 import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
-import {
-  ACCOUNT_DIRECTORY_FIXTURE,
-  AUDIT_PAGE_FIXTURE,
-} from './fixtures/access/account_query_contract_fixtures';
-import { AUDIT_DETAIL_FIXTURE } from './fixtures/access/audit_query_contract_fixtures';
+import { ACCOUNT_DIRECTORY_FIXTURE } from './fixtures/access/account_query_contract_fixtures';
 
 const ACCOUNTS_ENDPOINT = '/api/v1/admin/accounts';
 const AUDIT_ENDPOINT = '/api/v1/admin/audits';
-const AUDIT_DETAIL_ENDPOINT = '/api/v1/admin/audits/10';
 
 interface RecordedRequest {
   path: string;
@@ -50,8 +45,6 @@ function installFetchStub(): RecordedRequest[] {
     const method = init?.method ?? 'GET';
     requests.push({ path: url.pathname, method });
     if (url.pathname === ACCOUNTS_ENDPOINT) return response(ACCOUNT_DIRECTORY_FIXTURE);
-    if (url.pathname === AUDIT_ENDPOINT) return response(AUDIT_PAGE_FIXTURE);
-    if (url.pathname === AUDIT_DETAIL_ENDPOINT) return response(AUDIT_DETAIL_FIXTURE);
     if (url.pathname === SYSTEM_STATUS_ENDPOINT) {
       return response({
         started_at: '2026-08-20T01:02:03Z',
@@ -84,7 +77,7 @@ describe('Account Management Phase5 entry candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode keeps account/audit GET budgets and exposes only account-owned tabs', async () => {
+  it('shows only the account directory and authenticator guide without querying audit records', async () => {
     authenticate();
     const requests = installFetchStub();
     render(<StrictMode><App /></StrictMode>);
@@ -92,7 +85,6 @@ describe('Account Management Phase5 entry candidate', () => {
     await waitFor(() => expect(document.querySelector('.account-card-name')).toHaveTextContent('根帳號'));
     expect(window.location.hash).toBe('#account-management');
     expect(count(requests, ACCOUNTS_ENDPOINT)).toBe(1);
-    expect(count(requests, AUDIT_ENDPOINT)).toBe(0);
     expect(requests.some((request) => request.path.startsWith('/api/v1/jobs/'))).toBe(false);
 
     // Account actions now open a bounded Drawer; only the final confirmation
@@ -100,19 +92,18 @@ describe('Account Management Phase5 entry candidate', () => {
     expect(screen.getByRole('button', { name: /建立工作人員帳號/ })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /強制登出/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
-    await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());
-    expect(count(requests, AUDIT_ENDPOINT)).toBe(1);
-    fireEvent.click(screen.getByRole('button', { name: '查看' }));
-    await waitFor(() => expect(screen.getByText('provided')).toBeInTheDocument());
-    expect(count(requests, AUDIT_DETAIL_ENDPOINT)).toBe(1);
-
-    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.queryByRole('tab', { name: /安全操作與登入稽核/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /驗證器動態碼/ }));
+    expect(screen.getByRole('heading', { name: /驗證器動態碼登入說明/ })).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: /內部人員帳號清冊/ }));
+    expect(document.querySelector('.account-card-name')).toHaveTextContent('根帳號');
+    expect(count(requests, ACCOUNTS_ENDPOINT)).toBe(1);
+    expect(requests.some(({ path }) => path === AUDIT_ENDPOINT || path.startsWith(`${AUDIT_ENDPOINT}/`))).toBe(false);
     expect(screen.queryByRole('tab', { name: /背景工作狀態/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('背景工作查詢碼')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="account.jobs.lookup"]')).toBeNull();
     expect(document.querySelector('[data-control-id="account.jobs.refresh"]')).toBeNull();
-    expect(screen.getByText('管理工作人員帳號、登入驗證與安全稽核。')).toBeInTheDocument();
     expect(requests.some((request) => request.path.startsWith('/api/v1/jobs/'))).toBe(false);
 
     expect(requests.every((request) => request.method === 'GET')).toBe(true);

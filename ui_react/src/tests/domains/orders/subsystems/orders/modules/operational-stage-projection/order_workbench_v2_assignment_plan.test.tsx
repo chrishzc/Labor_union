@@ -112,6 +112,16 @@ describe('正式指派自動回讀與排班明細', () => {
     expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('2026-09-10、2026-09-11、2026-09-12、2026-09-13');
   });
 
+  it('歷史重啟的正式排班直接顯示已沿用原月嫂', async () => {
+    const plan = assignmentPlan();
+    mocks.getAssignmentPlan.mockResolvedValue({ ...plan, assignments: plan.assignments.slice(0, 1) });
+    mocks.queryPlan.mockRejectedValue(new ApiHttpError(404, 'resource_not_found', '找不到要求的資源'));
+    render(<OrderAssignmentPlanPanel caseNo="CASE-ASSIGNMENT-PLAN" historicalBinding />);
+
+    expect(await screen.findByText('已沿用原月嫂建立正式排班。')).toBeVisible();
+    expect(screen.queryByText(/尚無有效媒合方案/)).not.toBeInTheDocument();
+  });
+
   it('只使用既有 assignment-plan owner facts 顯示正式指派段與官方服務日', async () => {
     mocks.getAssignmentPlan.mockResolvedValue(assignmentPlan());
 

@@ -13,21 +13,22 @@
       "page_type": "navigation",
       "enabled": true,
       "title": "服務確認與身分導流",
-      "subtitle": "請確認您是否已於新竹市政府平台完成申請登記？",
+      "subtitle": "請選擇您的身分與登記狀態。",
       "submit_button": "繼續",
       "success_title": "",
       "success_description": "",
       "loading_text": "正在準備您的專屬通道...",
       "content": {
         "logo": "新竹市月子工會",
+        "navigation_layout": "two_step",
         "redirect_loading_text": "正在為您跳轉...",
         "load_error": "載入失敗，請嘗試重新整理。"
       },
       "actions": [
         {
           "id": "registered_city",
-          "label": "已申請市府平台",
-          "description": "我已在市府媒合服務平台完成登記，要核對客戶資料並繼續填寫工會需求調查表單。",
+          "label": "已在市府平台登記",
+          "description": "使用姓名與手機號碼核對資料。",
           "icon": "📝",
           "path": "/line-bind",
           "enabled": true,
@@ -35,7 +36,7 @@
         },
         {
           "id": "apply_city",
-          "label": "未申請市府平台",
+          "label": "尚未在市府平台登記",
           "description": "請先前往新竹市政府到宅月子媒合服務平台提出申請。",
           "icon": "🏛️",
           "path": "https://hsinchu-nanny.hccg.gov.tw/home",
@@ -43,13 +44,22 @@
           "order": 20
         },
         {
+          "id": "non_citizen_binding",
+          "label": "工會已建案，綁定 LINE",
+          "description": "使用建案時的姓名與手機號碼核對。",
+          "icon": "",
+          "path": "/line-bind?entry=existing_case",
+          "enabled": true,
+          "order": 21
+        },
+        {
           "id": "non_citizen_registration",
-          "label": "非市民服務申請",
-          "description": "填寫非市民服務需求，送工會核准建案。",
+          "label": "尚未申請",
+          "description": "填寫非市民服務需求申請表。",
           "icon": "",
           "path": "/line-non-citizen-registration",
           "enabled": true,
-          "order": 21
+          "order": 22
         }
       ],
       "fields": []

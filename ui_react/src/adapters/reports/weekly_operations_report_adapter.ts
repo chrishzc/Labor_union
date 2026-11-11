@@ -8,8 +8,15 @@ import { adaptSubsidyRow } from './subsidy_report_query_adapter';
 const REVIEW_LABELS: Record<WeeklyOperationsReportData['case_rows'][number]['review_result'], string> = {
   general_eligible: '一般符合',
   subsidized_eligible: '補助符合',
+  indigenous_eligible: '原住民符合',
   rejected_unpartitioned: '不符合（待分流）',
   pending: '審核中',
+};
+
+const PARTITION_KIND_LABELS: Record<WeeklyOperationsReportData['subsidy_partitions'][number]['citizen_kind'], string> = {
+  general: '一般市民',
+  subsidized: '補助市民',
+  indigenous: '原住民',
 };
 
 export function displayWeeklyMetric(value: number | null): string {
@@ -29,7 +36,7 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) 
     totalAmount: `NT$ ${partition.total_amount_ntd.toLocaleString()}`,
     rows: partition.rows.map((row) => ({
       ...adaptSubsidyRow(row),
-      annualIdentity: `(${row.application_roc_year ?? '—'})${partition.citizen_kind === 'general' ? '一般市民' : '補助市民'}`,
+      annualIdentity: `(${row.application_roc_year ?? '—'})${PARTITION_KIND_LABELS[partition.citizen_kind]}`,
       annualEntry: row.serial_number,
       notes: row.notes,
       reconciliationStatus: row.reconciliation_status || '結案',

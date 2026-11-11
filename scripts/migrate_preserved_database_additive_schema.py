@@ -379,6 +379,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
     "labor_union_2026_11_06_hcm_review_status_v1.json",
     "labor_union_2026_11_09_historical_accounting_corrections_v1.json",
+    "labor_union_2026_11_11_registry_save_receipts_v1.json",
+    "labor_union_2026_11_11_registry_bootstrap_reason_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2333,6 +2335,9 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        "1071_pending_order_terms_receipt_status.sql": {
+            "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')", "NO")},
+        },
         "1070_historical_order_terms_receipt_status.sql": {
             "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消')", "NO")},
         },
@@ -2601,7 +2606,12 @@ def _metadata_state_for_artifact(
                 and _normalize_check_contract(matches[0].get("check_clause", "")) == _normalize_check_contract(old):
             return "absent"
         return "drift"
-    if artifact in {"1062_order_reopen_reason_optional.sql", "1065_historical_order_reused_pairing_check.sql"}:
+    check_predecessors = {
+        "1062_order_reopen_reason_optional.sql": "123_order_reopen_workflow.sql",
+        "1065_historical_order_reused_pairing_check.sql": "194_historical_order_adoption.sql",
+        "1072_case_architecture_bootstrap_reason_optional.sql": "124_case_architecture_bootstrap.sql",
+    }
+    if artifact in check_predecessors:
         parent = {**descriptor, "checks": {}}
         parent_state = _artifact_metadata_state(snapshot, parent, artifact, defer_missing_triggers=defer_missing_triggers)
         if parent_state != "exact":
@@ -2616,9 +2626,7 @@ def _metadata_state_for_artifact(
         actual = _normalize_check_contract(matches[0].get("check_clause", ""))
         if actual == _normalize_check_contract(descriptor["checks"][key]):
             return "exact"
-        predecessor_part = ("123_order_reopen_workflow.sql" if artifact == "1062_order_reopen_reason_optional.sql"
-                            else "194_historical_order_adoption.sql")
-        predecessor = _canonical_artifact_descriptor(predecessor_part)["checks"][key]
+        predecessor = _canonical_artifact_descriptor(check_predecessors[artifact])["checks"][key]
         return "absent" if actual == _normalize_check_contract(predecessor) else "drift"
     # Current fresh databases omit retired structures; deployed historical
     # structures may remain. Neither case schedules DDL or weakens contracts
@@ -3932,9 +3940,19 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
-        historical_terms = ROOT / "db/schema_parts/1070_historical_order_terms_receipt_status.sql"
-        if normalized.startswith('alter table order_terms_apply_receipts modify column lifecycle_status ') and normalized.rstrip(';') == re.sub(r'\s+', ' ', split_sql(historical_terms.read_text(encoding='utf-8'))[0].strip()).casefold().rstrip(';'):
-            return 'alter_add_only'
+        if normalized.startswith((
+            "alter table order_terms_apply_receipts modify column lifecycle_status ",
+            "alter table case_architecture_bootstrap_events ",
+        )):
+            for artifact in (
+                "1070_historical_order_terms_receipt_status.sql",
+                "1071_pending_order_terms_receipt_status.sql",
+                "1072_case_architecture_bootstrap_reason_optional.sql",
+            ):
+                canonical = ROOT / "db/schema_parts" / artifact
+                (sql,) = split_sql(canonical.read_text(encoding="utf-8"))
+                if normalized.rstrip(";") == re.sub(r"\s+", " ", sql.strip()).casefold().rstrip(";"):
+                    return "alter_add_only"
         reused_pairing = ROOT / "db/schema_parts/1065_historical_order_reused_pairing_check.sql"
         if normalized.startswith("alter table historical_order_pairing_evidence ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reused_pairing.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
@@ -5674,6 +5692,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             item.name == "1065_historical_order_reused_pairing_check.sql" for item in SCHEMA_PARTS
         ):
             path = ROOT / "db/schema_parts/194_historical_order_adoption.sql"
+    if path is None and part_name == "124_case_architecture_bootstrap.sql" and any(
+        item.name == "1072_case_architecture_bootstrap_reason_optional.sql" for item in SCHEMA_PARTS
+    ):
+        path = ROOT / "db/schema_parts/124_case_architecture_bootstrap.sql"
     if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
@@ -5798,6 +5820,18 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["matching_response_events"] = {
             "reason": _column_contract("varchar(500)", "YES"),
         }
+    if part_name == "1072_case_architecture_bootstrap_reason_optional.sql":
+        table = "case_architecture_bootstrap_events"
+        check = "chk_case_architecture_bootstrap_text"
+        descriptor["parent_columns"][table] = {
+            "source_identity_status": _column_contract("varchar(100)", "NO"),
+            "actor": _column_contract("varchar(100)", "NO"),
+            "reason": _column_contract("varchar(500)", "NO"),
+            "correlation_id": _column_contract("varchar(191)", "NO"),
+        }
+        opening = re.search(r"ADD\s+CONSTRAINT\s+chk_case_architecture_bootstrap_text\s+CHECK\s*\(", sql, re.I).end() - 1
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][(table, check)] = _normalize_sql_contract(clause)
     if part_name == "1062_order_reopen_reason_optional.sql":
         descriptor["parent_columns"]["order_reopen_events"] = {
             "idempotency_key": _column_contract("varchar(191)", "NO"),
@@ -6310,6 +6344,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
+    if part_name == "1071_pending_order_terms_receipt_status.sql":
+        descriptor["parent_columns"]["order_terms_apply_receipts"] = {
+            "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件')", "NO"),
+        }
     if part_name == "1070_historical_order_terms_receipt_status.sql":
         descriptor["parent_columns"]["order_terms_apply_receipts"] = {
             "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')", "NO"),
@@ -6704,6 +6742,8 @@ def _release_descriptor_metadata_state(
         "1058_client_refund_overage_receipt.sql",
         "1065_historical_order_reused_pairing_check.sql",
         "1070_historical_order_terms_receipt_status.sql",
+        "1071_pending_order_terms_receipt_status.sql",
+        "1072_case_architecture_bootstrap_reason_optional.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6783,7 +6823,7 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
-    if part_name == "1065_historical_order_reused_pairing_check.sql":
+    if part_name in {"1065_historical_order_reused_pairing_check.sql", "1072_case_architecture_bootstrap_reason_optional.sql"}:
         return _metadata_state_for_artifact(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
     predecessor_state = _modified_parent_predecessor_absent_state(
         snapshot,
@@ -7339,7 +7379,7 @@ def _artifact_metadata_state(
                 _normalize_column_type_contract(row["column_type"])
                 == expected["column_type"]
             )
-            successor_type = _matching_coordination_successor_column_type(
+            successor_type = _allowed_successor_column_type(
                 part_name, table, name
             )
             successor_type_matches = (
@@ -7665,10 +7705,17 @@ def _allowed_later_artifact_columns(
     return set()
 
 
-def _matching_coordination_successor_column_type(
+def _allowed_successor_column_type(
     part_name: str, table: str, column: str,
 ) -> str | None:
-    """Return the only published successor type allowed on the 1003 parent table."""
+    """Return an exact type from a declared successor of the owned column."""
+    if (
+        part_name == "1070_historical_order_terms_receipt_status.sql"
+        and table == "order_terms_apply_receipts"
+        and column == "lifecycle_status"
+    ):
+        successor = _canonical_artifact_descriptor("1071_pending_order_terms_receipt_status.sql")
+        return successor["parent_columns"][table][column]["column_type"]
     if part_name != "1003_matching_coordination_successor.sql" or table != "matching_coordination_outbox":
         return None
     successor_types = {
@@ -7825,6 +7872,11 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == "124_case_architecture_bootstrap.sql" and any(
+        path.name == "1072_case_architecture_bootstrap_reason_optional.sql" for path in SCHEMA_PARTS
+    ):
+        successor = _canonical_artifact_descriptor("1072_case_architecture_bootstrap_reason_optional.sql")
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "194_historical_order_adoption.sql" and any(path.name == "1065_historical_order_reused_pairing_check.sql" for path in SCHEMA_PARTS):
         successor = _canonical_artifact_descriptor("1065_historical_order_reused_pairing_check.sql")
         return {key: (clause,) for key, clause in successor["checks"].items()}

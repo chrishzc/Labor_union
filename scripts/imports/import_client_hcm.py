@@ -576,7 +576,7 @@ def _requires_non_citizen_liff(record, cursor=None):
     identity = record.get("identity_status")
     if identity == "非市民" or re.fullmatch(r"A[0-9]{6}", str(record.get("case_no") or "")):
         return True
-    if cursor is not None and identity and identity not in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶"}:
+    if cursor is not None and identity and identity not in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶", "原住民", "原民", "原住民市民"}:
         from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
         return initial_identity_rule(cursor, str(identity), record.get("case_no")) == "non_citizen"
     return False

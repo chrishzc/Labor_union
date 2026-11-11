@@ -41,6 +41,7 @@ interface OrderServiceDatesPanelProps {
   onOpenArrangement?: () => void;
   onOpenDates?: () => void;
   onArrangementPendingChange?: (pending: boolean) => void;
+  onBoundStaffChange?: (staff: ServiceDateConfirmationQueryView['bound_staff']) => void;
   completedCorrection?: boolean;
   coordinatedStart?: boolean;
 }
@@ -100,7 +101,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = (props) =
   ? <OrderOfficialDateCorrectionPanel caseNo={props.caseNo} revision={props.projectionRevision} view={props.view} onOpenArrangement={props.onOpenArrangement} onOpenDates={props.onOpenDates} onObserved={props.onObserved} onBusyChange={props.onBusyChange} />
   : <OrderPreCompletionServiceDatesPanel {...props} />;
 
-const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange, coordinatedStart = false }) => {
+const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange, onBoundStaffChange, coordinatedStart = false }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
@@ -163,6 +164,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
   useEffect(() => { onArrangementPendingChange?.(arrangementPending); }, [arrangementPending, onArrangementPendingChange]);
+  useEffect(() => { onBoundStaffChange?.(queryView?.bound_staff ?? []); }, [queryView, onBoundStaffChange]);
   useEffect(() => {
     if (success?.startsWith('服務日期已確認並回讀')) {
       (arrangementPending && onOpenArrangement ? nextStepElement.current : readbackElement.current)?.focus();
@@ -278,7 +280,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       }
       let dates = serviceDates.current_dates;
       let calculated: SchedulePrecisionResult | null = null;
-      let modeValue: ServiceMode | null = calendarDetail.service_mode;
+      const modeValue: ServiceMode | null = calendarDetail.service_mode
+        ?? (serviceDates.bound_staff.length === 1 ? '休周日' : null);
       let basis: { date: string; confirmed: boolean } | null = null;
       let nextStartPreview: ActualStartPreview | null = null;
       let range = serviceDates.selectable_dates;
@@ -286,7 +289,6 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (mode === 'calculate') {
         const basisDate = inputDate ?? currentStart.current_actual_start_date ?? currentStart.planned_start_date;
         basis = { date: basisDate, confirmed: basisDate === currentStart.current_actual_start_date };
-        modeValue = calendarDetail.service_mode;
         if (weekdayOverride === null && modeValue === null) {
           throw new Error('請對照原始服務方式，人工選定休假星期；無固定週休請點選「無固定週休」。');
         }
@@ -641,7 +643,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
 
 
-  if (coordinatedStart && queryView && !arrangementPending && historicalArrangementCase.current!==caseNo) return (
+  if (coordinatedStart && queryView && queryView.bound_staff.length === 0
+    && !arrangementPending && historicalArrangementCase.current !== caseNo) return (
     <section aria-label="服務日期協調結果">
       <p>客戶與月嫂在原服務群組協調，由月嫂提交約定開始日；通過檢查即自動更新日期、排班及第一期款期限。</p>
       {queryView.current_dates.length>0 ? <details><summary>查看正式服務日期</summary><p>{queryView.current_dates.join('、')}</p></details> : <p>等待月嫂回報協調結果。</p>}

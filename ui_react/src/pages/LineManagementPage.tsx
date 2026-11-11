@@ -1,9 +1,9 @@
-import { ManagementPageHeader } from '../components/ManagementPageHeader';
-import { useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: LineManagementPage.tsx
  * Description: 整合 LINE typed Query／Preview／Apply 工作區，所有外送副作用仍由後端 durable task 執行。
  */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
+import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   Baby,
@@ -11,6 +11,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   Eraser,
+  FileBarChart,
   FilePenLine,
   FileText,
   Headphones,
@@ -102,7 +103,6 @@ import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOpera
 import { LineMessageFlow } from '../components/LineMessageFlow';
 import { LineNotificationWorkbench, PAYMENT_REMINDER_MESSAGE_IDS } from '../components/LineNotificationWorkbench';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
-import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import {
   lineRichMenuPublicationClient,
@@ -117,7 +117,6 @@ import type {
   RichMenuDraftDefinition,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSaveActions';
-import type { ServiceDayLogReminderClient } from '../api/line_order_groups/service_day_log_reminder_client';
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
@@ -154,14 +153,11 @@ interface LineManagementPageProps {
   escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
   safeReviewLink?: SafeReviewLinkClient;
-  onboardingClient?: LineOnboardingClient;
   notificationTemplateClient?: LineNotificationTemplateClient;
   /** Render only the safety and human-escalation workspace inside the canonical Group & Security page. */
   runtimeOnly?: boolean;
   /** 此頁面承載的責任範圍；預設為客服受理。 */
   scope?: LineScope;
-  /** 案件群組明細使用的服務日誌提醒 client，測試可替換。 */
-  serviceDayLogReminder?: ServiceDayLogReminderClient;
 }
 
 type QueryStatus = 'idle' | 'loading' | 'loaded' | 'error';
@@ -279,7 +275,6 @@ const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
   'target:staff_order_search': '/line-staff-orders',
   'target:staff_schedule': '/line-staff-schedule',
   'target:staff_leave_apply': '/line-staff-schedule',
-  'target:staff_baby_log': '/line-staff-baby-log',
   'target:staff_verification': '/line-identity?target=staff_verification',
   'target:staff_payout': '/line-staff-payout',
   'target:order_update': '/line-order-update',
@@ -312,7 +307,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   lineIdentity = lineIdentityClient,
   lineConfiguration = lineConfigurationQueryClient,
   notificationTemplateClient,
-  onboardingClient,
   richMenuDraft = lineRichMenuDraftClient,
   richMenuPublication = lineRichMenuPublicationClient,
   richMenuPublicationPollIntervalMs = 1500,
@@ -321,7 +315,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   safeReviewLink = safeReviewLinkClient,
   runtimeOnly = false,
   scope = 'service',
-  serviceDayLogReminder,
 }) => {
   const view = SCOPE_VIEWS[scope];
   const initialHashParams = useRef(currentHashParams()).current;
@@ -981,20 +974,22 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     {activeMenu.buttons.map((btn) => {
                       const label = btn.label;
                       const act = getTypedButtonAction(btn);
+                      const btnAccent = activeMenuDefinition?.buttons.find((item) => item.id === btn.id)?.background_color;
                       let Icon = MapPin;
-                      if (label.includes('登記')) Icon = FileText;
-                      else if (label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
+                      if (label.includes('營運') || label.includes('摘要') || label.includes('報表')) Icon = FileBarChart;
+                      else if (label.includes('客服') || label.includes('諮詢') || label.includes('聯絡') || label.includes('專人')) Icon = Headphones;
+                      else if (label.includes('改') || label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
+                      else if (label.includes('月嫂')) Icon = Baby;
+                      else if (label.includes('預約') || label.includes('登記')) Icon = FileText;
                       else if (label.includes('說明') || label.includes('FAQ') || label.includes('常見問答') || label.includes('問答')) Icon = Info;
                       else if (label.includes('AI') || label.includes('智慧問答') || label.includes('助理')) Icon = Sparkles;
-                      else if (label.includes('客服') || label.includes('諮詢')) Icon = Headphones;
-                      else if (label.includes('訂單')) Icon = PackageSearch;
-                      else if (label.includes('排班') || label.includes('日曆') || label.includes('請假')) Icon = CalendarDays;
+                      else if (label.includes('案件') || label.includes('訂單')) Icon = PackageSearch;
+                      else if (label.includes('班表') || label.includes('排班') || label.includes('日曆') || label.includes('請假')) Icon = CalendarDays;
                       else if (label.includes('薪資') || label.includes('請款')) Icon = WalletCards;
                       else if (label.includes('契約') || label.includes('合約')) Icon = FileText;
                       else if (label.includes('評價') || label.includes('滿意度')) Icon = Star;
-                      else if (label.includes('審核')) Icon = ClipboardCheck;
+                      else if (label.includes('待辦') || label.includes('審核')) Icon = ClipboardCheck;
                       else if (label.includes('一般用戶')) Icon = Users;
-                      else if (label.includes('月嫂專區')) Icon = Baby;
                       else if (label.includes('工會管理')) Icon = ShieldCheck;
 
                       return (
@@ -1008,6 +1003,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                             top: `${activeMenu.height > 0 ? (btn.bounds.y / activeMenu.height) * 100 : 0}%`,
                             width: `${activeMenu.width > 0 ? (btn.bounds.width / activeMenu.width) * 100 : 0}%`,
                             height: `${activeMenu.height > 0 ? (btn.bounds.height / activeMenu.height) * 100 : 0}%`,
+                            ...(btnAccent ? { '--richmenu-btn-accent': btnAccent } as React.CSSProperties : {}),
                           }}
                           onClick={() => {
                             if (act.type === 'URI') {
@@ -1248,13 +1244,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
       {activeTab === 'push_queue' && (notificationMessageId && PAYMENT_REMINDER_MESSAGE_IDS.includes(notificationMessageId)
         ? <p role="status">正在開啟帳務警示的提醒內容…</p>
-        : <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient} onboarding={onboardingClient}
+        : <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient}
           search={notificationRuleSearch} enabled={notificationRuleEnabled} onSearchChange={setNotificationRuleSearch} onEnabledChange={setNotificationRuleEnabled}
           selectedEntryId={notificationMessageId} onSelectedEntryChange={setNotificationMessageId} onReturnToFlow={() => { window.location.hash = '#line-management?tab=message_flow'; }}
           onOpenPaymentMessage={id=>{window.location.hash='#finance?'+new URLSearchParams({tab:'accounting-warnings',view:'reminder-content',message:id});}} />)}
 
       {activeTab === 'order_groups' && <LineOrderGroupWorkbench
-        reminderClient={serviceDayLogReminder}
         page={orderGroupPageNumber}
         search={orderGroupSearch}
         status={orderGroupStatus}

@@ -32,7 +32,7 @@
 - `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。建置以 `manualChunks` 切分穩定第三方套件（`vendor-react`、`vendor-icons`、`vendor-utils`），並由 `ui_react/src/App.tsx` 對次要／低頻管理頁面採 `React.lazy`＋`Suspense` 動態分塊載入，保留每日核心工作台同步載入。
 - 已登入的案件、客戶、財務、帳務通知設定與 LINE 三個工作頁（`line-management`、`line-notifications`、`line-interface`）掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。
-- `document/架構重整/01_規格基線/25_Access_Control正式規格.md` — session/auth boundary。
+- `document/架構重整/01_規格基線/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md` — session/auth boundary。
 
 ## Verification
 - layout_status: `custom_current`

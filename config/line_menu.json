@@ -8,7 +8,7 @@
       "enabled": true,
       "selected": true,
       "set_as_default": true,
-      "chat_bar_text": "訪客選單",
+      "chat_bar_text": "服務選單",
       "size": {
         "width": 2500,
         "height": 1686
@@ -22,7 +22,7 @@
       "buttons": [
         {
           "id": "client_service",
-          "label": "客戶登記與綁定",
+          "label": "預約與登記",
           "text_color": "#FFFFFF",
           "background_color": "#1E3A8A",
           "bounds": {
@@ -42,7 +42,7 @@
         },
         {
           "id": "staff_verification",
-          "label": "月嫂身分綁定",
+          "label": "月嫂認證",
           "text_color": "#FFFFFF",
           "background_color": "#EA580C",
           "bounds": {
@@ -62,7 +62,7 @@
         },
         {
           "id": "ai_assistant",
-          "label": "AI 智慧問答",
+          "label": "常見問答",
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
           "bounds": {
@@ -82,7 +82,7 @@
         },
         {
           "id": "human_contact",
-          "label": "聯絡專人服務",
+          "label": "聯絡專人",
           "text_color": "#FFFFFF",
           "background_color": "#10B981",
           "bounds": {
@@ -95,7 +95,7 @@
             "type": "postback",
             "text": null,
             "uri": null,
-            "displayText": "聯絡專人服務",
+            "displayText": "聯絡專人",
             "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
@@ -123,7 +123,7 @@
       "buttons": [
         {
           "id": "profile_update",
-          "label": "修改登記資料",
+          "label": "改個人資料",
           "text_color": "#FFFFFF",
           "background_color": "#2563EB",
           "bounds": {
@@ -143,7 +143,7 @@
         },
         {
           "id": "order_update",
-          "label": "修改訂單資訊",
+          "label": "改訂單內容",
           "text_color": "#FFFFFF",
           "background_color": "#0D9488",
           "bounds": {
@@ -163,7 +163,7 @@
         },
         {
           "id": "customer_ai_assistant",
-          "label": "AI 智慧問答",
+          "label": "常見問答",
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
           "bounds": {
@@ -183,7 +183,7 @@
         },
         {
           "id": "customer_human_contact",
-          "label": "聯絡專人服務",
+          "label": "聯絡專人",
           "text_color": "#FFFFFF",
           "background_color": "#10B981",
           "bounds": {
@@ -196,7 +196,7 @@
             "type": "postback",
             "text": null,
             "uri": null,
-            "displayText": "聯絡專人服務",
+            "displayText": "聯絡專人",
             "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
@@ -224,7 +224,7 @@
       "buttons": [
         {
           "id": "order_query",
-          "label": "訂單查詢",
+          "label": "我的案件",
           "text_color": "#FFFFFF",
           "background_color": "#BE123C",
           "bounds": {
@@ -244,7 +244,7 @@
         },
         {
           "id": "schedule_query",
-          "label": "排班資訊與請假",
+          "label": "班表與請假",
           "text_color": "#FFFFFF",
           "background_color": "#F43F5E",
           "bounds": {
@@ -263,10 +263,10 @@
           "border_radius": 54
         },
         {
-          "id": "baby_log",
-          "label": "寶寶日誌",
+          "id": "staff_human_contact",
+          "label": "聯絡工會人員",
           "text_color": "#FFFFFF",
-          "background_color": "#D97706",
+          "background_color": "#10B981",
           "bounds": {
             "x": 0,
             "y": 843,
@@ -274,17 +274,17 @@
             "height": 843
           },
           "action": {
-            "type": "uri",
+            "type": "postback",
             "text": null,
-            "uri": "?target=staff_baby_log",
-            "uri_source": "liff",
-            "data": null
+            "uri": null,
+            "displayText": "聯絡工會人員",
+            "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
         },
         {
           "id": "payout_query",
-          "label": "薪資請款明細",
+          "label": "薪資明細",
           "text_color": "#FFFFFF",
           "background_color": "#059669",
           "bounds": {

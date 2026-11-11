@@ -16,6 +16,7 @@ from domains.orders.reopen import (
     ReopenFinancialEventKind,
     ReopenOrderFacts,
 )
+from subsystems.orders.cancellation_workflow import ORDER_CANCELLATION_SOURCE_EVENT_FAMILY
 from subsystems.orders.order_lifecycle_command_envelope import (
     lock_order_lifecycle_command_envelope,
 )
@@ -36,6 +37,10 @@ from subsystems.orders.reopen_workflow import (
 from subsystems.orders.terms_workflow import CommandClaimState
 
 _COMMAND_FAMILY = "orders_reopen"
+_CANCELLATION_FINANCE_LINEAGE_SQL = (
+    f"REGEXP CONCAT('^({ORDER_CANCELLATION_SOURCE_EVENT_FAMILY}|order-cancellation):',"
+    "%s,':client-finance:') "
+)
 
 
 class MySqlOrderReopenRepository:
@@ -246,8 +251,8 @@ def _client_obligation_identities(cursor, case_no, cancellation):
     cursor.execute(
         "SELECT obligation_identity FROM client_obligation_events "
         "WHERE case_no=%s AND source_event_identity "
-        "LIKE CONCAT('order-cancellation:',%s,':client-finance:%%') "
-        "ORDER BY obligation_identity FOR UPDATE",
+        + _CANCELLATION_FINANCE_LINEAGE_SQL
+        + "ORDER BY obligation_identity FOR UPDATE",
         (case_no, int(cancellation["cancellation_event_id"])),
     )
     return _identity_tuple(cursor.fetchall())
@@ -668,8 +673,8 @@ _CLIENT_FINANCIAL_EVENT_SQL = (
     "ON ledger.id=allocation.ledger_entry_id "
     "WHERE obligation_event.case_no=%s "
     "AND obligation_event.source_event_identity "
-    "LIKE CONCAT('order-cancellation:',%s,':client-finance:%%') "
-    "AND ledger.created_at >= %s ORDER BY ledger.id"
+    + _CANCELLATION_FINANCE_LINEAGE_SQL
+    + "AND ledger.created_at >= %s ORDER BY ledger.id"
 )
 
 _STAFF_FINANCIAL_EVENT_SQL = (

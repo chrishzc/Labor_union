@@ -3,7 +3,7 @@ import { useUnsavedDraft } from '../components/UnsavedChanges';
 import { useSaveValidation } from '../components/useSaveValidation';
 /**
  * File: AccountManagementPage.tsx
- * Description: 帳號中心三個唯讀查詢區塊與明確停用的安全操作槽位。
+ * Description: 帳號清冊、安全操作與驗證器動態碼說明。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './AccountManagementPage.css';
@@ -11,19 +11,11 @@ import { Drawer } from '../components/Drawer';
 import { accountDirectoryClient } from '../api/access/account_directory_client';
 import { accountCenterClient } from '../api/access/account_center_client';
 import type { AccountMutationReceipt } from '../api/access/account_center_schemas';
-import { auditQueryClient, type AuditQueryParams } from '../api/access/audit_query_client';
 import {
   adaptAccountDirectory,
   type AccountDirectoryRow,
 } from '../adapters/access/account_query_adapter';
-import {
-  adaptAuditDetail,
-  adaptAuditPage,
-  type AuditDetailView,
-  type AuditPageView,
-} from '../adapters/access/audit_query_adapter';
-
-type Tab = 'users' | 'totp' | 'audit';
+type Tab = 'users' | 'totp';
 type AccountAction = 'enabled' | 'password' | 'mfa' | 'sessions';
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
@@ -34,8 +26,6 @@ interface QueryState<T> {
 }
 
 const initialUsersState: QueryState<AccountDirectoryRow[]> = { status: 'idle', data: null, error: null };
-const initialAuditState: QueryState<AuditPageView> = { status: 'idle', data: null, error: null };
-const initialAuditDetailState: QueryState<AuditDetailView> = { status: 'idle', data: null, error: null };
 const initialCommandState: QueryState<AccountMutationReceipt> = { status: 'idle', data: null, error: null };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -64,8 +54,6 @@ function QueryError({ message, onRetry }: { message: string; onRetry: () => void
 export const AccountManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('users');
   const [usersState, setUsersState] = useState(initialUsersState);
-  const [auditState, setAuditState] = useState(initialAuditState);
-  const [auditDetailState, setAuditDetailState] = useState(initialAuditDetailState);
   const [commandState, setCommandState] = useState(initialCommandState);
   const [commandTarget, setCommandTarget] = useState<'create' | { user: AccountDirectoryRow; action: AccountAction } | null>(null);
   const [commandReason, setCommandReason] = useState('');
@@ -79,17 +67,9 @@ export const AccountManagementPage: React.FC = () => {
   const [createUsername, setCreateUsername] = useState('');
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  const [auditLoaded, setAuditLoaded] = useState(false);
-  const [auditPage, setAuditPage] = useState(1);
-  const [auditFilterInput, setAuditFilterInput] = useState('');
 
   const usersGeneration = useRef(0);
-  const auditGeneration = useRef(0);
-  const auditDetailGeneration = useRef(0);
   const usersController = useRef<AbortController | null>(null);
-  const auditController = useRef<AbortController | null>(null);
-  const auditDetailController = useRef<AbortController | null>(null);
-  const auditActionPrefixRef = useRef('');
   const commandKeys = useRef(new Map<string, string>());
   const openCommand = (target: NonNullable<typeof commandTarget>) => {
     setCommandReason('');
@@ -168,45 +148,6 @@ export const AccountManagementPage: React.FC = () => {
     });
   }, [commandPassword, commandReason, runAccountCommand]);
 
-  const loadAudit = useCallback(async (page: number, actionPrefix = auditActionPrefixRef.current) => {
-    const generation = ++auditGeneration.current;
-    auditController.current?.abort();
-    auditDetailController.current?.abort();
-    auditDetailGeneration.current += 1;
-    setAuditDetailState(initialAuditDetailState);
-    const controller = new AbortController();
-    auditController.current = controller;
-    setAuditState((current) => ({ ...current, status: 'loading', error: null }));
-    const params: AuditQueryParams = { page, pageSize: 25, actionPrefix: actionPrefix.trim() || undefined };
-    try {
-      const result = await auditQueryClient.query(params, { signal: controller.signal });
-      if (generation !== auditGeneration.current) return;
-      const pageView = adaptAuditPage(result);
-      setAuditPage(pageView.page);
-      setAuditLoaded(true);
-      setAuditState({ status: pageView.items.length > 0 ? 'ready' : 'empty', data: pageView, error: null });
-    } catch (error) {
-      if (generation !== auditGeneration.current || isAbortError(error)) return;
-      setAuditState((current) => ({ ...current, status: 'error', error: errorMessage(error, '安全稽核紀錄暫時無法取得，請稍後重試。') }));
-    }
-  }, []);
-
-  const loadAuditDetail = useCallback(async (auditId: number) => {
-    const generation = ++auditDetailGeneration.current;
-    auditDetailController.current?.abort();
-    const controller = new AbortController();
-    auditDetailController.current = controller;
-    setAuditDetailState({ status: 'loading', data: null, error: null });
-    try {
-      const result = await auditQueryClient.detail(auditId, { signal: controller.signal });
-      if (generation !== auditDetailGeneration.current) return;
-      setAuditDetailState({ status: 'ready', data: adaptAuditDetail(result), error: null });
-    } catch (error) {
-      if (generation !== auditDetailGeneration.current || isAbortError(error)) return;
-      setAuditDetailState({ status: 'error', data: null, error: errorMessage(error, '安全稽核詳情暫時無法取得，請稍後重試。') });
-    }
-  }, []);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadUsers();
@@ -217,22 +158,13 @@ export const AccountManagementPage: React.FC = () => {
     };
   }, [loadUsers]);
 
-  useEffect(() => {
-    if (activeTab === 'audit' && !auditLoaded) void loadAudit(1);
-    return () => {
-      auditController.current?.abort();
-      auditDetailController.current?.abort();
-    };
-  }, [activeTab, auditLoaded, loadAudit]);
-
   const userRows = usersState.data ?? [];
-  const auditPageView = auditState.data;
   useUnsavedDraft('帳號權限', { '帳號': createUsername, '顯示名稱': createDisplayName, '原因': commandReason, '新密碼已輸入（不顯示內容）': !!createPassword || !!commandPassword }, { enabled: !!commandTarget, busy: commandState.status === 'loading', resetKey: commandTarget });
 
 
   return (
     <div className="account-page-container" data-surface-id="account.page">
-      <ManagementPageHeader className="account-page-header" title="👤 系統帳號與安全管理" description="管理工作人員帳號、登入驗證與安全稽核。">
+      <ManagementPageHeader className="account-page-header" title="👤 系統帳號與安全管理" description="管理工作人員帳號與登入驗證。">
         <button
           type="button"
           className="account-primary-btn"
@@ -265,16 +197,6 @@ export const AccountManagementPage: React.FC = () => {
           onClick={() => setActiveTab('totp')}
         >
           📱 2. 驗證器動態碼（說明）
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-surface-id="account.tab.audit"
-          aria-selected={activeTab === 'audit'}
-          className={`account-tab-btn ${activeTab === 'audit' ? 'active' : ''}`}
-          onClick={() => setActiveTab('audit')}
-        >
-          🛡️ 3. 安全操作與登入稽核 {auditPageView ? `(${auditPageView.total})` : ''}
         </button>
       </div>
 
@@ -469,143 +391,6 @@ export const AccountManagementPage: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'audit' && (
-        <section className="account-table-container" aria-label="遮罩稽核清單" data-surface-id="account.audit.table">
-          <div className="account-table-toolbar">
-            <div>
-              <h3>🛡️ 安全操作與登入稽核</h3>
-              <p>查看已去敏的操作人員、影響對象、來源位置、執行結果與安全操作詳情。</p>
-            </div>
-            <button
-              type="button"
-              className="account-secondary-btn"
-              data-control-id="account.audit.refresh"
-              onClick={() => void loadAudit(auditPage)}
-              disabled={auditState.status === 'loading'}
-            >
-              重新整理
-            </button>
-          </div>
-          <div className="account-filter-row">
-            <label htmlFor="account-audit-filter">動作前綴</label>
-            <input
-              id="account-audit-filter"
-              data-control-id="account.audit.filter"
-              value={auditFilterInput}
-              onChange={(event) => setAuditFilterInput(event.target.value)}
-              maxLength={100}
-              placeholder="例如 admin.login"
-            />
-            <button
-              type="button"
-              className="account-secondary-btn"
-              onClick={() => { auditActionPrefixRef.current = auditFilterInput.trim(); void loadAudit(1, auditFilterInput); }}
-              disabled={auditState.status === 'loading'}
-            >
-              套用篩選
-            </button>
-          </div>
-          {auditState.status === 'loading' && <div className="account-query-state">載入遮罩稽核清單中…</div>}
-          {auditState.status === 'error' && (
-            <div data-surface-id="account.audit.error">
-              <QueryError message={auditState.error ?? '遮罩稽核查詢失敗。'} onRetry={() => void loadAudit(auditPage)} />
-            </div>
-          )}
-          {auditState.status === 'empty' && (
-            <div className="account-query-state" data-surface-id="account.audit.empty">
-              目前沒有符合條件的安全稽核紀錄。
-            </div>
-          )}
-          {auditState.status === 'ready' && auditPageView && (
-            <>
-              <table className="account-data-table">
-                <thead>
-                  <tr>
-                    <th>審計編號</th>
-                    <th>事件時間</th>
-                    <th>操作分類</th>
-                    <th>操作人員</th>
-                    <th>目標</th>
-                    <th>來源 IP</th>
-                    <th>執行結果</th>
-                    <th>操作詳情</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditPageView.items.map((entry) => (
-                    <tr key={entry.auditId} data-surface-id="account.audit.row">
-                      <td><code>{entry.auditId}</code></td>
-                      <td>{entry.occurredAt}</td>
-                      <td><span className="account-action-pill">{entry.actionFamily}</span></td>
-                      <td>{entry.actorLabel ?? '—'}</td>
-                      <td>{entry.targetLabel ?? '—'}</td>
-                      <td><code>{entry.ipAddress ?? '—'}</code></td>
-                      <td><span className="account-outcome-pill">{entry.outcome}</span></td>
-                      <td>
-                        <button
-                          type="button"
-                          className="account-secondary-btn"
-                          data-control-id="account.audit.detail"
-                          onClick={() => void loadAuditDetail(entry.auditId)}
-                          disabled={auditDetailState.status === 'loading'}
-                        >
-                          查看
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="account-pagination" data-surface-id="account.audit.pagination">
-                <button
-                  type="button"
-                  onClick={() => void loadAudit(auditPageView.page - 1)}
-                  disabled={auditPageView.page <= 1}
-                >
-                  上一頁
-                </button>
-                <span>第 {auditPageView.page} / {auditPageView.totalPages} 頁（共 {auditPageView.total} 筆）</span>
-                <button
-                  type="button"
-                  onClick={() => void loadAudit(auditPageView.page + 1)}
-                  disabled={auditPageView.page >= auditPageView.totalPages}
-                >
-                  下一頁
-                </button>
-              </div>
-            </>
-          )}
-          <Drawer isOpen={auditDetailState.status !== 'idle'} title="安全稽核明細" closeLabel="關閉稽核明細" onClose={() => { auditDetailController.current?.abort(); auditDetailGeneration.current += 1; setAuditDetailState(initialAuditDetailState); }}>
-          {auditDetailState.status === 'loading' && (
-            <div className="account-query-state" data-surface-id="account.audit.unavailable">
-              載入遮罩明細中…
-            </div>
-          )}
-          {auditDetailState.status === 'error' && (
-            <div data-surface-id="account.audit.unavailable" role="alert">
-              {auditDetailState.error ?? '遮罩明細查詢失敗。'}
-            </div>
-          )}
-          {auditDetailState.status === 'ready' && auditDetailState.data && (
-            <aside className="account-query-panel" aria-label="遮罩稽核明細">
-              <strong>稽核 #{auditDetailState.data.auditId}</strong>
-              {auditDetailState.data.details.length === 0 ? (
-                <span>這筆紀錄沒有其他可顯示的安全詳情。</span>
-              ) : (
-                <dl>
-                  {auditDetailState.data.details.map((field) => (
-                    <React.Fragment key={field.key}>
-                      <dt>{field.key}</dt>
-                      <dd>{field.value}</dd>
-                    </React.Fragment>
-                  ))}
-                </dl>
-              )}
-            </aside>
-          )}
-          </Drawer>
-        </section>
-      )}
     </div>
   );
 };

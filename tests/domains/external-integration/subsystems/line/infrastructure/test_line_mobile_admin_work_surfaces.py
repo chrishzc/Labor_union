@@ -53,36 +53,21 @@ def test_mobile_payment_reminders_delegate_exact_period_and_preserve_conflicts(m
 def test_mobile_log_reminders_share_owner_gap_and_receipt_without_exposing_liff_token(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
     from subsystems.access.authentication_session import AdminPrincipal
     from api.dependencies.admin_auth import admin_actor_context
-    from subsystems.line.service_day_log_reminders import ServiceDayLogReminder
-    from subsystems.scheduling.service_day_log_workflow import ServiceDayLogGap
     from subsystems.line.capabilities import LineCapability
-    principal=AdminPrincipal(7,'union-test','合成人員','admin'); capabilities=[]; calls=[]
+    principal=AdminPrincipal(7,'union-test','合成人員','admin'); capabilities=[]
     monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda token,capability:(capabilities.append(capability) or principal,admin_actor_context(principal)))
-    gap=ServiceDayLogGap('SYNTHETIC',9,date(2026,10,1),date(2026,10,4),4)
-    class Application:
-        def list(self,page,size):
-            calls.append(('query',page,size));return ((ServiceDayLogReminder(gap,'合成案件群組',True),),1)
-        def send(self,command):
-            assert command.case_no==gap.case_no and command.staff_id==gap.staff_id
-            assert command.missing_from==gap.missing_from and command.missing_through==gap.missing_through
-            assert command.idempotency_key=='same-operation'
-            calls.append(('send',));return SimpleNamespace(task_id=SimpleNamespace(value=42),status=SimpleNamespace(value='pending'))
-    app=FastAPI();app.include_router(line_mobile_admin.router);app.dependency_overrides[get_service_day_log_reminders]=lambda:Application()
+    app=FastAPI();app.include_router(line_mobile_admin.router)
     with TestClient(app) as client:
         response=client.post('/api/v1/line/mobile-admin/log-reminders',json={'line_id_token':'synthetic-liff'})
-        assert response.status_code==200 and response.json()['data']['items'][0]['consecutive_days']==4
-        assert calls==[('query',1,25)]
-        item=response.json()['data']['items'][0]
-        response=client.post('/api/v1/line/mobile-admin/log-reminders/send',json={key:item[key] for key in ('case_no','staff_id','missing_from','missing_through')}|{'line_id_token':'synthetic-liff','idempotency_key':'same-operation'})
-        assert response.status_code==200 and response.json()['data']=={'task_id':42,'status':'pending'}
-        assert 'synthetic-liff' not in response.text
+        assert response.status_code==410 and response.json()['detail']['error']['code']=='service_day_log_reminder_retired'
+        send_resp=client.post('/api/v1/line/mobile-admin/log-reminders/send',json={'line_id_token':'synthetic-liff','case_no':'C1','staff_id':1,'missing_from':'2026-10-01','missing_through':'2026-10-04','idempotency_key':'op'})
+        assert send_resp.status_code==410 and send_resp.json()['detail']['error']['code']=='service_day_log_reminder_retired'
     assert capabilities==[LineCapability.ORDER_GROUP_READ,LineCapability.CUSTOMER_SERVICE_HANDLE]
 
 
-@pytest.mark.parametrize('route', ['payment-overdue-reminders','payment-overdue-reminders/send','log-reminders','log-reminders/send'])
+@pytest.mark.parametrize('route', ['payment-overdue-reminders','payment-overdue-reminders/send'])
 def test_mobile_reminder_denied_binding_never_reaches_owner(monkeypatch,route):
     def deny(*_):raise HTTPException(403,'synthetic forbidden')
     monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',deny)
@@ -93,12 +78,9 @@ def test_mobile_reminder_denied_binding_never_reaches_owner(monkeypatch,route):
     if route=='payment-overdue-reminders/send':
         body.update(case_no='SYNTHETIC',payment_stage='deposit',obligation_identity='deposit:SYNTHETIC',projection_version=1,obligation_event_id=1,due_date='2026-10-01',remaining_amount_ntd=1200,idempotency_key='operation')
         request=line_mobile_admin._MobileOverdueReminderSend(**body); function=line_mobile_admin.mobile_send_payment_overdue_reminder
-    elif route=='log-reminders/send':
-        body.update(case_no='SYNTHETIC',staff_id=9,missing_from='2026-10-01',missing_through='2026-10-04',idempotency_key='operation')
-        request=line_mobile_admin._MobileLogReminderSend(**body); function=line_mobile_admin.mobile_send_log_reminder
     else:
         request=line_mobile_admin._MobileTodoPageRequest(**body)
-        function=line_mobile_admin.mobile_payment_overdue_reminders if route.startswith('payment') else line_mobile_admin.mobile_log_reminders
+        function=line_mobile_admin.mobile_payment_overdue_reminders
     with pytest.raises(HTTPException) as error:function(request,Application())
     assert error.value.status_code==403
 

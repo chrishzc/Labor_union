@@ -33,6 +33,7 @@ def _disposable_access_control_database(monkeypatch):
 def test_account_center_security_transitions_are_atomic_and_root_is_protected(monkeypatch) -> None:
     from subsystems.access import authentication_session
 
+    audit_before = _audit_counts()
     run_id = secrets.token_hex(6)
     root_username = f"root-{run_id}"
     child_username = f"child-{run_id}"
@@ -104,21 +105,6 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         child_username, "Child-password-123", source_identifier="disabled-account-e2e",
         connection_factory=_connection,
     ) is None
-    from subsystems.access.security_alert_outbox import consume_security_alert_outbox
-    from subsystems.anomalies.system_alert_projection import upsert_system_alert
-
-    projection_connection = _connection()
-    try:
-        projection = consume_security_alert_outbox(
-            projection_connection,
-            project_alert=upsert_system_alert,
-        )
-    finally:
-        projection_connection.close()
-    assert projection.delivered_count >= 3
-    assert projection.failed_count == 0
-    assert _security_alert_counts() == (projection.delivered_count, projection.delivered_count)
-
     authentication_session.set_account_center_enabled(
         actor=root, account_id=child.id, enabled=True, reason="E2E enable",
         expected_version=2, idempotency_key="enable-child",
@@ -150,19 +136,18 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         )
 
     before = _user_state(child.id)
-    original_audit_recorder = authentication_session._record_admin_audit_with_cursor
-    monkeypatch.setattr(
-        authentication_session, "_record_admin_audit_with_cursor",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")),
-    )
-    with pytest.raises(RuntimeError, match="audit unavailable"):
-        authentication_session.set_account_center_enabled(
-            actor=root, account_id=child.id, enabled=False, reason="must rollback",
-            expected_version=5, idempotency_key="audit-rollback",
-        connection_factory=_connection,
-    )
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            authentication_session, "_save_account_command_receipt",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("receipt unavailable")),
+        )
+        with pytest.raises(RuntimeError, match="receipt unavailable"):
+            authentication_session.set_account_center_enabled(
+                actor=root, account_id=child.id, enabled=False, reason="must rollback",
+                expected_version=5, idempotency_key="receipt-rollback",
+                connection_factory=_connection,
+            )
     assert _user_state(child.id) == before
-    monkeypatch.setattr(authentication_session, "_record_admin_audit_with_cursor", original_audit_recorder)
     for _ in range(5):
         assert authentication_session.issue_password_login_challenge(
             f"unknown-{run_id}", "incorrect-password", source_identifier="e2e-rate-limit",
@@ -174,6 +159,7 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
             connection_factory=_connection,
         )
     assert root_secret
+    assert _audit_counts() == audit_before
 
 
 def _bootstrap_and_enroll(username: str):
@@ -282,16 +268,13 @@ def _last_factor_step(account_id: int) -> int:
         connection.close()
 
 
-def _security_alert_counts() -> tuple[int, int]:
+def _audit_counts() -> tuple[int, int]:
     connection = _connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM admin_security_alert_outbox WHERE processing_status='completed'"
-            )
-            completed = int(cursor.fetchone()["count"])
-            cursor.execute("SELECT COUNT(*) AS count FROM system_alerts WHERE source_domain='ACCESS_CONTROL'")
-            projected = int(cursor.fetchone()["count"])
-            return completed, projected
+            cursor.execute("SELECT COUNT(*) AS count FROM admin_audit_logs")
+            audit_count = int(cursor.fetchone()["count"])
+            cursor.execute("SELECT COUNT(*) AS count FROM admin_security_alert_outbox")
+            return audit_count, int(cursor.fetchone()["count"])
     finally:
         connection.close()

@@ -110,7 +110,6 @@ _PROFILE_UPDATE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" /
 _PROFILE_GUARD_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_guard.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
-_STAFF_BABY_LOG_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_baby_log.html"
 _STAFF_PAYOUT_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_payout.html"
 
 
@@ -167,9 +166,15 @@ def staff_schedule_page():
     return FileResponse(_STAFF_SCHEDULE_PAGE, headers=_NO_CACHE_HEADERS)
 
 
-@page_router.get("/line-staff-baby-log")
+@page_router.get("/line-staff-baby-log", status_code=410)
 def staff_baby_log_page():
-    return FileResponse(_STAFF_BABY_LOG_PAGE, headers=_NO_CACHE_HEADERS)
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "staff_baby_log_retired",
+            "message": "寶寶日誌與餐食照片網頁已退役，請維持於 LINE 群組相簿新增。",
+        },
+    )
 
 
 @page_router.get("/line-staff-payout")

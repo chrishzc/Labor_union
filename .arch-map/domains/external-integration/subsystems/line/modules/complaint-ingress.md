@@ -22,6 +22,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 
 - `subsystems/line/runtime_human_escalation_source.py`
 - `subsystems/line/service_help_application.py`
+- `domains/customer_service/ticket.py` — Customer Service 工單分類與狀態規則，已結案工單不可重開。
 - `subsystems/customer_service/escalation_application.py`
 - `subsystems/customer_service/escalation_contracts.py`
 - `infrastructure/mysql/customer_service_repository.py`
@@ -35,10 +36,8 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 
 ## Current flow and readback
 
-- 工單收到新訊息後可以 `resolved → handling`；新的 escalation 仍走
-  `open → claimed → handling → resolved`。`start_handling_for_escalation()`
-  在 ticket version CAS 下接受 `waiting | handling`，不能因工單已重新開啟而拒絕接手；
-  沒有新訊息的 `resolved` 工單仍不能由此操作直接接手。
+- 已結案（`resolved`）工單永不重開，新訊息固定建立新工單；`waiting → handling → resolved` 不可逆轉；`start_handling_for_escalation()` 與 `_append_event()` 皆僅接受 `waiting | handling`，`resolved` 工單不允許直接接手或附加事件。
+  補助分類澄清使用 `一般市民（最高40小時）`／`補助市民（最高120小時）`。
 - 2026-10-22 人工裁決取消群組告警。客服告警只擷取唯一啟用管理員個人對象；沒有或多個管理員不任選一人。新 intent 不選群組，歷史 group intent 拒絕投遞；provider 前亦拒絕既有群組告警工作。
 - 告警投遞來源為 `customer_service_escalation` 與 `escalation:<id>`，terminal
   outcome 回寫 escalation 的告警狀態。管理員結案後發給客戶的完成通知則使用既有

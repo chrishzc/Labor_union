@@ -1,6 +1,6 @@
 /**
  * File: line_management_page_real_data.test.tsx
- * Description: 驗證 LINE 管理頁以 typed client 呈現既有 LINE 工作分頁與遮罩身分；客服提醒由 canonical reminder integration oracle 覆蓋，不把未知資料偽裝為零。
+ * Description: 驗證 LINE 管理頁以 typed client 呈現工作分頁與遮罩身分，且不把未知資料偽裝為零。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -330,7 +330,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(escalation.create).not.toHaveBeenCalled();
   });
 
-  it('通知頁統一歡迎與內容設定，舊發送連結不再查詢獨立發送紀錄', async () => {
+  it('通知頁不再查詢或顯示歡迎詞，舊發送連結不再查詢獨立發送紀錄', async () => {
     window.history.replaceState(null, '', '#line-management?tab=push_queue&notice=delivery');
     const { customer, identity } = clients();
     const delivery = { ...lineDeliveryQueryClient, summary: vi.fn(), list: vi.fn(), detail: vi.fn() };
@@ -338,16 +338,13 @@ describe('LINE 管理頁真實資料呈現', () => {
       getNotificationRules: vi.fn(async () => LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
       getRichMenuConfiguration: vi.fn(), listRichMenuPublications: vi.fn(), getRichMenuPublication: vi.fn(),
     };
-    const onboardingClient = {
-      get: vi.fn(async () => ({ template_id: 'customer_onboarding_welcome', content: '歡迎加入 {url}', revision: 1, sample_preview: '歡迎加入', variables: ['url'] })),
-      update: vi.fn(), preview: vi.fn(),
-    };
     const notificationTemplateClient = {
       get: vi.fn(async (ruleId: string) => ({ rule_id: ruleId, template_id: 'deposit_template', name: '訂金通知', content: '正式通知內容', revision: 1, variables: [], sample_preview: '正式通知內容' })),
       update: vi.fn(),
     };
-    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} onboardingClient={onboardingClient} notificationTemplateClient={notificationTemplateClient} />);
-    await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' });
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} notificationTemplateClient={notificationTemplateClient} />);
+    await screen.findByRole('button', { name: '編輯訂金通知內容' });
+    expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '發送佇列與歷程' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
     expect(delivery.summary).not.toHaveBeenCalled(); expect(delivery.list).not.toHaveBeenCalled(); expect(delivery.detail).not.toHaveBeenCalled();
@@ -358,14 +355,13 @@ describe('LINE 管理頁真實資料呈現', () => {
   it('離開通知頁會取消內容查詢，晚到結果不開啟編輯頁', async () => {
     const { customer, identity } = clients();
     const lineConfiguration = {
-      getNotificationRules: vi.fn(async () => LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
+      getNotificationRules: vi.fn(() => new Promise<never>(() => {})),
       getRichMenuConfiguration: vi.fn(), listRichMenuPublications: vi.fn(), getRichMenuPublication: vi.fn(),
     };
-    const onboardingClient = { get: vi.fn(() => new Promise<never>(() => {})), update: vi.fn(), preview: vi.fn() };
-    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} onboardingClient={onboardingClient} />);
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} />);
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    await waitFor(() => expect(onboardingClient.get).toHaveBeenCalled());
-    const options = vi.mocked(onboardingClient.get).mock.calls[0] as unknown as [{ signal: AbortSignal }];
+    await waitFor(() => expect(lineConfiguration.getNotificationRules).toHaveBeenCalled());
+    const options = vi.mocked(lineConfiguration.getNotificationRules).mock.calls[0] as unknown as [{ signal: AbortSignal }];
     fireEvent.click(screen.getByRole('button', { name: '寄送與異常' }));
     expect(options[0].signal.aborted).toBe(true);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

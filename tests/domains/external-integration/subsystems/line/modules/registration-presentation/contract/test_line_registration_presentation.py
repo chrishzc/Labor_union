@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -10,6 +11,21 @@ ROOT = next(
     for parent in Path(__file__).resolve().parents
     if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
 )
+
+
+def test_non_citizen_service_choices_match_manual_case_form():
+    liff = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
+    manual = (ROOT / "ui_react/src/components/RegistrationApplications.tsx").read_text(encoding="utf-8")
+
+    for field in ("service_type", "delivery_type", "residence_type"):
+        liff_select = liff.split(f'id="{field}">', 1)[1].split("</select>", 1)[0]
+        manual_select = manual.split(f"value={{manualForm.{field}}}", 1)[1].split("</select>", 1)[0]
+        assert re.findall(r'<option value="([^"]+)">', liff_select) == re.findall(
+            r'<option value="([^"]+)">', manual_select
+        )
+    assert re.findall(r'data-service-time="([^"]+)"', liff) == re.findall(
+        r"service_time: '([^']+)' \}\)\)", manual
+    )
 
 
 def test_runtime_copy_describes_review_instead_of_promising_matching():
@@ -34,7 +50,7 @@ function renderCustomFields() {}
     assert "預填案件編號：${caseNo}（待工會核對）" in source
 
 
-def test_success_readback_requires_a_real_receipt_and_keeps_existing_registration_outcomes():
+def test_success_readback_requires_a_real_receipt_and_renders_current_registration_outcomes():
     source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
     renderer = "function renderRegistrationSuccess(receipt)" + source.split(
         "function renderRegistrationSuccess(receipt)", 1
@@ -52,14 +68,21 @@ assert.equal(element('.success-desc').textContent,'申請已送出，待工會�
 assert.equal(element('.success-title').textContent,'申請已送出');
 assert.equal(element('successCard').style.display,'block');
 assert.equal(element('registerForm').style.display,'none');
-for(const status of ['bound','existing']){
+const outcomes = {
+  approving: '核准建檔或清除確認中，請查詢原申請。',
+  approved: '申請已核准，待審問卷內容已清除。',
+  rejected: '申請已拒絕，問卷內容已清除。',
+  expired: '申請已到期，問卷內容已清除。',
+};
+for(const [status, message] of Object.entries(outcomes)){
   renderRegistrationSuccess({...pending,identity_status:status,client_id:10,beclass_record_id:11});
-  assert.equal(element('.success-desc').textContent,'登記資料已提交。\n申請編號：42');
+  assert.equal(element('.success-desc').textContent,message+'\n申請編號：42');
   assert(!element('.success-desc').textContent.includes('待工會核准'));
   assert(!element('.success-desc').textContent.includes('10'));
 }
 for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,registration_id:'42'},
   {...pending,identity_status:null},{...pending,identity_status:'unrecognized'},
+  {...pending,identity_status:'bound'},{...pending,identity_status:'existing'},
   {...pending,client_id:10},{...pending,beclass_record_id:11}]){
   element('successCard').style.display='none';element('registerForm').style.display='block';
   assert.throws(()=>renderRegistrationSuccess(invalid),/讀回不完整/);
@@ -68,7 +91,7 @@ for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,regist
 }
 runtimePage={success_title:'設定成功標題',success_description:'設定成功說明'};
 renderRegistrationSuccess(pending);
-assert.equal(element('.success-title').textContent,'設定成功標題');
+assert.equal(element('.success-title').textContent,'申請已送出');
 assert.equal(element('.success-desc').textContent,'設定成功說明\n申請已送出，待工會核准。\n申請編號：42');
 console.log('registration receipt rendering passed');
 '''

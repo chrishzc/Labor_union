@@ -62,7 +62,7 @@ const NOTIFICATION_RULE_LABELS: Record<LineNotificationEventCode, string> = {
   'complaint.ingress.hold_high_ticket': '重大客訴告警',
   'payroll.substitute.obligation_projected': '代班出勤薪資拆帳結算',
   'order_lifecycle_transition': '訂單生命週期變更',
-  'service_time_checkpoint': '提醒上傳寶寶日誌',
+  'service_time_checkpoint': '服務時間檢查點',
   'beclass_completion_changed': 'BeClass 完成狀態變更',
   'deposit_confirmed': '訂金確認',
   'order.service_start_day': '服務當天群組繳款與服務狀況',
@@ -93,7 +93,6 @@ const PREDICATE_OPTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { value: 'requires_cooking_true', label: '需要下廚' },
-  { value: 'baby_log_missing', label: '嬰兒日誌缺失' },
   { value: 'beclass_missing', label: 'BeClass 資料缺失' },
 ];
 

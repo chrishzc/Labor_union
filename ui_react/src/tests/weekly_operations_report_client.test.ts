@@ -43,6 +43,7 @@ describe('weekly operations report clients', () => {
       summary: {
         application_count: 4, general_eligible_count: 1, general_ineligible_count: 0,
         subsidized_eligible_count: 3, subsidized_ineligible_count: 0,
+        indigenous_eligible_count: 0, indigenous_ineligible_count: 0,
         order_established_count: 4, negotiating_count: 0, cancelled_count: 0, review_rejected_count: 0,
         order_status_counts: { '待補件': 0, '洽談中': 0, '訂單成立': 0, '服務中': 1, '訂單完成': 3, '訂單取消': 0 },
         unclassified_qualification_count: 0, other_status_count: 0,
@@ -62,7 +63,7 @@ describe('weekly operations report clients', () => {
     await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('案件統計回應結構異常');
     fetchMock.mockResolvedValueOnce(response({ ...data, summary: {
       ...data.summary, general_eligible_count: 0, general_ineligible_count: null,
-      subsidized_ineligible_count: null, unclassified_qualification_count: 1,
+      subsidized_ineligible_count: null, indigenous_ineligible_count: null, unclassified_qualification_count: 1,
     } }));
     const unknown = await caseStatisticsQueryClient.query(2026, 2, 4);
     expect(unknown.summary.general_ineligible_count).toBeNull();
@@ -71,6 +72,51 @@ describe('weekly operations report clients', () => {
     const requestCount = fetchMock.mock.calls.length;
     await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('請先登入');
     expect(fetchMock).toHaveBeenCalledTimes(requestCount);
+  });
+
+  it('接受 25 欄三軌與獨立 indigenous 補助分區 strict 解碼', async () => {
+    const indigenousReport = structuredClone(WEEKLY_OPERATIONS_REPORT);
+    indigenousReport.summary = {
+      ...indigenousReport.summary,
+      indigenous_eligible_count: 1,
+      indigenous_ineligible_count: null,
+    };
+    indigenousReport.case_rows = [
+      ...indigenousReport.case_rows,
+      {
+        ...indigenousReport.case_rows[0],
+        case_no: 'CASE-WEEK-IND',
+        serial_number: 103,
+        identity_status: '原住民',
+        review_result: 'indigenous_eligible',
+        general_eligible: 0,
+        indigenous_eligible: 1,
+      },
+    ];
+    indigenousReport.summary.application_count = 3;
+    indigenousReport.summary.order_established_count = 2;
+    indigenousReport.subsidy_partitions[2] = {
+      citizen_kind: 'indigenous',
+      row_count: 1,
+      total_amount_ntd: 28000,
+      rows: [{
+        ...indigenousReport.subsidy_partitions[0].rows[0],
+        case_no: 'CASE-WEEK-IND',
+        eligibility: '原住民',
+        subsidy_hours: '80',
+        subsidy_days: '10',
+        subsidy_amount_ntd: 28000,
+        unit_price_ntd: 350,
+      }],
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
+      ...WEEKLY_OPERATIONS_RESPONSE,
+      data: indigenousReport,
+    }));
+    const decoded = await weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26');
+    expect(decoded.summary.indigenous_eligible_count).toBe(1);
+    expect(decoded.subsidy_partitions[2]?.citizen_kind).toBe('indigenous');
+    expect(decoded.subsidy_partitions[2]?.total_amount_ntd).toBe(28000);
   });
 
   it('以 fresh bearer 執行單一週報 GET 並接受 strict 三分頁 view', async () => {

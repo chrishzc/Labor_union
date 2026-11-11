@@ -10,7 +10,8 @@
 Versioned customer pricing/subsidy limits, policy selection at first case creation,
 and typed coordination of explicit per-case repricing. Payroll owns salary tiers.
 No query writes; one outer transaction and typed stale/idempotency conflicts.
-一般市民為 citizen（預設 40）、補助市民為 social（預設 120）。新政策只用正式名稱；既有舊命名政策依保存的 rule／金額讀取，前端只轉換新稿與顯示標籤，保留原版名稱及自訂身分。新一般／補助案件遇到舊命名的有效政策回報 typed bootstrap blocker，避免錯綁。
+一般市民為 citizen（預設 40）、補助市民為 social（預設 120）、原住民（含別名 `原民`、`原住民市民`）預設上限 80 小時／350 元。新政策只用正式名稱；既有舊命名政策依保存的 rule／金額讀取，前端只轉換新稿與顯示標籤，保留原版名稱及自訂身分。新一般／補助／原住民案件遇到舊命名的有效政策回報 typed bootstrap blocker，避免錯綁。
+`domains/client_finance/subsidy_coverage.py` 與 `AccountingParametersDrawer` 同步對齊原住民預設 80h／350 元。
 
 ## Implementation
 - `domains/client_finance/pricing_policy.py`

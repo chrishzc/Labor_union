@@ -58,6 +58,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **非市民歷史補登**：移除表單與 `POST /api/v1/admin/registration-applications/manual-non-citizen/check`，手動建案只接受後端正式配號的新案。既有案件及虛擬帳號對照保留。
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
 - **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
+- **LINE 加入好友歡迎訊息設定**：`GET /api/v1/line/onboarding`、`POST /api/v1/line/onboarding/preview` 與 `PUT /api/v1/line/onboarding` 回傳 typed `410 Gone`；加入好友歡迎訊息改由 LINE 官方帳號後台設定，通知工作台與公版目錄不再列管歡迎詞。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
 ### 3.3 Windows NAS 維護入口

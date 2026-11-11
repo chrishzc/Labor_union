@@ -1,10 +1,17 @@
+/**
+ * File: WorkbenchCaseStatistics.tsx
+ * Description: 待辦看板案件統計元件：唯讀查詢三大補助資格六欄與非市民狀態統計。
+ */
 import './WorkbenchCaseStatistics.css';
-/** 待辦看板案件統計：唯讀查詢 Reporting，統計期間不影響下方待辦清單。 */
 import { useEffect, useState } from 'react';
 import { caseStatisticsQueryClient } from '../api/reports/weekly_operations_report_query_client';
 import type { CaseStatisticsData } from '../api/reports/weekly_operations_report_schemas';
 
-const QUALIFICATION_LABELS = ['一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合'];
+const QUALIFICATION_LABELS = [
+  '一般市民符合', '一般市民不符合',
+  '補助市民符合', '補助市民不符合',
+  '原住民符合', '原住民不符合',
+];
 const STATUS_LABELS = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消'] as const;
 const APPLICATION_STATUS_FIELDS = [
   ['訂單成立', 'order_established_count'], ['洽談中', 'negotiating_count'],
@@ -45,7 +52,11 @@ export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsid
   const lastMonth = month || (quarter ? quarter * 3 : 12);
   const selectedData = data?.year === year && data.quarter === (quarter || null) && data.month === (month || null) ? data : null;
   const summary = selectedData?.summary;
-  const counts = [summary?.general_eligible_count, summary?.general_ineligible_count, summary?.subsidized_eligible_count, summary?.subsidized_ineligible_count];
+  const counts = [
+    summary?.general_eligible_count, summary?.general_ineligible_count,
+    summary?.subsidized_eligible_count, summary?.subsidized_ineligible_count,
+    summary?.indigenous_eligible_count, summary?.indigenous_ineligible_count,
+  ];
   const endDay = new Date(year, lastMonth, 0).getDate();
   const period = `${year}/${String(firstMonth).padStart(2, '0')}/01－${year}/${String(lastMonth).padStart(2, '0')}/${endDay}`;
   const months = Array.from({ length: 12 }, (_, index) => index + 1)
@@ -88,7 +99,7 @@ export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsid
 
       {!nonCitizen && <div className="workbench-statistics-group">
         <div className="workbench-statistics-qualifications">
-          {['市民案件審核', '社福案件審核'].map((group, groupIndex) => <div key={group}>
+          {['市民案件審核', '社福案件審核', '原住民案件審核'].map((group, groupIndex) => <div key={group}>
             <h3>{group}</h3>
             <dl className="workbench-statistics-grid qualifications">
               {QUALIFICATION_LABELS.slice(groupIndex * 2, groupIndex * 2 + 2).map((label, index) =>

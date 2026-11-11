@@ -13,6 +13,7 @@ from domains.customer_service.ticket import (
     CustomerServiceStatus,
     CustomerServiceTicket,
     CustomerServiceTicketNotFoundError,
+    CustomerServiceTransitionError,
     CustomerServiceVersionConflictError,
 )
 from subsystems.customer_service.contracts import (
@@ -90,8 +91,7 @@ class MySqlCustomerServiceRepository:
     ) -> CustomerServiceTicket:
         admin_id = _admin_user_id(actor_id)
         with self._connection.cursor() as cursor:
-            # New messages reopen resolved tickets as handling. Match the domain's
-            # allowed handling -> handling transition without weakening the CAS.
+            # Resolved tickets never reopen; only waiting/handling can transition to handling.
             cursor.execute(
                 "UPDATE customer_service_tickets SET status='handling',"
                 "assigned_to_admin_user_id=COALESCE(%s,assigned_to_admin_user_id),"
@@ -363,8 +363,16 @@ class MySqlCustomerServiceRepository:
 
     def _append_event(self, ticket_id, command) -> None:
         with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_tickets SET version=version+1 "
+                "WHERE id=%s AND status IN ('waiting','handling')",
+                (ticket_id,),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceTransitionError(
+                    "cannot append event to resolved or missing customer-service ticket"
+                )
             cursor.execute(_EVENT_INSERT_SQL, (ticket_id, command.event_key, "customer_message", command.message, f"line:{command.line_user_id}"))
-            cursor.execute("UPDATE customer_service_tickets SET status=IF(status='resolved','handling',status),resolved_at_utc=NULL,version=version+1 WHERE id=%s", (ticket_id,))
 
 
 def _ticket(row: dict[str, Any]) -> CustomerServiceTicket:

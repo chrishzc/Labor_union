@@ -174,12 +174,17 @@ def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_peri
     for quarter, month in ((None, None), (2, None), (2, 4), (4, 11)):
         statistics = query.query_case_statistics(2026, quarter, month)
         report = query.query(statistics.start_date, statistics.end_date)
-        for field in ("application_count", "general_eligible_count", "general_ineligible_count", "subsidized_eligible_count", "subsidized_ineligible_count", "order_established_count", "negotiating_count", "cancelled_count"):
+        for field in (
+            "application_count", "general_eligible_count", "general_ineligible_count",
+            "subsidized_eligible_count", "subsidized_ineligible_count",
+            "indigenous_eligible_count", "indigenous_ineligible_count",
+            "order_established_count", "negotiating_count", "cancelled_count",
+        ):
             assert getattr(statistics.summary, field) == getattr(report.summary, field)
         statuses = query._case_totals(2026, month, statistics.start_date, statistics.end_date, report.case_rows, ()).order_status_counts
         assert statistics.summary.order_status_counts == {status: statuses[status] for status in statistics.summary.order_status_counts}
         assert statistics.summary.review_rejected_count == sum(row.review_rejected for row in report.case_rows)
-        assert report.summary.general_ineligible_count == report.summary.subsidized_ineligible_count == 0
+        assert report.summary.general_ineligible_count == report.summary.subsidized_ineligible_count == report.summary.indigenous_ineligible_count == 0
 
     # 尚有未能判定身分的不符合案件時，兩處共同保留未知，不猜成零。
     facts.rows[11] = replace(facts.rows[11], hcm_review_status="不符合")
@@ -187,6 +192,7 @@ def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_peri
     report = query.query(statistics.start_date, statistics.end_date)
     assert statistics.summary.general_ineligible_count is report.summary.general_ineligible_count is None
     assert statistics.summary.subsidized_ineligible_count is report.summary.subsidized_ineligible_count is None
+    assert statistics.summary.indigenous_ineligible_count is report.summary.indigenous_ineligible_count is None
     assert statistics.summary.unclassified_qualification_count == 2
 
 
@@ -583,10 +589,10 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert case_values[3][0] == "115年度累計"
     assert case_values[4][3] == "2026-08-17 ~ 2026-08-23"
     assert case_values[4][5:7] == (12, 34)
-    assert case_values[4][7:12] == (1, 1, None, None, None)
-    assert case_values[2][12:16] == ("訂單成立", "洽談中", "取消", "審核不符合")
-    assert case_values[4][12:16] == (1, None, None, None)
-    assert case_values[5][12:16] == (None, None, None, 1)
+    assert case_values[4][7:14] == (1, 1, None, None, None, None, None)
+    assert case_values[2][14:18] == ("訂單成立", "洽談中", "取消", "審核不符合")
+    assert case_values[4][14:18] == (1, None, None, None)
+    assert case_values[5][14:18] == (None, None, None, 1)
     assert case_values[5][3] == "2026-08-24 ~ 2026-08-30"
     assert case_values[6][0] == "115年8月小計"
     assert case_values[6][5:8] == (17, 40, 2)
@@ -595,19 +601,21 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     # 補助案件統計表對齊模板：經費統計格式，不包含身分證字號與地址個資
     assert "A123456789" not in workbook_text
     subsidy_sheet = workbook["補助案件統計表"]
-    assert subsidy_sheet.cell(row=6, column=2).value == "114000007"
-    assert subsidy_sheet.cell(row=6, column=3).value == "(114)一般市民"
-    assert subsidy_sheet.cell(row=6, column=5).value == "114000007"
-    assert subsidy_sheet.cell(row=5, column=14).value == "年度季度"
-    assert subsidy_sheet.cell(row=6, column=14).value == "2026年第三季"
-    assert subsidy_sheet.cell(row=6, column=2).number_format == "@"
-    assert subsidy_sheet.cell(row=6, column=5).number_format == "@"
+    assert subsidy_sheet.cell(row=8, column=2).value == "114000007"
+    assert subsidy_sheet.cell(row=8, column=3).value == "(114)一般市民"
+    assert subsidy_sheet.cell(row=8, column=5).value == "114000007"
+    assert subsidy_sheet.cell(row=7, column=14).value == "年度季度"
+    assert subsidy_sheet.cell(row=8, column=14).value == "2026年第三季"
+    assert subsidy_sheet.cell(row=8, column=2).number_format == "@"
+    assert subsidy_sheet.cell(row=8, column=5).number_format == "@"
     assert subsidy_sheet.cell(row=1, column=6).value == "114市民總計:"
     assert subsidy_sheet.cell(row=1, column=7).value == 1
     assert subsidy_sheet.cell(row=1, column=11).value == 12000
     assert subsidy_sheet.cell(row=2, column=6).value == "115市民總計:"
     assert subsidy_sheet.cell(row=2, column=7).value == 0
     assert subsidy_sheet.cell(row=2, column=11).value == 0
+    assert subsidy_sheet.cell(row=5, column=6).value == "114原住民總計:"
+    assert subsidy_sheet.cell(row=6, column=6).value == "115原住民總計:"
 
     # 每周服務中說明：在既有範例加入每列對應的服務人員。
     service_values = list(workbook["每周服務中說明"].values)

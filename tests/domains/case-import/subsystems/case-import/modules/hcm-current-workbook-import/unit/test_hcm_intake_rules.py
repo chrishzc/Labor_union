@@ -1,3 +1,7 @@
+"""
+File: test_hcm_intake_rules.py
+Description: 驗證 HCM 工作簿進件驗證、身分別名與單一休假基準運算規則。
+"""
 from datetime import date, datetime
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -373,3 +377,14 @@ def test_ambiguous_name_or_ip_is_a_nonblocking_warning(monkeypatch) -> None:
     assert outcome == "inserted_with_warning"
     assert len(applied) == 1
     assert recorded[0]["issue_codes"] == ("hcm_identity:hcm_identity_ambiguous",)
+
+
+@pytest.mark.parametrize("raw_identity", ["原住民", "原民", "原住民市民"])
+def test_hcm_accepts_and_normalizes_indigenous_identity_aliases(monkeypatch, valid_hcm_row, raw_identity):
+    row = pd.Series({**valid_hcm_row, "身分資格": raw_identity})
+    assert "身分資格" not in validate_hcm_row(row.to_dict())
+    preview, outcome, applied, _reviews, _reconciled = _exercise_hcm_row(monkeypatch, row)
+    assert preview["ready"] == 1
+    assert outcome == "inserted"
+    attributes = {item.name: item.value for item in applied[0].client_attributes}
+    assert attributes["identity_status"] == "原住民"

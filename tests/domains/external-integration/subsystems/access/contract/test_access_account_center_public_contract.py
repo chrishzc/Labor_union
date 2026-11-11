@@ -171,6 +171,25 @@ def test_account_mutation_request_is_closed_and_route_returns_typed_receipt(monk
         AccountEnabledRequest.model_validate({**payload.model_dump(), "role": "system_admin"})
 
 
+def test_disabling_account_keeps_receipt_and_revocation_without_audit() -> None:
+    conn = MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [None, {"id": 2, "access_control_version": 3}, None]
+    actor = AdminPrincipal(1, "root", "Root", "system_admin", is_root=True)
+
+    receipt = authentication.set_account_center_enabled(
+        connection_factory=lambda: conn, actor=actor, account_id=2, enabled=False,
+        reason="test", expected_version=3, idempotency_key="disable-without-audit",
+    )
+
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert any("UPDATE admin_sessions" in sql for sql in statements)
+    assert any("INSERT INTO admin_command_receipts" in sql for sql in statements)
+    assert all("admin_audit_logs" not in sql and "admin_security_alert_outbox" not in sql for sql in statements)
+    assert receipt.resulting_access_control_version == 4
+    conn.commit.assert_called_once()
+
+
 def test_account_command_errors_are_redacted_and_stable() -> None:
     conflict = account_center._command_error(ValueError("internal SQL duplicate detail"))
     unavailable = account_center._storage_unavailable(RuntimeError("secret storage location"))

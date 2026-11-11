@@ -1,6 +1,6 @@
-"""Editable LINE display copy; defaults come from the existing pure composers.
-
-This catalog contains no recipient lookup, operation token or provider action.
+"""
+File: message_copy_catalog.py
+Description: 定義 LINE 可編修文案預設目錄與純樣板渲染，不讀取收件對象或執行外送。
 """
 from copy import deepcopy
 import json
@@ -43,6 +43,7 @@ def _text_defaults():
         "service-progress-unbound": help._unbound_progress_reply("{identity_url}"),
         "service-registration": help._registration_reply("{registration_url}"),
         "service-registration-unavailable": help._registration_reply(None),
+        "identity-customer-link": _identity_link_message(LineIdentityFlowPurpose.CUSTOMER_BINDING, "{identity_url}"),
         "identity-staff-link": _identity_link_message(LineIdentityFlowPurpose.STAFF_VERIFICATION, "{identity_url}"),
         "identity-admin-link": _identity_link_message(LineIdentityFlowPurpose.ADMIN_BINDING, "{identity_url}"),
         **{f"cancellation-notice-{kind}": copy for kind, copy in CANCELLATION_NOTICE_COPY.items()},

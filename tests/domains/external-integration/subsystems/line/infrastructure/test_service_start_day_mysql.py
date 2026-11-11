@@ -1,7 +1,6 @@
-"""Real MySQL start-day chain, with a task-scoped fake provider only.
-
-Uses the existing disposable service-start fixture/writers. No application
-lifespan, canonical runtime, real provider or menu publication is started.
+"""
+File: test_service_start_day_mysql.py
+Description: 驗證真實本機 MySQL 開工詢問群組發送、Reply-only 回覆與投遞前現行性檢查。
 """
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -137,7 +136,7 @@ def test_group_actor_normal_help_idempotency_and_rollback(http):
     click(context.token,staff[0][1],group)
     click(context.token,staff[0][1],group,'help');click(context.token,staff[0][1],group,'help')
     assert len(rows('SELECT id,status FROM customer_service_tickets WHERE case_no=%s',(case,)))==1
-    acks=tasks(context.token,'order_service_start_day_response')
+    acks=rows("SELECT * FROM line_delivery_tasks WHERE source_aggregate_type='line_webhook_reply' AND idempotency_key LIKE %s ORDER BY id",(f"ack:start-day-response:{context.token}:%",))
     assert len(acks)==2 and all(item['recipient_identity']==group for item in acks)
     assert rows('SELECT lifecycle_version,actual_start_date FROM orders WHERE case_no=%s',(case,))==before
     # The actual customer-service read model exposes the service-progress need.
@@ -208,7 +207,7 @@ def test_multi_caregiver_only_first_day_assignee_can_respond(http):
     click(context.token,staff[1][1],context.group_id,'help')
     assert not rows('SELECT id FROM customer_service_tickets WHERE case_no=%s',(case,))
     click(context.token,staff[0][1],context.group_id)
-    assert len(tasks(context.token,'order_service_start_day_response'))==1
+    assert len(rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='line_webhook_reply' AND idempotency_key LIKE %s",(f"ack:start-day-response:{context.token}:%",)))==1
 
 
 def test_concurrent_help_clicks_create_one_todo_and_group_ack(http):
@@ -218,4 +217,4 @@ def test_concurrent_help_clicks_create_one_todo_and_group_ack(http):
         futures=[executor.submit(click,context.token,staff[0][1],group,'help') for _ in range(2)]
         for future in futures:future.result(timeout=20)
     assert len(rows('SELECT id FROM customer_service_tickets WHERE case_no=%s',(case,)))==1
-    assert len(tasks(context.token,'order_service_start_day_response'))==1
+    assert len(rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='line_webhook_reply' AND idempotency_key LIKE %s",(f"ack:start-day-response:{context.token}:%",)))==1

@@ -87,6 +87,17 @@ describe('saved demand application review', () => {
     fireEvent.change(screen.getByPlaceholderText('姓名'), { target: { value: '測試客戶' } });
     fireEvent.change(screen.getByPlaceholderText('手機或市話'), { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText(/預計服務開始日/), { target: { value: '2026-12-01' } });
+    for (const [label, value] of [
+      ['寶寶資訊', '單胞胎'],
+      ['電子郵件', 'synthetic@example.test'],
+      ['退款銀行代號（7碼）', '0000001'],
+      ['退款銀行帳號', '000000000001'],
+    ]) {
+      const field = screen.getByLabelText(label);
+      expect(field).toBeRequired();
+      expect(field).toHaveValue('');
+      fireEvent.change(field, { target: { value } });
+    }
     fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
 
     expect(await screen.findByText(/A115002.*99781699115502/)).toBeInTheDocument();

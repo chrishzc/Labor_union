@@ -1,4 +1,7 @@
-"""Exercise real LINE handlers/consumer with in-memory transaction boundaries."""
+"""
+File: test_line_friend_feedback_regressions.py
+Description: 驗證 LINE 好友狀態事件保序、follow 零歡迎發送與客服回饋交易回滾重試。
+"""
 
 from __future__ import annotations
 
@@ -101,7 +104,7 @@ class FriendHandlerRegressionTests(unittest.TestCase):
                 unit.identity_flows.open.assert_not_called()
                 unit.delivery_tasks.enqueue.assert_not_called()
 
-    def test_current_follow_still_opens_flow_and_enqueues_welcome(self):
+    def test_current_follow_updates_friend_state_without_opening_flow_or_welcome(self):
         for offset in (0, 5):
             with self.subTest(offset=offset):
                 unit, state = _friend_unit(LineFriendStatus.BLOCKED)
@@ -109,10 +112,9 @@ class FriendHandlerRegressionTests(unittest.TestCase):
                 inbox = _inbox("follow", occurred_at=NOW + timedelta(seconds=offset))
                 _handler(follow_scheduler=scheduler).handle_follow(inbox, unit)
                 self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
-                scheduler.assert_called_once_with(inbox, unit, USER)
-                unit.identity_flows.open.assert_called_once()
-                unit.delivery_tasks.enqueue.assert_called_once()
-                self.assertIn("https://example.test/identity", unit.delivery_tasks.enqueue.call_args.args[0].payload_json)
+                scheduler.assert_not_called()
+                unit.identity_flows.open.assert_not_called()
+                unit.delivery_tasks.enqueue.assert_not_called()
 
     def test_replayed_old_unfollow_uses_latest_returned_state(self):
         unit, state = _friend_unit(LineFriendStatus.ACTIVE)
@@ -300,28 +302,20 @@ def _welcome_configuration(legacy="missing"):
 
 
 class CanonicalWelcomeRegressionTests(unittest.TestCase):
-    def assert_welcome(self, unit, event_id):
-        from domains.line.configuration import LineConfigurationKind
-
-        unit.identity_flows.open.assert_called_once()
-        unit.delivery_tasks.enqueue.assert_called_once()
-        delivery = unit.delivery_tasks.enqueue.call_args.args[0]
-        self.assertEqual(json.loads(delivery.payload_json)["text"],
-                         "目前的歡迎訊息：https://example.test/identity")
-        self.assertEqual(delivery.recipient.identity, USER)
-        self.assertEqual(delivery.idempotency_key.value, f"identity-link:customer_binding:{event_id}")
-        self.assertEqual(delivery.source_aggregate_type, REPLY_ONLY_WEBHOOK_SOURCE)
-        unit.configurations.get.assert_called_once_with(LineConfigurationKind.MESSAGE_TEMPLATES)
+    def assert_no_follow_delivery(self, unit):
+        unit.identity_flows.open.assert_not_called()
+        unit.delivery_tasks.enqueue.assert_not_called()
+        unit.configurations.get.assert_not_called()
 
     def test_canonical_welcome_does_not_install_retired_scheduler(self):
         self.assertIsNone(_canonical_follow_handler()._follow_scheduler)
 
-    def test_first_follow_creates_only_current_welcome_despite_old_enabled_schedule(self):
+    def test_first_follow_creates_only_friend_state_despite_old_enabled_schedule(self):
         unit, state = _friend_unit(LineFriendStatus.UNKNOWN)
         unit.configurations = _welcome_configuration("enabled")
         _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
         self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
-        self.assert_welcome(unit, "friend-feedback-event")
+        self.assert_no_follow_delivery(unit)
 
     def test_cross_day_refollow_ignores_missing_broken_or_old_enabled_schedule(self):
         for legacy in ("missing", "broken", "enabled"):
@@ -334,62 +328,44 @@ class CanonicalWelcomeRegressionTests(unittest.TestCase):
                 _canonical_follow_handler(later).handle_follow(inbox, unit)
                 self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
                 self.assertIsNone(state[0].blocked_at)
-                self.assert_welcome(unit, "refollow-event")
-                self.assertEqual(unit.delivery_tasks.enqueue.call_args.args[0].scheduled_at, later)
+                self.assert_no_follow_delivery(unit)
 
-    def test_unfollow_then_refollow_uses_a_new_welcome_event_identity(self):
+    def test_unfollow_then_refollow_updates_friend_state_without_welcome(self):
         unit, state = _friend_unit(LineFriendStatus.UNKNOWN)
         unit.configurations = _welcome_configuration()
         _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
-        first_key = unit.delivery_tasks.enqueue.call_args.args[0].idempotency_key
+        self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
+        self.assert_no_follow_delivery(unit)
         later = NOW + timedelta(days=1)
         _canonical_follow_handler(later).handle_unfollow(_inbox("unfollow", occurred_at=later), unit)
         unit.delivery_tasks.cancel_pending_for_recipient.assert_called_once_with(USER)
         self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
-        unit.identity_flows.open.reset_mock()
-        unit.delivery_tasks.enqueue.reset_mock()
-        unit.configurations.get.reset_mock()
         later += timedelta(days=1)
         inbox = _inbox("follow", occurred_at=later)
         inbox.event.event_id = LineWebhookEventId("refollow-event")
         _canonical_follow_handler(later).handle_follow(inbox, unit)
-        self.assert_welcome(unit, "refollow-event")
-        self.assertNotEqual(unit.delivery_tasks.enqueue.call_args.args[0].idempotency_key, first_key)
+        self.assertIs(state[0].friend_status, LineFriendStatus.ACTIVE)
+        self.assertIsNone(state[0].blocked_at)
+        self.assert_no_follow_delivery(unit)
 
-    def test_same_follow_event_preserves_existing_welcome_idempotency_key(self):
-        unit, _ = _friend_unit(LineFriendStatus.UNKNOWN)
-        unit.configurations = _welcome_configuration()
-        handler = _canonical_follow_handler()
-        inbox = _inbox("follow")
-        handler.handle_follow(inbox, unit)
-        handler.handle_follow(inbox, unit)
-        first, second = (call.args[0] for call in unit.delivery_tasks.enqueue.call_args_list)
-        self.assertEqual(first.idempotency_key, second.idempotency_key)
-        self.assertEqual(first.fingerprint, second.fingerprint)
-        # Actual duplicate persistence remains owned by the unchanged delivery repository.
-
-    def test_old_follow_does_not_reactivate_or_welcome_after_newer_unfollow(self):
+    def test_old_follow_does_not_reactivate_after_newer_unfollow(self):
         unit, state = _friend_unit(LineFriendStatus.BLOCKED)
         unit.configurations = _welcome_configuration("broken")
         _canonical_follow_handler().handle_follow(
             _inbox("follow", occurred_at=NOW - timedelta(days=1)), unit,
         )
         self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
-        unit.identity_flows.open.assert_not_called()
-        unit.delivery_tasks.enqueue.assert_not_called()
-        unit.configurations.get.assert_not_called()
+        self.assert_no_follow_delivery(unit)
 
-    def test_real_welcome_enqueue_failure_is_not_swallowed(self):
-        unit, _ = _friend_unit(LineFriendStatus.BLOCKED)
+    def test_customer_binding_text_command_still_replies_with_identity_link(self):
+        unit, _ = _friend_unit(LineFriendStatus.ACTIVE)
         unit.configurations = _welcome_configuration()
-        unit.delivery_tasks.enqueue.side_effect = RuntimeError("welcome persistence unavailable")
-        with self.assertRaisesRegex(RuntimeError, "welcome persistence unavailable"):
-            _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
-
-    def test_identity_flow_failure_cannot_claim_a_welcome_was_created(self):
-        unit, _ = _friend_unit(LineFriendStatus.BLOCKED)
-        unit.configurations = _welcome_configuration()
-        unit.identity_flows.open.side_effect = RuntimeError("identity flow unavailable")
-        with self.assertRaisesRegex(RuntimeError, "identity flow unavailable"):
-            _canonical_follow_handler().handle_follow(_inbox("follow"), unit)
-        unit.delivery_tasks.enqueue.assert_not_called()
+        unit.configurations.get = Mock(return_value=SimpleNamespace(revision=SimpleNamespace(value=1), definition_json="{}"))
+        _handler().handle_message(_inbox("message", text="綁定訂單"), unit)
+        unit.identity_flows.open.assert_called_once()
+        unit.delivery_tasks.enqueue.assert_called_once()
+        delivery = unit.delivery_tasks.enqueue.call_args.args[0]
+        text = json.loads(delivery.payload_json)["text"]
+        self.assertIn("https://example.test/identity", text)
+        self.assertNotIn("歡迎加入", text)
+        self.assertEqual(delivery.source_aggregate_type, REPLY_ONLY_WEBHOOK_SOURCE)

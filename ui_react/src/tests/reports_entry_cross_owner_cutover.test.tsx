@@ -244,7 +244,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     expect(screen.getByText('(114)一般市民')).toBeInTheDocument();
     expect(screen.getByText('2026年第三季')).toBeInTheDocument();
     expect(screen.queryByText(/A\*+/)).not.toBeInTheDocument();
-    expect(screen.getByText('此類別目前沒有資料。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '原住民' })).toBeInTheDocument();
+    expect(screen.getAllByText('此類別目前沒有資料。')).toHaveLength(2);
 
     fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });
     await waitFor(() => expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument());

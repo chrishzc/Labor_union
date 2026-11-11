@@ -22,7 +22,6 @@ Canonical worker cycle、heartbeat 與 runtime health classification tests are r
 LINE 管理頁跨客服、選單、身分與通知的唯讀／零假 mutation 契約位於 UI integration root。
 
 # Deferred / higher-boundary
-- `tests/test_staff_service_day_log_api.py` remains at the LINE/Scheduling boundary because verified LINE identity is used to issue a Scheduling service-day command.
 - `tests/test_line_customer_service_first_release.py` remains at the release/relocation-sensitive boundary because it spans Customer Service, LINE, migration manifests, schema and static UI artifacts through repo-relative paths.
 - Release/migration/schema, disposable-MySQL/E2E, Task97, legacy UI, and true cross-owner tests remain at their higher verification boundaries.
 

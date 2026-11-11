@@ -1,3 +1,7 @@
+/**
+ * File: order_workbench_v2.test.tsx
+ * Description: 驗證待辦看板十三階段 projection 與三軌案件受理統計呈現。
+ */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -30,6 +34,7 @@ function statisticsResult(year: number, quarter: number | null, month: number | 
     summary: {
       application_count: count, general_eligible_count: count, general_ineligible_count: 0,
       subsidized_eligible_count: 0, subsidized_ineligible_count: 0,
+      indigenous_eligible_count: 0, indigenous_ineligible_count: 0,
       order_established_count: 0, negotiating_count: 0, cancelled_count: 0, review_rejected_count: 0,
       order_status_counts: { '待補件': count, '洽談中': 0, '訂單成立': 0, '服務中': 0, '訂單完成': 0, '訂單取消': 0 },
       unclassified_qualification_count: 0, other_status_count: 0,
@@ -419,7 +424,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
     const statistics = screen.getByRole('region', { name: '案件受理統計' });
     expect(within(statistics).queryByText('UI 預覽・示意數據')).not.toBeInTheDocument();
-    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
     await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')!.textContent).toBe('12'));
     const initialTotal = statistics.querySelector('.workbench-statistics-total strong')!.textContent;
     fireEvent.change(within(statistics).getByLabelText('季度'), { target: { value: '2' } });
@@ -435,7 +440,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     fireEvent.change(within(statistics).getByLabelText('年度'), { target: { value: '2025' } });
     expect(within(statistics).getByText('2025/10/01－2025/12/31')).toBeInTheDocument();
     await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenLastCalledWith(2025, 4, null, expect.any(Object)));
-    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
     expect(screen.getByText('CASE-NORMAL')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '13 個核心訂單階段' })).toBeInTheDocument();
     expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(callsBeforeSearch);
@@ -448,7 +453,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     const retry = await screen.findByRole('button', { name: '統計讀取失敗・重試' });
     const statistics = screen.getByRole('region', { name: '案件受理統計' });
     expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('—');
-    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
     fireEvent.click(retry);
     await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('12'));
     const beforeRefresh = vi.mocked(caseStatisticsQueryClient.query).mock.calls.length;
@@ -480,7 +485,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue(response);
     const view = render(<WorkbenchCaseStatistics />);
     await waitFor(() => expect(document.querySelector('.application-statuses dd')).toHaveTextContent('7'));
-    expect([...document.querySelectorAll('h3')].map((cell) => cell.textContent)).toEqual(['市民案件審核', '社福案件審核', '申請案件狀況']);
+    expect([...document.querySelectorAll('h3')].map((cell) => cell.textContent)).toEqual(['市民案件審核', '社福案件審核', '原住民案件審核', '申請案件狀況']);
     expect([...document.querySelectorAll('.application-statuses dt')].map((cell) => cell.textContent)).toEqual(['訂單成立', '洽談中', '取消', '審核不符合']);
     expect([...document.querySelectorAll('.application-statuses dd')].map((cell) => cell.textContent)).toEqual(['7', '2', '1', '2']);
     view.unmount();
@@ -495,7 +500,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     const response = statisticsResult(2026, null, null);
     vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue({ ...response, summary: {
       ...response.summary, general_eligible_count: 11, general_ineligible_count: null,
-      subsidized_ineligible_count: null, unclassified_qualification_count: 1,
+      subsidized_ineligible_count: null, indigenous_ineligible_count: null, unclassified_qualification_count: 1,
     } });
     render(<WorkbenchCaseStatistics />);
     await screen.findByText('部分資料待確認');

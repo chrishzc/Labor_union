@@ -779,7 +779,7 @@ CREATE TABLE `case_architecture_bootstrap_events` (
   CONSTRAINT `fk_case_architecture_bootstrap_terms_event` FOREIGN KEY (`client_payment_terms_event_id`) REFERENCES `client_payment_terms_events` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_case_architecture_bootstrap_amounts` CHECK (((`client_hourly_rate_ntd` > 0) and (`payroll_hourly_rate_ntd` > 0))),
   CONSTRAINT `chk_case_architecture_bootstrap_fingerprint` CHECK (regexp_like(`candidate_fingerprint`,_utf8mb4'^[0-9a-f]{64}$')),
-  CONSTRAINT `chk_case_architecture_bootstrap_text` CHECK (((char_length(trim(`source_identity_status`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`reason`)) > 0) and (char_length(trim(`correlation_id`)) > 0)))
+  CONSTRAINT `chk_case_architecture_bootstrap_text` CHECK (((char_length(trim(`source_identity_status`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`correlation_id`)) > 0)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `case_architecture_bootstrap_receipts` (
@@ -6136,7 +6136,7 @@ CREATE TABLE `order_terms_apply_receipts` (
   `scheduling_generation` int unsigned NOT NULL,
   `client_finance_version` bigint unsigned DEFAULT NULL,
   `payroll_version` bigint unsigned DEFAULT NULL,
-  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lifecycle_status` enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件') COLLATE utf8mb4_unicode_ci NOT NULL,
   `service_data_lock_formed` tinyint(1) NOT NULL,
   `correlation_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `result_snapshot` json NOT NULL,

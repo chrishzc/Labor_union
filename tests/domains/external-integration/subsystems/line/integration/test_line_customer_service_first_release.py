@@ -89,7 +89,8 @@ def _unit_of_work():
 
 def test_customer_service_ticket_state_machine_rejects_backwards_transition():
     assert transition_ticket(CustomerServiceStatus.WAITING, CustomerServiceStatus.HANDLING) is CustomerServiceStatus.HANDLING
-    assert transition_ticket(CustomerServiceStatus.RESOLVED, CustomerServiceStatus.HANDLING) is CustomerServiceStatus.HANDLING
+    with pytest.raises(CustomerServiceTransitionError):
+        transition_ticket(CustomerServiceStatus.RESOLVED, CustomerServiceStatus.HANDLING)
     with pytest.raises(CustomerServiceTransitionError):
         transition_ticket(CustomerServiceStatus.HANDLING, CustomerServiceStatus.WAITING)
 
@@ -126,7 +127,7 @@ def test_service_help_never_uses_reply_token_before_durable_delivery():
     assert request.idempotency_key.value == "service-help:menu:event-1"
 
 
-def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
+def test_contact_union_creates_ticket_and_audit_without_push_delivery_in_one_uow_boundary():
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(
         lambda: datetime(2026, 8, 11, tzinfo=timezone.utc)
@@ -143,10 +144,12 @@ def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
     assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.OTHER
     assert unit_of_work.customer_service.messages[0].event_key == "line-service-help:other:event-2"
     assert len(unit_of_work.audit.intents) == 1
-    assert len(unit_of_work.delivery_tasks.requests) == 1
+    assert unit_of_work.delivery_tasks.requests == []
 
 
 def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
+    from subsystems.line.service_help_application import _ai_assistant_payload
+
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
 
@@ -157,9 +160,8 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
 
     application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
 
-    fee_copy = unit_of_work.delivery_tasks.requests[1].payload_json
-    assert "實際補助金額依本案服務資料計算" in fee_copy
-    assert "最高40小時" in fee_copy and "最高120小時" in fee_copy
+    fee_payload = json.loads(unit_of_work.delivery_tasks.requests[1].payload_json)
+    assert fee_payload == _ai_assistant_payload()
 
 
 def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):
@@ -308,44 +310,35 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "服務說明" not in message_texts
     assert "常見問答" not in message_texts
     assert customer_quadrants == [
-        ("修改登記資料", "uri", None, "?target=profile_update"),
-        ("修改訂單資訊", "uri", None, "?target=order_update"),
-        ("AI 智慧問答", "uri", None, "?target=ai_assistant"),
-        ("聯絡專人服務", "postback", None, "customer-service:handoff:confirm"),
+        ("改個人資料", "uri", None, "?target=profile_update"),
+        ("改訂單內容", "uri", None, "?target=order_update"),
+        ("常見問答", "uri", None, "?target=ai_assistant"),
+        ("聯絡專人", "postback", None, "customer-service:handoff:confirm"),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris
-    assert "?target=staff_baby_log" in action_uris
+    assert "?target=staff_baby_log" not in action_uris
     assert "?target=staff_payout" in action_uris
     assert "flow_id=${encodeURIComponent(flowId)}" in identity
     assert "development_line_user_id" not in staff_orders
     assert "userId" not in staff_orders
 
 
-def test_staff_self_service_exposes_leave_and_split_service_day_log_flows():
+def test_staff_self_service_exposes_leave_flow_and_retires_baby_log():
     schedule = (
         PROJECT_ROOT / "line/static/staff_schedule.html"
     ).read_text(encoding="utf-8")
-    baby_log = (
-        PROJECT_ROOT / "line/static/staff_baby_log.html"
-    ).read_text(encoding="utf-8")
+    assert not (PROJECT_ROOT / "line/static/staff_baby_log.html").exists()
 
     assert "/api/v1/line/staff-self-service/leave-results/" in schedule
     assert "leaveResultPost('submit',pending)" in schedule
     assert '確認原操作結果' in schedule and 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in schedule
     assert '/leave-requests/preview' not in schedule
     assert 'confirmLeave' not in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in baby_log
-    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in baby_log
-    assert "/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query" in baby_log
-    assert "/api/v1/line/staff-self-service/service-day-media" in baby_log
-    assert "staging_id" in baby_log
     assert "LINE provider" not in schedule
     assert 'params.get("userId")' not in schedule
     assert 'searchParams.get("userId")' not in schedule
     assert 'development_line_user_id: ""' in schedule
-    assert 'development_line_user_id: ""' in baby_log
 
 
 def test_identity_flow_requires_and_forwards_client_idempotency_key(monkeypatch):

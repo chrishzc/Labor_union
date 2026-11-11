@@ -1,4 +1,7 @@
-/** LINE 流程圖僅分類正式目錄；內容、ID 與開關仍以 typed Query 為準。 */
+/**
+ * File: line_message_flow_adapter.ts
+ * Description: LINE 流程圖分類與狀態解析，引用正式目錄及規則，不保存文案或業務 gate。
+ */
 import type { PreviewDescriptor } from '../../api/line_notification_rules/line_message_preview_client';
 import type { LineNotificationRuleModel } from './line_configuration_query_adapter';
 
@@ -10,7 +13,7 @@ export const FLOW_MANAGED_NOTIFICATION_EVENTS = new Set([
 export type MessageFlowStatus = 'enabled' | 'disabled' | 'flow' | 'unavailable';
 export function messageFlowStatus(descriptor: Pick<PreviewDescriptor, 'id' | 'builtin'>, rule?: LineNotificationRuleModel): MessageFlowStatus {
   if (rule) return FLOW_MANAGED_NOTIFICATION_EVENTS.has(rule.eventCode) ? 'flow' : rule.enabled ? 'enabled' : 'disabled';
-  return descriptor.builtin || descriptor.id === 'welcome' ? 'flow' : 'unavailable';
+  return descriptor.builtin ? 'flow' : 'unavailable';
 }
 export const MESSAGE_FLOW_STATUS_LABELS: Record<MessageFlowStatus, string> = {
   enabled: '已啟用', disabled: '已停用', flow: '由流程控制', unavailable: '狀態無法確認',
@@ -48,7 +51,6 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
       { id: 'first-overdue', title: '第一期款逾期－私訊補寄與人工提醒', ids: ['payment-overdue-first'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
     ] },
     { title: '持續服務與異動', nodes: [
-      { id: 'baby-log', title: '日誌連續缺漏－工會決定提醒', ids: ['service-day-log-reminder'] },
       { id: 'second-payment', title: '第二期款到期與入帳', ids: ['payment-second-reminder'], templates: ['LINE-SECOND-PAYMENT-SETTLED-TEXT-V1'], summary: '到期當天仍有餘額時，依排程自動私訊客戶；不需第二期或已結清不催繳。' },
       { id: 'second-overdue', title: '第二期款逾期－私訊補寄與人工提醒', ids: ['payment-overdue-second'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
       { id: 'leave', title: '請假、順延、代班與換人（共用流程）', ids: ['service-start-inquiry', 'group-invitation-staff', 'service-start-result'], summary: '雙方自行協調。無衝突順延直接更新；代班或換人共用詢問意願、邀請加入原案件群組、工會記錄日期及帳務更新，最後寄無確認按鈕的日期表。' },
@@ -59,8 +61,8 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     ] },
   ] },
   { id: 'identity', name: '登記與身分', stages: [
-    { title: '加入好友', nodes: [{ id: 'welcome', title: '加入 LINE 好友', ids: ['welcome'] }] },
-    { title: '登記需求', nodes: [{ id: 'registration', title: '開啟服務登記', ids: ['service-registration'] }] },
+    { title: '加入好友', nodes: [{ id: 'welcome', title: '加入 LINE 好友（官方帳號設定）', internal: true, summary: '加入好友歡迎訊息改由 LINE 官方帳號後台設定，系統不額外發送歡迎訊息。' }] },
+    { title: '登記需求', nodes: [{ id: 'registration', title: '開啟服務登記', ids: ['service-registration', 'identity-customer-link'] }] },
     { title: '身分確認', nodes: [{ id: 'identity-pending', title: '受理身分申請', ids: ['identity-pending'], templates: ['staff_verification_rejected'] }] },
     { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'], templates: ['client_rebind_rejected'] }] },
   ] },

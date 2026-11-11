@@ -28,6 +28,8 @@ class WeeklyReportSummaryView(_StrictModel):
     general_ineligible_count: int | None = Field(default=None, ge=0)
     subsidized_eligible_count: int = Field(ge=0)
     subsidized_ineligible_count: int | None = Field(default=None, ge=0)
+    indigenous_eligible_count: int = Field(ge=0)
+    indigenous_ineligible_count: int | None = Field(default=None, ge=0)
     rejection_unpartitioned_count: int = Field(ge=0)
     order_established_count: int = Field(ge=0)
     negotiating_count: int = Field(ge=0)
@@ -52,6 +54,8 @@ class CaseStatisticsSummaryView(_StrictModel):
     general_ineligible_count: int | None = Field(ge=0)
     subsidized_eligible_count: int = Field(ge=0)
     subsidized_ineligible_count: int | None = Field(ge=0)
+    indigenous_eligible_count: int = Field(ge=0)
+    indigenous_ineligible_count: int | None = Field(ge=0)
     order_status_counts: dict[Literal["待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"], Annotated[int, Field(ge=0)]]
     unclassified_qualification_count: int = Field(ge=0)
     other_status_count: int = Field(ge=0)
@@ -83,7 +87,7 @@ class WeeklyOperationsSubsidyRowView(GovernmentSubsidyReportRowView):
 
 
 class WeeklyOperationsSubsidyPartitionView(_StrictModel):
-    citizen_kind: Literal["general", "subsidized"]
+    citizen_kind: Literal["general", "subsidized", "indigenous"]
     row_count: int = Field(ge=0)
     total_amount_ntd: int = Field(ge=0)
     rows: list[WeeklyOperationsSubsidyRowView]
@@ -97,6 +101,8 @@ class WeeklyReportCaseRowView(_StrictModel):
     general_ineligible: int = Field(ge=0, le=1)
     subsidized_eligible: int = Field(ge=0, le=1)
     subsidized_ineligible: int = Field(ge=0, le=1)
+    indigenous_eligible: int = Field(ge=0, le=1)
+    indigenous_ineligible: int = Field(ge=0, le=1)
     order_established: int = Field(ge=0, le=1)
     negotiating: int = Field(ge=0, le=1)
     cancelled: int = Field(ge=0, le=1)
@@ -110,6 +116,7 @@ class WeeklyReportCaseRowView(_StrictModel):
     review_result: Literal[
         "general_eligible",
         "subsidized_eligible",
+        "indigenous_eligible",
         "rejected_unpartitioned",
         "pending",
     ]

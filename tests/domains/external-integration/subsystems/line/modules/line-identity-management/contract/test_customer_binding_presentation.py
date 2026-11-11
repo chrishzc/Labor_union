@@ -10,9 +10,9 @@ import pytest
 ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "pyproject.toml").is_file())
 
 
-def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True):
+def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True, existing_case=False, case_no=None):
     source = (ROOT / "line/static/bind.html").read_text(encoding="utf-8").split("<script>", 1)[1].split("</script>", 1)[0]
-    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete})
+    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete, "existing_case": existing_case, "case_no": case_no})
     harness = r"""
 const vm = require('node:vm');
 const settings = SETTINGS;
@@ -34,7 +34,8 @@ get('lineUserId').value = 'U-test'; get('formContent').style.display = 'block';
 const calls = [], messages = [], redirects = [];
 let closes = 0;
 const storage = new Map();
-const location = {search: '?flow_id=flow-test', origin: 'https://line.example.test', replace: url => redirects.push(url)};
+const search = '?flow_id=flow-test' + (settings.existing_case ? '&entry=existing_case' : '');
+const location = {search, origin: 'https://line.example.test', replace: url => redirects.push(url)};
 const context = vm.createContext({
   document: {getElementById: get, querySelectorAll: () => [], createElement: () => new Element()},
   window: {addEventListener(){}, location, close(){}},
@@ -46,7 +47,9 @@ const context = vm.createContext({
     calls.push({url, body: JSON.parse(options.body)});
     if (url.endsWith('/preview')) return {ok: settings.preview_ok, json: async () => ({data: {
       status: settings.status, expected_version: 3, preview_fingerprint: 'a'.repeat(64),
-      candidate: settings.status === 'not_found' ? null : {has_completed_survey: settings.survey_complete, currently_bound: false},
+      candidate: settings.status === 'not_found' ? null : {
+        has_completed_survey: settings.survey_complete, currently_bound: false, case_no: settings.case_no,
+      },
     }})};
     if (url.endsWith('/apply')) return {ok: settings.apply_status !== 'conflict', json: async () => ({data: {status: settings.apply_status, receipt_identity:'public-receipt', preview_fingerprint:'a'.repeat(64), review_request_id:9}})};
     throw new Error('Unexpected request: ' + url);
@@ -56,7 +59,7 @@ vm.runInContext(SOURCE, context);
 const event = {preventDefault(){}};
 context.event = event;
 (async () => {
-  await vm.runInContext('(async () => { currentIdToken = "test-id-token"; ACTIONS })()', context);
+  await vm.runInContext('(async () => { currentIdToken = "test-id-token"; runtimePage = {success_title:"綁定成功",success_description:"綁定成功，專屬選單將稍後更新。"}; ACTIONS })()', context);
   const output = {calls, messages, redirects, closes, elements: {}};
   for (const [id, element] of elements) output.elements[id] = {text: element.textContent, display: element.style.display};
   process.stdout.write(JSON.stringify(output));
@@ -86,7 +89,10 @@ def test_rebind_cancel_does_not_apply_or_replace_any_binding():
 
 
 def test_rebind_only_applies_after_explicit_request_using_the_original_preview():
-    result = _run_page("requires_review", "await handleFormSubmit(event); await confirmRebind();", apply_status="pending_review")
+    result = _run_page(
+        "requires_review", "await handleFormSubmit(event); await confirmRebind();",
+        apply_status="pending_review", existing_case=True, case_no="A115001",
+    )
     assert [item["url"] for item in result["calls"]] == [
         "/api/v1/line/identity/customer/preview", "/api/v1/line/identity/customer/apply",
     ]
@@ -94,6 +100,7 @@ def test_rebind_only_applies_after_explicit_request_using_the_original_preview()
     assert result["calls"][1]["body"]["expected_version"] == 3
     assert result["elements"]["successTitle"]["text"] == "申請已送出"
     assert "核准前保留原綁定" in result["elements"]["successDesc"]["text"]
+    assert "綁定成功" not in result["elements"]["successDesc"]["text"]
     assert result["messages"] == []
 
 
@@ -139,6 +146,29 @@ def test_only_successful_lookup_can_enter_the_registration_form(status, survey_c
         assert len(result["calls"]) == 1
     else:
         assert result["redirects"] == []
+
+
+@pytest.mark.parametrize(("status", "call_count"), [("matched", 2), ("already_bound", 1)])
+def test_existing_case_can_bind_or_read_back_same_account(status, call_count):
+    result = _run_page(status, existing_case=True, case_no="A115001")
+    assert len(result["calls"]) == call_count
+    assert result["elements"]["successContent"]["display"] == "block"
+    assert result["elements"]["successTitle"]["text"] == ("綁定成功" if status == "matched" else "您已完成綁定")
+    assert result["redirects"] == result["messages"] == []
+
+
+@pytest.mark.parametrize(("status", "survey_complete", "preview_ok", "case_no"), [
+    ("not_found", True, True, None),
+    ("matched", False, True, "A115001"),
+    ("matched", True, True, None),
+    ("matched", True, False, "A115001"),
+])
+def test_existing_case_keeps_incomplete_lookup_on_binding_page(status, survey_complete, preview_ok, case_no):
+    result = _run_page(status, existing_case=True, case_no=case_no,
+                       survey_complete=survey_complete, preview_ok=preview_ok)
+    assert result["redirects"] == result["messages"] == []
+    assert [call["url"] for call in result["calls"]] == ["/api/v1/line/identity/customer/preview"]
+    assert result["elements"]["bindingFailureActions"]["display"] == "flex"
 
 
 @pytest.mark.parametrize("stale", [False, True])

@@ -35,6 +35,7 @@ ORDER_STATUS_LABELS = tuple(status.value for status in OrderLifecycleStatus if s
 MISSING_ORDER_STATUS = "無訂單／狀態缺值"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
+INDIGENOUS_CITIZEN = "原住民"
 _SERVICE_COMPLETED_STATUSES = frozenset({
     "訂單完成",
     "歷史訂單－服務完成",
@@ -105,6 +106,7 @@ class SubsidyFact:
 class SubsidyFacts:
     general: tuple[SubsidyFact, ...]
     subsidized: tuple[SubsidyFact, ...]
+    indigenous: tuple[SubsidyFact, ...] = ()
 
 
 class WeeklyOperationsReportFacts(Protocol):
@@ -136,6 +138,8 @@ class CaseStatisticsSummary:
     general_ineligible_count: int | None
     subsidized_eligible_count: int
     subsidized_ineligible_count: int | None
+    indigenous_eligible_count: int
+    indigenous_ineligible_count: int | None
     order_status_counts: dict[str, int]
     unclassified_qualification_count: int
     other_status_count: int
@@ -191,6 +195,8 @@ class WeeklyCaseRow:
     review_rejected: int = 0
     service_status: str = ""
     notes: str = ""
+    indigenous_eligible: int = 0
+    indigenous_ineligible: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +260,8 @@ class WeeklySummary:
     general_ineligible_count: int | None
     subsidized_eligible_count: int
     subsidized_ineligible_count: int | None
+    indigenous_eligible_count: int
+    indigenous_ineligible_count: int | None
     rejection_unpartitioned_count: int
     order_established_count: int
     negotiating_count: int
@@ -360,7 +368,9 @@ class WeeklyOperationsReportQuery:
         rows = tuple(row for row in annual_rows if start_date <= row.application_date <= end_date)
         status_counts = _order_status_counts(rows)
         qualifications = tuple(sum(getattr(row, field) for row in rows) for field in (
-            "general_eligible", "general_ineligible", "subsidized_eligible", "subsidized_ineligible",
+            "general_eligible", "general_ineligible",
+            "subsidized_eligible", "subsidized_ineligible",
+            "indigenous_eligible", "indigenous_ineligible",
         ))
         qualification_summary = self._summary(rows)
         generated_at = self._now()
@@ -373,6 +383,7 @@ class WeeklyOperationsReportQuery:
                 application_count=len(rows),
                 general_eligible_count=qualifications[0], general_ineligible_count=qualification_summary.general_ineligible_count,
                 subsidized_eligible_count=qualifications[2], subsidized_ineligible_count=qualification_summary.subsidized_ineligible_count,
+                indigenous_eligible_count=qualifications[4], indigenous_ineligible_count=qualification_summary.indigenous_ineligible_count,
                 order_status_counts={status: status_counts[status] for status in ORDER_STATUS_LABELS},
                 unclassified_qualification_count=0 if non_citizen else len(rows) - sum(qualifications),
                 other_status_count=len(rows) - sum(status_counts[status] for status in ORDER_STATUS_LABELS),
@@ -418,6 +429,7 @@ class WeeklyOperationsReportQuery:
         subsidy_partitions = (
             self._subsidy_partition("general", subsidies.general),
             self._subsidy_partition("subsidized", subsidies.subsidized),
+            self._subsidy_partition("indigenous", subsidies.indigenous),
         )
         weekly_metrics = tuple(self._facts.list_weekly_metrics(start_date, end_date))
 
@@ -527,9 +539,11 @@ class WeeklyOperationsReportQuery:
         identity = normalize_subsidy_policy_identity(fact.identity_status or "")
         is_general = identity == GENERAL_CITIZEN
         is_subsidized = identity == SUBSIDIZED_CITIZEN
+        is_indigenous = identity == INDIGENOUS_CITIZEN
         is_rejected = fact.hcm_review_status == "不符合"
         is_eligible = fact.hcm_review_status == "符合"
         gen_inelig = int(is_rejected and (is_general or identity == "非市民"))
+        ind_inelig = int(is_rejected and is_indigenous)
 
         if is_rejected:
             review_result = "rejected_unpartitioned"
@@ -537,6 +551,8 @@ class WeeklyOperationsReportQuery:
             review_result = "general_eligible"
         elif is_subsidized and is_eligible:
             review_result = "subsidized_eligible"
+        elif is_indigenous and is_eligible:
+            review_result = "indigenous_eligible"
         else:
             review_result = "pending"
             if not _is_non_citizen(fact):
@@ -577,6 +593,8 @@ class WeeklyOperationsReportQuery:
             general_ineligible=gen_inelig,
             subsidized_eligible=int(review_result == "subsidized_eligible"),
             subsidized_ineligible=0,
+            indigenous_eligible=int(review_result == "indigenous_eligible"),
+            indigenous_ineligible=ind_inelig,
             order_established=int(status in {"訂單成立", "服務中", "訂單完成"}),
             negotiating=int(status == "洽談中"),
             cancelled=int(status == "訂單取消"),
@@ -665,8 +683,9 @@ class WeeklyOperationsReportQuery:
     ) -> WeeklySummary:
         general_ineligible = sum(row.general_ineligible for row in rows)
         subsidized_ineligible = sum(row.subsidized_ineligible for row in rows)
+        indigenous_ineligible = sum(row.indigenous_ineligible for row in rows)
         unclassified_rejection = sum(
-            row.review_rejected and not row.general_ineligible
+            row.review_rejected and not row.general_ineligible and not row.indigenous_ineligible
             for row in rows
         )
         return WeeklySummary(
@@ -675,6 +694,8 @@ class WeeklyOperationsReportQuery:
             general_ineligible_count=general_ineligible if general_ineligible or not unclassified_rejection else None,
             subsidized_eligible_count=sum(row.subsidized_eligible for row in rows),
             subsidized_ineligible_count=subsidized_ineligible if subsidized_ineligible or not unclassified_rejection else None,
+            indigenous_eligible_count=sum(row.indigenous_eligible for row in rows),
+            indigenous_ineligible_count=indigenous_ineligible if indigenous_ineligible or not unclassified_rejection else None,
             rejection_unpartitioned_count=unclassified_rejection,
             order_established_count=sum(row.order_established for row in rows),
             negotiating_count=sum(row.negotiating for row in rows),
@@ -692,9 +713,9 @@ class WeeklyOperationsReportQuery:
         issues.append(
             DataQualityIssue(
                 "rejection_partition_unknown",
-                "general_ineligible_count,subsidized_ineligible_count",
-                sum(row.review_rejected and not row.general_ineligible for row in case_rows),
-                "不符合案件尚無一般／補助 canonical 分類。",
+                "general_ineligible_count,subsidized_ineligible_count,indigenous_ineligible_count",
+                sum(row.review_rejected and not row.general_ineligible and not row.indigenous_ineligible for row in case_rows),
+                "不符合案件尚無一般／補助／原住民 canonical 分類。",
             )
         )
         for code in sorted({code for row in case_rows for code in row.data_quality_codes}):

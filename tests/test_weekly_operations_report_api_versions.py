@@ -1,4 +1,7 @@
-"""週報 v3/v4 wire contract：使用實際 FastAPI route，Query/auth 為 dependency overrides。"""
+"""
+File: test_weekly_operations_report_api_versions.py
+Description: 驗證週報 v3 與 v4 strict wire 契約及 XLSX 版本標頭隔離。
+"""
 import json
 
 from dataclasses import dataclass, field
@@ -24,6 +27,8 @@ class _Summary:
     general_ineligible_count: int | None = None
     subsidized_eligible_count: int = 0
     subsidized_ineligible_count: int | None = None
+    indigenous_eligible_count: int = 0
+    indigenous_ineligible_count: int | None = None
     rejection_unpartitioned_count: int = 0
     order_established_count: int = 0
     negotiating_count: int = 0
@@ -56,7 +61,7 @@ def api():
         start_date=date(2026, 8, 31), end_date=date(2026, 9, 13), timezone="Asia/Taipei",
         period_label="2026-08-31 ~ 2026-09-13", generated_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
         source_revision="wire-contract-fixture", summary=_Summary(), case_rows=(),
-        subsidy_partitions=tuple(SimpleNamespace(citizen_kind=kind, rows=()) for kind in ("general", "subsidized")),
+        subsidy_partitions=tuple(SimpleNamespace(citizen_kind=kind, rows=()) for kind in ("general", "subsidized", "indigenous")),
         service_rows=(), weekly_metrics=(), data_quality_issues=(),
         annual_totals=(_Totals(),),
         monthly_subtotals=(_Totals(month=8, start_date=date(2026, 8, 31)),),

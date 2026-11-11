@@ -1,6 +1,6 @@
 """
 File: rich_menu_image_store.py
-Description: LINE Rich Menu 圖片檔案儲存管理與現代化卡片圖文選單繪製渲染引擎。
+Description: LINE Rich Menu 圖片檔案儲存管理與大字易讀卡片圖文選單繪製渲染引擎。
 """
 
 from __future__ import annotations
@@ -80,13 +80,17 @@ def _get_icon_for_label(label: str) -> str:
         return "🚨"
     if "看板" in label or "報表" in label or "數據" in label or "營運" in label:
         return "📊"
-    if "修改" in label or "異動" in label:
-        return "✏️"
+    if "客服" in label or "諮詢" in label or "聯絡" in label or "專人" in label:
+        return "💬"
+    if "個人" in label:
+        return "👤"
+    if "改" in label or "修改" in label or "異動" in label:
+        return "📝"
     if "月嫂" in label:
-        return "👩‍🍼"
+        return "🤱"
     if "客戶" in label or "產婦" in label:
         return "👶"
-    if "登記" in label or "申請" in label:
+    if "預約" in label or "登記" in label or "申請" in label:
         return "📝"
     if "AI" in label or "智慧" in label:
         return "🤖"
@@ -94,30 +98,52 @@ def _get_icon_for_label(label: str) -> str:
         return "💡"
     if "說明" in label:
         return "🔍"
-    if "客服" in label or "諮詢" in label:
-        return "💬"
-    if "訂單" in label or "案件" in label:
+    if "案件" in label or "訂單" in label:
         return "📦"
-    if "排班" in label or "日曆" in label:
+    if "班表" in label or "排班" in label or "日曆" in label:
         return "📅"
     if "請假" in label or "休假" in label:
-        return "🏖️"
+        return "📅"
     if "薪資" in label or "請款" in label or "明細" in label:
         return "💵"
     if "契約" in label or "合約" in label:
         return "📑"
     if "評價" in label or "滿意度" in label:
         return "⭐"
-    if "審核" in label or "調度" in label or "確認" in label:
+    if "待辦" in label or "審核" in label or "調度" in label or "確認" in label:
         return "📋"
     if "一般用戶" in label or "會員" in label or "用戶" in label:
         return "👥"
     if "工會" in label:
-        return "🛡️"
+        return "📋"
     return "📌"
 
 
-def _find_emoji_font(size: int = 140) -> ImageFont.FreeTypeFont | None:
+def _soft_tint(color: object, ratio: float = 0.10) -> str:
+    if isinstance(color, str) and len(color) == 7 and color.startswith("#"):
+        try:
+            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+            tr = round(255 - (255 - r) * ratio)
+            tg = round(255 - (255 - g) * ratio)
+            tb = round(255 - (255 - b) * ratio)
+            return f"#{tr:02X}{tg:02X}{tb:02X}"
+        except ValueError:
+            pass
+    return "#FFF7F2"
+
+
+def _action_hint_text(action: object) -> str:
+    action_type = action.get("type", "") if isinstance(action, dict) else ""
+    if action_type == "uri":
+        return "點此開啟 ›"
+    if action_type == "postback":
+        return "點此聯絡 ›"
+    if action_type == "richmenuswitch":
+        return "點此切換 ›"
+    return "點此使用 ›"
+
+
+def _find_emoji_font(size: int = 108) -> ImageFont.FreeTypeFont | None:
     for path in (
         "C:/Windows/Fonts/seguiemj.ttf",
         "seguiemj.ttf",
@@ -125,10 +151,11 @@ def _find_emoji_font(size: int = 140) -> ImageFont.FreeTypeFont | None:
         "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
         "/usr/share/fonts/truetype/google-noto-color-emoji/NotoColorEmoji.ttf",
     ):
-        try:
-            return ImageFont.truetype(path, size)
-        except OSError:
-            continue
+        for candidate_size in ((size, 109) if "noto" in path.lower() else (size,)):
+            try:
+                return ImageFont.truetype(path, candidate_size)
+            except OSError:
+                continue
     return None
 
 
@@ -171,7 +198,7 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
     draw = ImageDraw.Draw(image)
 
     buttons = menu.get("buttons", [])
-    margin = 16
+    margin = 20
 
     for button in buttons:
         bounds = button["bounds"]
@@ -179,38 +206,67 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
         bw, bh = int(bounds["width"]), int(bounds["height"])
         card_box = [bx + margin, by + margin, bx + bw - margin, by + bh - margin]
         is_compact = bh < 700
+        is_narrow = bw < 900
 
         radius = int(button.get("border_radius", 0) or 0)
-        card_radius = min(radius, 44) if radius > 0 else (34 if is_compact else 44)
+        card_radius = min(radius, 48) if radius > 0 else (36 if is_compact else 48)
 
-        # 1. 繪製純白卡片底圖與柔和邊框
+        # 1. 繪製純白卡片底圖與明確邊框
         draw.rounded_rectangle(
             card_box,
             radius=card_radius,
             fill="#FFFFFF",
-            outline="#E5DCD4",
-            width=3,
+            outline="#D8CFC7",
+            width=4,
         )
 
         # 2. 繪製頂部品牌強調色條
         accent_color = button.get("background_color") or "#FF7F50"
-        accent_h = 10 if is_compact else 14
+        accent_h = 14 if is_compact else 22
         draw.rounded_rectangle(
-            [card_box[0] + 24, card_box[1] + 4, card_box[2] - 24, card_box[1] + accent_h + 4],
-            radius=6,
+            [card_box[0] + 28, card_box[1] + 6, card_box[2] - 28, card_box[1] + accent_h + 6],
+            radius=8,
             fill=accent_color,
         )
 
         label = str(button.get("label", ""))
         icon = _get_icon_for_label(label)
         card_center_x = bx + bw / 2
-        card_center_y = by + bh / 2
 
-        # 3. 繪製圓形底圖與圖示 (Emoji / Icon)
-        emoji_size = 110 if is_compact else 145
+        # 3. 準備圖示、主標題（大字易讀）與動作提示尺寸
+        circle_r = 58 if is_compact else (72 if is_narrow else 90)
+        emoji_size = 78 if is_compact else (96 if is_narrow else 108)
         emoji_font = _find_emoji_font(emoji_size)
-        circle_r = 72 if is_compact else 100
-        circle_y = card_center_y - (50 if is_compact else 80)
+
+        title_font_size = 88 if is_compact else (104 if is_narrow else 138)
+        title_font = _find_text_font(title_font_size)
+        t_box = draw.textbbox((0, 0), label, font=title_font)
+        tw = t_box[2] - t_box[0]
+        th = t_box[3] - t_box[1]
+
+        max_title_w = max(120, bw - margin * 2 - 72)
+        while tw > max_title_w and title_font_size > 44:
+            title_font_size -= 6
+            title_font = _find_text_font(title_font_size)
+            t_box = draw.textbbox((0, 0), label, font=title_font)
+            tw = t_box[2] - t_box[0]
+            th = t_box[3] - t_box[1]
+
+        sub_text = _action_hint_text(button.get("action"))
+        sub_font_size = 36 if is_compact else (42 if is_narrow else 48)
+        sub_font = _find_text_font(sub_font_size)
+        s_box = draw.textbbox((0, 0), sub_text, font=sub_font)
+        sw = s_box[2] - s_box[0]
+        sh = s_box[3] - s_box[1]
+
+        # 4. 整組內容（圖示圈＋大字主標題＋提示副標）在卡片安全區垂直置中
+        gap_circle_title = 22 if is_compact else 38
+        gap_title_sub = 16 if is_compact else 28
+        content_top = card_box[1] + accent_h + 14
+        content_bottom = card_box[3] - 14
+        total_h = (circle_r * 2) + gap_circle_title + th + gap_title_sub + sh
+        start_y = max(content_top, content_top + ((content_bottom - content_top) - total_h) / 2)
+        circle_y = start_y + circle_r
 
         draw.ellipse(
             [
@@ -219,7 +275,7 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
                 card_center_x + circle_r,
                 circle_y + circle_r,
             ],
-            fill="#FFF7F2",
+            fill=_soft_tint(accent_color),
         )
 
         if emoji_font:
@@ -236,46 +292,24 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
             except Exception:
                 pass
 
-        # 4. 繪製主標題文字
-        title_font_size = 58 if is_compact else 76
-        title_font = _find_text_font(title_font_size)
-        t_box = draw.textbbox((0, 0), label, font=title_font)
-        tw = t_box[2] - t_box[0]
-        th = t_box[3] - t_box[1]
-
-        # 若文字過長則動態微調字型
-        if tw > (bw - margin * 2 - 40) and title_font_size > 40:
-            title_font_size = int(title_font_size * 0.8)
-            title_font = _find_text_font(title_font_size)
-            t_box = draw.textbbox((0, 0), label, font=title_font)
-            tw = t_box[2] - t_box[0]
-            th = t_box[3] - t_box[1]
-
-        ty = card_center_y + (54 if is_compact else 82)
         text_color = button.get("text_color")
-        if not text_color or text_color == "#FFFFFF":
-            text_color = "#2B211D"
+        if not text_color or str(text_color).upper() == "#FFFFFF":
+            text_color = "#1F1916"
 
+        title_top = start_y + (circle_r * 2) + gap_circle_title
         draw.text(
-            (card_center_x - tw / 2 - t_box[0], ty),
+            (card_center_x - tw / 2 - t_box[0], title_top - t_box[1]),
             label,
             font=title_font,
             fill=text_color,
         )
 
-        # 5. 繪製動作提示次標題
-        action = button.get("action", {})
-        action_type = action.get("type", "") if isinstance(action, dict) else ""
-        sub_text = "線上服務 ›" if action_type == "uri" else "即時查詢 ›"
-        sub_font_size = 32 if is_compact else 38
-        sub_font = _find_text_font(sub_font_size)
-        s_box = draw.textbbox((0, 0), sub_text, font=sub_font)
-        sw = s_box[2] - s_box[0]
+        sub_top = title_top + th + gap_title_sub
         draw.text(
-            (card_center_x - sw / 2 - s_box[0], ty + th + (16 if is_compact else 22)),
+            (card_center_x - sw / 2 - s_box[0], sub_top - s_box[1]),
             sub_text,
             font=sub_font,
-            fill="#A89587",
+            fill="#6E6056",
         )
 
     return encode_line_jpeg(image)

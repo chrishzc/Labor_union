@@ -21,8 +21,8 @@
   - `api/routes/finance_reports.py::preview_annual_reconciliation`
 
 ## Dependencies
-- outbound: `client-finance/pricing-configuration` — 重用 `CASE_PRICING_FACTS_SQL` 唯讀來源，人工／綁定政策優先且保留舊版 rule 與金額；來源身分為一般市民／補助市民，社福等僅為後者別名。沒有有效綁定時沿原規則一般 40／補助 120。
-- inbound: `global/reporting/weekly-operations-report` — `end_date` 所屬年度的營運專用補助統計 readback。
+- outbound: `client-finance/pricing-configuration` — 重用 `CASE_PRICING_FACTS_SQL` 唯讀來源，人工／綁定政策優先且保留舊版 rule 與金額；來源身分為一般市民／補助市民／原住民，社福等為補助市民別名、`原民`/`原住民市民` 為原住民別名。沒有有效綁定時沿原規則一般 40／原住民 80（350 元）／補助 120。
+- inbound: `global/reporting/weekly-operations-report` — `end_date` 所屬年度的營運專用三軌補助統計（`general_citizen_rows`、`subsidized_citizen_rows`、`indigenous_citizen_rows`）readback。
 - inbound: `domains/clients/subsystems/client-profile/modules/profile-change` — 客戶名冊訂單帳務匯出依案件讀取相同補助金額與服務結束日投影。
 - outbound: 季／年度與營運年度統計均使用 Orders lifecycle、Client 補助身分、訂單服務 facts、歷史實際服務時數 projection 與案件 Payroll 凍結費率，並納入同等已付訂金語意的歷史 Orders 狀態；歷史實際時數已確認時優先使用，未確認時以原約定天數乘每日時數，40／120 僅作政策補助上限。正式採用的歷史案件依唯一 pairing/adoption 關聯取其凍結費率，其他案件沿原案件快照。Case Import 正式雙胞胎事實固定投影 450，缺少非雙胞胎快照即 fail closed；不依賴 claim batch。尚未建立正式排班的案件依既有完整案件資料估算；已存在的目前 generation 關聯須符合 Scheduling owner 的 id／案件／effective 狀態。
 

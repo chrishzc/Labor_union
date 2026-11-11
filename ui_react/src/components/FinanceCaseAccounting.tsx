@@ -524,7 +524,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      <p>儲存成功後，本案帳務與原銀行流水的核銷款項會同步更新，請重新核對後核銷。</p>
      <fieldset disabled={reconciliationBusy||pricingEditState.busy}>
        {state.registry?.order_terms.status==='ready'&&state.registry.order_terms.data?
-         <OrderTermsMutationPanel caseNo={initialCase} query={state.registry.order_terms.data} onObserved={()=>setPendingAccountingRefresh(true)} onEditStateChange={setTermsEditState}/>:
+         <OrderTermsMutationPanel caseNo={initialCase} query={state.registry.order_terms.data} fromRegistry onObserved={()=>setPendingAccountingRefresh(true)} onEditStateChange={setTermsEditState}/>:
          <p>目前無法讀取正式服務條件，請重新查詢案件後再更正。</p>}
      </fieldset>
      <CasePricingAdjustmentPanel caseNo={initialCase} revision={revision} disabled={reconciliationBusy||termsEditState.busy}

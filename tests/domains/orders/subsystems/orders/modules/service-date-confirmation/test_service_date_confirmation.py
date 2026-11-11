@@ -672,6 +672,7 @@ def test_restart_detection_is_bound_to_the_current_generation_receipt():
         "restart_receipt.command_family='orders_historical_precision_restart'"
         in statement
     )
-    assert "order_lifecycle_state_events" not in statement
+    assert "restart_event.idempotency_key=restart_receipt.idempotency_key" in statement
+    assert "restart_event.case_no=aggregate.case_no" in statement
     assert parameters == ("HIST-73",)
     assert result == (None, ())

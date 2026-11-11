@@ -22,6 +22,8 @@ from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersio
 class HistoricalPrecisionRestartContext:
     facts: HistoricalPrecisionRestartFacts
     terms_facts: Any
+    matching_plan: dict | None = None
+    matching_conflicts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +33,7 @@ class HistoricalPrecisionRestartPreview:
     payroll_impact: Any | None
     lifecycle_impact: LifecycleImpactCandidate | None
     fingerprint: PreviewFingerprint
+    matching_plan: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +115,7 @@ class HistoricalPrecisionRestartWorkflow:
                 return replace(claimed.receipt, replayed=True)
             self._repository.preflight_staff_ids(request.intent.case_no)
             context = self._repository.load(request.intent.case_no, for_update=True)
-            preview = _preview(context, request.intent, self._now())
+            preview = _preview(context, request.intent, self._now(), check_matching=False)
             facts = context.facts
             if (
                 facts.order_version != request.expected_order_version
@@ -122,25 +125,36 @@ class HistoricalPrecisionRestartWorkflow:
                 or preview.fingerprint != request.preview_fingerprint
             ):
                 raise _error(request, ErrorCategory.CONFLICT, "historical_precision_restart_candidate_stale", facts.order_version)
+            if context.matching_conflicts:
+                raise _error(request, ErrorCategory.CONFLICT, "historical_precision_restart_matching_plan_conflict", facts.order_version)
             receipt = self._repository.persist(request, preview)
             unit.commit()
             return receipt
 
 
-def _preview(context, intent, evaluation_at):
+def _preview(context, intent, evaluation_at, *, check_matching=True):
     domain = build_historical_precision_restart_candidate(context.facts, intent)
     if domain.blockers:
         raise HistoricalPrecisionRestartError(
             TypedError(ErrorCategory.DOMAIN_BLOCKED, domain.blockers[0], "歷史訂單目前不能重啟正常流程。", CorrelationId("historical-precision-restart-preview"), domain_blockers=domain.blockers)
         )
     assert domain.scheduling is not None and domain.target_status is not None
+    if check_matching and context.matching_conflicts:
+        raise HistoricalPrecisionRestartError(TypedError(
+            ErrorCategory.CONFLICT, "historical_precision_restart_matching_plan_conflict",
+            "既有配對方案與歷史重啟條件不符：" + "、".join(context.matching_conflicts),
+            CorrelationId("historical-precision-restart-preview"),
+            domain_blockers=("historical_precision_restart_matching_plan_conflict",),
+        ))
     lifecycle = _lifecycle(domain, evaluation_at)
     fingerprint = fingerprint_payload({
         "domain": domain.fingerprint.value,
         "lifecycle": lifecycle.fingerprint.value,
         "normal_flow_requires_service_date_confirmation": True,
+        "matching_plan": context.matching_plan,
+        "matching_conflicts": context.matching_conflicts,
     })
-    return HistoricalPrecisionRestartPreview(domain, None, None, lifecycle, fingerprint)
+    return HistoricalPrecisionRestartPreview(domain, None, None, lifecycle, fingerprint, context.matching_plan)
 
 
 def _lifecycle(domain, evaluation_at):

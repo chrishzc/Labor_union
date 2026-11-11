@@ -108,7 +108,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
     } else if (val === 'indigenous') {
       rule = 'citizen';
       identityName = '原住民';
-      subsidyHours = 120;
+      subsidyHours = 80;
     } else if (val === 'regular_citizen') {
       rule = 'citizen';
       identityName = '一般市民';
@@ -126,8 +126,9 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
       subsidy_hours: subsidyHours,
       client: {
         ...draft.client,
-        covered: subsidyHours === 0 ? 0 : draft.client.covered,
+        covered: subsidyHours === 0 ? 0 : val === 'indigenous' ? 350 : draft.client.covered,
       },
+      payroll: val === 'indigenous' ? { ...draft.payroll, covered: 350 } : draft.payroll,
     });
   };
 
@@ -287,7 +288,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
                 >
                   <option value="citizen_subsidy">補助市民（一般補助 · 上限 120h）</option>
                   <option value="low_income">低收入戶市民（全額免自備 · 上限 120h）</option>
-                  <option value="indigenous">原住民市民（全額補助 · 上限 120h）</option>
+                  <option value="indigenous">原住民市民（預設上限 80h · 350 元）</option>
                   <option value="regular_citizen">一般市民（無補助自備 · 上限 0h）</option>
                   <option value="non_citizen">非市民（全額自費 · 上限 0h）</option>
                 </select>

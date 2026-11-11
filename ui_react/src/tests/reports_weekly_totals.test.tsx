@@ -1,4 +1,7 @@
-/** 驗證年度置頂、星期一歸月、月小計置底，以及 server totals 不被前端重新推算。 */
+/**
+ * File: reports_weekly_totals.test.tsx
+ * Description: 驗證年度置頂、星期一歸月、月小計置底，以及 server totals 與三軌欄位對齊。
+ */
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
@@ -66,16 +69,16 @@ describe('週報年度累計與月小計', () => {
     const table = await renderReport(WEEKLY_OPERATIONS_REPORT);
     expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
       '平台序號', '年度月份', '週報週數', '申請人', '推廣次數', '詢問人次', '平台案件申請數',
-      '市民案件審核', '社福案件審核', '申請案件狀況', '服務天數', '每日服務時數',
+      '市民案件審核', '社福案件審核', '原住民案件審核', '申請案件狀況', '服務天數', '每日服務時數',
       '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '備註',
-      '一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合',
+      '一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合', '原住民符合', '原住民不符合',
       '訂單成立', '洽談中', '取消', '審核不符合',
     ]);
     const first = within(table).getByRole('row', { name: '週次 2026-08-17' });
     const cells = within(first).getAllByRole('cell');
     expect(cells.map((cell) => cell.textContent)).toEqual([
       '101', '8月', '115/08/20', '2026-08-17 ~ 2026-08-23', '王**', '12', '8', '1',
-      '1', '', '', '', '1', '', '', '', '10', '8', '2026-08-17', '2026-08-28', '服務中', '板橋區', '',
+      '1', '', '', '', '', '', '1', '', '', '', '10', '8', '2026-08-17', '2026-08-28', '服務中', '板橋區', '',
     ]);
     expect(within(first).queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
   });

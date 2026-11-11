@@ -15,6 +15,8 @@ reconciliation orchestration。各資料 Domain／Subsystem 只提供 typed sour
 
 - `operational-retention` — 30-day／capacity policy、storage-management surface and bounded cleanup；path:
   `modules/operational-retention.md`
+- `repository-governance-validation` — Agent 任務治理、正式規格路由與部署規格的靜態驗證；path:
+  `modules/repository-governance-validation.md`
 
 ## Contracts
 
