@@ -60,6 +60,7 @@ _RESUME_AI_ALIASES = {
     "恢復機器人回答",
     "繼續讓機器人回答",
 }
+COMPLAINT_HANDOFF_TEXT = "很抱歉讓您有不好的感受，已轉接真人客服。"
 _REPLY_ONLY_SUFFIXES = frozenset({
     "menu", "order-update-menu", "registration", "clarification", "unavailable",
     "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "other",
@@ -290,9 +291,7 @@ class LineServiceHelpApplication:
             inbox,
             unit_of_work,
             line_user_id,
-            _handoff_active_payload(
-                "很抱歉讓您有不好的感受，已轉接真人客服。"
-            ),
+            _text_payload(COMPLAINT_HANDOFF_TEXT),
             "complaint-empathy",
         )
 
@@ -509,10 +508,6 @@ def _escalation_command(inbox, line_user_id, referral):
 
 def _text_payload(text):
     return {"type": "text", "text": text}
-
-
-def _handoff_active_payload(prefix: str):
-    return {"type": "text", "text": prefix}
 
 
 def _postback_quick_reply(label: str, data: str, display_text: str):

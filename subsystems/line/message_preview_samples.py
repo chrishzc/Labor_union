@@ -193,7 +193,29 @@ def current_message_sample(key):
         return value
     def case(): return field("案件編號", "case_no", CASE.case_no)
     def text(value): return {"type": "text", "text": value}
-    if key in {"contract-signing-client", "contract-signing-staff"}:
+    if key in {"contract-document-client", "contract-document-staff"}:
+        from subsystems.contract_signing.line_delivery import contract_delivery_text
+        audience = field("文件對象", "audience_label", "客戶契約" if key.endswith("client") else "服務人員契約")
+        url = field("公版下載連結", "download_url", "https://preview.invalid/contract")
+        payload = text(contract_delivery_text(case(), audience, url))
+    elif key in {"registration-approved-citizen", "registration-approved-non-citizen"}:
+        from subsystems.case_import.provisional_registration_application import registration_confirmation_text
+        name = field("客戶姓名", "name", CASE.client_name)
+        case_no = field("公版案件編號", "case_no", "A000000") if key == "registration-approved-non-citizen" else None
+        payload = text(registration_confirmation_text(name, approved=True, case_no=case_no))
+    elif key == "staff-leave-completed":
+        from subsystems.scheduling.leave_substitution_linked_request_resolution import LEAVE_COMPLETION_TEXT
+        field("收件人", "recipient", STAFF.name)
+        payload = text(LEAVE_COMPLETION_TEXT)
+    elif key == "complaint-handoff-received":
+        from subsystems.line.service_help_application import COMPLAINT_HANDOFF_TEXT
+        field("收件人", "recipient", CASE.client_name)
+        payload = text(COMPLAINT_HANDOFF_TEXT)
+    elif key == "customer-service-ticket-reply":
+        from subsystems.customer_service.application import customer_service_reply_payload
+        message = field("人員輸入的回覆（範例）", "reply_text", "您好，已收到您的需求，工會會再與您確認服務安排。")
+        payload = customer_service_reply_payload(message)
+    elif key in {"contract-signing-client", "contract-signing-staff"}:
         from subsystems.contract_signing.line_delivery import external_platform_staff_reminder_text
         field("收件人", "recipient", "客戶私人聊天室" if key.endswith("client") else "月嫂私人聊天室")
         payload = text(external_platform_staff_reminder_text(case()))

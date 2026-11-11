@@ -7,7 +7,7 @@ import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { ArrowLeft, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
+import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, FLOW_PREVIEW_ONLY_IDS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
 import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
 import { LineCardCopyEditor, cardCopyFieldId, type CardCopyField } from './LineCardCopyEditor';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
@@ -216,7 +216,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   useEffect(() => { setBuiltinContents({}); }, [reload]);
 
   useEffect(() => {
-    if (!selected || selected.kind !== 'card' || selected.id === 'card-candidate-information-3' || builtinContents[selected.id]) return;
+    if (!selected || selected.kind !== 'card' || selected.id === 'card-candidate-information-3'
+      || FLOW_PREVIEW_ONLY_IDS.has(selected.id) || builtinContents[selected.id]) return;
     const controller = new AbortController();
     const id = selected.id;
     void templates.get(id, { signal: controller.signal }).then(data => {
@@ -360,7 +361,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const manualFlow = selected ? MANUAL_FLOW_DETAILS[selected.id] : undefined;
   const descriptor = descriptors.find(item => item.id === selected?.id);
   const automaticImage = selected?.id === 'card-candidate-information-3';
-  const contentLoading = selected?.kind === 'card' && !automaticImage && !builtinContents[selected.id];
+  const previewOnly = selected ? FLOW_PREVIEW_ONLY_IDS.has(selected.id) : false;
+  const contentLoading = selected?.kind === 'card' && !automaticImage && !previewOnly && !builtinContents[selected.id];
   const confirmationFlows = ['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected?.id ?? '') ? [
     { id: 'card-customer-confirmation', label: '正式媒合 · 客戶確認' },
     { id: selected?.id === 'card-candidate-information-2' ? selected.id : 'card-candidate-information-1', label: '初步候選 · 月嫂承接' },
@@ -394,7 +396,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
           editor={<>
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
-            {!paymentOnly && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
+            {!paymentOnly && !previewOnly && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
             {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); onSelectedEntryChange?.(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
               <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
               {selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}

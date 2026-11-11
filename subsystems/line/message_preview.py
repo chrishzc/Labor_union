@@ -132,6 +132,13 @@ _IDENTITY_TEMPLATES = (
     "staff_verification_rejected",
 )
 _CURRENT_FLOW_PREVIEWS = (
+    ("contract-document-client", "客戶契約下載通知", "text"),
+    ("contract-document-staff", "月嫂契約下載通知", "text"),
+    ("registration-approved-citizen", "市民需求申請核准通知", "text"),
+    ("registration-approved-non-citizen", "非市民需求申請核准通知", "text"),
+    ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),
+    ("complaint-handoff-received", "客訴已轉接真人客服通知", "text"),
+    ("customer-service-ticket-reply", "工會人員回覆客服工單", "text"),
     ("contract-signing-client", "簽署提醒－客戶", "text"),
     ("contract-signing-staff", "簽署提醒－月嫂", "text"),
     ("payment-overdue-deposit", "訂金逾期－人工提醒客戶", "text"),

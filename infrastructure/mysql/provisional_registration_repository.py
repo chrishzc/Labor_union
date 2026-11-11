@@ -21,6 +21,7 @@ from domains.line.identities import LineUserId
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from subsystems.case_import.provisional_registration_application import registration_confirmation_text
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationConflictError,
@@ -280,26 +281,15 @@ def _confirmation_request(candidate, registration_id, scheduled_at, *, approved,
         LineRecipient(LineRecipientType.USER, LineUserId(candidate.line_user_id)),
         LineMessageKind.TEXT,
         canonical_line_payload_json(
-            {"type": "text", "text": _confirmation_message(candidate, approved=approved, case_no=case_no)}
+            {"type": "text", "text": registration_confirmation_text(
+                str(candidate.client_payload["name"]), approved=approved, case_no=case_no
+            )}
         ),
         scheduled_at,
         IdempotencyKey(f"line-registration:{registration_id}:{stage}"),
         CorrelationId(f"line-registration:{registration_id}"),
         "provisional_registration",
         str(registration_id),
-    )
-
-
-def _confirmation_message(candidate, *, approved, case_no=None) -> str:
-    name = str(candidate.client_payload["name"])
-    if not approved:
-        return f"【系統通知】\n{name}您好，需求申請已送出，待工會人員核准後才建立正式客戶資料。送出申請不代表已完成媒合。"
-    if case_no:
-        return f"【系統通知】\n{name}您好，非市民服務申請已核准。\n案件編號：{case_no}\n工會將與您確認後續服務安排。"
-    return (
-        f"【系統通知】\n服務登記與綁定成功！您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
-        "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
-        "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
     )
 
 

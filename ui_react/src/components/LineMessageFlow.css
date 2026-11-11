@@ -7,3 +7,22 @@
 
 .line-flow-node-summary{margin:0;padding:0 15px 14px;color:#74593f;font-size:.8rem;line-height:1.7}.line-flow-internal{padding:18px 15px;border-top:1px solid #f0e7df;line-height:1.7}.line-flow-internal>span{display:block;color:#8c7766;font-size:.75rem}.line-flow-internal>p{margin:8px 0 0;color:#74593f;font-size:.8rem}
 .line-flow-journey-summary{margin:0;padding:18px 24px 0;color:#74593f;font-size:.8125rem;line-height:1.8;overflow-wrap:anywhere}
+
+.line-flow-delivery-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 15px 10px;
+}
+
+.line-flow-delivery-labels span {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f5ece3;
+  color: #634833;
+  font-size: .75rem;
+}
+
+.line-flow-internal .line-flow-delivery-labels {
+  margin: 4px 0 0;
+}

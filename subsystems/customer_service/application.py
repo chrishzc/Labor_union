@@ -213,10 +213,14 @@ class CustomerServiceApplication:
         return result
 
 
+def customer_service_reply_payload(reply_text: str) -> dict[str, str]:
+    return {"type": "text", "text": reply_text.strip()}
+
+
 def _reply_delivery(command, line_user_id, now):
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId(line_user_id)), LineMessageKind.TEXT,
-        canonical_line_payload_json({"type": "text", "text": command.reply_text.strip()}), now,
+        canonical_line_payload_json(customer_service_reply_payload(command.reply_text)), now,
         command.idempotency_key, command.correlation_id, "customer_service_ticket", str(command.ticket_id),
     )
 

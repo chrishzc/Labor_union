@@ -59,7 +59,7 @@ def build_contract_delivery_request(
 ) -> LineDeliveryRequest:
     _require_https_url(download_url)
     payload = canonical_line_payload_json(
-        {"type": "text", "text": _delivery_text(case_no, audience_label, download_url)}
+        {"type": "text", "text": contract_delivery_text(case_no, audience_label, download_url)}
     )
     return LineDeliveryRequest(
         recipient,
@@ -136,5 +136,5 @@ def _require_https_url(value: str) -> None:
         raise ValueError("contract document download URL must use HTTPS")
 
 
-def _delivery_text(case_no: str, audience_label: str, download_url: str) -> str:
+def contract_delivery_text(case_no: str, audience_label: str, download_url: str) -> str:
     return f"案件 {case_no} 的{audience_label}已備妥，請由此安全連結查看：{download_url}"

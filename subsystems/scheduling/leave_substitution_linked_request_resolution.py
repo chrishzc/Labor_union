@@ -174,12 +174,15 @@ def _resolution_key(
     ).value
 
 
+LEAVE_COMPLETION_TEXT = "您的請假申請已完成正式排班處理。"
+
+
 def _completion_notification(snapshot, correlation_id, resolution_key, clock):
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId(snapshot.line_user_id)),
         LineMessageKind.TEXT,
         canonical_line_payload_json(
-            {"type": "text", "text": "您的請假申請已完成正式排班處理。"}
+            {"type": "text", "text": LEAVE_COMPLETION_TEXT}
         ),
         clock.now(),
         IdempotencyKey(

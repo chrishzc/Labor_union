@@ -4,7 +4,7 @@ import { ArrowRight, ChevronDown, MessageSquare, RefreshCw, X } from 'lucide-rea
 import { lineConfigurationQueryClient, type LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { adaptLineNotificationRulesCatalog, type LineNotificationRuleModel } from '../adapters/line_configuration/line_configuration_query_adapter';
-import { LINE_MESSAGE_FLOWS, MESSAGE_FLOW_STATUS_LABELS, resolveFlowMessages, type FlowMessage } from '../adapters/line_configuration/line_message_flow_adapter';
+import { LINE_MESSAGE_FLOWS, MESSAGE_DELIVERY_LABELS, MESSAGE_FLOW_STATUS_LABELS, resolveFlowMessages, type FlowMessage } from '../adapters/line_configuration/line_message_flow_adapter';
 import './LineMessageFlow.css';
 
 interface Props {
@@ -54,7 +54,10 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
       {journey.summary && <p className="line-flow-journey-summary">{journey.summary}</p>}
       {state === 'loading' ? <p className="line-flow-feedback" role="status">正在讀取正式訊息與啟用狀態…</p> : state === 'error' ? <div className="line-flow-feedback" role="alert"><p>流程訊息暫時無法載入，請重新整理。</p><button type="button" className="line-secondary-btn" onClick={() => setReload(value => value + 1)}>重新載入流程訊息</button></div> : <div id="line-flow-journey" role="tabpanel" aria-labelledby={`line-flow-tab-${journey.id}`}>
         <div className="line-flow-steps" style={{ '--line-flow-stage-count': journey.stages.length } as CSSProperties}>{journey.stages.map((item, index) => {
-          const count = item.nodes.reduce((sum, node) => sum + resolveFlowMessages(node, descriptors, rules).length, 0);
+          const count = item.nodes.reduce((sum, node) => {
+            const hasCatalogEntry = node.ids || node.templates;
+            return sum + (hasCatalogEntry ? resolveFlowMessages(node, descriptors, rules).length : node.delivery ? 1 : 0);
+          }, 0);
           return <div className="line-flow-step-wrap" key={item.title}>
             {index > 0 && <div className="line-flow-line" aria-hidden="true"><ArrowRight size={18} /></div>}
             <button type="button" className={`line-flow-step${stageIndex === index ? ' selected' : ''}`} aria-expanded={stageIndex === index} aria-controls="line-flow-stage-messages" onClick={() => { setStageIndex(stageIndex === index ? null : index); setExpandedNode(null); }}>
@@ -65,11 +68,21 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
         {stage ? <section className="line-flow-details" id="line-flow-stage-messages" aria-label={`${stage.title}的訊息`}><header><div><span>步驟 {stageIndex! + 1}</span><h3>{stage.title}</h3></div><button type="button" aria-label="收合訊息" onClick={() => { setStageIndex(null); setExpandedNode(null); }}><X size={18} /></button></header>
           {stage.nodes.length === 0 ? <p className="line-flow-instruction">由工會人員處理，這個步驟沒有額外的 LINE 通知。</p> : stage.nodes.map(node => {
             if (node.internal) return <article key={node.id} className="line-flow-internal"><strong>{node.title}</strong><span>自助／內部操作</span><p>{node.summary}</p></article>;
+            const deliveryLabels = node.delivery && <div className="line-flow-delivery-labels">{node.delivery.map(mode => (
+              <span key={mode}>{MESSAGE_DELIVERY_LABELS[mode]}</span>
+            ))}</div>;
+            if (!node.ids && !node.templates) {
+              return <article key={node.id} className="line-flow-internal">
+                <strong>{node.title}</strong>
+                {deliveryLabels}
+                <p>{node.summary}</p>
+              </article>;
+            }
             const items = resolveFlowMessages(node, descriptors, rules);
             const single = items.length === 1 ? items[0] : null;
             return <div className="line-flow-message-group" key={node.id}><button type="button" className="line-flow-message-row" disabled={items.length === 0} aria-expanded={!single && items.length > 0 ? expandedNode === node.id : undefined} onClick={() => single ? openMessage(single) : setExpandedNode(expandedNode === node.id ? null : node.id)}>
-              <span className="line-flow-row-name">{node.title}</span>{single ? statusLabel(single) : <span className="line-flow-group-count">{items.length ? `${items.length} 則訊息` : '缺少訊息設定'}</span>}<span className="line-flow-row-action">{single ? '調整訊息' : items.length ? '查看訊息' : '尚未設定'}{single ? <ArrowRight size={14} /> : <ChevronDown size={14} className={expandedNode === node.id ? 'expanded' : ''} />}</span>
-            </button>{items.length === 0 && <p className="line-flow-node-summary">此訊息的規則或模板尚未設定，請先同步通知設定。</p>}{node.summary && <p className="line-flow-node-summary">{node.summary}</p>}{!single && expandedNode === node.id && <div className="line-flow-nested">{items.map(item => <button type="button" key={item.descriptor.id} onClick={() => openMessage(item)}><span>{item.descriptor.name}</span>{statusLabel(item)}<ArrowRight size={14} aria-hidden="true" /></button>)}</div>}</div>;
+              <span className="line-flow-row-name">{node.title}</span>{single ? statusLabel(single) : <span className="line-flow-group-count">{items.length ? `${items.length} 則訊息` : '缺少訊息設定'}</span>}<span className="line-flow-row-action">{single ? (node.previewOnly ? '預覽訊息' : '調整訊息') : items.length ? '查看訊息' : '尚未設定'}{single ? <ArrowRight size={14} /> : <ChevronDown size={14} className={expandedNode === node.id ? 'expanded' : ''} />}</span>
+            </button>{deliveryLabels}{items.length === 0 && <p className="line-flow-node-summary">此訊息的規則或模板尚未設定，請先同步通知設定。</p>}{node.summary && <p className="line-flow-node-summary">{node.summary}</p>}{!single && expandedNode === node.id && <div className="line-flow-nested">{items.map(item => <button type="button" key={item.descriptor.id} onClick={() => openMessage(item)}><span>{item.descriptor.name}</span>{statusLabel(item)}<ArrowRight size={14} aria-hidden="true" /></button>)}</div>}</div>;
           })}
         </section> : <div className="line-flow-instruction" id="line-flow-stage-messages"><MessageSquare size={18} aria-hidden="true" /><p>點選上方步驟，查看這個環節的 LINE 訊息。</p></div>}
       </div>}

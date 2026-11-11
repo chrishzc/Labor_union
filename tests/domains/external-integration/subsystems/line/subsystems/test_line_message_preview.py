@@ -196,14 +196,14 @@ def test_rejected_authentication_never_constructs_preview_application(monkeypatc
 def test_registered_preview_bypasses_mutation_audit_for_success_and_validation_failure(monkeypatch):
     from fastapi import Request
     from api.main import app as main_app
-    import api.main as main
+    from subsystems.access import authentication_session
 
     def authenticated(request: Request):
         principal = AdminPrincipal(1, "test", "測試", "system_admin")
         request.state.admin_principal = principal
         return principal
     monkeypatch.setattr(route, "get_message_preview_application", lambda: app())
-    monkeypatch.setattr(main, "record_admin_audit", lambda **_: pytest.fail("preview must not append mutation audit"))
+    monkeypatch.setattr(authentication_session, "record_admin_audit", lambda **_: pytest.fail("preview must not append mutation audit"))
     previous = main_app.dependency_overrides.get(require_line_configuration_reader)
     main_app.dependency_overrides[require_line_configuration_reader] = authenticated
     try:
@@ -497,13 +497,33 @@ def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_perio
         assert any(fact.label==recipient for fact in result.facts)
 
 
-def test_all_current_builtin_messages_have_editable_copy_and_genesis_is_not_mutated():
+_READ_ONLY_FLOW_MESSAGES = {
+    "contract-document-client": "客戶契約已備妥",
+    "contract-document-staff": "服務人員契約已備妥",
+    "registration-approved-citizen": "服務登記與綁定成功",
+    "registration-approved-non-citizen": "案件編號：A000000",
+    "staff-leave-completed": "您的請假申請已完成正式排班處理。",
+    "complaint-handoff-received": "已轉接真人客服",
+    "customer-service-ticket-reply": "工會會再與您確認服務安排",
+}
+
+
+@pytest.mark.parametrize("key, expected", _READ_ONLY_FLOW_MESSAGES.items())
+def test_read_only_flow_previews_show_delivery_text_and_sample_facts(key, expected):
+    result = app().render(key, None, None, None, actor(), sample=True)
+    assert expected in result.text
+    assert result.facts
+    if key.startswith("contract-document-"):
+        assert "https://preview.invalid/contract" in result.text
+
+
+def test_all_editable_builtin_messages_have_copy_and_genesis_is_not_mutated():
     from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
     defaults = default_copy_templates()
     original = {"templates": []}
     effective = effective_copy_definition(original)
     for entry in app().catalog(actor()):
-        if entry.id == 'card-candidate-information-3':
+        if entry.id == 'card-candidate-information-3' or entry.id in _READ_ONLY_FLOW_MESSAGES:
             assert entry.id not in defaults
             continue
         if entry.builtin and entry.template_id is None:

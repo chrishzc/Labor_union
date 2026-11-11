@@ -83,6 +83,7 @@ function flowWorkbench() {
   vi.mocked(clients.previews.catalog).mockResolvedValue([
     ...catalog.definition.rules.map(rule => ({ ...builtin(rule.id, rule.id === 'current-payment-rule' ? '目前正式第二期款提醒' : '目前正式請假卡'), template_id: rule.template_id, builtin: false })),
     builtin('service-start-inquiry', '服務開始－代班接案意願詢問'),
+    builtin('staff-leave-completed', '月嫂請假完成正式排班通知'),
     builtin('card-candidate-information-1', '目前訂單資訊一'), builtin('card-candidate-information-2', '目前訂單資訊二'), builtin('card-candidate-information-3', '目前每週說明'),
     builtin('deposit-reminder', '目前訂金提醒卡'), builtin('deposit-settled', '目前訂金入帳卡'),
   ]);
@@ -129,7 +130,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.mocked(previews.catalog).mockResolvedValue([...current, ...fixed, ...alerts.map(rule => ({ ...fixed[0], id: rule.id, name: rule.id, template_id: rule.template_id, builtin: false }))]);
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
     fireEvent.click(await screen.findByRole('button', { name: /5 開始服務/ }));
-    fireEvent.click(screen.getByRole('button', { name: '服務開始當天 2 則訊息 查看訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '服務開始當天受理回覆 2 則訊息 查看訊息' }));
     fireEvent.click(screen.getByRole('button', { name: /服務當天－協助需求受理回覆/ }));
     expect(onOpen).toHaveBeenLastCalledWith('service-start-help-received');
     fireEvent.click(screen.getByRole('tab', { name: '客服與支援' }));
@@ -174,9 +175,86 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
     fireEvent.click(await screen.findByRole('button', { name: '7 完工與結案 缺少訊息設定' }));
-    expect(screen.getByRole('button', { name: /服務完工與滿意度問卷邀請 缺少訊息設定/ })).toBeDisabled();
-    expect(screen.getByText('此訊息的規則或模板尚未設定，請先同步通知設定。')).toBeInTheDocument();
+    const completion = screen.getByRole('button', { name: /服務完工與滿意度問卷邀請 缺少訊息設定/ });
+    expect(completion).toBeDisabled();
+    expect(within(completion.parentElement!).getByText('此訊息的規則或模板尚未設定，請先同步通知設定。')).toBeInTheDocument();
     expect(onOpen).not.toHaveBeenCalled(); expect(previews.render).not.toHaveBeenCalled();
+  });
+
+  it('補列人工推送、自動推播和聊天室回覆，區分兩種客服結案', async () => {
+    const { configuration, previews } = flowWorkbench();
+    const onOpen = vi.fn();
+    const missingCatalogIds = [
+      'payment-first-settled', 'cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection',
+      'service-profile-update', 'service-order-update', 'order-update-menu', 'matching-willing-received',
+      'matching-customer-response', 'service-registration-unavailable', 'identity-staff-link', 'identity-admin-link',
+      'service-resolved', 'contract-document-client', 'contract-document-staff',
+      'registration-approved-citizen', 'registration-approved-non-citizen',
+    ];
+    vi.mocked(previews.catalog).mockResolvedValue([
+      ...await previews.catalog(),
+      ...missingCatalogIds.map(id => ({
+        id, name: id, template_id: null, format: 'text' as const, requires_case: false,
+        requires_staff: false, builtin: true, allows_draft: false,
+      })),
+    ]);
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(await screen.findByRole('button', { name: /7 完工與結案/ }));
+    const cancellation = screen.getByRole('button', { name: /取消結算通知/ });
+    const cancellationGroup = within(cancellation.parentElement!);
+    expect(cancellationGroup.getByText('人工發送')).toBeInTheDocument();
+    expect(cancellationGroup.getByText(/不會自動寄送/)).toBeInTheDocument();
+    fireEvent.click(cancellation);
+    for (const id of missingCatalogIds.slice(1, 4)) {
+      fireEvent.click(cancellationGroup.getByRole('button', { name: new RegExp(id) }));
+      expect(onOpen).toHaveBeenLastCalledWith(id);
+    }
+    fireEvent.click(screen.getByRole('button', { name: /3 簽約/ }));
+    const contractButton = screen.getByRole('button', { name: /寄送客戶及月嫂契約文件/ });
+    const contracts = within(contractButton.parentElement!);
+    expect(contracts.getByText('人工發送')).toBeInTheDocument();
+    fireEvent.click(contractButton);
+    fireEvent.click(contracts.getByRole('button', { name: /contract-document-staff/ }));
+    expect(onOpen).toHaveBeenLastCalledWith('contract-document-staff');
+
+    fireEvent.click(screen.getByRole('tab', { name: '登記與身分' }));
+    fireEvent.click(screen.getByRole('button', { name: /2 登記需求/ }));
+    const approval = screen.getByRole('button', { name: /需求申請核准通知/ });
+    expect(within(approval.parentElement!).getByText('自動推播')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /開啟服務登記/ }).parentElement!).getByText('只在聊天室回覆')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '客服與支援' }));
+    fireEvent.click(screen.getByRole('button', { name: /4 案件完成/ }));
+    expect(screen.getByText(/只更新工單狀態，客戶不會收到結案訊息/)).toBeInTheDocument();
+    const escalation = screen.getByRole('button', { name: /人工升級案件結案通知/ });
+    expect(within(escalation.parentElement!).getByText('自動推播')).toBeInTheDocument();
+    fireEvent.click(escalation);
+    expect(onOpen).toHaveBeenLastCalledWith('service-resolved');
+    expect(previews.render).not.toHaveBeenCalled();
+  });
+
+  it('從流程開啟唯讀公版，跳過文案查詢與發送設定', async () => {
+    const { configuration, previews, templates } = flowWorkbench();
+    vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
+    vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
+    const example = '您的請假申請已完成正式排班處理。';
+    vi.mocked(previews.render).mockResolvedValue({
+      status: 'ready', format: 'text', message: '公版預覽', text: example, bubbles: [], facts: [],
+    });
+    window.history.replaceState(null, '', '#line-interface?tab=message_flow');
+    const flow = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /6 持續服務與異動/ }));
+    fireEvent.click(screen.getByRole('button', { name: /月嫂請假完成正式排班處理.*預覽訊息/ }));
+    expect(window.location.hash).toContain('message=staff-leave-completed');
+    flow.unmount();
+    const workbench = render(<UnsavedChangesProvider><LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
+    expect(await screen.findByText(example)).toBeInTheDocument();
+    expect(previews.render).toHaveBeenCalledWith({ id: 'staff-leave-completed', data_source: 'sample' }, expect.any(Object));
+    expect(templates.get).not.toHaveBeenCalledWith('staff-leave-completed', expect.anything());
+    expect(screen.queryByRole('button', { name: '發送設定' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    workbench.unmount();
+    window.history.replaceState(null, '', '/');
   });
 
   it('客服說明統一由 AI 客服 LIFF 提供，通知流程不再提供重複編輯', async () => {
@@ -227,11 +305,11 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
   it('依正式規則呈現停用，shadow rule 關閉仍顯示流程控制，並用目前 rule ID 導覽', async () => {
     const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
-    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 2 則訊息' }));
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
     expect(screen.queryByRole('button', { name: /日誌連續缺漏/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '第二期款入帳收據 已停用 調整訊息' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '請假、順延、代班與換人（共用流程） 由流程控制 調整訊息' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '第二期款入帳收據 已停用 調整訊息' }));
     expect(onOpen).toHaveBeenCalledExactlyOnceWith('current-payment-rule');
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
@@ -240,13 +318,13 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     const { configuration, previews, catalog } = flowWorkbench(); const onOpen = vi.fn();
     const ui = (active: boolean) => <LineMessageFlow active={active} configuration={configuration} previews={previews} onOpenMessage={onOpen} />;
     const { rerender } = render(ui(true));
-    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 2 則訊息' }));
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
     expect(screen.getByText('已停用')).toBeInTheDocument();
     rerender(ui(false));
     vi.mocked(configuration.getNotificationRules).mockResolvedValue({ ...catalog, definition: { rules: catalog.definition.rules.map(rule => ({ ...rule, enabled: true })) } });
     rerender(ui(true));
     await screen.findByText('已啟用');
-    expect(screen.getByRole('button', { name: '6 持續服務與異動 2 則訊息' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: '6 持續服務與異動 3 則訊息' })).toHaveAttribute('aria-expanded', 'true');
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(2);
   });
 
@@ -266,7 +344,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
     window.history.replaceState(null, '', '#line-management?tab=message_flow');
     const { unmount } = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
-    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 2 則訊息' }));
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
     expect(screen.queryByRole('button', { name: /日誌連續缺漏/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /服務日誌/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '登記與身分' }));
@@ -282,8 +360,8 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
     window.history.replaceState(null, '', '#line-management?tab=message_flow&rule_q=遮蔽條件&rule_state=enabled');
     const flow = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
-    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 2 則訊息' }));
-    fireEvent.click(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' }));
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '第二期款入帳收據 已停用 調整訊息' }));
     flow.unmount(); const { unmount, rerender } = render(<UnsavedChangesProvider><LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} /></UnsavedChangesProvider>);
     financeContentClients(clients);
     await waitFor(()=>expect(window.location.hash).toContain('view=reminder-content'));
