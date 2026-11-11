@@ -126,41 +126,68 @@ def test_full_subsidy_keeps_formed_dates_and_blocks_automatic_conversion_of_paid
 
 def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existing_payable(monkeypatch):
     from types import SimpleNamespace
+    from unittest.mock import Mock
     import infrastructure.mysql.automatic_client_accounting as writer
     import infrastructure.mysql.accounting_workspace_repository as workspace
+    import infrastructure.mysql.subsidy_confirmation_repository as confirmation
     from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
     from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
-    from datetime import datetime
+
+    order = {"status": "服務中", "completed_on": date(2026, 11, 12)}
+    selected_scheme = "advance"
+    existing_refunds = []
+    reads = []
 
     class Cursor:
-        connection = object()
-        def execute(self, sql, params):
-            assert sql.startswith('SELECT 1 FROM client_finance_accounts')
-        def fetchone(self): return {'present': 1}
+        def __enter__(self):
+            return self
 
-    order = dict(status='服務中', start_date=date(2026,9,1),service_days=30,service_hours_per_day=8,floor_fee=0)
-    source = SimpleNamespace(identity_status='一般市民', existing_subsidy_return_count=0)
-    captures, loads = [], []
-    decision = SubsidyPayableHandoff('advance',True,True,12000,False,True)
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, sql, params):
+            assert params == ("AUTO-1",)
+            reads.append(sql)
+
+        def fetchone(self):
+            assert "COALESCE(actual_end_date,end_date)" in reads[-1]
+            return order
+
+        def fetchall(self):
+            assert "obligation_type='subsidy_return'" in reads[-1]
+            return existing_refunds
+
+    connection = SimpleNamespace(cursor=Cursor)
+    caller = SimpleNamespace(connection=connection)
+    persist = Mock()
     monkeypatch.setattr(writer,'select_order',lambda *_a,**_k:order)
-    def load(*args, **options):
-        loads.append(options)
-        assert options['allow_planned'] is False
-        return facts(), source
-    monkeypatch.setattr(writer,'load_calculable_client_finance_facts',load)
-    monkeypatch.setattr(workspace,'query_subsidy_payable_handoff',lambda *_:decision)
-    monkeypatch.setattr(writer,'persist_client_finance_terms_impact',lambda *_: captures.append(_[-1]))
+    monkeypatch.setattr(workspace.MySqlAccountingWorkspaceState, "subsidy_plan",
+                        lambda *_: SimpleNamespace(selected_scheme=selected_scheme, version=1))
+    monkeypatch.setattr(workspace, "build_accounting_workspace",
+                        lambda _: SimpleNamespace(query=lambda *_, **__: SimpleNamespace(
+                            subsidy_ntd=12000, staff_receivable_ntd=30000, client_items=(), staff_items=(),
+                        )))
+    monkeypatch.setattr(workspace, "query_subsidy_payable_handoff",
+                        lambda *_, **__: SubsidyPayableHandoff("advance", True, True, 12000, False))
+    monkeypatch.setattr(confirmation, "persist_confirmed_refund", persist)
     options=dict(actor=ActorContext('test:handoff'),key=IdempotencyKey('handoff:test'),
         correlation_id=CorrelationId('handoff:test'),source_family='service-completion',source_id=1)
-    writer.synchronize_terminal_subsidy_return(Cursor(),'AUTO-1',**options)
-    assert not loads and not captures  # Planned dates and early choice never authorize a refund.
+    writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
+    assert not reads
+    persist.assert_not_called()
+
     order['status']='訂單完成'
-    writer.synchronize_terminal_subsidy_return(Cursor(),'AUTO-1',**options)
-    assert len(captures)==1 and captures[0].candidate.subsidy_return_plan.amount==MoneyNTD(12000)
-    source.existing_subsidy_return_count=1
-    writer.synchronize_terminal_subsidy_return(Cursor(),'AUTO-1',**options)
-    assert len(captures)==1  # Formed amounts, snapshots and dates are left to the original correction flow.
-    source.existing_subsidy_return_count=0
-    decision=SubsidyPayableHandoff('direct',True,True,12000,False,True,client_subsidy_reason='原退款與新安排不符')
-    writer.synchronize_terminal_subsidy_return(Cursor(),'AUTO-1',**options)
-    assert len(captures)==1
+    writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
+    persist.assert_called_once()
+    refund = persist.call_args.args[2]
+    assert refund.amount == MoneyNTD(12000)
+    assert refund.due_date == date(2027, 1, 15)
+
+    existing_refunds.append({"obligation_identity": refund.obligation_identity})
+    writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
+    persist.assert_called_once()
+
+    existing_refunds.clear()
+    selected_scheme = "direct"
+    writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
+    persist.assert_called_once()

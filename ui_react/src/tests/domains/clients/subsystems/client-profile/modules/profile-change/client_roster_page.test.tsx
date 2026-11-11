@@ -141,10 +141,10 @@ describe('ClientRosterPage', () => {
     mocks.list.mockResolvedValue({ items: listed ? [{ ...item, order_status: '訂單取消' }] : [], next_cursor: null, next_offset: null });
     try {
       render(<ClientRosterPage initialCaseNo={item.case_no} />);
-      fireEvent.click(await screen.findByRole('button', { name: '重開訂單', exact: true }));
+      fireEvent.click(await screen.findByRole('button', { name: '重開訂單' }));
       const panel = await screen.findByRole('region', { name: '案件 CASE-001 受控重開' });
-      expect(within(panel).getByRole('button', { name: '重開訂單', exact: true })).toBeVisible();
-      expect(screen.queryByRole('button', { name: '取消訂單', exact: true })).not.toBeInTheDocument();
+      expect(within(panel).getByRole('button', { name: '重開訂單' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
     } finally {
       user.mockRestore();
     }
