@@ -59,7 +59,7 @@
 
 Tracked artifact 必須有 current consumer、owner、關閉條件，且不能被較小產物取代；否則用對話、test output 或 ignored `scratch/<task-slug>/`。
 
-- spec：只保存跨執行仍需共享的 observable contract、Authority、acceptance。
+- spec：只保存跨執行仍需共享的 observable contract、Authority、acceptance；撰寫、原地改寫、Delta → Sync 流程與驗證（`scripts/validate_spec_hygiene.py`）一律遵守 [規格書撰寫與生命週期規範](./00_規格書撰寫與生命週期規範.md)。
 - Work Package：只在 material work 需要跨步驟 coverage／handoff／effect ceiling／safe stop 時建立。
 - final receipt：只在 release／migration／rollback／incident／external effect／audit 或明確 consumer 需要時保存。
 - Current register：只保留 owner、status、blocker、next material gate。

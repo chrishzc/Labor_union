@@ -1,53 +1,25 @@
 # Global 效能與 UX 體感架構
 
-> 2026-10-29 帳務參數UI裁決：規格04 §0為正式驗收。獨立帳務作業左側主頁（計價與補助／版本紀錄），不與舊帳務設定合併；個案人工調整在客戶名冊右側Drawer既有分區表單內。四個時薪獨立顯示，給付方式／訂金唯讀；沿用未儲存草稿、結果待確認與正式回讀保護；帳務儲存依 §3.5 最新裁決直接送出、原因選填。
+## 1. 文件邊界與所有權
 
+- 狀態：`current-spec`
+- Owner：Global UX / Performance Architecture
+- 單一負責範圍：管理端前端互動體感（UI state、防連點、離頁與草稿保護、資訊層級降噪）、網路 payload／快取契約與 202 長任務架構；不擁有個別業務頁欄位或 Domain 規則。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Entry Point Governance](19_Global_Entry_Point_Governance.md)、[案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md)
 
-## 1. 定位
-
-本文件在不破壞業務正確性、Preview／Apply、append-only、idempotency 與交易原子性的
-前提下，從「前端體感」、「網路傳輸」與「後端計算」三個關卡改善使用者體驗。
-
-效能不是繞過 Domain 規則的理由。任何快取、樂觀顯示、背景工作或 transport optimization
-都只能加速既有 typed contract，不能形成第二套 SSOT、第二套計算或隱藏 fallback。
+效能不是繞過 Domain 規則的理由。任何快取、樂觀顯示、背景工作或 transport optimization 都只能加速既有 typed contract，不能形成第二套 SSOT、第二套計算或隱藏 fallback。
 
 ## 2. 效能根事實與量測
 
-效能判斷只使用可量測 evidence：
+效能判斷只使用可量測 evidence：browser／React interaction timing、API server timing／payload bytes／correlation id、DB query count／duration／rows examined／lock wait、cache hit／miss／age／invalidation reason、background job queued／started／completed time、projector／outbox lag 與 compression response behavior。
 
-- browser／React interaction timing；
-- API server timing、status、payload bytes 與 correlation id；
-- DB query count、duration、rows examined 與 lock wait；
-- cache hit／miss／age／invalidation reason；
-- background job queued／started／completed time；
-- projector／outbox lag；
-- compression response behavior 與 payload evidence；部署協定由部署者在系統外自行處理。
+- 效能量測不得建立逐請求 telemetry 資料表、不得把 request／response payload 或逐筆 timing 寫入資料庫，也不得輸出無上限的 slow-request console log。
+- API 僅在當次回應附 `Server-Timing` 與 `X-Response-Time-Ms`；cache telemetry 僅為程序記憶體中的固定計數，程序重啟即歸零。
+- 效能 budget 採 record-only：只供人工於本機可重跑快照檢視與比較，不顯示即時警告、不建立 anomaly、不影響 command 結果，也不阻擋 release。
 
-「感覺很快」、開發機單次測量、mock timing 或 console print 不是 release evidence。
-正式效能 budget 必須按可重跑的本機隔離環境保存；不得用單次開發機測量冒充 Global
-invariant。target-host／edge latency 不屬產品設定或 release gate。
+### 2.1 系統效能快照查詢入口
 
-效能量測不得建立逐請求 telemetry 資料表、不得把 request／response payload 或逐筆 timing
-寫入資料庫，也不得輸出無上限的 slow-request console log。API 僅在當次回應附
-`Server-Timing` 與 `X-Response-Time-Ms`；cache telemetry 僅為程序記憶體中的固定計數，
-程序重啟即歸零。可重跑 benchmark 的彙總結果以有限 evidence artifact 保存，不是長期
-operation log；工作單、receipt、outbox 等業務稽核資料不屬效能 telemetry，仍依各自資料
-生命週期保存。
-
-效能 budget 採 record-only：只供人工在效能快照檢視與比較，不顯示即時警告、不建立 anomaly、
-不影響 command 結果，也不阻擋 release。每一筆彙總仍標示量測層級（UI、API、DB、cache 或
-job），使人工需要改善時可辨識方向。
-
-### 2.1 管理端查看入口
-
-管理端入口依 `19_Global_Entry_Point_Governance.md` 使用 React；獨立 `system-status` 頁面
-已退出正式導航與 render branches，既有 snapshot Query 與 shell 右上角狀態指示器仍保留。
-`GET /api/v1/system/status/performance-snapshot` 繼續提供記憶體快照；本次入口同步不改變
-其認證與授權契約，也不新增畫面、指標或監控能力。API 快照包含本次啟動後的樣本數、平均、
-p50／p95 的固定 latency-bucket 上限及最大值；不包含 URL、案件、人員、request／response
-payload 或逐筆 timestamp。不得把 API 可查欄位等同於右上角指示器必須逐項顯示。
-服務重啟後快照歸零，因此它不是歷史趨勢報表；cache、DB 與 job 的可重跑彙總仍隨各
-benchmark evidence artifact 人工比較，不因舊獨立頁面退出而刪除查詢契約。
+獨立 `system-status` 頁面已不在正式導航內，但 `GET /api/v1/system/status/performance-snapshot` 與右上角狀態指示器仍保留。API 快照只包含本次啟動後的樣本數、平均、p50／p95 的固定 latency-bucket 上限及最大值；不包含 URL、案件、人員、request／response payload 或逐筆 timestamp。
 
 ## 3. 前端關卡：先回應，再取得權威結果
 
@@ -56,447 +28,89 @@ benchmark evidence artifact 人工比較，不因舊獨立頁面退出而刪除�
 每個 Query／Preview／Apply 元件使用明確 typed UI state：
 
 ```text
-idle
-→ loading
-→ success | empty | warning | error
+idle → loading → success | empty | warning | error
 success --背景 refresh→ refreshing
 success --版本落後→ stale
 ```
 
 - route shell、標題、篩選器與已知 layout 先 render，資料區使用 skeleton／placeholder。
-- 點擊後的 loading／pending feedback 必須在等待 network response 前先進入前端 render
-  state；不得等 API 完成後才第一次改變畫面。
-- 不以空 list 冒充 loading，不以 spinner 覆蓋可繼續閱讀的既有資料。
-- refresh 時保留上一份標示為 stale 的 view，收到新版本後原子替換。
-- typed error 保留使用者草稿、correlation id、可否 retry 與合法下一步。
+- 點擊後的 loading／pending feedback 必須在等待 network response 前進入前端 render state，不以空 list 冒充 loading，不以 spinner 覆蓋可閱讀的既有資料。
+- refresh 時保留上一份標示為 stale 的 view，收到新版本後原子替換；typed error 保留使用者草稿、correlation id、可否 retry 與合法下一步。
 
 ### 3.2 Optimistic UI 邊界
 
-可以立即更新：
+可以立即更新：分頁、展開／收合、排序、篩選、local draft、尚未送出的欄位內容、skeleton、pending badge、按鈕 single-flight 狀態，以及可由 server receipt 還原的純顯示偏好。
 
-- 分頁、展開／收合、排序、篩選、local draft、尚未送出的勾選與欄位內容；
-- skeleton、pending badge、按鈕 single-flight 狀態；
-- 可由 server receipt 完整還原、且不代表業務完成的純顯示偏好。
-
-不得先顯示成功：
+不得先顯示成功（按下後僅可顯示「處理中」，收到成功 receipt 才顯示完成）：
 
 - Orders Terms／Actual Start／Cancellation／Reopen Apply；
 - assignment、leave／substitution、waiting lock 或 buffer Apply；
 - 收款、付款、退款、adjustment、reversal、帳務修正與核銷；
-- current issue owner Apply；Anomalies 不存在 claim／resolve command。cutover 前尚存的 legacy
-  Claim／Resolve 也不得 optimistic 顯示成功，且必須依 current-state slimming gate 退役；
 - Accounts Payable archive、正式匯入或 database cutover。
 
-上述權威命令按下後可立即顯示「處理中」，但只有收到成功 receipt 才能顯示已完成。
-timeout 不等於失敗；前端以相同 idempotency key Query receipt／retry，不得產生第二個命令。
+timeout 不等於失敗；前端以相同 idempotency key 查詢 receipt／retry，不得產生第二個命令。
 
 ### 3.3 防連點與過量請求
 
-- Submit 使用 single-flight：同一 command identity 在完成前只能有一個 in-flight request。
-- 按鈕 loading 時停用重複 submit，但保留取消尚未送出的 local draft 能力。
-- Search／filter 使用 debounce；scroll、resize、calendar hover 等高頻事件使用 throttle。
-- debounce／throttle interval 是前端 performance policy，不得硬編碼散落各頁；由集中設定、
-  使用者測試與 production telemetry 調整。
-- request 被新 Query 取代時應取消或忽略舊 response；不得讓較舊 response 覆蓋新 view。
+- Submit 使用 single-flight：同一 command identity 在完成前只能有一個 in-flight request，loading 時停用重複 submit。
+- Search／filter 使用 debounce；scroll、resize、calendar hover 等高頻事件使用 throttle，區間由集中 performance policy 管理。
+- request 被新 Query 取代時應取消或忽略舊 response；React 元件以 local draft 與 stable idempotency identity 搭配 typed API client 運作。
 
-現行 React 元件保存 local draft／stable idempotency identity，使用既有 typed API client 與
-明確 loading state；server contract 不因前端呈現而改變，不再依賴 Streamlit `session_state`。
+### 3.4 資料中心資訊架構
 
-### 3.4 資料中心資訊架構（依 2026-09-11 名冊裁決同步）
+資料中心包含 `資料匯入` 與 `NAS 檔案` 等分頁，日常個案與人員資料維護收斂於以 `case_no` 為中心的客戶名冊與以 `staff_id` 為中心的月嫂名冊，並可經 [Entry Point Governance](19_Global_Entry_Point_Governance.md) 定義之路由與 alias 進入。
 
-2026-08-25 的三分頁規劃中，六來源「數據瀏覽」日常入口已由
-`33_案件與月嫂整合名冊正式規格.md` 的名冊裁決取代；不得將舊規劃當作復活六來源頁面的要求。
-資料中心的 `NAS 檔案` 與 `資料匯入` 沿用各自既有 owner 契約；HCM、Client BeClass、
-Staff historical、Historical Orders 與其他 owner-specific typed Preview／Apply 匯入流程不變。
-
-日常資料修正使用以 `case_no` 為中心的客戶名冊與以 `staff_id` 為中心的月嫂名冊，各 owner
-仍獨立 Query／Preview／Confirm／Apply。舊六來源 Data Browser 只保留 authenticated、bounded
-masked archive Query，不再提供日常六來源 tab、raw table metadata 或 generic writer。
-`#data-browser` 相容深連結顯示客戶名冊；其餘現行入口與 aliases 依規格 19，不要求網址立即改寫。
-一般業務值與銀行帳號等特殊欄位依各 owner current typed contract 顯示，不得透過 raw payload、
-前端反遮罩或擴大 Query 欄位繞過 owner 契約。
-
-分頁切換屬 local navigation，不得重送 mutation、清空尚未送出的合法草稿或讓舊 response 覆蓋新分頁。
-每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 維持既有
-資料夾與檔案名稱的檔案總管式投影；不在畫面另列資料夾層級、用途、所屬案件／人員、版本、大小、
-更新時間或異常狀態等管理欄位。後端為安全讀取、對帳與版本治理所需的 metadata 仍由正式 storage
-契約管理，但不因此成為 UI 顯示需求。本次入口同步不變更 NAS 版型、互動與視覺細節的既有
-授權範圍，也不新增 metadata 顯示、檔案操作或介面實作要求。一般畫面不得顯示實體 NAS path、
-digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊。
+- 分頁切換屬 local navigation，不得重送 mutation、清空未送出草稿或讓舊 response 覆蓋新分頁；tab／tabpanel 需具可程式判讀之焦點與 selected state。
+- NAS 介面僅維持資料夾與檔案名稱的檔案總管式投影，不在畫面另列層級、用途、所屬案件／人員、版本、大小、更新時間、實體 NAS path、digest 全值、Preview fingerprint 或 raw cursor。
 
 ### 3.5 管理端未儲存變更與離頁
 
-管理端可儲存的編輯表單以既有 owner 提供的資料及目前草稿判斷差異。主選單、分區、
-Hash／歷史導航、登出、會卸載編輯內容的分頁、切換資料對象及關閉編輯抽屜／視窗，
-須在捨棄草稿前顯示欄位名稱、變更前與變更後內容，提供儲存／返回儲存、明確捨棄及
-繼續編輯。搜尋、篩選、純預覽選項及已還原為原值的欄位不算未儲存資料變更。
+主選單、分區、Hash／歷史導航、登出、會卸載編輯內容的分頁、切換資料對象及關閉抽屜前，若存在未儲存草稿差異（不含搜尋、篩選、純預覽選項及已還原為原值的欄位），須顯示欄位名稱與變更前後內容，提供儲存、明確捨棄或繼續編輯。
 
-2026-10-29 最新人工裁決：帳務相關儲存頁統一單擊儲存、原因選填，不要求人員先做預覽或另行確認。
-單一表單的離開提示須可呼叫同一儲存流程，確認正式結果後才離開；必要的 owner 驗證、
-既有零寫入檢查與 Apply／回讀仍保留，不以 UI 省步驟改變核銷規則，不批次提交不同 owner。
-多份未儲存表單由人員回原表單分別完成；明確判重仍須指定保留來源，不能猜測或自動合併。
-失敗時保留草稿。請求進行中不可捨棄或重複提交；結果待核對時保留原操作，不得把站內離頁
-當成捨棄該命令或允許另建命令。預覽、下載或其他操作的
-顯示狀態成功，不代表草稿已儲存；成功基準只能由該項既有儲存結果更新。
+- 帳務相關儲存頁採單擊儲存、原因選填；離開提示的儲存按鈕須呼叫同一正式儲存流程並確認回讀後才離開。多份未儲存表單由人員回原表單分別完成，不批次提交不同 owner。
+- 實際 in-flight 與請求結束後的 outcome unknown／readback failed 必須分開：後兩者於同一 React session 站內切頁不鎖死整頁；既有操作 store 保留案件、方案、actor、原命令 key、payload、收據及錯誤。「捨棄輸入並離開」只捨棄未提交草稿，不取消或重送待核對命令。
+- 切頁後抵達的結果仍更新原案件 store，不污染其他案件或帳號。重新整理、關頁與離站使用瀏覽器原生離頁警告；敏感欄位僅提示已修改，不複製明文進警告內容。草稿僅存於當次 React 記憶體。
 
-2026-10-29 正式媒合人工回覆的離頁修正：實際 in-flight 與請求結束後的 outcome unknown／
-readback failed 必須分開。後兩者在同一登入身分、同一 React session 的站內切頁不得持續
-鎖住整個頁面；既有案件操作 store 保留案件、方案、actor、原命令 key、payload、收據及真實錯誤。
-有一般未儲存輸入時仍逐項提示；「捨棄輸入並離開」只捨棄未提交草稿，不取消、清空或
-重新提交待核對命令。沒有未儲存輸入時可正常站內離開；返回原案件明確呈現待核對與合法下一步。
-該案件的同一人工回覆尚未核對前，不開放另一筆替代命令；其他案件不承接此命令。
+## 4. 網路關卡與資料可見邊界
 
-首次與恢復操作都按原命令的可證實結果決定是否解鎖：確定未提交才能回可編輯狀態；
-收到收據但讀取失敗只能回讀；未知結果保留原命令。不得把所有恢復失敗固定顯示為
-「恢復權限」，不得只憑一般 4xx 或當下查無事件宣告先前未知命令已失敗。詳細分類由規格 02
-「推薦、客戶決定與結果核對」擁有。切頁後才抵達的結果仍更新原案件操作 store，不能遺失收據、
-覆蓋新案件或將其他帳號的回應套入目前身分；身分切換沿既有隔離與清除契約。
-重新整理、關頁及離站仍採下述原生警告，不承諾 React 記憶體可跨重新載入恢復。
+### 4.0 內部完整值與外部安全邊界
 
-本項驗收須實際操作主選單／切換案件／返回：未知結果與回讀失敗都能離頁並保留續辦；
-一般草稿可明確捨棄，已提交命令不被清空；請求執行中仍防重複；延遲回條不污染其他案件。
-還須驗證原生離頁警告、鍵盤操作與對話框焦點，不以 DOM assertion 代替實際受影響畫面查核。
+- 已認證、enabled 且具對應 owner permission 的工會內部管理 UI，對畫面實際需要的一般業務資料（以及 verified applicant 查看自己 owner scope 的自助 readback）直接呈現 owner typed Query 提供的完整一般業務值，不使用局部姓名／電話／地址遮罩。
+- 完整值顯示仍受 bounded ViewModel、cursor pagination、rate limit、audit、capability 與 server-side filtering 約束。
+- credential、secret、完整銀行帳號驗證輸入以外的一般查詢投影（依各 owner 規範）、raw provider payload、NAS 實體 locator 與 raw error／log／receipt／evidence 仍嚴禁穿透 UI。
 
-差異提示只使用 presentation 所需欄位；密碼、金鑰、完整銀行輸入及可能含憑證的下載
-網址只說明已輸入／修改，不複製內容。草稿與離開判斷只保存在當次 React 記憶體，不新增
-瀏覽器持久儲存或後端草稿寫入。重新整理、關閉分頁或離開網站使用瀏覽器原生離頁警告；
-瀏覽器不允許在該警告內顯示自訂差異清單或執行非同步儲存。
+### 4.1 Payload、協定與條件查詢
 
-## 4. 網路關卡：傳最少且可快取的 typed data
+- Summary、list、detail、Preview 與 Apply receipt 使用不同 ViewModel；List 預設 cursor pagination、穩定排序與 bounded page size。
+- 大型 timeline、audit、Excel report 明細使用獨立 endpoint／export；API 僅回 UI 需要的 typed fields，不支援 client-selected SQL fields。
+- 應用程式業務語意不依 HTTP/1.1、HTTP/2、HTTP/3、reverse proxy 或 TLS 設定改變；部署架構細節由部署者自行處理。
+- 可重建 Query ViewModel 可用 `ETag`／`If-None-Match` 搭配 `304 Not Modified` 節省傳輸，但不取代 Domain version 檢查；Preview／Apply、typed errors、receipts 與財務明細禁止 shared proxy cache。
 
-### 4.0 內部完整值與外部安全邊界（2026-08-27 人工裁決）
+## 5. 後端關卡：Query read model 與受控快取
 
-- 已認證、enabled 且具對應 owner permission 的工會內部管理 UI，對畫面實際需要的一般業務資料使用
-  canonical 完整值，不再以遮罩防止內部人員查看。
-- 2026-08-31 最新人工裁決固定「先不使用個資遮罩」：上述授權內部 UI，以及verified applicant查看
-  自己資料的LIFF／自助readback，均直接呈現owner typed Query提供的完整一般業務值。遮罩功能
-  `deferred`，只有真實測試後人工確認確有需要才另行新增；不得把現有遮罩當成Task 96完成條件。
-- 完整值顯示不等於 unrestricted dump：API 仍只回該 ViewModel 需要的 typed fields，維持 cursor
-  pagination、bounded page size、rate limit、audit、download/export capability 與 server-side filtering。
-- LINE 對客／群組訊息與非本人公開頁面仍依各自 recipient 與 privacy 契約；verified applicant只可看
-  自己owner scope內的完整值，不得看他人資料。
-- credential、secret、完整銀行驗證資料、raw provider payload、NAS 實體 locator、raw error／log／receipt／
-  evidence 與純技術 identity 不是「一般 UI 去敏」範圍，仍禁止顯示。
-- 既有 masked surface依API owner、permission、欄位、copy/export/download、cache與測試分批改為完整值；
-  owner typed contract已具備完整值時直接使用，不得以browser-side unmask、額外raw endpoint或
-  client-selected fields繞過owner與權限。
-
-### 4.1 Payload contract
-
-- Summary、list、detail、Preview 與 Apply receipt 使用不同 ViewModel；不得以一個巨大
-  response 滿足所有頁面。
-- List 預設 cursor pagination、穩定排序與 bounded page size；不得一次傳回整表。
-- 大型 timeline、audit、Excel report 明細使用獨立 endpoint／export，不嵌入 summary。
-- API 只回 UI 需要的 typed fields；不得傳 raw bank payload、完整帳號、secret 或 UI 不使用
-  的 legacy columns。
-- response 支援壓縮；payload bytes、serialization time 與 DB query count 納入 telemetry。
-- 不提供任意 client-selected SQL fields；欄位集合由 versioned response contract 控制。
-
-### 4.2 Connection／protocol
-
-- HTTP/1.1 request／response 與 compression negotiation 必須正確；應用程式業務語意不得
-  依部署協定改變。
-- reverse proxy、keep-alive、HTTP/2、HTTP/3、TLS、UDP 與 connection reuse 是部署者可選的
-  外部基礎設施優化，不保存為 deployment profile，也不是產品 release gate。
-
-### 4.3 Conditional query
-
-- 可重建 Query ViewModel 可使用 `ETag`／version token 與 `If-None-Match`。
-- `304 Not Modified` 只節省 payload，不取代 Domain version 檢查。
-- Preview／Apply request、typed errors、receipts 與財務明細不得被 shared proxy cache。
-
-## 5. 後端關卡：Query read model、受控快取與索引
-
-### 5.1 Query path
-
-- Query 使用專用 read model／projection，不在 request path 觸發狀態轉移或全域 rescan。
-- 所有 list／search query 都必須 bounded、可分頁，並以真實 MySQL `EXPLAIN`／實測驗證索引。
-- 避免 N+1；跨 Domain 顯示由 Query assembler 批次載入 typed views。
-- 高成本但可重建的 summary 由 outbox projector 增量更新，不在每次頁面載入時計算全歷史。
-
-### 5.2 Cache policy
-
-可以快取：
-
-- immutable static assets；
-- 具授權範圍、bounded 且 typed 的 Query ViewModel；
-- 由完整 facts version、contract version、actor permission scope 與 canonical input
-  組成 key 的 pure Preview 計算結果；
-- bounded reference data。
-
-禁止快取成正式依據：
-
-- Apply authorization、row lock result、current balance、可接案結果、可付款結果；
-- idempotency receipt 的唯一權威；
-- Alert blocker predicate；
-- database cutover identity／freshness；
-- 任何 canonical bank fact、ledger 或 assignment root fact 的可寫副本。
-
-Apply 永遠鎖定 fresh facts，使用相同 candidate builder 重算並驗證 version／fingerprint；
-即使 Preview 命中 cache 也相同。Cache miss、eviction 或 Redis unavailable 只能降低速度，
-不得改變結果或阻擋核心正確流程。
-
-Cache key 必須包含 identity、授權範圍、facts／aggregate version、contract version 與
-locale／timezone 等會改變輸出的欄位。採 cache-aside、bounded TTL、Domain event
-invalidation、single-flight／request coalescing 防止 cache stampede。財務、排班與權限
-敏感 view 不使用未標示的 stale-while-revalidate；若顯示舊 view，UI 必須明確標示 stale。
-
-Redis 是可選 infrastructure adapter，不是初始必要依賴。先以測量證明重複高成本 Query
-值得快取，再引入外部服務；單機 in-process cache 也必須遵守相同 key／invalidation contract。
+- Query 使用專用 read model／projection，不在 request path 觸發狀態轉移或全域 rescan；list／search 均須 bounded 並經 MySQL `EXPLAIN` 驗證索引；高成本 summary 由 outbox projector 增量更新。
+- 可快取：immutable static assets、具授權範圍與版本 key 的 Query ViewModel、pure Preview 計算結果與 bounded reference data。
+- 禁止快取成正式依據：Apply authorization、row lock、current balance、可接案／可付款結果、idempotency receipt 權威、Cutover identity 或任何 root fact 可寫副本。Apply 永遠鎖定 fresh facts 重算。
+- Cache key 必須包含 identity、授權範圍、facts／aggregate version、contract version 與 timezone；採 cache-aside、bounded TTL、Domain event invalidation 與 single-flight。Redis 為可選 adapter，cache miss／unavailable 不得阻擋核心正確性。
 
 ## 6. 長任務：202 Accepted 與 durable job
 
-適合背景化：
+當單一原子 command 經量測超過互動 request budget（如大型報表匯出、批次匯入掃描、外部通知、projector catch-up）時，API 可建 durable command job 並回傳 `202 Accepted`（含 `job_id`、`command_identity`、`status_url`、`retry_after`、`correlation_id`）。
 
-- PDF／XLSX／大型 report 產生與 archive；
-- Email、LINE 或外部通知；
-- historical scan／reprocess report；
-- anomaly bounded rescan；
-- projector catch-up；
-- 不要求使用者同步等待的外部整合。
+- Worker 仍須執行原本同一個 application command 與單一 outer Unit of Work，不得拆成多個非原子 commit。
+- Job 生命週期為 `queued → running → succeeded | failed`（或 `queued → cancelled`，僅限未進入不可中斷交易時）；`succeeded` 連結正式 receipt，`failed` 保存 typed error。
+- Queue 採 at-least-once delivery，以 command idempotency identity 防重；前端採 bounded polling＋backoff／jitter，job repository 為狀態 SSOT。
+- Accounts Payable async export 須先產生一次 XLSX bytes、完成 archive 與 hash 驗證後再提供下載。
 
-核心 Apply 不因「可能較慢」就拆成多個非原子背景步驟。若完整 Finance Import Apply、
-Accounts Payable Export 或其他單一原子 command 經量測確實超過互動 request budget，
-API 可先建立 durable command job 並回：
+## 7. Modules、Ports 與 Typed errors
 
-```text
-202 Accepted
-job_id
-command_identity
-status_url
-retry_after
-correlation_id
-```
+- Modules：`UiOperationPolicy`、`OptimisticDisplayEligibility`、`SingleFlightCommandIdentity`、`RequestSupersessionPolicy`、`ApiViewModelProjection`、`CursorPaginationPolicy`、`PayloadBudgetPolicy`、`ConditionalQueryVersion`、`CacheKeyBuilder`、`CacheEligibilityPolicy`、`CacheFreshnessPolicy`、`CacheInvalidationIntent`、`BackgroundJobLifecycle`、`BackgroundJobReplayPolicy`、`PerformanceBudgetEvaluator`。
+- Ports：`QueryCachePort`、`PerformanceTelemetryPort`、`BackgroundJobRepository`、`BackgroundJobQueuePort`、`JobCompletionNotificationPort`、`DomainProjectionFreshnessPort`。
+- Stable errors：`payload_too_large`、`page_size_invalid`、`query_budget_exceeded`、`cache_contract_violation`、`job_not_found`、`job_identity_conflict`、`job_state_conflict`、`job_queue_unavailable`、`job_result_unavailable`、`request_superseded`、`performance_dependency_unavailable`。Cache unavailable 應 fallback 至 bounded source query。
 
-Worker 仍必須執行原本同一個 application command／outer Unit of Work；不能把 ledger、
-allocation、lifecycle 或 receipt 拆成多次 commit。
+## 8. 預設資訊層級與 UX 驗收
 
-Job lifecycle：
-
-```text
-queued → running → succeeded | failed
-queued → cancelled
-```
-
-- `succeeded` 必須連結正式 command receipt；`failed` 保存 typed error，不偽造業務成功。
-- queued job 可取消；running job 只有在 application command 尚未進入不可中斷交易且能
-  證明零副作用時才可取消。
-- Queue 採 at-least-once delivery；worker 以 command idempotency identity 防重。
-- 前端以 bounded polling＋backoff／jitter 為基準；SSE／WebSocket 只是完成通知優化，
-  job repository 才是狀態 SSOT。
-- worker crash、duplicate delivery、notification loss 或 WebSocket disconnect 不得重複
-  正式交易，也不得讓 job 永遠顯示假成功。
-
-Accounts Payable async export 仍須先產生一次 XLSX bytes、完成 archive 與 hash 驗證，
-再把同一 bytes 提供下載；202 不改變既有 archive invariant。
-
-## 7. Modules／Ports
-
-Modules：
-
-- `UiOperationPolicy`
-- `OptimisticDisplayEligibility`
-- `SingleFlightCommandIdentity`
-- `RequestSupersessionPolicy`
-- `ApiViewModelProjection`
-- `CursorPaginationPolicy`
-- `PayloadBudgetPolicy`
-- `ConditionalQueryVersion`
-- `CacheKeyBuilder`
-- `CacheEligibilityPolicy`
-- `CacheFreshnessPolicy`
-- `CacheInvalidationIntent`
-- `BackgroundJobLifecycle`
-- `BackgroundJobReplayPolicy`
-- `PerformanceBudgetEvaluator`
-
-Ports：
-
-- `QueryCachePort`
-- `PerformanceTelemetryPort`
-- `BackgroundJobRepository`
-- `BackgroundJobQueuePort`
-- `JobCompletionNotificationPort`
-- `DomainProjectionFreshnessPort`
-
-## 8. Typed results／errors
-
-Async accepted result：
-
-- `job_id`
-- `command_identity`
-- `status`
-- `status_url`
-- `retry_after`
-- `correlation_id`
-
-Stable errors：
-
-- `payload_too_large`
-- `page_size_invalid`
-- `query_budget_exceeded`
-- `cache_contract_violation`
-- `job_not_found`
-- `job_identity_conflict`
-- `job_state_conflict`
-- `job_queue_unavailable`
-- `job_result_unavailable`
-- `request_superseded`
-- `performance_dependency_unavailable`
-
-Cache unavailable 對核心 Query 應 fallback 至正確 bounded source query；DB、queue 或必要
-worker unavailable 才回 typed unavailable。UI 不得依 error message 字串決定 retry。
-
-## 9. 驗收
-
-### Module
-
-- optimistic eligibility 不允許任何正式 Apply 先顯示成功。
-- cache key 對 actor scope、facts version、contract version 或 timezone 任一變更都不同。
-- cursor、payload projection、job transition 與 retry/backoff deterministic。
-
-### Subsystem
-
-- skeleton／loading／stale／error 不互相冒充。
-- click handler 在 await network 前先產生 loading／pending state。
-- 連點十次只送一個 command identity；timeout retry 沿用同一 idempotency key。
-- 舊 Query response 晚到不覆蓋新 Query。
-- cache hit／miss／eviction／invalidation 回傳相同業務結果。
-- Redis unavailable 時 bounded Query 正確 fallback。
-- job duplicate delivery、worker crash 與 notification loss 不重複正式 command。
-- Accounts Payable async archive bytes 與下載 bytes 完全相同。
-
-### Domain
-
-- Orders、Scheduling、Finance、Payroll、Payables 的 Apply 在所有 cache 狀態下都 fresh
-  rebuild，stale Preview 固定 conflict。
-- Query read model／cache lag 不改變 Domain blocker。
-- 202 job 最終 receipt 與同步執行同一 command 的結果一致。
-
-### Global／UX
-
-- 2026-08-25 人工裁決：日常業務頁的預設資訊層級只呈現操作者需要的根事實、業務狀態、
-  阻擋原因、影響範圍與下一步。Preview 應以可理解的變更前後內容與業務影響呈現；不得把
-  `preview_fingerprint`、receipt identity／key、correlation／idempotency key、job UUID、內部
-  aggregate／domain version、source identity、raw enum／JSON 或 replay 旗標直接顯示為一般
-  成功訊息、摘要、卡片或確認條件。
-- 上述技術欄位仍必須保留在 typed contract、Apply fresh-fact 驗證、receipt／readback、稽核
-  或明確標示且受權限控管的「技術詳情／系統狀態」中；隱藏一般畫面雜訊不得刪除安全檢查、
-  交易證據或人工 recovery 能力。法律文件版本、案件編號、可供業務辨識的申請／待辦編號，
-  只有在辨識、下載、追蹤或客服溝通確實需要時才可保留。
-- 成功訊息使用「已排入／處理中／已完成並回讀」等業務語意；外部 provider 工作僅能顯示
-  「已排入，尚未代表送達／發布完成」，不得以 task／receipt 存在冒充外部成功。
-- UX 收斂進度（2026-08-26；其中 Data Browser／System Status 的舊頁面描述已由 §3.4／§2.1
-  的現行入口取代，不構成復活舊頁面的要求）：LINE Rich Menu 一般畫面已移除 `typed action`、`server Preview`、
-  provider request、Diff Mode、Active DB Snapshot、Before 與內部草稿 revision；Chrome 實點保留
-  本機預覽、明確業務 blocker 與零發送邊界。Staff 名冊搜尋零結果改顯示可清除的明確空狀態；
-  接案狀態 Drawer 對已取消紀錄明示「不可再次取消」，未填取消原因、資料已變更或操作進行中也以
-  業務語意說明 disabled 原因，不以隱藏舊分頁作為驗收入口。
-  Orders 媒合工作台的 delivery raw enum 改由 adapter closed label 投影，並將 reliable task、binding、
-  assignment-plan、Customer Decision 與原 Key 等工程文案改為排入／身分核對／正式分段／客戶決定／
-  安全重試等業務語意。營運報表已移除 server typed view 與內部資料版本；排班頁已將 Server Projection、
-  backend／Official Schedule 與可靠佇列改為正式資料檢查、正式排班與 LINE 通知業務語意。Finance 案件與
-  服務人員選單必須累積所有 typed 分頁，不得把前 200／20 筆當全集；收款查詢不顯示缺失結清欄位的技術
-  占位，付款狀態與事件使用 closed business labels，未知值固定顯示待確認；Finance Import blocking code
-  只顯示 closed 業務原因，案件、收款、人員、付款、工作簿、Preview、Apply 與結果查詢的失敗也只能依
-  authentication／authorization／stale／conflict／unavailable 與本機檔案類型投影 closed 業務訊息，不得
-  顯示 raw transport、schema、HTTP、correlation 或 provider detail。Anomalies 過濾技術識別後不得留下空白卡片；沒有通用 Resolve owner 時顯示
-  常駐處理說明，不渲染永久 disabled 假按鈕，detail／recovery 錯誤也不得顯示 context／identity／job／
-  receipt 等內部術語；timeline action、未知匯入 lane 與未知追蹤狀態固定使用 closed 業務標籤，raw enum
-  只保留於 typed contract／稽核。Data Browser 只呈現六來源去敏清單、業務欄位詳情、分頁與複製；不得
-  顯示 fingerprint、row／source／field identity、version、raw JSON、`loaded scope`、資料庫快照或永久 disabled
-  假更正控制，並須常駐顯示資料修正應回到對應業務頁面的理由。System Status 一般畫面以服務啟動時間、
-  測量次數與可理解的回應時間呈現，不顯示 server snapshot、p50／p95、`ms` 或 raw transport error；未登入
-  仍須保留可操作的 closed 登入指引。Account Center 只呈現帳號、顯示名稱、啟用狀態與 root 管理權限；
-  account id、access-control version、audit raw action／reason code、job UUID 與 raw command/status 只留在
-  typed contract／命令安全邊界。合法 403 必須明示「僅唯一啟用 root 可管理」，不得以 generic disabled
-  或任意 server message 取代。本項仍為 `in-progress`，
-  不代表其他頁面已完成全站盤點。
-- 2026-08-31 Orders 案件投影的 current 資訊層級固定為：每個正式指派分段在主畫面只呈現一次
-  服務人員、正式服務期間與 closed business status；`assignment_id`、`staff_id`、`sequence`、raw field
-  name 及逐欄 owner/version 收在同一個預設收合的「技術詳情與資料來源」。Orders lifecycle 的實際
-  起訖與 Scheduling assignment 的正式服務期間維持不同標籤，不因版面去重而合併 root facts。
-- 2026-08-31 Historical Orders review更正沿用既有strict identity binding、Preview／Confirm／Apply、
-  fresh alert readback與原操作安全重試；一般畫面只呈現案件、欄位衝突、檔案要求與closed處理結果。
-  review／remediation version、digest、fingerprint、receipt identity與issue code只留在預設收合的技術詳情，
-  未分類runtime error不得穿透畫面。
-- 2026-08-31 Client Finance三碼settlement remediation沿用既有exact dispatcher、Query／Preview／Apply、
-  partial-retain與fresh terminal readback。一般畫面只呈現案件、義務類型、日期、金額、可核對銀行流水
-  與closed結果；account version、obligation identity與bank row identity只留在預設收合技術詳情，
-  owner／root／Idempotency術語及未分類runtime error不得穿透畫面。
-- 2026-08-31 Government Subsidy GOVSUB-006沿用既有offset處置、Preview失效、stale只查最新資料、
-  receipt-only不完成、不重送Apply及owner＋current-issue雙重readback。一般畫面只呈現closed狀態、剩餘
-  金額、合法offset處置與標的；owner version與source references只留在預設收合技術詳情，
-  raw blocker/error及owner／predicate／receipt術語不得穿透畫面。
-- 2026-08-31 Current Anomalies canonical live page沿用15-code current-only list/detail、no generic resolve
-  與recheck removal。一般畫面只呈現問題代碼、負責流程、影響、必要判斷資料及closed安全處理說明；
-  owner domain/version與Preview／Apply／completion predicate只留在預設收合技術詳情，未分類runtime
-  error不得穿透畫面。
-- 2026-08-31 Contract Signing external signing沿用既有completion report、legacy recovery、final PDF
-  Query／Preview／Confirm／Apply／readback、strict evidence lineage及未知結果不得重送。一般畫面
-  只呈現簽約進度、簽回證據完整性、影響檢查、阻擋與完成結果；status version、session、
-  event、receipt、digest、fingerprint與原命令等技術資料只留在typed contract、安全比對或預設
-  收合詳情，不得作為一般操作文案。
-- 2026-08-31 Orders cancellation沿用既有跨owner Preview／Confirm／Apply、同一操作未知結果確認與
-  fresh Orders／Client Finance／Payroll readback。一般畫面只呈現取消基準日、正式服務量、客戶帳務與
-  服務人員薪資調整、阻擋及closed結果；raw action／direction、obligation identity、owner version、
-  receipt與idempotency術語只留在typed contract、安全流程或預設收合技術詳情，既有取消規則與跨owner
-  root facts不得因呈現收斂而改變。
-- 2026-08-31 Orders條款、服務日期與實際開工日的既有Preview／Apply表單，以「變更前後」及「稽核
-  必填」呈現原因與影響，不在一般欄位顯示Diff／Audit Log等工程術語；原有reason gate、zero-write
-  Preview、fresh Apply與readback契約不變。
-- 2026-08-31 Orders service completion沿用既有Preview／Confirm／Apply、完成事件與fresh owner
-  readback；一般畫面只呈現目前狀態、正式服務日、完成時刻、確認條件及closed結果。Client Finance／
-  Staff Payables owner、lifecycle controls、fingerprint、idempotency、receipt與未分類runtime error
-  不得穿透；服務完成eligibility、Orders state machine及後續結算責任不變。
-- 2026-08-31 Historical Operational Baseline readback維持Orders-owned唯讀Query、案件切換stale
-  response discard及零mutation。一般畫面只呈現案件、目前作業步驟與closed步驟狀態；Orders identity／
-  version、historical source event/version只留在預設收合技術詳情，typed unavailable code不得穿透。
-- 2026-08-31 LINE Identity Review沿用既有待審list／detail、Preview失效、明確Confirm、Apply、receipt
-  與fresh result readback。一般畫面以審核對象、人工決定、狀態與closed結果說明操作；typed error code、
-  provider detail及readback工程術語不得穿透，role-scoped binding、審核決定、provider delivery與receipt
-  語意不變。
-- 2026-08-31 LINE notification rules沿用既有欄位編輯、zero-write Preview、人工Confirm、Save／Delete
-  與提交後取消待發通知及工作。一般畫面不得顯示typed error code、raw backend／provider detail；
-  revision、fingerprint、idempotency、規則定義及既有delivery責任不變。
-- 2026-08-31 LINE identity maintenance沿用既有replacement Preview／Confirm／Apply、解除retry及
-  manual-completion資格與雙重確認。一般畫面不得顯示typed error code或raw backend／provider detail；
-  既有解除saga、Rich Menu provider邊界與callback語意不變。
-- 2026-08-31 LINE delivery task workbench沿用既有server pagination、allowlisted filters、bounded typed item、
-  stale response suppression與detail navigation。一般畫面不得顯示query error code或raw backend／
-  provider detail；delivery intent／receipt、worker、retry及provider transport責任不變。
-- 2026-08-31 Orders Order Tracker主清單沿用既有summary query、explicit retry request budget與stale
-  response suppression。一般錯誤不得顯示raw runtime detail；跨owner stage projection、drawer資料及
-  LINE notification timeline語意不變。
-- 2026-08-31 Global React ErrorBoundary沿用既有區域隔離、自訂fallback、重新嘗試與整頁重載。
-  預設crash畫面只呈現closed復原指引，不得顯示render exception message；既有auth/navigation與
-  nested boundary行為不變。
-  2026-11-03 人工補充：管理頁內容與其頁級 provider 的 render／lazy-load 失敗須隔離在 MasterLayout 內容區，保留側邊與分區導覽；切換頁面重置該內容邊界，卸載失敗頁的未儲存／busy 登記。HTTP 4xx／5xx、網路及回應格式錯誤須經既有 typed error 呈現，不因錯誤而鎖住整個管理介面或清除登入；Session 失效仍只沿既有 401 契約處理。已提交 mutation 的結果未知仍沿各 owner 的同命令確認規則，不因解鎖導覽而重送或宣稱取消。
-- 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
-- Anomalies 的分類、Preview、Apply、Drawer 關閉與背景篩選若因正式 action、未填理由、尚未 Preview、
-  Preview 失效、提交中或結果確認中而不可操作，必須常駐顯示 closed 業務原因並以
-  `aria-describedby` 關聯控制。已進入追蹤編輯後，不保留永久 disabled 的「開啟」按鈕。
-- React 人員 Session 的目前 Bearer 收到 401 時，必須清除同一 token 並立即卸載受保護 shell、返回登入頁；
-  晚到舊 token 的 401、未帶 token 的登入挑戰、403、network／5xx 與不同 service token 不得誤登出。
-- 真實 MySQL 與真實格式 Excel 下量測 Query、Preview、Apply、export、projector lag、
-  payload bytes、query count、lock wait 與 job latency。
-- 不要求 HTTP/2／HTTP/3 或 target-host 協定 evidence；部署者可在系統外量測其選用的
-  基礎設施。
-- 建立可重跑本機隔離環境的 baseline 與 record-only budget；彙總結果標示 frontend、
-  backend、DB lock 或 background queue 的量測層級，供人工檢視，不以取消正確性檢查換取
-  通過。
-
-## 10. 實作順序
-
-1. Slice 0 建立 telemetry、payload projection、pagination、single-flight、cache／job ports；
-   Redis、WebSocket、SSE 與 HTTP/3 不作初始強制依賴。
-2. 各 Domain Query 建立 bounded read models、version token、必要 indexes 與 query budgets。
-3. React 元件沿用 skeleton／placeholder、loading state、draft preservation、single-flight
-   與 request supersession。
-4. 以實測選出高成本重複 Query，再逐一加入 cache；每一項都要有 invalidation test。
-5. 以實測選出超過互動 budget 的 report／export／scan，再導入 durable job。
-6. API 維持 compression negotiation 與 HTTP/1.1 相容；proxy／HTTP/2／HTTP/3 由部署者
-   在系統外自行評估，不能阻擋產品 release。
-
-不得在缺少 baseline 時先部署 Redis、queue 或 WebSocket，避免把基礎設施複雜度當成效能
-成果。
+1. **業務降噪原則**：日常業務頁預設只呈現操作者需要的根事實、業務狀態、阻擋原因、影響範圍與下一步。`preview_fingerprint`、receipt/correlation/idempotency key、job UUID、內部 aggregate/domain version、source identity、raw enum／JSON 與 replay 旗標，一律收斂於 typed contract、稽核或預設收合的「技術詳情與資料來源」區塊，不得暴露於一般成功訊息、卡片或操作文案。
+2. **外部狀態誠實**：成功訊息採「已排入／處理中／已完成並回讀」業務語意；外部 provider 工作僅顯示「已排入，尚未代表送達／發布完成」。
+3. **錯誤與權限邊界**：頁面與 provider render／lazy-load 失敗隔離於 `MasterLayout` 內容區，切換頁面可重置該內容邊界而不鎖死導覽或清除登入；唯目前人員 Bearer 收到 401 時立即清除同一 token 並返回登入頁（晚到 401、403、5xx 或不同 service token 不誤登出）。禁止展示 raw exception／stack trace／HTTP detail。
+4. **效能與一致性驗證**：驗證 click 後立即進入 loading state、連點十次僅送單一 command identity、舊 Query 晚到不覆蓋新視圖、cache hit/miss/unavailable 回傳一致結果、202 job 重複投遞與 worker crash 不重複交易，以及隔離環境真實 MySQL／Excel 量測之 record-only budget。

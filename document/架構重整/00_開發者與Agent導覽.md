@@ -2,7 +2,7 @@
 
 ## Current authority
 
-使用者最新明確裁決優先。正式業務語意依 `01_規格基線/15_正式規格索引與裁決總表.md` 與較新的 formal amendment 指向的 current owner spec；既有業務規格、狀態機與欄位權威依正式規格保留來源追溯。
+使用者最新明確裁決優先。正式業務語意依 `01_規格基線/15_正式規格索引與裁決總表.md` 路由至唯一 owning current spec，並遵守 [規格書撰寫與生命週期規範](./00_規格書撰寫與生命週期規範.md) 之 Living Current Truth 原則；既有業務規格、狀態機與欄位權威依正式規格保留來源追溯。
 
 `AGENTS.md` 與 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md) 決定工作範圍、停止條件與最小交付，不取代正式業務語意。
 
@@ -65,32 +65,3 @@ npm test -- <direct-test>
 只有 failure signal、跨 boundary 修改或 release acceptance 明確要求時才擴大。
 
 Schema、migration、production、provider、credential 與外部寫入是不同權限；文件或測試通過不構成執行授權。
-
-## 零元客戶基準義務升級紀錄（2026-09-29，歷史追溯）
-
-本次人工授權範圍為 schema／migration 修復、完成本機 development DB 關卡並套用升級、commit／push；
-原匯入檔案不在本機，匯入重試由操作人員在原主機完成。部署或 production DB 不在範圍內。
-本節記錄當時已發行的 schema 相容性修復及其驗證。當時的匯入零元基準義務流程已由現行[規格 27 §6](01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-accounting-carry-forward)取代。現行歷史案件承接有證據的原帳務，缺項列待確認。已保存的零元事件及 source identity 供原紀錄查核與追溯。
-
-新 release `labor-union-client-zero-obligation-establishment-2026-09-29-v1` 僅替換
-`client_obligation_events.chk_client_obligation_event_amount`。新增例外限定 `established`、
-before／after 金額都為零且到期日都空；負金額與其他未異動事件仍拒絕。
-沒有 system seed、business-row backfill、資料刪除、owner／transaction 或 entry switch 變更。
-新安裝與 preserve-data chain 共用 part 1046，舊 part 111 與其 immutable manifest 保留原樣。
-
-本版本的可攜 qualification 由真實 MySQL fresh bootstrap 與代表性資料 dump → candidate → verify
-產生，發布位置為 `validation/receipts/PROV-ZERO-OBLIGATION-local-additive-qualification-20260929.json`。
-qualification 只證明本版本 artifact，不取代另一台主機自己的備份與 current metadata 檢查；
-原始 dump、local backup、journal 與操作 receipt 留在 ignored scratch，不提交業務資料。
-
-既有資料庫先使用 `.venv\Scripts\python.exe -m scripts.update_local_database` 取得零寫入計畫，
-確認 latest release 與待套用 part 1046；未知或缺失約束需阻擋，不得手動略過。
-套用前仍須依 Migration 正式規格 §9 完成 disposable fresh-bootstrap、preserve-data candidate、
-source backup 與 qualification gates，並取得 DB 執行授權。完成 schema Apply 後再重試歷史訂單 workbook。
-相同 release 已為 exact 時不重套；套用失敗可保留 journal 依既有 runner resume。
-切換前可丟棄 candidate 並保留 source；一旦有零元 established event，不可回退舊約束。
-
-靜態驗收使用 migration module 的 `contract/test_client_zero_obligation_establishment_schema.py`，
-涵蓋 hash／fresh／chain、一致 descriptor、predecessor／successor／drift 與 earlier-artifact successor。
-其中 MySQL CHECK 情境只做 SELECT、不寫資料；未設定完整 disposable MySQL 環境時明確 skip，
-不能代替真正 fresh／preserve engine qualification。升級是否可交付以正式 §9 gate table 為準。

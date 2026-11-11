@@ -1,44 +1,23 @@
 # Staff Roster Case Preference Read Model 正式補充契約
 
-## 1. 文件定位
+## 1. 文件邊界與所有權
 
-- Issue：`#104 [月嫂名冊] 建立接案偏好資訊架構與 UI owner`
-- Parent spec：`24_Staff_Matching_Preferences與不可服務期間正式規格.md`
-- Owner：`Staff roster read projection`；Matching / Scheduling 的 root ownership 仍以 Parent spec 為準。
-- 本文件只定義月嫂名冊「接案偏好」的 canonical read model、response contract、UI owner 與 fallback 規則。
-- 本文件不新增 production DB schema、不建立 write API、不 deploy、不執行 production re-import。
+- 狀態：`current-spec`
+- Owner：Staff Roster Read Projection
+- 單一負責範圍：月嫂名冊「接案偏好」與 Staff 詳細 read projection 的 bounded response shape、UI fallback 規則、read-only 邊界與敏感欄位排除契約；不擁有偏好寫入或 Matching/Scheduling 規則。
+- 關聯引用：見 [Staff Matching Preferences](24_Staff_Matching_Preferences與不可服務期間正式規格.md)、[Staff Roster Ownership Clarification](24B_Staff_Roster_Case_Preference_Ownership_Clarification.md)、[Global 效能與 UX 體感架構](12_Global_效能與UX體感架構.md)、[案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md)
 
-本補充契約的核心原則是：月嫂名冊不得從 Case Import workbook、relation tables 或前端 local mapping 臨時拼出偏好。UI 只能讀取 Staff domain 提供的 bounded typed read projection。
+月嫂名冊不得從 Case Import workbook、relation tables 或前端 local mapping 臨時拼出偏好，UI 只能讀取 Staff domain 提供的 bounded typed read projection。
 
-## 2. 現況邊界
+## 2. 現況邊界與 BeClass relation 對應
 
-### 2.1 既有 Staff roster summary
+### 2.1 既有 Staff roster summary 與 detail
 
-`subsystems/staff/summary_query.py` 的 `StaffSummary` 是名冊基本摘要，canonical fields 固定為：
+- `subsystems/staff/summary_query.py` 的 `StaffSummary` 維持 bounded 欄位：`id`、`name`、`phone`、`education`，不隨 BeClass 題目擴張。
+- 選取單一月嫂時以 `GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`（含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人電話、內部行政註記與銀行帳戶）。銀行完整帳號查閱與遮蔽邊界依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) §6 辦理；response 嚴禁包含 IP、LINE User ID、raw workbook／JSON 或 credential。空值顯示「尚未登錄」。
+- 一般資格證明由 `staff_certifications` 擁有，與 `has_massage_cert` 投影到 qualification master 的 `certifications` section。
 
-- `id`
-- `name`
-- `phone`
-- `education`
-
-這個 DTO 保持 bounded，不直接加入接案偏好 relation fields。接案偏好使用本文件定義的獨立 read model，避免基本名冊摘要隨 BeClass 題目擴張。
-
-2026-09-08 人工要求補齊名冊重要資料後，基本摘要仍維持上述四欄；選取單一月嫂時另以
-`GET /api/v1/staff/{staff_id}/profile` 讀取 Staff-owned `StaffProfile`。此 detail projection
-包含報名時間、完整身分證、行動電話、市話／分機、Email、生日、地址、學歷、完整緊急聯絡人
-電話、內部行政註記，以及該 Staff 的全部銀行帳戶（銀行代碼、分行代碼、帳號末四碼、主要與有效標記）。
-2026-09-11 Issue #276為較新人工明確裁決：完整銀行帳號只允許進入Staff Bank owner的授權add／replace
-command與current persistence；Query、event、receipt、log及error一律只回末四碼。其餘已認證內部管理UI的一般
-業務值仍依 `12_Global_效能與UX體感架構.md` §4.0使用owner typed Query提供的完整值。response不得包含IP、LINE User ID、raw workbook／JSON或
-credential。只有已登入且 enabled 的管理員可查詢；UI 只在選定單一月嫂後載入，空值顯示
-「尚未登錄」。
-
-一般資格證明仍由 `staff_certifications` 擁有，與 `has_massage_cert` 一併投影到既有
-qualification master 的 `certifications` section；不得複製成接案偏好或由前端解析來源資料。
-
-### 2.2 BeClass 已採納 relation facts
-
-目前 `subsystems/case_import/staff_historical_workbook.py` 已將下列母題正規化為 Staff relation facts：
+### 2.2 BeClass 已採納 relation facts 與交通方式 gap
 
 | BeClass 母題 | canonical relation | 現行 `[其它]` source | 本契約 logical other owner |
 |---|---|---|---|
@@ -47,19 +26,11 @@ qualification master 的 `certifications` section；不得複製成接案偏好�
 | 如何排休 | `staff_weekly_rest` | `[其它].3` | `rest_schedule_other_detail` |
 | 通常接幾胞胎 | `staff_baby_types` | `[其它].4` | `baby_count_other_detail` |
 | 特殊節日可接案 | `staff_holiday_availability` | `[其它].5` | `holiday_availability_other_detail` |
-| 交通方式／其他交通方式 | `staff_transportation` | **目前沒有 other source 採納** | `transportation_other_detail` |
+| 交通方式／其他交通方式 | `staff_transportation` | 無 `[其它]` 來源採納 | `transportation_other_detail`（回 `source_not_ready`） |
 
-`staff_cooking_skills` 的 `[其它]` 屬「料理能力」母題，不是交通方式 fallback，固定不得拿來填 `transportation_other_detail`。
-
-### 2.3 已知 implementation gap
-
-現行 importer 的 `staff_transportation` 只採納 canonical transportation values，沒有綁定交通方式的 `[其它]` source。故本文件先正式保留 `transportation_other_detail` ownership，但在 persistence/read owner 補齊前，read model 必須回 `source_not_ready`，不得猜測、不得搬用其他母題 detail、不得把空值誤判為「月嫂沒有填寫」。
-
-補齊 transportation other persistence 屬後續 runtime implementation；不在 #104 內修改 production DB 或 production data。
+`staff_cooking_skills` 的 `[其它]` 屬料理能力母題，嚴禁借填 `transportation_other_detail`。在 `staff_transportation` 補齊 persistence 前，`transportation_other_detail` 必須回 `source_not_ready`，不得猜測或顯示為「未填」。
 
 ## 3. Canonical read model
-
-月嫂名冊接案偏好使用獨立、唯讀、bounded 的 typed projection：
 
 ```text
 StaffCasePreferenceSummary {
@@ -81,131 +52,27 @@ PreferenceTopicSummary {
 
 契約規則：
 
-1. `values` 只能來自該母題 canonical relation facts；固定去重並使用 owner-defined deterministic order。
-2. `other_detail` 只能來自同一母題的 local `[其它]` ownership。
-3. 有 detail 時不得要求 `values` 同時存在；「只填其它」仍是合法 read fact。
-4. `other_detail_status=ready` 時 `other_detail` 必須是非空 canonical text。
-5. `other_detail_status=not_recorded` 表示 owner 有能力判斷該欄位、但此 Staff 沒有採納值；此時 `other_detail=null`。
-6. `other_detail_status=source_not_ready` 表示正式來源或 persistence 尚未能可靠提供；此時 `other_detail=null`，UI 不得把它當成使用者明確未填。
-7. 不增加 generic `other_note`；六組 detail 永遠不得合併。
+1. `values` 只能來自該母題 canonical relation facts，固定去重並採 owner-defined deterministic order。
+2. `other_detail` 只能來自同一母題 local `[其它]` ownership；只有 detail 時仍是合法 read fact。
+3. `other_detail_status=ready` 時 `other_detail` 須為非空 canonical text；`not_recorded` 與 `source_not_ready` 時皆為 `null`。
+4. 禁止 generic `other_note`；六組 detail 永遠不合併。
 
-## 4. API / application owner
+## 4. API／Application owner 與 UI 呈現規則
 
-### 4.1 Application owner
+- Application owner：`StaffCasePreferenceSummaryQueryApplication`（`subsystems/staff/`）。HTTP adapter 與 React 不得呼叫 Case Import mapper 重解 workbook。
+- HTTP route：`GET /api/v1/staff/{staff_id}/case-preference-summary`（同 Staff roster read 權限，不擴大為 public API）。
+- UI 呈現：
+  1. `values` 非空依序顯示；空陣列顯示「尚未登錄」。
+  2. `ready` 於同母題顯示 `其它：{other_detail}`；`not_recorded` 不另顯示其它列；`source_not_ready` 於 detail surface 顯示「其它來源尚未就緒」（不得誤標「未填」）。
+  3. 任一母題不可讀只降級該母題；roster 不因偏好缺失隱藏人員。
 
-正式 application owner 為 Staff domain 的獨立 query facade：
+## 5. Read / Write 邊界與敏感欄位排除
 
-`StaffCasePreferenceSummaryQueryApplication`
+- 本投影為 read-only，不提供接案偏好的 `POST`/`PUT`/`PATCH` write route；資料與銀行修改依 [案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md) 及各 root owner 辦理。
+- `StaffCasePreferenceSummary` 嚴禁包含：`identity_card`、銀行帳號／分行、IP address、credential／password／token／secret／key、`emergency_contact_name`/`phone`、`admin_notes`、raw workbook row／raw JSON／fingerprint／idempotency key。
 
-建議放置於 `subsystems/staff/`，與 `StaffSummaryQueryApplication` 同屬 Staff read boundary，但兩者 DTO 不互相擴張。
+## 6. 驗收標準
 
-Repository/read projection 可以 join Staff-owned canonical relation facts，但 Case Import importer 本身不是 UI query owner。HTTP adapter 與 React 都不得 import 或呼叫 Case Import mapper 來重新解析 workbook 語意。
-
-### 4.2 HTTP contract
-
-正式 bounded read route：
-
-`GET /api/v1/staff/{staff_id}/case-preference-summary`
-
-Response：
-
-```json
-{
-  "staff_id": 531,
-  "service_regions": {
-    "values": ["北區", "新竹縣"],
-    "other_detail": "偏遠地區需先確認交通",
-    "other_detail_status": "ready"
-  },
-  "service_periods": {
-    "values": ["8小時"],
-    "other_detail": null,
-    "other_detail_status": "not_recorded"
-  },
-  "rest_schedule": {
-    "values": ["週休1日"],
-    "other_detail": null,
-    "other_detail_status": "not_recorded"
-  },
-  "baby_counts": {
-    "values": ["雙胞胎"],
-    "other_detail": null,
-    "other_detail_status": "not_recorded"
-  },
-  "holiday_availability": {
-    "values": ["中秋節"],
-    "other_detail": null,
-    "other_detail_status": "not_recorded"
-  },
-  "transportation": {
-    "values": ["機車"],
-    "other_detail": null,
-    "other_detail_status": "source_not_ready"
-  }
-}
-```
-
-範例值只說明 shape，不是 production data，也不得拿來作 fallback/default。
-
-Authorization 必須至少與現行內部 Staff roster read 權限同級；本契約不得擴大成 public Staff profile API。
-
-## 5. UI owner 與 rendering rules
-
-月嫂名冊 card / Drawer 是此 read projection 的 consumer，不是偏好 root owner。
-
-UI 規則：
-
-1. UI 只使用 Staff case-preference response；不得自行 join `staff_regions`、`staff_time_slots` 等資料表，也不得重新解析 BeClass header。
-2. `values` 非空時依 API 順序顯示；空陣列時顯示「尚未登錄」。
-3. `other_detail_status=ready` 時，在**同一母題**下顯示 `其它：{other_detail}`。
-4. `other_detail_status=not_recorded` 時不另外顯示其它列；不得補空字串、`無`、`不限` 或推測值。
-5. `other_detail_status=source_not_ready` 時，detail surface 顯示「其它來源尚未就緒」；card 可省略 detail，但不得顯示為「未填」。
-6. 任一母題不可讀時，只降級該母題，不得把其他母題值搬過來。
-7. 前端不得建立六組 detail 的 generic merge field，也不得用料理能力 `[其它]` 回填交通方式。
-8. roster 不因偏好 source 缺失而隱藏 Staff；偏好是資訊／matching facts，不是名冊可見性的硬性資格。
-
-## 6. Read / write boundary
-
-接案偏好投影仍是 read-only；Staff個人資料與銀行帳戶修改由第33份正式規格另行擁有。
-
-- #104 不定義偏好編輯 UI。
-- #104 不提供接案偏好的 `POST` / `PUT` / `PATCH` write route。
-- 後續若要編輯上述 roots，必須交回各 root 的正式 owner，另行定義 Preview / Apply、validation、audit、version 與 idempotency 契約。
-- roster UI 不得直接寫 canonical relation tables。
-- BeClass historical facts 不因 roster 顯示需求而自動成為可編輯資料。
-
-## 7. Sensitive-field exclusion
-
-`StaffCasePreferenceSummary` 固定不得包含：
-
-- `identity_card` 或其他身分證明資料
-- 銀行帳號／分行資料
-- IP address
-- credential、password、token、session secret、encryption key
-- `emergency_contact_name`
-- `emergency_contact_phone`
-- `admin_notes`
-- raw workbook row、raw JSON、source fingerprint、idempotency key
-
-這些欄位即使 Staff canonical storage 已存在，也不因本 read model 而成為 roster preference 資料。
-
-## 8. Ownership / fallback 決策表
-
-| topic | values owner | other owner | fallback |
-|---|---|---|---|
-| service regions | `staff_regions` | `service_region_other_detail` | 僅同母題；無值顯示尚未登錄 |
-| service periods | `staff_time_slots` | `service_period_other_detail` | 僅同母題；無值顯示尚未登錄 |
-| rest schedule | `staff_weekly_rest` | `rest_schedule_other_detail` | 僅同母題；無值顯示尚未登錄 |
-| baby counts | `staff_baby_types` | `baby_count_other_detail` | 僅同母題；無值顯示尚未登錄 |
-| holiday availability | `staff_holiday_availability` | `holiday_availability_other_detail` | 僅同母題；無值顯示尚未登錄 |
-| transportation | `staff_transportation` | `transportation_other_detail` | persistence 未補齊前回 `source_not_ready`；固定不得借用 cooking other |
-
-## 9. #104 acceptance mapping
-
-- [x] 接案偏好的 canonical read model：`StaffCasePreferenceSummary` / `PreferenceTopicSummary` 已定義。
-- [x] roster summary shape：六母題與 deterministic bounded shape 已定義。
-- [x] UI owner / response contract：Staff query application、HTTP route、React consumer boundary 已定義。
-- [x] 六組 `[其它]` ownership：六組 local owner 與禁止 generic `other_note` 已定義。
-- [x] fallback：`ready` / `not_recorded` / `source_not_ready` 與 UI rendering 已定義。
-- [x] 現況 gap：交通方式 other source 未採納已明示，禁止猜測或跨母題回填。
-- [x] Safety：本 Issue 僅文件／architecture，無 production DB mutation、deploy 或 production re-import。
+1. 六母題與 `PreferenceTopicSummary` shape 具確定性且 bounded；`values` 與六組 `[其它]` 各自隔離不合併。
+2. `transportation` 在無正式來源前穩定回傳 `source_not_ready`，禁止挪用料理能力 `[其它]`。
+3. Read projection 零敏感欄位洩漏、零寫入能力、UI 不直接 join relation tables。

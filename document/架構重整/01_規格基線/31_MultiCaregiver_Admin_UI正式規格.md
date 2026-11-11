@@ -1,15 +1,11 @@
 # Multi-Caregiver Admin UI 正式規格
 
-## 1. 文件狀態與 Authority
+## 1. 文件邊界與所有權
 
-- 狀態：`consolidated-current-baseline`
-- 收斂日期：2026-09-09
-- Scope：工會 React／管理端的多月嫂媒合、排班、行事曆與人力配置 UI composition
-- 上位業務契約：`02_Assignments_Scheduling_Domain.md`
-- 關聯契約：`01_Orders_Domain.md`、`03_Payroll_Domain.md`、`04_Client_Finance_Domain.md`、`00_Global_共同契約.md`
-- 歷史來源：`document/管理端UI/` 下的多月嫂討論紀錄、目標指南、驗收矩陣與排班／行事曆規格；完成本次收斂後只由 Git history 保存。
-
-本文件只擁有「管理端如何組合 current owner Query／Preview／Apply，以及畫面如何分工、呈現與阻擋誤操作」。assignment、正式服務日、waiting-deposit lock、leave／substitution、薪資、付款、Orders lifecycle、version、idempotency、fingerprint 與 transaction semantics 仍由各 owning Domain 擁有；UI 不得建立第二套公式或寫入 Authority。
+- 狀態：`current-spec`
+- Owner：Admin UI Composition（Multi-Caregiver Scheduling Surface）
+- 單一負責範圍：工會 React／管理端的多月嫂媒合、排班、行事曆與人力配置 UI composition、畫面分工、呈現與誤操作阻擋；不擁有 assignment、正式服務日、waiting-deposit lock、leave／substitution、薪資、付款、Orders lifecycle、version、idempotency 或 transaction semantics。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)
 
 ## 2. 三分頁產品結構
 
@@ -19,7 +15,7 @@
 2. `月嫂配對中心`
 3. `案件人力配置`
 
-舊訂單頁不得再保存完整媒合、人力正式配置、換月嫂、排班移除或另一套 Preview／Apply 入口。若存在相容 deep link，只能導向 current owner page，不得形成第二套操作流程。
+訂單頁不得保存完整媒合、人力正式配置、換月嫂、排班移除或另一套 Preview／Apply 入口。若存在相容 deep link，只能導向 current owner page，不得形成第二套操作流程。
 
 ### 2.1 服務人員月曆
 
@@ -48,13 +44,13 @@
 - 同一月嫂若存在不連續區段，不得在 UI 合併成單一假區段。
 - 增加行數只建立 draft row；減少行數只建立 cancellation candidate。沒有 Preview／Confirm／Apply 前不得取消正式 assignment 或排班。
 - 已開始服務的 assignment 不得回溯換人或改寫歷史服務日；合法 replacement／split 只可依 Scheduling current contract 對未來日期生效。
-- 已付款、已進有效月結、已結算或具有其他 owner lock 的歷史事實不得由 staffing UI 直接覆寫。
+- 已付款、已進有效月結、已結算或具有其他 owner lock 的事實不得由 staffing UI 直接覆寫。
 - 正式區段增減、日期調整與換人均使用 Scheduling owner Query／Preview／Apply；UI 不自行計算新的 canonical assignment collection。
 
 ## 3. 共用 Preview／Apply 與 concurrency
 
 - 分頁二與分頁三對相同正式 mutation 必須呼叫同一 owning application contract，不得各自維護不同演算法。
-- Query 唯讀；Preview 零正式寫入；Apply fresh-read current owner facts 並依 owning version／fingerprint／idempotency contract執行。
+- Query 唯讀；Preview 零正式寫入；Apply fresh-read current owner facts 並依 owning version／fingerprint／idempotency contract 執行。
 - UI 顯示 draft、loading、previewed 或 pending 不等於成功；只有 terminal receipt 與 fresh owner readback 可顯示正式完成。
 - conflict／stale 時保留使用者可理解的 draft，但必須重新 Query／Preview；不得自動重送 Apply。
 - UI 不得直接 INSERT／UPDATE assignment、schedule、lock、payroll、payment 或 event table。
@@ -110,28 +106,7 @@ UI 不自行以 `planned_hours`、姓名或 `orders.staff_id` 補值。
 - 代班不得改變 Client Finance 的客戶應收義務；UI 不得用月嫂薪資差額反算或修正客戶付款。
 - 已付款／結算事實若需更正，導向 current adjustment／reversal／re-settlement owner workflow，不提供一般表格直接覆寫。
 
-## 8. Current acceptance 與 evidence lifecycle
-
-2026-07-30 的多月嫂 UX 驗收矩陣已對 `MCSUX-AC-001`～`008` 的 current code、Service／API／UI 與 focused tests 記錄 `通過`；其中 `MCSUX-AC-009` 的舊 ADAD checkpoint／固定 DB→Service→API→UI→Tests 程序要求在當次直接實作對照中明確排除，不構成 current產品契約。
-
-完成矩陣只作本次 consolidation 的 acceptance evidence；它不需要繼續在 `document/管理端UI/` 形成第二套 current Authority。後續 regression 由 current tests、formal spec 與必要 current evidence receipt 承接。
-
-## 9. 歷史來源處置
-
-下列文件完成本次 semantic disposition 後退出 working tree，由 Git history 保存：
-
-- `document/管理端UI/多月嫂排班UX改善討論紀錄.md`
-- `document/管理端UI/多月嫂排班UX目標指南.md`
-- `document/管理端UI/多月嫂排班UX驗收矩陣.md`
-- `document/管理端UI/多月嫂排班與行事曆規格.md`
-
-處置原則：
-
-- 已被 `02` 及本文件承接的 Domain／UI 語意，不再由來源文件競爭 Authority。
-- 討論紀錄中尚未核准、已被 current implementation／formal contract否定、純歷史 component／page／流程細節不搬移。
-- 驗收矩陣已完成項目不再作 working-tree current gate；需要稽核時從 Git history 精準取回。
-
-## 10. 驗收
+## 8. 驗收標準
 
 1. 管理端只存在一個三分頁多月嫂產品入口；相容入口不得形成第二套正式流程。
 2. 月曆只由 current typed Query 顯示 assignment／lock，占用與正式服務不混淆。

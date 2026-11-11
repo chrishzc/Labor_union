@@ -1,610 +1,88 @@
 # Contract Signing、月嫂與客戶簽約完成及正常驗收資料鏈正式規格
 
-> 2026-11-05 金流規格同步：本文件舊固定120小時、一般案件一律先墊、只能整筆一次付款及單一付款月份的敘述已取代，僅供歷史追溯。現行全額免自備依 [`22` §17.4.1](22_銀行流水匯入與帳務異常處理正式規格.md#full-subsidy-no-advance-20261105)；契約／詢問資訊只讀原owner正式金額及日期，不自行判方案、重算或拆薪。會計Excel沿規格16 §2.5.4，本次只改文件。
+## 1. 文件邊界與所有權
 
-## 2026-10-29 Excel 模板版本管理（人工授權整合）
+- 狀態：`current-spec`
+- Owner：Contract Signing Integration（`domains/contract_signing/`、`subsystems/contract_signing/`）
+- 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、未簽 PDF 下載／重複產生、送交外部平台交接記錄與獨立簽署提醒（LINE ＋未綁定人工名單）、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
-Authority：使用者確認 Excel 上傳／儲存格映射原型，明確要求整合現有系統，支援上傳、調整映射、預覽套值、保存版本，保留版型，且更新不影響既有契約。本節針對此功能取代下文「不提供任意本機契約檔作為核准模板」及僅固定兩份 XLSX 的限制；未經保存及啟用的上傳檔仍不是核准模板。
-
-- CTM-01：authenticated system_admin 可上傳 `.xlsx`、選擇工作表，查看原文字、欄寬、列高、字級、底色、邊框、合併格及內嵌 PNG／JPEG。圖片在管理預覽及 PDF 保留原 raster bytes、anchor 與顯示尺寸。檔案及映射在伺服器重新驗證；不信任瀏覽器解析結果。巨集、外部連結、圖表與無法完整保留的圖形須明確拒絕，不得靜默遺失。未被映射取代的公式須轉為固定內容，不執行或重算 Excel 業務公式。處理容量是可調整的 implementation default，不升格為業務規則。
-- CTM-02：映射只可從目前兩類契約既有 typed owner 欄位目錄選擇，requiredness／applicability 由原規則提供。位置可調整；合併格只接受左上角。上傳新 Excel 時提供預設勾選的「沿用目前版本映射」，沿用畫面目前選定版本／草稿的映射；取消勾選則從空白設定。沿用不推測語意或自動搬動座標；新工作表範圍外或合併格內部的舊位置必須保留為待調整項目，供使用者明確移到新位置或放棄沿用，處理完成前不得套值或保存。其餘有效位置保留，並提示檢查示範套值。保存必須涵蓋該類所有 required 資料來源，且拒絕未知來源、重複／範圍外位置或無法解析的規則。不得自行增加計價、日期或其他 owner 公式。
-- CTM-03：上傳檢視與示範套值 Preview 零持久寫入，使用明確標示的虛構值，不讀取真實案件或改變模板啟用狀態。正式案件 Query／Generate 仍使用現行 typed owner projections。
-- CTM-04：Excel 原始 bytes、已驗證映射、工作表與操作者資料一起保存為不可變版本，保存與啟用為不同操作。Contract Signing 擁有核准目錄；版本存於既有契約 archive root 的 `template-catalog/`，以不可變檔案及摘要保存歷史，以跨程序檔案鎖、expected catalog version 與原子替換提交單一目錄 head。此機制只負責模板自己的 outer mutation，不加入案件 DB transaction；不新增 DB schema。保存／啟用都需 actor、idempotency key 與 typed stale／same-key-mismatch，錯誤不得被當成成功或靜默改回內建模板。
-- CTM-05：啟用只影響後續明確產製的新來源版本；已保存 XLSX／PDF／簽回文件及文件 metadata 不重寫、不批次重產。每次產製使用同一個不可變模板／映射 pair。既有來源轉 PDF 時按其保存的模板／映射摘要讀取歷史版本，而非要求仍為目前啟用版本；既有下載沿原文件授權及 archive readback。
-- CTM-06：React 在稽核與系統提供契約模板入口，依確認原型呈現上傳、Excel 儲存格選取、欄位清單、示範套值、版本清單與啟用。未保存修改沿用既有離頁提示；結果未明時保留原命令身分並核對原結果，不換新 key 重送。既有案件欄位摘要須依該模板的實際映射及欄位名稱呈現，不假設舊座標。
-
-Acceptance：A1 上傳及合併格／樣式可檢視，損壞與不支援檔案 closed 拒絕；A2 新檔零自動映射、未知／缺漏／非 anchor 映射拒絕；A3 Preview 不建檔且樣本明確；A4 保存後重開可讀，重播相同命令、stale 與不一致命令有可辨識結果；A5 啟用新版後舊版本 bytes／摘要及舊來源 PDF 產製不變；A6 typed API、導航、操作狀態與實際畫面驗證通過。
-
-spec_status: SPEC_READY
-convergence:
-  status: READY
-  blockers: []
-
-> 2026-10-29 最新裁決：新計價案件依規格04 §0的四種時薪及來源給付月份投影；取代全補助／非全補助及不得按來源分期的舊限制。客戶及月嫂各讀owning-domain金額，不混用單價；原已簽文件保留不可變。\n
-
-
-## 1. 文件狀態
-
-- 狀態：`approved`
-- 人工裁決日期：2026-08-10
-- 正式收斂日期：2026-08-11
-- Owner：Contract Signing Integration
-- 跨域協作者：Orders、Assignments／Scheduling、Client Finance、LINE Integration
-- 歷史來源與已完成執行包已自工作樹移除；需要時依 `../04_已完成與上線封存/README.md` 從 Git 歷史精準取回。
-- 2026-08-21 M3 coordination amendment：customer `accepted` 只代表 matching decision；須經 fresh-effects
-  check 與 Assignment typed conversion/rematch request，不能直接形成 contract、assignment 或 Payroll obligation。
-
-本規格是第 `01`、`02`、`04`、`07`、`10`、`15`、`17` 份正式規格的契約簽署補充裁決。
-若舊條款仍把「客戶簽回」「契約完成」「訂金核銷」「訂單成立」視為同一事件，或要求先建立
-execution schedule 才能完成客戶契約，以本規格較新的人工裁決為準。
-
-### 1.1 簽約與應收用詞（2026-10-15 人工裁決）
-
-- 流程、規格說明與使用者介面統一使用「所有月嫂簽約完成」及「客戶簽約完成」，明確指出完成簽約的對象；不得只寫「簽約完成」而省略對象。
-- 「所有月嫂簽約完成」表示目前有效方案的全部月嫂契約均已簽回，且精確服務日完整、無重疊、合計符合訂單服務天數；此時保存人員與精確服務日資料，不另建立帳務。
-- 「客戶簽約完成」表示客戶簽回證據已驗證，且與 Orders 契約完成事件在同一交易保存；既有各期客戶應付及付款紀錄沿用，不以簽約產生帳務。
-- `commitment` 是所有月嫂簽約完成後保存的人員、方案版本及精確服務日資料，供後續客戶契約與正式排班驗證；它不是另一個供使用者操作的簽約階段。業務流程不得以「簽約前服務承諾」或「形成有效簽約承諾」代替「所有月嫂簽約完成」。
-- 應收不分「正式應收」與「非正式應收」。資料不足稱「待確認」；資料齊全即由系統同步並顯示訂金與各期客戶應付，不另設「建立付款義務」關卡。`obligation`、`commitment_ready`、`client_signed_received`、`contract_completed` 及既有資料表、API、事件識別名稱維持原名，不為簡化流程新增帳務狀態；計算與核銷不再依賴簽約時點。
-- 「簽回」可用於描述簽署文件回收與證據驗證；描述業務流程階段時使用上述簽約完成名稱。預覽不建立應收；已核銷交易與已簽文件不得因用詞修正而改寫。
-- 2026-10-29 訂金提醒與各期逾期待辦裁決：客戶及所有月嫂均已簽約完成才取得提醒資格；沿用同案 Orders `contract_completed` 事件及相符的目前 `contract_identity` 作為正式完成事實。單方簽署、僅產生／寄送文件或付款均不能代替。此資格只限制訂金繳費提醒及訂金／第一期／第二期逾期待辦與發送，未簽約仍依規格 04 預先計算各期金額，且不改變合法核銷與既有到期日。
-
-### 1.2 非市民自費契約（2026-10-29 人工確認）
-
-狀態：`implemented / repository-local-verified`。使用者已於 2026-10-29 核准七階段實作與逐階段驗收；執行範圍及實際證據見 [非市民案件實作工作包](../非市民案件實作工作包.md)。此狀態不代表已部署、使用正式資料或完成外部 provider 驗收。
-
-- 案件來源及 A 開頭案件編號依 `17` §5.1.1；契約、預覽、下載、交接及回收均須接受同一正式案件識別。
-- 費率、按 5 天服務費收取的定金、其餘期款與繳款期限，由 `04` §0.1 的既有非市民公式提供；客戶及月嫂金額仍各自讀 owning-domain 投影，不混用單價。
-- 契約及繳費資訊顯示 `04` §8 的本案正式虛擬帳號，不能把 A 開頭案件直接套舊九碼公式，也不得要求 HCM 來源存在才能產生文件。
-- 文件版本、簽回證據、簽署完成條件及已簽文件不可變規則保持；本次不改模板資產、不重產既有文件或操作外部平台。
-
-後續驗收需涵蓋非市民自費條文、費率／分期／日期／帳號一致及原有簽回回讀流程，實作影響見 `17` §5.1.2。
-
-## 2. Business scenario 與 Global invariants
+## 2. 核心架構、SSOT 與狀態機
 
 ```text
-完整案件／服務條件保存 → 系統自動計算訂金及各期客戶應付（可先核銷）
-月嫂表示願意承接候選方案 → 客戶接受推薦方案
-→ 客戶接受與 current confirmed service dates 齊備，最後條件的 Apply 自動取得 waiting-deposit 檔期鎖
-→ 每個月嫂 segment 產生、寄送並回收月嫂契約
-→ 所有月嫂簽約完成，保存人員與精確服務日資料（commitment）
-├─→ 訂金核銷 → 訂單成立（沿用已計算的金額）
-└─→ 產生、寄送並回收客戶契約 → 客戶簽約完成 → 沿用各期應付與既有收款
-→ 訂金已核銷且客戶簽約完成
-→ commitment exact conversion 為 execution assignment／effective schedule
-→ actual start → 月曆、薪資、補助與完成
+完整案件／服務條件保存 → 自動計算訂金與各期客戶應付（可先核銷）
+月嫂承接意願 → 客戶接受推薦方案 → 齊備確認服務日期後自動鎖定 waiting-deposit 檔期
+→ 契約瀏覽器列印或下載未簽 PDF → 記錄已送交外部簽署平台 → 獨立發送 LINE 簽署提醒
+→ 分別上傳回收全部月嫂與客戶已簽署 PDF（或本機受控 TEST-ONLY 跳過）
+→ Apply 納管受控文件、建立 commitment 與 Orders contract_completed
+→（訂金已核銷使訂單成立 AND contract_completed AND commitment_ready）
+→ commitment exact conversion → execution assignment／schedule
 ```
 
-1. 訂金核銷、客戶簽回、Contract Completion 與 execution conversion 是四個可區分事實。
-2. 訂金有效即可使 Orders 進入「訂單成立」；這不代表客戶已簽約，也不允許 execution。
-3. 客戶簽回前不得建立 execution assignment；commitment 不得被 Calendar、Payroll 或
-   Government Subsidy 當成正式服務事實。
-4. Query 唯讀、Preview 零寫入；每個 Apply 只有一個 outer Unit of Work 與 commit owner。
-5. 外部 LINE 傳送只由 committed durable delivery task 執行；delivery 成功不等於簽署完成。
-6. UI、script、fixture 與 migration 不得直接寫契約完成、Orders status、execution schedule、
-   finance settled projection、alert 或 receipt。
-7. 月嫂只提供承接意願，不負責決定正式配對；waiting-deposit 檔期鎖由 Scheduling 依 current matching
-   plan 與完整日期透過正式 writer 自動取得，且不得要求月嫂先簽約或先建立 precontract service commitment。
-
-## 3. Ownership、SSOT 與 non-goals
-
-2026-10-29 一致性修正：本節自動保留契約同時約束人工與 LINE 客戶接受，以及後到的服務日期保存。
-日期來源及單月嫂原詢問／說明日期解析沿規格 01 §3.4.1 與規格 02「推薦、客戶決定與結果核對」；
-Query、客戶看到的確認內容與保留 writer 不得各自以不同區間判定。多月嫂保留明確分段檢查。
-自動保留仍由既有 Scheduling writer 在最後條件的原 outer UoW 完成，任何正式 blocker 整筆 rollback，
-不改成先提交接受再另外補鎖。日期不符、資料待核對與實際占用須分別回報，不能以 generic 500
-或統稱檔期衝突掩蓋；未知命令／已提交收據的恢復與離頁依規格 02／12，不另建命令狀態 root。
-
-2026-10-15 自動等待訂金鎖人工裁決：客戶接受正式配對及 Orders current confirmed service dates 齊備後，自動借用既有 Scheduling 鎖定 writer；不再要求管理員另按「保留月嫂檔期」。不論先確認配對或先保存日期，最後條件的 Apply 在原 outer UoW 內完成鎖定；先取得 canonical staff occupancy mutex，再鎖 Orders／Matching，fresh-read current roots。占用或不可服務衝突回 typed conflict 並整筆 rollback，不保留半套確認。依 plan／confirmed version 保存唯一 lock-acquired event；重播不重建鎖。Query／Preview 零寫入，既有有效鎖與已生效排班不重建。既有簽約紀錄不因補確認日期重簽；契約、訂金與規格 02 SSTART-03／05 的正式日期結果齊備後，沿既有排班 writer 將等待鎖轉為正式排班；日期表只作群組結果紀錄。
+### 2.1 分責與 SSOT
 
 | Owner | Root facts／責任 | 不擁有 |
 |---|---|---|
-| Contract Signing Integration | 核准模板引用、不可變文件版本、月嫂／客戶 sent 與 signed-received events、provider-neutral identity、status version、command receipt | Orders lifecycle、應收金額、execution assignment、LINE attempt 結果 |
-| Scheduling Commitment | matching plan/version snapshot、segment、月嫂、精確服務日、commitment event／terminal event | execution schedule、薪資、補助、Orders status |
-| Client Finance | 依完整案件資料自動計算的訂金及各期客戶應付、ledger、allocation、settlement | 契約簽署證據、Orders status |
-| Orders | Contract Completion event、`contract_identity` projection、lifecycle | 外部簽署 payload、LINE delivery、assignment 日 |
-| Assignments／Scheduling | commitment 的 exact conversion、正式 assignment／schedule 與 occupancy | 契約文件、應收、LINE |
-| LINE Integration | 綁定身分、delivery task、attempt 與 retry | 契約或 Orders 成功狀態 |
-
-### 3.1 Root facts 與 derived values
-
-- `contract_document_version`：scope、case、segment、template id/version/digest、source snapshot
-  digest、MIME、size、SHA-256、archive locator、supersedes id、actor、created-at。
-- `contract_signing_event`：case、scope、segment、document version、event type、provider-neutral
-  event identity、payload digest、status version、actor、occurred-at、idempotency identity。
-- `precontract_service_commitment` 與 days：matching plan/version、segment snapshot digest、staff、
-  精確服務日、版本、created／cancelled／superseded／converted events。
-- Contract Signing command receipt、document access grant、LINE delivery intent/outbox。
-- Client Finance obligation／ledger roots、Orders contract event、Scheduling assignments 仍由各自
-  owning Domain 擁有。
-- segment sent／signed status、commitment readiness、client contract status、conversion eligibility、
-  UI blockers 與 alerts 都是 derived projections，不是 mutation SSOT。
-
-### 3.2 Non-goals
-
-- 不提供任意本機契約檔作為核准模板，也不裁決電子簽章 provider。
-- 不在 LINE callback、Streamlit 或 API route 直接推進 Orders／Scheduling／Finance。
-- 不支援半日或分時 commitment；同案同日只有一個月嫂 owner。
-- 不以人工勾選、delivery success、訂金核銷或 Orders status 偽造簽署事件。
-- 不授權 production DB migration、外部傳送、刪除舊資料或 cutover。
-
-## 4. 狀態機
-
-### 4.1 所有月嫂簽約完成與內部 commitment 狀態
-
-```text
-draft_generated → staff_contract_sent → staff_signed_received
-全部有效 segment signed + 精確日守恆 → commitment_ready
-commitment_ready → converted | cancelled | superseded
-```
-
-2026-08-24 人工裁決：外部寄送不是唯一途徑。LINE 未綁定、未送達、未回呼，或已使用電話、
-紙本、現場等非 LINE 流程完成簽約時，已授權內部操作者可經由 `manual_attested` 路徑，以
-已簽回的不可變 evidence 形成 `staff_signed_received`。此路徑不是 `staff_contract_sent`、不是
-LINE delivery success，也不是 target-status 修改；必須一併保存目前核准模板／版本、實際簽回
-evidence、confirmation method、非空 reason、actor、事件時間、matching plan／segment snapshot
-與 idempotency identity。當 waiting-deposit lock 尚未建立時，現行 `proposed` plan 必須另有最新
-customer acceptance root；已取得 lock 的 `accepted` plan 可直接驗證。沒有可驗證的簽回 evidence
-或 customer acceptance 時，人工入口固定拒絕。
-
-- 全部 segment 的精確服務日不得重疊，合計必須等於 `orders.service_days`。
-- `staff_signed_received` 是每份月嫂契約的簽回證據；須驗證全部月嫂契約及精確服務日，才能判定所有月嫂簽約完成，簽回不建立訂金或期款帳務。月嫂簽回本身不建立 execution、薪資、補助或訂單成立。
-- matching plan/version 變更使舊 commitment `superseded`；不得原地改寫日期或月嫂。
-
-### 4.2 客戶簽約完成與 Orders 契約完成事件
-
-```text
-commitment_ready → client_draft_generated → client_contract_sent
-→ client_signed_received → contract_completed
-
-有效訂金核銷 → 訂單成立
-訂單成立 AND contract_completed AND commitment_ready
-→ commitment converted → execution assignment／schedule
-```
-
-- 客戶簽約完成不得早於所有月嫂簽約完成。
-- 自動寄送路徑的簽回只接受與目前有效 sent document、commitment 與案件相符的不可變版本；
-  `manual_attested` 路徑則以同交易新建的目前核准模板版本與實際簽回 evidence 對應，兩者都不得
-  接受任意未受控文件或偽造 sent event。
-- 同一裁決下，客戶可在有效 commitment 已建立後，以 `manual_attested` 路徑提供實際簽回
-  evidence，直接形成 `client_signed_received` 與 Contract Completion；必須保存核准模板／版本、
-  evidence、confirmation method、reason、actor、commitment snapshot、Preview fingerprint 與
-  receipt。此路徑不建立或宣稱 LINE delivery，也不得以口頭勾選取代必要 evidence。
-- `official_service_dates_incomplete` 保留為 stable blocker 名稱；在 conversion 前，其完整性由
-  有效 commitment 的精確服務日判斷，不要求先建立 execution schedule。
-- 服務中仍須 actual start、有效 execution schedule、訂金與契約完成；不得只看 Orders label。
-
-### 4.3 服務中代班的文件例外（2026-08-27 人工裁決）
-
-服務中已有至少一筆 assignment-owned actual service fact 時，代班屬 Scheduling 的受影響日期
-substitution，不開啟新的整案 Contract Signing round：
-
-- 正常代班不要求代班月嫂獨立服務契約或簽回；客戶不需要追加確認或簽署變更文件。既有有效
-  commitment、客戶契約與不受影響日期的文件／簽回仍是 current facts，不能因代班而被
-  supersede 或重建。
-- 代班月嫂 identity、受影響服務日、原／新 assignment 與 Payroll impact 由 Scheduling／Payroll
-  的 substitution lineage 擁有。Contract Signing 不得把「代班無新簽回」投影成 contract blocker，
-  也不得要求 client completion report 才能讓 substitution、排班 lineage 或薪資成立。
-- 工會人員可選擇追加人工 `substitution_supplement` 文件／證據。它是 optional、可稽核的補充
-  evidence，不是獨立契約、簽回或客戶接受事件；無附件、未上傳或 archive 暫時不可用均不阻擋
-  代班與薪資。若補充文件宣稱改變條款、日期或金額，仍須另經 Orders／Scheduling／Client
-  Finance 的正式 owner command，附件本身不能改寫根事實。
-- 文件選配入口仍須沿用既有 actor、reason、method、digest／版本、Preview／Apply（若為納管
-  文件）與 immutable receipt；不可用口頭勾選或文件存在反推 signed／delivered／customer-
-  accepted。代班本身也不得偽造任何 provider delivery 或簽署事件。
-
-## 5. Commands、Queries 與 typed views
-
-Commands：
-
-- `GenerateContractDocumentVersion`
-- `SendStaffContract`
-- `UploadReturnedContractDocument`
-- `RecordStaffSignedContract`
-- `PreviewManualStaffContractAttestation`／`RecordManualStaffContractAttestation`
-- `SendClientContract`
-- `RecordClientSignedContractAndCompleteContract`
-- `PreviewManualClientContractAttestation`／`RecordManualClientContractAttestation`
-- `CancelOrSupersedeCommitment`
-- `ConvertCommitmentToExecution`
-
-每個 mutation 必須包含 actor、reason、correlation id、`expected_status_version`、idempotency key
-與 canonical command fingerprint。自動寄送路徑的簽回命令另必須帶目前 sent document 的
-`expected_document_version_id`；人工補登則必須帶 Preview fingerprint、confirmation method 與
-實際簽回 evidence；任一快照不同一律回 stale typed error。文件 bytes 只由 upload/archive port
-接受，不能穿透 Domain。
-
-Queries 提供案件契約進度、每 segment 狀態、目前文件版本、delivery 狀態、commitment 摘要與
-blockers。文件下載／預覽必須以案件、角色、文件版本授權並寫 security audit。Query 回傳 typed
-view，不得回 raw persistence dict 或觸發狀態轉換。
-
-## 6. Transaction、lock 與 partial failure
-
-### 6.1 契約寄送與所有月嫂簽約完成
-
-- Send 鎖定案件、plan/segment、status version、文件與 LINE binding；同交易建立 sent event、
-  access grant、delivery task/outbox、receipt 與新版本，commit 後才由 worker 傳送。
-- 月嫂簽回按 plan、segment id 固定順序鎖定；驗證文件、事件、日期守恆與版本；append event。
-- 所有月嫂簽約完成時，同交易建立 commitment header/days 及兩端
-  receipt/outbox；任一步失敗全部回滾。
-
-### 6.2 客戶簽約完成
-
-鎖定案件、有效 commitment、目前 client document、Orders aggregate、Client Finance account、
-既有 deposit obligation 與 command receipt。單一交易依序：
-
-1. archive 已成功且 digest 相符才 append client signed event；
-2. 投影唯一 `orders.contract_identity`；
-3. append Orders Contract Completion event；
-4. 核對並沿用既有訂金、各期客戶應付與核銷紀錄；計價資料未變時不寫入 Finance 事件或增加 Finance 版本；
-5. 重評 lifecycle，但不得覆寫已由訂金形成的「訂單成立」；
-6. 寫 versions、audit、outbox 與 receipt；單一 commit。
-
-不得以 HTTP 串接兩個 transaction。archive 在 DB rollback 後形成的 orphan object 必須由受控
-reaper 依「無 document root 引用」安全清理，不得把 orphan 誤認為可寄送版本。
-
-### 6.3 Execution conversion
-
-鎖定 commitment、Orders、Client Finance settlement、matching plan、所有受影響 staff occupancy
-與 assignment aggregate。fresh candidate 的 case、plan/version 與承諾服務量必須一致；原人改期採 current 服務開始結果的日期，已經工會選定且願意、加入原群組的新承接者以明確替代來源核對人員，不能任意變更人員或服務量；同交易建立 assignments、schedules、converted event、Payroll impact、outbox、receipt。
-任何 mismatch 或 occupancy conflict 零 partial write。
-
-實際開始日變動依規格 02 SSTART-01～08：正常由本人月嫂接受並填日期、代班由工會選定願意者且加入原群組後由人員填日期；不再要求雙方日期表確認或另行人工核准。同一 plan、同一人員與每人服務天數不變時，首次 execution conversion 可採用上述提交結果形成的 current owner 正式日期，並保存結果／日期版本引用。Preview／Apply 仍驗 fresh facts、occupancy、版本與人員／服務量，不改原 commitment days、已簽文件或簽回歷史。換人須保存工會選定、本人願意及目前群組加入的來源，沿用既有正式代班／換人 writer 的資格檢查，不把原人簽回或文件移植成新人的簽回；LINE 日期表只在正式保存後作結果紀錄。
-
-
-
-## 7. Idempotency、retry、stale、timeout 與 conflict
-
-- 相同 idempotency key＋相同 fingerprint 回原 receipt，零新增。
-- 相同 key 或 provider event identity＋不同 fingerprint 回
-  `contract_signature_idempotency_conflict`。
-- status、plan、document、Orders、Finance 或 Scheduling version stale 時回 typed conflict，UI
-  必須重新 Query／Preview；client 不自動換 key 重送敏感 command。
-- UI 對同一份上傳檔與 sent-document version 的使用者重送，必須保存同一 idempotency key；只有
-  檔案或版本快照變更、或收到 stale 後重新確認，才建立新 key。
-- 使用者選錯文件、驗證失敗與 Domain blocker 不 retry。
-- DB／archive／provider unavailable 可 retry，但必須保留同一 identity；timeout 結果未知時先查
-  receipt/delivery task，禁止直接建立第二份文件或事件。
-- delivery worker 依 durable task policy retry；簽署 root 永不因傳送失敗回滾。
-
-## 8. Typed errors、alerts 與人工入口
-
-Stable errors 至少包含：
-
-- `contract_document_empty | contract_document_too_large | contract_document_type_not_allowed`
-- `contract_document_digest_mismatch | contract_document_archive_failed`
-- `contract_status_version_conflict | contract_document_version_stale`
-- `contract_line_recipient_unbound | contract_line_recipient_subject_mismatch`
-- `staff_contract_not_sent | client_contract_not_sent | staff_commitment_incomplete`
-- `manual_contract_evidence_missing | manual_contract_confirmation_method_invalid | manual_contract_reason_missing | manual_contract_preview_stale | manual_contract_customer_acceptance_required`
-- `commitment_service_days_invalid | commitment_not_effective`
-- `official_service_dates_incomplete | service_time_terms_incomplete`
-- `contract_signature_idempotency_conflict`
-- `commitment_execution_mismatch | assignment_occupancy_conflict`
-- `contract_signing_unavailable | transaction_failed`
-
-Alerts 涵蓋長時間未寄送／未簽回、delivery exhausted、archive/digest failure、stale plan、承諾
-日期不守恆、identity conflict、conversion mismatch 與 orphan archive。Alert resolve 不得改變根因。
-
-人工 UI 必須提供模板與版本、產生／預覽、寄送、上傳簽回、紀錄簽署、delivery 狀態、blocker、
-receipt 與 repair navigation；每個 staff segment 與有效 commitment 後的 client contract，另必須
-提供人工簽約證據 Preview → 明確確認 → Apply → receipt/readback。該入口必填 confirmation
-method、非空 reason 與實際簽回檔，清楚標示「未建立 LINE 寄送任務」；不提供 status 直接
-修改或 SQL/data-browser patch。
-
-## 9. Ports、Module 與 Adapter 邊界
-
-Ports：TemplateCatalog、ContractRenderer、ImmutableDocumentArchive、DocumentAccessGrant、
-SigningEventRepository、CommitmentRepository、OrdersContractCompletionPort、
-ClientFinanceObligationPort、SchedulingConversionPort、LineDeliveryTaskPort、SecurityAuditPort、
-OutboxPort、BusinessClock 與 outer UnitOfWork。
-
-純 Module：DocumentDigest、SigningSequenceValidator、CommitmentDayConservationValidator、
-ContractStatusReducer、CommandFingerprint、RemainingObligationPlanner、
-CommitmentExecutionEqualityValidator。Module 不讀 DB、檔案、網路或現在時間。
-
-FastAPI 只驗證 transport 並映射 typed errors；Streamlit 只呼叫 bounded typed client。MySQL、
-archive 與 LINE 是 port adapter，不重新判斷狀態機或 commit。
-
-## 10. Preservation migration 與 validation dataset
-
-- 唯一 legacy source 固定為核准的 preserved source；source 永遠唯讀。
-- 驗收目標不再強制 disposable DB 或 `lu_test_dataset_*`／`lu_test_*` 前綴，可使用明確確認的 localhost development `union_db`；每次重建使用 current schema，但重建仍須另有明確授權，不寫 production DB 或 scope 外的 candidate／既有資料。
-- additive schema → preflight/digest → root adapter migration → projector rebuild → replay versioned
-  scenario manifests → DB/API/UI verifier。
-- 不直接搬運 view、cache、summary、current alert、derived occupancy、mutable status projection、
-  receipt 或 outbox；無法唯一映射的資料進 `legacy_unresolved` 人工清單，不猜值。
-- legacy 與 validation case number、external event identity、document digest、idempotency key 不得碰撞。
-- migration runner 必須使用 table classification allowlist；禁止對所有 base tables做通用
-  `INSERT ... SELECT`，也禁止以關閉 FK 作為正常搬移策略。
-- 依 2026-11-03 最新人工裁決，本機 DB 驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`；
-  environment／host／database／credential class 已精確回讀後，可在 current task 明確範圍內使用既有 DB，或依明確建立／重建授權準備目標，寫入
-  去識別代表性測試資料、執行 Query／Preview／Apply、receipt readback 與只清理本次 scenario owned rows，
-  不需逐次請示；建立／重建仍須在 current task 明確授權範圍內。這項授權不涵蓋 production、全庫 cleanup、source replacement、`--switch`、
-  未核准 schema／migration 或其他不可逆外部效果。
-
-## 11. Legacy exit
-
-- 可變本機模板管理不得作為核准模板、文件 archive 或簽署證據來源；所有正式 caller 轉至
-  TemplateCatalog、ContractRenderer 與 ImmutableDocumentArchive 後，舊入口只讀或退役。
-- 任何直接寫 `orders.contract_identity`、契約狀態、precontract commitment、assignment／schedule
-  或 Client Finance obligation 的 API、script、fixture 與 repository caller 必須清零。
-- generic preserve migration 不得 universal copy base tables；完成 allowlist roots、projector rebuild、
-  collision verification 與 focused regression 後才可關閉舊路徑。
-- retirement 需依 Entry Point Governance 更新 caller inventory、replacement、focused regression 與
-  receipt；找不到 static caller 不能直接刪除。
-
-## 12. 分層驗收與完成條件
-
-Module：模板／digest、日期守恆、sequence、fingerprint、remaining-obligation 與 exact conversion。
-
-Subsystem：send／return、同 key replay/conflict、stale、archive/DB rollback、delivery retry、所有月嫂
-簽約完成時保存 commitment、客戶簽約完成沿用既有各期帳務及核銷歷史、conversion mismatch 零寫入。
-
-Domain：
-
-1. 完整案件資料先自動形成各期應付；所有月嫂簽約完成後保存 commitment，尚無客戶 contract identity、execution、薪資或補助。
-2. 訂金先核銷時 Orders 為「訂單成立」，仍等待客戶簽約完成，execution 為零。
-3. 客戶簽約完成時沿用既有訂金及各期應付，已核銷紀錄不重建，contract receipt 唯一。
-4. 訂金已核銷且客戶簽約完成後，只有 exact commitment 可轉 execution。
-
-5. 服務中代班不建立新的必需契約／簽回或客戶變更簽署；無 optional substitution supplement
-   仍可完成 Scheduling substitution、排班 lineage 與 Payroll，補充文件若存在則只作 evidence。
-
-Global：每個 UI scenario 具 versioned fixture/expected、command lineage、DB verifier JSON、
-真實 MySQL pytest、typed API contract、UI 截圖或人工驗收、Repair/Re-observe/Replay receipt；DB 不強制 disposable 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9.1 保存 before／after 與限定 scenario-owned 資料；
-preserved migration 另具 source/target digest、projection rebuild 與 legacy immutability 證據。
-
-完成不得只以 schema、route、測試檔或最終資料存在判定。production DB、外部 LINE、部署與
-cutover 必須另有明確授權及 release receipt。
-
-2026-08-25 runtime 狀態：內部人工補登簽回已在 fresh lifecycle 案由 Chrome 完成雙方
-Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE 寄送與 provider delivery
-仍是獨立未驗收 lane，不得把它反推成人工簽約功能未完成，也不得宣稱 provider 成功。
-
-## 2026-08-25 外部簽約平台 PDF 交接裁決
-
-本節是較新的人工裁決；與前文「系統直接寄送契約」或「受控 HTTPS 文件下載網址」衝突時，
-以本節為準。電子簽章仍由工會既有外部平台執行，本系統不整合或模擬該 provider。
-
-正式流程固定為：
-
-```text
-系統產生未簽 PDF → 工會人員經已認證後台直接下載 PDF bytes
-→ 工會人員將 PDF 移到外部簽約平台
-→ 工會人員確認交接時，系統同時建立客戶與所有月嫂的 LINE 簽約提醒工作
-→ 客戶與月嫂前往外部平台簽約並各自用 LINE 回報完成
-→ 客戶用 LINE 回報完成
-→ 系統提醒工會人員到外部平台下載最終簽署 PDF
-→ 工會人員把最終 PDF 放回指定 NAS 投放區或由管理端受控上傳 → Preview／確認／Apply
-→ Contract Signing owner 將 NAS object reference、MIME、size、SHA-256、版本、actor、時間與 audit 保存到 DB
-```
-
-1. 管理端下載使用 authenticated、case-scoped 的 backend file response 與
-   `Content-Disposition: attachment`；不得建立持久、可轉傳或帶身分的 HTTPS 文件網址，也不得把
-   presigned URL／archive locator 回傳給一般 UI。下載須記 security audit，但不是簽署完成事實。
-2. 外部平台狀態不是本系統根事實。月嫂與客戶的 LINE 回覆必須經 verified binding、目前 document／
-   segment／commitment version 與防重放驗證，分別形成 provider-neutral completion report；LINE delivery
-   success 不能代替人的回覆。LINE 不可用時保留同等證據要求的人工補登入口。
-3. 外部平台交接、客戶提醒 intent 與所有月嫂提醒 intent 必須在同一 outer UoW 全有或全無；客戶回報完成後只建立「最終 PDF 待回收」任務，
-   不得在最終檔案上傳、digest 驗證與 DB 保存前形成 Contract Completion。
-4. 最終 PDF 納管採 NAS 指定投放區或管理端 staging → zero-write Preview → 明確確認 → Apply →
-   receipt/readback。Apply 必須在單一 outer UoW 鎖定 current case、document version、雙方 completion reports
-   與 status version，經 typed `ContractDocumentRepository` 保存 immutable NAS object reference 與 metadata；
-   route、UI、LINE callback 不得直接 SQL 或自行組合檔案路徑。
-5. 依較新的 `00` §2.2 人工裁決，PDF bytes 的正式來源是工會地端受控 NAS，DB 不保存大型 binary；
-   DB 只保存 opaque object reference、digest、MIME、size、版本與稽核 metadata。一般 JSON、LINE payload、
-   query string、log、receipt 不得暴露 drive letter、UNC path、NAS mount path、base64、raw PDF、SQL statement
-   或 storage locator。既有 `storage_key` 只有在被驗證為受控 logical object reference、具 digest／版本契約
-   且無 public path leakage 時才能由 adapter 採用；不能只因欄位存在就宣稱完成。若現有 schema 仍不足，
-   另立 schema release 並通過 DB change gates；本文件同步本身不授權 DDL、migration 或既有 DB mutation。
-6. 必要 commands／queries 至少包含 `DownloadUnsignedContractPdf`、`RecordExternalStaffSigningReport`、
-   `RecordExternalClientSigningReport`、`PreviewFinalSignedContractUpload`、`ApplyFinalSignedContractUpload`、
-   `QueryContractDocumentReadback`。每條 mutation 都須有 expected version、idempotency、stale／replay、
-   timeout outcome reconciliation、人工 recovery 與 receipt。
-7. Browser 驗收必須實點下載與上傳，確認 PDF MIME／檔名／digest、LINE 回覆順序、錯序／重播拒絕、
-   final readback 與一般 UI 不出現 document URL、fingerprint、raw cursor 或 storage locator。真實 provider
-   push 仍需另行授權；未測時標 `blocked`／`not_run`，不得假造。
-
-因此前述 `SendStaffContract`／`SendClientContract` 僅保留 legacy compatibility identity，不再是新 UI 的
-正式主路徑；`archive locator` 只可留在 repository 內部相容層，current public contract 必須退出。
-
-### 2026-09-09 外部平台自動轉送與最終 PDF 完成裁決
-
-2026-09-15 管理端功能修復人工確認：客戶契約的訂金、第一期、第二期及樓層費日期一律顯示 Client Finance 付款條款的預計繳款日；實際入帳日期只保留在 ledger／核銷紀錄，不投影至契約。此裁決取代 2026-09-10「契約收付日採實際收付紀錄」的舊決定。2026-09-14 再確認：初步接案詢問與正式推薦寄送前預覽可用目前訂單條款、Payroll 費率及預計服務期間投影「預估總薪資／預估發薪日」；必須明確標示預估，不據此建立 commitment、assignment 或正式應付。accepted plan 的契約準備不要求先存在 commitment，沿用下列 final PDF 完成順序；準備／預覽本身不建立 commitment。
-
-**已取代，僅供歷史追溯（2026-09-11金流規則）**：同日追加人工裁決，並於 2026-09-11 再確認：一般市民及非全補助案件由客戶依一般付款條款先代墊完整服務薪資，服務完成後才退符合資格的補助款；全補助案件限補助市民、有效正式服務不超過 120 小時且客戶應付為 0，客戶不出資，實務申請通常排滿 120 小時。無論哪一類，同一 assignment 的月嫂都只有一筆整筆應付報酬；舊契約的補助／雇主自費報酬及其兩筆付款欄不再適用。服務人員契約及詢問資訊沿用 Staff Payables 整筆應付，不推算資金來源分拆，也不把市府補助金額當作月嫂薪資。一般／非全補助案件於結案後次月 15 日付款，全補助案件於結案後第二個月 15 日付款。
-
-現行方案／對象依規格22 §17及§17.4.1，付款分期／已形成日期依03、05、16；不以本段舊固定120小時、只有補助市民、一般案件一律先墊或一次整筆付款作現行契約規則。原簽署／PDF證據及原已簽文件保持不變。
-
-本節覆蓋本章 2026-08-25 裁決中「月嫂逐筆回報 → 客戶逐筆回報 → 最終 PDF」的強制門禁。外部平台會在月嫂簽署後自行轉送客戶，雙方均不負責向本系統回報完成；本系統不得因此停在 `staff_reporting` 或 `client_reported_final_pdf_pending`。
-
-正式主流程改為：
-
-```text
-建立目前 accepted plan 的契約與未簽 PDF
-→ 管理員明確記錄已送交外部簽署平台
-→ 外部平台完成月嫂與客戶簽署
-→ 管理員上傳最終簽署 PDF，Preview 並確認其包含客戶與所有月嫂簽署
-→ Apply 在單一 outer UoW 建立缺少的 commitment、Orders contract identity／completion、
-  最終受控 PDF／receipt，並沿用 Client Finance 已預先同步的訂金及各期應付
-→ 進入訂金核銷
-```
-
-1. 外部平台交接為明確、可重播的本機 mutation；只代表操作者已送交，不宣稱 provider delivery 或簽署狀態。
-2. 最終簽署 PDF 的受控 readback 是雙方完成簽署的 aggregate evidence。個別 staff／client completion report 保留為選用、可稽核、replay-safe 的 compatibility evidence，不是 final Apply prerequisite。
-3. Preview 零寫入，綁定 current session、status version、staging version／digest、Orders 與 Client Finance versions。Apply fresh-lock 後由 PDF digest 推導穩定 contract identity，並在同一交易完成 commitment、Orders、Client Finance、controlled file、session 與 receipt；任一步失敗不得留下 partial writes。
-4. 依 2026-10-29 提醒資格裁決，訂金及各期金額依完整資料預先計算，不等待 final Apply；雙方簽約完成後才列入訂金繳費提醒與各期逾期待辦。第 8 階段在 final PDF 前不得提前顯示為進行中或完成，final PDF 後依 settlement owner 根事實顯示 blocked／completed。
-5. 既有個別回報、歷史 recovery 與 receipt 仍可查閱，不得回頭成為新主流程門禁。
-
-### 2026-09-29 未綁定 LINE 的外部平台交接裁決
-
-使用者確認：客戶或月嫂未綁定 LINE，仍可記錄已送交外部簽署平台。此節覆蓋上述「所有對象提醒 intent 必須全有」條件：已正確綁定者建立 LINE 提醒，未綁定者以 typed 人工通知對象清單保存在原交接 receipt，同一 outer UoW 完成 session、可建立的提醒 intent 與 receipt；重新查詢及重播均保留送交當時的人工通知要求，不隨後續綁定狀態重算或重新發送。沒有綁定的對象不建立虛構 delivery job，UI 明確提示工會人工通知。
-
-客戶與所有服務區段的 current 未簽 PDF 仍須完整；版本衝突、身分錯配或儲存失敗維持 typed conflict／零 partial write。無完整歷史簽回證據的新案件不顯示歷史人工修復區；最終 PDF 完成主流程沿用既有條件。本次授權本機程式及合成資料驗證，不操作外部簽署平台、LINE provider 或另一主機。
-
-Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 schema gate、
-controlled-file adapter 與 LINE sandbox 驗收；current renderer 仍僅產生 XLSX，現有 `media_assets` 與
-`contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／
-version adapter，事件模型也只有 legacy `sent`／`signed_received`，尚無外部平台雙方 completion report。
-必須先完成 PDF renderer、NAS discovery／read adapter、metadata 對帳與 completion-report contract；若盤點確認
-現有 schema 足夠，可不新增 binary 欄位，若不足仍須另立 DB Work Package。不得以 raw NAS path、受控 HTTPS URL
-或直接 signed-return 假裝完成。DDL／migration 仍須走正式 release chain；驗證不強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9 通過必要 gates；
-production、external deployment 與 entry switch 仍需精確 target gate。既有人工補登完成狀態不受影響。
-
-## 2026-08-21 M3 acceptance-effect amendment
-
-M3 Matching Coordination 可保存 customer acceptance decision 與其 criteria／candidate lineage，但 `accepted` 不等於 Contract Completion、contract identity、formal assignment、official service day 或 Payroll obligation。M3 只能在 fresh downstream facts 後產生 typed `AssignmentConversionRequested`／rematch reference；Orders、Assignment／Scheduling 與 Payroll 各自保留 root writer、Preview／Apply、lock 與 receipt。
-
-任何 conversion mismatch、stale service date、leave／availability conflict 或缺少 Assignment conversion receipt 均 fail closed、零 partial write；本 amendment 不授權 production code、schema／DB、LINE provider、deployment 或 cutover。
-
-## 2026-08-31 Full Contract Preview owner projection與public entry裁決
-
-兩份XLSX維持static legal/content/layout baseline。Client target固定exact case＋client scope；Staff target固定
-exact case＋exact assignment/segment＋staff scope。Contract Signing／renderer只組合closed typed owner
-projections，不擁有動態business facts，也不得新增金額、日期或INFO12公式。
-
-Client Finance、Payroll、Staff Payables各自提供契約需要的current typed money／business-date／payment-destination
-projection；Payroll計算obligation，Staff Payables不得重算，renderer也不得跨owner加總成新公式。Client預定
-服務日期由Scheduling Commitment projection提供exact commitment identity/version、start/end及owner計算的
-service-day count；Staff使用exact assignment/segment Scheduling projection。INFO12欄位只能由其current owner的
-typed projection提供，不得讀raw survey、legacy column、UI state或XLSX formula。
-
-每個mapping row requiredness固定為`required | conditional | optional`。required缺值、stale或source unavailable
-fail closed；conditional只在owner-defined condition成立時required；optional僅接受owner明確合法absence。
-unavailable、unresolved或ambiguous不得當optional null。
-
-核准authenticated internal bounded public API：client preview target為exact case；staff preview target為exact
-case＋assignment/segment。Preview零寫入，fresh-read owner snapshots並回target、template version、owner
-fingerprint、blockers、preview fingerprint與PDF result。正式document persistence仍走既有Apply/Generate；Download
-只讀opaque document version／controlled-file object並重新authorization，不暴露filesystem/NAS locator、raw URL，
-也不重新計算business facts。preview與正式download bytes/digest依既有version contract保持一致可追溯。
-本裁決解除public-entry及owner-projection blocker，但依Task 96 priority尚未開始此後順位implementation。
-
-### 2026-09-20 目前資料文件投影與缺值提醒裁決
-
-本節是較新的人工裁決，僅覆蓋一般文件預覽／下載的資料投影門檻；正式簽回、交接、履約、
-排班、收付款與最終 PDF Apply 的既有命令規則不變。
-
-1. 「訂單資訊－1」「訂單資訊－2」「每週服務時間」「客戶契約」「服務人員契約」是目前有效
-   資料的模板投影。預覽／下載不以同意、accepted plan、簽約 session、付款、正式排班、實際
-   開工或結案狀態為前置條件，也不得因產出文件建立或改寫上述業務事實。
-2. 適用欄位缺值時，Preview 必須回傳欄位層級的 `missing | optional_empty | not_applicable`
-   狀態與缺漏提醒；缺值只提醒，不列入技術 blockers，不停用預覽或下載。已有值照實呈現，
-   缺值及無法計算的結果不得猜測或以其他案件、其他服務人員或全案數值代填。模板損壞、
-   mapping 無法解析、資料查詢失敗或文件確實未產生仍是可辨識的技術失敗。
-3. 系統內保存的 Orders、HCM／BeClass 有效更正值是新投影的目前來源；同案號重匯仍跳過，
-   不覆寫系統內修改。保存後重新讀取、預覽或下載即使用目前有效值，不增加同步命令。
-4. 服務天數是上游輸入。預期服務開始日、服務天數、每日服務時數、休假方式及休假日產生
-   預期服務日期、預計結束日與每週時數；不得以起訖日曆跨度反算服務天數，也不得等待正式
-   日期、正式 assignment 或實際開工。文件投影本身不建立正式排班。
-   2026-10-13 人工裁決：服務方式「無休」，或未選擇休假星期（空值／空白），均按「連續服務」
-   投影預期日期、預計結束日與 Client Finance 付款金額，畫面及寄送前預覽也呈現「連續服務」。
-   已選休假星期與自訂休假日維持有效；其餘無法辨識的非空服務方式仍保留缺漏提醒，不猜測。
-5. 多服務人員案件的客戶契約呈現整案與各人服務區段／天數；個人契約只使用該人姓名、電話、
-   區段、服務量、單價及報酬。客戶費用與個人報酬沿用各自 owner，不得互相代用或將全案金額
-   重複填入每一份個人契約。
-6. 新投影不得覆寫已簽回原始文件，也不得冒充先前已簽內容。本節不新增文件版本、簽章、
-   缺件管理或欄位 registry。
-
-### 2026-10-21 NAS 瀏覽器列印裁決與實作邊界
-
-人工授權：目前一般契約輸出不需要自動歸檔或傳送簽署，新增「瀏覽器列印」供使用者列印或另存 PDF，並驗證版面。此入口使用目前有效資料與既有核准 XLSX 的完整條文、套值及版面；不以後端 Chromium、既存 PDF、簽約 session 或 accepted plan 為前置條件，也不列印欄位摘要。
-
-- 公開入口：authenticated `GET /api/v1/orders/{case_no}/contract-signing/client/print` 與 `GET /api/v1/orders/{case_no}/contract-signing/staff-segments/{segment_id}/print`。回傳不快取的完整 HTML，只沿用現有 Full Contract Preview owner projection；既有身分、exact target 及技術失敗語意不變，缺值留白並沿用欄位提醒。
-- 有界 write set：Full Contract Preview transient workbook result、既有 browser renderer 的 HTML 輸出、上述 routes、React 契約列印入口與直接測試；不改 schema、business facts、簽署 state machine、正式 PDF persistence 或外部 provider。
-- 列印零寫入，不建立 document version、archive、receipt、交接或通知。既存正式 PDF 下載及簽回流程保留；開啟列印視窗不能宣稱已儲存 PDF 或完成簽署。
-- 版面驗收：A4 直向、8 mm 頁邊、194 mm 內容寬，保留模板欄寬比例、合併格、字級、列高與條文；避免列內斷頁，不截斷長欄位。列印前等待字型載入，提供重印按鈕及 A4／100%／停用頁首頁尾／背景圖形提示。必須以兩份核准模板及合成長值檢查實際瀏覽器輸出；未驗證的瀏覽器／OS 字型組合不得宣稱保證一致。
-- 完成門：focused renderer、projection、authenticated route、前端列印與原契約操作測試，以及實際版面檢查；只授權本機編修與驗證，不含 image build／發布、NAS 部署、真實資料或外部操作。
-7. 管理端 `GET /api/v1/orders/{case_no}/contract-external-signing` 必須涵蓋文件準備階段。
-   案件存在但尚無可推導的簽約工作時，Query 回傳 HTTP 200 與 `state=preparing`、目前方案的
-   `staff_segments` 及已生成文件的 bounded `documents`，不以 `external_signing_session_facts_unavailable`
-   阻塞預覽／準備／下載。`preparing` 僅辨識文件準備投影，不是 Domain 簽約狀態，不包含虛構的
-   session、commitment 或 business version；Query 零寫入。已有可推導或已保存的簽約工作時沿用
-   原查詢結構。文件準備後依 exact case、scope、target 與 receipt document version 回讀；交接、
-   正式簽回及最終 PDF Apply 仍 fresh-read／lock 並驗證原命令條件。案件不存在回 typed 404。
-
-### 2026-09-15 客戶契約付款欄位人工裁決
-
-- 2026-10-14 人工確認：客戶契約 D29「服務時薪費用」是客戶應付時薪，與 B25 一樣使用
-  Client Finance 的 `client_hourly_rate`；不得取月嫂的 `assignment_hourly_rate`，也不以正式指派
-  或 Payroll rate snapshot 存在作為填值前提。
-- C34、C35、C36 分別使用 Client Finance 的 `deposit_due_date`、`first_payment_due_date`、
-  `second_payment_due_date`；C37 樓層費與訂金一起支付，使用同一筆 `deposit_due_date`。
-  實際入帳日不得套入契約，也不得由 Contract Signing 建立第二套日期算法。
-  2026-10-13 第二期日期人工裁決：C36 及訂單資訊－1 的第二期預計繳款日使用 Client Finance
-  stage plan 投影；第二期有金額時為 `first_payment_due_date` 加 15 個曆日，零金額時不適用，
-  不等待實際入帳，不直接採用舊的 `second_payment_due_date` 保存值。
-- D36 固定顯示本案專屬虛擬帳號。帳號以 Client Finance／Finance Import 共用的案件編號規則產生，
-  後續銀行核銷以同一帳號解析回唯一案件；不得改用全域工會／代收付帳戶、月嫂帳戶、環境變數或
-  Excel placeholder。案件編號無法產生合法虛擬帳號時不得列印。
-  2026-10-30 人工補充：契約此欄以「`(銀行代碼) 本案虛擬帳號`」呈現；銀行代碼讀取 `.env` 的 `CLIENT_DEPOSIT_BANK_CODE`（目前 `807`）。模板示範套值同步顯示設定的銀行代碼及明示的虛構帳號。此為契約顯示格式，不改寫帳務核銷使用的原始虛擬帳號；已保存文件保持原版本。
-
-### 2026-10-14 管理端契約下載與分開簽回人工裁決
-
-依使用者核准的「辦理契約與簽署」UI 預覽，新主流程改為下載契約、記錄已送交簽署、分開回收簽署文件。本節覆蓋上述新提交必須使用單一最終簽署 PDF 的限制；既有 owner、完成條件與單一 outer UoW 維持不變。
-
-1. 客戶服務契約與每段月嫂委任契約各有核對資料、下載 PDF 入口。缺少 current 未簽 PDF 時，由下載操作呼叫既有正式生成命令再回讀下載，不增加人工準備步驟，不建立虛構簽署或排班事實。核對資料僅呈現 exact case、scope、segment 的欄位摘要。
-   2026-10-15 人工補充：已產生但尚未簽署的客戶契約，修改本案虛擬帳號後可按「重新產生客戶契約」。
-   沿用既有 `client/unsigned-pdf` 命令，fresh-read Client Finance 對照與 current owner facts；來源 snapshot 改變時
-   append 新 XLSX／PDF 版本，D36 帶入新帳號，不覆寫舊檔。同一來源仍可重用既有 PDF。成功回讀後下載新版，後續下載亦指向新版。
-   current plan 的客戶已有 signed-received event、外部簽署回報或案件已有 contract identity 時，後端在原 outer UoW
-   內鎖定案件後拒絕重新產生，回 typed conflict；UI 已知簽署／完成時不提供此入口，有客戶簽回草稿時停用。
-   重新產生不建立交接、簽署事件、LINE 提醒、帳務義務或外部平台效果；進行中／結果未明沿用原命令身分核對。
-   早期已交接工作若保存包含客戶文件的舊文件集合 hash，僅能以同案／同方案的既有客戶文件版本與
-   current 月嫂文件集合證明原 hash，才可回讀新客戶版本；不改寫舊 hash，不容許月嫂文件變更或未知 hash。
-2. 每份簽回檔案綁定 current session、status version、scope、matching segment 與未簽文件版本，透過既有 Controlled Files staging／Preview 保存及檢查。部分回收可重新查詢；不完成簽約，也不建立訂金 obligation。重新載入後必須重新檢查保存的 staging。
-3. 最終 Preview 必須包含一份客戶契約與所有 current 月嫂區段的契約；拒絕缺件、重複 target／staging、版本過期或借用其他 target 的文件。既有 opaque Preview token 綁定完整集合及相關 owner versions，並要求操作者明確確認所有文件的簽署。
-4. 最終 Apply fresh-read／lock、驗證完整集合，在同一 outer UoW 納管各份受控文件、保存既有 final-document aggregate 及 immutable receipt 中的 typed 文件成員，完成 session、Commitment、Orders contract identity／completion 與 Client Finance 訂金 obligation。contract identity 由完整文件集合的 target、版本與 digest 推導；任一步失敗不得留下部分業務寫入。原命令重播回讀原 receipt，不再次生成檔案或 obligation。
-5. 新增的 staged returns Query、單份 document Preview 與已簽文件下載為 authenticated bounded API。下載只允許該案完成 receipt 的成員；不暴露儲存路徑，也不重新計算業務事實。
-6. 已完成的歷史單一最終 PDF 保持原始 readback／下載，不回填、不覆寫，也不作為新命令缺少完整集合時的 fallback。此裁決不需要 schema migration，不增加正式排班或外部簽署平台寄送。
-
-### 2026-10-14 本機測試手動跳過簽回文件回收
-
-使用者要求測試時可手動跳過回收。此例外只授權本機測試案件；一般簽回條件、owner、單一 outer UoW 與真實簽署流程不變。
-
-- 後端只在明確 `APP_ENV=development|dev|local|test`、DB host 為 loopback、DB 為 `union_db` 或 `lu_test_*` 且無 deployment profile 時提供 `testing_skip_allowed`。正式／未知環境、遠端 DB 與 reverse-SSH deployment profile 均拒絕測試準備及測試 Apply；管理員仍需通過 persisted authentication。
-- 管理端「測試用：跳過文件回收」呼叫 bounded `final-document/testing-skip`，綁定 current case、session、status version 與每個 current target，逐份經原 Controlled Files staging 產生 `TEST-ONLY-` PDF；PDF 頁面明示無真實簽署。準備階段僅保存 staging 並取得原完整集合 Preview，不完成業務。
-- 操作者須另行確認「測試案件、跳過真實回收、繼續後續收款」。原 Apply 接受互斥的 `signatures_confirmed=true` 或 `testing_skip_confirmed=true`；測試文件只能搭配測試確認，測試確認只能搭配完整測試文件集合。既有 fresh-read／lock、token、typed conflict、atomic completion 與原命令 reconciliation／replay 仍適用。
-- 測試完成使用原流程建立 Commitment、Orders completion 及訂金 obligation；reason 明示測試跳過且未驗證真實簽署，文件成員保留測試檔名。畫面重讀後顯示「測試簽約已完成」及「查看測試文件」。不呼叫外部簽署／LINE provider，不直接改 DB 狀態，也不新增 schema。
-  2026-10-15 指定測試案件驗證補充：若 Orders 已有客戶簽約完成根事實，但目前外部簽署工作尚未回收文件，完整 TEST ONLY 文件集合可沿用原契約 identity 及同案／同方案既有 commitment，完成測試文件回收與該 session。此分支不覆寫原簽回文件、契約 identity 或完成事件，不重建 commitment、應收或 outbox；Preview 零寫入，Apply fresh-lock 原完成 facts 與既有 commitment，沿用原完整文件 Preview token 驗版本及文件集合，再於同一 outer UoW 納管文件、完成 session 並保存 receipt。根事實或 commitment 改變使 Preview 失效；缺少原 commitment 不猜補。此例外只適用後端允許的本機測試環境、完整 TEST ONLY 集合及明確 `testing_skip_confirmed`；一般文件仍依原簽約檢查，不可藉此覆蓋其他契約。
-  此規則依 current facts 適用所有案件，不以案件編號分支。新案件由正式流程建立契約 identity、commitment 與應收；已有 identity 但尚無簽約完成事件時，測試流程保留原 identity 並完成一次正式簽約，不用占位文件推導新 identity 去覆蓋原值。已有完成事件時則只完成測試文件回收。三種狀態均沿用相同測試環境、完整文件集合、明確測試確認及版本驗證門禁。
-- 本次執行範圍限該 API／composition gate、final-document workflow、typed client、既有管理端元件與對應 current tests／map。驗收包括本機能力 gate、正式環境拒絕、stale 零 staging、完整 target 占位文件、明確確認、零 partial business write、同模式重播與完成回讀；使用合成資料，不對目前畫面案件執行 Apply。
-
-### 2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除
-
-2026-10-30 人工澄清：本次只解除「系統內必須存有未簽 PDF 才可記錄交接／建立簽署提醒」的前置條件。使用瀏覽器列印不會建立系統 PDF，不能因此使送交按鈕永久停用。既有有效且已接受方案、正確對象、檔期／服務日期檢查，以及提醒必須先有交接、已完成／被取代 session 不可提醒等業務條件保留；沒有 session 的 preparing Query 也須在點擊前投影相同方案／檔期 blockers，Apply 在原 UoW fresh-read 再驗證。
-
-- 範圍：沿既有 handoff／reminders API、command receipts、committed LINE delivery tasks 與各自原 outer UoW；不新增 schema、不修改既存文件或歷史 receipt。只有系統 PDF／session 尚未建立而其他條件通過時，交接保存目前已接受方案的案件層級 receipt（`session_id=null`、版本 `0`、真實 `matching_plan_id`），不得虛構 PDF、session、Commitment 或簽約完成。
-- 案件層級提醒須先讀回相同目前方案的交接紀錄，再 fresh-read 檔期／日期與通知對象；方案改變須重新交接。未綁定者保留人工通知名單，身分錯配及版本衝突維持 typed 拒絕；原命令重播不重送。提醒不自動交接，不推進簽約；簽回文件集合、正式完成、Orders／Finance 與 Scheduling 最終條件不變。
-- 驗收：合法方案使用瀏覽器列印後，未存 PDF 仍能記錄交接，交接後才能建立提醒；未接受方案、檔期／日期衝突、未交接提醒、已完成／被取代的提醒仍應阻擋，且不得部分提交。實測不呼叫 LINE provider。
-
-依使用者確認的 UI 預覽與明確施工授權，本節覆蓋 2026-09-29「交接同時建立提醒」的行為；保留既有 owner、文件完成條件與本機測試跳過功能。
-
-1. 管理端沿用「契約文件 → 送交簽署與提醒 → 回收簽署文件」版面。「記錄已送交簽署平台」只驗證完整 current 未簽 PDF，保存交接 session 與原 receipt；不查 LINE 綁定、不建立提醒、不受 LINE 綁定阻擋。
-2. 「發送簽署提醒」由操作者點擊後直接建立寄送工作，不再顯示再次確認視窗；一次涵蓋本案客戶與所有 current 月嫂，無個別對象篩選。authenticated bounded `POST contract-external-signing/reminders` 依 current session／expected status version fresh-lock；未交接、已完成／被取代、版本過期或身分錯配皆 typed 拒絕。LINE 訊息內容沿用既有模板，外部平台的郵件寄送時序不在本次修改範圍。
-3. 提醒命令在獨立 outer UoW 保存可建立的 committed LINE delivery tasks 與 immutable reminder receipt，未綁定者保存當時的人工通知對象。提醒不推進簽約 status version、Commitment、Orders completion 或 Finance obligation，不使已檢查的文件集合失效；文件回收／完成也不以提醒為門禁。任一步失敗 rollback；只有 committed tasks 可由既有 worker 對 provider 發送。
-4. reminder receipt 使用既有 `contract_signing_command_receipts` 的獨立 command kind，不新增 schema。same-key／same-command 重播回原 receipt，不再次建立提醒；fingerprint 綁定 case、session、expected version、actor 及 receipt identity。管理端保留原命令身分與操作者，逾時／離開畫面時只允許原操作確認；收到 receipt 後保留結果，不能以新命令掩蓋未明結果。
-5. Query 回傳該 current session 的最後提醒紀錄。畫面區分「尚未發送」、「提醒工作已建立」、「需人工通知」與結果未明；建立 task 不宣稱 provider 已送達。舊交接 receipt 缺少 `handoff_included_reminders` 時視為歷史自動通知紀錄；新交接保存 false。既有 immutable receipt 不回填／覆寫，畫面不把舊案件錯列為從未處理通知。
-6. 管理端完全移除「歷史簽回人工修復」區塊、其草稿與背景 Query；新主流程只使用分開文件回收。歷史證據／receipt 不刪除，本次不退役既有 compatibility API 或清理其資料。
-7. 本機測試跳過入口放在回收區的可展開「測試模式 · 跳過文件回收」，沿用 TEST ONLY 文件、互斥確認及後端環境 gate；不隨提醒修改而降低完成條件。
-8. 客戶與月嫂的文字提醒皆包含正式 LINE 訊息欄位 `type: text` 與 `text`；驗證覆蓋實際交給 provider 的訊息物件，不以工作建立取代格式正確或送達。文案維持既有內容。既有錯格式工作依狀態查核並走原補送機制，不改寫歷史寄送快照。
-9. 簽約完成畫面引導核對訂金、建立案件群組、雙方自行協調及月嫂提交開始日；系統檢查通過直接更新正式日期與排班，不要求雙方日期確認卡。
-
-執行範圍及驗收追溯：`../02_決策與退役執行記錄/Contract_Signing_Reminder_Separation_Work_Package.md`。
-
-### 2026-10-15 契約再次下載、重複送交與檢查原因人工裁決
-
-使用者要求移除契約下載及送交紀錄的簽署狀態限制。本節覆蓋前述「已簽署客戶契約不得重新產生」及「交接必須備齊所有未簽 PDF、不得重複記錄」條件。
-
-1. 客戶或月嫂已回報簽署、案件已有 contract identity 或簽約已完成，均不阻擋下載。客戶 PDF 缺漏或需要重新產生時沿既有來源 writer 生成文件；同一 snapshot 重用，來源變更 append 新版本，不覆寫原始簽回文件、舊版本、簽署事件或完成 receipt。
-2. 記錄送交不以所有 current PDF 皆已產生為門禁，也不以已交接或簽約已完成為門禁。已有 current session 時，每次明確操作只 append 交接 receipt，保留原簽署狀態與 status version；初次交接沿既有 current session facts 啟用工作。原命令重播仍回原 receipt，版本衝突及錯案／已被取代的 session 仍 typed 拒絕。
-3. 下載與記錄送交不新增簽署完成、Orders／Finance mutation、LINE 提醒或外部平台寄送。帳號授權、案件／文件對象及資料完整性檢查仍由既有 ports 驗證。
-4. 簽署內容由人員自行檢查；回收介面只提供選擇／重新選擇文件與「儲存簽署文件」，移除「檢查簽署文件」及「重新檢查」按鈕，呈現已選擇份數，不要求逐份檢查操作。儲存時沿用既有上傳、格式／完整性及完整文件集合 Preview／Apply，不省略後端驗證或改變交易邊界。測試跳過或正式完成遭拒時，畫面必須呈現後端的具體原因；已知契約、服務日期、帳務、版本或測試確認原因使用繁體中文。已選擇的文件保留，不將業務拒絕誤報為檔案格式失敗，也不以籠統的「未通過簽約檢查」或「資料已變更」取代實際原因。敏感內部路徑、秘密及儲存 locator 不呈現。
-
-### 2026-10-15 簽約前檔期衝突檢查人工裁決
-
-使用者要求已知檔期衝突至少在簽約前阻擋，並建議更換人選。推薦建立時原有的 availability 檢查保留；契約工作區 Query 再投影 current 推薦人員／服務期間的 Scheduling 實際占用、有效等待檔期鎖及不可服務期間，回 typed `signing_blockers`，不等到契約、訂金與日期確認完成後才提示。
-
-- 有 hard conflict 時，簽約工作區顯示原因及「更換推薦月嫂／調整服務日期」，停用送交紀錄。送交、簽署提醒及新簽約完成命令須在各自原 UoW fresh-read，衝突回 typed `signing_staff_occupancy_conflict`，服務日期與推薦不符回 `signing_service_dates_unavailable`；拒絕不得留下 session、通知、簽約或帳務的部分寫入。
-- 重用 Scheduling canonical occupancy／availability 計算；已有 current confirmed service dates 時依該版本核對，尚未確認日期才使用既有簽約預計日期計算，已確認日期不一致不得退回舊日期。固守同案既有檔期不視為跨案衝突、buffer 僅提醒。Query 零寫入，不因檢查自動取得檔期或建立排班。這是目前 facts 的提前檢查，後續正式檔期鎖及排班 Apply 仍須重新驗證並保護 occupancy race。
-- 契約下載仍可使用；既有簽回與已完成事實不撤銷、不改寫。已完成 session 的再次交接紀錄，以及已有 Orders completion 的 TEST ONLY 文件回收沿用既有保存結果，不重新簽約或取得占用。
+| Contract Signing | `template-catalog/` 核准版本、不可變 `contract_document_version`（opaque NAS reference + digest）、`contract_signing_event`、外部交接／提醒 receipt、檔案 access grant | Orders status、應收金額、execution schedule、LINE delivery 結果 |
+| Scheduling Commitment | `precontract_service_commitment` 與服務日、`waiting-deposit` 自動鎖定與 exact conversion、正式排班／occupancy | 契約文件、應收、LINE |
+| Client Finance | 訂金／第一二期應付／到期日與專屬虛擬帳號（`CLIENT_DEPOSIT_BANK_CODE` + 本案虛擬帳號） | 簽署證據、Orders status |
+| Orders | `contract_completed` 事件、`contract_identity`、訂單生命週期 | 外部簽署檔案、assignment 日 |
+| LINE Integration | 身分綁定、committed delivery task 與試送狀態 | 契約完成或 Orders 成立條件 |
+
+- **嚴格分離原則**：訂金核銷（`訂單成立`）、簽約完成（`contract_completed`）、commitment 成立與 execution conversion 為四個正交事實；LINE 送達、檔案下載或瀏覽器列印均不構成簽署完成。
+- **統一用詞**：介面與流程區分「**所有月嫂簽約完成**」與「**客戶簽約完成**」；`commitment` 為內部人員與精確服務日記錄，不得作為額外人工簽約關卡；應收一律於資料齊全時由系統自動同步（資料缺漏顯示「待確認」，不另設「建立付款義務」操作）。
+- **雙方簽約完成作為通知前提**：客戶與所有月嫂皆完成簽約（Orders `contract_completed` 且 `contract_identity` 吻合現行契約）始可發送訂金繳費提醒與各期逾期待辦；未完成前不阻擋各期應付計算、到期日確定或合法銀行核銷。
+- **非市民契約**：完全接受 [Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md) 之 `A＋民國年＋3碼流水號`、非市民自費政策與 5 天訂金／專屬虛擬帳號（禁止套用一般 9 碼公式或要求 HCM 來源）。
+
+### 2.2 `waiting-deposit` 自動保留與代班例外
+
+- **自動鎖定等待檔期**：客戶接受推薦方案（M3 `accepted` decision 不等於完成簽約或排班）與 Orders `confirmed_service_dates` 雙條件齊備時，後到條件的 Apply 在同一 outer UoW 借用 Scheduling writer 取得 `waiting-deposit` 檔期鎖（先鎖 staff occupancy mutex，再鎖 Orders／Matching；日期解析沿單月嫂原詢問區間與多月嫂明確分段，衝突回 typed error 全筆 rollback；不另設獨立「保留月嫂檔期」按鈕）。
+- **服務中代班文件例外**：已有 assignment-owned 實際服務日後發生代班屬 Scheduling substitution lineage，不重開整案簽約；人員可選填 `substitution_supplement` 補充證據（archive 不可用亦不阻擋代班與薪資，文件本身不能改變金額或日期）。
+
+## 3. 公開契約與流程
+
+### 3.1 契約 Excel 模板與欄位映射版本管理（`CTM-01～06`）
+
+- **`CTM-01`（受控上傳）**：`system_admin` 於「稽核與系統 → 契約模板管理」上傳 `.xlsx`、選工作表並檢視文字、欄寬、列高、字級、邊框、合併格及內嵌 PNG／JPEG（伺服器重驗；拒絕巨集、外部連結與圖表；非映射公式轉固定值）。
+- **`CTM-02／03`（映射與零寫入示範預覽）**：映射僅可對應兩類契約既有 typed owner 欄位（合併格僅綁左上角）；預設可選擇「沿用目前版本映射」（超界／落在合併格內部須明確調整或捨棄後方可保存），缺少必填來源或重複位置即拒絕。示範套值 Preview 使用明示虛構資料（含銀行代碼設定），零寫入且不讀真實案件。
+- **`CTM-04／05／06`（不可變版本存儲）**：原始 `.xlsx` bytes 與已驗證映射保存於契約 archive `template-catalog/`（以檔案鎖、`expected_catalog_version`、actor、idempotency key 原子更新目錄 head，不進入案件 DB 交易）；保存與啟用分離，啟用僅影響後續新產製版本，已產生／簽回文件維持讀取當次不可變模板摘要。
+
+### 3.2 目前資料投影、缺值提醒與瀏覽器 A4 列印
+
+- **免門禁預覽／列印**：訂單資訊－1、訂單資訊－2、每週服務時間、客戶契約與個人服務人員契約直接投影目前系統有效資料（HCM／BeClass 有效更正及目前方案）；預覽、下載或列印均**不以同意、accepted plan、簽約工作、付款、正式排班或開工為前提**。
+  - **欄位狀態與休假公式**：缺值回傳 `missing | optional_empty | not_applicable` 提醒而不列技術 blocker；服務方式為「無休」或空白一律按「連續服務」推導預期日期、結束日與分期金額（已選休假星期與自訂休假維持有效；無法辨識非空值保留提醒）。多月嫂案個人契約僅列該人員各自區段與薪資（嚴禁跨人複製或顯示全案總額）。
+  - **客戶契約關鍵欄位映射**：D29／B25 讀取 Client Finance 客戶時薪（不讀月嫂時薪）；C34／C35／C36 分別顯示訂金／第一期／第二期**預計繳款日**（C37 樓層費同訂金日；嚴禁寫入實際入帳日）；D36 固定顯示「`(CLIENT_DEPOSIT_BANK_CODE) 本案虛擬帳號`」（例如 `(807) 99781699...`）。
+- **瀏覽器列印（零寫入）**：
+  - Endpoints：`GET /api/v1/orders/{case_no}/contract-signing/client/print` 與 `GET /api/v1/orders/{case_no}/contract-signing/staff-segments/{segment_id}/print`（authenticated、不快取 HTML）。
+  - 版面契約：A4 直向、8 mm 頁邊、194 mm 內容寬，等待字型載入後呈現完整條文與套值（維持合併格比例，避免列內斷頁）；列印不建檔案版本、receipt 或簽署狀態。
+- **`preparing` 準備查詢**：`GET /api/v1/orders/{case_no}/contract-external-signing` 於尚無簽約工作時回傳 `HTTP 200`（`state=preparing`、`staff_segments` 與 `documents`），零虛構 session（案件不存在回 404）。
+
+### 3.3 檔期衝突檢核、送交記錄與獨立提醒
+
+- **簽約前檔期衝突檢核**：契約工作區 Query 即時投影 Scheduling canonical 占用、等待檔期鎖與不可服務期間，存在 hard conflict 時回傳 typed `signing_blockers`（提示「更換推薦月嫂／調整服務日期」並停用送交）；送交、提醒與完成命令在各自 UoW fresh-read 遭遇衝突固定回 `signing_staff_occupancy_conflict` 或 `signing_service_dates_unavailable`（零寫入；同案既有 waiting lock 不自相衝突，buffer 僅警示）。
+- **不阻塞下載與重複送交**：
+  - 客戶與每段月嫂未簽 PDF 缺失時由下載觸發生成（已簽署、有 `contract_identity` 或已完約亦允許再次下載；資料 snapshot 變動則 append 新版未簽 PDF 並保留原已簽檔案）。
+  - 「記錄已送交簽署平台」不以所有系統 PDF 已生成為前置（支持瀏覽器列印工作流：無系統 PDF／session 時保存案件層級 receipt `session_id=null, version=0, matching_plan_id`），**不檢查 LINE 綁定亦不建立提醒**（允許重複記錄送交、append receipt 並保留目前狀態與版本；`handoff_included_reminders=false`）。
+- **獨立簽署提醒（`POST .../contract-external-signing/reminders`）**：
+  - 點擊「發送簽署提醒」直接執行（無額外確認視窗），依現行方案對象範圍鎖定 session／expected version（未交接、版本過期或身分錯配回 typed 拒絕），於獨立 outer UoW 建立已綁定對象之 committed LINE 文字訊息任務（含 `type: text` 與 `text`）與人工通知名單（未綁定對象不建虛構 job，介面明確標示「需人工通知」）；同鍵重播回原 receipt，提醒失敗或執行不影響契約文件與簽署版本。
+
+### 3.4 分開文件回收、手工證明與本機測試跳過
+
+- **分開回收與完整集合完約**：
+  - 介面僅提供「契約文件 → 送交簽署與提醒 → 回收簽署文件」（移除「檢查簽署文件」按鈕與「歷史簽回人工修復」區塊）；各目標（1 份客戶契約 ＋ 所有 current 月嫂契約）分別上傳經 Controlled Files staging 保存。
+  - 最終 Preview（opaque token 綁定完整檔案集合與各 owner version）→ 明確確認簽署 → Apply 於單一 outer UoW 納管全部受控 NAS PDF（DB 僅存 opaque object reference ＋ SHA-256，嚴禁暴露實體路徑／UNC／presigned URL，下載限 authenticated attachment 並寫 security audit）、完成 session、建立 `precontract_service_commitment`、寫入 `orders.contract_identity` 與 `contract_completed`，並核對沿用 Client Finance 已同步之訂金及各期義務（計價未變不遞增 Finance version、不覆寫既成 `訂單成立`）。錯誤訊息直接回傳繁中具體業務原因，不掩蓋版本／檔期／測試門禁原因，且不遺棄已選檔案。
+- **手工證明（`manual_attested`）**：線下紙本／現場簽回時，管理員可透過獨立人工認證 Preview／Apply 上傳真實簽回證據並填寫 `confirmation_method` 與必填 `reason`，形成 `staff_signed_received`／`client_signed_received` 與完約（不宣稱 LINE 送達）。
+- **本機受控測試跳過（`testing_skip_allowed`）**：僅於 `APP_ENV=development|dev|local|test`、loopback MySQL（`union_db`／`lu_test_*`）且無 deployment profile 時開放；呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
+
+### 3.5 Execution Conversion、Idempotency 與 Typed Errors
+
+- **Execution Conversion**：僅在 `訂單成立 AND contract_completed AND commitment_ready` 下執行；鎖定 commitment、Orders、Finance settlement、matching plan 與所有相關 staff occupancy，驗證案號、方案與人日守恆，消費依 [Scheduling SSTART](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 生效之確認／代班／人員變更日期（保留原 commitment days 與原已簽文件，不將舊月嫂簽回移作新人簽回）。
+- **Idempotency 與 Conflict**：同鍵同指紋重播回原 receipt；同鍵異指紋回 `contract_signature_idempotency_conflict`；stale 版本固定 typed 409 且前端保持同一 idempotency key 供重試／查詢。
+- **Commands／Stable Errors**：`GenerateContractDocumentVersion`、`DownloadUnsignedContractPdf`、`UploadReturnedContractDocument`、`Preview/RecordManualStaffContractAttestation`、`Preview/RecordManualClientContractAttestation`、`Preview/ApplyFinalSignedContractUpload`、`ConvertCommitmentToExecution`（命令回執寫入既有 `contract_signing_command_receipts`，條款 C34／C37 到期基準沿 Client Finance `deposit_due_date` 讀取）。Errors：`contract_document_empty | too_large | type_not_allowed | digest_mismatch | archive_failed`、`contract_status_version_conflict`、`contract_document_version_stale`、`signing_staff_occupancy_conflict`、`signing_service_dates_unavailable`、`external_signing_session_facts_unavailable`、`manual_contract_evidence_missing | confirmation_method_invalid | reason_missing | preview_stale | customer_acceptance_required`、`commitment_service_days_invalid | not_effective`、`contract_signature_idempotency_conflict`、`assignment_occupancy_conflict`。
+- **Writer Exit**：所有可控模板與未／已簽文件存取一律經 `TemplateCatalog`、`ContractRenderer`、`ImmutableDocumentArchive`（`services/` 或 API／UI 嚴禁直改 `orders.contract_identity`、commitment 或 Finance obligation）。
+
+## 4. 驗收標準
+
+1. **`CTM` 模板管理與列印**：`.xlsx` 合併格／樣式檢視、巨集拒絕、沿用／缺件攔截、示範套值零寫入、版本啟用不改既有檔案、A4 8mm 194mm 瀏覽器列印雙模板驗證與 `state=preparing` 查詢。
+2. **主流程與分離邊界**：檔期衝突在送交與提醒前精確阻擋；瀏覽器列印後不預存系統 PDF 仍可記錄送交；送交與獨立 LINE 提醒完全解耦（含未綁定人員工名單、文字欄位 `type/text` 正確性、同鍵防重）；分開簽回／`manual_attested`／`testing_skip` 於單一 UoW 原子建立 commitment、Orders 完成與訂金核銷銜接（下載不暴露實體儲存路徑）。
+3. **本機受控 DB 驗收**：依 [Global Migration §6.1](10_Global_保留資料Migration與Cutover_Subsystem.md#61-本機開發-db-受控驗收91) 於受控 `union_db`／`lu_test_*` 通過 Module、Subsystem、Domain（訂金→訂單成立＋簽約→conversion、代班不重簽）與 Browser E2E。

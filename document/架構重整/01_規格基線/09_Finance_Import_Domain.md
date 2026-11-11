@@ -1,681 +1,79 @@
 # Finance Import／Canonical Bank Facts Domain
 
-> 2026-11-09 補助金額、明細確認與B最新裁決依22 §17.4.2及16 §2.5.5：一般／歷史訂單均先依原正式來源計算 S；各銀行依原列及正式對照辨識案件、對象與用途，不要求先有人工方案、退款單或補助分期。保存／解析／預覽只形成候選，原「套用／確認處理」成功才正式確認明細來源、承接合法款項及執行已預檢核銷。台新不因只有六碼而預設R台，也不再一律限定人工選方案；證據不足時保留原備註供同案判讀。原U13人工限定的實作及合成驗收僅追溯當時版本，不證明本次新行為通過；此輪只同步規格，新行為程式及執行驗收NOT_RUN。
+## 1. 文件邊界與所有權
 
-> U13 原始備註的需求背景（用詞更正）：工會歷史明細會把給月嫂的補助款寫成「月嫂薪資」，因此「月嫂薪資／服務人員薪資」不能直接等同一般薪資，也不能單靠該字樣選補助方案。一般／歷史訂單均沿22 §17.4.2的銀行判定表，以原備註與同案正式資料的組合證據判斷；證據充分可形成明細方案候選，不強制另由人工選擇。兩筆原文字樣僅為範例，不形成白名單，不放寬格式解析、案件唯一性或正式核銷規則。
+- 狀態：`current-spec`
+- Owner：Finance Import Domain（`domains/finance_import/`、`subsystems/finance_import/`）
+- 單一負責範圍：銀行來源檔規格驗證與正規化、不可變 `finance_import_batches`／`finance_import_rows`／`finance_import_occurrences`／`finance_import_ingestion_attempts` 與 `finance_import_classification_events`、跨檔去重 fingerprint、銀行流水交易分類與 typed dispatch intent、Reprocess Preview／Apply、`finance_import_manual_review`、`IMPORT-006` 異常投影、React 單鍵匯入 terminal receipt 與來源取代（`FI-DEC-001～003`）。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Staff Payables / Export Domain](05_Staff_Payables_Export_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[Government Subsidy Domain](14_Government_Subsidy_Domain.md)、[Staff Payables 與 Client Refund](16_Staff_Payables與Client_Refund正式規格.md)、[銀行流水對帳與手動補登](22_銀行流水匯入與帳務異常處理正式規格.md)、[案件帳務三方案與補助流向](22A_案件帳務三方案與補助流向正式規格.md)、[帳務差額處置與工作台 UI](22B_帳務差額處置與工作台UI正式規格.md)。
 
-> 對帳單支出配對與100元內手續費核銷依 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)：先依22 §17.4.2各銀行正式證據確認唯一案件、對象及用途，於套用前預檢擬建／沿用款項及接續核銷，再依原交易月份及金額規則配對。唯一符合 `0 <= 應付 - 實付 <= 100` 的單筆／合法合併集合才委派原owner核銷；尚無核銷目標不阻擋明細辨識或擬建款預檢。永豐保留原帳戶要求；台新保留各自合法例外，六碼不單獨決定P台／R台，不新增姓名／帳號／快照必填。無唯一案件的新來源在入庫前跳過；已定位案件者保留適用抽屜入口及具體原因。原應付及銀行實付不可變，費用按實際差額、不預設固定值；政府來源標記退回款沿原期間核對。
-
-> 方案分類及應付交接：[`22` §17.4.1](22_銀行流水匯入與帳務異常處理正式規格.md#full-subsidy-no-advance-20261105)為唯一全額免自備例外，補助市民／原住民H≤有效L時自動B＝0及方案一，不等待客戶實付。一般／歷史訂單的有效人工保存或B成功套用的明細確認，均可供16 §2.5.5承接款項，不要求明細確認後補人工事件；只有缺少上述正式確認來源時，才沿22 §17.4原範圍作款齊後的歷史金額推算，不以款齊限制 S 計算或銀行對象／用途辨識。原成立條件具備者，先預檢並於同次正式確認由原owner承接合法款項；未到時點者明示本次只確認安排、不建款。獨立人工設定不執行共同核銷入口的付款動作，也不無條件拆款。安排與既成款項衝突交原owner，不由分類器改款、移期或整案擋住其他合法款。Excel來源沿16 §2.5.4，金額口徑沿22 §17.4.2，不另設分類器或writer。原人工metadata、通知、交接的接線及限定驗收僅沿22 §18.10、16 §2.5.5的歷史紀錄，不代表本次新行為或真實核銷／通知已驗證。
-
-> 對帳來源與方案判斷：依 [`22` §17](22_銀行流水匯入與帳務異常處理正式規格.md#case-accounting-schemes-20261103)，永豐存入為客戶款 C，台新政府來源入款為 G；永豐出款區分一般月嫂款 P永／正常退客戶 R永，台新出款區分轉交月嫂補助 P台／退客戶先墊補助 R台。銀行名稱或方向不足以確認對象，須依§17.4.2保留原列及正式對照的唯一案件、對象與用途證據。銀行列辨識、原歷史金額推算及正式方案確認分開；一般／歷史訂單均適用人工保存或明細B套用的確認來源，不以未款齊、缺人工安排或缺既存款項阻擋辨識。款項及資金資格在套用前另驗，分類不代替真實核銷；銀行事實及已成立歷史不改寫。2026-11-03原文件階段及後續限定接線結果僅沿22 §18.10，不外推本次新行為已實作。
-
-> 2026-11-02 差額認列、人工金額更正與政府整期差額的最新實作／驗證見 [規格22 §16.9.1](22_銀行流水匯入與帳務異常處理正式規格.md#accounting-differences-implementation-20261102)。本檔 2026-11-01 的「尚未實作／本次僅規格」為當時記錄，以該續作結果為目前狀態；bank／ledger／allocation 的不可變性與各 owner 歸屬不變。
-
-> 差額處理依 [`22` §16](22_銀行流水匯入與帳務異常處理正式規格.md#finance-differences-20261101)，出款0～100元內扣手續費依22 §15.6.4。人工更正只作用於各 Finance owner 的系統應收／應付結果，銀行原金額、日期、方向與原檔不可變。客戶退匯只開放22 §16.4已分類且唯一案件確認的同案人工核對，不新增退匯自動辨識或其他退匯流程；操作異常在原畫面回饋。
-
-人員確認後可追收、協調合繳或選其他適用處理，Finance Import 仍只提供 typed bank facts 並委派 owner。依最新 [`22` §16.5.2](22_銀行流水匯入與帳務異常處理正式規格.md#client-case-receipts-total-20261101)，已辨識同案的多筆入款先展示明細及合計；合計符合本次應收，人員可直接一起核銷，不因單筆金額不同、同案多筆或有多期待收另生報錯／強制期款確認。原全面攔截期款誤判提案撤回，不再列為必要新規則。原 return／reversal 歷史證據保留，沒有刪除 API、schema 或歷史分類的執行授權。
-
-> 銀行成功明細依 [`22` §15](22_銀行流水匯入與帳務異常處理正式規格.md#finance-20261029)投影正式入帳證據及原始來源；人工補登依22 §19，從同案正式款項發起並經原owner核銷，不另提供無案件備查新增。案件頁只消費typed owner結果。既有人工備查紀錄及歷史驗收證據保留原查閱來源，不當作新流程已核銷或已驗收。
-
-## 1. Domain 責任
-
-Finance Import 是銀行來源檔、canonical bank facts、occurrence、分類結果及歷史重分類稽核的唯一 owner。
-
-它負責：
-
-- 驗證來源檔格式並轉成 canonical normalized rows；
-- 建立不可變 batch、canonical row 與 occurrence；
-- 以穩定 fingerprint 跨檔去重；
-- 依明確證據分類銀行流水；
-- 將可處理的業務分類轉成 typed dispatch intent；
-- 提供正常匯入、dry-run、歷史重處理、exact replay 與查詢；
-- 產生 bounded import-review desired state 供 Anomalies 投影。
-
-它不擁有：
-
-- 客戶應收、退款或補助退還義務；
-- 月嫂薪資、付款義務或正式 payout；
-- 政府補助申請、核准、撥款、退匯或 allocation；
-- Orders lifecycle 或服務狀態；
-- Alert workflow；
-- 人員、客戶或訂單主檔；
-- preserve-data database cutover。
-
-Client Finance、Staff Payables 與 Government Subsidy 只能透過 Finance Import ports
-讀取銀行 facts 或接收 typed dispatch intent，不得直接解析 Excel、修改 canonical row、
-共用 Finance Import repository 或自行推測分類。
-
-## 2. SSOT 與資料權威
+## 2. 核心不變量與資料模型（SSOT）
 
 | 概念 | 唯一權威 | 性質 |
 |---|---|---|
 | 來源檔識別 | content digest、logical name、format id、sheet identity | immutable ingestion fact |
 | 匯入批次 | `finance_import_batches` | append-only lifecycle fact |
-| canonical bank fact | `finance_import_rows` 的 canonical raw columns | immutable root fact |
+| 匯入嘗試稽核 | `finance_import_ingestion_attempts`（`FinanceImportAttempt`） | append-only out-of-transaction audit |
+| canonical bank fact | `finance_import_rows` canonical raw columns | immutable root fact |
 | 來源出現位置 | `finance_import_occurrences` | append-only occurrence |
 | 去重身分 | versioned canonical fingerprint contract | deterministic identity |
-| classification | append-only classification decision event 的 current projection | derived, monotonic |
-| reconciliation | owning Finance Domain 的正式 ledger／allocation | cross-Domain root result |
+| classification | `finance_import_classification_events` 之 current projection | derived, monotonic |
+| reconciliation | owning Finance Domain 正式 ledger／allocation | cross-Domain root result |
 | reprocess receipt | `finance_import_reprocess_runs` | append-only audit |
-| reclassification audit | `finance_import_classification_events` | append-only event |
 | import-review alert | Anomalies current projection | rebuildable derived state |
 
-Canonical raw columns、`fingerprint + fingerprint_version`、既有 occurrence、正式 ledger
-reference、classification event、reprocess run 及 event 禁止 UPDATE／DELETE。若銀行
-adapter 契約需要改變會影響 fingerprint，必須另立 versioned fingerprint migration；
-不得原地改寫舊 row。
+- **嚴格禁止覆寫**：canonical raw columns、`fingerprint + fingerprint_version`、occurrence、ledger reference、classification event 與 reprocess run 一律禁止 `UPDATE／DELETE`。主機絕對路徑僅為診斷資訊，不得進入公開 manifest；姓名、金額、列號、相似備註皆非 identity SSOT。
+- **跨 Domain 分責**：Finance Import 不擁有客戶應收／退款、月嫂薪資／實付、政府期間核銷、Orders lifecycle 或 Alert workflow；Client Finance／Staff Payables／Government Subsidy 僅透過 ports 消費銀行事實與 typed intent。
 
-主機絕對路徑只屬 adapter 診斷資訊，不是 source identity，也不得進入公開 manifest。
+### 2.1 五個正交狀態軸與重複來源邊界
 
-姓名、部分帳號、相同金額、Excel 列號、備註相似或人工猜測都不是 identity SSOT。
+1. **Batch lifecycle**：`staged → completed | failed`（失敗批次僅由主交易外之 `FinanceImportAttempt` 留存）。
+2. **Occurrence outcome**：`inserted | skipped_existing`。
+3. **Classification**：`pending → business classification | non_business_review`；歷史重分類僅允許符合資格者 `non_business_review → business classification`，不得自動倒退。
+4. **Reconciliation**：唯一以 owning Domain 正式 ledger／allocation 為準（相容欄位 `pending → reconciled` 不作第二套 SSOT）；正式退匯／沖正／調整不將核銷軸改回 `pending`。
+5. **Current issue projection**：僅 `IMPORT-006` active predicate 成立時存在，無 `open／claimed／resolved／reopen` lifecycle。
 
-## 3. 五個正交狀態軸
+- **同批 vs 跨批重複規則**（詳 [銀行流水去重規則](22_銀行流水匯入與帳務異常處理正式規格.md#32-重複排除與去重規則bank-04)）：本批新建的 canonical bank fact 於同批其他列保留 `skipped_existing` occurrence；先前批次已存在之相同 fingerprint 僅於本次操作 receipt 計數，不新增 occurrence、分類或待核銷名單，原交易核銷狀態維持不變。
 
-Finance Import 不使用單一巨大狀態欄位：
+## 3. 公開契約與流程
 
-1. Batch lifecycle：`staged → completed | failed`。
-2. Occurrence outcome：`inserted | skipped_existing`。
-3. Classification：
-   - `pending → business classification | non_business_review`
-   - 歷史重分類只允許 eligible
-     `non_business_review → business classification`
-   - 已是 business classification 不得自動倒退。
-4. Reconciliation：由 owning Finance Domain ledger／allocation 推導；相容 projection
-   可顯示 `pending → reconciled`，但不是第二套 SSOT，也不得倒退。
-5. Current issue projection：只有 15-code owner predicate 當下成立時存在；predicate false 後
-   bounded fresh recheck 直接刪除 row。不存在 `open／claimed／resolved／reopen` lifecycle。
+### 3.1 Source Intake、正規化與匯入嘗試稽核
 
-Occurrence outcome 不得寫入 classification 或 reconciliation。正式退匯、退款、adjustment 與 reversal 是 owning Finance Domain 的 append-only ledger event，不把 Finance Import reconciliation 改回 pending。
-重複來源依規格22 §4.1／§6區分：本批首次建立的 canonical bank fact，同批其他來源位置仍保存 occurrence；先前批次已存在的相同 fingerprint，只在本次 ingestion receipt 計數，不新增 occurrence、batch membership、分類或 dispatch。跨檔「已存在」只表示銀行來源去重，不表示已核銷；原未入帳交易仍留在原批次及原核對流程，按 current owner facts 驗證。只有正式核銷 receipt 或已成功 dispatch 結果才能判定已處理，並阻擋第二次入帳。
+- Normalization 為純計算（無 DB 交易），嚴格驗證 UTF-8 與整數 TWD 金額（小數回傳 typed anomaly）。
+- **欄位解析與辨識**：
+  - **永豐（Sinopac）**：存入以 `bank_references["銷帳編號"]` 之 `99781699 + 6碼`（含 `A` 開頭非市民 `115501` 規則）為來源，嚴格遵守 [Client Finance 虛擬帳號三階段判定](04_Client_Finance_Domain.md#35-專屬虛擬帳號與單案修改99781699va-0106)，不使用姓名／金額備援或「存摺備註」；支出除完整 `bank_references["交易參考編號"]` 與合法帳戶／姓名驗證外，依 [備註六碼與案件範圍定位](22_銀行流水匯入與帳務異常處理正式規格.md#42-永豐備註六碼定位案件規則與非市民-a-案件) 僅讀原檔 `memo`（「備註」，絕不讀「存摺備註」）擷取連續 6 碼定位案件。
+  - **台新（Taishin）與 Legacy**：台新政府入款與政府來源退回依「新竹市政府／市府」等政府來源標記；台新個人補助出款（`P台`／`R台`）與永豐出款四階段配對、`0～100` 元內扣手續費及方案候選辨識，一律遵循 [銀行明細判定與支出核銷契約](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation) 與 [補助方案判定表](22A_案件帳務三方案與補助流向正式規格.md#subsidy-flow)。
+- **新來源入庫前案號過濾**：新匯入銀行流水應歸屬案件但查無唯一案件（零案、多案或證據衝突）時，於建立正式流水前直接跳過（不建立待核對列或人工選案入口）；已確認唯一案件而缺核銷條件者保留 `business_pending` 並顯示具體 `pending_reason` 進入案件抽屜。
+- **同案多筆補款防誤判**：同一案件多筆不同銀行列各自實付不同時，保留各筆並合計供核銷，禁止只因命中同一期款或單筆不等於應收而標為 `suspected_duplicate_business_match`；若多筆各自足額指向同一期款，則轉合計超收人工核對。
+- **`FinanceImportAttempt`**：在主 Apply 交易外記錄 command identity、digest、phase、typed error、起迄時間與 outcome（不記完整帳號、姓名或 raw row）；exact retry 直接重播原 attempt／receipt。
 
-## 4. Subsystems
+### 3.2 Business Dispatch 與 Historical Reprocess
 
-### 4.1 Source Intake／Normalization
+- **Typed Dispatch Ports**：`ClientReceiptReconciliationPort`、`ClientSubsidyReturnReconciliationPort`、`GovernmentSubsidyReceiptPort`、`StaffPayoutReconciliationPort`、`StaffActualTransferPort`、`FinancePendingOccurrencePort`、`OrderDepositLifecycleIntentPort`。
+- owning Domain 回傳 `reconciled | existing | pending | rejected | conflict`；訂金核銷只送出 Orders typed intent，不得直接修改 `orders.status`；`government_subsidy` 固定委派 `GovernmentSubsidyReceiptPort`。
+- **Historical Reprocess Preview／Apply**：限定單一 completed batch 之 `non_business_review + pending` 列；Preview 零寫入並回傳 deterministic `plan_fingerprint`；Apply 鎖定驗證 fingerprint、expected batch version 與 idempotency key，於單一 outer UoW 原子寫入 append-only `finance_import_classification_events` 與 `finance_import_reprocess_runs`。
 
-將一份明確來源檔轉成 canonical input，不開啟 transaction、不讀業務資料庫、不建立正式帳務。
+### 3.3 正常匯入邊界（`FI-DEC-001～003`）與 React 單鍵匯入
 
-Modules：
+- **`FI-DEC-001`（Preview 與稽核）**：File Watcher 偵測 `downloads/bank/*.xlsx` 後僅負責驗證穩定檔案並觸發受控匯入指令，禁止直接連 DB 或修改業務投影。Preview 須列出新增數、重複數、預計 dispatch 類型與整數金額、待分類／`business_pending`／blocked 數、判定證據與 `plan_fingerprint`。
+- **`FI-DEC-002`（修改分流）**：禁止直接編輯 canonical row。銀行檔錯誤走重新匯入＋`SourceSuperseded`（作廢舊事實）；主檔缺漏回 owning Domain 補齊再重預覽；分類歧義經 Correction Workbench 補 `evidence`（必填）與 `reason`（選填）；已入帳錯配回 owning Domain 走 `reversal／adjustment／refund`。
+- **`FI-DEC-003`（整批與合格候選範圍）**：通過驗證之 candidates 一次 Apply；`non_business_review` 與 `business_pending` 留待處理；integrity／collision／stale／formal conflict 阻擋整批 Apply。客戶補助退款預檢於 Preview 階段即檢查擬建／沿用退款與接續核銷資格（缺資金／墊款資格轉 `business_pending` 並明確標示，不阻擋同批其他合法款）。禁止未經稽核的勾選略過機制。
+- **React 單鍵匯入 Terminal Receipt**：使用者選檔後點擊一次「匯入銀行交易明細」（原因選填），系統依序執行 `Upload/Ingest → 內部 Preview → 符合 apply_allowed 且有候選時自動 Durable Apply → terminal receipt`。受理 `202 Accepted` 非完成態；僅當 batch job `succeeded` 且從 `finance_import_apply_receipts` 讀回 `resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 後始可顯示入帳完成；結果未明以原鍵重查。
 
-- `FinanceSourceFileIdentity`
-- `FinanceWorkbookFormatDetector`
-- `LegacyBankStatementAdapter`
-- `SinopacBankStatementAdapter`
-- `TaishinBankStatementAdapter`
-- `CanonicalBankRowNormalizer`
-- `CanonicalBankRowValidator`
-- `FinanceTransactionFingerprint`
-- `FinanceFingerprintVersionPolicy`
-- `NormalizationManifestBuilder`
+### 3.4 Owner Review（`finance_import_manual_review`）與 `IMPORT-006`
 
-不變量：
+- **`finance_import_manual_review`**：綁定唯一 canonical bank fact（`source_id = <finance_import_row_id>`），呈現遮蔽帳號、分類與核對候選；`CorrectAndPostFinanceImportRow` 於單一 outer UoW 鎖定 row、review 與 target obligations，寫入 manual classification event、owning ledger／allocation、reconciliation receipt、outbox 與 current-issue recheck intent；任何一步失敗全批回滾。已有 Client Finance 正式 receipt 之列一律自待確認清單排除。
+- **`IMPORT-006`（Batch Integrity Current Alert）**：每 batch 最多一筆（`case_key = finance-import-batch:<batch_id>`），Strictly Privacy-bounded（禁止完整帳號、姓名、raw payload），由 `active = owner_readback_incomplete OR structural_ambiguity OR (integrity_inconsistent_count > 0 AND no_terminal_correction_successor)` 決定存在性；post-commit projector 僅做 bounded fresh upsert／delete，存在完整 `SourceSuperseded` successor 或不一致數歸零後直接刪除。
 
-- strict UTF-8／型別驗證失敗時不產生部分 normalized result；
-- 支援的 TWD 流水金額必須是整數；小數金額回 typed anomaly，不進正式核銷；
-- fingerprint 只使用 versioned canonical fields；
-- 合法虛擬帳號固定為 `99781699` 加六碼數字；
-- Legacy 存入讀取來自「銷帳編號」的 canonical cancellation code，支出讀取來自
-  「交易參考編號」的 `bank_references["transaction_reference"]`；不以空白比對欄、姓名貼值或
-  存摺備註替代帳號來源。2026-10-01 人工補充確認歷史對帳單沿用此方向欄位規則；
-- Sinopac 存入以 `bank_references["銷帳編號"]` 的完整虛擬帳號為來源；支出以
-  `bank_references["交易參考編號"]` 的完整對方帳號為來源，不使用更正註記、備註或存摺備註替代；
-- 2026-10-01 人工確認：上述 Sinopac／Legacy 欄位接受完整 ASCII 數字帳號，或帳號後緊接／空白分隔的姓名。
-  姓名不是帳戶 ownership，不能單獨配對；不截除數字前綴、補零或從多組數字任選帳號。
-  存入抽出的帳號仍須符合 `99781699` 加六碼數字，並沿用匯入虛擬帳號對照優先規則；
-- 欄位判讀只建立衍生 projection，不回寫 canonical raw fact，也不改 fingerprint。
-  新批次使用 `finance-transaction-classifier-v3` 記錄包含歷史格式的判讀規則；既有分類紀錄不自動覆寫。
+### 3.5 Typed Commands、Errors、交易與 Live Writer Exit
 
-### 4.2 Canonical Staging／Occurrence
+- **Commands**：`NormalizeFinanceWorkbook`、`PreviewFinanceImport`、`ApplyFinanceImport`、`PreviewFinanceReprocess`、`ApplyFinanceReprocess`、`PreviewFinanceImportCorrection`、`ApplyFinanceImportCorrection`、`CorrectAndPostFinanceImportRow`、`ScanFinanceImportReviewAlerts`、`QueryFinanceImportBatch`、`QueryFinanceImportRun`。
+- **Stable Errors**：`invalid_source_file`、`unsupported_bank_format`、`invalid_canonical_row`、`strict_decode_failed`、`batch_not_found`、`batch_not_completed`、`batch_too_large`、`stale_preview`、`idempotency_conflict`、`classification_conflict`、`manual_evidence_required`、`source_superseded`、`source_supersession_conflict`、`reconciliation_invariant_violation`、`dispatch_rejected`、`downstream_unavailable`、`transaction_failed`。僅 `downstream_unavailable`／deadlock／transient storage error 得依原 idempotency key 做 bounded retry。
+- **交易模型**：Normalization 無交易；Preview 零寫入；Apply／Reprocess／Correction 於單一 outer UoW 提交；Alert projector 於 outbox post-commit 獨立執行，不回滾正式銀行事實。Query 永遠唯讀（整庫明細匯出規範見 [銀行成功明細整庫匯出](22_銀行流水匯入與帳務異常處理正式規格.md#33-成功明細整庫匯出bank-03)）。
+- **Writer Exit**：runtime 僅保留 `domains/finance_import/` 與 `subsystems/finance_import/`；不得重新建立 `services/finance_cancellation_code.py`、`services/finance_import_states.py`、`services/finance_import_dispatch.py` 等相容路徑，File Watcher 亦嚴禁直連 DB 或自寫 Alert。
 
-在一個 outer Unit of Work 內先保存銀行根事實，再分類與 dispatch。
+## 4. 驗收標準
 
-Modules：
-
-- `FinanceImportBatchRepository`
-- `CanonicalBankFactRepository`
-- `FinanceImportOccurrenceRepository`
-- `FinanceImportFingerprintRepository`
-- `CanonicalFactCollisionComparator`
-- `DuplicateOccurrenceDetector`
-- `FinanceImportBatchLifecycle`
-
-不變量：
-
-- 本批新建 canonical bank fact 的每個可解析來源位置（包含同批重複）都要有 occurrence；先前批次已存在的交易依規格22只計入本次 receipt；
-- fingerprint 首次出現建立一筆 canonical row；
-- 同批新建 canonical 的其他來源位置新增 occurrence，結果為 `skipped_existing`；跨檔已存在者同樣回 `skipped_existing`，但不新增 occurrence 或本批待核銷成員；
-- 重複 occurrence 不覆寫既有 classification、reconciliation 或人工處理結果；
-- fingerprint 相同但非 fingerprint canonical facts 不一致時，保留 occurrence並回傳
-  collision anomaly；不得靜默捨棄差異；
-- 同批完全重複只允許首次 canonical insertion 進入下游；
-- 任一 staging、classification 或 dispatch failure 使整批 Apply rollback。
-
-`failed` batch 由獨立 ingestion-attempt audit 留存；不得宣稱已 rollback 的 batch row 同時持久存在。
-
-append-only `FinanceImportAttempt` 由 `finance_import_ingestion_attempts` 實作：
-
-- 在主 Apply transaction 外保存 command identity、source content digest、phase、typed error、
-  started／completed time 與 transaction outcome；
-- 不保存 raw row、完整帳號、姓名或 credential；
-- 成功時連結 completed batch；失敗時不偽造 batch id；
-- exact retry 以 command id 與 canonical payload 回原 attempt／receipt，不重跑已 rollback 的
-  workbook transaction。
-
-### 4.3 Classification
-
-Modules：
-
-- `FinanceCancellationCodeProjection`
-- `FinanceIdentityMapLoader`
-- `FinanceTransactionClassifier`
-- `FinanceClassificationTransitionPolicy`
-- `ClassificationReasonCanonicalizer`
-- `FinanceClassificationTuple`
-- `ClassificationDecisionFingerprint`
-- `ClassificationDecisionEventRepository`
-
-分類先建立可重播、可解釋的候選，再決定可否提出 typed intent。候選可使用：
-
-- canonical direction、amount、date、time、bank format；
-- 完整 cancellation code；
-- 唯一有效、完整且精確匹配的帳戶 ownership；
-- 客戶／對方姓名、備註、對方帳號、金額與交易時間的正規化交叉證據；
-- 已確認的銀行格式規則。
-
-2026-10-29 補充：永豐客戶退款／月嫂付款採用備註六碼線索時，只讀原檔「備註」（`memo`）中的完整連續六碼，對應 Client Finance 虛擬帳號後六碼；不讀／回退「存摺備註」，客戶收款完整虛擬帳號只讀原檔「銷帳編號」。人工範例 `HC115001服務人員`、`A115001服務人員`、`HC115001退款` 均擷取 `115001`；不得從較長連續數字截六碼，多組不同六碼的新來源依規格22 §15.6.1在入庫前跳過，不新增待核對流水；既存紀錄沿原查閱契約保留。六碼只是案件線索，不是收款帳號或直接核銷證據。Client Finance 既有匯入對照優先；退款／月嫂款候選必須限於已辨識案件，不能只按人員跨案加總。U10 已授權此局部實作，新批次分類版本為 `finance-transaction-classifier-v4`；原 fingerprint 版本／原始欄位及既存分類事件不改寫，其他功能不因此實作。完整規則及驗收見 `22` §15.6.1。
-
-各銀行已核准證據範圍內的候選與行為（永豐客戶入帳只用完整銷帳編號定位，不適用姓名／金額排序備援）：
-
-1. 虛擬帳號、完整銀行 reference 或唯一帳戶 ownership 為強證據，直接建立候選。
-2. 只在對應銀行／用途的正式規格明定允許時，依其姓名、備註、對方帳號與金額規則形成候選；不得替永豐客戶入帳新增猜測或評分備援。交易日期／時間保留在
-   canonical fact 與 fingerprint，作為疑似重匯與人工覆核的時間證據。把日期／時間納入
-   candidate score 的正式 owner-fact contract 尚未完成，不得假稱目前已用時間自動配對。
-   每一個已採用的命中或未命中都進 `evidence`，並隨
-   `classifier_version`／`decision_facts_fingerprint` 留存，讓 historical reprocess 可重播。
-3. 單一候選且證據不衝突時，可形成 business classification 與 typed dispatch intent；
-   owning Domain 仍須用 fresh obligations／ledger 做 Preview／Apply，不得因 classifier
-   命中就直接寫正式帳務。
-4. 新匯入若無法確認唯一案件（含零／多案或歸屬證據衝突）時，在入庫前跳過。已確認案件及對象、僅款項尚未唯一或未符核銷條件時留待人工核對；既存無唯一案件流水只沿原查閱契約顯示原因，不復活人工選案。
-   已確認同案的不同銀行列可為分次付款／自行補款，依 `22` §16.5.2 保留各筆並合計，
-   不能只因命中同案／同一義務或單筆金額不同就當成疑似重匯或 anomaly。合計正確可供
-   人員直接核銷；真正重複銀行來源的既有 identity 去重及已核銷來源不可重用規則保持原義。
-
-永豐客戶入帳的當次原因依22 §16.5.2統一：缺交易日、缺到期日、無未清款、無同月款及多候選分清；少收／超收承接Client Finance的正式碼。不同流水同一義務不產生疑似重匯標記；多筆各自全額配對同一期款時按合計超收轉人工核對，既有銀行來源去重及重送防重不變。
-
-2026-11-05 永豐客戶存入（虛擬帳號入款）期款判定規則定案：
-- 永豐銀行存入且配對到 14 碼銷帳編號（`99781699` + 6 碼）之入款，歸屬該案件編號後：
-  1. 先比對金額：若案件有單一未清償期款且金額完全一致，自動精確核銷入帳。
-  2. 無法以金額唯一定位時（含多筆等額期款）：進一步比對月份（銀行交易日月份 vs. 該案件未清償期款應付期限月份）。
-     - 若月份符合且能唯一定位期款：配對該期款並顯示實收、短少或超收差額，供人員確認處置；同月仍有多個有效候選時保留待核對，帶原流水進抽屜人工選款，不任選一筆。
-     - 若月份不符合：顯示為待核對入款，不擅自跨月配對，留待人員手動核銷。
-- 案件端（案件帳務抽屜）必須主動呈現已辨識為該案的待核對入款及合計，並提供人工核銷入口，不得直接跳過未顯示。
-
-2026-11-05 對帳單支出（月嫂付款／客戶退款）配對與 100 元內手續費直接核銷規則定案（詳 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)）：
-- 適用所有銀行對帳單之支出交易（`direction = outgoing`、`debit > 0`，涵蓋永豐 `P永`／`R永` 及台新 `P台`／`R台`；台新具政府來源標記如「新竹市政府」之支出維持政府多撥退回人工期間核對）：
-  1. **第一步（依銀行正式證據確認案件與對象）**：一般／歷史訂單均依22 §17.4.2銀行判定表。永豐 P永／R永沿原姓名／完整帳號及正式案件關聯；台新可先由唯一六碼定位案件，再依各自對象與用途組合證據形成P台／R台及方案候選，不一律要求人工選擇。六碼或用途字樣不能各自單獨推定方案，銀行原列保存／預覽不生效。對象與用途未確認者保留原文及原因，不進自動核銷；新來源無唯一案件時入庫前跳過。證據充分後，套用前由原owner預檢擬建／沿用款項及接續核銷，原B套用才確認並依序承接；不要求資料庫先有退款單／補助分期才做預檢。後續月份及金額條件同時適用擬建／沿用計畫，正式核銷仍由原owner執行。
-  2. **第二步（配對交易日的月份）**：取銀行「交易日（`transaction_date`）」月份（`YYYY-MM`），比對該對象未清償應付款項之應付／到期月份（`due_date` 所屬 `YYYY-MM`）；支援單筆義務及同人同銀行同月份合併匯款合計。月份不符時轉待核對，不擅自跨月自動配對。
-  3. **第三步（比對金額差距 100 元以內綁定成功）**：計算 `差額 = 應付金額 - 實付金額（debit）`。當 **`0 <= 差額 <= 100`** 且命中目標唯一時綁定成功；若同人同月多筆獨立款皆符合而無法區分、或 `差額 > 100`（少付超限）、或 `差額 < 0`（實付大於應付之超付），均不自動核銷，轉待核對並依門檻建立警示。
-  4. **第四步（計算手續費並直接核銷）**：動態計算 `手續費 = 應付金額 - 實付金額`（可為 `0`～`100` 元整數，同銀行免手續費為 `0`，嚴禁預設固定手續費）。委派 Staff Payables／Client Finance 直接核銷結清：保留應付原額、銀行實付原額及收款方負擔手續費，待付餘額歸零（`remaining = 0`），納入銀行成功明細庫。
-
-2026-10-29 非市民規格補充（尚未實作）：Client Finance `04` §8 已增加 A 開頭案件的正式帳號公式，Finance Import 必須消費同一 typed 解析結果並支援回傳 A 開頭 `case_no`。例如 `A115001` 的公式虛擬帳號為 `99781699115501`，尾六碼為 `115501`；不能以去掉 A 後的案件數字另推帳號。既有完整銷帳編號來源、匯入對照優先、備註六碼及唯一案件／款項條件保持，新增格式接線與回歸見 `22` §15.6.2。此規格同步不修改 classifier、fingerprint、歷史分類或帳務。
-
-### 4.3.1 銀行格式與分類品質驗證註記
-
-已去識別的真實銀行格式 Excel 是 parser、normalization 與完整 Preview／Apply 鏈路的
-產品驗收來源；fixture 的業務邊界案例則驗證唯一命中、零／多候選、衝突與疑似重匯時的
-fail-closed 行為。兩者可證明功能正確與不誤配，但不宣稱統計上的真實資料辨識率。
-`019fb603-937a-7e92-b8a2-a4e2838362d6` 的歷史匯入紀錄只證明當時的虛擬帳號 classifier
-覆蓋不足，不能用來推導目前的分類品質。
-
-未來取得可合法重播的實際資料分布樣本後，可在 disposable MySQL 追加下列分類品質量測：
-
-- 強識別命中、姓名／備註／帳號／金額／時間的單一候選，以及零／多候選；
-- 同客戶不同日期的不同銀行來源可為分次付款或補款，保留明細與合計供核對；不得只因此判為疑似重匯。真正重複來源仍依既有 fingerprint 及已使用來源防重；
-- 正確率、錯誤候選率、人工覆核率與可重播的 evidence；
-- intake → classification → Preview → Apply → owning Domain → Anomalies 的全鏈路。
-
-上述量測是持續品質改善 evidence，不是產品完成或 release gate；缺少樣本時仍必須維持
-唯一候選才自動分類、其餘全部人工覆核的安全行為。
-
-分類結果必須包含：
-
-- `classification_type`
-- `classification_reason`
-- `matched_identity_ids`
-- `resolved_counterparty_account`
-- `classifier_version`
-- `decision_facts_fingerprint`
-
-候選須分開案件／對象與款項層次：新來源不能唯一確認案件時，在入庫前跳過；案件及對象已確認但無可核銷款項、多個有效款項或 owner 資格拒絕時，保留 `business_pending` 與核對入口，不概括轉成 `non_business_review`。既存無唯一案件流水只保留原查閱及診斷，不復活人工選案。候選證據限各銀行正式允許欄位，不以姓名、金額或日期猜測 case／ledger identity。
-初次分類與歷史重分類都必須 append decision event；current classification columns
-只作相容 projection。
-
-### 4.4 Business Dispatch Coordination
-
-Finance Import 只決定「這筆銀行 fact 可提出哪種 typed intent」，正式義務、allocation、ledger 與業務狀態仍由 owning Domain 決定。
-
-輸出 ports：
-
-- `ClientReceiptReconciliationPort`
-- `ClientSubsidyReturnReconciliationPort`
-- `GovernmentSubsidyReceiptPort`
-- `StaffPayoutReconciliationPort`
-- `StaffActualTransferPort`
-- `FinancePendingOccurrencePort`
-- `OrderDepositLifecycleIntentPort`
-
-流程：
-
-```text
-canonical bank fact
-→ classification
-→ typed dispatch intent
-→ owning Domain fresh candidate
-→ owning Domain validation
-→ outer Unit of Work persistence
-→ reconciliation result
-→ transactional outbox
-```
-
-Owning Domain 可回傳：
-
-- `reconciled`
-- `existing`
-- `pending`
-- `rejected`
-- typed `conflict`
-
-`pending` 可以保留已完成的 business classification，但不得建立不完整 ledger。訂金核銷成功只能送出 Orders typed lifecycle intent；Finance Import 或 Client Finance writer 不得直接指定 `orders.status`。
-
-`government_subsidy` 固定委派 `GovernmentSubsidyReceiptPort`；不得映射為 Client Finance。
-Government Subsidy Domain 鎖定正式 claim batch／items，決定 receipt allocation、
-reversal、outstanding 與 review。無唯一批次或 allocation 時回
-`government_subsidy_review_required`，Finance Import 只保存 classification 與 review
-intent，不建立政府 ledger。
-
-### 4.5 Historical Reprocess Preview／Apply
-
-選取條件：
-
-- 明確單一 completed `batch_id`；
-- 以 occurrence 決定成員，再對 canonical row id 去重；
-- classification 為 `non_business_review`；
-- reconciliation 為 `pending`；
-- distinct rows 不超過預設 safety ceiling；
-- row id 升冪鎖定，鎖後再次驗證。
-
-Modules：
-
-- `FinanceReprocessEligibilityPolicy`
-- `FinanceReprocessBatchLoader`
-- `CanonicalRowRehydrator`
-- `FinanceReprocessCandidateBuilder`
-- `FinanceReprocessPlanFingerprint`
-- `FinanceReprocessReplayValidator`
-- `FinanceReprocessRunRepository`
-- `FinanceReclassificationEventRepository`
-- `FinanceReprocessResultBuilder`
-
-Preview：
-
-- 執行與 Apply 相同的 rehydrate、classification、dispatch candidate 與 desired alert calculation；
-- 不持久化 run、event、ledger、outbox 或 alert；
-- 回傳 DB identity、batch、classifier version、排序 row ids、before／after tuple、
-  counts 與 deterministic plan fingerprint。
-
-Apply：
-
-- 必須提供 Preview fingerprint、actor、idempotency key 與 expected batch version；
-- 鎖後以同一 candidate builder fresh rebuild；
-- fingerprint 不同時在任何 dispatch 前回傳 conflict；
-- 全批一個 outer Unit of Work，任一列失敗全批 rollback；
-- 只更新 changed classification-derived columns；
-- 每個 changed row 建立一筆 append-only event；
-- exact completed plan replay 回傳原 receipt，不重複 event 或 ledger。
-
-已存在正式交易但 reconciliation 仍 pending 是 invariant violation，停止整批並送出異常 intent，不自動修復。
-
-### 4.6 Query／Manifest
-
-Modules：
-
-- `FinanceImportBatchQuery`
-- `FinanceImportRowQuery`
-- `FinanceOccurrenceQuery`
-- `FinanceReprocessRunQuery`
-- `FinanceImportManifestMapper`
-- `FinanceImportTypedResultMapper`
-
-Query 永遠唯讀，不觸發 scan、reclassification、dispatch、alert refresh 或狀態轉移。API／CLI 只顯示 bounded summary；逐列結果必須使用明確 report export，且遮蔽敏感資料。
-
-成功明細整庫匯出依 `22` §15.4，可向獲授權帳務下載者提供原始銀行欄位，不授權 bounded summary／一般錯誤或 log 輸出完整帳號。人工補登依22 §19從已指定案件及正式款項發起，由原owner核銷成功後納入成功明細，保留人工來源及核銷關聯。新匯入無唯一案件時入庫前跳過；既有 staging／attempt／review及人工備查證據依原查閱契約保留，不回填為成功交易。銀行標籤不取消正式 client receipt／refund／staff payout 的 owner 身分。
-
-## 5. 正常匯入命令邊界
-
-### 已確認
-
-- 正常匯入與歷史重處理共用相同 normalizer、classifier、dispatch ports 與 transaction coordinator。
-- 正常匯入必須支援 full-path dry-run，rollback 後不得留下 batch、row、occurrence、ledger、outbox 或 alert。
-- Apply 是全批單一 transaction。
-- canonical duplicate 不重複 dispatch。
-
-### `FI-DEC-001` 已確認：自動 ingestion、人工確認正式帳務
-
-File Watcher 偵測到 `downloads/bank/*.xlsx` 後，只允許自動：
-
-- 驗證 stable file identity；
-- 保存 batch、canonical bank facts 與 occurrences；
-- 產生自動 classification；
-- 建立 Finance Import Preview 與 anomaly intent。
-
-不得自動建立 Client Finance／Staff Payables 等正式 ledger。人員必須先查看 Preview，
-確認後才可 Apply typed dispatch。
-
-Preview 至少顯示：
-
-- 來源列數、canonical 新增數與 duplicate occurrence 數；
-- 各帳務類型預計 dispatch 筆數與整數金額；
-- 預計建立、已存在、待分類、business pending 與 blocked 數；
-- 每筆預計關聯的案件、人員、義務及判定證據；
-- 異常原因、嚴重度、是否阻擋 Apply 與 available actions；
-- plan fingerprint、source content digest、classifier／fingerprint versions。
-
-一般 `non_business_review` 可留在待處理區，不得被當成已入帳。資料完整性異常、
-stale plan、fingerprint collision 或正式交易不一致則阻擋 Apply。
-
-### `FI-DEC-002` 已確認：修改來源分流
-
-人員不得直接修改 canonical bank fact，也不應把分類或主檔問題轉嫁成修改銀行 Excel。
-
-依錯誤來源分流：
-
-1. 銀行來源事實錯誤：
-   - 不編輯已匯入 row；
-   - 取得銀行正式更正版後重新 ingestion；
-   - 舊 source／batch／occurrence 保留，追加 `SourceSuperseded` event；
-   - 被 supersede 的 fact 不得 dispatch。
-2. Parser／欄位投影錯誤：
-   - 修正 versioned adapter 後對原 batch 重新 Preview；
-   - 若會改 fingerprint，必須先有 fingerprint compatibility migration；
-   - 不要求人員手改 Excel。
-3. 客戶、月嫂、帳戶或義務主檔缺漏：
-   - 由 owning Domain 介面修改主檔；
-   - 修改成功後重新產生 Finance Import Preview；
-   - Finance Import 介面不得直接改其他 Domain 根事實。
-4. Classification／關聯目標有歧義：
-   - 在 Finance Import Correction Workbench 選擇明確 classification 與既有 target；
-   - actor 與 evidence 必填，reason 選填；
-   - server 產生新的 manual decision candidate 與完整 batch Preview；
-   - 最終 Apply 才原子寫入 append-only classification decision event 與正式 ledger。
-5. 正式帳務已 Apply：
-   - 禁止修改 Excel、canonical fact 或既有 ledger；
-   - 只能由 owning Finance Domain 建立 reversal／adjustment／refund Preview→Apply。
-
-介面可選 classification、合法 target、reason 與 evidence；不可編輯交易日期、金額、
-方向、銀行帳號、cancellation code、raw payload、fingerprint、occurrence 或衍生狀態。
-
-Modules：
-
-- `FinanceImportCorrectionWorkbenchQuery`
-- `ManualClassificationCandidateBuilder`
-- `ManualClassificationEvidenceValidator`
-- `SourceSupersessionCandidateBuilder`
-- `CorrectionImpactPreviewBuilder`
-- `CorrectionApplyPolicy`
-
-### `FI-DEC-003` 已確認：異常存在時的 Apply 範圍
-
-同一 Preview 中：
-
-- 所有通過完整驗證的正式帳務 candidates 一次 Apply；
-- `non_business_review` 與 business pending 保留待處理，不建立正式 ledger；
-- integrity、collision、stale 或 formal-reference conflict 阻擋整批 Apply；
-- 補助退款的資金與代墊資格在正常 Preview 即由 Client Finance owner 檢查；一般／歷史訂單都先預檢本次擬建／沿用退款，再以該結果檢查接續核銷，不要求先有資料庫退款單。S先獨立計算、明細對象／用途依22 §17.4.2辨識，不以客戶款齊或人工事件作前置；原資金／先墊資格不足者保留 business pending，明示具體阻擋，不先標可入帳再等背景工作拒絕，也不阻擋其他合法 candidates。未到原成立時點與真正缺件分開，正式效果及可提交範圍沿B及原批次政策，不新增部分成功政策。
-- 不提供任意勾選略過一筆「其實已完整驗證」的 candidate。
-
-若人員認為某筆 candidate 不應入帳，必須先使用 Correction Workbench 提供原因與合法
-target，重新產生 Preview；不得以無稽核的 checkbox 讓分類結果與 Apply 結果分離。
-
-## 6. Owner review 與 current-issue Ports
-
-### 6.1 `finance_import_manual_review`：帳務區待確認
-
-普通 `non_business_review` 或分類／關聯目標暫時無法唯一判定的 canonical bank fact，
-逐筆轉入 Finance Import owner classification queue，不進入 `#anomalies`。已具有明確 business
-classification、但正式核銷仍 pending 的列，改用 owning Finance Domain 對應的既有
-owner work queue／current issue contract，不得一律改掛本代碼。Identity 綁定 canonical bank fact：
-
-- `work_item_code = finance_import_manual_review`
-- `source_domain = finance_import`
-- `source_type = canonical_bank_fact`
-- `source_id = <finance_import_row_id>`
-- 每個 canonical bank fact 最多一個 current owner review。
-
-Finance owner review 顯示：
-
-- 不可變銀行日期、整數金額、方向及遮蔽帳號；
-- 自動 classification、reason、合法候選對象與判定證據；
-- affected obligations、預計核銷結果與 available actions；
-- current fact version、review version 與 idempotency identity。
-
-人員在已確認唯一案件的帳務核對工作區，沿各銀行合法用途選擇 classification、正式 target 及 evidence，reason 選填。分類更正沿既有 correction impact Preview／Apply及「儲存更正並核銷」操作，不提供無唯一案件的人工選案；客戶入款確認前的期款、核銷額及全案餘額展示依22 §16.5.2。保留 selected allocation、版本與對象驗證，正式執行
-`CorrectAndPostFinanceImportRow`：
-
-已確認案件及對象而因金額、日期、正式款項多候選或其他owner資格未通過的銀行列，保留待核對原因及原流水，從「核對交易」進同案抽屜。已有合法款項者沿原選款流程；一般／歷史訂單尚無款項者，依22 §17.4.2及16 §2.5.5預檢擬建／沿用款項及接續核銷，通過後原套用時承接，不因查不到尚未建立的目標就關閉核對入口。同案不同銀行來源不因命中同一義務而判定疑似重匯。
-新來源無法唯一確認案件時入庫前跳過，不建立正式流水、待核對列或人工選案入口。
-未入帳清單只投影既存尚未正式處理的 canonical bank facts，包含 `manual_review`、`business_pending` 與 `blocked`；既存無唯一案件或缺有效虛擬帳號的流水只顯示明細與實際原因，不復活人工選案，也不據此允許同情況的新來源入庫。尚未形成 canonical bank fact 的來源格式警示保留匯入稽核，不混入銀行交易清單。Manifest筆數與清單使用相同範圍，沿owner正式入帳證據排除已處理列。標籤、原因及下一步提示共用實際原因碼，依22 §18.5，不另設原因判斷。
-正常匯入只呈現本次實際入帳筆數、已存在略過筆數與未入帳明細／原因，不並列可自動入帳、需人工處理及待業務配對等重疊統計，也不顯示一般批次狀態。符合入帳條件的 candidates 自動核銷，不等待人工核對或 business pending 完成；沿用 FI-DEC-003 的整批完整性阻擋規則，發生錯誤才顯示錯誤與影響。
-因整批錯誤而未執行的 ready candidates 也屬未入帳明細，須註明「符合條件但未執行」，不可誤報配對失敗；已持久化為 `create` 但沒有正式處理證據的列同樣保留。
-不得只顯示待配對筆數而沒有可完成的人工操作。
-同一銀行列已有 Client Finance 正式 receipt 時，批次待處理筆數及人工核對清單必須一併排除該列；以 owner immutable ledger 為準，不因舊分類事件仍是 business pending 或相容 reconciliation 欄位未更新，就重新列為待核銷。正常核銷、人工核銷及同檔重播後均由 Query 自動反映，不改寫銀行原始資料。
-
-```text
-lock canonical bank fact、review version、target obligations
-→ fresh rebuild correction candidate
-→ 驗證銀行金額完整 allocation；足額模式驗證所選款項結清，已核准部分核銷模式保留義務餘額
-→ append manual classification decision event
-→ owning Finance Domain append ledger／allocation
-→ append reconciliation receipt
-→ append owner receipt／outbox 與 durable current-issue recheck intent
-→ commit
-```
-
-任一步驟失敗全部 rollback，owner review 保持 current。UI 不直接連 DB，也不得送出 raw amount、
-derived balance 或 target status。若金額無法完整核銷，改提供 adjustment／refund／reversal
-等 owning Domain action，不得硬寫帳務。
-
-Exact retry 回原 receipt；相同 idempotency key 搭配不同 correction payload 固定 conflict。
-
-### 6.2 `IMPORT-006`：資料匯入完整性異常
-
-Finance Import 提供 `FinanceImportReviewDesiredState`，Anomalies 擁有 current alert projection。
-
-Identity：
-
-- `alert_code = IMPORT-006`
-- `source_domain = IMPORT`
-- `case_key = finance-import-batch:<batch_id>`
-- 每 batch 最多一筆。
-
-Allowed details：
-
-- batch id、format id、來源檔顯示名稱、batch status／time；
-- occurrence count、distinct canonical count；
-- fingerprint collision、invalid canonical row、missing occurrence、
-  non-pending inconsistency 與 partial batch counts；
-- direction／reason counts；
-- 最多 20 個 sample canonical row ids；
-- 最近 reprocess run 的 bounded summary。
-
-禁止 details：
-
-- 姓名；
-- 完整帳號；
-- raw payload；
-- 完整銀行列；
-- 可用於猜測 identity 的非必要欄位。
-
-Refresh（2026-08-29 current-state anomaly slimming supersession）：
-
-- import completion／reprocess completion 寫入 outbox intent；
-- projector post-commit 只對 bounded scope 依 fresh owner facts upsert present／delete absent；不寫
-  resolve、reopen、claim 或 workflow event；
-- projection failure 不回滾已提交的銀行根事實或正式 ledger；
-- historical scan 是明確 Command，只讀根事實並更新 projection；
-- 一般 Query 不 scan；
-- rescan 不 reclassify、不 dispatch、不新增 finance occurrence。
-
-Active predicate（2026-08-31 source-correction supersession）：
-
-```text
-active = owner_readback_incomplete
-         OR structural_ambiguity
-         OR (integrity_inconsistent_count > 0 AND no_terminal_correction_successor)
-```
-
-普通待分類筆數不啟動 `IMPORT-006`，只產生 6.1 的帳務待確認。Projection query 必須由
-occurrence membership CTE、bounded aggregate、grouped counts、`LIMIT 20` sample 及
-latest-run query 組成，不得把整批 canonical rows 載入記憶體。
-
-canonical source/root正確時只允許同batch/version owner deterministic rebuild。若人工確認original source
-本身錯誤，原batch／canonical rows／occurrences immutable，由新accepted batch在同一ingestion UoW保存
-exact `original_batch_identity + version -> corrected_successor_batch_identity + version` lineage；不得用filename、
-金額、姓名、row similarity或時間推測。successor必須唯一、completed、fresh verified且完整承接所有current
-integrity problems，否則原issue保持active。
-
-`integrity_inconsistent_count = 0` 或上述terminal successor成立，且 bounded recheck authoritative complete 時直接刪除
-current row。問題再次出現時以相同 stable `issue_key` 建立新 episode；不存在人工
-resolve、reopen 或 claimed metadata。Finance Import batch、canonical bank facts、owner occurrences、
-classification、ledger／allocation 與 receipts 仍保留在 Finance owner，不得被 anomaly cleanup 刪除。
-
-## 7. Typed Commands／Results／Errors
-
-Commands：
-
-- `NormalizeFinanceWorkbook`
-- `PreviewFinanceImport`
-- `ApplyFinanceImport`
-- `PreviewFinanceReprocess`
-- `ApplyFinanceReprocess`
-- `PreviewFinanceImportCorrection`
-- `ApplyFinanceImportCorrection`
-- `CorrectAndPostFinanceImportRow`
-- `ScanFinanceImportReviewAlerts`
-- `QueryFinanceImportBatch`
-- `QueryFinanceImportRun`
-
-Stable errors：
-
-- `invalid_source_file`
-- `unsupported_bank_format`
-- `invalid_canonical_row`
-- `strict_decode_failed`
-- `batch_not_found`
-- `batch_not_completed`
-- `batch_too_large`
-- `stale_preview`
-- `idempotency_conflict`
-- `classification_conflict`
-- `manual_evidence_required`
-- `source_superseded`
-- `source_supersession_conflict`
-- `reconciliation_invariant_violation`
-- `dispatch_rejected`
-- `downstream_unavailable`
-- `transaction_failed`
-
-只有 `downstream_unavailable`、deadlock 或明確 transient storage error 可依相同 idempotency identity bounded retry。Validation、stale、identity ambiguity 與 business rejection 不重試。
-
-## 8. Transaction／Retry／Conflict
-
-- Normalization 是 transaction 外的 pure phase。
-- Preview 不持久化。
-- Apply 取得 batch／row locks 後 fresh rebuild。
-- 同一 Apply 的 batch、canonical row、occurrence、classification、owning Domain ledger、
-  lifecycle intent、reprocess audit、idempotency receipt 與 outbox 共用 outer Unit of Work。
-- 各 Domain port 不得自行 commit 或建立第二個 connection。
-- Alert current projection 由 outbox post-commit 更新，不參與正式 ledger atomicity。
-- Retry 必須沿用相同 canonical payload、idempotency key 與 expected version。
-- 相同 key／相同 payload 回原 receipt；相同 key／不同 payload 固定 conflict。
-
-## 9. Application Adapters
-
-- File Watcher：只偵測 stable file、建立 command、呈現 typed outcome；不得連 DB、
-  解析 manifest 或自行 upsert alert。
-- Import CLI：只解析參數、呼叫 application contract、輸出 bounded summary。
-- Reprocess CLI：預設 Preview；Apply 必須 actor、plan fingerprint、idempotency key。
-- FastAPI：需要遠端管理入口時映射相同 contract，不另寫業務邏輯。
-- Streamlit：只顯示 typed query／preview／apply result；本輪不提供 reprocess Apply UI。
-
-### 9.1 React 正常匯入 terminal receipt
-
-React 正常匯入由人員選擇工作簿後點擊一次「匯入銀行交易明細」，系統依序執行 `Upload/Ingest → Batch Preview → durable Apply → terminal receipt`；不提供額外人工預覽、確認勾選或純確認視窗。原因選填，空白不阻擋。內部 Preview 零寫入；只有 `apply_allowed` 且存在 ready-dispatch candidates 時自動提交 Apply，阻擋或零筆候選不提交。
-
-處理中鎖定檔案及原因；受理結果未明時使用「以原操作確認匯入結果」重送相同命令，工作已受理但結果未明則只重新查詢，不建立另一筆 Apply。終態後自動回讀人工核對清單及帳務資料；重新選檔才能開始下一次操作。畫面不得在收到受理或正式結果前宣稱已入帳。
-
-Ingest
-與 Apply 的相同 idempotency key 必須分別回原 receipt／同一 job，並以 server-authoritative `replayed`
-明示重播；不得以新的 command identity 偽裝 retry。Apply 的 `202 Accepted` 只代表 durable job 受理，
-只有 batch job 進入 `succeeded` 且由 `finance_import_apply_receipts` 的 immutable typed receipt 查回
-`resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 時，UI 才可顯示正式
-入帳完成。job 的通用 `result_reference` 不是 receipt substitute，也不得公開 raw job payload。
-
-現況 `scripts/file_watcher.py` 使用位置參數呼叫已要求 `--excel-path` 的 CLI，且自行處理 `IMPORT-002`；這是 live drift，不是新架構契約。
-
-## 10. pytest 分層
-
-### Module
-
-- 各 adapter 對真實格式 fixture 的 canonical output。
-- fingerprint version、duplicate identity 與 balance boundary。
-- cancellation code projection。
-- classification vocabulary 與 transition policy。
-- plan fingerprint deterministic。
-- typed error mapping。
-
-### Subsystem
-
-- 同批首次匯入的兩個來源位置保留1個canonical／2個occurrences，只產生一次分類與核銷候選；跨檔已存在者只保存本次receipt／重複筆數，原pending或已核銷狀態不變，不新增本批待核銷成員。
-- staging 後 classifier／dispatch failure 全批 rollback。
-- dry-run 零持久化。
-- reprocess changed／unchanged／stale／exact replay。
-- row lock 後失去 eligibility 時零 dispatch。
-- `IMPORT-006` bounded privacy desired state。
-- File Watcher／CLI 只呼叫 application contract。
-
-### Domain
-
-- Legacy、Sinopac、Taishin incoming／outgoing 完整流程。
-- ambiguity 永不以姓名或金額猜測。
-- Client Finance／Staff Payables 各自拒絕錯誤 allocation。
-- classification 可完成但 reconciliation pending。
-- formal transaction、classification、audit、receipt 與 outbox 原子一致。
-
-### Global
-
-- Finance Import → Client Finance → Orders deposit lifecycle → Anomalies。
-- Finance Import → Staff Payables／Payroll → Anomalies。
-- projector failure 後重試不重複 ledger。
-- real-format Excel 加真實 MySQL；不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，僅操作 current scenario-owned 資料並保存 before／after，不得使用 production DB。
-
-## 11. 現況吸收與退出
-
-先前列為「可吸收」的 service compatibility modules 已完成退出；正式 runtime 僅使用
-`domains/finance_import/` 的 classifier／cancellation-code 與
-`subsystems/finance_import/` 的 typed ingestion、application、reprocessing、query、
-reconciliation-dispatch workflows。`services/finance_cancellation_code.py` 的重複 helper、
-`services/finance_import_states.py` 的無 caller characterization state contract、以及
-`services/finance_import_dispatch.py` 的舊 dispatcher compatibility import 已移除；不得重新
-建立這些 import path。
-
-開始實作前必須修正的漂移：
-
-- Application Service 函式過長且混合 orchestration、SQL、manifest 與 transaction。
-- 正常匯入預設 Apply 且沒有 Preview fingerprint。
-- File Watcher caller 參數已與 CLI contract 漂移。
-- File Watcher 直接連 DB、寫 alert 且使用 replacement decoding。
-- `project_finance_import_review_alert` 直接寫 Anomalies projection，Domain ownership 混合。
-- 全交易 rollback 時 `failed` batch 不會持久存在，與 batch vocabulary 語意不完整。
-- 部分既有 writer 仍直接修改 Orders status。
-
-以上是 implementation gap，不得反向改寫本文件的目標邊界。
+1. Unit／Module 驗證 Legacy、Sinopac、Taishin 原生格式解析、deterministic fingerprint、分類詞彙、plan fingerprint 與 typed error mapping 正確無缺。
+2. Subsystem 驗證同批重複留 `1` canonical ＋ 多 occurrences、跨批重複僅計 receipt 數而不重複建待核銷成員、dry-run 零寫入、reprocess exact replay 與 stale 拒絕、`IMPORT-006` 隱私邊界。
+3. Global E2E（real-format XLSX ＋ isolated MySQL）驗證 Finance Import → Client Finance（三階段收款、多筆補款合計、取消補退）／Staff Payables（0～100 元手續費、P永/P台）／Government Subsidy／Orders 訂金推進／React terminal receipt 與全批失敗原子回滾。

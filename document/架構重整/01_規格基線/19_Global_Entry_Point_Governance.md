@@ -1,121 +1,85 @@
 # Global Entry Point Governance
 
-## 1. Current boundary
+## 1. 文件邊界與所有權
 
-管理端唯一 current UI source 是 `ui_react/`。舊 `ui/` Streamlit tree 已於 2026-09-02 依人工裁決從工作樹移除；不得再把 Git 歷史、舊文件、舊測試、rollback metadata 或 generated queue 當成 current entry evidence。
+- 狀態：`current-spec`
+- Owner：Global Entry Point / Shell Governance
+- 單一負責範圍：管理端 React 正式導航／render 路由、相容 hash alias、已停用 API（410 Gone）邊界、本機標準開發入口與 NAS 維護腳本契約。
+- 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Global Deployment 與治理](18_Global_Deployment與治理正式規格.md)、[案件與月嫂整合名冊正式規格](33_案件與月嫂整合名冊正式規格.md)
 
-正式管理端入口由兩個直接事實共同成立：
+## 2. 管理端 React 正式入口
+
+管理端唯一前端為 `ui_react/`。正式入口必須同時存在於以下兩處，僅存其一即視為 registry drift：
 
 1. `ui_react/src/components/MasterLayout.tsx` 宣告可達 navigation entry；
-2. `ui_react/src/App.tsx` 對相同 page identity 有實際 render branch。
+2. `ui_react/src/App.tsx` 對相同 page identity 具備 render branch。
 
-只有其中之一存在時視為 registry drift，不得宣稱功能可達。
-
-## 2. Current React entries
-
-下列清單記錄現行 navigation 與 render branch 的共同 identity，不另行定義業務功能或復活已退役入口：
+### 2.1 現行導航與頁面清冊
 
 - `order-workbench-v2`
 - `scheduling`
 - `staff`
-- `clients`
+- `clients`（`#data-browser`、`#databrowser`、`#client-roster` alias 均解析至此頁，使用 `ClientRegistryPage`）
 - `data-import`
 - `reports`
-- `line-management` — 客服與營運（客服案件、身分與授權、案件群組）。
-- `line-notifications` — 通知與寄送（通知與發送、寄送與異常）。
-- `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖）。
-- `line-ai-events` — AI 客服工作室（常見問答、引導動作、回答測試、回饋分析、模型設定）。
-
-2026-11-05 人工裁決重整 LINE 專區導航與責任邊界：原 `line-management` 七個分頁依客服、營運與設定責任拆分為 `line-management`（客服與營運）、`line-notifications`（通知與寄送）與 `line-interface`（LINE 介面設定）；原獨立側欄入口 `line-liff-studio`（表單）併入 `line-interface` 分頁，原獨立側欄入口 `line-llm-settings`（AI 模型設定）併入 `line-ai-events`（AI 客服工作室）模型設定分頁。舊 `line-llm`／`line-llm-settings` hash 解析至 `line-ai-events` 模型設定分頁；舊 `line-studio`／`line-liff-studio` 解析至 `line-interface` 表單分頁；舊 `line-management?tab=` 之 `push_queue`、`delivery`、`richmenu`、`message_flow`、`liff` 依責任導向 `line-notifications` 或 `line-interface`。此為前端導覽重整，不改任何後端 owner、API 或 contract。
+- `line-management` — 客服與營運（客服案件、身分與授權、案件群組）
+- `line-notifications` — 通知與寄送（通知與發送、寄送與異常）
+- `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖）
+- `line-ai-events` — AI 客服工作室（常見問答、引導動作、回答測試、回饋分析、模型設定）
 - `finance`
 - `accounting-parameters`
-- payment-reminder-settings — 帳務作業內的帳務通知排程條件與10則帳務LINE範本設定。
-- `database-backup` — 稽核與系統內的每日備份時間與狀態，owner 為 Global migration §9.5。
+- `payment-reminder-settings` — 帳務通知排程條件與 10 則帳務 LINE 範本設定
+- `database-backup` — 每日備份時間與狀態（owner 為 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md)）
 - `account-management`
 - `contract-templates`
 
-依 `33_案件與月嫂整合名冊正式規格.md` 的名冊裁決，`data-browser` 相容深連結顯示客戶名冊，不再開啟 `DataImportPage` 的六來源分頁。现行 `databrowser` 與 `client-roster` aliases 亦映射至 `clients`，使用同一個 `ClientRegistryPage`；此為頁面解析，不要求網址立即改寫。
+### 2.2 相容 Deep Link 解析規則
 
-`order-tracker`、`orders` 與獨立 `system-status` 已不在上述正式導航及 render branches。系統狀態的既有 snapshot Query 與 shell 指示器仍保留，不因獨立頁面退出而刪除。
+- `#line-llm`／`#line-llm-settings` → `line-ai-events` 模型設定分頁。
+- `#line-studio`／`#line-liff-studio` → `line-interface` 表單分頁。
+- `#line-management?tab=push_queue|delivery|richmenu|message_flow|liff` → 依責任導向 `line-notifications` 或 `line-interface`。
+- `#finance?tab=payment-destination` → 導向 `finance` 每月帳務。
+- 已移除側欄入口之未知或 retired hash（包含 `#anomalies`、`#storage-management`、`#file-settings`、`#historical-service-accounting`、`#line-security`、`#order-tracker`、`#orders`、`#system-status`）：沿用 App 未知 hash 預設規則顯示待辦看板，不建立替代獨立頁面。
+- `system-status` 雖無獨立頁面，仍保留右上角 shell 狀態指示器與 `GET /api/v1/system/status/performance-snapshot` 唯讀 Query。
 
-2026-11-05 人工裁決退役帳務作業之「歷史服務天數」(historical-service-accounting) 獨立導航入口與頁面，其歷史實際服務天數填寫與帳務重算面板改內嵌於客戶名冊詳情抽屜（ClientRegistryDetailEditor）之案件帳務區塊原地操作。舊 #historical-service-accounting 導航項目移除，未知 hash 沿用 App 既有規則導向待辦看板。
+## 3. API 與 CLI 入口治理與已停用契約
 
-2026-10-30 人工裁決退役稽核與系統之「儲存空間管理」(`storage-management`) 與「檔案設定」(`file-settings`) 兩處 UI 頁面入口與導航項目。既有後端 30 天自動排程清理 (`run_automatic_retention_cycle`)、檔案傳輸安全預設限制（照片 10MB、履歷 20MB）及 API 保持運作，但不再於管理端側欄呈現維護畫面。舊 `#storage-management` 與 `#file-settings` 沿用 App 既有未知 hash 規則導向待辦看板。
+### 3.1 入口保留判斷基準
 
-## 3. Removed Streamlit surface
+API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，必須逐一確認 current owner、public／operator contract、replacement、實際 callers 與 focused readback。
 
-下列資產已退役，不得復活為 current dependency：
+### 3.2 已停用／移除之端點與替代邊界
 
-- `ui/` 與 `.streamlit/`
-- Streamlit API clients、pages、components 與 navigation helper
-- Streamlit rollback deep links
-- `react_admin_entrypoints.json` 與 `react_admin_retirement_requirements.json`
-- `entrypoint_review_queue_v1.jsonl` 與只為該 queue 存在的 generator／validator
-- Streamlit compatibility Docker image、build、setup 與 publish scripts
-- 直接 import 或讀取 `ui/` source 的測試
+- **銀行無案件人工新增**：`POST /api/v1/finance-import/statements/manual` 經認證後固定回 typed 410；案件手動補登改用案件抽屜正式補登入口。既有備查紀錄另保留 `GET /api/v1/finance-import/statements/manual/export` 唯讀下載。
+- **政府補助舊逐案入口**：改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷；原 claim planning／submission／approval、逐案 receipt、offset 與 advance settlement POST 端點回 410，durable worker 拒絕建立舊命令；歷史 Query 與原交易沖正保留。
+- **舊帳戶維護端點**：`/api/v1/client-finance/payment-destination`（GET、`/preview`、`/apply`）已自路由與 OpenAPI 移除。
+- **月嫂履歷暫存下載**：`GET /api/v1/matching-confirmation-files/{token}` 回 typed 410 Gone；履歷改由業務線下傳送，LINE 排班確認卡片不嵌入下載連結。
+- **Data Browser 原始資料表端點**：僅依名冊契約保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 之 authenticated bounded archive Query；移除 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 路由。
+- **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
+- **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
+- **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
-歷史內容需要追溯時從 Git history 讀取，不回存 current worktree。
+### 3.3 Windows NAS 維護入口
 
-## 4. API 與 CLI entry
+- `initialize_nas_schema.bat`：僅執行備份後的 candidate 安全升級，不委派 fresh／reset（低階 Python／Unix `.sh` 仍保留供 disposable 環境測試）。
+- `backup_nas_database.bat` 與 `restore_nas_database.bat`：提供明確備份／還原操作。
+- `GET /api/v1/system/database-backup` 與 `PUT /api/v1/system/database-backup/schedule`：限已認證管理員查閱狀態與設定每日備份時間，不提供 reset、SQL 執行、備份下載或網頁復原。
 
-API endpoint 與 operator CLI 需依 current objective 個別判定：
-
-- current owner 與實際用途；
-- public／operator contract；
-- replacement 是否存在；
-- source removal 後是否仍有 current caller；
-- focused regression 或直接 readback。
-
-不得因 UI 已改為 React，自動刪除仍被 React、worker、provider 或操作人員使用的 API／CLI。
-
-2026-10-30 Windows NAS 維護人工裁決：`initialize_nas_schema.bat` 的 operator contract 改為備份後的
-candidate 安全升級，不再委派 fresh/reset；新增 `backup_nas_database.bat`、`restore_nas_database.bat`。
-低階 Python fresh initializer／Unix `.sh` 仍有 technician/disposable consumer，保留原功能與直接測試。
-`GET /api/v1/system/database-backup` 與 `PUT /api/v1/system/database-backup/schedule` 只供既有 authenticated
-內部使用者查閱狀態／修改本機每日備份時間，不提供資料庫 reset、SQL 執行、備份下載或網頁復原。
-新舊 entry 的 owner／驗收及作用上限依 Global migration §9.5；正式排程與 NAS Apply 不由開發驗收啟用。
-
-2026-10-13 人工裁決退役 HCM 修正版工作簿各頁面入口與 `/api/v1/case-import/hcm/resubmissions/{preview|apply}`。
-保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake、已提交 correction outbox 與全部歷史證據。
-2026-10-16 最新人工裁決直接移除異常審核頁、側欄及專用鈴鐺入口，不新增替代清單，也不搬移 HCM／import／LINE 逐筆略過或 LINE 人工重送操作。此裁決 supersede 前述管理端入口保留要求；既有後端 API、Query／Preview／Apply、audit／receipt、worker 與資料不在移除範圍。舊 `#anomalies` 沿用 App 既有未知 hash 規則顯示待辦看板。
-
-Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 的 authenticated、bounded archive Query。舊 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 不屬此保留範圍；其路由已移除，不提供原始 rows、欄位或舊 editable metadata，也不新增相容 writer。Smoke 工具使用現行 OpenAPI 與明確 fixture，不自動展開原始資料表。
-
-
-
-2026-10-30 人工裁決退役「月嫂履歷暫存下載」端點（`GET /api/v1/matching-confirmation-files/{token}` 回應 typed 410 Gone），月嫂履歷改由業務線下直接傳送，LINE 排班確認卡片不嵌入下載連結；環境變數 `MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET` 與 `CONTRACT_FINAL_PREVIEW_TOKEN_SECRET` 一併自 `.env.example` 移除，相關防偽/加密改由內部密鑰自動處理。
-
-2026-11-02 使用者明確退役 Finance 工作台「舊帳戶維護」與 `/api/v1/client-finance/payment-destination` 的 GET、`/preview`、`/apply`。API 自路由與 OpenAPI 移除，不留替代讀寫入口；舊 `#finance?tab=payment-destination` 回既有每月帳務。專屬設定、事件及收據資料依規格 10 受控移除，舊契約帳戶維護規格不再有效；本案虛擬帳號及 `account-management` 登入帳號管理保留。
-
-銀行無案件人工新增 `POST /api/v1/finance-import/statements/manual` 已停用，經既有認證後回 typed 410，不能寫入或回放舊新增成功結果。案件補登改用規格22 §19原正式核銷入口。成功匯出只接受正式核銷證據；既有人工備查另經 `GET /api/v1/finance-import/statements/manual/export` 唯讀下載，不混入成功匯出、不刪除原紀錄。
-
-## 5. Standard local runtime
+## 4. Standard local runtime
 
 標準本機管理端固定為：
 
 1. FastAPI `127.0.0.1:8000`
 2. React/Vite `127.0.0.1:5173/admin/`
 
-`scripts/launchers/start_local_development.bat` 與 `.sh` 不得啟動 Streamlit、檢查 8501，或要求 `ui/app.py`。React 透過 relative `/api` proxy 呼叫同一 FastAPI owner。
+`scripts/launchers/start_local_development.bat` 與 `.sh` 僅啟動 FastAPI 與 React/Vite（透過 relative `/api` proxy 連線）。`--dry-run` 僅檢查 current dependencies；`--smoke-test` 僅啟動 owned FastAPI＋React 執行 GET-only readiness 後清理。
 
-`--dry-run` 只檢查 current dependencies；`--smoke-test` 只建立本次擁有的 FastAPI＋React process，執行 GET-only readiness 後清理。
+## 5. 驗收標準
 
-## 6. Verification
+管理端入口的最低充分驗證為：
 
-管理端 entry 的最低充分驗證是：
-
-- navigation identity 存在；
-- render branch 存在；
+- `MasterLayout.tsx` navigation identity 存在；
+- `App.tsx` render branch 存在；
 - page module 可被 TypeScript build／test 載入；
-- 直接相關 typed API client 與 focused UI test 通過。
-
-不得再要求 Streamlit rollback、retention window、removal receipt 或舊 queue 一致性來驗證 current React entry。
-
-## 政府補助現行入口
-
-政府入款與代墊回收改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷。原 claim planning／submission／approval、逐案 receipt、offset，以及逐案 advance settlement POST 入口回 410，指向整期工作台；既有歷史 Query 與原交易沖正保留。Durable worker 拒絕舊 claim／receipt 建立命令；runtime 不再消費逐案 allocation 進行代墊回收。申請與核准作業在系統外辦理，不保留舊操作關卡。
-
-
-### 2026-10-30 管理員通知對象入口退役
-
-React `line-security` 的導航、hash alias 與 render branch 一併移除；舊 hash 沿用未知入口的既有預設頁處理，不另建相容頁。管理員系統狀態移至既有 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，不新增獨立頁或 LIFF target。歷史 target 查詢保留；舊設定 mutation 由 LINE owner 明確拒絕。
+- 直接相關 typed API client 與 focused UI test 通過；
+- 已停用 410／移除路由均回傳預期 typed status 且無寫入副作用。
