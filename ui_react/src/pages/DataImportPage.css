@@ -189,3 +189,44 @@
 .datacenter-tab-btn.active:hover { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 [data-surface-id="finance.historical-service-accounting.page"] button:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 [data-surface-id="finance.historical-service-accounting.page"] button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.beclass-pairing { display: grid; gap: 12px; }
+.beclass-pairing :is(h4, h5, p) { margin: 0; }
+.beclass-pairing p { color: #795d43; font-size: 13px; }
+.beclass-pairing-board { position: relative; display: grid; align-items: start; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(26px, 7vw, 88px); }
+.beclass-pairing-column { display: grid; gap: 10px; min-width: 0; }
+.beclass-pairing-column h5 { background: #fffaf7; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.beclass-pairing-column:last-child h5 { background: #f1f5f9; }
+.beclass-pairing-card { --pairing-wire: var(--md-sys-color-primary); position: relative; border: 1px solid #f2e2dc; border-radius: 10px; background: #fff; }
+.beclass-pairing-card.alternate { --pairing-wire: #25688b; }
+.beclass-pairing-card.active { background: #fff7ed; }
+.beclass-pairing-card:is(.active, .linked) { border-color: var(--pairing-wire); }
+.beclass-pairing-pick { display: grid; gap: 4px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.beclass-pairing-pick:hover:not([aria-disabled="true"]) { background: #fffaf7; }
+.beclass-pairing-pick[aria-disabled="true"] { cursor: default; }
+.beclass-pairing-pick > strong { font-size: 15px; }
+.beclass-pairing-pick small { color: #795d43; font-size: 12px; }
+.beclass-pairing-facts { display: grid; gap: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.beclass-pairing-facts small { display: inline-block; margin-right: 4px; }
+.beclass-pairing-state { color: #795d43; font-size: 12px; font-weight: 600; }
+.beclass-pairing-card:is(.active, .linked) .beclass-pairing-state { color: var(--pairing-wire); }
+.beclass-pairing-port { position: absolute; z-index: 2; top: 23px; width: 10px; height: 10px; border: 2px solid #a28c83; border-radius: 50%; background: #fff; pointer-events: none; }
+.beclass-pairing-card.source .beclass-pairing-port { right: -5px; }
+.beclass-pairing-card.target .beclass-pairing-port { left: -5px; }
+.beclass-pairing-card:is(.active, .linked) .beclass-pairing-port { background: var(--pairing-wire); border-color: var(--pairing-wire); }
+.beclass-pairing-wires { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+.beclass-pairing-wires path { fill: none; stroke: var(--md-sys-color-primary); stroke-width: 2.5; stroke-linecap: round; }
+.beclass-pairing-wires path.alternate { stroke: #25688b; }
+.beclass-pairing-unlink { min-height: 36px; margin: 0 8px 4px; padding: 4px; border: 0; border-radius: 6px; background: transparent; color: #795d43; font: inherit; font-size: 12px; cursor: pointer; }
+.beclass-pairing-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid #f2e2dc; }
+.beclass-group-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 600; }
+.beclass-group-picker select { max-width: 100%; min-height: 42px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: inherit; padding: 6px 10px; font: inherit; }
+.beclass-drawer-actions { display: flex; align-items: center; flex-wrap: wrap; width: 100%; gap: 8px; }
+.beclass-drawer-actions p { margin: 0 auto 0 0; font-size: 13px; color: #795d43; }
+.beclass-pairing-secondary { min-height: 44px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #57423b; padding: 8px 16px; cursor: pointer; }
+.beclass-confirmed-pairs { list-style: none; padding: 0; margin: 0; }
+.beclass-confirmed-pairs li { padding: 8px 0; border-bottom: 1px solid #f2e2dc; }
+.beclass-binding-results summary { cursor: pointer; font-weight: 700; padding-bottom: 8px; }
+@media (max-width: 560px) {
+  .beclass-pairing-pick { padding: 8px; }
+  .beclass-pairing-facts small { display: block; }
+}

@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/pages/DataImportPage.tsx`
-- `ui_react/src/pages/DataImportPage.css` — four-metric import presentation。
+- `ui_react/src/pages/DataImportPage.css` — 匯入統計、結果與客戶 BeClass 左右配對樣式。
 - `ui_react/src/adapters/workbook_import_result_adapter.ts` — project typed owner receipts into source／imported／duplicate／not-imported counts without counting review overlays twice。
 
 ## Dependencies
@@ -19,7 +19,7 @@
 - inbound: authenticated React application navigation。
 
 ## Contracts
-- 匯入頁維持只顯示四種互斥筆數與問題／未匯入列明細（含跨案件月嫂排程重疊的對造 Excel 列號與案件期間說明，以及 Preview／Apply 驗證失敗時的 `衝突與錯誤明細` 列號與案件表格），不顯示應收、應付、樓層費、單雙薪等正常帳務明細。
+- 匯入頁顯示四種互斥筆數與問題／未匯入列明細（含跨案件月嫂排程重疊的對造 Excel 列號與案件期間說明，以及 Preview／Apply 驗證失敗時的 `衝突與錯誤明細` 列號與案件表格）。客戶 BeClass 另由 Case Import 人工配對元件承接確認流程及回執的人工綁定明細。
 - 匯入等待與結果未確認時維持換檔／重複送出鎖，允許側邊導覽與匯入類型切換；不提供「停止等待」。離開匯入頁停止後續確認，不取消已送出的 Apply。未知結果仍顯示實際去敏錯誤原因及穩定代碼。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §5.2 — four exclusive counters、未匯入明細及 bounded same-key 結果確認。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption presentation boundary。

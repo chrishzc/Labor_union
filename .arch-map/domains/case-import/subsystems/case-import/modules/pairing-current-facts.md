@@ -22,7 +22,10 @@
 - `api/routes/client_beclass_import.py`
 - `api/schemas/client_beclass_import.py`
 - `ui_react/src/api/case_import/client_beclass_workbook/client.ts` — immutable workbook Preview／Apply transport。
+- `ui_react/src/api/case_import/client_beclass_workbook/schemas.ts` — 候選案件、確認配對及綁定結果契約。
+- `ui_react/src/adapters/case_import/client_beclass_workbook_adapter.ts` — 預覽分類筆數守恆及候選資料投影。
 - `ui_react/src/api/case_import/client_beclass_workbook/errors.ts` — typed 匯入失敗與結果待確認說明。
+- `ui_react/src/components/ClientBeClassWorkbookPairing.tsx` — 客戶 BeClass 預覽的逐組配對抽屜、左右連線與整批確認。
 - `domains/case_import/cooking_requirement.py`
 - `subsystems/case_import/hcm_beclass_reconciliation.py`
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
@@ -44,6 +47,7 @@
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。
+- `ui_react/src/pages/DataImportPage.tsx` — 客戶 BeClass 工作簿預覽、確認匯入與綁定明細。
 - cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_registry_correction_disposable_mysql.py` — independent registry edits, absent roots and repeated assigned corrections; Case Import subsystem owns this integration proof.
 
 ## Verification

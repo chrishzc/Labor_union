@@ -14,6 +14,8 @@ export interface WorkbookImportResult {
   notImportedCount: number | null;
   replayedWorkbook: boolean;
   absentOrderCancellationCount?: number;
+  manualBindings?: ClientBeClassWorkbookReceipt['manual_bindings'];
+  requiresRepreview?: boolean;
   notImportedRows: Array<{ sourceRow: number; identifier: string | null; fields: string[]; reasons: string[] }> | null;
 }
 
@@ -22,6 +24,7 @@ const REASON_LABELS: Record<string, string> = {
   client_case_binding_no_client: '姓名與電話找不到可配對的客戶',
   client_case_binding_multiple_clients: '姓名與電話對應多位客戶，無法確定對象',
   client_case_binding_case_not_unique: '客戶沒有唯一可配對案件',
+  case_import_candidate_stale: '案件已無法綁定，請重新預覽後再選案',
   blocked_identity: '姓名或身分證字號缺漏／格式錯誤',
   identity_conflict: '身分資料與既有人員衝突，無法確定對象',
   unmatched_case: '找不到對應案件',
@@ -208,10 +211,15 @@ export function adaptHcmImportResult(receipt: HcmWorkbookReceipt): WorkbookImpor
 }
 
 export function adaptClientBeClassImportResult(receipt: ClientBeClassWorkbookReceipt): WorkbookImportResult {
-  return result(receipt.source_row_count, receipt.created_count,
+  const summary = result(receipt.source_row_count, receipt.created_count,
     receipt.exact_replay_count + receipt.existing_source_count,
     receipt.review_required_count + receipt.existing_conflict_count, receipt.replayed_workbook,
     receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.query_no, fields: row.fields, reasons: row.issue_codes.map(reasonLabel) })) ?? null);
+  return {
+    ...summary,
+    manualBindings: receipt.manual_bindings ?? [],
+    requiresRepreview: receipt.row_issues?.some(row => row.issue_codes.includes('case_import_candidate_stale')),
+  };
 }
 
 export function adaptStaffHistoricalImportResult(receipt: StaffHistoricalWorkbookReceipt): WorkbookImportResult {

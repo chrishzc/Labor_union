@@ -8,6 +8,31 @@ export const ClientBeClassSha256Schema = z
   .string()
   .regex(/^[0-9a-f]{64}$/, '預期 64 位小寫 Hex SHA-256');
 
+const ClientBeClassPairingSchema = z.strictObject({
+  source_row: z.number().int().min(2),
+  case_no: z.string().min(1).max(50),
+});
+export type ClientBeClassPairing = z.infer<typeof ClientBeClassPairingSchema>;
+
+const ClientBeClassManualRowSchema = z.strictObject({
+  source_row: z.number().int().min(2),
+  query_no: z.string(),
+  name: z.string(),
+  masked_phone: z.string(),
+  city: z.string().nullable(),
+  submitted_at: z.string().nullable(),
+  case_nos: z.array(z.string()).min(1),
+});
+
+const ClientBeClassCandidateSchema = z.strictObject({
+  case_no: z.string(),
+  name: z.string(),
+  masked_phone: z.string(),
+  city: z.string().nullable(),
+  created_at: z.string().nullable(),
+  start_date: z.string().nullable(),
+});
+
 export const ClientBeClassWorkbookPreviewSchema = z
   .object({
     source_content_digest: ClientBeClassSha256Schema,
@@ -24,6 +49,8 @@ export const ClientBeClassWorkbookPreviewSchema = z
       fields: z.array(z.string()),
       issue_codes: z.array(z.string()),
     })).optional(),
+    manual_rows: z.array(ClientBeClassManualRowSchema).optional(),
+    candidates: z.array(ClientBeClassCandidateSchema).optional(),
   })
   .strict();
 
@@ -49,6 +76,7 @@ export const ClientBeClassWorkbookReceiptSchema = z.object({
   existing_conflict_count: z.number().int().min(0),
   existing_source_count: z.number().int().min(0),
   replayed_workbook: z.boolean(),
+  manual_bindings: z.array(ClientBeClassPairingSchema.extend({ query_no: z.string() })).optional(),
   row_issues: z.array(z.strictObject({
     source_row: z.number().int().positive(),
     query_no: z.string().max(100).nullable(),

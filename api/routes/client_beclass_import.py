@@ -10,12 +10,13 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from pydantic import TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.client_beclass_import import get_client_beclass_workbook_import_service
 from api.schemas.base import BaseResponse
-from api.schemas.client_beclass_import import ClientBeClassWorkbookPreviewView, ClientBeClassWorkbookReceiptView
+from api.schemas.client_beclass_import import ClientBeClassPairingSelection, ClientBeClassWorkbookPreviewView, ClientBeClassWorkbookReceiptView
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
@@ -27,6 +28,7 @@ router = APIRouter(prefix="/api/v1/case-import/client-beclass/workbooks", tags=[
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)]
+_Pairings = TypeAdapter(list[ClientBeClassPairingSelection])
 
 
 @router.post("/preview", response_model=BaseResponse[ClientBeClassWorkbookPreviewView])
@@ -39,7 +41,7 @@ async def preview_client_beclass_workbook(
     del principal
     return await _with_workbook(
         workbook,
-        lambda path: service.preview(str(path)),
+        lambda path: service.preview(str(path), manual_pairing=True),
         "Client BeClass Preview 已完成",
         correlation_id,
     )
@@ -53,16 +55,22 @@ async def apply_client_beclass_workbook(
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_admin),
     service=Depends(get_client_beclass_workbook_import_service),
+    manual_pairings: str = Form("[]"),
 ):
+    def apply(path):
+        try:
+            selections = _Pairings.validate_json(manual_pairings)
+        except ValidationError:
+            raise ValueError("client_beclass_manual_pairings_invalid") from None
+        return service.apply(
+            str(path), idempotency_key, preview_fingerprint,
+            str(principal.username or "admin"), correlation_id,
+            manual_pairings=tuple((item.source_row, item.case_no) for item in selections),
+        )
+
     return await _with_workbook(
         workbook,
-        lambda path: service.apply(
-            str(path),
-            idempotency_key,
-            preview_fingerprint,
-            str(principal.username or "admin"),
-            correlation_id,
-        ),
+        apply,
         "Client BeClass Apply 已完成",
         correlation_id,
     )

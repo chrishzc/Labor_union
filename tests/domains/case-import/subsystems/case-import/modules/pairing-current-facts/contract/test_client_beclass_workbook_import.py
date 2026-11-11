@@ -10,10 +10,12 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from openpyxl import Workbook
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.routes import client_beclass_import as workbook_route
+from api.schemas.client_beclass_import import ClientBeClassWorkbookPreviewView, ClientBeClassWorkbookReceiptView
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
@@ -73,7 +75,7 @@ def test_workbook_preserves_terms_errors_and_removes_temporary_upload(tmp_path, 
     async def persist(_):
         return uploaded
 
-    def apply(*_):
+    def apply(*_, **__):
         raise TermsWorkflowError(TypedError(
             category, "terms_apply_mode_changed", "Terms changed after preview.",
             CorrelationId("inner-terms"),
@@ -512,3 +514,141 @@ def test_binding_review_preserves_real_candidate_classification_without_pii(
         "client_candidate_count": client_count,
         "case_candidate_count": case_count,
     }
+
+
+class _ManualPairingRepository(_Repository):
+    def __init__(self):
+        super().__init__()
+        self.binding_resolution = ClientCaseBindingResolution(
+            ClientCaseBindingStatus.CASE_NOT_UNIQUE, 1, 3
+        )
+        self.claims = {}
+        self.unavailable = set()
+
+    def load_workbook_claim(self, key):
+        return self.claims.get(key)
+
+    def claim_workbook(self, key, fingerprint, correlation):
+        return "created" if self.claims.setdefault(key, fingerprint) == fingerprint else "conflict"
+
+    def available_case_candidates(self, name, phone, *, for_update, case_no=None):
+        if for_update:
+            assert case_no is not None
+        unavailable = self.unavailable | {row["bound_case_no"] for row in self.created}
+        return tuple(
+            intake.ClientBeClassCaseCandidate(
+                number, 7, name, intake.mask_client_beclass_phone(phone), "新竹市",
+                f"2026-08-0{index} 09:30:00", f"2026-09-0{index}",
+            )
+            for index, number in enumerate(("HCM-A", "HCM-B", "HCM-C"), start=1)
+            if number not in unavailable and (case_no is None or case_no == number)
+        )
+
+    def source_state(self, payload):
+        if any(row["query_no"] == payload["query_no"] for row in self.created):
+            return "exact"
+        return super().source_state(payload)
+
+    def bound_case_no_for_root(self, root_id):
+        return self.created[root_id - 1]["bound_case_no"] if root_id else None
+
+
+@pytest.mark.parametrize("target_taken", [False, True])
+def test_same_client_workbook_confirmed_case_pairings_and_receipt(tmp_path, monkeypatch, target_taken):
+    repository = _ManualPairingRepository()
+    service = _service(repository)
+    upload = tmp_path / "synthetic.xlsx"
+    file = Workbook()
+    file.active.append(list(_valid_row()))
+    for query_no in ("BC-FIRST", "BC-SECOND"):
+        file.active.append(list(_valid_row(query_no).values()))
+    file.save(upload)
+    file.close()
+
+    async def persist(_):
+        temporary = tmp_path / "request.xlsx"
+        temporary.write_bytes(upload.read_bytes())
+        return temporary
+
+    async def execute(operation, path):
+        return operation(path)
+
+    monkeypatch.setattr(workbook_route, "_persist_workbook", persist)
+    monkeypatch.setattr(workbook_route, "run_in_threadpool", execute)
+    principal = AdminPrincipal(1, "test-admin", "Test Admin", "system_admin")
+
+    def route_result(coroutine):
+        with pytest.raises(StopIteration) as completed:
+            coroutine.send(None)
+        return completed.value.value.data
+
+    preview = ClientBeClassWorkbookPreviewView.model_validate(route_result(
+        workbook_route.preview_client_beclass_workbook(None, "corr", principal, service)
+    ))
+    assert repository.created == [] and repository.connection.commits == 0
+    assert [row.case_nos for row in preview.manual_rows] == [["HCM-A", "HCM-B", "HCM-C"]] * 2
+    assert len(preview.candidates) == 3
+    assert preview.manual_rows[0].masked_phone == "09•••••678"
+    selections = ((2, "HCM-B"), (3, "HCM-A"))
+
+    with pytest.raises(ValueError, match="pairings_required"):
+        service.apply(str(upload), "missing", preview.preview_fingerprint, "admin", "corr", manual_pairings=())
+    with pytest.raises(ValueError, match="pairings_not_unique"):
+        service.apply(str(upload), "duplicate", preview.preview_fingerprint, "admin", "corr",
+                      manual_pairings=((2, "HCM-A"), (3, "HCM-A")))
+    assert repository.created == []
+    if target_taken:
+        repository.unavailable.add("HCM-B")
+    form = json.dumps([{"source_row": row, "case_no": case_no} for row, case_no in selections])
+
+    def apply(form_data=form):
+        return ClientBeClassWorkbookReceiptView.model_validate(route_result(
+            workbook_route.apply_client_beclass_workbook(
+                None, preview.preview_fingerprint, "pairings-key", "corr", principal, service, form_data
+            )
+        ))
+
+    receipt = apply()
+    expected = [("BC-SECOND", "HCM-A")] if target_taken else [("BC-FIRST", "HCM-B"), ("BC-SECOND", "HCM-A")]
+    assert [(row["query_no"], row["bound_case_no"]) for row in repository.created] == expected
+    assert [(binding.query_no, binding.case_no) for binding in receipt.manual_bindings] == expected
+    assert receipt.created_count == len(expected)
+    assert receipt.existing_conflict_count == int(target_taken)
+    if target_taken:
+        assert receipt.row_issues[0].issue_codes == ["case_import_candidate_stale"]
+        fresh = service.preview(str(upload), manual_pairing=True)
+        assert [(row.source_row, row.case_nos) for row in fresh.manual_rows] == [(2, ("HCM-C",))]
+        recovered = service.apply(str(upload), "new-key", fresh.preview_fingerprint, "admin", "corr",
+                                  manual_pairings=((2, "HCM-C"),))
+        assert recovered.manual_bindings[0].case_no == "HCM-C"
+    replay = apply()
+    assert replay.replayed_workbook and replay.manual_bindings == receipt.manual_bindings
+    with pytest.raises(HTTPException) as conflict:
+        apply(form.replace("HCM-B", "HCM-C"))
+    assert conflict.value.status_code == 409
+
+
+def test_confirmed_pairings_resume_after_rows_commit_before_workbook_receipt(monkeypatch):
+    repository = _ManualPairingRepository()
+    service = _service(repository)
+    workbook = _workbook(_valid_row("BC-FIRST"), _valid_row("BC-SECOND"))
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    selections = ((2, "HCM-B"), (3, "HCM-A"))
+
+    def apply():
+        return service.apply("ignored.xlsx", "resume-key", preview.preview_fingerprint, "admin", "corr",
+                             manual_pairings=selections)
+
+    def fail_receipt(*_):
+        raise RuntimeError("test: workbook receipt unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repository, "save_workbook_receipt", fail_receipt)
+        with pytest.raises(RuntimeError, match="workbook receipt unavailable"):
+            apply()
+
+    assert len(repository.created) == 2
+    resumed = apply()
+    assert len(repository.created) == resumed.created_count == 2
+    assert [(item.source_row, item.case_no) for item in resumed.manual_bindings] == list(selections)

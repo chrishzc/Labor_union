@@ -14,6 +14,37 @@ class ClientBeClassWorkbookRowIssueView(BaseModel):
     issue_codes: list[str]
 
 
+class ClientBeClassPairingSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_row: int = Field(ge=2)
+    case_no: str = Field(min_length=1, max_length=50)
+
+
+class ClientBeClassManualBindingView(ClientBeClassPairingSelection):
+    query_no: str = Field(min_length=1, max_length=100)
+
+
+class ClientBeClassManualRowView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_row: int
+    query_no: str
+    name: str
+    masked_phone: str
+    city: str | None
+    submitted_at: str | None
+    case_nos: list[str]
+
+
+class ClientBeClassCandidateView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    case_no: str
+    name: str
+    masked_phone: str
+    city: str | None
+    created_at: str | None
+    start_date: str | None
+
+
 class ClientBeClassWorkbookPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     source_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -25,6 +56,8 @@ class ClientBeClassWorkbookPreviewView(BaseModel):
     existing_source_count: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     row_issues: list[ClientBeClassWorkbookRowIssueView] = Field(default_factory=list)
+    manual_rows: list[ClientBeClassManualRowView] = Field(default_factory=list)
+    candidates: list[ClientBeClassCandidateView] = Field(default_factory=list)
 
 
 class ClientBeClassWorkbookReceiptView(BaseModel):
@@ -38,3 +71,4 @@ class ClientBeClassWorkbookReceiptView(BaseModel):
     existing_source_count: int = Field(ge=0)
     replayed_workbook: bool
     row_issues: list[ClientBeClassWorkbookRowIssueView] | None = None
+    manual_bindings: list[ClientBeClassManualBindingView] = Field(default_factory=list)

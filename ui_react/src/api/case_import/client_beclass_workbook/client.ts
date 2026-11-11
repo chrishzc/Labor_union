@@ -17,6 +17,7 @@ import {
   ClientBeClassWorkbookReceiptEnvelopeSchema,
   type ClientBeClassWorkbookPreview,
   type ClientBeClassWorkbookReceipt,
+  type ClientBeClassPairing,
 } from './schemas';
 
 export const CLIENT_BECLASS_WORKBOOK_PREVIEW_PATH =
@@ -62,9 +63,10 @@ export class ClientBeClassWorkbookSnapshot {
     return data;
   }
 
-  toApplyFormData(previewFingerprint: string): FormData {
+  toApplyFormData(previewFingerprint: string, pairings?: readonly ClientBeClassPairing[]): FormData {
     const data = this.toFormData();
     data.append('preview_fingerprint', previewFingerprint);
+    if (pairings?.length) data.append('manual_pairings', JSON.stringify(pairings));
     return data;
   }
 }
@@ -87,7 +89,14 @@ function applyRequestOptions(idempotencyKey: string, correlationId: string, sign
 
 export interface ClientBeClassWorkbookPreviewClient {
   preview(snapshot: ClientBeClassWorkbookSnapshot, options?: { signal?: AbortSignal }): Promise<ClientBeClassWorkbookPreview>;
-  apply(snapshot: ClientBeClassWorkbookSnapshot, previewFingerprint: string, options: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }): Promise<ClientBeClassWorkbookReceipt>;
+  apply(snapshot: ClientBeClassWorkbookSnapshot, previewFingerprint: string, options: ClientBeClassApplyOptions): Promise<ClientBeClassWorkbookReceipt>;
+}
+
+interface ClientBeClassApplyOptions {
+  idempotencyKey: string;
+  correlationId: string;
+  signal?: AbortSignal;
+  manualPairings?: readonly ClientBeClassPairing[];
 }
 
 export async function previewClientBeClassWorkbook(
@@ -109,10 +118,10 @@ export async function previewClientBeClassWorkbook(
 export async function applyClientBeClassWorkbook(
   snapshot: ClientBeClassWorkbookSnapshot,
   previewFingerprint: string,
-  options: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }
+  options: ClientBeClassApplyOptions
 ): Promise<ClientBeClassWorkbookReceipt> {
   try {
-    const raw = await transport.post(CLIENT_BECLASS_WORKBOOK_APPLY_PATH, snapshot.toApplyFormData(previewFingerprint), applyRequestOptions(options.idempotencyKey, options.correlationId, options.signal));
+    const raw = await transport.post(CLIENT_BECLASS_WORKBOOK_APPLY_PATH, snapshot.toApplyFormData(previewFingerprint, options.manualPairings), applyRequestOptions(options.idempotencyKey, options.correlationId, options.signal));
     const receipt = decodePayload(ClientBeClassWorkbookReceiptEnvelopeSchema, raw).data;
     if (receipt.source_content_digest !== snapshot.sha256) throw new ClientBeClassWorkbookContractError('client_beclass_apply_source_digest_mismatch', '套用收據摘要與已選檔案不一致。');
     return receipt;

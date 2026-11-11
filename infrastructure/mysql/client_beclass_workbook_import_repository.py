@@ -9,6 +9,10 @@ import json
 from hashlib import sha256
 
 from domains.case_import.client_beclass_binding import classify_client_case_binding
+from subsystems.case_import.client_beclass_workbook_import import (
+    ClientBeClassCaseCandidate,
+    mask_client_beclass_phone,
+)
 
 
 class ClientBeClassWorkbookImportRepository:
@@ -35,6 +39,16 @@ class ClientBeClassWorkbookImportRepository:
 
     def load_workbook_receipt(self, key: str):
         return self._load_receipt(self._WORKBOOK_FAMILY, key)
+
+    def load_workbook_claim(self, key: str) -> str | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT command_fingerprint FROM application_command_claims "
+                "WHERE idempotency_key=%s AND command_family=%s FOR UPDATE",
+                (key, self._WORKBOOK_FAMILY),
+            )
+            row = cursor.fetchone()
+        return None if row is None else str(row["command_fingerprint"])
 
     def load_row_receipt(self, key: str):
         return self._load_receipt(self._ROW_FAMILY, key)
@@ -155,6 +169,57 @@ class ClientBeClassWorkbookImportRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("client_beclass_root_insert_failed")
             return int(cursor.lastrowid)
+
+    def available_case_candidates(
+        self, name: str, phone: str, *, for_update: bool, case_no: str | None = None,
+    ) -> tuple[ClientBeClassCaseCandidate, ...]:
+        if not name or not phone:
+            return ()
+        case_clause = " AND o.case_no=%s" if case_no is not None else ""
+        params = (name, phone) if case_no is None else (name, phone, case_no)
+        lock = " FOR UPDATE" if for_update else ""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no, c.id AS client_id, c.name, c.phone, c.city, "
+                "hcm.created_at, o.start_date "
+                "FROM clients c STRAIGHT_JOIN orders o ON o.client_id=c.id "
+                "JOIN clients hcm ON hcm.case_no=o.case_no "
+                "WHERE c.name=%s AND c.phone=%s"
+                f"{case_clause} ORDER BY o.case_no{lock}",
+                params,
+            )
+            rows = tuple(
+                row for row in cursor.fetchall()
+                if row["name"] == name and row["phone"] == phone
+                and (case_no is None or row["case_no"] == case_no)
+            )
+            if not rows:
+                return ()
+            # Read binding occupancy after locking the candidate order, using
+            # a current read even if an earlier source read opened a snapshot.
+            if for_update:
+                cursor.execute(
+                    "SELECT bound_case_no FROM beclass_records "
+                    "WHERE (client_id=%s OR client_id IS NULL) AND bound_case_no=%s FOR UPDATE",
+                    (rows[0]["client_id"], rows[0]["case_no"]),
+                )
+            else:
+                placeholders = ",".join(["%s"] * len(rows))
+                cursor.execute(
+                    "SELECT bound_case_no FROM beclass_records "
+                    f"WHERE bound_case_no IN ({placeholders})",
+                    tuple(row["case_no"] for row in rows),
+                )
+            occupied = {str(row["bound_case_no"]).casefold() for row in cursor.fetchall()}
+        return tuple(
+            ClientBeClassCaseCandidate(
+                row["case_no"], row["client_id"], row["name"],
+                mask_client_beclass_phone(row["phone"]), row["city"],
+                None if row["created_at"] is None else str(row["created_at"]),
+                None if row["start_date"] is None else str(row["start_date"]),
+            )
+            for row in rows if row["case_no"].casefold() not in occupied
+        )
 
     def require_matching_client_root(self, receipt) -> None:
         root_id = receipt.get("root_id")

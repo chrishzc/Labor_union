@@ -15,12 +15,15 @@ export interface ClientBeClassWorkbookPreviewModel {
   existingSourceCount: number;
   previewFingerprint: string;
   rowIssues: NonNullable<ClientBeClassWorkbookPreview['row_issues']>;
+  manualRows: NonNullable<ClientBeClassWorkbookPreview['manual_rows']>;
+  candidates: NonNullable<ClientBeClassWorkbookPreview['candidates']>;
 }
 
 export function adaptClientBeClassWorkbookPreview(
   preview: ClientBeClassWorkbookPreview
 ): ClientBeClassWorkbookPreviewModel {
-  const total = preview.create_count + preview.review_required_count + preview.existing_conflict_count + preview.existing_source_count;
+  const manualRows = preview.manual_rows ?? [];
+  const total = preview.create_count + preview.review_required_count + preview.existing_conflict_count + preview.existing_source_count + manualRows.length;
   if (total !== preview.source_row_count) {
     throw new ClientBeClassWorkbookContractError('client_beclass_row_outcomes_not_conserved', '客戶 BeClass Preview aggregate計數不守恆。');
   }
@@ -34,5 +37,7 @@ export function adaptClientBeClassWorkbookPreview(
     existingSourceCount: preview.existing_source_count,
     previewFingerprint: preview.preview_fingerprint,
     rowIssues: preview.row_issues ?? [],
+    manualRows,
+    candidates: preview.candidates ?? [],
   };
 }
