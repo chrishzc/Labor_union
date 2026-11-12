@@ -54,10 +54,10 @@ from subsystems.payroll.terms_impact import (
 )
 
 
-def load_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
+def load_preview_facts(cursor: Any, case_no: str, *, office_first_schedule=False) -> TermsWorkflowFacts:
     order_row = select_order(cursor, case_no, lock=False)
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
-    return _assemble_facts(cursor, order_row, aggregate_row, lock=False)
+    return _assemble_facts(cursor, order_row, aggregate_row, lock=False, office_first_schedule=office_first_schedule)
 
 
 def load_actual_start_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
@@ -249,13 +249,14 @@ def load_locked_facts(
     case_no: str,
     preflight_staff_ids: tuple[int, ...],
     after_staff_lock: Callable[[Any], None] | None = None,
+    *, office_first_schedule=False,
 ) -> TermsWorkflowFacts:
     order_row = select_order(cursor, case_no, lock=True)
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=True)
     lock_staff_mutexes(cursor, preflight_staff_ids)
     if after_staff_lock is not None:
         after_staff_lock(cursor)
-    return _assemble_facts(cursor, order_row, aggregate_row, lock=True)
+    return _assemble_facts(cursor, order_row, aggregate_row, lock=True, office_first_schedule=office_first_schedule)
 
 
 def load_actual_start_locked_facts(
@@ -348,6 +349,7 @@ def _assemble_facts(
     omit_preassignment_downstream: bool = False,
     omit_payroll_details: bool = False,
     proposed_terms: OrderTerms | None = None,
+    office_first_schedule: bool = False,
 ) -> TermsWorkflowFacts:
     if omit_preassignment_downstream and str(order_row.get('status')) in ('歷史訂單－服務完成','歷史訂單－帳務完成'):
         cursor.execute("SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='order_terms_apply_receipts' AND column_name='lifecycle_status'")
@@ -404,6 +406,9 @@ def _assemble_facts(
         )
     if lock and generation_row is not None:
         _lock_dated_occupancy(cursor, generation_row)
+    if office_first_schedule:
+        dated_assignments = _service_dates_by_assignment(schedule_rows)
+        assignment_rows = tuple(row for row in assignment_rows if row["id"] in dated_assignments)
     return _facts_from_rows(
         order_row,
         aggregate_row,

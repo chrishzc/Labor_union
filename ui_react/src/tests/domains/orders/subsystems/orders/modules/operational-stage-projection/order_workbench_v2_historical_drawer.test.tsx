@@ -211,7 +211,8 @@ function useLiveDateWorkspace() {
   mocks.getCalendar.mockResolvedValue({ case_no: 'CASE-FUTURE', service_mode: '連續服務', original_service_type: '連續服務' });
   mocks.getDates.mockImplementation(async () => ({ case_no: 'CASE-FUTURE', order_version: orderVersion, scheduling_version: 4,
     contracted_service_days: 20, suggested_dates: [], selectable_dates: days(actualStart ?? '2026-09-03', 40), current_version: null,
-    current_dates: [], bound_staff: [{ staff_id: 42, staff_name: '陳月嫂' }], arrangement_pending: true }));
+    current_dates: [], bound_staff: [{ staff_id: 42, staff_name: '陳月嫂' }],
+    arrangement_pending: false, historical_schedule_pending: true }));
   mocks.calculate.mockImplementation(async ({ actual_start_date }) => ({ actual_start_date, actual_end_date: days(actual_start_date, 20)[19], target_service_days: 20,
     total_calendar_days: 20, actual_work_days_count: 20, rest_days_count: 0, national_holidays_found: [], total_estimated_salary: null, weekly_stats: [],
     day_by_day: days(actual_start_date, 20).map((date, i) => ({ date, day_num: i + 1, is_work_day: true, is_rest_day: false, holiday_name: null })) }));
@@ -378,7 +379,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     await waitFor(() => expect(serviceEntry).toBeEnabled());
     fireEvent.click(serviceEntry);
     const caseHeader = within(dialog).getByRole('heading', { name: '案件處理', level: 1 }).closest('header')!;
-    expect(within(caseHeader).getByText('尚未正式指派')).toBeInTheDocument();
+    expect(within(caseHeader).getByText('尚未選定月嫂')).toBeInTheDocument();
     const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     expect(within(caseHeader).queryByText(/陳月嫂/)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('region', { name: '案件 CASE-FUTURE 正式指派與排班回讀' })).not.toBeInTheDocument();
@@ -389,6 +390,19 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(within(evidenceRegion).getByText(/陳月嫂/)).toBeInTheDocument();
     expect(within(evidenceRegion).queryByText(/陳\*嫂/)).not.toBeInTheDocument();
     expect(within(evidenceRegion).getByText(/不代表目前已確認的服務安排/)).toBeInTheDocument();
+  });
+
+  it('尚無正式班表時顯示有效媒合人選，實際開始日獨立顯示', async () => {
+    mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
+    mocks.matchingPlan.mockResolvedValue({ planId: 7, status: 'proposed', activeLockId: null,
+      segments: [{ segmentId: 8, sequence: 1, staffId: 42 }] });
+    mocks.matchingContact.mockResolvedValue({ plan: { id: 7, case_no: 'CASE-FUTURE' },
+      segments: [{ segment_id: 8, staff_id: 42, staff_name: '陳月嫂' }] });
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
+    const header = screen.getByRole('heading', { name: '案件處理' }).closest('header')!;
+    expect(await within(header).findByText(/陳月嫂/)).toBeInTheDocument();
+    expect(within(header).getByText('實際開始').parentElement).toHaveTextContent('尚未確認');
+    expect(within(header).queryByText(/待建立正式排班|尚未正式指派/)).not.toBeInTheDocument();
   });
 
   it('shows failed formal reads as unavailable while retaining the historical source period', async () => {
@@ -463,23 +477,15 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.applyStart).not.toHaveBeenCalled();
     expect(mocks.applyDates).not.toHaveBeenCalled();
     fireEvent.change(startInput, { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: /排班結果與代班/ }));
-    expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
+    expect(screen.queryByRole('button', { name: /排班結果與代班/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '儲存班表' })).toBeDisabled();
     expect(startInput).toHaveValue('');
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
     await act(async () => { fireEvent.change(startInput, { target: { value: '2026-09-04' } }); });
     await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('20 / 20 天'));
-    const saveStart = screen.getByRole('button', { name: '儲存實際開始日' });
-    await waitFor(() => expect(saveStart).toBeEnabled());
-    fireEvent.click(saveStart);
-    await screen.findByText('實際開始日已儲存；服務日期尚未儲存。');
-    expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
-    await waitFor(() => expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(expect.objectContaining({ calculationRevision: 1, projectionRevision: 2 })));
-    expect(mocks.applyStart).toHaveBeenCalledTimes(1);
-    expect(mocks.applyStart).toHaveBeenCalledWith('CASE-FUTURE', expect.objectContaining({ operation: 'date_only', new_actual_start_date: '2026-09-04', expected_order_version: 13, preview_fingerprint: '2'.repeat(64) }), expect.objectContaining({ idempotencyKey: expect.stringContaining('service-dates-start-') }));
-    expect(mocks.getStart.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyStart.mock.invocationCallOrder[0]!);
-    expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyStart.mock.invocationCallOrder[0]!);
+    expect(screen.getByRole('button', { name: '儲存班表' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '儲存實際開始日' })).not.toBeInTheDocument();
+    expect(mocks.applyStart).not.toHaveBeenCalled();
     expect(mocks.previewDates).not.toHaveBeenCalled();
     expect(mocks.applyDates).not.toHaveBeenCalled();
     expect(mocks.intakeApply).not.toHaveBeenCalled();

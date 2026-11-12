@@ -25,10 +25,12 @@ from domains.orders.service_date_confirmation import (
 from infrastructure.mysql.service_date_confirmation_repository import (
     MySqlServiceDateConfirmationRepository,
 )
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.payroll_terms_writer import (
     load_historical_restart_arrangement_rates,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+from subsystems.orders.actual_start_workflow import ActualStartQueryFacts, ActualStartWorkflow
 from subsystems.orders.historical_restart_arrangement import (
     ArrangementSegmentIntent,
     HistoricalRestartArrangementReceipt,
@@ -393,6 +395,116 @@ def _arrangement_lifecycle_facts(facts, actual_start=date(2026, 9, 6)):
             actual_start, actual_start is not None, False, False, True,
         ),
     )
+
+
+@pytest.mark.parametrize("fail_lifecycle", [False, True])
+def test_save_historical_schedule_commits_start_dates_and_multi_staff_generation_together(fail_lifecycle):
+    original = _pending_arrangement_facts()
+    initial = replace(original, current_dates=(), current_version=None)
+    start = original.selectable_dates[0]
+    segments = (
+        ArrangementSegmentIntent(12, original.current_dates[:2]),
+        ArrangementSegmentIntent(13, original.current_dates[2:]),
+    )
+
+    class Repository(_RestartRepository):
+        actual_start = None
+        schedule_receipt = None
+        schedule_fingerprint = None
+        commits = 0
+
+        def begin(self):
+            self.snapshot = self.facts, self.actual_start, self.replay_receipt, self.schedule_receipt
+
+        def rollback(self):
+            self.facts, self.actual_start, self.replay_receipt, self.schedule_receipt = self.snapshot
+
+        def commit(self):
+            self.commits += 1
+
+        def load_actual_start_query(self, case_no, *, for_update):
+            assert for_update
+            return ActualStartQueryFacts(
+                case_no, self.actual_start, start, False, self.facts.order_version,
+                self.facts.scheduling_version, 4, None, None, False, True,
+            )
+
+        def save_actual_start_date_only(self, command):
+            self.actual_start = command.actual_start_date
+            self.facts = replace(self.facts, order_version=command.resulting_order_version)
+
+        def save(self, candidate, **kwargs):
+            receipt = super().save(candidate, **kwargs)
+            self.facts = replace(
+                self.facts, current_dates=receipt.service_dates, current_version=receipt.confirmed_version,
+                current_confirmed_order_version=receipt.order_version,
+            )
+            return receipt
+
+        def load_arrangement_lifecycle(self, _case_no, *, lock):
+            return _arrangement_lifecycle_facts(self.facts, self.actual_start)
+
+        def lock_arrangement_staff(self, ids):
+            assert ids == (12, 13)
+
+        def validate_arrangement_availability(self, candidate, *, lock):
+            assert lock
+            assert self.commits == 0
+            assert [item.service_dates for item in candidate.assignments] == [
+                segment.service_dates for segment in segments
+            ]
+
+        def arrangement_rate_fingerprint(self, candidate, *, lock):
+            return PreviewFingerprint("a" * 64)
+
+        def replay_arrangement(self, key, fingerprint, *, lock):
+            if self.schedule_receipt and self.schedule_fingerprint != fingerprint:
+                raise ValueError("historical_arrangement_idempotency_conflict")
+            return self.schedule_receipt
+
+        def persist_arrangement(self, command):
+            self.schedule_fingerprint = command.command_fingerprint.value
+            self.schedule_receipt = HistoricalRestartArrangementReceipt(
+                initial.case_no, 8, 5, (101, 102), command.preview_fingerprint,
+            )
+            return self.schedule_receipt
+
+        def persist_arrangement_lifecycle(self, command):
+            assert self.actual_start == start and self.facts.current_dates == original.current_dates
+            assert self.commits == 0
+            assert command.candidate.actual_end_date == original.current_dates[-1]
+            if fail_lifecycle:
+                raise ValueError("historical_arrangement_stale_version")
+
+    repository = Repository(initial)
+
+    def unit_of_work():
+        return MySqlUnitOfWork(repository)
+
+    clock = FixedBusinessClock(datetime(2026, 10, 1, 11, 30, tzinfo=TAIPEI_TIME_ZONE))
+    workflow = HistoricalRestartArrangementWorkflow(repository, unit_of_work, clock)
+    kwargs = dict(
+        actual_start_date=start, expected_order_version=3, expected_scheduling_version=7,
+        expected_confirmed_version=None, idempotency_key="save-historical-schedule",
+        actor="admin", reason="", correlation_id="save-historical-schedule",
+        date_workflow=ServiceDateConfirmationWorkflow(repository, unit_of_work, _SnapshotInvalidation()),
+        actual_start_workflow=ActualStartWorkflow(repository, unit_of_work, clock),
+        actual_start_repository=repository,
+    )
+    if fail_lifecycle:
+        with pytest.raises(ValueError, match="stale_version"):
+            workflow.save_schedule(initial.case_no, segments, **kwargs)
+        assert repository.commits == 0
+        assert repository.facts == initial
+        assert repository.actual_start is None
+        assert repository.replay_receipt is None
+        assert repository.schedule_receipt is None
+    else:
+        receipt = workflow.save_schedule(initial.case_no, segments, **kwargs)
+        assert receipt == workflow.save_schedule(initial.case_no, segments, **kwargs)
+        assert repository.commits == 1
+        assert repository.actual_start == start
+        assert repository.facts.current_dates == original.current_dates
 
 
 def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():

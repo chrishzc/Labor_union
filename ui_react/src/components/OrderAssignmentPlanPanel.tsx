@@ -19,6 +19,7 @@ interface OrderAssignmentPlanPanelProps {
   onOpenRecommendation?: () => void;
   historicalBinding?: boolean;
   historicalArrangementPending?: boolean;
+  showScheduleActions?: boolean;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
@@ -34,7 +35,7 @@ function errorMessage(error: unknown): string {
     : '正式指派與排班資料讀取失敗';
 }
 
-export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement, revision, historicalBinding = false, historicalArrangementPending = false, onEditStateChange, contractReady, depositReady, onOpenDates, onOpenRecommendation }) => {
+export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved, onOpenReplacement, revision, historicalBinding = false, historicalArrangementPending = false, showScheduleActions = true, onEditStateChange, contractReady, depositReady, onOpenDates, onOpenRecommendation }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
   const [replacementOpen, setReplacementOpen] = useState(false);
   const [names, setNames] = useState<Record<number, string>>({});
@@ -157,7 +158,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
         </details>
       )}
 
-      {plan !== null && !historicalArrangementPending && (!historicalBinding || plan.assignments.length > 0) && (
+      {showScheduleActions && plan !== null && !historicalArrangementPending && (!historicalBinding || plan.assignments.length > 0) && (
         <MatchingScheduleAndAssignmentActions
           caseNo={caseNo}
           planId={matchingPlan?.planId ?? 0}
@@ -167,6 +168,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
           contractReady={contractReady} depositReady={depositReady} onOpenDates={onOpenDates} onOpenRecommendation={onOpenRecommendation}
           waitingLockAcquired={matchingPlan?.activeLockId != null}
           assignmentExists={plan.assignments.length > 0}
+          scheduleComplete={plan.assignments.length > 0 && plan.assignments.every(segment => segment.official_service_dates.length > 0)}
           officialServiceDates={plan.assignments.flatMap(segment => segment.official_service_dates).sort()}
           onAssignmentCompleted={() => load(true)}
         />

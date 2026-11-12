@@ -92,7 +92,12 @@ class ServiceDateConfirmationWorkflow:
         return self._repository.load(case_no)
 
     def preview(self, case_no: str, service_dates: tuple[date, ...]) -> ServiceDateConfirmationPreview:
-        facts = self._repository.load(case_no)
+        return self.preview_from_facts(self._repository.load(case_no), service_dates)
+
+    @staticmethod
+    def preview_from_facts(
+        facts: ServiceDateConfirmationFacts, service_dates: tuple[date, ...],
+    ) -> ServiceDateConfirmationPreview:
         candidate = _candidate(facts, service_dates)
         return ServiceDateConfirmationPreview(
             candidate,

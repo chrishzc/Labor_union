@@ -1,4 +1,4 @@
-"""Explicit formal arrangement after historical Precision Restart date confirmation."""
+"""Formal schedule coordination for historical Precision Restart."""
 
 from __future__ import annotations
 
@@ -18,10 +18,16 @@ from domains.scheduling.generation import (
     SchedulingGenerationCandidate,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from subsystems.orders.service_date_confirmation_workflow import (
     ServiceDateConfirmationFacts,
+    ServiceDateConfirmationWorkflow,
+)
+from subsystems.orders.actual_start_workflow import (
+    ActualStartDateOnlyApplyRequest,
+    ActualStartWorkflow,
+    ActualStartWorkflowRepository,
 )
 from subsystems.orders.terms_workflow import (
     LifecycleImpactPersistenceCommand,
@@ -98,6 +104,74 @@ class HistoricalRestartArrangementWorkflow:
     ) -> HistoricalRestartArrangementPreview:
         return self._build_preview(self._repository.load(case_no), segments, lock=False)
 
+    def save_schedule(
+        self, case_no: str, segments: tuple[ArrangementSegmentIntent, ...], *,
+        actual_start_date: date, expected_order_version: int,
+        expected_scheduling_version: int, expected_confirmed_version: int | None,
+        idempotency_key: str, actor: str, reason: str, correlation_id: str,
+        date_workflow: ServiceDateConfirmationWorkflow,
+        actual_start_workflow: ActualStartWorkflow,
+        actual_start_repository: ActualStartWorkflowRepository,
+    ) -> HistoricalRestartArrangementReceipt:
+        """Save the dates and official schedule under one commit owner."""
+        command_fingerprint = fingerprint_payload({
+            "operation": "save_historical_restart_schedule",
+            "case_no": case_no,
+            "segments": _segment_payload(segments),
+            "actual_start_date": actual_start_date.isoformat(),
+            "versions": (
+                expected_order_version, expected_scheduling_version,
+                expected_confirmed_version,
+            ),
+            "actor": actor,
+            "reason": reason,
+        }).value
+        with self._unit_of_work_factory() as unit_of_work:
+            facts = self._repository.load(case_no, lock=True)
+            replay = self._repository.replay_arrangement(
+                idempotency_key, command_fingerprint, lock=True,
+            )
+            if replay is not None:
+                return replay
+            if (facts.order_version, facts.scheduling_version, facts.current_version) != (
+                expected_order_version, expected_scheduling_version, expected_confirmed_version,
+            ):
+                raise ValueError("historical_arrangement_stale_version")
+            if facts.restart_generation_number is None or not facts.restart_assignments:
+                raise ValueError("historical_arrangement_not_pending_blocked")
+            staff_ids = tuple(sorted(item.staff_id for item in facts.restart_assignments))
+            self._repository.lock_arrangement_staff(staff_ids)
+            actual_start = actual_start_repository.load_actual_start_query(case_no, for_update=True)
+            if actual_start.service_data_locked:
+                raise ValueError("historical_arrangement_service_data_locked_blocked")
+            if actual_start.current_actual_start_date != actual_start_date:
+                start_preview = actual_start_workflow.preview_date_only(actual_start, actual_start_date)
+                actual_start_workflow.apply_date_only_in_current_unit_of_work(
+                    ActualStartDateOnlyApplyRequest(
+                        case_no, actual_start_date, ExpectedVersion(facts.order_version),
+                        start_preview.fingerprint, CorrelationId(correlation_id),
+                    )
+                )
+                facts = self._repository.load(case_no, lock=True)
+            service_dates = tuple(day for segment in segments for day in segment.service_dates)
+            if (facts.current_version is None or facts.current_dates != service_dates
+                or facts.current_confirmed_order_version != facts.order_version):
+                dates_preview = date_workflow.preview_from_facts(facts, service_dates)
+                date_workflow.apply_in_current_unit_of_work(
+                    case_no, service_dates, expected_order_version=facts.order_version,
+                    expected_scheduling_version=facts.scheduling_version,
+                    preview_fingerprint=dates_preview.candidate.fingerprint.value,
+                    actor=actor, reason=reason, reserve_waiting_deposit=False,
+                    idempotency_key="restart-dates:" + fingerprint_payload({"key": idempotency_key}).value,
+                )
+                facts = self._repository.load(case_no, lock=True)
+            preview = self._build_preview(facts, segments, lock=True)
+            receipt = self._persist(
+                preview, command_fingerprint, idempotency_key, actor, reason, correlation_id,
+            )
+            unit_of_work.commit()
+            return receipt
+
     def apply(
         self,
         case_no: str,
@@ -142,33 +216,39 @@ class HistoricalRestartArrangementWorkflow:
             preview = self._build_preview(facts, segments, lock=True)
             if preview.fingerprint.value != preview_fingerprint:
                 raise ValueError("historical_arrangement_stale_preview")
-            command = SchedulingReplacementCommand(
-                candidate=preview.candidate,
-                command_family="orders_historical_restart_arrangement",
-                expected_order_version=expected_order_version,
-                command_fingerprint=PreviewFingerprint(command_fingerprint),
-                preview_fingerprint=preview.fingerprint,
-                idempotency_key=IdempotencyKey(idempotency_key),
-                actor=ActorContext(actor),
-                reason=reason,
-                correlation_id=CorrelationId(correlation_id),
-            )
-            receipt = self._repository.persist_arrangement(command)
-            self._repository.persist_arrangement_lifecycle(
-                LifecycleImpactPersistenceCommand(
-                    candidate=preview.lifecycle,
-                    expected_order_version=expected_order_version,
-                    resulting_order_version=expected_order_version + 1,
-                    client_settlement_fingerprint=None,
-                    idempotency_key=command.idempotency_key,
-                    actor=command.actor,
-                    reason=command.reason,
-                    correlation_id=command.correlation_id,
-                    trigger_event=command.command_family,
-                )
+            receipt = self._persist(
+                preview, command_fingerprint, idempotency_key, actor, reason, correlation_id,
             )
             unit_of_work.commit()
             return receipt
+
+    def _persist(self, preview, command_fingerprint, idempotency_key, actor, reason, correlation_id):
+        command = SchedulingReplacementCommand(
+            candidate=preview.candidate,
+            command_family="orders_historical_restart_arrangement",
+            expected_order_version=preview.order_version,
+            command_fingerprint=PreviewFingerprint(command_fingerprint),
+            preview_fingerprint=preview.fingerprint,
+            idempotency_key=IdempotencyKey(idempotency_key),
+            actor=ActorContext(actor),
+            reason=reason,
+            correlation_id=CorrelationId(correlation_id),
+        )
+        receipt = self._repository.persist_arrangement(command)
+        self._repository.persist_arrangement_lifecycle(
+            LifecycleImpactPersistenceCommand(
+                candidate=preview.lifecycle,
+                expected_order_version=preview.order_version,
+                resulting_order_version=preview.order_version + 1,
+                client_settlement_fingerprint=None,
+                idempotency_key=command.idempotency_key,
+                actor=command.actor,
+                reason=command.reason,
+                correlation_id=command.correlation_id,
+                trigger_event=command.command_family,
+            )
+        )
+        return receipt
 
     def _build_preview(self, facts, segments, *, lock):
         candidate = _arrangement_candidate(facts, segments)

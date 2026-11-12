@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from domains.scheduling.assignment_plan import AssignmentPlanIntent, AssignmentPlanSegmentIntent
+from infrastructure.mysql.automatic_service_arrangement_repository import MySqlAutomaticServiceArrangementSource
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId
@@ -79,6 +80,21 @@ def test_dispatch_does_not_recreate_old_waiting_confirmation_locks():
 def test_incomplete_confirmations_do_not_preview_or_dispatch():
     app, _, preview, jobs = ports(confirmed=False)
     assert app.dispatch_case('CASE-1', 7).state == 'awaiting_service_start'
+    assert preview.calls == 0
+    assert jobs.commands == []
+
+
+def test_effective_assignment_without_service_days_is_not_an_effective_schedule():
+    app, _, preview, jobs = ports()
+    query = SimpleNamespace(assignment_plan=SimpleNamespace(
+        effective_assignments=(SimpleNamespace(official_service_dates=()),),
+    ))
+    app.source = MySqlAutomaticServiceArrangementSource(
+        None, SimpleNamespace(query=lambda case_no: query),
+    )
+    status = app.dispatch_case('CASE-1', 7)
+    assert status.state == 'awaiting_conditions'
+    assert status.blockers == ('effective_assignment_missing_service_days',)
     assert preview.calls == 0
     assert jobs.commands == []
 

@@ -147,7 +147,7 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
 
   it('shows automatic completion status without a manual completion action and refreshes on owner state changes', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-142" branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '排班結果與代班' });
+    await screen.findByRole('heading', { name: '設定服務日期' });
     expect(screen.queryByRole('button', { name: '辦理完工確認' })).not.toBeInTheDocument();
     expect(screen.getByText('預計服務完成時間・CASE-142')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '服務前更換月嫂 →' })).not.toBeInTheDocument();
@@ -202,7 +202,7 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
   it.each(['deposit_settlement', 'client_settlement', 'staff_payout'] as const)('routes the %s current stage to the service workspace without restoring a sixth step', async stage => {
     mocks.getCoreStageTimelines.mockReset().mockResolvedValue({ items: [{ ...timeline('CASE-142', stage), lifecycle_status: '訂單成立' }] });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-142" branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('navigation', { name: '服務安排步驟' });
+    await screen.findByRole('heading', { name: '設定服務日期' });
     expect(screen.getByRole('heading', { name: '確認服務日期與排班' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /客戶收款與月嫂結算/ })).not.toBeInTheDocument();
   });
@@ -217,6 +217,6 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
     expect(screen.getByRole('heading', { name: '辦理契約與簽署' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '前往確認服務日期與排班 →' }));
     expect(await screen.findByRole('heading', { name: '設定服務日期' })).toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: '服務安排步驟' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '服務安排步驟' })).not.toBeInTheDocument();
   });
 });

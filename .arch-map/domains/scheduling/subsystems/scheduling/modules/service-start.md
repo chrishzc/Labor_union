@@ -11,13 +11,13 @@
 - `domains/scheduling/service_start.py`
 - `subsystems/scheduling/service_start_workflow.py`
 - `infrastructure/mysql/service_start_repository.py` — 代班意願 LINE webhook 回覆（`service-start-reply:`）透過 `line_webhook_reply` Reply-only 建立確認回覆，禁止 fallback Push。
-- `infrastructure/mysql/service_start_arrangement.py`
+- `infrastructure/mysql/service_start_arrangement.py` — 一般案件工會首次儲存班表，同一交易確認服務日期並委派 Assignment Plan 及相關帳務 writer。
 - `subsystems/line/service_start_messages.py` — 共用零副作用訊息格式。
 - `api/dependencies/service_start.py`
 - `api/schemas/service_start.py`
 - `ui_react/src/api/scheduling/service_start_client.ts`
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.tsx`
-  - 排班頁「請假與代班」分頁先顯示全案待處理事項，案件工作區維持單案清單。
+  - 排班頁「請假與代班」分頁先顯示全案待處理事項。案件工作區在服務日期和正式排班下方顯示同案的服務開始、請假與換人待辦。
   - `requestId` 深連結獨立查詢該筆需求並核對案件，不依賴待辦分頁、不改選其他事項；`#scheduling?tab=coordination&case_no=<case>&request=<id>` 由既有 SchedulingPage 薄組合，開頁不 mutation。
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.css`
 - `line/static/staff_order_search.html`

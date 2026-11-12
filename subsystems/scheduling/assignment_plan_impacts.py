@@ -167,7 +167,7 @@ def _assignment_plan_readiness_blockers(
     settlement: Any,
 ) -> tuple[str, ...]:
     waiting_lock_ids = facts.assignment_plan.current_waiting_lock_ids
-    first_assignment = not facts.assignment_plan.effective_assignments
+    first_assignment = facts.assignment_plan.office_schedule or not facts.assignment_plan.effective_assignments
     if not first_assignment and not waiting_lock_ids:
         return ()
     if first_assignment and not waiting_lock_ids and not facts.assignment_plan.explicit_service_start_result:

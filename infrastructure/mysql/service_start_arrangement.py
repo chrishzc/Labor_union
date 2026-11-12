@@ -1,12 +1,14 @@
 """Adapt the approved coordination result to existing Orders/Scheduling writers."""
 
-from datetime import date
+from datetime import date, timedelta
+from functools import partial
 from dataclasses import replace
 import json
 
 from domains.scheduling.assignment_plan import (
     AssignmentPlanIntent, AssignmentPlanSegmentIntent, StaffOccupancyFact, service_shift_may_overlap,
 )
+from domains.scheduling.commitment_execution import ExecutionServiceDay
 from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
 from domains.scheduling.service_start import ServiceStartConflict
 from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
@@ -20,6 +22,14 @@ from infrastructure.mysql.leave_result_repository import leave_context
 from infrastructure.mysql.service_handover_repository import handover_context
 from infrastructure.mysql.scheduling_occupancy_facts import _unavailability_rows, load_case_service_time
 from shared_kernel.clock import SystemBusinessClock
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
+from infrastructure.mysql.matching_schedule_confirmation_repository import MySqlMatchingScheduleConfirmationRepository
+from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
+from subsystems.orders.actual_start_workflow import ActualStartWorkflow
+from subsystems.orders.historical_restart_arrangement import HistoricalRestartArrangementReceipt
+from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
 
 
 class MySqlServiceStartArrangement:
@@ -247,7 +257,6 @@ class MySqlServiceStartArrangement:
 
 def current_service_start_execution(cursor,case_no,plan_id=None,*,lock=False):
     """Current explicit results, never legacy date-card confirmation events."""
-    from domains.scheduling.commitment_execution import ExecutionServiceDay
     suffix=' FOR UPDATE' if lock else ''
     cursor.execute('SELECT r.id,r.staff_id,r.selected_candidate_id,r.execution_dates,r.confirmed_version_id '
         'FROM scheduling_service_start_requests r JOIN confirmed_service_date_versions v '
@@ -275,3 +284,142 @@ def current_service_start_execution(cursor,case_no,plan_id=None,*,lock=False):
                 substitutions[row['staff_id']]=int(item['staff_id'])
     return {'service_start_response_ids':[row['id'] for row in rows],
         'confirmed_version_id':rows[0]['confirmed_version_id'],'substitutions':substitutions},tuple(days)
+
+
+def save_office_schedule(
+    connection, assignment_application_factory, case_no, segments, *, actual_start_date, expected_order_version,
+    expected_scheduling_version, expected_confirmed_version, idempotency_key, actor,
+    reason, correlation_id,
+):
+    reason = reason.strip() or "工會確認服務日期並建立正式班表"
+    key = IdempotencyKey(idempotency_key)
+    who = ActorContext(actor)
+    cid = CorrelationId(correlation_id)
+    dates = tuple(day for segment in segments for day in segment.service_dates)
+    digest = fingerprint_payload({
+        "case": case_no, "start": str(actual_start_date), "actor": actor, "reason": reason,
+        "versions": (expected_order_version, expected_scheduling_version, expected_confirmed_version),
+        "segments": [(segment.staff_id, tuple(map(str, segment.service_dates))) for segment in segments],
+    }).value
+    from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
+
+    date_repository = MySqlServiceDateConfirmationRepository(connection)
+    actual_repository = MySqlOrderActualStartRepository(connection, office_first_schedule=True)
+    units = partial(MySqlUnitOfWork, connection)
+    date_workflow = ServiceDateConfirmationWorkflow(
+        date_repository, units, MySqlMatchingScheduleConfirmationRepository(connection),
+    )
+    actual_workflow = ActualStartWorkflow(actual_repository, units, SystemBusinessClock())
+    if not dates or dates != tuple(sorted(set(dates))) or dates[0] < actual_start_date:
+        raise ValueError("office_schedule_dates_invalid")
+    if len({segment.staff_id for segment in segments}) != len(segments):
+        raise ValueError("office_schedule_segments_invalid")
+
+    with units() as unit:
+        MySqlServiceStartRepository(connection).lock_case(case_no, tuple(segment.staff_id for segment in segments))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT e.payload FROM precontract_service_commitment_events e "
+                "JOIN precontract_service_commitments c ON c.id=e.commitment_id "
+                "WHERE c.case_no=%s AND e.event_type='converted' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.office_command_key'))=%s FOR UPDATE",
+                (case_no, key.value),
+            )
+            replay = cursor.fetchone()
+        if replay:
+            payload = replay["payload"]
+            payload = json.loads(payload) if isinstance(payload, str) else payload
+            if payload["office_command_fingerprint"] != digest:
+                raise ValueError("office_schedule_idempotency_conflict")
+            current = assignment_application_factory(connection).query(case_no).assignment_plan
+            if {a.assignment_id for a in current.effective_assignments} != set(payload["assignment_ids"]):
+                raise ValueError("office_schedule_result_stale")
+            return HistoricalRestartArrangementReceipt(
+                case_no, current.scheduling_version, current.scheduling_generation,
+                tuple(payload["assignment_ids"]), PreviewFingerprint(payload["preview_fingerprint"]),
+            )
+        facts = date_repository.load(case_no, lock=True)
+        if (facts.order_version, facts.scheduling_version, facts.current_version) != (
+            expected_order_version, expected_scheduling_version, expected_confirmed_version,
+        ):
+            raise ValueError("office_schedule_stale_version")
+        current = assignment_application_factory(connection).query(case_no).assignment_plan
+        if facts.restart_generation_number is not None or any(a.official_service_dates for a in current.effective_assignments):
+            raise ValueError("office_schedule_not_pending_blocked")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT a.id FROM case_staff_assignments a "
+                "LEFT JOIN scheduling_aggregates g ON g.case_no=a.case_no "
+                "WHERE a.case_no=%s AND a.status IN ('planned','active','completed') "
+                "AND (a.generation_id IS NULL OR NOT (a.generation_id <=> g.effective_generation_id)) FOR UPDATE",
+                (case_no,),
+            )
+            if cursor.fetchone() is not None:
+                raise ValueError("office_schedule_assignment_ownership_blocked")
+        staff_ids = {segment.staff_id for segment in segments}
+        if current.effective_assignments and {a.staff_id for a in current.effective_assignments} != staff_ids:
+            raise ValueError("office_schedule_incumbent_conflict")
+        start = actual_repository.load_actual_start_query(case_no, for_update=True)
+        if start.service_data_locked:
+            raise ValueError("office_schedule_locked_blocked")
+        if start.current_actual_start_date != actual_start_date:
+            if start.has_formal_assignments:
+                raise ValueError("office_schedule_existing_start_conflict")
+            preview = actual_workflow.preview_date_only(start, actual_start_date)
+            actual_workflow.apply_date_only_in_current_unit_of_work(ActualStartDateOnlyApplyRequest(
+                case_no, actual_start_date, ExpectedVersion(start.order_version), preview.fingerprint, cid,
+            ))
+            facts = date_repository.load(case_no, lock=True)
+        if facts.current_version is None or facts.current_dates != dates or facts.current_confirmed_order_version != facts.order_version:
+            preview = date_workflow.preview_from_facts(facts, dates)
+            date_workflow.apply_in_current_unit_of_work(
+                case_no, dates, expected_order_version=facts.order_version,
+                expected_scheduling_version=facts.scheduling_version, preview_fingerprint=preview.candidate.fingerprint.value,
+                actor=actor, reason=reason, idempotency_key=f"office-dates:{digest}", reserve_waiting_deposit=False,
+            )
+
+        def execution(cursor, requested_case, plan_id, *, lock):
+            if requested_case != case_no:
+                raise ValueError("office_schedule_case_conflict")
+            cursor.execute(
+                "SELECT p.id, v.id AS version_id FROM caregiver_matching_plans p "
+                "JOIN precontract_service_commitments c ON c.matching_plan_id=p.id AND c.case_no=p.case_no "
+                "JOIN confirmed_service_date_versions v ON v.case_no=p.case_no AND v.is_current=1 "
+                "JOIN orders o ON o.case_no=p.case_no AND o.status='訂單成立' "
+                "WHERE p.case_no=%s AND p.is_active=1 AND p.status IN ('proposed','accepted') "
+                "AND EXISTS (SELECT 1 FROM order_contract_flow_events e WHERE e.case_no=o.case_no AND e.event_type='contract_completed')"
+                + (" FOR UPDATE" if lock else ""), (case_no,),
+            )
+            matches = cursor.fetchall()
+            if len(matches) != 1 or (plan_id is not None and matches[0]["id"] != plan_id):
+                raise ValueError("office_schedule_commitment_blocked")
+            match = matches[0]
+            return {
+                "substitutions": {}, "service_start_response_ids": (), "confirmed_version_id": match["version_id"],
+                "office_command_key": key.value, "office_command_fingerprint": digest,
+            }, tuple(ExecutionServiceDay(segment.staff_id, day) for segment in segments for day in segment.service_dates)
+
+        interval_start = actual_start_date
+        intents = []
+        for segment in segments:
+            interval_end = segment.service_dates[-1]
+            intents.append(AssignmentPlanSegmentIntent(segment.staff_id, interval_start, interval_end, segment.service_dates))
+            interval_start = interval_end + timedelta(days=1)
+        intent = AssignmentPlanIntent(tuple(intents))
+        workflow = assignment_application_factory(connection, office_execution=execution).workflow
+        preview = workflow.preview(AssignmentPlanPreviewRequest(case_no, intent, cid))
+        receipt = workflow.apply_in_current_unit_of_work(AssignmentPlanApplyRequest(
+            case_no, intent, ExpectedVersion(preview.order_version), ExpectedVersion(preview.scheduling_version),
+            ExpectedVersion(preview.client_finance_version), ExpectedVersion(preview.payroll_version),
+            preview.fingerprint, IdempotencyKey(f"office-schedule:{digest}"), who, reason, cid,
+        ))
+        observed = workflow.query(case_no).assignment_plan
+        if {a.staff_id: a.official_service_dates for a in observed.effective_assignments} != {
+            segment.staff_id: segment.service_dates for segment in segments
+        } or len(observed.effective_assignments) != len(segments):
+            raise ValueError("office_schedule_result_conflict")
+        unit.commit()
+        return HistoricalRestartArrangementReceipt(
+            case_no, receipt.scheduling_version, receipt.scheduling_generation,
+            tuple(a.assignment_id for a in observed.effective_assignments), receipt.preview_fingerprint,
+        )

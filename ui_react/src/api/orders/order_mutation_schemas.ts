@@ -84,6 +84,7 @@ export const ServiceDateConfirmationQueryViewSchema = z
     current_dates: z.array(IsoDateSchema),
     bound_staff: z.array(BoundServiceStaffSchema),
     arrangement_pending: z.boolean(),
+    historical_schedule_pending: z.boolean().optional(),
   })
   .strict();
 
@@ -107,6 +108,16 @@ export const HistoricalArrangementApplyPayloadSchema = HistoricalArrangementPrev
   preview_fingerprint: FingerprintSchema,
   reason: ReasonSchema,
 }).strict();
+
+export const HistoricalScheduleSavePayloadSchema = HistoricalArrangementPreviewPayloadSchema.extend({
+  actual_start_date: IsoDateSchema,
+  expected_order_version: z.number().int().min(0),
+  expected_scheduling_version: z.number().int().min(0),
+  expected_confirmed_version: z.number().int().gt(0).nullable(),
+  reason: ReasonSchema,
+}).strict();
+
+export type HistoricalScheduleSavePayload = z.input<typeof HistoricalScheduleSavePayloadSchema>;
 
 export const HistoricalArrangementPreviewViewSchema = z.object({
   case_no: z.string().min(1),

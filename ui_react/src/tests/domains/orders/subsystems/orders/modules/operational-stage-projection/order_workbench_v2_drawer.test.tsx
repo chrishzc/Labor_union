@@ -588,8 +588,8 @@ describe('待辦看板 唯讀工作 Drawer', () => {
       expect(within(dialog).queryByRole('button', { name: '前往排班更正完工日期' })).not.toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole('button', { name: '更正完工服務日期' }));
       expect(within(dialog).getByText('完工更正月曆')).toBeVisible();
-      expect(within(dialog).getByRole('navigation', { name: '服務安排步驟' })).toBeVisible();
-      expect(within(dialog).getByRole('button', { name: /1\s*設定服務日期/ })).toBeVisible();
+      expect(within(dialog).getByRole('heading', { name: '現行服務日期' })).toBeVisible();
+      expect(within(dialog).queryByRole('navigation', { name: '服務安排步驟' })).not.toBeInTheDocument();
       expect(within(dialog).queryByText('排班工作區')).not.toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole('button', { name: '返回完工摘要' }));
       expect(within(dialog).getByRole('region', { name: '服務完工摘要' })).toBeVisible();

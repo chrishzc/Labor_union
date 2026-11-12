@@ -189,6 +189,7 @@ class AssignmentPlanFacts:
     current_waiting_lock_ids: tuple[int, ...] = ()
     explicit_service_start_result: bool = False
     service_time: ServiceTimeTerms | None = None
+    office_schedule: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -339,6 +340,7 @@ def _lineage_for_segment(
         assignment.assignment_id
         for assignment in facts.effective_assignments
         if _assignment_overlaps_segment(assignment, segment)
+        or (facts.office_schedule and not assignment.official_service_dates and assignment.staff_id == segment.staff_id)
     )
     return tuple(sorted(set(sources)))
 
@@ -371,7 +373,7 @@ def _build_assignment(
     )
     return AssignmentCandidate(
         candidate_key=candidate_key,
-        source_assignment_id=None,
+        source_assignment_id=lineage[0] if facts.office_schedule and len(lineage) == 1 else None,
         staff_id=segment.staff_id,
         sequence=sequence,
         assigned_start_date=segment.assigned_start_date,
@@ -511,6 +513,7 @@ def _candidate_payload(
 ) -> dict[str, object]:
     return {
         "case_no": facts.case_no,
+        **({"office_schedule": True} if facts.office_schedule else {}),
         "versions": _version_payload(facts),
         "service_started": facts.service_started,
         "contracted_service_days": facts.contracted_service_days,

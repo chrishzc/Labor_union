@@ -11,14 +11,16 @@ const mocks = vi.hoisted(() => ({
   getActualStart: vi.fn(), getOrderCalendarDetail: vi.fn(), calculate: vi.fn(),
   getServiceDates: vi.fn(), previewServiceDates: vi.fn(), applyServiceDates: vi.fn(),
   previewActualStart: vi.fn(), applyActualStart: vi.fn(),
-  previewHistoricalArrangement: vi.fn(), applyHistoricalArrangement: vi.fn(),
+  saveHistoricalSchedule: vi.fn(), getAssignmentPlan: vi.fn(),
 }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getActualStart: mocks.getActualStart, getOrderCalendarDetail: mocks.getOrderCalendarDetail,
+  getAssignmentPlan: mocks.getAssignmentPlan,
 } }));
-vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ ordersMutationClient: {
+vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({
+  saveHistoricalSchedule: mocks.saveHistoricalSchedule,
+  ordersMutationClient: {
   getServiceDates: mocks.getServiceDates, previewServiceDates: mocks.previewServiceDates, applyServiceDates: mocks.applyServiceDates,
-  previewHistoricalArrangement: mocks.previewHistoricalArrangement, applyHistoricalArrangement: mocks.applyHistoricalArrangement,
 } }));
 vi.mock('../../../../../../../api/orders/order_actual_start_client', () => ({ orderActualStartClient: {
   preview: mocks.previewActualStart, apply: mocks.applyActualStart,
@@ -190,8 +192,9 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(mocks.previewServiceDates.mock.invocationCallOrder[1]).toBeLessThan(mocks.applyServiceDates.mock.invocationCallOrder[1]);
   });
 
-  it('歷史重啟回到正常分支後可確認開始日並沿用既定月嫂排班', async () => {
+  it('歷史重啟用一次儲存確認實際開始日、服務日期並建立單一月嫂班表', async () => {
     actualStart = null;
+    currentQuery.historical_schedule_pending = true;
     currentQuery.bound_staff = [{ staff_id: 12, staff_name: '王月嫂' }];
     mocks.getOrderCalendarDetail.mockResolvedValue({ case_no: CASE, service_mode: null });
     const fingerprint = 'c'.repeat(64);
@@ -199,51 +202,73 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       case_no: CASE, operation: 'date_only', before_actual_start_date: null, after_actual_start_date: initialDates[0],
       order_version: 11, scheduling_version: 7, preview_fingerprint: fingerprint,
     });
-    mocks.applyActualStart.mockImplementation(async () => {
-      actualStart = initialDates[0];
-      currentQuery = { ...currentQuery, order_version: 12 };
-      return { case_no: CASE, operation: 'date_only', actual_start_date: actualStart,
-        order_version: 12, scheduling_version: 7, preview_fingerprint: fingerprint };
+    mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      currentQuery = { ...currentQuery, order_version: 13, scheduling_version: 8,
+        current_version: 1, current_dates: initialDates, bound_staff: [], historical_schedule_pending: false };
+      return { case_no: CASE, scheduling_version: 8, generation_number: 2,
+        preview_fingerprint: fingerprint, assignment_ids: [1] };
     });
-    const applyDates = mocks.applyServiceDates.getMockImplementation()!;
-    mocks.applyServiceDates.mockImplementation(async (...args) => {
-      const receipt = await applyDates(...args);
-      currentQuery.arrangement_pending = true;
-      return receipt;
-    });
-    mocks.previewHistoricalArrangement.mockResolvedValue({
-      case_no: CASE, order_version: 13, scheduling_version: 7, confirmed_version: 1, preview_fingerprint: fingerprint,
-    });
-    mocks.applyHistoricalArrangement.mockImplementation(async () => {
-      currentQuery = { ...currentQuery, order_version: 14, scheduling_version: 8, bound_staff: [], arrangement_pending: false };
-      return { case_no: CASE, scheduling_version: 8, preview_fingerprint: fingerprint, assignment_ids: [1] };
+    mocks.getAssignmentPlan.mockRejectedValueOnce(new Error('讀取失敗')).mockResolvedValue({
+      case_no: CASE, scheduling_version: 8, scheduling_generation: 2,
+      assignments: [{ staff_id: 12, assignment_id: 1, official_service_dates: initialDates }],
     });
 
-    const onOpenArrangement = vi.fn();
-    const { rerender } = render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart onOpenArrangement={onOpenArrangement} />);
-    expect(await screen.findByText(/既定服務人員：/)).toBeInTheDocument();
-    expect(screen.getByText(/未設定 王月嫂/)).toBeInTheDocument();
-    await save();
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart />);
+    const saveSchedule = await screen.findByRole('button', { name: '儲存班表' });
+    await waitFor(() => expect(saveSchedule).toBeEnabled());
     expect(mocks.calculate).toHaveBeenCalledWith(expect.objectContaining({ service_mode: '休周日' }));
-    const next = await screen.findByRole('button', { name: '前往排班' });
-    await waitFor(() => expect(next).toBeEnabled());
-    expect(mocks.applyActualStart).toHaveBeenCalledTimes(1);
-    fireEvent.click(next);
-    expect(onOpenArrangement).toHaveBeenCalled();
-    rerender(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart view="arrangement" />);
-    fireEvent.click(await screen.findByRole('button', { name: '建立正式安排' }));
-    await screen.findByText('歷史案件正式安排已建立並回讀。');
-    expect(mocks.applyHistoricalArrangement).toHaveBeenCalledWith(CASE, expect.objectContaining({
+    expect(screen.queryByRole('button', { name: '儲存實際開始日' })).not.toBeInTheDocument();
+    fireEvent.click(saveSchedule);
+    const retry = await screen.findByRole('button', { name: '重新讀取班表' });
+    fireEvent.click(retry);
+    await screen.findByText('班表已儲存並回讀正式排班。');
+    expect(mocks.applyActualStart).not.toHaveBeenCalled();
+    expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledTimes(1);
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledWith(CASE, expect.objectContaining({
+      actual_start_date: initialDates[0], expected_confirmed_version: null,
       segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.objectContaining({ idempotencyKey: expect.any(String) }));
   });
 
-  it('歷史日期已確認但未排班時顯示獨立建立正式安排入口', async () => {
+  it('歷史案件帶入已保存日期，依月嫂選好日期後才能一次儲存', async () => {
     currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates,
-      bound_staff: [{ staff_id: 12, staff_name: '王月嫂' }], arrangement_pending: true };
-    render(<OrderServiceDatesPanel caseNo={CASE} view="arrangement" />);
-    expect(await screen.findByRole('region', { name: '歷史訂單建立正式安排' })).toBeInTheDocument();
-    expect(screen.getByText(/排班與費率快照尚未建立/)).toBeInTheDocument();
+      bound_staff: [{ staff_id: 12, staff_name: '王月嫂' }, { staff_id: 13, staff_name: '林月嫂' }],
+      arrangement_pending: true, historical_schedule_pending: true };
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    const saveSchedule = await screen.findByRole('button', { name: '儲存班表' });
+    expect(saveSchedule).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /王月嫂 2026-10-01/ }));
+    expect(screen.getByRole('button', { name: /林月嫂 2026-10-01/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /林月嫂 2026-10-02/ }));
+    fireEvent.click(screen.getByRole('button', { name: /王月嫂 2026-10-04/ }));
+    expect(saveSchedule).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /王月嫂 2026-10-04/ }));
+    fireEvent.click(screen.getByRole('button', { name: /林月嫂 2026-10-04/ }));
+    expect(saveSchedule).toBeEnabled();
+    expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
+  });
+
+  it('一般案件帶入已確認日期並從原頁送出工會正式排班', async () => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
+    mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
+      return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5] };
+    });
+    mocks.getAssignmentPlan.mockResolvedValue({
+      case_no: CASE, scheduling_version: 8, scheduling_generation: 2,
+      assignments: [{ assignment_id: 5, staff_id: 12, official_service_dates: initialDates }],
+    });
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
+      officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
+    const button = await screen.findByRole('button', { name: '儲存班表' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await screen.findByText('班表已儲存並回讀正式排班。');
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
+      expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
+    }), expect.anything(), true);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 

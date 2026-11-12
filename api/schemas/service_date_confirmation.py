@@ -31,6 +31,7 @@ class ServiceDateConfirmationQueryView(BaseModel):
     current_dates: list[date]
     bound_staff: list[BoundServiceStaffView]
     arrangement_pending: bool
+    historical_schedule_pending: bool = False
 
 
 class HistoricalArrangementSegmentView(BaseModel):

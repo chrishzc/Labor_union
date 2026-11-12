@@ -82,8 +82,8 @@
 .order-case-page input:not([type=checkbox]):not([type=radio]), .order-case-page select, .order-case-page textarea { max-width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #d9cbbf; border-radius: 8px; background: #fff; font: inherit; }
 .order-case-page input[type=checkbox] { accent-color: #b95125; width: 16px; height: 16px; }
 .order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)) { min-height: 40px; padding: 9px 15px; border: 1px solid #d8c7b9; border-radius: 8px; background: #fffaf5; color: #794b2e; font: inherit; font-size: .84rem; cursor: pointer; }
-.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-steps button, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)) { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
-.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-steps button, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
+.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)) { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
+.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
 .order-case-page .order-v2-drawer-current-task > fieldset > section > button { margin-bottom: 18px; }
 .order-case-page button:disabled { opacity: 1; cursor: not-allowed !important; background: var(--md-sys-color-disabled-container) !important; color: var(--md-sys-color-disabled) !important; border-color: var(--md-sys-color-outline) !important; }
 .order-case-page button:focus-visible, .order-case-page a:focus-visible { outline: 3px solid #b95125; outline-offset: 3px; }
@@ -993,12 +993,6 @@
 .contract-review-body { flex: 1; overflow-y: auto; min-height: 0; padding: 24px; }
 .contract-review-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 24px; border-top: 1px solid #e9ded6; }
 .contract-review-footer small { color: #806d60; }
-.service-arrangement-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-bottom: 20px; margin-bottom: 22px; border-bottom: 1px solid #eadbd0; }
-.service-arrangement-steps button { display: flex; align-items: center; gap: 10px; padding: 15px 0; border: 0; border-bottom: 2px solid #e9ded6; border-radius: 0; background: transparent; color: #806d60; text-align: left; }
-.service-arrangement-steps button[aria-current='step'] { color: #b95125; border-color: #b95125; font-weight: 650; }
-.service-arrangement-steps button span { width: 25px; height: 25px; border: 1px solid currentColor; border-radius: 50%; display: grid; place-items: center; }
-.order-case-page .service-arrangement-steps > button { padding: 0 0 12px !important; border: 0 !important; border-bottom: 2px solid #eadbd0 !important; border-radius: 0 !important; background: transparent !important; }
-.order-case-page .service-arrangement-steps > button[aria-current='step'] { border-bottom-color: #ba4d20 !important; color: #ba4d20; }
 .order-case-page .order-case-service-title { border: 0; padding: 0; margin: 0 0 4px; font-size: 18px; }
 .service-arrangement-deposit-slot .service-arrangement-deposit { margin: 0; padding: 14px 16px; background: #fffdf8; border: 1px solid #eadbd0; border-radius: 10px; }
 .service-arrangement-deposit-slot .service-arrangement-deposit h3 { font-size: 15px; margin: 0; }
@@ -1038,6 +1032,12 @@
 .service-date-calendar-hint { display: block; margin-top: 12px; font-size: 12px; color: #857163; }
 .service-date-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #eadbd0; }
 .service-date-footer small { font-size: 13px; color: #857163; }
+.historical-schedule-allocation { display: grid; gap: var(--space-2); margin: 16px 0; }
+.historical-schedule-allocation h3, .historical-schedule-allocation p { margin: 0; }
+.historical-schedule-allocation fieldset { min-width: 0; border: 1px solid #eadbd0; border-radius: 8px; }
+.historical-schedule-date-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.order-case-page .historical-schedule-date-choices .calendar-date-cell { min-width: 44px; padding: 5px 8px; }
+.order-case-page .historical-schedule-date-choices .calendar-date-cell:disabled:not(.selected) { opacity: .55; }
 .order-case-page .service-date-footer .service-date-primary, .order-case-page .service-date-preview-actions .service-date-primary { width: auto; margin: 0; background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
 .service-date-preview { border: 1px solid #e8d2c2; border-radius: 10px; padding: 18px; margin: 16px 0; background: #fffaf6; }
 .service-date-preview h4 { margin: 0 0 8px; }

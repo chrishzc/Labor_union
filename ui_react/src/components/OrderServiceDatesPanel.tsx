@@ -3,9 +3,11 @@ import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import type {
+  HistoricalArrangementReceiptView,
+  HistoricalScheduleSavePayload,
   ServiceDateConfirmationQueryView,
 } from '../api/orders/order_mutation_schemas';
-import { ordersMutationClient } from '../api/orders/order_mutation_client';
+import { ordersMutationClient, saveHistoricalSchedule } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import {
@@ -22,10 +24,11 @@ import {
 } from '../adapters/orders/order_mutation_adapter';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { OrderMutationError } from '../api/orders/order_mutation_errors';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
-import { HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
+import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
 import { OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { OrderOfficialDateCorrectionPanel } from './OrderOfficialDateCorrectionPanel';
 
@@ -44,6 +47,7 @@ interface OrderServiceDatesPanelProps {
   onBoundStaffChange?: (staff: ServiceDateConfirmationQueryView['bound_staff']) => void;
   completedCorrection?: boolean;
   coordinatedStart?: boolean;
+  officeScheduleStaff?: ServiceDateConfirmationQueryView['bound_staff'];
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
@@ -101,12 +105,22 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = (props) =
   ? <OrderOfficialDateCorrectionPanel caseNo={props.caseNo} revision={props.projectionRevision} view={props.view} onOpenArrangement={props.onOpenArrangement} onOpenDates={props.onOpenDates} onObserved={props.onObserved} onBusyChange={props.onBusyChange} />
   : <OrderPreCompletionServiceDatesPanel {...props} />;
 
-const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange, onBoundStaffChange, coordinatedStart = false }) => {
+const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onArrangementPendingChange, onBoundStaffChange, coordinatedStart = false, officeScheduleStaff = [] }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const historicalArrangementCase=useRef<string|null>(null);
-  if(queryView?.case_no===caseNo && queryView.arrangement_pending) historicalArrangementCase.current=caseNo;
+  const arrangementPending = queryView?.case_no === caseNo
+    && (queryView.historical_schedule_pending ?? queryView.arrangement_pending);
+  if (arrangementPending) historicalArrangementCase.current = caseNo;
+  const [allocation, setAllocation] = useState<Record<string, number>>({});
+  const [savedSchedule, setSavedSchedule] = useState<AssignmentPlan | null>(null);
+  const scheduleRequests = useRef(new Map<string, {
+    key: string;
+    office: boolean;
+    payload: HistoricalScheduleSavePayload;
+    receipt?: HistoricalArrangementReceiptView;
+  }>());
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
   const initialCalculation = useRef('');
   const [serviceMode, setServiceMode] = useState<ServiceMode | null>(null);
@@ -129,14 +143,12 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const [inputInvalid, setInputInvalid] = useState(false);
   const [, setRecoveryRevision] = useState(0);
   const [attemptedCalculationRevision, setAttemptedCalculationRevision] = useState(0);
-  const [arrangementBusy, setArrangementBusy] = useState(false);
   const actionInFlight = useRef(new Set<string>());
   const saveDatesIntent = useRef(true);
   const saveValidation = useSaveValidation();
   const startDateRef = useRef<HTMLInputElement>(null);
   const dateSelectionRef = useRef<HTMLDivElement>(null);
   const readbackElement = useRef<HTMLDivElement | null>(null);
-  const nextStepElement = useRef<HTMLDivElement | null>(null);
   const calculationSequence = useRef(0);
   const readController = useRef<AbortController | null>(null);
   const renderedCaseNo = useRef(caseNo);
@@ -146,14 +158,19 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const needsBasisUpdate = calculationRevision > attemptedCalculationRevision;
   const startFlow = orderMutationFlowStore.getActualStart(caseNo);
   const startUnresolved = startFlow !== undefined && startFlow.status !== 'observed';
-  const saving = working === 'apply' || arrangementBusy;
-  const arrangementPending = queryView?.arrangement_pending ?? false;
+  const saving = working === 'apply';
+  const scheduleRecovery = scheduleRequests.current.get(caseNo);
+  const assignmentPlan = currentAssignmentPlan?.scheduling_version === queryView?.scheduling_version
+    ? currentAssignmentPlan : savedSchedule;
   const effectiveServiceDates = queryView !== null
-    && currentAssignmentPlan?.case_no === caseNo
-    && currentAssignmentPlan.scheduling_version === queryView.scheduling_version
-    && currentAssignmentPlan.assignments.length > 0
-    ? [...new Set(currentAssignmentPlan.assignments.flatMap((segment) => segment.official_service_dates))].sort()
+    && assignmentPlan?.case_no === caseNo
+    && assignmentPlan.scheduling_version === queryView.scheduling_version
+    && assignmentPlan.assignments.length > 0
+    && assignmentPlan.assignments.every(segment => segment.official_service_dates.length > 0)
+    ? [...new Set(assignmentPlan.assignments.flatMap((segment) => segment.official_service_dates))].sort()
     : null;
+  const officeSchedule = scheduleRecovery?.office ?? (!arrangementPending && officeScheduleStaff.length > 0 && effectiveServiceDates === null);
+  const schedulePending = arrangementPending || officeSchedule;
   const confirmationSupersededBySchedule = effectiveServiceDates !== null
     && queryView !== null
     && queryView.current_dates.length > 0
@@ -167,9 +184,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   useEffect(() => { onBoundStaffChange?.(queryView?.bound_staff ?? []); }, [queryView, onBoundStaffChange]);
   useEffect(() => {
     if (success === '服務日期已確認。') {
-      (arrangementPending && onOpenArrangement ? nextStepElement.current : readbackElement.current)?.focus();
+      readbackElement.current?.focus();
     }
-  }, [success, arrangementPending, onOpenArrangement]);
+  }, [success]);
+  useEffect(() => { setAllocation({}); }, [caseNo, queryView?.current_version, queryView?.order_version, queryView?.scheduling_version]);
 
   useEffect(() => {
     setAttemptedCalculationRevision(0);
@@ -281,7 +299,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       let dates = serviceDates.current_dates;
       let calculated: SchedulePrecisionResult | null = null;
       const modeValue: ServiceMode | null = calendarDetail.service_mode
-        ?? (serviceDates.bound_staff.length === 1 ? '休周日' : null);
+        ?? ((serviceDates.historical_schedule_pending ?? serviceDates.arrangement_pending) ? '休周日' : null);
       let basis: { date: string; confirmed: boolean } | null = null;
       let nextStartPreview: ActualStartPreview | null = null;
       let range = serviceDates.selectable_dates;
@@ -305,7 +323,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         }
         range = serviceDateRange(serviceDates, basis.date);
         recommendation = calculated.day_by_day.filter((day) => day.is_work_day).map((day) => day.date);
-        if (basis.date !== currentStart.current_actual_start_date) {
+        if (basis.date !== currentStart.current_actual_start_date && !officeSchedule) {
           nextStartPreview = await orderActualStartClient.preview(caseNo, { new_actual_start_date: basis.date }, { signal: controller.signal });
           if (!current()) return;
           if ((nextStartPreview.operation === 'date_only' ? nextStartPreview.case_no : nextStartPreview.actual_start.case_no) !== caseNo
@@ -621,53 +639,140 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     }
   };
 
+  const scheduleSegments = schedulePending && queryView
+    ? historicalScheduleSegments(officeSchedule ? officeScheduleStaff : queryView.bound_staff, selectedDates, allocation) : null;
+
+  const runScheduleSave = async () => {
+    if (!queryView || readController.current !== null || actionInFlight.current.has(caseNo)) return;
+    let request = scheduleRequests.current.get(caseNo);
+    if (!request) {
+      if (!scheduleSegments || selectedDates.length !== queryView.contracted_service_days) return;
+      request = {
+        key: crypto.randomUUID(),
+        office: officeSchedule,
+        payload: {
+          actual_start_date: startDate,
+          segments: scheduleSegments,
+          expected_order_version: queryView.order_version,
+          expected_scheduling_version: queryView.scheduling_version,
+          expected_confirmed_version: queryView.current_version,
+          reason: reason.trim(),
+        },
+      };
+      scheduleRequests.current.set(caseNo, request);
+    }
+    actionInFlight.current.add(caseNo);
+    setWorking('apply');
+    setError(null);
+    setSuccess(null);
+    let conflict: string | null = null;
+    try {
+      const receipt = request.receipt ?? await (request.office
+        ? saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }, true)
+        : saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }));
+      request.receipt = receipt;
+      const [observed, plan] = await Promise.all([
+        ordersMutationClient.getServiceDates(caseNo),
+        ordersQueryClient.getAssignmentPlan(caseNo),
+      ]);
+      const expected = request.payload.segments;
+      if (receipt.case_no !== caseNo || observed.case_no !== caseNo || plan.case_no !== caseNo
+        || observed.historical_schedule_pending || observed.arrangement_pending
+        || observed.scheduling_version !== receipt.scheduling_version
+        || plan.scheduling_version !== receipt.scheduling_version
+        || plan.scheduling_generation !== receipt.generation_number
+        || !sameServiceDates(observed.current_dates, expected.flatMap(segment => segment.service_dates))
+        || plan.assignments.length !== expected.length
+        || !expected.every(segment => plan.assignments.some(assignment =>
+          assignment.staff_id === segment.staff_id && assignment.assignment_id !== null
+          && receipt.assignment_ids.includes(assignment.assignment_id)
+          && sameServiceDates(assignment.official_service_dates, segment.service_dates)))) {
+        throw new Error('未能核對正式班表，請重新讀取結果。');
+      }
+      scheduleRequests.current.delete(caseNo);
+      if (renderedCaseNo.current !== caseNo) return;
+      orderMutationFlowStore.setServiceDatesQueryReady(caseNo, observed);
+      setSavedSchedule(plan);
+      setQueryView(observed);
+      setSelectedDates(observed.current_dates);
+      setStartPreview(null);
+      setCalculationBasis({ date: request.payload.actual_start_date, confirmed: true });
+      setActualStart(value => value ? {
+        ...value, current_actual_start_date: request.payload.actual_start_date,
+        order_version: observed.order_version, has_formal_assignments: true,
+      } : value);
+      setSuccess('班表已儲存並回讀正式排班。');
+      onObserved?.();
+    } catch (caught) {
+      const rejected = !request.receipt && (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
+        && caught.status >= 400 && caught.status < 500;
+      if (rejected) scheduleRequests.current.delete(caseNo);
+      if (renderedCaseNo.current === caseNo) {
+        setError(request.receipt ? '班表已提交，請重新讀取結果。' : errorMessage(caught));
+        if (rejected && isServiceDateConflict(caught)) conflict = errorMessage(caught);
+      }
+    } finally {
+      actionInFlight.current.delete(caseNo);
+      if (renderedCaseNo.current === caseNo) setWorking(null);
+      if (conflict && renderedCaseNo.current === caseNo) {
+        await loadServiceDates('read');
+        if (renderedCaseNo.current === caseNo) setError(conflict);
+      }
+    }
+  };
+
   const requiredDateCount = queryView?.contracted_service_days ?? 0;
   const canSave = queryView !== null
     && selectedDates.every((date) => queryView.selectable_dates.includes(date))
     && working === null
     && !isRecoveryActive
     && !needsBasisUpdate && !inputInvalid && !manualNeedsReview && !startUnresolved && !actualStart?.service_data_locked;
-  const arrangementReady = queryView !== null && !isRecoveryActive && !startUnresolved
-    && !needsBasisUpdate && !inputInvalid && startPreview === null
-    && sameServiceDates(selectedDates, queryView.current_dates);
+  const canSaveSchedule = canSave && !!startDate && scheduleSegments !== null
+    && selectedDates.length === requiredDateCount;
 
   useEffect(() => {
     if (initialCalculation.current === caseNo || queryView?.case_no !== caseNo || queryView.current_dates.length > 0
-      || selectedDates.length > 0 || serviceMode === null || !actualStart || actualStart.has_formal_assignments
+      || selectedDates.length > 0 || serviceMode === null || !actualStart || (actualStart.has_formal_assignments && !officeSchedule)
       || working !== null || isRecoveryActive || startUnresolved || needsBasisUpdate || !startDate) return;
     initialCalculation.current = caseNo;
     void loadServiceDates('calculate', startDate);
     // Only the first empty date table is calculated; saved dates and manual drafts are preserved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate]);
-  useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
+  }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate, officeSchedule]);
+  useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason, '月嫂分配': allocation }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive || !!scheduleRecovery });
 
 
   if (coordinatedStart && queryView && queryView.bound_staff.length === 0
-    && !arrangementPending && historicalArrangementCase.current !== caseNo) return (
+    && !schedulePending && historicalArrangementCase.current !== caseNo) return (
     <section aria-label="服務日期協調結果">
       <p>客戶與月嫂在原服務群組協調，由月嫂提交約定開始日；通過檢查即自動更新日期、排班及第一期款期限。</p>
-      {queryView.current_dates.length>0 ? <details><summary>查看正式服務日期</summary><p>{queryView.current_dates.join('、')}</p></details> : <p>等待月嫂回報協調結果。</p>}
+      {effectiveServiceDates ? <details><summary>查看正式服務日期</summary><p>{effectiveServiceDates.join('、')}</p></details>
+        : queryView.current_dates.length > 0 ? <details><summary>查看已確認服務日期</summary><p>{queryView.current_dates.join('、')}</p></details>
+          : <p>等待月嫂回報協調結果。</p>}
+      {effectiveServiceDates === null && assignmentPlan && assignmentPlan.scheduling_version === queryView.scheduling_version
+        && assignmentPlan.assignments.some(segment => segment.official_service_dates.length === 0)
+        && <p role="status">已有月嫂指派，但缺少正式逐日班次。</p>}
       <p>拒絕或檔期衝突的案件，請由下方代班待辦接續處理。</p>
+      {success !== null && <p role="status">{success}</p>}
     </section>
   );
   return (
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
-      hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>
+      hidden={view === 'arrangement' && !arrangementPending}>
       <div hidden={view !== 'dates'}>
       {saveValidation.feedback}
-      <div className="service-date-heading"><p className="service-date-instruction">{effectiveServiceDates ? '查看現行班表；更正開始日會同步調整各段排班。' : '依開始日與休假選擇計算服務日期，確認後儲存。'}</p>
+      <div className="service-date-heading"><p className="service-date-instruction">{effectiveServiceDates ? '查看現行班表；更正開始日會同步調整各段排班。' : schedulePending ? '選擇服務日期並分配月嫂，儲存後建立正式班表。' : '依開始日與休假選擇計算服務日期，確認後儲存。'}</p>
         {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
       </div>
       {effectiveServiceDates === null && <div className="service-date-settings">
         <div className="service-date-start-field">
           <label>實際開始日
             <input ref={startDateRef} aria-required="true" type="date" aria-label="實際開始日" value={startDate}
-              disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
+              disabled={saving || !!scheduleRecovery || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
               onChange={(event) => changeStartDate(event.target.value)} />
           </label>
           {actualStart && <small>約定服務開始日 {actualStart.planned_start_date}</small>}
-          {actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
+          {!schedulePending && actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
             disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked}
             onClick={() => void runApply(false)}>儲存實際開始日</button>}
         </div>
@@ -676,7 +781,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             <span>訂單原有服務方式</span><strong>{originalServiceType || '未提供'}</strong>
           </div>
       <fieldset aria-label="人工選定休假星期"
-        disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
+        disabled={saving || !!scheduleRecovery || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
         <legend>本次計算的休假星期</legend>
         <div className="service-date-weekday-choices">
           {REST_WEEKDAYS.map(({ value, label }) => <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -696,7 +801,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
 
       {error !== null && <p role="alert">{error}</p>}
-      {error !== null && !isRecoveryActive && !startUnresolved && (
+      {error !== null && !scheduleRecovery && !isRecoveryActive && !startUnresolved && (
         <button type="button" disabled={working !== null} onClick={() => void loadServiceDates('read')}>重新讀取服務日期</button>
       )}
       {basisNotice !== null && !routineCalculationNotice && effectiveServiceDates === null && <p className="service-date-inline-status" role="status">{basisNotice}</p>}
@@ -756,7 +861,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
       {queryView !== null && (
         <>
-          {queryView.bound_staff.length > 0 && (
+          {!arrangementPending && queryView.bound_staff.length > 0 && (
             <div role="status" className="order-v2-inline-notice">
               <strong>既定服務人員：</strong>
               {queryView.bound_staff.map((staff) => staffIdentity.label(staff.staff_id, staff.staff_name)).join('、')}
@@ -787,11 +892,19 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
-            isDateDisabled={date => effectiveServiceDates !== null || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
-            onToggle={date => changeDate(date, !displayedDates.includes(date))}
+            isDateDisabled={date => effectiveServiceDates !== null || !!scheduleRecovery || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
+            onToggle={date => {
+              const selected = displayedDates.includes(date);
+              if (selected) setAllocation(current => {
+                const next = { ...current };
+                delete next[date];
+                return next;
+              });
+              changeDate(date, !selected);
+            }}
             dayDetails={date => {
               const day = precision?.day_by_day.find(value => value.date === date);
-              const segmentIndex = currentAssignmentPlan?.assignments.findIndex(segment => segment.official_service_dates.includes(date)) ?? -1;
+              const segmentIndex = assignmentPlan?.assignments.findIndex(segment => segment.official_service_dates.includes(date)) ?? -1;
               return { holidayName: day?.holiday_name, rest: day?.is_rest_day, laterSegment: segmentIndex % 2 === 1 };
             }}
             hint={effectiveServiceDates ? '現行服務日期已保存；更正開始日會先核對各段調整結果。' : `選取國定假日即代表已確認該日安排服務；點選日期可調整，需選滿 ${requiredDateCount} 天。`}
@@ -799,11 +912,26 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
           </div>
 
-          {effectiveServiceDates === null && <label>原因（選填）<textarea maxLength={500} value={reason} disabled={working !== null || saving || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
+          {schedulePending && <HistoricalRestartArrangementPanel
+            staff={officeSchedule ? officeScheduleStaff : queryView.bound_staff} dates={selectedDates} allocation={allocation}
+            disabled={working !== null || !!scheduleRecovery}
+            onSelect={(date, staffId) => setAllocation(current => {
+              const next = { ...current };
+              if (next[date] === staffId) delete next[date];
+              else next[date] = staffId;
+              return next;
+            })} />}
+          {effectiveServiceDates === null && <label>原因（選填）<textarea maxLength={500} value={reason} disabled={working !== null || !!scheduleRecovery || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
           <div className="service-date-footer">
-            <small>{effectiveServiceDates ? '現行班表已保存。' : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>
-            {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看日期確認紀錄 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary" disabled={!canSave} onClick={() => void runApply(true)}>
-              {working === 'apply' ? '儲存並確認中…' : '儲存服務日期'}
+            <small>{effectiveServiceDates ? '現行班表已保存。' : schedulePending
+              ? (officeSchedule ? officeScheduleStaff : queryView.bound_staff).length > 1 && !scheduleSegments ? '請完成每位月嫂的日期分配。' : '儲存後即建立正式班表。'
+              : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>
+            {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看排班結果 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary"
+              disabled={schedulePending ? working !== null || (!scheduleRecovery && !canSaveSchedule) : !canSave}
+              onClick={() => void (schedulePending ? runScheduleSave() : runApply(true))}>
+              {working === 'apply' ? '儲存並確認中…' : schedulePending
+                ? scheduleRecovery ? scheduleRecovery.receipt ? '重新讀取班表' : '確認原儲存結果' : '儲存班表'
+                : '儲存服務日期'}
             </button>}
           </div>
         </>
@@ -818,33 +946,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           {effectiveServiceDates !== null && <div><dt>目前排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}
         </dl></details></div>
       )}
-      {arrangementPending && onOpenArrangement && (
-        <div className="order-v2-inline-notice" role="status" tabIndex={-1} ref={nextStepElement} aria-label="服務日期確認後下一步">
-          <strong>{arrangementReady ? '服務日期已保存，排班尚未建立。' : '已有保存日期；此次調整尚未完成確認。'}</strong>
-          <p>請接續核對既定月嫂並建立正式安排，完成後才能供週報與帳務使用。</p>
-          <button type="button" className="order-v2-open-drawer" disabled={working !== null || !arrangementReady}
-            onClick={onOpenArrangement}>前往排班</button>
-        </div>
-      )}
       </div>
-      {success !== null && (view === 'dates' || success === '歷史案件正式安排已建立並回讀。') && <p role="status">{success}</p>}
-      {arrangementPending && queryView && (
-        <div hidden={view !== 'arrangement'}>
-          {arrangementReady ? (
-            queryView.bound_staff.length === 0
-              ? <p role="alert">歷史案件缺少可核對的既定月嫂，請先處理配對證據，不能建立正式安排。</p>
-              : <HistoricalRestartArrangementPanel caseNo={caseNo} dates={queryView}
-                  onBusyChange={setArrangementBusy}
-                  onObserved={(observed) => {
-                    setQueryView(observed);
-                    setSuccess('歷史案件正式安排已建立並回讀。');
-                    onObserved?.();
-                  }} />
-          ) : <p role="status">開始日或服務日期尚未完成保存與回讀，請先回到「確認日期」接續確認。</p>}
-          {onOpenDates && <button type="button" className="order-v2-open-drawer" disabled={saving}
-            onClick={onOpenDates}>調整開始日與服務日期</button>}
-        </div>
-      )}
+      {success !== null && <p role="status">{success}</p>}
     </section>
   );
 };

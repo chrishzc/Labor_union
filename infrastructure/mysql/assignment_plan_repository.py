@@ -70,8 +70,9 @@ def _require_schedule_confirmation_gate(
     intent: AssignmentPlanIntent,
     *,
     lock: bool = False,
+    execution_reader=None,
 ) -> None:
-    _, days = _current_confirmed_execution(cursor, case_no, None, lock=lock)
+    _, days = (execution_reader or _current_confirmed_execution)(cursor, case_no, None, lock=lock)
     expected = {(day.staff_id, day.service_date) for day in days}
     actual = {(segment.staff_id, day) for segment in intent.segments for day in segment.official_service_dates}
     if actual != expected or sum(len(s.official_service_dates) for s in intent.segments) != len(expected):
@@ -167,8 +168,9 @@ def _require_retired_staff_assignment_preservation(cursor, source, intent, *, lo
 
 
 class MySqlAssignmentPlanRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, office_execution=None) -> None:
         self._connection = connection
+        self._office_execution = office_execution
 
     def load_for_query(self, case_no: str) -> AssignmentPlanQueryResult:
         # Query reports existing roots; downstream mutation readiness belongs to Preview.
@@ -232,8 +234,8 @@ class MySqlAssignmentPlanRepository:
         intent: AssignmentPlanIntent,
     ) -> AssignmentPlanWorkflowFacts:
         with self._connection.cursor() as cursor:
-            _require_schedule_confirmation_gate(cursor, case_no, intent)
-            source = load_preview_facts(cursor, case_no)
+            _require_schedule_confirmation_gate(cursor, case_no, intent, execution_reader=self._office_execution)
+            source = load_preview_facts(cursor, case_no, office_first_schedule=True) if self._office_execution else load_preview_facts(cursor, case_no)
             _require_retired_staff_assignment_preservation(
                 cursor, source, intent, lock=False
             )
@@ -249,13 +251,12 @@ class MySqlAssignmentPlanRepository:
                 case_no,
                 lock=False,
             )
-            facts = build_assignment_plan_workflow_facts(source, occupancy, lock_ids)
-            facts=replace(facts,assignment_plan=replace(facts.assignment_plan,explicit_service_start_result=True))
-            if not facts.assignment_plan.effective_assignments:
+            facts = self._execution_facts(source, occupancy, lock_ids)
+            if self._office_execution is not None or not facts.assignment_plan.effective_assignments:
                 _require_exact_commitment_days(cursor, case_no, tuple(
                     ExecutionServiceDay(segment.staff_id, service_date)
                     for segment in intent.segments for service_date in segment.official_service_dates
-                ), lock_ids, lock=False)
+                ), lock_ids, lock=False, execution_reader=self._office_execution)
         return facts
 
     def preflight_impacted_staff_ids(
@@ -292,12 +293,14 @@ class MySqlAssignmentPlanRepository:
                 request.case_no,
                 request.intent,
                 lock=True,
+                execution_reader=self._office_execution,
             )
             source = load_locked_facts(
                 cursor,
                 request.case_no,
                 preflight_staff_ids,
                 load_replay,
+                **({"office_first_schedule": True} if self._office_execution else {}),
             )
             if stored_receipt is None:
                 _require_retired_staff_assignment_preservation(
@@ -309,11 +312,20 @@ class MySqlAssignmentPlanRepository:
                 request.case_no,
                 lock=True,
             )
-        facts = build_assignment_plan_workflow_facts(
-            source, occupancy, waiting_lock_ids
-        )
-        facts=replace(facts,assignment_plan=replace(facts.assignment_plan,explicit_service_start_result=True))
+        facts = self._execution_facts(source, occupancy, waiting_lock_ids)
         return AssignmentPlanApplyEvidence(facts, claim_state, stored_receipt)
+
+    def _execution_facts(self, source, occupancy, waiting_lock_ids):
+        facts = build_assignment_plan_workflow_facts(source, occupancy, waiting_lock_ids)
+        plan = replace(facts.assignment_plan, explicit_service_start_result=True)
+        if self._office_execution is not None:
+            assignments = self.load_for_query(plan.case_no).assignment_plan.effective_assignments
+            if any(row.official_service_dates for row in assignments):
+                raise ValueError("office_schedule_not_pending_blocked")
+            plan = replace(plan, office_schedule=True, effective_assignments=tuple(
+                EffectiveAssignmentFact(row.assignment_id, row.staff_id, row.sequence) for row in assignments
+            ))
+        return replace(facts, assignment_plan=plan)
 
     def claim_command(
         self,
@@ -360,11 +372,12 @@ class MySqlAssignmentPlanRepository:
                 cursor,
                 command.candidate,
                 context.waiting_lock_ids,
+                execution_reader=self._office_execution,
             )
             result = persist_scheduling_replacement(cursor, command)
             _convert_waiting_locks(cursor, command, result, context)
             _append_commitment_conversion(
-                cursor, command, result, context, commitment_id
+                cursor, command, result, context, commitment_id, execution_reader=self._office_execution
             )
             return result
 
@@ -463,15 +476,15 @@ def _convert_waiting_locks(cursor, command, result, context) -> None:
         _append_waiting_lock_conversion(cursor, lock_id, command, result)
 
 
-def _require_exact_commitment_execution(cursor, candidate, lock_ids) -> int:
+def _require_exact_commitment_execution(cursor, candidate, lock_ids, *, execution_reader=None) -> int:
     days = tuple(
         ExecutionServiceDay(assignment.staff_id, service_date)
         for assignment in candidate.assignments for service_date in assignment.service_dates
     )
-    return _require_exact_commitment_days(cursor, candidate.case_no, days, lock_ids, lock=True)
+    return _require_exact_commitment_days(cursor, candidate.case_no, days, lock_ids, lock=True, execution_reader=execution_reader)
 
 
-def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *, lock) -> int:
+def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *, lock, execution_reader=None) -> int:
     suffix = ' FOR UPDATE' if lock else ''
     cursor.execute(
         "SELECT commitment.id,commitment.matching_plan_id,event.id AS terminal_event_id "
@@ -495,7 +508,7 @@ def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *,
         for row in cursor.fetchall()
     )
     lock_plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids, lock=lock)
-    proof, confirmed_days = _current_confirmed_execution(
+    proof, confirmed_days = (execution_reader or _current_confirmed_execution)(
         cursor, case_no, int(commitment["matching_plan_id"]), lock=lock
     )
     require_exact_commitment_execution(
@@ -528,7 +541,7 @@ def _locked_waiting_lock_plan_ids(cursor, lock_ids, *, lock=True) -> tuple[int, 
     return tuple(int(row["plan_id"]) for row in cursor.fetchall())
 
 
-def _append_commitment_conversion(cursor, command, result, context, commitment_id) -> None:
+def _append_commitment_conversion(cursor, command, result, context, commitment_id, *, execution_reader=None) -> None:
     assignment_ids = tuple(
         sorted(result.assignment_resolution.assignment_id_by_candidate_key.values())
     )
@@ -540,7 +553,11 @@ def _append_commitment_conversion(cursor, command, result, context, commitment_i
     }
     cursor.execute("SELECT matching_plan_id FROM precontract_service_commitments WHERE id=%s", (commitment_id,))
     plan = cursor.fetchone()
-    snapshot, _ = _current_confirmed_execution(cursor, command.candidate.case_no, plan["matching_plan_id"], lock=True)
+    snapshot, _ = (execution_reader or _current_confirmed_execution)(cursor, command.candidate.case_no, plan["matching_plan_id"], lock=True)
+    if execution_reader is not None:
+        payload["confirmation_source"] = "office"
+        payload["office_command_key"] = snapshot["office_command_key"]
+        payload["office_command_fingerprint"] = snapshot["office_command_fingerprint"]
     payload["service_start_response_ids"] = snapshot["service_start_response_ids"]
     payload["confirmed_service_date_version_id"] = snapshot["confirmed_version_id"]
     cursor.execute(

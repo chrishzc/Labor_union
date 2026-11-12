@@ -71,8 +71,9 @@ _COMMAND_FAMILY = "orders_actual_start"
 
 
 class MySqlOrderActualStartRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, office_first_schedule: bool = False) -> None:
         self._connection = connection
+        self._office_first_schedule = office_first_schedule
 
     def load_actual_start_query(
         self,
@@ -92,6 +93,13 @@ class MySqlOrderActualStartRepository:
                 scheduling,
                 False,
             )
+            if has_assignments and self._office_first_schedule:
+                cursor.execute(
+                    "SELECT 1 FROM staff_schedule WHERE case_no=%s AND generation_id=%s "
+                    "AND effective_marker=1 AND is_work_day=1 LIMIT 1",
+                    (case_no, scheduling["effective_generation_id"]),
+                )
+                has_assignments = cursor.fetchone() is not None
             client_finance_version = _optional_owner_version(
                 cursor,
                 "client_finance_accounts",

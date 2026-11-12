@@ -35,4 +35,4 @@
 ## Change triggers
 Reconcile when restart eligibility, historical accounting bridge, current-root revocation、API/UI entrypoint or provenance receipt semantics change.
 eligible 的歷史未服務／服務中狀態都只回到正常 `訂單成立`；重啟不得接受服務日期、直接建立帳務或視為 actual-start reconfirmation。後續沿用既有服務日期與排班 UI／API，但唯一歷史綁定人員不重跑候選、詢問、意願與推薦。
-重啟後在工作台確認實際開始日及服務日期，再以重啟事件綁定的方案分段建立正式排班。重啟後的日期保存與正式安排分屬既有操作。
+重啟後在工作台依重啟綁定人員核對服務日，以 `orders/service-date-confirmation` 的一次儲存班表提交建立正式排班。

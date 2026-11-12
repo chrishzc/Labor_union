@@ -31,3 +31,12 @@ it('只顯示協調結果與代班，不再顯示再次確認日期表的操作'
  expect(screen.queryByRole('button',{name:/發送日期表|人工確認|確認排班/})).not.toBeInTheDocument();
  expect(screen.getByText(/由月嫂提交開始日期/)).toBeInTheDocument();
 });
+
+it('有效指派缺少逐日班次時顯示待處理', async () => {
+  vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
+  vi.spyOn(serviceStartClient, 'options').mockResolvedValue({ items: [] });
+  render(<MatchingScheduleAndAssignmentActions caseNo="CASE" planId={1} planSegments={[]}
+    waitingLockAcquired={false} assignmentExists scheduleComplete={false} onAssignmentCompleted={async () => {}} />);
+  expect(await screen.findByText('已有月嫂指派，但缺少正式逐日班次。')).toBeInTheDocument();
+  expect(screen.queryByText('正式排班已生效。')).not.toBeInTheDocument();
+});

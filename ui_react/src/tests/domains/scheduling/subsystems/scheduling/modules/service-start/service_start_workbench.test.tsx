@@ -11,6 +11,22 @@ beforeEach(()=>{
   assignments:[{assignment_id:7,candidate_key:null,staff_id:2,sequence:1,assigned_start_date:'2027-01-05',assigned_end_date:'2027-01-05',official_service_dates:['2027-01-05'],actual_hours:null,lineage_source_assignment_ids:[]}]}));
 });
 afterEach(()=>{sessionStorage.clear();vi.restoreAllMocks();});
+it('同一案件待辦顯示首次排班和請假，且首次排班一次儲存',async()=>{
+ const leave={...item,request_id:9,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:'2027-02-10'}]};
+ vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[item,leave],total:2,page:1,page_size:25});
+ vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
+ const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...item,status:'applied',result:{actual_start_date:'2027-01-05',actual_end_date:'2027-01-05',order_version:3,first_payment_due_date:'2027-01-05',group_record_queued:true,assignments:[{staff_id:2,staff_name:'代班月嫂',service_dates:['2027-01-05']}]}});
+ const completed=vi.fn(async()=>{});
+ render(<ServiceStartSubstituteWorkbench caseNo="CASE" useScheduleSaveLabel onCompleted={completed}/>);
+ const save=await screen.findByRole('button',{name:'儲存班表'});
+ const workbench=screen.getByRole('region',{name:'服務開始、請假與代班待辦'});
+ expect(workbench).toContainElement(save);
+ expect(workbench).toContainElement(screen.getByRole('button',{name:'儲存並更新排班'}));
+ fireEvent.click(save);
+ await screen.findByText('正式排班已完成');
+ expect(command).toHaveBeenCalledTimes(1);
+ expect(completed).toHaveBeenCalledTimes(1);
+});
 it('通知深連結在正式排班頁只讀指定需求，不受第一頁清單影響',async()=>{
  window.location.hash='#scheduling?tab=coordination&case_no=CASE&request=8';
  const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(item);

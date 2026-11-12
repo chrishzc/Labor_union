@@ -129,6 +129,58 @@ def test_normal_start_atomic_dates_finance_group_result_and_replay(http):
     assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==0
 
 
+@pytest.mark.parametrize('placeholder', [False, True], ids=['first-assignment', 'empty-assignment'])
+def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder):
+    from api.routes.service_date_confirmation import router
+
+    if not getattr(http.app.state, 'service_dates_registered', False):
+        http.app.include_router(router)
+        http.app.state.service_dates_registered = True
+    count = 1 if placeholder else 2
+    case, staff, _ = seed_case(http, count=count)
+    # The signing prerequisite above seeds its event. Mirror the completed signing projection.
+    write("UPDATE orders SET status='訂單成立' WHERE case_no=%s", (case,))
+    if placeholder:
+        generation = write("INSERT INTO scheduling_generations (case_no,generation_number,resulting_aggregate_version,"
+                           "status,effective_marker,created_by,change_reason) VALUES (%s,1,1,'effective',1,'fixture','fixture')",
+                           (case,))
+        previous_assignment = write("INSERT INTO case_staff_assignments (case_no,generation_id,candidate_key,staff_id,"
+                                    "assignment_sequence,assigned_start_date,assigned_end_date,floor_fee_allocated,status) "
+                                    "VALUES (%s,%s,%s,%s,1,'2027-01-01','2027-01-30',0,'active')",
+                                    (case,generation,case+':placeholder',staff[0][0]))
+        write("INSERT INTO assignment_payroll_rate_snapshots (assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+              "source_identity_status) SELECT %s,policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
+              "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s", (previous_assignment,case))
+        write("INSERT INTO scheduling_aggregates(case_no,aggregate_version,generation_counter,effective_generation_id) "
+              "VALUES (%s,1,1,%s) ON DUPLICATE KEY UPDATE aggregate_version=1,generation_counter=1,effective_generation_id=%s",
+              (case,generation,generation))
+    endpoint = f'/api/v1/orders/{case}/service-dates'
+    before = checked(http.get(endpoint))
+    days = tuple(date(2027, 1, 5) + timedelta(days=i) for i in range(count*30))
+    body = {
+        'actual_start_date': str(days[0]), 'expected_order_version': before['order_version'],
+        'expected_scheduling_version': before['scheduling_version'],
+        'expected_confirmed_version': before['current_version'], 'reason': '',
+        'segments': [{'staff_id': staff[i][0], 'service_dates': list(map(str, days[i*30:(i+1)*30]))}
+                     for i in range(count)],
+    }
+    headers = {'Idempotency-Key': case + ':office'}
+    saved = checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers))
+    assert checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers)) == saved
+    observed = checked(http.get(endpoint))
+    assert observed['current_dates'] == list(map(str, days))
+    assert observed['scheduling_version'] == saved['scheduling_version']
+    work_days = rows("SELECT staff_id,work_date FROM staff_schedule WHERE case_no=%s "
+                     "AND effective_marker=1 AND is_work_day=1 ORDER BY work_date", (case,))
+    assert [(row['staff_id'], row['work_date']) for row in work_days] == [
+        (staff[i//30][0], day) for i, day in enumerate(days)
+    ]
+    assert len(saved['assignment_ids']) == count
+    if placeholder:
+        assert rows('SELECT status FROM case_staff_assignments WHERE id=%s', (previous_assignment,))[0]['status'] == 'cancelled'
+    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no':case}))['total'] == 0
+
+
 def test_same_staff_same_day_nonoverlapping_shifts_commit_and_read_back(http):
     morning, staff, morning_segments = seed_case(http, clock=("08:00", "12:00"), hours=4)
     afternoon, _, afternoon_segments = seed_case(http, shared_staff=staff[0], clock=("13:00", "17:00"), hours=4)

@@ -18,6 +18,8 @@ from pymysql.err import OperationalError
 from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.service_date_confirmation import (
     get_historical_restart_arrangement_workflow,
+    get_historical_restart_schedule_save,
+    get_office_schedule_save,
     get_service_date_confirmation_workflow,
 )
 from api.schemas.base import BaseResponse
@@ -29,6 +31,8 @@ from api.schemas.service_date_confirmation import (
     HistoricalArrangementReceiptView,
 )
 from subsystems.orders.historical_restart_arrangement import ArrangementSegmentIntent
+from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
+from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanWorkflowError
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
@@ -86,6 +90,14 @@ class HistoricalArrangementApplyBody(HistoricalArrangementPreviewBody):
     def validate_arrangement_reason(cls, value: str) -> str:
         trimmed = value.strip()
         return trimmed
+
+
+class HistoricalScheduleSaveBody(HistoricalArrangementPreviewBody):
+    actual_start_date: date
+    expected_order_version: int = Field(ge=0)
+    expected_scheduling_version: int = Field(ge=0)
+    expected_confirmed_version: int | None = Field(ge=1)
+    reason: str = Field(default="", max_length=500)
 
 
 @router.get(
@@ -152,6 +164,50 @@ def apply_historical_arrangement(
         "歷史正式安排已建立",
         identity,
     )
+
+
+@router.post(
+    "/{case_no}/service-dates/schedule/apply",
+    response_model=BaseResponse[HistoricalArrangementReceiptView],
+)
+def save_historical_restart_schedule(
+    body: HistoricalScheduleSaveBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+    save=Depends(get_historical_restart_schedule_save),
+):
+    return _call_endpoint(
+        lambda: _arrangement_receipt_payload(save(
+            case_no, _arrangement_segments(body),
+            actual_start_date=body.actual_start_date,
+            expected_order_version=body.expected_order_version,
+            expected_scheduling_version=body.expected_scheduling_version,
+            expected_confirmed_version=body.expected_confirmed_version,
+            idempotency_key=idempotency_key,
+            actor=str(principal.username or "").strip(),
+            reason=body.reason.strip(),
+            correlation_id=correlation_id,
+        )),
+        "正式班表已儲存",
+        CorrelationId(correlation_id),
+    )
+
+
+@router.post(
+    "/{case_no}/service-dates/office-schedule/apply",
+    response_model=BaseResponse[HistoricalArrangementReceiptView],
+)
+def save_office_schedule(
+    body: HistoricalScheduleSaveBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+    save=Depends(get_office_schedule_save),
+):
+    return save_historical_restart_schedule(body, case_no, idempotency_key, correlation_id, principal, save)
 
 
 @router.post(
@@ -238,6 +294,7 @@ def _query_payload(facts) -> dict[str, Any]:
             facts.restart_generation_number is not None
             and facts.current_version is not None
         ),
+        "historical_schedule_pending": facts.restart_generation_number is not None,
     }
 
 
@@ -306,6 +363,8 @@ def _call_endpoint(command, message: str, correlation_id: CorrelationId):
         return BaseResponse(data=command(), message=message)
     except OperationalError as error:
         _raise_mysql_error(error, correlation_id)
+    except (ActualStartWorkflowError, AssignmentPlanWorkflowError) as error:
+        _raise_typed_error(error.error)
     except ValueError as error:
         _raise_value_error(error, correlation_id)
     except HTTPException:
@@ -377,6 +436,10 @@ def _raise_value_error(
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
         message = "本案缺少已核定的月嫂費率政策，無法建立正式安排；已確認的服務日期不受影響。"
+    elif code == "office_schedule_assignment_ownership_blocked":
+        category = ErrorCategory.DOMAIN_BLOCKED
+        status_code = 409
+        message = "本案的既有月嫂指派與有效排班世代不一致，請先核對指派歸屬再儲存班表。"
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409

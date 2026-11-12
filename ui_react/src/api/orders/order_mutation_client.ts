@@ -9,6 +9,8 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 import { decodeMutationError } from './order_mutation_errors';
 import {
+  HistoricalScheduleSavePayloadSchema,
+  type HistoricalScheduleSavePayload,
   ServiceDateConfirmationQueryViewSchema,
   ServiceDateConfirmationPreviewViewSchema,
   ServiceDateConfirmationReceiptViewSchema,
@@ -269,6 +271,26 @@ export async function applyHistoricalArrangement(
     const raw = await transport.post(
       endpoint, validated, resolveTransportOptions(options, headers),
     );
+    return decodeOrderMutationEnvelope(HistoricalArrangementReceiptViewSchema, raw);
+  } catch (error) {
+    throw decodeMutationError(error, { caseNo, endpoint });
+  }
+}
+
+export async function saveHistoricalSchedule(
+  caseNo: string,
+  payload: HistoricalScheduleSavePayload,
+  options: OrderMutationApplyOptions,
+  office = false,
+): Promise<HistoricalArrangementReceiptView> {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/${office ? 'office-schedule' : 'schedule'}/apply`;
+  const validated = HistoricalScheduleSavePayloadSchema.parse(payload);
+  const headers = {
+    'X-Correlation-ID': options.correlationId ?? `historical-schedule-${caseNo}-${Date.now()}`,
+    'Idempotency-Key': requireValidIdempotencyKey(options.idempotencyKey),
+  };
+  try {
+    const raw = await transport.post(endpoint, validated, resolveTransportOptions(options, headers));
     return decodeOrderMutationEnvelope(HistoricalArrangementReceiptViewSchema, raw);
   } catch (error) {
     throw decodeMutationError(error, { caseNo, endpoint });

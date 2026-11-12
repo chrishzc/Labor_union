@@ -25,6 +25,8 @@ class MySqlAutomaticServiceArrangementSource:
     def proposal(self, case_no: str, plan_id: int) -> AutomaticArrangementProposal:
         facts = self.assignments.query(case_no).assignment_plan
         if facts.effective_assignments:
+            if any(not assignment.official_service_dates for assignment in facts.effective_assignments):
+                raise ValueError('effective_assignment_missing_service_days')
             return AutomaticArrangementProposal(case_no, plan_id, 0, False, len(facts.effective_assignments), None)
         from infrastructure.mysql.service_start_arrangement import current_service_start_execution
         with self.connection.cursor() as cursor:

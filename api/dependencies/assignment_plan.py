@@ -42,8 +42,8 @@ def get_assignment_plan_application():
         connection.close()
 
 
-def build_assignment_plan_application(connection):
-    repository = MySqlAssignmentPlanRepository(connection)
+def build_assignment_plan_application(connection, *, office_execution=None):
+    repository = MySqlAssignmentPlanRepository(connection, office_execution=office_execution)
     clock = SystemBusinessClock()
     workflow = AssignmentPlanWorkflow(
         repository,
