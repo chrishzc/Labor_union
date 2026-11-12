@@ -534,7 +534,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (!candidate && (freshPreview.order_version !== queryView?.order_version || freshPreview.scheduling_version !== queryView?.scheduling_version)) {
         throw new ApiHttpError(409, 'stale_preview', '日期或案件資料已更新，請重新讀取後儲存。');
       }
-      const receipt = await applyServiceDatesFlow(caseNo);
+      await applyServiceDatesFlow(caseNo);
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       const observed = orderMutationFlowStore.getServiceDatesDraft(caseNo);
       if (observed?.status !== 'observed' || observed.queryView === null) {
@@ -570,7 +570,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     setWorking('apply');
     setError(null);
     try {
-      const receipt = await retryServiceDatesApplyFlow(caseNo);
+      await retryServiceDatesApplyFlow(caseNo);
       if (renderedCaseNo.current !== caseNo) return;
       const observed = orderMutationFlowStore.getServiceDatesDraft(caseNo);
       if (observed?.status !== 'observed' || observed.queryView === null) {
