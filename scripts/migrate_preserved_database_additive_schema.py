@@ -3558,27 +3558,9 @@ def _local_ordered_chain_plan(
                 code="qualification_invalid",
             )
     artifacts: list[dict[str, Any]] = []
-    dependency_gap_seen = False
-    for entry in entries:
+    states = _local_classify_ordered_entries(config, source, entries, snapshot)
+    for entry, state in zip(entries, states, strict=True):
         artifact = entry["artifact"]
-        state = local_additive_target_state(
-            config,
-            source,
-            artifact["name"],
-            entry["descriptor"],
-            snapshot=snapshot,
-        )["state"]
-        if (
-            state == "absent"
-            and artifact["name"] in LOCAL_RETIRED_ABSENT_ARTIFACTS
-        ):
-            state = "retired_absent"
-        if (
-            dependency_gap_seen
-            and state not in {"absent", "exact"}
-            and _local_parent_tables_dependency_pending(snapshot, entry["descriptor"])
-        ):
-            state = "dependency_pending"
         projected = {
             "release_id": entry["release_id"],
             "release_fingerprint": entry["release_fingerprint"],
@@ -3593,8 +3575,6 @@ def _local_ordered_chain_plan(
             "blocked_reason": None,
         }
         artifacts.append(projected)
-        if state in {"absent", "dependency_pending"}:
-            dependency_gap_seen = True
 
     chain_details = {
         "baseline_release_id": entries[0]["release_id"],
@@ -3740,6 +3720,92 @@ def _local_parent_tables_dependency_pending(
         if row.get("table_name")
     }
     return parent_tables.isdisjoint(present_tables)
+
+
+def _local_parent_columns_dependency_pending(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    artifact_name: str,
+    pending_parent_columns: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> bool:
+    """Defer a column-modifying artifact when earlier pending column changes make it absent."""
+    parent_columns = descriptor.get("parent_columns", {})
+    if not parent_columns or not pending_parent_columns:
+        return False
+    overlapping = {
+        (table, column): pending_parent_columns[(table, column)]
+        for table, columns in parent_columns.items()
+        for column in columns
+        if (table, column) in pending_parent_columns
+    }
+    if not overlapping:
+        return False
+    projected_columns = []
+    seen_keys: set[tuple[str, str]] = set()
+    for row in snapshot.get("columns", ()):
+        key = (str(row.get("table_name", "")), str(row.get("column_name", "")))
+        if key in overlapping:
+            projected_columns.append({**row, **overlapping[key]})
+            seen_keys.add(key)
+        else:
+            projected_columns.append(row)
+    for (table, column), contract in overlapping.items():
+        if (table, column) not in seen_keys:
+            projected_columns.append({"table_name": table, "column_name": column, **contract})
+    projected_snapshot = {
+        "indexes": (),
+        "constraints": (),
+        "key_columns": (),
+        "foreign_keys": (),
+        "triggers": (),
+        "show_create_tables": {},
+        "views": (),
+        **snapshot,
+        "columns": projected_columns,
+    }
+    return (
+        local_additive_descriptor_state(projected_snapshot, descriptor, artifact_name)
+        == "absent"
+    )
+
+
+def _local_classify_ordered_entries(
+    config: Any,
+    source: str,
+    entries: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+    snapshot: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Classify an ordered release chain without hiding unrelated drift."""
+    states: list[str] = []
+    dependency_gap_seen = False
+    pending_parent_columns: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for entry in entries:
+        artifact_name = str(entry["artifact"]["name"])
+        descriptor = entry["descriptor"]
+        state = local_additive_target_state(
+            config,
+            source,
+            artifact_name,
+            descriptor,
+            snapshot=snapshot,
+        )["state"]
+        if state == "absent" and artifact_name in LOCAL_RETIRED_ABSENT_ARTIFACTS:
+            state = "retired_absent"
+        if dependency_gap_seen and state not in {"absent", "exact", "retired_absent"}:
+            if (
+                _local_parent_tables_dependency_pending(snapshot, descriptor)
+                or _local_parent_columns_dependency_pending(
+                    snapshot, descriptor, artifact_name, pending_parent_columns
+                )
+            ):
+                state = "dependency_pending"
+        states.append(state)
+        if state in {"absent", "dependency_pending"}:
+            dependency_gap_seen = True
+            for table, columns in descriptor.get("parent_columns", {}).items():
+                for column, contract in columns.items():
+                    pending_parent_columns[(table, column)] = contract
+    return tuple(states)
 
 
 def _local_verify_hashes(qualification: Mapping[str, Any]) -> None:

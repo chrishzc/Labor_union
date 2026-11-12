@@ -70,32 +70,9 @@ def _verify_release_boundary(
     if len(target_indexes) != 1:
         raise EngineEvidenceError("release must select one ordered chain entry")
     target_index = target_indexes[0]
-    states: list[str] = []
-    dependency_gap_seen = False
-    for entry in entries:
-        state = migration.local_additive_target_state(
-            config,
-            database,
-            entry["artifact"]["name"],
-            entry["descriptor"],
-            snapshot=snapshot,
-        )["state"]
-        if (
-            state == "absent"
-            and entry["artifact"]["name"] in migration.LOCAL_RETIRED_ABSENT_ARTIFACTS
-        ):
-            state = "retired_absent"
-        if (
-            dependency_gap_seen
-            and state not in {"absent", "exact"}
-            and migration._local_parent_tables_dependency_pending(
-                snapshot, entry["descriptor"]
-            )
-        ):
-            state = "dependency_pending"
-        states.append(state)
-        if state in {"absent", "dependency_pending"}:
-            dependency_gap_seen = True
+    states = list(
+        migration._local_classify_ordered_entries(config, database, entries, snapshot)
+    )
 
     expected_exact_end = target_index + (1 if applied else 0)
     if require_predecessor_prefix and any(
