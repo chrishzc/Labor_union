@@ -32,6 +32,7 @@
 
 ## Contracts
 - 案件摘要保留純姓名 `staff_name`，另投影 `staff_display_label` 為 current Staff 公會編號及姓名；沿既有正式指派優先、歷史配對備援與分段順序，不以姓名查找人員；標籤改變參與 ETag。
+- 看板指派月嫂使用摘要的 `scheduled_staff_display_label`，只讀有效排班世代中有有效服務日的指派，依人員 ID 去重並保留首次服務分段順序；沒有有效指派時不回退至歷史配對。標籤改變參與 ETag。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders root facts。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 管理端資訊層級與技術詳情邊界。
 
@@ -40,6 +41,7 @@
 - test_root: `ui_react/src/tests/order_workbench_v2_page.test.tsx`
 - test_root: `ui_react/src/tests/order_workbench_v2_terminal_aggregate.test.tsx`
 - test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/`
+- test_root: `tests/domains/orders/subsystems/orders/integration/test_order_summary_query.py`
 - test_root: `ui_react/src/tests/fixtures/orders_real_data_fixtures.ts`
 - test_root: `ui_react/src/tests/orders_no_fake_mutation.test.ts`
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/order-card-projection.md`

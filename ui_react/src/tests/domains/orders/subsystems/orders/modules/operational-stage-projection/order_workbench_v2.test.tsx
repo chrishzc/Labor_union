@@ -287,7 +287,11 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(within(cardFor('CASE-RESIDENCE')).queryByText('手機')).not.toBeInTheDocument();
   });
 
-  it('案件列只顯示目前階段通知，不提前顯示未來客戶結算阻塞', async () => {
+  it('案件列只在目前待辦是客戶結算時顯示未結清提醒', async () => {
+    const settlementNotice = {
+      code: 'client_settlement_not_complete',
+      message: '本案有客戶款項尚未結清',
+    };
     const current = timeline('CASE-CURRENT-NOTICE', 'confirmed_service_dates');
     const withFutureSettlementBlocker = {
       ...current,
@@ -296,17 +300,15 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
             ...stage,
             status: 'blocked' as const,
             substatus_code: SUBSTATUS_BY_STAGE_STATUS.client_settlement.blocked,
-            blockers: [{
-              code: 'client_settlement_not_complete',
-              message: 'Client Finance 子投影尚未完成。',
-            }],
+            blockers: [settlementNotice],
           }
         : stage),
     };
     clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
       withFutureSettlementBlocker,
+      timeline('CASE-SETTLEMENT', 'client_settlement', 'blocked', { blockers: [settlementNotice] }),
     ], {
-      stageCounts: { confirmed_service_dates: 1 },
+      stageCounts: { confirmed_service_dates: 1, client_settlement: 1 },
     }));
 
     render(<OrderWorkbenchV2Page />);
@@ -314,8 +316,10 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await screen.findByText('CASE-CURRENT-NOTICE');
     const card = cardFor('CASE-CURRENT-NOTICE');
     expect(within(card).getByTitle('服務日期確認')).toBeInTheDocument();
-    expect(within(card).queryByText('Client Finance 子投影尚未完成。')).not.toBeInTheDocument();
+    expect(within(card).queryByText(settlementNotice.message)).not.toBeInTheDocument();
     expect(within(card).queryByText(/阻塞 · 客戶端結算/)).not.toBeInTheDocument();
+    expect(within(cardFor('CASE-SETTLEMENT')).getByText('客戶款項未結')).toBeInTheDocument();
+    expect(within(cardFor('CASE-SETTLEMENT')).getByText(settlementNotice.message)).toBeInTheDocument();
   });
 
   it('移除阻塞篩選，搜尋清除後保留所有案件與清單阻塞原因', async () => {
@@ -344,8 +348,16 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
   it('保留正式階段總數與案件摘要，不再提供已移除的小狀態篩選', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
-      orderSummary('CASE-PLAN-1', '林小芳', null, '2026-10-01', '2026-10-20'),
-      orderSummary('CASE-ACTIVE-1', '王小明', '陳月嫂', '2026-09-01', '2026-09-20'),
+      {
+        ...orderSummary('CASE-PLAN-1', '林小芳', '歷史月嫂', '2026-10-01', '2026-10-20'),
+        staff_display_label: 'A001 歷史月嫂',
+        scheduled_staff_display_label: null,
+      },
+      {
+        ...orderSummary('CASE-ACTIVE-1', '王小明', '歷史月嫂', '2026-09-01', '2026-09-20'),
+        staff_display_label: 'A001 歷史月嫂',
+        scheduled_staff_display_label: 'A010 陳月嫂、A020 林月嫂',
+      },
     ]));
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
       if (params.stage === 'formal_service') {
@@ -373,7 +385,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     await waitFor(() => {
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('王小明')).toBeInTheDocument();
-      expect(within(cardFor('CASE-ACTIVE-1')).getByText('編號待確認 陳月嫂')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE-1')).getByText('A010 陳月嫂、A020 林月嫂')).toBeInTheDocument();
       expect(within(cardFor('CASE-PLAN-1')).getByText('尚未正式指派')).toBeInTheDocument();
     });
 

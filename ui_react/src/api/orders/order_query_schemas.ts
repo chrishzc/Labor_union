@@ -14,6 +14,7 @@ export const OrderSummaryItemSchema = z.strictObject({
   order_status: z.string(),
   staff_name: z.string().nullable(),
   staff_display_label: z.string().nullable().optional(),
+  scheduled_staff_display_label: z.string().nullable().optional(),
   identity_status: z.string().nullable(),
   start_date: DateOnlySchema.nullable(),
   end_date: DateOnlySchema.nullable(),

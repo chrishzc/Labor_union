@@ -65,6 +65,41 @@ _STAFF_LABELS_SQL = _STAFF_NAMES_SQL.replace(
     "historical_staff.name", "CONCAT(COALESCE(historical_staff.union_no, '未設定'), ' ', COALESCE(historical_staff.name, '姓名未設定'))",
 )
 
+_SCHEDULED_STAFF_LABELS_SQL = """
+       (
+           SELECT GROUP_CONCAT(
+                      CONCAT(COALESCE(scheduled_staff.union_no, '未設定'), ' ',
+                             COALESCE(scheduled_staff.name, '姓名未設定'))
+                      ORDER BY assignment.assignment_sequence, assignment.id
+                      SEPARATOR '、'
+                  )
+             FROM scheduling_aggregates scheduling
+             JOIN case_staff_assignments assignment
+               ON assignment.case_no = scheduling.case_no
+              AND assignment.generation_id = scheduling.effective_generation_id
+             JOIN staff scheduled_staff ON scheduled_staff.id = assignment.staff_id
+            WHERE scheduling.case_no = o.case_no
+              AND assignment.id = (
+                  SELECT first_assignment.id
+                    FROM case_staff_assignments first_assignment
+                   WHERE first_assignment.case_no = assignment.case_no
+                     AND first_assignment.generation_id = assignment.generation_id
+                     AND first_assignment.staff_id = assignment.staff_id
+                     AND first_assignment.status NOT IN ('cancelled', 'replaced')
+                     AND EXISTS (
+                         SELECT 1
+                           FROM staff_schedule schedule
+                          WHERE schedule.assignment_id = first_assignment.id
+                            AND schedule.generation_id = first_assignment.generation_id
+                            AND schedule.effective_marker = 1
+                            AND schedule.is_work_day = 1
+                     )
+                   ORDER BY first_assignment.assignment_sequence, first_assignment.id
+                   LIMIT 1
+              )
+       )
+"""
+
 _ORDER_SUMMARY_PAGE_SQL = f"""
 SELECT o.case_no,
        c.name AS client_name,
@@ -119,7 +154,8 @@ SELECT o.case_no,
        o.service_days,
        order_details.total_employer_self_pay_payable,
        {_STAFF_NAMES_SQL} AS staff_name,
-       {_STAFF_LABELS_SQL} AS staff_display_label
+       {_STAFF_LABELS_SQL} AS staff_display_label,
+       {_SCHEDULED_STAFF_LABELS_SQL} AS scheduled_staff_display_label
   FROM orders o FORCE INDEX (PRIMARY)
   JOIN clients c ON c.id = o.client_id
   JOIN v_order_details order_details ON order_details.case_no = o.case_no

@@ -145,7 +145,7 @@ def _timeline(
             blockers=(
                 ProjectionNotice(
                     "client_settlement_not_complete",
-                    "Client Finance 子投影尚未完成。",
+                    "本案有客戶款項尚未結清",
                 ),
             ),
             warnings=(),

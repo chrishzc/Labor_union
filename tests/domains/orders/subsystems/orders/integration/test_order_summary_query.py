@@ -171,3 +171,16 @@ def test_staff_display_label_is_separate_from_name_and_participates_in_etag() ->
     assert first.items[0].staff_name == "同名月嫂"
     assert first.items[0].staff_display_label == "A002 同名月嫂"
     assert first.etag != changed.etag
+
+
+def test_scheduled_staff_label_is_separate_from_historical_summary_and_participates_in_etag() -> None:
+    row = {**_row(), "staff_display_label": "A002 歷史月嫂"}
+    request = OrderSummaryQueryRequest(page_size=10, after_case_no=None)
+    first = _service((row,)).query(request)
+    scheduled_label = "A010 目前月嫂、A020 接班月嫂"
+    changed = _service(({**row, "scheduled_staff_display_label": scheduled_label},)).query(request)
+
+    assert first.items[0].scheduled_staff_display_label is None
+    assert changed.items[0].staff_display_label == first.items[0].staff_display_label
+    assert changed.items[0].scheduled_staff_display_label == scheduled_label
+    assert changed.etag != first.etag

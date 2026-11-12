@@ -473,7 +473,11 @@ def _settlement_stage(row: Mapping[str, object], case_no: str) -> StageProjectio
     blockers = tuple(
         _notice(
             f"{part.code}_not_complete",
-            f"{part.source.owner} 子投影尚未完成。",
+            (
+                "本案有客戶款項尚未結清"
+                if part.code == "client_settlement"
+                else f"{part.source.owner} 子投影尚未完成。"
+            ),
         )
         for part in parts
         if part.status == "blocked"

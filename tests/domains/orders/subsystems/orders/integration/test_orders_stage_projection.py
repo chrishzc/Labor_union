@@ -743,6 +743,7 @@ def test_mysql_aggregate_decimals_and_blocked_settlement_keep_typed_owner() -> N
         "staff_open_count",
     ):
         row[field] = Decimal(row[field])
+    row["client_open_count"] = Decimal(1)
     row["staff_open_count"] = Decimal(1)
 
     item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
@@ -750,7 +751,10 @@ def test_mysql_aggregate_decimals_and_blocked_settlement_keep_typed_owner() -> N
     ).items[0]
 
     assert item.stages[-1].status == "blocked"
-    assert item.stages[-1].blockers[0].message == "Staff Payables 子投影尚未完成。"
+    assert [(notice.code, notice.message) for notice in item.stages[-1].blockers] == [
+        ("client_settlement_not_complete", "本案有客戶款項尚未結清"),
+        ("staff_payout_not_complete", "Staff Payables 子投影尚未完成。"),
+    ]
 
 
 def test_service_stage_uses_official_service_completion_not_stale_assignment_status() -> None:
