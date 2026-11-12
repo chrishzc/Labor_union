@@ -381,7 +381,7 @@ function HolidayPolicyWorkspace() {
     <section className="holiday-policy-workspace" data-surface-id="scheduling.holiday-policy">
       <header className="holiday-policy-header">
         <div>
-          <p className="holiday-policy-kicker">編輯政策 → 儲存 → 回讀結果</p>
+          <p className="holiday-policy-kicker">編輯政策 → 儲存 → 查看結果</p>
           <h2>🗓️ 國定假日管理</h2>
           <p>排班前的初始建議預設跳過國定假日；人工已選日期與正式排班維持原安排。</p>
         </div>
@@ -934,7 +934,7 @@ function LeaveSubstitutionWorkspace({
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
       <header className="leave-substitution-header">
         <div>
-          <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 回讀結果</p>
+          <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 查看結果</p>
           <h2 ref={manualDispatchTitleRef} tabIndex={-1}>手動調度</h2>
           <p>處理電話或口頭請假。選定案件與服務日後，可安排代班或登記補班日期。</p>
         </div>
@@ -1216,8 +1216,8 @@ function LeaveSubstitutionWorkspace({
       )}
 
       {observedReceipt && (
-        <section className="leave-substitution-receipt" aria-label="代班薪資與應付款回讀" aria-live="polite">
-          <h3>代班薪資與應付款回讀</h3>
+        <section className="leave-substitution-receipt" aria-label="代班薪資與付款狀態" aria-live="polite">
+          <h3>代班薪資與付款狀態</h3>
           <p>以下為代班→Payroll→Staff Payables 的版本化血緣與最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
           {payablesBusy && <p>正在查詢受影響服務人員的最新應付款…</p>}
           {(payablesError || (payablesReadback && !payablesReadback.authoritative_complete)) && (
@@ -1230,7 +1230,7 @@ function LeaveSubstitutionWorkspace({
           )}
           {payablesReadback && !payablesReadback.authoritative_complete && (
             <p className="leave-substitution-notice error" role="alert">
-              代班已完成，薪資與應付款回讀尚待確認：{[...new Set([...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)])].map(code => PAYABLES_BLOCKER_MESSAGES[code] ?? `尚無法核對應付款（${code}）`).join('；') || '資料待補正'}。
+              代班已完成，薪資與應付金額仍待核對：{[...new Set([...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)])].map(code => PAYABLES_BLOCKER_MESSAGES[code] ?? `尚無法核對應付款（${code}）`).join('；') || '資料待補正'}。
               {' '}<a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(normalizedCaseNo)}&from=workbench`}>核對本案月嫂應付款 →</a>
             </p>
           )}
@@ -1245,7 +1245,7 @@ function LeaveSubstitutionWorkspace({
                 ? '已完成付款'
                 : evidence?.projection_status === 'anomaly'
                   ? '待異常處理'
-                  : '待投影';
+                  : '應付金額待確認';
             return (
               <div key={item.lineage_subject}>
                 <strong>{staffName}</strong>

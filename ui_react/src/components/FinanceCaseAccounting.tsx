@@ -505,6 +505,12 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const subsidyPayments = data?.subsidy_payments ?? [];
  const subsidyPaymentNotApplicable = state.order?.identity_status === '非市民' || data?.subsidy_ntd === 0;
  const subsidyTotal=data?.subsidy_ntd??0;
+ const orderStatus=state.order?.order_status;
+ const serviceInProgress=orderStatus==='服務中'||orderStatus==='歷史訂單－服務中';
+ const serviceEnded=orderStatus==='訂單完成'||orderStatus==='歷史訂單－服務完成'||orderStatus==='歷史訂單－帳務完成';
+ const unconfirmedPaymentStatus=serviceInProgress?'服務中，金額尚未確認'
+  :serviceEnded?'服務已結束，金額待核對':'金額待確認';
+ const subsidyRefundPending=(selected??data?.scheme)==='advance'&&subsidyTotal>0;
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
  const govReceivedNtd=data?.cash_by_flow?.G??govBankFacts.reduce((s,b)=>s+b.amount_ntd,0);
 
@@ -657,7 +663,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   return <tr key={stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{expected===0?'不需繳納':item?.due_date??'日期待確認'}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='manual'?'人工補登':receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {row.bank==='manual'?'人工補登':'入帳'} · {money(row.amount_ntd)}</p>)}</details>}</>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><div className="finance-case-period-actions"><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'通知'+stageNames[stage]} disabled={remaining==null||remaining<=0||!notice?.can_send||!!state.loading} title={remaining===0?(expected===0?'本期免繳':'本期已繳齊'):notice?.unavailable_reason??(notice?'查看本期通知內容與紀錄':'通知來源待確認')} onClick={()=>open(stage)}>通知</button></div></td></tr>;
   })}</tbody></table></div>{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
 </div></details>
- <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可提前確認方案，不改各期應繳；成立條件具備時，先預檢並承接款項。</p>{data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {data.subsidy_ntd==null?'金額待確認':money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'補助金額先計算，對象可由人工或符合條件的銀行明細確認。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><FinanceCaseBankMemos notes={data.bank_memos??[]}/><p>可在服務結束前先確認補助方案。符合給付條件時，儲存前會顯示給付金額。</p>{data.subsidy_plan?.events.at(-1)?.source==='bank'&&<p>依銀行明細確認方案</p>}{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
  <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
   {onPayableReview && state.order?.order_status.startsWith('歷史訂單－') &&
     <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
@@ -811,15 +817,15 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
       <tbody>{subsidyPayments.length ? subsidyPayments.map((payment, index) => (
         <tr key={index}>
           <td>{payment.recipient === 'staff' ? '轉付月嫂' : '退還客戶'}{payment.party && <small>{payment.party}</small>}</td>
-          <td>{money(payment.amount_ntd)}</td>
+          <td>{payment.source === 'estimate' && '預估 '}{money(payment.amount_ntd)}</td>
           <td>{payment.due_date ?? '日期待確認'}</td>
-          <td>{payment.source === 'formal' ? '已成立正式款項' : '預估 · 尚未成立正式款項'}</td>
+          <td>{payment.source === 'formal' ? (serviceEnded ? '服務已結束，金額已確認' : '金額已確認') : unconfirmedPaymentStatus}</td>
         </tr>
       )) : <tr><td colSpan={4}>{subsidyPaymentNotApplicable || data.scheme === 'direct' ? '不適用'
         : !subsidyKnown ? '補助金額待確認' : '補助給付方案待確認'}</td></tr>}</tbody>
     </table>
   </div>
-  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : selected === 'advance' && subsidyTotal > 0 && !refundClientItems.length ? '補助退款待成立' : refundClientItems.length ? '已結清' : '無已成立退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>
@@ -905,20 +911,19 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           <tr>
             <td>
               <strong>客戶退款</strong>
-              <small>{(selected ?? data.scheme) === 'advance' && subsidyTotal > 0 ? '補助退款待成立' : '無已成立退款'}</small>
+              {subsidyRefundPending && <small>補助退款</small>}
             </td>
-            <td>{(selected ?? data.scheme) === 'advance' && subsidyTotal > 0 ? '待成立' : '—'}</td>
-            <td>NT$ 0</td>
+            <td>{subsidyRefundPending ? '日期待確認' : '—'}</td>
+            <td>{subsidyRefundPending ? '金額待確認' : '—'}</td>
             <td>
-              <span>已退 NT$ 0</span>
-              <small className="finance-paid">無退款義務</small>
+              <span>—</span>
             </td>
             <td>
               <span>預先登記備查</span>
               <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo})` : ''}</small>
             </td>
             <td>
-              <span>無正式退款單</span>
+              <span>{subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</span>
             </td>
             <td>
               <div className="finance-case-period-actions">
@@ -1008,11 +1013,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  {data && (
    <AccountingParametersDrawer
+     key={initialCase}
      caseNo={initialCase}
      isOpen={paramsDrawerOpen}
      onClose={() => setParamsDrawerOpen(false)}
      initialPricing={state.pricing}
      initialMultiBirthCount={multiBirthCount}
+     canEditHistoricalDays={state.order?.order_status === '歷史訂單－服務完成'}
      onCommitted={() => {
        setPendingAccountingRefresh(true);
        refresh();

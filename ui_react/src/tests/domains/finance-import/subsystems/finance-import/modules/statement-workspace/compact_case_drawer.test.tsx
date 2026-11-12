@@ -49,6 +49,22 @@ it('未成立補助退款不顯示已結清，也不把自動推算代碼當成�
  expect(section.closest('details')?.querySelector('.finance-refund-summary-bar')).toHaveTextContent('補助歸屬待確認');
  expect(within(section).queryByText('advance',{exact:true})).not.toBeInTheDocument();
 });
+it.each([
+ ['歷史訂單－服務中','estimate','服務中，金額尚未確認'],
+ ['歷史訂單－服務完成','estimate','服務已結束，金額待核對'],
+ ['歷史訂單－服務完成','formal','服務已結束，金額已確認'],
+] as const)('補助給付依 %s 和 %s 顯示金額確認進度',async(orderStatus,source,label)=>{
+ const data:CaseAccounting={...facts(),scheme:'split',subsidy_payments:[
+  {recipient:'staff',party:'合成月嫂',amount_ntd:12000,due_date:'2026-11-15',source},
+ ]};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
+ vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,order_status:orderStatus} as never);
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const payments=within(await screen.findByRole('region',{name:'補助款預計給付'}));
+ expect(payments.getByText(label,{exact:true})).toBeVisible();
+ expect(payments.getByText(source==='estimate'?'預估 NT$ 12,000':'NT$ 12,000',{exact:true})).toBeVisible();
+ expect(payments.getByText('2026-11-15',{exact:true})).toBeVisible();
+});
 it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次保存範圍',async()=>{
  vi.mocked(financeAccountingClient.previewSubsidyPlan).mockResolvedValue({case_no:caseNo,scheme:'advance',plan_version:0,
   subsidy_ntd:12000,total_ntd:30000,confirmation_only:false,payables:[],blocker:'客戶實際墊款依據不足',preview_fingerprint:'c'.repeat(64)});
@@ -56,8 +72,8 @@ it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次�
  expect(screen.getByText(/本案補助金額：12,000 元/)).toBeVisible();
  fireEvent.click(screen.getByRole('radio',{name:/客戶先墊後退/}));
  await screen.findByRole('alert');
- expect(screen.getByRole('alert')).toHaveTextContent('只確認方案');
- expect(screen.getByRole('alert')).toHaveTextContent('不執行這些金融動作');
+ expect(screen.getByRole('alert')).toHaveTextContent('仍可儲存補助方案');
+ expect(screen.getByRole('alert')).toHaveTextContent('給付金額待核對');
  expect(financeAccountingClient.saveSubsidyPlan).not.toHaveBeenCalled();
 });
 

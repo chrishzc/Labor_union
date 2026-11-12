@@ -175,7 +175,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>查詢月份</label><input type="month" readOnly />
         <button type="button" className="mock-primary-btn" disabled>查詢班表</button>
         <div className="mock-placeholder-box">
-          <small>服務日 ｜ 指派休息日 ｜ 已鎖定／待成立</small>
+          <small>服務日 ｜ 指派休息日 ｜ 已鎖定／等候訂金</small>
           <small>正式不可服務 ｜ 歷史指派 ｜ 未排班</small>
         </div>
       </div>

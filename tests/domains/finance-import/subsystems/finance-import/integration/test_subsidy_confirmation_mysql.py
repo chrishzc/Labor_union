@@ -30,7 +30,7 @@ def connection(monkeypatch):
     c.close()
 
 
-def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True):
+def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10)):
     name = '合成補助月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
     with c.cursor() as q:
         while True:
@@ -41,7 +41,7 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True):
         status = ('歷史訂單－服務完成' if historical else '訂單完成') if completed else ('歷史訂單－服務中' if historical else '服務中')
         q.execute("INSERT INTO clients(case_no,name,identity_status) VALUES(%s,'Synthetic Subsidy Client','一般市民')",(case,))
         q.execute("INSERT INTO orders(case_no,client_id,status,start_date,end_date,actual_start_date,actual_end_date,service_days,service_hours_per_day,floor_fee) "
-                  "VALUES(%s,%s,%s,'2026-09-01','2026-09-10','2026-09-01','2026-09-10',10,10,0)",(case,q.lastrowid,status))
+                  "VALUES(%s,%s,%s,'2026-09-01','2026-09-10','2026-09-01',%s,10,10,0)",(case,q.lastrowid,status,actual_end))
         q.execute('INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES(%s,0)',(case,))
         q.execute('INSERT INTO staff(name) VALUES(%s)',(name,)); staff=q.lastrowid
         q.execute('UPDATE orders SET staff_id=%s WHERE case_no=%s',(staff,case))
@@ -67,7 +67,7 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True):
     return case,name,identity
 
 
-def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False, transaction_date=date(2026,11,15)):
+def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False, transaction_date=date(2026,11,15), memo_override=None):
     from infrastructure.mysql.mysql_adapter import get_connection
     from scripts.imports.finance_statement_normalizer import normalize_workbook
     from subsystems.finance_import.ingestion import ingest_finance_workbook
@@ -75,6 +75,8 @@ def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False,
     memo = name+'補助款' if scheme=='split' else 'HC'+build_client_virtual_account(case)[-6:]+'雇主補助款'
     if bare_case:
         memo = 'HC'+build_client_virtual_account(case)[-6:]
+    if memo_override is not None:
+        memo = memo_override
     path=tmp_path/(uuid4().hex+'.xlsx')
     pd.DataFrame([['說明'],['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註'],
         ['0001',transaction_date.strftime('%Y/%m/%d'),'09:00:00',transaction_date.strftime('%Y/%m/%d'),'轉出',cash,'',90000,memo]]).to_excel(path,index=False,header=False)
@@ -151,6 +153,48 @@ def test_missing_advance_cash_blocks_financial_action_before_apply(connection,tm
     assert not plan.dispatchable_rows
     assert plan.rows[0].subsidy_preflight.scheme=='advance'
     assert plan.rows[0].pending_reason and snapshot(connection,case)==before
+
+
+@pytest.mark.parametrize(('actual_end', 'expected_due'), [
+    (None, date(2026, 11, 15)),
+    (date(2026, 10, 1), date(2026, 12, 15)),
+])
+def test_historical_staff_subsidy_uses_same_due_date_in_both_previews(connection, tmp_path, actual_end, expected_due):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+
+    case, name, _ = seed(connection, True, 'split', actual_end=actual_end)
+    batch = bank_source(connection, tmp_path, case, name, 'split', transaction_date=expected_due,
+                        memo_override=name + ' 　GB,轉入0000000000000')
+    before = snapshot(connection, case)
+    assert before['installments'] == 0
+
+    manual = build_accounting_workspace(connection).preview_subsidy_plan(case, 'split', 0)
+    assert manual.blocker is None
+    manual_due = next(item.due_date for item in manual.payables if item.recipient == 'staff:subsidy')
+    app = application(connection)
+    correlation = CorrelationId('historical-staff-subsidy-date')
+    bank = app.preview_batch(batch, correlation)
+    assert len(bank.dispatchable_rows) == 1, [row.pending_reason for row in bank.rows]
+    preflight = bank.dispatchable_rows[0].subsidy_preflight
+    assert preflight.payable_due_date == manual_due == expected_due.isoformat()
+    assert preflight.payable_amount_ntd == 12000
+    assert snapshot(connection, case) == before
+    command = FinanceImportApplyRequest(
+        batch, ExpectedVersion(bank.batch_version), bank.fingerprint,
+        IdempotencyKey('historical-date:' + uuid4().hex), ActorContext('synthetic'), '', correlation,
+    )
+    assert app.apply_batch(command).reconciled_count == 1
+    readback = build_accounting_workspace(connection).query(case)
+    subsidy_portion = next(
+        portion for item in readback.staff_items for portion in item.funding_portions
+        if portion.funding_kind == 'subsidy'
+    )
+    assert (subsidy_portion.due_date, subsidy_portion.amount_ntd, subsidy_portion.remaining_ntd) == (
+        expected_due, 12000, 0,
+    )
+    assert any(t.amount_ntd == 12000 and t.bank_amount_ntd == 11970 and t.transfer_fee_ntd == 30
+               for t in readback.transactions)
 
 
 @pytest.mark.parametrize('historical',[False,True])

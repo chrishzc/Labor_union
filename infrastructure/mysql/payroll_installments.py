@@ -3,6 +3,17 @@
 from domains.payroll.installments import payroll_installments
 
 
+def query_subsidy_completion_date(cursor, case_no, *, for_update=False):
+    """Read the completion date used by subsidy confirmation after its lifecycle check."""
+    cursor.execute(
+        "SELECT COALESCE(actual_end_date, end_date) AS completed_on FROM orders WHERE case_no=%s"
+        + (" FOR UPDATE" if for_update else ""),
+        (case_no,),
+    )
+    row = cursor.fetchone()
+    return row["completed_on"] if row else None
+
+
 def establish_confirmed_subsidy_installments(cursor, identity, portions):
     """Insert only a previewed, absent schedule under the caller's owner locks/UoW."""
     cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments '

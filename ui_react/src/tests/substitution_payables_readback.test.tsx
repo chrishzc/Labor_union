@@ -191,7 +191,7 @@ describe('Scheduling substitution Staff Payables readback', () => {
 
     renderLeaveWorkspace();
 
-    const readback = await screen.findByRole('region', { name: '代班薪資與應付款回讀' });
+    const readback = await screen.findByRole('region', { name: '代班薪資與付款狀態' });
     await waitFor(() => expect(query).toHaveBeenCalledWith(LEAVE_CASE_NO, LEAVE_RECEIPT.batch_key));
     await waitFor(() => expect(readback).toHaveTextContent('月嫂甲'));
     expect(readback).toHaveTextContent('月嫂乙');
@@ -212,7 +212,7 @@ describe('Scheduling substitution Staff Payables readback', () => {
 
     renderLeaveWorkspace();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('代班變更已完成');
+    expect(await screen.findByRole('alert')).toHaveTextContent('代班已更新，暫時無法查詢薪資和應付款');
     fireEvent.click(screen.getByRole('button', { name: '重新查詢薪資與應付款' }));
 
     await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
@@ -231,7 +231,7 @@ describe('Scheduling substitution Staff Payables readback', () => {
     const review = vi.spyOn(staffLeaveInboxClient, 'review');
     const apply = vi.spyOn(leaveSubstitutionClient, 'apply');
     renderLeaveWorkspace();
-    expect(await screen.findByRole('alert')).toHaveTextContent('月嫂應付款查詢資料尚未更新');
+    expect(await screen.findByRole('alert')).toHaveTextContent('代班薪資已建立，應付款尚未更新');
     expect(screen.getByRole('link', { name: '核對本案月嫂應付款 →' }))
       .toHaveAttribute('href', `#finance?tab=client-receipts&case_no=${LEAVE_CASE_NO}&from=workbench`);
     fireEvent.click(screen.getByRole('button', { name: '重新查詢薪資與應付款' }));

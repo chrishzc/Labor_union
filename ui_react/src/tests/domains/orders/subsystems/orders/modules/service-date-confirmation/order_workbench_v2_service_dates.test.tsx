@@ -113,7 +113,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByRole('button', { name: '預覽服務日期' })).not.toBeInTheDocument();
     changeSelection();
     await save();
-    await screen.findByText('服務日期已確認並回讀版本 #1。');
+    await screen.findByText('服務日期已確認。');
     expect(mocks.previewServiceDates).toHaveBeenCalledWith(CASE, { service_dates: revisedDates }, undefined);
     expect(mocks.applyServiceDates).toHaveBeenCalledWith(CASE, {
       service_dates: revisedDates, expected_order_version: 11, expected_scheduling_version: 7,
@@ -122,7 +122,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(mocks.previewServiceDates.mock.invocationCallOrder[0]).toBeLessThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
     expect(mocks.getServiceDates.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
     fireEvent.click(screen.getByText('查看已保存日期與版本'));
-    expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent(revisedDates.join('、'));
+    expect(screen.getByLabelText('已確認的服務日期')).toHaveTextContent(revisedDates.join('、'));
     expect(onObserved).toHaveBeenCalledTimes(1);
     expect(onOpenActualStart).not.toHaveBeenCalled();
   });
@@ -146,7 +146,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     }
     expect(within(calendar).getByRole('button', { name: '服務日期 2026-10-01' })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByText('查看已保存日期與版本'));
-    const readback = screen.getByLabelText('先前確認日期與目前排班回讀');
+    const readback = screen.getByLabelText('先前確認的日期與目前排班');
     expect(readback).toHaveTextContent(initialDates.join('、'));
     expect(readback).toHaveTextContent('目前排班服務日2026-10-05、2026-10-06、2026-10-07');
     expect(screen.queryByRole('button', { name: '儲存服務日期' })).not.toBeInTheDocument();
@@ -177,12 +177,12 @@ describe('服務日期自動讀取與單次儲存流程', () => {
   it('保存後修改日期會清除舊 Preview，下一次儲存重新核對新選日與版本', async () => {
     render(<OrderServiceDatesPanel caseNo={CASE} />);
     await save();
-    await screen.findByText('服務日期已確認並回讀版本 #1。');
+    await screen.findByText('服務日期已確認。');
     changeSelection();
     expect(orderMutationFlowStore.getServiceDatesDraft(CASE)?.previewView).toBeNull();
     expect(mocks.applyServiceDates).toHaveBeenCalledTimes(1);
     await save();
-    await screen.findByText('服務日期已確認並回讀版本 #2。');
+    await screen.findByText('服務日期已確認。');
     expect(mocks.previewServiceDates).toHaveBeenCalledTimes(2);
     expect(mocks.previewServiceDates.mock.calls.map(call => call[1].service_dates)).toEqual([initialDates, revisedDates]);
     expect(mocks.applyServiceDates.mock.calls[1][1]).toMatchObject({ service_dates: revisedDates,
@@ -285,7 +285,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(currentQuery.current_dates).toEqual([]);
     expect(currentQuery.current_version).toBeNull();
     expect(onObserved).not.toHaveBeenCalled();
-    expect(screen.queryByText(/服務日期已確認並回讀版本/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^服務日期已確認。$/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '採用新建議' }));
     await ready();
     expect(orderMutationFlowStore.getServiceDatesDraft(CASE)?.selectedDates).toEqual(['2026-09-28', '2026-09-29', '2026-09-30']);
@@ -305,6 +305,6 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(orderMutationFlowStore.getServiceDatesDraft(CASE)).toMatchObject({ status: 'observation_failed', receiptView: { confirmed_version: 1 } });
     expect(mocks.applyServiceDates).toHaveBeenCalledTimes(1);
     expect(onObserved).not.toHaveBeenCalled();
-    expect(screen.queryByText(/服務日期已確認並回讀版本/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^服務日期已確認。$/)).not.toBeInTheDocument();
   });
 });

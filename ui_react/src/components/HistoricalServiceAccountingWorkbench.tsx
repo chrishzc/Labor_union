@@ -73,7 +73,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAcc
       : orderSummaries.length === 0
         ? '目前沒有可選案件'
         : '請選擇案件';
-  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy: busy || outcomeUnknown, resetKey: facts, save: () => run(save), discard: () => { setDays(Object.fromEntries((facts?.assignments ?? []).map(item => [item.assignment_identity, '']))); setReason(''); setPreview(null); } });
+  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy, resetKey: facts, save: outcomeUnknown ? undefined : () => run(save), discard: () => { setDays(Object.fromEntries((facts?.assignments ?? []).map(item => [item.assignment_identity, '']))); setReason(''); setPreview(null); } });
   async function save() {
     if (!facts || outcomeUnknown) return;
     const checkedInputs = inputs();

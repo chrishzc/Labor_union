@@ -166,7 +166,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   useEffect(() => { onArrangementPendingChange?.(arrangementPending); }, [arrangementPending, onArrangementPendingChange]);
   useEffect(() => { onBoundStaffChange?.(queryView?.bound_staff ?? []); }, [queryView, onBoundStaffChange]);
   useEffect(() => {
-    if (success?.startsWith('服務日期已確認並回讀')) {
+    if (success === '服務日期已確認。') {
       (arrangementPending && onOpenArrangement ? nextStepElement.current : readbackElement.current)?.focus();
     }
   }, [success, arrangementPending, onOpenArrangement]);
@@ -433,7 +433,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     if (completedStart) {
       setActualStart((value) => value ? { ...value, current_actual_start_date: completedStart.after_actual_start_date } : value);
       setCalculationBasis({ date: completedStart.after_actual_start_date, confirmed: true });
-      setBasisNotice('實際開始日與此次服務日期已保存並回讀。');
+      setBasisNotice('實際開始日與服務日期已儲存。');
     }
   };
 
@@ -538,13 +538,13 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (renderedCaseNo.current !== caseNo || calculationSequence.current !== basisSequence) return;
       const observed = orderMutationFlowStore.getServiceDatesDraft(caseNo);
       if (observed?.status !== 'observed' || observed.queryView === null) {
-        throw new Error('服務日期已套用，但未取得正式回讀狀態。');
+        throw new Error('服務日期已送出，結果待確認。請重新查詢。');
       }
       setQueryView(observed.queryView);
       setSelectedDates(observed.queryView.current_dates);
 
       finishStartConfirmation(candidate);
-      setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
+      setSuccess('服務日期已確認。');
       onObserved?.();
       onOpenArrangement?.();
     } catch (caught) {
@@ -574,13 +574,13 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       if (renderedCaseNo.current !== caseNo) return;
       const observed = orderMutationFlowStore.getServiceDatesDraft(caseNo);
       if (observed?.status !== 'observed' || observed.queryView === null) {
-        throw new Error('服務日期已套用，但未取得正式回讀狀態。');
+        throw new Error('服務日期已送出，結果待確認。請重新查詢。');
       }
       setQueryView(observed.queryView);
       setSelectedDates(observed.queryView.current_dates);
 
       finishStartConfirmation();
-      setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
+      setSuccess('服務日期已確認。');
       onObserved?.();
       onOpenArrangement?.();
     } catch (caught) {
@@ -608,7 +608,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       setSelectedDates(observed.current_dates);
 
       finishStartConfirmation();
-      setSuccess(`服務日期已確認並回讀版本 #${recovery.confirmedVersion}。`);
+      setSuccess('服務日期已確認。');
       onObserved?.();
       onOpenArrangement?.();
     } catch (caught) {
@@ -702,7 +702,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       {basisNotice !== null && !routineCalculationNotice && effectiveServiceDates === null && <p className="service-date-inline-status" role="status">{basisNotice}</p>}
       {startPreview?.operation === 'reschedule' && <p role="status">本案確認開始日會同步建立或重排既定人員的正式服務安排。以下建議為後端正式重排日期，請核對後再保存。</p>}
       {startUnresolved && !saving && <div role="status">
-        <p>開始日保存或回讀尚未完成，服務日期未確認。請先確認開始日結果再接續。</p>
+        <p>實際開始日的儲存結果待確認。請先確認開始日，再繼續設定服務日期。</p>
         {startPreview && <button type="button" onClick={() => void runApply()}>讀取開始日結果並接續保存</button>}
         {!startPreview && onOpenActualStart && <button type="button" onClick={onOpenActualStart}>查看實際開始日操作</button>}
       </div>}
@@ -751,7 +751,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         </div>
       )}
       {recovery?.caseNo === caseNo && recovery.kind === 'observation_in_progress' && (
-        <p role="status">服務日期確認正在處理或回讀中，暫不可建立新操作。</p>
+        <p role="status">正在確認服務日期，請等候結果。</p>
       )}
 
       {queryView !== null && (
@@ -803,7 +803,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           <div className="service-date-footer">
             <small>{effectiveServiceDates ? '現行班表已保存。' : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>
             {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看日期確認紀錄 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary" disabled={!canSave} onClick={() => void runApply(true)}>
-              {working === 'apply' ? '儲存並回讀中…' : '儲存服務日期'}
+              {working === 'apply' ? '儲存並確認中…' : '儲存服務日期'}
             </button>}
           </div>
         </>
@@ -812,7 +812,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       {queryView !== null && queryView.current_dates.length > 0 && (
         <div tabIndex={-1} ref={readbackElement}><details className="service-date-saved-details"><summary>查看已保存日期與版本</summary>
           {calculationBasis?.confirmed && <div aria-label="服務日期計算基準">正式實際開始日：{calculationBasis.date}</div>}
-          <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認日期與目前排班回讀' : '已確認服務日期回讀'}>
+          <dl className="order-v2-business-summary" aria-label={confirmationSupersededBySchedule ? '先前確認的日期與目前排班' : '已確認的服務日期'}>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認版本' : '日期確認版本'}</dt><dd>{queryView.current_version === null ? '未建立' : `#${queryView.current_version}`}</dd></div>
           <div><dt>{confirmationSupersededBySchedule ? '先前確認日期' : '已確認服務日期'}</dt><dd>{queryView.current_dates.join('、')}</dd></div>
           {effectiveServiceDates !== null && <div><dt>目前排班服務日</dt><dd>{effectiveServiceDates.join('、')}</dd></div>}

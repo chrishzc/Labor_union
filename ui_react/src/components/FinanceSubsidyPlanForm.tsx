@@ -21,9 +21,9 @@ export function FinanceSubsidyPlanForm({caseNo,source,onSaved,onBack,bankMemos=[
   <FinanceCaseBankMemos notes={bankMemos}/>
   <form ref={form} onSubmit={e=>{e.preventDefault();void submit();}}>
    <fieldset className="finance-manual-plan-options" disabled={busy||unknown}><legend>補助款歸屬</legend>{(Object.keys(subsidyPlanLabels) as Array<keyof typeof subsidyPlanLabels>).map(scheme=><label key={scheme}><input type="radio" name="subsidy-plan" value={scheme} checked={choice===scheme} onChange={()=>setChoice(scheme)}/><span><strong>{subsidyPlanLabels[scheme]}</strong><small>{subsidyPlanTargets[scheme]}</small></span></label>)}</fieldset>
-   {checking&&<p role="status">正在檢查款項來源與建款條件…</p>}
+   {checking&&<p role="status">正在確認補助給付條件…</p>}
    {preview&&<div aria-label="方案保存前預檢">
-    {preview.blocker?<p role="alert">本次建款已攔下：{preview.blocker}。保存時只確認方案，不執行這些金融動作。</p>:preview.confirmation_only?<p>服務尚未正式結束，本次只確認方案，不建立款項或核銷。</p>:preview.payables.length>0?<p>保存方案時將依下列內容承接款項；本次不執行付款或核銷。</p>:<p>本次確認方案，沒有新增款項；不執行付款或核銷。</p>}
+    {preview.blocker?<p role="alert">{preview.blocker}。仍可儲存補助方案，給付金額待核對。</p>:preview.confirmation_only?<p>服務尚未結束。本次只確認補助方案，給付金額仍待確認。</p>:preview.payables.length>0?<p>儲存方案時會記錄下列給付金額。付款與核銷另行辦理。</p>:<p>本次只確認補助方案。付款與核銷另行辦理。</p>}
     {preview.payables.length>0&&<ul>{preview.payables.map((item,i)=><li key={item.identity+':'+i}>{item.recipient==='client'?'應退客戶補助':item.recipient==='staff:subsidy'?'應付月嫂補助':'應付月嫂自備款'}：{new Intl.NumberFormat('zh-TW').format(item.amount_ntd)} 元，日期 {item.due_date??'待確認'}</li>)}</ul>}
    </div>}
    {error&&<p role="alert">{error}</p>}

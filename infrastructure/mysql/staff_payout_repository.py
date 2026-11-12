@@ -403,6 +403,7 @@ class MySqlStaffPayoutRepository:
         from domains.payroll.installments import confirmed_subsidy_installments, PayrollInstallment
         from domains.staff_payables.reconciliation import project_staff_payable
         from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace, MySqlAccountingWorkspaceState
+        from infrastructure.mysql.payroll_installments import query_subsidy_completion_date
         from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
         if len(obligation_rows) != 1 or len(bank_rows) != 1 or bank_rows[0]['format_id'] not in {'sinopac','taishin'}:
             raise ValueError('staff_subsidy_split_selection_invalid')
@@ -437,11 +438,10 @@ class MySqlStaffPayoutRepository:
             installments = tuple(PayrollInstallment(p.funding_kind, p.amount_ntd, p.due_date) for p in existing)
             remaining = {p.funding_kind: p.remaining_ntd for p in existing}
         else:
-            cursor.execute('SELECT actual_end_date FROM orders WHERE case_no=%s', (case_no,))
-            order = cursor.fetchone()
-            if not order or order['actual_end_date'] is None:
+            completed_on = query_subsidy_completion_date(cursor, case_no)
+            if completed_on is None:
                 raise ValueError('staff_subsidy_split_service_end_missing')
-            installments = confirmed_subsidy_installments(total, subsidy, root.get('due_date'), order['actual_end_date'])
+            installments = confirmed_subsidy_installments(total, subsidy, root.get('due_date'), completed_on)
             paid, unconfirmed = _funding_settlements(cursor, root['obligation_identity'])
             if unconfirmed or sum(paid.values()) != project_staff_payable(payable).net_paid.amount:
                 raise ValueError('staff_installment_funding_unconfirmed')

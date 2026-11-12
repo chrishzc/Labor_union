@@ -12,6 +12,8 @@ import {
   pricingTermsError,
 } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
+import { useUnsavedNavigation } from './UnsavedChanges';
 import './AccountingParameters.css';
 import './Drawer.css';
 
@@ -22,6 +24,7 @@ interface AccountingParametersDrawerProps {
   onCommitted: () => Promise<void> | void;
   initialPricing?: CasePricing | null;
   initialMultiBirthCount?: string | null;
+  canEditHistoricalDays?: boolean;
   totalHours?: number;
 }
 
@@ -32,6 +35,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   onCommitted,
   initialPricing,
   initialMultiBirthCount,
+  canEditHistoricalDays = false,
   totalHours = 160,
 }) => {
   const [current, setCurrent] = useState<CasePricing | null>(initialPricing ?? null);
@@ -43,6 +47,8 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   const [loading, setLoading] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [showHistoricalDays, setShowHistoricalDays] = useState(false);
+  const { requestLeave } = useUnsavedNavigation();
   const inFlight = useRef<boolean>(false);
 
   // 當抽屜開啟時，載入最新的本案計價資料
@@ -78,6 +84,15 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   }, [isOpen, caseNo, initialPricing, initialMultiBirthCount]);
 
   if (!isOpen) return null;
+
+  const close = () => {
+    const proceed = () => {
+      setShowHistoricalDays(false);
+      onClose();
+    };
+    if (showHistoricalDays) requestLeave(proceed);
+    else proceed();
+  };
 
   // 切換單雙胞胎
   const handleToggleTwins = (twinVal: boolean) => {
@@ -197,7 +212,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
     <div
       className="drawer-backdrop open"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !saving) onClose();
+        if (e.target === e.currentTarget && !saving) close();
       }}
       role="dialog"
       aria-modal="true"
@@ -213,7 +228,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
             type="button"
             className="drawer-close-btn"
             disabled={saving}
-            onClick={onClose}
+            onClick={close}
             title="關閉抽屜"
           >
             ✕
@@ -222,6 +237,15 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
 
         {/* 抽屜內容主體 */}
         <div className="drawer-body">
+          {showHistoricalDays ? (
+            <HistoricalServiceAccountingWorkbench key={caseNo} caseNo={caseNo} onSaved={onCommitted} />
+          ) : (
+          <>
+          {canEditHistoricalDays && (
+            <button type="button" className="finance-btn-secondary" disabled={saving} onClick={() => setShowHistoricalDays(true)}>
+              調整歷史訂單服務天數
+            </button>
+          )}
           <div className="case-banner-note" style={{ margin: '0 0 16px 0' }}>
             <span>💡</span>
             <span>
@@ -443,15 +467,23 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
               </div>
             </>
           )}
+          </>
+          )}
         </div>
 
         {/* 抽屜底部操作按鈕 */}
         <div className="drawer-footer">
+          {showHistoricalDays ? (
+            <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(() => setShowHistoricalDays(false))}>
+              返回帳務參數
+            </button>
+          ) : (
+          <>
           <button
             type="button"
             className="finance-btn-secondary"
             disabled={saving}
-            onClick={onClose}
+            onClick={close}
           >
             取消
           </button>
@@ -463,6 +495,8 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
           >
             {saving ? '儲存並同步重算中…' : '儲存本案帳務參數並重算'}
           </button>
+          </>
+          )}
         </div>
       </div>
     </div>

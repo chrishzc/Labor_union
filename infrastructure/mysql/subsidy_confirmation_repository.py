@@ -274,6 +274,7 @@ def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_upd
     from subsystems.finance_import.accounting_workspace import SubsidyPlanPreview, SubsidyPlanPayable
     from domains.client_finance.obligation_planning import confirmed_subsidy_return_plan
     from domains.payroll.installments import confirmed_subsidy_installments
+    from infrastructure.mysql.payroll_installments import query_subsidy_completion_date
     from infrastructure.mysql.staff_payout_repository import _funding_settlements
     case = build_accounting_workspace(connection).query(case_no, for_update=for_update)
     handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme=scheme)
@@ -281,17 +282,15 @@ def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_upd
     blocker = None
     only = not handoff.service_completed
     with connection.cursor() as cursor:
-        cursor.execute('SELECT COALESCE(actual_end_date,end_date) completed_on FROM orders WHERE case_no=%s'
-                       + (' FOR UPDATE' if for_update else ''), (case_no,))
-        order = cursor.fetchone()
+        completed_on = query_subsidy_completion_date(cursor, case_no, for_update=for_update)
         if not only and scheme != 'direct' and case.subsidy_ntd != 0:
             blocker = handoff.client_subsidy_reason if scheme == 'advance' else handoff.staff_subsidy_reason
-            if not blocker and (not order or order['completed_on'] is None):
+            if not blocker and completed_on is None:
                 blocker = 'subsidy_service_end_missing'
             if not blocker and scheme == 'advance':
                 cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s AND obligation_type='subsidy_return'", (case_no,))
                 if not cursor.fetchall():
-                    refund = confirmed_subsidy_return_plan(case_no, MoneyNTD(case.subsidy_ntd), order['completed_on'])
+                    refund = confirmed_subsidy_return_plan(case_no, MoneyNTD(case.subsidy_ntd), completed_on)
                     payables = (SubsidyPlanPayable(refund.obligation_identity, 'client', refund.amount.amount, refund.due_date.isoformat()),)
             elif not blocker and scheme == 'split':
                 cursor.execute("SELECT o.obligation_identity,o.due_date,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=o.obligation_identity) has_installments "
@@ -300,7 +299,7 @@ def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_upd
                 if len(roots) == 1 and not roots[0]['has_installments']:
                     staff_identity = roots[0]['obligation_identity']
                     installments = confirmed_subsidy_installments(case.staff_receivable_ntd, case.subsidy_ntd,
-                        roots[0]['due_date'], order['completed_on'])
+                        roots[0]['due_date'], completed_on)
                     paid, unconfirmed = _funding_settlements(cursor, staff_identity)
                     actual = sum(item.actual_ntd for item in case.staff_items if item.identity == staff_identity)
                     if unconfirmed or sum(paid.values()) != actual or any(paid[p.funding_kind] > p.amount for p in installments):

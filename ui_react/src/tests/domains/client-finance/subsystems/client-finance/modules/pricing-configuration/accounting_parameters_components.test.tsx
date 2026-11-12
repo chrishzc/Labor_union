@@ -8,6 +8,11 @@ import { AccountingParametersCard } from '../../../../../../../components/Accoun
 import { AccountingParametersBar } from '../../../../../../../components/AccountingParametersBar';
 import { AccountingParametersDrawer } from '../../../../../../../components/AccountingParametersDrawer';
 import { accountingPricingClient, type CasePricing } from '../../../../../../../api/client_finance/accounting_pricing_client';
+import { historicalServiceAccountingClient } from '../../../../../../../api/orders/historical_service_accounting_client';
+
+vi.mock('../../../../../../../api/orders/historical_service_accounting_client', () => ({
+  historicalServiceAccountingClient: { query: vi.fn(), preview: vi.fn(), apply: vi.fn() },
+}));
 
 vi.mock('../../../../../../../api/client_finance/accounting_pricing_client', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../../../../../api/client_finance/accounting_pricing_client')>();
@@ -130,6 +135,7 @@ describe('AccountingParametersDrawer component', () => {
     );
 
     expect(await screen.findByText('調整本案帳務參數 · 115000088')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '調整歷史訂單服務天數' })).not.toBeInTheDocument();
 
     // Toggle to single birth
     const singleBtn = screen.getByRole('button', { name: /單胞胎/ });
@@ -147,6 +153,72 @@ describe('AccountingParametersDrawer component', () => {
       expect(handleCommitted).toHaveBeenCalledTimes(1);
       expect(handleClose).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('saves historical days for the same case and refreshes reconciliation', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(mockPricing);
+    const facts = {
+      case_no: mockPricing.case_no,
+      lifecycle_status: '歷史訂單－服務完成',
+      lifecycle_version: 1,
+      adoption_receipt_id: 1,
+      adoption_source_identity: 'source',
+      historical_day_revision: 0,
+      client_finance_version: 1,
+      payroll_version: 1,
+      contracted_service_days: 20,
+      service_hours_per_day: 8,
+      contractual_floor_fee_ntd: 0,
+      client_identity_status: '一般市民',
+      assignments: [{
+        assignment_identity: 'assignment-1', staff_id: 1, staff_name: '測試月嫂',
+        policy_version: '1', policy_kind: 'citizen' as const, hourly_rate_ntd: 300,
+      }],
+    };
+    const preview = {
+      facts,
+      total_actual_service_days: 18,
+      total_actual_service_hours: '144',
+      historical_floor_fee_ntd: 0,
+      historical_double_pay_days: 0 as const,
+      historical_double_pay_hours: '0' as const,
+      allocations: [],
+      payroll_assignments: [],
+      staff_obligation_amount_ntd: 43_200,
+      client_obligation_amount_ntd: 43_200,
+      client_service_receivable_ntd: 43_200,
+      client_subsidy_hours: 0,
+      client_self_pay_service_hours: 144,
+      preview_fingerprint: 'a'.repeat(64),
+    };
+    vi.mocked(historicalServiceAccountingClient.query).mockResolvedValue(facts);
+    vi.mocked(historicalServiceAccountingClient.preview).mockResolvedValue(preview);
+    vi.mocked(historicalServiceAccountingClient.apply).mockResolvedValue({
+      case_no: facts.case_no,
+      resulting_historical_day_revision: 1,
+      resulting_client_finance_version: 1,
+      resulting_payroll_version: 1,
+      total_actual_service_days: 18,
+      client_obligation_amount_ntd: 43_200,
+      staff_obligation_amount_ntd: 43_200,
+      preview_fingerprint: preview.preview_fingerprint,
+      replayed: false,
+    });
+    const onCommitted = vi.fn();
+    render(<AccountingParametersDrawer caseNo={facts.case_no} isOpen canEditHistoricalDays
+      onClose={vi.fn()} onCommitted={onCommitted} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '調整歷史訂單服務天數' }));
+    fireEvent.change(await screen.findByRole('spinbutton', { name: /實際服務天數/ }), { target: { value: '18' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務天數' }));
+
+    await screen.findByText(/實際服務天數已儲存/);
+    const days = [{ assignment_identity: 'assignment-1', staff_id: 1, actual_service_days: 18 }];
+    expect(historicalServiceAccountingClient.query).toHaveBeenCalledWith(facts.case_no);
+    expect(historicalServiceAccountingClient.preview).toHaveBeenCalledWith(facts.case_no, days);
+    expect(historicalServiceAccountingClient.apply).toHaveBeenCalledWith(preview, days, '');
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    expect(onCommitted).toHaveBeenCalledTimes(1);
   });
 
   it('switches indigenous identity preset to 80h cap and 350 covered rate', async () => {

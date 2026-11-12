@@ -91,13 +91,13 @@ function toneLabel(
     case 'rest':
       return assignmentStatusLabel(statuses, true) ?? '指派休息日';
     case 'buffer':
-      return '7天防撞期 Buffer 鎖定';
+      return '七日防撞期，檔期已保留';
     case 'waiting':
-      return '待成立檔期占用';
+      return '等候訂金，檔期已保留';
     case 'leave':
       return unavailabilityLabels.join('、') || '服務人員不可服務';
     case 'available':
-      return 'Server 顯示可用';
+      return '可安排服務';
   }
 }
 
@@ -162,7 +162,7 @@ function loadedStatusLabel(
     kinds.includes('waiting_deposit_service') ||
     kinds.includes('waiting_deposit_buffer')
   ) {
-    return '待成立檔期占用';
+    return '等候訂金，檔期已保留';
   }
   if (statuses.includes('active')) return '正常履約中';
   if (statuses.includes('planned')) return '已排定待開始';

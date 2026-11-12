@@ -45,6 +45,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 
 ## Dependencies
 - outbound: `payroll` — salary calculation/obligations; no duplicate payroll writer.
+- outbound: `orders/historical-service-accounting` — 對帳的帳務參數抽屜借用同案歷史服務天數工作台。
 - inbound: `case-import` — bind only on first case creation.
 - inbound: `clients/client-profile` — Drawer composes typed workflow only.
 - inbound: `global/reporting` and Client Finance payment queries — reuse the same policy-based case category; case-number spelling does not determine category.

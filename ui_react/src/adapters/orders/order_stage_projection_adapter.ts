@@ -82,7 +82,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: '進行中',
   blocked: '受阻',
   completed: '已完成',
-  unavailable: '待補正式根事實',
+  unavailable: '案件資料待補齊',
 };
 
 const AVAILABILITY_REASON_LABELS: Record<string, string> = {
@@ -111,7 +111,7 @@ export function stageStatusLabel(status: string): string {
 export function stageAvailabilityLabel(value: string | null): string | null {
   if (!value) return null;
   return AVAILABILITY_REASON_LABELS[value]
-    ?? (value.endsWith('_missing') ? '尚未形成正式根事實' : '請依目前階段補齊正式根事實');
+    ?? '案件資料待補齊';
 }
 
 export function formatProjectionTimestamp(value: string | null): string {
