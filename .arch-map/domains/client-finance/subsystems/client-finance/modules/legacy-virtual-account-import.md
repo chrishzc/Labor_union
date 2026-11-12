@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-由 Client Finance 匯入舊流程的案件／虛擬帳號實際對照。只要案件存在匯入對照，收款解析與契約顯示皆以匯入帳號為優先且不得回退公式；唯一對照可直接使用，多筆不同對照須人工處理。只有完全沒有匯入對照時才使用現行案件編號公式；空白、格式不符或查無訂單的來源列直接略過。相同帳號命中多個案件時不得自動核銷。
+由 Client Finance 匯入舊流程的案件／虛擬帳號實際對照。一般案 115 年含以前使用匯入對照，116 年起及各年度非市民案使用案件編號公式。匯入對照保留優先順位；歧義待確認。公式號碼須可唯一反查至本案才提供。空白、格式不符或查無訂單的來源列直接略過。
 
 客戶名冊可經同一 owner 的單案 Query／Apply 直接儲存，將全部舊匯入對照原子取代為一個帳號；不填原因、不預覽、不改內建公式。
 人工命令與批次匯入共用鎖，Query 的 mapping IDs 作集合版本，Apply fresh-lock 比較 expected IDs 防 stale；receipt 與對照同一 outer UoW。
@@ -29,7 +29,7 @@
 
 ## Dependencies
 - outbound: `orders` — 只接受已存在的 canonical `case_no`，不存在即略過。
-- inbound: `receipt-reconciliation`／`contract-signing` — 虛擬帳號解析先判斷匯入對照；不存在時才建立現行公式候選。
+- inbound: `receipt-reconciliation`／`contract-signing` — 虛擬帳號解析依案件年度及類型決定帳號來源。
 
 ## Contracts
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md`

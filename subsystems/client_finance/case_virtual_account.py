@@ -8,7 +8,7 @@ from typing import Callable, Protocol
 from domains.client_finance.virtual_account import canonical_virtual_account
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+from subsystems.client_finance.virtual_account_resolution import build_effective_formula_account
 
 
 class CaseVirtualAccountError(RuntimeError):
@@ -42,6 +42,7 @@ class CaseVirtualAccountRepository(Protocol):
     def acquire_lock(self, key: str) -> bool: ...
     def release_lock(self, key: str) -> None: ...
     def load_case_mappings(self, case_no: str, *, lock: bool) -> tuple[AccountMapping, ...] | None: ...
+    def resolve_formula_account(self, case_no: str) -> str | None: ...
     def account_used_by_other_case(self, case_no: str, account: str, *, lock: bool) -> bool: ...
     def load_case_account_receipt(self, key: str) -> dict | None: ...
     def replace_case_account(self, case_no: str, account: str, digest: str, actor: str) -> None: ...
@@ -61,7 +62,8 @@ class CaseVirtualAccountApplication:
 
     def query(self, case_no: str) -> CaseVirtualAccountView:
         mappings = self._mappings(case_no)
-        return CaseVirtualAccountView(case_no, tuple(row.virtual_account for row in mappings), build_client_virtual_account(case_no), tuple(row.id for row in mappings))
+        formula = self._repository.resolve_formula_account(case_no) if build_effective_formula_account(case_no) else None
+        return CaseVirtualAccountView(case_no, tuple(row.virtual_account for row in mappings), formula, tuple(row.id for row in mappings))
 
     def apply(self, case_no: str, virtual_account: str, expected_mapping_ids: tuple[int, ...], key: str, actor: str) -> CaseVirtualAccountReceipt:
         account = canonical_virtual_account(virtual_account)

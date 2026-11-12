@@ -18,13 +18,13 @@ from shared_kernel.money import MoneyNTD
 
 
 class _CaseCursor:
-    def __init__(self, bank, obligations, mappings=(), cases=("115000001",)):
+    def __init__(self, bank, obligations, mappings=("115000001",), cases=("115000001",)):
         self.bank = bank
         self.obligations = obligations
         self.mappings = mappings
         self.cases = cases
         self.executions = []
-        self.current = None
+        self.current = ()
 
     def __enter__(self):
         return self
@@ -36,22 +36,41 @@ class _CaseCursor:
         sql = " ".join(sql.split())
         self.executions.append((sql, params))
         if "FROM finance_import_rows WHERE id=" in sql:
-            self.current = self.bank
-        elif "FROM client_legacy_virtual_accounts" in sql:
-            self.current = tuple({"case_no": value} for value in self.mappings)
+            self.current = (self.bank,)
+        elif "FROM finance_import_rows fir" in sql:
+            self.current = ({
+                **self.bank,
+                "id": params[0],
+                "dedup_fingerprint": "a" * 64,
+                "classification_type": "staff_salary",
+                "effective_classification_type": "client_refund",
+                "reconciliation_status": "pending",
+            },)
         elif "FROM orders WHERE case_no" in sql:
             self.current = tuple({"case_no": value} for value in self.cases if value == params[0])
+        elif "FROM client_legacy_virtual_accounts" in sql:
+            self.current = tuple({"case_no": value} for value in self.mappings)
+        elif "WHERE obligation.obligation_identity IN" in sql or "WHERE obligations.obligation_identity IN" in sql:
+            identities = params[:-3] if "AND obligation.case_no=%s" in sql else params
+            self.current = tuple(row for row in self.obligations if row["obligation_identity"] in identities)
+        elif "FROM client_obligations WHERE obligation_identity IN" in sql:
+            self.current = tuple(row for row in self.obligations if row["obligation_identity"] in params)
         elif "FROM client_obligations obligation" in sql or "FROM staff_obligations obligation" in sql:
             self.current = tuple(
                 row for row in self.obligations
                 if row["owner_id"] == params[0]
                 and ("AND obligation.case_no=%s" not in sql or row["case_no"] == params[1])
             )
+        elif any(table in sql for table in (
+            "FROM client_finance_accounts", "FROM staff_payable_accounts",
+            "FROM staff_payout_obligation_links", "FROM finance_anomaly_occurrences",
+        )):
+            self.current = ()
         else:
             raise AssertionError("Unexpected SQL in memo resolution")
 
     def fetchone(self):
-        return self.current
+        return self.current[0] if self.current else None
 
     def fetchall(self):
         return self.current
@@ -107,7 +126,15 @@ def _pending(row, kind, *, verified_name=True):
 
 def _obligation(case_no, identity, owner_id=7):
     return {"case_no": case_no, "obligation_identity": identity, "owner_id": owner_id,
+            "staff_id": owner_id, "obligation_type": "refund", "bank_account": "10001",
             "amount_due_ntd": 12000, "due_date": "2026-10-20"}
+
+
+def _target_query(connection):
+    return next(
+        (sql, params) for sql, params in connection.cursor_instance.executions
+        if "obligation.direction=" in sql and "obligation_identity IN" not in sql
+    )
 
 
 @pytest.mark.parametrize("memo", ["HC115001服務人員", "A115001服務人員", "HC115001退款"])
@@ -124,7 +151,7 @@ def test_workbook_memo_selects_only_that_case_for_refunds_and_staff_payouts(tmp_
 
     assert result.disposition is FinanceImportDisposition.CREATE
     assert result.target_identities == (kind + ":selected",)
-    target_sql, params = connection.cursor_instance.executions[-1]
+    target_sql, params = _target_query(connection)
     assert "AND obligation.case_no=%s" in target_sql
     assert params == (7, "115000001")
     assert row["memo"] == memo
@@ -143,20 +170,25 @@ def test_memo_case_uses_imported_mapping_instead_of_a_formula_guess(tmp_path, ki
     row = _workbook_row(tmp_path, "HC115001退款")
     connection = _CaseConnection(row, (
         _obligation("114000018", "selected"), _obligation("115000001", "wrong-formula"),
-    ), mappings=("114000018",))
+    ), mappings=("114000018",), cases=("114000018", "115000001"))
     result = MySqlFinanceImportOwningDomainComposite(connection).resolve(_pending(row, kind))
     assert result.target_identities == ("selected",)
-    assert not any("FROM orders" in sql for sql, _ in connection.cursor_instance.executions)
+    assert not any("SELECT case_no FROM orders" in sql for sql, _ in connection.cursor_instance.executions)
 
 
 @pytest.mark.parametrize("kind", ["refund", "staff"])
 @pytest.mark.parametrize("memo", [None, "", "HC11500", "HC1150010", "HC115001 HC115002"])
-def test_unverified_recipient_never_falls_back_to_passbook_or_all_cases(tmp_path, kind, memo):
+def test_account_identified_recipient_cannot_use_passbook_to_select_one_of_two_cases(tmp_path, kind, memo):
     row = _workbook_row(tmp_path, memo)
     candidate = _pending(row, kind, verified_name=False)
-    connection = _CaseConnection(row, (_obligation("115000001", "must-not-select"),))
-    assert MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate) == candidate
-    assert connection.cursor_instance.executions == []
+    connection = _CaseConnection(row, (
+        _obligation("115000001", "must-not-select"),
+        _obligation("115000999", "also-must-not-select"),
+    ), cases=("115000001", "115000999"))
+    result = MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate)
+    assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert result.target_identities == candidate.target_identities
+    assert not any("FROM finance_import_rows fir" in sql for sql, _ in connection.cursor_instance.executions)
 
 
 @pytest.mark.parametrize("kind", ["refund", "staff"])
@@ -185,7 +217,13 @@ def test_memo_case_without_an_obligation_for_the_counterparty_stays_pending(tmp_
         _obligation("115000001", "different-person", owner_id=8),
         _obligation("115000002", "same-person-wrong-case"),
     ))
-    assert MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate) == candidate
+    result = MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate)
+    assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert result.target_identities == candidate.target_identities
+    assert result.pending_reason == (
+        "outgoing_client_refund_no_open_obligation" if kind == "refund"
+        else "outgoing_staff_payout_no_open_obligation"
+    )
 
 
 @pytest.mark.parametrize("json_references", [False, True])
@@ -209,7 +247,7 @@ def test_verified_name_can_resolve_without_a_memo_case(tmp_path, kind, format_id
     connection = _CaseConnection(source, (_obligation("115000001", "existing-target"),))
     result = MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate)
     assert result.target_identities == ("existing-target",)
-    target_sql, parameters = connection.cursor_instance.executions[-1]
+    target_sql, parameters = _target_query(connection)
     assert "AND obligation.case_no=%s" not in target_sql
     assert parameters == (7,)
 

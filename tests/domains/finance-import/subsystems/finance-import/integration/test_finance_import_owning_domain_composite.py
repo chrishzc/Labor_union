@@ -208,9 +208,9 @@ def test_taishin_subsidy_records_actual_failed_matching_step(monkeypatch, date, 
 
 
 @pytest.mark.parametrize(("canonical", "reference"), [
-    (None, "99781699115150"),
-    ("Y", "99781699115150測試甲"),
-    ("99781699115151", "99781699115150 測試甲"),
+    (None, "99781699116150"),
+    ("Y", "99781699116150測試甲"),
+    ("99781699116151", "99781699116150 測試甲"),
 ])
 def test_virtual_account_resolves_one_exact_open_client_obligation(canonical, reference) -> None:
     connection = _VirtualAccountConnection(
@@ -222,8 +222,8 @@ def test_virtual_account_resolves_one_exact_open_client_obligation(canonical, re
                     "transaction_date":"2026-10-20",
                 },
                 (),
-                ({"case_no": "115000150"},),
-                ({"obligation_identity": "client-obligation:115000150:deposit"},),
+                ({"case_no": "116000150"},),
+                ({"obligation_identity": "client-obligation:116000150:deposit"},),
         )
     )
 
@@ -231,7 +231,7 @@ def test_virtual_account_resolves_one_exact_open_client_obligation(canonical, re
 
     assert resolved.disposition is FinanceImportDisposition.CREATE
     assert resolved.target_identities == (
-        "client-obligation:115000150:deposit",
+        "client-obligation:116000150:deposit",
     )
     assert "exact-open-client-obligation" in resolved.evidence
 
@@ -261,7 +261,6 @@ def test_virtual_account_keeps_underpayment_pending() -> None:
                     "cancellation_code": None,
                     "bank_references": '{"銷帳編號":"99781699115150"}',
                 },
-                (),
                 ({"case_no": "115000150"},),
                 (),
         )

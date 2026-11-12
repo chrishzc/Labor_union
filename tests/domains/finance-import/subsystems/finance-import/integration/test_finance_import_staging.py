@@ -8,19 +8,36 @@ from subsystems.finance_import import staging
 
 
 class FakeCursor:
-    def __init__(self, fail_on_execute=None, existing_rows=None):
+    def __init__(self, fail_on_execute=None, existing_rows=None, *, staff_cases=None, client_cases=None):
         self.executed = []
         self.lastrowid = None
         self._next_id = 100
         self.fail_on_execute = fail_on_execute
         self.rows_by_fingerprint = dict(existing_rows or {})
         self._fetchone = None
+        self._fetchall = ()
+        self.staff_cases = staff_cases or {}
+        self.client_cases = client_cases or {}
 
     def execute(self, sql, params):
         statement = " ".join(sql.split())
         self.executed.append((statement, params))
         if self.fail_on_execute == len(self.executed):
             raise RuntimeError("database write failed")
+        self._fetchone = None
+        self._fetchall = ()
+        if statement.startswith("SELECT DISTINCT case_no FROM orders WHERE "):
+            owners = self.staff_cases if "staff_id=%s" in statement else self.client_cases
+            self._fetchall = tuple({"case_no": case} for case in owners.get(params[0], ()))
+            return
+        if statement.startswith("SELECT DISTINCT case_no FROM case_staff_assignments"):
+            return
+        if statement.startswith("SELECT client_id FROM orders WHERE case_no=%s"):
+            self._fetchone = next(
+                ({"client_id": owner} for owner, cases in self.client_cases.items() if params[0] in cases),
+                None,
+            )
+            return
         if statement.startswith(("SELECT id, classification_type, matched_identity_ids", "SELECT id FROM finance_import_rows")):
             self._fetchone = self.rows_by_fingerprint.get(params[0])
             return
@@ -48,6 +65,9 @@ class FakeCursor:
 
     def fetchone(self):
         return self._fetchone
+
+    def fetchall(self):
+        return self._fetchall
 
 
 def _row(source_row=17):
@@ -592,8 +612,9 @@ def test_workbook_staging_keeps_taishin_case_for_manual_scheme_only_if_unique(mo
                           memo=memo, bank_references={})
     monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix", lambda _cursor, suffix: {
         "result": "resolved" if resolved and suffix == "115001" else "pending",
+        "case_no": "115000001" if resolved else None,
     })
-    cursor = FakeCursor()
+    cursor = FakeCursor(staff_cases={7: ("115000001",)})
     result = staging.stage_finance_rows(cursor, _normalized([row]), {
         "known_case_suffixes": frozenset({"115001"}),
         "all_staff_names": ("合成台新月嫂",),
@@ -602,10 +623,15 @@ def test_workbook_staging_keeps_taishin_case_for_manual_scheme_only_if_unique(mo
 
     assert len(result["staged_rows"]) == int(resolved)
     if resolved:
-        assert result["staged_rows"][0]["classification_type"] == "non_business_review"
-        assert result["staged_rows"][0]["matched_identity_ids"] == []
-        updates = [params for sql, params in cursor.executed if sql.startswith('UPDATE finance_import_rows')]
-        assert updates[0][3] == 'taishin_memo_case_requires_manual_scheme'
+        item = result["staged_rows"][0]
+        if memo.startswith("合成台新月嫂"):
+            assert item["classification_type"] == "staff_legacy_subsidy"
+            assert item["matched_identity_ids"] == [7]
+        else:
+            assert item["classification_type"] == "non_business_review"
+            assert item["matched_identity_ids"] == []
+            updates = [params for sql, params in cursor.executed if sql.startswith('UPDATE finance_import_rows')]
+            assert updates[0][3] == 'taishin_memo_case_requires_manual_scheme'
     else:
         assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
 
@@ -620,18 +646,17 @@ def test_taishin_normalization_preserves_original_note_spacing_and_fullwidth(tmp
     assert normalize_workbook(target)['normalized_rows'][0]['memo'] == memo
 
 
-def test_taishin_staff_name_precedes_an_unrelated_six_digit_memo_without_an_account(monkeypatch):
+def test_taishin_staff_name_cannot_override_an_unrelated_memo_case(monkeypatch):
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo="Synthetic Staff HC115002", counterparty_account=None, bank_references={})
     monkeypatch.setattr(staging, 'resolve_client_virtual_account_suffix',
-                        lambda *_: pytest.fail('Staff name must take priority over the six-digit memo'))
+                        lambda *_: {"result": "resolved", "case_no": "115000002"})
     result = staging.stage_finance_rows(FakeCursor(), _normalized([row]), {
         'all_staff_names': ('Synthetic Staff',),
         'staff_payout_candidates': ({'staff_id': 12, 'name': 'Synthetic Staff', 'case_no': '115000001',
             'due_date': '2026-10-20', 'amount_due_ntd': 12000},),
     }, business_only=True)
-    assert result['staged_rows'][0]['classification_type'] == 'staff_salary'
-    assert result['staged_rows'][0]['matched_identity_ids'] == [12]
+    assert result["staged_rows"] == []
 
 
 def test_incoming_name_account_and_amount_without_a_virtual_account_is_not_persisted():
@@ -676,15 +701,17 @@ def test_business_only_repeat_checks_identity_before_classification(bank, monkey
 
 @pytest.mark.parametrize("kind", ["staff_salary", "client_refund"])
 @pytest.mark.parametrize(
-    "proof,admitted",
-    [("account", True), ("case", True), ("both", True), ("none", False),
-     ("conflict", False), ("other_person", False), ("ambiguous_account", False), ("cross_type", False)],
+    "proof,staff_admitted,refund_admitted",
+    [("account", False, True), ("case", True, True), ("both", True, True), ("none", False, False),
+     ("conflict", True, False), ("other_person", False, False), ("ambiguous_account", False, False),
+     ("cross_type", False, False)],
 )
 def test_sinopac_shared_names_use_only_consistent_original_evidence_before_admission(
-    monkeypatch, kind, proof, admitted,
+    monkeypatch, kind, proof, staff_admitted, refund_admitted,
 ):
     name, account = "合成同名對象", "0000007001"
     is_staff = kind == "staff_salary"
+    admitted = staff_admitted if is_staff else refund_admitted
     person_key = "staff_id" if is_staff else "client_id"
     candidates = tuple(
         {person_key: person, "name": name, "case_no": f"11500000{person - 6}",
@@ -721,7 +748,7 @@ def test_sinopac_shared_names_use_only_consistent_original_evidence_before_admis
         return {"result": "resolved", "case_no": "115000001"}
 
     monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix", resolve_case)
-    cursor = FakeCursor()
+    cursor = FakeCursor(client_cases={7: ("115000001",), 8: ("115000002",)})
     result = staging.stage_finance_rows(
         cursor, {**_normalized([row, unrelated]), "format_id": "sinopac"}, maps, business_only=True,
     )
@@ -763,7 +790,7 @@ def test_sinopac_unrelated_names_cannot_override_original_recipient(monkeypatch,
                           summary="合成乙乙" if unrelated_field == "summary" else "轉帳")
     monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
                         lambda *_: {"result": "resolved", "case_no": "115000001"})
-    cursor = FakeCursor()
+    cursor = FakeCursor(client_cases={7: ("115000001",), 8: ("115000002",)})
     result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "sinopac"}, maps, business_only=True)
     assert len(result["staged_rows"]) == 1
     assert result["staged_rows"][0]["classification_type"] == kind
@@ -793,14 +820,15 @@ def test_sinopac_paid_namesake_remains_identifiable_before_open_payment_matching
                           bank_references={"交易參考編號": f"0000007001{name}"} if has_account else {})
     monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
                         lambda *_: {"result": "resolved", "case_no": "115000001"})
-    cursor = FakeCursor()
-    cursor.fetchall = lambda: [{"case_no": "115000001"}]
+    case_owner = 8 if proof == "conflict" else 7
+    cases_by_owner = {case_owner: ("115000001",)}
+    cursor = FakeCursor(staff_cases=cases_by_owner, client_cases=cases_by_owner)
     result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "sinopac"}, maps, business_only=True)
-    admitted = proof not in {"none", "conflict"}
+    admitted = proof in ({"case", "both", "conflict"} if staff else {"account", "case", "both"})
     assert len(result["staged_rows"]) == int(admitted)
     if admitted:
         assert result["staged_rows"][0]["classification_type"] == kind
-        assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+        assert result["staged_rows"][0]["matched_identity_ids"] == [case_owner]
 
 
 @pytest.mark.parametrize("case_count", [0, 1, 2])

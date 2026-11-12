@@ -7,6 +7,7 @@ from infrastructure.mysql.nas_mutations import call_mutation
 import json
 
 from subsystems.client_finance.case_virtual_account import AccountMapping
+from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account
 
 
 class MySqlLegacyVirtualAccountRepository:
@@ -89,6 +90,10 @@ class MySqlLegacyVirtualAccountRepository:
                 f"WHERE case_no=%s ORDER BY virtual_account,id{suffix}", (case_no,),
             )
             return tuple(AccountMapping(int(row["id"]), str(row["virtual_account"])) for row in cursor.fetchall())
+
+    def resolve_formula_account(self, case_no: str) -> str | None:
+        with self.connection.cursor() as cursor:
+            return resolve_case_virtual_account(cursor, case_no)["virtual_account"]
 
     def account_used_by_other_case(self, case_no: str, account: str, *, lock: bool) -> bool:
         suffix = " FOR UPDATE" if lock else ""

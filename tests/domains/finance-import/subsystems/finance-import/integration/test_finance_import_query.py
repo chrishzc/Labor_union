@@ -419,8 +419,8 @@ class _EnrichCursor:
             self._one = {"name": "陳月嫂"} if params == (19,) else None
         elif "SELECT c.name FROM orders o JOIN clients c" in sql:
             self._one = {"name": "林小美"} if params == ("115000001",) else None
-        elif "SELECT case_no FROM orders WHERE case_no = %s" in sql:
-            self._rows = [{"case_no": "115000001"}] if params == ("115000001",) else []
+        elif "FROM client_legacy_virtual_accounts mapping" in sql:
+            self._rows = [{"case_no": "115000001"}] if params == ("99781699115001",) else []
         elif "SELECT obligation_identity, due_date, amount_due_ntd FROM client_obligations" in sql:
             self._rows = self.receipt_rows
         elif "FROM staff_obligations" in sql:

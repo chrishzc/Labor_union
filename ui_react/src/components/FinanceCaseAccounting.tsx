@@ -54,19 +54,6 @@ export function formatBankDisplay(code: string | null | undefined): string {
   return branch ? `${head} ${bankName}（分行 ${branch}）` : `${head} ${bankName}`;
 }
 
-export function buildDefaultVirtualAccount(caseNo: string): string | null {
-  if (!caseNo) return null;
-  const match = caseNo.match(/^A?(\d{3})(\d{3,6})$/);
-  if (!match) return null;
-  const prefix = '99781699';
-  const year = match[1];
-  const rawSeq = parseInt(match[2], 10);
-  if (isNaN(rawSeq)) return null;
-  const accountSeq = caseNo.startsWith('A') ? rawSeq + 500 : rawSeq;
-  if (accountSeq < 1 || accountSeq > 999) return null;
-  return `${prefix}${year}${String(accountSeq).padStart(3, '0')}`;
-}
-
 const labels={over_received:'客戶超收',over_paid:'付款超付',under_paid:'付款差額超過 100 元'};
 const money=(value:number|bigint|null|undefined)=>value==null?'待確認':financeMoney(value);
 type Stage='deposit'|'first'|'second';
@@ -514,8 +501,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
  const govReceivedNtd=data?.cash_by_flow?.G??govBankFacts.reduce((s,b)=>s+b.amount_ntd,0);
 
- const virtualAccount=state.accountView?.imported_virtual_accounts?.[0]??state.registry?.finance?.values?.virtual_account??state.accountView?.built_in_virtual_account??buildDefaultVirtualAccount(initialCase);
- const isImportedVirtual=(state.accountView?.imported_virtual_accounts?.length??0)>0;
+ const virtualAccount=state.registry?.finance?.values?.virtual_account??null;
+ const isImportedVirtual=virtualAccount!==null && state.accountView?.imported_virtual_accounts?.length===1 && state.accountView.imported_virtual_accounts[0]===virtualAccount;
  const hasMultipleImported=(state.accountView?.imported_virtual_accounts?.length??0)>1;
  const refundBankCode=state.registry?.beclass?.values?.refund_bank_code??null;
  const refundAccountNo=state.registry?.beclass?.values?.refund_account_no??null;

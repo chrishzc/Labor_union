@@ -119,13 +119,13 @@ def test_replaces_only_this_case_and_consumers_read_new_account(setup, old_accou
         _seed(connection, CASE, account)
     _seed(connection, OTHER, "99781699114002")
     before = connection.raw.total_changes
-    assert application.query(CASE).built_in_virtual_account == OLD
+    assert application.query(CASE).built_in_virtual_account is None
     state = application.query(CASE)
     assert connection.raw.total_changes == before  # Query is zero-write.
     receipt = _apply(application, state)
     assert receipt.before == tuple(sorted(old_accounts))
     assert application.query(CASE).imported_virtual_accounts == (NEW,)
-    assert application.query(CASE).built_in_virtual_account == OLD
+    assert application.query(CASE).built_in_virtual_account is None
     assert application.query(OTHER).imported_virtual_accounts == ("99781699114002",)
     with connection.cursor() as cursor:
         assert resolve_case_virtual_account(cursor, CASE)["virtual_account"] == NEW

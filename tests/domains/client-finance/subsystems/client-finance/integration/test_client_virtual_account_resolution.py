@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from subsystems.client_finance.virtual_account_resolution import (
@@ -29,9 +31,9 @@ def test_memo_suffix_uses_imported_virtual_account_mapping_before_formula():
 
 
 def test_memo_suffix_uses_existing_case_when_no_imported_mapping_exists():
-    cursor = _Cursor([], [{"case_no": "015000001"}])
-    assert resolve_client_virtual_account_suffix(cursor, "015001")["case_no"] == "015000001"
-    assert cursor.executions[-1][1] == ("015000001",)
+    cursor = _Cursor([], [{"case_no": "116000001"}])
+    assert resolve_client_virtual_account_suffix(cursor, "116001")["case_no"] == "116000001"
+    assert cursor.executions[-1][1] == ("116000001",)
 
 
 @pytest.mark.parametrize("suffix", [None, 115001, "11500", "1150010", "１１５００１"])
@@ -63,8 +65,8 @@ def test_non_citizen_suffix_does_not_treat_case_digits_as_virtual_account_suffix
 
 def test_non_citizen_formula_never_overrides_imported_mapping_or_ambiguous_cases():
     assert resolve_client_virtual_account(_Cursor([{"case_no": "114000018"}]), "99781699115501")["case_no"] == "114000018"
-    assert resolve_client_virtual_account(_Cursor([], [{"case_no": "115000501"}, {"case_no": "A115001"}]),
-                                        "99781699115501")["reason"] == "case_not_unique"
+    assert resolve_client_virtual_account(_Cursor([], [{"case_no": "116000501"}, {"case_no": "A116001"}]),
+                                        "99781699116501")["reason"] == "case_not_unique"
 
 
 @pytest.mark.parametrize("case_no", [None, "CASE-1", "115001234", "１１５０００１５７"])
@@ -85,17 +87,60 @@ def test_invalid_virtual_account_does_not_query_orders(value):
 
 
 def test_resolves_virtual_account_to_roc_year_and_padded_sequence():
-    cursor = _Cursor([], [{"case_no": "114000001"}])
+    cursor = _Cursor([], [{"case_no": "116000001"}])
 
-    assert resolve_client_virtual_account(cursor, "99781699114001") == {
+    assert resolve_client_virtual_account(cursor, "99781699116001") == {
         "result": "resolved",
-        "case_no": "114000001",
+        "case_no": "116000001",
         "reason": None,
     }
-    assert cursor.executions == [
-        ("SELECT case_no FROM client_legacy_virtual_accounts WHERE virtual_account = %s ORDER BY case_no", ("99781699114001",)),
-        ("SELECT case_no FROM orders WHERE case_no = %s", ("114000001",)),
+    assert [params for _, params in cursor.executions] == [
+        ("99781699116001",), ("116000001",),
     ]
+
+
+def test_cases_with_imported_accounts_cannot_be_resolved_by_their_formula():
+    from subsystems.finance_import.identity_maps import _known_case_virtual_accounts
+
+    class SqliteCursor:
+        def __init__(self, database):
+            self.cursor = database.cursor()
+
+        def execute(self, statement, parameters=()):
+            self.cursor.execute(statement.replace("%s", "?"), parameters)
+
+        def fetchall(self):
+            return [dict(row) for row in self.cursor.fetchall()]
+
+    with sqlite3.connect(":memory:") as database:
+        database.row_factory = sqlite3.Row
+        database.executescript("""
+            CREATE TABLE orders (case_no TEXT, client_id INTEGER);
+            CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
+            INSERT INTO orders VALUES ('115000001', 1), ('115000002', 2), ('115000003', 3),
+                ('116000001', 4), ('116000009', 5), ('A115001', 6), ('115000004', 7);
+            INSERT INTO client_legacy_virtual_accounts VALUES
+                ('115000001', '99781699115009'),
+                ('115000003', '99781699115007'),
+                ('115000003', '99781699115008'),
+                ('115000004', '99781699116009'),
+                ('116000001', '99781699116008'),
+                ('A115001', '99781699115006');
+        """)
+        cursor = SqliteCursor(database)
+        assert resolve_client_virtual_account(cursor, "99781699115009")["case_no"] == "115000001"
+        assert resolve_client_virtual_account(cursor, "99781699115001")["result"] == "pending"
+        assert resolve_client_virtual_account(cursor, "99781699115002")["result"] == "pending"
+        assert resolve_client_virtual_account(cursor, "99781699115007")["reason"] == "case_not_unique"
+        assert resolve_client_virtual_account(cursor, "99781699115003")["result"] == "pending"
+        assert resolve_case_virtual_account(cursor, "115000002")["reason"] == "imported_account_missing"
+        assert resolve_case_virtual_account(cursor, "116000001")["virtual_account"] == "99781699116001"
+        assert resolve_case_virtual_account(cursor, "A115001")["virtual_account"] == "99781699115501"
+        assert resolve_case_virtual_account(cursor, "116000009")["result"] == "pending"
+        assert resolve_client_virtual_account(cursor, "99781699116009")["case_no"] == "115000004"
+        known_accounts, _, _, case_suffixes = _known_case_virtual_accounts(cursor)
+        assert known_accounts == {"99781699115009", "99781699116001", "99781699115501", "99781699116009"}
+        assert "116000009" not in case_suffixes
 
 
 @pytest.mark.parametrize(
@@ -145,7 +190,7 @@ def test_multiple_imported_cases_stay_pending_without_formula_fallback():
 
 
 def test_case_projection_prefers_its_unique_imported_account():
-    cursor = _Cursor([{"virtual_account": "99781699114991"}])
+    cursor = _Cursor([{"virtual_account": "99781699114991"}], [{"case_no": "114000033"}])
 
     assert resolve_case_virtual_account(cursor, "114000033") == {
         "result": "resolved",
@@ -167,9 +212,9 @@ def test_case_projection_rejects_multiple_imported_accounts_without_formula_fall
     }
 
 
-def test_case_projection_uses_formula_only_without_an_imported_account():
-    assert resolve_case_virtual_account(_Cursor([]), "114000033") == {
+def test_case_projection_uses_formula_for_116_cases():
+    assert resolve_case_virtual_account(_Cursor([], [{"case_no": "116000033"}]), "116000033") == {
         "result": "resolved",
-        "virtual_account": "99781699114033",
+        "virtual_account": "99781699116033",
         "reason": None,
     }
