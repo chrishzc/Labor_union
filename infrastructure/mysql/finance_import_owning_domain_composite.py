@@ -211,6 +211,24 @@ class MySqlFinanceImportOwningDomainComposite:
             return _resolve_staff_payout(self._connection, candidate)
         return candidate
 
+    def resolve_pending_government(self, candidate):
+        if candidate.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
+            return candidate
+        from subsystems.government_subsidy.period_reconciliation import period_rematch_targets
+
+        period = self._government_period_application().unique_bank_period(_row_id(candidate.row_identity))
+        if period is None:
+            return candidate
+        return _ready_candidate(candidate, period_rematch_targets(period), "unique-exact-government-period")
+
+    def _government_period_application(self):
+        from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
+        from subsystems.government_subsidy.period_reconciliation import PeriodReconciliationApplication
+
+        return PeriodReconciliationApplication(
+            MySqlGovernmentSubsidyPeriodRepository(self._connection), BorrowedTransactionUnitOfWork,
+        )
+
     def post(self, candidate):
         try:
             return self._post(candidate, self._require_context())
@@ -376,6 +394,16 @@ class MySqlFinanceImportOwningDomainComposite:
         return _client_subsidy_return_result(candidate, receipt)
 
     def _post_government_subsidy(self, candidate, context):
+        if isinstance(candidate, CanonicalFinanceImportRow) and "unique-exact-government-period" in candidate.evidence:
+            receipt = self._government_period_application().reconcile_unique(
+                _row_id(candidate.row_identity), candidate.target_identities,
+                _child_key(context, candidate, "government-period-rematch").value, context.actor.actor_id,
+            )
+            if receipt is None:
+                return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.PENDING,
+                                                   reason_code="government_period_rematch_unresolved")
+            return FinanceImportDispatchResult(candidate.row_identity, FinanceDispatchOutcome.RECONCILED,
+                                               f"government-subsidy-period:{receipt}")
         raise ValueError('government_subsidy_period_entry_required')
 
     def _require_context(self) -> _PostingContext:

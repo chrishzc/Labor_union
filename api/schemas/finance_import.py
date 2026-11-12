@@ -607,6 +607,13 @@ class FinanceImportBatchPreviewView(_StrictModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class PendingFinanceReconciliationView(_StrictModel):
+    checked_count: int = Field(ge=0)
+    reconciled_count: int = Field(ge=0)
+    existing_count: int = Field(ge=0)
+    pending_count: int = Field(ge=0)
+
+
 class FinanceImportBatchReceiptView(_StrictModel):
     batch_identity: str
     resulting_batch_version: int = Field(gt=0)

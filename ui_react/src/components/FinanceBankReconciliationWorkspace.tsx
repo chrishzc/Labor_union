@@ -10,7 +10,7 @@ import { FinanceStatementArchive } from './FinanceStatementArchive';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { bankReconciliationUnavailableReason, financeBankReviewPresentation, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage } from '../api/finance_import/finance_import_query_schemas';
-import type { FinanceImportBatchOutcome, FinanceImportBatchPreview, FinanceImportJobAccepted, FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
+import { financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -148,6 +148,20 @@ export function FinanceBankReconciliationWorkspace({
   const [filterSearch, setFilterSearch] = useState('');
   const [cursors, setCursors] = useState<(number | undefined)[]>([undefined]);
   const [retry, setRetry] = useState(0);
+  const [rematch, setRematch] = useState<LoadState<string>>({ kind: 'idle' });
+
+  async function reconcilePending() {
+    setRematch({ kind: 'loading' });
+    try {
+      const result = await financeImportMutationClient.reconcilePending();
+      setRematch({ kind: 'ready', data: `已查核 ${result.checked_count} 筆，核銷 ${result.reconciled_count} 筆，仍待核對 ${result.pending_count} 筆。` });
+    } catch {
+      setRematch({ kind: 'error', message: '無法確認批次核銷結果，請查核明細後再試。' });
+    } finally {
+      setCursors([undefined]);
+      setRetry(value => value + 1);
+    }
+  }
   const [transactions, setTransactions] = useState<LoadState<FinanceBankTransactionPage>>({ kind: 'loading' });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [showImportPanel, setShowImportPanel] = useState(false);
@@ -228,6 +242,13 @@ export function FinanceBankReconciliationWorkspace({
           </button>
           <button type="button" className="finance-btn-secondary" onClick={() => setHistoryOpen(true)}>匯入紀錄</button>
           <FinanceStatementArchive compact={true} />
+          <button type="button" className="finance-btn-primary"
+            disabled={importBusy || rematch.kind === 'loading'}
+            onClick={() => void reconcilePending()}>
+            {rematch.kind === 'loading' ? '重新配對中…' : '重新配對並核銷'}
+          </button>
+          {rematch.kind === 'ready' && <span role="status">{rematch.data}</span>}
+          {rematch.kind === 'error' && <span role="alert">{rematch.message}</span>}
         </div>
       </section>
 

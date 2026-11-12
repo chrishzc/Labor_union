@@ -25,6 +25,8 @@
 - `query_case_bank_memos`／typed `CaseBankMemo`：台新備註六碼經 Client Finance 正式帳號對照確認唯一案件，原文逐筆投影至案件 `bank_memos`；不要求有款項、不推用途或計入金流。方案區及既有人工選擇頁顯示原文，沿原方案 metadata writer 明確保存。
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
+- `subsystems/finance_import/import_workflow.py`、`infrastructure/mysql/finance_import_repository.py` — 待核對跨批次重配借用既有 owner resolve／post；保留跨批次競用與須人工確認的明細。
+- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx` — 單一正式明細匯出入口及待核對批次重配。
 - `api/dependencies/finance_import.py`
 - `api/schemas/finance_import.py`
 - shared: `api/schemas/base.py`, `ui_react/src/api/shared/exact_ntd.ts` — transport preserves whole NTD above the browser's safe integer range.

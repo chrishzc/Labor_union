@@ -32,6 +32,12 @@ const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_
 const jobAcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), status_url: z.string().min(1), replayed: z.boolean() });
 const batchReceiptSchema = z.strictObject({ batch_identity: z.string().min(1), resulting_batch_version: z.number().int().positive(), preview_fingerprint: sha256, reconciled_count: z.number().int().nonnegative(), existing_count: z.number().int().nonnegative(), pending_count: z.number().int().nonnegative() });
 const batchOutcomeSchema = z.strictObject({ job_id: z.string().min(1).max(191), status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']), attempt_count: z.number().int().nonnegative(), max_attempts: z.number().int().nonnegative(), result_reference: z.string().min(1).max(191).nullable(), receipt: batchReceiptSchema.nullable() });
+const pendingReconciliationSchema = z.strictObject({
+  checked_count: z.number().int().nonnegative(),
+  reconciled_count: z.number().int().nonnegative(),
+  existing_count: z.number().int().nonnegative(),
+  pending_count: z.number().int().nonnegative(),
+});
 const envelope = <T extends z.ZodType>(data: T) => z.strictObject({ success: z.literal(true), message: z.string(), data, error: z.null() });
 
 export type FinanceWorkbookIngestionReceipt = z.infer<typeof ingestionReceiptSchema>;
@@ -75,6 +81,14 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, label: string): T {
 }
 
 export const financeImportMutationClient = {
+  async reconcilePending() {
+    const key = `finance-pending:${crypto.randomUUID()}`;
+    const raw = await transport.post<unknown>('/api/v1/finance-import/pending/reconcile', undefined, {
+      ...requestOptions(undefined, { 'Idempotency-Key': key, 'X-Correlation-ID': key }),
+      timeoutMs: 120000,
+    });
+    return envelope(pendingReconciliationSchema).parse(raw).data;
+  },
   async queryIngestionOutcome(command: { idempotencyKey: string; correlationId: string; sourceDigest: string }) {
     try {
       const raw = await transport.get('/api/v1/finance-import/workbooks/ingestion-outcome',

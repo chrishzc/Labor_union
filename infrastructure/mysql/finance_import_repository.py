@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from decimal import Decimal
 import hashlib
 import json
@@ -86,6 +86,40 @@ class MySqlFinanceImportRepository:
                 str(identity_or_selection),
                 for_update,
             )
+
+    def load_pending_batches(self):
+        from subsystems.finance_import.identity_maps import load_finance_identity_maps
+
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT contract.batch_id,contract.batch_identity FROM finance_import_batch_contracts contract "
+                "JOIN finance_import_batches batch ON batch.id=contract.batch_id AND batch.status='completed' "
+                "WHERE EXISTS(SELECT 1 FROM finance_import_rows bank WHERE bank.batch_id=contract.batch_id "
+                "AND bank.reconciliation_status='pending') ORDER BY contract.batch_id FOR UPDATE"
+            )
+            headers = tuple(cursor.fetchall())
+            if not headers:
+                return
+            identity_maps = load_finance_identity_maps(cursor)
+            for header in headers:
+                cursor.execute(
+                    "SELECT * FROM finance_import_rows WHERE batch_id=%s AND reconciliation_status='pending' "
+                    "ORDER BY id FOR UPDATE", (header["batch_id"],),
+                )
+                pending = {_row_identity(row["id"]): row for row in cursor.fetchall()}
+                facts = _load_batch_facts(cursor, header["batch_identity"], True)
+                pending_ids = frozenset(
+                    row.row_identity for row in facts.rows
+                    if row.row_identity in pending and row.disposition is not FinanceImportDisposition.EXISTING
+                )
+                if not pending_ids:
+                    continue
+                rows = tuple(
+                    _refresh_pending_classification(row, pending[row.row_identity], identity_maps)
+                    if row.row_identity in pending_ids else row
+                    for row in facts.rows
+                )
+                yield replace(facts, rows=rows), pending_ids
 
     def find_receipt(self, key, *, for_update=False):
         with _mysql_cursor(self._connection) as cursor:
@@ -365,6 +399,27 @@ class MySqlFinanceImportRepository:
 
 
 # Kept whole so every Preview fact comes from one consistent batch snapshot.
+def _refresh_pending_classification(row, source, identity_maps):
+    from domains.finance_import.ingestion import InitialClassificationFacts, build_initial_classification
+    from infrastructure.mysql.historical_reprocess_repository import _normalized_row
+    from subsystems.finance_import.staging import classify_row_with_identity_maps
+
+    if row.canonical_fact_version != 0 or row.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
+        return row
+    if row.integrity_violations or row.fingerprint_collision or row.formal_reference_conflict:
+        return row
+    current = classify_row_with_identity_maps(_normalized_row(source), identity_maps)
+    decision = build_initial_classification(InitialClassificationFacts(
+        int(source["id"]), current["classification_type"], tuple(current["matched_identity_ids"]), current["reason"],
+    ))
+    if (decision.classification_type is not row.classification_type
+            or (row.target_identities and decision.target_identities != row.target_identities)):
+        return replace(row, classification_type=FinanceClassificationType.NON_BUSINESS_REVIEW,
+                       disposition=FinanceImportDisposition.MANUAL_REVIEW, target_identities=())
+    return replace(row, evidence=decision.evidence, target_identities=decision.target_identities,
+                   decision_facts_fingerprint=decision.decision_facts_fingerprint)
+
+
 def _load_batch_facts(cursor, batch_identity, for_update):
     cursor.execute(
         _BATCH_HEADER_SQL + (" FOR UPDATE" if for_update else ""),

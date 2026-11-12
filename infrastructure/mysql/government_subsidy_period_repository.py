@@ -8,7 +8,7 @@ from domains.government_subsidy.period_reconciliation import (
 )
 from subsystems.government_subsidy.period_reconciliation import CasePeriodCoverage, PeriodBankRow, PeriodCoverage, SubsidyPeriodView,GovernmentAmountChange
 from subsystems.government_subsidy.reconciliation_register_query import (
-    _select_established_cases, project_receivable_estimate,
+    ESTABLISHED_ORDER_STATUSES, _select_established_cases, project_receivable_estimate,
 )
 
 
@@ -34,6 +34,23 @@ def query_case_subsidy_amount(connection, case_no, *, lock=False):
 class MySqlGovernmentSubsidyPeriodRepository:
     def __init__(self, connection):
         self.connection = connection
+
+    def candidate_end_dates(self, paid_on, *, lock=False):
+        placeholders = ",".join("%s" for _ in ESTABLISHED_ORDER_STATUSES)
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(actual_end_date,end_date) AS service_end_date FROM orders "
+                f"WHERE status IN ({placeholders}) AND COALESCE(actual_end_date,end_date)<=%s "
+                "ORDER BY case_no" + (" FOR UPDATE" if lock else ""),
+                (*ESTABLISHED_ORDER_STATUSES, paid_on),
+            )
+            return tuple(sorted({row["service_end_date"] for row in cursor.fetchall()}))
+
+    def bank_paid_on(self, bank_row_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT transaction_date FROM finance_import_rows WHERE id=%s", (bank_row_id,))
+            row = cursor.fetchone()
+            return row["transaction_date"] if row else None
 
     def query(self, period, *, lock=False):
         with self.connection.cursor() as cursor:
@@ -110,7 +127,7 @@ class MySqlGovernmentSubsidyPeriodRepository:
             raise PeriodReconciliationConflict('subsidy_period_idempotency_conflict')
         return int(row['id'])
 
-    def bank_amount(self, bank_row_id, *, reversal=False):
+    def bank_amount(self, bank_row_id, *, reversal=False, lock=True):
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT bank.credit,bank.debit,bank.currency,bank.transaction_date,bank.direction,bank.reconciliation_status, '
                 'bank.format_id,bank.memo,bank.bank_references,classification.reason AS classification_event_reason, '
@@ -120,7 +137,7 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 'AND latest.finance_import_row_id=issue.finance_import_row_id AND latest.issue_code=issue.issue_code)) has_active_integrity '
                 'FROM finance_import_rows bank LEFT JOIN finance_import_classification_events classification '
                 'ON classification.id=(SELECT MAX(latest.id) FROM finance_import_classification_events latest '
-                'WHERE latest.finance_import_row_id=bank.id) WHERE bank.id=%s FOR UPDATE', (bank_row_id,))
+                'WHERE latest.finance_import_row_id=bank.id) WHERE bank.id=%s' + (' FOR UPDATE' if lock else ''), (bank_row_id,))
             row = cursor.fetchone()
             memo_text = str(row.get('memo') or '') if row else ''
             is_stale_non_gov_taishin = bool(

@@ -65,6 +65,7 @@ from api.schemas.finance_import import (
     FinanceImportReviewRowPageView,
     FinanceWorkbookIngestionReceiptView,
     FinanceImportJobAcceptedView,
+    PendingFinanceReconciliationView,
     RefundReturnReviewApplyBody,
     RefundReturnReviewPreviewBody,
     RefundReturnReviewPreviewView,
@@ -91,6 +92,7 @@ from subsystems.finance_import.correction_workflow import (
 from subsystems.finance_import.import_workflow import (
     FinanceImportApplyRequest,
     FinanceImportWorkflowError,
+    PendingReconciliationRequest,
 )
 from subsystems.finance_import.historical_reprocess_workflow import (
     HistoricalOwnerSelection,
@@ -116,6 +118,26 @@ _IdempotencyHeader = Annotated[
     str,
     Header(alias="Idempotency-Key", min_length=1, max_length=191),
 ]
+
+
+@router.post("/pending/reconcile", response_model=BaseResponse[PendingFinanceReconciliationView])
+def reconcile_pending_finance_import(
+    idempotency_key: _IdempotencyHeader,
+    correlation_id: _CorrelationHeader,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: FinanceImportApplication = Depends(get_finance_import_application),
+):
+    correlation = CorrelationId(correlation_id)
+    request = PendingReconciliationRequest(
+        IdempotencyKey(idempotency_key),
+        ActorContext(immutable_admin_job_actor(principal, correlation_id)),
+        correlation,
+    )
+    return _call_endpoint(
+        lambda: PendingFinanceReconciliationView.model_validate(_materialize(application.reconcile_pending(request))),
+        "已重新配對待核對明細",
+        correlation,
+    )
 
 
 @router.get("/jobs/{job_id}")

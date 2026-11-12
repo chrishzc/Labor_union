@@ -6,6 +6,7 @@ from typing import Protocol, TypedDict
 from domains.government_subsidy.period_reconciliation import (
     PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine, require_exact_period_receipt, GovernmentPeriodBalance,
 )
+from shared_kernel.fingerprints import fingerprint_payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,11 +107,25 @@ class CasePeriodCoverage(TypedDict):
 class PeriodRepository(Protocol):
     def query(self, period: SubsidyPeriod, *, lock: bool = False) -> SubsidyPeriodView: ...
     def find_replay(self, key: str, command: tuple) -> int | None: ...
-    def bank_amount(self, bank_row_id: int, *, reversal: bool = False) -> int: ...
+    def bank_amount(self, bank_row_id: int, *, reversal: bool = False, lock: bool = True) -> int: ...
+    def bank_paid_on(self, bank_row_id: int) -> date | None: ...
+    def candidate_end_dates(self, paid_on: date, *, lock: bool = False) -> tuple[date, ...]: ...
     def save(self, view: SubsidyPeriodView, bank_row_id: int, key: str, actor: str) -> int: ...
     def reverse(self, receipt_id: int, bank_row_id: int, key: str, actor: str) -> int: ...
     def bank_rows(self) -> tuple[PeriodBankRow, ...]: ...
     def case_coverage(self, case_no: str) -> CasePeriodCoverage: ...
+
+
+def period_rematch_targets(view: SubsidyPeriodView) -> tuple[str, ...]:
+    period = view.period
+    digest = fingerprint_payload({
+        "period": (period.year, period.unit, period.index),
+        "version": view.version,
+        "lines": tuple(sorted((line.case_no, line.service_end_date.isoformat(), line.amount_ntd) for line in view.lines)),
+    }).value
+    return tuple(sorted((f"government-period-rematch:{digest}", *(
+        f"government-period-case:{line.case_no.casefold()}" for line in view.lines
+    ))))
 
 
 class PeriodReconciliationApplication:
@@ -126,6 +141,50 @@ class PeriodReconciliationApplication:
 
     def case_coverage(self, case_no: str) -> CasePeriodCoverage:
         return self.repository.case_coverage(case_no)
+
+    def unique_bank_period(self, bank_row_id: int, *, lock: bool = False) -> SubsidyPeriodView | None:
+        try:
+            amount = self.repository.bank_amount(bank_row_id, lock=lock)
+        except PeriodReconciliationConflict:
+            return None
+        paid_on = self.repository.bank_paid_on(bank_row_id)
+        if paid_on is None:
+            return None
+        end_dates = self.repository.candidate_end_dates(paid_on, lock=lock)
+        periods = {
+            period
+            for end in end_dates if 1912 <= end.year <= 9998
+            for period in (
+                SubsidyPeriod("month", end.year, end.month),
+                SubsidyPeriod("quarter", end.year, (end.month - 1) // 3 + 1),
+                SubsidyPeriod("year", end.year, 1),
+            )
+        }
+        match = None
+        for period in sorted(periods, key=lambda value: (value.year, value.unit, value.index)):
+            try:
+                current = self.repository.query(period, lock=lock)
+            except PeriodReconciliationConflict:
+                return None
+            if not all(line.service_end_date <= paid_on for line in current.lines):
+                continue
+            if current.total_ntd is None and not current.coverage and not current.blocked_cases:
+                return None
+            if current.can_reconcile and current.total_ntd == amount:
+                if match is not None:
+                    return None
+                match = current
+        return match
+
+    def reconcile_unique(self, bank_row_id: int, expected_targets: tuple[str, ...], key: str, actor: str) -> int | None:
+        with self.unit_of_work() as work:
+            current = self.unique_bank_period(bank_row_id, lock=True)
+            if current is None or period_rematch_targets(current) != expected_targets:
+                return None
+            require_exact_period_receipt(current.lines, self.repository.bank_amount(bank_row_id))
+            identity = self.repository.save(current, bank_row_id, key, actor)
+            work.commit()
+            return identity
 
     def reconcile(self, period: SubsidyPeriod, bank_row_id: int, version: int, key: str, actor: str) -> int:
         with self.unit_of_work() as work:

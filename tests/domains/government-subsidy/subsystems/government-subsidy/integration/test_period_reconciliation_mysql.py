@@ -245,6 +245,42 @@ def test_real_bank_workbook_government_receipt_stays_pending_until_period_select
                     'ON item.id=allocation.claim_item_id WHERE item.case_no=%s',(case,))
 
 
+def test_bank_rematch_requires_a_single_exact_unreconciled_period(http):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    seed_case(http, 2088, 1, days=20)
+    january = query(http, 'month', 2088, 1)
+    book = Workbook()
+    book.active.append(['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註'])
+    book.active.append([uuid4().hex,'2088/06/15','09:00:00','2088/06/15','轉帳',None,
+                        january['total_ntd'],january['total_ntd'],'新竹市政府'])
+    contents = BytesIO()
+    book.save(contents)
+    batch = checked(http.post('/api/v1/finance-import/workbooks/ingest',
+        files={'workbook': ('rematch-government.xlsx', contents.getvalue())},
+        headers={'Idempotency-Key': uuid4().hex}))['batch_identity']
+    plan = checked(http.post('/api/v1/finance-import/batches/preview',json={'batch_identity':batch}))
+    bank_row = int(plan['rows'][0]['row_identity'].split(':')[-1])
+
+    def rematch():
+        return checked(http.post('/api/v1/finance-import/pending/reconcile',
+                                 headers={'Idempotency-Key': uuid4().hex}))
+
+    def posted():
+        return rows("SELECT period_unit,period_index FROM government_subsidy_period_entries WHERE finance_import_row_id=%s",
+                    (bank_row,))
+
+    # January, Q1, and the year initially all contain the same exact amount.
+    assert rematch()['reconciled_count'] == 0
+    assert not posted()
+    seed_case(http, 2088, 2, days=3)
+    assert rematch()['reconciled_count'] == 1
+    assert tuple(posted()) == ({'period_unit': 'month', 'period_index': 1},)
+    assert rematch()['reconciled_count'] == 0
+    assert len(posted()) == 1
+
+
 def test_concurrent_month_and_quarter_reconciliation_create_only_one_receipt(http):
     from concurrent.futures import ThreadPoolExecutor
     seed_case(http,2075,1,days=20)

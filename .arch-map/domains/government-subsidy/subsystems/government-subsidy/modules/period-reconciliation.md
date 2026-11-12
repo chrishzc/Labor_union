@@ -8,6 +8,7 @@
 月／季／年共用有效服務結束月份與補助公式，整期金額核對銀行事實；季度涵蓋月份、跨單位／移期防重、追加整期沖正。案件快照只作證據，不拆造逐案入款。工會代墊回收直接依同一期的既有實付與沖正紀錄彙總。
 
 ## Implementation
+- 銀行待核對批次重配透過既有整期 repository 讀取月／季／年候選，唯一金額吻合才於 Finance Import outer UoW 委派整期核銷。
 - difference adapter: `infrastructure/mysql/government_period_difference_repository.py`; original receipt/member snapshot frozen at first partial payment, supplemental receipt/refund/loss and separate case corrections; amount controls consume canonical formula, never allocate government cash to cases.
 - schema: `db/schema_parts/242_accounting_difference_resolution.sql`, `db/schema_parts/1064_accounting_difference_resolution.sql` (shared release, owner-specific tables).
 - domain: `domains/government_subsidy/period_reconciliation.py`

@@ -24,6 +24,7 @@ import { ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { staffPayoutRemediationClient } from '../../../../../../../api/staff_payables/staff_payout_remediation_client';
 import { staffPayoutBlockerMessage } from '../../../../../../../api/staff_payables/staff_payout_remediation_errors';
 import { financeImportCorrectionClient } from '../../../../../../../api/finance_import/finance_import_correction_client';
+import { financeImportMutationClient } from '../../../../../../../api/finance_import/finance_import_mutation_client';
 
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
   financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn() },
@@ -31,8 +32,7 @@ vi.mock('../../../../../../../api/finance_import/finance_import_query_client', (
 vi.mock('../../../../../../../components/FinanceStatementArchive', () => ({
   FinanceStatementArchive: ({ compact: _compact }: { compact?: boolean }) => (
     <div data-testid="statement-archive">
-      <button type="button">匯出 Excel</button>
-      <button type="button">匯出歷史備查</button>
+      <button type="button">匯出對帳明細</button>
     </div>
   ),
 }));
@@ -133,7 +133,8 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByText('先辨識來源，再確認款項交給誰。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '匯入永豐對帳單' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '匯入台新對帳單' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '匯出 Excel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '匯出對帳明細' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新配對並核銷' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新增人工明細' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '匯入紀錄' })).toBeInTheDocument();
     expect(screen.queryByLabelText('篩選匯入批次')).not.toBeInTheDocument();
@@ -148,6 +149,20 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByLabelText('交易起日')).toBeInTheDocument();
     expect(screen.getByLabelText('交易迄日')).toBeInTheDocument();
     expect(screen.getByLabelText('搜尋交易')).toBeInTheDocument();
+  });
+
+  it('runs one rematch and refreshes the bank list after showing the counts', async () => {
+    const rematch = vi.spyOn(financeImportMutationClient, 'reconcilePending').mockResolvedValue({
+      checked_count: 5, reconciled_count: 3, existing_count: 0, pending_count: 2,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    await screen.findByLabelText('銀行對帳統計摘要');
+    const initialRequests = vi.mocked(financeImportQueryClient.listBankTransactions).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '重新配對並核銷' }));
+    expect(await screen.findByText('已查核 5 筆，核銷 3 筆，仍待核對 2 筆。')).toBeInTheDocument();
+    expect(rematch).toHaveBeenCalledOnce();
+    expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledTimes(initialRequests + 1);
+    rematch.mockRestore();
   });
 
   it('marks a known difference separately from government period selection', async () => {

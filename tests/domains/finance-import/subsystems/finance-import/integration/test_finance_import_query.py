@@ -623,6 +623,50 @@ def test_refund_matching_reason_survives_apply_receipt_and_query_mapping(monkeyp
     assert query._bank_transaction({**source, 'recorded_pending_reason':None}, ['C-1'])['recorded_pending_reason'] is None
 
 
+def test_pending_rematch_resolves_across_batches_and_keeps_contested_targets_pending():
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    from shared_kernel.identities import ActorContext, IdempotencyKey
+    from subsystems.finance_import.import_workflow import (
+        FinanceDispatchOutcome, FinanceImportDispatchResult, FinanceImportWorkflow, PendingReconciliationRequest,
+    )
+
+    kinds = (
+        FinanceClassificationType.STAFF_PAYOUT, FinanceClassificationType.CLIENT_RECEIPT,
+        FinanceClassificationType.CLIENT_REFUND, FinanceClassificationType.GOVERNMENT_SUBSIDY,
+        FinanceClassificationType.STAFF_PAYOUT,
+    )
+    rows = tuple(CanonicalFinanceImportRow(
+        f"finance-import-row:{number}", 0, MoneyNTD(12000), kind,
+        FinanceImportDisposition.BUSINESS_PENDING, PreviewFingerprint("a" * 64),
+    ) for number, kind in enumerate(kinds, 1))
+    repository = MagicMock()
+    repository.load_pending_batches.return_value = tuple(
+        (FinanceImportBatchFacts(f"finance-import-batch:{number}", 0, 1, 1, 0, "b" * 64, "v1", "v1", (row,)),
+         frozenset({row.row_identity}))
+        for number, row in enumerate(rows, 1)
+    )
+    targets = ("staff-obligation:shared", "client-receipt:unique", "client-refund:unique", None, "staff-obligation:shared")
+    posting = MagicMock()
+    posting.resolve.side_effect = [
+        replace(row, disposition=FinanceImportDisposition.CREATE, target_identities=(target,))
+        for row, target in zip(rows, targets, strict=True)
+        if target is not None
+    ]
+    posting.resolve_pending_government.return_value = rows[3]
+    posting.post.side_effect = lambda row: FinanceImportDispatchResult(
+        row.row_identity, FinanceDispatchOutcome.RECONCILED, "formal-payment",
+    )
+    unit = MagicMock()
+    unit.__enter__.return_value = unit
+    receipt = FinanceImportWorkflow(repository, posting, lambda: unit).reconcile_pending(
+        PendingReconciliationRequest(IdempotencyKey("rematch:test"), ActorContext("test"), CorrelationId("test")),
+    )
+    assert (receipt.checked_count, receipt.reconciled_count, receipt.pending_count) == (5, 2, 3)
+    assert [call.args[0].row_identity for call in posting.post.call_args_list] == [rows[1].row_identity, rows[2].row_identity]
+    unit.commit.assert_called_once()
+
+
 def test_missing_receipt_due_date_is_saved_as_null_and_decoded_without_inventing_a_date(monkeypatch):
     import json
     from api.schemas.finance_import import FinanceBankClientReceiptReviewView

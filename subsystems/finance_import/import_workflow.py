@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections import Counter
 from enum import StrEnum
 import re
 from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
-    CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
+    CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceClassificationType, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
     build_finance_import_plan, defer_overlapping_client_receipts, defer_overlapping_outgoing_payments,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -51,6 +52,22 @@ class FinanceImportApplyReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class PendingReconciliationRequest:
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    correlation_id: CorrelationId
+    reason: str = "重新配對並核銷待核對明細"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingReconciliationReceipt:
+    checked_count: int
+    reconciled_count: int
+    existing_count: int
+    pending_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class StoredFinanceImportReceipt:
     command_fingerprint: PreviewFingerprint; receipt: FinanceImportApplyReceipt
     client_receipt_reviews: tuple[tuple[str, ClientReceiptReviewDiagnostic], ...] = ()
@@ -59,6 +76,7 @@ class StoredFinanceImportReceipt:
 
 class FinanceImportRepository(Protocol):
     def load(self, batch_identity: str, *, for_update: bool) -> FinanceImportBatchFacts: ...
+    def load_pending_batches(self): ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool = False) -> StoredFinanceImportReceipt | None: ...
     def append_dispatch_audit(self, plan: FinanceImportPlan, results: tuple[FinanceImportDispatchResult, ...]) -> None: ...
     def append_outbox(self, plan: FinanceImportPlan, results: tuple[FinanceImportDispatchResult, ...]) -> None: ...
@@ -68,6 +86,7 @@ class FinanceImportRepository(Protocol):
 
 class FinanceImportFormalPostingPort(Protocol):
     def resolve(self, row: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow: ...
+    def resolve_pending_government(self, row: CanonicalFinanceImportRow) -> CanonicalFinanceImportRow: ...
     def post(self, row: CanonicalFinanceImportRow) -> FinanceImportDispatchResult: ...
 
 
@@ -92,6 +111,60 @@ class FinanceImportWorkflow:
         except FinanceImportWorkflowError: raise
         except FinanceImportRepositoryUnavailable as error: raise _transaction_error(request, error, retryable=True) from error
         except Exception as error: raise _transaction_error(request, error, retryable=False) from error
+
+    def reconcile_pending(self, request: PendingReconciliationRequest) -> PendingReconciliationReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            batches = tuple(self._repository.load_pending_batches())
+            checked = sum(len(ids) for _, ids in batches)
+            plans = tuple(self._pending_plan(facts, ids) for facts, ids in batches)
+            targets = Counter(
+                target
+                for plan in plans if plan.apply_allowed
+                for row in plan.dispatchable_rows
+                for target in row.target_identities
+            )
+            reconciled = 0
+            existing = 0
+            for plan, (_, pending_ids) in zip(plans, batches, strict=True):
+                existing += sum(row.disposition is FinanceImportDisposition.EXISTING
+                                and row.row_identity in pending_ids for row in plan.rows)
+                if not plan.apply_allowed:
+                    continue
+                # No owner confirmation or contested balance is implicitly authorized.
+                rows = tuple(
+                    row for row in plan.dispatchable_rows
+                    if row.subsidy_preflight is None and row.target_identities
+                    and all(targets[target] == 1 for target in row.target_identities)
+                )
+                if not rows:
+                    continue
+                plan = replace(plan, rows=rows, fingerprint=fingerprint_payload({
+                    "pending_reconciliation": request.idempotency_key.value,
+                    "source_plan": plan.fingerprint.value,
+                    "rows": tuple(row.row_identity for row in rows),
+                }))
+                results = self._dispatch(plan, request)
+                self._repository.append_dispatch_audit(plan, results)
+                self._repository.append_outbox(plan, results)
+                self._repository.advance_batch_version(plan.batch_identity, plan.batch_version, plan.batch_version + 1)
+                reconciled += sum(result.outcome is FinanceDispatchOutcome.RECONCILED for result in results)
+                existing += sum(result.outcome is FinanceDispatchOutcome.EXISTING for result in results)
+            unit_of_work.commit()
+            return PendingReconciliationReceipt(checked, reconciled, existing, checked - reconciled - existing)
+
+    def _pending_plan(self, facts, pending_ids):
+        rows = []
+        for row in facts.rows:
+            if row.row_identity not in pending_ids:
+                if row.disposition in {FinanceImportDisposition.CREATE, FinanceImportDisposition.BUSINESS_PENDING}:
+                    row = replace(row, disposition=FinanceImportDisposition.EXISTING)
+            elif not (row.integrity_violations or row.fingerprint_collision or row.formal_reference_conflict):
+                if row.classification_type is FinanceClassificationType.GOVERNMENT_SUBSIDY:
+                    row = self._posting_port.resolve_pending_government(row)
+                else:
+                    row = self._posting_port.resolve(row)
+            rows.append(row)
+        return build_finance_import_plan(replace(facts, rows=tuple(rows)))
     def _apply_in_unit_of_work(self, request):
         command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:

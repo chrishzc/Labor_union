@@ -46,6 +46,7 @@ class FinanceImportOwningDomainCompositePort(Protocol):
     def clear_request(self): ...
 
     def resolve(self, candidate): ...
+    def resolve_pending_government(self, candidate): ...
 
     def post(self, candidate): ...
 
@@ -71,6 +72,9 @@ class UnavailableOwningDomainCompositePort:
     def resolve(self, candidate):
         return candidate
 
+    def resolve_pending_government(self, candidate):
+        return candidate
+
     def post(self, candidate):
         del candidate
         raise FinanceImportRepositoryUnavailable(
@@ -91,6 +95,13 @@ class FinanceImportApplication:
         self.posting_port.bind_request(request)
         try:
             return self.workflow.apply(request)
+        finally:
+            self.posting_port.clear_request()
+
+    def reconcile_pending(self, request):
+        self.posting_port.bind_request(request)
+        try:
+            return self.workflow.reconcile_pending(request)
         finally:
             self.posting_port.clear_request()
 

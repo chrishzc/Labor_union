@@ -89,7 +89,7 @@ describe('案件帳務及成功明細', () => {
   it('preserves warning dismissal and server history in its owning tool',async()=>{const dismissed=detail();dismissed.pending_warning_count=0;dismissed.warnings[0]={...dismissed.warnings[0],dismissed:true,dismissed_by:'operator',dismissed_at:'2026-10-29'};vi.mocked(financeAccountingClient.dismiss).mockResolvedValue(dismissed);const onChange=vi.fn();const {rerender}=render(<AccountingWarningList data={detail()} onChange={onChange}/>);fireEvent.click(screen.getByRole('button',{name:'解除警示'}));await waitFor(()=>expect(onChange).toHaveBeenCalledWith(dismissed));rerender(<AccountingWarningList data={dismissed} onChange={onChange}/>);expect(screen.getByText('帳務警示 · 待檢查 0')).toBeInTheDocument();fireEvent.click(screen.getByRole('checkbox',{name:'顯示已解除'}));expect(screen.getByText(/已解除 · operator/)).toBeInTheDocument();});
   it('keeps the warning visible after failed dismissal',async()=>{vi.mocked(financeAccountingClient.dismiss).mockRejectedValue(Error('conflict'));render(<AccountingWarningList data={detail()} onChange={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'解除警示'}));expect(await screen.findByRole('alert')).toHaveTextContent('解除失敗');expect(screen.getByText('帳務警示 · 待檢查 1')).toBeInTheDocument();});
   it('ignores delayed old case response after source selection changes',async()=>{let finish:(value:CaseAccounting)=>void=()=>{};vi.mocked(financeAccountingClient.query).mockImplementation(caseNo=>caseNo==='115000701'?new Promise(resolve=>{finish=resolve;}):Promise.resolve(detail(caseNo)));const {rerender}=render(<FinanceCaseAccounting initialCase="115000701"/>);rerender(<FinanceCaseAccounting initialCase="115000702"/>);await screen.findByRole('heading',{name:'115000702 · 測試客戶'});finish(detail());await waitFor(()=>expect(screen.queryByRole('heading',{name:'115000701 · 測試客戶'})).not.toBeInTheDocument());});
-  it.each([false,true])('offers only separate readonly exports (compact: %s)',async compact=>{
+  it.each([false,true])('offers one formal reconciliation export (compact: %s)',async compact=>{
     const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:synthetic');
     const click=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
     vi.mocked(financeAccountingClient.download).mockResolvedValue(new Blob(['formal']));
@@ -97,20 +97,18 @@ describe('案件帳務及成功明細', () => {
     render(<FinanceStatementArchive compact={compact}/>);
     expect(screen.queryByRole('button',{name:'新增人工明細'})).not.toBeInTheDocument();
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:'匯出 Excel'}));
-    expect(await screen.findByRole('status')).toHaveTextContent('成功明細已匯出');
+    fireEvent.click(screen.getByRole('button',{name:'匯出對帳明細'}));
+    expect(await screen.findByRole('status')).toHaveTextContent('對帳明細已匯出');
     expect(financeAccountingClient.download).toHaveBeenCalledOnce();
     expect(financeAccountingClient.downloadLegacyReferences).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button',{name:'匯出歷史備查'}));
-    expect(await screen.findByRole('status')).toHaveTextContent('不代表已核銷');
-    expect(financeAccountingClient.downloadLegacyReferences).toHaveBeenCalledOnce();
-    expect(click).toHaveBeenCalledTimes(2);create.mockRestore();click.mockRestore();
+    expect(screen.queryByRole('button',{name:'匯出歷史備查'})).not.toBeInTheDocument();
+    expect(click).toHaveBeenCalledOnce();create.mockRestore();click.mockRestore();
   });
 
-  it('reports reference-export failure without claiming success',async()=>{
-    vi.mocked(financeAccountingClient.downloadLegacyReferences).mockRejectedValue(new Error('unavailable'));
+  it('reports export failure without claiming success',async()=>{
+    vi.mocked(financeAccountingClient.download).mockRejectedValue(new Error('unavailable'));
     render(<FinanceStatementArchive/>);
-    fireEvent.click(screen.getByRole('button',{name:'匯出歷史備查'}));
+    fireEvent.click(screen.getByRole('button',{name:'匯出對帳明細'}));
     expect(await screen.findByRole('alert')).toHaveTextContent('匯出失敗');
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
