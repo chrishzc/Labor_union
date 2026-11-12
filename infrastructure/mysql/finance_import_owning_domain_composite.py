@@ -805,7 +805,9 @@ def _sinopac_outgoing_case_info(connection, row_identity, *, taishin_staff=False
         if row is None:
             return True, None, None
         trans_date = row.get("transaction_date")
-        if row["format_id"] not in {"sinopac", "taishin"}:
+        if row["format_id"] not in {"sinopac", "taishin"} and not (
+            taishin_staff and row["format_id"] == "legacy"
+        ):
             return False, None, trans_date
         if row["direction"] != "outgoing":
             return True, None, trans_date
@@ -892,7 +894,7 @@ def _resolve_staff_payout(connection, candidate):
     with connection.cursor() as cursor:
         cursor.execute('SELECT format_id,currency FROM finance_import_rows WHERE id=%s', (_row_id(candidate.row_identity),))
         source = cursor.fetchone() or {}
-    is_sinopac = source.get('format_id') == 'sinopac'
+    is_sinopac = source.get('format_id') in {'sinopac', 'legacy'}
     is_taishin = source.get('format_id') == 'taishin'
     if (is_sinopac or is_taishin) and candidate.disposition in {FinanceImportDisposition.EXISTING,FinanceImportDisposition.BLOCKED}:
         return candidate

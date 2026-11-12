@@ -101,17 +101,10 @@ def _classify_sinopac_outgoing(
         if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
             return _review("counterparty_account_multiple_matches")
         if memo_staff_ids:
-            reference_key = 'transaction_reference' if row['format_id'] == 'legacy' else '交易參考編號'
-            account = extract_sinopac_account_reference(row['bank_references'].get(reference_key))
-            account_staff = _ids_for_account(staff_accounts, account)
-            if (_ids_for_account(client_refund_accounts, account)
-                    or (account_staff and set(account_staff) != set(memo_staff_ids))):
-                return _review('counterparty_identity_type_conflict')
             return _result(
                 "staff_salary",
                 memo_staff_ids,
                 "sinopac_unique_staff_case_suffix_in_memo",
-                suffix,
             )
         if memo_refund_ids:
             reference_key = 'transaction_reference' if row['format_id'] == 'legacy' else '交易參考編號'
@@ -474,7 +467,7 @@ def classify_finance_transaction(
                 is_client_name = fee_result["classification_type"] == "client_refund" or fee_result["reason"] in {
                     "outgoing_client_refund_name_ambiguous", "outgoing_client_refund_no_open_obligation",
                 }
-                if format_id == "sinopac" and (is_staff_name or is_client_name):
+                if (format_id in {"sinopac", "legacy"} and is_staff_name) or (format_id == "sinopac" and is_client_name):
                     is_staff = is_staff_name
                     kind = "staff_salary" if is_staff else "client_refund"
                     identity_key = "staff_id" if is_staff else "client_id"
@@ -489,17 +482,27 @@ def classify_finance_transaction(
                     name_ids = set(directory.get(name, ())) if directory is not None else {
                         item[identity_key] for item in candidates if item.get("name") == name
                     }
-                    account = extract_sinopac_account_reference(row["bank_references"].get("交易參考編號"))
-                    owners = _ids_for_account(staff_accounts if is_staff else client_refund_accounts, account)
                     case_ids = _ids_for_account(
                         (staff_case_suffixes if is_staff else client_refund_case_suffixes) or {},
                         extract_sinopac_memo_case_suffix(memo),
                     )
+                    if is_staff:
+                        matching_ids = name_ids.intersection(case_ids) if case_ids else name_ids
+                        if case_ids and name_ids and not matching_ids:
+                            return _review("counterparty_identity_type_conflict")
+                        if len(matching_ids) != 1:
+                            return _review("outgoing_staff_payout_name_ambiguous")
+                        matched = sorted(matching_ids)
+                        reason = fee_result["reason"]
+                        if case_ids and ids != matched:
+                            reason = "sinopac_unique_staff_case_suffix_in_memo"
+                        return _result("staff_salary", matched, reason)
+                    account = extract_sinopac_account_reference(row["bank_references"].get("交易參考編號"))
+                    owners = _ids_for_account(client_refund_accounts, account)
                     other_ids = (
-                        _ids_for_account(client_refund_accounts, account) + _ids_for_account(client_subsidy_return_accounts, account)
-                        if is_staff else _ids_for_account(staff_accounts, account) + _ids_for_account(client_subsidy_return_accounts, account)
+                        _ids_for_account(staff_accounts, account) + _ids_for_account(client_subsidy_return_accounts, account)
                     )
-                    prefix = "staff" if is_staff else "client_refund"
+                    prefix = "client_refund"
                     if len(owners) == 1 and owners[0] in name_ids:
                         if other_ids or (case_ids and owners[0] not in case_ids):
                             return _review("counterparty_identity_type_conflict")

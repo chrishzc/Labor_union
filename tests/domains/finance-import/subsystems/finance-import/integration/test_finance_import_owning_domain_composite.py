@@ -596,23 +596,25 @@ def test_resolve_staff_payout_fee_over_100_remains_pending() -> None:
     ((12000,12000),12000,'2026-10-15','outgoing_staff_payout_multiple_fee_matches'),
     ((),12000,'2026-10-15','outgoing_staff_payout_no_open_obligation'),
     ((12000,),12000,'2026-11-15','outgoing_staff_payout_month_no_match'),
-    ((7000,5000),11970,'2026-10-15',None),
+    ((7000,5000),11900,'2026-10-15',None),
+    ((7000,5000),11899,'2026-10-15','staff_payout_amount_mismatch'),
 ])
+@pytest.mark.parametrize('format_id',['sinopac','legacy'])
 @pytest.mark.parametrize('initial',[FinanceImportDisposition.CREATE,FinanceImportDisposition.BUSINESS_PENDING])
-def test_sinopac_staff_resolver_records_actual_reason_and_preflights_the_real_owner(monkeypatch,amounts,cash,due,reason,initial):
+def test_sinopac_staff_resolver_records_actual_reason_and_preflights_the_real_owner(monkeypatch,amounts,cash,due,reason,initial,format_id):
     from unittest.mock import Mock
-    from domains.staff_payables.reconciliation import OutgoingBankFact,StaffPayableFacts,StaffPrimaryBankAccount
+    from domains.staff_payables.reconciliation import OutgoingBankFact,StaffPayableFacts
     from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationFacts
     import infrastructure.mysql.finance_import_owning_domain_composite as module
     rows=tuple(dict(obligation_identity=f'staff:{i}',due_date=due,amount_due_ntd=amount) for i,amount in enumerate(amounts))
-    source={'format_id':'sinopac','direction':'outgoing','memo':'合成服務甲','transaction_date':'2026-10-20','currency':'TWD'}
+    source={'format_id':format_id,'direction':'outgoing','memo':'合成服務甲','transaction_date':'2026-10-20','currency':'TWD'}
     connection=_VirtualAccountConnection((source,rows))
     candidate=CanonicalFinanceImportRow('finance-import-row:88',0,MoneyNTD(cash),FinanceClassificationType.STAFF_PAYOUT,
         initial,PreviewFingerprint('a'*64),target_identities=('staff:7',),
-        evidence=('sinopac_unique_staff_account_in_transaction_reference',))
+        evidence=('sinopac_unique_staff_case_suffix_in_memo',))
     repository=Mock()
     repository.load.side_effect=lambda selection,**kwargs:StaffPayoutReconciliationFacts(4,8,
-        (OutgoingBankFact('88',7,MoneyNTD(cash),'account:7'),),(StaffPrimaryBankAccount('account:7',7),),
+        (OutgoingBankFact('88',7,MoneyNTD(cash),is_sinopac_payout=True),),(),
         tuple(StaffPayableFacts(row['obligation_identity'],7,MoneyNTD(row['amount_due_ntd'])) for row in rows if row['obligation_identity'] in selection.obligation_identities))
     monkeypatch.setattr(module,'MySqlStaffPayoutRepository',lambda *args:repository)
     result=_resolve_staff_payout(connection,candidate)

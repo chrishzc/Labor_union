@@ -110,14 +110,14 @@ def test_sinopac_refund_failure_is_not_inferred_from_raw_candidate_count(amounts
     assert result['matched_identity_ids']==[7]
 
 
-def test_sinopac_shared_name_can_use_unique_original_reference_account():
+def test_sinopac_shared_name_requires_case_evidence_even_with_reference_account():
     name='合成服務甲'
     candidates=tuple(dict(staff_id=staff,name=name,case_no='SYNTHETIC',due_date='2026-10-15',amount_due_ntd=12000) for staff in (7,8))
     source=_row(direction='outgoing',debit=Decimal(12000),credit=None,memo=name,transaction_date='2026-10-20',
                 bank_references={'交易參考編號':'0000007001'})
     result=classify_finance_transaction(source,{}, {'0000007001':[7]},all_staff_names=[name,name],staff_payout_candidates=candidates)
-    assert result['classification_type']=='staff_salary' and result['matched_identity_ids']==[7]
-    assert result['reason']=='sinopac_unique_staff_account_in_transaction_reference'
+    assert result['classification_type']=='non_business_review'
+    assert result['reason']=='outgoing_staff_payout_name_ambiguous'
     unresolved=classify_finance_transaction(source,{}, {},all_staff_names=[name,name],staff_payout_candidates=candidates)
     assert unresolved['classification_type']=='non_business_review'
     assert unresolved['reason']=='outgoing_staff_payout_name_ambiguous'
@@ -330,12 +330,14 @@ def test_taishin_named_customer_subsidy_uses_the_same_unique_case_identity(named
     assert result['classification_type']==kind
 
 
-def test_sinopac_memo_case_and_account_cannot_name_different_staff():
-    row=_row(direction='outgoing',debit=Decimal(12000),credit=None,memo='HC115001服務人員',
-        bank_references={'交易參考編號':'123456789012'})
+@pytest.mark.parametrize('format_id,reference_key',[('sinopac','交易參考編號'),('legacy','transaction_reference')])
+def test_sinopac_staff_case_is_resolved_without_checking_the_reference_account(format_id,reference_key):
+    row=_row(format_id=format_id,direction='outgoing',debit=Decimal(12000),credit=None,memo='HC115001服務人員',
+        bank_references={reference_key:'123456789012'})
     result=classify_finance_transaction(row,{}, {'123456789012':[10]},staff_case_suffixes={'115001':[9]})
-    assert result['classification_type']=='non_business_review'
-    assert result['reason']=='counterparty_identity_type_conflict'
+    assert result['classification_type']=='staff_salary'
+    assert result['matched_identity_ids']==[9]
+    assert result['reason']=='sinopac_unique_staff_case_suffix_in_memo'
 
 
 def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():
