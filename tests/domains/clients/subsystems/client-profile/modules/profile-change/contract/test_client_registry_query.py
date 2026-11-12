@@ -502,7 +502,7 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     assert rows[0]["imported_virtual_accounts"] == (
         "009978160011500001", "009978160011500009",
     )
-    assert rows[0]["built_in_virtual_account"] == "99781699115001"
+    assert rows[0]["built_in_virtual_account"] is None
     assert rows[1]["imported_virtual_accounts"] == ()
     assert rows[0]["district"] == "東區"
     assert rows[1]["district"] is None
@@ -590,9 +590,10 @@ def test_client_receipt_summary_includes_adjustment_allocations_and_net_reversal
 
 @pytest.mark.parametrize("status", ["洽談中", "訂單完成", "訂單取消", "歷史訂單－服務完成"])
 def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
+    case_no = "114000999"
     start = date(2026, 10, 1)
     facts = ClientFinanceTermsFacts(
-        case_no="CASE-001",
+        case_no=case_no,
         account_version=4,
         service_hours_per_day=10,
         floor_fee=MoneyNTD(0),
@@ -611,11 +612,12 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
     )
     connection = _SqlConnection(
         [
-            {"case_no": "CASE-001", "status": status},
+            {"case_no": case_no, "status": status},
             {"received_total_ntd": 70000},
             (),
             (),
             ({"virtual_account": "99781699114999"},),
+            ({"case_no": case_no},),
         ]
     )
     monkeypatch.setattr(
@@ -634,7 +636,7 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
             no_planned_facts,
         )
 
-    status, code, values = _finance_values(connection, "CASE-001")
+    status, code, values = _finance_values(connection, case_no)
 
     assert (status, code) == ("ready", None)
     assert values["customer_payable_total_ntd"] == 70000
@@ -682,6 +684,7 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
     )
     connection = _SqlConnection([
         {"case_no": "A115001"}, {"received_total_ntd": 0}, (), (), (),
+        ({"case_no": "A115001"},),
     ])
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
@@ -696,6 +699,7 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
     assert values["deposit_amount_ntd"] == values["first_payment_amount_ntd"] == 13200
     assert values["second_payment_amount_ntd"] == 0
     assert values["received_total_ntd"] == 0
+    assert values["virtual_account"] == "99781699115501"
     assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
 
 
@@ -730,8 +734,9 @@ def test_registry_finance_preserves_effective_amount_and_stored_remaining(monkey
 
 
 def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeypatch):
+    case_no = "114000999"
     facts = ClientFinanceTermsFacts(
-        case_no="CASE-HIST-01",
+        case_no=case_no,
         account_version=1,
         service_hours_per_day=10,
         floor_fee=MoneyNTD(0),
@@ -748,13 +753,13 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
     )
     connection = _SqlConnection(
         [
-            {"case_no": "CASE-HIST-01", "status": "歷史訂單－服務完成", "service_days": 20, "service_hours_per_day": 10, "floor_fee": 0},
+            {"case_no": case_no, "status": "歷史訂單－服務完成", "service_days": 20, "service_hours_per_day": 10, "floor_fee": 0},
             {"received_total_ntd": 70000},
             (),
             (),
             [
                 {
-                    "obligation_identity": "historical-service:CASE-HIST-01:revision:1:client:receivable_from_client",
+                    "obligation_identity": f"historical-service:{case_no}:revision:1:client:receivable_from_client",
                     "obligation_type": "adjustment",
                     "direction": "receivable_from_client",
                     "amount_due_ntd": 70000,
@@ -763,6 +768,7 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
             ],
             {"total_actual_service_days": 20, "total_actual_service_hours": 200.0},
             ({"virtual_account": "99781699114999"},),
+            ({"case_no": case_no},),
         ]
     )
     monkeypatch.setattr(
@@ -770,7 +776,7 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
         lambda _cursor, _order, lock, **kwargs: facts,
     )
 
-    status, code, values = _finance_values(connection, "CASE-HIST-01")
+    status, code, values = _finance_values(connection, case_no)
 
     assert (status, code) == ("ready", None)
     assert values["customer_payable_total_ntd"] == 70000
@@ -825,8 +831,9 @@ def test_registry_historical_social_deposit_includes_floor_fee_once(monkeypatch,
 
 
 def test_registry_finance_handles_historical_unserved_order_projection(monkeypatch):
+    case_no = "114000888"
     facts = ClientFinanceTermsFacts(
-        case_no="CASE-HIST-02",
+        case_no=case_no,
         account_version=1,
         service_hours_per_day=8,
         floor_fee=MoneyNTD(0),
@@ -843,13 +850,14 @@ def test_registry_finance_handles_historical_unserved_order_projection(monkeypat
     )
     connection = _SqlConnection(
         [
-            {"case_no": "CASE-HIST-02", "status": "歷史訂單－未服務", "service_days": 10, "service_hours_per_day": 8, "floor_fee": 0},
+            {"case_no": case_no, "status": "歷史訂單－未服務", "service_days": 10, "service_hours_per_day": 8, "floor_fee": 0},
             {"received_total_ntd": 0},
             (),
             (),
             [],
             None,
             ({"virtual_account": "99781699114888"},),
+            ({"case_no": case_no},),
         ]
     )
     monkeypatch.setattr(
@@ -857,7 +865,7 @@ def test_registry_finance_handles_historical_unserved_order_projection(monkeypat
         lambda _cursor, _order, lock: facts,
     )
 
-    status, code, values = _finance_values(connection, "CASE-HIST-02")
+    status, code, values = _finance_values(connection, case_no)
 
     assert (status, code) == ("ready", None)
     assert values["customer_payable_total_ntd"] == 28000
