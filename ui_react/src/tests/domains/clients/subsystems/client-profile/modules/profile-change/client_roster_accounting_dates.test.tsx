@@ -69,9 +69,9 @@ describe('client roster accounting date columns', () => {
     }], next_cursor: null });
     render(<ClientRosterPage />);
     expect((await dateCells()).map(cell => cell.textContent)).toEqual(Array(dateColumns.length).fill('無值'));
-    expect(screen.getByRole('columnheader', { name: '帳務預估日期' })).toBeVisible();
-    expect(screen.getByText('自費薪資時程：2026-09-15')).toBeVisible();
-    expect(screen.getByText('補助給付：2026-10-15')).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: '薪資預估日期' })).toBeVisible();
+    expect(screen.getByRole('cell', { name: '2026-09-15', exact: true })).toBeVisible();
+    expect(screen.queryByText('2026-10-15')).not.toBeInTheDocument();
   });
 
   it('does not lose list dates when the existing amount/detail query fails', async () => {
