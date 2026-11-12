@@ -19,3 +19,13 @@ def effective_staff_obligation_amount(alias="obligations"):
 
 def selectable_staff_obligation(alias="obligations"):
     return f"{alias}.obligation_identity NOT LIKE 'staff-handover:%%'"
+
+
+def staff_obligation_funding_not_held(alias="obligations"):
+    return (
+        "NOT COALESCE(JSON_CONTAINS((SELECT JSON_EXTRACT(e.facts_snapshot,'$.funding_review.obligation_ids') "
+        f"FROM order_lifecycle_state_events e WHERE e.case_no={alias}.case_no "
+        "AND e.trigger_event IN ('official_service_attribution_corrected','official_service_attribution_funding_confirmed') "
+        "AND JSON_CONTAINS_PATH(e.facts_snapshot,'one','$.funding_review') ORDER BY e.id DESC LIMIT 1), "
+        f"JSON_QUOTE({alias}.obligation_identity)),0)"
+    )

@@ -896,7 +896,9 @@ def _monthly_payout_target_candidates(rows, trans_date, amount, *, by_case=False
 
 
 def _resolve_staff_payout(connection, candidate):
-    from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount
+    from infrastructure.mysql.staff_payable_correction_sql import (
+        effective_staff_obligation_amount, selectable_staff_obligation, staff_obligation_funding_not_held,
+    )
     staff_id = _single_prefixed_identity(candidate, "staff:")
     if staff_id is None:
         return candidate
@@ -934,6 +936,8 @@ def _resolve_staff_payout(connection, candidate):
             "AND obligation.status<>'cancelled' "
             "AND obligation.amount_due_ntd>0 "
             "AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid')) "
+            + "AND " + selectable_staff_obligation("obligation") + " "
+            + "AND " + staff_obligation_funding_not_held("obligation") + " "
             + case_predicate +
             "ORDER BY obligation.obligation_identity",
             parameters,

@@ -176,7 +176,8 @@ describe('#335 direct start input and existing writer integration', () => {
     await screen.findByLabelText('建議服務日期摘要');
     await act(async () => resolve(result('2026-10-15')));
     expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('2026-10-01');
-    expect(screen.getByLabelText('人工選定休假星期')).toHaveTextContent('此次休假：星期五、星期日');
+    expect(screen.getByRole('checkbox', { name: '星期五' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '星期日' })).toBeChecked();
     expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeEnabled();
     expect(mocks.applyStart).not.toHaveBeenCalled();
     expect(mocks.applyDates).not.toHaveBeenCalled();

@@ -33,6 +33,7 @@ import { AccountingParametersBar } from './AccountingParametersBar';
 import { AccountingParametersDrawer } from './AccountingParametersDrawer';
 import { accountingPricingClient, type CasePricing } from '../api/client_finance/accounting_pricing_client';
 import './FinanceCaseAccounting.css';
+import { OrderAttributionFundingReview } from './OrderAttributionFundingReview';
 import './FinanceCompactCase.css';
 
 const TAIWAN_BANKS: Record<string, string> = {
@@ -533,6 +534,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)}/>}
  </fieldset>}
  {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
+ <OrderAttributionFundingReview key={initialCase} caseNo={initialCase} revision={revision} onSaved={refresh} />
  {showFullCase&&bankReconciliation&&(
    <div className="finance-reconciliation-return-banner">
      <div>

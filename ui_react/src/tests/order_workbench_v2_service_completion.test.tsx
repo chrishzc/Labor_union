@@ -146,9 +146,9 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
   });
 
   it.each([
-    [[101], '轉換為多月嫂'],
-    [[101, 102], '調整多月嫂排班'],
-  ] as const)('opens existing handover for the selected assignment in %j', async (assignmentIds, label) => {
+    { assignmentIds: [101] },
+    { assignmentIds: [101, 102] },
+  ])('opens existing handover for the selected assignment in $assignmentIds', async ({ assignmentIds }) => {
     mocks.getAssignmentPlan.mockResolvedValue({
       ...assignment,
       assignments: assignmentIds.map((assignmentId, index) => ({
@@ -164,14 +164,14 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
       })),
     });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-142" branchType="normal" onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByText(label));
+    fireEvent.click(await screen.findByText('服務中換人', { selector: 'summary' }));
     const links = screen.getAllByRole('link', { name: /服務中換人/ });
     expect(links).toHaveLength(assignmentIds.length);
     assignmentIds.forEach((id, index) => {
       expect(links[index]).toHaveAttribute('href', `#scheduling?tab=handover&case_no=CASE-142&assignment_id=${id}`);
     });
-    fireEvent.click(screen.getByRole('button', { name: '更正已服務紀錄' }));
-    const editor = screen.getByRole('region', { name: '更正已服務紀錄' });
+    fireEvent.click(screen.getByRole('button', { name: '多月嫂排班' }));
+    const editor = screen.getByRole('region', { name: '多月嫂排班' });
     expect(within(editor).getByLabelText('原服務區段')).toHaveValue('101');
     expect(within(editor).getByRole('checkbox', { name: '2026-10-01' })).toBeInTheDocument();
   });

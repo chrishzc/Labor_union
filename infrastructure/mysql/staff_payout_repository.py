@@ -31,7 +31,9 @@ from domains.staff_payables.reconciliation import (
     StaffPrimaryBankAccount,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount, selectable_staff_obligation
+from infrastructure.mysql.staff_payable_correction_sql import (
+    effective_staff_obligation_amount, selectable_staff_obligation, staff_obligation_funding_not_held,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -323,6 +325,8 @@ class MySqlStaffPayoutRepository:
         lock,
     ):
         if selection.event_type is StaffPayoutEventType.PAYOUT:
+            if any(row.get("funding_not_held") == 0 for row in obligation_rows):
+                raise ValueError("staff_installment_funding_unconfirmed")
             for row in bank_rows:
                 if row.get("transaction_date") is None:
                     raise ValueError("bank_transaction_date_missing")
@@ -346,6 +350,15 @@ class MySqlStaffPayoutRepository:
         implicit_bank_split = (selection.event_type is StaffPayoutEventType.PAYOUT
             and len(bank_rows) == 1 and bank_rows[0]['format_id'] == 'taishin' and len(obligation_rows) == 1
             and bank_rows[0].get('manual_confirmed_staff_id') is None)
+        if implicit_bank_split and obligation_rows[0].get("has_installments"):
+            root = obligation_rows[0]
+            cursor.execute(
+                "SELECT 1 FROM order_lifecycle_state_events WHERE case_no=%s "
+                "AND trigger_event='official_service_attribution_funding_confirmed' "
+                "AND JSON_SEARCH(facts_snapshot,'one',%s,NULL,'$.approved_funding[*][0]') IS NOT NULL LIMIT 1",
+                (root["case_no"], root["obligation_identity"]),
+            )
+            implicit_bank_split = cursor.fetchone() is None
         if getattr(selection, 'confirm_subsidy_split', False) or implicit_bank_split:
             from dataclasses import replace
             subsidy_split = self._prepare_subsidy_split(cursor, bank_rows, obligation_rows, obligations, lock)
@@ -573,6 +586,7 @@ def _load_obligation_rows(cursor, identities, *, lock):
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.staff_id,obligations.case_no,obligations.due_date,"
+        + staff_obligation_funding_not_held() + " AS funding_not_held,"
         "COALESCE((SELECT plan.scheme FROM finance_case_subsidy_plan_events plan WHERE plan.case_no=obligations.case_no ORDER BY plan.version DESC LIMIT 1),'')='split' AS requires_funding_split,"
         + effective_staff_obligation_amount() + " AS amount_due_ntd,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments "
         "FROM staff_obligations obligations "
@@ -1365,6 +1379,7 @@ def _query_obligation_rows(cursor, staff_id):
         "AND obligations.direction='payable_to_staff' "
         "AND " + selectable_staff_obligation() + " "
         "AND obligations.status<>'cancelled' "
+        "AND " + staff_obligation_funding_not_held() + " "
         "AND obligations.amount_due_ntd>0 "
         "ORDER BY obligations.due_date,obligations.obligation_identity",
         (staff_id,),

@@ -91,6 +91,7 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 
 - [服務歸屬更正](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction) 依正式班次或已採用的各人歷史服務量重算受影響月嫂的有效應付，沿 §2.1、§2.2 採用可證實的費率與服務量，按既有樓層費及付款來源規則分配。原費率快照與付款家族保留來源關聯。歷史同步讀取已採用的多人版本，沿該版本的應付身分重播。
 - 無付款歷史的受影響待付列依 §3.2 退出並由新應付承接。有付款歷史時保留原 obligation 與付款關聯，依 §3.5 追加更正差額，按原受款人及付款來源交由 [Staff Payables](16_Staff_Payables與Client_Refund正式規格.md#service-attribution-settlement) 承接。接任或實際服務月嫂的款項獨立建列。
+- 一般案件從「多月嫂排班」調整正式班表時，依本次受影響的月嫂與款項來源核對付款與核銷。其他來源或月嫂已有核銷時，仍可重算本次受影響的未付款、未核銷應付，原核銷連結保留。人工分期缺少調整後的來源分配時，沿用案件事件保存待核對。以原受影響分期的補助總額為上限與守恆依據，確認每一區段的補助款，自備款為該區段應付扣除補助。其他受款人的既有分期維持。已核銷來源的超付與其他來源的待付各自計算，超付獨立立追償。
 - 原應付曾人工更正時，依 §3.3 顯示原人工值及新試算，採用新金額前須經辦確認。單筆人工總額不得複製到拆分後各款。一般單依 [服務歸屬更正交易契約](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction) 核對後提交。歷史服務歸屬以指派費率、案件費率、§2.1 身分預設費率依序決定計算依據。
 
 ### 3.6 `PAYOUT-002` 晚到義務處置

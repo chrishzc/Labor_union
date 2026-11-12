@@ -1,3 +1,4 @@
+import { useId, useState } from 'react';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import type {
   HistoricalArrangementSegmentPayload,
@@ -35,21 +36,52 @@ interface Props {
   allocation: Allocation;
   disabled: boolean;
   onSelect: (date: string, staffId: number) => void;
+  staffManagement?: {
+    options: Staff;
+    limit: number;
+    disabled: boolean;
+    onAdd: (person: Staff[number]) => void;
+    onRemove: (staffId: number) => void;
+  };
 }
 
-export function HistoricalRestartArrangementPanel({ staff, dates, allocation, disabled, onSelect }: Props) {
+export function HistoricalRestartArrangementPanel({ staff, dates, allocation, disabled, onSelect, staffManagement }: Props) {
   const identity = useStaffIdentityLabels();
+  const idPrefix = useId();
+  const [staffToAdd, setStaffToAdd] = useState('');
   if (staff.length === 0) return <p role="alert">歷史案件缺少既定月嫂，請先核對配對資料。</p>;
-  if (staff.length === 1) return <p>選定服務日期由 {identity.label(staff[0].staff_id, staff[0].staff_name)} 承接。</p>;
+  const multiple = staff.length > 1;
+  const options = staffManagement?.options.filter(person => !staff.some(item => item.staff_id === person.staff_id)) ?? [];
+  const newStaff = options.find(person => String(person.staff_id) === staffToAdd);
+  const canManageStaff = Boolean(staffManagement && !disabled && !staffManagement.disabled);
 
   return <section className="historical-schedule-allocation" aria-label="月嫂分配">
     <h3>月嫂分配</h3>
-    <p>請在每位月嫂下方選日期，每位各安排一段連續服務日。</p>
+    {(multiple || staffManagement) && <div className="schedule-allocation-controls">
+      {multiple && <p>每位月嫂選一段連續的服務日。</p>}
+      {staffManagement && <div className="schedule-allocation-add">
+        <select aria-label="新增排班月嫂" value={newStaff ? staffToAdd : ''}
+          disabled={!canManageStaff || staff.length >= staffManagement.limit} onChange={event => setStaffToAdd(event.target.value)}>
+          <option value="">選擇月嫂</option>
+          {options.map(person => <option key={person.staff_id} value={person.staff_id}>{identity.label(person.staff_id, person.staff_name)}</option>)}
+        </select>
+        <button type="button" disabled={!canManageStaff || !newStaff || staff.length >= staffManagement.limit} onClick={() => {
+          if (!newStaff) return;
+          staffManagement.onAdd(newStaff);
+          setStaffToAdd('');
+        }}>加入排班月嫂</button>
+      </div>}
+    </div>}
     {[...staff].sort((a, b) => identity.compare(a.staff_id, b.staff_id)).map((person, index) => {
       const label = identity.label(person.staff_id, person.staff_name);
-      return <fieldset key={person.staff_id} disabled={disabled}>
-        <legend>{label}</legend>
-        <div className="historical-schedule-date-choices">
+      const labelId = `${idPrefix}-${person.staff_id}`;
+      return <fieldset key={person.staff_id} aria-labelledby={labelId} className="schedule-allocation-person" disabled={disabled}>
+        <div className="schedule-allocation-person-heading">
+          <p id={labelId}>{!multiple && '承接月嫂 '}<strong>{label}</strong></p>
+          {multiple && staffManagement && <button type="button" className="schedule-allocation-remove" aria-describedby={labelId}
+            disabled={!canManageStaff} onClick={() => staffManagement.onRemove(person.staff_id)}>移除該月嫂</button>}
+        </div>
+        {multiple && <div className="historical-schedule-date-choices">
           {[...dates].sort().map(date => {
             const selected = allocation[date] === person.staff_id;
             return <button type="button" key={date}
@@ -59,7 +91,7 @@ export function HistoricalRestartArrangementPanel({ staff, dates, allocation, di
               onClick={() => onSelect(date, person.staff_id)}
             >{date.slice(5).replace('-', '/')}</button>;
           })}
-        </div>
+        </div>}
       </fieldset>;
     })}
   </section>;

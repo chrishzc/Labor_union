@@ -98,7 +98,7 @@ it('工作台用一次儲存建立正式班表並刷新指派', async () => {
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} onObserved={observed} />);
   const save = await screen.findByRole('button', { name: '儲存班表' });
   await waitFor(() => expect(save).toBeEnabled());
-  expect(screen.getByText(/既定月嫂.*承接/)).toBeInTheDocument();
+  expect(screen.getByText('承接月嫂')).toHaveTextContent('既定月嫂');
   expect(screen.queryByRole('button', { name: '建立正式安排' })).not.toBeInTheDocument();
 
   fireEvent.click(save);

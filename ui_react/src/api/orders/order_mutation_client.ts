@@ -277,11 +277,30 @@ export async function applyHistoricalArrangement(
   }
 }
 
+const OfficeScheduleQuote = z.object({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  staff_entitlements: z.array(z.object({ staff_id: z.number().int(), amount_ntd: z.number().int(),
+    funding: z.array(z.object({ kind: z.enum(['client', 'subsidy']), amount_ntd: z.number().int() })) })),
+});
+export type OfficeScheduleQuote = z.infer<typeof OfficeScheduleQuote>;
+
+export async function previewOfficeSchedule(caseNo: string, payload: HistoricalScheduleSavePayload): Promise<OfficeScheduleQuote> {
+  const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/office-schedule/preview`;
+  try {
+    return decodeOrderMutationEnvelope(OfficeScheduleQuote, await transport.post(
+      endpoint, HistoricalScheduleSavePayloadSchema.parse(payload), resolveTransportOptions(),
+    ));
+  } catch (error) {
+    throw decodeMutationError(error, { caseNo, endpoint });
+  }
+}
+
 export async function saveHistoricalSchedule(
   caseNo: string,
   payload: HistoricalScheduleSavePayload,
   options: OrderMutationApplyOptions,
   office = false,
+  previewFingerprint?: string,
 ): Promise<HistoricalArrangementReceiptView> {
   const endpoint = `/api/v1/orders/${encodeURIComponent(caseNo)}/service-dates/${office ? 'office-schedule' : 'schedule'}/apply`;
   const validated = HistoricalScheduleSavePayloadSchema.parse(payload);
@@ -290,7 +309,8 @@ export async function saveHistoricalSchedule(
     'Idempotency-Key': requireValidIdempotencyKey(options.idempotencyKey),
   };
   try {
-    const raw = await transport.post(endpoint, validated, resolveTransportOptions(options, headers));
+    const raw = await transport.post(endpoint, office && previewFingerprint
+      ? { ...validated, preview_fingerprint: previewFingerprint } : validated, resolveTransportOptions(options, headers));
     return decodeOrderMutationEnvelope(HistoricalArrangementReceiptViewSchema, raw);
   } catch (error) {
     throw decodeMutationError(error, { caseNo, endpoint });

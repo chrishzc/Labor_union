@@ -140,8 +140,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
         { assignment_id: 102, candidate_key: null, staff_id: 2, sequence: 2, assigned_start_date: '2026-10-07', assigned_end_date: '2026-10-07', official_service_dates: ['2026-10-07'], actual_hours: 8, lineage_source_assignment_ids: [92] },
       ],
     }} />);
-    await screen.findByText('現行班表已保存。');
-    const calendar = screen.getByRole('group', { name: '服務日期月曆' });
+    const calendar = await screen.findByRole('group', { name: '服務日期月曆' });
     for (const date of ['2026-10-05', '2026-10-06', '2026-10-07']) {
       expect(within(calendar).getByRole('button', { name: `服務日期 ${date}` })).toHaveAttribute('aria-pressed', 'true');
       expect(within(calendar).getByRole('button', { name: `服務日期 ${date}` })).toBeDisabled();
@@ -237,6 +236,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       arrangement_pending: true, historical_schedule_pending: true };
     render(<OrderServiceDatesPanel caseNo={CASE} />);
     const saveSchedule = await screen.findByRole('button', { name: '儲存班表' });
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(saveSchedule).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /王月嫂 2026-10-01/ }));
     expect(screen.getByRole('button', { name: /林月嫂 2026-10-01/ })).toBeDisabled();
@@ -263,12 +263,14 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
       officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
     const button = await screen.findByRole('button', { name: '儲存班表' });
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await screen.findByText('班表已儲存並回讀正式排班。');
+    expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
       expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
-    }), expect.anything(), true);
+    }), expect.anything(), true, undefined);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 

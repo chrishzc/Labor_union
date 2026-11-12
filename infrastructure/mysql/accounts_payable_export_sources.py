@@ -12,6 +12,7 @@ from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem, ClientRefundExportFact, StaffPayableExportFact
 from infrastructure.mysql.order_terms_read_model import select_current_assignments, select_scheduling_aggregate
 from infrastructure.mysql.payroll_installments import installment_export_sql
+from infrastructure.mysql.staff_payable_correction_sql import staff_obligation_funding_not_held
 
 
 class MySqlReadOnlySnapshot:
@@ -364,7 +365,7 @@ def _date_value(value) -> date:
     raise TypeError("payment date must be a date")
 
 
-_STAFF_PAYABLES_SQL = """
+_STAFF_PAYABLES_SQL = f"""
 SELECT obligations.obligation_identity,
        obligations.case_no,
        obligations.staff_id,
@@ -390,6 +391,7 @@ LEFT JOIN staff_bank_accounts bank_accounts
   ON bank_accounts.staff_id = obligations.staff_id
  AND bank_accounts.is_primary = 1
 WHERE obligations.due_date = %s
+  AND {staff_obligation_funding_not_held()}
   AND obligations.direction = 'payable_to_staff'
   AND obligations.obligation_identity NOT LIKE 'staff-handover:%%'
   AND obligations.status <> 'cancelled'

@@ -43,8 +43,10 @@ def hourly_rate_projection(pricing):
     return f"補助內 {pricing.payroll.covered} 元／時；用盡後 {pricing.payroll.excess} 元／時"
 
 
-def persist_payroll_installments(cursor, case_no, candidate, identities=None):
-    tiered = tuple(item for item in candidate.assignments if item.tiered_pricing)
+def persist_payroll_installments(cursor, case_no, candidate, identities=None, *, unchanged_paid=frozenset(), staff_ids=None):
+    tiered = tuple(item for item in candidate.assignments
+                   if item.tiered_pricing and item.assignment_identity not in unchanged_paid
+                   and (staff_ids is None or item.staff_id in staff_ids))
     if not tiered:
         return
     # Scheduling has already saved this generation; Orders' end-date projection

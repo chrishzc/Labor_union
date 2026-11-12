@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Path
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +17,9 @@ from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.official_service_date_correction_workflow import (
+    AttributionFundingChange,
     OfficialDateMonetaryImpactBlocked,
+    OfficialDateOccupancyConflict,
     OfficialDateSelection,
     ServiceAttributionChange,
 )
@@ -50,9 +52,12 @@ class AttributionPreviewBody(BaseModel):
     staff_id: int = Field(gt=0)
     service_dates: tuple[date, ...] = Field(min_length=1, max_length=366)
     evidence: str = Field(min_length=1, max_length=500)
+    replacement_dates: tuple[date, ...] = Field(default=(), max_length=366)
+    scope: Literal["served", "upcoming"] = "served"
 
     def change(self) -> ServiceAttributionChange:
-        return ServiceAttributionChange(self.source_assignment_id, self.staff_id, self.service_dates, self.evidence)
+        return ServiceAttributionChange(self.source_assignment_id, self.staff_id, self.service_dates, self.evidence,
+                                        self.replacement_dates, self.scope)
 
 
 class AttributionApplyBody(AttributionPreviewBody):
@@ -60,6 +65,83 @@ class AttributionApplyBody(AttributionPreviewBody):
     expected_scheduling_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+    adopt_calculated_amounts: bool = False
+
+
+class AttributionFundingSelectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assignment_id: int = Field(gt=0)
+    subsidy_ntd: int = Field(ge=0, strict=True)
+
+
+class AttributionFundingPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selections: tuple[AttributionFundingSelectionBody, ...] = Field(min_length=1, max_length=366)
+    evidence: str = Field(min_length=1, max_length=500)
+
+    def changes(self):
+        return tuple(AttributionFundingChange(item.assignment_id, item.subsidy_ntd) for item in self.selections)
+
+
+class AttributionFundingApplyBody(AttributionFundingPreviewBody):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@router.get("/{case_no}/service-attribution/funding-review", response_model=BaseResponse[dict[str, Any]])
+def query_attribution_funding_review(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_official_service_date_correction_workflow),
+):
+    return _call(lambda: _funding_payload(workflow.query_funding_review(case_no)))
+
+
+@router.post("/{case_no}/service-attribution/funding-review/preview", response_model=BaseResponse[dict[str, Any]])
+def preview_attribution_funding_review(
+    body: AttributionFundingPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_official_service_date_correction_workflow),
+):
+    return _call(lambda: _funding_payload(workflow.preview_funding_review(case_no, body.changes(), body.evidence)))
+
+
+@router.post("/{case_no}/service-attribution/funding-review/apply", response_model=BaseResponse[dict[str, Any]])
+def apply_attribution_funding_review(
+    body: AttributionFundingApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_official_service_date_correction_workflow),
+):
+    def apply():
+        workflow.apply_funding_review(case_no, body.changes(), body.evidence, body.preview_fingerprint,
+            actor=str(principal.username or "").strip(), key=idempotency_key, correlation=correlation_id)
+        return {"pending": False}
+    return _call(apply)
+
+
+def _funding_payload(review):
+    if review is None:
+        return {"pending": False}
+    return {
+        "pending": True, "preview_fingerprint": review.fingerprint.value,
+        "subsidy_ntd": sum(s.amount for s in review.accounting.sources if s.kind == "subsidy"),
+        "payment_evidence_missing": any(s.settled is None or (s.kind == "unsplit" and s.settled)
+                                        for s in review.accounting.sources),
+        "assignments": [{"assignment_id": int(item.assignment_identity), "staff_id": item.staff_id,
+                         "amount_ntd": item.total_payable.amount,
+                         "service_dates": next(a.service_dates for a in review.facts.assignments
+                                               if a.assignment_id == int(item.assignment_identity))}
+                        for item in review.payroll.payroll.assignments if item.staff_id in review.accounting.pending_staff],
+        "sources": [{"staff_id": s.staff_id, "kind": s.kind, "amount_ntd": s.amount, "settled_ntd": s.settled}
+                    for s in review.accounting.sources],
+        "installments": [{"staff_id": item.staff_id, "kind": kind, "amount_ntd": amount,
+                          "settled_ntd": settled, "payable_ntd": max(0, amount - settled),
+                          "recovery_ntd": dict(item.recovery).get(kind, 0)}
+                         for item in review.plan for kind, amount, settled in item.revised],
+    }
 
 
 @router.post("/{case_no}/service-attribution/preview", response_model=BaseResponse[dict[str, Any]])
@@ -87,6 +169,7 @@ def apply_service_attribution(
         expected_scheduling_version=body.expected_scheduling_version,
         preview_fingerprint=body.preview_fingerprint, actor=str(principal.username or "").strip(),
         reason=body.reason, idempotency_key=idempotency_key, correlation_id=correlation_id,
+        adopt_calculated_amounts=body.adopt_calculated_amounts,
     )))
 
 
@@ -96,12 +179,17 @@ def _attribution_payload(preview):
         "order_version": preview.facts.order_version,
         "scheduling_version": preview.facts.scheduling_version,
         "preview_fingerprint": preview.fingerprint.value,
+        "funding_review_pending": bool(preview.funding_review_staff),
         "proposed_assignments": [{
             "staff_id": item.staff_id, "service_dates": item.service_dates,
         } for item in preview.scheduling.assignments],
         "staff_entitlements": [{
             "staff_id": item.staff_id, "amount_ntd": item.total_payable.amount,
         } for item in preview.payroll.payroll.assignments],
+        "manual_amounts": [{"staff_id": staff_id, "previous_calculated_ntd": computed, "manual_ntd": effective}
+                           for _, staff_id, computed, effective in preview.manual_amounts],
+        "funding": [{"staff_id": staff_id, "kind": kind, "before_ntd": before, "settled_ntd": settled, "after_ntd": after}
+                    for staff_id, kind, before, settled, after in preview.funding],
         "paid_obligations": [{
             "staff_id": item.staff_id, "before_ntd": item.previous_entitlement.amount,
             "after_ntd": item.revised_entitlement.amount, "paid_ntd": item.paid_net_amount.amount,
@@ -210,6 +298,7 @@ def _receipt_payload(receipt) -> dict[str, Any]:
             "service_dates": item.service_dates,
         } for item in receipt.effective_dates],
         "preview_fingerprint": receipt.preview_fingerprint.value,
+        "funding_review_pending": receipt.funding_review_pending,
     }
 
 
@@ -225,10 +314,18 @@ _VALIDATION_MESSAGES = {
     'service_attribution_status_blocked': '本案目前無法更正已服務紀錄，請重新核對案件狀態。',
     'service_attribution_evidence_required': '請填寫可核對的實際服務依據。',
     'service_attribution_unperformed_date_blocked': '請選擇已服務的日期。後續服務請使用換人或代班。',
+    'service_attribution_upcoming_date_blocked': '後續排班只能調整今天起的服務日期。',
     'service_attribution_assignment_conflict': '所選日期或月嫂與目前指派不符，請重新讀取排班。',
     'service_attribution_target_assignment_ambiguous': '該月嫂已有多個區段，請先核對應承接的區段。',
     'service_attribution_special_pay_review_required': '本案有特殊薪資紀錄，請先核對特殊薪資與服務歸屬。',
     'service_attribution_manual_amount_review_required': '本案有人工更正的薪資金額，請先在帳務工作台核對處置。',
+    'service_attribution_manual_amount_confirmation_required': '請確認採用排班異動後的新計算金額。',
+    'service_attribution_funding_review_conflict': '此筆待核對已處理或班表已變更，請重新載入。',
+    'service_attribution_funding_evidence_required': '請填寫分來源金額的核對依據。',
+    'service_attribution_funding_payment_evidence_required': '原核銷的自備款或補助款來源尚未確認。請核對原銀行流水及其核銷連結後重新預覽。',
+    'service_attribution_funding_amount_control_required': '原已核銷應付含人工改額，請先在帳務中心核對原金額。',
+    'service_attribution_funding_amount_invalid': '請填寫每個受影響區段的補助款。金額須介於零與該區段應付，合計須等於原補助總額。',
+    'service_attribution_funding_recovery_review_required': '新分配涉及減少既有追償，請先核對該追償的清償與調整紀錄。',
     'service_attribution_source_rate_required': '原服務指派缺少可核對的薪資費率，請先確認費率。',
     'official_date_no_change': '更正日期與目前正式服務日期相同，無需更正；請先修改需要補正的日期，再重新預覽。',
     'official_date_dates_not_canonical': '同一位月嫂的服務日期不能重複或留白，請修正日期後重新預覽。',
@@ -269,6 +366,8 @@ def _call(operation):
         message = _VALIDATION_MESSAGES.get(code, '正式排班日期更正未通過驗證，請重新讀取排班日期；若仍有問題，請由管理員核對排班紀錄。')
         if isinstance(error, OfficialDateMonetaryImpactBlocked) and error.blockers:
             message = "；".join(_MONETARY_BLOCKERS[item]["message"] for item in error.blockers) + "請重新讀取排班日期，依原因前往對應入口核對。"
+        if isinstance(error, OfficialDateOccupancyConflict):
+            message = f"{error.staff_name}在 {error.day.isoformat()} 有檔期衝突。請調整月嫂或日期後重新預覽。"
         raise typed_http_error(status, category, code, message, "official-service-date-correction") from error
     except IntegrityError as error:
         if error.args and error.args[0] == 1062:

@@ -6,9 +6,11 @@ from dataclasses import replace
 import json
 
 from domains.scheduling.assignment_plan import (
-    AssignmentPlanIntent, AssignmentPlanSegmentIntent, StaffOccupancyFact, service_shift_may_overlap,
+    AssignmentPlanIntent, AssignmentPlanSegmentIntent, StaffOccupancyFact, first_shift_conflict, service_shift_may_overlap,
 )
 from domains.scheduling.commitment_execution import ExecutionServiceDay
+from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
+from domains.payroll.installments import payroll_installments
 from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
 from domains.scheduling.service_start import ServiceStartConflict
 from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
@@ -20,7 +22,8 @@ from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanApplyRe
 from subsystems.scheduling.leave_substitution_workflow import LeaveSubstitutionApplyRequest, LeaveSubstitutionPreviewRequest
 from infrastructure.mysql.leave_result_repository import leave_context
 from infrastructure.mysql.service_handover_repository import handover_context
-from infrastructure.mysql.scheduling_occupancy_facts import _unavailability_rows, load_case_service_time
+from infrastructure.mysql.scheduling_occupancy_facts import _unavailability_rows, load_case_service_time, load_occupancy_snapshot
+from infrastructure.mysql.order_terms_read_model import load_preview_facts
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -30,6 +33,7 @@ from infrastructure.mysql.service_start_repository import MySqlServiceStartRepos
 from subsystems.orders.actual_start_workflow import ActualStartWorkflow
 from subsystems.orders.historical_restart_arrangement import HistoricalRestartArrangementReceipt
 from subsystems.orders.service_date_confirmation_workflow import ServiceDateConfirmationWorkflow
+from subsystems.payroll.terms_impact import calculate_assignment_payroll
 
 
 class MySqlServiceStartArrangement:
@@ -286,11 +290,58 @@ def current_service_start_execution(cursor,case_no,plan_id=None,*,lock=False):
         'confirmed_version_id':rows[0]['confirmed_version_id'],'substitutions':substitutions},tuple(days)
 
 
+def preview_office_schedule(connection, case_no, segments, *, actual_start_date, reason, lock=False):
+    with connection.cursor() as cursor:
+        facts = load_preview_facts(cursor, case_no, office_first_schedule=True)
+        dates = tuple(day for segment in segments for day in segment.service_dates)
+        staff_ids = tuple(segment.staff_id for segment in segments)
+        if (facts.lifecycle.current_status.value != '訂單成立' or facts.order.service_data_locked
+                or any(item.official_service_dates for item in facts.scheduling.segments)):
+            raise ValueError('office_schedule_not_pending_blocked')
+        if (len(dates) != facts.order.terms.service_days or dates != tuple(sorted(set(dates)))
+                or not dates or dates[0] < actual_start_date):
+            raise ValueError('office_schedule_dates_invalid')
+        if len(set(staff_ids)) != len(staff_ids):
+            raise ValueError('office_schedule_segments_invalid')
+        existing = {item.staff_id: item.assignment_id for item in facts.scheduling.segments}
+        assignments = tuple(AssignmentCandidate(
+            f'office-preview:{index}', existing.get(segment.staff_id), segment.staff_id, index,
+            segment.service_dates[0], segment.service_dates[-1], segment.service_dates,
+            len(segment.service_dates) * float(facts.order.terms.service_hours_per_day),
+        ) for index, segment in enumerate(segments, start=1))
+        candidate = SchedulingGenerationCandidate(
+            case_no, facts.scheduling.generation_number + 1, facts.scheduling.aggregate_version,
+            facts.scheduling.aggregate_version + 1, tuple(existing.values()), assignments, (),
+        )
+        occupied, _ = load_occupancy_snapshot(cursor, tuple(sorted(staff_ids)), case_no, lock=lock)
+        conflict = first_shift_conflict(case_no, load_case_service_time(cursor, case_no, lock=lock), assignments, occupied)
+        if conflict:
+            raise ServiceStartConflict('office_schedule_occupancy_conflict',
+                                       f'月嫂 {conflict.staff_id} 在 {conflict.occupancy_date} 有檔期衝突。')
+        if facts.payroll is None:
+            raise ValueError('payroll_bootstrap_required')
+        payroll = calculate_assignment_payroll(facts.payroll, candidate, facts.order.terms)
+        amounts = [
+            {'staff_id': item.staff_id, 'amount_ntd': item.total_payable.amount,
+             'funding': [{'kind': part.funding_kind, 'amount_ntd': part.amount}
+                         for part in payroll_installments(item, dates[-1])]} for item in payroll.assignments
+        ]
+        fingerprint = fingerprint_payload({
+            'case_no': case_no, 'order_version': facts.order.version,
+            'scheduling_version': facts.scheduling.aggregate_version, 'payroll_version': facts.payroll.payroll_version,
+            'start': actual_start_date.isoformat(), 'reason': reason.strip(),
+            'segments': [(item.staff_id, tuple(d.isoformat() for d in item.service_dates)) for item in assignments],
+            'payroll': payroll.fingerprint.value,
+        })
+    return {'preview_fingerprint': fingerprint.value, 'staff_entitlements': amounts}
+
+
 def save_office_schedule(
     connection, assignment_application_factory, case_no, segments, *, actual_start_date, expected_order_version,
     expected_scheduling_version, expected_confirmed_version, idempotency_key, actor,
-    reason, correlation_id,
+    reason, correlation_id, preview_fingerprint=None,
 ):
+    reallocation_reason = reason.strip() if preview_fingerprint else ""
     reason = reason.strip() or "工會確認服務日期並建立正式班表"
     key = IdempotencyKey(idempotency_key)
     who = ActorContext(actor)
@@ -300,6 +351,7 @@ def save_office_schedule(
         "case": case_no, "start": str(actual_start_date), "actor": actor, "reason": reason,
         "versions": (expected_order_version, expected_scheduling_version, expected_confirmed_version),
         "segments": [(segment.staff_id, tuple(map(str, segment.service_dates))) for segment in segments],
+        **({"preview_fingerprint": preview_fingerprint} if preview_fingerprint else {}),
     }).value
     from infrastructure.mysql.service_date_confirmation_repository import MySqlServiceDateConfirmationRepository
 
@@ -343,6 +395,10 @@ def save_office_schedule(
             expected_order_version, expected_scheduling_version, expected_confirmed_version,
         ):
             raise ValueError("office_schedule_stale_version")
+        if preview_fingerprint is not None and preview_office_schedule(
+            connection, case_no, segments, actual_start_date=actual_start_date, reason=reallocation_reason, lock=True,
+        )["preview_fingerprint"] != preview_fingerprint:
+            raise ValueError("office_schedule_stale_version")
         current = assignment_application_factory(connection).query(case_no).assignment_plan
         if facts.restart_generation_number is not None or any(a.official_service_dates for a in current.effective_assignments):
             raise ValueError("office_schedule_not_pending_blocked")
@@ -357,7 +413,8 @@ def save_office_schedule(
             if cursor.fetchone() is not None:
                 raise ValueError("office_schedule_assignment_ownership_blocked")
         staff_ids = {segment.staff_id for segment in segments}
-        if current.effective_assignments and {a.staff_id for a in current.effective_assignments} != staff_ids:
+        if (current.effective_assignments and {a.staff_id for a in current.effective_assignments} != staff_ids
+                and not reallocation_reason):
             raise ValueError("office_schedule_incumbent_conflict")
         start = actual_repository.load_actual_start_query(case_no, for_update=True)
         if start.service_data_locked:
@@ -397,6 +454,7 @@ def save_office_schedule(
             return {
                 "substitutions": {}, "service_start_response_ids": (), "confirmed_version_id": match["version_id"],
                 "office_command_key": key.value, "office_command_fingerprint": digest,
+                "office_reallocation_reason": reallocation_reason,
             }, tuple(ExecutionServiceDay(segment.staff_id, day) for segment in segments for day in segment.service_dates)
 
         interval_start = actual_start_date

@@ -7,12 +7,13 @@ interface Props {
   selectedDates: readonly string[];
   isDateDisabled: (date: string) => boolean;
   onToggle: (date: string) => void;
-  hint: string;
+  hint?: string;
+  showHolidaySelectionHint?: boolean;
   dayDetails?: (date: string) => { holidayName?: string | null; rest?: boolean; laterSegment?: boolean };
 }
 
 // The same case calendar is used before service and for audited corrections after completion.
-export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, dayDetails }) => {
+export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, showHolidaySelectionHint, dayDetails }) => {
   const [year, monthNumber] = month.split('-').map(Number);
   const [holidayNames, setHolidayNames] = useState<Record<string, string>>({});
   const [holidayLoading, setHolidayLoading] = useState(true);
@@ -64,7 +65,9 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
           </button>;
         })}
       </div>
-      <small className="service-date-calendar-hint">{hint}</small>
+      {hint && <p className="service-date-calendar-hint">{hint}</p>}
+      {showHolidaySelectionHint && Object.keys(holidayNames).some(date => !isDateDisabled(date)) &&
+        <p className="service-date-calendar-hint">選取國定假日即確認當日服務。</p>}
     </div>
   </div>;
 };

@@ -9,6 +9,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
+from functools import partial
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
@@ -20,9 +21,11 @@ from api.dependencies.service_date_confirmation import (
     get_historical_restart_arrangement_workflow,
     get_historical_restart_schedule_save,
     get_office_schedule_save,
+    get_office_schedule_preview,
     get_service_date_confirmation_workflow,
 )
 from api.schemas.base import BaseResponse
+from domains.scheduling.service_start import ServiceStartConflict
 from api.schemas.service_date_confirmation import (
     ServiceDateConfirmationPreviewView,
     ServiceDateConfirmationQueryView,
@@ -98,6 +101,10 @@ class HistoricalScheduleSaveBody(HistoricalArrangementPreviewBody):
     expected_scheduling_version: int = Field(ge=0)
     expected_confirmed_version: int | None = Field(ge=1)
     reason: str = Field(default="", max_length=500)
+
+
+class OfficeScheduleSaveBody(HistoricalScheduleSaveBody):
+    preview_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 @router.get(
@@ -195,19 +202,34 @@ def save_historical_restart_schedule(
     )
 
 
+@router.post("/{case_no}/service-dates/office-schedule/preview", response_model=BaseResponse[dict[str, Any]])
+def preview_office_schedule(
+    body: HistoricalScheduleSaveBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+    preview=Depends(get_office_schedule_preview),
+):
+    del principal
+    return _call_endpoint(
+        lambda: preview(case_no, _arrangement_segments(body), actual_start_date=body.actual_start_date, reason=body.reason),
+        "已預覽首次正式班表", CorrelationId("office-schedule-preview"),
+    )
+
+
 @router.post(
     "/{case_no}/service-dates/office-schedule/apply",
     response_model=BaseResponse[HistoricalArrangementReceiptView],
 )
 def save_office_schedule(
-    body: HistoricalScheduleSaveBody,
+    body: OfficeScheduleSaveBody,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
     correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
     principal: AdminPrincipal = Depends(require_line_matching_override),
     save=Depends(get_office_schedule_save),
 ):
-    return save_historical_restart_schedule(body, case_no, idempotency_key, correlation_id, principal, save)
+    operation = save if body.preview_fingerprint is None else partial(save, preview_fingerprint=body.preview_fingerprint)
+    return save_historical_restart_schedule(body, case_no, idempotency_key, correlation_id, principal, operation)
 
 
 @router.post(
@@ -365,6 +387,8 @@ def _call_endpoint(command, message: str, correlation_id: CorrelationId):
         _raise_mysql_error(error, correlation_id)
     except (ActualStartWorkflowError, AssignmentPlanWorkflowError) as error:
         _raise_typed_error(error.error)
+    except ServiceStartConflict as error:
+        _raise_typed_error(TypedError(ErrorCategory.CONFLICT, error.code, error.message, correlation_id))
     except ValueError as error:
         _raise_value_error(error, correlation_id)
     except HTTPException:

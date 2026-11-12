@@ -90,6 +90,17 @@ def test_actual_start_shift_preserves_signed_people_and_volume_without_resigning
     assert signed[0].service_date == date(2026, 10, 26)
 
 
+def test_office_reallocation_keeps_the_signed_service_volume_and_current_plan():
+    first, second = date(2027, 1, 4), date(2027, 1, 5)
+    signed = (CommitmentServiceDay(1, first), CommitmentServiceDay(1, second))
+    execution = (ExecutionServiceDay(1, first), ExecutionServiceDay(2, second))
+    require_exact_commitment_execution(4, (4,), signed, execution, confirmed_days=execution, office_reallocation=True)
+    with pytest.raises(CommitmentExecutionMismatch):
+        require_exact_commitment_execution(4, (4,), signed, execution, confirmed_days=execution)
+    with pytest.raises(CommitmentExecutionMismatch):
+        require_exact_commitment_execution(4, (4,), signed, execution[:1], confirmed_days=execution[:1], office_reallocation=True)
+
+
 @pytest.mark.parametrize('plan,staff,days,confirmed', [
     (5, 1, (4,), (4,)),       # different plan
     (4, 2, (4,), (4,)),       # different caregiver

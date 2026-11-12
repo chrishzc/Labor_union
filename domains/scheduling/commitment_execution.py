@@ -32,6 +32,7 @@ def require_exact_commitment_execution(
     confirmed_days: tuple[ExecutionServiceDay, ...] | None = None,
     authorized_substitutions: tuple[tuple[int, int], ...] = (),
     service_start_plan_id: int | None = None,
+    office_reallocation: bool = False,
 ) -> None:
     """Preserve signed people/volume; a date shift requires current confirmations."""
     if (lock_plan_ids and set(lock_plan_ids) != {commitment_plan_id}) or (
@@ -49,6 +50,11 @@ def require_exact_commitment_execution(
     ))
     execution = _day_identities(execution_days)
     if signed == execution:
+        return
+    if office_reallocation:
+        if (not signed or confirmed_days is None or execution != _day_identities(confirmed_days)
+                or len(execution) != len(signed) or len({day for _, day in execution}) != len(signed)):
+            raise CommitmentExecutionMismatch("commitment_execution_mismatch")
         return
     if (
         not signed

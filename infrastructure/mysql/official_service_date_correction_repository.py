@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from domains.scheduling.assignment_plan import first_shift_conflict
+from domains.scheduling.generation import AssignmentIdentityResolution
+from domains.staff_payables.overpayment_recovery import PayrollCorrectionRecoverySource
 from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
 
 import json
@@ -18,18 +20,30 @@ from infrastructure.mysql.order_terms_read_model import (
     select_order,
     select_scheduling_aggregate,
 )
-from infrastructure.mysql.payroll_terms_writer import persist_actual_start_rate_snapshot_carry, persist_payroll_terms_impact
+from infrastructure.mysql.payroll_terms_writer import (
+    persist_actual_start_rate_snapshot_carry, persist_payroll_rate_snapshots, persist_payroll_terms_impact,
+)
 from infrastructure.mysql.scheduling_replacement_writer import persist_scheduling_replacement
-from shared_kernel.fingerprints import PreviewFingerprint
+from infrastructure.mysql.staff_payout_repository import query_staff_funding_portions
+from infrastructure.mysql.staff_overpayment_recovery_repository import MySqlStaffOverpaymentRecoveryRepository
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.identities import IdempotencyKey
+from shared_kernel.money import MoneyNTD
 from subsystems.orders.official_service_date_correction_workflow import (
+    AttributionFundingFacts,
+    AttributionFundingSource,
     OfficialAssignmentDates,
     OfficialDateFacts,
     OfficialDateHistoryRecord,
+    OfficialDateOccupancyConflict,
     OfficialDateReceipt,
     OfficialDateSelection,
     MonetaryBlocker,
 )
 from subsystems.orders.terms_workflow import PayrollImpactPersistenceCommand
+from subsystems.staff_payables.overpayment_recovery import (
+    StaffOverpaymentRecoveryCreationApplication, StaffOverpaymentRecoveryCreationRequest,
+)
 
 
 _FAMILY = "orders_official_service_date_correction"
@@ -150,10 +164,24 @@ class MySqlOfficialServiceDateCorrectionRepository:
             monetary_blockers=monetary_blockers,
         )
 
-    def load_attribution(self, case_no: str, staff_id: int, *, lock: bool):
+    def load_attribution(self, case_no: str, change, *, lock: bool):
+        return self._load_attribution_facts(case_no, change, lock=lock)
+
+    def load_funding_review(self, case_no: str, *, lock: bool):
+        return self._load_attribution_facts(case_no, None, lock=lock)
+
+    def _load_attribution_facts(self, case_no, change, *, lock):
         suffix = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
-            staff_ids = tuple(sorted(set(preflight_staff_ids(cursor, case_no)) | {staff_id}))
+            pending = self._funding_pending(cursor, case_no)
+            if change is None and pending is None:
+                return None
+            staff_ids = set(preflight_staff_ids(cursor, case_no))
+            if change is not None:
+                staff_ids.add(change.staff_id)
+            if pending:
+                staff_ids.update(pending[1])
+            staff_ids = tuple(sorted(staff_ids))
             if lock:
                 def lock_payables(locked_cursor):
                     placeholders = ",".join("%s" for _ in staff_ids)
@@ -165,34 +193,97 @@ class MySqlOfficialServiceDateCorrectionRepository:
                 terms = load_locked_facts(cursor, case_no, staff_ids, lock_payables)
                 if not set(preflight_staff_ids(cursor, case_no)).issubset(staff_ids):
                     raise ValueError("official_date_version_conflict")
+                pending = self._funding_pending(cursor, case_no, lock=True)
+                if pending and not set(pending[1]).issubset(staff_ids):
+                    raise ValueError("official_date_version_conflict")
+                if change is None and pending is None:
+                    return None
             else:
                 terms = load_preview_facts(cursor, case_no)
-            cursor.execute("SELECT id FROM staff WHERE id=%s" + suffix, (staff_id,))
-            if cursor.fetchone() is None:
-                raise ValueError("service_attribution_staff_required")
+            if change is not None:
+                cursor.execute("SELECT id FROM staff WHERE id=%s AND (status='active' OR id=("
+                               "SELECT staff_id FROM case_staff_assignments WHERE id=%s AND case_no=%s))" + suffix,
+                               (change.staff_id, change.source_assignment_id, case_no))
+                if cursor.fetchone() is None:
+                    raise ValueError("service_attribution_staff_required")
+            facts = self.load(case_no, lock=lock, include_special_pay=True)
+            affected = set(pending[1]) if pending else set()
+            if change is not None:
+                affected.add(change.staff_id)
+                affected.update(a.staff_id for a in facts.assignments if a.assignment_id == change.source_assignment_id)
+            affected_ids = tuple(sorted(affected))
+            affected_slots = ",".join("%s" for _ in affected_ids)
             cursor.execute(
-                "SELECT c.obligation_identity FROM payroll_amount_controls c "
+                "SELECT c.obligation_identity,o.staff_id,c.computed_ntd,c.effective_ntd,c.amount_mode FROM payroll_amount_controls c "
                 "JOIN staff_obligations o ON o.obligation_identity=c.obligation_identity "
-                "WHERE o.case_no=%s AND o.status<>'cancelled' AND c.amount_mode='manual'" + suffix,
-                (case_no,),
+                f"WHERE o.case_no=%s AND o.status<>'cancelled' AND o.staff_id IN ({affected_slots}) "
+                "ORDER BY c.obligation_identity" + suffix,
+                (case_no, *affected_ids),
             )
-            if cursor.fetchall():
-                raise ValueError("service_attribution_manual_amount_review_required")
+            controls = tuple(cursor.fetchall())
+            manual_amounts = tuple((str(row["obligation_identity"]), int(row["staff_id"]),
+                                    int(row["computed_ntd"]), int(row["effective_ntd"])) for row in controls
+                                   if row["amount_mode"] == "manual")
             placeholders = ",".join("%s" for _ in staff_ids)
             cursor.execute(
                 f"SELECT staff_id,aggregate_version FROM staff_payable_accounts WHERE staff_id IN ({placeholders}) "
                 "ORDER BY staff_id" + suffix, staff_ids,
             )
             payable_versions = tuple((int(row["staff_id"]), int(row["aggregate_version"])) for row in cursor.fetchall())
-        return self.load(case_no, lock=lock, include_special_pay=True), terms, payable_versions
+            funding, paid_roots = [], set()
+            previous_recoveries = self._funding_recoveries(cursor, case_no) if pending or change else {}
+            for root in terms.payroll.existing_obligations if terms.payroll is not None else ():
+                if root.staff_id not in affected or root.obligation_kind.value != "service_pay":
+                    continue
+                portions = query_staff_funding_portions(cursor, root.obligation_identity, lock=lock,
+                    settled_total=root.paid_net_amount.amount)
+                if root.payout_history_exists:
+                    paid_roots.add(root.obligation_identity)
+                if portions:
+                    for part in portions:
+                        recovered = previous_recoveries.get((root.obligation_identity, part.funding_kind), 0)
+                        funding.append(AttributionFundingSource(root.obligation_identity, root.staff_id,
+                            root.source_assignment_id, part.funding_kind,
+                            part.amount_ntd - recovered, part.settled_ntd, part.due_date, recovered))
+                else:
+                    funding.append(AttributionFundingSource(root.obligation_identity, root.staff_id,
+                        root.source_assignment_id, "unsplit",
+                        root.contractual_amount.amount, root.paid_net_amount.amount, root.due_date))
+        return facts, terms, payable_versions, manual_amounts, AttributionFundingFacts(tuple(funding),
+            pending[1] if pending else (), pending[0] if pending else None,
+            tuple(str(row["obligation_identity"]) for row in controls if row["obligation_identity"] in paid_roots))
+
+    def _funding_pending(self, cursor, case_no, *, lock=False):
+        cursor.execute("SELECT id, facts_snapshot FROM order_lifecycle_state_events WHERE case_no=%s AND "
+            "trigger_event IN ('official_service_attribution_corrected','official_service_attribution_funding_confirmed') "
+            "AND JSON_CONTAINS_PATH(facts_snapshot,'one','$.funding_review') ORDER BY id DESC LIMIT 1"
+            + (" FOR UPDATE" if lock else ""), (case_no,))
+        row = cursor.fetchone()
+        if row:
+            review = json.loads(row["facts_snapshot"])["funding_review"]
+            if review["state"] == "pending":
+                return int(row["id"]), tuple(review["staff_ids"])
+        return None
+
+    def _funding_recoveries(self, cursor, case_no):
+        cursor.execute("SELECT facts_snapshot FROM order_lifecycle_state_events WHERE case_no=%s "
+                       "AND trigger_event='official_service_attribution_funding_confirmed' ORDER BY id", (case_no,))
+        result = {}
+        for row in cursor.fetchall():
+            for identity, kind, amount in json.loads(row["facts_snapshot"])["recoveries"]:
+                result[(identity, kind)] = result.get((identity, kind), 0) + amount
+        return result
 
     def validate_availability(self, candidate, *, lock: bool) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
         with self._connection.cursor() as cursor:
             occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
             service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
-        if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
-            raise ValueError("official_date_occupancy_conflict")
+            conflict = first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied)
+            if conflict:
+                cursor.execute("SELECT name FROM staff WHERE id=%s", (conflict.staff_id,))
+                row = cursor.fetchone()
+                raise OfficialDateOccupancyConflict(row["name"] if row else str(conflict.staff_id), conflict.occupancy_date)
 
     def load_history(self, case_no: str) -> tuple[OfficialDateHistoryRecord, ...]:
         with self._connection.cursor() as cursor:
@@ -251,7 +342,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
             if row["command_family"] not in families or row["command_fingerprint"] != command_fingerprint:
                 raise ValueError("official_date_idempotency_mismatch")
             cursor.execute(
-                "SELECT expected_version FROM order_lifecycle_state_events "
+                "SELECT expected_version,facts_snapshot FROM order_lifecycle_state_events "
                 "WHERE case_no=%s AND idempotency_key=%s" + suffix,
                 (row["case_no"], key),
             )
@@ -271,17 +362,98 @@ class MySqlOfficialServiceDateCorrectionRepository:
             int(row["resulting_scheduling_version"]), int(row["resulting_generation_id"]),
             tuple(OfficialDateSelection(identity, tuple(values)) for identity, values in dates.items()),
             PreviewFingerprint(str(row["preview_fingerprint"])),
+            bool(json.loads(event["facts_snapshot"]).get("funding_review")),
         )
+
+    def replay_funding_review(self, case_no: str, key: str, digest: str, *, lock: bool = False):
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT trigger_event,facts_snapshot FROM order_lifecycle_state_events "
+                           "WHERE case_no=%s AND idempotency_key=%s" + (" FOR UPDATE" if lock else ""), (case_no, key))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            if (row["trigger_event"] != "official_service_attribution_funding_confirmed"
+                    or json.loads(row["facts_snapshot"])["command_fingerprint"] != digest):
+                raise ValueError("official_date_idempotency_mismatch")
+            return True
+
+    def persist_funding_review(self, review, *, actor, key, correlation, digest):
+        facts = review.facts
+        reason = review.evidence
+        recoveries = []
+        recovery_identities = {}
+        with self._connection.cursor() as cursor:
+            resolution = AssignmentIdentityResolution({str(item.assignment_id): item.assignment_id
+                                                      for item in facts.assignments})
+            persist_payroll_terms_impact(cursor, PayrollImpactPersistenceCommand(
+                review.payroll, resolution, key, actor, reason, correlation, review.accounting.pending_event_id,
+                reuse_existing_assignments=True,
+                replace_unpaid_amount_controls=tuple(item[0] for item in review.manual_amounts),
+                installment_staff_ids=frozenset(),
+            ))
+            recovery_owner = StaffOverpaymentRecoveryCreationApplication(
+                MySqlStaffOverpaymentRecoveryRepository(self._connection))
+            for item in review.plan:
+                cursor.executemany(
+                    "INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) "
+                    "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE amount_ntd=VALUES(amount_ntd),due_date=VALUES(due_date)",
+                    tuple((item.identity, part.funding_kind, part.amount, part.due_date) for part in item.installments),
+                )
+                for kind, amount in item.recovery:
+                    recovery_digest = fingerprint_payload({"case": facts.case_no,
+                        "event": review.accounting.pending_event_id, "obligation": item.identity, "kind": kind}).value
+                    recovery = recovery_owner.create_from_payroll_correction(StaffOverpaymentRecoveryCreationRequest(
+                        PayrollCorrectionRecoverySource("service-funding:" + recovery_digest, facts.case_no, item.identity,
+                            item.staff_id, MoneyNTD(amount)),
+                        IdempotencyKey("service-funding-recovery:" + recovery_digest), actor, reason, correlation,
+                        evidence_reference=f"schedule-funding:{review.accounting.pending_event_id}:{kind}",
+                    ))
+                    recoveries.append((item.identity, kind, amount))
+                    recovery_identities[recovery.recovery_identity] = {"obligation_identity": item.identity,
+                                                                       "funding_kind": kind}
+            snapshot = {
+                "funding_review": {"state": "confirmed", "pending_event_id": review.accounting.pending_event_id},
+                "command_fingerprint": digest, "preview_fingerprint": review.fingerprint.value,
+                "generation_id": facts.generation_id, "evidence": review.evidence, "recoveries": recoveries,
+                "recovery_identities": recovery_identities,
+                "original_funding": [(part.identity, part.staff_id, part.kind, part.amount, part.settled,
+                                      part.due_date.isoformat() if part.due_date else None)
+                                     for part in review.accounting.sources],
+                "installments": [(item.identity, item.staff_id, part.funding_kind, part.amount,
+                                  part.due_date.isoformat() if part.due_date else None)
+                                 for item in review.plan for part in item.installments],
+                "approved_funding": [(item.identity, item.staff_id, *part)
+                                     for item in review.plan for part in item.revised],
+            }
+            cursor.execute(
+                "INSERT INTO order_lifecycle_state_events "
+                "(case_no,trigger_event,before_status,after_status,actor,business_date,expected_version,idempotency_key,facts_snapshot) "
+                "VALUES (%s,'official_service_attribution_funding_confirmed',%s,%s,%s,%s,%s,%s,%s)",
+                (facts.case_no, facts.order_status, facts.order_status, actor.actor_id,
+                 datetime.now(ZoneInfo("Asia/Taipei")).date(), facts.order_version, key.value, json.dumps(snapshot, ensure_ascii=False)),
+            )
 
     def persist_attribution(self, command, preview) -> OfficialDateReceipt:
         facts = preview.facts
         with self._connection.cursor() as cursor:
             result = persist_scheduling_replacement(cursor, command)
-            persist_payroll_terms_impact(cursor, PayrollImpactPersistenceCommand(
+            payroll = PayrollImpactPersistenceCommand(
                 preview.payroll, result.assignment_resolution, command.idempotency_key,
                 command.actor, command.reason, command.correlation_id, result.rebuild_event_id,
                 special_pay_events=preview.payroll.special_pay_events,
-            ))
+                replace_unpaid_amount_controls=tuple(item[0] for item in preview.manual_amounts),
+                installment_staff_ids=frozenset(row[0] for row in preview.funding),
+            )
+            if preview.funding_review_staff:
+                persist_payroll_rate_snapshots(cursor, payroll)
+            else:
+                persist_payroll_terms_impact(cursor, payroll)
+            before = {str(a.assignment_id): [d.isoformat() for d in a.service_dates] for a in facts.assignments}
+            after = {str(result.assignment_resolution.assignment_id_by_candidate_key[a.candidate_key]):
+                     [d.isoformat() for d in a.service_dates] for a in command.candidate.assignments}
+            dates_changed = {d for dates in before.values() for d in dates} != {d for dates in after.values() for d in dates}
+            end = max(d for a in command.candidate.assignments for d in a.service_dates) if dates_changed else facts.actual_end_date
+            start = min(d for a in command.candidate.assignments for d in a.service_dates) if dates_changed else facts.actual_start_date
             cursor.execute(
                 "INSERT INTO order_lifecycle_state_events "
                 "(case_no,trigger_event,before_status,after_status,actor,business_date,"
@@ -293,13 +465,16 @@ class MySqlOfficialServiceDateCorrectionRepository:
                      "previous_generation_id": facts.generation_id,
                      "successor_generation_id": result.generation_id,
                      "scheduling_receipt_id": result.scheduling_receipt_id,
+                     "before": before, "after": after,
                      "reason": command.reason, "evidence": preview.evidence,
+                     **({"funding_review": {"state": "pending", "staff_ids": preview.funding_review_staff,
+                         "obligation_ids": preview.funding_review_roots}} if preview.funding_review_staff else {}),
                  }, ensure_ascii=False)),
             )
             cursor.execute(
-                "UPDATE orders SET lifecycle_version=lifecycle_version+1 "
+                "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,lifecycle_version=lifecycle_version+1 "
                 "WHERE case_no=%s AND lifecycle_version=%s AND status=%s",
-                (facts.case_no, facts.order_version, facts.order_status),
+                (start, end, facts.case_no, facts.order_version, facts.order_status),
             )
             if cursor.rowcount != 1:
                 raise ValueError("official_date_version_conflict")
@@ -308,7 +483,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
             tuple(OfficialDateSelection(
                 result.assignment_resolution.assignment_id_by_candidate_key[assignment.candidate_key],
                 assignment.service_dates,
-            ) for assignment in command.candidate.assignments), preview.fingerprint,
+            ) for assignment in command.candidate.assignments), preview.fingerprint, bool(preview.funding_review_staff),
         )
 
     def replace_and_record(self, command, preview) -> OfficialDateReceipt:

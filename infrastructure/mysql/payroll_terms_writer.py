@@ -15,7 +15,7 @@ from infrastructure.mysql.effective_case_service_rate import (
 
 def persist_payroll_terms_impact(cursor, command) -> None:
     if not command.reuse_existing_assignments:
-        _insert_carried_rate_snapshots(cursor, command)
+        persist_payroll_rate_snapshots(cursor, command)
     from infrastructure.mysql.payroll_amount_correction_repository import controlled_payroll_terms,carry_payroll_amount_control
     controlled,carry=controlled_payroll_terms(cursor,command)
     for ordinal, action in enumerate(command.candidate.actions, start=1):
@@ -39,7 +39,10 @@ def persist_payroll_terms_impact(cursor, command) -> None:
         resolution = dict(command.candidate.rate_source_assignments)
     from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
     if not isinstance(command.candidate.payroll, HistoricalCasePayrollCandidate):
-        persist_payroll_installments(cursor, command.candidate.case_no, command.candidate.payroll, resolution)
+        unchanged_paid = {item.candidate_assignment_key for item in command.candidate.frozen_settlements
+                          if item.previous_entitlement == item.revised_entitlement}
+        persist_payroll_installments(cursor, command.candidate.case_no, command.candidate.payroll, resolution,
+                                     unchanged_paid=unchanged_paid, staff_ids=command.installment_staff_ids)
 
 
 def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, result) -> None:
@@ -248,7 +251,7 @@ def _action_requires_event(action) -> bool:
     )
 
 
-def _insert_carried_rate_snapshots(cursor, command):
+def persist_payroll_rate_snapshots(cursor, command):
     rows = tuple(_rate_row(command, item) for item in command.candidate.carried_rate_snapshots)
     cursor.executemany(
         "INSERT INTO assignment_payroll_rate_snapshots "

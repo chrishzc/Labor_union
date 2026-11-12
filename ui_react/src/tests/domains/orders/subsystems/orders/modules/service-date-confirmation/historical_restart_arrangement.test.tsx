@@ -18,10 +18,32 @@ it('列出既定月嫂及各自可選的服務日期', () => {
 
   const first = screen.getByRole('group', { name: /王月嫂/ });
   const second = screen.getByRole('group', { name: /李月嫂/ });
+  const allocationPanel = screen.getByRole('region', { name: '月嫂分配' });
+  expect(allocationPanel).toContainElement(first);
+  expect(within(allocationPanel).queryByRole('button', { name: '移除該月嫂' })).not.toBeInTheDocument();
   expect(within(first).getByRole('button', { name: /2026-09-08/ })).toHaveAttribute('aria-pressed', 'true');
   expect(within(second).getByRole('button', { name: /2026-09-08/ })).toBeDisabled();
   fireEvent.click(within(second).getByRole('button', { name: /2026-09-11/ }));
   expect(onSelect).toHaveBeenCalledWith(dates[2], 13);
+});
+
+it('可編輯時，新增控制在月嫂分配內，每位月嫂的移除控制在自己的日期群組', () => {
+  const newStaff = { staff_id: 14, staff_name: '陳月嫂' };
+  const onAdd = vi.fn();
+  const onRemove = vi.fn();
+  render(<HistoricalRestartArrangementPanel staff={staff} dates={dates} allocation={{}} disabled={false}
+    onSelect={vi.fn()} staffManagement={{ options: [...staff, newStaff], limit: 4, disabled: false, onAdd, onRemove }} />);
+
+  const panel = within(screen.getByRole('region', { name: '月嫂分配' }));
+  fireEvent.change(panel.getByRole('combobox', { name: '新增排班月嫂' }), { target: { value: '14' } });
+  fireEvent.click(panel.getByRole('button', { name: '加入排班月嫂' }));
+  expect(onAdd).toHaveBeenCalledExactlyOnceWith(newStaff);
+
+  for (const person of staff) {
+    const group = within(panel.getByRole('group', { name: new RegExp(person.staff_name) }));
+    fireEvent.click(group.getByRole('button', { name: '移除該月嫂' }));
+  }
+  expect(onRemove.mock.calls).toEqual([[12], [13]]);
 });
 
 it('只接受每位月嫂各一段連續的服務日序列，非服務日不切斷分段', () => {

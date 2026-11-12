@@ -519,6 +519,7 @@ def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *,
         confirmed_days=confirmed_days,
         authorized_substitutions=tuple(proof["substitutions"].items()),
         service_start_plan_id=int(commitment["matching_plan_id"]),
+        office_reallocation=bool(proof.get("office_reallocation_reason")),
     )
     return commitment_id
 
@@ -558,6 +559,8 @@ def _append_commitment_conversion(cursor, command, result, context, commitment_i
         payload["confirmation_source"] = "office"
         payload["office_command_key"] = snapshot["office_command_key"]
         payload["office_command_fingerprint"] = snapshot["office_command_fingerprint"]
+        if snapshot.get("office_reallocation_reason"):
+            payload["office_reallocation_reason"] = snapshot["office_reallocation_reason"]
     payload["service_start_response_ids"] = snapshot["service_start_response_ids"]
     payload["confirmed_service_date_version_id"] = snapshot["confirmed_version_id"]
     cursor.execute(

@@ -63,6 +63,7 @@ const ReceiptSchema = z.object({
     service_dates: z.array(DateSchema),
   })),
   preview_fingerprint: z.string(),
+  funding_review_pending: z.boolean().default(false),
 });
 
 const AttributionPreviewSchema = z.object({
@@ -70,19 +71,42 @@ const AttributionPreviewSchema = z.object({
   order_version: z.number().int(),
   scheduling_version: z.number().int(),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  funding_review_pending: z.boolean().default(false),
   proposed_assignments: z.array(AssignmentSchema.pick({ staff_id: true, service_dates: true })),
   staff_entitlements: z.array(z.object({ staff_id: z.number().int(), amount_ntd: z.number().int() })),
+  manual_amounts: z.array(z.object({ staff_id: z.number().int(), previous_calculated_ntd: z.number().int(), manual_ntd: z.number().int() })).default([]),
+  funding: z.array(z.object({ staff_id: z.number().int(), kind: z.enum(['client', 'subsidy', 'unsplit']),
+    before_ntd: z.number().int(), settled_ntd: z.number().int().nullable(), after_ntd: z.number().int().nullable() })).default([]),
   paid_obligations: z.array(z.object({
     staff_id: z.number().int(), before_ntd: z.number().int(), after_ntd: z.number().int(),
     paid_ntd: z.number().int(), recovery_increase_ntd: z.number().int(),
   })),
 });
 export type AttributionPreview = z.infer<typeof AttributionPreviewSchema>;
+const FundingSourceSchema = z.object({
+  staff_id: z.number().int(), kind: z.enum(['client', 'subsidy', 'unsplit']),
+  amount_ntd: z.number().int(), settled_ntd: z.number().int().nullable(),
+});
+const FundingReviewSchema = z.discriminatedUnion('pending', [
+  z.object({ pending: z.literal(false) }),
+  z.object({
+    pending: z.literal(true), preview_fingerprint: z.string(), subsidy_ntd: z.number().int(),
+    payment_evidence_missing: z.boolean(),
+    assignments: z.array(z.object({ assignment_id: z.number().int(), staff_id: z.number().int(),
+      amount_ntd: z.number().int(), service_dates: z.array(DateSchema) })),
+    sources: z.array(FundingSourceSchema),
+    installments: z.array(FundingSourceSchema.extend({ payable_ntd: z.number().int(), recovery_ntd: z.number().int() })),
+  }),
+]);
+export type AttributionFundingReview = Extract<z.infer<typeof FundingReviewSchema>, { pending: true }>;
+export type AttributionFundingInput = { selections: { assignment_id: number; subsidy_ntd: number }[]; evidence: string };
 export type AttributionChange = {
   source_assignment_id: number;
   staff_id: number;
   service_dates: string[];
   evidence: string;
+  replacement_dates?: string[];
+  scope?: 'served' | 'upcoming';
 };
 
 export type OfficialDateQuery = z.infer<typeof QuerySchema>;
@@ -98,16 +122,32 @@ function path(caseNo: string) {
 }
 
 export const officialServiceDateCorrectionClient = {
+  async queryFundingReview(caseNo: string, signal: AbortSignal) {
+    return decodeEnvelope(FundingReviewSchema, await transport.get(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/funding-review`, { ...options(), signal },
+    ));
+  },
+  async previewFundingReview(caseNo: string, input: AttributionFundingInput) {
+    return decodeEnvelope(FundingReviewSchema, await transport.post(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/funding-review/preview`, input, options(),
+    ));
+  },
+  async applyFundingReview(caseNo: string, input: AttributionFundingInput, fingerprint: string, key: string) {
+    return decodeEnvelope(FundingReviewSchema, await transport.post(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/funding-review/apply`,
+      { ...input, preview_fingerprint: fingerprint }, options({ 'Idempotency-Key': key, 'X-Correlation-ID': key }),
+    ));
+  },
   async previewAttribution(caseNo: string, change: AttributionChange) {
     return decodeEnvelope(AttributionPreviewSchema, await transport.post(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/preview`, change, options(),
     ));
   },
-  async applyAttribution(caseNo: string, change: AttributionChange, preview: AttributionPreview, reason: string, key: string) {
+  async applyAttribution(caseNo: string, change: AttributionChange, preview: AttributionPreview, reason: string, key: string, adoptCalculatedAmounts = false) {
     return decodeEnvelope(ReceiptSchema, await transport.post(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/apply`,
       { ...change, expected_order_version: preview.order_version, expected_scheduling_version: preview.scheduling_version,
-        preview_fingerprint: preview.preview_fingerprint, reason },
+        preview_fingerprint: preview.preview_fingerprint, reason, adopt_calculated_amounts: adoptCalculatedAmounts },
       options({ 'Idempotency-Key': key, 'X-Correlation-ID': key }),
     ));
   },

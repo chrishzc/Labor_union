@@ -191,6 +191,7 @@ class PayrollFrozenSettlement:
     revised_entitlement: MoneyNTD
     paid_net_amount: MoneyNTD
     recovery_increase: MoneyNTD
+    candidate_assignment_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,7 +293,8 @@ def calculate_assignment_payroll(source_facts, scheduling, order_terms):
     return payroll
 
 
-def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_identity):
+def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_identity, *,
+                                 funding_staff=frozenset(), settlement_amounts=None):
     """Preserve paid roots and append only the change in legal entitlement.
 
     Corrections belong to the original obligation, across Scheduling generations.
@@ -301,7 +303,8 @@ def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_
     """
     facts = _impact_facts(source_facts, scheduling, order_terms)
     payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy)
-    return _handover_candidate(facts, payroll, rates, change_identity)
+    return _handover_candidate(facts, payroll, rates, change_identity,
+                               funding_staff=funding_staff, settlement_amounts=settlement_amounts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,7 +331,7 @@ def _has_handover_corrections(facts):
     return any(item.obligation_identity.startswith("staff-handover:") for item in facts.existing_obligations)
 
 
-def _handover_candidate(facts, payroll, rates, change_identity):
+def _handover_candidate(facts, payroll, rates, change_identity, *, funding_staff=frozenset(), settlement_amounts=None):
     if any(item.paid_net_amount.amount > 0 and not item.payout_history_exists for item in facts.existing_obligations):
         raise ValueError("handover_paid_history_review_required")
     if any(item.total_payable.amount < 0 for item in payroll.assignments):
@@ -344,6 +347,7 @@ def _handover_candidate(facts, payroll, rates, change_identity):
     if children.get(None):
         raise ValueError("handover_obligation_lineage_ambiguous")
     actions, settlements, retained = [], [], set()
+    settlement_amounts = settlement_amounts or {}
     for assignment in payroll.assignments:
         segment = _scheduling_assignment(facts, assignment)
         source = by_source.get(segment.source_assignment_id)
@@ -361,11 +365,13 @@ def _handover_candidate(facts, payroll, rates, change_identity):
             raise ValueError("handover_obligation_lineage_ambiguous")
         retained.add(root.obligation_identity)
         _handover_root_actions(facts, root, assignment.total_payable, assignment.assignment_identity,
-                               children.get(root.obligation_identity, ()), change_identity, actions, settlements)
+                               children.get(root.obligation_identity, ()), change_identity, actions, settlements,
+                               funding_staff, settlement_amounts)
     for root in roots.values():
         if root.obligation_identity not in retained:
             _handover_root_actions(facts, root, MoneyNTD(0), None,
-                                   children.get(root.obligation_identity, ()), change_identity, actions, settlements)
+                                   children.get(root.obligation_identity, ()), change_identity, actions, settlements,
+                                   funding_staff, settlement_amounts)
     candidate = _candidate(facts, payroll, rates, tuple(actions))
     return replace(candidate, frozen_settlements=tuple(settlements), fingerprint=fingerprint_payload({
         "payroll": candidate.fingerprint.value,
@@ -375,7 +381,8 @@ def _handover_candidate(facts, payroll, rates, change_identity):
     }))
 
 
-def _handover_root_actions(facts, root, total, key, children, change_identity, actions, settlements):
+def _handover_root_actions(facts, root, total, key, children, change_identity, actions, settlements,
+                           funding_staff, settlement_amounts):
     # Unpaid adjustment projections can be rebuilt; immutable allocations stay
     # with their original caregiver. A paid independent correction needs review.
     corrections = [item for item in children if item.obligation_identity.startswith("staff-handover:")]
@@ -402,7 +409,9 @@ def _handover_root_actions(facts, root, total, key, children, change_identity, a
     )
     if previous < 0 or any(item.payout_history_exists for item in corrections):
         raise ValueError("handover_obligation_lineage_ambiguous")
-    recovery_delta = max(0, root.paid_net_amount.amount - total.amount) - max(0, root.paid_net_amount.amount - previous)
+    total = MoneyNTD(settlement_amounts.get(root.obligation_identity, total.amount))
+    recovery_delta = (0 if root.staff_id in funding_staff else
+        max(0, root.paid_net_amount.amount - total.amount) - max(0, root.paid_net_amount.amount - previous))
     if recovery_delta < 0:
         raise ValueError("handover_recovery_adjustment_required")
     delta = total.amount - previous
@@ -419,7 +428,7 @@ def _handover_root_actions(facts, root, total, key, children, change_identity, a
             MoneyNTD(abs(delta)), root.due_date,
         ))
     settlements.append(PayrollFrozenSettlement(root.obligation_identity, identity, root.staff_id,
-        MoneyNTD(previous), total, root.paid_net_amount, MoneyNTD(recovery_delta)))
+        MoneyNTD(previous), total, root.paid_net_amount, MoneyNTD(recovery_delta), key))
 
 
 def _impact_facts(source, scheduling, order_terms):
