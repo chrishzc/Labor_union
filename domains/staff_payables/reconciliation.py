@@ -104,6 +104,7 @@ class OutgoingBankFact:
     blocking_anomalies: tuple[str, ...] = ()
     taishin_memo_staff_id: int | None = None
     manual_confirmed_staff_id: int | None = None
+    is_sinopac_payout: bool = False
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "outgoing bank fact identity")
@@ -528,6 +529,8 @@ def _validate_bank_fact_owner(bank_fact, bank_accounts, staff_id) -> None:
     if bank_fact.taishin_memo_staff_id is not None:
         if bank_fact.taishin_memo_staff_id != staff_id:
             raise ValueError("cross_staff_allocation_forbidden")
+        return
+    if bank_fact.is_sinopac_payout:
         return
     if bank_fact.bank_account_identity is None:
         raise ValueError("staff_bank_account_ambiguous")

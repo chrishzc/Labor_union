@@ -12,7 +12,8 @@
 ### 2.1 責任分離與根事實
 
 - Staff Payables 擁有：`staff_obligations` projection 消費、不可變 `payout／return／reversal` ledger、obligation link、`payable | partially_paid | completed | recovery_required | anomaly` 投影與同月嫂彙整清冊來源；不擁有訂單狀態、服務日、薪資公式或月結 (`draft/finalized`) 狀態機。
-- **根事實**：Payroll 產生的 `staff_obligations`、assignment identity 與 rate snapshot、canonical bank payout fact（或 [手動補登](22_銀行流水匯入與帳務異常處理正式規格.md#6-案件帳務手動補登與自動銷帳) 來源）、payout/return/reversal event、allocation link、各銀行正式對象證據（台新 `P台` 僅須原始備註及唯一月嫂姓名，不要求交易帳號；其餘沿帳號 snapshot）、version 與 receipt。
+- **根事實**：Payroll 產生的 `staff_obligations`、assignment identity 與 rate snapshot、canonical bank payout fact（或 [手動補登](22_銀行流水匯入與帳務異常處理正式規格.md#6-案件帳務手動補登與自動銷帳) 來源）、payout/return/reversal event、allocation link、各銀行正式對象證據、version 與 receipt。
+- **銀行月嫂出款對象**：永豐 `P永` 自動核銷依匯入辨識的對象與配對義務，人工核銷依經操作者確認的應付義務。兩者均免驗交易收款帳號與月嫂主要帳戶。台新 `P台` 依原始備註辨識唯一月嫂姓名並比對所選義務。
 - `staff_monthly_settlements`、`staff_monthly_settlement_details`、`staff_actual_transfers`、`staff_payment_transactions`、`staff_transfer_allocations` 僅供歷史唯讀查詢或明確 backfill；`staff_payments` 僅唯讀相容投影。
 
 ### 2.2 Payout Reconciliation Preview／Apply

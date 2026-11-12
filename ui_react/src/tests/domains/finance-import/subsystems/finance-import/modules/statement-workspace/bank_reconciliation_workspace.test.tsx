@@ -273,6 +273,11 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
 
   it('does not infer candidate count from an unknown review, or hide a saved concrete cause behind legacy diagnostics',()=>{
     const message='未留存當次未核銷原因，請進入核對確認';
+    expect(financeBankReviewPresentation({
+      ...sinopac, bank: 'sinopac', direction: 'outgoing', classification_type: 'staff_payout',
+      review_reason: 'staff_payout_amount_mismatch', dispatch_reason: 'staff_bank_account_ambiguous',
+      recorded_pending_reason: 'staff_bank_account_ambiguous',
+    })).toMatchObject({ label: '金額不符' });
     expect(financeBankReviewPresentation({...sinopac,review_reason:'sinopac_client_receipt_shortfall'}))
       .toEqual({label:'待核對',reason:message,nextStep:message});
     expect(financeBankReviewPresentation({...sinopac,recorded_pending_reason:'sinopac_client_receipt_shortfall'}))

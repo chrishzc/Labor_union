@@ -16,7 +16,6 @@ import re
 from typing import Iterator, Mapping
 
 from pymysql.err import IntegrityError, OperationalError
-from domains.finance_import.cancellation_code import extract_sinopac_account_reference
 from domains.finance_import.transaction_classifier import extract_name_from_row_text
 
 from domains.staff_payables.reconciliation import (
@@ -650,12 +649,7 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=N
 
 def _payout_source_account(row):
     if row.get("format_id") == "sinopac":
-        references = row.get("bank_references")
-        if isinstance(references, str):
-            references = json.loads(references)
-        if not isinstance(references, Mapping):
-            return None
-        return extract_sinopac_account_reference(references.get("交易參考編號"))
+        return None
     return row.get("resolved_counterparty_account")
 
 
@@ -814,6 +808,7 @@ def _outgoing_bank_fact(row, staff_id, anomaly_codes):
         anomaly_codes,
         taishin_memo_staff_id=row.get("taishin_memo_staff_id"),
         manual_confirmed_staff_id=row.get("manual_confirmed_staff_id"),
+        is_sinopac_payout=row.get("format_id") == "sinopac",
     )
 
 

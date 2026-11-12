@@ -111,6 +111,7 @@ function resolveFinanceImportReview(
   postingStopped?: 'preview_blocked' | 'apply_failed',
 ): ReviewResult {
   const casePayment = ['client_receipt','staff_payout','staff_salary','client_refund','client_subsidy_return'].includes(row.classification_type);
+  const sinopacStaffPayout = row.bank === 'sinopac' && ['staff_payout', 'staff_salary'].includes(row.classification_type);
   const reasonLabel = (code: string) => {
     if (casePayment && LEGACY_REVIEW_DIAGNOSTICS.has(code)) return MISSING_REVIEW_REASON;
     if ((row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return') {
@@ -130,8 +131,8 @@ function resolveFinanceImportReview(
       if (code === 'due_date_missing') return '待收期款缺少原到期日，無法完成月份配對；請人工選款核對。';
       if (code === 'bank_fact_not_eligible' || code === 'client_refund_recipient_snapshot_missing') return MISSING_REVIEW_REASON;
     }
-    if (row.bank === 'sinopac' && ['staff_payout','staff_salary'].includes(row.classification_type)) {
-      if (code === 'outgoing_bank_fact_not_eligible') return MISSING_REVIEW_REASON;
+    if (sinopacStaffPayout) {
+      if (code === 'outgoing_bank_fact_not_eligible' || code === 'staff_bank_account_ambiguous') return MISSING_REVIEW_REASON;
       if (SINOPAC_PAYOUT_REASON_MESSAGES[code]) return SINOPAC_PAYOUT_REASON_MESSAGES[code];
     }
     if (row.bank === 'taishin' && ['staff_payout','staff_salary'].includes(row.classification_type)) {
@@ -180,6 +181,9 @@ function resolveFinanceImportReview(
     return { reasonCode: null, message: postingStopped === 'preview_blocked'
       ? '流水已保存。批次預覽有阻擋，尚未執行自動核銷。'
       : `流水已保存。當次批次核銷未完成。${MISSING_REVIEW_REASON}` };
+  }
+  if (sinopacStaffPayout && row.review_reason === 'staff_payout_amount_mismatch') {
+    return describe(row.review_reason);
   }
   if (casePayment) return { reasonCode: null, message: UNRECORDED_REVIEW_MESSAGE };
   const reviewReason = row.review_reason ?? '';
