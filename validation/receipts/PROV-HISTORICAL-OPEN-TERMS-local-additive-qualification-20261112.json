@@ -1,0 +1,99 @@
+{
+  "artifact": {
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "descriptor_sha256": "75d0f4e27540f49ec66894f24a713e643b4c099796cfe876eacbcf1d85d29bd0",
+    "name": "1074_historical_open_order_terms_receipt_status.sql",
+    "sql_sha256": "5bb4f7e93edbf65b5f6ad236c65a1cb055c574f0f9cc39fb4e9d5b23c63088e2"
+  },
+  "contract": "local-additive-qualification/v1",
+  "fresh_bootstrap": {
+    "data_rows_written": 0,
+    "schema_fingerprint": "a6b29af8fc2268f22f5f33a91160e8cc7bdd55803b7b7b853936c41ba2a18892",
+    "status": "verified",
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850"
+  },
+  "manifest_artifact_inventory": [
+    {
+      "data_effect": "schema_only",
+      "dependencies": [],
+      "name": "1074_historical_open_order_terms_receipt_status.sql",
+      "sha256": "5bb4f7e93edbf65b5f6ad236c65a1cb055c574f0f9cc39fb4e9d5b23c63088e2"
+    }
+  ],
+  "metadata_backup": {
+    "backup_dump_sha256": "40a62cef8ee75dd7d472930a878a3454732a68f8b9493a3486dbeb0f1245dc02",
+    "data_fingerprint_sha256": "cbb13932c85aa8e3a6cf4efaea512bb809dfc7c005fe9d85c09da81f3922581a",
+    "data_fingerprints": {
+      "client_obligations": "0d295265f1bee7f9403200496006f9b2bc2cc6c1f16688c5e5a0a4459d8e7849",
+      "order_terms_apply_receipts": "90772f07bf29e7427ca37022564998adec1ec91709804c23d1aebb14a2b0a687",
+      "orders": "6e7a19390b80a3272efc00a1d8abed24f2131dea4f271e5b3fe8c39da0f8f2a9"
+    },
+    "data_row_counts": {
+      "client_obligations": 6,
+      "order_terms_apply_receipts": 1,
+      "orders": 3
+    },
+    "schema_sha256": "797b33189db64a4f0b2ef9f6d030ff8adfb042211e1691c66dc852243ee23714",
+    "status": "verified"
+  },
+  "payload_digest": "8288eac20653d462a38f596227ae7e6910caf05598c3d572ec3bab00716e25b6",
+  "policy": {
+    "backfill": 0,
+    "destructive": 0,
+    "local_in_place_eligible": true,
+    "seed": 0
+  },
+  "policy_evidence": {
+    "candidate_dump_sha256": "b11ace3e88f788b7da3bcd42dfa49ba8dc178013d99346faf07a49828128cf1b",
+    "fresh_schema_fingerprint": "a6b29af8fc2268f22f5f33a91160e8cc7bdd55803b7b7b853936c41ba2a18892",
+    "fresh_target_projection_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850",
+    "preserve_candidate_schema_fingerprint": "985659d60e59d2fed86564a7af6ab6a304af375c626efb6a7c67abc804f31794",
+    "preserve_candidate_target_projection_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850",
+    "preserve_source_schema_fingerprint": "797b33189db64a4f0b2ef9f6d030ff8adfb042211e1691c66dc852243ee23714",
+    "source_dump_sha256": "40a62cef8ee75dd7d472930a878a3454732a68f8b9493a3486dbeb0f1245dc02"
+  },
+  "preserve_data_candidate": {
+    "candidate_data_fingerprints": {
+      "client_obligations": "0d295265f1bee7f9403200496006f9b2bc2cc6c1f16688c5e5a0a4459d8e7849",
+      "order_terms_apply_receipts": "90772f07bf29e7427ca37022564998adec1ec91709804c23d1aebb14a2b0a687",
+      "orders": "6e7a19390b80a3272efc00a1d8abed24f2131dea4f271e5b3fe8c39da0f8f2a9"
+    },
+    "candidate_data_row_counts": {
+      "client_obligations": 6,
+      "order_terms_apply_receipts": 1,
+      "orders": 3
+    },
+    "candidate_dump_sha256": "b11ace3e88f788b7da3bcd42dfa49ba8dc178013d99346faf07a49828128cf1b",
+    "candidate_schema_fingerprint": "985659d60e59d2fed86564a7af6ab6a304af375c626efb6a7c67abc804f31794",
+    "data_fingerprints": {
+      "client_obligations": "0d295265f1bee7f9403200496006f9b2bc2cc6c1f16688c5e5a0a4459d8e7849",
+      "order_terms_apply_receipts": "90772f07bf29e7427ca37022564998adec1ec91709804c23d1aebb14a2b0a687",
+      "orders": "6e7a19390b80a3272efc00a1d8abed24f2131dea4f271e5b3fe8c39da0f8f2a9"
+    },
+    "data_row_counts": {
+      "client_obligations": 6,
+      "order_terms_apply_receipts": 1,
+      "orders": 3
+    },
+    "source_dump_sha256": "40a62cef8ee75dd7d472930a878a3454732a68f8b9493a3486dbeb0f1245dc02",
+    "source_schema_fingerprint": "797b33189db64a4f0b2ef9f6d030ff8adfb042211e1691c66dc852243ee23714",
+    "status": "verified",
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850"
+  },
+  "published_manifest_sha256": "0a96a31da61a136010b789b796f8211e9195be5b0b959d936125ddd87a8e129a",
+  "release_fingerprint": "7a0e02155896d14dd272897f6e7ddfa3a22b8756eb326a9abf3a8ff3c8461c40",
+  "release_id": "labor-union-historical-open-terms-receipts-2026-11-12-v1",
+  "target_projection": {
+    "artifact_name": "1074_historical_open_order_terms_receipt_status.sql",
+    "contract": "local-additive-target-projection/v1",
+    "descriptor_sha256": "75d0f4e27540f49ec66894f24a713e643b4c099796cfe876eacbcf1d85d29bd0",
+    "fresh_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850",
+    "fresh_state": "exact",
+    "preserve_candidate_fingerprint": "f363228590411c761ff25385f805cacf9060979b72470113a702e89671e21850",
+    "preserve_candidate_state": "exact"
+  },
+  "work_package": "HISTORICAL-OPEN-TERMS"
+}

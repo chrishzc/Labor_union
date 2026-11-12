@@ -338,8 +338,8 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
 
   const termsDirty = Object.entries(draft).some(([field, value]) => value !== draftFromQuery(currentQuery)[field as keyof OrderTermsDraft]);
   useEffect(() => {
-    onEditStateChange?.({ dirty: termsDirty, busy: status !== 'idle' || outcomeUnknown || Boolean(receipt && !readback) });
-  }, [termsDirty, status, outcomeUnknown, receipt, readback, onEditStateChange]);
+    onEditStateChange?.({ dirty: termsDirty, busy: status !== 'idle' });
+  }, [termsDirty, status, onEditStateChange]);
 
   const proposedTermsPayload = (dates = replacementDates) => ({
     ...(floorCorrection ? { floor_fee_correction: true } : {}),
@@ -550,13 +550,13 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
         }
       } else {
         setOutcomeUnknown(true);
-        setError(`送出結果尚未確認，請重播同一筆提交以取得結果：${errorMessage(caught, '無法確認套用訂單條款。')}`);
+        setError(`送出結果尚未確認。你可以重播同一筆提交，或離開後重新開啟案件核對已儲存的條款。${errorMessage(caught, '無法確認套用訂單條款。')}`);
       }
     } finally {
       if (mounted.current && activeCase.current === caseNo) setStatus('idle');
     }
   };
-  useUnsavedDraft('訂單條件', Object.fromEntries(Object.entries(draft).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), { baseline: Object.fromEntries(Object.entries(draftFromQuery(currentQuery)).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), busy: status !== 'idle' || outcomeUnknown || Boolean(receipt && !readback) });
+  useUnsavedDraft('訂單條件', Object.fromEntries(Object.entries(draft).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), { baseline: Object.fromEntries(Object.entries(draftFromQuery(currentQuery)).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), busy: status !== 'idle' });
 
 
   return (

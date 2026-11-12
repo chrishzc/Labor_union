@@ -82,6 +82,7 @@
 
 - **HCM 審核狀態獨立升級與回填**：`labor_union_2026_11_06_hcm_review_status_v1.json`（`1069_hcm_review_status.sql`）僅新增 nullable 欄位（無 system seed 或自動回填）。具備原始 HCM Excel 之開發環境透過 `python -m scripts.backfill_hcm_review_status <Excel...> [--apply --confirm-database <db>]`（限 localhost `union_db`／`lu_test_*`）預覽 SHA-256 後僅補寫空白欄位，衝突或重複維持原值。
 - **BeClass 多案配對升級**。`labor_union_2026_11_12_client_beclass_query_case_v1.json` 以一個 ALTER 替換 `beclass_records` 的唯一索引，保留既有列、主鍵與查詢索引，無種子或回填。部署與驗證須搭配支援多案配對的 API。一旦同一查詢序號已有多案紀錄，保留新索引及資料，使用相容版本向前修復。
+- **歷史未結案的條款收據升級**。`labor_union_2026_11_12_historical_open_terms_receipts_v1.json` 以 `1074_historical_open_order_terms_receipt_status.sql` 在既有狀態值尾端追加「歷史訂單－未服務」與「歷史訂單－服務中」，保留原狀態順序、收據與案件資料。新建與保留資料升級均採同一欄位契約。
 
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 

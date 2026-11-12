@@ -81,6 +81,29 @@ def test_registry_save_receipts_accept_only_declared_predecessors_and_successors
     assert migration.local_additive_descriptor_state(metadata, descriptor, bootstrap_part) == 'drift'
 
 
+def test_open_historical_terms_receipts_preserve_enum_order_and_release_chain():
+    name = 'labor_union_2026_11_12_historical_open_terms_receipts_v1.json'
+    artifact = '1074_historical_open_order_terms_receipt_status.sql'
+    pending = '1071_pending_order_terms_receipt_status.sql'
+    prior = NEW[:-1] + ",'待補件')"
+    current = prior[:-1] + ",'歷史訂單－未服務','歷史訂單－服務中')"
+    release = load_migration_release_manifest(migration.ROOT / 'db/migration_releases' / name, migration.ROOT)
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    assert name in migration.DEFAULT_RELEASE_MANIFESTS
+    assert release.owned_object_descriptors(migration.ROOT)[artifact]['parent_columns'] == descriptor['parent_columns']
+    assert release.backfills == ()
+    assert validate_schema_assembly() == []
+    sql, = migration.split_sql((migration.ROOT / 'db/schema_parts' / artifact).read_text(encoding='utf-8'))
+    assert migration._local_classify_statement(sql) == 'alter_add_only'
+    assert migration.local_additive_descriptor_state(snapshot(prior), descriptor, artifact) == 'absent'
+    assert migration.local_additive_descriptor_state(snapshot(current), descriptor, artifact) == 'exact'
+    swapped = prior[:-1] + ",'歷史訂單－服務中','歷史訂單－未服務')"
+    assert migration.local_additive_descriptor_state(snapshot(swapped), descriptor, artifact) == 'drift'
+    for predecessor in (ARTIFACT, pending):
+        older = migration._canonical_artifact_descriptor(predecessor)
+        assert migration.local_additive_descriptor_state(snapshot(current), older, predecessor) == 'exact'
+
+
 def test_ordered_chain_defers_1071_while_1070_is_pending_and_blocks_real_drift(
     monkeypatch, tmp_path
 ) -> None:

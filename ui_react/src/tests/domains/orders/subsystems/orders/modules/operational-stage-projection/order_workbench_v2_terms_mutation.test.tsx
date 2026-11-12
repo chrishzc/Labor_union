@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import {
   CORE_STAGE_CODES,
   SUBSTATUS_BY_STAGE_STATUS,
@@ -543,7 +545,7 @@ describe('validateServiceTimeWindow 驗證與提示', () => {
 
 describe('Issue326 replacement dates and allocation from the Terms UI', () => {
   beforeEach(() => { vi.restoreAllMocks(); Object.values(mocks).forEach((mock) => mock.mockReset()); });
-  it.each([[false, 'none'], [true, 'none'], [true, 'readback'], [true, 'unknown']] as const)('40→30 submits one target and reads back dates (assigned=%s, failure=%s)', async (assigned, failure) => {
+  it.each([[false, 'none'], [true, 'none'], [true, 'readback'], [true, 'unknown'], [true, 'leave']] as const)('40→30 handles save and navigation (assigned=%s, failure=%s)', async (assigned, failure) => {
     const dates = Array.from({ length: 30 }, (_, i) => `2026-10-${String(i + 1).padStart(2, '0')}`);
     const query = { ...orderTerms(), terms: { ...orderTerms().terms, service_days: 40 }, confirmed_service_dates: [...dates, ...Array.from({ length: 10 }, (_, i) => `2026-11-${String(i+1).padStart(2,'0')}`)], confirmed_service_date_version: 1,
       assignments: assigned ? [{ assignment_id: 9, staff_id: 3, service_days: 20 }, { assignment_id: 10, staff_id: 4, service_days: 20 }] : [] };
@@ -555,8 +557,18 @@ describe('Issue326 replacement dates and allocation from the Terms UI', () => {
     mocks.applyTerms.mockResolvedValue({ case_no: 'CASE-TERMS', order_version: 13, scheduling_version: 14, scheduling_generation: 3, client_finance_version: 5, payroll_version: 6, lifecycle_status: '洽談中', service_data_lock_formed: false, cancelled_assignment_ids: assigned ? [9, 10] : [], created_assignment_keys: [], official_service_day_count: assigned ? 30 : 0, official_service_hours: assigned ? 270 : 0, preview_fingerprint: 'a'.repeat(64) });
     mocks.queryTerms.mockImplementation(async () => ({ ...query, order_version: 13, scheduling_version: 14, terms: mocks.applyTerms.mock.calls[0][1].proposed_terms, confirmed_service_dates: dates }));
     if (failure === 'readback') mocks.queryTerms.mockRejectedValueOnce(new Error('readback unavailable'));
-    if (failure === 'unknown') mocks.applyTerms.mockRejectedValueOnce(new Error('connection interrupted'));
-    render(<OrderTermsMutationPanel caseNo="CASE-TERMS" query={query} />);
+    if (failure === 'unknown' || failure === 'leave') mocks.applyTerms.mockRejectedValueOnce(new Error('connection interrupted'));
+    function TermsDrawer() {
+      const [open, setOpen] = useState(true);
+      const [busy, setBusy] = useState(false);
+      const { requestLeave } = useUnsavedNavigation();
+      if (!open) return <p>已離開案件</p>;
+      return <>
+        <button disabled={busy} onClick={() => requestLeave(() => setOpen(false))}>關閉案件</button>
+        <OrderTermsMutationPanel caseNo="CASE-TERMS" query={query} onEditStateChange={({ busy }) => setBusy(busy)} />
+      </>;
+    }
+    render(<UnsavedChangesProvider><TermsDrawer /></UnsavedChangesProvider>);
     fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '30' } });
     expect(screen.getByRole('button', { name: '儲存服務條件' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('替代日期排休方式'), { target: { value: '連續服務' } });
@@ -576,9 +588,17 @@ describe('Issue326 replacement dates and allocation from the Terms UI', () => {
       expect(screen.queryByText(/服務條件已儲存並重新讀取確認/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '重新讀取已提交條款' }));
     }
-    if (failure === 'unknown') {
+    if (failure === 'unknown' || failure === 'leave') {
       await screen.findByText(/送出結果尚未確認/);
       expect(screen.getByLabelText('服務天數')).toBeDisabled();
+      expect(screen.getByRole('button', { name: '關閉案件' })).toBeEnabled();
+      if (failure === 'leave') {
+        fireEvent.click(screen.getByRole('button', { name: '關閉案件' }));
+        fireEvent.click(await screen.findByRole('button', { name: '捨棄變更並離開' }));
+        expect(screen.getByText('已離開案件')).toBeInTheDocument();
+        expect(mocks.applyTerms).toHaveBeenCalledTimes(1);
+        return;
+      }
       fireEvent.click(screen.getByRole('button', { name: '重播同一筆條款提交' }));
     }
     await screen.findByText(/服務條件已儲存並重新讀取確認/);

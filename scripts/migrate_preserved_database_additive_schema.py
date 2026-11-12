@@ -383,6 +383,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_11_registry_save_receipts_v1.json",
     "labor_union_2026_11_11_registry_bootstrap_reason_v1.json",
     "labor_union_2026_11_12_client_beclass_query_case_v1.json",
+    "labor_union_2026_11_12_historical_open_terms_receipts_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2337,6 +2338,9 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        "1074_historical_open_order_terms_receipt_status.sql": {
+            "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件')", "NO")},
+        },
         "1071_pending_order_terms_receipt_status.sql": {
             "order_terms_apply_receipts": {"lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')", "NO")},
         },
@@ -4032,6 +4036,7 @@ def _local_classify_statement(statement: str) -> str:
                 "1071_pending_order_terms_receipt_status.sql",
                 "1072_case_architecture_bootstrap_reason_optional.sql",
                 "1073_client_beclass_query_case_uniqueness.sql",
+                "1074_historical_open_order_terms_receipt_status.sql",
             ):
                 canonical = ROOT / "db/schema_parts" / artifact
                 (sql,) = split_sql(canonical.read_text(encoding="utf-8"))
@@ -6468,6 +6473,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["order_terms_apply_receipts"] = {
             "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件')", "NO"),
         }
+    if part_name == "1074_historical_open_order_terms_receipt_status.sql":
+        descriptor["parent_columns"]["order_terms_apply_receipts"] = {
+            "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成','待補件','歷史訂單－未服務','歷史訂單－服務中')", "NO"),
+        }
     if part_name == "1070_historical_order_terms_receipt_status.sql":
         descriptor["parent_columns"]["order_terms_apply_receipts"] = {
             "lifecycle_status": _column_contract("enum('洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務完成','歷史訂單－帳務完成')", "NO"),
@@ -6864,6 +6873,7 @@ def _release_descriptor_metadata_state(
         "1070_historical_order_terms_receipt_status.sql",
         "1071_pending_order_terms_receipt_status.sql",
         "1072_case_architecture_bootstrap_reason_optional.sql",
+        "1074_historical_open_order_terms_receipt_status.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -7503,13 +7513,11 @@ def _artifact_metadata_state(
                 _normalize_column_type_contract(row["column_type"])
                 == expected["column_type"]
             )
-            successor_type = _allowed_successor_column_type(
+            successor_types = _allowed_successor_column_types(
                 part_name, table, name
             )
             successor_type_matches = (
-                successor_type is not None
-                and _normalize_column_type_contract(row["column_type"])
-                == successor_type
+                _normalize_column_type_contract(row["column_type"]) in successor_types
             )
             if (
                 not (type_matches or successor_type_matches)
@@ -7829,19 +7837,23 @@ def _allowed_later_artifact_columns(
     return set()
 
 
-def _allowed_successor_column_type(
+def _allowed_successor_column_types(
     part_name: str, table: str, column: str,
-) -> str | None:
-    """Return an exact type from a declared successor of the owned column."""
-    if (
-        part_name == "1070_historical_order_terms_receipt_status.sql"
-        and table == "order_terms_apply_receipts"
-        and column == "lifecycle_status"
-    ):
-        successor = _canonical_artifact_descriptor("1071_pending_order_terms_receipt_status.sql")
-        return successor["parent_columns"][table][column]["column_type"]
+) -> tuple[str, ...]:
+    """Return exact types from declared successors of the owned column."""
+    if table == "order_terms_apply_receipts" and column == "lifecycle_status":
+        pending = "1071_pending_order_terms_receipt_status.sql"
+        historical_open = "1074_historical_open_order_terms_receipt_status.sql"
+        successors = {
+            "1070_historical_order_terms_receipt_status.sql": (pending, historical_open),
+            pending: (historical_open,),
+        }
+        return tuple(
+            _canonical_artifact_descriptor(artifact)["parent_columns"][table][column]["column_type"]
+            for artifact in successors.get(part_name, ())
+        )
     if part_name != "1003_matching_coordination_successor.sql" or table != "matching_coordination_outbox":
-        return None
+        return ()
     successor_types = {
         "intent_type": (
             "enum('line_matching_interaction','line_criteria_diff_resend',"
@@ -7855,11 +7867,7 @@ def _allowed_successor_column_type(
         ),
     }
     value = successor_types.get(column)
-    return (
-        _normalize_column_type_contract(value)
-        if value is not None
-        else None
-    )
+    return (_normalize_column_type_contract(value),) if value is not None else ()
 
 
 def _buffer_advisory_indexes() -> dict[tuple[str, str], dict[str, Any]]:
