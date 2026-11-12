@@ -325,6 +325,9 @@ class MySqlHistoricalServiceCompletionWriter:
         with self._connection.cursor() as cursor:
             event_id = persist_order_lifecycle_impact(cursor, command)
             persist_order_lifecycle_projection(cursor, command)
+        from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
+
+        synchronize_historical_payroll(self._connection, request.case_no)
         return HistoricalServiceCompletionReceipt(
             request.case_no,
             event_id,

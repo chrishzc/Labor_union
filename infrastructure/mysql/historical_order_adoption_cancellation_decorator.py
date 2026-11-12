@@ -40,6 +40,9 @@ class MySqlHistoricalOrderAdoptionCancellationDecorator:
     def has_current_adoption(self, preview):
         return self._inner.has_current_adoption(preview)
 
+    def synchronize_completed_payroll(self, case_no):
+        return self._inner.synchronize_completed_payroll(case_no)
+
     def persist(self, request, preview, assignment_ids):
         _sync_historical_cancellation(self._connection, request, preview)
         return self._inner.persist(request, preview, assignment_ids)

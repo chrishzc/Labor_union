@@ -52,7 +52,7 @@ def connection(monkeypatch):
     connection.db.executescript("""
         CREATE TABLE orders (case_no TEXT, client_id INTEGER, service_days INTEGER,
             requires_cooking INTEGER, start_date DATE, status TEXT,
-            staff_payment_due_date DATE, actual_end_date DATE);
+            staff_payment_due_date DATE, actual_end_date DATE, end_date DATE);
         CREATE TABLE clients (id INTEGER, name TEXT, phone TEXT, city TEXT,
             address TEXT, identity_status TEXT, service_type TEXT);
         CREATE TABLE beclass_records (id INTEGER, bound_case_no TEXT, survey_details TEXT);
@@ -65,8 +65,8 @@ def connection(monkeypatch):
         CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
         INSERT INTO clients VALUES (1,'客戶甲',NULL,'新竹市','東區','一般市民','週休2日');
         INSERT INTO clients VALUES (2,'客戶乙',NULL,NULL,NULL,'補助市民',NULL);
-        INSERT INTO orders VALUES ('115000101',1,20,1,'2026-07-01','訂單完成','2026-09-15','2026-08-20');
-        INSERT INTO orders VALUES ('115000102',2,40,0,'2026-12-01','歷史訂單－服務完成',NULL,NULL);
+        INSERT INTO orders VALUES ('115000101',1,20,1,'2026-07-01','訂單完成','2026-09-15','2026-08-20','2026-12-01');
+        INSERT INTO orders VALUES ('115000102',2,40,0,'2026-12-01','歷史訂單－服務完成',NULL,NULL,'2026-12-31');
         INSERT INTO staff VALUES (7,'月嫂甲');
         INSERT INTO staff VALUES (8,'月嫂乙');
         INSERT INTO client_obligations VALUES ('115000101','c-deposit','deposit','2026-06-20','receivable_from_client','settled');
@@ -90,7 +90,7 @@ def connection(monkeypatch):
     monkeypatch.setattr(repository_module, "load_calculable_client_finance_facts", no_amount_calculation)
     monkeypatch.setattr(repository_module, "build_client_finance_terms_candidate", no_amount_calculation)
     # Virtual-account calculation is unchanged and outside this test boundary.
-    monkeypatch.setattr(repository_module, "build_client_virtual_account", lambda _: None)
+    monkeypatch.setattr(repository_module, "_load_registry_formula_accounts", lambda _, cases: dict.fromkeys(cases))
     yield connection
     connection.db.close()
 
@@ -123,8 +123,8 @@ def test_stored_values_survive_query_and_http_serialization(connection):
     assert historical["staff_payment_due_date"] is None
     assert historical["client_obligation_dates"] == []
     assert historical["staff_obligation_dates"] == []
-    assert historical["claim_application_year"] is None
-    assert historical["claim_application_month"] is None
+    assert historical["claim_application_year"] == 2027
+    assert historical["claim_application_month"] == 1
     assert len(connection.statements) == 4
     assert sum("FROM client_legacy_virtual_accounts" in sql for sql, _ in connection.statements) == 1
     assert not any("v_order_details" in sql or "staff_schedule" in sql for sql, _ in connection.statements)

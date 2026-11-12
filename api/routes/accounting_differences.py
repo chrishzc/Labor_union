@@ -124,14 +124,13 @@ def sync_historical_baseline_obligations_route(
     case_no: str,
     principal=Depends(require_admin),
 ):
-    del principal
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.payroll.historical_baseline_obligation_sync import (
         sync_historical_staff_baseline_obligations,
     )
     conn = get_connection()
     try:
-        result = sync_historical_staff_baseline_obligations(conn, case_no)
+        result = sync_historical_staff_baseline_obligations(conn, case_no, actor=admin_actor_context(principal))
         conn.commit()
         return BaseResponse(data=result)
     finally:

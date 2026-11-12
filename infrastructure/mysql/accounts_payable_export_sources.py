@@ -253,9 +253,9 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
 def _missing_case_audit_item(row) -> CaseStaffPayableAuditItem:
     due_date = row.get("staff_payment_due_date")
     if due_date is None:
-        disposition, reason = "date_not_formed", "尚未建立月嫂應付帳務及付款日，請核對原帳務。"
+        disposition, reason = "date_not_formed", "月嫂應付與付款日尚未同步，請查核歷史服務量、月嫂時薪及付款來源。"
     else:
-        disposition, reason = "missing_calculation_basis", "尚未建立月嫂應付帳務，請核對原帳務。"
+        disposition, reason = "missing_calculation_basis", "尚未建立月嫂應付帳務，請查核歷史服務量及月嫂時薪。"
     staff_id = row.get("staff_id")
     return CaseStaffPayableAuditItem(
         case_no=str(row["case_no"]),

@@ -27,8 +27,9 @@ from domains.payroll.monthly_aggregation import (
     MonthlyPayrollObligationFact,
     build_staff_monthly_payroll_summary,
 )
+from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
-from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
+from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, is_full_subsidy_case
 from infrastructure.mysql.effective_case_service_rate import (
     load_explicit_case_service_rate,
 )
@@ -136,7 +137,8 @@ class MySqlPayrollRebuildRepository:
                 start=1,
             ):
                 from infrastructure.mysql.payroll_amount_correction_repository import persist_controlled_payroll_amount
-                if persist_controlled_payroll_amount(self._connection,cursor,persistence,action):
+                if (not isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)
+                        and persist_controlled_payroll_amount(self._connection,cursor,persistence,action)):
                     continue
                 if action.action is StaffObligationActionKind.UNCHANGED:
                     continue
@@ -145,7 +147,8 @@ class MySqlPayrollRebuildRepository:
             _append_outbox(cursor, persistence)
             _insert_receipt(cursor, persistence)
             from infrastructure.mysql.payroll_installments import persist_payroll_installments
-            persist_payroll_installments(cursor, persistence.request.case_no, persistence.preview.payroll)
+            if not isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate):
+                persist_payroll_installments(cursor, persistence.request.case_no, persistence.preview.payroll)
 
     def query_staff_month(self, staff_id: int, year: int, month: int):
         month_start, month_end = _month_range(year, month)
@@ -313,21 +316,29 @@ def _rebuild_facts(
         terms=_payroll_terms(root),
         adjustments=_payroll_adjustments(adjustments_by_assignment),
         existing_obligations=_existing_obligations(obligations),
-        staff_payment_due_date=_payment_due_date(root),
+        staff_payment_due_date=_payment_due_date(
+            root, pricing, len({day for assignment in service_facts for day in assignment.service_dates}),
+        ),
     )
 
 
-def _payment_due_date(root):
-    if root.get("pricing_policy_id") is not None or root.get("pricing_override_event_id") is not None:
-        from domains.payroll.tiered_rates import funding_due_date
-        completed_on = root.get("actual_end_date")
-        return funding_due_date(completed_on, directly_subsidized=False) if completed_on else None
+def _payment_due_date(root, pricing=None, service_day_count=0):
     existing = root["staff_payment_due_date"]
     if existing is not None:
         return existing
     completed_on = root.get("actual_end_date")
+    if completed_on is None:
+        return None
     payable = root.get("client_payable_ntd")
-    if completed_on is None or payable is None:
+    if pricing is not None:
+        from domains.payroll.tiered_rates import funding_due_date
+
+        hours = Decimal(str(root["service_hours_per_day"])) * service_day_count
+        directly_subsidized = payable in (None, 0) and is_full_subsidy_case(
+            root["identity_status"], hours, pricing.subsidy_hours,
+        ) is True
+        return funding_due_date(completed_on, directly_subsidized=directly_subsidized)
+    if payable is None:
         return None
     coverage = derive_subsidy_coverage(
         str(root["identity_status"]),
@@ -421,7 +432,8 @@ def _persist_action(cursor, persistence, action, ordinal):
         _create_service_obligation(cursor, persistence, action, ordinal)
         return
     if action.action is StaffObligationActionKind.REPLACE_UNPAID:
-        if action.delta_amount.is_zero and action.due_date is not None:
+        if (action.delta_amount.is_zero and action.due_date is not None
+                and not isinstance(persistence.preview.payroll, HistoricalCasePayrollCandidate)):
             _replace_missing_due_date(cursor, persistence, action, ordinal)
             return
         _replace_unpaid_obligation(cursor, persistence, action, ordinal)

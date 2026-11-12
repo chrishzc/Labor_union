@@ -77,6 +77,7 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
 
     clock = FixedBusinessClock(datetime(2026, 11, 5, 1, tzinfo=timezone.utc))
     monkeypatch.setattr(historical_dependencies, "SystemBusinessClock", lambda: clock)
+    monkeypatch.setattr("subsystems.orders.historical_adoption_workflow.SystemBusinessClock", lambda: clock)
     app = FastAPI()
     app.include_router(historical_routes.router)
     app.dependency_overrides[historical_routes.require_admin] = lambda: AdminPrincipal(
@@ -209,7 +210,9 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
             assert json.loads(row["result_snapshot"])["historical_service_time"] == {
                 "start_time": start_time, "end_time": end_time, "end_day_offset": 0,
             }
-        assert _accounting_snapshot(connection, morning_case) == original_accounting[morning_case]
+        morning = _accounting_snapshot(connection, morning_case)
+        assert morning[:3] == original_accounting[morning_case][:3]
+        assert [(item["amount_due_ntd"], item["due_date"]) for item in morning[3]] == [(72000, date(2026, 11, 15))]
         assert _accounting_snapshot(connection, afternoon_case) == original_accounting[afternoon_case]
         with connection.cursor() as cursor:
             cursor.execute("SELECT lifecycle_version FROM orders WHERE case_no=%s", (afternoon_case,))
@@ -230,7 +233,9 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         assert receipt["after_status"] == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
         assert replay["replayed"] is True
         assert _order_status(connection, afternoon_case) == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
-        assert _accounting_snapshot(connection, afternoon_case) == original_accounting[afternoon_case]
+        afternoon = _accounting_snapshot(connection, afternoon_case)
+        assert afternoon[:3] == original_accounting[afternoon_case][:3]
+        assert [(item["amount_due_ntd"], item["due_date"]) for item in afternoon[3]] == [(72000, date(2026, 12, 15))]
     finally:
         connection.close()
 
@@ -296,7 +301,7 @@ def test_manual_service_days_apply_and_replay_preserve_original_finance(tmp_path
             receipt = first.json()["data"]
             assert receipt["resulting_historical_day_revision"] == 1
             assert receipt["resulting_client_finance_version"] == facts["client_finance_version"]
-            assert receipt["resulting_payroll_version"] == facts["payroll_version"] == 0
+            assert receipt["resulting_payroll_version"] == facts["payroll_version"] == 1
             assert receipt["client_obligation_amount_ntd"] == preview["client_obligation_amount_ntd"]
             assert receipt["replayed"] is False
             saved = _accounting_snapshot(connection, case_no, expected_revisions=1)
@@ -310,9 +315,9 @@ def test_manual_service_days_apply_and_replay_preserve_original_finance(tmp_path
             assert _accounting_snapshot(connection, case_no, expected_revisions=1) == saved
             with connection.cursor() as cursor:
                 cursor.execute("SELECT staff_payment_due_date FROM orders WHERE case_no=%s", (case_no,))
-                assert cursor.fetchone()["staff_payment_due_date"] is None
+                assert cursor.fetchone()["staff_payment_due_date"] == date(2025, 2, 15)
                 cursor.execute("SELECT COUNT(*) AS n FROM payroll_outbox WHERE case_no=%s", (case_no,))
-                assert cursor.fetchone()["n"] == 0
+                assert cursor.fetchone()["n"] == 1
     finally:
         connection.close()
 
@@ -816,7 +821,6 @@ def _accounting_snapshot(connection, case_no, *, expected_revisions=0):
             snapshot.append(cursor.fetchall())
     assert [row["amount_due_ntd"] for row in snapshot[0]] == [4000]
     assert [row["allocated"] for row in snapshot[2]] == [8000]
-    assert not snapshot[3]
     assert len(snapshot[4]) == expected_revisions
     return snapshot
 

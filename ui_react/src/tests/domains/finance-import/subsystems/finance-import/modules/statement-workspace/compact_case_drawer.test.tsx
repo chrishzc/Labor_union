@@ -66,6 +66,16 @@ it.each([
  expect(payments.getByText(source==='estimate'?'預估 NT$ 12,000':'NT$ 12,000',{exact:true})).toBeVisible();
  expect(payments.getByText('2026-11-15',{exact:true})).toBeVisible();
 });
+it('方案未定仍在給付表顯示本案補助，且沒有正式客戶退款列',async()=>{
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'waiting',subsidy_payments:[]});
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const payments=within(await screen.findByRole('region',{name:'補助款預計給付'}));
+ const pending=within(payments.getByRole('row',{name:/補助給付方案待確認/}));
+ expect(pending.getByText('NT$ 12,000',{exact:true})).toBeVisible();
+ expect(pending.getByText('尚未建立補助給付款項')).toBeVisible();
+ const details=within(screen.getByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
+ expect(details.queryByText('客戶退款',{exact:true})).not.toBeInTheDocument();
+});
 it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次保存範圍',async()=>{
  vi.mocked(financeAccountingClient.previewSubsidyPlan).mockResolvedValue({case_no:caseNo,scheme:'advance',plan_version:0,
   subsidy_ntd:12000,total_ntd:30000,confirmation_only:false,payables:[],blocker:'客戶實際墊款依據不足',preview_fingerprint:'c'.repeat(64)});

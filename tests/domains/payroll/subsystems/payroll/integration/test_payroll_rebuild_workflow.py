@@ -238,6 +238,15 @@ def test_official_schedule_can_form_missing_payment_date_without_waiting_for_com
     assert mysql_rebuild._payment_due_date(root) is None
 
 
+@pytest.mark.parametrize("completed_on", [None, date(2026, 10, 31)])
+def test_bound_pricing_rebuild_preserves_the_original_payment_date(completed_on):
+    assert mysql_rebuild._payment_due_date({
+        "staff_payment_due_date": date(2026, 12, 15),
+        "pricing_policy_id": 1,
+        "actual_end_date": completed_on,
+    }) == date(2026, 12, 15)
+
+
 def test_created_obligation_persists_preview_payment_date_instead_of_null_compatibility_field(monkeypatch):
     owner={'due_date':None}
     monkeypatch.setattr(mysql_rebuild,'_assignment_owner',lambda *_:owner)

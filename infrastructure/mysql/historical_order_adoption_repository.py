@@ -130,6 +130,9 @@ class MySqlHistoricalOrderAdoptionRepository:
             review_identity,
         )
         self._append_pairing_evidence(receipt_id, preview, assignment_ids)
+        if (preview.outcome is HistoricalOrderOutcome.ADOPTED
+                and preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value):
+            self.synchronize_completed_payroll(preview.case_no)
         self._append_outbox(receipt_id, request, preview, review_identity)
         return HistoricalOrderAdoptionReceipt(
             preview.outcome,
@@ -140,6 +143,11 @@ class MySqlHistoricalOrderAdoptionRepository:
             False,
             preview.fingerprint,
         )
+
+    def synchronize_completed_payroll(self, case_no):
+        from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
+
+        return synchronize_historical_payroll(self._connection, case_no)
 
     def _append_review(self, request, preview):
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE or not preview.issue_codes:
@@ -223,7 +231,6 @@ class MySqlHistoricalOrderAdoptionRepository:
             "issue_codes": preview.issue_codes,
             "service_calendar_status": "not_reconstructed_for_historical_order",
             "historical_service_days_status": "not_changed_by_adoption",
-            "payroll_rebuild_status": "not_run_by_adoption",
             **_operational_baseline_snapshot(request, preview),
         }
         if request.row.service_time is not None:

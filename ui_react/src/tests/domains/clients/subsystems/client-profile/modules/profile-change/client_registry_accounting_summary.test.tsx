@@ -35,3 +35,27 @@ it('preserves unavailable amounts and conflicts instead of inventing a zero or o
   expect(screen.queryByText('0 元', {exact:true})).not.toBeInTheDocument();
   expect(screen.getByRole('status')).toHaveTextContent('方案與正式金流事實衝突');
 });
+
+it('shows formal salary and estimated subsidy separately from the same accounting result', async () => {
+  vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
+    ...facts('advance'),
+    staff_items: [{
+      identity: 'synthetic-salary', direction: 'payable', label: '薪資', party: '月嫂甲',
+      expected_ntd: 14400, actual_ntd: 0, has_payment: false, version: 'v1', due_date: '2026-12-15',
+    }],
+    subsidy_payments: [{
+      recipient: 'client', party: '客戶甲', amount_ntd: 12000, due_date: '2027-01-15', source: 'estimate',
+    }],
+  });
+  render(<ClientRegistryAccountingSummary caseNo="SYNTHETIC-1" revision={0}/>);
+  expect(await screen.findByText(/月嫂甲／薪資：14,400 元，應付日 2026-12-15/)).toBeInTheDocument();
+  expect(screen.getByText(/退還客戶／客戶甲：預估 12,000 元，給付日 2027-01-15/)).toBeInTheDocument();
+});
+
+it('labels the salary as an estimate when there is no formal payable', async () => {
+  vi.spyOn(financeAccountingClient, 'query').mockResolvedValue({
+    ...facts('advance'), staff_receivable_ntd: 14400,
+  });
+  render(<ClientRegistryAccountingSummary caseNo="SYNTHETIC-1" revision={0}/>);
+  expect(await screen.findByText('月嫂薪資預估 14,400 元，正式應付待確認。')).toBeInTheDocument();
+});

@@ -107,7 +107,7 @@ class MySqlClientRegistryQueryRepository:
                 + BIRTH_COUNT_SQL + " AS multi_birth_count,"
                 "o.service_days,o.requires_cooking,c.service_type,"
                 "o.start_date AS planned_start_date,o.status AS order_status,"
-                "o.staff_payment_due_date,o.actual_end_date,c.identity_status "
+                "o.staff_payment_due_date,o.actual_end_date,o.end_date AS planned_end_date,c.identity_status "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
                 + BIRTH_COUNT_JOINS + "WHERE "
                 + " AND ".join(where)
@@ -232,13 +232,14 @@ class MySqlClientRegistryQueryRepository:
             subsidy_row.get("服務結束") if subsidy_row is not None else None
         )
         staff_payment_due_date = row.get("staff_payment_due_date")
+        estimated_staff_payment_due_date = None
         customer_payable = values.get("customer_payable_total_ntd")
         if (
             staff_payment_due_date is None
             and isinstance(subsidy_service_end, date)
             and customer_payable is not None
         ):
-            staff_payment_due_date = calculate_staff_payment_due_date(
+            estimated_staff_payment_due_date = calculate_staff_payment_due_date(
                 subsidy_service_end,
                 customer_payable,
                 normalize_subsidy_policy_identity(
@@ -283,6 +284,7 @@ class MySqlClientRegistryQueryRepository:
             subsidy_return_due_date=values.get('subsidy_return_due_date'),
             subsidy_return_status=values.get('subsidy_return_status'),
             staff_payment_due_date=staff_payment_due_date,
+            estimated_staff_payment_due_date=estimated_staff_payment_due_date,
             claim_application_year=claim["claim_application_year"],
             claim_application_month=claim["claim_application_month"],
         )
@@ -634,12 +636,13 @@ def _load_obligation_dates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[
 
 
 def _claim_application_month(row) -> dict[str, int | None]:
-    # Reuse the existing owner projection. Never manufacture a day or use a
-    # planned date to fill a missing actual end date in this diagnostic list.
     eligible = normalize_subsidy_policy_identity(
         str(row.get("identity_status") or "")
     ) in {"一般市民", "補助市民"}
-    schedule = _claim_schedule(row.get("actual_end_date") if eligible else None)
+    service_end = row.get("actual_end_date")
+    if service_end is None and "取消" not in str(row.get("order_status") or ""):
+        service_end = row.get("planned_end_date")
+    schedule = _claim_schedule(service_end if eligible else None)
     return {
         "claim_application_year": schedule["claim_application_year"],
         "claim_application_month": schedule["claim_application_month"],

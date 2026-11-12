@@ -649,7 +649,7 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=N
 
 
 def _payout_source_account(row):
-    if row.get("format_id") in _SINOPAC_PAYOUT_FORMATS:
+    if row.get("direction") == "outgoing" and row.get("format_id") in _SINOPAC_PAYOUT_FORMATS:
         return None
     return row.get("resolved_counterparty_account")
 

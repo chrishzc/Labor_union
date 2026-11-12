@@ -810,8 +810,16 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           <td>{payment.due_date ?? '日期待確認'}</td>
           <td>{payment.source === 'formal' ? (serviceEnded ? '服務已結束，金額已確認' : '金額已確認') : unconfirmedPaymentStatus}</td>
         </tr>
-      )) : <tr><td colSpan={4}>{subsidyPaymentNotApplicable || data.scheme === 'direct' ? '不適用'
-        : !subsidyKnown ? '補助金額待確認' : '補助給付方案待確認'}</td></tr>}</tbody>
+      )) : subsidyPaymentNotApplicable || data.scheme === 'direct' ? (
+        <tr><td colSpan={4}>不適用</td></tr>
+      ) : (
+        <tr>
+          <td>補助給付方案待確認</td>
+          <td>{subsidyKnown ? money(subsidyTotal) : '補助金額待確認'}</td>
+          <td>日期待確認</td>
+          <td>尚未建立補助給付款項</td>
+        </tr>
+      )}</tbody>
     </table>
   </div>
   <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
@@ -895,29 +903,12 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
               </tr>
             );
         })}
-        {refundClientItems.length === 0 && (
+        {refundClientItems.length === 0 && (refundBankCode || refundAccountNo) && (
           <tr>
-            <td>
-              <strong>客戶退款</strong>
-              {subsidyRefundPending && <small>補助退款</small>}
-            </td>
-            <td>{subsidyRefundPending ? '日期待確認' : '—'}</td>
-            <td>{subsidyRefundPending ? '金額待確認' : '—'}</td>
-            <td>
-              <span>—</span>
-            </td>
-            <td>
-              <span>預先登記備查</span>
-              <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo})` : ''}</small>
-            </td>
-            <td>
-              <span>{subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</span>
-            </td>
-            <td>
-              <div className="finance-case-period-actions">
-                <button type="button" className="finance-btn-secondary" disabled>免操作</button>
-              </div>
-            </td>
+            <td>退款帳戶備查</td>
+            <td colSpan={3}>尚未建立退款款項</td>
+            <td>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? '(' + refundAccountNo + ')' : ''}</td>
+            <td colSpan={2}>—</td>
           </tr>
         )}
 

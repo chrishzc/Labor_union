@@ -6,6 +6,7 @@
 import {describe,expect,it} from 'vitest';
 import {financeImportReviewReason} from '../adapters/finance/finance_import_query_adapter';
 
+const unrecorded = '未留存當次未核銷原因，請進入核對確認';
 const source = {classification_type:'client_receipt',direction:'incoming',available_actions:[],disposition:'business_pending'} as const;
 
 describe('current bank review reasons',()=>{
@@ -22,7 +23,7 @@ describe('current bank review reasons',()=>{
   });
   it.each(['outgoing_client_refund_name_ambiguous','outgoing_client_refund_target_ambiguous','client_refund_recipient_account_ambiguous','client_refund_recipient_account_mismatch','client_refund_source_account_missing'])(
     'does not present a removed Taishin customer subsidy code as a current reason: %s',code=>{
-      expect(financeImportReviewReason({...source,available_actions:[],bank:'taishin',classification_type:'client_subsidy_return',direction:'outgoing',review_reason:code})).toBe('未留存當次阻擋原因。');
+      expect(financeImportReviewReason({...source,available_actions:[],bank:'taishin',classification_type:'client_subsidy_return',direction:'outgoing',review_reason:code})).toBe(unrecorded);
     });
   it('keeps the saved subsidy cause before generic or stale operation feedback',()=>{
     const row={...source,available_actions:[],bank:'taishin' as const,classification_type:'client_subsidy_return',direction:'outgoing',recorded_pending_reason:'due_date_missing'};
@@ -43,12 +44,12 @@ describe('current bank review reasons',()=>{
     expect(result).toContain(message);
     expect(result).not.toContain('未留存');
   });
-  it('reads old Taishin amount aliases but keeps missing ambiguity detail and account diagnostics explicit',()=>{
+  it('reads saved Taishin amount aliases without treating old classification evidence as a posting cause',()=>{
     const row={...source,available_actions:[],bank:'taishin' as const,classification_type:'staff_payout',direction:'outgoing'};
-    expect(financeImportReviewReason({...row,review_reason:'outgoing_staff_payout_amount_mismatch'}))
-      .toBe(financeImportReviewReason({...row,review_reason:'staff_payout_amount_mismatch'}));
-    expect(financeImportReviewReason({...row,review_reason:'outgoing_staff_payout_target_ambiguous'})).toContain('舊紀錄未留存');
-    expect(financeImportReviewReason({...row,review_reason:'staff_bank_account_ambiguous'})).toContain('不要求帳號');
+    expect(financeImportReviewReason({...row,recorded_pending_reason:'outgoing_staff_payout_amount_mismatch'}))
+      .toBe(financeImportReviewReason({...row,recorded_pending_reason:'staff_payout_amount_mismatch'}));
+    expect(financeImportReviewReason({...row,review_reason:'outgoing_staff_payout_target_ambiguous'})).toBe(unrecorded);
+    expect(financeImportReviewReason({...row,review_reason:'staff_bank_account_ambiguous'})).toBe(unrecorded);
     expect(financeImportReviewReason({...row,dispatch_reason:'outgoing_bank_fact_not_eligible',recorded_pending_reason:'due_date_missing'})).toContain('缺少原預計撥款日');
     expect(financeImportReviewReason({...row,dispatch_reason:'staff_payable_candidate_stale',recorded_pending_reason:'staff_payout_amount_mismatch'})).toContain('不符合足額或100元內手續費條件');
   });
@@ -70,7 +71,7 @@ describe('current bank review reasons',()=>{
   });
   it('does not reinterpret old refund ambiguity and does not replace a saved cause with a generic operation failure',()=>{
     const row={...source,available_actions:[],bank:'sinopac' as const,classification_type:'client_refund' as const,direction:'outgoing' as const};
-    expect(financeImportReviewReason({...row,review_reason:'outgoing_client_refund_target_ambiguous'})).toContain('未留存實際是');
+    expect(financeImportReviewReason({...row,review_reason:'outgoing_client_refund_target_ambiguous'})).toBe(unrecorded);
     expect(financeImportReviewReason({...row,dispatch_reason:'bank_fact_not_eligible',recorded_pending_reason:'due_date_missing'})).toContain('缺少預計退款日');
     expect(financeImportReviewReason({...row,dispatch_reason:'stale_preview',recorded_pending_reason:'outgoing_client_refund_amount_mismatch'})).toContain('合併待退金額');
   });
@@ -120,17 +121,21 @@ describe('current bank review reasons',()=>{
     expect(message).not.toContain('已依備註六碼');
   });
   it.each([
-    ['sinopac_unique_staff_account_in_transaction_reference','已由交易參考帳號辨識月嫂，未留存當次阻擋原因。'],
-    ['sinopac_unique_client_refund_account_in_transaction_reference','已由交易參考帳號辨識客戶退款對象，未留存當次阻擋原因。'],
-    ['taishin_client_subsidy_case_suffix_in_memo','已依備註六碼定位客戶補助案件，請核對同案補助待退款。'],
-    ['outgoing_client_refund_multiple_fee_matches','同月有多個待退款配對符合金額或手續費條件，無法唯一選定。'],
-    ['taishin_outgoing_unrecognized','備註未辨識到月嫂姓名或可唯一定位案件的六碼；新匯入跳過，不建立流水。'],
-  ])('describes only the actual evidence or blocker: %s',(review_reason,message)=>{
-    expect(financeImportReviewReason({...source,available_actions:[],review_reason})).toBe(message);
+    ['staff_payout','sinopac_unique_staff_account_in_transaction_reference'],
+    ['client_refund','sinopac_unique_client_refund_account_in_transaction_reference'],
+    ['client_subsidy_return','taishin_client_subsidy_case_suffix_in_memo'],
+    ['client_refund','outgoing_client_refund_multiple_fee_matches'],
+  ] as const)('does not promote %s classification evidence to a failed posting step: %s',(classification_type,review_reason)=>{
+    expect(financeImportReviewReason({...source,available_actions:[],classification_type,direction:'outgoing',review_reason})).toBe(unrecorded);
+  });
+
+  it('keeps the recognition result for a historical non-business row',()=>{
+    expect(financeImportReviewReason({...source,available_actions:[],classification_type:'non_business_review',direction:'outgoing',review_reason:'taishin_outgoing_unrecognized'}))
+      .toContain('備註未辨識到月嫂姓名或可唯一定位案件的六碼');
   });
 
   it.each([null,'unrecognized_historical_reason'])('does not invent a current cause from missing or unknown history: %s',review_reason=>{
-    expect(financeImportReviewReason({...source,available_actions:[],review_reason})).toBe('未留存當次阻擋原因。');
+    expect(financeImportReviewReason({...source,available_actions:[],review_reason})).toBe(unrecorded);
   });
 
   it('shows the recorded formal rejection before classification evidence',()=>{

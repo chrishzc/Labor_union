@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from domains.orders.floor_fee import (
     allocate_largest_remainder,
@@ -143,8 +144,8 @@ def _assignment_candidate(facts, rate, terms, floor_fee, adjustments):
     )
 
 
-def _whole_ntd(value: float | int) -> int:
-    if isinstance(value, float) and not value.is_integer():
+def _whole_ntd(value: Decimal | float | int) -> int:
+    if value != int(value):
         raise ValueError("half-hour payroll amount must resolve to whole NTD")
     return int(value)
 

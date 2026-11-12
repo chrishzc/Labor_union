@@ -62,6 +62,56 @@ export function HistoricalPayableLookup({ month, revision, onCase, caseNo }: {
 }
 
 export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
+  if (item.disposition !== 'paid_or_settled' && (!item.obligation_identity || item.effective_due_date === null)) {
+    return <HistoricalPayableSync item={item} onSaved={onSaved} />;
+  }
+  return <HistoricalPayableCorrection item={item} onSaved={onSaved} />;
+}
+
+function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function synchronize() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await accountsPayableQueryClient.synchronizeHistorical(item.case_no);
+      if (result === 'created' || result === 'updated' || result === 'already_synced') {
+        setMessage('已查回月嫂應付，清冊將重新讀取。');
+        onSaved();
+      } else {
+        setMessage(historicalSyncMessages[result ?? ''] ?? '本案目前無法同步，請重新查核案件狀態。');
+      }
+    } catch {
+      setMessage('無法確認同步結果，請重新查核本案。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="case-accounting-card" aria-label="歷史月嫂款查核">
+    <h3>{item.recipient_name ?? '月嫂待確認'} · 應付清冊查核</h3>
+    <p>{item.reason}</p>
+    <button type="button" className="finance-btn-primary" disabled={busy} onClick={() => void synchronize()}>
+      {busy ? '同步中…' : '同步月嫂應付'}
+    </button>
+    {message && <p role="status">{message}</p>}
+  </section>;
+}
+
+const historicalSyncMessages: Record<string, string> = {
+  historical_payroll_unique_assignment_required: '請確認本案唯一的歷史月嫂指派。',
+  historical_payroll_obligation_binding_conflict: '現有應付與歷史指派不一致，請查核原應付歸屬。',
+  historical_payroll_original_payment_preserved: '本案已有付款或結清紀錄，請查核原付款證據。',
+  historical_payroll_settled_source_required: '本案已標記帳務完成，請查核原付款及應付證據。',
+  historical_payroll_service_basis_missing: '請查核 HCM 服務天數、每日服務時數和歷史結束日。',
+  payroll_rate_policy_not_found: '請查核本案保存的月嫂時薪。',
+  historical_payroll_nonpositive_amount: '計算出的月嫂應付金額須大於零，請查核計算依據。',
+  historical_payroll_funding_conflict: '請查核本案自費與直接補助的付款來源。',
+};
+
+function HistoricalPayableCorrection({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
   const [amount, setAmount] = useState(item.amount_due_ntd?.toString() ?? '');
   const [dueDate, setDueDate] = useState(item.effective_due_date ?? '');
   const [evidence, setEvidence] = useState('');
@@ -72,9 +122,9 @@ export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPay
   const [error, setError] = useState('');
   const command = useRef<HistoricalUnpaidPayableCommand | null>(null);
   const validAmount = /^\d+$/.test(amount) && Number(amount) > 0 && Number(amount) <= 9999999999;
-  const targetKnown = item.staff_id !== null && (!item.obligation_identity || item.current_event_id !== null);
+  const targetKnown = item.staff_id !== null && item.current_event_id !== null;
   const editable = targetKnown && item.disposition !== 'paid_or_settled' && item.balance_ntd === item.amount_due_ntd;
-  const title = item.obligation_identity ? '更正應付' : '補登原應付';
+  const title = '更正應付';
 
   useUnsavedChanges(title, saved ? [] : [
     { label: '原應付金額', before: item.amount_due_ntd?.toString() ?? '', after: amount },
@@ -119,7 +169,7 @@ export function HistoricalPayableEditor({ item, onSaved }: { item: HistoricalPay
     <p>如需更正服務天數，請到 <a href={`#clients?case=${encodeURIComponent(item.case_no)}`}>本案客戶名冊</a> 查核。</p>
     {saved ? <p role="status">原應付已更新，清冊查核結果已重新讀取。</p>
       : editable ? <form onSubmit={submit}>
-        <p>請先核對原薪資、付款日及付款紀錄。此操作建立或更正應付義務。已付款或付款狀態不明的款項須先查核。</p>
+        <p>更正前請先核對原薪資、付款日及付款紀錄。已付款或付款狀態不明的款項須先查核。</p>
         <fieldset disabled={busy || unknown} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', border: '1px solid #ebdcd1', borderRadius: '8px', padding: '16px', margin: '14px 0' }}>
           <legend style={{ fontWeight: 700, padding: '0 8px' }}>{title}</legend>
           <label style={{ display: 'grid', gap: '6px' }}>原應付金額<input className="finance-input" type="number" min="1" max="9999999999" step="1" required value={amount}

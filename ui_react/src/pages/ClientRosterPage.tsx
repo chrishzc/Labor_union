@@ -295,7 +295,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col" title="orders.staff_payment_due_date">{columnHeading('staff_payment_due_date')}</th>
         <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
         <th scope="col" title="client_obligations.due_date（subsidy_return）">{columnHeading('subsidy_return_due_date')}</th>
-        <th scope="col" title="依服務結束日估算，供安排送件時程。">補助預計申請年月</th>
+        <th scope="col" title="依實際服務結束日估算，尚無實際日期時使用預定結束日。">補助預計申請年月</th>
       </tr></thead>
       <tbody>{page.items.map((item) => <tr
         key={item.case_no}

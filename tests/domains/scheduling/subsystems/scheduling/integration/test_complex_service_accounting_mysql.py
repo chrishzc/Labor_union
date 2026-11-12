@@ -133,9 +133,9 @@ def staff_account(staff):
     return "8" * 10 + str(staff).zfill(4)
 
 
-def workbook(case, amount, sequence, *, account=None):
+def workbook(case, amount, sequence, *, account=None, transaction_date=None):
     headers = ['帳號','交易日','計息日','入帳日','摘要','幣別','支出','存入','餘額','銷帳編號','交易參考編號','','更正註記','存摺備註']
-    day = f"2026/11/{sequence:02d}"
+    day = transaction_date.strftime("%Y/%m/%d") if transaction_date else f"2026/11/{sequence:02d}"
     virtual = f"99781699{int(case[:3]):03d}{int(case[3:]):03d}"
     row = ['1'*12,day+' 09:08:07',day,day,'轉帳','TWD',amount if account else None,None if account else amount,200000+int(case[3:])*100+sequence,None if account else virtual,account or f'{case}:{sequence}','synthetic',None,'fixture']
     out = BytesIO()
@@ -143,8 +143,8 @@ def workbook(case, amount, sequence, *, account=None):
     return out.getvalue()
 
 
-def bank(client, case, amount, sequence, *, account=None):
-    contents = workbook(case, amount, sequence, account=account)
+def bank(client, case, amount, sequence, *, account=None, transaction_date=None):
+    contents = workbook(case, amount, sequence, account=account, transaction_date=transaction_date)
     batch = checked(client.post('/api/v1/finance-import/workbooks/ingest', files={'workbook': (f'{case}-{sequence}.xlsx', contents, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}, headers={'Idempotency-Key': f'{case}:ingest:{sequence}'}))['batch_identity']
     plan = checked(client.post('/api/v1/finance-import/batches/preview', json={'batch_identity': batch}))
     assert plan['apply_allowed'] and plan['counts']['ready_dispatch'] == 1, plan

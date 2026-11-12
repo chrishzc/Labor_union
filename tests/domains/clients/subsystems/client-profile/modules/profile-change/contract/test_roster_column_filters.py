@@ -53,7 +53,7 @@ def roster(monkeypatch):
     connection.create_function("JSON_UNQUOTE", 1, lambda value: value)
     connection.executescript("""
         CREATE TABLE clients(id INTEGER,name TEXT,phone TEXT,city TEXT,address TEXT,service_type TEXT,identity_status TEXT);
-        CREATE TABLE orders(case_no TEXT,client_id INTEGER,service_days INTEGER,requires_cooking INTEGER,start_date TEXT,status TEXT,staff_payment_due_date TEXT,actual_end_date TEXT);
+        CREATE TABLE orders(case_no TEXT,client_id INTEGER,service_days INTEGER,requires_cooking INTEGER,start_date TEXT,status TEXT,staff_payment_due_date TEXT,actual_end_date TEXT,end_date TEXT);
         CREATE TABLE beclass_records(id INTEGER,bound_case_no TEXT,survey_details TEXT);
         CREATE TABLE beclass_record_correction_states(beclass_record_id INTEGER,effective_values_json TEXT);
         CREATE TABLE client_obligations(case_no TEXT,status TEXT,obligation_type TEXT,direction TEXT,due_date TEXT);
@@ -62,9 +62,9 @@ def roster(monkeypatch):
         connection.execute("INSERT INTO clients VALUES(?,?,?,?,?,?,?)", (
             number, f"測試客戶{number:03}", None, "", "東區測試路" if number % 2 else "未辨識地址", "連續服務", "",
         ))
-        connection.execute("INSERT INTO orders VALUES(?,?,?,?,?,?,?,?)", (
+        connection.execute("INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?)", (
             f"TEST-{number:03}", number, 26, (None if number % 3 == 0 else number % 2),
-            "2026-10-01", "訂單取消" if number <= 100 else "服務中", None, None,
+            "2026-10-01", "訂單取消" if number <= 100 else "服務中", None, None, None,
         ))
     monkeypatch.setattr(adapter, "_load_imported_virtual_accounts", lambda cursor, cases: {case: () for case in cases})
     monkeypatch.setattr(adapter, "_load_obligation_dates", lambda cursor, cases: {case: {"client_obligation_dates": [], "staff_obligation_dates": []} for case in cases})

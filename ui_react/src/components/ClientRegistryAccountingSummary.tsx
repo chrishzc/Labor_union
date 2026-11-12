@@ -14,7 +14,8 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
     }).catch(() => { if (!controller.signal.aborted) setState({error: true}); });
     return () => controller.abort();
   }, [caseNo, revision]);
-  const money = (value: number | null | undefined) => value == null ? '待確認' : `${value.toLocaleString('zh-TW')} 元`;
+  const money = (value: number | bigint | null | undefined) => value == null ? '待確認' : `${value.toLocaleString('zh-TW')} 元`;
+  const staffPayables = state.data?.staff_items.filter(item => item.direction === 'payable') ?? [];
   const scheme = state.data?.scheme;
   const manual = state.data?.subsidy_plan?.events.at(-1)?.scheme;
   const known = scheme === 'split' || scheme === 'advance' || scheme === 'direct' ? scheme : undefined;
@@ -31,6 +32,21 @@ export function ClientRegistryAccountingSummary({caseNo, revision}: {caseNo: str
         <div><dt>歷史方案補助對象</dt><dd>{known ? subsidyPlanTargets[known] : '待確認'}</dd></div>
         <div><dt>人工設定補助對象</dt><dd>{manual ? subsidyPlanTargets[manual] : '待確認'}</dd></div>
       </dl>
+      <h4>月嫂應付</h4>
+      {staffPayables.length > 0 ? <ul>
+        {staffPayables.map(item =>
+          <li key={item.identity}>{item.party}／{item.label}：{money(item.expected_ntd)}，應付日 {item.due_date ?? '待確認'}</li>
+        )}
+      </ul> : <p>{state.data.staff_receivable_ntd == null
+        ? '尚無月嫂應付明細。'
+        : `月嫂薪資預估 ${money(state.data.staff_receivable_ntd)}，正式應付待確認。`}</p>}
+      <h4>補助給付</h4>
+      {state.data.subsidy_payments?.length ? <ul>
+        {state.data.subsidy_payments.map((payment, index) =>
+          <li key={index}>{payment.recipient === 'staff' ? '轉付月嫂' : '退還客戶'}{payment.party && `／${payment.party}`}：
+            {payment.source === 'estimate' && '預估 '}{money(payment.amount_ntd)}，給付日 {payment.due_date ?? '待確認'}</li>
+        )}
+      </ul> : <p>{state.data.subsidy_ntd === 0 || scheme === 'direct' ? '不適用' : '給付款項待確認。'}</p>}
       {state.data.scheme_conflict && <p role="status">方案與正式金流事實衝突，請由原帳務入口核對。</p>}
       <p>金額與方案沿用案件帳務結果；此處僅供查閱，未設定的人工方案仍須由原帳務入口確認。</p>
     </>}

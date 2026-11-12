@@ -40,7 +40,7 @@
   1. 一致性唯讀快照讀取 `payable`／`partially_paid` 月嫂款（取正數 `remaining`，且 `due_date == 所選月份 15 日`）與 `normal` review 的 `pending`／`partially_refunded` 客戶一般／補助退款（`due_date <= 所選月份月底`，包含前期與部分退款未退餘額）。
   2. `anomaly`、`completed`、`refunded`、`review_required` 嚴禁進入 Excel；被排除義務必須於查詢區明確呈現待確認或排除原因。
   3. 月嫂部分付款（`partially_paid`）屬正常可匯出狀態（取正數 `remaining`）。
-- **歷史月嫂款未列入清冊查核（每月帳務 → 應付清冊「查未列入原因」）**：依案號或月嫂查詢（不要求先有付款日），將缺應付、缺日期／收款資料、已有已付線索但未關聯等原因分流帶回同案抽屜：補登應付（Payroll）、補齊資料或更正（原 owner）、補登已付交易（[手動補登 §6](22_銀行流水匯入與帳務異常處理正式規格.md#case-manual-accounting-supplement) 或 [Staff Payables 歷史付款契約](05_Staff_Payables_Export_Domain.md)），完成且條件俱全後方進下次清冊。
+- **歷史月嫂款未列入清冊查核（每月帳務 → 應付清冊「查未列入原因」）**：依案號或月嫂查詢，將缺應付或日期的案件帶回同案查核 [Payroll 計算來源與同步結果](03_Payroll_Domain.md#32-未核銷重建與已核銷追加rebuildpayrollforcase)。收款資料缺項由原 owner 補齊。已有已付線索但未關聯時走 [手動補登 §6](22_銀行流水匯入與帳務異常處理正式規格.md#case-manual-accounting-supplement) 或 [Staff Payables 歷史付款契約](05_Staff_Payables_Export_Domain.md)。條件俱全的未清應付進入對應月份清冊。
 
 ### 3.3 三方案映射與十欄會計 Excel 規範（`APX-SOURCE-01～08`）
 

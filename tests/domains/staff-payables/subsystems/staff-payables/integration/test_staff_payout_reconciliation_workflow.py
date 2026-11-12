@@ -228,7 +228,7 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
     class Cursor:
         def execute(self,sql,params=()):
             assert sql.startswith(('SELECT id,name FROM staff WHERE',
-                'SELECT case_no FROM client_legacy_virtual_accounts WHERE'))
+                'SELECT CASE WHEN EXISTS (SELECT 1 FROM client_legacy_virtual_accounts other '))
             self.case_query = 'client_legacy_virtual_accounts' in sql
         def fetchall(self):
             if self.case_query:

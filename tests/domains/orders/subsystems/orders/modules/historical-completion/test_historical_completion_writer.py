@@ -89,7 +89,6 @@ def test_persist_reuses_canonical_event_outbox_and_projection_writers(monkeypatc
         "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_projection",
         persist_projection,
     )
-
     receipt = MySqlHistoricalCompletionWriter(_Connection()).persist(
         _request(), _candidate()
     )
@@ -170,11 +169,15 @@ def test_service_completion_persist_reuses_canonical_event_outbox_and_projection
         CorrelationId("historical-service-completion:test"),
     )
 
+    monkeypatch.setattr(
+        "subsystems.payroll.historical_baseline_obligation_sync.synchronize_historical_payroll",
+        lambda connection, case_no: calls.append(("payroll", case_no)),
+    )
     receipt = MySqlHistoricalServiceCompletionWriter(_Connection()).persist_service_completion(
         request, candidate
     )
 
-    assert [name for name, _ in calls] == ["event", "projection"]
+    assert [name for name, _ in calls] == ["event", "projection", "payroll"]
     command = calls[0][1]
     assert command.trigger_event == "historical_service_period_elapsed"
     assert command.candidate.service_data_lock_should_exist is False

@@ -13,7 +13,7 @@
 
 ## Implementation
 - `ui_react/src/api/shared/case_accounting_changes.ts` — 本頁及跨分頁的 committed case invalidation；Terms／個案計價／取消沿正式成功收據發布，Finance Page／案件抽屜重查。抽屜借用既有 Terms 與個案計價面板，不擁有重算；依銀行 `row_id` 精確重查候選，儲存／未知核銷保留原命令，重新同步使舊預覽失效。
-- `ui_react/src/components/HistoricalPayableReview.tsx` — 每月帳務及案件抽屜查核歷史月嫂款，帶入同案、同月嫂，委派正式應付的補登／更正至 Payroll。
+- `ui_react/src/components/HistoricalPayableReview.tsx` — 每月帳務及案件抽屜查核歷史月嫂款，帶入同案、同月嫂，委派缺少的應付或付款日同步至 Payroll，並保留已有應付的更正入口。
 - `domains/finance_import/statement_archive.py`
 - `subsystems/finance_import/statement_archive.py`
 - `subsystems/finance_import/accounting_workspace.py`

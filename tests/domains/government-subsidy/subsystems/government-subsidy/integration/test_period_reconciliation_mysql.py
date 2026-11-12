@@ -131,7 +131,7 @@ def test_stale_and_changed_case_membership_do_not_allow_double_receipt(http):
 
 def test_whole_reversal_keeps_evidence_and_reopens_coverage(http):
     year=2064
-    seed_case(http,year,1)
+    seed_case(http,year,1,identity='一般市民')
     receipt=checked(reconcile(http,query(http,'quarter',year),bank(12000)))['receipt_id']
     url='/api/v1/government-subsidy/periods/reverse'
     assert http.post(url,json={'receipt_id':receipt,'bank_row_id':bank(-11999),'idempotency_key':uuid4().hex}).status_code==409
@@ -172,15 +172,52 @@ def payout(http,case,paid_on):
 
 def test_each_month_can_advance_and_whole_period_receipt_recovers_without_second_payout(http):
     year=2070
-    cases=[seed_case(http,year,month,days=20) for month in (1,2,3)]
-    for month,case in enumerate(cases,1):
-        payment=payout(http,case,date(year,month+2,15))
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    seed = runpy.run_path(
+        'tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py',
+    )['seed']
+    cases = []
+    ledger_before_period = {}
+    for month in (1, 2, 3):
+        completed_on = date(year, month, 10)
+        connection = mysql_adapter.get_connection()
+        try:
+            case, _, _ = seed(connection, False, 'advance', actual_end=completed_on)
+        finally:
+            connection.close()
+        cases.append(case)
+        write('UPDATE orders SET start_date=%s,actual_start_date=%s,end_date=%s WHERE case_no=%s',
+              (date(year, month, 1), date(year, month, 1), completed_on, case))
+        write('UPDATE government_subsidy_amount_controls SET period_year=%s WHERE case_no=%s', (year, case))
+        plan_url = f'/api/v1/finance-import/cases/{case}/accounting/subsidy-plan'
+        intent = {'scheme': 'advance', 'expected_version': 0}
+        preview = checked(http.post(plan_url + '/preview', json=intent))
+        assert preview['blocker'] is None and preview['payables'][0]['amount_ntd'] == 12000
+        checked(http.post(plan_url, json={**intent, 'preview_fingerprint': preview['preview_fingerprint']},
+                          headers={'Idempotency-Key': case + ':period-advance-plan'}))
+        obligation = rows("SELECT obligation_identity FROM client_obligations WHERE case_no=%s "
+                          "AND obligation_type='subsidy_return'", (case,))[0]['obligation_identity']
+        paid_on = date(year, month + 2, 15)
+        bank_row = bank(-12000, paid_on, classification='client_subsidy_return')
+        memo = 'HC' + build_client_virtual_account(case)[-6:] + '雇主補助款'
+        write("UPDATE finance_import_rows SET format_id='taishin',memo=%s WHERE id=%s", (memo, bank_row))
+        body = {'finance_import_row_ids': [bank_row], 'obligation_identities': [obligation]}
+        url = f'/api/v1/orders/{case}/client-finance/subsidy-return'
+        preview = checked(http.post(url + '/preview', json=body))
+        checked(http.post(url + '/apply', json={**body, 'expected_account_version': preview['account_version'],
+            'preview_fingerprint': preview['preview_fingerprint'], 'reason': ''},
+            headers={'Idempotency-Key': case + ':period-advance'}))
+        payment = rows('SELECT entry_type,amount_ntd FROM client_ledger_entries WHERE finance_import_row_id=%s',
+                       (bank_row,))[0]
         assert payment['entry_type']=='subsidy_advance' and payment['amount_ntd']==12000
+        ledger_before_period[case] = rows('SELECT id FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,))
     view=query(http,'quarter',year)
-    result=checked(reconcile(http,view,bank(36000,date(year,6,15))))
+    assert view['total_ntd'] == 36000
+    checked(reconcile(http,view,bank(36000,date(year,6,15))))
     assert query(http,'quarter',year)['coverage'][0]['recovered_advance_ntd']==36000
     for case in cases:
-        assert rows('SELECT COUNT(*) n FROM client_ledger_entries WHERE case_no=%s',(case,))[0]['n']==1
+        assert rows('SELECT id FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,)) == ledger_before_period[case]
         assert not checked(http.get('/api/v1/finance-reports/client-subsidy-returns',params={'case_no':case}))['rows']
     cash=checked(http.get('/api/v1/finance-reports/accounts-payable/cash-requirements',params={'page_size':200}))
     for case in cases:
@@ -228,7 +265,7 @@ def test_source_date_and_quantity_changes_update_refund_in_same_owner_transactio
 def test_real_bank_workbook_government_receipt_stays_pending_until_period_selected(http):
     from io import BytesIO
     import pandas as pd
-    case=seed_case(http,2074,1,days=20)
+    case=seed_case(http,2074,1,identity='一般市民',days=20)
     headers=['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註']
     raw=[uuid4().hex,'2074/06/15','09:00:00','2074/06/15','轉帳',None,12000,12000,'新竹市政府']
     contents=BytesIO();pd.DataFrame([headers,raw]).to_excel(contents,index=False,header=False)

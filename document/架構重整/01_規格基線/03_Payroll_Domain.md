@@ -48,7 +48,9 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 - 正式服務日的工時依服務歸屬與適用費率計算，國定假日出勤與其他正式服務日使用相同的工時及費率規則。此計算口徑也適用於改約、取消、代班／換人及應付重建。
 - 中途取消案件的樓層費先以 `ROUND_HALF_UP` 計算全案整數，再以最大餘數法按有效 assignment 服務日數分配（同餘數時依 `assignment_id` 升冪決定）。完整履約後取消一律拒絕，不得縮減薪資。
 - 正式服務日數、`service_hours_per_day`、hourly rate、樓層費與 adjustment 皆須為整數 NTD。非整數異常輸入須進 [Anomalies Domain](06_Anomalies_Domain.md)，不得在每日或 assignment 層私自四捨五入。
-- **歷史訂單例外**：依 [歷史訂單生命週期與服務天數帳務](27_歷史訂單生命週期與服務天數帳務正式規格.md)，可消費 Orders application 已確認、逐 assignment 且具 provenance 的 `actual_service_days` 建立薪資義務；不接受人工輸入 actual hours，亦不將該天數偽造成正式 `service_dates`。
+- **一般訂單服務量**：按月嫂歸屬加總正式排班的有效服務工時。
+- **歷史已完成訂單基準服務量**。尚無採用的服務量更正時，基準總工時取 HCM 匯入的 `orders.service_days × orders.service_hours_per_day`，以已採納的唯一歷史指派確認月嫂。月嫂時薪先取 `assignment_payroll_rate_snapshots.hourly_rate_ntd`，缺指派快照時取 `case_payroll_rate_policy_snapshots.hourly_rate_ntd`。基準計算直接使用登記服務量。
+- **已採用的歷史多人服務量**。有 [歷史服務歸屬更正](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 時，以該版本的各人服務量為計薪依據，按各人的可證實費率及本節樓層費規則計算。原登記總量只供基準比較。
 
 ## 3. 公開契約與流程
 
@@ -60,6 +62,7 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ### 3.2 未核銷重建與已核銷追加（`RebuildPayrollForCase`）
 
 - 依正式指派與服務資料異動自動同步應付；`staff_obligations` 未核銷時依最新根事實重算，已有正式付款歷史時禁止覆寫原 obligation，改追加 immutable adjustment／reversal obligation event。
+- 歷史服務完成案件優先承接可證實的原月嫂應付。尚無服務量更正且缺原應付時，具備唯一歷史指派、HCM 登記服務量、費率、採納的歷史結束日及付款來源即可建立基準應付。已採用多人服務量時依 [服務歸屬更正的應付拆分](#service-attribution-payroll-correction) 同步。新建應付或原應付尚未形成付款日時，按歷史結束月份套用 §2.1 付款日政策，依各款項來源形成對應日期。重匯或重新同步使用同一款項身分，保留原應付、已形成日期與付款關聯。缺計算依據或來源有衝突時回報具體缺項，交由原資料 owner 處理。
 - `RebuildPayrollForCase` 接受 caller 外層 Unit of Work（鎖定 Terms／assignments／服務日 → 讀取費率與 adjustments → 純計算 Preview → 驗證整數與 ownership → 鎖定 `staff_payments` → 更新投影／追加事件 → 寫 outbox → caller 提交）。
 - 涉及大量跨月重算時支援回傳 `202 Accepted` 與 Durable Job，於單一交易內原子完成。
 - 案件／月嫂薪資唯讀查詢保留已取消或已結清的 `0` 元紀錄（非負整數）；既有 open 義務 invariant 仍須大於 `0`，且 Query 零寫入。
@@ -82,6 +85,14 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
   - 付款家族 ancestry 僅延續同一月嫂；經其他月嫂轉手後再回任視同新付款家族。原 adjustment allocation 只承接給同一來源家族之原受款月嫂一次。
   - 若實際已付超過更新後合法 entitlement，Payroll 先完成 obligation correction，再以唯一 `payroll_correction_identity` 透過 Staff Payables typed port 建立追償義務；若未支援通用路徑或存在跨來源已付衝突，回傳 `payroll_handover_settlement_required` 交人工核對。
 
+<a id="service-attribution-payroll-correction"></a>
+
+#### 3.5.1 服務歸屬更正的應付拆分
+
+- [服務歸屬更正](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction) 依正式班次或已採用的各人歷史服務量重算受影響月嫂的有效應付，沿 §2.1、§2.2 採用可證實的費率與服務量，按既有樓層費及付款來源規則分配。原費率快照與付款家族保留來源關聯。歷史同步讀取已採用的多人版本，沿該版本的應付身分重播。
+- 無付款歷史的受影響待付列依 §3.2 退出並由新應付承接。有付款歷史時保留原 obligation 與付款關聯，依 §3.5 追加更正差額，按原受款人及付款來源交由 [Staff Payables](16_Staff_Payables與Client_Refund正式規格.md#service-attribution-settlement) 承接。接任或實際服務月嫂的款項獨立建列。
+- 原應付曾人工更正時，依 §3.3 顯示原人工值及新試算，經辦確認處置後才提交。單筆人工總額不得複製到拆分後各款。費率、來源或原應付有歧義時回 typed blocker 並指出待核項。
+
 ### 3.6 `PAYOUT-002` 晚到義務處置
 
 - 每筆晚到服務／調整來源只能由 Payroll 追加唯一 immutable disposition：`delta > 0` 追加 adjustment obligation，`delta < 0` 追加 reduction／reversal obligation，`delta = 0` 保存 reviewed disposition event。
@@ -97,7 +108,10 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 
 ## 4. 驗收標準
 
+- 多月嫂服務歸屬更正按各人服務量、費率、樓層費及付款來源產生應付。人工值經確認處置，拆分後只留下各人合法待付餘額。歷史多人版本重跑薪資同步不重建基準應付或遺失原付款連結。
+
 1. `cancelled`、休假與 buffer 日不計薪；actual-hours 快取與正式日數不符時拒絕使用。
 2. 多月嫂同案按各自服務 ownership、凍結費率 獨立計算，合計等於 `T`（`20` 天樓層費 `3,000` 元，中途服務 `5` 天得 `750` 元，再依 `3 / 2` 天按最大餘數法分得 `450 / 300` 元）。
 3. 完整履約後取消申請被拒絕且薪資不變；未核銷義務重算更新、已付款義務僅追加差額事件，全部新義務為整數 NTD。
 4. 雙胞胎更正、`staff-handover:` 換人差額、兩段時薪與方案一 `T - S`／`S` 分期拆分於同一 UoW 原子成立；0～100 元轉帳手續費由 Staff Payables 核銷結清，不竄改 Payroll 原始義務總額。
+5. 歷史服務完成案件具備 §3.2 資料時，從 HCM 登記工時與 Payroll 費率建立可核銷應付，依自費及直接補助來源形成各自付款日，且重匯不重複入帳。無正式班表或人工服務天數紀錄仍可計薪。

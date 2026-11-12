@@ -1,300 +1,165 @@
-"""
-File: historical_baseline_obligation_sync.py
-Description: 自動為歷史服務完成訂單建立月嫂薪資基準應付義務，避免逐案手動調整天數。
-"""
+"""Synchronize completed historical payroll from adopted and registered facts."""
 
-from __future__ import annotations
-
-from datetime import date, timedelta
 from decimal import Decimal
-import hashlib
-import json
-from typing import Any
 
-from domains.payroll.payment_due_date import (
-    calculate_staff_payment_due_date,
-    is_full_subsidy_eligible,
+from domains.payroll.calculation import AssignmentRateSnapshot, PayrollPolicyKind, PayrollTerms
+from domains.payroll.historical_calculation import HistoricalAssignmentServiceFacts, build_historical_case_payroll_candidate
+from domains.payroll.installments import confirmed_subsidy_installments
+from domains.payroll.tiered_rates import funding_due_date
+from infrastructure.mysql.payroll_rebuild_repository import (
+    MySqlPayrollRebuildRepository, _load_adjustments, _amount_index, _payroll_adjustments,
+)
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.money import MoneyNTD
+from subsystems.payroll.rebuild_workflow import (
+    PayrollRebuildWorkflow, StaffObligationAction, StaffObligationActionKind, build_source_preview,
 )
 
-
-_HISTORICAL_COMPLETED_STATUSES = (
-    "歷史訂單－服務完成",
-    "歷史訂單－帳務完成",
-)
-
-DEFAULT_HISTORICAL_HOURLY_RATE = 250
-DEFAULT_HISTORICAL_HOURS_PER_DAY = Decimal("9.0")
-DEFAULT_HISTORICAL_SERVICE_DAYS = 20
+_COMPLETED = ("歷史訂單－服務完成", "歷史訂單－帳務完成")
 
 
-def sync_historical_staff_baseline_obligations(
-    connection: Any,
-    case_no: str | None = None,
-    *,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    """為歷史服務完成或帳務完成訂單建立或同步月嫂基準應付義務。
-
-    若指定 case_no 則只同步單案；未指定時掃描全庫所有符合條件的歷史訂單。
-    """
+def sync_historical_staff_baseline_obligations(connection, case_no=None, *, dry_run=False, actor=None):
+    """Keep the existing maintenance entry points on the same writer as adoption."""
     with connection.cursor() as cursor:
-        if case_no:
-            cursor.execute(
-                "SELECT o.case_no, o.client_id, o.staff_id, o.status, o.lifecycle_version, "
-                "o.service_days, o.service_hours_per_day, o.floor_fee, o.start_date, o.end_date, "
-                "o.actual_start_date, o.actual_end_date, o.staff_payment_due_date, "
-                "c.identity_status "
-                "FROM orders o "
-                "LEFT JOIN clients c ON c.id = o.client_id "
-                "WHERE o.case_no = %s AND o.status IN (%s, %s)",
-                (case_no, *_HISTORICAL_COMPLETED_STATUSES),
-            )
-        else:
-            cursor.execute(
-                "SELECT o.case_no, o.client_id, o.staff_id, o.status, o.lifecycle_version, "
-                "o.service_days, o.service_hours_per_day, o.floor_fee, o.start_date, o.end_date, "
-                "o.actual_start_date, o.actual_end_date, o.staff_payment_due_date, "
-                "c.identity_status "
-                "FROM orders o "
-                "LEFT JOIN clients c ON c.id = o.client_id "
-                "WHERE o.status IN (%s, %s) "
-                "ORDER BY o.case_no",
-                _HISTORICAL_COMPLETED_STATUSES,
-            )
-        orders = cursor.fetchall()
-
-    created_count = 0
-    updated_count = 0
-    skipped_count = 0
-    details = []
-
-    for order in orders:
-        c_no = str(order["case_no"])
-        status = str(order["status"])
-        res = _sync_single_order(connection, order, dry_run=dry_run)
-        if res["action"] == "created":
-            created_count += 1
-            details.append({"case_no": c_no, "action": "created", **res})
-        elif res["action"] == "updated":
-            updated_count += 1
-            details.append({"case_no": c_no, "action": "updated", **res})
-        else:
-            skipped_count += 1
-
+        sql = "SELECT case_no FROM orders WHERE status IN (%s,%s)"
+        params = _COMPLETED
+        if case_no is not None:
+            sql += " AND case_no=%s"
+            params += (case_no,)
+        cursor.execute(sql + " ORDER BY case_no", params)
+        case_numbers = tuple(row["case_no"] for row in cursor.fetchall())
+    details = [
+        {"case_no": number, **synchronize_historical_payroll(connection, number, dry_run=dry_run, actor=actor)}
+        for number in case_numbers
+    ]
     return {
-        "scanned_orders": len(orders),
-        "created_count": created_count,
-        "updated_count": updated_count,
-        "skipped_count": skipped_count,
+        "scanned_orders": len(details),
+        **{f"{action}_count": sum(row["action"] == action for row in details)
+           for action in ("created", "updated", "skipped")},
         "details": details,
     }
 
 
-def _sync_single_order(
-    connection: Any,
-    order: dict[str, Any],
-    *,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    case_no = str(order["case_no"])
-    is_settled = str(order["status"]) == "歷史訂單－帳務完成"
-
+def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=None):
+    """Borrow the caller's transaction. The order lock serializes first establishment."""
     with connection.cursor() as cursor:
-        # 1. 查找現有有效的月嫂指派
         cursor.execute(
-            "SELECT id, staff_id, hourly_rate, planned_hours, actual_hours, floor_fee_allocated "
-            "FROM case_staff_assignments "
-            "WHERE case_no = %s AND status NOT IN ('cancelled', 'replaced') "
-            "ORDER BY assignment_sequence ASC, id ASC",
+            "SELECT status,service_days,service_hours_per_day,floor_fee,actual_end_date,staff_payment_due_date "
+            "FROM orders WHERE case_no=%s" + ("" if dry_run else " FOR UPDATE"), (case_no,),
+        )
+        order = cursor.fetchone()
+        if order is None or order["status"] not in _COMPLETED:
+            return _skipped("historical_service_not_completed")
+        cursor.execute(_ADOPTED_ASSIGNMENT_SQL, (case_no,))
+        assignments = tuple(cursor.fetchall())
+        if len(assignments) != 1:
+            return _skipped("historical_payroll_unique_assignment_required")
+        assignment = assignments[0]
+        assignment_id = assignment["id"]
+        staff_id = assignment["staff_id"]
+        cursor.execute(
+            "SELECT obligation_identity,assignment_id,staff_id,amount_due_ntd,due_date,status,payout_history_exists,"
+            "EXISTS(SELECT 1 FROM staff_payout_obligation_links payment "
+            "WHERE payment.obligation_identity=o.obligation_identity) "
+            "OR EXISTS(SELECT 1 FROM historical_staff_payout_projections payment "
+            "WHERE payment.obligation_identity=o.obligation_identity) AS has_payment "
+            "FROM staff_obligations o WHERE case_no=%s AND obligation_kind='service_pay' "
+            "AND direction='payable_to_staff' AND status<>'cancelled'" + ("" if dry_run else " FOR UPDATE"),
             (case_no,),
         )
-        assignments = cursor.fetchall()
-
-        # 若指派為空但訂單上有 staff_id，補建一筆 completed assignment
-        staff_id = order.get("staff_id")
-        if not assignments and staff_id:
-            staff_id = int(staff_id)
-            days = int(order.get("service_days") or DEFAULT_HISTORICAL_SERVICE_DAYS)
-            hpd = Decimal(str(order.get("service_hours_per_day") or DEFAULT_HISTORICAL_HOURS_PER_DAY))
-            hours = Decimal(days) * hpd
-            if not dry_run:
-                cursor.execute(
-                    "INSERT INTO case_staff_assignments "
-                    "(case_no, generation_id, staff_id, assignment_sequence, "
-                    "assigned_start_date, assigned_end_date, original_assigned_start_date, original_assigned_end_date, "
-                    "planned_hours, actual_hours, hourly_rate, floor_fee_allocated, status) "
-                    "VALUES (%s, 1, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, 'completed')",
-                    (
-                        case_no, staff_id,
-                        order.get("actual_start_date") or order.get("start_date"),
-                        order.get("actual_end_date") or order.get("end_date"),
-                        order.get("start_date"), order.get("end_date"),
-                        hours, hours, DEFAULT_HISTORICAL_HOURLY_RATE,
-                        order.get("floor_fee") or 0,
-                    ),
-                )
-                assignment_id = int(cursor.lastrowid)
-            else:
-                assignment_id = 0
-            assignments = [{
-                "id": assignment_id,
-                "staff_id": staff_id,
-                "hourly_rate": DEFAULT_HISTORICAL_HOURLY_RATE,
-                "planned_hours": hours,
-                "actual_hours": hours,
-                "floor_fee_allocated": order.get("floor_fee") or 0,
-            }]
-
-        if not assignments:
-            return {"action": "skipped", "reason": "no_staff_assigned"}
-
-        # 2. 計算完工日與應付款日
-        completed_on = (
-            order.get("actual_end_date")
-            or order.get("end_date")
-            or order.get("actual_start_date")
-            or order.get("start_date")
-            or date.today()
+        existing = tuple(cursor.fetchall())
+        if existing and (len(existing) != 1 or existing[0]["assignment_id"] != assignment_id
+                         or existing[0]["staff_id"] != staff_id):
+            return _skipped("historical_payroll_obligation_binding_conflict")
+        original = existing[0] if existing else None
+        if original and original["due_date"] is not None:
+            return _skipped("already_synced")
+        if original and (original["status"] != "open" or original["payout_history_exists"] or original["has_payment"]):
+            return _skipped("historical_payroll_original_payment_preserved")
+        if not original and order["status"] == _COMPLETED[1]:
+            return _skipped("historical_payroll_settled_source_required")
+        order = {**order, "actual_end_date": assignment["source_end_date"] or order["actual_end_date"]}
+        if not all(order[name] for name in ("service_days", "service_hours_per_day", "actual_end_date")):
+            return _skipped("historical_payroll_service_basis_missing")
+        if not assignment["hourly_rate_ntd"]:
+            return _skipped("payroll_rate_policy_not_found")
+        identity = f"assignment:{assignment_id}"
+        days = int(order["service_days"])
+        terms = PayrollTerms(days, Decimal(str(order["service_hours_per_day"])), MoneyNTD(int(order["floor_fee"] or 0)))
+        payroll = build_historical_case_payroll_candidate(
+            (HistoricalAssignmentServiceFacts(identity, staff_id, days),),
+            (AssignmentRateSnapshot(identity, assignment["policy_version"], PayrollPolicyKind(assignment["policy_kind"]),
+                                    MoneyNTD(int(assignment["hourly_rate_ntd"]))),),
+            terms,
+            _payroll_adjustments(_amount_index(_load_adjustments(cursor, assignments, not dry_run))),
         )
-        identity_status = str(order.get("identity_status") or "一般市民")
-        is_full_subsidy = False
-        try:
-            is_full_subsidy = is_full_subsidy_eligible(identity_status)
-        except Exception:
-            pass
-
-        due_date = order.get("staff_payment_due_date")
-        if due_date is None:
-            try:
-                due_date = calculate_staff_payment_due_date(
-                    completed_on,
-                    Decimal("1"),
-                    is_full_subsidy,
-                )
-            except Exception:
-                month_idx = completed_on.month
-                due_date = date(completed_on.year + month_idx // 12, month_idx % 12 + 1, 15)
-
-            if not dry_run:
-                cursor.execute(
-                    "UPDATE orders SET staff_payment_due_date = %s WHERE case_no = %s",
-                    (due_date, case_no),
-                )
-
-        # 3. 檢查歷史服務天數項目中是否已有計算過的金額
-        cursor.execute(
-            "SELECT assignment_id, staff_id, staff_obligation_amount_ntd, actual_service_days "
-            "FROM historical_service_day_items "
-            "WHERE event_id = ("
-            "  SELECT MAX(id) FROM historical_service_day_events WHERE case_no = %s"
-            ")",
-            (case_no,),
+        amount = MoneyNTD(int(original["amount_due_ntd"])) if original else payroll.total_payable
+        if amount.amount <= 0:
+            return _skipped("historical_payroll_nonpositive_amount")
+        funding = _funding_schedule(connection, case_no, order, amount.amount)
+        if funding is None:
+            return _skipped("historical_payroll_funding_conflict")
+        due_date, portions = funding
+        result = {"action": "updated" if original else "created", "staff_id": staff_id,
+                  "amount_ntd": amount.amount, "due_date": due_date.isoformat()}
+        if dry_run:
+            return result
+        cursor.execute("INSERT IGNORE INTO payroll_case_accounts (case_no) VALUES (%s)", (case_no,))
+        cursor.execute("SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+        version = int(cursor.fetchone()["aggregate_version"])
+        cursor.execute("UPDATE orders SET staff_payment_due_date=%s WHERE case_no=%s AND staff_payment_due_date IS NULL",
+                       (due_date, case_no))
+        obligation_identity = original["obligation_identity"] if original else f"staff-obligation:{identity}"
+        before = amount if original else MoneyNTD(0)
+        action = StaffObligationAction(identity, obligation_identity,
+                                       StaffObligationActionKind.REPLACE_UNPAID if original else StaffObligationActionKind.CREATE,
+                                       before, amount, amount - before, due_date)
+        preview = build_source_preview(case_no, version, payroll, (action,))
+        key = f"historical-payroll:{case_no}:{version}"
+        PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(connection), None).persist_source_preview(
+            case_no, preview, actor=actor or ActorContext("system:historical-payroll"),
+            key=IdempotencyKey(key), correlation_id=CorrelationId(key),
         )
-        saved_items = {int(r["staff_id"]): r for r in cursor.fetchall()}
-
-        # 4. 針對每一筆 assignment 同步 staff_obligations
-        created_any = False
-        updated_any = False
-
-        for a in assignments:
-            a_staff_id = int(a["staff_id"])
-            a_id = int(a["id"])
-
-            if a_staff_id in saved_items and saved_items[a_staff_id].get("staff_obligation_amount_ntd"):
-                amount_ntd = int(saved_items[a_staff_id]["staff_obligation_amount_ntd"])
-            else:
-                days = int(order.get("service_days") or DEFAULT_HISTORICAL_SERVICE_DAYS)
-                hpd = Decimal(str(order.get("service_hours_per_day") or DEFAULT_HISTORICAL_HOURS_PER_DAY))
-                rate = Decimal(str(a.get("hourly_rate") or DEFAULT_HISTORICAL_HOURLY_RATE))
-                floor = Decimal(str(a.get("floor_fee_allocated") or order.get("floor_fee") or 0))
-                hours = Decimal(days) * hpd
-                amount_ntd = int(round(hours * rate)) + int(floor)
-
-            obligation_identity = f"staff-obligation:{case_no}:{a_staff_id}"
-
+        if portions:
+            from infrastructure.mysql.payroll_installments import establish_confirmed_subsidy_installments
             cursor.execute(
-                "SELECT obligation_identity, amount_due_ntd, due_date, status, current_event_id "
-                "FROM staff_obligations WHERE obligation_identity = %s",
-                (obligation_identity,),
+                "SELECT obligation_identity FROM staff_obligations WHERE case_no=%s AND assignment_id=%s "
+                "AND obligation_kind='service_pay' AND direction='payable_to_staff' AND status='open'",
+                (case_no, assignment_id),
             )
-            existing = cursor.fetchone()
+            current = cursor.fetchone()
+            establish_confirmed_subsidy_installments(cursor, current["obligation_identity"], portions)
+        return result
 
-            if existing:
-                # 已存在義務，若到期日不同或為空則更新
-                if existing.get("due_date") != due_date or (existing.get("amount_due_ntd") == 0 and not is_settled and amount_ntd > 0):
-                    if not dry_run:
-                        cursor.execute(
-                            "UPDATE staff_obligations SET due_date = %s, "
-                            "amount_due_ntd = CASE WHEN status='open' AND amount_due_ntd=0 THEN %s ELSE amount_due_ntd END "
-                            "WHERE obligation_identity = %s",
-                            (due_date, amount_ntd, obligation_identity),
-                        )
-                    updated_any = True
-                continue
 
-            if dry_run:
-                created_any = True
-                continue
+def _funding_schedule(connection, case_no, order, amount):
+    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
 
-            # 確保 payroll_case_accounts 與 staff_payable_accounts 存在
-            cursor.execute("INSERT IGNORE INTO payroll_case_accounts (case_no) VALUES (%s)", (case_no,))
-            cursor.execute("SELECT aggregate_version FROM payroll_case_accounts WHERE case_no = %s FOR UPDATE", (case_no,))
-            payroll_ver = int(cursor.fetchone()["aggregate_version"])
+    funding = query_subsidy_payable_handoff(connection, case_no)
+    completed_on = order["actual_end_date"]
+    subsidy = funding.subsidy_ntd if funding.scheme == "split" else 0
+    if funding.staff_subsidy_reason or subsidy is None or not 0 <= subsidy <= amount:
+        return None
+    due_date = order["staff_payment_due_date"] or funding_due_date(completed_on, directly_subsidized=subsidy == amount)
+    portions = confirmed_subsidy_installments(amount, subsidy, due_date, completed_on) if subsidy else ()
+    return due_date, portions
 
-            cursor.execute("INSERT IGNORE INTO staff_payable_accounts (staff_id) VALUES (%s)", (a_staff_id,))
-            cursor.execute("SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id = %s FOR UPDATE", (a_staff_id,))
-            cursor.fetchone()
 
-            event_key = f"historical-baseline-payable:{case_no}:{a_staff_id}"
-            digest = hashlib.sha256(f"{case_no}:{a_staff_id}:{amount_ntd}".encode("utf-8")).hexdigest()
-            status_val = "settled" if is_settled else "open"
+def _skipped(reason):
+    return {"action": "skipped", "reason": reason}
 
-            cursor.execute(
-                "INSERT INTO staff_obligation_events "
-                "(obligation_identity, assignment_id, case_no, staff_id, obligation_kind, "
-                "direction, source_obligation_identity, event_type, before_amount_ntd, "
-                "after_amount_ntd, due_date, payroll_fingerprint, expected_payroll_version, "
-                "resulting_payroll_version, idempotency_key, actor, reason) "
-                "VALUES (%s, %s, %s, %s, 'service_pay', 'payable_to_staff', NULL, 'established', "
-                "0, %s, %s, %s, %s, %s, %s, 'system:historical-sync', '自動建立歷史完成訂單月嫂薪資基準')",
-                (
-                    obligation_identity, a_id, case_no, a_staff_id,
-                    amount_ntd, due_date, digest, payroll_ver, payroll_ver + 1, event_key,
-                ),
-            )
-            event_id = int(cursor.lastrowid)
 
-            cursor.execute(
-                "INSERT INTO staff_obligations "
-                "(obligation_identity, assignment_id, case_no, staff_id, obligation_kind, "
-                "direction, source_obligation_identity, amount_due_ntd, due_date, status, "
-                "current_event_id, payroll_version, payout_history_exists) "
-                "VALUES (%s, %s, %s, %s, 'service_pay', 'payable_to_staff', NULL, "
-                "%s, %s, %s, %s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE "
-                "amount_due_ntd = VALUES(amount_due_ntd), "
-                "due_date = VALUES(due_date), "
-                "current_event_id = VALUES(current_event_id), "
-                "payroll_version = payroll_version + 1",
-                (
-                    obligation_identity, a_id, case_no, a_staff_id,
-                    amount_ntd, due_date, status_val, event_id, payroll_ver + 1,
-                    1 if is_settled else 0,
-                ),
-            )
-
-            cursor.execute(
-                "UPDATE payroll_case_accounts SET aggregate_version = %s WHERE case_no = %s",
-                (payroll_ver + 1, case_no),
-            )
-            cursor.execute(
-                "UPDATE staff_payable_accounts SET aggregate_version = aggregate_version + 1 WHERE staff_id = %s",
-                (a_staff_id,),
-            )
-            created_any = True
-
-    if created_any:
-        return {"action": "created", "staff_id": a_staff_id, "amount_ntd": amount_ntd, "due_date": str(due_date)}
-    if updated_any:
-        return {"action": "updated", "due_date": str(due_date)}
-    return {"action": "skipped", "reason": "already_synced"}
+_ADOPTED_ASSIGNMENT_SQL = """
+SELECT a.id,a.staff_id,e.source_end_date,
+       COALESCE(rate.policy_version,base.policy_version) AS policy_version,
+       COALESCE(rate.policy_kind,base.policy_kind) AS policy_kind,
+       COALESCE(rate.hourly_rate_ntd,base.hourly_rate_ntd) AS hourly_rate_ntd
+FROM historical_order_pairing_evidence e
+JOIN historical_order_adoption_receipts r ON r.id=e.receipt_id
+JOIN case_staff_assignments a ON a.id=e.assignment_id AND a.staff_id=e.staff_id AND a.case_no=r.case_no
+LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=a.id
+LEFT JOIN case_payroll_rate_policy_snapshots base ON base.case_no=a.case_no
+WHERE r.id=(SELECT id FROM historical_order_adoption_receipts WHERE case_no=%s AND outcome='adopted'
+            ORDER BY id DESC LIMIT 1)
+  AND a.status IN ('planned','active','completed')
+"""

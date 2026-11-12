@@ -76,7 +76,8 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None):
         for kind in ("client", "subsidy"):
             portion = portions.get(kind)
             cursor.execute("INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) "
-                "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE amount_ntd=VALUES(amount_ntd),due_date=VALUES(due_date)",
+                "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE amount_ntd=VALUES(amount_ntd),"
+                "due_date=COALESCE(due_date,VALUES(due_date))",
                 (identity, kind, portion.amount if portion else 0, portion.due_date if portion else None))
 
 

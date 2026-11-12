@@ -21,7 +21,7 @@ def has_official_staff_subsidy_evidence(cursor, cases):
     workspace = build_accounting_workspace(cursor.connection)
     return any(
         case.subsidy_ntd is not None and case.subsidy_ntd > 0 and case.staff_receivable_ntd is not None
-        for case in (workspace.query(case_no, include_sources=False) for case_no in cases)
+        for case in (workspace.query(case_no) for case_no in cases)
     )
 
 

@@ -31,7 +31,7 @@ def connection(monkeypatch):
 
 
 def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10), staff=None):
-    name = '合成補助月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
+    name = '合成月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
     with c.cursor() as q:
         while True:
             case = f'{800+int(uuid4().hex[:3],16)%100:03d}{int(uuid4().hex[:3],16)%1000:06d}'
@@ -104,13 +104,19 @@ def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path
     from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
 
-    case, name, _ = seed(connection, False, 'split')
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    case, name, _ = seed(connection, False, 'split', paid=False)
     with connection.cursor() as cursor:
         cursor.execute('SELECT staff_id FROM orders WHERE case_no=%s', (case,))
         staff = cursor.fetchone()['staff_id']
     other, _, _ = seed(connection, False, 'split', staff=staff,
-                       actual_end=date(2026, 9 if same_month else 10, 20), subsidy=8000)
-    batch = bank_source(connection, tmp_path, case, name, 'split', memo_override=name)
+                       actual_end=date(2026, 9 if same_month else 10, 20), subsidy=8000, paid=False)
+    before = build_accounting_workspace(connection).query(case)
+    assert before.scheme == 'waiting'
+    assert before.subsidy_ntd == 12000 and not before.subsidy_payments
+    batch = bank_source(connection, tmp_path, case, name, 'split',
+                        memo_override=name + ' 　GB,轉入' + '0' * 15 + '3')
     app = application(connection)
     correlation = CorrelationId('staff-subsidy-candidates')
     plan = app.preview_batch(batch, correlation)

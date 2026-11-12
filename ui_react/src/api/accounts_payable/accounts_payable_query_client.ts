@@ -13,6 +13,7 @@ export interface AccountsPayableQueryClient {
   queryCase(caseNo: string, targetMonth: string, options?: AccountsPayableQueryOptions): Promise<CaseStaffPayableAudit>;
   lookupHistorical(keyword: string, targetMonth: string, signal?: AbortSignal): Promise<HistoricalPayableAuditItem[]>;
   recordHistoricalUnpaid(caseNo: string, command: HistoricalUnpaidPayableCommand): Promise<void>;
+  synchronizeHistorical(caseNo: string): Promise<string | undefined>;
 }
 export type HistoricalUnpaidPayableCommand = {
   staff_id: number; obligation_identity: string | null; expected_event_id: number | null;
@@ -38,6 +39,16 @@ class DefaultAccountsPayableQueryClient implements AccountsPayableQueryClient {
     await transport.post(`/api/v1/orders/${encodeURIComponent(caseNo)}/payroll/historical-unpaid-payable`, command, {
       token: sessionClient.getToken(),
     });
+  }
+
+  async synchronizeHistorical(caseNo: string) {
+    const result = await transport.post<{ success: boolean; data?: { details: { action: string; reason?: string }[] } }>(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/payroll/sync-historical-baseline-obligations`,
+      undefined, { token: sessionClient.getToken() },
+    );
+    if (!result.success) throw new Error('historical_payroll_sync_failed');
+    const detail = result.data?.details[0];
+    return detail?.action === 'skipped' ? detail.reason : detail?.action;
   }
 
   async query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview> {

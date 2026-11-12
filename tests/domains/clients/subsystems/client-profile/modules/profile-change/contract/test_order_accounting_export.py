@@ -150,7 +150,7 @@ def test_export_keeps_fixed_hcm_columns_and_native_excel_value_types():
     assert worksheet["Y2"].value.date() == date(2026, 10, 1)
     assert worksheet["AG2"].value.date() == date(2026, 12, 15)
     assert worksheet["AI2"].value.date() == date(2026, 11, 10)
-    assert worksheet.auto_filter.ref == "A1:AK2"
+    assert worksheet.auto_filter.ref == "A1:AL2"
     assert worksheet.freeze_panes == "A2"
 
 
@@ -254,11 +254,13 @@ def test_mysql_export_uses_one_unbounded_base_join_and_current_finance_projectio
     assert rows[0].imported_virtual_accounts == (
         "009978160011500001", "009978160011500009",
     )
-    assert rows[0].built_in_virtual_account == "99781699115001"
+    assert rows[0].built_in_virtual_account is None
     assert rows[0].multi_birth_count == "雙胞胎"
     assert rows[0].customer_payable_total_ntd == 93600
     assert rows[0].subsidy_amount_ntd == 36000
     assert rows[0].subsidy_return_amount_ntd is None
     assert rows[0].subsidy_return_due_date is None
     assert rows[0].subsidy_return_status is None
-    assert rows[0].staff_payment_due_date == date(2026, 11, 15)
+    assert rows[0].staff_payment_due_date is None
+    assert rows[0].estimated_staff_payment_due_date == date(2026, 11, 15)
+    assert (rows[0].claim_application_year, rows[0].claim_application_month) == (2027, 1)

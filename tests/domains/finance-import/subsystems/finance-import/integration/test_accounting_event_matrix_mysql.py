@@ -1,7 +1,7 @@
 """Real MySQL event matrix: accounting follows service and bank owner events.
 
-Initial execution, recipient master data and the explicitly reviewed government
-reversal classification are synthetic source fixtures.
+Initial execution, recipient master data and already classified bank return
+sources are synthetic source fixtures.
 All subsequent schedule changes, receipts, refunds, returns, period receipts and
 reconciliation use public APIs. No provider worker or product lifespan runs.
 """
@@ -13,7 +13,6 @@ pytestmark = pytest.mark.skipif(not DATABASE, reason='requires disposable localh
 from datetime import date, timedelta
 from io import BytesIO
 import json, runpy
-import base64
 from uuid import uuid4
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -46,15 +45,17 @@ def snapshot(case):
 def next_case():
     return f"116{rows('SELECT COUNT(*) AS n FROM orders')[0]['n'] + 1:06d}"
 
-def new_case(*, service=False, identity='補助市民', days=30, hours=8, floor=0, survey=None):
+def new_case(*, service=False, identity='一般市民', days=30, hours=8, floor=0, survey=None, pricing_policy_id=None):
     case = next_case()
-    if service and identity == '補助市民' and (days == 30) and (hours == 8) and (floor == 0) and (survey is None):
+    if service and identity == '一般市民' and (days == 30) and (hours == 8) and (floor == 0) and (survey is None):
         staff = h['seed_case'](http, case)
         return (case, staff)
     client = write("INSERT INTO clients(case_no,name,identity_status,service_type,created_at) VALUES (%s,'Synthetic event acceptance',%s,'連續服務','2026-09-01')", (case, identity))
     write("INSERT INTO orders(case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day,floor_fee,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,'待補件',0,'2026-10-01',%s,%s,%s,'08:00:00','17:00:00',0)", (case, client, days, hours, floor))
     if survey is not None:
         write('INSERT INTO beclass_records(query_no,bound_case_no,client_id,survey_details) VALUES (%s,%s,%s,%s)', (case, case, client, json.dumps(survey, ensure_ascii=False)))
+    if pricing_policy_id is not None:
+        write('UPDATE orders SET pricing_policy_id=%s WHERE case_no=%s', (pricing_policy_id, case))
     url = f'/api/v1/orders/{case}/intake-completion'
     before = snapshot(case)
     plan = checked(http.post(url + '/preview', json={}))
@@ -63,25 +64,54 @@ def new_case(*, service=False, identity='補助市民', days=30, hours=8, floor=
     return (case, [])
 
 def bank(case, amount, sequence, account=None):
-    return h['bank'](http, case, amount, sequence, account=account)
+    due_date = None
+    if account is None:
+        stages = rows(
+            "SELECT due_date FROM client_obligations WHERE case_no=%s AND direction='receivable_from_client' "
+            "AND status='open' AND amount_due_ntd=%s AND obligation_type IN ('deposit','first','second') "
+            "ORDER BY FIELD(obligation_type,'deposit','first','second')",
+            (case, amount),
+        )
+        assert stages and stages[0]['due_date'] is not None
+        due_date = stages[0]['due_date']
+    return h['bank'](http, case, amount, sequence, account=account, transaction_date=due_date)
 
-def stage(case, amount, sequence, *, account=None, incoming=False, government=False, refund_account=None, evidence=None):
+
+def classified_return(case, amount, transaction_date, classification, *, account=None):
+    reference = {'case_no': case} if classification == 'client_refund_return' else {}
+    return write(
+        "INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,direction,credit,debit,currency,"
+        "counterparty_account,resolved_counterparty_account,bank_references,warnings,raw_payload,classification_type) "
+        "VALUES(%s,'sinopac',%s,'incoming',%s,0,'TWD',%s,%s,%s,'[]','{}',%s)",
+        (uuid4().hex + uuid4().hex, transaction_date, amount, account, account, json.dumps(reference), classification),
+    )
+
+def stage(case, amount, sequence, *, account=None, incoming=False, government=False, refund_account=None):
     day = f'2026/11/{sequence:02d}'
-    if government or refund_account:
+    if refund_account:
+        refund_due = rows("SELECT due_date FROM client_obligations WHERE case_no=%s AND obligation_type='refund' "
+                          "AND status='open'", (case,))
+        assert len(refund_due) == 1 and refund_due[0]['due_date'] is not None
+        day = refund_due[0]['due_date'].strftime('%Y/%m/%d')
+    if government:
         headers = ['序號', '交易日期', '交易時間', '帳務日期', '摘要', '支出金額', '存入金額', '帳戶餘額', '備註']
-        row = [f'{int(case[3:]) * 100 + sequence}', day, '09:08:07', day, '轉帳', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, '新竹市政府' if government else '客戶退款 ' + refund_account]
+        row = [f'{int(case[3:]) * 100 + sequence}', day, '09:08:07', day, '轉帳', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, '新竹市政府']
     else:
         headers = ['帳號', '交易日', '計息日', '入帳日', '摘要', '幣別', '支出', '存入', '餘額', '銷帳編號', '交易參考編號', '', '更正註記', '存摺備註']
         virtual = f'99781699{int(case[:3]):03d}{int(case[3:]):03d}'
-        row = ['1' * 12, day + ' 09:08:07', day, day, '轉帳', 'TWD', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, None if account else virtual, account or f'{case}:{sequence}', 'synthetic', None, 'fixture']
+        reference = refund_account or account
+        memo = f'HC{virtual[-6:]} 客戶退款' if refund_account else 'synthetic'
+        row = ['1' * 12, day + f' 09:08:{sequence:02d}', day, day, '轉帳', 'TWD', None if incoming else amount, amount if incoming else None, 300000 + int(case[3:]) * 100 + sequence, None if reference else virtual, reference or f'{case}:{sequence}', memo, None, 'fixture']
+    if refund_account:
+        from domains.finance_import.statement_archive import STATEMENT_COLUMNS
+        headers = list(STATEMENT_COLUMNS)
+        row.insert(9, None)  # 票據號碼
     out = BytesIO()
     pd.DataFrame([headers, row]).to_excel(out, sheet_name='來源', index=False, header=False)
     ingestion = http.post('/api/v1/finance-import/workbooks/ingest', headers={'Idempotency-Key': f'{case}:stage:{sequence}'}, files={'workbook': (f'synthetic-{case}-{sequence}.xlsx', out.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')})
     batch = checked(ingestion)['batch_identity']
     preview = http.post('/api/v1/finance-import/batches/preview', json={'batch_identity': batch})
     plan = checked(preview)
-    if evidence is not None:
-        evidence.update(ingestion=ingestion.json(), preview=preview.json(), workbook_base64=base64.b64encode(out.getvalue()).decode('ascii'))
     assert len(plan['rows']) == 1, plan
     return (int(plan['rows'][0]['row_identity'].split(':')[-1]), plan)
 
@@ -173,7 +203,7 @@ def seed_service(case, days=30, *, splits=None, double_days=()):
     return staff
 
 def identities():
-    matrix = [('補助市民', 30, 0, None, 72000), ('社福', 15, 0, None, 42000), ('社福', 16, 0, None, 44800), ('非市民', 30, 0, None, 76800), ('補助市民', 30, 0, {'特殊計費:胎數': '雙胞胎'}, 108000)]
+    matrix = [('一般市民', 30, 0, None, 72000), ('補助市民', 15, 0, None, 42000), ('社福', 16, 0, None, 44800), ('非市民', 30, 0, None, 76800), ('一般市民', 30, 0, {'特殊計費:胎數': '雙胞胎'}, 108000)]
     for identity, days, floor, survey, expected in matrix:
         case, _ = new_case(identity=identity, days=days, floor=floor, survey=survey)
         seed_service(case, days)
@@ -186,7 +216,7 @@ def identities():
     all_receipts(case)
     complete(case)
     amounts = rows("SELECT staff_id,amount_due_ntd FROM staff_obligations WHERE case_no=%s AND obligation_kind='service_pay' AND status<>'cancelled' ORDER BY staff_id", (case,))
-    assert amounts == [{'staff_id': staff[0], 'amount_due_ntd': 26734}, {'staff_id': staff[1], 'amount_due_ntd': 48667}], amounts
+    assert amounts == [{'staff_id': staff[0], 'amount_due_ntd': 24334}, {'staff_id': staff[1], 'amount_due_ntd': 48667}], amounts
 
 def government():
     # Current whole-period owner oracle also proves real workbook bank consumption.
@@ -221,7 +251,7 @@ def cancellation():
     assert len(snapshot(case)['schedule']) == 4
     assert all(item['after_due_date'] is not None for item in plan['client_finance_impact']['actions'] if item['direction'] == 'refund_due')
     assert sum(int(r['amount_due_ntd']) for r in snapshot(case)['client'] if r['obligation_type'] == 'refund') == 62400
-    assert sum(int(r['amount_due_ntd']) for r in snapshot(case)['client'] if r['obligation_type'] == 'subsidy_return') == 9600
+    assert not any(r['obligation_type'] == 'subsidy_return' for r in snapshot(case)['client'])
     assert sum(int(r['amount_ntd']) for r in snapshot(case)['ledger'] if r['entry_type'] == 'receipt') == 72000
     assert sum((int(r['amount_due_ntd']) for r in rows("SELECT amount_due_ntd FROM staff_obligations WHERE case_no=%s AND direction='payable_to_staff' AND status<>'cancelled'", (case,)))) == 9600
 
@@ -285,7 +315,8 @@ def recovery():
     recovery = rows('SELECT recovery_identity,remaining_amount_ntd FROM staff_overpayment_recoveries WHERE staff_id=%s', (staff[1],))[0]
     rid = recovery['recovery_identity']
     amount = int(recovery['remaining_amount_ntd'])
-    bank_id, plan = stage(case, amount, 20, account=h['staff_account'](staff[1]), incoming=True)
+    bank_id = classified_return(case, amount, date(2026, 11, 20), 'staff_payout_return',
+                                account=h['staff_account'](staff[1]))
     body = {'recovery_identity': rid, 'finance_import_row_id': bank_id, 'evidence_reference': 'synthetic return confirmation'}
     versions = {'recovery': 'recovery_version', 'staff_payables': 'staff_payables_version'}
     _, matching = owner_apply('/api/v1/staff-payables/overpayment-recoveries/matching', body, case=case, key=case + ':matching', versions=versions)
@@ -367,7 +398,8 @@ def bank_return():
             body['mode'] = 'underpayment'
         owner_apply(url, body, case=case, key=case + f':paid:{sequence}', versions={'staff_payables': 'staff_payables_version', 'bank_facts': 'bank_facts_version'})
     source = rows('SELECT event.id FROM staff_payout_events event JOIN staff_payout_obligation_links link ON link.payout_event_id=event.id WHERE link.obligation_identity=%s AND event.amount_ntd=12000', (root,))[0]['id']
-    bid, _ = stage(case, 12000, 26, account=h['staff_account'](staff[0]), incoming=True)
+    bid = classified_return(case, 12000, date(2026, 11, 26), 'staff_payout_return',
+                            account=h['staff_account'](staff[0]))
     owner_apply('/api/v1/staff-payables/return', {'return_finance_import_row_id': bid, 'source_payout_event_id': source, 'obligation_identities': [root]}, case=case, key=case + ':returned', versions={'staff_payables': 'staff_payables_version', 'bank_facts': 'bank_facts_version'})
     assert rows('SELECT balance_ntd,status FROM staff_payable_projections WHERE obligation_identity=%s', (root,)) == [{'balance_ntd': 12000, 'status': 'partially_paid'}]
     return (case, staff)
@@ -408,23 +440,18 @@ def customer_refund():
     owner_apply(f'/api/v1/orders/{case}/client-finance/refund', {'finance_import_row_ids': [bid], 'obligation_identities': [root['obligation_identity']]}, case=case, key=case + ':refund', versions={'account': 'account_version'})
     entry = rows("SELECT id FROM client_ledger_entries WHERE case_no=%s AND entry_type='refund'", (case,))[0]['id']
     assert rows('SELECT status FROM client_obligations WHERE obligation_identity=%s', (root['obligation_identity'],)) == [{'status': 'settled'}]
-    bid, plan = stage(case, int(root['amount_due_ntd']), 25, refund_account=account, incoming=True)
-    body = {'row_identity': plan['rows'][0]['row_identity'], 'classification_type': 'client_refund_return', 'target_obligation_identities': [root['obligation_identity']], 'refund_ledger_entry_identity': str(entry), 'allow_partial_refund_recovery': False, 'allow_refund_overage_recovery': False, 'allow_client_receipt_overage': False, 'reason': '', 'evidence': ['synthetic bank refund return']}
-    url = '/api/v1/finance-import/corrections'
-    before = snapshot(case)
-    preview = checked(http.post(url + '/preview', json=body))
-    assert snapshot(case) == before
-    apply = {**body, **{f'expected_{k}_version': preview[k + '_version'] for k in ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': preview['preview_fingerprint']}
-    accepted = checked(http.post(url + '/apply', json=apply, headers={'Idempotency-Key': case + ':refund-return'}), 202)
-    jobs(accepted)
+    bid = classified_return(case, int(root['amount_due_ntd']), date(2026, 11, 25), 'client_refund_return')
+    owner_apply(f'/api/v1/orders/{case}/client-finance/refund-return',
+                {'finance_import_row_id': bid, 'refund_ledger_entry_id': entry},
+                case=case, key=case + ':refund-return', versions={'account': 'account_version'})
     assert rows('SELECT status FROM client_obligations WHERE obligation_identity=%s', (root['obligation_identity'],)) == [{'status': 'open'}]
 
-def partial_customer_refund(tmp_path):
+def partial_customer_refund():
     case, _ = new_case()
     bank(case, 12000, 1)
     cancel(case, [])
     # A repeat customer has another cancelled case awaiting refund. The account
-    # identifies the customer, but the operator must select the correct case.
+    # identifies the customer; the memo carries the required unique case reference.
     other_case, _ = new_case()
     client_id = rows('SELECT client_id FROM orders WHERE case_no=%s', (case,))[0]['client_id']
     write('UPDATE orders SET client_id=%s WHERE case_no=%s', (client_id, other_case))
@@ -434,8 +461,10 @@ def partial_customer_refund(tmp_path):
     root = rows("SELECT obligation_identity,amount_due_ntd FROM client_obligations WHERE case_no=%s AND direction='payable_to_client' AND obligation_type='refund' AND status='open'", (case,))[0]
     account = '7' * 12 + case[-4:]
     write("INSERT INTO client_refund_recipient_snapshots(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) VALUES (%s,%s,'0040000',%s,'synthetic-acceptance')", (root['obligation_identity'], case, account))
+    target_month = rows('SELECT due_date FROM client_obligations WHERE obligation_identity=%s',
+                        (root['obligation_identity'],))[0]['due_date'].strftime('%Y-%m')
     partial, topup = {}, {}
-    bid, bank_plan = stage(case, 4000, 26, refund_account=account, evidence=partial)
+    bid, bank_plan = stage(case, 4000, 26, refund_account=account)
 
     def readback(batch):
         before = snapshot(case)
@@ -445,7 +474,7 @@ def partial_customer_refund(tmp_path):
             'reviews': f'/api/v1/finance-import/batches/{batch}/review-rows',
             'settlement': f'/api/v1/orders/{case}/client-finance/settlement-remediation?include_not_due=true',
             'cash': '/api/v1/finance-reports/accounts-payable/cash-requirements?page_size=100',
-            'payables': '/api/v1/finance-reports/accounts-payable?target_month=2026-10',
+            'payables': f'/api/v1/finance-reports/accounts-payable?target_month={target_month}',
         }.items():
             response = http.get(url)
             checked(response)
@@ -460,7 +489,7 @@ def partial_customer_refund(tmp_path):
     assert pending[0]['classification_type'] == 'client_refund'
     assert set(pending[0]['available_actions']) & {'preview_manual_correction', 'resolve_owning_domain_target', 'review_suspected_duplicate_business_match'}
     assert partial['before']['settlement']['data']['refund_obligations'][0]['amount_due_ntd'] == 12000
-    assert bank_plan['counts']['ready_dispatch'] == 0, 'ambiguous case targets require operator selection'
+    assert bank_plan['counts']['ready_dispatch'] == 0, 'partial refund requires explicit review'
     selection = {'row_identity': f'finance-import-row:{bid}', 'classification_type': 'client_refund',
                  'target_obligation_identities': [root['obligation_identity']], 'refund_ledger_entry_identity': None,
                  'allow_partial_refund_recovery': True, 'allow_refund_overage_recovery': False,
@@ -475,35 +504,28 @@ def partial_customer_refund(tmp_path):
     jobs(checked(accepted, 202))
     outcome = http.get(f"/api/v1/finance-import/jobs/{accepted.json()['data']['job_id']}/correction-outcome")
     assert checked(outcome)['receipt']['row_identity'] == f'finance-import-row:{bid}'
-    partial['correction'] = {'preview': preview.json(), 'accepted': accepted.json(), 'outcome': outcome.json()}
     after = snapshot(case)
     assert checked(http.post('/api/v1/finance-import/corrections/apply', json=body, headers=headers), 202)['replayed'] is True
     assert snapshot(case) == after, 'same-key partial refund must not pay twice'
     assert rows('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s', (root['obligation_identity'],)) == [{'amount_due_ntd': 8000, 'status': 'open'}]
-    report = checked(http.get('/api/v1/finance-reports/accounts-payable?target_month=2026-10'))
+    report = checked(http.get(f'/api/v1/finance-reports/accounts-payable?target_month={target_month}'))
     assert any(case in row['case_numbers'] and row['amount_ntd'] == 8000 for row in report['rows'])
     partial['after'] = readback(bank_plan['batch_identity'])
     assert partial['after']['reviews']['data']['items'] == []
     assert partial['after']['settlement']['data']['refund_obligations'][0]['obligation_identity'] == root['obligation_identity']
     assert sum(row['unpaid_amount_ntd'] for row in partial['after']['cash']['data']['rows'] if row['case_no'] == case and row['payment_type'] == 'client_refund') == 8000
-    bid, topup_plan = stage(case, 8000, 27, refund_account=account, evidence=topup)
+    bid, topup_plan = stage(case, 8000, 27, refund_account=account)
     topup['before'] = readback(topup_plan['batch_identity'])
-    assert topup_plan['counts']['ready_dispatch'] == 0
-    assert len(topup['before']['reviews']['data']['items']) == 1
-    selection = {**selection, 'row_identity': f'finance-import-row:{bid}', 'allow_partial_refund_recovery': False}
-    before = snapshot(case)
-    preview = http.post('/api/v1/finance-import/corrections/preview', json=selection)
-    plan = checked(preview)
-    assert snapshot(case) == before
-    body = {**selection, **{f'expected_{key}_version': plan[f'{key}_version'] for key in ('batch', 'canonical_fact', 'alert')}, 'preview_fingerprint': plan['preview_fingerprint']}
-    headers = {'Idempotency-Key': case + ':refund-topup-review'}
-    accepted = http.post('/api/v1/finance-import/corrections/apply', json=body, headers=headers)
-    jobs(checked(accepted, 202))
-    outcome = http.get(f"/api/v1/finance-import/jobs/{accepted.json()['data']['job_id']}/correction-outcome")
-    assert checked(outcome)['receipt']['row_identity'] == f'finance-import-row:{bid}'
-    topup['correction'] = {'preview': preview.json(), 'accepted': accepted.json(), 'outcome': outcome.json()}
+    assert topup_plan['counts']['ready_dispatch'] == 1, repr(topup_plan['rows'][0])
+    assert topup_plan['rows'][0]['target_identities'] == [root['obligation_identity']]
+    body = {'batch_identity': topup_plan['batch_identity'],
+            'expected_batch_version': topup_plan['batch_version'],
+            'preview_fingerprint': topup_plan['preview_fingerprint'], 'reason': ''}
+    headers = {'Idempotency-Key': case + ':refund-topup'}
+    url = '/api/v1/finance-import/batches/apply'
+    jobs(checked(http.post(url, json=body, headers=headers), 202))
     after = snapshot(case)
-    assert checked(http.post('/api/v1/finance-import/corrections/apply', json=body, headers=headers), 202)['replayed'] is True
+    assert checked(http.post(url, json=body, headers=headers), 202)['replayed'] is True
     assert snapshot(case) == after, 'same-key top-up must not pay twice'
     topup['after'] = readback(topup_plan['batch_identity'])
     assert topup['after']['reviews']['data']['items'] == []
@@ -511,24 +533,12 @@ def partial_customer_refund(tmp_path):
     settled_rows = [row for row in topup['after']['cash']['data']['rows'] if row['case_no'] == case and row['payment_type'] == 'client_refund']
     assert settled_rows and all(row['unpaid_amount_ntd'] == 0 and row['payment_status'] == 'paid' for row in settled_rows)
     assert rows('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s', (root['obligation_identity'],)) == [{'amount_due_ntd': 0, 'status': 'settled'}]
-    report = checked(http.get('/api/v1/finance-reports/accounts-payable?target_month=2026-10'))
+    report = checked(http.get(f'/api/v1/finance-reports/accounts-payable?target_month={target_month}'))
     assert not any(case in row['case_numbers'] for row in report['rows'])
     assert sum(int(row['amount_ntd']) for row in rows("SELECT amount_ntd FROM client_ledger_entries WHERE case_no=%s AND entry_type='refund'", (case,))) == 12000
     assert rows('SELECT COUNT(*) AS n FROM line_delivery_tasks') == [{'n': 0}]
     assert snapshot(other_case) == other_before, 'selecting this refund must not change another case of the same customer'
-    # Fresh backend envelopes exercise the real frontend decoders and list entry.
-    from pathlib import Path
-    import subprocess
-    exchange = tmp_path / 'refund-review-exchange.json'
-    exchange.write_text(json.dumps({'case_no': case, 'partial': partial, 'topup': topup}, default=str), encoding='utf-8')
-    project = Path(__file__).resolve().parents[6]
-    report_path = tmp_path / 'refund-review-ui-report.json'
-    environment = {name: os.environ[name] for name in ('PATH', 'SystemRoot', 'TEMP', 'TMP') if name in os.environ}
-    environment.update(CI='true', FI_REFUND_REVIEW_EXCHANGE=str(exchange))
-    result = subprocess.run(['node', str(project / 'ui_react/node_modules/vitest/vitest.mjs'), 'run', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run refund-review', '--reporter=json', '--outputFile', str(report_path)], cwd=project / 'ui_react', env=environment, capture_output=True, text=True, timeout=60)
-    assert result.returncode == 0, result.stdout[-5000:] + result.stderr[-5000:]
-    report = json.loads(report_path.read_text(encoding='utf-8'))
-    assert report['numPassedTests'] == 1 and report['numFailedTests'] == 0
+
 
 
 def government_reversal():
@@ -584,8 +594,57 @@ def isolated_event_matrix():
             http.close()
 
 @pytest.mark.parametrize('event', [cancellation, terms, recovery, differences, reversals, complex_scheduling, identities, government, bank_return, compound, customer_refund, partial_customer_refund, government_extra, government_reversal], ids=lambda event: event.__name__)
-def test_accounting_updates_after_each_real_event(event, tmp_path):
-    if event is partial_customer_refund:
-        event(tmp_path)
-    else:
-        event()
+def test_accounting_updates_after_each_real_event(event):
+    event()
+
+@pytest.mark.parametrize(('identity', 'days', 'expected_payable', 'full_subsidy'), [
+    ('一般市民', 6, 14400, False),
+    ('補助市民', 15, 42000, True),
+    ('補助市民', 16, 44800, False),
+])
+def test_completed_service_establishes_payable_with_or_without_deposit(identity, days, expected_payable, full_subsidy):
+    def pricing_identity(name, rule, subsidy_hours, rate):
+        rates = {'covered': rate, 'excess': rate}
+        return {'identity_name': name, 'rule': rule, 'subsidy_hours': subsidy_hours,
+                'client': rates, 'payroll': rates, 'deposit_service_days': 5}
+
+    policy = {
+        'effective_on': '2026-01-01',
+        'identities': [
+            pricing_identity('一般市民', 'citizen', 40, 300),
+            pricing_identity('補助市民', 'social', 120, 350),
+            pricing_identity('非市民', 'non_citizen', 0, 320),
+        ],
+        'twins_client': {'covered': 450, 'excess': 450},
+        'twins_payroll': {'covered': 450, 'excess': 450},
+    }
+    policy_id = 9900 + days
+    write(
+        "INSERT INTO accounting_pricing_policies(id,effective_on,policy_json,actor,reason,created_at_utc) "
+        "VALUES (%s,%s,%s,'synthetic','completion test',UTC_TIMESTAMP(6))",
+        (policy_id, policy['effective_on'], json.dumps(policy, ensure_ascii=False)),
+    )
+    case, _ = new_case(identity=identity, days=days, pricing_policy_id=policy_id)
+    seed_service(case, days)
+    deposit = rows(
+        "SELECT amount_due_ntd FROM client_obligations "
+        "WHERE case_no=%s AND obligation_type='deposit' AND status<>'cancelled' AND amount_due_ntd>0",
+        (case,),
+    )
+    assert bool(deposit) is not full_subsidy
+    assert not rows("SELECT obligation_identity FROM staff_obligations WHERE case_no=%s", (case,))
+
+    complete(case)
+
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    with mysql_adapter.get_connection() as connection:
+        view = build_accounting_workspace(connection).query(case)
+    payables = tuple(item for item in view.staff_items if item.direction == 'payable')
+    assert len(payables) == 1
+    assert payables[0].remaining_ntd == expected_payable
+    assert payables[0].due_date == ('2026-12-15' if full_subsidy else '2026-11-15')
+    assert not any(item.obligation_type == 'subsidy_return' for item in view.client_items)
+    if full_subsidy:
+        assert view.scheme == 'split' and view.subsidy_ntd == expected_payable
+        assert view.customer_amount_ntd == 0 and view.customer_fully_received

@@ -32,7 +32,7 @@ HEADERS = (
     "預計服務開始日", "預計服務結束日", "實際服務開始日", "實際服務結束日",
     "訂金到期日", "第一期到期日", "第二期到期日", "訂金入帳日",
     "補助返還到期日", "補助返還狀態", "服務人員付款到期日",
-    "補助申請年度", "補助申請月份",
+    "補助申請年度", "補助申請月份", "服務人員預估付款日",
 )
 
 
@@ -87,6 +87,7 @@ class OrderAccountingExportRow:
     claim_application_year: int | None
     claim_application_month: int | None
     subsidy_amount_ntd: int | None = None
+    estimated_staff_payment_due_date: date | None = None
 
 
 class OrderAccountingExportRepository(Protocol):
@@ -152,6 +153,7 @@ def build_order_accounting_workbook(
             row.staff_payment_due_date,
             row.claim_application_year,
             row.claim_application_month,
+            row.estimated_staff_payment_due_date,
         ))
 
     header_fill = PatternFill(fill_type="solid", fgColor="FCE7D6")
@@ -166,7 +168,7 @@ def build_order_accounting_workbook(
     worksheet.row_dimensions[1].height = 32
 
     text_columns = (2, 10, 11)
-    date_columns = tuple(range(25, 34)) + (35,)
+    date_columns = tuple(range(25, 34)) + (35, 38)
     money_columns = tuple(range(16, 25))
     decimal_columns = (13, 14)
     for row_number in range(2, worksheet.max_row + 1):

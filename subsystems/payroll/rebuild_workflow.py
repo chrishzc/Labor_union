@@ -18,6 +18,7 @@ from domains.payroll.calculation import (
     PayrollTerms,
     build_case_payroll_candidate,
 )
+from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
@@ -97,7 +98,7 @@ class StaffObligationAction:
 
 @dataclass(frozen=True, slots=True)
 class PayrollRebuildPreview:
-    payroll: CasePayrollCandidate
+    payroll: CasePayrollCandidate | HistoricalCasePayrollCandidate
     actions: tuple[StaffObligationAction, ...]
     payroll_version: int
     fingerprint: PreviewFingerprint
@@ -207,14 +208,16 @@ class PayrollRebuildWorkflow:
             if any(item.tiered_pricing for item in preview.payroll.assignments):
                 self._repository.synchronize_installments(case_no, preview.payroll)
             return facts.staff_payment_due_date
-        request = PayrollRebuildRequest(case_no, ExpectedVersion(facts.payroll_version), preview.fingerprint,
+        self.persist_source_preview(case_no, preview, actor=actor, key=key, correlation_id=correlation_id)
+        return facts.staff_payment_due_date
+
+    def persist_source_preview(self, case_no, preview, *, actor, key, correlation_id):
+        request = PayrollRebuildRequest(case_no, ExpectedVersion(preview.payroll_version), preview.fingerprint,
             key, actor, "系統依已確認服務資料同步月嫂應付", correlation_id)
         command = _command_fingerprint(request)
         replay = self._find_replay(request, command)
-        if replay is not None:
-            return facts.staff_payment_due_date
-        self._persist(request, preview, command, _receipt(request, preview))
-        return facts.staff_payment_due_date
+        if replay is None:
+            self._persist(request, preview, command, _receipt(request, preview))
 
     def _find_replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(request.idempotency_key)
@@ -258,13 +261,17 @@ def _build_preview(facts: PayrollRebuildFacts) -> PayrollRebuildPreview:
 
 
 def _preview_result(facts, payroll, actions) -> PayrollRebuildPreview:
+    return build_source_preview(facts.case_no, facts.payroll_version, payroll, actions)
+
+
+def build_source_preview(case_no, payroll_version, payroll, actions) -> PayrollRebuildPreview:
     return PayrollRebuildPreview(
         payroll,
         actions,
-        facts.payroll_version,
+        payroll_version,
         fingerprint_payload({
-            "case_no": facts.case_no,
-            "payroll_version": facts.payroll_version,
+            "case_no": case_no,
+            "payroll_version": payroll_version,
             "payroll_fingerprint": payroll.fingerprint.value,
             "actions": tuple(_action_payload(item) for item in actions),
         }),
