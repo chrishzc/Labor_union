@@ -346,6 +346,8 @@ def _bank_fact_payload(bank_fact):
     payload = {"identity": bank_fact.identity, "staff_id": bank_fact.staff_id, "amount_ntd": bank_fact.amount.amount, "bank_account_identity": bank_fact.bank_account_identity, "direction": bank_fact.direction.value, "raw_fact_identity": bank_fact.canonical_raw_fact_identity, "eligible": bank_fact.eligible, "blocking_anomalies": bank_fact.blocking_anomalies}
     if bank_fact.taishin_memo_staff_id is not None:
         payload["taishin_memo_staff_id"] = bank_fact.taishin_memo_staff_id
+    if bank_fact.is_sinopac_payout:
+        payload["is_sinopac_payout"] = True
     return payload
 
 

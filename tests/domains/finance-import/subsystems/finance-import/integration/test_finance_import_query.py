@@ -454,42 +454,33 @@ def test_case_only_taishin_bank_entry_opens_case_without_reconciliation_target(m
     assert result['reconciliation_unavailable_reason'] == 'purpose_unconfirmed'
 
 
-@pytest.mark.parametrize('reference,owners,same_case,format_id,matched,targets,allowed',[
-    ('000000001234',[19],True,'sinopac',[],[],True),
-    ('000000001234 合成月嫂',[19],True,'sinopac',[],[],True),
-    ('000000001234',[19,20],True,'sinopac',[],[],False),
-    ('000000001234',[],True,'sinopac',[],[],False),
-    ('000000001234',[19],False,'sinopac',[],[],False),
-    (None,[19],True,'sinopac',[],[],False),
-    ('not-an-account',[19],True,'sinopac',[],[],False),
-    ('000000001234',[19],True,'taishin',[],[],False),
-    ('000000001234',[19],True,'sinopac',[19,20],[],False),
-    ('000000001234',[19],True,'sinopac',[],['staff:19','staff:20'],False),
+@pytest.mark.parametrize('owners,format_id,matched,targets,allowed',[
+    ([19],'sinopac',[],[],True),
+    ([19,20],'sinopac',[],[],False),
+    ([],'sinopac',[],[],False),
+    ([19],'taishin',[],[],False),
+    ([19],'sinopac',[19,20],[],False),
+    ([19],'sinopac',[],['staff:19','staff:20'],False),
 ])
-def test_sinopac_legacy_staff_entry_uses_the_original_unique_account_and_same_case_obligation(reference,owners,same_case,format_id,matched,targets,allowed):
+def test_sinopac_legacy_staff_entry_uses_unique_same_case_staff_without_an_account(owners,format_id,matched,targets,allowed):
     import json
     from copy import deepcopy
     class Cursor(_EnrichCursor):
         def __init__(self):super().__init__();self.calls=[]
         def execute(self,statement,params=()):
             self.calls.append((statement,params))
-            if 'FROM staff_bank_accounts' in statement:
-                assert 'account_no=%s AND is_primary=1' in statement
-                assert params==('000000001234',)
+            if 'SELECT DISTINCT staff_id FROM staff_obligations' in statement:
+                assert params==('115000001',)
                 self._rows=[{'staff_id':identity} for identity in owners]
-            elif 'SELECT 1 AS same_case FROM staff_obligations' in statement:
-                assert params==('115000001',19)
-                self._one={'same_case':1} if same_case else None
             elif 'FROM staff_obligations' in statement:
-                self._rows=[{'case_no':'115000001','obligation_identity':'legacy:first','amount_due_ntd':12000,'due_date':'2026-10-19'}]
+                self._rows=[{'case_no':'115000001','obligation_identity':'legacy:first','amount_due_ntd':12000,'due_date':'2026-10-19','uses_funding_split':0}]
             else:super().execute(statement,params)
     source={
         'row_id':51,'transaction_date':'2026-10-20','format_id':format_id,'direction':'outgoing',
-        'debit':12000,'credit':None,'memo':'HC115001','classification_type':'staff_payout',
+        'debit':11000,'credit':None,'memo':'HC115001','classification_type':'staff_payout',
         'transaction_status':'pending','disposition':'business_pending','review_reason':'sinopac_unique_staff_case_suffix_in_memo',
         'matched_identity_ids':json.dumps(matched),'target_identities':json.dumps(targets),
-        'bank_references':json.dumps({'交易參考編號':reference}),
-        'resolved_counterparty_account':'000000001234','counterparty_name':None,
+        'bank_references':'{}','resolved_counterparty_account':None,'counterparty_name':None,
         'available_actions':'[]','safe_reference':'SYNTHETIC-LEGACY-51',
     }
     original=deepcopy(source);cursor=Cursor()
@@ -498,6 +489,7 @@ def test_sinopac_legacy_staff_entry_uses_the_original_unique_account_and_same_ca
     if allowed:
         assert row['reconciliation_target']=={'case_no':'115000001','obligation_identities':['legacy:first'],'staff_id':19}
         assert row['reconciliation_unavailable_reason'] is None
+        assert row['review_reason'] == 'staff_payout_amount_mismatch'
     else:assert row['reconciliation_target'] is None
     assert all(statement.startswith('SELECT') for statement,_ in cursor.calls)
 

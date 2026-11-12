@@ -13,7 +13,6 @@ import json
 import unicodedata
 from typing import Any
 from domains.finance_import.cancellation_code import (
-    extract_sinopac_account_reference,
     extract_sinopac_memo_case_suffix,
     sinopac_memo_case_suffixes,
     resolve_finance_cancellation_code,
@@ -829,24 +828,13 @@ def _sinopac_legacy_staff_id(cursor, row, case_no):
         or any(str(identity).startswith(("staff:", "client:")) for identity in _json_list(row.get("target_identities")))
     ):
         return None
-    account = extract_sinopac_account_reference(_json_dict(row.get("bank_references")).get("交易參考編號"))
-    if account is None:
-        return None
     cursor.execute(
-        "SELECT staff_id FROM staff_bank_accounts WHERE account_no=%s AND is_primary=1 "
-        "ORDER BY staff_id,id LIMIT 2",
-        (account,),
+        "SELECT DISTINCT staff_id FROM staff_obligations WHERE case_no=%s "
+        "AND direction='payable_to_staff' AND status<>'cancelled' ORDER BY staff_id LIMIT 2",
+        (case_no,),
     )
     owners = cursor.fetchall()
-    if len(owners) != 1:
-        return None
-    staff_id = int(owners[0]["staff_id"])
-    cursor.execute(
-        "SELECT 1 AS same_case FROM staff_obligations WHERE case_no=%s AND staff_id=%s "
-        "AND direction='payable_to_staff' AND status<>'cancelled' LIMIT 1",
-        (case_no, staff_id),
-    )
-    return staff_id if cursor.fetchone() is not None else None
+    return int(owners[0]["staff_id"]) if len(owners) == 1 else None
 
 
 def _enrich_bank_transactions(
@@ -1042,7 +1030,11 @@ def _enrich_bank_transactions(
                 if staff_id is not None:
                     cursor.execute(
                         "SELECT o.case_no, o.due_date, o.obligation_identity, "
-                        "COALESCE(p.balance_ntd,o.amount_due_ntd) AS amount_due_ntd FROM staff_obligations o "
+                        "COALESCE(p.balance_ntd,o.amount_due_ntd) AS amount_due_ntd, "
+                        "EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=o.obligation_identity) "
+                        "OR COALESCE((SELECT plan.scheme FROM finance_case_subsidy_plan_events plan "
+                        "WHERE plan.case_no=o.case_no ORDER BY plan.version DESC LIMIT 1),'')='split' AS uses_funding_split "
+                        "FROM staff_obligations o "
                         "LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity "
                         "WHERE o.staff_id=%s AND o.direction='payable_to_staff' "
                         "AND o.status<>'cancelled' AND o.amount_due_ntd>0 "
@@ -1193,6 +1185,16 @@ def _enrich_bank_transactions(
                 if _is_same_month(row.get("transaction_date"), item.get("due_date"))
             ]
             amount = _integer_money(row)
+            if (
+                row.get("format_id") == "sinopac" and row.get("direction") == "outgoing"
+                and c_type in {"staff_payout", "staff_salary"} and staff_id is not None
+                and not row.get("recorded_pending_reason")
+                and len(month_rows) == 1
+                and (memo_suffixes or len(target_rows) == len(scoped_rows))
+                and all(item.get("due_date") and item.get("uses_funding_split") == 0 for item in scoped_rows)
+                and not 0 <= int(month_rows[0]["amount_due_ntd"]) - amount <= 100
+            ):
+                review_reason = "staff_payout_amount_mismatch"
             if c_type == "client_receipt":
                 exact = [item for item in scoped_rows if int(item["amount_due_ntd"]) == amount]
                 month_exact = [item for item in month_rows if int(item["amount_due_ntd"]) == amount]

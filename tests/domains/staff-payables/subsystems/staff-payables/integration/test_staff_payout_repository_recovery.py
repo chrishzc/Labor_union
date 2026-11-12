@@ -203,16 +203,16 @@ def test_sinopac_case_suffix_is_not_used_as_staff_recipient_bank_account():
     assert source['bank_references']['交易參考編號'] == '000012345678'
 
 
-def test_sinopac_recipient_account_still_rejects_another_staff_owner():
-    with pytest.raises(ValueError, match='cross_staff_allocation_forbidden'):
-        _candidate_from_bank_source(_sinopac_bank_source(), account_owner=8)
+def test_sinopac_payout_does_not_check_the_reference_against_staff_accounts():
+    candidate = _candidate_from_bank_source(_sinopac_bank_source(), account_owner=8)
+    assert candidate.resulting_status is StaffPayableStatus.COMPLETED
 
 
-def test_sinopac_memo_cannot_replace_missing_recipient_account():
+def test_sinopac_payout_accepts_selected_obligation_without_recipient_account():
     source = _sinopac_bank_source()
     source['bank_references'] = {'備註': 'HC115807服務人員'}
-    with pytest.raises(ValueError, match='staff_bank_account_ambiguous'):
-        _candidate_from_bank_source(source)
+    candidate = _candidate_from_bank_source(source)
+    assert candidate.resulting_status is StaffPayableStatus.COMPLETED
 
 
 @pytest.mark.parametrize('memo,error', [
