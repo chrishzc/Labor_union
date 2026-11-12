@@ -143,6 +143,10 @@ def test_service_completion_persist_reuses_canonical_event_outbox_and_projection
         "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_projection",
         persist_projection,
     )
+    monkeypatch.setattr(
+        "infrastructure.mysql.automatic_client_accounting.synchronize_terminal_subsidy_return",
+        lambda cursor, case_no, **kwargs: calls.append(("subsidy", case_no)),
+    )
     lifecycle = LifecycleImpactCandidate(
         "CASE-1",
         OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
@@ -171,13 +175,13 @@ def test_service_completion_persist_reuses_canonical_event_outbox_and_projection
 
     monkeypatch.setattr(
         "subsystems.payroll.historical_baseline_obligation_sync.synchronize_historical_payroll",
-        lambda connection, case_no: calls.append(("payroll", case_no)),
+        lambda connection, case_no, **kwargs: calls.append(("payroll", case_no)),
     )
     receipt = MySqlHistoricalServiceCompletionWriter(_Connection()).persist_service_completion(
         request, candidate
     )
 
-    assert [name for name, _ in calls] == ["event", "projection", "payroll"]
+    assert [name for name, _ in calls] == ["event", "projection", "payroll", "subsidy"]
     command = calls[0][1]
     assert command.trigger_event == "historical_service_period_elapsed"
     assert command.candidate.service_data_lock_should_exist is False

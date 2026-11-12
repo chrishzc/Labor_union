@@ -62,7 +62,7 @@ total_payable    = service_salary + floor_fee_allocated + effective_adjustments
 ### 3.2 未核銷重建與已核銷追加（`RebuildPayrollForCase`）
 
 - 依正式指派與服務資料異動自動同步應付；`staff_obligations` 未核銷時依最新根事實重算，已有正式付款歷史時禁止覆寫原 obligation，改追加 immutable adjustment／reversal obligation event。
-- 歷史服務完成案件優先承接可證實的原月嫂應付。尚無服務量更正且缺原應付時，具備唯一歷史指派、HCM 登記服務量、費率、採納的歷史結束日及付款來源即可建立基準應付。已採用多人服務量時依 [服務歸屬更正的應付拆分](#service-attribution-payroll-correction) 同步。新建應付或原應付尚未形成付款日時，按歷史結束月份套用 §2.1 付款日政策，依各款項來源形成對應日期。重匯或重新同步使用同一款項身分，保留原應付、已形成日期與付款關聯。缺計算依據或來源有衝突時回報具體缺項，交由原資料 owner 處理。
+- 歷史服務完成案件優先承接可證實的原月嫂應付。尚無服務量更正且缺原應付時，具備唯一歷史指派、HCM 登記服務量、費率、採納的歷史結束日及付款來源即可建立基準應付。已採用多人服務量時依 [服務歸屬更正的應付拆分](#service-attribution-payroll-correction) 同步。新建應付或原應付尚未形成付款日時，按歷史結束月份套用 §2.1 付款日政策，依各款項來源形成對應日期。重匯或重新同步使用同一款項身分，保留原應付、已形成日期與付款關聯。缺計算依據或來源有衝突時回報具體缺項，交由原資料 owner 處理。尚無正式應付時，補助資金交接檢核可使用同次 Payroll 計算的應付總額，仍須核對既有客戶期款、收款與補助來源。
 - `RebuildPayrollForCase` 接受 caller 外層 Unit of Work（鎖定 Terms／assignments／服務日 → 讀取費率與 adjustments → 純計算 Preview → 驗證整數與 ownership → 鎖定 `staff_payments` → 更新投影／追加事件 → 寫 outbox → caller 提交）。
 - 涉及大量跨月重算時支援回傳 `202 Accepted` 與 Durable Job，於單一交易內原子完成。
 - 案件／月嫂薪資唯讀查詢保留已取消或已結清的 `0` 元紀錄（非負整數）；既有 open 義務 invariant 仍須大於 `0`，且 Query 零寫入。

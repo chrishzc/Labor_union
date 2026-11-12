@@ -9,7 +9,7 @@
 
 ## Implementation
 - `infrastructure/mysql/order_cancellation_repository.py`
-- `infrastructure/mysql/order_auto_completion_repository.py`
+- `infrastructure/mysql/order_auto_completion_repository.py` — 正常完工先同步正式 Payroll 應付，再依補助方案交接客戶退款或月嫂補助分期。
 - `infrastructure/mysql/orders_terminal_closure_source.py` — read-only source adapter for LINE consumption.
 
 ## Contracts

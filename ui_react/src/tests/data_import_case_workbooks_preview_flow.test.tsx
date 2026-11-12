@@ -480,7 +480,7 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
   });
 
-  it('shows excluded conflicting rows in not-imported details while importing healthy historical orders without accounting details', async () => {
+  it('shows excluded conflicting rows in not-imported details separately from an adopted row with a payroll blocker', async () => {
     vi.mocked(historicalOrderWorkbookPreviewClient.preview).mockResolvedValueOnce({
       source_content_digest: digest,
       sheet_identity: identity,
@@ -512,6 +512,8 @@ describe('Data Import simple result flows', () => {
       result_counts: { not_adopted: 2, matching_pending_deposit: 0, historical_unserved: 0, historical_in_service: 0, historical_service_completed: 1 },
       review_references: [],
       import_counts: { imported_count: 1, duplicate_skipped_count: 0, not_imported_count: 2 },
+      payroll_issues: [{ source_row: 2, case_no: 'CASE-002', fields: ['月嫂應付'],
+        issue_codes: ['historical_payroll_funding_conflict'] }],
       row_issues: [
         {
           source_row: 15,
@@ -543,6 +545,9 @@ describe('Data Import simple result flows', () => {
     expect(details).toHaveTextContent('本列的服務時段無法確認，與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的日期有交集，無法比對。');
     expect(details).toHaveTextContent('本列「服務時間」無法解析成有效的開始與結束時間');
     expect(details).toHaveTextContent('Excel 第 15 列（案件 CASE-015，2026-08-01～2026-08-10）的服務時段無法確認，請查看該列原因。');
-    expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
+    const payroll = within(card).getByLabelText('月嫂應付待核對');
+    expect(payroll).toHaveTextContent('CASE-002');
+    expect(payroll).toHaveTextContent('補助方案與既有帳務來源不一致');
+    expect(details).not.toHaveTextContent('CASE-002');
   });
 });

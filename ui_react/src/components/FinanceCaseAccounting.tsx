@@ -491,8 +491,9 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  },0n);
 
  const subsidyKnown=data?.subsidy_ntd!=null;
- const subsidyPayments = data?.subsidy_payments ?? [];
- const subsidyPaymentNotApplicable = state.order?.identity_status === '非市民' || data?.subsidy_ntd === 0;
+ const standaloneSubsidyPayments = data?.subsidy_payments?.filter(
+  payment => payment.recipient === 'staff' || payment.source === 'estimate',
+ ) ?? [];
  const subsidyTotal=data?.subsidy_ntd??0;
  const orderStatus=state.order?.order_status;
  const serviceInProgress=orderStatus==='服務中'||orderStatus==='歷史訂單－服務中';
@@ -799,37 +800,14 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
-  <div className="finance-table-container" role="region" aria-label="補助款預計給付">
-    <table className="finance-table finance-case-periods">
-      <caption>補助款預計給付</caption>
-      <thead><tr><th>收款對象</th><th>補助金額</th><th>預計給付日</th><th>狀態</th></tr></thead>
-      <tbody>{subsidyPayments.length ? subsidyPayments.map((payment, index) => (
-        <tr key={index}>
-          <td>{payment.recipient === 'staff' ? '轉付月嫂' : '退還客戶'}{payment.party && <small>{payment.party}</small>}</td>
-          <td>{payment.source === 'estimate' && '預估 '}{money(payment.amount_ntd)}</td>
-          <td>{payment.due_date ?? '日期待確認'}</td>
-          <td>{payment.source === 'formal' ? (serviceEnded ? '服務已結束，金額已確認' : '金額已確認') : unconfirmedPaymentStatus}</td>
-        </tr>
-      )) : subsidyPaymentNotApplicable || data.scheme === 'direct' ? (
-        <tr><td colSpan={4}>不適用</td></tr>
-      ) : (
-        <tr>
-          <td>補助給付方案待確認</td>
-          <td>{subsidyKnown ? money(subsidyTotal) : '補助金額待確認'}</td>
-          <td>日期待確認</td>
-          <td>尚未建立補助給付款項</td>
-        </tr>
-      )}</tbody>
-    </table>
-  </div>
   <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">
       <thead>
         <tr>
           <th>項目</th>
-          <th>預計退款日</th>
-          <th>應退／應收</th>
+          <th>預計給付／退款日</th>
+          <th>應付／應退／應收</th>
           <th>已退(收)／待退(收)</th>
           <th>出款／入帳資訊</th>
           <th>核銷狀態</th>
@@ -837,16 +815,28 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
         </tr>
       </thead>
       <tbody>
+        {standaloneSubsidyPayments.map((payment, index) => (
+          <tr key={index}>
+            <td><strong>{payment.recipient === 'staff' ? '補助款轉付月嫂' : '補助款退還客戶'}</strong>{payment.party && <small>{payment.party}</small>}</td>
+            <td>{payment.due_date ?? '日期待確認'}</td>
+            <td>{payment.source === 'estimate' && '預估 '}{money(payment.amount_ntd)}</td>
+            <td colSpan={2}>{payment.source === 'formal' ? '出款與核銷明細見月嫂薪資' : '—'}</td>
+            <td>{payment.source === 'formal' ? (serviceEnded ? '服務已結束，金額已確認' : '金額已確認') : unconfirmedPaymentStatus}</td>
+            <td>—</td>
+          </tr>
+        ))}
         {refundClientItems.map(row => {
+            const isSubsidyReturn = row.obligation_type === 'subsidy_return';
+            const itemTransactions = refundTransactions.filter(transaction => transaction.item_identity === row.identity);
             const isRefundSettled = row.settled || row.remaining_ntd === 0 || (row.actual_ntd >= row.expected_ntd && row.has_payment);
             return (
               <tr key={row.identity}>
                 <td>
-                  <strong>客戶退款</strong>
+                  <strong>{isSubsidyReturn ? '補助款退還客戶' : '客戶退款'}</strong>
                   <small>{row.party || refundName} · {row.label}</small>
                 </td>
                 <td>
-                  <span>{row.due_date ?? '市府核撥後退款'}</span>
+                  <span>{row.due_date ?? (isSubsidyReturn ? '日期待確認' : '市府核撥後退款')}</span>
                   <small>{isRefundSettled ? '已結算' : '案件結束結算'}</small>
                 </td>
                 <td>{money(row.expected_ntd)}</td>
@@ -859,14 +849,14 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                   )}
                 </td>
                 <td>
-                  {refundTransactions.length > 0 ? (
+                  {itemTransactions.length > 0 ? (
                     <>
-                      <span>{refundTransactions[0].occurred_on} · {refundTransactions[0].bank === 'manual' ? '人工補登' : refundTransactions[0].bank === 'taishin' ? '台新銀行' : refundTransactions[0].bank === 'sinopac' ? '永豐銀行' : (refundTransactions[0].bank ?? '銀行退款')}</span>
-                      {refundTransactions[0].bank_amount_ntd != null && <small>整筆銀行實付 {money(refundTransactions[0].bank_amount_ntd)}；內扣手續費 {money(refundTransactions[0].transfer_fee_ntd)}</small>}
-                      {refundTransactions.length > 1 && (
+                      <span>{itemTransactions[0].occurred_on} · {itemTransactions[0].bank === 'manual' ? '人工補登' : itemTransactions[0].bank === 'taishin' ? '台新銀行' : itemTransactions[0].bank === 'sinopac' ? '永豐銀行' : (itemTransactions[0].bank ?? '銀行退款')}</span>
+                      {itemTransactions[0].bank_amount_ntd != null && <small>整筆銀行實付 {money(itemTransactions[0].bank_amount_ntd)}；內扣手續費 {money(itemTransactions[0].transfer_fee_ntd)}</small>}
+                      {itemTransactions.length > 1 && (
                         <details>
-                          <summary>{refundTransactions.length} 筆退款</summary>
-                          {refundTransactions.map(t => (
+                          <summary>{itemTransactions.length} 筆退款</summary>
+                          {itemTransactions.map(t => (
                             <p key={t.identity}>{t.occurred_on} · {t.bank === 'manual' ? '人工補登' : '退款'} · 已核銷 {money(t.amount_ntd)}{t.bank_amount_ntd != null && <>；整筆銀行實付 {money(t.bank_amount_ntd)}；內扣手續費 {money(t.transfer_fee_ntd)}</>}</p>
                           ))}
                         </details>

@@ -61,20 +61,38 @@ it.each([
  vi.mocked(financeAccountingClient.query).mockResolvedValue(data);
  vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,order_status:orderStatus} as never);
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
- const payments=within(await screen.findByRole('region',{name:'補助款預計給付'}));
- expect(payments.getByText(label,{exact:true})).toBeVisible();
- expect(payments.getByText(source==='estimate'?'預估 NT$ 12,000':'NT$ 12,000',{exact:true})).toBeVisible();
- expect(payments.getByText('2026-11-15',{exact:true})).toBeVisible();
+ const payments=within(await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
+ const staff=within(payments.getByRole('row',{name:/補助款轉付月嫂/}));
+ expect(staff.getByText(label,{exact:true})).toBeVisible();
+ expect(staff.getByText(source==='estimate'?'預估 NT$ 12,000':'NT$ 12,000',{exact:true})).toBeVisible();
+ expect(staff.getByText('2026-11-15',{exact:true})).toBeVisible();
 });
-it('方案未定仍在給付表顯示本案補助，且沒有正式客戶退款列',async()=>{
+it('方案未定由政府列顯示已知補助，未列出收款對象',async()=>{
  vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'waiting',subsidy_payments:[]});
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
- const payments=within(await screen.findByRole('region',{name:'補助款預計給付'}));
- const pending=within(payments.getByRole('row',{name:/補助給付方案待確認/}));
- expect(pending.getByText('NT$ 12,000',{exact:true})).toBeVisible();
- expect(pending.getByText('尚未建立補助給付款項')).toBeVisible();
- const details=within(screen.getByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
- expect(details.queryByText('客戶退款',{exact:true})).not.toBeInTheDocument();
+ const details=within(await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
+ const government=within(details.getByRole('row',{name:/政府補助款/}));
+ expect(government.getByText('NT$ 12,000',{exact:true})).toBeVisible();
+ expect(government.getByText('補助歸屬待確認')).toBeVisible();
+ expect(details.queryByRole('row',{name:/補助款退還客戶|補助款轉付月嫂/})).not.toBeInTheDocument();
+});
+it('正式補助退款只列一次並與一般客戶退款分開',async()=>{
+ const subsidy={identity:'subsidy-return',obligation_type:'subsidy_return',label:'補助退款／工會代墊',
+  party:'合成客戶',direction:'payable' as const,expected_ntd:12000,actual_ntd:0,has_payment:false,
+  version:'v1',due_date:'2027-02-15',remaining_ntd:12000};
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'advance',
+  client_items:[subsidy,{...subsidy,identity:'regular-return',obligation_type:'refund',label:'一般退款',expected_ntd:2000}],
+  subsidy_payments:[{recipient:'client',party:subsidy.party,amount_ntd:12000,due_date:subsidy.due_date,source:'formal'}],
+ });
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ const details=within(await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
+ expect(details.getAllByRole('row',{name:/補助款退還客戶/})).toHaveLength(1);
+ const refund=within(details.getByRole('row',{name:/補助款退還客戶/}));
+ expect(refund.getByText('2027-02-15')).toBeVisible();
+ expect(refund.getByText('NT$ 12,000',{exact:true})).toBeVisible();
+ expect(refund.getByText('待退 NT$ 12,000')).toBeVisible();
+ expect(details.getByRole('row',{name:/客戶退款.*一般退款/})).toBeVisible();
+ expect(screen.queryByRole('region',{name:'補助款預計給付'})).not.toBeInTheDocument();
 });
 it('方案未定仍顯示補助，預檢缺件只阻擋建款且先說明本次保存範圍',async()=>{
  vi.mocked(financeAccountingClient.previewSubsidyPlan).mockResolvedValue({case_no:caseNo,scheme:'advance',plan_version:0,

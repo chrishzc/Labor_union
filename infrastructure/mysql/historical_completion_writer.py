@@ -325,9 +325,16 @@ class MySqlHistoricalServiceCompletionWriter:
         with self._connection.cursor() as cursor:
             event_id = persist_order_lifecycle_impact(cursor, command)
             persist_order_lifecycle_projection(cursor, command)
+        from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
         from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 
-        synchronize_historical_payroll(self._connection, request.case_no)
+        synchronize_historical_payroll(self._connection, request.case_no, actor=request.actor)
+        with self._connection.cursor() as cursor:
+            synchronize_terminal_subsidy_return(
+                cursor, request.case_no, actor=request.actor, key=request.idempotency_key,
+                correlation_id=request.correlation_id, source_family="historical-service-completion",
+                source_id=event_id,
+            )
         return HistoricalServiceCompletionReceipt(
             request.case_no,
             event_id,

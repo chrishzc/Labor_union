@@ -128,18 +128,31 @@ class MySqlOrderAutoCompletionRepository:
             cursor.execute(_OUTBOX_INSERT_SQL, (request.case_no, lifecycle_event_id, _child_identity(request, "orders-outbox"), "lifecycle_projection_changed", _json(payload)))
 
     def synchronize_completion_accounting(self, request, lifecycle_event_id):
+        from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
         from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
+        from infrastructure.mysql.payroll_installments import establish_confirmed_subsidy_installments
+        from infrastructure.mysql.subsidy_confirmation_repository import preview_manual_subsidy_plan
         from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
         from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
         with self._connection.cursor() as cursor:
-            synchronize_terminal_subsidy_return(cursor, request.case_no, actor=request.actor,
-                key=request.idempotency_key, correlation_id=request.correlation_id,
-                source_family="service-completion", source_id=lifecycle_event_id)
             due_date = PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(self._connection), None).synchronize_in_unit_of_work(
                 request.case_no, actor=request.actor, key=request.idempotency_key, correlation_id=request.correlation_id)
             if due_date is not None:
                 cursor.execute("UPDATE orders SET staff_payment_due_date=%s WHERE case_no=%s AND staff_payment_due_date IS NULL",
                                (due_date, request.case_no))
+            plan = MySqlAccountingWorkspaceState(self._connection).subsidy_plan(request.case_no)
+            if plan.selected_scheme == 'split':
+                preview = preview_manual_subsidy_plan(
+                    self._connection, request.case_no, 'split', plan.version, for_update=True,
+                )
+                if not preview.blocker and preview.installments:
+                    establish_confirmed_subsidy_installments(cursor, preview.staff_identity, preview.installments)
+            else:
+                synchronize_terminal_subsidy_return(
+                    cursor, request.case_no, actor=request.actor, key=request.idempotency_key,
+                    correlation_id=request.correlation_id, source_family="service-completion",
+                    source_id=lifecycle_event_id,
+                )
 
     def save_receipt(self, receipt: AutoCompletionReceipt) -> None:
         payload = _receipt_payload(receipt)

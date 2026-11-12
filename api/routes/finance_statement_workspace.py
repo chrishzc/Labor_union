@@ -87,8 +87,6 @@ def _case_view(case):
             projected.update(remaining_ntd=item.remaining_ntd, noncash_ntd=item.noncash_ntd)
             if field == 'staff_items':
                 projected['funding_portions'] = list(projected['funding_portions'])
-            else:
-                projected.pop("obligation_type")
     payload["bank_facts"] = [
         {**bank, "cases": list(bank["cases"])} for bank in payload["bank_facts"]
     ]

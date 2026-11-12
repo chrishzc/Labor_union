@@ -130,9 +130,13 @@ class MySqlHistoricalOrderAdoptionRepository:
             review_identity,
         )
         self._append_pairing_evidence(receipt_id, preview, assignment_ids)
+        payroll_skip_reason = None
         if (preview.outcome is HistoricalOrderOutcome.ADOPTED
                 and preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value):
-            self.synchronize_completed_payroll(preview.case_no)
+            result = self.synchronize_completed_payroll(preview.case_no)
+            if result["action"] == "skipped":
+                payroll_skip_reason = result.get("reason")
+            self._synchronize_completed_subsidy_return(request, receipt_id)
         self._append_outbox(receipt_id, request, preview, review_identity)
         return HistoricalOrderAdoptionReceipt(
             preview.outcome,
@@ -142,7 +146,19 @@ class MySqlHistoricalOrderAdoptionRepository:
             review_identity,
             False,
             preview.fingerprint,
+            payroll_skip_reason=payroll_skip_reason,
         )
+
+    def _synchronize_completed_subsidy_return(self, request, receipt_id):
+        from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
+        from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+
+        with self._connection.cursor() as cursor:
+            synchronize_terminal_subsidy_return(
+                cursor, request.row.case_no, actor=ActorContext(request.actor),
+                key=IdempotencyKey(request.idempotency_key), correlation_id=CorrelationId(request.correlation_id),
+                source_family="historical-order-adoption", source_id=receipt_id,
+            )
 
     def synchronize_completed_payroll(self, case_no):
         from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll

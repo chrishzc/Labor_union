@@ -37,6 +37,7 @@ const caseDetail = detail.extend({
   payable_ntd: exactNtd.nullable(), paid_ntd: exactNtd.nullable(),
   remaining_in_ntd: exactNtd.nullable().optional(), remaining_out_ntd: exactNtd.nullable().optional(),
   client_items: z.array(item.extend({
+    obligation_type: z.string().nullable().optional(),
     expected_ntd: exactNtd, actual_ntd: exactNtd, remaining_ntd: exactNtd.nullable().optional(),
     noncash_ntd: exactNtd.optional(), recognized_ntd: exactNtd.optional(), unallocated_surplus_ntd: exactNtd.optional(),
   })),

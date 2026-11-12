@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-依歷史來源服務迄日驅動「歷史訂單－服務中」到「歷史訂單－服務完成」的每日推進，不依賴 Scheduling 可用性。沿原 outer UoW 追加 canonical lifecycle event/outbox 並委派 Payroll 同步歷史月嫂應付。另組合 Orders Step 11 所需的 Orders、Scheduling、Client Finance 與 Staff Payables fresh readback；Query 保持 read-only。當 fresh oracle 證明歷史服務天數完整且雙邊款項均真正結清時，由 bounded Preview／Apply 將 Orders 從「歷史服務完成」推進為「歷史帳務完成」。
+依歷史來源服務迄日驅動「歷史訂單－服務中」到「歷史訂單－服務完成」的每日推進，不依賴 Scheduling 可用性。沿原 outer UoW 追加 canonical lifecycle event/outbox 並依序委派 Payroll 同步歷史月嫂應付及 Client Finance 檢查客戶補助退款。另組合 Orders Step 11 所需的 Orders、Scheduling、Client Finance 與 Staff Payables fresh readback；Query 保持 read-only。當 fresh oracle 證明歷史服務天數完整且雙邊款項均真正結清時，由 bounded Preview／Apply 將 Orders 從「歷史服務完成」推進為「歷史帳務完成」。
 
 ## Implementation
 - primary:

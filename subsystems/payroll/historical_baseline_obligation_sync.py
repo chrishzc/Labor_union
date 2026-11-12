@@ -135,7 +135,7 @@ def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=
 def _funding_schedule(connection, case_no, order, amount):
     from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
 
-    funding = query_subsidy_payable_handoff(connection, case_no)
+    funding = query_subsidy_payable_handoff(connection, case_no, payroll_candidate_total=amount)
     completed_on = order["actual_end_date"]
     subsidy = funding.subsidy_ntd if funding.scheme == "split" else 0
     if funding.staff_subsidy_reason or subsidy is None or not 0 <= subsidy <= amount:

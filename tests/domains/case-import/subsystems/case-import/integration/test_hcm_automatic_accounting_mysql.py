@@ -117,3 +117,122 @@ def test_import_and_new_accounting_roll_back_together_on_failure(isolated,monkey
     finally:c.close()
     for table in ('clients','orders','client_finance_accounts','client_obligations','case_import_receipts','client_obligation_events'):
         assert rows(f'SELECT case_no FROM {table} WHERE case_no=%s',(case,))==()
+
+
+def test_hcm_to_historical_completion_establishes_payroll_and_routes_subsidy_by_scheme(isolated, tmp_path):
+    from types import SimpleNamespace
+    from openpyxl import Workbook
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
+    from api.routes.finance_statement_workspace import router
+    from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.client_profile.registry_query import ClientRegistryQueryApplication
+
+    cases = ("115000961", "115000962", "115000963", "115000964")
+    start, end = date(2026, 8, 1), date(2026, 8, 20)
+    path = tmp_path / "hcm.xlsx"
+    workbook(path, cases[0], 20)
+    source = pd.read_excel(path)
+    pd.concat([
+        source.assign(**{"查詢序號(案件編號)": case, "身分資格": "補助市民" if i == 0 else "一般市民"})
+        for i, case in enumerate(cases)
+    ]).to_excel(path, index=False)
+    dependency = get_hcm_workbook_import_service()
+    try:
+        service = next(dependency)
+        frame = service.load_frame(str(path))
+        preview = service.preview(frame, str(path))
+        assert preview.ready_count == len(cases)
+        receipt = service.apply(frame, str(path), preview.preview_fingerprint, "hcm-historical-chain", "synthetic", "hcm-historical-chain")
+        assert receipt.failed_count == 0
+    finally:
+        dependency.close()
+
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            names = tuple(f"合成月嫂-{case}" for case in cases)
+            cursor.executemany("INSERT INTO staff(name,identity_card) VALUES (%s,%s)",
+                               [(name, f"T{case}") for name, case in zip(names, cases)])
+            # Isolated source evidence of the customer's original advance, before completion.
+            cursor.execute("SELECT obligation_identity,amount_due_ntd FROM client_obligations WHERE case_no=%s "
+                           "AND direction='receivable_from_client' AND amount_due_ntd>0", (cases[2],))
+            original_charges = tuple(cursor.fetchall())
+            assert sum(row["amount_due_ntd"] for row in original_charges) == 54000
+            for charge in original_charges:
+                identity, amount = charge["obligation_identity"], charge["amount_due_ntd"]
+                key = f"synthetic-paid:{identity}"
+                cursor.execute("INSERT INTO client_ledger_entries(case_no,entry_type,amount_ntd,occurred_on,"
+                               "reconciliation_reference,idempotency_key,actor,reason) "
+                               "VALUES(%s,'receipt',%s,%s,%s,%s,'synthetic','Original paid advance fixture')",
+                               (cases[2], amount, start, key, key))
+                cursor.execute("INSERT INTO client_ledger_obligation_allocations(ledger_entry_id,obligation_identity,"
+                               "amount_ntd,allocation_ordinal) VALUES(%s,%s,%s,1)",
+                               (cursor.lastrowid, identity, amount))
+                cursor.execute("UPDATE client_obligations SET amount_due_ntd=0,status='settled' WHERE obligation_identity=%s", (identity,))
+        connection.commit()
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[require_admin] = lambda: AdminPrincipal(1, "synthetic", "Synthetic", "system_admin")
+        with TestClient(app) as http:
+            for case, scheme in zip(cases, ("split", "split", "advance", "direct")):
+                url = f"/cases/{case}/accounting/subsidy-plan"
+                command = {"scheme": scheme, "expected_version": 0}
+                response = http.post(url + "/preview", json=command)
+                assert response.is_success, response.text
+                command["preview_fingerprint"] = response.json()["data"]["preview_fingerprint"]
+                response = http.post(url, json=command, headers={"Idempotency-Key": f"scheme:{case}"})
+                assert response.is_success, response.text
+
+            history = Workbook()
+            history.active.append(["client_name", "case_no", "start_date", "end_date", "status", "staff_name"])
+            for case, name in zip(cases, names):
+                history.active.append(["合成短案", case, start, end, 1, name])
+            path = tmp_path / "historical.xlsx"
+            history.save(path)
+            dependency = get_historical_order_workbook_import_service(SimpleNamespace(state=SimpleNamespace()))
+            try:
+                service = next(dependency)
+                preview = service.preview(str(path))
+                assert preview.result_counts.historical_service_completed == len(cases)
+                receipt = service.apply(str(path), "hcm-historical-adoption", preview.preview_fingerprint,
+                                        "synthetic", "hcm-historical-adoption")
+                replay_preview = service.preview(str(path))
+                replay = service.apply(str(path), "hcm-historical-reimport", replay_preview.preview_fingerprint,
+                                       "synthetic", "hcm-historical-reimport")
+            finally:
+                dependency.close()
+            assert receipt.import_counts.imported_count == len(cases)
+            assert replay.import_counts.duplicate_skipped_count == len(cases)
+            assert replay.payroll_issues == receipt.payroll_issues
+            assert [(row.case_no, row.issue_codes) for row in receipt.payroll_issues] == [
+                (cases[1], ("historical_payroll_funding_conflict",)),
+            ]
+
+            roster = ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection))
+            for case, amount, recipient, subsidy in zip(cases, (63000, None, 54000, 54000),
+                                                        ("staff", None, "client", None), (42000, None, 12000, None)):
+                item, = roster.list(query=case, limit=10, after=None).items
+                response = http.get(f"/cases/{case}/accounting")
+                assert response.is_success, response.text
+                accounting = response.json()["data"]
+                if amount is None:
+                    assert item.staff_payment_due_date is None
+                    assert not item.staff_obligation_dates and not accounting["staff_items"]
+                else:
+                    assert item.staff_payment_due_date == date(2026, 9, 15)
+                    assert item.staff_obligation_dates[0]["due_date"] == item.staff_payment_due_date
+                    staff, = accounting["staff_items"]
+                    assert staff["expected_ntd"] == amount and staff["due_date"] == "2026-09-15"
+                refund_dates = [row["due_date"] for row in item.client_obligation_dates if row["obligation_type"] == "subsidy_return"]
+                assert refund_dates == ([date(2026, 10, 15)] if recipient == "client" else [])
+                formal = [row for row in accounting["subsidy_payments"] if row["source"] == "formal"]
+                if recipient:
+                    payment, = formal
+                    assert (payment["recipient"], payment["amount_ntd"], payment["due_date"]) == (recipient, subsidy, "2026-10-15")
+                else:
+                    assert not formal
+    finally:
+        connection.close()

@@ -115,6 +115,7 @@ class AccountingItemView(_StrictModel):
 
 
 class ClientAccountingItemView(AccountingItemView):
+    obligation_type: str | None = None
     expected_ntd: ExactNtd
     actual_ntd: ExactNtd
     unallocated_surplus_ntd: ExactNtd = 0

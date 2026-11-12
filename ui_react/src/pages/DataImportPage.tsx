@@ -357,6 +357,15 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
             </tr>)}</tbody>
           </table></div>
         </details>}
+        {result?.payrollIssues && result.payrollIssues.length > 0 && <section className="import-not-imported-details" aria-label="月嫂應付待核對">
+          <h4>月嫂應付待核對</h4>
+          <div className="import-details-scroll"><table>
+            <thead><tr><th scope="col">Excel 列號</th><th scope="col">案件編號</th><th scope="col">略過原因</th></tr></thead>
+            <tbody>{result.payrollIssues.map(row => <tr key={row.sourceRow}>
+              <td>{row.sourceRow}</td><td>{row.identifier ?? '—'}</td><td>{row.reasons.join('；')}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </section>}
         {result && result.notImportedCount !== 0 && <section className="import-not-imported-details" aria-label="未匯入明細">
           <h4>未匯入明細</h4>
           {result.notImportedRows === null ? <p>這份匯入收據未保存逐筆明細，無法從收據確認未匯入的是哪些資料。</p> : <div className="import-details-scroll"><table>

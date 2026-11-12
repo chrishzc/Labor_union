@@ -16,6 +16,7 @@ export interface WorkbookImportResult {
   absentOrderCancellationCount?: number;
   manualBindings?: ClientBeClassWorkbookReceipt['manual_bindings'];
   requiresRepreview?: boolean;
+  payrollIssues?: NonNullable<WorkbookImportResult["notImportedRows"]>;
   notImportedRows: Array<{ sourceRow: number; identifier: string | null; fields: string[]; reasons: string[] }> | null;
 }
 
@@ -31,6 +32,15 @@ const REASON_LABELS: Record<string, string> = {
   current_conflict: '來源與目前案件資料衝突',
   review_required: '資料未通過匯入檢查',
   failed: '處理失敗',
+  historical_payroll_unique_assignment_required: '需要唯一有效的歷史月嫂指派，請核對服務歸屬',
+  historical_payroll_obligation_binding_conflict: '原應付與採納指派不一致，請核對月嫂與原款項',
+  historical_payroll_original_payment_preserved: '原應付已付款或結清，保留原款項，請核對付款日期',
+  historical_payroll_settled_source_required: '歷史帳務完成案缺少可證實的原應付來源',
+  historical_payroll_service_basis_missing: '缺少服務天數、每日時數或有效服務結束日',
+  payroll_rate_policy_not_found: '找不到可用的月嫂費率快照',
+  historical_payroll_nonpositive_amount: '月嫂應付計算結果沒有正金額',
+  historical_payroll_funding_conflict: '補助方案與既有帳務來源不一致，請核對款項歸屬',
+  historical_service_not_completed: '案件尚未達歷史服務完成狀態',
   historical_case_no_missing: '缺少案件編號',
   historical_client_name_missing: '缺少客戶姓名',
   historical_status_invalid: '訂單狀態空白或格式錯誤',
@@ -231,17 +241,21 @@ export function adaptStaffHistoricalImportResult(receipt: StaffHistoricalWorkboo
 
 export function adaptHistoricalOrderImportResult(receipt: HistoricalOrderWorkbookReceipt): WorkbookImportResult {
   const rows = receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.case_no, fields: row.fields, reasons: historicalOrderRowReasons(row.issue_codes) })) ?? null;
+  const payrollIssues = receipt.payroll_issues?.map(row => ({
+    sourceRow: row.source_row, identifier: row.case_no, fields: row.fields,
+    reasons: historicalOrderRowReasons(row.issue_codes),
+  }));
   const absentOrderCancellationCount = receipt.absent_order_cancellation_count;
   if (receipt.import_counts) {
     return { ...result(receipt.source_row_count, receipt.import_counts.imported_count,
       receipt.import_counts.duplicate_skipped_count, receipt.import_counts.not_imported_count,
       receipt.replayed_workbook,
-      rows), absentOrderCancellationCount };
+      rows), absentOrderCancellationCount, payrollIssues };
   }
   // Old receipts with mixed row replay do not identify which outcomes overlapped.
   if (receipt.replayed_rows > 0) {
-    return { sourceCount: receipt.source_row_count, importedCount: null, duplicateCount: null, notImportedCount: null, replayedWorkbook: receipt.replayed_workbook, notImportedRows: null, absentOrderCancellationCount };
+    return { sourceCount: receipt.source_row_count, importedCount: null, duplicateCount: null, notImportedCount: null, replayedWorkbook: receipt.replayed_workbook, notImportedRows: null, absentOrderCancellationCount, payrollIssues };
   }
   return { ...result(receipt.source_row_count, receipt.adopted_count, 0,
-    receipt.source_row_count - receipt.adopted_count, receipt.replayed_workbook, rows), absentOrderCancellationCount };
+    receipt.source_row_count - receipt.adopted_count, receipt.replayed_workbook, rows), absentOrderCancellationCount, payrollIssues };
 }

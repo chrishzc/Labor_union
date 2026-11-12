@@ -150,7 +150,7 @@ def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existi
             reads.append(sql)
 
         def fetchone(self):
-            assert "COALESCE(actual_end_date,end_date)" in reads[-1]
+            assert "COALESCE(actual_end_date,end_date)" in reads[-1].replace(" ", "")
             return order
 
         def fetchall(self):

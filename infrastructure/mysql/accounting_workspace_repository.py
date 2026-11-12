@@ -197,7 +197,7 @@ class MySqlAccountingWorkspaceState:
         self.connection.rollback()
 
 
-def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None):
+def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, payroll_candidate_total=None):
     """Borrow current Orders, owner money facts and the last saved plan; query only."""
     from domains.staff_payables.subsidy_handoff import SubsidyHandoffFacts, decide_subsidy_handoff
     with connection.cursor() as cursor:
@@ -211,7 +211,10 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None):
         raise LookupError('accounting_case_not_found')
     case = build_accounting_workspace(connection).query(case_no)
     funding = case.funding
-    total = case.staff_receivable_ntd if case.staff_receivable_ntd is not None else (funding.total_ntd if funding else None)
+    staff_total = case.staff_receivable_ntd
+    if staff_total is None:
+        staff_total = payroll_candidate_total
+    total = staff_total if staff_total is not None else (funding.total_ntd if funding else None)
     cash = case.cash_by_flow
     customer_paid = case.customer_paid_ntd
     if customer_paid is not None and cash is not None:
@@ -225,5 +228,5 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None):
         None if cash is None else cash['PT'], None if cash is None else cash['RT'],
         None if cash is None else cash['G'], bool(row['has_customer_subsidy_payable']),
         funding.full_subsidy if funding is not None else False,
-        funding is not None and case.staff_receivable_ntd is not None and funding.total_ntd != case.staff_receivable_ntd,
+        funding is not None and staff_total is not None and funding.total_ntd != staff_total,
         'bank' if proposed_scheme is not None else case.subsidy_plan.confirmation_source if case.subsidy_plan else None))

@@ -114,7 +114,7 @@ def test_case_get_projects_bank_and_historical_collections_to_strict_http_lists(
     from subsystems.client_finance.case_accounting_query import ClientAccountingItem
     case = CaseAccounting(
         '115000001', 'Synthetic', 10000, 9900, None, None, 0,
-        (ClientAccountingItem('first', 'receivable', '第一期', 'Synthetic', 10000, 9900, True, '1', '2026-11-01', recognized_ntd=100),),
+        (ClientAccountingItem('first', 'receivable', '第一期', 'Synthetic', 10000, 9900, True, '1', '2026-11-01', recognized_ntd=100, obligation_type='first'),),
         (), (), (),
         bank_facts=(AccountingBankFact('bank:1', '2026-11-02', 'in', 9900, ('115000001',)),) if with_bank else (),
         historical_marker=HistoricalAccountingMarker(
@@ -132,6 +132,7 @@ def test_case_get_projects_bank_and_historical_collections_to_strict_http_lists(
     assert isinstance(data['bank_facts'], list)
     assert data['client_items'][0]['remaining_ntd'] == 0
     assert data['client_items'][0]['noncash_ntd'] == 100
+    assert data['client_items'][0]['obligation_type'] == 'first'
     if with_bank:
         assert data['bank_facts'][0]['cases'] == ['115000001']
     if with_marker:

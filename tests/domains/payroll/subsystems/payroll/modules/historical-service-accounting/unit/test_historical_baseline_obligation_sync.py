@@ -21,9 +21,13 @@ def test_historical_due_date_preserves_recorded_dates_and_separates_funding(
     monkeypatch, scheme, subsidy, existing_due, expected_due, expected_portions,
 ):
     handoff = SubsidyPayableHandoff(scheme, False, True, subsidy, subsidy == 12000)
+    def read_handoff(connection, case_no, *, payroll_candidate_total):
+        assert payroll_candidate_total == 12000
+        return handoff
+
     monkeypatch.setattr(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
-        lambda *_: handoff,
+        read_handoff,
     )
     due_date, portions = _funding_schedule(
         None, "CASE-1",
@@ -39,6 +43,6 @@ def test_historical_due_date_preserves_recorded_dates_and_separates_funding(
 def test_conflicting_historical_funding_blocks_establishment(monkeypatch):
     monkeypatch.setattr(
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
-        lambda *_: SubsidyPayableHandoff("split", False, True, 5000, False, staff_subsidy_reason="conflict"),
+        lambda *_, payroll_candidate_total: SubsidyPayableHandoff("split", False, True, 5000, False, staff_subsidy_reason="conflict"),
     )
     assert _funding_schedule(None, "CASE-1", {"actual_end_date": date(2026, 11, 30)}, 12000) is None

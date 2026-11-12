@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納與檔外取消共用同一 outer UoW。採納保留原帳務，歷史服務完成時委派 Payroll 同步月嫂應付。
+將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納與檔外取消共用同一 outer UoW。採納保留原帳務，歷史服務完成時委派 Payroll 同步月嫂應付，匯入收據另列略過原因，並依正式方案委派 Client Finance 同步客戶補助退款。
 
 ## Implementation
 - primary:

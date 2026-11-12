@@ -206,6 +206,7 @@ class HistoricalOrderWorkbookReceipt:
     absent_order_cancellation_count: int = 0
     import_counts: HistoricalOrderWorkbookImportCounts | None = None
     row_issues: tuple[HistoricalOrderWorkbookRowIssue, ...] | None = None
+    payroll_issues: tuple[HistoricalOrderWorkbookRowIssue, ...] = ()
 
     def __post_init__(self) -> None:
         value = self.absent_order_cancellation_count
@@ -235,6 +236,7 @@ class HistoricalOrderWorkbookReceipt:
             "review_references": list(self.review_references),
             "import_counts": None if self.import_counts is None else self.import_counts.as_dict(),
             "row_issues": None if self.row_issues is None else [item.as_dict() for item in self.row_issues],
+            "payroll_issues": [item.as_dict() for item in self.payroll_issues],
         }
 
 
@@ -442,6 +444,7 @@ class HistoricalOrderWorkbookImportService:
             initial_locked = []
             locked_exclusions = {}
 
+        payroll_issues: list[HistoricalOrderWorkbookRowIssue] = []
         mutated_cases: set[str] = set()
         for index, row in enumerate(workbook.rows):
             if index in locked_exclusions:
@@ -501,6 +504,11 @@ class HistoricalOrderWorkbookImportService:
                     (locked_preview,),
                 )
                 row_issues.extend(issues or (HistoricalOrderWorkbookRowIssue(row.source_row, row.case_no, ("來源資料",), (receipt.outcome.value,)),))
+            payroll_reason = getattr(receipt, "payroll_skip_reason", None)
+            if payroll_reason and payroll_reason != "already_synced":
+                payroll_issues.append(HistoricalOrderWorkbookRowIssue(
+                    row.source_row, row.case_no, ("月嫂應付",), (payroll_reason,),
+                ))
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
             review_identity = getattr(receipt, "review_identity", None)
             if review_identity is not None and review_identity not in review_references:
@@ -537,6 +545,7 @@ class HistoricalOrderWorkbookImportService:
                 import_counts["not_imported_count"],
             ),
             row_issues=tuple(row_issues),
+            payroll_issues=tuple(payroll_issues),
         )
 
 def _preview(

@@ -648,3 +648,38 @@ def test_completed_service_establishes_payable_with_or_without_deposit(identity,
     if full_subsidy:
         assert view.scheme == 'split' and view.subsidy_ntd == expected_payable
         assert view.customer_amount_ntd == 0 and view.customer_fully_received
+        payment, = view.subsidy_payments
+        assert (payment.recipient, payment.amount_ntd, payment.due_date, payment.source) == (
+            'staff', expected_payable, '2026-12-15', 'formal',
+        )
+
+
+def test_ordinary_completion_materializes_confirmed_customer_subsidy_after_payroll():
+    case, _ = new_case(days=6)
+    seed_service(case, 6)
+    all_receipts(case)
+    plan_url = f'/api/v1/finance-import/cases/{case}/accounting/subsidy-plan'
+    command = {'scheme': 'advance', 'expected_version': 0}
+    preview = checked(http.post(plan_url + '/preview', json=command))
+    assert preview['confirmation_only'] and not preview['payables']
+    checked(http.post(plan_url, json={**command, 'preview_fingerprint': preview['preview_fingerprint']},
+                      headers={'Idempotency-Key': f'{case}:advance-before-completion'}))
+    assert not any(row['obligation_type'] == 'subsidy_return' for row in snapshot(case)['client'])
+
+    complete(case)
+
+    result = checked(http.get(f'/api/v1/finance-import/cases/{case}/accounting'))
+    staff, = result['staff_items']
+    assert int(staff['expected_ntd']) == 14400 and staff['due_date'] == '2026-11-15'
+    payment, = result['subsidy_payments']
+    assert payment['recipient'] == 'client' and payment['source'] == 'formal'
+    assert int(payment['amount_ntd']) == 12000 and payment['due_date'] == '2026-12-15'
+
+    from infrastructure.mysql.client_registry_query_repository import MySqlClientRegistryQueryRepository
+    from subsystems.client_profile.registry_query import ClientRegistryQueryApplication
+
+    with mysql_adapter.get_connection() as connection:
+        roster = ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection))
+        item, = roster.list(query=case, limit=10, after=None).items
+    assert item.staff_payment_due_date == date(2026, 11, 15)
+    assert [row['due_date'] for row in item.client_obligation_dates if row['obligation_type'] == 'subsidy_return'] == [date(2026, 12, 15)]

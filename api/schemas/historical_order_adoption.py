@@ -100,6 +100,7 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
     review_references: list[str] = Field(default_factory=list, max_length=100)
     import_counts: HistoricalOrderWorkbookImportCountsView | None = None
     row_issues: list[HistoricalOrderWorkbookRowIssueView] | None = None
+    payroll_issues: list[HistoricalOrderWorkbookRowIssueView] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_status_count_conservation(self):
