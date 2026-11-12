@@ -37,15 +37,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
   const [resumeStatus, setResumeStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [resumeError, setResumeError] = useState(false);
   const [resumeSettings, setResumeSettings] = useState<FileTransferSettings | null>(null);
-  const [resumePreview, setResumePreview] = useState<Blob | null>(null);
-  const [resumePreviewUrl, setResumePreviewUrl] = useState<string | null>(null);
   const resumeInput = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!resumePreview) { setResumePreviewUrl(null); return; }
-    const url = URL.createObjectURL(resumePreview);
-    setResumePreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [resumePreview]);
   const loadResume = async () => {
     const request = ++resumeRequest.current;
     setResumeStatus('loading'); setResumeError(false); setResumeMessage('正在讀取目前履歷…');
@@ -66,7 +58,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
   useEffect(() => {
     setDraft(Object.fromEntries(fields.map(([field]) => [String(field), String(profile[field] ?? '')])));
     setProfilePreview(null); setBankPreview(null); setProfileApplyKey(null); setBankApplyKey(null);
-    setResume(null); setResumeFile(null); setResumePreview(null); setResumeSettings(null);
+    setResume(null); setResumeFile(null); setResumeSettings(null);
     resumeUploadIdentity.current = null;
     if (showResume) void loadResume();
     return () => { resumeRequest.current += 1; };
@@ -119,7 +111,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
     } finally { setBankBusy(false); }
   };
   const selectResume = (file: File | null) => {
-    setResumeFile(null); setResumePreview(null); setResumeError(false); setResumeMessage(null);
+    setResumeFile(null); setResumeError(false); setResumeMessage(null);
     resumeUploadIdentity.current = null;
     if (!file) return;
     if (file.type !== 'application/pdf' || !file.name.toLowerCase().endsWith('.pdf')) {
@@ -130,7 +122,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
       setResumeMessage(`所選履歷 ${fileSizeLabel(file.size)}，超過目前上限 ${fileSizeLabel(resumeSettings.resume_max_bytes)}。本次未上傳，請選擇較小檔案或請管理者調整上限。`);
       return;
     }
-    setResumeFile(file); setResumePreview(file);
+    setResumeFile(file);
   };
   const uploadResume = async () => {
     if (resumeBusy || !resumeFile || resumeStatus !== 'ready') return;
@@ -141,7 +133,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
       setResumeBusy(true); setResumeError(false); setResumeMessage('正在上傳並保存履歷，請稍候…');
       const saved = await staffResumeClient.upload(profile.staff_id, resumeFile, resumeUploadIdentity.current.key);
       if (resumeRequest.current !== request) return;
-      setResume(saved); resumeUploadIdentity.current = null; setResumeFile(null); setResumePreview(null);
+      setResume(saved); resumeUploadIdentity.current = null; setResumeFile(null);
       if (resumeInput.current) resumeInput.current.value = '';
       setResumeMessage('月嫂履歷已完成受控上傳。');
     } catch (error) {
@@ -149,18 +141,13 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
       setResumeError(true); setResumeMessage(error instanceof Error ? error.message : '履歷上傳失敗。');
     } finally { setResumeBusy(false); }
   };
-  const readResume = async (download: boolean) => {
+  const downloadResume = async () => {
     if (!resume || resumeBusy) return;
     const request = resumeRequest.current;
     try {
-      setResumeBusy(true); setResumeError(false); setResumeMessage(download ? '正在準備履歷下載…' : '正在讀取履歷預覽…');
-      if (download) await staffResumeClient.download(resume.file_id, resume.filename);
-      else {
-        const blob = await staffResumeClient.preview(resume.file_id);
-        if (resumeRequest.current !== request) return;
-        setResumePreview(blob);
-      }
-      if (resumeRequest.current === request) setResumeMessage(download ? '已交由瀏覽器下載履歷。' : '履歷已載入，下方可預覽。');
+      setResumeBusy(true); setResumeError(false); setResumeMessage('正在準備履歷下載…');
+      await staffResumeClient.download(resume.file_id, resume.filename);
+      if (resumeRequest.current === request) setResumeMessage('已交由瀏覽器下載履歷。');
     } catch (error) {
       if (resumeRequest.current !== request) return;
       setResumeError(true); setResumeMessage(error instanceof Error ? error.message : '履歷讀取失敗，請重試。');
@@ -170,17 +157,12 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
     <h3 className="staff-op-title">月嫂履歷 PDF</h3>
     {resumeStatus === 'ready' && (resume ? <>
       <p>目前履歷：{resume.filename}</p><p>版本：{resume.version}</p>
-      <button type="button" className="staff-secondary-btn" disabled={resumeBusy} onClick={() => void readResume(false)}>預覽目前履歷</button>
-      <button type="button" className="staff-secondary-btn" disabled={resumeBusy} onClick={() => void readResume(true)}>下載目前履歷</button>
+      <button type="button" className="staff-secondary-btn" disabled={resumeBusy} onClick={() => void downloadResume()}>下載目前履歷</button>
     </> : <p>尚未上傳月嫂履歷 PDF</p>)}
     {resumeStatus === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void loadResume()}>重新讀取履歷</button>}
     {resumeSettings && <p>PDF 上限：{fileSizeLabel(resumeSettings.resume_max_bytes)}。上傳新版會保留既有版本。</p>}
     <label className="staff-op-field">選擇 PDF<input ref={resumeInput} type="file" accept="application/pdf,.pdf" disabled={resumeBusy || resumeStatus !== 'ready'} onChange={(event) => selectResume(event.target.files?.[0] ?? null)} /></label>
     {resumeFile && <p>已選擇：{resumeFile.name}（{fileSizeLabel(resumeFile.size)}），尚未上傳。</p>}
-    {resumePreviewUrl && <div>
-      <object aria-label="履歷 PDF 預覽" data={resumePreviewUrl} type="application/pdf" style={{ width: '100%', height: 420 }}><p>瀏覽器無法顯示 PDF 預覽，可使用下載功能查看。</p></object>
-      <button type="button" className="staff-secondary-btn" onClick={() => setResumePreview(null)}>關閉履歷預覽</button>
-    </div>}
     <button type="button" className="staff-primary-btn" disabled={resumeBusy || !resumeFile || resumeStatus !== 'ready'} onClick={() => void uploadResume()}>{resume ? '上傳新版履歷' : '上傳履歷'}</button>
     {resumeMessage && <p role={resumeError ? 'alert' : 'status'} className={resumeError ? 'staff-op-error' : undefined}>{resumeMessage}</p>}
   </section>;

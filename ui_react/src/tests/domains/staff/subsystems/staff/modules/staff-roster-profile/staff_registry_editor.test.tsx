@@ -7,14 +7,13 @@ import { STAFF_PROFILE } from './fixtures/staff_profile_contract_fixtures';
 
 const mocks = vi.hoisted(() => ({
   previewProfile: vi.fn(), applyProfile: vi.fn(), previewBank: vi.fn(), applyBank: vi.fn(),
-  currentResume: vi.fn(), uploadResume: vi.fn(), downloadResume: vi.fn(), previewResume: vi.fn(), settings: vi.fn(),
+  currentResume: vi.fn(), uploadResume: vi.fn(), downloadResume: vi.fn(), settings: vi.fn(),
 }));
 vi.mock('../../../../../../../api/staff_registry/staff_registry_client', () => ({ staffRegistryClient: mocks }));
 vi.mock('../../../../../../../api/staff_profile/staff_resume_client', () => ({ fileSizeLabel: (bytes: number) => `${(bytes / 1048576).toFixed(2)} MiB`, staffResumeClient: {
   current: mocks.currentResume,
   upload: mocks.uploadResume,
   download: mocks.downloadResume,
-  preview: mocks.previewResume,
   settings: mocks.settings,
 } }));
 
@@ -29,8 +28,6 @@ describe('Staff registry owner editing', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.currentResume.mockResolvedValue(null);
     mocks.settings.mockResolvedValue({ photo_max_bytes: 10485760, resume_max_bytes: 20971520, timeout_seconds: 300 });
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:resume-preview');
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     mocks.previewBank.mockResolvedValue({ staff_id: STAFF_PROFILE.staff_id, current_version: STAFF_PROFILE.bank_accounts_version, operation: 'add', before: null, after: { account_id: null, bank_code: '812', branch_code: '0012', account_last4: '7890', is_primary: false, is_active: true }, preview_fingerprint: 'b'.repeat(64) });
   });
   afterEach(() => vi.restoreAllMocks());
@@ -198,19 +195,17 @@ describe('Staff registry owner editing', () => {
     expect(mocks.uploadResume.mock.calls[1][2]).toBe(mocks.uploadResume.mock.calls[0][2]);
   });
 
-  it('previews selected and saved PDFs and releases the preview on close', async () => {
+  it('allows selecting a PDF without showing a resume preview', async () => {
     mocks.currentResume.mockResolvedValue({ file_id: 'cf_' + '1'.repeat(32), filename: 'resume.pdf', version: 1 });
-    mocks.previewResume.mockResolvedValue(new Blob(['%PDF-saved'], { type: 'application/pdf' }));
     render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: '預覽目前履歷' }));
-    expect(await screen.findByLabelText('履歷 PDF 預覽')).toHaveAttribute('data', 'blob:resume-preview');
-    expect(mocks.previewResume).toHaveBeenCalledWith('cf_' + '1'.repeat(32));
-    fireEvent.click(screen.getByRole('button', { name: '關閉履歷預覽' }));
-    await waitFor(() => expect(screen.queryByLabelText('履歷 PDF 預覽')).not.toBeInTheDocument());
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:resume-preview');
+    await screen.findByRole('button', { name: '下載目前履歷' });
+    expect(screen.queryByRole('button', { name: '預覽目前履歷' })).not.toBeInTheDocument();
     const file = new File(['%PDF-selected'], 'selected.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('選擇 PDF'), { target: { files: [file] } });
-    expect(await screen.findByLabelText('履歷 PDF 預覽')).toBeInTheDocument();
+    expect(screen.getByText(/已選擇：selected\.pdf/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上傳新版履歷' })).toBeEnabled();
+    expect(screen.queryByLabelText('履歷 PDF 預覽')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '關閉履歷預覽' })).not.toBeInTheDocument();
     expect(mocks.uploadResume).not.toHaveBeenCalled();
   });
 

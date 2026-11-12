@@ -22,7 +22,7 @@ describe('resume file transfers', () => {
         })),
       };
     }));
-    const pending = expect(staffResumeClient.preview('cf_' + '1'.repeat(32))).rejects.toThrow('檔案尚未讀取完成');
+    const pending = expect(staffResumeClient.readPdf('cf_' + '1'.repeat(32))).rejects.toThrow('檔案尚未讀取完成');
     await vi.advanceTimersByTimeAsync(1001);
     await pending;
     expect(aborted).toBe(true);
@@ -40,7 +40,7 @@ describe('resume file transfers', () => {
         blob: () => new Promise<Blob>(resolve => { finish = resolve; }),
       };
     }));
-    const pending = staffResumeClient.preview('cf_' + '1'.repeat(32));
+    const pending = staffResumeClient.readPdf('cf_' + '1'.repeat(32));
     await vi.advanceTimersByTimeAsync(600000);
     expect(signal?.aborted).toBe(false);
     const blob = new Blob(['%PDF-file'], { type: 'application/pdf' });
@@ -61,7 +61,7 @@ describe('resume file transfers', () => {
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session');
     const blob = new Blob(['%PDF-1.7'], { type: 'application/pdf' });
     const get = vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope(settings)).mockResolvedValueOnce(blob);
-    expect(await staffResumeClient.preview('cf_' + '1'.repeat(32))).toBe(blob);
+    expect(await staffResumeClient.readPdf('cf_' + '1'.repeat(32))).toBe(blob);
     expect(get).toHaveBeenLastCalledWith(expect.stringContaining('/download'), expect.objectContaining({
       token: 'synthetic-session', timeoutMs: 900000, responseType: 'blob', cache: 'no-store',
     }));
@@ -71,7 +71,7 @@ describe('resume file transfers', () => {
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session');
     const get = vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope({ ...settings, timeout_seconds: 0 }))
       .mockRejectedValueOnce(new ApiHttpError(404, 'controlled_file_not_found', 'missing', false, null));
-    await expect(staffResumeClient.preview('cf_' + '1'.repeat(32))).rejects.toThrow('找不到這份履歷');
+    await expect(staffResumeClient.readPdf('cf_' + '1'.repeat(32))).rejects.toThrow('找不到這份履歷');
     expect(get).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ timeoutMs: 0 }));
   });
 });

@@ -107,17 +107,17 @@ export const staffResumeClient = {
       return { file_id: receipt.file_id, filename: receipt.filename, version: receipt.version };
     } catch (error) { throw resumeError(error, true); }
   },
-  async preview(fileId: string): Promise<Blob> {
+  async readPdf(fileId: string): Promise<Blob> {
     const settings = await staffResumeClient.settings();
     try {
       const blob = await transport.get<Blob>(`/api/v1/storage/files/${encodeURIComponent(fileId)}/download`,
         { ...headers(), responseType: 'blob', cache: 'no-store', timeoutMs: settings.timeout_seconds * 1000 });
-      if (blob.type.split(';')[0] !== 'application/pdf') throw new Error('履歷回應不是 PDF，無法預覽或下載。');
+      if (blob.type.split(';')[0] !== 'application/pdf') throw new Error('履歷回應不是 PDF，無法下載。');
       return blob;
     } catch (error) { throw resumeError(error); }
   },
   async download(fileId: string, filename: string): Promise<void> {
-    const url = URL.createObjectURL(await staffResumeClient.preview(fileId));
+    const url = URL.createObjectURL(await staffResumeClient.readPdf(fileId));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
