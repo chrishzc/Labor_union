@@ -327,7 +327,12 @@ def test_historical_manual_plan_versions_preserve_money_and_original_bank_candid
     before=_scenario['cash_snapshot'](connection,case)
     workspace=build_accounting_workspace(connection)
     for version,plan in enumerate(('advance','split',scheme)):
-        result=workspace.save_subsidy_plan(case.case_no,plan,version,f'{case.case_no}-plan-{version}','synthetic')
+        preview=workspace.preview_subsidy_plan(case.case_no,plan,version)
+        assert _scenario['cash_snapshot'](connection,case)==before
+        result=workspace.save_subsidy_plan(
+            case.case_no,plan,version,f'{case.case_no}-plan-{version}','synthetic',
+            preview_fingerprint=preview.fingerprint.value,
+        )
         assert result.applied_version==version+1
         assert _scenario['cash_snapshot'](connection,case)==before
     assert_payroll_expected(connection,case,72000)
