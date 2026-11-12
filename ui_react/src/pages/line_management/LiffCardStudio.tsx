@@ -187,9 +187,15 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     return (
       <div className="mock-form-inputs">
         <fieldset className="mock-placeholder-box">
-          <legend>聯絡方式、地址與緊急聯絡</legend>
+          <legend>聯絡方式</legend>
           <label>手機<input type="tel" placeholder="目前手機號碼" readOnly /></label>
+        </fieldset>
+        <fieldset className="mock-placeholder-box">
+          <legend>聯絡地址</legend>
           <label>詳細地址<input type="text" placeholder="目前聯絡地址" readOnly /></label>
+        </fieldset>
+        <fieldset className="mock-placeholder-box">
+          <legend>緊急聯絡</legend>
           <label>緊急聯絡人<input type="text" placeholder="目前聯絡人" readOnly /></label>
         </fieldset>
         <fieldset className="mock-placeholder-box">
@@ -422,7 +428,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
       <div className="liff-studio-device-brand">新竹市到宅月子工會</div>
       <div className="liff-studio-device-content">
         <div className="mock-liff-body">
-          <h3 className="mock-liff-title">{selectedItem.displayTitle}</h3>
+          <h3 className="mock-liff-title">{selectedItem.id === 'staff_profile_update' ? '我的資料' : selectedItem.displayTitle}</h3>
           <p className="mock-liff-desc">{selectedItem.purpose}</p>
           <LiffVisualPreview item={selectedItem} />
         </div>

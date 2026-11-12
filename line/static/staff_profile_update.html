@@ -1,39 +1,130 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant-TW">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>更新個人資料</title>
+  <title>我的資料｜新竹市到宅月子工會</title>
   <style>
+    :root {
+      --paper: #fffdfa;
+      --text: #3e2723;
+      --muted: #74593f;
+      --accent: #ab421f;
+      --accent-hover: #883314;
+      --border: #e8cec2;
+      --soft: #fff2ec;
+      --radius: 16px;
+    }
     * { box-sizing: border-box; }
-    body { background: #f6f8f5; color: #173128; font: 17px/1.5 system-ui, sans-serif; margin: 0; }
-    main { max-width: 660px; margin: auto; padding: 20px; }
-    fieldset { border: 1px solid #cdded5; border-radius: 8px; background: white; margin: 16px 0; padding: 16px; }
-    legend { font-weight: 700; padding: 0 6px; }
-    label { display: block; margin: 12px 0; }
-    input, textarea { display: block; width: 100%; padding: 10px; font: inherit; border: 1px solid #84998d; border-radius: 6px; }
-    textarea { min-height: 72px; }
-    input[type=checkbox] { display: inline-block; width: auto; }
-    button { padding: 12px 18px; font: inherit; font-weight: 700; border: 0; border-radius: 6px; color: white; background: #076848; }
-    button:disabled { opacity: .6; }
-    #status[data-error] { color: #a32020; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #fff5f2 0%, #faece8 100%);
+      color: var(--text);
+      font: 17px/1.6 "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", sans-serif;
+    }
+    main { width: min(100%, 664px); margin: 0 auto; padding: 20px 16px max(28px, env(safe-area-inset-bottom)); }
+    .page-header, .section, .submit-panel {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .page-header { border-top: 4px solid var(--accent); box-shadow: 0 6px 20px rgba(120, 52, 28, .08); }
+    .brand { color: var(--accent); font-size: 15px; font-weight: 700; margin: 0 0 8px; }
+    h1 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; }
+    p { margin: 0; }
+    .help { color: var(--muted); font-size: 15px; }
+    form { display: grid; gap: 16px; margin-top: 16px; }
+    fieldset { border: 0; min-inline-size: 0; margin: 0; padding: 0; }
+    legend { color: var(--text); font-size: 21px; font-weight: 700; padding: 0; margin-bottom: 12px; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .field, .preference { display: block; min-width: 0; font-weight: 700; }
+    .field-wide, .preference { grid-column: 1 / -1; }
+    .preference .help { display: block; margin: 3px 0 0; font-weight: 400; }
+    input:not([type=checkbox]), textarea {
+      display: block;
+      width: 100%;
+      min-height: 48px;
+      margin-top: 5px;
+      padding: 9px 12px;
+      border: 1px solid #b89484;
+      border-radius: 10px;
+      color: var(--text);
+      background: #fff;
+      font: inherit;
+      font-weight: 400;
+    }
+    textarea { min-height: 78px; resize: vertical; }
+    input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .bank-choice {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--soft);
+      font-weight: 700;
+    }
+    .bank-choice input { accent-color: var(--accent); width: 22px; height: 22px; flex: none; margin: 0; }
+    #bank-fields { margin-top: 14px; }
+    .submit-panel button {
+      width: 100%;
+      min-height: 52px;
+      padding: 12px 16px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .submit-panel button:hover:not(:disabled) { background: var(--accent-hover); }
+    .submit-panel button:disabled { opacity: .65; cursor: wait; }
+    .status { margin-top: 14px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--paper); }
+    .status[data-state="ready"] { display: none; }
+    .status[data-state="error"] { color: #972923; background: #fff1ef; border-color: #e6ada7; }
+    .status[data-state="receipt"] { color: #255b3f; background: #f0faf3; border-color: #b6d9c4; }
+    #submit-status:not(:empty) { margin-top: 10px; }
+    #submit-status[data-error] { color: #972923; }
+    @media (max-width: 420px) {
+      main { padding-inline: 12px; }
+      .page-header, .section, .submit-panel { padding: 16px; }
+      .field-grid { grid-template-columns: minmax(0, 1fr); }
+    }
   </style>
 </head>
 <body>
 <main>
-  <h1>更新個人資料</h1>
-  <p>只修改有變動的欄位。工會核准後，整張申請的資料才會一起更新。</p>
-  <p id="status" role="status" aria-live="polite">正在確認 LINE 身分…</p>
+  <header class="page-header">
+    <p class="brand">新竹市到宅月子工會</p>
+    <h1>我的資料</h1>
+    <p class="help">只需填寫要變更的欄位。工會核准後，整張申請的資料才會一起更新。</p>
+  </header>
+  <p id="status" class="status" role="status" aria-live="polite">正在確認 LINE 身分…</p>
   <form id="form" hidden>
-    <fieldset id="profile"><legend>聯絡方式、地址與緊急聯絡</legend></fieldset>
-    <fieldset id="bank">
-      <legend>更換收款帳戶</legend>
-      <p id="current-bank"></p>
-      <label><input id="replace-bank" type="checkbox">申請更換收款帳戶</label>
-      <div id="bank-fields" hidden></div>
-    </fieldset>
-    <fieldset id="preferences"><legend>接案偏好</legend></fieldset>
-    <button id="send" type="submit">送出整張申請</button>
+    <div class="section"><fieldset><legend>聯絡方式</legend><div id="contact" class="field-grid"></div></fieldset></div>
+    <div class="section"><fieldset><legend>聯絡地址</legend><div id="address-fields" class="field-grid"></div></fieldset></div>
+    <div class="section"><fieldset><legend>緊急聯絡</legend><div id="emergency" class="field-grid"></div></fieldset></div>
+    <div class="section">
+      <fieldset>
+        <legend>更換收款帳戶</legend>
+        <p id="current-bank" class="help"></p>
+        <label class="bank-choice"><input id="replace-bank" type="checkbox">申請更換收款帳戶</label>
+        <div id="bank-fields" class="field-grid" hidden></div>
+      </fieldset>
+    </div>
+    <div class="section"><fieldset><legend>接案偏好</legend><div id="preferences" class="field-grid"></div></fieldset></div>
+    <div class="submit-panel">
+      <button id="send" type="submit" aria-describedby="submit-status">送出整張申請</button>
+      <p id="submit-status" class="help" role="status"></p>
+    </div>
   </form>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -50,23 +141,39 @@ const relationLabels = {
 const form = document.getElementById("form");
 const status = document.getElementById("status");
 const send = document.getElementById("send");
+const submitStatus = document.getElementById("submit-status");
 const replacement = document.getElementById("replace-bank");
 const bankFields = document.getElementById("bank-fields");
 let identity, snapshot, previousSubmission;
 
-function show(message, error = false) {
+function show(message, state = "notice") {
   status.textContent = message;
-  status.toggleAttribute("data-error", error);
+  status.dataset.state = state;
 }
 
 function input(parent, id, label, value, options = {}) {
   const wrapper = document.createElement("label");
-  wrapper.textContent = label;
+  wrapper.className = options.hint ? "preference" : options.wide ? "field field-wide" : "field";
+  const caption = document.createElement("span");
+  caption.id = id + "-label";
+  caption.textContent = label;
+  wrapper.append(caption);
   const element = document.createElement(options.multiline ? "textarea" : "input");
   element.id = id;
+  element.setAttribute("aria-labelledby", caption.id);
   element.value = value ?? "";
-  if (options.numeric) element.inputMode = "numeric";
+  if (options.inputMode) element.inputMode = options.inputMode;
+  else if (options.numeric) element.inputMode = "numeric";
+  if (options.type) element.type = options.type;
   if (options.maximum) element.maxLength = options.maximum;
+  if (options.hint) {
+    const hint = document.createElement("small");
+    hint.id = id + "-hint";
+    hint.className = "help";
+    hint.textContent = options.hint;
+    wrapper.append(hint);
+    element.setAttribute("aria-describedby", hint.id);
+  }
   wrapper.append(element);
   parent.append(wrapper);
   return element;
@@ -79,28 +186,34 @@ function relationText(rows) {
 }
 
 function render(data) {
-  const profile = document.getElementById("profile");
-  for (const [key, label] of Object.entries(profileLabels)) input(profile, key, label, data.profile[key]);
+  const groups = { contact: ["phone", "tel", "tel_ext", "email"], "address-fields": ["city", "zip_code", "address"],
+    emergency: ["emergency_contact_name", "emergency_contact_phone"] };
+  const types = { phone: "tel", tel: "tel", emergency_contact_phone: "tel" };
+  for (const [group, fields] of Object.entries(groups)) {
+    for (const key of fields) {
+      input(document.getElementById(group), key, profileLabels[key], data.profile[key],
+        { type: types[key], inputMode: key === "email" ? "email" : undefined,
+          numeric: key === "zip_code" || key === "tel_ext", wide: key === "address" });
+    }
+  }
   document.getElementById("current-bank").textContent = data.bank
     ? "目前帳號末四碼 " + data.bank.account_last4 : "尚未設定收款帳戶，請聯絡工會。";
   replacement.disabled = !data.bank;
   for (const [key, label, maximum] of [["bank_code", "銀行代碼", 3], ["branch_code", "分行代碼", 4], ["account_no", "新收款帳號", 20]]) {
-    input(bankFields, key, label, "", { numeric: true, maximum });
+    input(bankFields, key, label, "", { numeric: true, maximum, wide: key === "account_no" });
   }
   const preferences = document.getElementById("preferences");
   for (const [key, label] of Object.entries(relationLabels)) {
-    const hint = document.createElement("small");
-    hint.textContent = key === "service_periods"
+    const hint = key === "service_periods"
       ? "一行一項，例如 4小時(09:00-13:00)"
       : "一行一項。可選值：" + data.relation_options[key].join("、");
-    input(preferences, key, label, relationText(data.relations[key]), { multiline: true });
-    preferences.append(hint);
+    input(preferences, key, label, relationText(data.relations[key]), { multiline: true, hint });
   }
-  input(preferences, "transportation", "交通方式（一行一項）", data.transportation.join("\n"), { multiline: true });
+  input(preferences, "transportation", "交通方式", data.transportation.join("\n"), { multiline: true, hint: "一行一項。" });
   const days = data.matching.preferred_service_days ?? {};
   input(preferences, "minimum", "最少可承接天數", days.minimum, { numeric: true });
   input(preferences, "maximum", "最多可承接天數", days.maximum, { numeric: true });
-  input(preferences, "hours", "每日可服務時數（用逗號分隔）", data.matching.daily_service_hours?.values.join(","), { numeric: true });
+  input(preferences, "hours", "每日可服務時數", data.matching.daily_service_hours?.values.join(","), { hint: "用逗號分隔，例如 4,8。" });
 }
 
 function changes() {
@@ -151,6 +264,9 @@ replacement.addEventListener("change", () => {
 form.addEventListener("submit", async event => {
   event.preventDefault();
   send.disabled = true;
+  send.textContent = "正在送出…";
+  submitStatus.textContent = "";
+  submitStatus.removeAttribute("data-error");
   try {
     const proposed = changes();
     const signature = JSON.stringify(proposed);
@@ -160,11 +276,14 @@ form.addEventListener("submit", async event => {
     previousSubmission = null;
     form.hidden = true;
     const labels = { pending: "待工會審核", approving: "工會處理中", approved: "已核准", rejected: "已退回", conflict: "資料已更新，請重新申請" };
-    show("申請 #" + result.id + "，" + (labels[result.status] || "已送出"));
+    show("申請 #" + result.id + "，" + (labels[result.status] || "已送出"), "receipt");
+    window.scrollTo(0, 0);
   } catch (error) {
-    show(error.message || "送出失敗，請再試一次。", true);
+    submitStatus.textContent = error.message || "送出失敗，請再試一次。";
+    submitStatus.setAttribute("data-error", "");
   } finally {
     send.disabled = false;
+    send.textContent = "送出整張申請";
   }
 });
 
@@ -184,8 +303,8 @@ async function init() {
     snapshot = await request("query", {});
     render(snapshot);
     form.hidden = false;
-    show("請填寫要變更的資料。");
-  } catch (error) { show(error.message || "無法載入資料，請重新開啟。", true); }
+    show("", "ready");
+  } catch (error) { show(error.message || "無法載入資料，請重新開啟。", "error"); }
 }
 init();
 </script>

@@ -200,7 +200,10 @@ describe('React entrypoint registry', () => {
 
     fireEvent.click(liffAsset('staff_profile_update.html'));
     const staffProfilePreview = within(screen.getByRole('region', { name: '所選項目預覽' }));
-    expect(staffProfilePreview.getByRole('group', { name: '聯絡方式、地址與緊急聯絡' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('heading', { name: '我的資料' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('group', { name: '聯絡方式' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('group', { name: '聯絡地址' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('group', { name: '緊急聯絡' })).toBeInTheDocument();
     expect(staffProfilePreview.getByRole('group', { name: '更換收款帳戶' })).toBeInTheDocument();
     expect(staffProfilePreview.getByRole('group', { name: '接案偏好' })).toBeInTheDocument();
     expect(staffProfilePreview.getByRole('button', { name: '送出整張申請' })).toBeDisabled();
