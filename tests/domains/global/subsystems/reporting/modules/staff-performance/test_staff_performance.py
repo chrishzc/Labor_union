@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+import sqlite3
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -13,7 +14,8 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.operations_reports import get_staff_performance_query
 from api.routes.operations_reports import router
 from subsystems.reporting.staff_performance_query import (
-    PerformanceCaseOpening, PerformanceServiceDay, PerformanceStaff, StaffPerformanceQuery,
+    PerformanceCaseOpening, PerformanceHistoricalAssignment, PerformanceServiceDay, PerformanceStaff,
+    StaffPerformanceQuery,
 )
 from subsystems.reporting.staff_performance_export import export_staff_performance
 from shared_kernel.clock import TAIPEI_TIME_ZONE
@@ -39,6 +41,9 @@ class Facts:
 
     def list_service_days(self, start, end):
         return tuple(day for day in self.days if start <= day.work_date <= end)
+
+    def list_historical_assignments(self, start, end):
+        return ()
 
     def case_amounts(self, case_nos):
         return {case: self.amounts.get(case) for case in case_nos}
@@ -125,7 +130,7 @@ def test_xlsx_contains_same_totals_and_forces_text_cells():
     assert book["服務案件"].max_row == 9
     assert book["期間趨勢"].max_row == 7
     assert book["期間趨勢"]["A7"].value == "2026年10月"
-    assert book["月嫂表現比較"]["D3"].value == "排班工時"
+    assert book["月嫂表現比較"]["D3"].value == "服務工時（含歷史估算）"
     assert book["月嫂表現比較"]["B4"].value == "2026-09-01 ～ 2026-09-30"
 
 
@@ -209,6 +214,34 @@ def test_user_example_october_november_and_fourth_quarter():
     assert november.service_staff_count == 1
     detail = november.rows[0].cases[0]
     assert detail.total_amount_ntd == 100000 and detail.recognized_amount_ntd == 0
+
+
+def test_historical_assignment_spans_three_months_and_only_credits_the_opening_month():
+    case_no = "HISTORICAL-THREE-MONTHS"
+    start, end = date(2026, 7, 27), date(2026, 9, 4)
+    facts = Facts()
+    facts.days = ()
+    facts.openings = {case_no: PerformanceCaseOpening(case_no, start, 1)}
+    facts.amounts = {case_no: 57600}
+    assignment = PerformanceHistoricalAssignment(1, case_no, start, end, "週休二日", 8, 30, 24)
+    facts.list_historical_assignments = lambda _start, _end: (assignment,)
+    report_query = query(facts)
+    expected = [(4, 32, 1, 57600), (17, 136, 0, 0), (3, 24, 0, 0)]
+
+    for month, (days, hours, count, amount) in zip((7, 8, 9), expected, strict=True):
+        report = report_query.query(2026, "month", month=month, staff_id=1)
+        assert report.service_staff_count == 1
+        assert (report.totals.service_hours, report.totals.case_count, report.totals.total_amount_ntd) == (hours, count, amount)
+        (case,) = report.rows[0].cases
+        assert (case.case_no, case.work_days, case.service_hours, case.recognized_case_count,
+                case.recognized_amount_ntd, case.total_amount_ntd) == (case_no, days, hours, count, amount, 57600)
+
+    quarter = report_query.query(2026, "quarter", quarter=3, staff_id=1)
+    year = report_query.query(2026, "year", staff_id=1)
+    assert (quarter.totals.service_hours, quarter.totals.case_count, quarter.totals.total_amount_ntd) == (192, 1, 57600)
+    assert year.totals == quarter.totals
+    assert [(point.totals.service_hours, point.totals.case_count, point.totals.total_amount_ntd)
+            for point in quarter.trend] == [row[1:] for row in expected]
 
 
 def test_handover_has_hours_but_never_takes_the_opening_credit():
@@ -296,6 +329,7 @@ def test_opening_repository_resolves_first_day_substitution_after_rebuild():
         [{"case_no": "A", "old_assignment_identity": "assignment:2", "new_assignment_id": 3}],
         [{"case_no": "A", "original_assignment_id": 1, "original_work_date": date(2026, 10, 30),
           "resulting_assignment_id": 2, "resulting_service_date": date(2026, 10, 30)}],
+        [],
     ]
     class Cursor:
         def __enter__(self): return self
@@ -306,3 +340,125 @@ def test_opening_repository_resolves_first_day_substitution_after_rebuild():
         def cursor(self): return Cursor()
     result = MySqlStaffPerformanceQueryRepository(Connection()).list_case_openings(date(2026, 10, 1), date(2026, 10, 31), ("A",))
     assert result == (PerformanceCaseOpening("A", date(2026, 10, 30), 1),)
+
+
+@pytest.mark.parametrize("missing_pricing_reason", [
+    "historical_client_payment_terms_missing",
+    "client_finance_bootstrap_required",
+])
+def test_historical_hours_follow_rest_mode_and_confirmed_days_across_months(monkeypatch, missing_pricing_reason):
+    from infrastructure.mysql import staff_performance_query_repository as adapter
+
+    database = sqlite3.connect(":memory:", detect_types=sqlite3.PARSE_DECLTYPES)
+    database.row_factory = sqlite3.Row
+    database.create_function("YEAR", 1, lambda value: int(value[:4]))
+    database.executescript("""
+        CREATE TABLE orders (case_no TEXT, actual_start_date DATE, status TEXT, service_hours_per_day REAL,
+            service_days INT, client_id INT);
+        CREATE TABLE clients (id INT, service_type TEXT);
+        CREATE TABLE staff (id INT, union_no TEXT, name TEXT);
+        CREATE TABLE scheduling_generations (id INT, case_no TEXT, effective_marker INT);
+        CREATE TABLE staff_schedule (assignment_id INT, generation_id INT, effective_marker INT,
+            is_work_day INT, work_date DATE);
+        CREATE TABLE case_staff_assignments (id INT, case_no TEXT, staff_id INT, generation_id INT,
+            status TEXT, assignment_sequence INT, assigned_start_date DATE, assigned_end_date DATE);
+        CREATE TABLE historical_order_adoption_receipts (id INT, case_no TEXT, outcome TEXT);
+        CREATE TABLE historical_order_pairing_evidence (receipt_id INT, staff_id INT, assignment_id INT,
+            source_start_date DATE, source_end_date DATE);
+        CREATE TABLE historical_service_day_projections (case_no TEXT, current_event_id INT);
+        CREATE TABLE historical_service_day_items (event_id INT, assignment_id INT, staff_id INT, actual_service_days INT);
+        CREATE TABLE scheduling_rebuild_lineage (old_assignment_identity TEXT, new_assignment_id INT);
+        CREATE TABLE scheduling_leave_substitution_receipts (case_no TEXT, batch_key TEXT);
+        CREATE TABLE scheduling_leave_substitution_outcomes (batch_key TEXT, original_assignment_id INT,
+            original_work_date DATE, resulting_assignment_id INT, resulting_service_date DATE);
+        INSERT INTO staff VALUES (1,'U1','甲'),(2,'U2','乙');
+        INSERT INTO clients VALUES (1,'週休二日'),(2,'週休一日');
+        INSERT INTO orders VALUES
+            ('H','2024-10-30','歷史訂單－帳務完成',8,11,1),
+            ('P','2023-11-02','歷史訂單－服務完成',8,4,2),
+            ('A','2024-10-03','歷史訂單－服務中',8,3,1),
+            ('U','2024-10-01','歷史訂單－未服務',8,5,1),
+            ('S','2024-10-20','歷史訂單－服務完成',8,4,1);
+        INSERT INTO historical_order_adoption_receipts VALUES
+            (1,'H','adopted'),(2,'H','adopted'),(3,'P','adopted'),(4,'A','adopted'),
+            (5,'U','adopted'),(6,'S','adopted');
+        INSERT INTO case_staff_assignments VALUES
+            (1,'H',2,NULL,'completed',1,'2024-10-30','2024-11-05'),
+            (2,'H',1,NULL,'completed',2,'2024-10-30','2024-11-05'),
+            (3,'P',2,NULL,'completed',1,'2023-11-02','2023-11-08'),
+            (4,'A',1,NULL,'completed',1,'2024-10-03','2024-10-12'),
+            (5,'U',2,NULL,'completed',1,'2024-10-01','2024-10-05'),
+            (6,'S',2,NULL,'completed',1,'2024-10-20','2024-10-25'),
+            (7,'S',1,1,'completed',2,'2024-10-20','2024-10-25'),
+            (8,'H',2,NULL,'completed',3,'2024-11-01','2024-11-05');
+        INSERT INTO historical_service_day_projections VALUES ('H',1);
+        INSERT INTO historical_service_day_items VALUES (1,2,1,7),(1,8,2,2);
+        INSERT INTO historical_order_pairing_evidence VALUES
+            (1,2,1,'2024-10-30','2024-11-10'),(2,1,2,'2024-10-30','2024-11-10'),
+            (3,2,3,'2023-11-02','2023-11-08'),(4,1,4,'2024-10-03','2024-10-12'),
+            (4,NULL,NULL,'2024-10-03','2024-10-05'),(5,2,5,'2024-10-01','2024-10-05'),
+            (6,2,6,'2024-10-20','2024-10-25');
+        INSERT INTO scheduling_generations VALUES (1,'S',1);
+        INSERT INTO staff_schedule VALUES (7,1,1,1,'2024-10-20');
+    """)
+
+    class Cursor:
+        def __enter__(self):
+            self.cursor = database.cursor()
+            return self
+
+        def __exit__(self, *args):
+            self.cursor.close()
+
+        def execute(self, sql, params=()):
+            self.cursor.execute(sql.replace("%s", "?"), params)
+
+        def fetchall(self):
+            return self.cursor.fetchall()
+
+    class PricingRepository:
+        def __init__(self, connection):
+            pass
+
+        def case(self, case_no):
+            if case_no == "P":
+                raise ValueError(missing_pricing_reason)
+            return {"H": 12800, "S": 2000}[case_no]
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    monkeypatch.setattr(adapter, "MySqlPricingConfigurationRepository", PricingRepository)
+    monkeypatch.setattr(adapter, "case_total_amount", lambda amount: amount)
+    repository = adapter.MySqlStaffPerformanceQueryRepository(Connection())
+    try:
+        october = query(repository).query(2024, "month", 10)
+        november = query(repository).query(2024, "month", 11)
+        missing_amount = query(repository).query(2023, "month", 11)
+        quarter = query(repository).query(2024, "quarter", quarter=4)
+        continuing_openings = repository.list_case_openings(date(2024, 11, 1), date(2024, 11, 30), ("H",))
+    finally:
+        database.close()
+
+    assert (october.totals.case_count, october.totals.total_amount_ntd, october.totals.service_hours) == (2, 14800, 32)
+    assert october.rows[1].cases == ()
+    historical_case = october.rows[0].cases[0]
+    assert (historical_case.case_no, historical_case.recognized_amount_ntd, historical_case.service_hours) == ("H", 12800, 24)
+    assert historical_case.work_days == 3
+    assert (november.totals.case_count, november.totals.service_hours, november.service_staff_count) == (0, 48, 2)
+    assert continuing_openings == (PerformanceCaseOpening("H", date(2024, 10, 30), 1),)
+    assert november.rows[1].cases[0].service_hours == 16
+    assert missing_amount.rows[1].cases[0].service_hours == 32
+    assert missing_amount.rows[1].cases[0].service_start == date(2023, 11, 2)
+    assert (missing_amount.totals.case_count, missing_amount.totals.total_amount_ntd) == (1, None)
+    assert quarter.totals.case_count == 2
+    assert quarter.totals.service_hours == 80
+    assert [point.totals.service_hours for point in quarter.trend] == [32, 48, 0]
+    assert [(point.totals.case_count, point.totals.total_amount_ntd) for point in quarter.trend] == [
+        (2, 14800), (0, 0), (0, 0),
+    ]
+    assert october.available_years == (2026, 2024, 2023)
+    workbook = load_workbook(BytesIO(export_staff_performance(october)))
+    assert workbook["服務案件"]["I7"].value == 24
+    assert workbook["服務案件"]["L7"].value == 12800

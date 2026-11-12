@@ -5,9 +5,9 @@ import { compareStaffUnionNumbers, staffDisplayLabel } from '../../adapters/staf
 import { staffPerformanceClient, type PerformanceFilters, type PerformanceMetric, type StaffPerformanceReport, type StaffPerformanceRow } from '../../api/reports/staff_performance_client';
 import './StaffPerformancePanel.css';
 
-const labels: Record<PerformanceMetric, string> = { case_count: '接案數', service_hours: '排班工時', total_amount_ntd: '本期認列金額' };
+const labels: Record<PerformanceMetric, string> = { case_count: '接案數', service_hours: '服務工時（含歷史估算）', total_amount_ntd: '本期認列金額' };
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
-const money = (value: number | null) => value === null ? '—' : `NT$ ${number(value)}`;
+const money = (value: number | null) => value === null ? '待確認' : `NT$ ${number(value)}`;
 const display = (value: number | null, metric: PerformanceMetric) => metric === 'total_amount_ntd' ? money(value) : number(value);
 const units: Record<PerformanceMetric, string> = { case_count: '件', service_hours: '小時', total_amount_ntd: '元' };
 const metrics = ['service_hours', 'case_count', 'total_amount_ntd'] as const;
@@ -58,7 +58,7 @@ function StaffDetail({ row, rows, period, staffOptions, onClose }: { row: StaffP
     <header className="performance-drawer-header"><div><span className="performance-pill">個人表現分析</span><h2 id="performance-detail-title">{staffDisplayLabel(row.union_no, row.staff_name)}</h2><p>{period}</p></div><button type="button" className="performance-close" aria-label="關閉個人分析" onClick={onClose}><X size={20} /></button></header>
     <div className="performance-drawer-body"><div className="performance-person-kpis">{(['case_count', 'service_hours', 'total_amount_ntd'] as const).map(key => <article key={key}><span>{labels[key]}</span><strong>{display(row.totals[key], key)}</strong><small>{rank(row, rows, key) === null ? '—' : `第 ${rank(row, rows, key)} 名`}</small></article>)}</div>
       <section className="performance-panel"><h3>個人服務趨勢</h3><MetricButtons value={metric} onChange={setMetric} /><Trend points={row.trend} metric={metric} /></section>
-      <section className="performance-panel performance-table-panel"><div className="performance-table-heading"><h3>案件明細 <small>{row.cases.length} 件</small></h3></div><div className="performance-table-scroll" role="region" aria-label="個人服務案件，可左右捲動" tabIndex={0}><table><thead><tr><th>案件／開案主責</th><th>本期服務日期</th><th className="numeric">排班工時</th><th className="numeric">整案總額</th><th className="numeric">本期認列金額</th></tr></thead><tbody>{row.cases.map(item => {
+      <section className="performance-panel performance-table-panel"><div className="performance-table-heading"><h3>案件明細 <small>{row.cases.length} 件</small></h3></div><div className="performance-table-scroll" role="region" aria-label="個人服務案件，可左右捲動" tabIndex={0}><table><thead><tr><th>案件／開案主責</th><th>本期服務日期</th><th className="numeric">{labels.service_hours}</th><th className="numeric">整案總額</th><th className="numeric">本期認列金額</th></tr></thead><tbody>{row.cases.map(item => {
         const primary = staffOptions.find(staff => staff.staff_id === item.primary_staff_id);
         return <tr key={item.case_no}><td><a href={`#order-workbench-v2?case=${encodeURIComponent(item.case_no)}`}>{item.case_no}</a><small className="performance-staff-number">開案：{item.actual_start_date ?? '待確認'}</small><small className="performance-staff-number">主責：<span>{primary ? staffDisplayLabel(primary.union_no, primary.staff_name) : '待確認'}</span></small></td><td>{item.service_start ?? '—'}{item.service_end && <small className="performance-staff-number">至 {item.service_end}</small>}</td><td className="numeric">{number(item.service_hours)}</td><td className="numeric">{money(item.total_amount_ntd)}</td><td className="numeric">{money(item.recognized_amount_ntd)}</td></tr>;
       })}</tbody></table>{!row.cases.length && <p className="performance-empty">本期沒有服務或認列案件。</p>}</div></section>

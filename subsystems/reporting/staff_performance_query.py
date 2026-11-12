@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Literal, Protocol
 
+from domains.orders.actual_start import calculate_service_dates
+from domains.orders.terms import canonical_service_mode
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 
 PeriodKind = Literal["month", "quarter", "year"]
@@ -24,6 +27,19 @@ class PerformanceServiceDay:
     case_no: str
     work_date: date
     hours: float | None
+    work_days: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class PerformanceHistoricalAssignment:
+    staff_id: int
+    case_no: str
+    start_date: date
+    end_date: date
+    service_mode: str | None
+    hours_per_day: float
+    registered_days: int
+    confirmed_days: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +53,7 @@ class StaffPerformanceFacts(Protocol):
     def list_staff(self) -> tuple[PerformanceStaff, ...]: ...
     def list_years(self) -> tuple[int, ...]: ...
     def list_service_days(self, start: date, end: date) -> tuple[PerformanceServiceDay, ...]: ...
+    def list_historical_assignments(self, start: date, end: date) -> tuple[PerformanceHistoricalAssignment, ...]: ...
     def list_case_openings(self, start: date, end: date, service_cases: tuple[str, ...]) -> tuple[PerformanceCaseOpening, ...]: ...
     def case_amounts(self, case_nos: tuple[str, ...]) -> dict[str, int | None]: ...
 
@@ -108,6 +125,44 @@ def _bounds(year: int, first_month: int, months: int) -> tuple[date, date]:
     return date(year, first_month, 1), date(year, last_month, monthrange(year, last_month)[1])
 
 
+def _historical_service_days(
+    assignments: tuple[PerformanceHistoricalAssignment, ...], start: date, end: date,
+) -> tuple[PerformanceServiceDay, ...]:
+    registered_candidates: dict[str, list[tuple[date, int]]] = defaultdict(list)
+    allocation: dict[tuple[str, int, date], int] = defaultdict(int)
+    case_terms: dict[str, tuple[float, int]] = {}
+
+    def distribute(case_no: str, candidates: list[tuple[date, int]], total: int) -> None:
+        # Differences of rounded cumulative shares preserve the total across report periods.
+        size = len(candidates)
+        previous = 0
+        for index, (day, staff_id) in enumerate(candidates, 1):
+            cumulative = (2 * total * index + size) // (2 * size)
+            if cumulative > previous and start <= day <= end:
+                allocation[case_no, staff_id, day] += cumulative - previous
+            previous = cumulative
+
+    for item in assignments:
+        span = (item.end_date - item.start_date).days + 1
+        mode = canonical_service_mode(item.service_mode) or "連續服務"
+        dates = [day for day in calculate_service_dates(item.start_date, span, mode, ()) if day <= item.end_date]
+        candidates = [(day, item.staff_id) for day in dates or [item.start_date]]
+        case_terms[item.case_no] = (item.hours_per_day, item.registered_days)
+        if item.confirmed_days is None:
+            registered_candidates[item.case_no].extend(candidates)
+        else:
+            distribute(item.case_no, candidates, item.confirmed_days)
+
+    for case_no, candidates in registered_candidates.items():
+        distinct = sorted(set(candidates))
+        distribute(case_no, distinct, case_terms[case_no][1] or len(distinct))
+
+    return tuple(
+        PerformanceServiceDay(staff_id, case_no, day, case_terms[case_no][0] * count, work_days=count)
+        for (case_no, staff_id, day), count in allocation.items()
+    )
+
+
 def _recognition(opening: PerformanceCaseOpening, start: date, end: date, served_cases: set[str]) -> int | None:
     if opening.actual_start_date is None:
         return None if opening.case_no in served_cases else 0
@@ -162,7 +217,11 @@ class StaffPerformanceQuery:
         options = self._facts.list_staff()
         if staff_id is not None and staff_id not in {staff.staff_id for staff in options}:
             raise ValueError("staff_performance_staff_not_found")
-        service_days = self._facts.list_service_days(previous_start, through) if previous_start <= through else ()
+        service_days = ()
+        if previous_start <= through:
+            service_days = self._facts.list_service_days(previous_start, through) + _historical_service_days(
+                self._facts.list_historical_assignments(previous_start, through), previous_start, through,
+            )
         # One person/case/work date is one service day even if source joins repeat it.
         unique: dict[tuple[int, str, date], PerformanceServiceDay] = {}
         for item in service_days:
@@ -200,7 +259,7 @@ class StaffPerformanceQuery:
                 hours = None if any(item.hours is None for item in case_days) else sum(item.hours or 0 for item in case_days)
                 recognized_amount = 0 if recognition == 0 else amounts.get(case_no) if recognition == 1 else None
                 cases.append(PerformanceCase(case_no, min((item.work_date for item in case_days), default=None),
-                    max((item.work_date for item in case_days), default=None), len(case_days), hours, amounts.get(case_no),
+                    max((item.work_date for item in case_days), default=None), sum(item.work_days for item in case_days), hours, amounts.get(case_no),
                     opening.actual_start_date, opening.primary_staff_id, recognition, recognized_amount))
             rows.append(StaffPerformanceRow(staff.staff_id, staff.union_no, staff.staff_name,
                 _totals(own, amounts, openings, start, through, current_served, staff.staff_id),

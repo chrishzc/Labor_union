@@ -42,6 +42,7 @@ describe('staff performance accepted UI', () => {
     fireEvent.click(within(screen.getByRole('table', { name: '月嫂表現比較' })).getByRole('button', { name: '甲月嫂' }));
     const dialog = screen.getByRole('dialog', { name: 'U2 甲月嫂' });
     expect(within(dialog).getByText('PERF-001')).toHaveAttribute('href', '#order-workbench-v2?case=PERF-001');
+    expect(within(dialog).getByRole('columnheader', { name: '服務工時（含歷史估算）' })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉個人分析' }));
     fireEvent.click(screen.getByRole('columnheader', { name: '本期認列金額' }).querySelector('button')!);
     fireEvent.click(screen.getByRole('button', { name: '匯出 XLSX' }));
@@ -83,6 +84,20 @@ describe('staff performance accepted UI', () => {
     expect(within(dialog).getByText('NT$ 99,000')).toBeInTheDocument();
     expect(within(dialog).getByText('U2 甲月嫂')).toBeInTheDocument();
     expect(screen.queryByText(/每日/)).not.toBeInTheDocument();
+  });
+
+  it('shows an unknown case amount while keeping the service hours visible', async () => {
+    const report = performanceFixture();
+    const opening = report.rows[0].cases[0];
+    opening.total_amount_ntd = null;
+    opening.recognized_amount_ntd = null;
+    vi.mocked(staffPerformanceClient.query).mockResolvedValueOnce(report);
+    render(<StaffPerformancePanel />);
+    const table = await screen.findByRole('table', { name: '月嫂表現比較' });
+    fireEvent.click(within(table).getByRole('button', { name: '甲月嫂' }));
+    const detail = screen.getByRole('link', { name: 'PERF-001' }).closest('tr')!;
+    expect(within(detail).getAllByText('待確認')).toHaveLength(2);
+    expect(within(detail).getByText('16.5')).toBeInTheDocument();
   });
 
   it('does not label continuing service as no service when new-case recognition is zero', async () => {
