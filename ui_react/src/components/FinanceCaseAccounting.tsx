@@ -476,6 +476,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const selected=data?.subsidy_plan?.events.at(-1)?.scheme;
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
  const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
+ const pricingTotal=state.pricing?.case_no===initialCase ? state.pricing.impact.staff_total_amount : null;
+ const caseTotal=data?.staff_receivable_ntd??pricingTotal;
  const staffTransactions=data?.transactions.filter(row=>row.kind==='payout'||staffItems.some(s=>s.identity===row.item_identity))??[];
  const staffPayableTotal=staffItems.reduce((sum,item)=>sum+item.expected_ntd,0);
  const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
@@ -552,7 +554,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    staffAmountNtd={data.staff_receivable_ntd}
    onOpenEdit={() => setParamsDrawerOpen(true)}
  />
- <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>
+ <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(caseTotal)}</dd></div></dl>
  <section className="finance-reconciliation-card" aria-label="銀行對帳與帳戶資訊">
    <div className="finance-reconciliation-header">
      <div className="finance-reconciliation-title">
@@ -656,8 +658,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
     <HistoricalPayableLookup caseNo={initialCase} month={today.slice(0, 7)} revision={revision} onCase={onPayableReview} />}
   <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
     <div className="finance-staff-summary-card">
-      <small>應付月嫂總額</small>
-      <strong>{money(staffItems.length ? staffPayableTotal : null)}</strong>
+      <small>{staffItems.length ? '應付月嫂總額' : '月嫂薪資金額'}</small>
+      <strong>{money(staffItems.length ? staffPayableTotal : caseTotal)}</strong>
     </div>
     <div className="finance-staff-summary-card">
       <small>已核銷金額（含內扣手續費）</small>
@@ -788,7 +790,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           })
         ) : (
           <tr>
-            <td colSpan={8} className="finance-state">本案目前無月嫂應付項目。</td>
+            <td colSpan={8} className="finance-state">尚未建立月嫂應付明細。預計撥款日、已核銷與待出款金額待確認。</td>
           </tr>
         )}
       </tbody>
@@ -827,8 +829,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
         </tr>
       </thead>
       <tbody>
-        {refundClientItems.length > 0 ? (
-          refundClientItems.map(row => {
+        {refundClientItems.map(row => {
             const isRefundSettled = row.settled || row.remaining_ntd === 0 || (row.actual_ntd >= row.expected_ntd && row.has_payment);
             return (
               <tr key={row.identity}>
@@ -893,8 +894,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
                 </td>
               </tr>
             );
-          })
-        ) : (
+        })}
+        {refundClientItems.length === 0 && (
           <tr>
             <td>
               <strong>客戶退款</strong>

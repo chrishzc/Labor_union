@@ -9,6 +9,7 @@ import {paymentOverdueReminderClient,type CasePaymentReminder} from '../../../..
 import {ordersQueryClient} from '../../../../../../../api/orders/order_query_client';
 import {clientRegistryClient} from '../../../../../../../api/client_registry/client_registry_client';
 import {caseVirtualAccountClient} from '../../../../../../../api/client_finance/case_virtual_account_client';
+import {accountingPricingClient} from '../../../../../../../api/client_finance/accounting_pricing_client';
 import {clientReceiptQueryClient} from '../../../../../../../api/client_finance/client_receipt_query_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
 import {notifyCaseAccountingChanged} from '../../../../../../../api/shared/case_accounting_changes';
@@ -91,6 +92,34 @@ function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{re
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.previewSubsidyPlan).mockImplementation(async(caseNo,command)=>({case_no:caseNo,scheme:command.scheme,plan_version:command.expected_version,subsidy_ntd:12000,total_ntd:30000,confirmation_only:true,payables:[],blocker:null,preview_fingerprint:'b'.repeat(64)}));vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:caseNo,account_version:0,bank_facts:[],obligations:[]});});
 describe('精簡案件抽屜',()=>{
+ it.each([
+  [null, 'NT$ 48,000'],
+  [0, 'NT$ 0'],
+  [42000, 'NT$ 42,000'],
+ ] as const)('帳務總額為 %s 時直接顯示金額，缺應付明細時保留核銷狀態',async(accountingTotal,amount)=>{
+  vi.mocked(financeAccountingClient.query).mockResolvedValue({
+   ...facts(), staff_receivable_ntd:accountingTotal, staff_items:[], payable_ntd:null, paid_ntd:null,
+  });
+  const pricing = vi.spyOn(accountingPricingClient, 'queryCase').mockResolvedValueOnce({
+   case_no:caseNo, revision:0, source:'legacy',
+   terms:{identity_name:'一般市民',rule:'citizen',subsidy_hours:40,client:{covered:300,excess:300},payroll:{covered:300,excess:300}},
+   impact:{covered_hours:40,excess_hours:120,client_amount:48000,staff_covered_amount:12000,
+    staff_excess_amount:36000,staff_total_amount:48000,subsidy_amount:12000,subsidy_return_amount:0},
+  });
+  try {
+   wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+   const summary=within(await screen.findByLabelText('案件精簡摘要'));
+   expect(summary.getByText(amount,{exact:true})).toBeVisible();
+   const staffSummary=within(screen.getByLabelText('月嫂薪資匯總'));
+   expect(staffSummary.getByText('月嫂薪資金額',{exact:true})).toBeVisible();
+   expect(staffSummary.getByText(amount,{exact:true})).toBeVisible();
+   expect(staffSummary.getAllByText('待確認',{exact:true})).toHaveLength(2);
+   expect(staffSummary.queryByText('已付齊')).not.toBeInTheDocument();
+   expect(screen.getByText(/尚未建立月嫂應付明細/)).toBeVisible();
+  } finally {
+   pricing.mockRestore();
+  }
+ });
  it('committed changes replace stale bank candidates and previews before reconciling the same original row',async()=>{
   let version=1,identity='first';
   const data=()=>({...facts(),client_items:[{...facts().client_items[1],identity,expected_ntd:1000,actual_ntd:0,remaining_ntd:1000,version:`${version}:1:0`}]});
