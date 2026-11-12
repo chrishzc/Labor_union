@@ -9,7 +9,7 @@ from domains.controlled_files.reference_finalize import canonical_scheduling_obj
 from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository, _storage_locator_for
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
 from infrastructure.file import storage_layout as layout
-from subsystems.controlled_files.workflow import ControlledFileOwner as Owner, ControlledFilePurpose as Purpose
+from subsystems.controlled_files.workflow import ControlledFileOwner as Owner, ControlledFilePurpose as Purpose, ControlledFileWorkflow
 
 
 @pytest.fixture
@@ -20,19 +20,30 @@ def production(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("purpose,section", [(Purpose.STAFF_RESUME, "resume"), (Purpose.STAFF_CERTIFICATE, "certificates"), (Purpose.STAFF_HEALTH_EXAM, "health_and_police")])
-def test_staff_files_finalize_to_named_owner_directory_and_download_by_old_staging_identity(production, purpose, section):
+@pytest.mark.parametrize("app_env", ["production", "development"])
+def test_staff_files_finalize_to_named_owner_directory_and_download_by_old_staging_identity(production, monkeypatch, purpose, section, app_env):
+    monkeypatch.setenv("APP_ENV", app_env)
     storage = FileSystemControlledFileStorage(production)
     content = b"synthetic staff document"
     staged = storage.put_staged(idempotency_key="fixture:staff-file", filename="document.pdf", mime_type="application/pdf", content=content)
     candidate = SimpleNamespace(owner=Owner.STAFF, purpose=purpose, subject_reference="12", object_key="resume",
                                 mime_type="application/pdf", sha256_digest=staged.sha256_digest)
-    locator = _storage_locator_for(candidate, {}, version=3, staff_record={"id": 12, "union_no": "ST012", "name": "測試月嫂"})
+    locator = _storage_locator_for(candidate, {"storage_locator": staged.staging_id}, version=3,
+                                   staff_record={"id": 12, "union_no": "ST012", "name": "測試月嫂"})
+    if app_env == "development" and purpose is not Purpose.STAFF_RESUME:
+        assert locator == staged.staging_id
+        return
     assert locator.startswith(f"{layout.STAFF_DIRECTORY}/ST012_測試月嫂/{section}/")
     assert "v3_" in locator
     storage.finalize_staged(staged.staging_id, expected_sha256=staged.sha256_digest, object_reference=locator)
     assert (production / locator).read_bytes() == content
+    assert not (production / "_staging" / "objects" / "cf" / staged.staging_id / "payload.bin").exists()
     assert all((production / layout.STAFF_DIRECTORY / "ST012_測試月嫂" / name).is_dir() for name in ("resume", "certificates", "health_and_police"))
-    assert storage.read_registered_staged(staged.staging_id, expected_sha256=staged.sha256_digest).content == content
+    readback = SimpleNamespace(sha256_digest=staged.sha256_digest, filename="document.pdf", mime_type="application/pdf")
+    reference = SimpleNamespace(staging_id=staged.staging_id, readback=readback)
+    repository = SimpleNamespace(get_download_reference=lambda _: reference)
+    download = ControlledFileWorkflow(repository, storage, None, None).download("cf_" + "b" * 32)
+    assert download.content == content
 
 
 @pytest.mark.parametrize("purpose,kind,label", [(Purpose.BABY_LOG_PHOTO, "baby_log_photo", "寶寶"), (Purpose.MEAL_PHOTO, "meal_photo", "餐點")])
@@ -54,7 +65,9 @@ def test_contract_pdf_and_menu_have_their_business_directories(production):
     assert _storage_locator_for(candidate, {}).startswith(layout.MEDIA_DIRECTORY + "/rich_menus/")
 
 
-def test_finalize_intent_uses_existing_queue_and_never_commits_outer_transaction(production):
+@pytest.mark.parametrize("app_env", ["production", "development"])
+def test_finalize_intent_uses_existing_queue_and_never_commits_outer_transaction(production, monkeypatch, app_env):
+    monkeypatch.setenv("APP_ENV", app_env)
     calls = []
     class Cursor:
         rowcount = 1
@@ -62,7 +75,8 @@ def test_finalize_intent_uses_existing_queue_and_never_commits_outer_transaction
         def __exit__(self, *_): pass
         def execute(self, sql, parameters): calls.append((sql, parameters))
     connection = SimpleNamespace(cursor=lambda: Cursor(), commit=lambda: pytest.fail("no hidden commit"))
-    candidate = SimpleNamespace(owner=Owner.STAFF, staging_id="cfs_" + "a" * 32, sha256_digest="c" * 64)
+    candidate = SimpleNamespace(owner=Owner.STAFF, purpose=Purpose.STAFF_RESUME,
+                                staging_id="cfs_" + "a" * 32, sha256_digest="c" * 64)
     file_id = "cf_" + "b" * 32
     MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(candidate, file_id, datetime.now(timezone.utc))
     assert len(calls) == 1 and "INSERT INTO controlled_file_finalize_intents" in calls[0][0]
@@ -72,7 +86,8 @@ def test_finalize_intent_uses_existing_queue_and_never_commits_outer_transaction
 def test_development_files_do_not_gain_new_finalize_jobs(production, monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
     connection = SimpleNamespace(cursor=lambda: pytest.fail("must not queue old development data"))
-    MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(object(), "unused", datetime.now(timezone.utc))
+    candidate = SimpleNamespace(owner=Owner.STAFF, purpose=Purpose.STAFF_CERTIFICATE)
+    MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(candidate, "unused", datetime.now(timezone.utc))
 
 
 def test_scheduling_keeps_its_existing_attachment_owned_finalize_intent(production):
@@ -80,7 +95,8 @@ def test_scheduling_keeps_its_existing_attachment_owned_finalize_intent(producti
     MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(SimpleNamespace(owner=Owner.SCHEDULING, purpose=Purpose.BABY_LOG_PHOTO), "unused", datetime.now(timezone.utc))
 
 
-def test_new_layout_runner_filters_out_all_existing_legacy_locators(production):
+@pytest.mark.parametrize("staff_resume_only", [False, True])
+def test_new_layout_runner_filters_out_all_existing_legacy_locators(production, staff_resume_only):
     from infrastructure.mysql.controlled_file_finalize_worker import MySqlControlledFileFinalizeRunner
     calls = []
     class Cursor:
@@ -89,7 +105,12 @@ def test_new_layout_runner_filters_out_all_existing_legacy_locators(production):
         def execute(self, sql, parameters): calls.append((sql, parameters))
         def fetchall(self): return ()
     connection = SimpleNamespace(cursor=lambda: Cursor(), close=lambda: None)
-    result = MySqlControlledFileFinalizeRunner(lambda: connection, object(), "fixture-worker", lambda: datetime.now(timezone.utc), layout_only=True).run_once()
+    result = MySqlControlledFileFinalizeRunner(lambda: connection, object(), "fixture-worker", lambda: datetime.now(timezone.utc),
+                                               layout_only=True, staff_resume_only=staff_resume_only).run_once()
     assert result == 0
     assert "SUBSTRING_INDEX(object.storage_locator" in calls[0][0]
-    assert calls[0][1][1:5] == layout.BUSINESS_DIRECTORIES[:4]
+    if staff_resume_only:
+        assert "object.owner_type=%s AND object.purpose=%s" in calls[0][0]
+        assert calls[0][1][1:-1] == (Owner.STAFF.value, Purpose.STAFF_RESUME.value, layout.STAFF_DIRECTORY)
+    else:
+        assert calls[0][1][1:-1] == layout.BUSINESS_DIRECTORIES[:4]

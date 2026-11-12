@@ -13,7 +13,7 @@ from typing import Any
 import uuid
 from infrastructure.file.storage_layout import (
     ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY,
-    safe_filename_component, unified_storage_enabled,
+    safe_filename_component, staff_resume_archiving_enabled, unified_storage_enabled,
 )
 
 from domains.controlled_files.reference_finalize import canonical_scheduling_storage_locator
@@ -221,7 +221,7 @@ class MySqlControlledFileWorkflowRepository:
             file_id = f"cf_{uuid.uuid4().hex}"
             applied_at_utc = _mysql_utc(applied_at)
             staff_record = None
-            if unified_storage_enabled() and candidate.owner is ControlledFileOwner.STAFF:
+            if candidate.owner is ControlledFileOwner.STAFF and _uses_archive_layout(candidate):
                 cursor.execute("SELECT id,union_no,name FROM staff WHERE id=%s", (candidate.subject_reference,))
                 staff_record = cursor.fetchone()
                 if not isinstance(staff_record, Mapping):
@@ -270,7 +270,7 @@ class MySqlControlledFileWorkflowRepository:
         # production objects use the existing committed finalize queue.
         # Scheduling already queues its own finalize intent together with the
         # authoritative service-day attachment reference. Do not duplicate it.
-        if not unified_storage_enabled() or (candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {
+        if not _uses_archive_layout(candidate) or (candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {
             ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
         }):
             return
@@ -685,8 +685,14 @@ def _preview_fingerprint_from_context(row: Mapping[str, object]) -> PreviewFinge
     )
 
 
+def _uses_archive_layout(candidate: ControlledFileCandidate) -> bool:
+    return unified_storage_enabled() or (
+        candidate.purpose is ControlledFilePurpose.STAFF_RESUME and staff_resume_archiving_enabled()
+    )
+
+
 def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) -> str:
-    if unified_storage_enabled():
+    if _uses_archive_layout(candidate):
         subject = safe_filename_component(candidate.subject_reference)
         digest = candidate.sha256_digest[:6]
         extension = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png",

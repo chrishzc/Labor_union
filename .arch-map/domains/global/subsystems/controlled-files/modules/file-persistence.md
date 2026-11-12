@@ -9,7 +9,7 @@
 
 ## Implementation
 - primary: `infrastructure/db/controlled_file_repository.py`
-- Production-only physical locators use current case/date/kind/sequence or Staff number/name display facts and immutable version/digest; opaque IDs and canonical business object keys remain unchanged. New non-photo registrations enqueue the existing finalize intent in the caller's transaction; Scheduling photos retain their attachment-owned enqueue. No legacy locator rewrite or hidden commit.
+- Archive locators use current case/date/kind/sequence or Staff number/name display facts and immutable version/digest. Unified storage covers its existing purposes, and explicitly configured local absolute roots also archive new staff resumes. New non-photo archive registrations enqueue the existing finalize intent in the caller's transaction; Scheduling photos retain their attachment-owned enqueue. Opaque IDs, canonical business object keys and legacy locators are preserved.
 
 ## Dependencies
 - inbound: `subsystems/controlled_files/workflow.py` — typed facts、claims、receipts 與 caller-owned transaction。

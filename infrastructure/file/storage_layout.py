@@ -35,6 +35,11 @@ def unified_storage_enabled() -> bool:
     return root is not None and (is_nas_storage_root(root) or not is_development_environment())
 
 
+def staff_resume_archiving_enabled() -> bool:
+    root = configured_storage_root()
+    return root is not None and root.is_absolute()
+
+
 def is_nas_storage_root(root: Path) -> bool:
     # Windows source-mode launchers set APP_ENV=development even on the formal
     # NAS installation. The explicitly configured UNC root is authoritative.

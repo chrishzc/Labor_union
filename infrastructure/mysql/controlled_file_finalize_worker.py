@@ -30,6 +30,7 @@ class MySqlControlledFileFinalizeRunner:
         *,
         limit: int = 100,
         layout_only: bool = False,
+        staff_resume_only: bool = False,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("controlled file finalize worker identity is required")
@@ -41,6 +42,7 @@ class MySqlControlledFileFinalizeRunner:
         self._now = now
         self._limit = limit
         self._layout_only = layout_only
+        self._staff_resume_only = staff_resume_only
 
     def run_once(self) -> int:
         observed_at = self._now()
@@ -59,15 +61,23 @@ class MySqlControlledFileFinalizeRunner:
                     LIMIT %s
                     """
                 parameters = ((observed_at - timedelta(hours=24)).astimezone(timezone.utc).replace(tzinfo=None), self._limit)
-                if self._layout_only:
-                    from infrastructure.file.storage_layout import BUSINESS_DIRECTORIES
+                if self._layout_only or self._staff_resume_only:
+                    from infrastructure.file.storage_layout import BUSINESS_DIRECTORIES, STAFF_DIRECTORY
                     statement = """SELECT intent.finalize_id FROM controlled_file_finalize_intents intent
                         JOIN controlled_file_objects object ON object.id=intent.controlled_file_object_id
                         WHERE (intent.finalize_state IN ('pending','reconciliation_required')
                             OR (intent.finalize_state='processing' AND intent.claimed_at_utc < %s))
-                        AND SUBSTRING_INDEX(object.storage_locator,'/',1) IN (%s,%s,%s,%s)
-                        ORDER BY intent.id LIMIT %s"""
-                    parameters = (parameters[0], *BUSINESS_DIRECTORIES[:4], self._limit)
+                        """
+                    if self._staff_resume_only:
+                        from subsystems.controlled_files.workflow import ControlledFileOwner, ControlledFilePurpose
+                        statement += """AND object.owner_type=%s AND object.purpose=%s
+                            AND SUBSTRING_INDEX(object.storage_locator,'/',1)=%s """
+                        parameters = (parameters[0], ControlledFileOwner.STAFF.value,
+                                      ControlledFilePurpose.STAFF_RESUME.value, STAFF_DIRECTORY, self._limit)
+                    else:
+                        statement += "AND SUBSTRING_INDEX(object.storage_locator,'/',1) IN (%s,%s,%s,%s) "
+                        parameters = (parameters[0], *BUSINESS_DIRECTORIES[:4], self._limit)
+                    statement += "ORDER BY intent.id LIMIT %s"
                 cursor.execute(statement, parameters)
                 rows = cursor.fetchall() or ()
             finalize_ids = tuple(str(row["finalize_id"]) for row in rows)

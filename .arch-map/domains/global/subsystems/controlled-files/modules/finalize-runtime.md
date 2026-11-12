@@ -14,6 +14,7 @@ reports availability without digest-verified storage bytes.
 - workflow: `subsystems/controlled_files/reference_finalize.py`
 - MySQL runner: `infrastructure/mysql/controlled_file_finalize_worker.py`
 - Shared-root production transport can set `layout_only=True`; its bounded selection includes only new 01–04 locators, preserving all pending legacy objects. Existing default runner behavior remains available to its original consumers.
+- Local absolute-root transport selects only Staff resume intents with a 03 archive locator.
 
 ## Verification
 - integration_root: `tests/domains/global/subsystems/controlled-files/integration/`
