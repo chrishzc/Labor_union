@@ -120,8 +120,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 ├── 04_LINE選單資源 (media)/rich_menus/
 │   └── {預設選單底圖|月嫂專用選單底圖}_{發布日期}.png
 ├── 05_資料庫冷備份 (db_backups)/{YYYY-MM}/
-│   ├── union_db_{YYYYMMDD_HHMMSS}.sql.gz
-│   └── union_db_{YYYYMMDD_HHMMSS}.sql.gz.sha256
+│   └── union_db_{YYYYMMDD_HHMMSS}.zip   # 單檔封裝 .sql.gz + .sql.gz.sha256 + receipt .json
 └── _staging/
 ```
 
@@ -130,7 +129,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 - Windows 正式環境單一設定 `.env` 之 `CONTROLLED_FILE_STORAGE_ROOT` 為唯一 NAS 共用根設定（未設定時不得回存專案或本機預設路徑），優先於 `APP_ENV=development` 等啟動標記。
 - 共用根目錄由 NAS 管理者預建並授予子目錄建立 ACL；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging` 並繼承 NAS ACL（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移舊檔）；不合法路徑字元轉底線且嚴防 root escape。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
-- `05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`），Global migration 使用 `_partial/`、`_receipts/YYYY-MM/` 與 `_maintenance/`，備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過才發布成功紀錄；一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
+- `05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`），Global migration 使用 `_partial/` 與 `_maintenance/`，備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取既有 `_receipts/YYYY-MM/` 舊三檔備份）；一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
 - 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。
 
 ## 9. 驗收標準

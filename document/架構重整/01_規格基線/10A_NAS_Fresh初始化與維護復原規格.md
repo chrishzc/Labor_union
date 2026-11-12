@@ -44,9 +44,9 @@
 
 | 維護操作 | 核心契約與失敗保護 |
 |---|---|
-| **每日／手動 SQL 備份** | `mysqldump --single-transaction --quick` 串流輸出 `union_db_YYYYMMDD_HHMMSS.sql.gz`＋`.sha256`（含 InnoDB SQL、views、routines、triggers、events，禁止期間執行 DDL）；通過 UTF-8、SQL 尾註、schema 一致與寫後讀回檢核方於 `_receipts/YYYY-MM/` 寫入成功 marker（不完整材料留 `_partial/`）；寫入前驗證 `write/rename/readback probe` |
+| **每日／手動 SQL 備份** | `mysqldump --single-transaction --quick` 串流輸出至 `_partial/` 暫存 `.sql.gz`（含 InnoDB SQL、views、routines、triggers、events，禁止期間執行 DDL），通過 UTF-8、SQL 尾註、schema 一致與寫後讀回檢核後，打包成單一 `union_db_YYYYMMDD_HHMMSS.zip`（內含 `.sql.gz`、`.sql.gz.sha256` 與成功紀錄 `.json`）原子發布至 `YYYY-MM/`（不再另寫 `_receipts/`）；寫入前驗證 `write/rename/readback probe` |
 | **安全資料升級（Upgrade）** | 人工停機確認 → zero-write canonical plan → 完整備份 → 建立全新 `lu_nas_upgrade_*` schema 執行 `restore → schema／backfill → verify → switch`（已 exact 物件共用入場快照，最後完整 fresh-read 不省略）→ 僅等量授予原雙帳號 schema 權限並實測原 credential 登入 |
-| **備份復原（Restore）** | 由 NAS 專區或手動單選無 symlink `.sql.gz` 檔案（非預設路徑可叫用 Windows 原生選檔窗），驗校驗碼、gzip CRC、解壓後 digest 與 current schema 相容性後，串流匯入全新 `lu_nas_restore_*`（含 SQL events 且全域開啟 `event_scheduler` 時停機隔離處理），通過逐表 CHECK 與帳號認證檢查後方原子切換 `.env` 唯一 `DB_DATABASE`（先複製原 `.env` ACL 規則至暫存檔，digest 變動即停止；SQL 不包含實體照片與 MFA keyring，須另作災難備份） |
+| **備份復原（Restore）** | 由 NAS 專區或手動單選無 symlink `.zip`（或向下相容選取保留完整 `.sha256` 與 `_receipts/` 之既有 `.sql.gz` 備份組）檔案（非預設路徑可叫用 Windows 原生選檔窗），驗封裝結構、校驗碼、gzip CRC、解壓後 digest 與 current schema 相容性後，串流匯入全新 `lu_nas_restore_*`（含 SQL events 且全域開啟 `event_scheduler` 時停機隔離處理），通過逐表 CHECK 與帳號認證檢查後方原子切換 `.env` 唯一 `DB_DATABASE`（先複製原 `.env` ACL 規則至暫存檔，digest 變動即停止；SQL 不包含實體照片與 MFA keyring，須另作災難備份） |
 | **排程與管理端 UI** | 正式機可安裝每日預設臺灣時間 `18:00` 之工作排程（僅限 backup）；管理端「稽核與系統 → 資料庫備份」（[Global Entry Point Governance](19_Global_Entry_Point_Governance.md) 核准路由 `database-backup`）顯示設定時間、最近成功／失敗狀態並提供 CAS version 控制之安全修改（409 stale；不外洩帳號／設定／SQL 或提供檔案下載） |
 
 ## 6. 驗收標準

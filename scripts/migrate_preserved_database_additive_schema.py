@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time as time_module
 from typing import Any, Callable, Iterable, Mapping
+import zipfile
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -5065,15 +5066,47 @@ def _validate_plan_integrity(
             raise UpgradeBlocked(f"plan source identity mismatch: {key}")
 
 
+def _zip_sql_gz_member(archive: zipfile.ZipFile) -> zipfile.ZipInfo:
+    members = [
+        info for info in archive.infolist()
+        if not info.is_dir()
+        and "/" not in info.filename
+        and "\\" not in info.filename
+        and ((info.external_attr >> 16) & 0o170000) != 0o120000
+        and info.filename.endswith(".sql.gz")
+    ]
+    if len(members) != 1:
+        raise UpgradeBlocked("source zip backup must contain one .sql.gz member")
+    return members[0]
+
+
+@contextmanager
+def _open_decompressed_dump_stream(path: Path):
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path, "r") as archive:
+            member = _zip_sql_gz_member(archive)
+            with archive.open(member, "r") as entry, gzip.GzipFile(fileobj=entry, mode="rb") as stream:
+                yield stream
+        return
+    with gzip.open(path, "rb") as stream:
+        yield stream
+
+
 def validate_dump(
     dump_path: Path, receipt_path: Path, source: str, identity: Mapping[str, Any]
 ) -> dict[str, Any]:
     path = dump_path.expanduser().resolve()
     if not path.is_file() or path.stat().st_size <= 0:
         raise UpgradeBlocked("source dump is missing or empty")
-    opener = gzip.open if path.suffix == ".gz" else Path.open
-    with opener(path, "rb") as stream:
-        head = stream.read(1024 * 1024)
+    try:
+        if path.suffix in {".gz", ".zip"}:
+            with _open_decompressed_dump_stream(path) as stream:
+                head = stream.read(1024 * 1024)
+        else:
+            with path.open("rb") as stream:
+                head = stream.read(1024 * 1024)
+    except (zipfile.BadZipFile, OSError, EOFError) as error:
+        raise UpgradeBlocked("source backup archive is unreadable or corrupted") from error
     if MYSQL_DUMP_MARKER not in head:
         raise UpgradeBlocked("source backup is not a mysqldump artifact")
     markers = (
@@ -5166,9 +5199,9 @@ def create_source_dump(
 
 
 def restore_sql_dump(command, dump_path, environment):
-    """Import native SQL or stream a gzip archive without a plaintext disk copy."""
+    """Import native SQL or stream a gzip/zip archive without a plaintext disk copy."""
     path = Path(dump_path).expanduser().resolve()
-    if path.suffix != ".gz":
+    if path.suffix not in {".gz", ".zip"}:
         with path.open("rb") as stream:
             return subprocess.run(command, stdin=stream, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, env=environment, check=False)
@@ -5179,12 +5212,12 @@ def restore_sql_dump(command, dump_path, environment):
     deadline.daemon = True
     deadline.start()
     try:
-        with gzip.open(path, "rb") as stream:
+        with _open_decompressed_dump_stream(path) as stream:
             while chunk := stream.read(65536):
                 process.stdin.write(chunk)
         process.stdin.close()
         return subprocess.CompletedProcess(command, process.wait(timeout=7200))
-    except (OSError, EOFError, subprocess.TimeoutExpired):
+    except (OSError, EOFError, subprocess.TimeoutExpired, zipfile.BadZipFile, UpgradeBlocked):
         return subprocess.CompletedProcess(command, 2)
     finally:
         deadline.cancel()

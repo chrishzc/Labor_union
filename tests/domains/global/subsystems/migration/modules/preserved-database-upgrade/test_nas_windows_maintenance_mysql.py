@@ -83,9 +83,10 @@ def test_sql_backup_restore_and_canonical_upgrade_keep_source_accounts_and_neigh
                     "--default-character-set=utf8mb4"]
         monkeypatch.setattr(nas.migration, "_mysql_base", client_command)
         backup = nas.backup(settings)
-        assert backup.suffixes == [".sql", ".gz"]
-        assert backup.with_suffix(".gz.sha256").is_file()
+        assert backup.suffix == ".zip"
         assert not list(settings["backup_root"].glob("????-??/*.sql"))
+        assert not list(settings["backup_root"].glob("????-??/*.sql.gz"))
+        assert not (settings["backup_root"] / "_receipts").exists()
         source_before = nas.migration._table_evidence(nas.reader(settings), source_db)
         nas.restore(settings, backup)
         restored = dotenv_values(runtime)["DB_DATABASE"]

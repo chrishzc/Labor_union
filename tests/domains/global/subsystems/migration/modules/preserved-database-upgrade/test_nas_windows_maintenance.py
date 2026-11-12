@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 from fastapi import FastAPI
@@ -291,7 +292,7 @@ def test_file_picker_uses_native_single_file_dialog_sta_utf8_and_no_user_timeout
     assert options["creationflags"] == nas.subprocess.CREATE_NO_WINDOW
     assert options["encoding"] == "utf-8"
     script = args[-1]
-    assert "OpenFileDialog" in script and "*.sql.gz" in script
+    assert "OpenFileDialog" in script and "*.zip;*.sql.gz" in script
     assert "$dialog.CheckFileExists=$true" in script and "$dialog.Multiselect=$false" in script
     assert "O''Brien" in script and "UTF8Encoding" in script
 
@@ -308,8 +309,7 @@ def test_file_picker_cancel_or_failure_does_not_fall_back_to_typed_path(settings
 
 def test_verified_manual_source_is_read_only_and_restore_creates_default_journal_folder(settings, monkeypatch, tmp_path):
     archive, _ = make_backup(settings, monkeypatch)
-    source_files = (archive, archive.with_suffix(".gz.sha256"), nas.receipt_path(archive))
-    before = {path: path.read_bytes() for path in source_files}
+    before = archive.read_bytes()
     parent = tmp_path / "replacement-share"
     parent.mkdir()
     settings["backup_root"] = parent / nas.BACKUP_FOLDER
@@ -320,7 +320,7 @@ def test_verified_manual_source_is_read_only_and_restore_creates_default_journal
     with pytest.raises(nas.MaintenanceBlocked, match="synthetic stop"):
         nas.restore(settings, archive)
     assert settings["backup_root"].is_dir()
-    assert {path: path.read_bytes() for path in source_files} == before
+    assert archive.read_bytes() == before
 
 
 def test_manual_backup_parent_junction_is_rejected_before_database_access(settings, monkeypatch):
@@ -337,10 +337,17 @@ def test_daily_dump_is_complete_keeps_history_and_never_puts_password_in_argumen
     second = nas.backup(settings)
     assert first != second and first.exists()
     assert nas.validate_backup(first)["status"] == "completed"
-    assert first.parent.name == "2026-10" and first.name == "union_db_20261030_180000.sql.gz"
-    assert b"synthetic fixture" in gzip.decompress(first.read_bytes())
-    assert first.with_suffix(".gz.sha256").is_file()
+    assert first.parent.name == "2026-10" and first.name == "union_db_20261030_180000.zip"
+    with zipfile.ZipFile(first, "r") as zf:
+        assert set(zf.namelist()) == {
+            "union_db_20261030_180000.sql.gz",
+            "union_db_20261030_180000.sql.gz.sha256",
+            "union_db_20261030_180000.json",
+        }
+        assert b"synthetic fixture" in gzip.decompress(zf.read("union_db_20261030_180000.sql.gz"))
     assert not list(settings["backup_root"].rglob("*.sql"))
+    assert not list(settings["backup_root"].rglob("*.sql.gz"))
+    assert not (settings["backup_root"] / "_receipts").exists()
     command, environment = calls[0]
     assert "--single-transaction" in command and "--quick" in command
     assert "--databases" not in command and "union_db" == command[-1]
@@ -374,9 +381,22 @@ def test_tampered_backup_stops_before_any_restore_connection(settings, monkeypat
         nas.restore(settings, path)
 
 
+def _rewrite_zip_bundle(bundle: Path, transform) -> None:
+    with zipfile.ZipFile(bundle, "r") as src:
+        entries = {name: src.read(name) for name in src.namelist()}
+    transform(entries)
+    with zipfile.ZipFile(bundle, "w") as dst:
+        for name, data in entries.items():
+            ctype = zipfile.ZIP_STORED if name.endswith(".sql.gz") else zipfile.ZIP_DEFLATED
+            dst.writestr(name, data, compress_type=ctype)
+
+
 def test_tampered_checksum_stops_before_restore(settings, monkeypatch):
     path, _ = make_backup(settings, monkeypatch)
-    path.with_suffix(".gz.sha256").write_text('0' * 64 + "  " + path.name, encoding="ascii")
+    sql_name = path.stem + ".sql.gz"
+    _rewrite_zip_bundle(path, lambda entries: entries.__setitem__(
+        sql_name + ".sha256", ('0' * 64 + "  " + sql_name + "\n").encode("ascii")
+    ))
     monkeypatch.setattr(nas, "writer", lambda *_: pytest.fail("checksum failure must not connect"))
     with pytest.raises(nas.MaintenanceBlocked, match="檢查碼"):
         nas.restore(settings, path)
@@ -395,12 +415,19 @@ def test_full_disk_during_compression_never_publishes_success(settings, monkeypa
 
 
 def test_bad_gzip_crc_is_rejected_even_with_matching_archive_checksum(settings, monkeypatch):
+    import hashlib
     path, _ = make_backup(settings, monkeypatch)
-    path.write_bytes(path.read_bytes()[:-6])
-    info = json.loads(nas.receipt_path(path).read_text(encoding="utf-8"))
-    info.update(sha256=nas.digest(path), size=path.stat().st_size)
-    nas.receipt_path(path).write_text(json.dumps(info), encoding="utf-8")
-    path.with_suffix(".gz.sha256").write_text(info["sha256"] + "  " + path.name + '\n', encoding="ascii")
+    sql_name = path.stem + ".sql.gz"
+    json_name = path.stem + ".json"
+    def corrupt_inner_gzip(entries):
+        truncated = entries[sql_name][:-6]
+        entries[sql_name] = truncated
+        new_hash = hashlib.sha256(truncated).hexdigest()
+        info = json.loads(entries[json_name].decode("utf-8"))
+        info.update(sha256=new_hash, size=len(truncated))
+        entries[json_name] = json.dumps(info).encode("utf-8")
+        entries[sql_name + ".sha256"] = f"{new_hash}  {sql_name}\n".encode("ascii")
+    _rewrite_zip_bundle(path, corrupt_inner_gzip)
     monkeypatch.setattr(nas, "writer", lambda *_: pytest.fail("bad compression must not create a database"))
     with pytest.raises(nas.MaintenanceBlocked, match="壓縮檔損壞"):
         nas.restore(settings, path)
@@ -409,12 +436,12 @@ def test_bad_gzip_crc_is_rejected_even_with_matching_archive_checksum(settings, 
 def test_uncommitted_pair_is_excluded_and_previous_archive_is_kept(settings, monkeypatch):
     first, _ = make_backup(settings, monkeypatch)
     original = first.read_bytes()
-    monkeypatch.setattr(nas, "save", lambda *_: (_ for _ in ()).throw(OSError("synthetic publication failure")))
+    monkeypatch.setattr(nas, "_publish_backup_bundle", lambda *_args: (_ for _ in ()).throw(OSError("synthetic publication failure")))
     with pytest.raises(OSError):
         nas.backup(settings)
     assert [path for path, _ in nas.available_backups(settings)] == [first]
     assert first.read_bytes() == original
-    assert len(list(first.parent.glob("*.sql.gz"))) == 2
+    assert list(first.parent.glob("*.zip")) == [first]
 
 
 def test_same_second_backup_never_overwrites_existing_artifact(settings, monkeypatch):
@@ -443,12 +470,73 @@ def test_compressed_import_streams_sql_bytes_to_client_without_plaintext_file(tm
     payload = ("中文復原資料\n".encode() + b"\x00\xff") * 10000
     archive = tmp_path / "fixture.sql.gz"
     archive.write_bytes(gzip.compress(payload))
+    bundle = tmp_path / "fixture.zip"
+    with zipfile.ZipFile(bundle, "w") as zf:
+        zf.write(archive, arcname="fixture.sql.gz", compress_type=zipfile.ZIP_STORED)
     output = tmp_path / "digest.txt"
     command = [sys.executable, "-c", "import sys,hashlib;from pathlib import Path;h=hashlib.sha256();[(h.update(c)) for c in iter(lambda:sys.stdin.buffer.read(65536),b'')];Path(sys.argv[1]).write_text(h.hexdigest())", str(output)]
-    result = nas.migration.restore_sql_dump(command, archive, os.environ.copy())
     import hashlib
-    assert result.returncode == 0 and output.read_text() == hashlib.sha256(payload).hexdigest()
+    expected_digest = hashlib.sha256(payload).hexdigest()
+    for source in (archive, bundle):
+        output.unlink(missing_ok=True)
+        result = nas.migration.restore_sql_dump(command, source, os.environ.copy())
+        assert result.returncode == 0 and output.read_text() == expected_digest
     assert not list(tmp_path.glob("*.sql"))
+
+
+def test_validate_dump_accepts_zip_bundle_with_bundle_digest(tmp_path):
+    sql_bytes = b"-- MySQL dump\n-- Host: fixture    Database: union_db\n-- Dump completed on 2026-11-12\n"
+    inner = tmp_path / "union_db_20261112_090000.sql.gz"
+    inner.write_bytes(gzip.compress(sql_bytes))
+    bundle = tmp_path / "union_db_20261112_090000.zip"
+    with zipfile.ZipFile(bundle, "w") as zf:
+        zf.write(inner, arcname=inner.name, compress_type=zipfile.ZIP_STORED)
+    receipt = tmp_path / "backup.receipt.json"
+    receipt.write_text(json.dumps({
+        "kind": "source_backup", "database": "union_db",
+        "server": "fixture-server", "sha256": nas.digest(bundle), "size": bundle.stat().st_size,
+    }), encoding="utf-8")
+    verified = nas.migration.validate_dump(bundle, receipt, "union_db", {"server": "fixture-server"})
+    assert verified["sha256"] == nas.digest(bundle)
+
+
+def test_legacy_three_file_backup_remains_discoverable_and_single_zip_deletion_is_clean(settings, monkeypatch):
+    import hashlib
+    bundle, _ = make_backup(settings, monkeypatch)
+    root = settings["backup_root"]
+    legacy_dir = root / "2026-09"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_archive = legacy_dir / "union_db_20260915_180000.sql.gz"
+    raw_sql = b"-- MySQL dump\n-- Host: fixture    Database: union_db\n-- legacy\n-- Dump completed on 2026-09-15\n"
+    compressed = gzip.compress(raw_sql)
+    legacy_archive.write_bytes(compressed)
+    archive_sha = hashlib.sha256(compressed).hexdigest()
+    legacy_archive.with_suffix(".gz.sha256").write_text(f"{archive_sha}  {legacy_archive.name}\n", encoding="ascii")
+    receipt = {
+        "format": "nas-sql-backup/v2",
+        "status": "completed",
+        "created_at": "2026-09-15T10:00:00+00:00",
+        "database": "union_db",
+        "server": "fixture-server",
+        "sha256": archive_sha,
+        "size": len(compressed),
+        "inventory": {"tables": [], "charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"},
+        "archive": legacy_archive.name,
+        "month": "2026-09",
+        "sql_sha256": hashlib.sha256(raw_sql).hexdigest(),
+        "sql_size": len(raw_sql),
+    }
+    nas.receipt_path(legacy_archive).parent.mkdir(parents=True, exist_ok=True)
+    nas.receipt_path(legacy_archive).write_text(json.dumps(receipt), encoding="utf-8")
+
+    listed = [path for path, _ in nas.available_backups(settings)]
+    assert listed == [bundle, legacy_archive]
+    assert nas.validate_backup(bundle)["status"] == "completed"
+    assert nas.validate_backup(legacy_archive)["status"] == "completed"
+
+    # Deleting the single .zip file completely removes that backup with zero sidecar files left.
+    bundle.unlink()
+    assert [path for path, _ in nas.available_backups(settings)] == [legacy_archive]
 
 
 def test_arbitrary_external_file_is_not_executed_as_sql(settings, tmp_path, monkeypatch):

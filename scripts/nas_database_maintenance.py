@@ -20,6 +20,8 @@ import subprocess
 import sys
 from threading import Timer
 from uuid import uuid4
+import zipfile
+import zlib
 
 if not hasattr(Path, "is_junction"):
     def _is_junction(self) -> bool:
@@ -47,6 +49,7 @@ BACKUP_FOLDER = DATABASE_BACKUP_DIRECTORY
 LOCAL_STATUS = SCHEDULE.parent / "last-result.json"
 TAIPEI = timezone(timedelta(hours=8))
 ARCHIVE_NAME = re.compile(r"union_db_(\d{8}_\d{6})\.sql\.gz\Z")
+BUNDLE_NAME = re.compile(r"union_db_(\d{8}_\d{6})\.zip\Z")
 IDENTIFIER = re.compile(r"[A-Za-z0-9_]{1,64}\Z")
 # The NAS IO adapter below mirrors this CLI revision's receipt/verification
 # orchestration. A future artifact must be reviewed, not silently skipped.
@@ -365,6 +368,78 @@ def receipt_path(archive):
     return archive.parent.parent / "_receipts" / archive.parent.name / (archive.name.removesuffix(".sql.gz") + ".json")
 
 
+def _backup_kind_and_stamp(path):
+    path = Path(path)
+    match = BUNDLE_NAME.fullmatch(path.name)
+    if match:
+        return "zip", match.group(1)
+    match = ARCHIVE_NAME.fullmatch(path.name)
+    if match:
+        return "legacy", match.group(1)
+    return None
+
+
+def _read_zip_backup(archive, stamp, *, verify_payload):
+    sql_name = f"union_db_{stamp}.sql.gz"
+    checksum_name = sql_name + ".sha256"
+    receipt_name = f"union_db_{stamp}.json"
+    expected_names = {sql_name, checksum_name, receipt_name}
+    try:
+        with zipfile.ZipFile(archive, "r") as zf:
+            infos = zf.infolist()
+            require(
+                len(infos) == 3
+                and all(
+                    not info.is_dir()
+                    and "/" not in info.filename
+                    and "\\" not in info.filename
+                    and ((info.external_attr >> 16) & 0o170000) != 0o120000
+                    for info in infos
+                )
+                and {info.filename for info in infos} == expected_names,
+                "找不到完整備份、校驗檔與成功紀錄。",
+            )
+            receipt = json.loads(zf.read(receipt_name).decode("utf-8"))
+            require(
+                receipt.get("format") == "nas-sql-backup/v2"
+                and receipt.get("status") == "completed"
+                and receipt.get("bundle") == archive.name
+                and receipt.get("archive") == sql_name
+                and receipt.get("month") == archive.parent.name,
+                "不是有效的 NAS 資料庫備份。",
+            )
+            checksum_text = zf.read(checksum_name).decode("ascii").strip()
+            require(checksum_text == receipt["sha256"] + "  " + sql_name, "備份檢查碼不符，已停止；原資料庫不變。")
+            if not verify_payload:
+                return receipt
+            sql_info = zf.getinfo(sql_name)
+            require(sql_info.file_size == receipt["size"], "備份檢查碼不符，已停止；原資料庫不變。")
+            hasher, total = hashlib.sha256(), 0
+            with zf.open(sql_name, "r") as member:
+                while chunk := member.read(65536):
+                    hasher.update(chunk)
+                    total += len(chunk)
+            require(hasher.hexdigest() == receipt["sha256"] and total == receipt["size"],
+                    "備份檢查碼不符，已停止；原資料庫不變。")
+            with zf.open(sql_name, "r") as member:
+                sql = verify_gzip_stream(member)
+            require(sql["sha256"] == receipt["sql_sha256"] and sql["size"] == receipt["sql_size"],
+                    "備份解壓驗證不符，已停止。")
+            return {**receipt, "bundle_sha256": digest(archive), "bundle_size": archive.stat().st_size}
+    except (zipfile.BadZipFile, OSError, UnicodeDecodeError, ValueError, KeyError):
+        raise MaintenanceBlocked("備份檔損壞或檢查碼不符，已停止；原資料庫不變。") from None
+
+
+def read_backup_receipt(archive):
+    archive = Path(archive)
+    parsed = _backup_kind_and_stamp(archive)
+    require(parsed is not None, "不是有效的 NAS 資料庫備份。")
+    kind, stamp = parsed
+    if kind == "zip":
+        return _read_zip_backup(archive, stamp, verify_payload=False)
+    return json.loads(receipt_path(archive).read_text(encoding="utf-8"))
+
+
 def backup_time():
     return datetime.now(TAIPEI)
 
@@ -522,6 +597,10 @@ def apply_candidate_additive_migrations(config, candidate, run, preview):
     return current
 
 
+def _publish_backup_bundle(pending, bundle):
+    pending.rename(bundle)
+
+
 def backup(settings):
     print("正在備份資料，完成前請勿關閉視窗。", flush=True)
     root = destination_ready(settings, writable=True)
@@ -530,9 +609,12 @@ def backup(settings):
     moment = backup_time()
     month, stem = moment.strftime("%Y-%m"), moment.strftime("union_db_%Y%m%d_%H%M%S")
     archive_name = stem + ".sql.gz"
+    bundle_name = stem + ".zip"
     month_directory = nas_directory(root, month)
-    archive = month_directory / archive_name
-    require(not archive.exists() and not archive.with_suffix(".gz.sha256").exists() and not receipt_path(archive).exists(),
+    bundle = month_directory / bundle_name
+    legacy_archive = month_directory / archive_name
+    require(not bundle.exists() and not legacy_archive.exists()
+            and not legacy_archive.with_suffix(".gz.sha256").exists() and not receipt_path(legacy_archive).exists(),
             "這個時間已有備份，已停止且不覆寫；請稍後重新選擇備份。")
     directory = nas_directory(root, "_partial", stem + "-" + uuid4().hex[:8])
     before = schema_inventory(config, database)
@@ -566,43 +648,56 @@ def backup(settings):
     receipt = {"format": "nas-sql-backup/v2", "status": "completed", "created_at": datetime.now(timezone.utc).isoformat(),
                "database": database, "host": config.host, "port": config.port, "server": identity["server"],
                "sha256": digest(path), "size": path.stat().st_size, "inventory": before, "archive": archive_name,
-               "month": month, "sql_sha256": sql["sha256"], "sql_size": sql["size"], "kind": "online_sql_snapshot"}
-    checksum = path.with_suffix(".gz.sha256")
-    with checksum.open("x", encoding="ascii", newline="\n") as stream:
-        stream.write(receipt["sha256"] + "  " + archive_name + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    # Receipt is the commit marker for the pair. A crash between these renames
-    # leaves no published receipt and cannot enter status/restore selection.
-    require(not archive.exists() and not archive.with_suffix(".gz.sha256").exists(), "備份名稱已被使用，未覆寫。")
-    path.rename(archive)
-    checksum.rename(archive.with_suffix(".gz.sha256"))
-    require(digest(archive) == receipt["sha256"]
-            and archive.with_suffix(".gz.sha256").read_text(encoding="ascii").strip() == receipt["sha256"] + "  " + archive_name,
-            "NAS 備份發布後檢查碼不符，未標記成功。")
-    nas_directory(root, "_receipts", month)
-    save(receipt_path(archive), receipt)
-    return archive
+               "bundle": bundle_name, "month": month, "sql_sha256": sql["sha256"], "sql_size": sql["size"],
+               "kind": "online_sql_snapshot"}
+    checksum_text = receipt["sha256"] + "  " + archive_name + "\n"
+    receipt_text = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
+    pending_bundle = directory / (bundle_name + ".pending")
+    with pending_bundle.open("xb") as raw:
+        with zipfile.ZipFile(raw, "w") as zf:
+            zf.write(path, arcname=archive_name, compress_type=zipfile.ZIP_STORED)
+            zf.writestr(archive_name + ".sha256", checksum_text.encode("ascii"), compress_type=zipfile.ZIP_DEFLATED)
+            zf.writestr(stem + ".json", receipt_text.encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
+        raw.flush()
+        os.fsync(raw.fileno())
+    pending_digest = digest(pending_bundle)
+    require(not bundle.exists() and not legacy_archive.exists(), "備份名稱已被使用，未覆寫。")
+    _publish_backup_bundle(pending_bundle, bundle)
+    require(digest(bundle) == pending_digest, "NAS 備份發布後檢查碼不符，未標記成功。")
+    shutil.rmtree(directory, ignore_errors=True)
+    return bundle
 
 
-def verify_gzip(path):
+def verify_gzip_stream(raw_stream):
     sha, size, tail = hashlib.sha256(), 0, b""
     try:
-        with gzip.open(path, "rb") as stream:
+        with gzip.GzipFile(fileobj=raw_stream, mode="rb") as stream:
             while chunk := stream.read(65536):
                 sha.update(chunk)
                 size += len(chunk)
                 tail = (tail + chunk)[-2048:]
-    except (OSError, EOFError):
+    except (OSError, EOFError, zlib.error):
         raise MaintenanceBlocked("備份壓縮檔損壞或不完整，已停止。") from None
     require(size and b"-- Dump completed on " in tail, "備份內容不完整，未標記為成功。")
     return {"sha256": sha.hexdigest(), "size": size}
 
 
+def verify_gzip(path):
+    with Path(path).open("rb") as raw_stream:
+        return verify_gzip_stream(raw_stream)
+
+
 def validate_backup(archive):
     archive = Path(archive)
-    require(ARCHIVE_NAME.fullmatch(archive.name) and re.fullmatch(r"\d{4}-\d{2}", archive.parent.name),
+    parsed = _backup_kind_and_stamp(archive)
+    require(parsed is not None and re.fullmatch(r"\d{4}-\d{2}", archive.parent.name),
             "不是按月份歸檔的完整壓縮備份，不能復原。")
+    kind, stamp = parsed
+    if kind == "zip":
+        require(not any(node.is_symlink() or node.is_junction() for node in (archive, *archive.parents)),
+                "備份檔案及資料夾不能是符號連結或轉接點。")
+        require(archive.is_file() and not archive.is_symlink(), "找不到完整備份、校驗檔與成功紀錄。")
+        return _read_zip_backup(archive, stamp, verify_payload=True)
     meta, checksum = receipt_path(archive), archive.with_suffix(".gz.sha256")
     require(not any(node.is_symlink() or node.is_junction()
                     for path in (archive, meta, checksum) for node in (path, *path.parents)),
@@ -771,7 +866,8 @@ def upgrade(settings):
     info = validate_backup(archive)
     require_event_scheduler_safe(write, info)
     save(directory / "backup.receipt.json", {"kind": "source_backup", "created_at": info["created_at"],
-         "database": source, "server": info["server"], "sha256": info["sha256"], "size": info["size"], "exit_code": 0})
+         "database": source, "server": info["server"], "sha256": info.get("bundle_sha256", info["sha256"]),
+         "size": info.get("bundle_size", info["size"]), "exit_code": 0})
     migration.write_receipt(directory / "plan.json", plan)
     operation = directory / "operation.json"
     migration.restore_candidate(config, source, candidate, archive, directory / "backup.receipt.json", operation)
@@ -812,7 +908,8 @@ def restore(settings, archive):
     # The source may be absent/corrupt. Recovery only needs a working server.
     require(not migration.database_exists(config, candidate), "復原副本已存在，請維護人員確認。")
     run = nas_directory(root, "_maintenance", candidate)
-    save(run / "operation.json", {"status": "prepared", "candidate": candidate, "backup_sha256": info["sha256"]})
+    save(run / "operation.json", {"status": "prepared", "candidate": candidate,
+         "backup_sha256": info.get("bundle_sha256", info["sha256"])})
     connection = config.connect()
     try:
         with connection.cursor() as cursor:
@@ -928,21 +1025,37 @@ def registered_backup_enabled():
 
 def available_backups(settings):
     root = settings["backup_root"]
-    for path in sorted((root / "_receipts").glob("????-??/union_db_*.json"), reverse=True):
-        if path.is_symlink():
+    found = []
+    for path in root.glob("????-??/union_db_*.zip"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        parsed = _backup_kind_and_stamp(path)
+        if parsed is None or parsed[0] != "zip":
             continue
         try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-            name, month = info.get("archive", ""), info.get("month", "")
-            if not ARCHIVE_NAME.fullmatch(name) or not re.fullmatch(r"\d{4}-\d{2}", month):
-                continue
-            archive = root / month / name
-            if (info.get("format") == "nas-sql-backup/v2" and info.get("status") == "completed"
-                    and receipt_path(archive) == path and archive.is_file() and not archive.is_symlink()
-                    and archive.with_suffix(".gz.sha256").is_file()):
-                yield archive, info
-        except (OSError, ValueError):
+            info = _read_zip_backup(path, parsed[1], verify_payload=False)
+            found.append((path, info))
+        except (MaintenanceBlocked, OSError, ValueError):
             continue
+    receipts_root = root / "_receipts"
+    if receipts_root.is_dir():
+        for path in receipts_root.glob("????-??/union_db_*.json"):
+            if path.is_symlink():
+                continue
+            try:
+                info = json.loads(path.read_text(encoding="utf-8"))
+                name, month = info.get("archive", ""), info.get("month", "")
+                if not ARCHIVE_NAME.fullmatch(name) or not re.fullmatch(r"\d{4}-\d{2}", month):
+                    continue
+                archive = root / month / name
+                if (info.get("format") == "nas-sql-backup/v2" and info.get("status") == "completed"
+                        and receipt_path(archive) == path and archive.is_file() and not archive.is_symlink()
+                        and archive.with_suffix(".gz.sha256").is_file()):
+                    found.append((archive, info))
+            except (OSError, ValueError):
+                continue
+    found.sort(key=lambda item: (_backup_kind_and_stamp(item[0])[1], str(item[1].get("created_at", "")), item[0].suffix == ".zip"), reverse=True)
+    yield from found
 
 
 def record_backup_result(settings, status, *, message=None, created_at=None):
@@ -1001,7 +1114,7 @@ def select_backup_file(settings):
         "  $owner.StartPosition='CenterScreen'",
         "  $owner.Show()",
         "  $dialog.Title='選擇要復原的資料庫備份'",
-        "  $dialog.Filter='資料庫備份 (*.sql.gz)|*.sql.gz'",
+        "  $dialog.Filter='資料庫備份 (*.zip;*.sql.gz)|*.zip;*.sql.gz'",
         "  $dialog.CheckFileExists=$true",
         "  $dialog.Multiselect=$false",
         "  $dialog.RestoreDirectory=$true",
@@ -1026,7 +1139,7 @@ def choose_backup(settings):
         choices = []
     if not choices:
         print(f"預設備份位置找不到可用備份：{settings['backup_root']}")
-        print("將開啟檔案選擇視窗，請選取 .sql.gz 備份檔；需保留校驗檔與成功紀錄。")
+        print("將開啟檔案選擇視窗，請選取 .zip 或舊版 .sql.gz 備份檔；選取舊版 .sql.gz 時需保留校驗檔與成功紀錄。")
         return select_backup_file(settings)
     paths = [item[0] for item in choices]
     require(paths, "指定位置沒有完整且已完成的備份。")
@@ -1147,7 +1260,7 @@ def main(argv=None):
             else:
                 path = restore(settings, selected_backup)
         if args.mode == "backup":
-            record_backup_result(settings, "passed", created_at=json.loads(receipt_path(path).read_text(encoding="utf-8"))["created_at"])
+            record_backup_result(settings, "passed", created_at=read_backup_receipt(path)["created_at"])
             print(f"備份成功，儲存位置：{path}")
         else:
             print(f"副本驗證與設定切換完成。請重新啟動工會系統，再確認登入與資料。紀錄：{path}")
