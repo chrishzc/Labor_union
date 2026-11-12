@@ -456,6 +456,7 @@ def test_case_only_taishin_bank_entry_opens_case_without_reconciliation_target(m
 
 @pytest.mark.parametrize('owners,format_id,matched,targets,allowed',[
     ([19],'sinopac',[],[],True),
+    ([19],'legacy',[],[],True),
     ([19,20],'sinopac',[],[],False),
     ([],'sinopac',[],[],False),
     ([19],'taishin',[],[],False),
@@ -479,6 +480,7 @@ def test_sinopac_legacy_staff_entry_uses_unique_same_case_staff_without_an_accou
         'row_id':51,'transaction_date':'2026-10-20','format_id':format_id,'direction':'outgoing',
         'debit':11000,'credit':None,'memo':'HC115001','classification_type':'staff_payout',
         'transaction_status':'pending','disposition':'business_pending','review_reason':'sinopac_unique_staff_case_suffix_in_memo',
+        'recorded_pending_reason':'staff_bank_account_ambiguous',
         'matched_identity_ids':json.dumps(matched),'target_identities':json.dumps(targets),
         'bank_references':'{}','resolved_counterparty_account':None,'counterparty_name':None,
         'available_actions':'[]','safe_reference':'SYNTHETIC-LEGACY-51',

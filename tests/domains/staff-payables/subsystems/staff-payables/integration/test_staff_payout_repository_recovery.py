@@ -208,8 +208,10 @@ def test_sinopac_payout_does_not_check_the_reference_against_staff_accounts():
     assert candidate.resulting_status is StaffPayableStatus.COMPLETED
 
 
-def test_sinopac_payout_accepts_selected_obligation_without_recipient_account():
+@pytest.mark.parametrize('format_id', ['sinopac', 'legacy'])
+def test_sinopac_payout_accepts_selected_obligation_without_recipient_account(format_id):
     source = _sinopac_bank_source()
+    source['format_id'] = format_id
     source['bank_references'] = {'備註': 'HC115807服務人員'}
     candidate = _candidate_from_bank_source(source)
     assert candidate.resulting_status is StaffPayableStatus.COMPLETED

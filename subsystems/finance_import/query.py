@@ -823,7 +823,7 @@ def _single_entity_id(row: Mapping[str, Any], prefix: str) -> int | None:
 
 def _sinopac_legacy_staff_id(cursor, row, case_no):
     if (
-        row.get("format_id") != "sinopac" or row.get("direction") != "outgoing"
+        row.get("format_id") not in {"sinopac", "legacy"} or row.get("direction") != "outgoing"
         or _json_list(row.get("matched_identity_ids"))
         or any(str(identity).startswith(("staff:", "client:")) for identity in _json_list(row.get("target_identities")))
     ):
@@ -1185,14 +1185,15 @@ def _enrich_bank_transactions(
                 if _is_same_month(row.get("transaction_date"), item.get("due_date"))
             ]
             amount = _integer_money(row)
+            singles = [item for item in month_rows if 0 <= int(item["amount_due_ntd"]) - amount <= 100]
+            grouped = len(month_rows) > 1 and 0 <= sum(int(item["amount_due_ntd"]) for item in month_rows) - amount <= 100
             if (
-                row.get("format_id") == "sinopac" and row.get("direction") == "outgoing"
+                row.get("format_id") in {"sinopac", "legacy"} and row.get("direction") == "outgoing"
                 and c_type in {"staff_payout", "staff_salary"} and staff_id is not None
-                and not row.get("recorded_pending_reason")
-                and len(month_rows) == 1
+                and row.get("recorded_pending_reason") in {None, "staff_bank_account_ambiguous"}
+                and month_rows and not singles and not grouped
                 and (memo_suffixes or len(target_rows) == len(scoped_rows))
                 and all(item.get("due_date") and item.get("uses_funding_split") == 0 for item in scoped_rows)
-                and not 0 <= int(month_rows[0]["amount_due_ntd"]) - amount <= 100
             ):
                 review_reason = "staff_payout_amount_mismatch"
             if c_type == "client_receipt":
@@ -1202,8 +1203,6 @@ def _enrich_bank_transactions(
             elif len(month_rows) <= 1:
                 selected = month_rows
             else:
-                singles = [item for item in month_rows if 0 <= int(item["amount_due_ntd"]) - amount <= 100]
-                grouped = 0 <= sum(int(item["amount_due_ntd"]) for item in month_rows) - amount <= 100
                 selected = month_rows if grouped and not singles else singles if len(singles) == 1 and not grouped else []
             if c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"} and staff_id is None:
                 unavailable = "staff_unconfirmed"

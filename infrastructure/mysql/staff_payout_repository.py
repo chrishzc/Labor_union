@@ -48,6 +48,7 @@ _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _PAYOUT_CLASSIFICATIONS = frozenset(
     {"staff_payout", "staff_salary", "staff_legacy_subsidy"}
 )
+_SINOPAC_PAYOUT_FORMATS = frozenset({"sinopac", "legacy"})
 _RETURN_CLASSIFICATIONS = frozenset({"staff_payout_return", "staff_salary_return", "non_business_review"})
 _RETURN_IDENTITY = re.compile(r"^return:row:(\d+):source:(\d+)$")
 _REVERSAL_IDENTITY = re.compile(
@@ -648,7 +649,7 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=N
 
 
 def _payout_source_account(row):
-    if row.get("format_id") == "sinopac":
+    if row.get("format_id") in _SINOPAC_PAYOUT_FORMATS:
         return None
     return row.get("resolved_counterparty_account")
 
@@ -808,7 +809,7 @@ def _outgoing_bank_fact(row, staff_id, anomaly_codes):
         anomaly_codes,
         taishin_memo_staff_id=row.get("taishin_memo_staff_id"),
         manual_confirmed_staff_id=row.get("manual_confirmed_staff_id"),
-        is_sinopac_payout=row.get("format_id") == "sinopac",
+        is_sinopac_payout=row.get("format_id") in _SINOPAC_PAYOUT_FORMATS,
     )
 
 
