@@ -43,7 +43,6 @@ db/schema_assembly/labor_union_fresh_schema_v1.json -text whitespace=cr-at-eol
 db/schema_assembly/labor_union_fresh_table_retirements_v1.json -text whitespace=cr-at-eol
 db/cutover_releases/labor_union_validation_schema_v1.json -text whitespace=cr-at-eol
 # Generated snapshot retains formatting from unchanged historical SQL sources.
-db/releases/labor_union_validation_schema_registry_guards_v1.sql -whitespace
 
 *.xlsx binary
 *.xls  binary
@@ -54,5 +53,3 @@ db/releases/labor_union_validation_schema_registry_guards_v1.sql -whitespace
 *.pdf  binary
 
 db/releases/labor_union_validation_schema_finance_case_arrangements_v1.sql -whitespace
-db/releases/labor_union_validation_schema_case_subsidy_plans_v1.sql -whitespace
-db/releases/labor_union_validation_schema_hcm_review_status_v1.sql -whitespace

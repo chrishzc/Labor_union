@@ -39,7 +39,9 @@ jobs:
         run: python -m unittest discover -s tests -p test_migrate_admin_capability_grants_schema.py
       - name: Verify validation schema manifest
         run: python -m scripts.verify_validation_schema_manifest
-      - name: Verify SQL release reproducibility without rebuilding
+      - name: Generate complete validation SQL
+        run: python -m scripts.build_validation_schema_release
+      - name: Verify generated validation SQL
         run: python -m scripts.build_validation_schema_release --check
 
   weekly-report-api:

@@ -4,7 +4,7 @@
   "release_id": "labor-union-validation-schema-client-beclass-query-case-v1",
   "source_bindings": {
     "assembly_sha256": "dd811c24ab1ec654a0c7b985d3bedb47dac2eb0ca7645c38a810954306bc04b9",
-    "validation_manifest_sha256": "017a8e39fd6d4e0e51ce77b29474beae75d7e642461bb9d0d3135ba85170b518",
+    "validation_manifest_sha256": "931ef96134a4a0b866f952714c470b0c90b9b5697af784ffefa3590feb64b8a0",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
   "sql_sha256": "bc811691f6a255e315a80f5cfe17242dad6f2700b208a49d016e5305963e482c",

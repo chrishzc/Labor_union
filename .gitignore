@@ -68,6 +68,7 @@ history/refactor_line_bot
 task-*.md
 PROJECT_SPEC.md
 scratch/
+/db/releases/labor_union_validation_schema*.sql
 certificate-maintenance/
 **/tunnel/token
 .pytest_tmp/

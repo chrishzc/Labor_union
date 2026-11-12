@@ -5,10 +5,10 @@ import json
 
 ROOT = Path(__file__).resolve().parents[8]
 
-def test_direct_arrangement_release_is_selected_and_hash_bound_without_data_backfill():
+def test_direct_arrangement_release_is_selected_and_hash_bound_without_data_backfill(tmp_path):
     from scripts import migrate_preserved_database_additive_schema as migration
     from scripts.schema_assembly import load_schema_assembly
-    from scripts.build_validation_schema_release import verify_release
+    from scripts.build_validation_schema_release import verify_release, write_release
     from scripts.verify_validation_schema_manifest import load_manifest
     manifest_path=ROOT/'db/migration_releases/labor_union_2026_11_04_finance_case_arrangements_v1.json'
     data=json.loads(manifest_path.read_text('utf-8'))
@@ -27,4 +27,6 @@ def test_direct_arrangement_release_is_selected_and_hash_bound_without_data_back
     assert 'PRIMARY KEY (case_no,version)' in sql and 'UNIQUE KEY uk_finance_arrangement_operation' in sql
     assert 'BEFORE UPDATE' in sql and 'BEFORE DELETE' in sql
     assert not any(command in sql.upper() for command in ('UPDATE ORDERS','DELETE FROM','INSERT INTO','ALTER TABLE'))
-    assert verify_release(load_manifest())==[]
+    manifest = load_manifest()
+    release = write_release(manifest, tmp_path / "validation_schema.sql")
+    assert verify_release(manifest, release) == []

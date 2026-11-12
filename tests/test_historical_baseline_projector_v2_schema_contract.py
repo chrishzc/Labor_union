@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from scripts import migrate_preserved_database_additive_schema as migration
-from scripts.build_validation_schema_release import verify_release
+from scripts.build_validation_schema_release import verify_release, write_release
 from scripts.schema_assembly import load_schema_assembly
 from scripts.verify_validation_schema_manifest import load_manifest, verify_manifest
 from shared_kernel.migration_release import load_migration_release_manifest
@@ -83,7 +83,7 @@ def test_v2_descriptor_matches_every_canonical_owned_object() -> None:
     assert canonical["parent_columns"] == {}
 
 
-def test_v2_is_the_fresh_assembly_and_validation_release_terminal() -> None:
+def test_v2_is_the_fresh_assembly_and_validation_release_terminal(tmp_path: Path) -> None:
     assembly = load_schema_assembly()
     validation_manifest = load_manifest()
 
@@ -94,7 +94,8 @@ def test_v2_is_the_fresh_assembly_and_validation_release_terminal() -> None:
     assert "1023_task96_line_safe_review_link_matching_outbox_v1.sql" in names
     assert validation_manifest["schema_parts"]["terminal_artifact"] == names[-1]
     assert verify_manifest(validation_manifest) == []
-    assert verify_release(validation_manifest) == []
+    release = write_release(validation_manifest, tmp_path / "validation_schema.sql")
+    assert verify_release(validation_manifest, release) == []
 
 
 def _table_block(sql: str, table: str) -> str:

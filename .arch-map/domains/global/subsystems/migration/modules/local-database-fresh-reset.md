@@ -21,12 +21,12 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
   - `scripts/reset_fake_database.py`
   - `scripts/reset_root_authentication.py` — root-only capture, encrypted backup and exact restoration.
   - `scripts/bootstrap_disposable_mysql_schema.py` — library-only；沒有獨立命令入口。
+  - `scripts/build_validation_schema_release.py` — CI 或開發者按需組裝完整驗證 SQL，預設寫入 Git 忽略的 `scratch/validation-schema/`。
   - `scripts/compact_fresh_schema.py` — 共用 current final schema loader。
   - `scripts/verify_verification_scenarios.py`
 - entrypoints:
   - `scripts/launchers/reset_DB.bat`
 - config:
-  - `db/releases/labor_union_validation_schema_reused_pairing_check_v1.sql` — v59 fresh source，與 243 reused pairing CHECK successor／compact current 一致。
   - `db/fresh_schema/labor_union_fresh_current.sql`
   - `db/fresh_schema/labor_union_fresh_current.json`
   - `db/schema_assembly/labor_union_fresh_table_retirements_v1.json`
@@ -34,14 +34,12 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
   - `db/schema_parts/218_weekly_report_metrics.sql` (fresh bootstrap owner)
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
   - `db/releases/labor_union_validation_schema_v1.sql`
-  - `db/releases/labor_union_validation_schema_client_beclass_query_case_v1.sql` — validation schema for the BeClass questionnaire and case key.
-  - `db/releases/labor_union_validation_schema_scheduling_shift_v1.sql` — current full schema source for same-day shift occupancy indexes and compact bootstrap.
-  - `db/releases/labor_union_validation_schema_registry_guards_v1.sql` — current registry-guard successor source snapshot.
   - `db/releases/labor_union_validation_schema_finance_case_accounting_v1.sql` — preserved v57 predecessor snapshot with historical accounting marker metadata.
   - `db/releases/labor_union_validation_schema_accounting_differences_v1.sql` — current v58 full source snapshot with owner-specific noncash events, amount modes and frozen government period balances; preserve artifact 1064 and its canonical descriptor/qualification are schema-only, no business backfill.
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/`
+- 完整驗證 SQL 由 `python -m scripts.build_validation_schema_release` 產生。重建已移出目前版本的歷史 SQL 時，先用 `git log --diff-filter=AM -1 --format=%H -- <原路徑>` 找到對應版本，再於該版本的獨立副本執行同一命令並指定 `--output <輸出路徑>`。
 
 ## Provenance
 - Fresh bootstrap 與 preserve-data upgrade 是分離流程 — `architecture_declared` —

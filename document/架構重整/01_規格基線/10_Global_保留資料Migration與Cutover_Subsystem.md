@@ -49,7 +49,7 @@
 ### 4.2 Preflight、Backup、Schema State 與 Runner
 
 - **Preflight／Backup**：`DatabaseIdentityReader`、`SourceReadOnlyGuard`、`CandidateAbsenceGuard`、`CutoverPlanFingerprint`、`MySqlDumpCommandBuilder`、`AtomicBackupPublisher`、`RestoreEvidenceValidator` 產生 zero-write plan 與驗證備份還原。
-- **Schema State Classification**：Descriptor 須同時列明新表及 `altered_tables` 新增／修改欄位與完整 metadata（type、nullability、default、generated expr、index、FK、check）。Parent-table ALTER 不擁有 parent 既有物件；較早 artifact 遇到後續 canonical release 加入的物件僅依「successor artifact identity ＋ 完整契約」allowlist 視為相容，契約不符仍判 `drift`。1060 條件式 trigger 採 hash-bound predecessor／successor 定義（`db/releases/labor_union_validation_schema_registry_guards_v1.sql`），共用 SQL loader 採 quote／comment-aware `DELIMITER`。
+- **Schema State Classification**：Descriptor 須同時列明新表及 `altered_tables` 新增／修改欄位與完整 metadata（type、nullability、default、generated expr、index、FK、check）。Parent-table ALTER 不擁有 parent 既有物件；較早 artifact 遇到後續 canonical release 加入的物件僅依「successor artifact identity ＋ 完整契約」allowlist 視為相容，契約不符仍判 `drift`。1060 條件式 trigger 採 hash-bound predecessor／successor 定義（`db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json`），共用 SQL loader 採 quote／comment-aware `DELIMITER`。
 - **Additive Migration Runner**：
   ```text
   append prepared journal → verify prior journal & metadata → execute 1 statement

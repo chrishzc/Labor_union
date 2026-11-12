@@ -17,7 +17,7 @@
     "sha256": "dd811c24ab1ec654a0c7b985d3bedb47dac2eb0ca7645c38a810954306bc04b9"
   },
   "full_release": {
-    "path": "db/releases/labor_union_validation_schema_client_beclass_query_case_v1.sql",
+    "path": "scratch/validation-schema/labor_union_validation_schema.sql",
     "database_token": "__LU_TEST_DATABASE__",
     "generation": "base_schema_then_ordered_schema_parts"
   },
