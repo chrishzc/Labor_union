@@ -18,16 +18,20 @@ from domains.case_import.order_information import project_order_information
 from domains.clients.profile import can_reclassify_client
 from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
-from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account, resolve_case_virtual_account
+from subsystems.client_finance.virtual_account_resolution import (
+    build_effective_formula_account,
+    resolve_case_virtual_account,
+    uses_imported_case_virtual_account,
+)
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
 from domains.client_finance.order_amount_calculation import _claim_schedule
 from domains.case_import.refund_account import mask_refund_values, effective_refund_account
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.client_finance.pricing_policy import IdentityRule
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.order_terms_read_model import (
     load_calculable_client_finance_facts,
     load_contract_client_finance_facts,
-from domains.client_finance.pricing_policy import IdentityRule
     select_order,
 )
 from subsystems.client_profile.order_accounting_export import (
@@ -115,13 +119,14 @@ class MySqlClientRegistryQueryRepository:
             imported_virtual_accounts = _load_imported_virtual_accounts(
                 cursor, visible_case_nos
             )
+            formula_accounts = _load_registry_formula_accounts(cursor, visible_case_nos)
             obligation_dates = _load_obligation_dates(
                 cursor, visible_case_nos
             )
         visible = tuple({
             **row,
             "imported_virtual_accounts": imported_virtual_accounts[str(row["case_no"])],
-            "built_in_virtual_account": build_client_virtual_account(row.get("case_no")),
+            "built_in_virtual_account": formula_accounts[str(row["case_no"])],
             "district": _client_district(row.get("address")),
             **obligation_dates[str(row["case_no"])],
             **_claim_application_month(row),
@@ -194,9 +199,9 @@ class MySqlClientRegistryQueryRepository:
                 tuple(parameters),
             )
             base_rows = tuple(cursor.fetchall() or ())
-            imported_virtual_accounts = _load_imported_virtual_accounts(
-                cursor, tuple(str(row["case_no"]) for row in base_rows)
-            )
+            case_nos = tuple(str(row["case_no"]) for row in base_rows)
+            imported_virtual_accounts = _load_imported_virtual_accounts(cursor, case_nos)
+            formula_accounts = _load_registry_formula_accounts(cursor, case_nos)
         subsidy_rows = self._subsidy_projection_loader(
             tuple(str(row["case_no"]) for row in base_rows),
             self._connection,
@@ -206,6 +211,7 @@ class MySqlClientRegistryQueryRepository:
                 row,
                 subsidy_rows.get(str(row["case_no"])),
                 imported_virtual_accounts[str(row["case_no"])],
+                formula_accounts[str(row["case_no"])],
             )
             for row in base_rows
         )
@@ -215,6 +221,7 @@ class MySqlClientRegistryQueryRepository:
         row: Mapping[str, Any],
         subsidy_row: Mapping[str, Any] | None,
         imported_virtual_accounts: tuple[str, ...],
+        formula_account: str | None,
     ) -> OrderAccountingExportRow:
         case_no = str(row["case_no"])
         finance_status, _, finance = _finance_values(self._connection, case_no)
@@ -250,7 +257,7 @@ class MySqlClientRegistryQueryRepository:
             multi_birth_count=row.get("multi_birth_count"),
             order_status=row.get("order_status"),
             imported_virtual_accounts=imported_virtual_accounts,
-            built_in_virtual_account=build_client_virtual_account(case_no),
+            built_in_virtual_account=formula_account,
             service_days=row.get("service_days"),
             service_hours_per_day=row.get("service_hours_per_day"),
             service_hours=values.get("service_hours"),
@@ -428,8 +435,9 @@ class MySqlClientRegistryQueryRepository:
 
 def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     result: dict[str, list[str]] = {case_no: [] for case_no in case_nos}
+    case_nos = tuple(case_no for case_no in case_nos if uses_imported_case_virtual_account(case_no))
     if not case_nos:
-        return {}
+        return {case_no: () for case_no in result}
     placeholders = ",".join(("%s",) * len(case_nos))
     cursor.execute(
         "SELECT case_no,virtual_account FROM client_legacy_virtual_accounts "
@@ -439,6 +447,14 @@ def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[s
     for row in cursor.fetchall():
         result[str(row["case_no"])].append(str(row["virtual_account"]))
     return {case_no: tuple(accounts) for case_no, accounts in result.items()}
+
+
+def _load_registry_formula_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, str | None]:
+    return {
+        case_no: resolve_case_virtual_account(cursor, case_no)["virtual_account"]
+        if build_effective_formula_account(case_no) else None
+        for case_no in case_nos
+    }
 
 
 def _decode(value: Any) -> dict[str, Any]:
@@ -705,6 +721,7 @@ def _finance_values(connection, case_no):
                 r for r in obligation_rows if r.get("direction") == "receivable_from_client"
             )
             if any(r.get("obligation_type") in ("deposit", "first", "second")
+                and (not historical_social or r["status"] != "cancelled")
                    and not str(r["obligation_identity"]).startswith("historical-floor-fee-deposit:")
                    for r in receivable_rows):
                 receivable_rows = tuple(
@@ -712,6 +729,13 @@ def _finance_values(connection, case_no):
                     for r in receivable_rows
                     if not str(r.get("obligation_identity", "")).startswith("historical-service:")
                 )
+            if historical_social:
+                stage_identities = {r["obligation_identity"] for r in receivable_rows
+                                    if r["obligation_type"] in ("deposit", "first", "second")}
+                # The source's effective stage amount already includes its
+                # linked corrections, even when a settled source stays frozen.
+                receivable_rows = tuple(r for r in receivable_rows
+                                        if r.get("source_obligation_identity") not in stage_identities)
             deposit_amount = sum(
                 int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "deposit"
             )
@@ -721,7 +745,6 @@ def _finance_values(connection, case_no):
             second_payment_amount = sum(
                 int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "second"
             )
-                and (not historical_social or r["status"] != "cancelled")
             if status.startswith("歷史"):
                 if historical_projection is not None:
                     actual_days = int(historical_projection.get("total_actual_service_days") or 0)
@@ -729,13 +752,6 @@ def _finance_values(connection, case_no):
                 else:
                     actual_days = int(order_row.get("service_days") or 0)
                     service_hours = float(Decimal(str(actual_days)) * Decimal(str(facts.service_hours_per_day)))
-            if historical_social:
-                stage_identities = {r["obligation_identity"] for r in receivable_rows
-                                    if r["obligation_type"] in ("deposit", "first", "second")}
-                # The source's effective stage amount already includes its
-                # linked corrections, even when a settled source stays frozen.
-                receivable_rows = tuple(r for r in receivable_rows
-                                        if r.get("source_obligation_identity") not in stage_identities)
 
                 if receivable_rows:
                     customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
@@ -759,15 +775,24 @@ def _finance_values(connection, case_no):
                 customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
 
         stage_amounts = {"deposit": deposit_amount, "first": first_payment_amount, "second": second_payment_amount}
+        historical_stage_amounts = dict.fromkeys(stage_amounts, 0)
         for row in current_rows:
             stage = row["obligation_type"]
             if stage in stage_amounts:
+                if historical_social:
+                    if row["direction"] == "receivable_from_client":
+                        effective = row["effective_ntd"] if row["effective_ntd"] is not None else row["nominal_ntd"]
+                        historical_stage_amounts[stage] += max(0, int(effective) - int(row["service_reduction_ntd"]))
+                    continue
                 effective = max(0, (int(row["effective_ntd"]) if row["effective_ntd"] is not None
                                     else stage_amounts[stage]) - int(row["service_reduction_ntd"]))
                 customer_payable += effective - stage_amounts[stage]
                 stage_amounts[stage] = effective
             elif row["obligation_type"] == "adjustment" and row["direction"] == "receivable_from_client":
                 customer_payable -= int(row["service_reduction_ntd"])
+        if historical_social:
+            customer_payable += sum(historical_stage_amounts.values()) - sum(stage_amounts.values())
+            stage_amounts = historical_stage_amounts
         balance = customer_payable - received_total
         if current_rows and not status.startswith("歷史"):
             balance = sum(int(row["amount_due_ntd"]) * (
@@ -775,24 +800,15 @@ def _finance_values(connection, case_no):
             ) for row in current_rows)
         subsidy = subsidy_rows[0] if subsidy_rows else None
         from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
-        historical_stage_amounts = dict.fromkeys(stage_amounts, 0)
         subsidy_amount = query_case_subsidy_amount(connection, case_no).amount_ntd
         return "ready", None, {
             "virtual_account": _case_virtual_account(connection, case_no),
-                if historical_social:
-                    if row["direction"] == "receivable_from_client":
-                        effective = row["effective_ntd"] if row["effective_ntd"] is not None else row["nominal_ntd"]
-                        historical_stage_amounts[stage] += max(0, int(effective) - int(row["service_reduction_ntd"]))
-                    continue
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
             "service_hours": service_hours,
             "customer_payable_total_ntd": customer_payable,
             "deposit_amount_ntd": stage_amounts["deposit"],
             "first_payment_amount_ntd": stage_amounts["first"],
             "second_payment_amount_ntd": stage_amounts["second"],
-        if historical_social:
-            customer_payable += sum(historical_stage_amounts.values()) - sum(stage_amounts.values())
-            stage_amounts = historical_stage_amounts
             "received_total_ntd": received_total,
             "customer_balance_ntd": balance,
             "subsidy_amount_ntd": subsidy_amount,

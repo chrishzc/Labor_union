@@ -35,7 +35,7 @@ from infrastructure.mysql.order_terms_read_model import (
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate, ClientChargeDay
 from shared_kernel.money import MoneyNTD
 from subsystems.client_finance.virtual_account_resolution import (
-    build_client_virtual_account,
+    build_effective_formula_account,
     resolve_case_virtual_account,
 )
 from subsystems.contract_signing.full_contract_preview import (
@@ -447,7 +447,7 @@ def _common_facts(
     # receives only this named projection, never the raw survey mapping.
     case_import = project_order_information(case.get("survey_details"))
     virtual_account = (
-        build_client_virtual_account(case.get("case_no"))
+        build_effective_formula_account(case.get("case_no"))
         if client_virtual_account is _UNSET_VIRTUAL_ACCOUNT
         else client_virtual_account
     )

@@ -10,7 +10,8 @@ import unicodedata
 from typing import Any
 
 from subsystems.client_finance.virtual_account_resolution import (
-    build_client_virtual_account,
+    build_effective_formula_account,
+    uses_imported_case_virtual_account,
 )
 
 
@@ -109,7 +110,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         staff_candidates.setdefault(account, set()).add(staff_id)
 
     receipt_candidates = _client_receipt_candidates(cursor)
-    known_virtual_accounts, known_case_suffixes, client_case_suffixes = _known_case_virtual_accounts(cursor)
+    known_virtual_accounts, known_case_suffixes, client_case_suffixes, case_suffixes = _known_case_virtual_accounts(cursor)
 
     cursor.execute(
         """SELECT obligation.case_no, obligation.staff_id
@@ -147,30 +148,6 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
            ORDER BY order_row.client_id, obligation.obligation_identity"""
     )
     refund_obligation_rows = cursor.fetchall()
-
-    all_cases = {
-        str(r["case_no"]) for r in all_staff_case_rows if isinstance(r, Mapping) and r.get("case_no")
-    } | {
-        str(r["case_no"]) for r in refund_obligation_rows if isinstance(r, Mapping) and r.get("case_no")
-    }
-    case_suffixes: dict[str, str] = {}
-    if all_cases:
-        format_strings = ",".join("%s" for _ in all_cases)
-        cursor.execute(
-            f"SELECT case_no, virtual_account FROM client_legacy_virtual_accounts WHERE case_no IN ({format_strings})",
-            tuple(all_cases),
-        )
-        legacy_va = {
-            str(row["case_no"]): str(row["virtual_account"])
-            for row in cursor.fetchall()
-            if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account")
-        }
-        for case_no in all_cases:
-            va = legacy_va.get(case_no) or build_client_virtual_account(case_no)
-            if va and len(va) >= 6:
-                case_suffixes[case_no] = va[-6:]
-            elif len(case_no) == 6 and case_no.isdigit():
-                case_suffixes[case_no] = case_no
 
     staff_case_candidates: dict[str, set[int]] = {}
     for r in all_staff_case_rows:
@@ -218,7 +195,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
 
 def _known_case_virtual_accounts(
     cursor: Any,
-) -> tuple[frozenset[str], frozenset[str], dict[str, list[int]]]:
+) -> tuple[frozenset[str], frozenset[str], dict[str, list[int]], dict[str, str]]:
     cursor.execute("SELECT case_no,client_id FROM orders WHERE case_no IS NOT NULL")
     order_rows = tuple(cursor.fetchall())
     existing_cases = {
@@ -234,19 +211,22 @@ def _known_case_virtual_accounts(
     legacy_rows = list(cursor.fetchall())
 
     va_to_cases: dict[str, set[str]] = {}
+    imported_by_case: dict[str, set[str]] = {}
     for row in legacy_rows:
         if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account"):
             case_no = str(row["case_no"])
             virtual_account = str(row["virtual_account"]).strip()
-            if virtual_account:
+            if virtual_account and uses_imported_case_virtual_account(case_no):
                 va_to_cases.setdefault(virtual_account, set()).add(case_no)
+                imported_by_case.setdefault(case_no, set()).add(virtual_account)
 
     valid_virtual_accounts = {
-        va for va, cases in va_to_cases.items() if len(cases) == 1
+        va for va, cases in va_to_cases.items()
+        if len(cases) == 1 and len(imported_by_case[next(iter(cases))]) == 1
     }
     formula_to_cases: dict[str, set[str]] = {}
     for case_no in existing_cases:
-        built = build_client_virtual_account(case_no)
+        built = build_effective_formula_account(case_no)
         if built and built not in va_to_cases:
             formula_to_cases.setdefault(built, set()).add(case_no)
     valid_virtual_accounts.update(
@@ -257,12 +237,14 @@ def _known_case_virtual_accounts(
     )
     clients = {str(row['case_no']): row.get('client_id') for row in order_rows}
     suffix_clients: dict[str, set[int]] = {}
+    case_suffixes: dict[str, str] = {}
     for account in valid_virtual_accounts:
         cases = va_to_cases.get(account) or formula_to_cases.get(account, set())
         for case in cases:
+            case_suffixes[case] = account[-6:]
             if clients.get(case) is not None:
                 suffix_clients.setdefault(account[-6:], set()).add(int(clients[case]))
-    return frozenset(valid_virtual_accounts), known_suffixes, _stable_map(suffix_clients)
+    return frozenset(valid_virtual_accounts), known_suffixes, _stable_map(suffix_clients), case_suffixes
 
 
 def _staff_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:

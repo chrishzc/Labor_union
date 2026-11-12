@@ -80,7 +80,7 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
     <p className="registry-section-note">儲存後將取代本案全部匯入虛擬帳號，供後續契約與收款辨識使用。</p>
     {phase === 'loading' && <p role="status">正在讀取虛擬帳號…</p>}
     {view && <>
-      <dl className="registry-information-fields"><div><dt>目前匯入虛擬帳號</dt><dd>{view.imported_virtual_accounts.join('、') || '未登錄，使用內建帳號'}</dd></div><div><dt>內建虛擬帳號</dt><dd>{view.built_in_virtual_account ?? '此案件無法產生內建帳號'}</dd></div></dl>
+      <dl className="registry-information-fields"><div><dt>目前匯入虛擬帳號</dt><dd>{view.imported_virtual_accounts.join('、') || '未登錄'}</dd></div><div><dt>內建虛擬帳號</dt><dd>{view.built_in_virtual_account ?? '不適用'}</dd></div></dl>
       <div className="registry-fields">
         <><label>匯入虛擬帳號<input ref={saveFieldRef} aria-required="true" inputMode="numeric" maxLength={14} value={account} disabled={locked} placeholder="99781699 開頭，共 14 碼" onChange={event => { setAccount(event.target.value); setSubmission(null); setMessage(''); }} /></label>{saveValidation.feedback}</>
       </div>

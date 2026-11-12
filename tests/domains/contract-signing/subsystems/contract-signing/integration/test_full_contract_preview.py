@@ -1194,9 +1194,9 @@ def test_common_facts_projects_the_same_per_case_virtual_account_used_by_reconci
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 
     monkeypatch.setenv('CLIENT_DEPOSIT_BANK_CODE', bank_code)
-    facts = _common_facts({"case_no": "115000157", "survey_details": None})
+    facts = _common_facts({"case_no": "116000157", "survey_details": None})
 
-    account = build_client_virtual_account('115000157')
+    account = build_client_virtual_account('116000157')
     assert facts["client_virtual_account"] == f'({bank_code}) {account}'
     mapping, template = _approved_mapping(tmp_path)
     mapping.write_text(json.dumps({'id': 'contract_client_copy', 'param_mappings': {
@@ -1204,9 +1204,9 @@ def test_common_facts_projects_the_same_per_case_virtual_account_used_by_reconci
     monkeypatch.setattr('subsystems.contract_signing.full_contract_preview.load_approved_template',
         lambda key: SimpleNamespace(template_key=key, mapping_sha256='b'*64, template_sha256='c'*64,
             template_filename=template.name, mapping_path=mapping, template_path=template))
-    projection = FullContractOwnerProjection('115000157', ContractPreviewScope.CLIENT, None,
+    projection = FullContractOwnerProjection('116000157', ContractPreviewScope.CLIENT, None,
         facts, {'client_finance': 'a'*64})
-    result = FullContractPreviewApplication(_Repository(projection)).preview_client('115000157')
+    result = FullContractPreviewApplication(_Repository(projection)).preview_client('116000157')
     assert result.field_values['D36'] == f'({bank_code}) {account}'
     book = load_workbook(BytesIO(result.workbook_content))
     assert book.active['D36'].value == result.field_values['D36']
