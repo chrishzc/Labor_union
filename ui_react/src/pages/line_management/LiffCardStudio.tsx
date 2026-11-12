@@ -183,6 +183,29 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
   }
 
 
+  if (item.id === 'staff_profile_update') {
+    return (
+      <div className="mock-form-inputs">
+        <fieldset className="mock-placeholder-box">
+          <legend>聯絡方式、地址與緊急聯絡</legend>
+          <label>手機<input type="tel" placeholder="目前手機號碼" readOnly /></label>
+          <label>詳細地址<input type="text" placeholder="目前聯絡地址" readOnly /></label>
+          <label>緊急聯絡人<input type="text" placeholder="目前聯絡人" readOnly /></label>
+        </fieldset>
+        <fieldset className="mock-placeholder-box">
+          <legend>更換收款帳戶</legend>
+          <small>目前帳號只顯示末四碼。選擇更換後可填寫新的收款資料。</small>
+        </fieldset>
+        <fieldset className="mock-placeholder-box">
+          <legend>接案偏好</legend>
+          <small>服務地區、時段、排休、胎數、節日、交通方式與可承接天數／時數</small>
+        </fieldset>
+        <button type="button" className="mock-primary-btn" disabled>送出整張申請</button>
+        <small>工會核准後，整張申請的異動才會一起生效。</small>
+      </div>
+    );
+  }
+
   if (item.id === 'staff_payout') {
     return (
       <div className="mock-form-inputs">

@@ -83,6 +83,29 @@ class StaffProfileMutationWorkflow:
         reason: str,
         correlation_id: CorrelationId,
     ) -> StaffProfileMutationReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            result, replayed = self.apply_in_current_uow(
+                staff_id, changes, expected_version, preview_fingerprint,
+                idempotency_key, actor, reason, correlation_id,
+            )
+            if replayed:
+                fresh = self.query(staff_id)
+            unit_of_work.commit()
+        if not replayed:
+            fresh = self.query(staff_id)
+        return _receipt(result, preview_fingerprint, idempotency_key, replayed, fresh)
+
+    def apply_in_current_uow(
+        self,
+        staff_id: int,
+        changes: Mapping[str, object],
+        expected_version: ExpectedVersion,
+        preview_fingerprint: PreviewFingerprint,
+        idempotency_key: IdempotencyKey,
+        actor: ActorContext,
+        reason: str,
+        correlation_id: CorrelationId,
+    ) -> tuple[Mapping[str, Any], bool]:
         identity = _staff_id(staff_id)
         normalized = normalize_staff_profile_changes(changes)
         clean_reason = reason.strip()
@@ -95,49 +118,44 @@ class StaffProfileMutationWorkflow:
             "actor": actor.actor_id,
             "reason": clean_reason,
         })
-        with self._unit_of_work_factory() as unit_of_work:
-            self._repository.claim(
-                staff_id=identity,
-                key=idempotency_key,
-                command_fingerprint=command_fingerprint,
-                correlation_id=correlation_id,
-            )
-            replay = self._repository.load_receipt(idempotency_key, for_update=True)
-            if replay is not None:
-                if str(replay["request_fingerprint"]) != command_fingerprint.value:
-                    raise StaffProfileMutationConflict("idempotency_mismatch")
-                fresh = _snapshot(self._require(self._repository.load(identity, for_update=False)))
-                unit_of_work.commit()
-                return _receipt(replay["result"], preview_fingerprint, idempotency_key, True, fresh)
-            snapshot = _snapshot(self._require(self._repository.load(identity, for_update=True)))
-            preview = self._preview(snapshot, normalized, expected_version)
-            if preview.preview_fingerprint != preview_fingerprint:
-                raise StaffProfileMutationConflict("staff_profile_stale_preview")
-            self._check_union_number(identity, normalized)
-            resulting_version = self._repository.persist(
-                snapshot=snapshot,
-                changes=normalized,
-                actor=actor,
-                reason=clean_reason,
-                key=idempotency_key,
-                correlation_id=correlation_id,
-            )
-            result = {
-                "staff_id": identity,
-                "resulting_version": resulting_version,
-                "changed_fields": sorted(normalized),
-            }
-            self._repository.save_receipt(
-                key=idempotency_key,
-                command_fingerprint=command_fingerprint,
-                preview_fingerprint=preview_fingerprint,
-                actor=actor,
-                reason=clean_reason,
-                result=result,
-            )
-            unit_of_work.commit()
-            fresh = _snapshot(self._require(self._repository.load(identity, for_update=False)))
-            return _receipt(result, preview_fingerprint, idempotency_key, False, fresh)
+        self._repository.claim(
+            staff_id=identity,
+            key=idempotency_key,
+            command_fingerprint=command_fingerprint,
+            correlation_id=correlation_id,
+        )
+        replay = self._repository.load_receipt(idempotency_key, for_update=True)
+        if replay is not None:
+            if str(replay["request_fingerprint"]) != command_fingerprint.value:
+                raise StaffProfileMutationConflict("idempotency_mismatch")
+            return replay["result"], True
+        snapshot = _snapshot(self._require(self._repository.load(identity, for_update=True)))
+        preview = self._preview(snapshot, normalized, expected_version)
+        if preview.preview_fingerprint != preview_fingerprint:
+            raise StaffProfileMutationConflict("staff_profile_stale_preview")
+        self._check_union_number(identity, normalized)
+        resulting_version = self._repository.persist(
+            snapshot=snapshot,
+            changes=normalized,
+            actor=actor,
+            reason=clean_reason,
+            key=idempotency_key,
+            correlation_id=correlation_id,
+        )
+        result = {
+            "staff_id": identity,
+            "resulting_version": resulting_version,
+            "changed_fields": sorted(normalized),
+        }
+        self._repository.save_receipt(
+            key=idempotency_key,
+            command_fingerprint=command_fingerprint,
+            preview_fingerprint=preview_fingerprint,
+            actor=actor,
+            reason=clean_reason,
+            result=result,
+        )
+        return result, False
 
     def _check_union_number(self, staff_id: int, changes: Mapping[str, str | None]) -> None:
         union_no = changes.get("union_no")

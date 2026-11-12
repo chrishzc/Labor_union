@@ -1,8 +1,10 @@
 """Owner-local contracts for Staff profile and bank-account mutations."""
 
 from contextlib import AbstractContextManager
+from copy import deepcopy
 import inspect
 import re
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -13,7 +15,9 @@ from api.routes.staff_registry_mutation import _raise_staff_error
 from infrastructure.mysql.staff_profile_mutation_repository import MySqlStaffProfileMutationRepository
 from subsystems.staff.profile_workflow import StaffProfileSnapshot
 from infrastructure.mysql.staff_bank_account_repository import MySqlStaffBankAccountRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.staff.bank_account_workflow import StaffBankAccountConflict, StaffBankAccountWorkflow
+from subsystems.staff.profile_change_approval import StaffProfileChange, StaffProfileChangeApproval, VersionedChange
 from subsystems.staff.profile_workflow import StaffProfileMutationConflict, StaffProfileMutationWorkflow
 
 
@@ -108,6 +112,63 @@ class _BankRepository:
 
 def _identity():
     return ActorContext("admin:9", ("data_browser.write",)), CorrelationId("registry-corr-1")
+
+
+@pytest.mark.parametrize("bank_version_conflict", [False, True])
+def test_reviewed_profile_and_bank_changes_commit_together(bank_version_conflict):
+    profile_repository, bank_repository = _ProfileRepository(), _BankRepository()
+
+    class Connection:
+        commits = 0
+        rollbacks = 0
+
+        def begin(self):
+            self.before = deepcopy((vars(profile_repository), vars(bank_repository)))
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rollbacks += 1
+            profile_repository.__dict__.update(self.before[0])
+            bank_repository.__dict__.update(self.before[1])
+
+    connection = Connection()
+    factory = lambda: MySqlUnitOfWork(connection)
+    profile = StaffProfileMutationWorkflow(profile_repository, factory)
+    bank = StaffBankAccountWorkflow(bank_repository, factory)
+    contact_change = {"phone": "0911222333"}
+    bank_change = {
+        "operation": "replace", "account_id": 3, "bank_code": "812",
+        "branch_code": "0012", "account_no": "123456789013",
+    }
+    version = ExpectedVersion(0)
+    change = StaffProfileChange(
+        7,
+        profile=VersionedChange(contact_change, version, profile.preview(7, contact_change, version).preview_fingerprint),
+        bank=VersionedChange(bank_change, version, bank.preview(7, bank_change, version).preview_fingerprint),
+    )
+    approval = StaffProfileChangeApproval(factory, profile, bank, None, None, None)
+    operation_id = UUID("01234567-89ab-cdef-0123-456789abcdef")
+    actor, _ = _identity()
+    if bank_version_conflict:
+        bank_repository.row["aggregate_version"] = 1
+        with pytest.raises(StaffBankAccountConflict, match="staff_bank_stale_version"):
+            approval.apply(change, operation_id, actor, "")
+        assert connection.commits == 0
+        assert connection.rollbacks == 1
+        assert profile_repository.row["staff_profile_version"] == 0
+        assert profile_repository.receipts == {}
+        assert bank_repository.receipts == {}
+    else:
+        approval.apply(change, operation_id, actor, "")
+        assert connection.commits == 1
+        assert connection.rollbacks == 0
+        assert profile_repository.row["staff_profile_version"] == 1
+        assert bank_repository.row["aggregate_version"] == 1
+        approval.apply(change, operation_id, actor, "")
+        assert profile_repository.row["staff_profile_version"] == 1
+        assert bank_repository.persist_count == 1
 
 
 def test_staff_profile_preview_apply_and_replay_are_versioned():

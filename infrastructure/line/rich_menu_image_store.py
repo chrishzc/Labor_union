@@ -82,7 +82,7 @@ def _get_icon_for_label(label: str) -> str:
         return "📊"
     if "客服" in label or "諮詢" in label or "聯絡" in label or "專人" in label:
         return "💬"
-    if "個人" in label:
+    if "個人" in label or label == "我的資料":
         return "👤"
     if "改" in label or "修改" in label or "異動" in label:
         return "📝"

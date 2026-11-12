@@ -36,6 +36,7 @@ _LIFF_TARGETS = frozenset(
         "?target=staff_leave_apply",
         "?target=staff_order_search",
         "?target=staff_payout",
+        "?target=staff_profile_update",
         "?target=staff_review",
         "?target=staff_schedule",
         "?target=staff_verification",
@@ -65,6 +66,7 @@ _LIFF_TARGETS_BY_AUDIENCE = {
             "?target=staff_leave_apply",
             "?target=staff_order_search",
             "?target=staff_payout",
+            "?target=staff_profile_update",
             "?target=staff_schedule",
         }
     ),
@@ -93,6 +95,104 @@ _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 class RichMenuDraftValidationError(ValueError):
     """Raised when a draft contains unsupported or ambiguous data."""
+
+
+_STAFF_MENU_LABELS = {
+    "?target=staff_order_search": ("我的訂單", {"我的案件", "訂單查詢"}),
+    "?target=staff_schedule": ("我的排班", {"班表與請假", "排班資訊與請假"}),
+    "?target=staff_profile_update": ("我的資料", {"更新個人資料"}),
+    "?target=staff_payout": ("我的薪資", {"薪資明細", "薪資請款明細"}),
+}
+
+
+def project_saved_staff_menu(definition: dict[str, object]) -> dict[str, object]:
+    """Update the standard entries in saved generated staff menus."""
+    if not isinstance(definition, dict):
+        return definition
+    menus = definition.get("menus")
+    if not isinstance(menus, list):
+        return definition
+    current_menus = []
+    for menu in menus:
+        if isinstance(menu, dict) and menu.get("audience_role") == "staff":
+            buttons = menu.get("buttons")
+            if isinstance(buttons, list):
+                appearance = menu.get("appearance")
+                generated = not isinstance(appearance, dict) or appearance.get("image_mode", "generated") == "generated"
+                has_profile_button = any(
+                    isinstance(button, dict) and isinstance(button.get("action"), dict)
+                    and button["action"].get("uri") == "?target=staff_profile_update"
+                    for button in buttons
+                )
+                current_buttons = []
+                for button in buttons:
+                    retired = _is_retired_staff_baby_log(button)
+                    default_contact = (
+                        generated and isinstance(button, dict) and button.get("id") == "staff_human_contact"
+                        and button.get("bounds") == _staff_profile_slot()
+                        and isinstance(button.get("action"), dict)
+                        and button["action"].get("data") == "customer-service:handoff:confirm"
+                    )
+                    if not retired and not (default_contact and not has_profile_button):
+                        current_buttons.append(_updated_staff_menu_label(button) if generated else button)
+                    elif generated and not has_profile_button:
+                        current_buttons.append(_profile_button(button))
+                        has_profile_button = True
+                if generated and not has_profile_button and _has_standard_profile_vacancy(menu, current_buttons):
+                    current_buttons.append(_profile_button({
+                        "id": "staff_profile_update", "bounds": _staff_profile_slot(),
+                        "text_color": "#FFFFFF", "background_color": "#10B981", "border_radius": 54,
+                    }))
+                menu = {**menu, "buttons": current_buttons}
+        current_menus.append(menu)
+    return {**definition, "menus": current_menus}
+
+
+def _staff_profile_slot() -> dict[str, int]:
+    return {"x": 0, "y": 843, "width": 1250, "height": 843}
+
+
+def _profile_button(button: dict) -> dict:
+    return {
+        **button, "label": _STAFF_MENU_LABELS["?target=staff_profile_update"][0],
+        "action": {"type": "uri", "uri_source": "liff", "uri": "?target=staff_profile_update"},
+    }
+
+
+def _updated_staff_menu_label(button: object) -> object:
+    action = button.get("action") if isinstance(button, dict) else None
+    if not isinstance(action, dict) or action.get("type") != "uri" or action.get("uri_source") != "liff":
+        return button
+    target = action.get("uri")
+    label = button.get("label")
+    if isinstance(target, str) and target in _STAFF_MENU_LABELS and isinstance(label, str):
+        current, previous = _STAFF_MENU_LABELS[target]
+        if label in previous:
+            return {**button, "label": current}
+    return button
+
+
+def _has_standard_profile_vacancy(menu: dict, buttons: list) -> bool:
+    if menu.get("size") != {"width": 2500, "height": 1686} or len(buttons) != 3:
+        return False
+    expected = [
+        {**_staff_profile_slot(), "x": x, "y": y}
+        for x, y in ((0, 0), (1250, 0), (1250, 843))
+    ]
+    if any(isinstance(button, dict) and button.get("id") == "staff_profile_update" for button in buttons):
+        return False
+    bounds = [button.get("bounds") for button in buttons if isinstance(button, dict)]
+    return all(slot in bounds for slot in expected)
+
+
+def _is_retired_staff_baby_log(button: object) -> bool:
+    action = button.get("action") if isinstance(button, dict) else None
+    return (
+        isinstance(action, dict)
+        and action.get("type") == "uri"
+        and action.get("uri_source") == "liff"
+        and action.get("uri") == "?target=staff_baby_log"
+    )
 
 
 def normalize_rich_menu_draft(definition: Mapping[str, object]) -> dict[str, object]:

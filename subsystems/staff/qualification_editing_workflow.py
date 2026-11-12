@@ -36,30 +36,38 @@ class StaffQualificationEditingWorkflow:
 
     def apply(self, staff_id: int, values, *, expected_snapshot: str, preview: str,
               key: str, actor: str, reason: str, correlation: str):
+        with self.unit_of_work_factory() as unit_of_work:
+            result = self.apply_in_current_uow(
+                staff_id, values, expected_snapshot=expected_snapshot, preview=preview,
+                key=key, actor=actor, reason=reason, correlation=correlation,
+            )
+            unit_of_work.commit()
+        return result
+
+    def apply_in_current_uow(self, staff_id: int, values, *, expected_snapshot: str, preview: str,
+              key: str, actor: str, reason: str, correlation: str):
+        """Apply qualification facts using the caller's transaction."""
         after = normalize_facts(values)
         command = fingerprint_payload({"staff_id": staff_id, "facts": after.payload(), "actor": actor,
                                        "reason": reason.strip(), "expected_snapshot": expected_snapshot, "preview": preview}).value
-        with self.unit_of_work_factory() as uow:
-            # Lock the parent first: protects empty child sets and competing manual edits.
-            before = self.repository.load(staff_id, for_update=True)
-            replay = self.repository.find_receipt(key)
-            if replay is not None:
-                if replay["request_fingerprint"] != command:
-                    raise QualificationEditingError("staff_qualification_idempotency_conflict")
-                uow.commit()
-                return {**replay["result"], "replayed": True}
-            if snapshot_fingerprint(staff_id, before).value != expected_snapshot:
-                raise QualificationEditingError("staff_qualification_stale_snapshot")
-            if preview_fingerprint(staff_id, before, after).value != preview:
-                raise QualificationEditingError("staff_qualification_stale_preview")
-            self.repository.persist(staff_id, before, after)
-            persisted = self.repository.load(staff_id, for_update=True)
-            if persisted != after:
-                raise QualificationEditingError("staff_qualification_persisted_mismatch")
-            result = {"staff_id": staff_id, "before": before.payload(), "after": persisted.payload(),
-                      "snapshot_fingerprint": snapshot_fingerprint(staff_id, persisted).value,
-                      "preview_fingerprint": preview, "idempotency_key": key, "replayed": False,
-                      "correlation_id": correlation}
-            self.repository.save_receipt(key, command, preview, actor, reason.strip(), result)
-            uow.commit()
-            return result
+        # Lock the parent first: protects empty child sets and competing manual edits.
+        before = self.repository.load(staff_id, for_update=True)
+        replay = self.repository.find_receipt(key)
+        if replay is not None:
+            if replay["request_fingerprint"] != command:
+                raise QualificationEditingError("staff_qualification_idempotency_conflict")
+            return {**replay["result"], "replayed": True}
+        if snapshot_fingerprint(staff_id, before).value != expected_snapshot:
+            raise QualificationEditingError("staff_qualification_stale_snapshot")
+        if preview_fingerprint(staff_id, before, after).value != preview:
+            raise QualificationEditingError("staff_qualification_stale_preview")
+        self.repository.persist(staff_id, before, after)
+        persisted = self.repository.load(staff_id, for_update=True)
+        if persisted != after:
+            raise QualificationEditingError("staff_qualification_persisted_mismatch")
+        result = {"staff_id": staff_id, "before": before.payload(), "after": persisted.payload(),
+                  "snapshot_fingerprint": snapshot_fingerprint(staff_id, persisted).value,
+                  "preview_fingerprint": preview, "idempotency_key": key, "replayed": False,
+                  "correlation_id": correlation}
+        self.repository.save_receipt(key, command, preview, actor, reason.strip(), result)
+        return result

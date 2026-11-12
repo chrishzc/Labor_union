@@ -133,18 +133,24 @@ class StaffMatchingPreferenceWorkflow:
         )
 
     def apply_profile(self, staff_id: int, proposed: Mapping[str, Mapping[str, Any]], request: PreferenceApplyRequest):
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self.apply_profile_in_current_uow(
+                staff_id, proposed, request,
+            )
+            unit_of_work.commit()
+        return result
+
+    def apply_profile_in_current_uow(self, staff_id: int, proposed: Mapping[str, Mapping[str, Any]], request: PreferenceApplyRequest):
+        """Apply matching preferences using the caller's transaction."""
         family, identity = "staff_matching_profile/v1", str(staff_id)
         command_fingerprint = _command_fingerprint(family, identity, proposed, request)
-        with self._unit_of_work_factory() as unit_of_work:
-            _lock_profile_aggregate(self._repository, staff_id)
-            replay = _replay(self._repository, request, command_fingerprint)
-            if replay is not None:
-                unit_of_work.commit()
-                return replay
-            preview, values = self._fresh_profile_preview(staff_id, proposed, request)
-            result = self._persist_profile(preview, values, request, command_fingerprint)
-            unit_of_work.commit()
-            return result
+        _lock_profile_aggregate(self._repository, staff_id)
+        replay = _replay(self._repository, request, command_fingerprint)
+        if replay is not None:
+            return replay
+        preview, values = self._fresh_profile_preview(staff_id, proposed, request)
+        result = self._persist_profile(preview, values, request, command_fingerprint)
+        return result
 
     def _fresh_definition_preview(self, definition, request):
         current = self._repository.load_definition(definition.preference_key, for_update=True)

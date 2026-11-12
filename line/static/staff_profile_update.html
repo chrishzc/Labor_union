@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>更新個人資料</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #f6f8f5; color: #173128; font: 17px/1.5 system-ui, sans-serif; margin: 0; }
+    main { max-width: 660px; margin: auto; padding: 20px; }
+    fieldset { border: 1px solid #cdded5; border-radius: 8px; background: white; margin: 16px 0; padding: 16px; }
+    legend { font-weight: 700; padding: 0 6px; }
+    label { display: block; margin: 12px 0; }
+    input, textarea { display: block; width: 100%; padding: 10px; font: inherit; border: 1px solid #84998d; border-radius: 6px; }
+    textarea { min-height: 72px; }
+    input[type=checkbox] { display: inline-block; width: auto; }
+    button { padding: 12px 18px; font: inherit; font-weight: 700; border: 0; border-radius: 6px; color: white; background: #076848; }
+    button:disabled { opacity: .6; }
+    #status[data-error] { color: #a32020; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>更新個人資料</h1>
+  <p>只修改有變動的欄位。工會核准後，整張申請的資料才會一起更新。</p>
+  <p id="status" role="status" aria-live="polite">正在確認 LINE 身分…</p>
+  <form id="form" hidden>
+    <fieldset id="profile"><legend>聯絡方式、地址與緊急聯絡</legend></fieldset>
+    <fieldset id="bank">
+      <legend>更換收款帳戶</legend>
+      <p id="current-bank"></p>
+      <label><input id="replace-bank" type="checkbox">申請更換收款帳戶</label>
+      <div id="bank-fields" hidden></div>
+    </fieldset>
+    <fieldset id="preferences"><legend>接案偏好</legend></fieldset>
+    <button id="send" type="submit">送出整張申請</button>
+  </form>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const profileLabels = {
+  phone: "手機", tel: "市話", tel_ext: "分機", email: "Email", city: "縣市",
+  zip_code: "郵遞區號", address: "詳細地址", emergency_contact_name: "緊急聯絡人",
+  emergency_contact_phone: "緊急聯絡電話"
+};
+const relationLabels = {
+  service_regions: "服務地區", service_periods: "服務時段", rest_schedule: "排休方式",
+  baby_types: "接案胎數", holiday_availability: "特殊節日可接案"
+};
+const form = document.getElementById("form");
+const status = document.getElementById("status");
+const send = document.getElementById("send");
+const replacement = document.getElementById("replace-bank");
+const bankFields = document.getElementById("bank-fields");
+let identity, snapshot, previousSubmission;
+
+function show(message, error = false) {
+  status.textContent = message;
+  status.toggleAttribute("data-error", error);
+}
+
+function input(parent, id, label, value, options = {}) {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = label;
+  const element = document.createElement(options.multiline ? "textarea" : "input");
+  element.id = id;
+  element.value = value ?? "";
+  if (options.numeric) element.inputMode = "numeric";
+  if (options.maximum) element.maxLength = options.maximum;
+  wrapper.append(element);
+  parent.append(wrapper);
+  return element;
+}
+
+function value(id) { return document.getElementById(id).value.trim(); }
+function lines(text) { return text.split("\n").map(item => item.trim()).filter(Boolean); }
+function relationText(rows) {
+  return rows.map(row => row.detail ? row.value + "：" + row.detail : row.value).join("\n");
+}
+
+function render(data) {
+  const profile = document.getElementById("profile");
+  for (const [key, label] of Object.entries(profileLabels)) input(profile, key, label, data.profile[key]);
+  document.getElementById("current-bank").textContent = data.bank
+    ? "目前帳號末四碼 " + data.bank.account_last4 : "尚未設定收款帳戶，請聯絡工會。";
+  replacement.disabled = !data.bank;
+  for (const [key, label, maximum] of [["bank_code", "銀行代碼", 3], ["branch_code", "分行代碼", 4], ["account_no", "新收款帳號", 20]]) {
+    input(bankFields, key, label, "", { numeric: true, maximum });
+  }
+  const preferences = document.getElementById("preferences");
+  for (const [key, label] of Object.entries(relationLabels)) {
+    const hint = document.createElement("small");
+    hint.textContent = key === "service_periods"
+      ? "一行一項，例如 4小時(09:00-13:00)"
+      : "一行一項。可選值：" + data.relation_options[key].join("、");
+    input(preferences, key, label, relationText(data.relations[key]), { multiline: true });
+    preferences.append(hint);
+  }
+  input(preferences, "transportation", "交通方式（一行一項）", data.transportation.join("\n"), { multiline: true });
+  const days = data.matching.preferred_service_days ?? {};
+  input(preferences, "minimum", "最少可承接天數", days.minimum, { numeric: true });
+  input(preferences, "maximum", "最多可承接天數", days.maximum, { numeric: true });
+  input(preferences, "hours", "每日可服務時數（用逗號分隔）", data.matching.daily_service_hours?.values.join(","), { numeric: true });
+}
+
+function changes() {
+  const profile = {};
+  for (const key of Object.keys(profileLabels)) {
+    if (value(key) !== (snapshot.profile[key] ?? "")) profile[key] = value(key) || null;
+  }
+  const relations = {};
+  for (const key of Object.keys(relationLabels)) {
+    if (value(key) !== relationText(snapshot.relations[key])) {
+      relations[key] = lines(value(key)).map(line => {
+        const separator = line.indexOf("：");
+        return separator < 0 ? { value: line } : { value: line.slice(0, separator), detail: line.slice(separator + 1) };
+      });
+    }
+  }
+  const matching = {};
+  const days = snapshot.matching.preferred_service_days ?? {};
+  if (value("minimum") !== String(days.minimum ?? "") || value("maximum") !== String(days.maximum ?? "")) {
+    matching.preferred_service_days = { kind: "integer_range", minimum: Number(value("minimum")), maximum: Number(value("maximum")) };
+  }
+  if (value("hours") !== (snapshot.matching.daily_service_hours?.values.join(",") ?? "")) {
+    matching.daily_service_hours = {
+      kind: "integer_set", values: [...new Set(value("hours").split(/[,，]/).map(Number))].sort((a, b) => a - b)
+    };
+  }
+  return {
+    profile, relations, matching,
+    ...(value("transportation") === snapshot.transportation.join("\n") ? {} : { transportation: lines(value("transportation")) }),
+    ...(replacement.checked ? { bank: { bank_code: value("bank_code"), branch_code: value("branch_code"), account_no: value("account_no") } } : {})
+  };
+}
+
+async function request(path, body) {
+  const response = await fetch("/api/v1/line/staff-self-service/profile-change/" + path, {
+    method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+    body: JSON.stringify({ ...identity, ...body })
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail?.error?.message || result.error?.message || "處理失敗，請核對資料後再試。");
+  return result.data;
+}
+
+replacement.addEventListener("change", () => {
+  bankFields.hidden = !replacement.checked;
+  if (!replacement.checked) document.getElementById("account_no").value = "";
+});
+form.addEventListener("submit", async event => {
+  event.preventDefault();
+  send.disabled = true;
+  try {
+    const proposed = changes();
+    const signature = JSON.stringify(proposed);
+    if (previousSubmission?.signature !== signature) previousSubmission = { signature, id: crypto.randomUUID() };
+    const result = await request("submit", { ...proposed, basis: snapshot.basis, submission_id: previousSubmission.id });
+    form.reset();
+    previousSubmission = null;
+    form.hidden = true;
+    const labels = { pending: "待工會審核", approving: "工會處理中", approved: "已核准", rejected: "已退回", conflict: "資料已更新，請重新申請" };
+    show("申請 #" + result.id + "，" + (labels[result.status] || "已送出"));
+  } catch (error) {
+    show(error.message || "送出失敗，請再試一次。", true);
+  } finally {
+    send.disabled = false;
+  }
+});
+
+async function init() {
+  try {
+    const flow = new URLSearchParams(location.search).get("flow_id") || "";
+    const response = await fetch("/api/v1/line/identity/runtime-config", { cache: "no-store" });
+    const { data } = await response.json();
+    let token = "";
+    if (data?.liff_id) {
+      await liff.init({ liffId: data.liff_id });
+      if (liff.isLoggedIn()) token = liff.getIDToken() || "";
+      else if (!flow) { liff.login({ redirectUri: location.href }); return; }
+    }
+    if (!token && !flow) throw new Error("請從 LINE 圖文選單開啟此頁。");
+    identity = token ? { line_id_token: token } : { flow_id: flow };
+    snapshot = await request("query", {});
+    render(snapshot);
+    form.hidden = false;
+    show("請填寫要變更的資料。");
+  } catch (error) { show(error.message || "無法載入資料，請重新開啟。", true); }
+}
+init();
+</script>
+</body>
+</html>

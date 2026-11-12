@@ -560,6 +560,40 @@ def test_dedicated_query_normalizes_legacy_null_fields_without_writing() -> None
     assert unit_of_work.commit_count == 0
 
 
+def test_draft_query_replaces_retired_staff_button_without_writing() -> None:
+    project_root = Path(__file__).resolve().parents[6]
+    definition = json.loads((project_root / "config/line_menu.json").read_text(encoding="utf-8"))
+    staff_menu = next(menu for menu in definition["menus"] if menu["audience_role"] == "staff")
+    labels = [button["label"] for button in staff_menu["buttons"]]
+    for button, old_label in zip(staff_menu["buttons"], ("訂單查詢", "排班資訊與請假", "寶寶日誌", "薪資請款明細"), strict=True):
+        button["label"] = old_label
+    retired_button = staff_menu["buttons"][2]
+    current_action = retired_button["action"]
+    retired_button["action"] = {
+        "type": "uri",
+        "uri_source": "liff",
+        "uri": "?target=staff_baby_log",
+    }
+    snapshot = LineConfigurationSnapshot(
+        LineConfigurationKind.RICH_MENUS,
+        LineConfigurationRevision(6),
+        canonical_line_payload_json(definition),
+    )
+    repository = _ConfigurationRepository(snapshot)
+    unit_of_work = _UnitOfWork(repository, _Audit(), _PublicationRepository())
+    application = LineConfigurationApplication(lambda: unit_of_work)
+
+    result = application.get_rich_menu_draft_query(_actor())
+
+    retired_button["action"] = current_action
+    for button, label in zip(staff_menu["buttons"], labels, strict=True):
+        button["label"] = label
+    assert json.loads(result.snapshot.definition_json) == normalize_rich_menu_draft(definition)
+    assert result.snapshot.revision == snapshot.revision
+    assert repository.apply_count == 0
+    assert unit_of_work.commit_count == 0
+
+
 def test_draft_query_uses_exact_revision_publication_locks_with_published_precedence() -> None:
     definition = _definition({"type": "message", "text": "服務說明"})
     staff_menu = json.loads(json.dumps(definition["menus"][0]))
@@ -687,7 +721,8 @@ def test_all_bootstrap_menus_use_concise_labels_and_large_accessible_image_rende
 
     monkeypatch.setattr(store, "_find_text_font", spy_font)
     staff_menu = next(menu for menu in raw["menus"] if menu["id"] == "staff_menu")
-    assert [b["label"] for b in staff_menu["buttons"]] == ["我的案件", "班表與請假", "聯絡工會人員", "薪資明細"]
+    assert [b["label"] for b in staff_menu["buttons"]] == ["我的訂單", "我的排班", "我的資料", "我的薪資"]
+    assert store._get_icon_for_label("我的資料") == "👤"
     assert store._get_icon_for_label("聯絡工會人員") == "💬"
     assert store._get_icon_for_label("月嫂認證") == "🤱"
     assert store._get_icon_for_label("改個人資料") == "👤"

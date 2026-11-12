@@ -69,7 +69,7 @@ LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「
 
 ### 4.2 請假與調休協調（`leave-v1`）
 
-- 月嫂於一對一聊天室開啟「班表與請假」，選定案件與受影響服務日並填寫雙方群組已協議之新日期：
+- 月嫂於一對一聊天室開啟「我的排班」，選定案件與受影響服務日並填寫雙方群組已協議之新日期：
   - **無衝突順延**：Scheduling fresh-lock 檢核無檔期衝突即同交易更新正式服務日、排班與連動帳務，並向原案件服務群組發送無確認按鈕之最新日期表，不須工會額外核准或詢問客戶確認。
   - **需代班或存在衝突**：自動建立工會內部待辦；工會另行徵詢代班人選（Postback ack 走 `line_webhook_reply`），確定願意且實際加入原服務群組後由工會補記新日期與群組日期表。
 - 歷史雙邊確認 API `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 永久回傳 `410 Gone`。
@@ -97,7 +97,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
   - **React 客服六欄表規格**：呼叫 `GET /api/v1/customer-service/tickets/reminders`（單批個人資料補水上限 100 筆、最高 4 並行請求、總預算 2 秒），固定只渲染六欄摘要欄位；不設額外狀態分頁籤、右側明細抽屜、行內回覆框或刪除按鈕。
 - **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；M4 重大升級與繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
 - **`#line-interface`（LINE 介面設定）** 與 **`#line-ai-events`（AI 客服工作室）**：
-  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 17 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與四個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
+  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 18 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與四個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
   - `#line-ai-events` 維護 AI/FAQ 知識庫、引導動作、回答測試、回饋分析與模型設定。
 
 ### 5.2 手機審核中心、DB 版控 LIFF 設定與非市民入口契約
@@ -115,6 +115,15 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 - **`profile_update`**：管理客戶基本聯絡資料與退費相關資訊之申請；服務縣市（`city`）、詳細地址（`address`）與居住類型（`residence_type`）統一移至 **`order_update`** 處理，且 `order_update` 採純 URI 導向、依訂單鎖定狀態限制欄位修改。
 - 送出異動後產生紅綠 Diff 待審工單，須經工會人員於桌面端或 `mobile_admin` 明確核准後才透過 Client／Orders canonical writer 更新主資料；尚未建立正式排班與帳務鎖定前之 `OrderTerms` 更新可先反映至 `OrderTerms`，已鎖定訂單依既有變更管制阻擋。
+
+#### 月嫂更新個人資料
+
+- 已綁定的現役月嫂可由圖文選單左下角「我的資料」開啟本人申請表。查詢與送件以目前有效的 LINE 身分綁定取得 `staff_id`。
+- 申請欄位限手機、市話、分機、Email、縣市、郵遞區號、地址、緊急聯絡人姓名及電話，以及[接案偏好](24B_Staff_Roster_Case_Preference_Ownership_Clarification.md#21-可寫偏好-vs-只讀投影-vs-獨立能力-root)的兩項數字偏好和六項接案事實。
+- 銀行異動限更換收款帳戶。原帳號於月嫂表單只顯示末四碼，新資料包括銀行代碼、分行代碼與帳號。通知只提供待審摘要與審核入口。
+- 送件沿用[需求調查的 Redis 待審機制](17B_Case_Import與非市民Redis待審正式規格.md#32-核准前問卷不得進-mysql-與獨立-redis-7-架構reg-boundaryreg-redisreg-expiry)，以月嫂資料異動專用的 Redis 鍵與存取範圍保存待審內容。核准前申請內容不寫入 MySQL；待審查詢與通知摘要以申請編號辨識，同一核准操作以原操作識別及正式寫入回執核對結果。
+- 送出成功時保存待審申請，月嫂端顯示待審狀態。提醒只出現在後台「通知事項」，由有審核權限的工會人員開啟對應申請。此流程不發送 LINE 通知。工會人員核對異動前後資料後核准或退回。核准才經各欄位既有的正式寫入流程更新主資料；退回、權限不足或資料版本衝突時，主資料不變。
+- 同一次送件的所有異動屬於同一張申請，工會一次核准或退回整張。核准時，各正式寫入流程在同一筆 MySQL 交易內鎖定並重新核對來源資料版本，全部成功才提交。任一異動驗證失敗或版本衝突時，整筆交易回滾。正式提交後，才將 Redis 申請標為已核准並清除暫存的完整申請內容。
 
 ## 6. Flex 條件協調、`feedback` 與繳款通知契約（`LINE-PAY-01`～`08`）
 

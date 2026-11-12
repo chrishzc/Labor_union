@@ -17,6 +17,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 ## Implementation
 - Binding reminder sources `customer_binding` / `staff_binding` reuse LINE Identity's bounded owner query and binding-read capability. Desktop and mobile expose manual telephone/copy actions only; no new notification state or outbound task.
 - `api/routes/notification_tasks.py`、`api/schemas/notification_tasks.py` — 桌面與 LIFF 共用逐來源唯讀 projection、allowlisted catalog 及 bounded cursor；每次請求只讀原 owner，不新增 inbox／read state。來源失敗明示，來源原分頁保留；搜尋明示只限已載入事項。同一客服聯絡需求使用同一 ticket identity，不重複列入推薦與客服事項。
+- 月嫂資料異動只列於桌面「通知事項」，唯讀查詢 Staff 申請的 Redis 待審摘要，從單筆連結開啟月嫂名冊審核；不建立 LINE 寄送工作。
 - `api/routes/notification_task_actions.py` — session／LINE capability 薄轉接原訂金、資訊回覆、條件審核、重新詢問、登記與 delivery command；runtime/query 改為 authenticated 唯讀系統摘要，舊 target command 由原 owner 回退役錯誤；原 owner 擁有 fresh check、冪等、receipt 及 outer commit。LIFF 不接受桌面 Session。
 - `ui_react/src/pages/NotificationTasksPreviewPage.tsx`、`ui_react/src/pages/NotificationTasksPreviewPage.css`、`ui_react/src/api/line_notifications/notification_tasks_client.ts` — 正式通知事項查詢、來源分頁、寄送紀錄、同案工作區入口及缺綁定修復入口；沒有範例資料 fallback。
 - `ui_react/src/components/NotificationTaskActions.tsx` — 桌面通知僅提供正式作業深連結與客戶／月嫂綁定、人工建群三類指引。服務登記、資料異動、資訊／條件協調、開工／順延／代班、寄送異常、通知建立異常各到 owning 工作面，攜帶單筆 identity；不在通知頁重複操作。客服及已有工單推薦聯絡需求仍接客服頁 `ticket_q`，對象姓名缺值顯示「未具名使用者」。

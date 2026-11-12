@@ -15,7 +15,10 @@ from domains.line.configuration import (
 from domains.line.canonical_payload import validate_canonical_line_payload_json
 from domains.line.configuration import LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
-from domains.line.rich_menu_draft import normalize_rich_menu_draft
+from domains.line.rich_menu_draft import (
+    normalize_rich_menu_draft,
+    project_saved_staff_menu,
+)
 from domains.line.rich_menu import LineRichMenuPublicationStatus
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -115,7 +118,9 @@ class LineConfigurationApplication:
         require_line_capability(actor, LineCapability.CONFIG_MANAGE)
         with self._unit_of_work_factory() as unit_of_work:
             snapshot = unit_of_work.configurations.get(LineConfigurationKind.RICH_MENUS)
-        definition = normalize_rich_menu_draft(json.loads(snapshot.definition_json))
+        definition = normalize_rich_menu_draft(
+            project_saved_staff_menu(json.loads(snapshot.definition_json))
+        )
         return LineConfigurationSnapshot(
             snapshot.kind,
             snapshot.revision,
@@ -135,7 +140,9 @@ class LineConfigurationApplication:
             publications = unit_of_work.rich_menu_publications.list_for_configuration_revision(
                 snapshot.revision
             )
-        definition = normalize_rich_menu_draft(json.loads(snapshot.definition_json))
+        definition = normalize_rich_menu_draft(
+            project_saved_staff_menu(json.loads(snapshot.definition_json))
+        )
         normalized_snapshot = LineConfigurationSnapshot(
             snapshot.kind,
             snapshot.revision,

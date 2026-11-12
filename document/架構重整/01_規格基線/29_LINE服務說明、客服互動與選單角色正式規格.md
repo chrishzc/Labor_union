@@ -41,7 +41,7 @@
 |---|---|---|---|
 | `default_menu` | `visitor`（未綁定訪客／待審新客） | `預約與登記`、`月嫂認證`、`常見問答`、`聯絡專人` | 預約與登記 → Gateway LIFF；月嫂認證 → `staff_binding` LIFF；常見問答 → `?target=ai_assistant`；聯絡專人 → Postback 明確呼叫專員 |
 | `customer_menu` | `customer`（已綁定正式產婦／客戶） | `改個人資料`、`改訂單內容`、`常見問答`、`聯絡專人` | 改個人資料 → `profile_update` LIFF；改訂單內容 → `order_update` LIFF；常見問答 → `?target=ai_assistant`；聯絡專人 → Postback 明確呼叫專員 |
-| `staff_menu` | `staff`（已綁定在職月嫂） | `我的案件`、`班表與請假`、`聯絡工會人員`、`薪資明細` | 我的案件 → `staff_order_search` LIFF；班表與請假 → `staff_schedule` LIFF；聯絡工會人員 → Postback 專員聯繫；薪資明細 → `staff_payout` LIFF（※ **已永久移除「寶寶日誌」按鈕**） |
+| `staff_menu` | `staff`（已綁定在職月嫂） | `我的訂單`、`我的排班`、`我的資料`、`我的薪資` | 我的訂單 → `staff_order_search` LIFF；我的排班 → `staff_schedule` LIFF；我的資料 → [月嫂更新個人資料](20_LINE客服與月嫂自助服務正式規格.md#月嫂更新個人資料)；我的薪資 → `staff_payout` LIFF |
 | `union_staff_menu` | `union_staff`（已綁定工會後台人員） | `待辦工作台`、`客服中心`、`狀態追蹤`、`營運摘要` | 分別開啟 `line-mobile-admin` 對應視圖：`staff_review`、`customer_service`、`order_tracking`、`dashboard` |
 
 - **雙角色與切換規則**：月嫂同時以產婦身分申請服務並完成二次驗證時，可於專用雙頁籤選單（`staff_customer_menu`）在「月嫂工作」與「我的月子」間切換視圖；當所屬產婦案件全數達到終結狀態（取消／完工結案歸檔）後，依 `R1-LIFECYCLE` 由 Orders closure outbox 驅動 LINE Identity 自動恢復為單一 `staff_menu`。

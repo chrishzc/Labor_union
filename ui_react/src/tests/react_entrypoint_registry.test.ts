@@ -28,6 +28,7 @@ const LIFF_ASSETS = [
   ['profile_update.html', '修改個人資料'], ['order_update.html', '申請訂單異動'],
   ['candidate_contact_customer.html', '媒合條件協調'], ['staff_order_search.html', '我的案件'],
   ['staff_schedule.html', '班表與請假'],
+  ['staff_profile_update.html', '更新個人資料'],
   ['staff_payout.html', '薪資與付款紀錄'], ['candidate_contact.html', '接案回覆'],
   ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],
   ['mobile_admin.html · 客服中心', '客服中心'], ['mobile_admin.html · 狀態追蹤', '訂單進度'],
@@ -126,6 +127,7 @@ describe('React entrypoint registry', () => {
         'candidate_contact_customer.html',
         'staff_order_search.html',
         'staff_schedule.html',
+        'staff_profile_update.html',
         'staff_payout.html',
         'candidate_contact.html',
         'identity.html',
@@ -196,6 +198,17 @@ describe('React entrypoint registry', () => {
     expect(screen.getByText(/必須由客戶收到的案件協調卡帶入專屬識別碼/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /正式 LIFF 入口|安全展示頁/ })).not.toBeInTheDocument();
 
+    fireEvent.click(liffAsset('staff_profile_update.html'));
+    const staffProfilePreview = within(screen.getByRole('region', { name: '所選項目預覽' }));
+    expect(staffProfilePreview.getByRole('group', { name: '聯絡方式、地址與緊急聯絡' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('group', { name: '更換收款帳戶' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('group', { name: '接案偏好' })).toBeInTheDocument();
+    expect(staffProfilePreview.getByRole('button', { name: '送出整張申請' })).toBeDisabled();
+    expect(staffProfilePreview.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-staff-profile-update',
+    );
+
     fireEvent.click(liffAsset('candidate_contact.html'));
     expect(screen.getByText('候選月嫂案件回覆')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
@@ -264,7 +277,7 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'staff_order_search.html', 'staff_schedule.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
+      'staff_order_search.html', 'staff_schedule.html', 'staff_profile_update.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
     ].sort()));
   });
 

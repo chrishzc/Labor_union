@@ -68,6 +68,15 @@ class StaffCasePreferenceManualWorkflow:
         )
 
     def apply(self, staff_id: int, proposed: Mapping[str, object], request: CasePreferenceManualApplyRequest) -> CasePreferenceManualReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self.apply_in_current_uow(
+                staff_id, proposed, request,
+            )
+            unit_of_work.commit()
+        return result
+
+    def apply_in_current_uow(self, staff_id: int, proposed: Mapping[str, object], request: CasePreferenceManualApplyRequest) -> CasePreferenceManualReceipt:
+        """Apply relations using the caller's transaction."""
         after = normalize_relations(proposed)
         command_fingerprint = fingerprint_payload({
             "actor": request.actor.actor_id, "aggregate_identity": str(staff_id),
@@ -77,42 +86,39 @@ class StaffCasePreferenceManualWorkflow:
             "expected_snapshot_fingerprint": request.expected_snapshot_fingerprint.value,
             "preview_fingerprint": request.preview_fingerprint.value,
         })
-        with self._unit_of_work_factory() as unit_of_work:
-            # The parent row is the aggregate lock; relation-row locks follow it.
-            self._repository.lock_staff(staff_id)
-            replay = self._repository.find_receipt(request.idempotency_key, for_update=True)
-            if replay is not None:
-                if str(replay["request_fingerprint"]) != command_fingerprint.value:
-                    raise CasePreferenceManualError("staff_case_preference_idempotency_conflict")
-                unit_of_work.commit()
-                return _receipt_from_result(replay["result"], request.idempotency_key, replayed=True)
-            fresh = normalize_relations(self._repository.load_relations(staff_id, for_update=True))
-            fresh_snapshot = snapshot_fingerprint(staff_id, fresh)
-            if fresh_snapshot != request.expected_snapshot_fingerprint:
-                raise CasePreferenceManualError("staff_case_preference_stale_snapshot")
-            expected_preview = preview_fingerprint(staff_id, fresh, after, fresh_snapshot)
-            if expected_preview != request.preview_fingerprint:
-                raise CasePreferenceManualError("staff_case_preference_stale_preview")
-            validate_proposed_relations(fresh, after)
-            self._repository.replace_relations(staff_id, after, before=fresh)
-            persisted = normalize_relations(self._repository.load_relations(staff_id, for_update=True))
-            if persisted != after:
-                raise CasePreferenceManualError("staff_case_preference_persisted_mismatch")
-            result = {
-                "staff_id": staff_id,
-                "relations": {key: [item.canonical_payload() for item in persisted[key]] for key in RELATION_KEYS},
-                "snapshot_fingerprint": snapshot_fingerprint(staff_id, persisted).value,
-                "preview_fingerprint": request.preview_fingerprint.value,
-                "idempotency_key": request.idempotency_key.value,
-                "replayed": False,
-            }
-            self._repository.save_receipt(
-                key=request.idempotency_key, request_fingerprint=command_fingerprint,
-                preview_fingerprint=request.preview_fingerprint, actor=request.actor.actor_id,
-                reason=request.reason.strip(), result=result,
-            )
-            unit_of_work.commit()
-            return _receipt_from_result(result, request.idempotency_key, replayed=False)
+        # The parent row is the aggregate lock; relation-row locks follow it.
+        self._repository.lock_staff(staff_id)
+        replay = self._repository.find_receipt(request.idempotency_key, for_update=True)
+        if replay is not None:
+            if str(replay["request_fingerprint"]) != command_fingerprint.value:
+                raise CasePreferenceManualError("staff_case_preference_idempotency_conflict")
+            return _receipt_from_result(replay["result"], request.idempotency_key, replayed=True)
+        fresh = normalize_relations(self._repository.load_relations(staff_id, for_update=True))
+        fresh_snapshot = snapshot_fingerprint(staff_id, fresh)
+        if fresh_snapshot != request.expected_snapshot_fingerprint:
+            raise CasePreferenceManualError("staff_case_preference_stale_snapshot")
+        expected_preview = preview_fingerprint(staff_id, fresh, after, fresh_snapshot)
+        if expected_preview != request.preview_fingerprint:
+            raise CasePreferenceManualError("staff_case_preference_stale_preview")
+        validate_proposed_relations(fresh, after)
+        self._repository.replace_relations(staff_id, after, before=fresh)
+        persisted = normalize_relations(self._repository.load_relations(staff_id, for_update=True))
+        if persisted != after:
+            raise CasePreferenceManualError("staff_case_preference_persisted_mismatch")
+        result = {
+            "staff_id": staff_id,
+            "relations": {key: [item.canonical_payload() for item in persisted[key]] for key in RELATION_KEYS},
+            "snapshot_fingerprint": snapshot_fingerprint(staff_id, persisted).value,
+            "preview_fingerprint": request.preview_fingerprint.value,
+            "idempotency_key": request.idempotency_key.value,
+            "replayed": False,
+        }
+        self._repository.save_receipt(
+            key=request.idempotency_key, request_fingerprint=command_fingerprint,
+            preview_fingerprint=request.preview_fingerprint, actor=request.actor.actor_id,
+            reason=request.reason.strip(), result=result,
+        )
+        return _receipt_from_result(result, request.idempotency_key, replayed=False)
 
     def _require_staff(self, staff_id: int) -> None:
         if not self._repository.staff_exists(staff_id):

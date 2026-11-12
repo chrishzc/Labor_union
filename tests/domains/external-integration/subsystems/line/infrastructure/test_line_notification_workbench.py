@@ -186,7 +186,9 @@ def test_pending_manual_replay_is_a_typed_state_conflict(monkeypatch):
     assert conflict.value.detail['error']['code']=='notification_replay_in_progress'
 
 
-@pytest.mark.parametrize('source',[source for source in NotificationSource if source not in {NotificationSource.LEAVE, NotificationSource.LOG}])
+@pytest.mark.parametrize('source',[source for source in NotificationSource if source not in {
+    NotificationSource.LEAVE, NotificationSource.LOG, NotificationSource.STAFF_PROFILE,
+}])
 def test_desktop_and_verified_liff_use_same_projection_and_cursor(monkeypatch,source):
     cursor='original-owner-cursor' if source == NotificationSource.NOTIFICATION_FAILURE else 1
     calls=[]
@@ -205,6 +207,16 @@ def test_desktop_and_verified_liff_use_same_projection_and_cursor(monkeypatch,so
     assert desktop.json()['data']==mobile.json()['data']
     assert calls==[(source,cursor,1),(source,cursor,1)]
     assert verified==[('synthetic-verified-token',query.SOURCES[source][2])]
+
+
+def test_staff_profile_review_reminder_is_desktop_only(monkeypatch):
+    monkeypatch.setattr(query, 'has_required_capability', lambda principal, cap: cap == 'data_browser.write')
+    source = NotificationSource.STAFF_PROFILE
+    assert source in {item.source for item in query._catalog(PRINCIPAL)}
+    assert source not in {item.source for item in query._catalog(PRINCIPAL, mobile=True)}
+    with pytest.raises(HTTPException) as failure:
+        query.mobile_source_page(source, query.MobileNotificationQuery(line_id_token='synthetic'))
+    assert failure.value.status_code == 404
 
 
 def test_liff_unbound_admin_stops_before_any_pending_query(monkeypatch):

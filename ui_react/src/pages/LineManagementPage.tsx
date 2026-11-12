@@ -978,7 +978,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       let Icon = MapPin;
                       if (label.includes('營運') || label.includes('摘要') || label.includes('報表')) Icon = FileBarChart;
                       else if (label.includes('客服') || label.includes('諮詢') || label.includes('聯絡') || label.includes('專人')) Icon = Headphones;
-                      else if (label.includes('改') || label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
+                      else if (label === '我的資料' || label.includes('改') || label.includes('修改') || label.includes('異動')) Icon = FilePenLine;
                       else if (label.includes('月嫂')) Icon = Baby;
                       else if (label.includes('預約') || label.includes('登記')) Icon = FileText;
                       else if (label.includes('說明') || label.includes('FAQ') || label.includes('常見問答') || label.includes('問答')) Icon = Info;

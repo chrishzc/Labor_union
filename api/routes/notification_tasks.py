@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin, admin_actor_context, has_required_capability
 from api.dependencies.line_identity import get_line_identity_application, get_line_identity_review_application
 from api.dependencies.client_profile import get_client_profile_application
+from api.dependencies.staff_profile_change import staff_profile_change_staging
 from api.dependencies.line_runtime import get_line_order_group_query_application, get_line_delivery_task_admin_application
 from api.dependencies.service_start import get_service_start_application
 from api.dependencies.line_deposit import get_deposit_notifications
@@ -46,6 +47,7 @@ SOURCES = {
     Source.CUSTOMER_BINDING: ('客戶綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.STAFF_BINDING: ('月嫂綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.PROFILE: ('客戶資料異動', 'review', Cap.CUSTOMER_SERVICE_READ),
+    Source.STAFF_PROFILE: ('月嫂資料異動', 'review', 'data_browser.write'),
     Source.INFORMATION: ('確認資訊與調整條件', 'review', Cap.MATCHING_READ),
     Source.FOLLOWUP: ('月嫂回覆待跟進', 'review', Cap.MATCHING_READ),
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
@@ -63,12 +65,13 @@ SOURCES = {
 
 def _allowed(principal, source):
     capability = SOURCES[source][2]
-    return capability is None or has_required_capability(principal, capability.value)
+    return capability is None or has_required_capability(principal, str(capability))
 
 
-def _catalog(principal):
+def _catalog(principal, *, mobile=False):
     return [NotificationSourceView(source=key, label=value[0], group=value[1])
-            for key, value in SOURCES.items() if key != Source.RUNTIME and _allowed(principal, key)]
+            for key, value in SOURCES.items()
+            if key != Source.RUNTIME and not (mobile and key == Source.STAFF_PROFILE) and _allowed(principal, key)]
 
 
 def _item(source, identity, title, summary, reason, **kwargs):
@@ -138,6 +141,12 @@ def _read_source(source, cursor, principal):
                        reference_id=int(r.subject_reference), case_no=r.case_no, person=r.subject_name,
                        tag='待人工提醒', recipient=r.phone,
                        message=f'請加入工會 LINE 官方帳號並完成{label}身分綁定。{guidance}') for r in result.items]
+    elif source == Source.STAFF_PROFILE:
+        rows, next_cursor = staff_profile_change_staging().pending(cursor, SIZE)
+        items = [_item(source, row['id'], '月嫂資料異動待審核', '月嫂已提出資料異動。',
+                       '請核對異動前後內容。', reference_id=row['id'],
+                       person=f"月嫂 #{row['staff_id']}", expected_version=row['version']) for row in rows]
+        return NotificationPage(items=items, next_cursor=next_cursor)
     elif source == Source.PROFILE:
         rows, total = get_client_profile_application().list_requests(status='pending', page=page, page_size=SIZE)
         items = [_item(source, r.request_id, '客戶資料異動待審核', '客戶已提出資料異動。', r.reason or '請核對異動前後內容。',
@@ -264,6 +273,9 @@ def source_page(source: Source, cursor: NotificationCursor=0, principal=Depends(
 @router.post('/api/v1/line/mobile-admin/notification-tasks/{source}', response_model=BaseResponse[NotificationPage])
 def mobile_source_page(source: Source, body: MobileNotificationQuery):
     from api.routes.line_mobile_admin import _mobile_admin_context
+    if source == Source.STAFF_PROFILE:
+        raise typed_http_error(404, 'not_found', 'notification_source_not_found',
+                               '請由後台通知事項處理。', 'notification-workbench')
     cap = Cap.REVIEW_READ if source == Source.LEAVE else (Cap.ORDER_GROUP_READ if source == Source.LOG else SOURCES[source][2])
     principal, _ = _mobile_admin_context(body.line_id_token, cap)
     return BaseResponse(data=query_source(source, body.cursor, principal))
@@ -273,7 +285,7 @@ def mobile_source_page(source: Source, body: MobileNotificationQuery):
 def mobile_source_catalog(body: MobileNotificationQuery):
     from api.routes.line_mobile_admin import _mobile_admin_context
     principal, _ = _mobile_admin_context(body.line_id_token)
-    return BaseResponse(data=_catalog(principal))
+    return BaseResponse(data=_catalog(principal, mobile=True))
 
 
 def failure_readback(unit, projection):

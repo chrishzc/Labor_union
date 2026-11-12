@@ -18,6 +18,12 @@
   - `subsystems/staff/profile_query.py`
   - `domains/staff/profile.py`
   - `subsystems/staff/profile_workflow.py`
+  - `subsystems/staff/profile_change_approval.py` — applies the reviewed Staff profile, bank and preference changes through one caller-owned transaction.
+  - `api/dependencies/staff_profile_change.py`
+  - `api/routes/staff_profile_change.py`
+  - `infrastructure/redis/staff_profile_change_staging.py`
+  - `line/static/staff_profile_update.html`
+  - `ui_react/src/components/StaffProfileChangeReview.tsx`
   - `infrastructure/mysql/staff_profile_mutation_repository.py`
   - `domains/staff/bank_account.py`
   - `subsystems/staff/bank_account_workflow.py`

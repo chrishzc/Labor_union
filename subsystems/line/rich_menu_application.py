@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Callable
 
+from domains.line.rich_menu_draft import project_saved_staff_menu
 from domains.line.configuration import LineConfigurationKind
 from domains.line.identities import LineRichMenuPublicationId
 from shared_kernel.fingerprints import fingerprint_payload
@@ -136,7 +137,7 @@ class LineRichMenuApplication:
         snapshot = unit_of_work.configurations.get(LineConfigurationKind.RICH_MENUS)
         if snapshot.revision != command.configuration_revision:
             raise RuntimeError("line_rich_menu_configuration_revision_conflict")
-        definition = configuration_definition(snapshot)
+        definition = project_saved_staff_menu(configuration_definition(snapshot))
         menu = next(
             (
                 item

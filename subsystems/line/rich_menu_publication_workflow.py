@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 import pymysql
 
+from domains.line.rich_menu_draft import project_saved_staff_menu
 from domains.line.canonical_payload import canonical_line_payload_json
 from subsystems.line.rich_menu_models import LineMenusConfig, RichMenuDefinition
 from domains.line.configuration import LineConfigurationKind
@@ -106,7 +107,7 @@ def _current_menu_configuration() -> tuple[LineMenusConfig, str]:
             LineConfigurationKind.RICH_MENUS
         )
     configuration = LineMenusConfig.model_validate(
-        configuration_definition(configuration_snapshot)
+        project_saved_staff_menu(configuration_definition(configuration_snapshot))
     )
     return configuration, str(configuration_snapshot.revision.value)
 
@@ -350,7 +351,7 @@ def _current_publication_candidate(
         configuration_snapshot = unit_of_work.configurations.get(
             LineConfigurationKind.RICH_MENUS
         )
-    definition = configuration_definition(configuration_snapshot)
+    definition = project_saved_staff_menu(configuration_definition(configuration_snapshot))
     menu = next(
         (
             item
@@ -415,7 +416,7 @@ def _locked_menu(unit_of_work, command: QueueLineRichMenuPublicationCommand):
             "Rich Menu 設定已變更，請重新預覽",
             code="line_rich_menu_configuration_revision_conflict",
         )
-    definition = configuration_definition(snapshot)
+    definition = project_saved_staff_menu(configuration_definition(snapshot))
     menu = next(
         (
             item

@@ -102,6 +102,29 @@ class StaffBankAccountWorkflow:
         reason: str,
         correlation_id: CorrelationId,
     ) -> StaffBankAccountReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            result, replayed = self.apply_in_current_uow(
+                staff_id, raw_command, expected_version, preview_fingerprint,
+                idempotency_key, actor, reason, correlation_id,
+            )
+            if replayed:
+                fresh = self.query(staff_id)
+            unit_of_work.commit()
+        if not replayed:
+            fresh = self.query(staff_id)
+        return _receipt(result, preview_fingerprint, idempotency_key, replayed, fresh)
+
+    def apply_in_current_uow(
+        self,
+        staff_id: int,
+        raw_command: Mapping[str, object],
+        expected_version: ExpectedVersion,
+        preview_fingerprint: PreviewFingerprint,
+        idempotency_key: IdempotencyKey,
+        actor: ActorContext,
+        reason: str,
+        correlation_id: CorrelationId,
+    ) -> tuple[Mapping[str, Any], bool]:
         identity = _staff_id(staff_id)
         command = normalize_bank_command(raw_command)
         clean_reason = reason.strip()
@@ -114,53 +137,48 @@ class StaffBankAccountWorkflow:
             "actor": actor.actor_id,
             "reason": clean_reason,
         })
-        with self._unit_of_work_factory() as unit_of_work:
-            self._repository.claim(
-                staff_id=identity,
-                key=idempotency_key,
-                command_fingerprint=command_fingerprint,
-                correlation_id=correlation_id,
-            )
-            replay = self._repository.load_receipt(idempotency_key, for_update=True)
-            if replay is not None:
-                if str(replay["request_fingerprint"]) != command_fingerprint.value:
-                    raise StaffBankAccountConflict("idempotency_mismatch")
-                fresh = _snapshot(self._require(self._repository.load(identity, for_update=False)))
-                unit_of_work.commit()
-                return _receipt(replay["result"], preview_fingerprint, idempotency_key, True, fresh)
-            snapshot = _snapshot(self._require(self._repository.load(identity, for_update=True)))
-            if snapshot.version != expected_version.value:
-                raise StaffBankAccountConflict("staff_bank_stale_version")
-            candidate, target_before, target_after = self._candidate(snapshot, command, lock_collision=True)
-            expected_preview = _preview(snapshot, command, candidate, target_before, target_after)
-            if expected_preview.preview_fingerprint != preview_fingerprint:
-                raise StaffBankAccountConflict("staff_bank_stale_preview")
-            account_id, resulting_version = self._repository.persist(
-                snapshot=snapshot,
-                command=command,
-                candidate=candidate,
-                actor=actor,
-                reason=clean_reason,
-                key=idempotency_key,
-                correlation_id=correlation_id,
-            )
-            result = {
-                "staff_id": identity,
-                "account_id": account_id,
-                "operation": command.operation,
-                "resulting_version": resulting_version,
-            }
-            self._repository.save_receipt(
-                key=idempotency_key,
-                command_fingerprint=command_fingerprint,
-                preview_fingerprint=preview_fingerprint,
-                actor=actor,
-                reason=clean_reason,
-                result=result,
-            )
-            unit_of_work.commit()
-            fresh = _snapshot(self._require(self._repository.load(identity, for_update=False)))
-            return _receipt(result, preview_fingerprint, idempotency_key, False, fresh)
+        self._repository.claim(
+            staff_id=identity,
+            key=idempotency_key,
+            command_fingerprint=command_fingerprint,
+            correlation_id=correlation_id,
+        )
+        replay = self._repository.load_receipt(idempotency_key, for_update=True)
+        if replay is not None:
+            if str(replay["request_fingerprint"]) != command_fingerprint.value:
+                raise StaffBankAccountConflict("idempotency_mismatch")
+            return replay["result"], True
+        snapshot = _snapshot(self._require(self._repository.load(identity, for_update=True)))
+        if snapshot.version != expected_version.value:
+            raise StaffBankAccountConflict("staff_bank_stale_version")
+        candidate, target_before, target_after = self._candidate(snapshot, command, lock_collision=True)
+        expected_preview = _preview(snapshot, command, candidate, target_before, target_after)
+        if expected_preview.preview_fingerprint != preview_fingerprint:
+            raise StaffBankAccountConflict("staff_bank_stale_preview")
+        account_id, resulting_version = self._repository.persist(
+            snapshot=snapshot,
+            command=command,
+            candidate=candidate,
+            actor=actor,
+            reason=clean_reason,
+            key=idempotency_key,
+            correlation_id=correlation_id,
+        )
+        result = {
+            "staff_id": identity,
+            "account_id": account_id,
+            "operation": command.operation,
+            "resulting_version": resulting_version,
+        }
+        self._repository.save_receipt(
+            key=idempotency_key,
+            command_fingerprint=command_fingerprint,
+            preview_fingerprint=preview_fingerprint,
+            actor=actor,
+            reason=clean_reason,
+            result=result,
+        )
+        return result, False
 
     def _candidate(self, snapshot: StaffBankAccountSnapshot, command: StaffBankAccountCommand, *, lock_collision: bool) -> tuple[StaffBankAccountSnapshot, StaffBankAccountFact | None, StaffBankAccountFact | None]:
         accounts = list(snapshot.accounts)

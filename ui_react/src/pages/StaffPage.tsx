@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
 import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
+import { StaffProfileChangeReview } from '../components/StaffProfileChangeReview';
 import { StaffQualificationEditor } from '../components/StaffQualificationEditor';
 import {
   loadAllStaffDirectoryPages,
@@ -410,7 +411,7 @@ function isEligibleEndPauseBlock(
     && block.endDate === null;
 }
 
-export const StaffPage: React.FC = () => {
+const StaffRosterPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [rosterLifecycle, setRosterLifecycle] = useState<'active' | 'retired'>('active');
@@ -1638,6 +1639,23 @@ export const StaffPage: React.FC = () => {
       </Drawer>
     </div>
   );
+};
+
+function requestedProfileChange(): number | null {
+  const query = window.location.hash.split('?')[1] ?? '';
+  const value = new URLSearchParams(query).get('profile_request');
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+export const StaffPage: React.FC = () => {
+  const [requestId, setRequestId] = useState(requestedProfileChange);
+  useEffect(() => {
+    const update = () => setRequestId(requestedProfileChange());
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  return requestId === null ? <StaffRosterPage /> : <StaffProfileChangeReview key={requestId} requestId={requestId} />;
 };
 
 export default StaffPage;
