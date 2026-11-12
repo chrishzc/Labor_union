@@ -38,6 +38,7 @@ class ClientBeClassManualRowView(BaseModel):
 class ClientBeClassCandidateView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     case_no: str
+    client_id: int
     name: str
     masked_phone: str
     city: str | None

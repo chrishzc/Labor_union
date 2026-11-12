@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-registry-save-receipts-v1",
+  "release_id": "labor-union-validation-schema-client-beclass-query-case-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,16 +8,16 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 195,
-    "ordered_digest_sha256": "99ecc7b2ae6e202393c584170fd19bfe4081e239585a57facd400fb4bd7f357b",
-    "terminal_artifact": "1072_case_architecture_bootstrap_reason_optional.sql"
+    "expected_count": 196,
+    "ordered_digest_sha256": "2ea2850808b6713d96dd7b5addd0324217caab7b899d06cd5410a375036ab0fe",
+    "terminal_artifact": "1073_client_beclass_query_case_uniqueness.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "849e055447ab9bcc7abab6598c30e3a2de3188ec2d90725902faab2e3f589fd4"
+    "sha256": "dd811c24ab1ec654a0c7b985d3bedb47dac2eb0ca7645c38a810954306bc04b9"
   },
   "full_release": {
-    "path": "db/releases/labor_union_validation_schema_registry_save_receipts_v1.sql",
+    "path": "db/releases/labor_union_validation_schema_client_beclass_query_case_v1.sql",
     "database_token": "__LU_TEST_DATABASE__",
     "generation": "base_schema_then_ordered_schema_parts"
   },

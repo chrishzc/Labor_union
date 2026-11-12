@@ -20,6 +20,7 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
   const shared = { name: '測試客戶', masked_phone: '09•••••678', city: '新竹市' };
   const pairings = [
     { source_row: 2, case_no: 'HCM-B' },
+    { source_row: 2, case_no: 'HCM-C' },
     { source_row: 3, case_no: 'HCM-A' },
     { source_row: 4, case_no: 'HCM-D' },
   ];
@@ -35,10 +36,10 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
       existing_conflict_count: 0, existing_source_count: 0, preview_fingerprint: previewFingerprint,
       manual_rows: queryNos.map((query_no, index) => ({
         ...shared, source_row: index + 2, query_no, submitted_at: '2026-08-02 10:00',
-        case_nos: index === 0 ? ['HCM-B', 'HCM-C'] : index === 1 ? ['HCM-A', 'HCM-B'] : ['HCM-D', 'HCM-E'],
+        case_nos: index === 0 ? ['HCM-B', 'HCM-C', 'HCM-X'] : index === 1 ? ['HCM-A', 'HCM-B'] : ['HCM-D', 'HCM-E'],
       })),
-      candidates: ['HCM-A', 'HCM-B', 'HCM-C', 'HCM-D', 'HCM-E'].map((case_no, index) => ({
-        ...shared, case_no, created_at: `2026-08-0${index + 1} 09:30`,
+      candidates: ['HCM-A', 'HCM-B', 'HCM-C', 'HCM-D', 'HCM-E', 'HCM-X'].map((case_no, index) => ({
+        ...shared, case_no, client_id: index < 3 ? 7 : 8, created_at: `2026-08-0${index + 1} 09:30`,
         start_date: `2026-09-0${index + 1}`,
       })),
     }))
@@ -46,7 +47,7 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
       source_content_digest: snapshot.sha256, source_row_count: 3, created_count: 3,
       exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0,
       existing_source_count: 0, replayed_workbook: false,
-      manual_bindings: pairings.map((pairing, index) => ({ ...pairing, query_no: queryNos[index] })),
+      manual_bindings: pairings.map(pairing => ({ ...pairing, query_no: queryNos[pairing.source_row - 2] })),
     }));
   vi.stubGlobal('fetch', request);
   const { container } = render(<DataImportPage />);
@@ -68,10 +69,17 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
   expect(cases.getByRole('button', { name: /HCM-B/ })).toHaveTextContent('預計服務日期 2026-09-02');
   fireEvent.click(sources.getByRole('button', { name: /BC-FIRST/ }));
   fireEvent.click(cases.getByRole('button', { name: /HCM-B/ }));
+  expect(cases.getByRole('button', { name: /HCM-X/ })).toHaveAttribute('aria-disabled', 'true');
+  const extraCase = cases.getByRole('button', { name: /HCM-C/ });
+  fireEvent.click(extraCase);
+  expect(extraCase).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(extraCase);
+  expect(extraCase).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(extraCase);
   fireEvent.click(sources.getByRole('button', { name: /BC-SECOND/ }));
   expect(cases.getByRole('button', { name: /HCM-B/ })).toHaveAttribute('aria-disabled', 'true');
   fireEvent.click(cases.getByRole('button', { name: /HCM-A/ }));
-  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(2);
+  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(3);
   expect(check).toBeDisabled();
   fireEvent.click(drawer.getByRole('button', { name: '下一組待配對' }));
   expect(cases.queryByRole('button', { name: /HCM-B/ })).not.toBeInTheDocument();
@@ -82,17 +90,19 @@ it('groups shared cases in a drawer, retains links across groups and closing, an
   expect(screen.getByText(/2 組 · 已配對 3/)).toBeVisible();
   fireEvent.click(openDrawer);
   fireEvent.change(screen.getByRole('combobox', { name: '配對組別' }), { target: { value: '0' } });
-  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(2);
+  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: '檢查配對' }));
   expect(request).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/第 2 列 · BC-FIRST/)).toHaveTextContent('HCM-B');
+  expect(screen.getByText(/第 2 列 · BC-FIRST/)).toHaveTextContent('HCM-C');
   fireEvent.click(screen.getByRole('button', { name: '返回修改' }));
-  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(2);
+  expect(container.querySelectorAll('.beclass-pairing-wires path')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: '檢查配對' }));
   fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
 
-  expect(await screen.findByText('人工綁定明細（3 筆）')).toBeVisible();
-  expect(screen.getByRole('row', { name: /BC-FIRST/ })).toHaveTextContent('HCM-B');
+  expect(await screen.findByText('人工綁定明細（4 筆）')).toBeVisible();
+  expect(screen.getByRole('row', { name: /BC-FIRST.*HCM-B/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /BC-FIRST.*HCM-C/ })).toBeVisible();
   expect(screen.getByRole('row', { name: /BC-SECOND/ })).toHaveTextContent('HCM-A');
   expect(screen.getByRole('row', { name: /BC-THIRD/ })).toHaveTextContent('HCM-D');
   const applied = request.mock.calls[1][1].body as FormData;

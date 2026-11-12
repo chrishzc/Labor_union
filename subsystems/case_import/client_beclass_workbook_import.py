@@ -51,9 +51,7 @@ class ClientBeClassCaseCandidate:
     start_date: str | None
 
     def as_view(self) -> dict[str, object]:
-        view = asdict(self)
-        del view["client_id"]
-        return view
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,10 +181,10 @@ class ClientBeClassWorkbookImportRepositoryPort(Protocol):
     def available_case_candidates(self, name, phone, *, for_update: bool, case_no=None) -> tuple[ClientBeClassCaseCandidate, ...]: ...
     def claim_workbook(self, key, fingerprint, correlation_id) -> str: ...
     def claim_row(self, key, fingerprint, correlation_id) -> str: ...
-    def create_bound_source_if_absent(self, payload, client_case) -> int | None: ...
+    def create_bound_source_if_absent(self, payload, client_case, *, allow_additional_case: bool = False) -> int | None: ...
     def require_matching_client_root(self, receipt) -> None: ...
     def bound_case_no_for_root(self, root_id: int | None) -> str | None: ...
-    def bound_source_for_query(self, query_no: str): ...
+    def bound_sources_for_query(self, query_no: str): ...
     def bound_case_nos_for_workbook(self, digest: str) -> tuple[str, ...]: ...
     def save_row_receipt(self, *args) -> str | None: ...
     def save_workbook_receipt(
@@ -281,9 +279,12 @@ class ClientBeClassWorkbookImportService:
             raise ClientBeClassWorkbookUnavailable("client_beclass_workbook_coordinator_lock_timeout")
         try:
             workbook = _load_workbook(source_path)
-            selections = dict(manual_pairings or ())
-            if len(selections) != len(manual_pairings or ()) or len(set(selections.values())) != len(selections):
+            pairings = manual_pairings or ()
+            if len({case_no.casefold() for _, case_no in pairings}) != len(pairings):
                 raise ValueError("client_beclass_manual_pairings_not_unique")
+            selections: dict[int, list[str]] = {}
+            for row_number, case_no in pairings:
+                selections.setdefault(row_number, []).append(case_no)
             if selections and not selections.keys() <= {
                 row_number for row_number, row in workbook.rows if not validate_client_beclass_row(row)
             }:
@@ -293,7 +294,7 @@ class ClientBeClassWorkbookImportService:
                 request_fingerprint = fingerprint_payload({
                     "digest": workbook.digest,
                     "preview": supplied_preview,
-                    "pairings": sorted(selections.items()),
+                    "pairings": sorted(pairings),
                 }).value
             replay = self._stored_replay_and_reconcile(key, workbook.digest, request_fingerprint)
             if replay is not None:
@@ -347,46 +348,63 @@ class ClientBeClassWorkbookImportService:
         workbook: _Workbook,
         row_number: int,
         row: dict[str, Any],
-        case_no: str,
+        case_nos: list[str],
         actor: str,
         correlation_id: str,
         issues: list[ClientBeClassWorkbookRowIssue],
         bindings: list[ClientBeClassManualBinding],
     ) -> str:
         payload = _normalized_payload(row)
-        binding = ClientBeClassManualBinding(row_number, payload["query_no"], case_no)
-        fingerprint = fingerprint_payload({"source": payload, "case_no": case_no}).value
-        source_identity = f"{_source_identity(workbook.digest, row_number)}:manual:{fingerprint}"
+        selected_bindings = [
+            ClientBeClassManualBinding(row_number, payload["query_no"], case_no)
+            for case_no in sorted(case_nos)
+        ]
+        source_prefix = _source_identity(workbook.digest, row_number)
         with self._unit_of_work_factory() as unit_of_work:
-            stored = self._repository.load_row_receipt(source_identity)
-            if stored is not None:
-                _require_same_fingerprint(stored, fingerprint)
-                self._repository.require_matching_client_root(stored)
-                if self._repository.bound_case_no_for_root(stored["root_id"]) == case_no:
-                    bindings.append(binding)
-                    unit_of_work.commit()
-                    return "created"
-            elif self._repository.source_state(payload) == "absent":
+            pending = []
+            for binding in selected_bindings:
+                case_no = binding.case_no
+                fingerprint = fingerprint_payload({"source": payload, "case_no": case_no}).value
+                source_identity = f"{source_prefix}:manual:{fingerprint}"
+                stored = self._repository.load_row_receipt(source_identity)
+                if stored is not None:
+                    _require_same_fingerprint(stored, fingerprint)
+                    self._repository.require_matching_client_root(stored)
+                    if self._repository.bound_case_no_for_root(stored["root_id"]) == case_no:
+                        continue
+                    break
                 candidates = self._repository.available_case_candidates(
                     payload["name"], payload["phone"], case_no=case_no, for_update=True
                 )
-                if len(candidates) == 1:
-                    self._repository.claim_row(source_identity, fingerprint, correlation_id)
-                    root_id = self._repository.create_bound_source_if_absent(
-                        payload, {"id": candidates[0].client_id, "case_no": case_no}
-                    )
-                    if root_id is not None:
-                        self._reconciliation.reconcile(case_no)
-                        self._repository.save_row_receipt(
-                            source_identity, fingerprint, root_id, "created", None, actor
-                        )
-                        unit_of_work.commit()
-                        bindings.append(binding)
-                        return "created"
-            # No terminal row receipt for a stale choice. A fresh Preview can
-            # offer the remaining eligible cases for the same source row.
-            issues.append(_case_unavailable_issue(row_number, payload["query_no"]))
-            return "existing_conflict"
+                if len(candidates) != 1:
+                    break
+                pending.append((candidates[0], source_identity, fingerprint))
+            else:
+                if not pending or (
+                    len(pending) == len(selected_bindings)
+                    and len({item.client_id for item, _, _ in pending}) == 1
+                    and self._write_manual_bindings(payload, pending, actor, correlation_id)
+                ):
+                    unit_of_work.commit()
+                    bindings.extend(selected_bindings)
+                    return "created"
+        issues.append(_case_unavailable_issue(row_number, payload["query_no"]))
+        return "existing_conflict"
+
+    def _write_manual_bindings(self, payload, pending, actor, correlation_id) -> bool:
+        for index, (case, source_identity, fingerprint) in enumerate(pending):
+            self._repository.claim_row(source_identity, fingerprint, correlation_id)
+            root_id = self._repository.create_bound_source_if_absent(
+                payload, {"id": case.client_id, "case_no": case.case_no},
+                allow_additional_case=index > 0,
+            )
+            if root_id is None:
+                return False
+            self._reconciliation.reconcile(case.case_no)
+            self._repository.save_row_receipt(
+                source_identity, fingerprint, root_id, "created", None, actor
+            )
+        return True
 
     def _preview_row(
         self,
@@ -468,15 +486,15 @@ class ClientBeClassWorkbookImportService:
                 return "review_required"
             source_state = self._repository.source_state(payload)
             if source_state == "exact":
-                bound_source = self._repository.bound_source_for_query(
+                bound_sources = self._repository.bound_sources_for_query(
                     str(payload["query_no"])
                 )
-                if bound_source is not None:
+                for bound_source in bound_sources:
                     self._reconciliation.reconcile(bound_source["case_no"])
                 self._repository.save_row_receipt(
                     source_identity,
                     fingerprint,
-                    None if bound_source is None else bound_source["root_id"],
+                    bound_sources[0]["root_id"] if bound_sources else None,
                     "existing_source",
                     None,
                     actor,
@@ -527,10 +545,6 @@ class ClientBeClassWorkbookImportService:
                         "client_beclass_source_payload_conflict",
                     )
                 self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
-                if outcome == "existing_source":
-                    bound_source = self._repository.bound_source_for_query(
-                        str(payload["query_no"])
-                    )
                 unit_of_work.commit()
                 return outcome
             self._reconciliation.reconcile(str(bound_root["case_no"]))

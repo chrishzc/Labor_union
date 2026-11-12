@@ -6,13 +6,16 @@ Description: 驗證 Client BeClass temporary workbook 的 Preview、Apply、repl
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from openpyxl import Workbook
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pymysql.err import IntegrityError
 
 from api.routes import client_beclass_import as workbook_route
 from api.schemas.client_beclass_import import ClientBeClassWorkbookPreviewView, ClientBeClassWorkbookReceiptView
@@ -23,6 +26,9 @@ from subsystems.orders.terms_workflow import TermsWorkflowError
 
 from domains.orders.terms import OrderCookingRequirementFacts, OrderTerms, ServiceTimeTerms
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
+from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+from infrastructure.mysql.client_beclass_workbook_import_repository import ClientBeClassWorkbookImportRepository
+from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.identities import ExpectedVersion
 from shared_kernel.money import MoneyNTD
 from domains.case_import.client_beclass_binding import (
@@ -222,7 +228,7 @@ class _Repository:
     def claim_row(self, key, fingerprint, correlation):
         return "created"
 
-    def create_bound_source_if_absent(self, payload, client_case):
+    def create_bound_source_if_absent(self, payload, client_case, *, allow_additional_case=False):
         if payload["query_no"] == "EXISTING-1":
             return None
         self.created.append({**payload, "client_id": client_case["id"], "bound_case_no": client_case["case_no"]})
@@ -234,8 +240,8 @@ class _Repository:
     def bound_case_no_for_root(self, root_id):
         return "HCM-0007" if root_id is not None else None
 
-    def bound_source_for_query(self, query_no):
-        return {"root_id": 77, "case_no": "HCM-0007"}
+    def bound_sources_for_query(self, query_no):
+        return ({"root_id": 77, "case_no": "HCM-0007"},)
 
     def bound_case_nos_for_workbook(self, digest):
         del digest
@@ -524,6 +530,7 @@ class _ManualPairingRepository(_Repository):
         )
         self.claims = {}
         self.unavailable = set()
+        self.other_client_cases = set()
 
     def load_workbook_claim(self, key):
         return self.claims.get(key)
@@ -537,7 +544,8 @@ class _ManualPairingRepository(_Repository):
         unavailable = self.unavailable | {row["bound_case_no"] for row in self.created}
         return tuple(
             intake.ClientBeClassCaseCandidate(
-                number, 7, name, intake.mask_client_beclass_phone(phone), "新竹市",
+                number, 8 if number in self.other_client_cases else 7, name,
+                intake.mask_client_beclass_phone(phone), "新竹市",
                 f"2026-08-0{index} 09:30:00", f"2026-09-0{index}",
             )
             for index, number in enumerate(("HCM-A", "HCM-B", "HCM-C"), start=1)
@@ -652,3 +660,109 @@ def test_confirmed_pairings_resume_after_rows_commit_before_workbook_receipt(mon
     resumed = apply()
     assert len(repository.created) == resumed.created_count == 2
     assert [(item.source_row, item.case_no) for item in resumed.manual_bindings] == list(selections)
+
+
+@pytest.mark.parametrize("second_case", ["same_client", "occupied", "other_client"])
+def test_one_questionnaire_applies_to_two_cases_atomically(monkeypatch, second_case):
+    repository = _ManualPairingRepository()
+    service = _service(repository)
+    workbook = _workbook(_valid_row("BC-SHARED"))
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
+    selections = ((2, "HCM-A"), (2, "HCM-B"))
+    if second_case == "other_client":
+        repository.other_client_cases.add("HCM-B")
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    if second_case == "occupied":
+        repository.unavailable.add("HCM-B")
+
+    receipt = service.apply("ignored.xlsx", "shared-key", preview.preview_fingerprint, "admin", "corr",
+                            manual_pairings=selections)
+    if second_case != "same_client":
+        assert repository.created == []
+        assert receipt.existing_conflict_count == 1
+        assert receipt.manual_bindings == ()
+        return
+
+    assert receipt.created_count == receipt.source_row_count == 1
+    assert [(item.source_row, item.case_no) for item in receipt.manual_bindings] == list(selections)
+    replay = service.apply("ignored.xlsx", "shared-key", preview.preview_fingerprint, "admin", "corr",
+                           manual_pairings=tuple(reversed(selections)))
+    assert replay.replayed_workbook and replay.manual_bindings == receipt.manual_bindings
+    assert [(row["query_no"], row["bound_case_no"]) for row in repository.created] == [
+        ("BC-SHARED", "HCM-A"), ("BC-SHARED", "HCM-B"),
+    ]
+
+
+def test_multi_case_questionnaire_round_trip_in_disposable_mysql(tmp_path):
+    database = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE", "")
+    if (
+        not database.startswith("lu_test_")
+        or os.getenv("DB_DATABASE") != database
+        or os.getenv("DB_HOST") not in {"localhost", "127.0.0.1"}
+        or os.getenv("APP_ENV") != "development"
+    ):
+        pytest.skip("requires an explicitly configured local disposable MySQL database")
+
+    scenario = uuid4().hex[:12]
+    case_a, case_b = (f"MC-{scenario}-{suffix}" for suffix in ("A", "B"))
+    query_no = f"BC-{scenario}"
+    source_row = _valid_row(query_no)
+    source_row["姓名"] = f"測試客戶-{scenario}"
+    file = Workbook()
+    file.active.append(list(source_row))
+    file.active.append(list(source_row.values()))
+    upload = str(tmp_path / "multi-case.xlsx")
+    file.save(upload)
+    file.close()
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO clients (case_no,name,phone) VALUES (%s,%s,%s)",
+                (case_a, source_row["姓名"], source_row["行動電話"]),
+            )
+            client_id = int(cursor.lastrowid)
+            cursor.execute("INSERT INTO clients (case_no,name) VALUES (%s,%s)", (case_b, "HCM 建檔"))
+            cursor.executemany(
+                "INSERT INTO orders (case_no,client_id,status) VALUES (%s,%s,'洽談中')",
+                [(case_a, client_id), (case_b, client_id)],
+            )
+        connection.commit()
+
+        repository = ClientBeClassWorkbookImportRepository(connection)
+        service = intake.ClientBeClassWorkbookImportService(
+            repository,
+            reconciliation_adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+            lambda: MySqlUnitOfWork(connection),
+        )
+        initial = service.preview(upload, manual_pairing=True)
+        assert initial.manual_rows[0].case_nos == (case_a, case_b)
+        selected = ((2, case_a), (2, case_b))
+
+        def apply():
+            return service.apply(upload, scenario, initial.preview_fingerprint, "test", scenario,
+                                 manual_pairings=selected)
+
+        receipt = apply()
+        assert receipt.created_count == 1
+        assert [(item.source_row, item.case_no) for item in receipt.manual_bindings] == list(selected)
+        assert apply().manual_bindings == receipt.manual_bindings
+        repeated_preview = service.preview(upload, manual_pairing=True)
+        assert repeated_preview.existing_source_count == 1
+        repeated = service.apply(upload, f"{scenario}-new", repeated_preview.preview_fingerprint,
+                                 "test", scenario, manual_pairings=())
+        assert repeated.existing_source_count == 1
+        stored = repository.bound_sources_for_query(query_no)
+        assert [item["case_no"] for item in stored] == [case_a, case_b]
+        corrections = MySqlBeClassCorrectionRepository(connection)
+        roots = [corrections.load(case_no, for_update=False)["beclass_record_id"] for case_no in (case_a, case_b)]
+        assert roots == [item["root_id"] for item in stored] and roots[0] != roots[1]
+        with connection.cursor() as cursor, pytest.raises(IntegrityError) as duplicate:
+            cursor.execute(
+                "INSERT INTO beclass_records (query_no,client_id,bound_case_no) VALUES (%s,%s,%s)",
+                (query_no, client_id, case_a),
+            )
+        assert duplicate.value.args[0] == 1062
+    finally:
+        connection.close()

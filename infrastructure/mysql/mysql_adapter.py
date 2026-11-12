@@ -802,11 +802,14 @@ def get_order_details() -> list[dict]:
             # 嘗試讀取 beclass_records survey_details 進行關聯
             survey_map = {}
             try:
-                cursor.execute("SELECT query_no, survey_details FROM beclass_records WHERE survey_details IS NOT NULL")
+                cursor.execute(
+                    "SELECT COALESCE(bound_case_no,query_no) AS survey_case_no, survey_details "
+                    "FROM beclass_records WHERE survey_details IS NOT NULL ORDER BY bound_case_no IS NOT NULL,id"
+                )
                 b_rows = cursor.fetchall()
                 for br in b_rows:
-                    if br.get('query_no') and br.get('survey_details'):
-                        survey_map[str(br['query_no']).strip()] = parse_beclass_survey_details(br['survey_details'])
+                    if br.get('survey_case_no') and br.get('survey_details'):
+                        survey_map[str(br['survey_case_no']).strip()] = parse_beclass_survey_details(br['survey_details'])
             except Exception:
                 pass
 

@@ -60,10 +60,10 @@ function ComparisonFacts({ name, phone, city, dateLabel, date, start }: {
 export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
   const [open, setOpen] = useState(false);
   const [groupIndex, setGroupIndex] = useState(0);
-  const [selected, setSelected] = useState(new Map<number, string>());
+  const [selected, setSelected] = useState(new Map<number, string[]>());
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [paths, setPaths] = useState<Array<{ row: number; path: string }>>([]);
+  const [paths, setPaths] = useState<Array<{ caseNo: string; path: string }>>([]);
   const boardRef = useRef<HTMLDivElement>(null);
   const checkRef = useRef<HTMLButtonElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -79,29 +79,28 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
     return candidate ? [candidate] : [];
   });
   const active = groupRows.find(row => row.source_row === activeRow);
-  const ownerByCase = new Map(groupRows.flatMap((row, index) => {
-    const caseNo = selected.get(row.source_row);
-    return caseNo ? [[caseNo, { row, alternate: index % 2 === 1 }] as const] : [];
-  }));
+  const activeCases = active ? selected.get(active.source_row) ?? [] : [];
+  const activeClient = candidatesByCase.get(activeCases[0])?.client_id;
+  const ownerByCase = new Map(groupRows.flatMap((row, index) =>
+    (selected.get(row.source_row) ?? []).map(caseNo => [caseNo, { row, alternate: index % 2 === 1 }] as const)
+  ));
 
   useLayoutEffect(() => {
     const board = boardRef.current;
     if (!open || confirming || !board) return;
     const draw = () => {
       const frame = board.getBoundingClientRect();
-      setPaths(Array.from(sourcePorts.current, ([row, port]) => {
-        const caseNo = selected.get(row);
-        if (!caseNo) return null;
+      setPaths(Array.from(sourcePorts.current).flatMap(([row, port]) => (selected.get(row) ?? []).flatMap(caseNo => {
         const source = port.getBoundingClientRect();
         const target = casePorts.current.get(caseNo)?.getBoundingClientRect();
-        if (!source || !target) return null;
+        if (!target) return [];
         const x1 = source.left + source.width / 2 - frame.left;
         const y1 = source.top + source.height / 2 - frame.top;
         const x2 = target.left + target.width / 2 - frame.left;
         const y2 = target.top + target.height / 2 - frame.top;
         const middle = (x1 + x2) / 2;
-        return { row, path: `M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}` };
-      }).filter(item => item !== null));
+        return [{ caseNo, path: `M ${x1} ${y1} C ${middle} ${y1}, ${middle} ${y2}, ${x2} ${y2}` }];
+      })));
     };
     draw();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(draw);
@@ -112,11 +111,14 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
     return () => observer?.disconnect();
   }, [activeRow, confirming, groupIndex, open, selected]);
 
-  const confirm = () => onConfirm(Array.from(selected, ([source_row, case_no]) => ({ source_row, case_no })));
+  const pairings = Array.from(selected).flatMap(([source_row, caseNos]) =>
+    caseNos.map(case_no => ({ source_row, case_no }))
+  );
+  const confirm = () => onConfirm(pairings);
   useLayoutEffect(() => {
     if (confirming) backRef.current?.focus();
-    else if (selected.size === manualRows.length) checkRef.current?.focus();
-  }, [confirming, manualRows.length, selected.size]);
+    else checkRef.current?.focus();
+  }, [confirming]);
   const progress = `已配對 ${selected.size} / ${manualRows.length} 筆`;
   const notImported = preview.reviewRequiredCount + preview.existingConflictCount;
 
@@ -157,16 +159,16 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
       </select>
     </label>}
     {confirming ? <>
-      <p>{preview.createCount} 筆可直接匯入、{selected.size} 筆依所選案件匯入、{preview.existingSourceCount} 筆重複略過、{notImported} 筆未匯入。</p>
+      <p>{preview.createCount} 筆可直接匯入、{selected.size} 份問卷將套用至 {pairings.length} 個案件、{preview.existingSourceCount} 筆重複略過、{notImported} 筆未匯入。</p>
       <ul className="beclass-confirmed-pairs">
-        {groupRows.map(row => <li key={row.source_row}>第 {row.source_row} 列 · {row.query_no} → <strong>{selected.get(row.source_row)}</strong></li>)}
+        {groupRows.map(row => <li key={row.source_row}>第 {row.source_row} 列 · {row.query_no} → <strong>{selected.get(row.source_row)?.join('、')}</strong></li>)}
       </ul>
     </> : <>
-    <p>先點左側問卷，再點右側案件連線。</p>
+    <p>先點左側問卷，再勾選右側同一位客戶的案件。再次點選案件可解除連線。</p>
     <div className="beclass-pairing-board" ref={boardRef}>
       <svg className="beclass-pairing-wires" aria-hidden="true">
-        {paths.map(({ row, path }) => <path key={row} d={path}
-          className={ownerByCase.get(selected.get(row) ?? '')?.alternate ? 'alternate' : undefined} />)}
+        {paths.map(({ caseNo, path }) => <path key={caseNo} d={path}
+          className={ownerByCase.get(caseNo)?.alternate ? 'alternate' : undefined} />)}
       </svg>
       <section className="beclass-pairing-column" aria-label="BeClass 問卷">
         <h5>BeClass 問卷</h5>
@@ -175,11 +177,11 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
           const isActive = activeRow === row.source_row;
           return <div key={row.source_row} className={`beclass-pairing-card source${isActive ? ' active' : ''}${match ? ' linked' : ''}${index % 2 === 1 ? ' alternate' : ''}`}>
             <button className="beclass-pairing-pick" type="button" aria-pressed={isActive}
-              onClick={() => setActiveRow(isActive ? null : row.source_row)}>
+              onClick={() => setActiveRow(row.source_row)}>
               <strong>{row.query_no}</strong>
               <small>Excel 第 {row.source_row} 列</small>
               <ComparisonFacts name={row.name} phone={row.masked_phone} city={row.city} dateLabel="問卷報名時間" date={row.submitted_at} />
-              <span className="beclass-pairing-state">{match ? `已連 ${match}${isActive ? '，可改選' : ''}` : isActive ? '已選取，請點右側' : '待配對'}</span>
+              <span className="beclass-pairing-state">{match ? `已連 ${match.join('、')}` : isActive ? '已選取，請點右側' : '待配對'}</span>
             </button>
             <span className="beclass-pairing-port" aria-hidden="true" ref={node => {
               if (node) sourcePorts.current.set(row.source_row, node);
@@ -202,16 +204,24 @@ export function ClientBeClassWorkbookPairing({ preview, onConfirm }: Props) {
         {groupCases.map(item => {
           const assigned = ownerByCase.get(item.case_no);
           const owner = assigned?.row;
-          const canSelect = active !== undefined && active.case_nos.includes(item.case_no) && (!owner || owner === active);
+          const canSelect = active !== undefined && active.case_nos.includes(item.case_no)
+            && (!owner || owner === active) && (activeClient === undefined || activeClient === item.client_id);
           return <div key={item.case_no} className={`beclass-pairing-card target${owner ? ' linked' : ''}${assigned?.alternate ? ' alternate' : ''}`}>
-            <button className="beclass-pairing-pick" type="button" aria-disabled={!canSelect} onClick={() => {
+            <button className="beclass-pairing-pick" type="button" aria-disabled={!canSelect} aria-pressed={owner !== undefined} onClick={() => {
               if (!canSelect) return;
-              setSelected(previous => new Map(previous).set(active.source_row, item.case_no));
-              setActiveRow(null);
+              setSelected(previous => {
+                const updated = new Map(previous);
+                const cases = previous.get(active.source_row) ?? [];
+                const next = cases.includes(item.case_no)
+                  ? cases.filter(caseNo => caseNo !== item.case_no) : [...cases, item.case_no];
+                if (next.length) updated.set(active.source_row, next);
+                else updated.delete(active.source_row);
+                return updated;
+              });
             }}>
               <strong>{item.case_no}</strong>
               <ComparisonFacts name={item.name} phone={item.masked_phone} city={item.city} dateLabel="HCM 建檔時間" date={item.created_at} start={item.start_date} />
-              <span className="beclass-pairing-state">{owner ? `已連 ${owner.query_no}` : active && !canSelect ? '非此問卷的候選' : '可配對'}</span>
+              <span className="beclass-pairing-state">{owner ? `已連 ${owner.query_no}` : active && !canSelect ? '目前不可配對' : '可配對'}</span>
             </button>
             <span className="beclass-pairing-port" aria-hidden="true" ref={node => {
               if (node) casePorts.current.set(item.case_no, node);

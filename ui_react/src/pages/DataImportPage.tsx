@@ -352,7 +352,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
           <summary>人工綁定明細（{result.manualBindings.length} 筆）</summary>
           <div className="import-details-scroll"><table>
             <thead><tr><th scope="col">Excel 列號</th><th scope="col">BeClass 查詢序號</th><th scope="col">綁定 HCM 案號</th></tr></thead>
-            <tbody>{result.manualBindings.map(binding => <tr key={binding.source_row}>
+            <tbody>{result.manualBindings.map(binding => <tr key={`${binding.source_row}:${binding.case_no}`}>
               <td>{binding.source_row}</td><td>{binding.query_no}</td><td>{binding.case_no}</td>
             </tr>)}</tbody>
           </table></div>

@@ -267,7 +267,8 @@ FROM orders o
 LEFT JOIN ({pricing_facts}) pricing ON pricing.case_no=o.case_no
 JOIN clients c ON c.id = o.client_id
 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
-LEFT JOIN beclass_records br ON (br.query_no=o.case_no OR br.bound_case_no=o.case_no)
+LEFT JOIN beclass_records br ON br.bound_case_no=o.case_no
+    OR (br.bound_case_no IS NULL AND br.query_no=o.case_no)
 LEFT JOIN beclass_record_correction_states correction ON correction.beclass_record_id=br.id
 LEFT JOIN subsidy_claim_batch_items i ON i.case_no = o.case_no
 LEFT JOIN subsidy_claim_batches batch ON batch.id = i.batch_id

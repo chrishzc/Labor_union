@@ -60,7 +60,7 @@ class ClientBeClassWorkbookImportRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 f"SELECT {','.join(self._SOURCE_COLUMNS)} "
-                "FROM beclass_records WHERE query_no=%s LIMIT 1",
+                "FROM beclass_records WHERE query_no=%s ORDER BY id LIMIT 1",
                 (query_no,),
             )
             stored = cursor.fetchone()
@@ -68,17 +68,18 @@ class ClientBeClassWorkbookImportRepository:
             return "absent"
         return "exact" if _comparable_source(stored) == _comparable_source(payload) else "conflict"
 
-    def bound_source_for_query(self, query_no: str):
+    def bound_sources_for_query(self, query_no: str):
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id,bound_case_no FROM beclass_records "
-                "WHERE query_no=%s LIMIT 1 FOR UPDATE",
+                "WHERE query_no=%s ORDER BY id FOR UPDATE",
                 (query_no,),
             )
-            row = cursor.fetchone()
-        if row is None or row["bound_case_no"] is None:
-            return None
-        return {"root_id": int(row["id"]), "case_no": str(row["bound_case_no"])}
+            return tuple(
+                {"root_id": int(row["id"]), "case_no": str(row["bound_case_no"])}
+                for row in cursor.fetchall()
+                if row["bound_case_no"] is not None
+            )
 
     def bound_case_no_for_root(self, root_id: int | None) -> str | None:
         if root_id is None:
@@ -158,12 +159,26 @@ class ClientBeClassWorkbookImportRepository:
             case_nos = tuple(str(row["case_no"]) for row in cursor.fetchall())
         return classify_client_case_binding(client_ids, case_nos)
 
-    def create_bound_source_if_absent(self, payload: dict[str, object], client_case) -> int | None:
+    def create_bound_source_if_absent(
+        self, payload: dict[str, object], client_case, *, allow_additional_case: bool = False,
+    ) -> int | None:
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT id FROM beclass_records WHERE query_no=%s FOR UPDATE", (payload["query_no"],))
-            if cursor.fetchone() is not None:
+            cursor.execute(
+                f"SELECT client_id,bound_case_no,{','.join(self._SOURCE_COLUMNS)} "
+                "FROM beclass_records WHERE query_no=%s ORDER BY id FOR UPDATE",
+                (payload["query_no"],),
+            )
+            client_id = int(client_case["id"])
+            case_no = str(client_case["case_no"])
+            source = _comparable_source(payload)
+            if any(
+                not allow_additional_case or row["client_id"] != client_id
+                or row["bound_case_no"] is None or row["bound_case_no"].casefold() == case_no.casefold()
+                or _comparable_source(row) != source
+                for row in cursor.fetchall()
+            ):
                 return None
-            bound_payload = {**payload, "client_id": int(client_case["id"]), "bound_case_no": str(client_case["case_no"])}
+            bound_payload = {**payload, "client_id": client_id, "bound_case_no": case_no}
             columns = tuple(sorted(bound_payload))
             cursor.execute(f"INSERT INTO beclass_records ({','.join(f'`{column}`' for column in columns)}) VALUES ({','.join(['%s'] * len(columns))})", tuple(bound_payload[column] for column in columns))
             if cursor.rowcount != 1:

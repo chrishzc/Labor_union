@@ -16,6 +16,7 @@
 - primary: `domains/client_finance/obligation_planning.py`
 - calculation: `domains/client_finance/order_amount_calculation.py`
 - adapter: `infrastructure/mysql/client_finance_terms_writer.py`
+- query: `subsystems/client_finance/accounting_source_query.py` — reads case accounting inputs and collection terms, with BeClass source resolved by its bound case.
 - automatic adapter: `infrastructure/mysql/automatic_client_accounting.py` — 沿 caller transaction，同步應付與應退補助；不 commit、不發送。
 
 ## Contracts
@@ -25,6 +26,7 @@
 
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_automatic_accounting.py`
+- test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_accounting_source_projection.py`
 - integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_order_amount_calculator.py`
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py`

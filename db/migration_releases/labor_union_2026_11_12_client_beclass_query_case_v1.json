@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-beclass-query-case-2026-11-12-v1",
+  "release_metadata": {
+    "release_name": "Client BeClass questionnaire and case uniqueness",
+    "application_version": "client-beclass-query-case-v1",
+    "published_at": "2026-11-12",
+    "description": "Allow the same source questionnaire to be stored once per case, preserving existing rows and case-local corrections."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-registry-bootstrap-reason-2026-11-11-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1073_client_beclass_query_case_uniqueness.sql",
+      "relative_path": "db/schema_parts/1073_client_beclass_query_case_uniqueness.sql",
+      "sha256": "98e3dc901cbbd0ee9d44c018d65606ea0fe4b4af8a6170c016249b56f05c5907",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-index-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "client-beclass-query-case-index-exact",
+      "phase": "post-schema",
+      "policy": "Require unique (query_no, bound_case_no), the existing lookup index, and absence of the old global unique query_no index.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "client-beclass-query-case-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "client-beclass-query-case-index-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_12_client_beclass_query_case_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_12_client_beclass_query_case_v1.descriptors.json",
+    "sha256": "9b9c6404e02b1e202aadfc237e46ac66b0d896736a54ed6134791950a3ac56e3",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -50,7 +50,8 @@ def load_case_accounting_source_with_cursor(cursor: Any, case_no: str) -> dict[s
                terms.deposit_service_days, terms.deposit_due_date
         FROM orders o
         JOIN clients c ON c.case_no = o.case_no
-        LEFT JOIN beclass_records b ON b.query_no = o.case_no
+        LEFT JOIN beclass_records b ON b.bound_case_no = o.case_no
+            OR (b.bound_case_no IS NULL AND b.query_no = o.case_no)
         LEFT JOIN client_payment_terms terms ON terms.case_no = o.case_no
         WHERE o.case_no = %s
         """,

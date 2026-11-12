@@ -20,12 +20,12 @@
 - `subsystems/case_import/client_beclass_workbook_import.py`
 - `infrastructure/mysql/client_beclass_workbook_import_repository.py`
 - `api/routes/client_beclass_import.py`
-- `api/schemas/client_beclass_import.py`
+- `api/schemas/client_beclass_import.py` — 同一問卷列可提交同一客戶的多個案號，人工綁定明細按案件回傳。
 - `ui_react/src/api/case_import/client_beclass_workbook/client.ts` — immutable workbook Preview／Apply transport。
 - `ui_react/src/api/case_import/client_beclass_workbook/schemas.ts` — 候選案件、確認配對及綁定結果契約。
 - `ui_react/src/adapters/case_import/client_beclass_workbook_adapter.ts` — 預覽分類筆數守恆及候選資料投影。
 - `ui_react/src/api/case_import/client_beclass_workbook/errors.ts` — typed 匯入失敗與結果待確認說明。
-- `ui_react/src/components/ClientBeClassWorkbookPairing.tsx` — 客戶 BeClass 預覽的逐組配對抽屜、左右連線與整批確認。
+- `ui_react/src/components/ClientBeClassWorkbookPairing.tsx` — 客戶 BeClass 預覽的逐組配對抽屜、同客戶案件多選與整批確認。
 - `domains/case_import/cooking_requirement.py`
 - `subsystems/case_import/hcm_beclass_reconciliation.py`
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
@@ -40,6 +40,7 @@
 ## Correction boundary
 - HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖、fresh version 與已知值異動規則仍由 Orders 擁有。
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
+- Workbook Apply stores one source copy per selected case within the workbook row transaction. The unique source key is `(query_no, bound_case_no)` and each case resolves its own correction record.
 - Named care／bonus／floor-agreement fields share the existing BeClass correction state／version／event／receipt and effective projection. Corrected NULL clears an original value／field issue, unchanged bool／number scalars retain their type. Holiday bonus and floor-agreement text do not invoke financial sync; floor-fee amounts use Orders Terms and birth count retains its existing financial coordination.
 - Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
 - A pre-service effective birth-count correction coordinates existing Client Finance／formally assigned Payroll impact in the same outer UoW. Absent financial roots only retain effective correction for later bootstrap; unassigned cases do not require full Payroll facts. Partial roots and orphan history remain blocked. Once service has started, birth count is financially locked while non-financial BeClass fields remain independently correctable.

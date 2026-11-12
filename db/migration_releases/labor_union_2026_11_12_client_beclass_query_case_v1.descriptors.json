@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-beclass-query-case-2026-11-12-v1",
+  "descriptors": {
+    "1073_client_beclass_query_case_uniqueness.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {
+        "beclass_records.uq_beclass_query_case": {
+          "non_unique": 0,
+          "columns": [
+            "query_no",
+            "bound_case_no"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

@@ -149,7 +149,8 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 LEFT JOIN scheduling_generations current_generation
                     ON current_generation.id=current_schedule.effective_generation_id
                 LEFT JOIN staff s ON s.id = o.staff_id
-                LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
+                LEFT JOIN beclass_records br ON br.bound_case_no = o.case_no
+                    OR (br.bound_case_no IS NULL AND br.query_no = o.case_no)
                 LEFT JOIN beclass_record_correction_states correction
                     ON correction.beclass_record_id = br.id
                 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy

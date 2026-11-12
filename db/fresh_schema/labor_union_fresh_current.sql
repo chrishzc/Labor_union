@@ -579,7 +579,7 @@ CREATE TABLE `beclass_records` (
   `db_created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `db_updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `query_no` (`query_no`),
+  UNIQUE KEY `uq_beclass_query_case` (`query_no`,`bound_case_no`),
   KEY `idx_query_no` (`query_no`),
   KEY `idx_phone` (`phone`),
   KEY `idx_name` (`name`),

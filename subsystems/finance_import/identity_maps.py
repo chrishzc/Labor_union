@@ -355,7 +355,8 @@ def _client_receipt_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
            FROM client_obligations obligation
            JOIN orders order_row ON order_row.case_no=obligation.case_no
            JOIN clients client ON client.id=order_row.client_id
-           LEFT JOIN beclass_records beclass ON beclass.query_no=order_row.case_no
+           LEFT JOIN beclass_records beclass ON beclass.bound_case_no=order_row.case_no
+               OR (beclass.bound_case_no IS NULL AND beclass.query_no=order_row.case_no)
            WHERE obligation.direction='receivable_from_client'
              AND obligation.status='open' AND obligation.amount_due_ntd>0
            ORDER BY order_row.client_id,obligation.obligation_identity"""

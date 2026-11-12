@@ -26,6 +26,7 @@ const ClientBeClassManualRowSchema = z.strictObject({
 
 const ClientBeClassCandidateSchema = z.strictObject({
   case_no: z.string(),
+  client_id: z.number().int().positive(),
   name: z.string(),
   masked_phone: z.string(),
   city: z.string().nullable(),

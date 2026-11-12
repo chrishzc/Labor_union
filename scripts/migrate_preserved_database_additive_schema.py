@@ -382,6 +382,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_09_historical_accounting_corrections_v1.json",
     "labor_union_2026_11_11_registry_save_receipts_v1.json",
     "labor_union_2026_11_11_registry_bootstrap_reason_v1.json",
+    "labor_union_2026_11_12_client_beclass_query_case_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2590,6 +2591,20 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    if artifact == "1073_client_beclass_query_case_uniqueness.sql":
+        indexes = {
+            row["index_name"]: (int(row["non_unique"]), row["columns"])
+            for row in snapshot["indexes"] if row["table_name"] == "beclass_records"
+        }
+        if indexes.get("idx_query_no") != (1, "query_no"):
+            return "drift"
+        previous = indexes.get("query_no")
+        current = indexes.get("uq_beclass_query_case")
+        if previous is None and current == (0, "query_no,bound_case_no"):
+            return "exact"
+        if previous == (0, "query_no") and current is None:
+            return "absent"
+        return "drift"
     snapshot, registry_state = _registry_guard_snapshot(snapshot, artifact)
     if registry_state is not None:
         return registry_state
@@ -4010,11 +4025,13 @@ def _local_classify_statement(statement: str) -> str:
         if normalized.startswith((
             "alter table order_terms_apply_receipts modify column lifecycle_status ",
             "alter table case_architecture_bootstrap_events ",
+            "alter table beclass_records drop index query_no,",
         )):
             for artifact in (
                 "1070_historical_order_terms_receipt_status.sql",
                 "1071_pending_order_terms_receipt_status.sql",
                 "1072_case_architecture_bootstrap_reason_optional.sql",
+                "1073_client_beclass_query_case_uniqueness.sql",
             ):
                 canonical = ROOT / "db/schema_parts" / artifact
                 (sql,) = split_sql(canonical.read_text(encoding="utf-8"))
@@ -6198,6 +6215,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["indexes"].update(_buffer_advisory_indexes())
     if part_name == "1068_scheduling_shift_occupancy_indexes.sql":
         descriptor["indexes"].update(_scheduling_shift_indexes())
+    if part_name == "1073_client_beclass_query_case_uniqueness.sql":
+        descriptor["indexes"][("beclass_records", "uq_beclass_query_case")] = {
+            "non_unique": 0, "columns": ("query_no", "bound_case_no"),
+        }
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -6922,7 +6943,11 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
-    if part_name in {"1065_historical_order_reused_pairing_check.sql", "1072_case_architecture_bootstrap_reason_optional.sql"}:
+    if part_name in {
+        "1065_historical_order_reused_pairing_check.sql",
+        "1072_case_architecture_bootstrap_reason_optional.sql",
+        "1073_client_beclass_query_case_uniqueness.sql",
+    }:
         return _metadata_state_for_artifact(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
     predecessor_state = _modified_parent_predecessor_absent_state(
         snapshot,
