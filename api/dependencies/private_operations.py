@@ -92,10 +92,10 @@ def run_durable_job_cycle(
 
 def _finalize_new_nas_files(worker_id: str) -> int:
     from infrastructure.file.storage_layout import (
-        configured_storage_root, staff_resume_archiving_enabled, unified_storage_enabled,
+        absolute_storage_root, configured_storage_root, unified_storage_enabled,
     )
     unified_layout = unified_storage_enabled()
-    if not unified_layout and not staff_resume_archiving_enabled():
+    if not unified_layout and absolute_storage_root() is None:
         return 0
     from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
     from infrastructure.mysql.controlled_file_finalize_worker import MySqlControlledFileFinalizeRunner
@@ -106,7 +106,7 @@ def _finalize_new_nas_files(worker_id: str) -> int:
         get_connection,
         FileSystemControlledFileStorage(configured_storage_root(), max_staging_bytes=capacity, max_read_bytes=capacity),
         worker_id, lambda: datetime.now(TAIPEI_TIME_ZONE), layout_only=True,
-        staff_resume_only=not unified_layout,
+        local_documents_only=not unified_layout,
     ).run_once()
 
 

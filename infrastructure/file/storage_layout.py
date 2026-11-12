@@ -12,6 +12,12 @@ MEDIA_DIRECTORY = "04_LINE選單資源 (media)"
 DATABASE_BACKUP_DIRECTORY = "05_資料庫冷備份 (db_backups)"
 STAGING_DIRECTORY = "_staging"
 BUSINESS_DIRECTORIES = (ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY, DATABASE_BACKUP_DIRECTORY)
+LOCAL_DOCUMENT_ARCHIVES = (
+    ("staff", "staff_resume", STAFF_DIRECTORY),
+    ("staff", "staff_certificate", STAFF_DIRECTORY),
+    ("staff", "staff_health_exam", STAFF_DIRECTORY),
+    ("contract_signing", "final_signed_contract", ORDERS_DIRECTORY),
+)
 
 
 class StorageLayoutError(RuntimeError):
@@ -35,9 +41,9 @@ def unified_storage_enabled() -> bool:
     return root is not None and (is_nas_storage_root(root) or not is_development_environment())
 
 
-def staff_resume_archiving_enabled() -> bool:
+def absolute_storage_root() -> Path | None:
     root = configured_storage_root()
-    return root is not None and root.is_absolute()
+    return root if root is not None and root.is_absolute() else None
 
 
 def is_nas_storage_root(root: Path) -> bool:
@@ -70,20 +76,21 @@ def component_storage_root(directory: str, *, legacy_variable: str, development_
     raise StorageLayoutError("尚未設定 NAS 根目錄 CONTROLLED_FILE_STORAGE_ROOT；未改存本機。")
 
 
-def ensure_storage_layout(root: Path) -> None:
+def ensure_storage_layout(root: Path, *, directories: tuple[str, ...] = (*BUSINESS_DIRECTORIES, STAGING_DIRECTORY)) -> None:
     """Only create children of an existing, non-linked deployment root."""
     try:
         if not root.is_dir() or root.is_symlink() or root.is_junction():
             raise StorageLayoutError("NAS 根目錄無法使用，請確認連線與權限；不會自動建立根目錄。")
-        for name in (*BUSINESS_DIRECTORIES, STAGING_DIRECTORY):
+        for name in directories:
             child = root / name
             if child.is_symlink() or child.is_junction():
                 raise StorageLayoutError("NAS 子資料夾不能是符號連結或轉接點。")
             child.mkdir(exist_ok=True)
-        menus = root / MEDIA_DIRECTORY / "rich_menus"
-        if menus.is_symlink() or menus.is_junction():
-            raise StorageLayoutError("NAS 子資料夾不能是符號連結或轉接點。")
-        menus.mkdir(exist_ok=True)
+        if MEDIA_DIRECTORY in directories:
+            menus = root / MEDIA_DIRECTORY / "rich_menus"
+            if menus.is_symlink() or menus.is_junction():
+                raise StorageLayoutError("NAS 子資料夾不能是符號連結或轉接點。")
+            menus.mkdir(exist_ok=True)
     except OSError:
         raise StorageLayoutError("NAS 子資料夾無法建立，請確認連線與新增資料夾權限；未改存本機。") from None
 

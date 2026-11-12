@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path as FileSystemPath
-from infrastructure.file.storage_layout import MEDIA_DIRECTORY, component_storage_root, prepare_component_write
+from infrastructure.file.storage_layout import (
+    MEDIA_DIRECTORY, absolute_storage_root, component_storage_root, ensure_storage_layout, prepare_component_write,
+)
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
@@ -100,9 +102,22 @@ def _menu_media_storage_root():
     return root if root.is_absolute() else project / root
 
 
+def _menu_upload_archive_root() -> FileSystemPath | None:
+    root = absolute_storage_root()
+    return None if root is None else root / MEDIA_DIRECTORY
+
+
+def _prepare_menu_storage_write(root: FileSystemPath, archive_upload: bool) -> None:
+    if archive_upload:
+        ensure_storage_layout(root.parent, directories=(MEDIA_DIRECTORY,))
+    else:
+        prepare_component_write(root)
+
+
 _media_archive.get_connection = get_connection
 _media_archive.storage_root_provider = _menu_media_storage_root
-_media_archive.prepare_storage_write = lambda: prepare_component_write(_menu_media_storage_root())
+_media_archive.upload_archive_root_provider = _menu_upload_archive_root
+_media_archive.prepare_storage_write = _prepare_menu_storage_write
 _media_archive.encode_line_jpeg = encode_line_jpeg
 _media_archive.render_rich_menu_image = render_rich_menu_image
 _rich_menu_workflow.get_connection = get_connection

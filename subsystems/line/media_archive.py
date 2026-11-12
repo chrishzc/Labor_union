@@ -52,12 +52,14 @@ def _unconfigured_storage_root() -> Path:
     raise RuntimeError("LINE media storage root is not configured")
 
 
-def _unconfigured_storage_write() -> None:
+def _unconfigured_storage_write(_root: Path, _archive_upload: bool) -> None:
     raise RuntimeError("LINE media storage writer is not configured")
 
 
 storage_root_provider: Callable[[], Path] = _unconfigured_storage_root
-prepare_storage_write: Callable[[], None] = _unconfigured_storage_write
+upload_archive_root_provider: Callable[[], Path | None] = lambda: None
+prepare_storage_write: Callable[[Path, bool], None] = _unconfigured_storage_write
+_UPLOAD_ARCHIVE_PREFIX = "rich_menus/uploads/v1/"
 
 
 def media_storage_root() -> Path:
@@ -88,8 +90,8 @@ def normalize_uploaded_rich_menu_image(
         raise MediaValidationError("檔案不是有效圖片") from exc
 
 
-def _safe_storage_path(storage_key: str) -> Path:
-    root = media_storage_root()
+def _safe_storage_path(root: Path, storage_key: str) -> Path:
+    root = root.resolve()
     target = (root / storage_key).resolve()
     try:
         target.relative_to(root)
@@ -110,16 +112,23 @@ def _save_asset(
     connection_factory: Callable[[], Any] | None = None,
     unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
-    storage_key = f"rich_menus/{menu_id}/{uuid.uuid4().hex}.jpg"
-    target = _safe_storage_path(storage_key)
-    prepare_storage_write()
+    root = media_storage_root()
+    prefix = "rich_menus/"
+    archive_root = None if generated else upload_archive_root_provider()
+    if archive_root is not None:
+        if archive_root.resolve() != root.resolve():
+            prefix = _UPLOAD_ARCHIVE_PREFIX
+        root = archive_root
+    storage_key = f"{prefix}{menu_id}/{uuid.uuid4().hex}.jpg"
+    prepare_storage_write(root, archive_root is not None)
+    target = _safe_storage_path(root, storage_key)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".tmp")
     temporary.write_bytes(content)
     os.replace(temporary, target)
     digest = hashlib.sha256(content).hexdigest()
     provider = os.getenv("MEDIA_STORAGE_PROVIDER", "local").strip().lower()
-    windows = PureWindowsPath(str(media_storage_root()))
+    windows = PureWindowsPath(str(root))
     nas_root = windows.is_absolute() and windows.drive.startswith("\\\\") and not windows.drive.startswith("\\\\?\\")
     if nas_root or os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
         provider = "nas"
@@ -228,7 +237,11 @@ def get_media_asset(asset_id: int, *, connection_factory: Callable[[], Any] | No
 
 def read_media_asset(asset_id: int, *, connection_factory: Callable[[], Any] | None = None) -> tuple[dict[str, Any], bytes]:
     asset = get_media_asset(asset_id, connection_factory=connection_factory)
-    path = _safe_storage_path(asset["storage_key"])
+    storage_key = asset["storage_key"]
+    root = upload_archive_root_provider() if storage_key.startswith(_UPLOAD_ARCHIVE_PREFIX) else media_storage_root()
+    if root is None:
+        raise MediaAssetNotFoundError(f"媒體資產 #{asset_id} 的儲存區未設定")
+    path = _safe_storage_path(root, storage_key)
     if not path.is_file():
         raise MediaAssetNotFoundError(f"媒體資產 #{asset_id} 的檔案不存在")
     content = path.read_bytes()

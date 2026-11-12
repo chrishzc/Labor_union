@@ -13,7 +13,7 @@ from typing import Any
 import uuid
 from infrastructure.file.storage_layout import (
     ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY,
-    safe_filename_component, staff_resume_archiving_enabled, unified_storage_enabled,
+    LOCAL_DOCUMENT_ARCHIVES, absolute_storage_root, safe_filename_component, unified_storage_enabled,
 )
 
 from domains.controlled_files.reference_finalize import canonical_scheduling_storage_locator
@@ -687,7 +687,9 @@ def _preview_fingerprint_from_context(row: Mapping[str, object]) -> PreviewFinge
 
 def _uses_archive_layout(candidate: ControlledFileCandidate) -> bool:
     return unified_storage_enabled() or (
-        candidate.purpose is ControlledFilePurpose.STAFF_RESUME and staff_resume_archiving_enabled()
+        absolute_storage_root() is not None
+        and any((candidate.owner.value, candidate.purpose.value) == (owner, purpose)
+                for owner, purpose, _ in LOCAL_DOCUMENT_ARCHIVES)
     )
 
 
