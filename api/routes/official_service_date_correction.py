@@ -19,6 +19,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateMonetaryImpactBlocked,
     OfficialDateSelection,
+    ServiceAttributionChange,
 )
 
 
@@ -41,6 +42,72 @@ class ApplyBody(PreviewBody):
     expected_scheduling_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(default="", max_length=500)
+
+
+class AttributionPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_assignment_id: int = Field(gt=0)
+    staff_id: int = Field(gt=0)
+    service_dates: tuple[date, ...] = Field(min_length=1, max_length=366)
+    evidence: str = Field(min_length=1, max_length=500)
+
+    def change(self) -> ServiceAttributionChange:
+        return ServiceAttributionChange(self.source_assignment_id, self.staff_id, self.service_dates, self.evidence)
+
+
+class AttributionApplyBody(AttributionPreviewBody):
+    expected_order_version: int = Field(ge=0)
+    expected_scheduling_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/{case_no}/service-attribution/preview", response_model=BaseResponse[dict[str, Any]])
+def preview_service_attribution(
+    body: AttributionPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_official_service_date_correction_workflow),
+):
+    del principal
+    return _call(lambda: _attribution_payload(workflow.preview_attribution(case_no, body.change())))
+
+
+@router.post("/{case_no}/service-attribution/apply", response_model=BaseResponse[dict[str, Any]])
+def apply_service_attribution(
+    body: AttributionApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_official_service_date_correction_workflow),
+):
+    return _call(lambda: _receipt_payload(workflow.apply_attribution(
+        case_no, body.change(), expected_order_version=body.expected_order_version,
+        expected_scheduling_version=body.expected_scheduling_version,
+        preview_fingerprint=body.preview_fingerprint, actor=str(principal.username or "").strip(),
+        reason=body.reason, idempotency_key=idempotency_key, correlation_id=correlation_id,
+    )))
+
+
+def _attribution_payload(preview):
+    return {
+        "case_no": preview.facts.case_no,
+        "order_version": preview.facts.order_version,
+        "scheduling_version": preview.facts.scheduling_version,
+        "preview_fingerprint": preview.fingerprint.value,
+        "proposed_assignments": [{
+            "staff_id": item.staff_id, "service_dates": item.service_dates,
+        } for item in preview.scheduling.assignments],
+        "staff_entitlements": [{
+            "staff_id": item.staff_id, "amount_ntd": item.total_payable.amount,
+        } for item in preview.payroll.payroll.assignments],
+        "paid_obligations": [{
+            "staff_id": item.staff_id, "before_ntd": item.previous_entitlement.amount,
+            "after_ntd": item.revised_entitlement.amount, "paid_ntd": item.paid_net_amount.amount,
+            "recovery_increase_ntd": item.recovery_increase.amount,
+        } for item in preview.payroll.frozen_settlements],
+    }
 
 
 @router.get("/{case_no}/official-service-dates", response_model=BaseResponse[dict[str, Any]])
@@ -155,6 +222,14 @@ _MONETARY_BLOCKERS = {
 
 
 _VALIDATION_MESSAGES = {
+    'service_attribution_status_blocked': '本案目前無法更正已服務紀錄，請重新核對案件狀態。',
+    'service_attribution_evidence_required': '請填寫可核對的實際服務依據。',
+    'service_attribution_unperformed_date_blocked': '請選擇已服務的日期。後續服務請使用換人或代班。',
+    'service_attribution_assignment_conflict': '所選日期或月嫂與目前指派不符，請重新讀取排班。',
+    'service_attribution_target_assignment_ambiguous': '該月嫂已有多個區段，請先核對應承接的區段。',
+    'service_attribution_special_pay_review_required': '本案有特殊薪資紀錄，請先核對特殊薪資與服務歸屬。',
+    'service_attribution_manual_amount_review_required': '本案有人工更正的薪資金額，請先在帳務工作台核對處置。',
+    'service_attribution_source_rate_required': '原服務指派缺少可核對的薪資費率，請先確認費率。',
     'official_date_no_change': '更正日期與目前正式服務日期相同，無需更正；請先修改需要補正的日期，再重新預覽。',
     'official_date_dates_not_canonical': '同一位月嫂的服務日期不能重複或留白，請修正日期後重新預覽。',
     'official_date_service_days_changed': '更正後的服務天數或各月嫂分配天數與原紀錄不一致，請保持原天數並排除重複日期。',

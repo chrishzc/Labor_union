@@ -34,7 +34,9 @@ from subsystems.orders.historical_service_accounting_workflow import (
     ApplyHistoricalServiceAccounting,
     ConfirmHistoricalServiceDaysIntent,
     HistoricalServiceAccountingError,
+    HistoricalAttributionIntent,
 )
+from api.schemas.historical_service_accounting import HistoricalAttributionApplyBody, HistoricalAttributionPreviewBody
 from subsystems.orders.historical_precision_restart_workflow import (
     ApplyHistoricalPrecisionRestart,
     HistoricalPrecisionRestartError,
@@ -49,7 +51,68 @@ _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 
 
-@router.get("", response_model=BaseResponse[HistoricalServiceAccountingQueryView])
+def _attribution_intent(case_no, body):
+    return HistoricalAttributionIntent(case_no.strip(), tuple(
+        (item.staff_id, item.actual_service_days) for item in body.caregivers
+    ), body.evidence.strip())
+
+
+@router.post("/attribution/preview")
+def preview_historical_attribution(
+    body: HistoricalAttributionPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    correlation_id: _CorrelationHeader = "historical-attribution-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_historical_service_accounting_workflow),
+):
+    del principal
+    def preview():
+        result = workflow.preview_attribution(_attribution_intent(case_no, body))
+        return {
+            "preview_fingerprint": result.fingerprint.value, "reopen_accounting": result.reopen,
+            "accounting_pending": result.accounting_pending,
+            "caregivers": [{
+                "staff_id": item.staff_id, "actual_service_days": item.actual_service_days,
+                "entitlement_ntd": item.total_payable.amount,
+            } for item in result.comparison.payroll.assignments],
+            "paid_obligations": [{
+                "staff_id": item.staff_id, "paid_ntd": item.paid_net_amount.amount,
+                "remaining_payable_ntd": max(0, item.revised_entitlement.amount - item.paid_net_amount.amount),
+                "new_recovery_ntd": item.recovery_increase.amount,
+            } for item in (result.payroll.frozen_settlements if result.payroll else ())],
+            "manual_amounts": [{
+                "staff_id": staff_id, "previous_calculated_ntd": calculated, "manual_ntd": effective,
+            } for _, staff_id, calculated, effective in result.manual_amounts],
+            "funding": [{
+                "staff_id": staff_id, "funding_kind": kind, "entitlement_ntd": amount,
+                "settled_ntd": paid, "due_date": due_date,
+            } for staff_id, kind, amount, paid, due_date in result.funding],
+        }
+    return _call(preview, "已預覽歷史服務歸屬更正", CorrelationId(correlation_id))
+
+
+@router.post("/attribution/apply")
+def apply_historical_attribution(
+    body: HistoricalAttributionApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow=Depends(get_historical_service_accounting_workflow),
+):
+    correlation = CorrelationId(correlation_id)
+    def apply():
+        receipt = workflow.apply_attribution(
+            _attribution_intent(case_no, body), PreviewFingerprint(body.preview_fingerprint),
+            actor=ActorContext(str(principal.username or "").strip()), reason=body.reason.strip(),
+            key=IdempotencyKey(idempotency_key), correlation=correlation,
+            adopt_calculated_amounts=body.adopt_calculated_amounts,
+        )
+        return {**_receipt_view(receipt), "accounting_pending": receipt.accounting_pending}
+    return _call(apply, "已更正歷史服務歸屬", correlation)
+
+
+@router.get("", response_model=BaseResponse[HistoricalServiceAccountingQueryView], response_model_exclude_unset=True)
 def query_historical_service_accounting(
     case_no: str = Path(..., min_length=1, max_length=50),
     principal: AdminPrincipal = Depends(require_system_admin),
@@ -196,6 +259,7 @@ def _precision_receipt_view(receipt):
 
 def _query_view(facts):
     return {
+        **({"accounting_pending": list(facts.accounting_pending)} if facts.accounting_pending else {}),
         "case_no": facts.case_no,
         "lifecycle_status": facts.lifecycle_status.value,
         "lifecycle_version": facts.lifecycle_version,
@@ -280,11 +344,29 @@ def _receipt_view(receipt):
 
 def _call(command, message, correlation):
     try:
-        return BaseResponse(data=command(), message=message)
+        return BaseResponse(success=True, data=command(), message=message, error=None)
     except (HistoricalServiceAccountingError, HistoricalPrecisionRestartError) as error:
         _raise(error.error)
     except ValueError as error:
         code = str(error) or "historical_actual_service_days_invalid"
+        if code == "historical_attribution_idempotency_conflict":
+            _raise(TypedError(ErrorCategory.IDEMPOTENCY_MISMATCH, code, "操作識別已用於不同內容。", correlation))
+        if code == "historical_attribution_preview_stale":
+            _raise(TypedError(ErrorCategory.CONFLICT, code, "案件或帳務已變動，請重新預覽。", correlation))
+        attribution_blockers = {
+            "historical_attribution_formal_workflow_required": "本案已採用多人服務天數，請從「調整各月嫂服務天數」辦理。",
+            "historical_attribution_manual_confirmation_required": "請確認採用拆分後的新計算金額。",
+            "historical_attribution_paid_manual_review_required": "已有付款的人工金額需先核對原款項及差額歸屬。",
+            "historical_attribution_actual_payout_evidence_missing": "原款項只有歷史結清紀錄，缺少可核對的出款與應付核銷連結。請補齊實付證據後重做預覽。",
+            "historical_attribution_source_payout_evidence_missing": "缺少可核對的自備款或補助款核銷來源，請先核對原出款與分期。",
+            "historical_attribution_source_payout_conflict": "原來源已核銷額超過拆分後同來源應付，須先核對該來源的差額。",
+            "historical_attribution_funding_review_required": "本案應付來源或付款日期尚待核對。",
+            "handover_historical_payment_review_required": "本案原付款只有歷史結清證據，請先核對可證實的實付。",
+            "historical_attribution_total_days_changed": "各月嫂天數合計須等於本案已採用的服務天數。",
+        }
+        if code in attribution_blockers:
+            _raise(TypedError(ErrorCategory.DOMAIN_BLOCKED, code, attribution_blockers[code], correlation,
+                              domain_blockers=(code,)))
         if code in {
             "historical_client_payment_terms_missing",
             "historical_payroll_rate_policy_missing",

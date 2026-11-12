@@ -531,7 +531,7 @@ SELECT assignment.id,assignment.staff_id,assignment.assignment_sequence,
 FROM case_staff_assignments assignment
 WHERE assignment.case_no=%s AND assignment.status IN ('planned','active','completed')
   AND (assignment.generation_id=%s OR (
-       assignment.generation_id IS NULL AND EXISTS (
+       assignment.generation_id IS NULL AND (EXISTS (
            SELECT 1 FROM historical_order_pairing_evidence evidence
            JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id
            JOIN orders historical_order ON historical_order.case_no=receipt.case_no
@@ -541,7 +541,14 @@ WHERE assignment.case_no=%s AND assignment.status IN ('planned','active','comple
                              WHERE latest.case_no=assignment.case_no AND latest.outcome='adopted')
              AND evidence.assignment_id=assignment.id AND evidence.staff_id=assignment.staff_id
              AND historical_order.status IN ('歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成')
-       )))
+       ) OR EXISTS (
+           SELECT 1 FROM historical_service_day_projections projection
+           JOIN historical_service_day_items item ON item.event_id=projection.current_event_id
+           JOIN orders historical_order ON historical_order.case_no=projection.case_no
+           WHERE projection.case_no=assignment.case_no
+             AND item.assignment_id=assignment.id AND item.staff_id=assignment.staff_id
+             AND historical_order.status IN ('歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成')
+       ))))
 ORDER BY assignment.assignment_sequence,assignment.id
 """
 

@@ -51,10 +51,11 @@ SELECT 'payroll_account' row_kind, p.case_no, NULL identity, NULL related_identi
        NULL historical_event_expected_version, NULL historical_event_resulting_version,
        NULL historical_event_adoption_receipt_id,
        NULL historical_link_amount_snapshot_ntd, NULL historical_link_payroll_version,
-       NULL historical_link_ordinal
+       NULL historical_link_ordinal, NULL payroll_correction_identity,
+       NULL payroll_recovery_receipt_staff_id, NULL payroll_recovery_receipt_amount
 FROM payroll_case_accounts p WHERE p.case_no=%s
 UNION ALL
-SELECT 'obligation', o.case_no, o.obligation_identity, NULL, o.staff_id,
+SELECT 'obligation', o.case_no, o.obligation_identity, o.source_obligation_identity, o.staff_id,
        o.assignment_id, o.payroll_version, o.direction, o.status, o.amount_due_ntd,
        o.current_event_id, oe.resulting_payroll_version, oe.event_type,
        oe.after_amount_ntd, NULL, NULL, NULL, sp.obligation_amount_ntd,
@@ -68,7 +69,7 @@ SELECT 'obligation', o.case_no, o.obligation_identity, NULL, o.staff_id,
        he.confirmation_kind, he.payer_role, he.payee_role,
        he.expected_staff_payables_version, he.resulting_staff_payables_version,
        he.historical_adoption_receipt_id, hl.amount_snapshot_ntd,
-       hl.obligation_payroll_version, hl.link_ordinal
+       hl.obligation_payroll_version, hl.link_ordinal, NULL, NULL, NULL
 FROM staff_obligations o
 LEFT JOIN staff_obligation_events oe ON oe.id=o.current_event_id
 LEFT JOIN staff_payable_projections sp ON sp.obligation_identity=o.obligation_identity
@@ -93,7 +94,7 @@ SELECT 'payout', linked.case_no,
        linked.staff_id, NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL
+       NULL, NULL, NULL, NULL, NULL, NULL
 FROM staff_payout_events e
 JOIN staff_payout_obligation_links l ON l.payout_event_id=e.id
 JOIN staff_obligations linked ON linked.obligation_identity=l.obligation_identity
@@ -116,10 +117,17 @@ SELECT 'recovery', %s, r.recovery_identity, NULL, r.staff_id, NULL,
        re.id, re.before_remaining_ntd, re.after_remaining_ntd, re.resulting_status,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL
+       NULL, NULL, NULL,
+       JSON_UNQUOTE(JSON_EXTRACT(cr.result_snapshot,'$.payroll_correction_identity')),
+       CAST(JSON_UNQUOTE(JSON_EXTRACT(cr.result_snapshot,'$.staff_id')) AS UNSIGNED),
+       CAST(JSON_UNQUOTE(JSON_EXTRACT(cr.result_snapshot,'$.original_amount_ntd')) AS UNSIGNED)
 FROM staff_overpayment_recoveries r
 LEFT JOIN staff_overpayment_recovery_events re
        ON re.recovery_identity=r.recovery_identity
+LEFT JOIN staff_overpayment_recovery_apply_receipts cr
+       ON cr.recovery_identity=r.recovery_identity
+      AND JSON_UNQUOTE(JSON_EXTRACT(cr.result_snapshot,'$.command_type'))=
+          'staff-overpayment-recovery.create-from-payroll.v1'
 WHERE r.staff_id IN (
     SELECT DISTINCT staff_id FROM staff_obligations
     WHERE case_no=%s AND direction='payable_to_staff' AND status<>'cancelled'
@@ -179,6 +187,18 @@ def _build_readback(
     projection_payload: list[dict[str, Any]] = []
     historical_projection_payload: list[dict[str, Any]] = []
     open_identities: set[str] = set()
+    # Handover and service-attribution corrections are immutable changes to
+    # the original payable, not separately payable obligations.
+    correction_rows = {
+        row["identity"]: row for row in obligations
+        if isinstance(row.get("identity"), str)
+        and row["identity"].startswith("staff-handover:")
+    }
+    corrected_roots = {
+        row["related_identity"] for row in correction_rows.values()
+        if isinstance(row.get("related_identity"), str)
+    }
+    corrected_overpayments: dict[str, int] = {}
     for row in obligations:
         identity = _identity(row.get("identity"), "staff_payables_obligation_identity_invalid", blockers)
         if identity is None:
@@ -192,7 +212,8 @@ def _build_readback(
         staff_id = _integer(row.get("staff_id"), "staff_payables_staff_identity_invalid", blockers, positive=True, maximum=_SIGNED_BIGINT_MAXIMUM)
         assignment_id = _integer(row.get("assignment_id"), "staff_payables_assignment_identity_invalid", blockers, positive=True, maximum=_SIGNED_BIGINT_MAXIMUM)
         direction = row.get("direction")
-        if direction != "payable_to_staff":
+        correction = identity in correction_rows
+        if direction != "payable_to_staff" and not (correction and direction == "receivable_from_staff"):
             blockers.add("staff_payables_obligation_direction_invalid")
         payroll_version = _integer(row.get("version"), "staff_payables_obligation_version_invalid", blockers, positive=True)
         resulting_version = _integer(row.get("resulting_version"), "staff_payables_obligation_event_missing", blockers, positive=True)
@@ -214,9 +235,16 @@ def _build_readback(
         event_amount = _integer(row.get("event_amount_ntd"), "staff_payables_obligation_event_amount_invalid", blockers)
         if amount_due is not None and event_amount != amount_due:
             blockers.add("staff_payables_obligation_event_amount_mismatch")
-        account_version = _integer(row.get("account_version"), "staff_payables_account_missing", blockers)
+        account_version = None
+        if row.get("account_version") is not None or (
+            correction or row.get("projection_amount_ntd") is not None
+            or row.get("historical_projection_event_id") is not None
+        ):
+            account_version = _integer(row.get("account_version"), "staff_payables_account_missing", blockers)
         if staff_id is not None and account_version is not None:
             _add_source(versions, SettlementSourceKind.STAFF_PAYABLE_ACCOUNT, str(staff_id), account_version, blockers)
+        if correction:
+            continue
         if direction != "payable_to_staff":
             open_identities.add(identity)
             continue
@@ -232,6 +260,10 @@ def _build_readback(
             versions=versions,
             blockers=blockers,
             payload=historical_projection_payload,
+            superseded_by_bank=(
+                identity in corrected_roots and row.get("target_event_id") is not None
+                and row.get("net_paid_ntd") == row.get("historical_amount_snapshot_ntd")
+            ),
         )
         projection_status = row.get("projection_status")
         normal_terminal = False
@@ -243,7 +275,10 @@ def _build_readback(
         else:
             projection_version = _integer(row.get("projection_version"), "staff_payables_projection_version_invalid", blockers)
             _add_source(versions, SettlementSourceKind.STAFF_PAYABLE_PROJECTION, identity, projection_version, blockers)
-            if projection_version is not None and account_version is not None and projection_version != account_version:
+            if projection_version is not None and account_version is not None and (
+                projection_version > account_version
+                or (projection_version < account_version and identity not in corrected_roots)
+            ):
                 blockers.add("staff_payables_projection_account_version_mismatch")
             projection_staff_id = _integer(
                 row.get("target_staff_id"),
@@ -258,7 +293,9 @@ def _build_readback(
             net = row.get("net_paid_ntd")
             balance = row.get("balance_ntd")
             projection_event_id = _integer(row.get("target_event_id"), "staff_payables_projection_event_missing", blockers, positive=True, maximum=_SIGNED_BIGINT_MAXIMUM)
-            if not all(_is_int(value) for value in (amount, net, balance)) or amount <= 0 or net < 0:
+            if not all(_is_int(value) for value in (amount, net, balance)) or amount < 0 or (
+                amount == 0 and identity not in corrected_roots
+            ) or net < 0:
                 blockers.add("staff_payables_projection_money_invalid")
                 open_identities.add(identity)
             elif balance != amount - net:
@@ -284,6 +321,8 @@ def _build_readback(
             elif projection_status == "anomaly":
                 if balance >= 0:
                     blockers.add("staff_payables_anomaly_projection_money_invalid")
+                elif identity in corrected_roots:
+                    corrected_overpayments[identity] = -balance
                 open_identities.add(identity)
             else:
                 blockers.add("staff_payables_projection_status_invalid")
@@ -449,6 +488,8 @@ def _build_readback(
 
     for identity, row in obligation_index.items():
         net = row.get("net_paid_ntd")
+        if identity in allocations_by_obligation and row.get("account_version") is None:
+            blockers.add("staff_payables_account_missing")
         if _is_int(net) and allocations_by_obligation.get(identity, 0) != net:
             blockers.add("staff_payables_projection_allocation_mismatch")
         projection_event_id = row.get("target_event_id")
@@ -461,8 +502,33 @@ def _build_readback(
             }:
                 blockers.add("staff_payables_projection_event_obligation_mismatch")
 
+    correction_deltas: dict[str, int] = {}
+    for identity, row in correction_rows.items():
+        parent = row.get("related_identity")
+        root = obligation_index.get(parent) if isinstance(parent, str) else None
+        direction = row.get("direction")
+        amount = row.get("amount_due_ntd")
+        if (
+            root is None or parent in correction_rows or root.get("direction") != "payable_to_staff"
+            or root.get("staff_id") != row.get("staff_id")
+            or row.get("event_type") != {"payable_to_staff": "adjustment", "receivable_from_staff": "reversal"}.get(direction)
+            or not _is_int(amount) or amount <= 0
+            or identity in allocations_by_obligation
+        ):
+            blockers.add("staff_payables_payroll_correction_lineage_invalid")
+            continue
+        sign = 1 if direction == "payable_to_staff" else -1
+        correction_deltas[parent] = correction_deltas.get(parent, 0) + sign * amount
+    for parent, delta in correction_deltas.items():
+        root = obligation_index[parent]
+        original = root.get("amount_due_ntd")
+        if not _is_int(original) or root.get("projection_amount_ntd") != original + delta:
+            blockers.add("staff_payables_payroll_correction_projection_mismatch")
+
     recovery_payload: list[dict[str, Any]] = []
     recovery_source_obligations: set[str] = set()
+    open_payroll_recovery_count = 0
+    correction_recovery_amounts: dict[str, int] = {}
     claimed_recovery_source_events: set[int] = set()
     case_identities = set(obligation_index)
     recovery_groups: dict[str, list[Mapping[str, Any]]] = {}
@@ -483,6 +549,9 @@ def _build_readback(
             "source_event_ids",
             "source_obligation_identities",
             "source_bank_fact_identities",
+            "payroll_correction_identity",
+            "payroll_recovery_receipt_staff_id",
+            "payroll_recovery_receipt_amount",
         )
         if any(
             any(item.get(field) != row.get(field) for field in recovery_fields)
@@ -494,7 +563,17 @@ def _build_readback(
         source_obligations = _json_string_list(row.get("source_obligation_identities"), "staff_payables_recovery_sources_invalid", blockers)
         source_event_ids = _json_integer_list(row.get("source_event_ids"), "staff_payables_recovery_event_sources_invalid", blockers)
         source_bank_facts = _json_string_list(row.get("source_bank_fact_identities"), "staff_payables_recovery_bank_sources_invalid", blockers)
-        if not source_obligations or not source_event_ids or not source_bank_facts:
+        payroll_correction = row.get("payroll_correction_identity")
+        is_payroll_recovery = identity.startswith("staff-overpayment-recovery:payroll:")
+        if is_payroll_recovery:
+            if not case_identities.intersection(source_obligations):
+                continue
+            if payroll_correction not in source_obligations or len(source_obligations) != 2:
+                blockers.add("staff_payables_payroll_recovery_receipt_missing_or_invalid")
+            source_obligations = tuple(item for item in source_obligations if item != payroll_correction)
+            if source_event_ids or source_bank_facts:
+                blockers.add("staff_payables_payroll_recovery_source_conflict")
+        elif not source_obligations or not source_event_ids or not source_bank_facts:
             blockers.add("staff_payables_recovery_sources_incomplete")
         if not case_identities.intersection(source_obligations):
             blockers.add("staff_payables_recovery_case_attribution_missing")
@@ -531,7 +610,7 @@ def _build_readback(
             for event in source_payouts
             for link in event["links"]
         }
-        if set(source_obligations) != allocated_source_obligations:
+        if not is_payroll_recovery and set(source_obligations) != allocated_source_obligations:
             blockers.add("staff_payables_recovery_obligation_source_mismatch")
         if any(event["staff_id"] != staff_id for event in source_payouts) or any(
             obligation_index[obligation_identity].get("staff_id") != staff_id
@@ -552,8 +631,30 @@ def _build_readback(
             for event in source_payouts
             if _is_int(event.get("amount"))
         )
-        if original is not None and original > source_payout_total:
+        if not is_payroll_recovery and original is not None and original > source_payout_total:
             blockers.add("staff_payables_recovery_amount_exceeds_sources")
+        if is_payroll_recovery:
+            receipt_staff_id = _integer(row.get("payroll_recovery_receipt_staff_id"), "staff_payables_payroll_recovery_receipt_staff_invalid", blockers, positive=True)
+            receipt_amount = _integer(row.get("payroll_recovery_receipt_amount"), "staff_payables_payroll_recovery_receipt_amount_invalid", blockers, positive=True)
+            if receipt_staff_id != staff_id or receipt_amount != original:
+                blockers.add("staff_payables_payroll_recovery_receipt_mismatch")
+            expected_identity = "staff-overpayment-recovery:payroll:" + fingerprint_payload({
+                "payroll_correction_identity": payroll_correction, "staff_id": staff_id,
+            }).value
+            if identity != expected_identity:
+                blockers.add("staff_payables_payroll_recovery_identity_mismatch")
+            if isinstance(payroll_correction, str) and payroll_correction.startswith("staff-handover:"):
+                source = correction_rows.get(payroll_correction)
+                if (
+                    source is None or source.get("direction") != "receivable_from_staff"
+                    or source_obligations != (source.get("related_identity"),)
+                    or original is None or not _is_int(source.get("amount_due_ntd"))
+                    or original > source["amount_due_ntd"]
+                ):
+                    blockers.add("staff_payables_payroll_recovery_correction_mismatch")
+                else:
+                    parent = source_obligations[0]
+                    correction_recovery_amounts[parent] = correction_recovery_amounts.get(parent, 0) + original
         remaining = _integer(row.get("amount_due_ntd"), "staff_payables_recovery_remaining_invalid", blockers)
         status = row.get("status")
         if original is not None and remaining is not None and remaining > original:
@@ -571,6 +672,8 @@ def _build_readback(
                 blockers.add("staff_payables_recovery_partial_amount_invalid")
         else:
             blockers.add("staff_payables_recovery_status_invalid")
+        if is_payroll_recovery and remaining is not None and remaining > 0:
+            open_payroll_recovery_count += 1
         recovery_version = _integer(row.get("version"), "staff_payables_source_version_invalid", blockers)
         if recovery_version is not None:
             versions.append(HistoricalSettlementSourceVersion(SettlementSourceKind.STAFF_OVERPAYMENT_RECOVERY, identity, recovery_version))
@@ -610,7 +713,7 @@ def _build_readback(
             current_event = recovery_events[-1]
             if current_event["after"] != remaining or current_event["status"] != status:
                 blockers.add("staff_payables_recovery_event_projection_mismatch")
-        recovery_payload.append({"identity": identity, "staff_id": staff_id, "status": status, "original_amount_ntd": original, "remaining_amount_ntd": remaining, "source_bank_facts": tuple(source_bank_facts), "source_event_ids": tuple(source_event_ids), "source_obligations": tuple(source_obligations), "events": tuple(recovery_events)})
+        recovery_payload.append({"identity": identity, "staff_id": staff_id, "status": status, "original_amount_ntd": original, "remaining_amount_ntd": remaining, "source_bank_facts": tuple(source_bank_facts), "source_event_ids": tuple(source_event_ids), "source_obligations": tuple(source_obligations), "payroll_correction_identity": payroll_correction, "events": tuple(recovery_events)})
 
     if any(
         item["status"] == "recovery_required"
@@ -618,6 +721,11 @@ def _build_readback(
         for item in projection_payload
     ):
         blockers.add("staff_payables_recovery_required_root_missing")
+    for identity, overpaid in corrected_overpayments.items():
+        if correction_recovery_amounts.get(identity) == overpaid:
+            open_identities.discard(identity)
+        else:
+            blockers.add("staff_payables_payroll_recovery_coverage_missing")
 
     source_versions = tuple(sorted(set(versions)))
     lineage_payload = {
@@ -646,12 +754,13 @@ def _build_readback(
         owner=CompletionOwner.STAFF_PAYABLES,
         aggregate_version=None,
         settlement_lineage_identity=fingerprint_payload(lineage_payload).value if source_versions and available else None,
-        obligation_count=len(obligation_index),
+        obligation_count=len(obligation_index) - len(correction_rows),
         open_obligation_count=len(open_identities),
         allocation_lineage_identity=fingerprint_payload(allocation_payload).value if (payout_payload or historical_projection_payload) and available else None,
         source_versions=source_versions,
         readback_available=available,
         integrity_blockers=tuple(sorted(blockers)),
+        open_payroll_recovery_count=open_payroll_recovery_count,
     )
 
 
@@ -667,6 +776,7 @@ def _historical_projection_terminal(
     versions: list[HistoricalSettlementSourceVersion],
     blockers: set[str],
     payload: list[dict[str, Any]],
+    superseded_by_bank: bool = False,
 ) -> bool:
     event_id_value = row.get("historical_projection_event_id")
     if event_id_value is None:
@@ -766,7 +876,10 @@ def _historical_projection_terminal(
         blockers.add("staff_payables_historical_event_version_mismatch")
     if projection_owner_version != resulting_version:
         blockers.add("staff_payables_historical_projection_event_version_mismatch")
-    if account_version != projection_owner_version:
+    if account_version != projection_owner_version and not (
+        superseded_by_bank and account_version is not None and projection_owner_version is not None
+        and account_version > projection_owner_version
+    ):
         blockers.add("staff_payables_historical_projection_account_version_mismatch")
     if link_amount != amount_snapshot:
         blockers.add("staff_payables_historical_link_amount_mismatch")
@@ -829,6 +942,7 @@ def _historical_projection_terminal(
         )
     return bool(
         structurally_complete
+        and not superseded_by_bank
         and amount_snapshot == amount_due
         and projection_payroll_version == payroll_version
     )

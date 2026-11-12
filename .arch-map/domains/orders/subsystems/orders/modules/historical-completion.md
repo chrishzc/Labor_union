@@ -29,7 +29,7 @@
 
 ## Dependencies
 - outbound: `scheduling`、`client-finance`、`staff-payables` — Query 只讀各 owner typed current readback；Apply 鎖定並驗證 exact owner versions/source vector，不改寫這些 owner root。
-- Staff Payables completion evidence accepts either canonical bank payout/allocation lineage or exact current historical payout projection/event/link lineage；Apply locks both lineage families before fresh re-read，且歷史流程只接受 `payable_to_staff` obligations。
+- Staff Payables completion evidence accepts either canonical bank payout/allocation lineage or exact current historical payout projection/event/link lineage；Apply locks both lineage families before fresh re-read。更正差額及追償讀取見 [Staff Payables historical payment settlement](../../../../staff-payables/subsystems/staff-payables/modules/historical-payment-settlement.md)。
 - outbound: Orders canonical lifecycle writer — 追加 lifecycle event/outbox 並以 lifecycle version CAS 更新 Orders projection。
 - inbound: `ui_react/src/pages/FinancePage.tsx` — 客戶收款頁選取歷史服務完成案件時，透過 HistoricalCompletionPanel 呈現 owner referral、預覽並確認帳務完成；成功或手動重新整理後重新讀取案件及完成狀態。案件工作台保留完工摘要與同案帳務連結。
 

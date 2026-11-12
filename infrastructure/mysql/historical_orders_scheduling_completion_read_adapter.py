@@ -345,7 +345,6 @@ def _historical_service_day_facts(
     """Validate one adopted count root and its complete per-assignment items."""
 
     if not rows:
-        blockers.append("orders.historical_service_day_projection_missing")
         return None, ()
     event_ids = {row.get("historical_event_id") for row in rows}
     projection_event_ids = {
@@ -373,6 +372,8 @@ def _historical_service_day_facts(
     event_id = row.get("historical_event_id")
     projection_event_id = row.get("historical_projection_event_id")
     identity = row.get("historical_event_identity")
+    if isinstance(identity, str) and identity.startswith("historical-service-days-pending:"):
+        blockers.append("orders.historical_attribution_accounting_pending")
     event_revision = row.get("historical_event_resulting_day_revision")
     projection_revision = row.get("historical_projection_day_revision")
     event_total = row.get("historical_event_total_actual_service_days")

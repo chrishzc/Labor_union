@@ -6,6 +6,8 @@
 
 ## Responsibility
 接受人員確認的實際服務天數，保存 immutable revision 及帳務比較快照。正式帳務差異由原帳務流程處理。
+歷史多人服務歸屬透過獨立 Preview／Apply 在同一交易保存各人天數、委派 Payroll 應付及 Staff Payables 追償，並在必要時重開歷史帳務。歷史指派與天數不產生逐日班次。
+費率可計算而原實付證據不足時，沿歷史天數事件及收據保存待核對，並阻擋再次結清。補齊原核銷後，沿同一 Preview／Apply 依目前天數接續帳務。
 
 ## Implementation
 - primary:
@@ -18,6 +20,7 @@
   - `api/dependencies/historical_service_accounting.py`
   - `api/schemas/historical_service_accounting.py`
   - `ui_react/src/components/HistoricalServiceAccountingWorkbench.tsx`
+  - `ui_react/src/components/HistoricalServiceAttributionPanel.tsx`
   - `ui_react/src/api/orders/historical_service_accounting_client.ts`
 - schema:
   - `db/schema_parts/215_historical_service_accounting.sql`
@@ -28,6 +31,7 @@
 ## Dependencies
 - outbound: `client-finance/historical-service-accounting` — 計算客戶端比較金額。
 - outbound: `payroll/historical-service-accounting` — 計算逐指派比較金額。
+- outbound: `payroll/assignment-terms-impact` — 以歷史各人服務量建立或更正應付，保留原核銷及追償來源。
 - inbound: authenticated historical-order administration（查詢／人工處理）。
 
 ## Contracts

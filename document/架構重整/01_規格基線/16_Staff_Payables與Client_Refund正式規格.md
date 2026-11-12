@@ -87,9 +87,19 @@
 ## 4. 跨 Domain 交易與換人銜接
 
 - **歷史付款來源順位**：優先消費 Finance Import 對帳單；僅系統前採納之歷史訂單於舊來源無法還原時使用 owner-specific 人工 `paid | settled`。Client Finance settlement、Staff Payables completion 與 Orders 結案為三個獨立投影。
-- **服務中換人銜接（`staff-handover:`）**：Staff Payables 僅消費 Payroll `staff-handover:` correction；換人差額不得被 AP 清冊或自助查詢拆成獨立第二張 payable，實付高於有效新應付時依唯一 correction 建立單次追償（重播／連續換人不重複計追償）；未收回追償不阻擋合法排班交接或新月嫂薪資。
+- **服務中換人銜接（`staff-handover:`）**：Staff Payables 消費 Payroll 的換人更正；換人差額不得被 AP 清冊或自助查詢拆成獨立第二張 payable，實付高於有效新應付時依唯一 correction 建立單次追償（重播／連續換人不重複計追償）；未收回追償不阻擋合法排班交接或新月嫂薪資。
+
+<a id="service-attribution-settlement"></a>
+
+### 4.1 服務歸屬更正的核銷與追償
+
+- 消費 [Payroll 服務歸屬更正](03_Payroll_Domain.md#service-attribution-payroll-correction) 的正式差額與款項承接資料。原出款、核銷及沖正留在原受款月嫂、原款項來源與分期。依各來源有效核銷及既有手續費規則算出待付餘額。其他月嫂的新應付獨立核銷。
+- 依 §2.4 對原受款月嫂及原款項來源計算新增淨超付。各來源分別處理待付與追償，以唯一 Payroll 更正、受款人、款項來源及既有追償餘額防重。一般單核銷確認順序依 [服務歸屬更正交易契約](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。歷史單補證依 [歷史服務歸屬](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction)。
+- 供 [歷史帳務完成投影](27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 讀取各月嫂有效待付、已核銷及未處理追償。
 
 ## 5. 驗收標準
+
+- 多月嫂歸屬更正涵蓋未付、部分付款、已付、自備與補助分來源及沖正後狀態。原核銷留在原受款人及來源，新月嫂可獨立核銷。原受款人超付只立一次追償，重送或連續更正不重複追收。
 
 1. Unit／Subsystem 驗證整數 NTD、精確與差額核銷守恆、`0～100` 元手續費結清、超過 `100` 元部分付款保留餘額、方案一 `T - S`／`S` 分來源共同確認、return／reversal 重開及 idempotency 防重／conflict。
 2. 隔離 MySQL Domain 與 Global E2E 驗證：超收 `3,000 / 2,500` 建 `customer_refund 500` 並出款核銷；超退 `750 / 500` 建 `client_over_refund_recovery 250` 與後續收回；同一批次同時存在月嫂付款與客戶退款互不抵銷；失敗注入證實跨 Domain UoW 原子全批回滾。

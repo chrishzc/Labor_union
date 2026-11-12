@@ -22,6 +22,7 @@ from shared_kernel.validation import (
 )
 
 _IDENTITY_MAXIMUM_LENGTH = 191
+DEFAULT_PAYROLL_POLICY_VERSION = "approved-rates-v1"
 
 
 class PayrollPolicyKind(StrEnum):

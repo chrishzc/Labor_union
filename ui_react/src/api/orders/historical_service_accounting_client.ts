@@ -5,19 +5,30 @@ import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
 
 const Fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
-const Assignment = z.strictObject({ assignment_identity: z.string().min(1), staff_id: z.number().int().positive(), staff_name: z.string().min(1), policy_version: z.string().min(1), policy_kind: z.enum(['citizen', 'subsidized_citizen', 'non_citizen']), hourly_rate_ntd: z.number().int().positive() });
+const Assignment = z.strictObject({ assignment_identity: z.string().min(1), staff_id: z.number().int().positive(), staff_name: z.string().min(1), policy_version: z.string().min(1), policy_kind: z.enum(['citizen', 'subsidized_citizen', 'non_citizen', 'twins']), hourly_rate_ntd: z.number().int().positive() });
 const Query = z.strictObject({ case_no: z.string().min(1), lifecycle_status: z.string().min(1), lifecycle_version: z.number().int().nonnegative(), adoption_receipt_id: z.number().int().positive(), adoption_source_identity: z.string().min(1), historical_day_revision: z.number().int().nonnegative(), client_finance_version: z.number().int().nonnegative(), payroll_version: z.number().int().nonnegative(), contracted_service_days: z.number().int().positive(), service_hours_per_day: z.number().positive().max(24).multipleOf(0.5), contractual_floor_fee_ntd: z.number().int().nonnegative(), client_identity_status: z.string().min(1), assignments: z.array(Assignment).min(1) });
 const Allocation = z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(), actual_service_days: z.number().int().positive(), actual_service_hours: z.string(), floor_fee_ntd: z.number().int().nonnegative() });
 const Payroll = z.strictObject({ assignment_identity: z.string(), staff_id: z.number().int().positive(), actual_service_days: z.number().int().positive(), actual_hours: z.number().positive().multipleOf(0.5), double_pay_hours: z.literal(0), hourly_rate_ntd: z.number().int().positive(), service_salary_ntd: z.number().int().nonnegative(), floor_fee_allocated_ntd: z.number().int().nonnegative(), effective_adjustments_ntd: z.number().int(), total_payable_ntd: z.number().int().positive() });
 const Preview = z.strictObject({ facts: Query, total_actual_service_days: z.number().int().positive(), total_actual_service_hours: z.string(), historical_floor_fee_ntd: z.number().int().nonnegative(), historical_double_pay_days: z.literal(0), historical_double_pay_hours: z.literal('0'), allocations: z.array(Allocation).min(1), payroll_assignments: z.array(Payroll).min(1), staff_obligation_amount_ntd: z.number().int().positive(), client_obligation_amount_ntd: z.number().int().nonnegative(), client_service_receivable_ntd: z.number().int().nonnegative(), client_subsidy_hours: z.number().int().nonnegative(), client_self_pay_service_hours: z.number().int().nonnegative(), preview_fingerprint: Fingerprint });
 const Receipt = z.strictObject({ case_no: z.string(), resulting_historical_day_revision: z.number().int().positive(), resulting_client_finance_version: z.number().int().nonnegative(), resulting_payroll_version: z.number().int().nonnegative(), total_actual_service_days: z.number().int().positive(), client_obligation_amount_ntd: z.number().int().nonnegative(), staff_obligation_amount_ntd: z.number().int().positive(), preview_fingerprint: Fingerprint, replayed: z.boolean() });
+const AttributionPreview = z.strictObject({
+  accounting_pending: z.array(z.string()),
+  preview_fingerprint: Fingerprint, reopen_accounting: z.boolean(),
+  caregivers: z.array(z.strictObject({ staff_id: z.number().int(), actual_service_days: z.number().int(), entitlement_ntd: z.number().int() })),
+  paid_obligations: z.array(z.strictObject({ staff_id: z.number().int(), paid_ntd: z.number().int(), remaining_payable_ntd: z.number().int(), new_recovery_ntd: z.number().int() })),
+  manual_amounts: z.array(z.strictObject({ staff_id: z.number().int(), previous_calculated_ntd: z.number().int(), manual_ntd: z.number().int() })),
+  funding: z.array(z.strictObject({ staff_id: z.number().int(), funding_kind: z.enum(['client', 'subsidy']), entitlement_ntd: z.number().int(), settled_ntd: z.number().int(), due_date: z.string().nullable() })),
+});
 const PrecisionAssignment = z.strictObject({ assignment_identity: z.string().min(1), staff_id: z.number().int().positive(), staff_name: z.string().min(1) });
 const PrecisionQuery = z.strictObject({ case_no: z.string().min(1), lifecycle_status: z.string().min(1), order_version: z.number().int().nonnegative(), scheduling_version: z.number().int().nonnegative(), client_finance_version: z.number().int().nonnegative(), payroll_version: z.number().int().nonnegative(), historical_day_revision: z.number().int().nonnegative(), confirmed_service_date_version: z.number().int().positive().nullable(), planned_start_date: z.string(), actual_start_date: z.string().nullable(), contracted_service_days: z.number().int().positive(), assignments: z.array(PrecisionAssignment), blockers: z.array(z.string()) });
 const PrecisionPreview = PrecisionQuery.extend({ target_status: z.string().min(1), actual_end_date: z.null(), official_service_dates: z.array(z.string()).max(0), client_finance_resulting_version: z.number().int().nonnegative(), payroll_resulting_version: z.number().int().nonnegative(), preview_fingerprint: Fingerprint });
 const PrecisionReceipt = z.strictObject({ case_no: z.string(), lifecycle_status: z.string(), order_version: z.number().int().positive(), scheduling_version: z.number().int().positive(), scheduling_generation: z.number().int().positive(), client_finance_version: z.number().int().nonnegative(), payroll_version: z.number().int().nonnegative(), historical_day_revision: z.number().int().nonnegative(), preview_fingerprint: Fingerprint, replayed: z.boolean() });
 const envelope = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.literal(true), message: z.string(), data, error: z.null() });
 
-export type HistoricalServiceAccountingQuery = z.infer<typeof Query>;
+const HistoricalAccountingQuery = Query.extend({ accounting_pending: z.array(z.string()).optional() });
+export type HistoricalServiceAccountingQuery = z.infer<typeof HistoricalAccountingQuery>;
+export type HistoricalAttributionPreview = z.infer<typeof AttributionPreview>;
+export type HistoricalAttributionCommand = { caregivers: { staff_id: number; actual_service_days: number }[]; evidence: string };
 export type HistoricalServiceAccountingPreview = z.infer<typeof Preview>;
 export type HistoricalCaregiverDays = { assignment_identity: string; staff_id: number; actual_service_days: number };
 export type HistoricalPrecisionRestartQuery = z.infer<typeof PrecisionQuery>;
@@ -31,8 +42,16 @@ const options = (headers?: Record<string, string>) => {
 };
 
 export const historicalServiceAccountingClient = {
+  async previewAttribution(caseNo: string, command: HistoricalAttributionCommand) {
+    return decodePayload(envelope(AttributionPreview), await transport.post(`${path(caseNo)}/attribution/preview`, command, options())).data;
+  },
+  async applyAttribution(caseNo: string, command: HistoricalAttributionCommand, preview: HistoricalAttributionPreview, reason: string, key: string, adoptCalculatedAmounts: boolean) {
+    return decodePayload(envelope(Receipt.extend({ accounting_pending: z.array(z.string()) })), await transport.post(`${path(caseNo)}/attribution/apply`, {
+      ...command, preview_fingerprint: preview.preview_fingerprint, reason, adopt_calculated_amounts: adoptCalculatedAmounts,
+    }, options({ 'Idempotency-Key': key, 'X-Correlation-ID': key }))).data;
+  },
   async query(caseNo: string): Promise<HistoricalServiceAccountingQuery> {
-    return decodePayload(envelope(Query), await transport.get(path(caseNo), options())).data;
+    return decodePayload(envelope(HistoricalAccountingQuery), await transport.get(path(caseNo), options())).data;
   },
   async preview(caseNo: string, caregivers: HistoricalCaregiverDays[]): Promise<HistoricalServiceAccountingPreview> {
     return decodePayload(envelope(Preview), await transport.post(`${path(caseNo)}/preview`, { caregivers }, options({ 'X-Correlation-ID': `historical-days-preview-${crypto.randomUUID()}` }))).data;

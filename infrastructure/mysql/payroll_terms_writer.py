@@ -37,7 +37,9 @@ def persist_payroll_terms_impact(cursor, command) -> None:
     resolution = command.assignment_resolution.assignment_id_by_candidate_key if command.assignment_resolution is not None else None
     if command.reuse_existing_assignments:
         resolution = dict(command.candidate.rate_source_assignments)
-    persist_payroll_installments(cursor, command.candidate.case_no, command.candidate.payroll, resolution)
+    from domains.payroll.historical_calculation import HistoricalCasePayrollCandidate
+    if not isinstance(command.candidate.payroll, HistoricalCasePayrollCandidate):
+        persist_payroll_installments(cursor, command.candidate.case_no, command.candidate.payroll, resolution)
 
 
 def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, result) -> None:

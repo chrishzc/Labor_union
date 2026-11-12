@@ -234,6 +234,7 @@ class PayrollImpactPersistenceCommand:
     source_event_id: int
     special_pay_events: tuple[PayrollSpecialPayEventCandidate, ...] = ()
     reuse_existing_assignments: bool = False
+    replace_unpaid_amount_controls: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

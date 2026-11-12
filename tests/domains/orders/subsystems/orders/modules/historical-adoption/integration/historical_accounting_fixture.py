@@ -1,23 +1,27 @@
 """Shared real-accounting setup for historical-adoption native regressions."""
 
-def seed_accounting_basis(cursor, case_no):
-    cursor.execute("UPDATE clients SET identity_status='一般市民' WHERE case_no=%s", (case_no,))
+def seed_accounting_basis(cursor, case_no, *, has_case_rate=True):
+    identity = "一般市民" if has_case_rate else "非市民"
+    client_rate = 300 if has_case_rate else 320
+    cursor.execute("UPDATE clients SET identity_status=%s WHERE case_no=%s", (identity, case_no))
     cursor.execute("UPDATE orders SET service_days=30,service_hours_per_day=8,floor_fee=0,"
                    "start_date='2025-02-01',end_date='2025-03-02' WHERE case_no=%s", (case_no,))
     cursor.execute(
         "INSERT INTO client_payment_terms_events(case_no,policy_version,client_hourly_rate_ntd,"
         "deposit_service_days,deposit_due_date,first_payment_due_date,second_payment_due_date,"
         "expected_account_version,source_event_identity,idempotency_key,actor,reason) "
-        "VALUES (%s,'historical-fixture-v1',300,0,'2025-01-01','2025-01-02',NULL,0,%s,%s,'test','fixture')",
-        (case_no, case_no+'-terms-source', case_no+'-terms-key'),
+        "VALUES (%s,'historical-fixture-v1',%s,0,'2025-01-01','2025-01-02',NULL,0,%s,%s,'test','fixture')",
+        (case_no, client_rate, case_no+'-terms-source', case_no+'-terms-key'),
     )
     event_id = cursor.lastrowid
     cursor.execute(
         "INSERT INTO client_payment_terms(case_no,policy_version,client_hourly_rate_ntd,"
         "deposit_service_days,deposit_due_date,first_payment_due_date,second_payment_due_date,current_event_id) "
-        "VALUES (%s,'historical-fixture-v1',300,0,'2025-01-01','2025-01-02',NULL,%s)",
-        (case_no, event_id),
+        "VALUES (%s,'historical-fixture-v1',%s,0,'2025-01-01','2025-01-02',NULL,%s)",
+        (case_no, client_rate, event_id),
     )
+    if not has_case_rate:
+        return
     cursor.execute(
         "INSERT INTO case_architecture_bootstrap_events(case_no,order_version,client_payment_terms_event_id,"
         "client_policy_version,client_hourly_rate_ntd,payroll_policy_version,payroll_policy_kind,"

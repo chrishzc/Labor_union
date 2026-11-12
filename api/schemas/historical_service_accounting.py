@@ -28,6 +28,24 @@ class HistoricalServiceAccountingApplyBody(HistoricalServiceAccountingPreviewBod
     reason: str = Field(default="", max_length=500)
 
 
+class HistoricalAttributionDaysBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    staff_id: StrictInt = Field(gt=0)
+    actual_service_days: StrictInt = Field(gt=0)
+
+
+class HistoricalAttributionPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    caregivers: list[HistoricalAttributionDaysBody] = Field(min_length=2, max_length=20)
+    evidence: str = Field(min_length=1, max_length=500)
+
+
+class HistoricalAttributionApplyBody(HistoricalAttributionPreviewBody):
+    adopt_calculated_amounts: bool = False
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class HistoricalServiceAccountingAssignmentView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -55,6 +73,7 @@ class HistoricalServiceAccountingQueryView(BaseModel):
     contractual_floor_fee_ntd: int
     client_identity_status: str
     assignments: list[HistoricalServiceAccountingAssignmentView]
+    accounting_pending: list[str] | None = None
 
 
 class HistoricalServiceDaysAllocationView(BaseModel):

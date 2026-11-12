@@ -21,10 +21,10 @@ from domains.case_import.case_import import (
 )
 from shared_kernel.money import MoneyNTD
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.payroll.calculation import DEFAULT_PAYROLL_POLICY_VERSION as PAYROLL_POLICY_VERSION
 
 
 CLIENT_PAYMENT_POLICY_VERSION = "client-approved-v1"
-PAYROLL_POLICY_VERSION = "approved-rates-v1"
 _CLIENT_RATE_BY_IDENTITY = {
     "一般市民": 300,
     "補助市民": 350,

@@ -50,6 +50,14 @@ def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=
         order = cursor.fetchone()
         if order is None or order["status"] not in _COMPLETED:
             return _skipped("historical_service_not_completed")
+        cursor.execute(
+            "SELECT 1 FROM historical_service_day_projections p "
+            "JOIN historical_service_day_events e ON e.id=p.current_event_id "
+            "WHERE p.case_no=%s AND JSON_CONTAINS_PATH(e.result_snapshot,'one','$.service_attribution_evidence')",
+            (case_no,),
+        )
+        if cursor.fetchone():
+            return _skipped("already_synced")
         cursor.execute(_ADOPTED_ASSIGNMENT_SQL, (case_no,))
         assignments = tuple(cursor.fetchall())
         if len(assignments) != 1:

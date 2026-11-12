@@ -6,6 +6,7 @@
 
 ## Responsibility
 完成案件正式服務日期的 Query／Preview／fresh-lock Apply。完整更正日期由 current effective Scheduling 取得，date-only 更正於同一 outer transaction 委派 Scheduling generation replacement、保留不可變 Orders lifecycle 更正證據與既有 service-data lock；不重建金額義務。金額影響無法安全承接時 fail closed。
+一般服務中與完工案件的已服務歸屬 Preview／Apply 按原正式服務日重新指派，於同一交易沿用 Scheduling generation replacement 及 Payroll handover 差額 writer。
 
 ## Implementation
 - primary:
@@ -16,6 +17,7 @@
   - `api/dependencies/official_service_date_correction.py`
   - `ui_react/src/api/orders/official_service_date_correction_client.ts`
   - `ui_react/src/components/OrderOfficialDateCorrectionPanel.tsx`
+  - `ui_react/src/components/OrderServiceAttributionPanel.tsx`
   - `ui_react/src/components/OrderServiceDatesPanel.tsx` — 完工模式沿用案件內「設定服務日期／確認排班」月曆，經原 official-service-dates Query／Preview／Apply 保存，不走事前確認 writer。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
   - `ui_react/src/components/OrderWorkbenchV2OwnerContext.tsx` — 案件頁既有相關紀錄入口內，於服務資料欄位唯讀呈現原完工及日期更正歷程。

@@ -65,6 +65,26 @@ const ReceiptSchema = z.object({
   preview_fingerprint: z.string(),
 });
 
+const AttributionPreviewSchema = z.object({
+  case_no: z.string(),
+  order_version: z.number().int(),
+  scheduling_version: z.number().int(),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  proposed_assignments: z.array(AssignmentSchema.pick({ staff_id: true, service_dates: true })),
+  staff_entitlements: z.array(z.object({ staff_id: z.number().int(), amount_ntd: z.number().int() })),
+  paid_obligations: z.array(z.object({
+    staff_id: z.number().int(), before_ntd: z.number().int(), after_ntd: z.number().int(),
+    paid_ntd: z.number().int(), recovery_increase_ntd: z.number().int(),
+  })),
+});
+export type AttributionPreview = z.infer<typeof AttributionPreviewSchema>;
+export type AttributionChange = {
+  source_assignment_id: number;
+  staff_id: number;
+  service_dates: string[];
+  evidence: string;
+};
+
 export type OfficialDateQuery = z.infer<typeof QuerySchema>;
 export type OfficialDatePreview = z.infer<typeof PreviewSchema>;
 export type OfficialDateSelection = { assignment_id: number; service_dates: string[] };
@@ -78,6 +98,19 @@ function path(caseNo: string) {
 }
 
 export const officialServiceDateCorrectionClient = {
+  async previewAttribution(caseNo: string, change: AttributionChange) {
+    return decodeEnvelope(AttributionPreviewSchema, await transport.post(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/preview`, change, options(),
+    ));
+  },
+  async applyAttribution(caseNo: string, change: AttributionChange, preview: AttributionPreview, reason: string, key: string) {
+    return decodeEnvelope(ReceiptSchema, await transport.post(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/service-attribution/apply`,
+      { ...change, expected_order_version: preview.order_version, expected_scheduling_version: preview.scheduling_version,
+        preview_fingerprint: preview.preview_fingerprint, reason },
+      options({ 'Idempotency-Key': key, 'X-Correlation-ID': key }),
+    ));
+  },
   async query(caseNo: string, request?: { signal?: AbortSignal }) {
     return decodeEnvelope(QuerySchema, await transport.get(path(caseNo), { ...options(), signal: request?.signal }));
   },

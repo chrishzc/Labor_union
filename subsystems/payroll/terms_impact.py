@@ -304,6 +304,26 @@ def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_
     return _handover_candidate(facts, payroll, rates, change_identity)
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalPayrollAssignment:
+    candidate_key: str
+    source_assignment_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalPayrollAllocation:
+    case_no: str
+    assignments: tuple[HistoricalPayrollAssignment, ...]
+
+
+def build_historical_payroll_attribution_impact(source, allocation, payroll, rates, terms, change_identity):
+    facts = PayrollTermsImpactFacts(
+        source.case_no, source.payroll_version, allocation, terms, source.source_terms,
+        source.existing_obligations, source.staff_payment_due_date,
+    )
+    return _handover_candidate(facts, payroll, rates, change_identity)
+
+
 def _has_handover_corrections(facts):
     return any(item.obligation_identity.startswith("staff-handover:") for item in facts.existing_obligations)
 

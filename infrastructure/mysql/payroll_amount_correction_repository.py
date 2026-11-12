@@ -282,6 +282,8 @@ def controlled_payroll_terms(cursor,command):
     controls={};handled=set();carry={}
     for action in command.candidate.actions:
         source=action.source_obligation_identity or action.obligation_identity
+        if source in command.replace_unpaid_amount_controls:
+            continue
         cursor.execute('SELECT c.*,o.assignment_id,o.staff_id FROM payroll_amount_controls c JOIN staff_obligations o ON o.obligation_identity=c.obligation_identity WHERE c.obligation_identity=%s FOR UPDATE',(source,))
         control=cursor.fetchone()
         if control:

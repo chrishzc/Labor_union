@@ -11,6 +11,7 @@ from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerat
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import SchedulingReplacementCommand
+from subsystems.payroll.terms_impact import PayrollTermsImpactCandidate, build_payroll_handover_impact
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,7 @@ class OfficialAssignmentDates:
     status: str
     service_dates: tuple[date, ...]
     staff_name: str = ""
+    double_pay_dates: tuple[date, ...] = ()
 
 
 MonetaryBlocker = Literal[
@@ -93,12 +95,36 @@ class OfficialDateReceipt:
     preview_fingerprint: PreviewFingerprint
 
 
+@dataclass(frozen=True, slots=True)
+class ServiceAttributionChange:
+    source_assignment_id: int
+    staff_id: int
+    service_dates: tuple[date, ...]
+    evidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceAttributionPreview:
+    facts: OfficialDateFacts
+    scheduling: SchedulingGenerationCandidate
+    payroll: PayrollTermsImpactCandidate
+    fingerprint: PreviewFingerprint
+    evidence: str
+
+
+def _attribution_family(status: str) -> str:
+    return "orders_completed_service_attribution" if status == "訂單完成" else "orders_service_attribution"
+
+
 class OfficialDateRepository(Protocol):
     def load(self, case_no: str, *, lock: bool = False) -> OfficialDateFacts: ...
     def load_history(self, case_no: str) -> tuple[OfficialDateHistoryRecord, ...]: ...
     def validate_availability(self, candidate: SchedulingGenerationCandidate, *, lock: bool) -> None: ...
     def replay(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None: ...
     def replace_and_record(self, command: SchedulingReplacementCommand, preview: OfficialDatePreview) -> OfficialDateReceipt: ...
+    def load_attribution(self, case_no: str, staff_id: int, *, lock: bool): ...
+    def replay_attribution(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None: ...
+    def persist_attribution(self, command: SchedulingReplacementCommand, preview: ServiceAttributionPreview) -> OfficialDateReceipt: ...
 
 
 class UnitOfWork(Protocol):
@@ -114,6 +140,52 @@ class OfficialServiceDateCorrectionWorkflow:
 
     def query(self, case_no: str) -> OfficialDateFacts:
         return replace(self._repository.load(case_no), history=self._repository.load_history(case_no))
+
+    def preview_attribution(self, case_no: str, change: ServiceAttributionChange) -> ServiceAttributionPreview:
+        return self._prepare_attribution(case_no, change, lock=False)
+
+    def apply_attribution(self, case_no: str, change: ServiceAttributionChange, *,
+                          expected_order_version: int, expected_scheduling_version: int,
+                          preview_fingerprint: str, actor: str, reason: str,
+                          idempotency_key: str, correlation_id: str) -> OfficialDateReceipt:
+        if not reason.strip():
+            raise ValueError("service_attribution_reason_required")
+        command_fingerprint = fingerprint_payload({
+            "case_no": case_no, "source_assignment_id": change.source_assignment_id,
+            "staff_id": change.staff_id, "dates": tuple(day.isoformat() for day in change.service_dates),
+            "evidence": change.evidence.strip(), "reason": reason.strip(), "actor": actor,
+            "order_version": expected_order_version, "scheduling_version": expected_scheduling_version,
+            "preview": preview_fingerprint,
+        })
+        replay = self._repository.replay_attribution(idempotency_key, command_fingerprint.value)
+        if replay is not None:
+            return replay
+        with self._unit_of_work() as unit_of_work:
+            facts, terms, payable_versions = self._repository.load_attribution(case_no, change.staff_id, lock=True)
+            replay = self._repository.replay_attribution(idempotency_key, command_fingerprint.value, lock=True)
+            if replay is not None:
+                return replay
+            if (facts.order_version, facts.scheduling_version) != (expected_order_version, expected_scheduling_version):
+                raise ValueError("official_date_version_conflict")
+            preview = _attribution_preview(facts, terms, payable_versions, change)
+            if preview.fingerprint.value != preview_fingerprint:
+                raise ValueError("official_date_preview_stale")
+            self._repository.validate_availability(preview.scheduling, lock=True)
+            command = SchedulingReplacementCommand(
+                preview.scheduling, _attribution_family(facts.order_status), facts.order_version,
+                command_fingerprint, preview.fingerprint, IdempotencyKey(idempotency_key),
+                ActorContext(actor), reason.strip(), CorrelationId(correlation_id),
+                preserve_leave_occupancy=True,
+            )
+            receipt = self._repository.persist_attribution(command, preview)
+            unit_of_work.commit()
+            return receipt
+
+    def _prepare_attribution(self, case_no, change, *, lock):
+        facts, terms, payable_versions = self._repository.load_attribution(case_no, change.staff_id, lock=lock)
+        preview = _attribution_preview(facts, terms, payable_versions, change)
+        self._repository.validate_availability(preview.scheduling, lock=lock)
+        return preview
 
     def preview(self, case_no: str, selections: tuple[OfficialDateSelection, ...]) -> OfficialDatePreview:
         facts = self._repository.load(case_no)
@@ -165,6 +237,80 @@ class OfficialServiceDateCorrectionWorkflow:
             receipt = self._repository.replace_and_record(command, preview)
             unit_of_work.commit()
             return receipt
+
+
+def _attribution_preview(facts, terms, payable_versions, change):
+    if facts.order_status not in {"服務中", "訂單完成"} or facts.actual_start_date is None:
+        raise ValueError("service_attribution_status_blocked")
+    if not change.evidence.strip():
+        raise ValueError("service_attribution_evidence_required")
+    if facts.service_data_locked and facts.order_status == "服務中":
+        raise ValueError("service_attribution_status_blocked")
+    official_days = tuple(day for item in facts.assignments for day in item.service_dates)
+    if len(official_days) != facts.service_days or len(set(official_days)) != facts.service_days:
+        raise ValueError("official_date_schedule_incomplete")
+    if any(item.double_pay_dates for item in facts.assignments):
+        raise ValueError("service_attribution_special_pay_review_required")
+    if "source_rate_snapshot_missing_or_ambiguous" in facts.monetary_blockers:
+        raise ValueError("service_attribution_source_rate_required")
+    selected = change.service_dates
+    if not selected or tuple(sorted(set(selected))) != selected:
+        raise ValueError("official_date_dates_not_canonical")
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    if any(day >= today for day in selected) and facts.order_status == "服務中":
+        raise ValueError("service_attribution_unperformed_date_blocked")
+    if any(day > today for day in selected):
+        raise ValueError("service_attribution_unperformed_date_blocked")
+    source = next((item for item in facts.assignments if item.assignment_id == change.source_assignment_id), None)
+    if source is None or not set(selected).issubset(source.service_dates) or source.staff_id == change.staff_id:
+        raise ValueError("service_attribution_assignment_conflict")
+    if terms.payroll is None:
+        raise ValueError("service_attribution_payroll_required")
+    target = next((item for item in facts.assignments if item.staff_id == change.staff_id), None)
+    if sum(item.staff_id == change.staff_id for item in facts.assignments) > 1:
+        raise ValueError("service_attribution_target_assignment_ambiguous")
+    moves = set(selected)
+    segments = []
+    for item in facts.assignments:
+        days = set(item.service_dates)
+        if item == source:
+            days -= moves
+        if item == target:
+            days |= moves
+        if days:
+            segments.append((item.assignment_id, item.staff_id, tuple(sorted(days))))
+    if target is None:
+        segments.append((None, change.staff_id, selected))
+    assignments = tuple(
+        AssignmentCandidate(
+            f"service-attribution:{facts.case_no}:{facts.scheduling_version + 1}:{index}",
+            assignment_id, staff_id, index, days[0], days[-1], days,
+            len(days) * facts.hours_per_day,
+        )
+        for index, (assignment_id, staff_id, days) in enumerate(
+            sorted(segments, key=lambda item: (item[2][0], item[1])), start=1,
+        )
+    )
+    scheduling = SchedulingGenerationCandidate(
+        facts.case_no, facts.generation_number + 1, facts.scheduling_version,
+        facts.scheduling_version + 1, tuple(item.assignment_id for item in facts.assignments),
+        assignments, (),
+    )
+    payroll = build_payroll_handover_impact(
+        terms.payroll, scheduling, terms.order.terms,
+        f"service-attribution:{facts.case_no}:{facts.scheduling_version + 1}",
+    )
+    if payroll.blockers:
+        raise ValueError(payroll.blockers[0])
+    fingerprint = fingerprint_payload({
+        "case": facts.case_no, "status": facts.order_status, "order": facts.order_version,
+        "scheduling": facts.scheduling_version, "generation": facts.generation_id,
+        "client_finance": facts.client_finance_version, "staff_payables": payable_versions,
+        "payroll": payroll.fingerprint.value, "source": source.assignment_id,
+        "staff": change.staff_id, "dates": tuple(day.isoformat() for day in selected),
+        "evidence": change.evidence.strip(),
+    })
+    return ServiceAttributionPreview(facts, scheduling, payroll, fingerprint, change.evidence.strip())
 
 
 def _preview(facts: OfficialDateFacts, selections: tuple[OfficialDateSelection, ...]) -> OfficialDatePreview:

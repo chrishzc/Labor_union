@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from shared_kernel.clock import SystemBusinessClock
+from infrastructure.mysql import mysql_adapter
 
 base = runpy.run_path('tests/domains/scheduling/subsystems/scheduling/modules/service-start/test_service_start_mysql.py')
 http = base['http']
@@ -168,16 +169,13 @@ def test_initial_selection_fresh_versions_and_command_content_are_guarded(http):
     assert len(rows("SELECT id FROM scheduling_service_start_requests WHERE case_no=%s AND JSON_UNQUOTE(JSON_EXTRACT(execution_dates,'$.kind'))='handover-v1'",(case,)))==1
 
 
-@pytest.mark.parametrize('paid',[0,12000,72000])
-def test_handover_uses_payroll_correction_preserving_actual_payout_and_customer_receipts(http,paid):
-    case,staff,assignment=setup(http)
+def _settle_original_staff_obligation(http, case, staff, paid):
     if paid:
         write("INSERT INTO staff_bank_accounts(staff_id,is_primary,bank_code,account_no) VALUES (%s,1,'synthetic',%s)",(staff[0][0],base['h']['staff_account'](staff[0][0])))
         contents=base['h']['workbook'](case,paid,4,account=base['h']['staff_account'](staff[0][0]))
         batch=checked(http.post('/api/v1/finance-import/workbooks/ingest',files={'workbook':(case+'.xlsx',contents,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},headers={'Idempotency-Key':case+':paid-fixture'}))['batch_identity']
         plan=checked(http.post('/api/v1/finance-import/batches/preview',json={'batch_identity':batch}))
         from api.dependencies.staff_payout import build_staff_payout_application
-        from infrastructure.mysql import mysql_adapter
         from domains.staff_payables.reconciliation import StaffPayoutEventType,StaffPayoutDifferenceMode
         from subsystems.staff_payables.payout_reconciliation import StaffPayoutSelection,StaffPayoutApplyRequest
         from shared_kernel.identities import ActorContext,CorrelationId,ExpectedVersion,IdempotencyKey
@@ -191,17 +189,142 @@ def test_handover_uses_payroll_correction_preserving_actual_payout_and_customer_
             application.apply(StaffPayoutApplyRequest(selection,ExpectedVersion(preview.staff_payables_version),
                 ExpectedVersion(preview.bank_facts_version),preview.fingerprint,IdempotencyKey(case+':payout'),ActorContext('synthetic'),'',CorrelationId(case)))
         finally:connection.close()
+
+
+@pytest.mark.parametrize('paid',[0,12000,72000])
+def test_handover_uses_payroll_correction_preserving_actual_payout_and_customer_receipts(http,paid):
+    case,staff,assignment=setup(http)
+    _settle_original_staff_obligation(http, case, staff, paid)
     ledger=rows('SELECT * FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))
     payout=rows('SELECT link.* FROM staff_payout_obligation_links link JOIN staff_obligations o ON o.obligation_identity=link.obligation_identity WHERE o.case_no=%s ORDER BY link.payout_event_id,link.id',(case,))
-    item=ready(http,case,assignment,staff[1]);assert checked(save(http,item)[0])['status']=='applied'
+    item = ready(http, case, assignment, staff[1])
+    response, command = save(http, item)
+    receipt = checked(response)
+    assert receipt['status'] == 'applied'
+    if paid == 72000:
+        from infrastructure.mysql.historical_staff_payables_completion_read_adapter import (
+            MySqlStaffPayablesCompletionReadAdapter,
+        )
+
+        recoveries = rows(
+            'SELECT recovery_identity,remaining_amount_ntd FROM staff_overpayment_recoveries WHERE staff_id=%s',
+            (staff[0][0],),
+        )
+        assert len(recoveries) == 1 and recoveries[0]['remaining_amount_ntd'] == 24000
+        assert checked(save(http, item, key=command['idempotency_key'])[0]) == receipt
+        assert rows(
+            'SELECT recovery_identity,remaining_amount_ntd FROM staff_overpayment_recoveries WHERE staff_id=%s',
+            (staff[0][0],),
+        ) == recoveries
+        connection = mysql_adapter.get_connection()
+        try:
+            readback = MySqlStaffPayablesCompletionReadAdapter(connection).load_completion_readback(case)
+        finally:
+            connection.close()
+        assert readback is not None
+        assert readback.open_payroll_recovery_count == 1
+        assert any(source.identity == recoveries[0]['recovery_identity'] for source in readback.source_versions)
     assert rows('SELECT * FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))==ledger
     assert rows('SELECT link.* FROM staff_payout_obligation_links link JOIN staff_obligations o ON o.obligation_identity=link.obligation_identity WHERE o.case_no=%s ORDER BY link.payout_event_id,link.id',(case,))==payout
     obligations=base['h']['money_snapshot'](case)
     active={r['staff_id']:max(0,int(r['balance_ntd'])) for r in obligations if r['obligation_kind']=='service_pay' and r['status']!='cancelled' and r['projection_status']!='closed'}
     assert active=={staff[0][0]:max(0,48000-paid),staff[1][0]:24000},obligations
     assert sum(int(link['allocated_amount_ntd']) for link in payout)==paid
-    if paid==72000:
-        assert rows('SELECT remaining_amount_ntd FROM staff_overpayment_recoveries WHERE staff_id=%s',(staff[0][0],))[0]['remaining_amount_ntd']==24000
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_service_attribution_correction_changes_only_the_proven_day(http, completed):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.official_service_date_correction import router
+    from api.routes.staff_payout import router as staff_payout_router
+
+    case, staff, assignment = setup(http)
+    original = schedule(case)
+    _settle_original_staff_obligation(http, case, staff, 72000)
+    payout_query = (
+        "SELECT link.* FROM staff_payout_obligation_links link "
+        "JOIN staff_obligations o ON o.obligation_identity=link.obligation_identity "
+        "WHERE o.case_no=%s ORDER BY link.payout_event_id,link.id"
+    )
+    original_links = rows(payout_query, (case,))
+    assert original_links
+    if completed:
+        write("UPDATE orders SET status='訂單完成' WHERE case_no=%s", (case,))
+        write("UPDATE case_staff_assignments SET status='completed' WHERE id=%s", (assignment,))
+    selected = original[0]["work_date"]
+    change = {"source_assignment_id": assignment, "staff_id": staff[1][0],
+              "service_dates": [selected.isoformat()], "evidence": "Synthetic attendance confirmation"}
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(staff_payout_router)
+    app.dependency_overrides.update(http.app.dependency_overrides)
+    path = f"/api/v1/orders/{case}/service-attribution"
+    headers = {"Idempotency-Key": case + ":attribution", "X-Correlation-ID": case}
+    with TestClient(app) as client:
+        preview = checked(client.post(path + "/preview", json=change))
+        assert schedule(case) == original
+        command = {**change, "expected_order_version": preview["order_version"],
+                   "expected_scheduling_version": preview["scheduling_version"],
+                   "preview_fingerprint": preview["preview_fingerprint"],
+                   "reason": "Correct reported caregiver"}
+        receipt = checked(client.post(path + "/apply", json=command, headers=headers))
+        assert checked(client.post(path + "/apply", json=command, headers=headers)) == receipt
+    assert schedule(case) == [
+        {**row, "staff_id": staff[1][0]} if row["work_date"] == selected else row
+        for row in original
+    ]
+    assert rows(payout_query, (case,)) == original_links
+    recoveries = rows(
+        "SELECT recovery_identity,remaining_amount_ntd FROM staff_overpayment_recoveries WHERE staff_id=%s",
+        (staff[0][0],),
+    )
+    assert len(recoveries) == 1 and recoveries[0]["remaining_amount_ntd"] == 2400
+    from infrastructure.mysql.historical_staff_payables_completion_read_adapter import (
+        MySqlStaffPayablesCompletionReadAdapter,
+    )
+    connection = mysql_adapter.get_connection()
+    try:
+        settlement = MySqlStaffPayablesCompletionReadAdapter(connection).load_completion_readback(case)
+    finally:
+        connection.close()
+    assert settlement is not None and settlement.readback_available, settlement
+    assert settlement.open_obligation_count == 1
+    assert settlement.open_payroll_recovery_count == 1
+    if completed:
+        account = base["h"]["staff_account"](staff[0][0])
+        incoming = write(
+            "INSERT INTO finance_import_rows(dedup_fingerprint,format_id,transaction_date,direction,credit,debit,"
+            "currency,counterparty_account,resolved_counterparty_account,bank_references,warnings,raw_payload,classification_type) "
+            "VALUES(%s,'legacy',%s,'incoming',2400,0,'TWD',%s,%s,'{}','[]','{}','staff_payout_return')",
+            (uuid4().hex + uuid4().hex, TODAY, account, account),
+        )
+        selection = {
+            "recovery_identity": recoveries[0]["recovery_identity"],
+            "finance_import_row_id": incoming,
+            "evidence_reference": "Synthetic repayment evidence",
+        }
+        recovery_path = "/api/v1/staff-payables/overpayment-recoveries"
+        with TestClient(app) as client:
+            for action in ("matching", "matched"):
+                preview = checked(client.post(f"{recovery_path}/{action}/preview", json=selection))
+                receipt = checked(client.post(f"{recovery_path}/{action}/apply", json={
+                    **selection, "expected_recovery_version": preview["recovery_version"],
+                    "expected_staff_payables_version": preview["staff_payables_version"],
+                    "preview_fingerprint": preview["preview_fingerprint"], "reason": "Synthetic repayment",
+                }, headers={"Idempotency-Key": f"{case}:{action}", "X-Correlation-ID": case}))
+                if action == "matching":
+                    selection.update(matching_identity=receipt["matching_identity"],
+                                     matching_version=receipt["matching_version"])
+        connection = mysql_adapter.get_connection()
+        try:
+            cleared = MySqlStaffPayablesCompletionReadAdapter(connection).load_completion_readback(case)
+        finally:
+            connection.close()
+        assert cleared is not None and cleared.readback_available, cleared
+        assert cleared.open_payroll_recovery_count == 0
+        assert cleared.open_obligation_count == 1
+        assert rows(payout_query, (case,)) == original_links
 
 
 def test_handover_transaction_failure_rolls_back_all_owner_changes_and_can_replay(http,monkeypatch):

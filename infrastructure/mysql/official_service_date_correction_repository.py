@@ -11,12 +11,14 @@ from zoneinfo import ZoneInfo
 
 
 from infrastructure.mysql.order_terms_read_model import (
+    load_locked_facts,
+    load_preview_facts,
     lock_staff_mutexes,
     preflight_staff_ids,
     select_order,
     select_scheduling_aggregate,
 )
-from infrastructure.mysql.payroll_terms_writer import persist_actual_start_rate_snapshot_carry
+from infrastructure.mysql.payroll_terms_writer import persist_actual_start_rate_snapshot_carry, persist_payroll_terms_impact
 from infrastructure.mysql.scheduling_replacement_writer import persist_scheduling_replacement
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.official_service_date_correction_workflow import (
@@ -27,6 +29,7 @@ from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateSelection,
     MonetaryBlocker,
 )
+from subsystems.orders.terms_workflow import PayrollImpactPersistenceCommand
 
 
 _FAMILY = "orders_official_service_date_correction"
@@ -36,7 +39,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
 
-    def load(self, case_no: str, *, lock: bool = False) -> OfficialDateFacts:
+    def load(self, case_no: str, *, lock: bool = False, include_special_pay: bool = False) -> OfficialDateFacts:
         suffix = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
             order = select_order(cursor, case_no, lock=lock)
@@ -65,24 +68,29 @@ class MySqlOfficialServiceDateCorrectionRepository:
             rows = tuple(cursor.fetchall())
             if not rows:
                 raise ValueError("official_date_completed_assignment_required")
+            special_pay_column = ",is_double_pay" if include_special_pay else ""
             cursor.execute(
-                "SELECT assignment_id,staff_id,work_date,is_work_day "
+                f"SELECT assignment_id,staff_id,work_date,is_work_day{special_pay_column} "
                 "FROM staff_schedule WHERE generation_id=%s AND effective_marker=1 "
                 "ORDER BY work_date,assignment_id" + suffix,
                 (generation_id,),
             )
             schedule = tuple(cursor.fetchall())
             by_assignment = {int(row["id"]): [] for row in rows}
+            double_pay_by_assignment = {int(row["id"]): [] for row in rows}
             for day in schedule:
                 assignment_id = int(day["assignment_id"])
                 if assignment_id not in by_assignment or not bool(day["is_work_day"]):
                     raise ValueError("official_date_schedule_ownership_invalid")
                 by_assignment[assignment_id].append(day["work_date"])
+                if day.get("is_double_pay"):
+                    double_pay_by_assignment[assignment_id].append(day["work_date"])
             if any(not dates for dates in by_assignment.values()):
                 raise ValueError("official_date_schedule_incomplete")
             assignments = tuple(OfficialAssignmentDates(
                 int(row["id"]), int(row["staff_id"]), int(row["assignment_sequence"]),
                 str(row["status"]), tuple(by_assignment[int(row["id"])]), str(row["staff_name"]),
+                tuple(double_pay_by_assignment[int(row["id"])]),
             ) for row in rows)
             cursor.execute("SELECT actual_end_date FROM orders WHERE case_no=%s" + suffix, (case_no,))
             actual_end_date = cursor.fetchone()["actual_end_date"]
@@ -142,6 +150,42 @@ class MySqlOfficialServiceDateCorrectionRepository:
             monetary_blockers=monetary_blockers,
         )
 
+    def load_attribution(self, case_no: str, staff_id: int, *, lock: bool):
+        suffix = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            staff_ids = tuple(sorted(set(preflight_staff_ids(cursor, case_no)) | {staff_id}))
+            if lock:
+                def lock_payables(locked_cursor):
+                    placeholders = ",".join("%s" for _ in staff_ids)
+                    locked_cursor.execute(
+                        f"SELECT staff_id FROM staff_payable_accounts WHERE staff_id IN ({placeholders}) "
+                        "ORDER BY staff_id FOR UPDATE", staff_ids,
+                    )
+                    locked_cursor.fetchall()
+                terms = load_locked_facts(cursor, case_no, staff_ids, lock_payables)
+                if not set(preflight_staff_ids(cursor, case_no)).issubset(staff_ids):
+                    raise ValueError("official_date_version_conflict")
+            else:
+                terms = load_preview_facts(cursor, case_no)
+            cursor.execute("SELECT id FROM staff WHERE id=%s" + suffix, (staff_id,))
+            if cursor.fetchone() is None:
+                raise ValueError("service_attribution_staff_required")
+            cursor.execute(
+                "SELECT c.obligation_identity FROM payroll_amount_controls c "
+                "JOIN staff_obligations o ON o.obligation_identity=c.obligation_identity "
+                "WHERE o.case_no=%s AND o.status<>'cancelled' AND c.amount_mode='manual'" + suffix,
+                (case_no,),
+            )
+            if cursor.fetchall():
+                raise ValueError("service_attribution_manual_amount_review_required")
+            placeholders = ",".join("%s" for _ in staff_ids)
+            cursor.execute(
+                f"SELECT staff_id,aggregate_version FROM staff_payable_accounts WHERE staff_id IN ({placeholders}) "
+                "ORDER BY staff_id" + suffix, staff_ids,
+            )
+            payable_versions = tuple((int(row["staff_id"]), int(row["aggregate_version"])) for row in cursor.fetchall())
+        return self.load(case_no, lock=lock, include_special_pay=True), terms, payable_versions
+
     def validate_availability(self, candidate, *, lock: bool) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
         with self._connection.cursor() as cursor:
@@ -186,6 +230,14 @@ class MySqlOfficialServiceDateCorrectionRepository:
         return tuple(records)
 
     def replay(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None:
+        return self._replay(key, command_fingerprint, (_FAMILY,), lock=lock)
+
+    def replay_attribution(self, key: str, command_fingerprint: str, *, lock: bool = False) -> OfficialDateReceipt | None:
+        return self._replay(key, command_fingerprint, (
+            "orders_service_attribution", "orders_completed_service_attribution",
+        ), lock=lock)
+
+    def _replay(self, key, command_fingerprint, families, *, lock):
         suffix = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -196,7 +248,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
             row = cursor.fetchone()
             if row is None:
                 return None
-            if row["command_family"] != _FAMILY or row["command_fingerprint"] != command_fingerprint:
+            if row["command_family"] not in families or row["command_fingerprint"] != command_fingerprint:
                 raise ValueError("official_date_idempotency_mismatch")
             cursor.execute(
                 "SELECT expected_version FROM order_lifecycle_state_events "
@@ -219,6 +271,44 @@ class MySqlOfficialServiceDateCorrectionRepository:
             int(row["resulting_scheduling_version"]), int(row["resulting_generation_id"]),
             tuple(OfficialDateSelection(identity, tuple(values)) for identity, values in dates.items()),
             PreviewFingerprint(str(row["preview_fingerprint"])),
+        )
+
+    def persist_attribution(self, command, preview) -> OfficialDateReceipt:
+        facts = preview.facts
+        with self._connection.cursor() as cursor:
+            result = persist_scheduling_replacement(cursor, command)
+            persist_payroll_terms_impact(cursor, PayrollImpactPersistenceCommand(
+                preview.payroll, result.assignment_resolution, command.idempotency_key,
+                command.actor, command.reason, command.correlation_id, result.rebuild_event_id,
+                special_pay_events=preview.payroll.special_pay_events,
+            ))
+            cursor.execute(
+                "INSERT INTO order_lifecycle_state_events "
+                "(case_no,trigger_event,before_status,after_status,actor,business_date,"
+                "expected_version,idempotency_key,facts_snapshot) "
+                "VALUES (%s,'official_service_attribution_corrected',%s,%s,%s,%s,%s,%s,%s)",
+                (facts.case_no, facts.order_status, facts.order_status, command.actor.actor_id,
+                 datetime.now(ZoneInfo("Asia/Taipei")).date(), facts.order_version,
+                 command.idempotency_key.value, json.dumps({
+                     "previous_generation_id": facts.generation_id,
+                     "successor_generation_id": result.generation_id,
+                     "scheduling_receipt_id": result.scheduling_receipt_id,
+                     "reason": command.reason, "evidence": preview.evidence,
+                 }, ensure_ascii=False)),
+            )
+            cursor.execute(
+                "UPDATE orders SET lifecycle_version=lifecycle_version+1 "
+                "WHERE case_no=%s AND lifecycle_version=%s AND status=%s",
+                (facts.case_no, facts.order_version, facts.order_status),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("official_date_version_conflict")
+        return OfficialDateReceipt(
+            facts.case_no, facts.order_version + 1, result.scheduling_version, result.generation_id,
+            tuple(OfficialDateSelection(
+                result.assignment_resolution.assignment_id_by_candidate_key[assignment.candidate_key],
+                assignment.service_dates,
+            ) for assignment in command.candidate.assignments), preview.fingerprint,
         )
 
     def replace_and_record(self, command, preview) -> OfficialDateReceipt:

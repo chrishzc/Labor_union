@@ -50,6 +50,7 @@
 - **完工帳務交接**：同一交易先同步正式月嫂應付，再由原帳務規則檢查已確認的補助方案。轉付月嫂承接有效補助分期，先墊後退須有客戶實際墊款才建立正式退款，政府直付或方案未確認時不建立客戶補助退款。
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
 - **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
+- **服務人員或區段更正**。見 [Scheduling 多月嫂調整](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。歷史結清狀態依 [歷史帳務完成投影](27_歷史訂單生命週期與服務天數帳務正式規格.md#7-帳務完成投影) 處理。
 
 ### 3.3 訂金 Reversal 與開工重認
 

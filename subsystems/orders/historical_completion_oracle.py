@@ -154,6 +154,7 @@ class HistoricalSettlementReadback:
     source_versions: tuple[HistoricalSettlementSourceVersion, ...] = ()
     readback_available: bool = True
     integrity_blockers: tuple[str, ...] = ()
+    open_payroll_recovery_count: int = 0
 
     def __post_init__(self) -> None:
         _case(self.case_no)
@@ -183,6 +184,9 @@ class HistoricalSettlementReadback:
             raise ValueError("Staff Payables must use source versions instead of one aggregate version")
         require_nonnegative_integer(self.obligation_count, "obligation count")
         require_nonnegative_integer(self.open_obligation_count, "open obligation count")
+        require_nonnegative_integer(self.open_payroll_recovery_count, "open Payroll recovery count")
+        if self.owner is CompletionOwner.CLIENT_FINANCE and self.open_payroll_recovery_count:
+            raise ValueError("Payroll recoveries belong to Staff Payables")
         if self.open_obligation_count > self.obligation_count:
             raise ValueError("open obligations exceed obligations")
         if type(self.readback_available) is not bool:
@@ -377,9 +381,7 @@ def _check_orders(missing: list[CompletionMissingRoot], facts: HistoricalOrdersC
     if facts.actual_start_date is None:
         _add(missing, "orders_actual_start_missing", CompletionOwner.ORDERS, "orders.actual_start_date", CompletionReferral.ORDERS_ACTUAL_START, "Actual service start date is missing")
     if historical_count_path:
-        if facts.historical_service_day_count_identity is None:
-            _add(missing, "historical_actual_service_days_required", CompletionOwner.ORDERS, "orders.historical_service_day_count_identity", CompletionReferral.ORDERS_COMPLETION, "Historical actual service day counts are missing")
-        if not facts.historical_assignment_day_counts:
+        if facts.historical_service_day_count_identity is not None and not facts.historical_assignment_day_counts:
             _add(missing, "historical_actual_service_days_assignment_mismatch", CompletionOwner.ORDERS, "orders.historical_assignment_day_counts", CompletionReferral.ORDERS_COMPLETION, "Historical assignment day counts are incomplete")
     else:
         if facts.official_service_fact_identity is None:
@@ -443,6 +445,8 @@ def _check_settlement(missing: list[CompletionMissingRoot], facts: HistoricalSet
         _add(missing, f"{prefix}_settlement_lineage_missing", facts.owner, f"{prefix}.settlement_lineage_identity", referral, f"{owner_label} settlement lineage is missing")
     if facts.open_obligation_count:
         _add(missing, f"{prefix}_settlement_open", facts.owner, f"{prefix}.open_obligation_count", referral, f"{owner_label} has unsettled obligations")
+    if facts.open_payroll_recovery_count:
+        _add(missing, f"{prefix}_payroll_recovery_open", facts.owner, f"{prefix}.open_payroll_recovery_count", referral, f"{owner_label} has an open Payroll correction recovery")
     if facts.allocation_lineage_identity is None:
         _add(missing, f"{prefix}_allocation_lineage_missing", facts.owner, f"{prefix}.allocation_lineage_identity", referral, f"{owner_label} bank/allocation lineage is missing")
     for blocker in facts.integrity_blockers:
@@ -492,6 +496,7 @@ def _settlement_payload(item: HistoricalSettlementReadback) -> dict[str, object]
         "settlement_lineage_identity": item.settlement_lineage_identity,
         "obligation_count": item.obligation_count,
         "open_obligation_count": item.open_obligation_count,
+        "open_payroll_recovery_count": item.open_payroll_recovery_count,
         "allocation_lineage_identity": item.allocation_lineage_identity,
         "readback_available": item.readback_available,
         "integrity_blockers": item.integrity_blockers,

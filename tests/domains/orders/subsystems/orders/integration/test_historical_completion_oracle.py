@@ -169,6 +169,18 @@ def test_open_recovery_source_is_lineage_not_a_step_11_blocker() -> None:
     )
 
 
+def test_open_payroll_correction_recovery_prevents_accounting_completion() -> None:
+    opened = evaluate_historical_completion(_facts(staff_payables=_settlement(
+        CompletionOwner.STAFF_PAYABLES, open_payroll_recovery_count=1,
+    )))
+    cleared = evaluate_historical_completion(_facts())
+
+    assert {item.code for item in opened.missing_roots} == {"staff_payables_payroll_recovery_open"}
+    assert not opened.step_11_completed
+    assert cleared.step_11_completed
+    assert opened.fingerprint != cleared.fingerprint
+
+
 def test_exact_historical_staff_payout_bundle_satisfies_payment_lineage() -> None:
     normal = _settlement(CompletionOwner.STAFF_PAYABLES)
     core_kinds = {

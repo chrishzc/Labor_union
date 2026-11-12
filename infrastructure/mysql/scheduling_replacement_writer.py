@@ -173,7 +173,7 @@ def _insert_assignments(
     assignment_ids: dict[str, int] = {}
     assignment_status = (
         "completed"
-        if command.command_family == "orders_official_service_date_correction"
+        if command.command_family in {"orders_official_service_date_correction", "orders_completed_service_attribution"}
         else "planned"
     )
     for assignment in command.candidate.assignments:

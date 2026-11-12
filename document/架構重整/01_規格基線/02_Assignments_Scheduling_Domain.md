@@ -70,6 +70,16 @@
 - **批次重播與 AutoComplete 競爭**：`batch_key` 加鎖檢查 header／item_count／連續 ordinal／snapshot／fingerprint（同鍵異內容回 `batch_key_request_identity_conflict`）；Apply 與 [Orders AutoComplete](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正) **皆須先鎖定同一 Orders lifecycle aggregate 驗證 expected version**，先提交者勝出、後到者以 stale 失敗零寫入。
 - **服務中換人（`handover-v1`）**：針對已開工、仍有剩餘服務日且未鎖定之案件指定原 segment：選定接任月嫂詢問意願（附全部剩餘日）→ 願意後單人邀請並取得真實入群 membership → 工會填入交接日（`>= 今日` Taipei 時鐘，不得遺漏或改動已服務日與原薪資）→ 委派 `LeaveSubstitutionBatchIntent.handover_date` Preview／Apply 於單一 UoW 更新排班、原月嫂保留已付／匯出段與 Payroll handover 差額（見 [Payroll §3.5](03_Payroll_Domain.md#35-服務中換人付款承接staff-handover)）＋發送無按鈕群組結果表（維持最多 4 個有效 segments）。
 
+<a id="multi-caregiver-service-correction"></a>
+
+#### 3.4.1 服務中與完工後多月嫂調整
+
+- **工作台入口**。授權經辦從「確認服務日期與排班」或「服務完工」開啟操作。有效指派只有一位月嫂時顯示「轉換為多月嫂」，已有多位時顯示「調整多月嫂排班」。以原指派及其日期或天數選取區段，可選擇本案其他月嫂或符合資格的新月嫂。預覽呈現受影響人員及服務量、更正前後應付與帳務狀態，確認後回讀生效結果及收據。
+- **調整後續排班**。一般服務中可從交接日起由另一位月嫂承接原區段剩餘班次，或以局部代班調整指定後續服務日，分別沿本節交接與代班契約。歷史服務中依 [歷史服務歸屬與後續排班](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 接續。一般案件的預覽逐日顯示所選區段異動，其餘班次、已服務紀錄及原開工事實維持。
+- **更正已服務紀錄**。一般服務中可依證據重新分配所選區段的已服務日，後續班表維持原安排。一般完工案可重新分配原正式服務日，每個原班次恰分配一次，保留原完工事件與服務資料鎖。歷史已服務部分依 [歷史服務歸屬與後續排班](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 處理。經辦保存原因及來源證據，沿用本案已確認的服務量、時數與客戶計價基準。同時需更正已服務部分與調整後續班次時，各自預覽及確認，下一次預覽讀取前一次生效結果。
+- **交易契約**。Query 與 Preview 零寫入。Apply 先鎖定並驗證目前 Orders lifecycle、Scheduling、相關歷史服務量、Payroll、Staff Payables 及結清來源版本。服務歸屬有效且正式班次無檔期衝突時，Apply 儲存正式排班或歷史服務天數。區段、服務量、檔期或來源版本衝突回 typed error 並零寫入；交易錯誤整筆回滾。
+- **帳務同交易承接**。一般單依業務順序先核對原出款與核銷來源，原應付有人工改額時先確認採用的計算結果。更正確認時，由各 owner 在同一外層交易提交正式排班、[Payroll 應付更正](03_Payroll_Domain.md#service-attribution-payroll-correction)及 [Staff Payables 分來源待付與追償](16_Staff_Payables與Client_Refund正式規格.md#service-attribution-settlement)。歷史單的原付款證據與帳務重開依 [歷史服務歸屬與帳務完成](27_歷史訂單生命週期與服務天數帳務正式規格.md#historical-service-attribution-correction) 處理。同鍵同命令回原收據，同鍵異內容回 typed conflict。
+
 ### 3.5 確定性加鎖順序、Durable Job 與 `SCHEDULE` 異常矩陣
 
 - **統一六層鎖順序**（所有 Scheduling command 共用，禁止局部重訂或半途加鎖；若 fresh 重算發現新增未鎖定月嫂直接回 `scheduling_lock_set_stale` 整筆回滾）：
@@ -90,6 +100,9 @@
 - **Writer Exit**：僅 Scheduling adapters 可寫 effective assignment、`staff_schedule`、waiting lock、buffer 與 generation；`services/assignment_schedule_rest_date_service.py`、`caregiver_availability_lock_*`、`caregiver_matching_*`、`multi_caregiver_schedule_*`、`order_assignment_synchronization.py`、`payment_service.py`、`actual_hours_adjustment_confirmation_service.py` 與 `db_service.py` 均不得直接修改核心根事實。
 
 ## 4. 驗收標準
+
+- 單月嫂及既有多月嫂案件顯示對應入口。多月嫂案可辨識並選取原區段，其他區段照原安排。服務中分別驗證交接、指定日代班及已服務歸屬更正；完工案驗證原班次完整分配、服務量守恆及原完工紀錄可查。
+- 班次重疊、服務量不守恆或預覽所用來源版本變更時，確認回 typed conflict 或驗證錯誤且零寫入。一般單驗證原款未付、部分付款、已付及人工改額已確認的更正，排班與差額同交易生效，原核銷可追溯。驗證交易回滾、同鍵重播及追償防重。
 
 1. Unit／Subsystem 驗證 `SHIFT-01..05`（非重疊雙班、首尾相接、跨午夜歸屬、不可服務與 buffer 分離）、6 層升冪防死結鎖、`scheduling_lock_set_stale` 回滾、`batch_key` 重播／錯荷拒絕，及 Leave vs AutoComplete 競爭零部分寫入。
 2. `SSTART-01..08` 與 `handover-v1` 驗證客戶／月嫂／工會各工作面按鈕與 `410` 舊確認阻擋、群組單人邀請與真實入群驗證、局部代班／換人不覆寫已服務日或全案開始日，及甘特圖唯讀 `historical_assignment` 並列顯示。

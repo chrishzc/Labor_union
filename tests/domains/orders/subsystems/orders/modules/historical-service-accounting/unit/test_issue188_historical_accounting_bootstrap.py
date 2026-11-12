@@ -24,9 +24,11 @@ from subsystems.orders.historical_service_accounting_workflow import (
 
 
 class _LoadCursor:
-    def __init__(self, *, terms=True, rate=True):
+    def __init__(self, *, terms=True, rate=True, identity="一般市民", birth_count=None):
         self.terms = terms
         self.rate = rate
+        self.identity = identity
+        self.birth_count = birth_count
         self.statements = []
         self._one = None
         self._all = ()
@@ -34,7 +36,12 @@ class _LoadCursor:
     def execute(self, statement, parameters):
         normalized = " ".join(statement.split())
         self.statements.append((normalized, parameters))
-        if "FROM orders o JOIN clients c" in statement:
+        if "AS multi_birth_count FROM orders" in statement:
+            self._one = {"identity_status": self.identity, "multi_birth_count": self.birth_count}
+        elif "FROM payroll_rate_policies" in statement:
+            rate = rate_snapshot("assignment:188", parameters[0], PayrollPolicyKind(parameters[1]))
+            self._one = {"hourly_rate_ntd": rate.hourly_rate.amount}
+        elif "FROM orders o JOIN clients c" in statement:
             self._one = {
                 "case_no": "CASE-188",
                 "status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
@@ -42,7 +49,7 @@ class _LoadCursor:
                 "service_days": 30,
                 "service_hours_per_day": 8,
                 "floor_fee": 3_000,
-                "identity_status": "一般市民",
+                "identity_status": self.identity,
                 "client_finance_version": 0,
                 "payroll_version": 0,
                 "adoption_receipt_id": 188,
@@ -80,8 +87,8 @@ class _LoadCursor:
 
 
 class _LoadConnection:
-    def __init__(self, *, terms=True, rate=True):
-        self.cursor_instance = _LoadCursor(terms=terms, rate=rate)
+    def __init__(self, **facts):
+        self.cursor_instance = _LoadCursor(**facts)
 
     def cursor(self):
         return self.cursor_instance
@@ -110,11 +117,21 @@ def test_missing_client_payment_terms_fails_closed_with_specific_code():
         repository.load("CASE-188", for_update=False)
 
 
-def test_missing_payroll_rate_fails_closed_with_specific_code():
-    repository = MySqlHistoricalServiceAccountingRepository(_LoadConnection(rate=False))
+@pytest.mark.parametrize(("identity", "birth_count", "kind", "amount"), [
+    ("一般市民", None, PayrollPolicyKind.CITIZEN, 300),
+    ("低收入戶", None, PayrollPolicyKind.SUBSIDIZED_CITIZEN, 350),
+    ("原住民", None, PayrollPolicyKind.SUBSIDIZED_CITIZEN, 350),
+    ("非市民", None, PayrollPolicyKind.NON_CITIZEN, 320),
+    ("非市民", "雙胞胎", PayrollPolicyKind.TWINS, 450),
+])
+def test_missing_payroll_snapshots_use_approved_default(identity, birth_count, kind, amount):
+    connection = _LoadConnection(rate=False, identity=identity, birth_count=birth_count)
+    facts = MySqlHistoricalServiceAccountingRepository(connection).load("CASE-188", for_update=False)
+    snapshot = facts.assignments[0].rate_snapshot
 
-    with pytest.raises(ValueError, match="historical_payroll_rate_policy_missing"):
-        repository.load("CASE-188", for_update=False)
+    assert snapshot.policy_version == "approved-rates-v1"
+    assert snapshot.policy_kind == kind
+    assert snapshot.hourly_rate == MoneyNTD(amount)
 
 
 @pytest.mark.parametrize(
