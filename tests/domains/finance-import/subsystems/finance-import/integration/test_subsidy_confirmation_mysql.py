@@ -143,29 +143,40 @@ def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path
     assert state.subsidy_plan(other).selected_scheme is None
 
 
-@pytest.mark.parametrize('scheme', ['split', 'advance'])
-def test_pending_rematch_settles_existing_confirmed_subsidy(connection, tmp_path, scheme):
+@pytest.mark.parametrize(('scheme', 'bare_case'), [('split', False), ('advance', False), ('advance', True)])
+def test_pending_rematch_settles_existing_confirmed_subsidy(connection, tmp_path, scheme, bare_case):
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
     from subsystems.finance_import.import_workflow import PendingReconciliationRequest
 
     case, name, _ = seed(connection, False, scheme)
     workspace = build_accounting_workspace(connection)
+    app = application(connection)
+    correlation = CorrelationId('staff-subsidy-rematch')
+    if bare_case:
+        batch = bank_source(connection, tmp_path, case, name, scheme, bare_case=True)
+        assert not app.preview_batch(batch, correlation).dispatchable_rows
+        assert app.reconcile_pending(PendingReconciliationRequest(
+            IdempotencyKey('rematch-before-scheme:' + uuid4().hex), ActorContext('synthetic'), correlation,
+        )).reconciled_count == 0
     preview = workspace.preview_subsidy_plan(case, scheme, 0)
     assert preview.blocker is None
     workspace.save_subsidy_plan(case, scheme, 0, 'manual:' + uuid4().hex, 'synthetic', preview.fingerprint.value)
     connection.commit()
-    batch = bank_source(connection, tmp_path, case, name, scheme)
-    app = application(connection)
-    correlation = CorrelationId('staff-subsidy-rematch')
-    plan = app.preview_batch(batch, correlation)
-    assert len(plan.dispatchable_rows) == 1, [item.pending_reason for item in plan.rows]
-    assert plan.dispatchable_rows[0].subsidy_preflight.existing_confirmed_payable
+    if not bare_case:
+        batch = bank_source(connection, tmp_path, case, name, scheme)
+        plan = app.preview_batch(batch, correlation)
+        assert len(plan.dispatchable_rows) == 1, [item.pending_reason for item in plan.rows]
+        assert plan.dispatchable_rows[0].subsidy_preflight.existing_confirmed_payable
     receipt = app.reconcile_pending(PendingReconciliationRequest(
         IdempotencyKey('rematch:' + uuid4().hex), ActorContext('synthetic'), correlation,
     ))
     assert receipt.reconciled_count >= 1
     assert any(t.bank_amount_ntd == 11970 and t.transfer_fee_ntd == 30
                for t in workspace.query(case).transactions)
+    if bare_case:
+        row, = app.preview_batch(batch, correlation).rows
+        assert row.classification_type.value == 'client_subsidy_return'
+        assert row.disposition.value == 'existing'
 
 
 @pytest.mark.parametrize('suffix_text', ['雇主補助款', '服務人員薪資'])
@@ -294,6 +305,53 @@ def test_manual_confirmation_previews_and_establishes_without_payment(connection
     assert after['client_obligation_events']==before['client_obligation_events']+int(scheme=='advance')
     assert after['installments']==before['installments']+(2 if scheme=='split' else 0)
     assert after['client_ledger_entries']==before['client_ledger_entries']
+
+
+@pytest.mark.parametrize('historical',[False,True])
+def test_reconfirm_advance_restores_cancelled_refund_for_bank_reconciliation(connection,tmp_path,historical):
+    from dataclasses import replace
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.subsidy_confirmation_repository import persist_confirmed_refund
+    from shared_kernel.money import MoneyNTD
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+
+    case, name, _ = seed(connection, historical, 'advance', actual_end=date(2026, 8, 10))
+    workspace = build_accounting_workspace(connection)
+    initial = workspace.preview_subsidy_plan(case, 'advance', 0)
+    workspace.save_subsidy_plan(case, 'advance', 0, 'original:'+uuid4().hex, 'synthetic', initial.fingerprint.value)
+    persist_confirmed_refund(
+        connection, case, replace(initial.refund_plan, amount=MoneyNTD(0)),
+        ActorContext('synthetic'), IdempotencyKey('cancel:'+uuid4().hex),
+        CorrelationId('cancelled-refund'), 'synthetic-cancellation',
+    )
+    connection.commit()
+    assert not any(item.obligation_type == 'subsidy_return' for item in workspace.query(case).client_items)
+    batch = bank_source(connection, tmp_path, case, name, 'advance', cash=12000, transaction_date=date(2026, 10, 15))
+    app = application(connection)
+    before_refund = app.preview_batch(batch, CorrelationId('missing-refund'))
+    assert not before_refund.dispatchable_rows
+    before = snapshot(connection, case)
+    preview = workspace.preview_subsidy_plan(case, 'advance', 1)
+    assert preview.blocker is None and snapshot(connection, case) == before
+    payment, = preview.payables
+    assert (payment.identity, payment.amount_ntd, payment.due_date) == (
+        initial.refund_plan.obligation_identity, 12000, '2026-10-15',
+    )
+    workspace.save_subsidy_plan(case, 'advance', 1, 'reconfirm:'+uuid4().hex, 'synthetic', preview.fingerprint.value)
+    refund, = [item for item in workspace.query(case).client_items if item.obligation_type == 'subsidy_return']
+    assert refund.identity == payment.identity and refund.remaining_ntd == 12000
+    assert snapshot(connection, case)['client_ledger_entries'] == before['client_ledger_entries']
+
+    plan = app.preview_batch(batch, CorrelationId('restored-refund'))
+    candidate, = plan.dispatchable_rows
+    assert candidate.target_identities == (refund.identity,)
+    receipt = app.apply_batch(FinanceImportApplyRequest(
+        batch, ExpectedVersion(plan.batch_version), plan.fingerprint,
+        IdempotencyKey('restored:'+uuid4().hex), ActorContext('synthetic'), '', CorrelationId('restored-refund'),
+    ))
+    assert receipt.reconciled_count == 1
+    final, = [item for item in workspace.query(case).client_items if item.obligation_type == 'subsidy_return']
+    assert final.identity == refund.identity and final.remaining_ntd == 0
 
 
 @pytest.mark.parametrize('historical',[False,True])

@@ -16,7 +16,6 @@ export const rosterFilterColumns: RosterFilterColumn[] = [
   { field: 'deposit_due_date', label: '定金應繳日', kind: 'date' },
   { field: 'first_due_date', label: '第一期應繳日', kind: 'date' },
   { field: 'second_due_date', label: '第二期應繳日', kind: 'date' },
-  { field: 'staff_payment_due_date', label: '訂單月嫂應付日', kind: 'date' },
   { field: 'subsidy_return_due_date', label: '客戶補助退還日', kind: 'date' },
 ];
 export const rosterFilterValueLabel = (column: RosterFilterColumn, value: string | null) => value === null ? '空白／未登錄' : column.kind === 'boolean' ? value === 'true' ? '需要' : '不需要' : value;

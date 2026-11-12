@@ -105,8 +105,8 @@ def synchronize_historical_payroll(connection, case_no, *, dry_run=False, actor=
         if amount.amount <= 0:
             return _skipped("historical_payroll_nonpositive_amount")
         funding = _funding_schedule(connection, case_no, order, amount.amount)
-        if funding is None:
-            return _skipped("historical_payroll_funding_conflict")
+        if isinstance(funding, str):
+            return {**_skipped("historical_payroll_funding_conflict"), "detail": funding}
         due_date, portions = funding
         result = {"action": "updated" if original else "created", "staff_id": staff_id,
                   "amount_ntd": amount.amount, "due_date": due_date.isoformat()}
@@ -146,8 +146,12 @@ def _funding_schedule(connection, case_no, order, amount):
     funding = query_subsidy_payable_handoff(connection, case_no, payroll_candidate_total=amount)
     completed_on = order["actual_end_date"]
     subsidy = funding.subsidy_ntd if funding.scheme == "split" else 0
-    if funding.staff_subsidy_reason or subsidy is None or not 0 <= subsidy <= amount:
-        return None
+    if funding.staff_subsidy_reason:
+        return funding.staff_subsidy_reason
+    if subsidy is None:
+        return "缺少正式補助金額，請查核補助來源。"
+    if not 0 <= subsidy <= amount:
+        return "正式補助金額須介於零與月嫂應付總額之間，請查核補助來源。"
     due_date = order["staff_payment_due_date"] or funding_due_date(completed_on, directly_subsidized=subsidy == amount)
     portions = confirmed_subsidy_installments(amount, subsidy, due_date, completed_on) if subsidy else ()
     return due_date, portions

@@ -321,6 +321,12 @@ class MySqlFinanceImportOwningDomainComposite:
 
     # Kept cohesive so the child receipt and repository binding share the outer UoW.
     def _post_client_subsidy_return(self, candidate, context):
+        from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON
+
+        if isinstance(candidate, CanonicalFinanceImportRow) and TAISHIN_CASE_MEMO_REASON in candidate.evidence:
+            from infrastructure.mysql.finance_import_repository import append_rematched_subsidy_classification
+
+            append_rematched_subsidy_classification(self._connection, candidate, context.actor)
         selection = _client_subsidy_return_selection(
             self._connection,
             candidate,
@@ -649,6 +655,8 @@ def _client_receipt_target_query(client_id, case_no, amount_ntd):
 
 
 def _resolve_client_subsidy_return(connection, candidate):
+    from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON
+
     client_id = _single_prefixed_identity(candidate, "client:")
     memo_identified = TAISHIN_CLIENT_SUBSIDY_MEMO_REASON in candidate.evidence
     if not memo_identified and (client_id is None or _VERIFIED_OUTGOING_NAME_EVIDENCE.isdisjoint(candidate.evidence)):
@@ -704,7 +712,11 @@ def _resolve_client_subsidy_return(connection, candidate):
         "unique-monthly-client-subsidy-return-obligations",
     )
     workflow = ClientRefundReversalWorkflow(
-        MySqlClientRefundReversalRepository(connection), BorrowedTransactionUnitOfWork,
+        MySqlClientRefundReversalRepository(
+            connection,
+            preview_refund_classification=_CLIENT_SUBSIDY_RETURN.value if TAISHIN_CASE_MEMO_REASON in candidate.evidence else None,
+        ),
+        BorrowedTransactionUnitOfWork,
     )
     try:
         preview = workflow.preview(

@@ -800,6 +800,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  </div></details>
 
  <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
+  {subsidyRefundPending && !refundClientItems.some(item => item.obligation_type === 'subsidy_return') &&
+    <p role="status">已確認先墊後退，正式補助退款尚未建立。可開啟補助退款方案查看給付預檢。</p>}
   <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal > 0n ? money(refundRemainingTotal) : !selected && (!subsidyKnown || subsidyTotal > 0) ? '補助歸屬待確認' : refundClientItems.length ? '已結清' : subsidyRefundPending ? unconfirmedPaymentStatus : '目前無退款'}</strong></span><span>政府款待入：<strong>{selected==='direct'?'不適用':!subsidyKnown?'金額待確認':subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
   <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
     <table className="finance-table finance-case-periods">

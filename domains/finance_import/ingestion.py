@@ -116,6 +116,7 @@ def _identity_evidence(facts):
         "staff"
         if facts.legacy_classification_type
         in {"staff_salary", "staff_legacy_subsidy"}
+        or facts.classification_reason == "sinopac_staff_return_requires_matching"
         else "client"
     )
     return tuple(

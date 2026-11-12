@@ -15,16 +15,6 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 
 
-def has_official_staff_subsidy_evidence(cursor, cases):
-    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
-
-    workspace = build_accounting_workspace(cursor.connection)
-    return any(
-        case.subsidy_ntd is not None and case.subsidy_ntd > 0 and case.staff_receivable_ntd is not None
-        for case in (workspace.query(case_no) for case_no in cases)
-    )
-
-
 def _staff_subsidy_related_cases(cursor, staff_id):
     cursor.execute("SELECT case_no FROM orders WHERE staff_id=%s UNION "
         "SELECT case_no FROM case_staff_assignments WHERE staff_id=%s AND status IN ('planned','active','completed') UNION "
@@ -63,6 +53,7 @@ def _staff_subsidy_month_cases(connection, transaction_date, staff_id, cases):
         if not portions and staff_items:
             preview = preview_manual_subsidy_plan(connection, case_no, 'split', case.subsidy_plan.version)
             identities = {item.identity for item in staff_items}
+            missing_due_date |= preview.blocker == 'subsidy_service_end_missing'
             if not preview.blocker:
                 with connection.cursor() as cursor:
                     for item in preview.payables:
@@ -372,9 +363,18 @@ def preview_manual_subsidy_plan(connection, case_no, scheme, version, *, for_upd
             if not blocker and completed_on is None:
                 blocker = 'subsidy_service_end_missing'
             if not blocker and scheme == 'advance':
-                cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s AND obligation_type='subsidy_return'", (case_no,))
-                if not cursor.fetchall():
+                cursor.execute(
+                    "SELECT obligation_identity,status FROM client_obligations WHERE case_no=%s "
+                    "AND obligation_type='subsidy_return'",
+                    (case_no,),
+                )
+                refunds = tuple(cursor.fetchall())
+                if len(refunds) > 1:
+                    blocker = 'subsidy_return_lineage_ambiguous'
+                elif not refunds or refunds[0]['status'] == 'cancelled':
                     refund = confirmed_subsidy_return_plan(case_no, MoneyNTD(case.subsidy_ntd), completed_on)
+                    if refunds:
+                        refund = replace(refund, obligation_identity=refunds[0]['obligation_identity'])
                     payables = (SubsidyPlanPayable(refund.obligation_identity, 'client', refund.amount.amount, refund.due_date.isoformat()),)
             elif not blocker and scheme == 'split':
                 cursor.execute("SELECT o.obligation_identity,o.due_date,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=o.obligation_identity) has_installments "
@@ -407,8 +407,9 @@ def apply_manual_subsidy_plan(connection, preview, actor, key):
     if preview.blocker:
         return  # The reviewed command confirms only the arrangement, not blocked money actions.
     if preview.refund_plan is not None:
+        source = f'{preview.case_no}:manual-plan:{preview.plan_version + 1}'
         persist_confirmed_refund(connection, preview.case_no, preview.refund_plan,
-            ActorContext(actor), IdempotencyKey(key), CorrelationId('subsidy-plan:' + preview.case_no), preview.case_no)
+            ActorContext(actor), IdempotencyKey(key), CorrelationId('subsidy-plan:' + preview.case_no), source)
     if preview.installments:
         from infrastructure.mysql.payroll_installments import establish_confirmed_subsidy_installments
         with connection.cursor() as cursor:

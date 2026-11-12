@@ -107,6 +107,7 @@ class HistoricalOrderAdoptionReceipt:
     preview_fingerprint: PreviewFingerprint
     unchanged: bool = False
     payroll_skip_reason: str | None = None
+    payroll_skip_detail: str | None = None
 
 
 class HistoricalOrderAdoptionRepository(Protocol):
@@ -186,13 +187,16 @@ class HistoricalOrderAdoptionWorkflow:
                     and self._repository.has_current_adoption(preview)):
                 unchanged = True
                 payroll_skip_reason = None
+                payroll_skip_detail = None
                 if preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value:
                     result = self._repository.synchronize_completed_payroll(preview.case_no)
                     unchanged = result["action"] == "skipped"
                     payroll_skip_reason = result.get("reason") if unchanged else None
+                    payroll_skip_detail = result.get("detail") if unchanged else None
                 return HistoricalOrderAdoptionReceipt(
                     preview.outcome, preview.case_no, preview.resulting_version,
                     0, None, False, preview.fingerprint, unchanged=unchanged, payroll_skip_reason=payroll_skip_reason,
+                    payroll_skip_detail=payroll_skip_detail,
                 )
             source_identity = f"{request.row.source_identity}:{request.idempotency_key.removeprefix('historical-order-row:')}"
             request = replace(request, row=replace(request.row, source_identity=source_identity))

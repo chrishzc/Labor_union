@@ -131,11 +131,13 @@ class MySqlHistoricalOrderAdoptionRepository:
         )
         self._append_pairing_evidence(receipt_id, preview, assignment_ids)
         payroll_skip_reason = None
+        payroll_skip_detail = None
         if (preview.outcome is HistoricalOrderOutcome.ADOPTED
                 and preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value):
             result = self.synchronize_completed_payroll(preview.case_no)
             if result["action"] == "skipped":
                 payroll_skip_reason = result.get("reason")
+                payroll_skip_detail = result.get("detail")
             self._synchronize_completed_subsidy_return(request, receipt_id)
         self._append_outbox(receipt_id, request, preview, review_identity)
         return HistoricalOrderAdoptionReceipt(
@@ -147,6 +149,7 @@ class MySqlHistoricalOrderAdoptionRepository:
             False,
             preview.fingerprint,
             payroll_skip_reason=payroll_skip_reason,
+            payroll_skip_detail=payroll_skip_detail,
         )
 
     def _synchronize_completed_subsidy_return(self, request, receipt_id):

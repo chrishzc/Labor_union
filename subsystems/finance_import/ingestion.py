@@ -57,7 +57,6 @@ def ingest_finance_workbook(
     connection_factory: Callable[[], Any],
     normalizer: Callable[[str], Mapping[str, Any]],
     source_filename: str | None = None,
-    staff_subsidy_evidence: Callable[[Any, tuple[str, ...]], bool] | None = None,
 ) -> FinanceWorkbookIngestionReceipt:
     # Kept cohesive: the primary UoW rollback and independent attempt audit are one boundary.
     source_path = _validated_source_path(excel_path)
@@ -88,7 +87,6 @@ def ingest_finance_workbook(
             idempotency_key,
             actor,
             progress,
-            staff_subsidy_evidence,
         )
         with connection.cursor() as cursor:
             _save_success_attempt(
@@ -130,7 +128,6 @@ def _ingest_or_replay(
     idempotency_key: IdempotencyKey,
     actor: ActorContext,
     progress: _IngestionProgress,
-    staff_subsidy_evidence: Callable[[Any, tuple[str, ...]], bool] | None,
 ) -> FinanceWorkbookIngestionReceipt:
     with connection.cursor() as cursor:
         replay = _find_replay(cursor, idempotency_key, command_fingerprint)
@@ -143,7 +140,6 @@ def _ingest_or_replay(
             normalized_result,
             identity_maps,
             business_only=True,
-            staff_subsidy_evidence=staff_subsidy_evidence,
         )
         progress.phase = "classification"
         receipt = _persist_ingestion(

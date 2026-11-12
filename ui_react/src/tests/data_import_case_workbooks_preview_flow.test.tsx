@@ -513,7 +513,8 @@ describe('Data Import simple result flows', () => {
       review_references: [],
       import_counts: { imported_count: 1, duplicate_skipped_count: 0, not_imported_count: 2 },
       payroll_issues: [{ source_row: 2, case_no: 'CASE-002', fields: ['月嫂應付'],
-        issue_codes: ['historical_payroll_funding_conflict'] }],
+        issue_codes: ['historical_payroll_funding_conflict'],
+        detail: '客戶期款或實收款金額與分別入款安排不符，請由原帳務流程核對。' }],
       row_issues: [
         {
           source_row: 15,
@@ -547,7 +548,7 @@ describe('Data Import simple result flows', () => {
     expect(details).toHaveTextContent('Excel 第 15 列（案件 CASE-015，2026-08-01～2026-08-10）的服務時段無法確認，請查看該列原因。');
     const payroll = within(card).getByLabelText('月嫂應付待核對');
     expect(payroll).toHaveTextContent('CASE-002');
-    expect(payroll).toHaveTextContent('補助方案與既有帳務來源不一致');
+    expect(payroll).toHaveTextContent('客戶期款或實收款金額與分別入款安排不符');
     expect(details).not.toHaveTextContent('CASE-002');
   });
 });

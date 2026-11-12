@@ -8,8 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from decimal import Decimal
 import json
-from typing import Any, Callable, Mapping
-import unicodedata
+from typing import Any, Mapping
 
 from domains.finance_import.cancellation_code import (
     extract_sinopac_memo_case_suffix,
@@ -187,9 +186,16 @@ def classify_row_with_identity_maps(
         )
 
 
-def _has_unique_import_case(cursor, row, classification, identity_maps, staff_subsidy_evidence):
+def _has_unique_import_case(cursor, row, classification, identity_maps):
     kind = classification["classification_type"]
     if kind == "non_business_review":
+        if (row["format_id"] in {"sinopac", "legacy"} and row["direction"] == "incoming"
+                and classification["reason"] == "sinopac_staff_return_requires_matching"):
+            cursor.execute(
+                "SELECT DISTINCT staff_id FROM staff_bank_accounts WHERE account_no=%s AND is_primary=1",
+                (classification["resolved_counterparty_account"],),
+            )
+            return tuple(item["staff_id"] for item in cursor.fetchall()) == tuple(classification["matched_identity_ids"])
         if (row["format_id"] == "taishin" and row["direction"] == "outgoing"
                 and classification["reason"] == TAISHIN_CASE_MEMO_REASON):
             suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
@@ -220,6 +226,9 @@ def _has_unique_import_case(cursor, row, classification, identity_maps, staff_su
     owner_ids = classification["matched_identity_ids"]
     if len(owner_ids) != 1:
         return False
+    if (kind == "staff_legacy_subsidy" and row["format_id"] == "taishin"
+            and row["direction"] == "outgoing" and not sinopac_memo_case_suffixes(row.get("memo"))):
+        return True
     owner_id = owner_ids[0]
     owner_column = "client_id"
     if kind in {"staff_salary", "staff_legacy_subsidy"}:
@@ -252,12 +261,6 @@ def _has_unique_import_case(cursor, row, classification, identity_maps, staff_su
                        "AND status IN ('planned','active','completed')", (owner_id,))
         cases.update(str(item['case_no']) for item in cursor.fetchall())
     suffixes = sinopac_memo_case_suffixes(row.get('memo'))
-    if kind in {'staff_salary', 'staff_legacy_subsidy'} and row['format_id'] == 'taishin' and not suffixes:
-        if '補助' in unicodedata.normalize('NFKC', row.get('memo') or ''):
-            return True
-        if len(cases) == 1:
-            return True
-        return bool(staff_subsidy_evidence and cases and staff_subsidy_evidence(cursor, tuple(sorted(cases))))
     if suffixes:
         if len(suffixes) != 1:
             return False
@@ -272,7 +275,6 @@ def stage_finance_rows(
     identity_maps: Mapping[str, Any],
     *,
     business_only: bool = False,
-    staff_subsidy_evidence: Callable[[Any, tuple[str, ...]], bool] | None = None,
 ) -> dict[str, Any]:
     """Keep source positions for new batch facts; count earlier-batch repeats in the receipt."""
     assert callable(getattr(cursor, "execute", None)), "cursor must provide execute()"
@@ -353,7 +355,7 @@ def stage_finance_rows(
 
         if business_only:
             classification = classify_row_with_identity_maps(row, identity_maps)
-            if not _has_unique_import_case(cursor, row, classification, identity_maps, staff_subsidy_evidence):
+            if not _has_unique_import_case(cursor, row, classification, identity_maps):
                 continue
 
         cursor.execute(

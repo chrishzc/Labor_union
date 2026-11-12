@@ -15,8 +15,9 @@ reprocess與必要 owner validation／migration evidence，不再提供 anomaly 
 - `domains/finance_import/transaction_fingerprint.py` — canonical identity，指紋命中只計入匯入收據的重複筆數。
 - `domains/finance_import/planning.py` — 正常批次配對計畫及待核對原因快照。不同客戶銀行來源不因相同義務而判重；多筆各自全額命中同一期款時，改為合計超收人工核對，避免重複自動清償。
 - `subsystems/finance_import/ingestion.py`
+- `domains/finance_import/ingestion.py` — 將來源分類與對象證據投影成初始正式分類事件，月嫂退匯保留月嫂身分供人工核對。
 - `subsystems/finance_import/import_workflow.py` — 正常匯入批次 Preview／Apply，逐筆正式核銷拒絕原因隨既有 durable job 失敗結果保存，未進入核銷的永豐客戶款配對原因沿原 Apply 收據保存。
-- `subsystems/finance_import/staging.py` — 新工作簿交易寫入 canonical row 前確認唯一案件，政府款沿原整期分流；借用 caller transaction，無自行 commit。
+- `subsystems/finance_import/staging.py` — 新工作簿交易寫入 canonical row 前確認案件證據。台新無六碼且備註唯一辨識月嫂的出款先保留待核對，補助資格與日期由原預檢判定。政府款沿原整期分流；借用 caller transaction，無自行 commit。
 - `subsystems/finance_import/identity_maps.py` — 匯入分類使用的精確帳號候選唯讀投影。
 - `subsystems/finance_import/reprocessing.py` — 舊批次重新分類唯讀／rollback-only 診斷，historical Apply 已退役。
 - `infrastructure/mysql/finance_import_owning_domain_composite.py`

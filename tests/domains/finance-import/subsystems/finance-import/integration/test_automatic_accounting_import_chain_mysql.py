@@ -38,7 +38,7 @@ def accounting_snapshot(case):
         with connection.cursor() as c:
             result = {}
             for name, sql in {
-                'obligations': 'SELECT obligation_type,amount_due_ntd,status FROM client_obligations WHERE case_no=%s ORDER BY obligation_type',
+                'obligations': 'SELECT obligation_type,amount_due_ntd,status,due_date FROM client_obligations WHERE case_no=%s ORDER BY obligation_type',
                 'receipts': "SELECT COUNT(*) AS count,COALESCE(SUM(amount_ntd),0) AS total FROM client_ledger_entries WHERE case_no=%s AND entry_type='receipt'",
                 'staff': 'SELECT amount_due_ntd,due_date,status FROM staff_obligations WHERE case_no=%s',
                 'order': 'SELECT status,lifecycle_version,staff_payment_due_date FROM orders WHERE case_no=%s',
@@ -52,11 +52,12 @@ def accounting_snapshot(case):
         connection.close()
 
 
-def workbook(case, amount, *, sequence, invalid=False):
+def workbook(case, amount, *, sequence, transaction_date, invalid=False):
     """Synthetic Sinopac source, using the real canonical virtual-account rule."""
     headers = ['帳號','交易日','計息日','入帳日','摘要','幣別','支出','存入','餘額','銷帳編號','交易參考編號','','更正註記','存摺備註']
     year, serial = int(case[:3]), int(case[3:])
-    row = ['123456789012',f'2026/11/{sequence:02d} 09:08:07',f'2026/11/{sequence:02d}',f'2026/11/{sequence:02d}',
+    day = transaction_date.strftime('%Y/%m/%d')
+    row = ['123456789012',f'{day} 09:08:07',day,day,
            '轉帳','TWD',None,amount,100000+sequence,f'99781699{year:03d}{serial:03d}',f'{case}:{sequence}','synthetic',None,'fixture']
     if invalid:
         row[7] = 100.5
@@ -112,9 +113,10 @@ def client():
     from api.routes.finance_import import router as bank_router
     from api.routes.order_intake_terms_bootstrap import router as intake_router
     from api.routes.order_auto_completion import router as completion_router
+    from api.routes.government_subsidy_periods import router as government_period_router
     from subsystems.access.authentication_session import AdminPrincipal
     api = FastAPI()
-    for router in (bank_router,intake_router,completion_router):
+    for router in (bank_router,intake_router,completion_router,government_period_router):
         api.include_router(router)
     principal = AdminPrincipal(1,'isolated-accounting','Synthetic','system_admin')
     for name in ('require_admin','require_system_admin','require_persisted_admin'):
@@ -157,14 +159,15 @@ def _verify_accounting_chain(client,complete_before_last_receipt):
         assert accounting_snapshot(case) == saved
         return saved
 
-    for i, amount in enumerate((12000,36000,24000),1):
+    due_dates = {r['obligation_type']:r['due_date'] for r in initial['obligations']}
+    for i, (stage, amount) in enumerate(zip(('deposit','first','second'), (12000,36000,24000)),1):
         if i == 3 and complete_before_last_receipt:
             saved = complete()
             assert all(r['obligation_type'] != 'subsidy_return' for r in saved['obligations'])
             assert len(saved['staff']) == 1 and int(saved['staff'][0]['amount_due_ntd']) == 72000
         bank_before = accounting_snapshot(case)
         headers = {'Idempotency-Key':case+f':bank:{i}','X-Correlation-ID':case}
-        contents = workbook(case,amount,sequence=i)
+        contents = workbook(case,amount,sequence=i,transaction_date=due_dates[stage])
         response = client.post('/api/v1/finance-import/workbooks/ingest',headers=headers,files={'workbook':(f'bank-{i}.xlsx',contents,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')})
         assert response.status_code == 200,response.text
         batch = response.json()['data']['batch_identity']
@@ -201,6 +204,17 @@ def _verify_accounting_chain(client,complete_before_last_receipt):
     final = accounting_snapshot(case) if complete_before_last_receipt else complete()
     assert final['order'][0]['status'] == '訂單完成'
     assert str(final['order'][0]['staff_payment_due_date']) == '2026-12-15'
+    assert not any(r['obligation_type'] == 'subsidy_return' for r in final['obligations'])
+    plan_url = f'/api/v1/finance-import/cases/{case}/accounting/subsidy-plan'
+    command = {'scheme': 'advance', 'expected_version': 0}
+    response = client.post(plan_url + '/preview', json=command)
+    assert response.status_code == 200,response.text
+    preview = response.json()['data']
+    assert not preview['blocker'],preview
+    response = client.post(plan_url, json={**command, 'preview_fingerprint': preview['preview_fingerprint']},
+                           headers={'Idempotency-Key': case + ':subsidy-plan'})
+    assert response.status_code == 200,response.text
+    final = accounting_snapshot(case)
     returns = [r for r in final['obligations'] if r['obligation_type'] == 'subsidy_return']
     assert len(returns) == 1 and int(returns[0]['amount_due_ntd']) == 12000
     assert len(final['staff']) == 1 and int(final['staff'][0]['amount_due_ntd']) == 72000
@@ -215,7 +229,10 @@ def test_each_bank_stage_and_completion_updates_accounting_once(client,complete_
 
 
 def test_subsidy_funding_is_checked_before_dispatch_and_updates_after_government_receipt(client):
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
     case = _verify_accounting_chain(client,False)
+    suffix = build_client_virtual_account(case)[-6:]
     connection = mysql_adapter.get_connection()
     account = '7' * 12 + case[-4:]
     try:
@@ -235,10 +252,16 @@ def test_subsidy_funding_is_checked_before_dispatch_and_updates_after_government
     finally:
         connection.close()
 
+    period_url = '/api/v1/government-subsidy/periods'
+    response = client.get(period_url, params={'unit':'month','year':2026,'index':11})
+    assert response.status_code == 200,response.text
+    period = response.json()['data']
+    assert period['can_reconcile'] and period['total_ntd'] >= 12000,period
+
     def source(*, government=False, repacked=False):
         columns = ['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註']
-        day = '2027/01/10' if government else '2027/01/15'
-        row = ['0001',day,'09:08:07',day,'轉帳',None if government else 12000,12000 if government else None,100000,'新竹市政府' if government else '補助退款 '+account]
+        day = '2027/01/10' if government else '2027/01/14'
+        row = ['0001',day,'09:08:07',day,'轉帳',None if government else 12000,period['total_ntd'] if government else None,100000,'新竹市政府' if government else f'HC{suffix}雇主補助款']
         output = BytesIO()
         pd.DataFrame([columns,row]).to_excel(output,sheet_name='重匯來源' if repacked else '來源',index=False,header=False)
         return output.getvalue()
@@ -263,11 +286,15 @@ def test_subsidy_funding_is_checked_before_dispatch_and_updates_after_government
     before = accounting_snapshot(case)
     pending = ingest_and_preview(refund_bytes,case+':refund-source')
     assert pending['counts']['ready_dispatch']==0 and pending['counts']['business_pending']==1,pending
-    assert 'subsidy_advance_not_due' in pending['rows'][0]['evidence']
+    assert pending['rows'][0]['pending_reason'] == 'subsidy_advance_not_due'
     assert accounting_snapshot(case)==before
     government = ingest_and_preview(source(government=True),case+':government-source')
-    assert government['counts']['ready_dispatch']==1,government
-    post(government,case+':government-apply')
+    assert government['counts']['ready_dispatch']==0,government
+    government_row = int(government['rows'][0]['row_identity'].split(':')[-1])
+    response = client.post(period_url + '/reconcile', json={**period['period'],
+        'expected_version':period['version'],'bank_row_id':government_row,'idempotency_key':case+':government-apply'})
+    assert response.status_code==200,response.text
+    government_receipt = response.json()['data']['receipt_id']
     repeat = ingest_and_preview(source(repacked=True),case+':refund-repacked-source')
     assert repeat['batch_identity'] != pending['batch_identity']
     assert repeat['rows'] == []
@@ -288,7 +315,7 @@ def test_subsidy_funding_is_checked_before_dispatch_and_updates_after_government
         with connection.cursor() as c:
             c.execute("SELECT entry_type,amount_ntd FROM client_ledger_entries WHERE case_no=%s AND entry_type<>'receipt'",(case,))
             assert c.fetchall()==[{'entry_type':'subsidy_return','amount_ntd':12000}]
-            c.execute('SELECT net_allocated_ntd,outstanding_ntd,status FROM government_subsidy_batch_accounts WHERE batch_id=%s',(batch,))
-            assert c.fetchone()=={'net_allocated_ntd':12000,'outstanding_ntd':0,'status':'paid'}
+            c.execute('SELECT case_no FROM government_subsidy_period_members WHERE receipt_id=%s AND case_no=%s',(government_receipt,case))
+            assert c.fetchone()=={'case_no':case}
     finally:
         connection.close()

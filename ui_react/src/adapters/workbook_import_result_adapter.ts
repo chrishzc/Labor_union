@@ -243,7 +243,7 @@ export function adaptHistoricalOrderImportResult(receipt: HistoricalOrderWorkboo
   const rows = receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.case_no, fields: row.fields, reasons: historicalOrderRowReasons(row.issue_codes) })) ?? null;
   const payrollIssues = receipt.payroll_issues?.map(row => ({
     sourceRow: row.source_row, identifier: row.case_no, fields: row.fields,
-    reasons: historicalOrderRowReasons(row.issue_codes),
+    reasons: row.detail ? [row.detail] : historicalOrderRowReasons(row.issue_codes),
   }));
   const absentOrderCancellationCount = receipt.absent_order_cancellation_count;
   if (receipt.import_counts) {

@@ -618,20 +618,23 @@ def _load_obligation_dates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[
             "due_date": row["due_date"],
         })
     cursor.execute(
-        "SELECT obligations.case_no,obligations.obligation_identity,"
+        "SELECT DISTINCT obligations.case_no,obligations.obligation_identity,"
         "obligations.obligation_kind,obligations.due_date,obligations.staff_id,"
+        "installment.obligation_identity AS installment_identity,installment.due_date AS installment_due_date,"
         "staff.name AS staff_name FROM staff_obligations obligations "
+        "LEFT JOIN staff_obligation_installments installment ON installment.obligation_identity=obligations.obligation_identity "
         "LEFT JOIN staff ON staff.id=obligations.staff_id "
         "WHERE obligations.case_no IN (" + placeholders + ") "
         "AND obligations.direction='payable_to_staff' AND obligations.status<>'cancelled' "
-        "ORDER BY obligations.case_no,obligations.staff_id,obligations.obligation_identity",
+        "AND (installment.obligation_identity IS NULL OR installment.amount_ntd>0) "
+        "ORDER BY obligations.case_no,obligations.staff_id,obligations.obligation_identity,installment_due_date",
         case_nos,
     )
     for row in cursor.fetchall():
         result[str(row["case_no"])]["staff_obligation_dates"].append({
             "obligation_identity": row["obligation_identity"],
             "obligation_kind": row["obligation_kind"],
-            "due_date": row["due_date"],
+            "due_date": row["installment_due_date"] if row["installment_identity"] is not None else row["due_date"],
             "staff_id": row["staff_id"],
             "staff_name": row["staff_name"],
         })

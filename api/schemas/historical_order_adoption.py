@@ -12,6 +12,7 @@ class HistoricalOrderWorkbookRowIssueView(BaseModel):
     case_no: str | None = Field(default=None, max_length=50)
     fields: list[str]
     issue_codes: list[str]
+    detail: str | None = None
 
 
 class HistoricalOrderStatusCountsView(BaseModel):

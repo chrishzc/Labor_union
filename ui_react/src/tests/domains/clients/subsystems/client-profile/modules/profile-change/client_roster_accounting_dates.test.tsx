@@ -26,7 +26,7 @@ const item = {
   claim_application_year: 2026, claim_application_month: 10,
 };
 
-const dateColumns = ['定金應繳日', '第一期應繳日', '第二期應繳日', '訂單月嫂應付日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月'] as const;
+const dateColumns = ['定金應繳日', '第一期應繳日', '第二期應繳日', '月嫂義務應付日', '客戶補助退還日', '補助預計申請年月'] as const;
 
 async function dateCells() {
   const row = (await screen.findByText('115000101')).closest('tr')!;
@@ -45,13 +45,14 @@ describe('client roster accounting date columns', () => {
     mocks.query.mockReset();
   });
 
-  it('displays all seven columns and distinct source dates without recalculation', async () => {
+  it('displays formal obligation dates without exposing the order-level salary date', async () => {
     render(<ClientRosterPage />);
-    const [deposit, first, second, staffDue, staffObligations, returns, claimMonth] = await dateCells();
+    const [deposit, first, second, staffObligations, returns, claimMonth] = await dateCells();
     expect(deposit).toHaveTextContent('2026-06-20');
     expect(first).toHaveTextContent('2026-07-03');
     expect(second).toHaveTextContent('無值');
-    expect(staffDue).toHaveTextContent('2026-09-15');
+    expect(screen.queryByRole('columnheader', { name: /訂單月嫂應付日/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('2026-09-15')).not.toBeInTheDocument();
     expect(staffObligations).toHaveTextContent('月嫂甲／薪資：2026-10-15');
     expect(staffObligations).toHaveTextContent('月嫂乙／調整：2026-08-15');
     expect(staffObligations).toHaveTextContent('未設定 姓名未設定／薪資：無值');
@@ -80,8 +81,8 @@ describe('client roster accounting date columns', () => {
     const row = (await screen.findByText('115000101')).closest('tr')!;
     fireEvent.click(row);
     expect(await screen.findByRole('alert')).toHaveTextContent('帳務詳情無法計算');
-    const [, , , staffDue] = await dateCells();
-    expect(staffDue).toHaveTextContent('2026-09-15');
+    const [, , , staffObligations] = await dateCells();
+    expect(staffObligations).toHaveTextContent('2026-10-15');
     expect(screen.getByRole('alert').closest('[role="dialog"]')).toHaveAccessibleName('案件 115000101 詳細資料');
   });
 

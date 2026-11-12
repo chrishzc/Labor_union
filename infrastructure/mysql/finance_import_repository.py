@@ -398,13 +398,39 @@ class MySqlFinanceImportRepository:
             )
 
 
+def append_rematched_subsidy_classification(connection, candidate, actor):
+    """Record the bank decision in the same transaction as the refund posting."""
+    row_id = _row_database_id(candidate.row_identity)
+    with _mysql_cursor(connection) as cursor:
+        cursor.execute("SELECT batch_id FROM finance_import_rows WHERE id=%s FOR UPDATE", (row_id,))
+        bank = cursor.fetchone()
+        cursor.execute(_CLASSIFICATION_VERSION_SQL, (row_id,))
+        current = cursor.fetchone()
+        if bank is None or current["canonical_fact_version"] != candidate.canonical_fact_version:
+            raise ValueError("bank_classification_changed")
+        cursor.execute(_CLASSIFICATION_INSERT_SQL, (
+            bank["batch_id"], row_id, int(current["next_classification_version"]),
+            candidate.canonical_fact_version, candidate.classification_type.value,
+            candidate.decision_facts_fingerprint.value,
+            _canonical_json(candidate.target_identities), _canonical_json(candidate.evidence),
+            actor.actor_id, "已依正式方案二與既有退款義務重新配對",
+        ))
+
+
 # Kept whole so every Preview fact comes from one consistent batch snapshot.
 def _refresh_pending_classification(row, source, identity_maps):
     from domains.finance_import.ingestion import InitialClassificationFacts, build_initial_classification
+    from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON
     from infrastructure.mysql.historical_reprocess_repository import _normalized_row
     from subsystems.finance_import.staging import classify_row_with_identity_maps
 
-    if row.canonical_fact_version != 0 or row.disposition is not FinanceImportDisposition.BUSINESS_PENDING:
+    awaiting_scheme = (
+        source.get("format_id") == "taishin" and source.get("direction") == "outgoing"
+        and row.classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW
+        and row.disposition is FinanceImportDisposition.MANUAL_REVIEW
+        and row.evidence == (TAISHIN_CASE_MEMO_REASON,)
+    )
+    if row.canonical_fact_version != 0 or (row.disposition is not FinanceImportDisposition.BUSINESS_PENDING and not awaiting_scheme):
         return row
     if row.integrity_violations or row.fingerprint_collision or row.formal_reference_conflict:
         return row
@@ -412,6 +438,14 @@ def _refresh_pending_classification(row, source, identity_maps):
     decision = build_initial_classification(InitialClassificationFacts(
         int(source["id"]), current["classification_type"], tuple(current["matched_identity_ids"]), current["reason"],
     ))
+    if awaiting_scheme:
+        if decision.classification_type is not FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
+            return row
+        return replace(
+            row, classification_type=decision.classification_type, disposition=decision.disposition,
+            target_identities=decision.target_identities, evidence=(*decision.evidence, TAISHIN_CASE_MEMO_REASON),
+            available_actions=decision.available_actions, decision_facts_fingerprint=decision.decision_facts_fingerprint,
+        )
     if (decision.classification_type is not row.classification_type
             or (row.target_identities and decision.target_identities != row.target_identities)):
         return replace(row, classification_type=FinanceClassificationType.NON_BUSINESS_REVIEW,

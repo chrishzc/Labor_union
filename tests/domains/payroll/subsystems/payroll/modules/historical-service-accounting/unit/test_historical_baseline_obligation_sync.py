@@ -45,4 +45,4 @@ def test_conflicting_historical_funding_blocks_establishment(monkeypatch):
         "infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff",
         lambda *_, payroll_candidate_total: SubsidyPayableHandoff("split", False, True, 5000, False, staff_subsidy_reason="conflict"),
     )
-    assert _funding_schedule(None, "CASE-1", {"actual_end_date": date(2026, 11, 30)}, 12000) is None
+    assert _funding_schedule(None, "CASE-1", {"actual_end_date": date(2026, 11, 30)}, 12000) == "conflict"

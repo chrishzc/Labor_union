@@ -576,6 +576,25 @@ def test_business_only_staging_keeps_only_matched_new_transactions(bank, expecte
     assert result["staged_rows"][0]["dedup_fingerprint"] == staging.build_dedup_fingerprint(matched)
 
 
+@pytest.mark.parametrize(("primary_staff", "retained"), [((), False), ((12,), True)])
+def test_business_only_staging_retains_staff_return_with_verified_primary_account(primary_staff, retained):
+    class ReturnCursor(FakeCursor):
+        def execute(self, sql, params):
+            super().execute(sql, params)
+            if "FROM staff_bank_accounts WHERE account_no=" in sql:
+                self._fetchall = tuple({"staff_id": staff_id} for staff_id in primary_staff)
+
+    account = "000000000024"
+    row = _normalized_row(format_id="sinopac", bank_references={"交易參考編號": account})
+    result = staging.stage_finance_rows(
+        ReturnCursor(), {**_normalized([row]), "format_id": "sinopac"},
+        {"staff_accounts": {account: [12]}}, business_only=True,
+    )
+    assert bool(result["staged_rows"]) is retained
+    if retained:
+        assert result["staged_rows"][0]["classification_type"] == "non_business_review"
+
+
 @pytest.mark.parametrize("bank", ["sinopac", "taishin"])
 @pytest.mark.parametrize("amount", [11899, 12001])
 def test_business_only_staging_preserves_known_same_month_payout_differences(bank, amount):
@@ -591,7 +610,7 @@ def test_business_only_staging_preserves_known_same_month_payout_differences(ban
 
 
 @pytest.mark.parametrize("other_case_amount", [12000, 20000])
-def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases(other_case_amount):
+def test_workbook_staging_skips_without_verified_memo_identity_when_multiple_cases(other_case_amount):
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo="Synthetic Staff", counterparty_name="Synthetic Staff", bank_references={})
     first = {"staff_id": 12, "name": "Synthetic Staff", "case_no": "115000001",
@@ -603,6 +622,20 @@ def test_workbook_staging_skips_recognized_staff_with_multiple_same_month_cases(
 
     assert result["staged_rows"] == []
     assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
+
+
+@pytest.mark.parametrize("staff_ids,retained", [([12], True), ([12, 13], False)])
+def test_workbook_staging_retains_name_only_taishin_staff_without_formal_accounting(staff_ids, retained):
+    name = "合成缺應付款月嫂"
+    row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
+                          memo=name + " 　GB,轉入0000000000000003", bank_references={})
+    result = staging.stage_finance_rows(
+        FakeCursor(staff_cases={12: ("115000001", "115000002")}), _normalized([row]),
+        {"all_staff_names": (name,), "staff_name_identities": {name: staff_ids}}, business_only=True,
+    )
+    assert bool(result["staged_rows"]) is retained
+    if retained:
+        assert result["staged_rows"][0]["classification_type"] == "staff_legacy_subsidy"
 
 
 @pytest.mark.parametrize("resolved", [True, False])

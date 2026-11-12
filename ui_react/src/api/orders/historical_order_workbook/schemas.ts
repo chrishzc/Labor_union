@@ -67,6 +67,7 @@ export const HistoricalOrderWorkbookPreviewSchema = z
       case_no: z.string().max(50).nullable(),
       fields: z.array(z.string()),
       issue_codes: z.array(z.string()),
+      detail: z.string().nullable().optional(),
     })).default([]),
   })
   .strict()
@@ -99,12 +100,14 @@ export const HistoricalOrderWorkbookReceiptSchema = z
       case_no: z.string().max(50).nullable(),
       fields: z.array(z.string()),
       issue_codes: z.array(z.string()),
+      detail: z.string().nullable().optional(),
     })).optional(),
     row_issues: z.array(z.strictObject({
       source_row: z.number().int().positive(),
       case_no: z.string().max(50).nullable(),
       fields: z.array(z.string()),
       issue_codes: z.array(z.string()),
+      detail: z.string().nullable().optional(),
     })).nullable().optional(),
   })
   .strict()

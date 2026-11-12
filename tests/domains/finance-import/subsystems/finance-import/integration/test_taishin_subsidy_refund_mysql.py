@@ -8,6 +8,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+from runpy import run_path
 from uuid import uuid4
 
 import pandas as pd
@@ -42,24 +43,18 @@ def connection(monkeypatch):
 
 
 def _seed(connection, amounts, missing_due):
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    seed = run_path(str(Path(__file__).with_name('test_subsidy_confirmation_mysql.py')))['seed']
+    case, _, _ = seed(connection, False, 'advance', subsidy=sum(amounts), actual_end=date(2026, 8, 31))
     with connection.cursor() as cursor:
-        while True:
-            year = 200 + int(uuid4().hex[:6], 16) % 700
-            sequence = int(uuid4().hex[:6], 16) % 1000
-            case = f'{year:03d}{sequence:06d}'
-            cursor.execute('SELECT case_no FROM orders WHERE case_no=%s', (case,))
-            if cursor.fetchone() is None:
-                break
-        cursor.execute("INSERT INTO clients(case_no,name) VALUES (%s,'Synthetic Rta Client')", (case,))
-        cursor.execute("INSERT INTO orders(case_no,client_id,status,end_date,actual_end_date) VALUES (%s,%s,'服務中','2026-09-30','2026-09-30')", (case, cursor.lastrowid))
-        cursor.execute('INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES (%s,0)', (case,))
         identities = tuple(f'subsidy:{case}:{i}' for i in range(len(amounts)))
         for identity, amount in zip(identities, amounts):
             due = None if missing_due else date(2026, 10, 15)
             cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,'subsidy_return','payable_to_client','established',0,%s,%s,%s,0,%s,'rta-mysql','Synthetic original official due date')", (identity, case, amount, due, identity, identity))
             cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,'subsidy_return','payable_to_client',%s,%s,'open',%s,0)", (identity, case, amount, due, cursor.lastrowid))
     connection.commit()
-    return case, f'{year:03d}{sequence:03d}', identities
+    return case, build_client_virtual_account(case)[-6:], identities
 
 
 def _snapshot(connection, case):
@@ -69,13 +64,13 @@ def _snapshot(connection, case):
                       'client_refund_reversal_apply_receipts', 'client_over_refund_recoveries'):
             cursor.execute(f'SELECT COUNT(*) n FROM {table} WHERE case_no=%s', (case,))
             result[table] = cursor.fetchone()['n']
-        cursor.execute('SELECT obligation_identity,amount_due_ntd,due_date,status FROM client_obligations WHERE case_no=%s ORDER BY obligation_identity', (case,))
+        cursor.execute("SELECT obligation_identity,amount_due_ntd,due_date,status FROM client_obligations WHERE case_no=%s AND obligation_type='subsidy_return' ORDER BY obligation_identity", (case,))
         result['obligations'] = list(cursor.fetchall())
-        cursor.execute('SELECT allocation.obligation_identity,allocation.amount_ntd FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries entry ON entry.id=allocation.ledger_entry_id WHERE entry.case_no=%s ORDER BY allocation.obligation_identity', (case,))
+        cursor.execute("SELECT allocation.obligation_identity,allocation.amount_ntd FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries entry ON entry.id=allocation.ledger_entry_id WHERE entry.case_no=%s AND entry.entry_type<>'receipt' ORDER BY allocation.obligation_identity", (case,))
         result['allocations'] = list(cursor.fetchall())
         cursor.execute('SELECT amount_due_ntd,status FROM client_over_refund_recoveries WHERE case_no=%s', (case,))
         result['recoveries'] = list(cursor.fetchall())
-        cursor.execute('SELECT entry_type,amount_ntd FROM client_ledger_entries WHERE case_no=%s', (case,))
+        cursor.execute("SELECT entry_type,amount_ntd FROM client_ledger_entries WHERE case_no=%s AND entry_type<>'receipt'", (case,))
         result['ledger'] = list(cursor.fetchall())
         return result
 
@@ -112,13 +107,16 @@ def test_current_rta_mysql_preview_apply_replay(connection, tmp_path, amounts, c
         assert bank['debit'] == cash and bank['counterparty_account'] is None
         cursor.execute('SELECT COUNT(*) n FROM client_refund_recipient_snapshots WHERE case_no=%s', (case,))
         assert cursor.fetchone()['n'] == 0
+        cursor.execute('SELECT client_id FROM orders WHERE case_no=%s', (case,))
+        client_id = cursor.fetchone()['client_id']
     app = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
     plan = app.preview_batch(ingested.batch_identity, correlation)
     expected = 'due_date_missing' if missing_due else 'outgoing_client_refund_multiple_fee_matches' if mode == 'choose_second' else 'outgoing_client_refund_amount_mismatch' if mode == 'overage' else None
     assert plan.rows[0].pending_reason == expected
     if expected is None:
         from domains.finance_import.planning import FinanceImportDisposition
-        old_reason_frame = replace(plan.rows[0], disposition=FinanceImportDisposition.BUSINESS_PENDING, pending_reason='due_date_missing')
+        old_reason_frame = replace(plan.rows[0], disposition=FinanceImportDisposition.BUSINESS_PENDING,
+            target_identities=(f'client:{client_id}',), pending_reason='due_date_missing', subsidy_preflight=None)
         refreshed = MySqlFinanceImportOwningDomainComposite(connection).resolve(old_reason_frame)
         assert refreshed.disposition is FinanceImportDisposition.CREATE and refreshed.pending_reason is None
     selected = (identities[1],) if mode == 'choose_second' else identities

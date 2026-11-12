@@ -77,6 +77,14 @@ it('方案未定由政府列顯示已知補助，未列出收款對象',async()=
  expect(government.getByText('補助給付預估：2027-02-15')).toBeVisible();
  expect(details.queryByRole('row',{name:/補助款退還客戶|補助款轉付月嫂/})).not.toBeInTheDocument();
 });
+it('方案二已保存但沒有正式退款時，仍指出款項待建立',async()=>{
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'advance',subsidy_ntd:12000,
+  client_items:facts().client_items.filter(row=>row.direction!=='payable'),
+  subsidy_plan:{case_no:caseNo,version:1,events:[{version:1,scheme:'advance',actor:'synthetic',created_at:'2026-10-01T00:00:00Z'}]},
+ });
+ wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+ expect(await screen.findByText(/已確認先墊後退，正式補助退款尚未建立/)).toBeVisible();
+});
 it('正式補助退款只列一次並與一般客戶退款分開',async()=>{
  const subsidy={identity:'subsidy-return',obligation_type:'subsidy_return',label:'補助退款／工會代墊',
   party:'合成客戶',direction:'payable' as const,expected_ntd:12000,actual_ntd:0,has_payment:false,

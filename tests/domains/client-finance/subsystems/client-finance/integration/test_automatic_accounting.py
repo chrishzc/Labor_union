@@ -183,7 +183,7 @@ def test_manual_handoff_writer_waits_for_formal_end_and_never_rewrites_an_existi
     assert refund.amount == MoneyNTD(12000)
     assert refund.due_date == date(2027, 1, 15)
 
-    existing_refunds.append({"obligation_identity": refund.obligation_identity})
+    existing_refunds.append({"obligation_identity": refund.obligation_identity, "status": "open"})
     writer.synchronize_terminal_subsidy_return(caller,'AUTO-1',**options)
     persist.assert_called_once()
 

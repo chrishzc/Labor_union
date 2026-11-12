@@ -207,13 +207,10 @@ def get_refund_return_review_application():
 
 
 def get_finance_import_ingestion_service():
-    from infrastructure.mysql.subsidy_confirmation_repository import has_official_staff_subsidy_evidence
-
     return partial(
         ingest_finance_workbook,
         connection_factory=get_connection,
         normalizer=normalize_workbook,
-        staff_subsidy_evidence=has_official_staff_subsidy_evidence,
     )
 
 

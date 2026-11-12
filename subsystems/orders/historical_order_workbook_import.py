@@ -125,6 +125,7 @@ class HistoricalOrderWorkbookRowIssue:
     case_no: str | None
     fields: tuple[str, ...]
     issue_codes: tuple[str, ...]
+    detail: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -132,6 +133,7 @@ class HistoricalOrderWorkbookRowIssue:
             "case_no": self.case_no,
             "fields": list(self.fields),
             "issue_codes": list(self.issue_codes),
+            **({"detail": self.detail} if self.detail else {}),
         }
 
 
@@ -508,6 +510,7 @@ class HistoricalOrderWorkbookImportService:
             if payroll_reason and payroll_reason != "already_synced":
                 payroll_issues.append(HistoricalOrderWorkbookRowIssue(
                     row.source_row, row.case_no, ("月嫂應付",), (payroll_reason,),
+                    detail=getattr(receipt, "payroll_skip_detail", None),
                 ))
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
             review_identity = getattr(receipt, "review_identity", None)

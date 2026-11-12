@@ -61,6 +61,7 @@ def connection(monkeypatch):
             obligation_type TEXT, due_date DATE, direction TEXT, status TEXT);
         CREATE TABLE staff_obligations (case_no TEXT, obligation_identity TEXT,
             obligation_kind TEXT, due_date DATE, staff_id INTEGER, direction TEXT, status TEXT);
+        CREATE TABLE staff_obligation_installments (obligation_identity TEXT, due_date DATE, amount_ntd INTEGER);
         CREATE TABLE staff (id INTEGER, name TEXT);
         CREATE TABLE client_legacy_virtual_accounts (case_no TEXT, virtual_account TEXT);
         INSERT INTO clients VALUES (1,'客戶甲',NULL,'新竹市','東區','一般市民','週休2日');
@@ -132,6 +133,16 @@ def test_stored_values_survive_query_and_http_serialization(connection):
     assert len(connection.statements) == 4
     assert sum("FROM client_legacy_virtual_accounts" in sql for sql, _ in connection.statements) == 1
     assert not any("v_order_details" in sql or "staff_schedule" in sql for sql, _ in connection.statements)
+
+
+def test_staff_due_dates_follow_positive_formal_funding_installments(connection):
+    connection.db.executemany("INSERT INTO staff_obligation_installments VALUES ('s-one',?,?)", [
+        ("2026-09-15", 18000), ("2026-11-15", 12000), ("2026-12-15", 0),
+    ])
+    entry = _page(connection).items[0]
+    assert [row["due_date"] for row in entry.staff_obligation_dates if row["obligation_identity"] == "s-one"] == [
+        date(2026, 9, 15), date(2026, 11, 15),
+    ]
 
 
 def test_accounting_reads_are_page_bounded_without_changing_cursor(connection):

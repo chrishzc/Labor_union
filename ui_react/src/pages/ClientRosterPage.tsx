@@ -292,7 +292,6 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col" title="client_obligations.due_date（deposit）">{columnHeading('deposit_due_date')}</th>
         <th scope="col" title="client_obligations.due_date（first）">{columnHeading('first_due_date')}</th>
         <th scope="col" title="client_obligations.due_date（second）">{columnHeading('second_due_date')}</th>
-        <th scope="col" title="orders.staff_payment_due_date">{columnHeading('staff_payment_due_date')}</th>
         <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
         <th scope="col" title="client_obligations.due_date（subsidy_return）">{columnHeading('subsidy_return_due_date')}</th>
         <th scope="col" title="自費薪資以實際或預定服務結束日估算，為次月 15 日。">薪資預估日期</th>
@@ -323,9 +322,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <td>{clientDueDates(item, 'deposit')}</td>
         <td>{clientDueDates(item, 'first')}</td>
         <td>{clientDueDates(item, 'second')}</td>
-        <td>{item.staff_payment_due_date === undefined ? '未載入' : item.staff_payment_due_date ?? '無值'}</td>
         <td>{item.staff_obligation_dates === undefined ? '未載入' : item.staff_obligation_dates.length ? item.staff_obligation_dates.map((entry) => (
-          <div key={entry.obligation_identity} title={entry.obligation_identity}>
+          <div key={`${entry.obligation_identity}:${entry.due_date ?? ''}`} title={entry.obligation_identity}>
             {staffIdentity.label(entry.staff_id, entry.staff_name)}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
           </div>
         )) : '無值'}</td>

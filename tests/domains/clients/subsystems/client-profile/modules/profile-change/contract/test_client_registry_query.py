@@ -178,6 +178,8 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
         "service_type": None,
         "client_obligation_dates": (),
         "staff_obligation_dates": (),
+        "estimated_self_funded_staff_due_date": None,
+        "estimated_subsidy_payment_date": None,
         "claim_application_year": None,
         "claim_application_month": None,
     }
@@ -482,7 +484,8 @@ def test_mysql_registry_list_preserves_filters_and_batches_visible_page_dates():
     ), (
         {"case_no": "115000001", "obligation_identity": "client-deposit", "obligation_type": "deposit", "due_date": None},
     ), (
-        {"case_no": "115000002", "obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None, "staff_id": 8, "staff_name": None},
+        {"case_no": "115000002", "obligation_identity": "staff-service", "obligation_kind": "service_pay", "due_date": None,
+         "installment_identity": None, "installment_due_date": None, "staff_id": 8, "staff_name": None},
     )])
 
     rows, next_cursor, next_offset = MySqlClientRegistryQueryRepository(connection).list_page(
