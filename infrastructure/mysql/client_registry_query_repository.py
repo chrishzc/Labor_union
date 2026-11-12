@@ -719,9 +719,9 @@ def _finance_values(connection, case_no):
 
             receivable_rows = tuple(
                 r for r in obligation_rows if r.get("direction") == "receivable_from_client"
+                and (not historical_social or r["status"] != "cancelled")
             )
             if any(r.get("obligation_type") in ("deposit", "first", "second")
-                and (not historical_social or r["status"] != "cancelled")
                    and not str(r["obligation_identity"]).startswith("historical-floor-fee-deposit:")
                    for r in receivable_rows):
                 receivable_rows = tuple(
