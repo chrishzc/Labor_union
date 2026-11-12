@@ -686,11 +686,12 @@ def _finance_values(connection, case_no):
             current_rows = tuple(cursor.fetchall() or ())
         if len(subsidy_rows) > 1:
             return "not_ready", "client_subsidy_return_ambiguous", None
-        historical_social = historical_completed and (
-            facts.pricing.rule is IdentityRule.SOCIAL if facts.pricing is not None
-            else normalize_subsidy_policy_identity(facts.identity_status or "") == "補助市民"
+        use_historical_installments = historical_completed and (
+            any(row["obligation_type"] in ("deposit", "first", "second") for row in current_rows)
+            or (facts.pricing.rule is IdentityRule.SOCIAL if facts.pricing is not None
+                else normalize_subsidy_policy_identity(facts.identity_status or "") == "補助市民")
         )
-        if not historical_social and len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
+        if not use_historical_installments and len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
             candidate = build_client_finance_terms_candidate(
                 facts, f"client-registry:{case_no}"
             )
@@ -719,7 +720,7 @@ def _finance_values(connection, case_no):
 
             receivable_rows = tuple(
                 r for r in obligation_rows if r.get("direction") == "receivable_from_client"
-                and (not historical_social or r["status"] != "cancelled")
+                and (not use_historical_installments or r["status"] != "cancelled")
             )
             if any(r.get("obligation_type") in ("deposit", "first", "second")
                    and not str(r["obligation_identity"]).startswith("historical-floor-fee-deposit:")
@@ -729,7 +730,7 @@ def _finance_values(connection, case_no):
                     for r in receivable_rows
                     if not str(r.get("obligation_identity", "")).startswith("historical-service:")
                 )
-            if historical_social:
+            if use_historical_installments:
                 stage_identities = {r["obligation_identity"] for r in receivable_rows
                                     if r["obligation_type"] in ("deposit", "first", "second")}
                 # The source's effective stage amount already includes its
@@ -779,7 +780,7 @@ def _finance_values(connection, case_no):
         for row in current_rows:
             stage = row["obligation_type"]
             if stage in stage_amounts:
-                if historical_social:
+                if use_historical_installments:
                     if row["direction"] == "receivable_from_client":
                         effective = row["effective_ntd"] if row["effective_ntd"] is not None else row["nominal_ntd"]
                         historical_stage_amounts[stage] += max(0, int(effective) - int(row["service_reduction_ntd"]))
@@ -790,7 +791,7 @@ def _finance_values(connection, case_no):
                 stage_amounts[stage] = effective
             elif row["obligation_type"] == "adjustment" and row["direction"] == "receivable_from_client":
                 customer_payable -= int(row["service_reduction_ntd"])
-        if historical_social:
+        if use_historical_installments:
             customer_payable += sum(historical_stage_amounts.values()) - sum(stage_amounts.values())
             stage_amounts = historical_stage_amounts
         balance = customer_payable - received_total

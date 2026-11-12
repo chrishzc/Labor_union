@@ -7,7 +7,7 @@
 ## Responsibility
 
 歷史服務／帳務完成案件的 `floor_fee_correction` 使用既有歷史服務量。Query 的 `floor_fee_correction_available` 與一般服務鎖分開，原 lifecycle、起訖及 Scheduling roots 保持。收據狀態擴充由 migration 1070 承接，未升級時明示 blocker。
-補助市民的歷史樓層費更正由 Client Finance 將差額列入訂金，Preview／Apply 使用既有服務天數與訂金資料，Payroll version 為 null，名冊儲存後讀回有效訂金金額。其他身分沿 Finance／Payroll 金額更正。規則見歷史訂單規格 §6.3。
+歷史樓層費更正由 Client Finance 將差額列入訂金，Preview／Apply 使用既有服務天數與訂金資料，Payroll version 為 null，名冊儲存後讀回有效訂金金額。規則見歷史訂單規格 §6.3。
 
 既有 Terms input 的 `floor_fee_correction=true` 僅允許更正已完成服務的樓層費，沿原 Terms 事件與收據。需同步 Payroll 的更正沿用既有 rate-correction candidate，連續更正以 Orders version 區分。
 編排 Orders Terms 的 Query／zero-write Preview／fresh-lock Apply。Preview 衍生 `requires_formal_apply`：不形成 Scheduling、confirmed dates、Finance、Payroll 或 lifecycle 正式影響的普通保存只更新 Orders aggregate，不建立 command claim、事件或永久 receipt；有正式影響時才以單一 outer Unit of Work 套用跨 owner 影響並產生可追溯 receipt。Terms caller 另比對 current effective assignments 與 candidate 的 identity／人員／日期／區間形狀；形狀未變時不呼叫 Scheduling replacement writer，沿用 current generation 與真實 assignment identity，Terms receipt 的 Scheduling receipt linkage 為 nullable。尚未建立 assignment 時，起始日平移不虛構排班 segment，並以相同天數平移預計結束日；已有 current confirmed service dates 時保留日期間隔、建立新的 immutable current version 取代舊版。

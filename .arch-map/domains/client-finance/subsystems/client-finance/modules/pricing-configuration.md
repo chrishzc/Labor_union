@@ -7,7 +7,7 @@
 ## Responsibility
 
 歷史完成案件以 `CasePricingFacts.historical_service_hours` 借用已採納／已確認服務量計價，不建逐日資料或套現代分期。typed historical repricing plan 把價格差額分配至原期款、既有補助退款及原月嫂應付，交各原金額更正 writer 在同一外層交易處理；人工金額控制與現金 lineage 保留。
-歷史已完成補助市民案件的 Terms 樓層費更正讀取既有歷史服務天數與訂金資料，將樓層費差額交給 Client Finance 差額 writer 更正原訂金或建立訂金應收。規則見歷史訂單規格 §6.3。
+各身分的歷史已完成案件，Terms 樓層費更正讀取既有歷史服務天數與訂金資料，將樓層費差額交給 Client Finance 差額 writer 更正原訂金或建立訂金應收。規則見歷史訂單規格 §6.3。
 Versioned customer pricing/subsidy limits, policy selection at first case creation,
 and typed coordination of explicit per-case repricing. Payroll owns salary tiers.
 No query writes; one outer transaction and typed stale/idempotency conflicts.

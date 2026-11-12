@@ -153,9 +153,9 @@ def build_historical_deposit_floor_fee_plan(case_no, client_version, service_bas
     return HistoricalRepricingPlan(case_no, client_version, None, updates, (), service_basis, new_deposit)
 
 
-def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None, subsidy_source=None):
+def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, subsidy_source=None):
     before = pricing_impact(facts.terms, facts)
-    after = pricing_impact(terms, replace(facts, floor_fee=facts.floor_fee if floor_fee is None else floor_fee))
+    after = pricing_impact(terms, facts)
     def update(source, delta):
         revised = source.computed + delta
         effective = source.effective if source.mode == 'manual' else revised

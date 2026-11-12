@@ -90,12 +90,12 @@ def original_installments(connection, case):
         return cursor.fetchall()
 
 
-def assert_historical_service_preserved(connection, case):
+def assert_historical_service_preserved(connection, case, status='歷史訂單－服務完成'):
     with connection.cursor() as cursor:
         cursor.execute('SELECT COUNT(*) n FROM staff_schedule WHERE case_no=%s',(case.case_no,))
         assert cursor.fetchone()['n']==0
         cursor.execute('SELECT status,actual_start_date,actual_end_date FROM orders WHERE case_no=%s',(case.case_no,))
-        assert cursor.fetchone()=={'status':'歷史訂單－服務完成','actual_start_date':date(2025,1,2),'actual_end_date':date(2025,1,31)}
+        assert cursor.fetchone()=={'status':status,'actual_start_date':date(2025,1,2),'actual_end_date':date(2025,1,31)}
 
 
 def test_fixtures_include_historical_bindings_original_cash_and_zero_daily_schedule(scenarios):
@@ -170,7 +170,7 @@ def test_historical_closed_fee_formal_preview_does_not_require_daily_schedule(sc
     assert _scenario['cash_snapshot'](connection,case)==before
     from subsystems.orders.terms_workflow import OrderTermsApplyRequest
     request=OrderTermsApplyRequest(case.case_no,preview.after,ExpectedVersion(preview.order_version),
-        ExpectedVersion(preview.scheduling_version),ExpectedVersion(preview.client_finance_version),ExpectedVersion(preview.payroll_version),
+        ExpectedVersion(preview.scheduling_version),ExpectedVersion(preview.client_finance_version),None,
         preview.fingerprint,IdempotencyKey(case.case_no+'-floor'),ActorContext('synthetic'),'結案漏填樓層費',CorrelationId(case.case_no+'-floor'),floor_fee_correction=True)
     # A new historical-volume revision invalidates the original Preview even
     # when the day count and downstream account versions happen to be equal.
@@ -198,34 +198,44 @@ def test_historical_closed_fee_formal_preview_does_not_require_daily_schedule(sc
     receipt=workflow.apply(request)
     assert workflow.apply(request)==receipt
     assert _scenario['cash_snapshot'](connection,case)==before
-    assert_payroll_expected(connection,case,73000)
+    assert_payroll_expected(connection,case,72000)
     reconcile_original_source(connection,case)
     assert_original_cash_preserved(connection,case,before)
     assert_historical_service_preserved(connection,case)
-    assert original_installments(connection,case)==installments
+    assert [row for row in original_installments(connection,case)
+            if row['obligation_type'] != 'deposit'] == installments
     with pytest.raises(TermsWorkflowError):
         workflow.apply(replace(request,proposed_terms=replace(terms,floor_fee=MoneyNTD(1500))))
     next_terms=replace(terms,floor_fee=MoneyNTD(1500))
     next_preview=workflow.preview(case.case_no,next_terms,floor_fee_correction=True)
     next_request=replace(request,proposed_terms=next_terms,expected_order_version=ExpectedVersion(next_preview.order_version),
-        expected_client_finance_version=ExpectedVersion(next_preview.client_finance_version),expected_payroll_version=ExpectedVersion(next_preview.payroll_version),
+        expected_client_finance_version=ExpectedVersion(next_preview.client_finance_version),
         preview_fingerprint=next_preview.fingerprint,idempotency_key=IdempotencyKey(case.case_no+'-floor-next'))
     workflow.apply(next_request)
     assert bank_candidate(connection,case)['status']=='posted'
-    assert_payroll_expected(connection,case,73500)
+    assert_payroll_expected(connection,case,72000)
     assert_original_cash_preserved(connection,case,before)
 
 
+@pytest.mark.parametrize(('identity', 'new_case', 'original_case'), [
+    ('一般市民', '115990010', '115990011'),
+    ('補助市民', '115990012', '115990013'),
+    ('原住民', '115990014', '115990015'),
+    ('非市民', 'A115016', 'A115017'),
+])
 @pytest.mark.parametrize('has_original_deposit', [False, True])
-def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_original_deposit, monkeypatch):
+def test_historical_floor_fee_is_read_back_as_deposit(
+    scenarios, has_original_deposit, identity, new_case, original_case, monkeypatch,
+):
     from infrastructure.mysql.client_registry_query_repository import _finance_values
     from infrastructure.mysql import pricing_configuration_repository
     from subsystems.orders.terms_workflow import OrderTermsApplyRequest
 
     connection, _ = scenarios
+    bank_amount = 1000 if has_original_deposit else 1500
     case = _scenario['create_historical_scenario'](
-        connection, '115990011' if has_original_deposit else '115990010',
-        paid=72000 if has_original_deposit else 0, waiting=1500,
+        connection, original_case if has_original_deposit else new_case,
+        paid=72000 if has_original_deposit else 0, waiting=bank_amount,
         client_stage='deposit' if has_original_deposit else 'first',
     )
     if has_original_deposit:
@@ -242,8 +252,10 @@ def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_orig
             IdempotencyKey(case.case_no+'-recorded-days'), ActorContext('synthetic'), '確認歷史服務天數',
             CorrelationId(case.case_no+'-recorded-days'),
         ))
+    lifecycle = '歷史訂單－帳務完成' if has_original_deposit else '歷史訂單－服務完成'
     with connection.cursor() as cursor:
-        cursor.execute("UPDATE clients SET identity_status='補助市民' WHERE case_no=%s", (case.case_no,))
+        cursor.execute("UPDATE clients SET identity_status=%s WHERE case_no=%s", (identity, case.case_no))
+        cursor.execute("UPDATE orders SET status=%s WHERE case_no=%s", (lifecycle, case.case_no))
         if not has_original_deposit:
             cursor.execute("UPDATE client_obligations SET status='cancelled',amount_due_ntd=0 WHERE obligation_identity=%s",
                            (case.client_obligation,))
@@ -302,14 +314,13 @@ def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_orig
             else:
                 assert (deposit['status'], deposit['amount_due_ntd']) == ('open', expected_delta)
 
-    if not has_original_deposit:
-        reconcile_original_source(connection, case)
-        status, code, values = _finance_values(connection, case.case_no)
-        assert (status, code) == ('ready', None)
-        assert values['deposit_amount_ntd'] == values['received_total_ntd'] == 1500
-        assert values['customer_balance_ntd'] == 0
-        assert snapshots() == service_and_payables
-    assert_historical_service_preserved(connection, case)
+    reconcile_original_source(connection, case)
+    status, code, values = _finance_values(connection, case.case_no)
+    assert (status, code) == ('ready', None)
+    assert values['deposit_amount_ntd'] == values['received_total_ntd'] == case.original_client_paid + bank_amount
+    assert values['customer_balance_ntd'] == 0
+    assert snapshots() == service_and_payables
+    assert_historical_service_preserved(connection, case, lifecycle)
 
 
 def test_historical_subsidy_hours_formal_apply_preserves_original_cash(scenarios,monkeypatch):

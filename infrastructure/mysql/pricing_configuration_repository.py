@@ -230,12 +230,6 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
 
 def historical_deposit_floor_fee_plan(cursor, order, proposed_fee, *, lock):
     """Use recorded service days to plan the customer-side floor-fee delta."""
-    pricing = load_case_pricing(cursor, order, lock=lock)
-    is_social = (pricing.rule is IdentityRule.SOCIAL if pricing is not None else
-                 normalize_subsidy_policy_identity(str(order['client_identity_status'])) == '補助市民')
-    if not is_social:
-        return None
-
     case_no = str(order['case_no'])
     suffix = ' FOR UPDATE' if lock else ''
     cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s' + suffix, (case_no,))
@@ -284,7 +278,7 @@ def _historical_amount_facts(row):
     return HistoricalAmountFacts(row['obligation_identity'], computed, effective, row['amount_mode'] or 'automatic')
 
 
-def historical_repricing_plan(connection, facts, terms, *, floor_fee=None, lock=True):
+def historical_repricing_plan(connection, facts, terms, *, lock=True):
     """Apply a price delta to evidenced original installments, never regenerate them."""
     suffix = ' FOR UPDATE' if lock else ''
     with connection.cursor() as cursor:
@@ -306,7 +300,7 @@ def historical_repricing_plan(connection, facts, terms, *, floor_fee=None, lock=
         if len(subsidy_rows) > 1:
             raise PricingConflict('historical_pricing_original_subsidy_return_required')
     return build_historical_repricing_plan(facts, terms, tuple(_historical_amount_facts(r) for r in client_rows),
-        _historical_amount_facts(staff_rows[0]), floor_fee=floor_fee,
+        _historical_amount_facts(staff_rows[0]),
         subsidy_source=_historical_amount_facts(subsidy_rows[0]) if subsidy_rows else None)
 
 

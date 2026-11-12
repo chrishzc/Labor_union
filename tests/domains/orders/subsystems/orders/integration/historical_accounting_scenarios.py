@@ -122,8 +122,12 @@ def create_historical_scenario(connection, case_no, *, paid=24000, waiting=24000
     assert workflow.apply(request).replayed
     assert cash_snapshot(connection,original_case)==original_cash
     with connection.cursor() as cursor:
-        account='99781699'+case_no[:3]+case_no[-3:]
-        cursor.execute("INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by) VALUES (%s,%s,%s,2,'synthetic')",(case_no,account,'b'*64))
+        from subsystems.client_finance.virtual_account_resolution import build_effective_formula_account
+
+        account = build_effective_formula_account(case_no)
+        if account is None:
+            account = '99781699' + case_no[:3] + case_no[-3:]
+            cursor.execute("INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by) VALUES (%s,%s,%s,2,'synthetic')",(case_no,account,'b'*64))
         cursor.execute("INSERT INTO finance_import_batches(format_id,sheet_name,header_row,row_count) VALUES ('sinopac','synthetic historical',1,1)");batch=cursor.lastrowid
         cursor.execute("INSERT INTO finance_import_rows(dedup_fingerprint,batch_id,format_id,transaction_date,credit,direction,cancellation_code,bank_references,warnings,raw_payload,classification_type) VALUES (%s,%s,'sinopac','2025-02-15',%s,'incoming',%s,%s,'[]','{}','client_receipt')",(hashlib.sha256(uuid4().bytes).hexdigest(),batch,waiting,account,json.dumps({'銷帳編號':account})))
         bank_row=cursor.lastrowid
