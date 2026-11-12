@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useState, type FC, type ReactNode } from 'react';
 import {
   adaptOrdersCardProjection,
   type OrdersCardProjectionViewModel,
@@ -16,6 +16,7 @@ interface OrderWorkbenchV2OwnerContextProps {
   caseNo: string;
   revision?: number;
   placement?: 'header';
+  summary?: { fields: ReactNode; actions: ReactNode };
   disabled?: boolean;
   completedService?: boolean;
 }
@@ -50,8 +51,15 @@ function recordTime(value: string): string {
   return new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 }
 
+function revealRecords(panel: HTMLDivElement | null) {
+  if (!panel || !panel.previousElementSibling) return;
+  const summaryBottom = panel.previousElementSibling.getBoundingClientRect().bottom;
+  const panelTop = panel.getBoundingClientRect().top;
+  if (panelTop < summaryBottom) window.scrollBy(0, panelTop - summaryBottom);
+}
+
 /** Reuse the same bounded, read-only owner clients as the two legacy pages. */
-export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0, placement, disabled = false, completedService = false }) => {
+export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps> = ({ caseNo, revision = 0, placement, summary, disabled = false, completedService = false }) => {
   const [expanded, setExpanded] = useState(false);
   const [retryRevision, setRetryRevision] = useState(0);
   const [card, setCard] = useState<ReadState<OrdersCardProjectionViewModel>>({ status: 'loading' });
@@ -107,21 +115,38 @@ export const OrderWorkbenchV2OwnerContext: FC<OrderWorkbenchV2OwnerContextProps>
     return () => controller.abort();
   }, [caseNo, expanded, retryRevision, revision]);
 
+  const inHeader = placement === 'header' || summary !== undefined;
+  const recordsToggle = inHeader ? (
+    <button type="button" className="order-case-records-toggle" disabled={disabled} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+      {expanded ? '收起相關資料與通知紀錄' : '查看相關資料與通知紀錄'}
+    </button>
+  ) : (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => {
+        if (expanded) setRetryRevision((value) => value + 1);
+        else setExpanded(true);
+      }}
+    >
+      {expanded ? '重新讀取案件聯絡、服務資料與 LINE 歷程' : '讀取案件聯絡、服務資料與 LINE 歷程'}
+    </button>
+  );
+
   return (
-    <section className={placement === 'header' ? 'order-case-owner-context-header' : 'order-v2-drawer-section order-case-owner-context'} aria-label="案件聯絡、服務資料與 LINE 歷程">
-      {placement !== 'header' && <h3>案件聯絡、服務資料與 LINE 歷程</h3>}
-      {placement === 'header' ? <button type="button" className="order-case-records-toggle" disabled={disabled} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起相關資料與通知紀錄' : '查看相關資料與通知紀錄'}</button> : <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => {
-          if (expanded) setRetryRevision((value) => value + 1);
-          else setExpanded(true);
-        }}
-      >
-        {expanded ? '重新讀取案件聯絡、服務資料與 LINE 歷程' : '讀取案件聯絡、服務資料與 LINE 歷程'}
-      </button>}
+    <section className={inHeader ? 'order-case-owner-context-header' : 'order-v2-drawer-section order-case-owner-context'} aria-label="案件聯絡、服務資料與 LINE 歷程">
+      {!inHeader && <h3>案件聯絡、服務資料與 LINE 歷程</h3>}
+      {summary ? (
+        <div className="order-case-summary-row" role="region" aria-label="案件摘要">
+          <div className="order-case-context">{summary.fields}</div>
+          <div className="order-case-summary-actions">
+            {recordsToggle}
+            {summary.actions}
+          </div>
+        </div>
+      ) : recordsToggle}
       {expanded && (
-        <div className={placement === 'header' ? 'order-case-related-records order-v2-drawer-section' : 'order-case-related-records'}>
+        <div ref={summary ? revealRecords : undefined} className={inHeader ? 'order-case-related-records order-v2-drawer-section' : 'order-case-related-records'}>
           <section aria-label="正式案件聯絡與帳務投影">
             <h4>案件聯絡與帳務資料</h4>
             {card.status === 'loading' && <p role="status">載入案件聯絡與帳務資料…</p>}

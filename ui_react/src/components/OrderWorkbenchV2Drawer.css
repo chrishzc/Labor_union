@@ -49,9 +49,9 @@
 .order-case-eyebrow { color: #8d6e5d; font-size: .78rem; letter-spacing: .04em; margin: 0; }
 .order-case-lifecycle { padding: 8px 13px; border-radius: 20px; background: #f2e9df; color: #79533a; font-size: .82rem; }
 .order-case-purpose { margin: 8px 0 20px; color: #7b6e64; line-height: 1.7; }
-.order-case-context { display: flex; flex-wrap: wrap; gap: 20px 36px; padding: 16px 0; border-top: 1px solid #e9ded6; }
-.order-case-context > span { display: grid; gap: 5px; font-size: .88rem; }
-.order-case-context small { color: #938073; font-size: .75rem; }
+.order-case-context { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.order-case-context > span { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; font-size: 1.125rem; }
+.order-case-context small { color: #938073; font-size: 1rem; }
 .order-case-view-nav { display: flex; flex-wrap: wrap; gap: 24px; border-bottom: 1px solid #e4d6cb; margin: 8px 0 24px; }
 .order-case-view-nav button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 14px 2px; font: inherit; font-weight: 650; color: #806c5d; cursor: pointer; }
 .order-case-view-nav button[aria-current=page] { color: #b64d21; border-bottom-color: #b64d21; }
@@ -812,17 +812,28 @@
 .order-case-secondary-actions[open] summary { margin-bottom: 12px; }
 .order-case-page :is(button, input, select, summary, a):focus-visible { outline: 3px solid #a43b16; outline-offset: 3px; }
 .order-case-service-title { margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid #eee5df; font-size: 1.05rem; }
-.order-case-header { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #eadfd6; }
 .order-case-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .order-case-page .order-case-header-actions .order-case-reopen { background: #be4214; color: white; border-color: #be4214; }
-.order-case-summary-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 16px 0; border-top: 1px solid #e9ded6; }
-.order-case-summary-row > .order-case-context { flex: 1 1 560px; padding: 0; border-top: 0; }
+.order-case-summary-row {
+  position: sticky;
+  top: 64px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-bottom: 24px;
+  padding: 12px 0;
+  border-block: 1px solid #e9ded6;
+  background: var(--md-sys-color-surface);
+}
+.order-case-summary-row > .order-case-context { flex: 1 1 700px; min-width: 0; }
+.order-case-summary-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .order-case-owner-context-header { display: contents; }
-.order-case-records-toggle { flex: 0 1 auto; }
-.order-case-profile-link { margin-left: auto; font-size: .84rem; }
+.order-case-profile-link { font-size: .84rem; }
 .order-case-profile-link[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .order-case-related-records > section + section { margin-top: 24px; }
-.order-case-summary-row .order-case-related-records { flex: 1 0 100%; box-sizing: border-box; order: 1; }
+@media (max-width: 900px) { .order-case-summary-row { top: 57px; } }
 .order-case-related-data { border-top: 1px solid #eadfd6; padding: 16px 0; margin-top: 20px; }
 .order-case-related-data > summary { cursor: pointer; color: #715d50; }
 .order-intake-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }

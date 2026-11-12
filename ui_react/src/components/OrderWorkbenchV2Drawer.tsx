@@ -460,7 +460,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       <header className="order-case-header">
         <button type="button" className="order-case-back" disabled={navigationLocked} onClick={guardedClose}>← 返回待辦看板</button>
         <div className="order-case-heading-row">
-          <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>案件處理</h1></div>
+          <h1 ref={pageHeadingRef} tabIndex={-1}>案件處理</h1>
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
             {timeline.status === 'ready' && currentBranch !== 'cancelled' && !terminalStatus &&
@@ -468,20 +468,28 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </div>
         </div>
         <p className="order-case-purpose">依目前進度接續工作；需要的訂單與服務資料會顯示在各辦理事項中。</p>
-        <div className="order-case-summary-row">
-        <div className="order-case-context">
-          <span><small>客戶</small>{clientName}</span>
-          <span><small>約定服務開始日</small>{plannedStart}</span>
-          <span><small>實際開始</small>{actualStart}</span>
-          <span><small>服務量</small>{serviceVolume}</span>
-          <span><small>服務月嫂</small>{assignedStaff}</span>
-          {branchType === 'historical' && historicalEvidence.status === 'ready' && <span><small>歷史匯入期間</small>{evidencePeriod(historicalEvidence.data)}</span>}
-        </div>
-        <OrderWorkbenchV2OwnerContext caseNo={caseNo} revision={refreshRevision} placement="header" disabled={navigationLocked} completedService={completedService} />
-        {!showCompletion && <a aria-disabled={navigationLocked || undefined} onClick={(event) => { if (navigationLocked) event.preventDefault(); }} href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}&from=workbench`}>查看本案帳務 →</a>}
-        <a className="order-case-profile-link" aria-disabled={navigationLocked || undefined} onClick={(event) => { if (navigationLocked) event.preventDefault(); }} href={`#clients?case=${encodeURIComponent(caseNo)}&from=workbench`}>編輯客戶與訂單資料 →</a>
-        </div>
       </header>
+      <OrderWorkbenchV2OwnerContext
+        caseNo={caseNo}
+        revision={refreshRevision}
+        disabled={navigationLocked}
+        completedService={completedService}
+        summary={{
+          fields: <>
+            <span><small>案件編號</small>{caseNo}</span>
+            <span><small>客戶</small>{clientName}</span>
+            <span><small>約定服務開始日</small>{plannedStart}</span>
+            <span><small>實際開始</small>{actualStart}</span>
+            <span><small>服務量</small>{serviceVolume}</span>
+            <span><small>服務月嫂</small>{assignedStaff}</span>
+            {branchType === 'historical' && historicalEvidence.status === 'ready' && <span><small>歷史匯入期間</small>{evidencePeriod(historicalEvidence.data)}</span>}
+          </>,
+          actions: <>
+            {!showCompletion && <a aria-disabled={navigationLocked || undefined} onClick={(event) => { if (navigationLocked) event.preventDefault(); }} href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(caseNo)}&from=workbench`}>查看本案帳務 →</a>}
+            <a className="order-case-profile-link" aria-disabled={navigationLocked || undefined} onClick={(event) => { if (navigationLocked) event.preventDefault(); }} href={`#clients?case=${encodeURIComponent(caseNo)}&from=workbench`}>編輯客戶與訂單資料 →</a>
+          </>,
+        }}
+      />
       {factsRefreshing && <p role="status" className="order-case-read-status">正在更新案件資料…</p>}
       {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
       <div className="order-case-workspace">

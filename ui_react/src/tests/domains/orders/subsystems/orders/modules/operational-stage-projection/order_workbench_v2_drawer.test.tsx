@@ -308,19 +308,22 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     setOwnerFacts(caseNo);
     const view = render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
     await screen.findByRole('region', { name: '正式補件入口' });
-    const header = view.container.querySelector('.order-case-header') as HTMLElement;
+    const summary = screen.getByRole('region', { name: '案件摘要' });
+    const recordsRegion = screen.getByRole('region', { name: '案件聯絡、服務資料與 LINE 歷程' });
     const body = view.container.querySelector('.order-case-task-body') as HTMLElement;
-    const records = within(header).getByRole('button', { name: '查看相關資料與通知紀錄' });
-    expect(within(header).getByRole('link', { name: '編輯客戶與訂單資料 →' })).toHaveAttribute('href', `#clients?case=${caseNo}&from=workbench`);
+    const records = within(summary).getByRole('button', { name: '查看相關資料與通知紀錄' });
+    expect(summary.querySelector('.order-case-context > span:first-child')).toHaveTextContent(`案件編號${caseNo}`);
+    expect(within(summary).getByRole('link', { name: '編輯客戶與訂單資料 →' })).toHaveAttribute('href', `#clients?case=${caseNo}&from=workbench`);
     expect(clientMocks.getFormManagementContext).not.toHaveBeenCalled();
     expect(within(body).queryByText('確認基本服務需求；待補資料與可先辦事項分開處理。')).not.toBeInTheDocument();
     expect(within(body).queryByRole('region', { name: '本步驟相關資料' })).not.toBeInTheDocument();
     expect(within(body).queryByRole('link', { name: '編輯客戶與訂單資料 →' })).not.toBeInTheDocument();
     fireEvent.click(records);
-    expect(await within(header).findByText('測試縣市')).toBeInTheDocument();
+    expect(await within(recordsRegion).findByText('測試縣市')).toBeInTheDocument();
+    expect(within(summary).queryByText('測試縣市')).not.toBeInTheDocument();
     expect(clientMocks.getFormManagementContext).toHaveBeenCalledWith(caseNo, { signal: expect.any(AbortSignal) });
-    fireEvent.click(within(header).getByRole('button', { name: '收起相關資料與通知紀錄' }));
-    expect(within(header).queryByRole('heading', { name: '客戶服務資料' })).not.toBeInTheDocument();
+    fireEvent.click(within(summary).getByRole('button', { name: '收起相關資料與通知紀錄' }));
+    expect(within(recordsRegion).queryByRole('heading', { name: '客戶服務資料' })).not.toBeInTheDocument();
     expect(within(body).getByRole('region', { name: '正式補件入口' })).toBeVisible();
   });
 
