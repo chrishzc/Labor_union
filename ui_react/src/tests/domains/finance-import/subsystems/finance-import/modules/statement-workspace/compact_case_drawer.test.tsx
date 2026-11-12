@@ -68,12 +68,13 @@ it.each([
  expect(staff.getByText('2026-11-15',{exact:true})).toBeVisible();
 });
 it('方案未定由政府列顯示已知補助，未列出收款對象',async()=>{
- vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'waiting',subsidy_payments:[]});
+ vi.mocked(financeAccountingClient.query).mockResolvedValue({...facts(),scheme:'waiting',subsidy_payments:[],estimated_subsidy_payment_date:'2027-02-15'});
  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
  const details=within(await screen.findByRole('region',{name:'補助退款與政府核銷明細，可左右捲動'}));
  const government=within(details.getByRole('row',{name:/政府補助款/}));
  expect(government.getByText('NT$ 12,000',{exact:true})).toBeVisible();
  expect(government.getByText('補助歸屬待確認')).toBeVisible();
+ expect(government.getByText('補助給付預估：2027-02-15')).toBeVisible();
  expect(details.queryByRole('row',{name:/補助款退還客戶|補助款轉付月嫂/})).not.toBeInTheDocument();
 });
 it('正式補助退款只列一次並與一般客戶退款分開',async()=>{

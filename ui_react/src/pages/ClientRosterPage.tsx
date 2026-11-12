@@ -295,6 +295,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <th scope="col" title="orders.staff_payment_due_date">{columnHeading('staff_payment_due_date')}</th>
         <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
         <th scope="col" title="client_obligations.due_date（subsidy_return）">{columnHeading('subsidy_return_due_date')}</th>
+        <th scope="col" title="以實際或預定服務結束日估算，自費薪資與補助分別採各自的付款時程。">帳務預估日期</th>
         <th scope="col" title="依實際服務結束日估算，尚無實際日期時使用預定結束日。">補助預計申請年月</th>
       </tr></thead>
       <tbody>{page.items.map((item) => <tr
@@ -329,6 +330,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           </div>
         )) : '無值'}</td>
         <td>{clientDueDates(item, 'subsidy_return')}</td>
+        <td>
+          {item.estimated_self_funded_staff_due_date && <div>自費薪資時程：{item.estimated_self_funded_staff_due_date}</div>}
+          {item.estimated_subsidy_payment_date && <div>補助給付：{item.estimated_subsidy_payment_date}</div>}
+          {!item.estimated_self_funded_staff_due_date && !item.estimated_subsidy_payment_date && '—'}
+        </td>
         <td>{item.claim_application_year === undefined || item.claim_application_month === undefined ? '未載入'
           : item.claim_application_year !== null && item.claim_application_month !== null
           ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`

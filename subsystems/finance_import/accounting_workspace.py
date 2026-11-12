@@ -161,6 +161,7 @@ class CaseAccounting:
     cancellation_settlement: ClientCancellationAccounting | None = None
     bank_memos: tuple[CaseBankMemo, ...] = ()
     subsidy_payments: tuple[SubsidyPayment, ...] = ()
+    estimated_subsidy_payment_date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +411,11 @@ class AccountingWorkspace:
         plan = self.plan(case_no) if include_sources and self.plan is not None else None
         if plan is not None and plan.selected_scheme is not None:
             scheme = plan.selected_scheme
+        from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+        estimated_subsidy_payment_date = (
+            subsidy_advance_due_date(terms.service_end_date).isoformat()
+            if include_sources and subsidy and subsidy > 0 and terms.service_end_date else None
+        )
         return CaseAccounting(
             case_no, client_name,
             sum(item.expected_ntd for item in incoming) if incoming else None,
@@ -433,6 +439,7 @@ class AccountingWorkspace:
             subsidy_payments=_subsidy_payments(
                 scheme, subsidy, terms.service_end_date, client_name, client_items, staff_due,
             ) if include_sources else (),
+            estimated_subsidy_payment_date=estimated_subsidy_payment_date,
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

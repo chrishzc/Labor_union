@@ -313,6 +313,7 @@ class CaseAccountingView(_StrictModel):
     subsidy_plan: CaseSubsidyPlanView | None = None
     bank_memos: list[CaseBankMemoView] = Field(default_factory=list)
     subsidy_payments: list[SubsidyPaymentView] = Field(default_factory=list)
+    estimated_subsidy_payment_date: str | None = None
     ongoing_completed: bool = False
     cancellation_settlement: CaseCancellationSettlementView | None = None
 

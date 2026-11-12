@@ -70,6 +70,8 @@ export const ClientRegistrySummarySchema = z.strictObject({
   requires_cooking: optionalNullableBoolean, planned_start_date: nullableText, order_status: nullableText,
   service_type: nullableText.optional(),
   staff_payment_due_date: accountingDate.optional(),
+  estimated_self_funded_staff_due_date: accountingDate.optional(),
+  estimated_subsidy_payment_date: accountingDate.optional(),
   client_obligation_dates: z.array(clientObligationDate).optional(),
   staff_obligation_dates: z.array(staffObligationDate).optional(),
   claim_application_year: z.number().int().min(1).max(9999).nullable().optional(),

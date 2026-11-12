@@ -125,6 +125,10 @@ def test_stored_values_survive_query_and_http_serialization(connection):
     assert historical["staff_obligation_dates"] == []
     assert historical["claim_application_year"] == 2027
     assert historical["claim_application_month"] == 1
+    assert first["estimated_self_funded_staff_due_date"] == "2026-09-15"
+    assert first["estimated_subsidy_payment_date"] == "2026-10-15"
+    assert historical["estimated_self_funded_staff_due_date"] == "2027-01-15"
+    assert historical["estimated_subsidy_payment_date"] == "2027-02-15"
     assert len(connection.statements) == 4
     assert sum("FROM client_legacy_virtual_accounts" in sql for sql, _ in connection.statements) == 1
     assert not any("v_order_details" in sql or "staff_schedule" in sql for sql, _ in connection.statements)

@@ -28,7 +28,9 @@ from domains.client_finance.order_amount_calculation import _claim_schedule
 from domains.case_import.refund_account import mask_refund_values, effective_refund_account
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.client_finance.pricing_policy import IdentityRule
+from domains.client_finance.subsidy_advance import subsidy_advance_due_date
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
+from domains.payroll.tiered_rates import funding_due_date
 from infrastructure.mysql.order_terms_read_model import (
     load_calculable_client_finance_facts,
     load_contract_client_finance_facts,
@@ -130,6 +132,7 @@ class MySqlClientRegistryQueryRepository:
             "district": _client_district(row.get("address")),
             **obligation_dates[str(row["case_no"])],
             **_claim_application_month(row),
+            **_registry_payment_estimates(row),
         } for row in rows[:limit])
         next_cursor = str(visible[-1]["case_no"]) if len(rows) > limit and visible else None
         next_offset = offset + limit if len(rows) > limit and after is None else None
@@ -633,6 +636,20 @@ def _load_obligation_dates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[
             "staff_name": row["staff_name"],
         })
     return result
+
+
+def _registry_payment_estimates(row) -> dict[str, date | None]:
+    cancelled = "取消" in str(row.get("order_status") or "")
+    service_end = row.get("actual_end_date") or row.get("planned_end_date")
+    if cancelled or not isinstance(service_end, date):
+        return {"estimated_self_funded_staff_due_date": None, "estimated_subsidy_payment_date": None}
+    eligible = normalize_subsidy_policy_identity(
+        str(row.get("identity_status") or "")
+    ) in {"一般市民", "補助市民"}
+    return {
+        "estimated_self_funded_staff_due_date": funding_due_date(service_end, directly_subsidized=False),
+        "estimated_subsidy_payment_date": subsidy_advance_due_date(service_end) if eligible else None,
+    }
 
 
 def _claim_application_month(row) -> dict[str, int | None]:

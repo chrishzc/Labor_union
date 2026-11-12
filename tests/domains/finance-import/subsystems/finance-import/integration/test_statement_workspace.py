@@ -515,6 +515,7 @@ def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_revi
 
 
 def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():
+    from datetime import date
     from dataclasses import replace
     from domains.client_finance.reconciliation import PaymentStage
     from subsystems.client_finance.case_accounting_query import ClientAccountingItem, ClientCasePaymentTerms
@@ -541,7 +542,11 @@ def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_
     # Overcollection in another stage must not silently settle the first stage.
     partial=(replace(stages[0],expected_ntd=100,actual_ntd=0),replace(stages[1],actual_ntd=18100),stages[2])
     query.client=lambda *_,**__: (partial,())
-    assert query.query('CASE').scheme=='waiting'
+    query.payment_terms=lambda _: ClientCasePaymentTerms(service_end_date=date(2026, 10, 20))
+    waiting=query.query('CASE')
+    assert waiting.scheme=='waiting'
+    assert waiting.estimated_subsidy_payment_date=='2026-12-15'
+    assert not waiting.subsidy_payments
     query.client=lambda *_,**__: (stages[1:],())
     assert query.query('CASE').customer_fully_received is None
     query.payment_terms=lambda _: ClientCasePaymentTerms(zero_stages=frozenset({PaymentStage.DEPOSIT, PaymentStage.SECOND}))

@@ -62,12 +62,16 @@ describe('client roster accounting date columns', () => {
     expect(screen.queryByRole('button', { name: /儲存|更新|套用日期|重算/ })).not.toBeInTheDocument();
   });
 
-  it('keeps a historical case with no stored obligations and does not invent dates', async () => {
+  it('displays estimates separately when a historical case has no stored obligations', async () => {
     mocks.list.mockResolvedValue({ items: [{ ...item, order_status: '歷史訂單－服務完成', staff_payment_due_date: null,
       client_obligation_dates: [], staff_obligation_dates: [], claim_application_year: null, claim_application_month: null,
+      estimated_self_funded_staff_due_date: '2026-09-15', estimated_subsidy_payment_date: '2026-10-15',
     }], next_cursor: null });
     render(<ClientRosterPage />);
     expect((await dateCells()).map(cell => cell.textContent)).toEqual(Array(dateColumns.length).fill('無值'));
+    expect(screen.getByRole('columnheader', { name: '帳務預估日期' })).toBeVisible();
+    expect(screen.getByText('自費薪資時程：2026-09-15')).toBeVisible();
+    expect(screen.getByText('補助給付：2026-10-15')).toBeVisible();
   });
 
   it('does not lose list dates when the existing amount/detail query fails', async () => {

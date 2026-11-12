@@ -49,6 +49,8 @@ class ClientRegistrySummaryView(_StrictModel):
     staff_obligation_dates: tuple[ClientRegistryStaffObligationDateView, ...] = ()
     claim_application_year: int | None = Field(default=None, ge=1, le=9999)
     claim_application_month: int | None = Field(default=None, ge=1, le=12)
+    estimated_self_funded_staff_due_date: date | None = None
+    estimated_subsidy_payment_date: date | None = None
 
 
 class ClientRegistryPageView(_StrictModel):

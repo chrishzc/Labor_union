@@ -906,6 +906,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           <td>
             <strong>政府補助款</strong>
             <small>{selected ? subsidyPlanLabels[selected] : '補助歸屬待確認'}</small>
+            {(data.scheme === 'waiting' || data.scheme === 'unknown') && data.estimated_subsidy_payment_date &&
+              !orderStatus?.includes('取消') && <small>補助給付預估：{data.estimated_subsidy_payment_date}</small>}
           </td>
           <td>
             <span>依市府審查期程</span>

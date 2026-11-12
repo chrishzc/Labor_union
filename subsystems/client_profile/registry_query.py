@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal, Protocol
 
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
@@ -46,6 +46,8 @@ class ClientRegistrySummary:
     staff_obligation_dates: tuple[Mapping[str, Any], ...] = ()
     claim_application_year: int | None = None
     claim_application_month: int | None = None
+    estimated_self_funded_staff_due_date: date | None = None
+    estimated_subsidy_payment_date: date | None = None
     service_type: str | None = None
     identity_status: str | None = None
 
@@ -321,6 +323,8 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
         tuple(row.get("staff_obligation_dates", ())),
         row.get("claim_application_year"),
         row.get("claim_application_month"),
+        estimated_self_funded_staff_due_date=row.get("estimated_self_funded_staff_due_date"),
+        estimated_subsidy_payment_date=row.get("estimated_subsidy_payment_date"),
         service_type=_nullable_text(row.get("service_type")),
         identity_status=_nullable_text(row.get("identity_status")),
     )
