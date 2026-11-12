@@ -124,6 +124,7 @@ class HistoricalRepricingPlan:
     client_updates: tuple[HistoricalAmountUpdate, ...]
     staff_updates: tuple[HistoricalAmountUpdate, ...]
     source_versions: tuple[int, ...] = ()
+    new_deposit: tuple[str, str | None] | None = None
 
     @property
     def client_changed(self):
@@ -134,30 +135,37 @@ class HistoricalRepricingPlan:
         return any(i.computed != i.before_computed or i.effective != i.before_effective for i in self.staff_updates)
 
 
-def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None, subsidy_source=None):
+def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None,
+                                    subsidy_source=None, deposit_only=False, new_deposit=None):
     before = pricing_impact(facts.terms, facts)
     after = pricing_impact(terms, replace(facts, floor_fee=facts.floor_fee if floor_fee is None else floor_fee))
-    def update(source, delta):
+    def update(source, delta, *, adjust_manual=False):
         revised = source.computed + delta
-        if revised < 0:
+        effective = source.effective + delta if adjust_manual else (
+            source.effective if source.mode == 'manual' else revised
+        )
+        if min(revised, effective) < 0:
             raise PricingConflict('historical_pricing_amount_conflict')
-        return HistoricalAmountUpdate(source.identity, revised,
-            source.effective if source.mode == 'manual' else revised,
+        return HistoricalAmountUpdate(source.identity, revised, effective,
             source.computed, source.effective, source.mode)
     delta = after.client_amount - before.client_amount
     updates = []
-    # Keep evidenced installment amounts/dates; apply the price difference to
-    # the final original installment, carrying a larger reduction backwards.
+    if new_deposit is not None and delta > 0:
+        client_sources = (HistoricalAmountFacts(new_deposit[0], 0, 0, 'automatic'),)
+    else:
+        new_deposit = None
+    # The deposit-only path receives at most one deposit. General historical
+    # repricing carries a larger reduction back through the original installments.
     for source in reversed(client_sources):
         applied = max(-source.computed, delta) if delta < 0 else delta
-        updates.append(update(source, applied))
+        updates.append(update(source, applied, adjust_manual=deposit_only))
         delta -= applied
     if delta:
         raise PricingConflict('historical_pricing_amount_conflict')
     if subsidy_source is not None:
         updates.append(update(subsidy_source, after.subsidy_return_amount - before.subsidy_return_amount))
     return HistoricalRepricingPlan(facts.case_no, facts.versions[1], facts.versions[2], tuple(updates),
-        (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions)
+        (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions, new_deposit)
 
 
 class PricingRepository(Protocol):

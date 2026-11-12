@@ -624,7 +624,7 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
     )
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
-        lambda _cursor, _order, lock: facts,
+        lambda _cursor, _order, lock, **kwargs: facts,
     )
     if status != "洽談中":
         def no_planned_facts(*args, **kwargs):
@@ -767,7 +767,7 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
     )
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
-        lambda _cursor, _order, lock: facts,
+        lambda _cursor, _order, lock, **kwargs: facts,
     )
 
     status, code, values = _finance_values(connection, "CASE-HIST-01")
@@ -781,6 +781,47 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
     assert values["first_payment_amount_ntd"] == 0
     assert values["second_payment_amount_ntd"] == 0
     assert values["virtual_account"] == "99781699114999"
+
+
+@pytest.mark.parametrize("original_paid", [0, 6000])
+def test_registry_historical_social_deposit_includes_floor_fee_once(monkeypatch, original_paid):
+    case_no = "CASE-SOCIAL"
+    floor_fee = 1200
+    deposit_identity = "original-deposit" if original_paid else f"historical-floor-fee-deposit:{case_no}:2"
+    remaining = 0 if original_paid else floor_fee
+    deposit = {
+        "obligation_identity": deposit_identity, "obligation_type": "deposit",
+        "direction": "receivable_from_client", "amount_due_ntd": remaining,
+        "status": "settled" if original_paid else "open",
+    }
+    linked = ({
+        "obligation_identity": "fee-correction", "obligation_type": "adjustment",
+        "source_obligation_identity": deposit_identity, "direction": "receivable_from_client",
+        "amount_due_ntd": floor_fee, "status": "open",
+    },) if original_paid else ()
+    current_deposit = {**deposit, "nominal_ntd": original_paid or floor_fee,
+                       "effective_ntd": original_paid + floor_fee, "service_reduction_ntd": 0}
+    facts = ClientFinanceTermsFacts(
+        case_no, 2, 8, MoneyNTD(floor_fee), (),
+        ClientPaymentTerms(0, MoneyNTD(350), date(2025, 1, 1), date(2025, 1, 2), None),
+        (), identity_status="補助市民",
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
+        lambda _cursor, _order, *, lock, historical_registry: facts,
+    )
+    connection = _SqlConnection([
+        {"case_no": case_no, "status": "歷史訂單－帳務完成", "service_days": 10},
+        {"received_total_ntd": original_paid}, (), (current_deposit,), (deposit, *linked),
+        None, (),
+    ])
+
+    status, code, values = _finance_values(connection, case_no)
+
+    assert (status, code) == ("ready", None)
+    assert values["deposit_amount_ntd"] == values["customer_payable_total_ntd"] == original_paid + floor_fee
+    assert values["received_total_ntd"] == original_paid
+    assert values["customer_balance_ntd"] == floor_fee
 
 
 def test_registry_finance_handles_historical_unserved_order_projection(monkeypatch):

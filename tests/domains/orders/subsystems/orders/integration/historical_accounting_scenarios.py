@@ -67,10 +67,10 @@ def scenario_database():
         finally:server.close()
 
 
-def create_historical_scenario(connection, case_no, *, paid=24000, waiting=24000, excess_rate=300, legacy_identity=False, subsidy_return=False):
+def create_historical_scenario(connection, case_no, *, paid=24000, waiting=24000, excess_rate=300, legacy_identity=False, subsidy_return=False, client_stage='first'):
     """Import confirmed historic roots; preserve original obligations and actual cash evidence."""
     staff_name='合成歷史月嫂 '+case_no
-    client_obligation=f'historical-original:{case_no}:first'
+    client_obligation=f'historical-original:{case_no}:{client_stage}'
     original_expected = 40 * 300 + 200 * excess_rate
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO clients(case_no,name,identity_status) VALUES (%s,'合成歷史客戶','一般市民')",(case_no,))
@@ -92,8 +92,8 @@ def create_historical_scenario(connection, case_no, *, paid=24000, waiting=24000
                 (cursor.lastrowid, case_no))
         cursor.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status) VALUES (%s,%s,1,'2025-01-02','2025-01-31','completed')",(case_no,staff_id));assignment_id=cursor.lastrowid
         cursor.execute("INSERT INTO assignment_payroll_rate_snapshots(assignment_id,policy_version,policy_kind,hourly_rate_ntd,source_identity_status) VALUES (%s,'approved-rates-v1','citizen',300,'一般市民')",(assignment_id,))
-        cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,'first','receivable_from_client','established',0,%s,'2025-02-15',%s,0,%s,'synthetic','原歷史期款證據')",(client_obligation,case_no,original_expected,case_no+'-original',case_no+'-client-original'))
-        cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,'first','receivable_from_client',%s,'2025-02-15','open',%s,1)",(client_obligation,case_no,original_expected,cursor.lastrowid))
+        cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,'receivable_from_client','established',0,%s,'2025-02-15',%s,0,%s,'synthetic','原歷史期款證據')",(client_obligation,case_no,client_stage,original_expected,case_no+'-original',case_no+'-client-original'))
+        cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,%s,'receivable_from_client',%s,'2025-02-15','open',%s,1)",(client_obligation,case_no,client_stage,original_expected,cursor.lastrowid))
         cursor.execute("INSERT INTO staff_obligation_events(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,resulting_payroll_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff','established',0,%s,'2025-02-15',%s,0,1,%s,'synthetic','原歷史應付證據')",(staff_obligation,assignment_id,case_no,staff_id,original_expected,'a'*64,case_no+'-staff-original'))
         cursor.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) VALUES (%s,%s,%s,%s,'service_pay','payable_to_staff',%s,'2025-02-15','open',%s,1)",(staff_obligation,assignment_id,case_no,staff_id,original_expected,cursor.lastrowid))
         if subsidy_return:

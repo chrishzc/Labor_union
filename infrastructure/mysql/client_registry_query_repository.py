@@ -27,6 +27,7 @@ from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.order_terms_read_model import (
     load_calculable_client_finance_facts,
     load_contract_client_finance_facts,
+from domains.client_finance.pricing_policy import IdentityRule
     select_order,
 )
 from subsystems.client_profile.order_accounting_export import (
@@ -639,7 +640,10 @@ def _finance_values(connection, case_no):
         with connection.cursor() as cursor:
             order_row = select_order(cursor, case_no, lock=False)
             status = str(order_row.get("status") or "")
-            if status.startswith("歷史") or status in ("訂單取消", "訂單完成"):
+            historical_completed = status in ("歷史訂單－服務完成", "歷史訂單－帳務完成")
+            if historical_completed:
+                facts = load_contract_client_finance_facts(cursor, order_row, lock=False, historical_registry=True)
+            elif status.startswith("歷史") or status in ("訂單取消", "訂單完成"):
                 facts = load_contract_client_finance_facts(cursor, order_row, lock=False)
             else:
                 facts, _ = load_calculable_client_finance_facts(cursor, order_row, lock=False)
@@ -652,11 +656,12 @@ def _finance_values(connection, case_no):
             )
             subsidy_rows = tuple(cursor.fetchall() or ())
             cursor.execute(
-                "SELECT o.obligation_type,o.direction,o.amount_due_ntd,c.effective_ntd,"
+                "SELECT o.obligation_type,o.direction,o.amount_due_ntd,c.effective_ntd,e.after_amount_ntd AS nominal_ntd,"
                 "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n "
                 "WHERE n.target_identity=o.obligation_identity AND n.action='reduce_service_fee'),0) "
                 "AS service_reduction_ntd "
-                "FROM client_obligations o LEFT JOIN client_finance_amount_controls c "
+                "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
+                "LEFT JOIN client_finance_amount_controls c "
                 "ON c.obligation_identity=o.obligation_identity "
                 "WHERE o.case_no=%s AND o.status<>'cancelled' "
                 "AND o.obligation_type IN ('deposit','first','second','adjustment','refund')",
@@ -665,7 +670,11 @@ def _finance_values(connection, case_no):
             current_rows = tuple(cursor.fetchall() or ())
         if len(subsidy_rows) > 1:
             return "not_ready", "client_subsidy_return_ambiguous", None
-        if len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
+        historical_social = historical_completed and (
+            facts.pricing.rule is IdentityRule.SOCIAL if facts.pricing is not None
+            else normalize_subsidy_policy_identity(facts.identity_status or "") == "補助市民"
+        )
+        if not historical_social and len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
             candidate = build_client_finance_terms_candidate(
                 facts, f"client-registry:{case_no}"
             )
@@ -678,7 +687,7 @@ def _finance_values(connection, case_no):
         else:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT obligation_identity,obligation_type,direction,amount_due_ntd,status "
+                    "SELECT obligation_identity,obligation_type,direction,amount_due_ntd,status,source_obligation_identity "
                     "FROM client_obligations WHERE case_no=%s ORDER BY obligation_identity",
                     (case_no,),
                 )
@@ -695,7 +704,9 @@ def _finance_values(connection, case_no):
             receivable_rows = tuple(
                 r for r in obligation_rows if r.get("direction") == "receivable_from_client"
             )
-            if any(r.get("obligation_type") in ("deposit", "first", "second") for r in receivable_rows):
+            if any(r.get("obligation_type") in ("deposit", "first", "second")
+                   and not str(r["obligation_identity"]).startswith("historical-floor-fee-deposit:")
+                   for r in receivable_rows):
                 receivable_rows = tuple(
                     r
                     for r in receivable_rows
@@ -710,6 +721,7 @@ def _finance_values(connection, case_no):
             second_payment_amount = sum(
                 int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "second"
             )
+                and (not historical_social or r["status"] != "cancelled")
             if status.startswith("歷史"):
                 if historical_projection is not None:
                     actual_days = int(historical_projection.get("total_actual_service_days") or 0)
@@ -717,6 +729,13 @@ def _finance_values(connection, case_no):
                 else:
                     actual_days = int(order_row.get("service_days") or 0)
                     service_hours = float(Decimal(str(actual_days)) * Decimal(str(facts.service_hours_per_day)))
+            if historical_social:
+                stage_identities = {r["obligation_identity"] for r in receivable_rows
+                                    if r["obligation_type"] in ("deposit", "first", "second")}
+                # The source's effective stage amount already includes its
+                # linked corrections, even when a settled source stays frozen.
+                receivable_rows = tuple(r for r in receivable_rows
+                                        if r.get("source_obligation_identity") not in stage_identities)
 
                 if receivable_rows:
                     customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
@@ -756,15 +775,24 @@ def _finance_values(connection, case_no):
             ) for row in current_rows)
         subsidy = subsidy_rows[0] if subsidy_rows else None
         from infrastructure.mysql.government_subsidy_period_repository import query_case_subsidy_amount
+        historical_stage_amounts = dict.fromkeys(stage_amounts, 0)
         subsidy_amount = query_case_subsidy_amount(connection, case_no).amount_ntd
         return "ready", None, {
             "virtual_account": _case_virtual_account(connection, case_no),
+                if historical_social:
+                    if row["direction"] == "receivable_from_client":
+                        effective = row["effective_ntd"] if row["effective_ntd"] is not None else row["nominal_ntd"]
+                        historical_stage_amounts[stage] += max(0, int(effective) - int(row["service_reduction_ntd"]))
+                    continue
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
             "service_hours": service_hours,
             "customer_payable_total_ntd": customer_payable,
             "deposit_amount_ntd": stage_amounts["deposit"],
             "first_payment_amount_ntd": stage_amounts["first"],
             "second_payment_amount_ntd": stage_amounts["second"],
+        if historical_social:
+            customer_payable += sum(historical_stage_amounts.values()) - sum(stage_amounts.values())
+            stage_amounts = historical_stage_amounts
             "received_total_ntd": received_total,
             "customer_balance_ntd": balance,
             "subsidy_amount_ntd": subsidy_amount,

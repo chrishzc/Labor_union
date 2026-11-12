@@ -20,7 +20,7 @@ interface OrderTermsMutationPanelProps {
   caseNo: string;
   query: OrderTerms;
   fromRegistry?: boolean;
-  onObserved?: () => void;
+  onObserved?: () => void | Promise<void>;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
 }
 
@@ -422,8 +422,10 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           && JSON.stringify(refreshed.confirmed_service_dates) !== JSON.stringify(target.replacement_service_dates);
         if (termsDiffer || datesDiffer) throw new Error('正式讀回內容與已提交條款／日期不一致。');
       }
+      await onObserved?.();
+      if (!mounted.current || activeCase.current !== caseNo) return;
       setReadback(refreshed); setDraft(draftFromQuery(refreshed)); setReplacementDates(null);
-      if (mounted.current) onObserved?.();
+      setFloorCorrection(false);
     } catch (caught) { if (mounted.current && activeCase.current === caseNo) setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`); }
     finally { if (mounted.current && activeCase.current === caseNo) setStatus('idle'); }
   };

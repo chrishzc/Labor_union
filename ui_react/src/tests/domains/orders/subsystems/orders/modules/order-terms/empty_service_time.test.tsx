@@ -180,6 +180,39 @@ describe('Issue #337 empty service time', () => {
     }).success).toBe(false);
   });
 
+  it('waits for the registry readback before confirming the floor fee', async () => {
+    const current = { ...queryFixture(), floor_fee_correction_available: true };
+    const refreshed = {
+      ...current, order_version: 4, client_finance_version: 5, payroll_version: 6,
+      terms: { ...current.terms, floor_fee_ntd: 1200 },
+    };
+    const preview = vi.mocked(orderTermsMutationClient.preview).getMockImplementation()!;
+    vi.mocked(orderTermsMutationClient.preview).mockImplementation(async (...args) => ({
+      ...await preview(...args), requires_formal_apply: true,
+    }));
+    vi.mocked(orderTermsMutationClient.query).mockResolvedValueOnce(current).mockResolvedValueOnce(refreshed);
+    vi.mocked(orderTermsMutationClient.apply).mockResolvedValue(OrderTermsReceiptSchema.parse({
+      case_no: current.case_no, order_version: 4, scheduling_version: 2, scheduling_generation: 1,
+      client_finance_version: 5, payroll_version: 6, lifecycle_status: '歷史訂單－服務完成',
+      service_data_lock_formed: false, cancelled_assignment_ids: [], created_assignment_keys: [],
+      official_service_day_count: 0, official_service_hours: 0, preview_fingerprint: 'a'.repeat(64),
+    }));
+    let completeRefresh!: () => void;
+    const onObserved = vi.fn(() => new Promise<void>((resolve) => { completeRefresh = resolve; }));
+    render(<OrderTermsMutationPanel caseNo={current.case_no} query={current} fromRegistry onObserved={onObserved} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '更正結案樓層費' }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: '樓層加給' }), { target: { value: '1200' } });
+    fireEvent.change(screen.getByLabelText('條款變更原因'), { target: { value: '補登樓層費' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存樓層費更正' }));
+
+    await waitFor(() => expect(onObserved).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/服務條件已儲存並重新讀取確認/)).not.toBeInTheDocument();
+    completeRefresh();
+    await screen.findByText(/服務條件已儲存並重新讀取確認/);
+    expect(screen.getByRole('spinbutton', { name: '樓層加給' })).toHaveValue(1200);
+  });
+
   it('lets a date-only edit reach preview without inventing service times', async () => {
     const query = queryFixture();
     render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);

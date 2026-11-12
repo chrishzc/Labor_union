@@ -169,7 +169,17 @@ def persist_historical_source_amounts(connection, plan, actor, reason, key):
             if item.computed == item.before_computed and item.effective == item.before_effective:
                 continue
             child = 'historical-client-source:' + sha256((key + ':' + item.identity).encode()).hexdigest()
-            _set_client_amount(cursor, plan.case_no, item.identity, item.effective, item.before_effective, child, actor, reason, version)
+            if plan.new_deposit is not None and item.identity == plan.new_deposit[0]:
+                due_date = plan.new_deposit[1]
+                direction = 'receivable_from_client'
+                event = _obligation_event(cursor, {'case_no': plan.case_no, 'due_date': due_date},
+                    item.identity, 'deposit', direction, 0, item.effective, child, actor, reason,
+                    version, None, establishing=True)
+                cursor.execute('INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) '
+                    "VALUES(%s,%s,'deposit',%s,%s,%s,'open',%s,%s)",
+                    (item.identity, plan.case_no, direction, item.effective, due_date, event, version))
+            else:
+                _set_client_amount(cursor, plan.case_no, item.identity, item.effective, item.before_effective, child, actor, reason, version)
             _amount_event(cursor, item.identity, 'source_update', item.before_effective, item.effective, item.computed, child, sha256(child.encode()).hexdigest(), actor, reason)
             cursor.execute('INSERT INTO client_finance_amount_controls(obligation_identity,case_no,amount_mode,computed_ntd,effective_ntd) '
                 'VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE computed_ntd=VALUES(computed_ntd),effective_ntd=VALUES(effective_ntd)',
@@ -263,10 +273,10 @@ def _has_separate_correction(cursor,identity):
     return cursor.fetchone() is not None
 
 
-def _obligation_event(cursor,row,identity,kind,direction,before,after,key,actor,reason,version,source):
+def _obligation_event(cursor,row,identity,kind,direction,before,after,key,actor,reason,version,source,*,establishing=False):
     eventkey='client-amount:'+sha256((key+':'+identity).encode()).hexdigest()
     cursor.execute('INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,before_due_date,after_due_date,source_event_identity,source_obligation_identity,expected_account_version,idempotency_key,actor,reason) '
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(identity,row['case_no'],kind,direction,'adjusted' if source is None else 'established',before,after,row['due_date'] if before else None,row['due_date'],eventkey,source,version-1,eventkey,actor,reason))
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(identity,row['case_no'],kind,direction,'established' if establishing or source is not None else 'adjusted',before,after,row['due_date'] if before else None,row['due_date'],eventkey,source,version-1,eventkey,actor,reason))
     return int(cursor.lastrowid)
 
 

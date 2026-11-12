@@ -29,7 +29,10 @@ vi.mock('../../../../../../../api/client_finance/case_virtual_account_client', (
   caseVirtualAccountClient: { query: async (caseNo: string) => ({ case_no: caseNo, imported_virtual_accounts: [], built_in_virtual_account: null, mapping_ids: [] }) },
 }));
 vi.mock('../../../../../../../components/OrderTermsMutationPanel', async (original) => ({
-  ...await original<typeof import('../../../../../../../components/OrderTermsMutationPanel')>(), OrderTermsMutationPanel: () => <div>訂單條款 owner</div>,
+  ...await original<typeof import('../../../../../../../components/OrderTermsMutationPanel')>(),
+  OrderTermsMutationPanel: ({ onObserved }: { onObserved: () => Promise<void> }) => (
+    <button type="button" onClick={() => void onObserved()}>訂單條款已儲存</button>
+  ),
 }));
 const staffMocks = vi.hoisted(() => ({ assignment: vi.fn(), directory: vi.fn(), query: vi.fn(), preview: vi.fn(), apply: vi.fn(), orderDetail: vi.fn() }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: staffMocks.assignment, getOrderDetail: staffMocks.orderDetail } }));
@@ -841,6 +844,38 @@ describe('Client registry owner editing', () => {
     await screen.findByText('客戶主檔已儲存。');
     expect(mocks.apply.mock.calls[0]).toEqual(mocks.apply.mock.calls[1]);
     expect(mocks.preview).toHaveBeenCalledTimes(1);
+  });
+
+  it('displays the saved deposit from the registry refresh after a Terms correction', async () => {
+    window.location.hash = '#clients?case=CASE-001';
+    const before = {
+      ...detail,
+      order_terms: { status: 'ready', code: null, field_capabilities: {}, data: {
+        case_no: 'CASE-001', order_version: 1, scheduling_version: 1, scheduling_generation: 0,
+        client_finance_version: 1, payroll_version: 1, service_data_locked: true,
+        floor_fee_correction_available: true, terms: {
+          planned_start_date: '2025-01-02', service_days: 30, service_hours_per_day: 8,
+          requires_cooking: false, floor_fee_ntd: 0, service_time: { start_time: null, end_time: null, end_day_offset: null },
+        },
+      } },
+      finance: { status: 'ready', code: null, values: {
+        virtual_account: null, service_unit_price_ntd: 350, service_hours: 240,
+        customer_payable_total_ntd: 6000, deposit_amount_ntd: 6000, first_payment_amount_ntd: 0,
+        second_payment_amount_ntd: 0, received_total_ntd: 6000, customer_balance_ntd: 0,
+        subsidy_return_amount_ntd: null, subsidy_return_due_date: null, subsidy_return_status: null,
+      } },
+    };
+    mocks.query.mockResolvedValue(before);
+    render(<ClientRegistryPage />);
+    const deposit = await screen.findByText('定金金額');
+    expect(deposit.nextElementSibling).toHaveTextContent('6000');
+
+    mocks.query.mockResolvedValue({ ...before, finance: { ...before.finance, values: {
+      ...before.finance.values, deposit_amount_ntd: 7200, customer_payable_total_ntd: 7200, customer_balance_ntd: 1200,
+    } } });
+    fireEvent.click(screen.getByRole('button', { name: '訂單條款已儲存' }));
+    await waitFor(() => expect(screen.getByText('定金金額').nextElementSibling).toHaveTextContent('7200'));
+    expect(screen.getByText('已入帳金額').nextElementSibling).toHaveTextContent('6000');
   });
 
   it('keeps the operation busy when a new owner version renders before readback finishes', async () => {

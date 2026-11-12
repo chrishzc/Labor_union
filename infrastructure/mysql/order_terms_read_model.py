@@ -142,13 +142,14 @@ def load_contract_client_finance_facts(
     order_row: Mapping[str, Any],
     *,
     lock: bool,
+    historical_registry: bool = False,
 ) -> ClientFinanceTermsFacts:
     case_no = str(order_row["case_no"])
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=lock)
     generation_row = _select_generation(cursor, aggregate_row, lock)
     schedule_rows = _select_schedules(cursor, generation_row, lock)
     charge_days = _contract_charge_days(cursor, case_no, schedule_rows, lock)
-    source = _load_client_finance(cursor, order_row, lock)
+    source = _load_client_finance(cursor, order_row, lock, historical_registry=historical_registry)
     return _materialize_contract_client_finance_facts(order_row, charge_days, source)
 
 
@@ -667,16 +668,16 @@ def _validate_scheduling_aggregate_state(aggregate_row) -> None:
     raise ValueError("scheduling_generation_conflict")
 
 
-def _load_client_finance(cursor, order_row, lock):
+def _load_client_finance(cursor, order_row, lock, *, historical_registry=False):
     terms_row = _select_client_payment_terms(
         cursor,
         str(order_row["case_no"]),
         lock,
     )
-    obligation_rows = _select_client_obligations(
-        cursor,
-        str(order_row["case_no"]),
-        lock,
+    # The historical registry reads stage amounts directly from the ledger
+    # projection, including cases with multiple evidenced rows in a stage.
+    obligation_rows = () if historical_registry else _select_client_obligations(
+        cursor, str(order_row["case_no"]), lock,
     )
     rate_override = load_explicit_case_service_rate(
         cursor, str(order_row["case_no"]), lock=lock, use_bound_policy_without_start=True,
