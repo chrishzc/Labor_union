@@ -310,6 +310,7 @@ function HolidayPolicyWorkspace() {
       action,
       holiday_date: holidayDate,
       holiday_name: action === 'upsert' ? holidayName.trim() || null : null,
+      is_double_pay_default: false,
       from_date: fromDate,
       to_date: toDate,
       ...overrides,
@@ -358,6 +359,7 @@ function HolidayPolicyWorkspace() {
       const prepared = await previewHolidayFlow(previewRequest);
       const request: HolidayApplyRequest = {
         ...previewRequest,
+        is_double_pay_default: prepared.command.is_double_pay_default,
         expected_calendar_version: prepared.command.expected_calendar_version,
         preview_fingerprint: prepared.preview_fingerprint,
         reason: reason.trim(),

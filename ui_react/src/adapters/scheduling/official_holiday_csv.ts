@@ -239,6 +239,7 @@ export async function importOfficialHolidayCandidates(
       action: 'upsert',
       holiday_date: candidate.holiday_date,
       holiday_name: candidate.holiday_name,
+      is_double_pay_default: false,
       ...horizon,
     };
 
@@ -247,6 +248,7 @@ export async function importOfficialHolidayCandidates(
       const preview = await operations.preview(previewRequest);
       const receipt = await operations.apply({
         ...previewRequest,
+        is_double_pay_default: preview.command.is_double_pay_default,
         expected_calendar_version: preview.command.expected_calendar_version,
         preview_fingerprint: preview.preview_fingerprint,
         reason: reason.trim(),

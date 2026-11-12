@@ -211,7 +211,11 @@ function assertApplyMatchesPreview(draft: MutableDraft, request: HolidayApplyReq
   }
   const { expected_calendar_version: _version, preview_fingerprint: _fingerprint, reason: _reason, ...identity } = request;
   const { expected_calendar_version: _previewVersion, ...previewIdentity } = preview.command;
-  if (!sameValue(identity, previewIdentity)) {
+  const normalizedIdentity = {
+    ...identity,
+    is_double_pay_default: identity.is_double_pay_default ?? false,
+  };
+  if (!sameValue(normalizedIdentity, previewIdentity)) {
     throw new HolidayFlowContractError('Apply payload identity 與 Preview request 不一致。');
   }
 }

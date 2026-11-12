@@ -158,4 +158,17 @@ describe('holiday flow adapter', () => {
     expect(applyPayload).not.toHaveProperty('end_date');
     expect(applyPayload).not.toHaveProperty('double_pay_amount');
   });
+
+  it('rejects mismatched explicit is_double_pay_default while allowing omitted optional default', async () => {
+    const client = fakeClient();
+    await preparePreview(client);
+
+    await expect(
+      applyHolidayFlow({ ...HOLIDAY_APPLY_REQUEST, is_double_pay_default: true }, { client }),
+    ).rejects.toThrow('Apply payload identity 與 Preview request 不一致。');
+
+    const { is_double_pay_default: _omitted, ...withoutOptionalFlag } = HOLIDAY_APPLY_REQUEST;
+    const receipt = await applyHolidayFlow(withoutOptionalFlag, { client });
+    expect(receipt).toEqual(HOLIDAY_RECEIPT);
+  });
 });

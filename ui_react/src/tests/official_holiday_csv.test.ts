@@ -3,10 +3,16 @@
  * Description: Focused deterministic coverage for official holiday CSV parsing and import orchestration.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type {
-  HolidayCalendar,
-  HolidayPreview,
-  HolidayReceipt,
+import {
+  applyHolidayFlow,
+  holidayFlowStore,
+  previewHolidayFlow,
+  queryHolidayFlow,
+  setHolidayDraft,
+  type HolidayCalendar,
+  type HolidayFlowClient,
+  type HolidayPreview,
+  type HolidayReceipt,
 } from '../adapters/scheduling/holiday_flow_adapter';
 import {
   importOfficialHolidayCandidates,
@@ -221,6 +227,43 @@ describe('official holiday import orchestration', () => {
       skipCount: 0,
       failureCount: 1,
       failures: [{ holiday_date: '2026-01-01', reason: 'preview rejected' }],
+    });
+  });
+
+  it('passes real holiday_flow_adapter Preview -> Apply identity validation without failing on is_double_pay_default', async () => {
+    holidayFlowStore.clear();
+    const client: HolidayFlowClient = {
+      query: vi.fn(async () => calendar()),
+      preview: vi.fn(async (request) => previewFor(request.holiday_date, request.holiday_name ?? '')),
+      apply: vi.fn(async (request) => receiptFor(request.holiday_date)),
+    };
+
+    const summary = await importOfficialHolidayCandidates(
+      [
+        { holiday_date: '2026-01-01', holiday_name: '元旦' },
+        { holiday_date: '2026-02-28', holiday_name: '和平紀念日' },
+      ],
+      2026,
+      0,
+      {
+        query: (q) => queryHolidayFlow(q, { client }),
+        preview: (r) => previewHolidayFlow(r, { client }),
+        apply: (r) => applyHolidayFlow(r, { client }),
+        setDraft: (r) => setHolidayDraft(r),
+      },
+      '',
+    );
+
+    expect(summary).toEqual({
+      successCount: 2,
+      skipCount: 0,
+      failureCount: 0,
+      failures: [],
+    });
+    expect(client.apply).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(client.apply).mock.calls[0]?.[0]).toMatchObject({
+      holiday_date: '2026-01-01',
+      is_double_pay_default: false,
     });
   });
 });
