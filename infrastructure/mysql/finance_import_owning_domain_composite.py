@@ -990,16 +990,23 @@ def _resolve_staff_payout(connection, candidate):
         if diff == 0
         else "unique-staff-payout-transfer-fee-reconciled"
     )
-    ready = _ready_candidate(candidate,targets,evidence)
-    if is_sinopac or is_taishin:
-        workflow = StaffPayoutReconciliationWorkflow(MySqlStaffPayoutRepository(connection),BorrowedTransactionUnitOfWork)
-        try:
-            workflow.preview(StaffPayoutSelection(StaffPayoutEventType.PAYOUT,(_row_id(candidate.row_identity),),tuple(sorted(targets))),CorrelationId(f'finance-import-staff-preview:{candidate.row_identity}'))
-        except StaffPayoutReconciliationError as error:
-            if error.error.category is not ErrorCategory.DOMAIN_BLOCKED:
-                raise
-            return replace(candidate,disposition=FinanceImportDisposition.BUSINESS_PENDING,available_actions=('resolve_owning_domain_target',),pending_reason=error.error.code)
-    return replace(ready,pending_reason=None) if is_sinopac or is_taishin else ready
+    ready = _ready_candidate(candidate, targets, evidence)
+    workflow = StaffPayoutReconciliationWorkflow(
+        MySqlStaffPayoutRepository(connection), BorrowedTransactionUnitOfWork,
+    )
+    selection = StaffPayoutSelection(
+        StaffPayoutEventType.PAYOUT, (_row_id(candidate.row_identity),), ready.target_identities,
+    )
+    try:
+        workflow.preview(selection, CorrelationId(f"finance-import-staff-preview:{candidate.row_identity}"))
+    except StaffPayoutReconciliationError as error:
+        if error.error.category is not ErrorCategory.DOMAIN_BLOCKED:
+            raise
+        return replace(
+            candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+            available_actions=("resolve_owning_domain_target",), pending_reason=error.error.code,
+        )
+    return replace(ready, pending_reason=None)
 
 
 def _resolve_government_subsidy(connection, candidate):

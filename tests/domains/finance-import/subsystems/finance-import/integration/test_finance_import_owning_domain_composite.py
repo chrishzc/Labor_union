@@ -627,16 +627,18 @@ def test_sinopac_staff_resolver_records_actual_reason_and_preflights_the_real_ow
     repository.append_events.assert_not_called()
 
 
+@pytest.mark.parametrize('bank', ['sinopac', 'legacy'])
 @pytest.mark.parametrize('code',['staff_bank_account_ambiguous','cross_staff_allocation_forbidden'])
-def test_sinopac_staff_auto_plan_keeps_the_actual_owner_rejection_before_posting(monkeypatch,code):
+def test_staff_auto_plan_keeps_the_actual_owner_rejection_before_posting(monkeypatch,bank,code):
     from unittest.mock import Mock
     import infrastructure.mysql.finance_import_owning_domain_composite as module
     connection=_VirtualAccountConnection((
-        {'format_id':'sinopac','direction':'outgoing','memo':'合成服務甲','transaction_date':'2026-10-20'},
+        {'format_id':bank,'direction':'outgoing','memo':'合成服務甲','transaction_date':'2026-10-20'},
         ({'obligation_identity':'staff:0','due_date':'2026-10-15','amount_due_ntd':12000},),
     ))
     candidate=CanonicalFinanceImportRow('finance-import-row:88',0,MoneyNTD(12000),FinanceClassificationType.STAFF_PAYOUT,
-        FinanceImportDisposition.CREATE,PreviewFingerprint('a'*64),target_identities=('staff:7',))
+        FinanceImportDisposition.BUSINESS_PENDING,PreviewFingerprint('a'*64),target_identities=('staff:7',),
+        evidence=('unique_staff_payout_name_month_fee_matched',))
     repo=Mock();repo.load.side_effect=ValueError(code)
     monkeypatch.setattr(module,'MySqlStaffPayoutRepository',lambda *args:repo)
     result=_resolve_staff_payout(connection,candidate)
