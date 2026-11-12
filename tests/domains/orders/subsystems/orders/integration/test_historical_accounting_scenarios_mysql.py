@@ -217,43 +217,79 @@ def test_historical_closed_fee_formal_preview_does_not_require_daily_schedule(sc
 
 
 @pytest.mark.parametrize('has_original_deposit', [False, True])
-def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_original_deposit):
+def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_original_deposit, monkeypatch):
     from infrastructure.mysql.client_registry_query_repository import _finance_values
+    from infrastructure.mysql import pricing_configuration_repository
     from subsystems.orders.terms_workflow import OrderTermsApplyRequest
 
     connection, _ = scenarios
     case = _scenario['create_historical_scenario'](
         connection, '115990011' if has_original_deposit else '115990010',
-        paid=72000 if has_original_deposit else 0,
+        paid=72000 if has_original_deposit else 0, waiting=1500,
         client_stage='deposit' if has_original_deposit else 'first',
     )
+    if has_original_deposit:
+        history = HistoricalServiceAccountingWorkflow(
+            MySqlHistoricalServiceAccountingRepository(connection), lambda: MySqlUnitOfWork(connection),
+        )
+        intent = ConfirmHistoricalServiceDaysIntent(case.case_no, (
+            HistoricalActualServiceDaysInput(f'assignment:{case.assignment_id}', case.staff_id, 20),
+        ))
+        volume = history.preview(intent)
+        history.apply(ApplyHistoricalServiceAccounting(
+            intent, volume.facts.lifecycle_version, volume.facts.historical_day_revision,
+            volume.facts.client_finance_version, volume.facts.payroll_version, volume.fingerprint,
+            IdempotencyKey(case.case_no+'-recorded-days'), ActorContext('synthetic'), '確認歷史服務天數',
+            CorrelationId(case.case_no+'-recorded-days'),
+        ))
     with connection.cursor() as cursor:
         cursor.execute("UPDATE clients SET identity_status='補助市民' WHERE case_no=%s", (case.case_no,))
         if not has_original_deposit:
             cursor.execute("UPDATE client_obligations SET status='cancelled',amount_due_ntd=0 WHERE obligation_identity=%s",
                            (case.client_obligation,))
+            cursor.execute("UPDATE staff_obligations SET status='cancelled',amount_due_ntd=0 WHERE obligation_identity=%s",
+                           (case.staff_obligation,))
     connection.commit()
     original_cash = _scenario['cash_snapshot'](connection, case)
+    def snapshots():
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT * FROM historical_service_day_projections WHERE case_no=%s', (case.case_no,))
+            service_volume = cursor.fetchone()
+            cursor.execute('SELECT * FROM staff_obligations WHERE case_no=%s ORDER BY obligation_identity', (case.case_no,))
+            return service_volume, cursor.fetchall()
+
+    service_and_payables = snapshots()
+    if not has_original_deposit:
+        assert all(row['status'] == 'cancelled' for row in service_and_payables[1])
+
+    def reject_combined_repricing(*args, **kwargs):
+        pytest.fail('Customer deposit correction must not load Payroll or reconstruct historical hours')
+
+    monkeypatch.setattr(pricing_configuration_repository, 'load_historical_pricing_facts', reject_combined_repricing)
     repository = MySqlOrderTermsRepository(connection)
     workflow = OrderTermsWorkflow(repository, lambda: MySqlUnitOfWork(connection), SystemBusinessClock())
     terms = repository.load_for_query(case.case_no).registry.order.terms
 
-    for fee in (1000, 1500):
+    for fee in (1200, 1500):
+        expected_delta = fee * 20 // 30 if has_original_deposit else fee
         preview = workflow.preview(case.case_no, replace(terms, floor_fee=MoneyNTD(fee)), floor_fee_correction=True)
+        assert preview.payroll_version is None
         request = OrderTermsApplyRequest(
             case.case_no, preview.after, ExpectedVersion(preview.order_version),
             ExpectedVersion(preview.scheduling_version), ExpectedVersion(preview.client_finance_version),
-            ExpectedVersion(preview.payroll_version), preview.fingerprint,
+            None, preview.fingerprint,
             IdempotencyKey(f'{case.case_no}-fee-{fee}'), ActorContext('synthetic'),
             '補登樓層費', CorrelationId(f'{case.case_no}-fee-{fee}'), floor_fee_correction=True,
         )
         receipt = workflow.apply(request)
+        assert receipt.payroll_version is None
         assert workflow.apply(request) == receipt
         assert _scenario['cash_snapshot'](connection, case) == original_cash
+        assert snapshots() == service_and_payables
         status, code, values = _finance_values(connection, case.case_no)
         assert (status, code) == ('ready', None)
-        assert values['deposit_amount_ntd'] == case.original_client_paid + fee
-        assert values['customer_balance_ntd'] == fee
+        assert values['deposit_amount_ntd'] == case.original_client_paid + expected_delta
+        assert values['customer_balance_ntd'] == expected_delta
         with connection.cursor() as cursor:
             cursor.execute("SELECT obligation_identity,status,amount_due_ntd FROM client_obligations "
                            "WHERE case_no=%s AND obligation_type='deposit' AND status<>'cancelled'", (case.case_no,))
@@ -262,9 +298,18 @@ def test_historical_social_floor_fee_is_read_back_as_deposit(scenarios, has_orig
                 assert (deposit['obligation_identity'], deposit['status']) == (case.client_obligation, 'settled')
                 cursor.execute("SELECT SUM(amount_due_ntd) AS amount FROM client_obligations "
                                "WHERE source_obligation_identity=%s AND status='open'", (case.client_obligation,))
-                assert cursor.fetchone()['amount'] == fee
+                assert cursor.fetchone()['amount'] == expected_delta
             else:
-                assert (deposit['status'], deposit['amount_due_ntd']) == ('open', fee)
+                assert (deposit['status'], deposit['amount_due_ntd']) == ('open', expected_delta)
+
+    if not has_original_deposit:
+        reconcile_original_source(connection, case)
+        status, code, values = _finance_values(connection, case.case_no)
+        assert (status, code) == ('ready', None)
+        assert values['deposit_amount_ntd'] == values['received_total_ntd'] == 1500
+        assert values['customer_balance_ntd'] == 0
+        assert snapshots() == service_and_payables
+    assert_historical_service_preserved(connection, case)
 
 
 def test_historical_subsidy_hours_formal_apply_preserves_original_cash(scenarios,monkeypatch):

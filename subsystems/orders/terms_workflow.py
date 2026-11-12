@@ -103,7 +103,7 @@ class TermsWorkflowFacts:
 @dataclass(frozen=True, slots=True)
 class HistoricalFinancialVersions:
     account_version: int
-    payroll_version: int
+    payroll_version: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -849,8 +849,8 @@ def _build_receipt(preview):
             else preview.client_finance_version
         ),
         (
-            preview.historical_correction.payroll_version + int(preview.historical_correction.payroll_changed)
-            if preview.historical_correction is not None else
+            preview.payroll_version + int(preview.historical_correction.payroll_changed)
+            if preview.historical_correction is not None and preview.payroll_version is not None else
             preview.payroll_impact.resulting_payroll_version
             if preview.requires_formal_apply and preview.payroll_impact is not None
             else preview.payroll_version

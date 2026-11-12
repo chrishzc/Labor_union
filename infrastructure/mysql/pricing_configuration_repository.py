@@ -11,12 +11,14 @@ from zoneinfo import ZoneInfo
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from domains.orders.floor_fee import prorate_historical_floor_fee
 from domains.payroll.tiered_rates import TieredPayrollRate
 from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.money import MoneyNTD
 from subsystems.client_finance.pricing_configuration import (
     CasePricingFacts, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
-    HistoricalAmountFacts, build_historical_repricing_plan,
+    HistoricalAmountFacts, build_historical_deposit_floor_fee_plan, build_historical_repricing_plan,
 )
 
 
@@ -226,27 +228,68 @@ def load_historical_pricing_facts(connection, case_no, *, lock=False, order=None
         (), floor, source.assignments[0].effective_adjustment.amount, None, hours)
 
 
+def historical_deposit_floor_fee_plan(cursor, order, proposed_fee, *, lock):
+    """Use recorded service days to plan the customer-side floor-fee delta."""
+    pricing = load_case_pricing(cursor, order, lock=lock)
+    is_social = (pricing.rule is IdentityRule.SOCIAL if pricing is not None else
+                 normalize_subsidy_policy_identity(str(order['client_identity_status'])) == '補助市民')
+    if not is_social:
+        return None
+
+    case_no = str(order['case_no'])
+    suffix = ' FOR UPDATE' if lock else ''
+    cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s' + suffix, (case_no,))
+    account = cursor.fetchone()
+    if account is None:
+        raise PricingConflict('client_finance_bootstrap_required')
+    version = int(account['aggregate_version'])
+    cursor.execute('SELECT day_revision,total_actual_service_days FROM historical_service_day_projections '
+                   'WHERE case_no=%s' + suffix, (case_no,))
+    volume = cursor.fetchone()
+    contracted_days = int(order['service_days'])
+    adopted_days = int(volume['total_actual_service_days']) if volume else contracted_days
+    revision = int(volume['day_revision']) if volume else 0
+    before = prorate_historical_floor_fee(MoneyNTD(int(order['floor_fee'])), contracted_days, adopted_days)
+    after = prorate_historical_floor_fee(proposed_fee, contracted_days, adopted_days)
+    delta = after.amount - before.amount
+    rows = _historical_client_amount_rows(cursor, case_no, ('deposit',), suffix)
+    if len(rows) > 1:
+        raise PricingConflict('historical_pricing_original_installments_required')
+    new_deposit = None
+    if not rows and delta > 0:
+        cursor.execute('SELECT deposit_due_date FROM client_payment_terms WHERE case_no=%s' + suffix, (case_no,))
+        payment_terms = cursor.fetchone()
+        due_date = payment_terms['deposit_due_date'] if payment_terms else None
+        new_deposit = (f'historical-floor-fee-deposit:{case_no}:{version + 1}', due_date.isoformat() if due_date else None)
+    return build_historical_deposit_floor_fee_plan(
+        case_no, version, (contracted_days, adopted_days, revision),
+        _historical_amount_facts(rows[0]) if rows else None, new_deposit, delta,
+    )
+
+
+def _historical_client_amount_rows(cursor, case_no, stages, suffix):
+    placeholders = ','.join('%s' for _ in stages)
+    cursor.execute('SELECT o.obligation_identity,o.obligation_type,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+        'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
+        'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
+        "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.source_obligation_identity IS NULL "
+        "AND o.direction='receivable_from_client' AND o.obligation_type IN (" + placeholders +
+        ") ORDER BY FIELD(o.obligation_type,'deposit','first','second')" + suffix, (case_no, *stages))
+    return cursor.fetchall()
+
+
+def _historical_amount_facts(row):
+    computed = int(row['computed_ntd'] if row['computed_ntd'] is not None else row['nominal'])
+    effective = int(row['effective_ntd'] if row['effective_ntd'] is not None else row['nominal'])
+    return HistoricalAmountFacts(row['obligation_identity'], computed, effective, row['amount_mode'] or 'automatic')
+
+
 def historical_repricing_plan(connection, facts, terms, *, floor_fee=None, lock=True):
     """Apply a price delta to evidenced original installments, never regenerate them."""
-    deposit_only = floor_fee is not None and facts.terms.rule is IdentityRule.SOCIAL
-    stage_filter = "AND o.obligation_type='deposit'" if deposit_only else "AND o.obligation_type IN ('deposit','first','second')"
     suffix = ' FOR UPDATE' if lock else ''
-    new_deposit = None
     with connection.cursor() as cursor:
-        cursor.execute('SELECT o.obligation_identity,o.obligation_type,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
-            'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
-            'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
-            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.source_obligation_identity IS NULL "
-            "AND o.direction='receivable_from_client' " + stage_filter +
-            " ORDER BY FIELD(o.obligation_type,'deposit','first','second')" + suffix, (facts.case_no,))
-        client_rows = cursor.fetchall()
-        if deposit_only and not client_rows:
-            cursor.execute('SELECT deposit_due_date FROM client_payment_terms WHERE case_no=%s' + suffix, (facts.case_no,))
-            payment_terms = cursor.fetchone()
-            due_date = payment_terms['deposit_due_date'] if payment_terms else None
-            new_deposit = (f'historical-floor-fee-deposit:{facts.case_no}:{facts.versions[1] + 1}',
-                           due_date.isoformat() if due_date else None)
-        elif not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows):
+        client_rows = _historical_client_amount_rows(cursor, facts.case_no, ('deposit', 'first', 'second'), suffix)
+        if not client_rows or len({r['obligation_type'] for r in client_rows}) != len(client_rows):
             raise PricingConflict('historical_pricing_original_installments_required')
         cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
             'FROM staff_obligations o JOIN staff_obligation_events e ON e.id=o.current_event_id '
@@ -255,30 +298,24 @@ def historical_repricing_plan(connection, facts, terms, *, floor_fee=None, lock=
         staff_rows = cursor.fetchall()
         if len(staff_rows) != 1:
             raise PricingConflict('historical_pricing_original_payable_required')
-        subsidy_rows = ()
-        if not deposit_only:
-            cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
-                'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
-                'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
-                "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_type='subsidy_return' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
-            subsidy_rows = cursor.fetchall()
-            if len(subsidy_rows) > 1:
-                raise PricingConflict('historical_pricing_original_subsidy_return_required')
-    def amounts(row):
-        computed = int(row['computed_ntd'] if row['computed_ntd'] is not None else row['nominal'])
-        effective = int(row['effective_ntd'] if row['effective_ntd'] is not None else row['nominal'])
-        mode = row['amount_mode'] or 'automatic'
-        return HistoricalAmountFacts(row['obligation_identity'],computed,effective,mode)
-    return build_historical_repricing_plan(facts, terms, tuple(amounts(r) for r in client_rows), amounts(staff_rows[0]),
-        floor_fee=floor_fee, subsidy_source=amounts(subsidy_rows[0]) if subsidy_rows else None,
-        deposit_only=deposit_only, new_deposit=new_deposit)
+        cursor.execute('SELECT o.obligation_identity,e.after_amount_ntd nominal,c.amount_mode,c.computed_ntd,c.effective_ntd '
+            'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
+            'LEFT JOIN client_finance_amount_controls c ON c.obligation_identity=o.obligation_identity '
+            "WHERE o.case_no=%s AND o.status<>'cancelled' AND o.obligation_type='subsidy_return' AND o.source_obligation_identity IS NULL" + suffix, (facts.case_no,))
+        subsidy_rows = cursor.fetchall()
+        if len(subsidy_rows) > 1:
+            raise PricingConflict('historical_pricing_original_subsidy_return_required')
+    return build_historical_repricing_plan(facts, terms, tuple(_historical_amount_facts(r) for r in client_rows),
+        _historical_amount_facts(staff_rows[0]), floor_fee=floor_fee,
+        subsidy_source=_historical_amount_facts(subsidy_rows[0]) if subsidy_rows else None)
 
 
 def persist_historical_repricing(connection, plan, actor, reason, key):
     from infrastructure.mysql.client_difference_repository import persist_historical_source_amounts as client_apply
-    from infrastructure.mysql.payroll_amount_correction_repository import persist_historical_source_amounts as staff_apply
     client_apply(connection, plan, actor, reason, key)
-    staff_apply(connection, plan, actor, reason, key)
+    if plan.payroll_changed:
+        from infrastructure.mysql.payroll_amount_correction_repository import persist_historical_source_amounts as staff_apply
+        staff_apply(connection, plan, actor, reason, key)
 
 
 class MySqlPricingConfigurationRepository:

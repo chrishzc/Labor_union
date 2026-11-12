@@ -120,7 +120,7 @@ class HistoricalAmountUpdate:
 class HistoricalRepricingPlan:
     case_no: str
     client_version: int
-    payroll_version: int
+    payroll_version: int | None
     client_updates: tuple[HistoricalAmountUpdate, ...]
     staff_updates: tuple[HistoricalAmountUpdate, ...]
     source_versions: tuple[int, ...] = ()
@@ -135,37 +135,46 @@ class HistoricalRepricingPlan:
         return any(i.computed != i.before_computed or i.effective != i.before_effective for i in self.staff_updates)
 
 
-def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None,
-                                    subsidy_source=None, deposit_only=False, new_deposit=None):
+def build_historical_deposit_floor_fee_plan(case_no, client_version, service_basis, source, new_deposit, delta):
+    if source is None and delta < 0:
+        raise PricingConflict('historical_pricing_amount_conflict')
+    if source is None and delta > 0:
+        source = HistoricalAmountFacts(new_deposit[0], 0, 0, 'automatic')
+    else:
+        new_deposit = None
+    updates = ()
+    if source is not None and delta:
+        computed = source.computed + delta
+        effective = source.effective + delta
+        if min(computed, effective) < 0:
+            raise PricingConflict('historical_pricing_amount_conflict')
+        updates = (HistoricalAmountUpdate(source.identity, computed, effective,
+            source.computed, source.effective, source.mode),)
+    return HistoricalRepricingPlan(case_no, client_version, None, updates, (), service_basis, new_deposit)
+
+
+def build_historical_repricing_plan(facts, terms, client_sources, staff_source, *, floor_fee=None, subsidy_source=None):
     before = pricing_impact(facts.terms, facts)
     after = pricing_impact(terms, replace(facts, floor_fee=facts.floor_fee if floor_fee is None else floor_fee))
-    def update(source, delta, *, adjust_manual=False):
+    def update(source, delta):
         revised = source.computed + delta
-        effective = source.effective + delta if adjust_manual else (
-            source.effective if source.mode == 'manual' else revised
-        )
+        effective = source.effective if source.mode == 'manual' else revised
         if min(revised, effective) < 0:
             raise PricingConflict('historical_pricing_amount_conflict')
         return HistoricalAmountUpdate(source.identity, revised, effective,
             source.computed, source.effective, source.mode)
     delta = after.client_amount - before.client_amount
     updates = []
-    if new_deposit is not None and delta > 0:
-        client_sources = (HistoricalAmountFacts(new_deposit[0], 0, 0, 'automatic'),)
-    else:
-        new_deposit = None
-    # The deposit-only path receives at most one deposit. General historical
-    # repricing carries a larger reduction back through the original installments.
     for source in reversed(client_sources):
         applied = max(-source.computed, delta) if delta < 0 else delta
-        updates.append(update(source, applied, adjust_manual=deposit_only))
+        updates.append(update(source, applied))
         delta -= applied
     if delta:
         raise PricingConflict('historical_pricing_amount_conflict')
     if subsidy_source is not None:
         updates.append(update(subsidy_source, after.subsidy_return_amount - before.subsidy_return_amount))
     return HistoricalRepricingPlan(facts.case_no, facts.versions[1], facts.versions[2], tuple(updates),
-        (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions, new_deposit)
+        (update(staff_source, after.staff_total_amount - before.staff_total_amount),), facts.versions)
 
 
 class PricingRepository(Protocol):

@@ -357,14 +357,18 @@ def _assemble_facts(
         column = cursor.fetchone()
         if column is None or any(status not in column['COLUMN_TYPE'] for status in ('歷史訂單－服務完成','歷史訂單－帳務完成')):
             raise ValueError('historical_floor_fee_schema_upgrade_required')
-        from infrastructure.mysql.pricing_configuration_repository import load_historical_pricing_facts, historical_repricing_plan
+        from infrastructure.mysql.pricing_configuration_repository import (
+            historical_deposit_floor_fee_plan, historical_repricing_plan, load_historical_pricing_facts,
+        )
         from subsystems.orders.terms_workflow import HistoricalFinancialVersions
         from domains.orders.floor_fee import prorate_historical_floor_fee
-        pricing = load_historical_pricing_facts(cursor.connection, str(order_row['case_no']), lock=lock, order=order_row)
         terms = proposed_terms if proposed_terms is not None else _order_facts(order_row).terms
-        actual_days = int(pricing.historical_service_hours / Decimal(str(order_row['service_hours_per_day'])))
-        fee = prorate_historical_floor_fee(terms.floor_fee, int(order_row['service_days']), actual_days).amount
-        plan = historical_repricing_plan(cursor.connection, pricing, pricing.terms, floor_fee=fee, lock=lock)
+        plan = historical_deposit_floor_fee_plan(cursor, order_row, terms.floor_fee, lock=lock)
+        if plan is None:
+            pricing = load_historical_pricing_facts(cursor.connection, str(order_row['case_no']), lock=lock, order=order_row)
+            actual_days = int(pricing.historical_service_hours / Decimal(str(order_row['service_hours_per_day'])))
+            fee = prorate_historical_floor_fee(terms.floor_fee, int(order_row['service_days']), actual_days).amount
+            plan = historical_repricing_plan(cursor.connection, pricing, pricing.terms, floor_fee=fee, lock=lock)
         versions = HistoricalFinancialVersions(plan.client_version, plan.payroll_version)
         facts = _facts_from_rows(order_row, aggregate_row, None, (), (), versions, versions,
             _load_lifecycle(cursor, order_row, lock), None, ())
