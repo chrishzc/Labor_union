@@ -30,7 +30,7 @@ def connection(monkeypatch):
     c.close()
 
 
-def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10)):
+def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10), staff=None):
     name = '合成補助月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
     with c.cursor() as q:
         while True:
@@ -43,7 +43,12 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
         q.execute("INSERT INTO orders(case_no,client_id,status,start_date,end_date,actual_start_date,actual_end_date,service_days,service_hours_per_day,floor_fee) "
                   "VALUES(%s,%s,%s,'2026-09-01','2026-09-10','2026-09-01',%s,10,10,0)",(case,q.lastrowid,status,actual_end))
         q.execute('INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES(%s,0)',(case,))
-        q.execute('INSERT INTO staff(name) VALUES(%s)',(name,)); staff=q.lastrowid
+        if staff is None:
+            q.execute('INSERT INTO staff(name) VALUES(%s)', (name,))
+            staff = q.lastrowid
+        else:
+            q.execute('SELECT name FROM staff WHERE id=%s', (staff,))
+            name = q.fetchone()['name']
         q.execute('UPDATE orders SET staff_id=%s WHERE case_no=%s',(staff,case))
         q.execute("INSERT INTO case_staff_assignments(case_no,staff_id,assignment_sequence,status) VALUES(%s,%s,1,'completed')",(case,staff)); assignment=q.lastrowid
         identity='subsidy-fixture:'+uuid4().hex
@@ -53,7 +58,7 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
             "VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',30000,'2026-10-15','open',%s,1)",(identity,assignment,case,staff,event))
         if subsidy is not None:
             q.execute("INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) VALUES(%s,2026,'manual',%s,%s)",(case,subsidy,subsidy))
-        amounts=(5000,7000,6000) if scheme=='split' else (5000,10000,15000)
+        amounts=(5000,7000,18000-(subsidy if subsidy is not None else 12000)) if scheme=='split' else (5000,10000,15000)
         for stage,amount in zip(('deposit','first','second'),amounts):
             target=f'{case}:{stage}'
             q.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
@@ -68,9 +73,7 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
 
 
 def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False, transaction_date=date(2026,11,15), memo_override=None):
-    from infrastructure.mysql.mysql_adapter import get_connection
-    from scripts.imports.finance_statement_normalizer import normalize_workbook
-    from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from api.dependencies.finance_import import get_finance_import_ingestion_service
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     memo = name+'補助款' if scheme=='split' else 'HC'+build_client_virtual_account(case)[-6:]+'雇主補助款'
     if bare_case:
@@ -80,8 +83,8 @@ def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False,
     path=tmp_path/(uuid4().hex+'.xlsx')
     pd.DataFrame([['說明'],['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註'],
         ['0001',transaction_date.strftime('%Y/%m/%d'),'09:00:00',transaction_date.strftime('%Y/%m/%d'),'轉出',cash,'',90000,memo]]).to_excel(path,index=False,header=False)
-    result=ingest_finance_workbook(str(path),IdempotencyKey('ingest:'+uuid4().hex),ActorContext('synthetic'),
-        connection_factory=get_connection,normalizer=normalize_workbook)
+    ingest = get_finance_import_ingestion_service()
+    result = ingest(str(path), IdempotencyKey('ingest:' + uuid4().hex), ActorContext('synthetic'))
     assert result.canonical_created_count==1
     c.rollback()  # Refresh the read-only pre-ingest REPEATABLE READ snapshot.
     return result.batch_identity
@@ -94,6 +97,78 @@ def snapshot(c, case):
             q.execute(f'SELECT COUNT(*) n FROM {table} WHERE case_no=%s',(case,));result[table]=q.fetchone()['n']
         q.execute('SELECT COUNT(*) n FROM staff_obligation_installments i JOIN staff_obligations o ON o.obligation_identity=i.obligation_identity WHERE o.case_no=%s',(case,));result['installments']=q.fetchone()['n']
     return result
+
+
+@pytest.mark.parametrize('same_month', [False, True])
+def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path, same_month):
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+
+    case, name, _ = seed(connection, False, 'split')
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT staff_id FROM orders WHERE case_no=%s', (case,))
+        staff = cursor.fetchone()['staff_id']
+    other, _, _ = seed(connection, False, 'split', staff=staff,
+                       actual_end=date(2026, 9 if same_month else 10, 20), subsidy=8000)
+    batch = bank_source(connection, tmp_path, case, name, 'split', memo_override=name)
+    app = application(connection)
+    correlation = CorrelationId('staff-subsidy-candidates')
+    plan = app.preview_batch(batch, correlation)
+    row = plan.rows[0]
+    assert {item.case_no for item in row.staff_subsidy_cases} == ({case, other} if same_month else {case})
+    selections = ()
+    if same_month:
+        assert row.pending_reason == 'staff_subsidy_multiple_same_month_cases'
+        assert not plan.dispatchable_rows
+        assert {item.payable_amount_ntd for item in row.staff_subsidy_cases} == {8000, 12000}
+        invalid = app.preview_batch(batch, correlation, ((row.row_identity, 'invalid-case'),))
+        assert invalid.rows[0].pending_reason == 'staff_subsidy_case_selection_invalid'
+        selections = ((row.row_identity, case),)
+        plan = app.preview_batch(batch, correlation, selections)
+    assert len(plan.dispatchable_rows) == 1, [item.pending_reason for item in plan.rows]
+    assert plan.dispatchable_rows[0].subsidy_preflight.case_no == case
+    receipt = app.apply_batch(FinanceImportApplyRequest(
+        batch, ExpectedVersion(plan.batch_version), plan.fingerprint,
+        IdempotencyKey('apply:' + uuid4().hex), ActorContext('synthetic'), '', correlation, selections,
+    ))
+    assert receipt.reconciled_count == 1
+    state = MySqlAccountingWorkspaceState(connection)
+    assert state.subsidy_plan(case).selected_scheme == 'split'
+    assert state.subsidy_plan(other).selected_scheme is None
+
+
+@pytest.mark.parametrize('scheme', ['split', 'advance'])
+def test_pending_rematch_settles_existing_confirmed_subsidy(connection, tmp_path, scheme):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from subsystems.finance_import.import_workflow import PendingReconciliationRequest
+
+    case, name, _ = seed(connection, False, scheme)
+    workspace = build_accounting_workspace(connection)
+    preview = workspace.preview_subsidy_plan(case, scheme, 0)
+    assert preview.blocker is None
+    workspace.save_subsidy_plan(case, scheme, 0, 'manual:' + uuid4().hex, 'synthetic', preview.fingerprint.value)
+    connection.commit()
+    batch = bank_source(connection, tmp_path, case, name, scheme)
+    app = application(connection)
+    correlation = CorrelationId('staff-subsidy-rematch')
+    plan = app.preview_batch(batch, correlation)
+    assert len(plan.dispatchable_rows) == 1, [item.pending_reason for item in plan.rows]
+    assert plan.dispatchable_rows[0].subsidy_preflight.existing_confirmed_payable
+    receipt = app.reconcile_pending(PendingReconciliationRequest(
+        IdempotencyKey('rematch:' + uuid4().hex), ActorContext('synthetic'), correlation,
+    ))
+    assert receipt.reconciled_count >= 1
+    assert any(t.bank_amount_ntd == 11970 and t.transfer_fee_ntd == 30
+               for t in workspace.query(case).transactions)
+
+
+@pytest.mark.parametrize('suffix_text', ['雇主補助款', '服務人員薪資'])
+def test_existing_six_digit_subsidy_memos_still_ingest(connection, tmp_path, suffix_text):
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    case, name, _ = seed(connection, False, 'advance')
+    memo = 'HC' + build_client_virtual_account(case)[-6:] + suffix_text
+    bank_source(connection, tmp_path, case, name, 'advance', memo_override=memo)
 
 
 @pytest.mark.parametrize('historical',[False,True])

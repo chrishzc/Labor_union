@@ -98,6 +98,46 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     confirmedImportReceipt: null,
   };
 
+  it('reopens a pending subsidy batch and sends the explicitly selected case for preview', async () => {
+    const onPreviewBankBatch = vi.fn();
+    const rowIdentity = 'finance-import-row:102';
+    const batchIdentity = 'finance-import-batch:9';
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...taishin, direction: 'outgoing', classification_type: 'staff_payout',
+        staff_subsidy_batch_identity: batchIdentity }], pending_count: 1, next_before_row_id: null,
+    });
+    const { rerender } = render(<FinanceBankReconciliationWorkspace {...defaultProps}
+      onPreviewBankBatch={onPreviewBankBatch} />);
+    fireEvent.click(await screen.findByRole('button', { name: '核對月嫂補助' }));
+    expect(onPreviewBankBatch).toHaveBeenCalledWith(batchIdentity);
+    rerender(<FinanceBankReconciliationWorkspace {...defaultProps} onPreviewBankBatch={onPreviewBankBatch}
+      batchPreview={{ kind: 'ready', data: {
+        batch_identity: batchIdentity, batch_version: 0, source_content_digest: 'a'.repeat(64),
+        classifier_version: 'v1', fingerprint_version: 'v1', preview_fingerprint: 'b'.repeat(64),
+        rows: [{
+          row_identity: rowIdentity, canonical_fact_version: 0, amount_ntd: 11970,
+          classification_type: 'staff_payout', disposition: 'business_pending',
+          pending_reason: 'staff_subsidy_multiple_same_month_cases', target_identities: [],
+          evidence: [], available_actions: [], integrity_violations: [],
+          fingerprint_collision: false, formal_reference_conflict: false,
+          staff_subsidy_cases: [
+            { case_no: '115000001', payable_due_date: '2026-11-15', payable_amount_ntd: 12000 },
+            { case_no: '115000002', payable_due_date: '2026-11-15', payable_amount_ntd: 8000 },
+          ],
+        }], apply_allowed: true, blocking_codes: [], dispatch_summaries: [],
+        counts: { source_rows: 1, canonical_created: 1, duplicate_occurrences: 0,
+          ready_dispatch: 0, existing: 0, manual_review: 0, business_pending: 1, blocked: 0 },
+      } }} />);
+    const group = screen.getByRole('group', { name: '選擇同月補助案件' });
+    const first = within(group).getByRole('button', { name: /115000001.*12,000/ });
+    const second = within(group).getByRole('button', { name: /115000002.*8,000/ });
+    expect(first).toHaveAttribute('aria-pressed', 'false');
+    expect(second).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(second);
+    expect(onPreviewBankBatch).toHaveBeenCalledWith(batchIdentity, { [rowIdentity]: '115000002' });
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
   it.each(['staff_payout','staff_salary'] as const)(
     'keeps Sinopac %s source failures consistent with payout preview and Apply and preserves the review entry', async classification => {
       const {cleanup}=await import('@testing-library/react');

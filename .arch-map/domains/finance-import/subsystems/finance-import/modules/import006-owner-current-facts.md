@@ -20,7 +20,7 @@ reprocess與必要 owner validation／migration evidence，不再提供 anomaly 
 - `subsystems/finance_import/identity_maps.py` — 匯入分類使用的精確帳號候選唯讀投影。
 - `subsystems/finance_import/reprocessing.py` — 舊批次重新分類唯讀／rollback-only 診斷，historical Apply 已退役。
 - `infrastructure/mysql/finance_import_owning_domain_composite.py`
-- subsidy preflight composition: `infrastructure/mysql/subsidy_confirmation_repository.py`（statement-workspace owner）— 僅原 Apply 生效，身份不以金額或月份選案；金額、日期、資金與原 owner 資格於身份唯一後預檢。原 outer UoW 一併確認方案、合法承接與核銷，不自行 commit。
+- subsidy preflight composition: `infrastructure/mysql/subsidy_confirmation_repository.py`（statement-workspace owner）— 僅原 Apply 生效，台新月嫂以原始備註確認身分，僅有姓名時以補助撥款月份查候選；多案保留原明細供人工選案，金額只驗證已定位款項。原 owner 驗證資金與核銷資格。原 outer UoW 一併確認方案、合法承接與核銷，不自行 commit。
 - 永豐月嫂薪資的重配對按實際步驟產生 `pending_reason` 並沿原批次收據保存；缺預計撥款日不作月份不符，無符合金額不作候選不唯一。唯一單筆／合併款先借用 Staff Payables Preview 重驗帳戶及資格，失敗維持待核對；已入帳來源不重開。其他明細類別的既有配對規則不變。
 - 台新月嫂補助的重配對先重讀原始備註，借用同一 Staff Payables 姓名驗證；缺日期、無未清／同月款、金額不符及多個有效配對依實際步驟保存原因。唯一單筆／合併款同樣委派 owner Preview 後才可自動核銷，台新不要求帳號，六碼不作月嫂證據；其他用途的 resolver 不變。
 - `api/routes/finance_import.py`

@@ -34,6 +34,8 @@ class FinanceDispatchOutcome(StrEnum):
 class FinanceImportApplyRequest:
     batch_identity: str; expected_batch_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; correlation_id: CorrelationId
+    staff_subsidy_selections: tuple[tuple[str, str], ...] = ()
+
     def __post_init__(self):
         require_canonical_text(self.batch_identity, "finance import batch identity", _IDENTITY_MAXIMUM_LENGTH)
         require_canonical_text(self.reason, "finance import apply reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
@@ -101,8 +103,8 @@ class FinanceImportWorkflowError(Exception):
 class FinanceImportWorkflow:
     def __init__(self, repository: FinanceImportRepository, posting_port: FinanceImportFormalPostingPort, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository; self._posting_port = posting_port; self._unit_of_work_factory = unit_of_work_factory
-    def preview(self, batch_identity: str, correlation_id: CorrelationId) -> FinanceImportPlan:
-        try: return self._build_resolved_plan(self._repository.load(batch_identity, for_update=False))
+    def preview(self, batch_identity: str, correlation_id: CorrelationId, staff_subsidy_selections=()) -> FinanceImportPlan:
+        try: return self._build_resolved_plan(self._repository.load(batch_identity, for_update=False), staff_subsidy_selections)
         except FinanceImportWorkflowError: raise
         except FinanceImportRepositoryUnavailable as error: raise _preview_transaction_error(correlation_id, error) from error
         except ValueError as error: raise _validation_error(correlation_id, str(error)) from error
@@ -133,7 +135,8 @@ class FinanceImportWorkflow:
                 # No owner confirmation or contested balance is implicitly authorized.
                 rows = tuple(
                     row for row in plan.dispatchable_rows
-                    if row.subsidy_preflight is None and row.target_identities
+                    if (row.subsidy_preflight is None or row.subsidy_preflight.existing_confirmed_payable)
+                    and row.target_identities
                     and all(targets[target] == 1 for target in row.target_identities)
                 )
                 if not rows:
@@ -185,12 +188,27 @@ class FinanceImportWorkflow:
         raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict", "Idempotency key was used by another Finance Import command.")
     def _fresh_plan(self, request, facts):
         _validate_batch_version(request, facts)
-        plan = self._build_resolved_plan(facts); _validate_plan_is_applicable(request, plan)
+        try:
+            plan = self._build_resolved_plan(facts, request.staff_subsidy_selections)
+        except ValueError as error:
+            if str(error) != "staff_subsidy_case_selection_invalid":
+                raise
+            raise _stale_error(request, facts.batch_version) from error
+        _validate_plan_is_applicable(request, plan)
         if plan.fingerprint != request.preview_fingerprint: raise _stale_error(request, facts.batch_version)
         return plan
-    def _build_resolved_plan(self, facts):
+    def _build_resolved_plan(self, facts, staff_subsidy_selections=()):
+        selections = dict(staff_subsidy_selections)
+        eligible_selection_rows = {
+            row.row_identity for row in facts.rows
+            if row.classification_type is FinanceClassificationType.STAFF_PAYOUT
+            and row.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        }
+        if not selections.keys() <= eligible_selection_rows:
+            raise ValueError("staff_subsidy_case_selection_invalid")
         resolved_rows = tuple(
-            self._posting_port.resolve(row)
+            self._posting_port.resolve(replace(row, selected_staff_subsidy_case=selections[row.row_identity]))
+            if row.row_identity in selections else self._posting_port.resolve(row)
             for row in facts.rows
         )
         return build_finance_import_plan(
@@ -241,7 +259,17 @@ def _validate_dispatch_results(plan, results, request):
 def _build_receipt(plan, results):
     outcomes = tuple(item.outcome for item in results)
     return FinanceImportApplyReceipt(plan.batch_identity, plan.batch_version + 1, plan.fingerprint, outcomes.count(FinanceDispatchOutcome.RECONCILED), outcomes.count(FinanceDispatchOutcome.EXISTING), outcomes.count(FinanceDispatchOutcome.PENDING))
-def _command_fingerprint(request): return fingerprint_payload({"batch_identity":request.batch_identity,"expected_batch_version":request.expected_batch_version.value,"preview_fingerprint":request.preview_fingerprint.value,"actor_id":request.actor.actor_id,"reason":request.reason})
+def _command_fingerprint(request):
+    payload = {
+        "batch_identity": request.batch_identity,
+        "expected_batch_version": request.expected_batch_version.value,
+        "preview_fingerprint": request.preview_fingerprint.value,
+        "actor_id": request.actor.actor_id,
+        "reason": request.reason,
+    }
+    if request.staff_subsidy_selections:
+        payload["staff_subsidy_selections"] = dict(request.staff_subsidy_selections)
+    return fingerprint_payload(payload)
 def _stale_error(request, current_version): return _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_preview", "Finance Import facts changed after Preview.", current_version=current_version)
 def _dispatch_error(request, code, row_blockers): return _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, code, "Owning Finance Domain rejected the proposed dispatch.", blockers=(code, *row_blockers))
 def _validation_error(correlation_id, code): return _workflow_error(correlation_id, ErrorCategory.VALIDATION, "invalid_finance_import_facts", code)

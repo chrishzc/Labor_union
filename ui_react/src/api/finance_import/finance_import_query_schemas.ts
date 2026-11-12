@@ -36,6 +36,7 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
       requires_selection: z.boolean().optional(),
     }).nullish(),
     reconciliation_unavailable_reason: z.string().nullish(),
+    staff_subsidy_batch_identity: z.string().nullish(),
   })),
   pending_count: optionalCount,
   next_before_row_id: z.number().int().positive().nullable(),

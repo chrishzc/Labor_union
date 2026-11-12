@@ -199,6 +199,8 @@ class MySqlFinanceImportOwningDomainComposite:
         subsidy = resolve_subsidy_confirmation(self._connection, candidate, for_update=self._context is not None)
         if subsidy is not None:
             return subsidy
+        if candidate.selected_staff_subsidy_case is not None:
+            return replace(candidate, pending_reason="staff_subsidy_case_selection_invalid")
         if candidate.classification_type is _CLIENT_RECEIPT:
             return _resolve_client_receipt(self._connection, candidate)
         if candidate.classification_type is _CLIENT_REFUND:

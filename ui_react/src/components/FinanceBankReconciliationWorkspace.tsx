@@ -115,6 +115,7 @@ export interface FinanceBankReconciliationWorkspaceProps {
   onApply: (preview: FinanceImportBatchPreview) => void;
   onObserveApplyOutcome: (jobId: string, expected?: { batchIdentity: string; previewFingerprint: string }) => void;
   onReconcile: (row: FinanceBankTransaction) => void;
+  onPreviewBankBatch?: (batchIdentity: string, selections?: Record<string, string>) => void;
   confirmedImportReceipt: { reconciled_count: number; existing_count: number } | null;
   submittedFinanceCommand?: unknown;
 }
@@ -138,6 +139,7 @@ export function FinanceBankReconciliationWorkspace({
   onApply,
   onObserveApplyOutcome,
   onReconcile,
+  onPreviewBankBatch,
   confirmedImportReceipt,
   submittedFinanceCommand,
 }: FinanceBankReconciliationWorkspaceProps) {
@@ -323,6 +325,44 @@ export function FinanceBankReconciliationWorkspace({
         </div>
 
         {/* 上傳與審查即時結果 */}
+        {batchPreview.kind === 'ready' && batchPreview.data.rows.some(row =>
+          row.staff_subsidy_cases != null || row.pending_reason === 'staff_subsidy_case_selection_invalid') && (
+          <section aria-label="月嫂補助案件歸屬">
+            {batchPreview.data.rows.map(row => {
+              if ((row.staff_subsidy_cases?.length ?? 0) < 2) {
+                if (row.staff_subsidy_cases == null && row.pending_reason !== 'staff_subsidy_case_selection_invalid') return null;
+                if (row.pending_reason === 'due_date_missing' || row.pending_reason === 'bank_transaction_date_missing') {
+                  return <p key={row.row_identity}>
+                    {row.pending_reason === 'due_date_missing' ? '缺少預計補助撥款日' : '缺少銀行交易日'}
+                  </p>;
+                }
+                if (row.pending_reason === 'outgoing_staff_payout_month_no_match') {
+                  return <p key={row.row_identity}>查無同月補助案件</p>;
+                }
+                if (row.pending_reason === 'staff_subsidy_case_selection_invalid') {
+                  return <p key={row.row_identity}>原選定案件已不符合條件，請重新核對。</p>;
+                }
+                return null;
+              }
+              return <fieldset key={row.row_identity}>
+                <legend>選擇同月補助案件</legend>
+                {row.staff_subsidy_cases?.map(candidate => (
+                  <button key={candidate.case_no} type="button"
+                    aria-pressed={row.selected_staff_subsidy_case === candidate.case_no}
+                    disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
+                    onClick={() => {
+                      const selections = Object.fromEntries(batchPreview.data.rows.flatMap(item =>
+                        item.selected_staff_subsidy_case ? [[item.row_identity, item.selected_staff_subsidy_case]] : []));
+                      selections[row.row_identity] = candidate.case_no;
+                      onPreviewBankBatch?.(batchPreview.data.batch_identity, selections);
+                    }}>
+                    {candidate.case_no} · {candidate.payable_due_date} · NT$ {candidate.payable_amount_ntd.toLocaleString()}
+                  </button>
+                ))}
+              </fieldset>;
+            })}
+          </section>
+        )}
         {batchPreview.kind==='ready'&&batchPreview.data.rows.some(row=>row.subsidy_preflight)&&<section aria-label="補助處理預檢">
           <h4>本次補助處理預檢</h4><p>確認套用後，即可查看給付金額與核銷結果。</p>
           {batchPreview.data.rows.map(row=>{const p=row.subsidy_preflight;if(!p)return null;const amount=(n:number|bigint|null)=>n==null?'待確認':n.toLocaleString()+' 元';return <div key={row.row_identity}>
@@ -553,6 +593,16 @@ export function FinanceBankReconciliationWorkspace({
                       <td style={{ textAlign: 'right' }}>
                         {row.disposition === 'blocked' ? (
                           <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>銷帳受阻</span>
+                        ) : row.staff_subsidy_batch_identity && onPreviewBankBatch ? (
+                          <button type="button" className="bank-btn-action"
+                            disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
+                            onClick={() => {
+                              if (!row.staff_subsidy_batch_identity) return;
+                              setShowImportPanel(true);
+                              onPreviewBankBatch(row.staff_subsidy_batch_identity);
+                            }}>
+                            核對月嫂補助
+                          </button>
                         ) : (row.reconciliation_target || (row.classification_type === 'government_subsidy' && row.direction !== 'unknown')) ? (
                           <button
                             type="button"

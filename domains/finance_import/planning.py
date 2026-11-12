@@ -54,6 +54,13 @@ class ClientReceiptReviewDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class StaffSubsidyCaseCandidate:
+    case_no: str
+    payable_due_date: str
+    payable_amount_ntd: int
+
+
+@dataclass(frozen=True, slots=True)
 class SubsidyConfirmationPreflight:
     case_no: str
     scheme: str
@@ -67,6 +74,7 @@ class SubsidyConfirmationPreflight:
     blocker: str | None = None
     payable_amount_ntd: int | None = None
     payable_due_date: str | None = None
+    existing_confirmed_payable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +94,8 @@ class CanonicalFinanceImportRow:
     client_receipt_review: ClientReceiptReviewDiagnostic | None = None
     pending_reason: str | None = None
     subsidy_preflight: SubsidyConfirmationPreflight | None = None
+    staff_subsidy_cases: tuple[StaffSubsidyCaseCandidate, ...] | None = None
+    selected_staff_subsidy_case: str | None = None
 
     def __post_init__(self) -> None:
         _validate_row_identity(self)
@@ -389,6 +399,13 @@ def _row_payload(row):
     }
     if row.client_receipt_review is not None:
         payload["client_receipt_review"] = asdict(row.client_receipt_review)
+    if row.staff_subsidy_cases is not None:
+        payload["staff_subsidy_cases"] = [
+            (case.case_no, case.payable_due_date, case.payable_amount_ntd)
+            for case in row.staff_subsidy_cases
+        ]
+    if row.selected_staff_subsidy_case is not None:
+        payload["selected_staff_subsidy_case"] = row.selected_staff_subsidy_case
     if row.pending_reason is not None:
         payload["pending_reason"] = row.pending_reason
     return payload

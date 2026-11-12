@@ -88,8 +88,8 @@ class FinanceImportApplication:
     correction_workflow: FinanceImportCorrectionWorkflow
     posting_port: FinanceImportOwningDomainCompositePort
 
-    def preview_batch(self, batch_identity, correlation_id):
-        return self.workflow.preview(batch_identity, correlation_id)
+    def preview_batch(self, batch_identity, correlation_id, staff_subsidy_selections=()):
+        return self.workflow.preview(batch_identity, correlation_id, staff_subsidy_selections)
 
     def apply_batch(self, request: FinanceImportApplyRequest):
         self.posting_port.bind_request(request)
@@ -207,10 +207,13 @@ def get_refund_return_review_application():
 
 
 def get_finance_import_ingestion_service():
+    from infrastructure.mysql.subsidy_confirmation_repository import has_official_staff_subsidy_evidence
+
     return partial(
         ingest_finance_workbook,
         connection_factory=get_connection,
         normalizer=normalize_workbook,
+        staff_subsidy_evidence=has_official_staff_subsidy_evidence,
     )
 
 

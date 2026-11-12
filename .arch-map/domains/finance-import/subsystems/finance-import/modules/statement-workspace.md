@@ -21,7 +21,7 @@
 - `infrastructure/mysql/monthly_accounting_repository.py`
 - `infrastructure/mysql/finance_statement_archive_repository.py`
 - `infrastructure/mysql/accounting_workspace_repository.py`
-- `infrastructure/mysql/subsidy_confirmation_repository.py` — 一般／歷史案件共用補助確認組合：Preview 借用原 Client Refund／Staff Payout 預檢尚未建立的合法款項；原 Apply 鎖定來源後，於同一 outer UoW 確認方案、承接款項與核銷，任一步失敗整筆回滾。未達服務結束條件時只確認方案。
+- `infrastructure/mysql/subsidy_confirmation_repository.py` — 一般／歷史案件共用補助確認組合：Preview 借用原 Client Refund／Staff Payout 預檢尚未建立的合法款項；台新月嫂出款僅有姓名時，按正式補助撥款月份投影案件候選。多案選擇隨原 batch Preview／Apply 傳遞並重新驗證；原 Apply 鎖定來源後，於同一 outer UoW 確認方案、承接款項與核銷，任一步失敗整筆回滾。已定位但未達服務結束條件時只確認方案。
 - `query_case_bank_memos`／typed `CaseBankMemo`：台新備註六碼經 Client Finance 正式帳號對照確認唯一案件，原文逐筆投影至案件 `bank_memos`；不要求有款項、不推用途或計入金流。方案區及既有人工選擇頁顯示原文，沿原方案 metadata writer 明確保存。
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
@@ -88,7 +88,7 @@
 - layout_status: `custom_current`
 - test_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement.py`
-- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py` — 隔離 MySQL 驗證一般／歷史未確認補助計算、兩種台新受款方案、Preview 零寫入、原 Apply 建款核銷、提前確認、來源過期與失敗整筆回滾。
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_subsidy_confirmation_mysql.py` — 隔離 MySQL 驗證一般／歷史未確認補助計算、兩種台新受款方案、Preview 零寫入、原 Apply 建款核銷、同月唯一及多案選擇、原六碼備註入庫、提前確認、來源過期與失敗整筆回滾。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_case_manual_supplement_mysql.py` — opt-in isolated MySQL：三方向正式核銷、足額／部分／手續費／超收退款／超付追償、完整回滾及同鍵重送／衝突／並行。
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/test_statement_archive_mysql.py` — 隔離MySQL驗證410零寫入、原鍵不重放舊新增成功、成功匯出只含正式核銷、歷史備查唯讀不改資料、三種正式補登仍可匯出。
 - Higher-boundary MySQL coverage uses the finance-import Subsystem's declared disposable E2E entry.

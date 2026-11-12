@@ -26,6 +26,10 @@ const previewRowSchema = z.strictObject({
   classification_type: z.string(), disposition: z.string(), target_identities: z.array(z.string()), evidence: z.array(z.string()),
   available_actions: z.array(z.string()), integrity_violations: z.array(z.string()), fingerprint_collision: z.boolean(),
   formal_reference_conflict: z.boolean(), client_receipt_review: FinanceClientReceiptReviewSchema.nullish(), pending_reason: z.string().nullish(),
+  staff_subsidy_cases: z.array(z.strictObject({
+    case_no: z.string(), payable_due_date: z.string(), payable_amount_ntd: exactNtd,
+  })).nullish(),
+  selected_staff_subsidy_case: z.string().nullish(),
   subsidy_preflight:z.strictObject({case_no:z.string(),scheme:z.enum(['split','advance']),subsidy_ntd:exactNtd.nullable(),total_ntd:exactNtd.nullable(),confirmation_only:z.boolean(),payable_amount_ntd:exactNtd.nullable(),payable_due_date:z.string().nullable(),bank_cash_ntd:exactNtd,transfer_fee_ntd:exactNtd.nullable(),settlement_ntd:exactNtd.nullable(),remaining_ntd:exactNtd.nullable(),blocker:z.string().nullable()}).nullish(),
 });
 const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_version: z.number().int().nonnegative(), source_content_digest: sha256, classifier_version: z.string(), fingerprint_version: z.string(), counts: countsSchema, dispatch_summaries: z.array(z.strictObject({ classification_type: z.string(), candidate_count: z.number().int().nonnegative(), total_amount_ntd: z.number().int().nonnegative() })), rows: z.array(previewRowSchema), blocking_codes: z.array(z.string()), apply_allowed: z.boolean(), preview_fingerprint: sha256 });
@@ -108,13 +112,16 @@ export const financeImportMutationClient = {
       return receipt;
     } catch (error) { throw mapFinanceImportQueryError(error); }
   },
-  async preview(batchIdentity: string, signal?: AbortSignal): Promise<FinanceImportBatchPreview> {
+  async preview(batchIdentity: string, signal?: AbortSignal, staffSubsidySelections?: Record<string, string>): Promise<FinanceImportBatchPreview> {
     const batch = batchIdentity.trim(); if (!batch) throw new FinanceImportQueryError('FINANCE_IMPORT_BATCH_IDENTITY_INVALID', 'batch identity 不得為空白。');
-    try { return decode(previewSchema, await transport.post('/api/v1/finance-import/batches/preview', { batch_identity: batch }, requestOptions(signal, { 'X-Correlation-ID': `finance-import-preview-${crypto.randomUUID()}` })), 'Finance Import Preview'); } catch (error) { throw mapFinanceImportQueryError(error); }
+    try { return decode(previewSchema, await transport.post('/api/v1/finance-import/batches/preview', { batch_identity: batch, ...(staffSubsidySelections && { staff_subsidy_selections: staffSubsidySelections }) }, requestOptions(signal, { 'X-Correlation-ID': `finance-import-preview-${crypto.randomUUID()}` })), 'Finance Import Preview'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
   async apply(preview: FinanceImportBatchPreview, reason: string, command: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }): Promise<FinanceImportJobAccepted> {
     const normalizedReason = reason.trim(); if (normalizedReason.length > 500) throw new FinanceImportQueryError('FINANCE_IMPORT_REASON_INVALID', '正式入帳原因不得超過500字。');
-    try { return decode(jobAcceptedSchema, await transport.post('/api/v1/finance-import/batches/apply', { batch_identity: preview.batch_identity, expected_batch_version: preview.batch_version, preview_fingerprint: preview.preview_fingerprint, reason: normalizedReason }, requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), 'Finance Import Apply'); } catch (error) { throw mapFinanceImportQueryError(error); }
+    const selections = Object.fromEntries(preview.rows.flatMap(row =>
+      row.selected_staff_subsidy_case ? [[row.row_identity, row.selected_staff_subsidy_case]] : []));
+    try { return decode(jobAcceptedSchema, await transport.post('/api/v1/finance-import/batches/apply', {
+      ...(Object.keys(selections).length && { staff_subsidy_selections: selections }), batch_identity: preview.batch_identity, expected_batch_version: preview.batch_version, preview_fingerprint: preview.preview_fingerprint, reason: normalizedReason }, requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), 'Finance Import Apply'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
   async queryBatchOutcome(jobId: string, signal?: AbortSignal): Promise<FinanceImportBatchOutcome> {
     const normalized = jobId.trim(); if (!normalized) throw new FinanceImportQueryError('FINANCE_IMPORT_JOB_ID_INVALID', 'job id 不得為空白。');

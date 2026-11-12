@@ -58,6 +58,8 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   unsupported_bank_direction: '這種銀行交易尚無適用的自動配對方式。',
   sinopac_staff_return_requires_matching: '交易帳號對應月嫂，無法辨識為客戶入款；新匯入跳過，不建立流水。',
   staff_bank_account_ambiguous: '帳戶驗證未通過。交易收款帳號缺少，或無法對應唯一有效的月嫂主要帳戶。',
+  staff_subsidy_multiple_same_month_cases: '同一月嫂有多個同月補助案件，請選擇本筆付款的案件。',
+  staff_subsidy_case_selection_invalid: '所選案件已不符合本筆補助付款，請重新核對。',
   staff_memo_recipient_unconfirmed: '備註姓名驗證未通過。無法唯一確認收款月嫂，請核對原始銀行備註與人員姓名。',
   cross_staff_allocation_forbidden: '帳戶或對象驗證未通過。交易、收款帳戶與待付款項的月嫂歸屬不一致。',
   outgoing_bank_fact_not_eligible: '銀行出款未通過核銷資格驗證。系統沒有留存更細的拒絕原因。',

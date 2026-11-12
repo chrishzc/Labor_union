@@ -509,7 +509,8 @@ def preview_finance_import_batch(
     correlation = CorrelationId(correlation_id)
     return _call_endpoint(
         lambda: _plan_payload(
-            application.preview_batch(body.batch_identity.strip(), correlation)
+            application.preview_batch(body.batch_identity.strip(), correlation, tuple(sorted(body.staff_subsidy_selections.items())))
+            if body.staff_subsidy_selections else application.preview_batch(body.batch_identity.strip(), correlation)
         ),
         "成功產生 Finance Import Preview",
         correlation,
@@ -655,6 +656,7 @@ def apply_finance_import_batch(
         ActorContext(immutable_admin_job_actor(principal, correlation_id)),
         body.reason.strip(),
         correlation,
+        tuple(sorted(body.staff_subsidy_selections.items())),
     )
     
     return _durable_acceptance(
@@ -672,6 +674,7 @@ def _batch_apply_job_command(job_id, request) -> DurableJobCommand:
         command_type="finance_import_batch_apply",
         command_version=1,
         payload={
+            **({"staff_subsidy_selections": dict(request.staff_subsidy_selections)} if request.staff_subsidy_selections else {}),
             "batch_identity": request.batch_identity,
             "expected_batch_version": request.expected_batch_version.value,
             "preview_fingerprint": request.preview_fingerprint.value,
@@ -914,6 +917,8 @@ def _row_payload(row):
         "client_receipt_review": _materialize(row.client_receipt_review),
         "pending_reason": row.pending_reason,
         "subsidy_preflight": preflight,
+        "staff_subsidy_cases": _materialize(row.staff_subsidy_cases),
+        "selected_staff_subsidy_case": row.selected_staff_subsidy_case,
     }
 
 

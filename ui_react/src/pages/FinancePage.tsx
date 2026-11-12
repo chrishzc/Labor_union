@@ -264,14 +264,14 @@ export const FinancePage: React.FC = () => {
     } finally { setImportBusy(false); }
   };
 
-  const previewImportedBatch = async (ingested: FinanceWorkbookIngestionReceipt) => {
+  const previewBankBatch = async (batchIdentity: string, selections?: Record<string, string>, applyReady = false) => {
     const request = start('batch-preview');
     setBatchPreview({ kind: 'loading' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
+      const preview = await financeImportMutationClient.preview(batchIdentity, request.controller.signal, selections);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      if (canApplyImportedBatch(preview) && !preview.rows.some(row => row.subsidy_preflight != null)) {
+      if (applyReady && canApplyImportedBatch(preview) && !preview.rows.some(row => row.subsidy_preflight != null)) {
         await applyImportedBatch(preview);
       } else {
         setReload(value => value + 1);
@@ -284,6 +284,9 @@ export const FinancePage: React.FC = () => {
       }
     }
   };
+
+  const previewImportedBatch = (ingested: FinanceWorkbookIngestionReceipt) =>
+    previewBankBatch(ingested.batch_identity, undefined, true);
 
   const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
     if (!canApplyImportedBatch(checked)) return;
@@ -443,6 +446,7 @@ export const FinancePage: React.FC = () => {
           onApply={(preview) => void applyImportedBatch(preview)}
           onObserveApplyOutcome={(jobId, expected) => void observeApplyOutcome(jobId, expected)}
           onReconcile={openBankReview}
+          onPreviewBankBatch={(batchIdentity, selections) => void previewBankBatch(batchIdentity, selections)}
           confirmedImportReceipt={confirmedImportReceipt}
           submittedFinanceCommand={submittedFinanceCommand}
         />

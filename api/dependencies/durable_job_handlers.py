@@ -45,6 +45,7 @@ def finance_import_batch_apply_handler(payload: dict[str, Any]) -> tuple[dict[st
             ActorContext(payload["actor"]),
             payload["reason"],
             CorrelationId(payload["correlation_id"]),
+            tuple(sorted(payload.get("staff_subsidy_selections", {}).items())),
         )
         receipt = _materialize(application.apply_batch(request))
         reference = "finance_import_batch:" + receipt["batch_identity"]

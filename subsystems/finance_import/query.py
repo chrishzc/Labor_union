@@ -355,7 +355,8 @@ class FinanceImportQueryService:
                         FROM finance_import_apply_receipts receipt
                         WHERE receipt.batch_id=page.batch_id
                         ORDER BY receipt.id DESC LIMIT 1
-                    ) AS recorded_pending_reason
+                    ) AS recorded_pending_reason,
+                    contract.batch_identity
                 FROM page
                 LEFT JOIN finance_import_batch_contracts contract
                     ON page.transaction_status='pending' AND contract.batch_id=page.batch_id
@@ -1246,6 +1247,11 @@ def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_una
         )
     return {
         "row_id": int(row["row_id"]),
+        "staff_subsidy_batch_identity": (
+            row.get("batch_identity") if row["transaction_status"] == "pending"
+            and bank == "taishin" and row["direction"] == "outgoing"
+            and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary"} else None
+        ),
         "row_identity": f'finance-import-row:{row["row_id"]}',
         "transaction_date": row["transaction_date"],
         "bank": bank,

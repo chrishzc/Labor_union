@@ -8,14 +8,77 @@ owner; public manual commands cannot claim that source namespace.
 from dataclasses import replace
 
 from domains.finance_import.planning import (
-    FinanceClassificationType, FinanceImportDisposition, SubsidyConfirmationPreflight,
+    FinanceClassificationType, FinanceImportDisposition, StaffSubsidyCaseCandidate, SubsidyConfirmationPreflight,
 )
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 
 
-def _bank_case(connection, row, candidate):
+def has_official_staff_subsidy_evidence(cursor, cases):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+
+    workspace = build_accounting_workspace(cursor.connection)
+    return any(
+        case.subsidy_ntd is not None and case.subsidy_ntd > 0 and case.staff_receivable_ntd is not None
+        for case in (workspace.query(case_no, include_sources=False) for case_no in cases)
+    )
+
+
+def _staff_subsidy_related_cases(cursor, staff_id):
+    cursor.execute("SELECT case_no FROM orders WHERE staff_id=%s UNION "
+        "SELECT case_no FROM case_staff_assignments WHERE staff_id=%s AND status IN ('planned','active','completed') UNION "
+        "SELECT case_no FROM staff_obligations WHERE staff_id=%s AND direction='payable_to_staff' AND status<>'cancelled'",
+        (staff_id, staff_id, staff_id))
+    return tuple(sorted({row['case_no'] for row in cursor.fetchall()}))
+
+
+def _staff_subsidy_month_cases(connection, transaction_date, staff_id, cases):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace, query_subsidy_payable_handoff
+    from infrastructure.mysql.finance_import_owning_domain_composite import _is_same_month
+    from infrastructure.mysql.staff_payout_repository import _funding_settlements, _query_obligation_rows
+
+    with connection.cursor() as cursor:
+        eligible = _query_obligation_rows(cursor, staff_id)
+    open_identities = {}
+    for row in eligible:
+        if row['balance_ntd'] > 0 and row['payout_status'] in {'payable', 'partially_paid'}:
+            open_identities.setdefault(row['case_no'], set()).add(row['obligation_identity'])
+    candidates = []
+    missing_due_date = False
+    workspace = build_accounting_workspace(connection)
+    for case_no in cases:
+        if case_no not in open_identities:
+            continue
+        case = workspace.query(case_no)
+        if case.subsidy_plan.selected_scheme not in (None, 'split') or not case.subsidy_ntd:
+            continue
+        handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='split')
+        if not handoff.service_completed or handoff.staff_subsidy_reason:
+            continue
+        staff_identities = open_identities[case_no]
+        staff_items = [item for item in case.staff_items if item.identity in staff_identities and item.remaining_ntd > 0]
+        portions = [(portion.due_date, portion.remaining_ntd) for item in staff_items
+                    for portion in item.funding_portions if portion.funding_kind == 'subsidy']
+        if not portions and staff_items:
+            preview = preview_manual_subsidy_plan(connection, case_no, 'split', case.subsidy_plan.version)
+            identities = {item.identity for item in staff_items}
+            if not preview.blocker:
+                with connection.cursor() as cursor:
+                    for item in preview.payables:
+                        if item.recipient == 'staff:subsidy' and item.identity in identities:
+                            paid, _ = _funding_settlements(cursor, item.identity)
+                            portions.append((item.due_date, item.amount_ntd - paid['subsidy']))
+        monthly = [(due, amount) for due, amount in portions
+                   if amount and amount > 0 and _is_same_month(transaction_date, due)]
+        missing_due_date |= any(due is None and amount and amount > 0 for due, amount in portions)
+        if monthly:
+            earliest = min(due if isinstance(due, str) else due.isoformat() for due, _ in monthly)
+            candidates.append(StaffSubsidyCaseCandidate(case_no, earliest, sum(amount for _, amount in monthly)))
+    return tuple(candidates), missing_due_date
+
+
+def _bank_case(connection, row, candidate, *, for_update=False):
     from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
     from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
     from infrastructure.mysql.finance_import_owning_domain_composite import _single_prefixed_identity
@@ -40,18 +103,19 @@ def _bank_case(connection, row, candidate):
         verified = _verify_taishin_memo_recipients(cursor, (row,), False)
         if staff_id is None or verified[0].get('taishin_memo_staff_id') != staff_id:
             raise ValueError('staff_memo_recipient_unconfirmed')
-        cursor.execute("SELECT case_no FROM orders WHERE staff_id=%s UNION "
-            "SELECT case_no FROM case_staff_assignments WHERE staff_id=%s AND status IN ('planned','active','completed') UNION "
-            "SELECT case_no FROM staff_obligations WHERE staff_id=%s AND direction='payable_to_staff' AND status<>'cancelled'",
-            (staff_id, staff_id, staff_id))
-        cases = {r['case_no'] for r in cursor.fetchall()}
+        cases = _staff_subsidy_related_cases(cursor, staff_id)
         if resolved is not None:
-            if resolved['case_no'] not in cases:
+            if resolved['case_no'] not in cases or candidate.selected_staff_subsidy_case:
                 raise ValueError('staff_memo_case_mismatch')
             return resolved['case_no']
-        if len(cases) != 1:
-            raise ValueError('subsidy_case_not_unique')
-        return cases.pop()
+        if for_update:
+            from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+            state = MySqlAccountingWorkspaceState(connection)
+            for case_no in cases:
+                state.lock_arrangement_case(case_no)
+    if row['transaction_date'] is None:
+        return (), False
+    return _staff_subsidy_month_cases(connection, row['transaction_date'], staff_id, cases)
 
 
 def resolve_subsidy_confirmation(connection, candidate, *, for_update=False):
@@ -71,7 +135,25 @@ def resolve_subsidy_confirmation(connection, candidate, *, for_update=False):
         return None
     pending = replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING, available_actions=('resolve_owning_domain_target',))
     try:
-        case_no = _bank_case(connection, source, candidate)
+        matched = _bank_case(connection, source, candidate, for_update=for_update)
+        if isinstance(matched, str):
+            case_no = matched
+        else:
+            cases, missing_due_date = matched
+            pending = replace(pending, staff_subsidy_cases=cases)
+            selected = candidate.selected_staff_subsidy_case
+            if selected is not None:
+                if not any(item.case_no == selected for item in cases):
+                    raise ValueError('staff_subsidy_case_selection_invalid')
+                case_no = selected
+            elif len(cases) == 1:
+                case_no = cases[0].case_no
+            elif cases:
+                raise ValueError('staff_subsidy_multiple_same_month_cases')
+            else:
+                if source['transaction_date'] is None:
+                    raise ValueError('bank_transaction_date_missing')
+                raise ValueError('due_date_missing' if missing_due_date else 'outgoing_staff_payout_month_no_match')
         scheme = 'advance' if candidate.classification_type is FinanceClassificationType.CLIENT_SUBSIDY_RETURN else 'split'
         state = MySqlAccountingWorkspaceState(connection)
         if for_update:
@@ -120,6 +202,8 @@ def resolve_subsidy_confirmation(connection, candidate, *, for_update=False):
             if len(roots) == 1 and not roots[0]['has_installments']:
                 return _preview_staff_split(connection, pending, source, case, roots[0]['obligation_identity'])
             ready = _resolve_staff_payout(connection, pending)
+        if plan.selected_scheme == scheme and ready.disposition is FinanceImportDisposition.CREATE:
+            ready = replace(ready, subsidy_preflight=replace(ready.subsidy_preflight, existing_confirmed_payable=True))
         return _annotate(ready, case)
     except ValueError as error:
         preflight = pending.subsidy_preflight
@@ -150,7 +234,7 @@ def _annotate(candidate, case, owner_fingerprint=None):
     return replace(candidate, decision_facts_fingerprint=fingerprint_payload({
         'row': candidate.row_identity, 'canonical_version': candidate.canonical_fact_version,
         'classification': candidate.classification_type.value,
-        'plan_version': candidate.subsidy_preflight.plan_version,
+        'case': preflight.case_no, 'plan_version': preflight.plan_version,
         'subsidy': case.subsidy_ntd, 'total': case.staff_receivable_ntd,
         'customer_due': case.customer_amount_ntd, 'customer_paid': case.customer_paid_ntd,
         'staff': [(item.identity, item.version, item.expected_ntd, item.actual_ntd, item.due_date) for item in case.staff_items],

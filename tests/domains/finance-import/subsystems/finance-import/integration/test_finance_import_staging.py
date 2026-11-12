@@ -804,21 +804,20 @@ def test_sinopac_paid_namesake_remains_identifiable_before_open_payment_matching
 
 
 @pytest.mark.parametrize("case_count", [0, 1, 2])
-def test_taishin_unique_memo_staff_without_open_payables_keeps_only_a_unique_case(case_count):
+def test_taishin_memo_staff_with_explicit_subsidy_purpose_keeps_source_for_matching(case_count):
     class CaseCursor(FakeCursor):
         def fetchall(self):
             return tuple({"case_no": f"11500000{index + 1}"} for index in range(case_count))
 
     name = "合成台新月嫂"
     row = _normalized_row(direction="outgoing", debit=Decimal("11970"), credit=None,
-                          memo=name, bank_references={})
+                          memo=name + "補助款", bank_references={})
     cursor = CaseCursor()
     result = staging.stage_finance_rows(cursor, _normalized([row]), {
         "all_staff_names": (name,), "staff_name_identities": {name: (7,)},
     }, business_only=True)
 
-    assert len(result["staged_rows"]) == int(case_count == 1)
-    if case_count == 1:
-        assert result["staged_rows"][0]["classification_type"] == "staff_salary"
-        assert result["staged_rows"][0]["matched_identity_ids"] == [7]
-        assert result["staged_rows"][0]["reconciliation_status"] == "pending"
+    assert len(result["staged_rows"]) == 1
+    assert result["staged_rows"][0]["classification_type"] == "staff_legacy_subsidy"
+    assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+    assert result["staged_rows"][0]["reconciliation_status"] == "pending"
