@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from pymysql import MySQLError
 
 from domains.line.identities import LineReviewRequestId, LineUserId
 from domains.line.identity_binding import (
@@ -22,6 +25,7 @@ from domains.line.review import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from infrastructure.mysql.line_repository_support import optional_row
+from infrastructure.mysql.nas_mutations import call_mutation
 from shared_kernel.identities import ExpectedVersion
 from subsystems.line.review_contracts import (
     CreateLineReviewCommand,
@@ -625,6 +629,23 @@ class MySqlLineIdentityReviewRepository:
             cursor.execute(_REVIEW_SELECT_SQL, (request_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _review_snapshot(row)
+
+    def delete_pending(self, request_id: LineReviewRequestId, version: ExpectedVersion) -> None:
+        with self._connection.cursor() as cursor:
+            try:
+                if os.getenv("DEPLOYMENT_PROFILE") == "nas":
+                    call_mutation(cursor, "lu_nas_delete_pending_line_review_v1", request_id.value, version.value)
+                    return
+                cursor.execute(
+                    "DELETE FROM line_review_requests WHERE id=%s AND review_status='pending' AND aggregate_version=%s",
+                    (request_id.value, version.value),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("line_review_version_conflict")
+            except MySQLError as error:
+                if error.args[0] == 1451 or error.args[:2] == (1644, "line_review_version_conflict"):
+                    raise RuntimeError("line_review_version_conflict") from error
+                raise
 
     # Kept cohesive because replay validation and insert-readback are one idempotent write.
     def create(self, command: CreateLineReviewCommand) -> CreateLineReviewResult:

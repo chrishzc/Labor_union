@@ -15,7 +15,7 @@ from subsystems.line.delivery_admin_contracts import (
 )
 from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
-    RETIRED_SIGNING_REMINDER_SOURCES,
+    RETIRED_CONTRACT_DELIVERY_SOURCES,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
@@ -92,8 +92,8 @@ class LineDeliveryTaskAdminApplication:
                 raise LineDeliveryTaskNotFoundError(
                     f"找不到 LINE 發送任務 #{command.task_id.value}"
                 )
-            if action != "cancel" and current.request.source_aggregate_type in RETIRED_SIGNING_REMINDER_SOURCES:
-                raise LineDeliveryTaskStateConflictError("簽署提醒已停用，無法發送或重試。")
+            if action != "cancel" and current.request.source_aggregate_type in RETIRED_CONTRACT_DELIVERY_SOURCES:
+                raise LineDeliveryTaskStateConflictError("契約 LINE 投遞已停用，無法發送或重試。")
             if existing is not None:
                 return current
             try:

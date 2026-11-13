@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from api.dependencies.admin_auth import (
     admin_actor_context,
@@ -19,6 +19,8 @@ from api.schemas.line_identity_management import (
     LineIdentityCandidatePageView,
     LineIdentityBindingView,
     LineIdentityCurrentFactReadbackView,
+    LineIdentityBindingActionRequest,
+    LineIdentityDeleteRevokedRequest,
     LineIdentityRevocationActionRequest,
     LineIdentityRevocationApplyRequest,
     LineIdentityRevocationPreviewView,
@@ -41,6 +43,7 @@ from subsystems.line.identity_management_contracts import (
     PairProvisionalRegistrationCommand,
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
+    LineIdentityBindingActionCommand,
 )
 
 
@@ -89,6 +92,22 @@ def list_unbound_candidates(
 ):
     result = _call(_application().unbound_pairing_candidates)
     return BaseResponse(data=UnboundPairingCandidatesResponseView.model_validate(result))
+
+
+@router.post("/provisional-registrations/{registration_id}/delete", response_model=BaseResponse[None])
+def delete_pending_provisional_registration(
+    registration_id: int,
+    payload: LineIdentityBindingActionRequest,
+    principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
+):
+    if registration_id <= 0:
+        raise HTTPException(status_code=422, detail={"code": "line_provisional_registration_invalid"})
+    _call(
+        _application().delete_pending_provisional_registration, registration_id,
+        ExpectedVersion(payload.expected_version), admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+    )
+    return BaseResponse(data=None)
 
 
 @router.post(
@@ -180,6 +199,51 @@ def apply_replacement(
     result = _call(_application().replace_subject, command)
     _audit_request(request, "replace", line_user_id)
     return BaseResponse(data=result, message="LINE 身分綁定對象已更正")
+
+
+@router.post(
+    "/{line_user_id}/menu/resync",
+    response_model=BaseResponse[LineIdentityBindingView],
+)
+def resync_binding_menu(
+    line_user_id: str,
+    payload: LineIdentityBindingActionRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    subject_type: LineBindingSubjectType,
+    principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
+):
+    result = _call(_application().resync_menu, LineIdentityBindingActionCommand(
+        LineUserId(line_user_id), subject_type, ExpectedVersion(payload.expected_version),
+        admin_actor_context(principal), IdempotencyKey(payload.idempotency_key),
+    ))
+    request.state.audit_action = "line.identity.menu.resync"
+    request.state.audit_resource_type = "line_identity_binding"
+    request.state.audit_resource_id = line_user_id
+    background_tasks.add_task(publish_line_wakeup_best_effort)
+    return BaseResponse(data=result, message="已受理選單同步")
+
+
+@router.post(
+    "/{line_user_id}/delete-revoked",
+    response_model=BaseResponse[None],
+)
+def delete_revoked_binding(
+    line_user_id: str,
+    payload: LineIdentityDeleteRevokedRequest,
+    request: Request,
+    subject_type: LineBindingSubjectType,
+    principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
+):
+    _call(_application().delete_revoked_binding, LineIdentityBindingActionCommand(
+        LineUserId(line_user_id), subject_type, ExpectedVersion(payload.expected_version),
+        admin_actor_context(principal), IdempotencyKey(payload.idempotency_key),
+        expected_updated_at=payload.expected_updated_at,
+    ))
+    request.state.audit_action = "line.identity.binding.deleted"
+    request.state.audit_resource_type = "line_identity_binding"
+    request.state.audit_resource_id = subject_type.value
+    return BaseResponse(data=None, message="已永久刪除停用綁定資料")
 
 
 @router.post(

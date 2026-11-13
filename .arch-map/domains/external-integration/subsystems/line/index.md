@@ -60,7 +60,7 @@
 
 綁定入口、服務導覽、選單說明、客服受理、群組指令及接案等互動確認使用 `line_webhook_reply`。Webhook 核對原事件及原聊天室，在提交必要的業務寫入後發送，失敗不重試或補 Push。背景 worker 只結清遺留 Reply 任務。聊天室 AI 入口已停用，遺留聊天室知識回答任務亦停止投遞。正式語意見規格 20 §3.2。
 
-`webhook_intake.py` 在驗簽並保存事件時保留新事件的處理租約。`webhook_event_consumer.py::consume_registered` 呼叫同一組業務 owner，保留本次交易新增的 Reply 任務租約，提交後交 `delivery_worker.py::deliver_webhook_reply`；未處理的業務交回 Inbox。HTTP 接線由 `api/dependencies/line_runtime.py` 組合。
+`webhook_intake.py` 在驗簽並保存事件時保留新事件的處理租約。`webhook_event_consumer.py::consume_registered` 保留新建 Reply 任務的租約，提交後交 `delivery_worker.py::deliver_webhook_reply`。同一事件的背景業務在 Reply 嘗試後交回 Inbox，程序中斷時依租約逾期回收。HTTP 接線由 `api/dependencies/line_runtime.py` 組合。
 
 - integration_test: `tests/domains/external-integration/subsystems/line/integration/test_informational_reply_only.py` — Webhook 即時投遞、兩種初步候選意願先提交、重複事件、Token／聊天室核對、失敗零 Push 與背景工作分流。
 
@@ -76,7 +76,7 @@
 
 `delivery_worker.py` 每次只 claim 即將處理的一筆，保留每輪預設25筆上限；送出前確認
 同一未過期lease及取消狀態。Reply 5xx不確定結果不得立即Push，亦不自動重試該不確定回答。
-既有簽署提醒任務（`contract_external_signing_session`、`contract_signing_case`）於呼叫 provider 前取消，拒絕人工立即執行與重試。兩種來源仍可查閱投遞歷史。契約文件下載通知沿用 `contract_document_version`。
+既有簽署提醒（`contract_external_signing_session`、`contract_signing_case`）與契約下載通知（`contract_document_version`）由 worker 在呼叫 provider 前取消，管理端拒絕立即執行與重試。三種來源的投遞歷史仍可查閱。
 
 `infrastructure/mysql/line_platform_identity_repository.py`保存晚到的好友事件與版本紀錄，
 同一 adapter 內的 canonical 狀態與 legacy `line_users` 投影都不倒退；

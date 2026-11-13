@@ -61,6 +61,23 @@ def test_unknown_procedure_never_reaches_database():
         call_mutation(NoSql(), "delete_arbitrary_table", "clients")
 
 
+def test_pending_line_request_deletes_are_management_only_and_version_guarded():
+    from infrastructure.mysql.nas_permissions import DELETE_TABLES
+
+    tables = {"line_review_requests", "provisional_client_registrations", "provisional_registration_conflicts"}
+    assert tables <= DELETE_TABLES
+    for profile in ("management", "line", "access", "maintenance"):
+        assert all("DELETE" not in privilege for _, privileges in _table_grants(profile, sorted(tables))
+                   for privilege in privileges)
+    for name, status, version in (
+        ("lu_nas_delete_pending_line_review_v1", "review_status='pending'", "aggregate_version=p_version"),
+        ("lu_nas_delete_pending_line_pairing_v1", "status='submitted'", "application_version=p_version"),
+    ):
+        _, body, profiles = PROCEDURES[name]
+        assert profiles == ("management",)
+        assert status in body and version in body
+
+
 def test_registry_delete_procedures_do_not_grant_runtime_direct_root_delete():
     from infrastructure.mysql.nas_permissions import DELETE_TABLES
     assert {"orders", "clients"} <= DELETE_TABLES

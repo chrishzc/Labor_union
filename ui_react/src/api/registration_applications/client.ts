@@ -11,6 +11,7 @@ const view = z.strictObject({
   fields: z.array(z.strictObject({ label: z.string(), value: z.string() })),
   registration_kind: z.enum(['subsidy', 'non_citizen']),
   case_no: z.string().nullable(), approved_at_utc: z.string().nullable(),
+  passbook_image_url: z.string().nullable().optional(),
 });
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
   success: z.literal(true), message: z.string(), data: schema, error: z.null(),

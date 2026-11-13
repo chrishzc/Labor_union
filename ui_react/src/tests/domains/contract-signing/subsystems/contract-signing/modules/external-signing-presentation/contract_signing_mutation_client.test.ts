@@ -1,11 +1,11 @@
 /**
  * File: contract_signing_mutation_client.test.ts
- * Description: 驗證契約寄送與簽回命令使用既有 typed endpoint、multipart 與 command identity。
+ * Description: 驗證簽回與人工簽約命令使用既有 typed endpoint、multipart 與 command identity。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionClient } from '../api/auth/session_client';
-import { contractSigningMutationClient } from '../api/orders/contract_signing_mutation_client';
-import { transport } from '../api/shared/transport';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { contractSigningMutationClient } from '../../../../../../../api/orders/contract_signing_mutation_client';
+import { transport } from '../../../../../../../api/shared/transport';
 
 const receipt = {
   document_version_id: 7,
@@ -22,15 +22,6 @@ describe('contractSigningMutationClient', () => {
     vi.restoreAllMocks();
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('token');
     vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: 'ok', data: receipt, error: null });
-  });
-
-  it('sends a staff contract with command identity and the existing endpoint', async () => {
-    await expect(contractSigningMutationClient.sendStaff('CASE-1', 3, 'https://contracts.example/download', command)).resolves.toEqual(receipt);
-    expect(transport.post).toHaveBeenCalledWith(
-      '/api/v1/orders/CASE-1/contract-signing/staff-segments/3/send',
-      { download_url: 'https://contracts.example/download' },
-      expect.objectContaining({ token: 'token', headers: { 'Idempotency-Key': 'contract-idem', 'X-Correlation-ID': 'contract-corr' } }),
-    );
   });
 
   it('submits a client signed return as multipart and preserves its expected sent version', async () => {

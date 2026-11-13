@@ -11,7 +11,6 @@ from enum import StrEnum
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from subsystems.line.service_day_log_reminders import ServiceDayLogReminderPort
     from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationPort
     from subsystems.line.payment_receipt_notifications import PaymentReceiptPort
@@ -570,6 +569,8 @@ class LineIdentityFlowRepositoryPort(Protocol):
 
 
 class LineIdentityReviewRepositoryPort(Protocol):
+    def delete_pending(self, request_id: LineReviewRequestId, version: ExpectedVersion) -> None: ...
+
     def create(self, command: CreateLineReviewCommand) -> CreateLineReviewResult: ...
 
     def get(self, request_id: LineReviewRequestId) -> LineReviewSnapshot | None: ...
@@ -907,6 +908,8 @@ class LineOutboxRepositoryPort(OutboxWriter, Protocol):
 
     def lock_menu_user(self, line_user_id: LineUserId) -> None: ...
 
+    def menu_provider_lock(self, line_user_id: LineUserId): ...
+
     def lock_menu_lease(self, item: LineOutboxWorkItem, now: datetime) -> bool: ...
 
     def latest_menu_intent_id(self, line_user_id: LineUserId) -> int | None: ...
@@ -1074,7 +1077,6 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     identity_management: object
     service_starts: object
     service_start_days: "ServiceStartDayRepositoryPort"
-    service_day_log_reminders: "ServiceDayLogReminderPort"
     payment_overdue_reminders: "PaymentOverdueReminderPort"
     payment_reminder_notifications: "PaymentReminderNotificationPort"
     payment_receipt_notifications: "PaymentReceiptPort"

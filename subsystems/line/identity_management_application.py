@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable
 
 from domains.line.identities import LineUserId
@@ -33,16 +33,20 @@ from subsystems.line.identity_management_contracts import (
     LineIdentityRevocationStatus,
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
+    LineIdentityBindingActionCommand,
     SelectLineIdentityRoleCommand,
     UnboundPairingCandidatesView,
     PairProvisionalRegistrationCommand,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.rich_menu_binding import (
+    role_menu_definition_id,
+    resolved_identity_binding,
+    schedule_manual_menu_resync,
     schedule_resolved_identity_menu,
     schedule_revocation_successor_menu,
 )
-from subsystems.line.outbox_contracts import IDENTITY_MENU_RESET_INTENT
+from subsystems.line.outbox_contracts import IDENTITY_MENU_RESET_INTENT, LineRichMenuSyncStatus
 
 
 
@@ -66,6 +70,86 @@ class LineIdentityManagementApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.list(query)
 
+    def resync_menu(self, command: LineIdentityBindingActionCommand):
+        require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
+        user_id = command.line_user_id
+        subject_type = command.subject_type
+        key = _derived_key(command.idempotency_key, f"menu-resync:{user_id.value}")
+        fingerprint = fingerprint_payload({
+            "line_user_id": user_id.value,
+            "subject_type": subject_type.value,
+            "binding_version": command.expected_version.value,
+        })
+        with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.outbox.lock_menu_user(user_id)
+            current = _management_detail(unit_of_work, user_id, subject_type)
+            existing = unit_of_work.receipts.get(key)
+            if existing is not None:
+                if existing.payload_fingerprint != fingerprint:
+                    raise RuntimeError("line_identity_menu_resync_idempotency_conflict")
+                return current
+            if current.version != command.expected_version.value:
+                raise RuntimeError("line_identity_binding_version_conflict")
+            if current.status is not LineIdentityBindingStatus.BOUND:
+                raise RuntimeError("line_identity_binding_not_bound")
+            if unit_of_work.outbox.menu_reset_pending(user_id):
+                raise RuntimeError("line_identity_revocation_in_progress")
+            binding = resolved_identity_binding(unit_of_work, user_id)
+            if binding is None or binding.subject_type is not subject_type:
+                raise RuntimeError("line_identity_menu_role_not_active")
+            if current.rich_menu_sync_status is not LineRichMenuSyncStatus.PENDING:
+                schedule_manual_menu_resync(unit_of_work, binding, key.value.rsplit(":", 1)[-1])
+                unit_of_work.audit.append(LineAuditIntent(
+                    "line.identity.menu.resync_requested", command.actor.actor_id,
+                    "line_identity_binding", user_id.value,
+                ))
+            unit_of_work.receipts.append(IdempotencyReceipt(
+                key, fingerprint, f"line-identity-menu-resync:{subject_type.value}",
+            ))
+            result = _management_detail(unit_of_work, user_id, subject_type)
+            unit_of_work.commit()
+            return result
+
+    def delete_revoked_binding(self, command: LineIdentityBindingActionCommand) -> None:
+        require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
+        user_id = command.line_user_id
+        role = command.subject_type
+        expected_updated_at = command.expected_updated_at
+        if expected_updated_at is None:
+            raise RuntimeError("line_identity_binding_version_conflict")
+        if expected_updated_at.tzinfo is not None:
+            expected_updated_at = expected_updated_at.astimezone(timezone.utc).replace(tzinfo=None)
+        key = _derived_key(command.idempotency_key, f"delete-revoked:{user_id.value}")
+        fingerprint = fingerprint_payload({
+            "subject_type": role.value, "binding_version": command.expected_version.value,
+            "updated_at": expected_updated_at.isoformat(),
+        })
+        with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.outbox.lock_menu_user(user_id)
+            receipt = unit_of_work.receipts.get(key)
+            if receipt is not None:
+                if receipt.payload_fingerprint != fingerprint:
+                    raise RuntimeError("line_identity_binding_version_conflict")
+                return
+            current = unit_of_work.identities.get(user_id, role)
+            if current is None:
+                raise LookupError("line_identity_binding_not_found")
+            if current.version != command.expected_version:
+                raise RuntimeError("line_identity_binding_version_conflict")
+            if current.status is not LineIdentityBindingStatus.REVOKED:
+                raise RuntimeError("line_identity_binding_not_revoked")
+            owner = unit_of_work.identity_management.subject_candidate(role, current.subject_reference)
+            if _candidate_line_user_id(owner) == user_id:
+                raise RuntimeError("line_identity_owner_projection_conflict")
+            unit_of_work.identity_management.delete_revoked_binding(
+                user_id, role, command.expected_version, expected_updated_at, role_menu_definition_id(role),
+            )
+            unit_of_work.receipts.append(IdempotencyReceipt(key, fingerprint, "line-identity-binding-deleted"))
+            unit_of_work.audit.append(LineAuditIntent(
+                "line.identity.binding.deleted", command.actor.actor_id, "line_identity_binding", role.value,
+            ))
+            unit_of_work.commit()
+
     def replacement_candidates(self, query: LineIdentityCandidateQuery):
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.replacement_candidates(query)
@@ -81,6 +165,35 @@ class LineIdentityManagementApplication:
     def unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.list_unbound_pairing_candidates()
+
+    def delete_pending_provisional_registration(
+        self, registration_id: int, version: ExpectedVersion, actor: ActorContext, idempotency_key: IdempotencyKey,
+    ) -> None:
+        require_line_capability(actor, LineCapability.IDENTITY_BINDING_MANAGE)
+        fingerprint = fingerprint_payload({
+            "action": "delete-pending-line-pairing", "id": registration_id,
+            "version": version.value, "actor": actor.actor_id,
+        })
+        with self._unit_of_work_factory() as unit_of_work:
+            existing = unit_of_work.receipts.get(idempotency_key)
+            if existing is not None:
+                if existing.payload_fingerprint != fingerprint:
+                    raise RuntimeError("line_provisional_registration_idempotency_conflict")
+                return
+            try:
+                unit_of_work.identity_management.delete_pending_provisional_registration(registration_id, version)
+            except RuntimeError as error:
+                if str(error) != "line_provisional_registration_stale":
+                    raise
+                replay = unit_of_work.receipts.get(idempotency_key, for_update=True)
+                if replay is not None and replay.payload_fingerprint == fingerprint:
+                    return
+                raise
+            unit_of_work.receipts.append(IdempotencyReceipt(idempotency_key, fingerprint, f"line-pairing-deleted:{registration_id}"))
+            unit_of_work.audit.append(LineAuditIntent(
+                "line.identity.provisional.deleted", actor.actor_id, "provisional_client_registration", str(registration_id),
+            ))
+            unit_of_work.commit()
 
     def pair_provisional_registration(self, command: PairProvisionalRegistrationCommand) -> dict:
         require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)

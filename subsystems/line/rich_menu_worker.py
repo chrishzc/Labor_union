@@ -11,7 +11,6 @@ from typing import Callable
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.ports import (
-    LineRichMenuCleanupAnomaly,
     LineRichMenuCleanupWorkItem,
     LineRichMenuPublicationStep,
     LineRichMenuProviderPort,
@@ -271,6 +270,28 @@ class LineRichMenuWorker:
                 ),
                 existing,
             )
+        if step is LineRichMenuPublicationStep.CREATE:
+            create_attempts = attempts.get(step, ())
+            acknowledged = {event.provider_menu_id for event in create_attempts
+                            if event.outcome is LineRichMenuStepAttemptOutcome.SUCCESS}
+            if len(acknowledged) > 1:
+                raise RuntimeError("line_rich_menu_step_attempt_provider_id_conflict")
+            if acknowledged:
+                menu_id = acknowledged.pop()
+                self._append_step_receipt(item, request, step, menu_id, fingerprint_provider_id=None)
+                return LineRichMenuProviderOutcome(
+                    LineRichMenuProviderOutcomeType.SUCCESS, provider_menu_id=menu_id,
+                ), menu_id
+            if create_attempts and max(create_attempts, key=lambda event: event.attempt_number).outcome in {
+                LineRichMenuStepAttemptOutcome.LOST_ACK,
+                LineRichMenuStepAttemptOutcome.TIMEOUT,
+                LineRichMenuStepAttemptOutcome.UNAVAILABLE,
+            }:
+                return self._unknown_create_outcome(), None
+            self._append_step_attempt(
+                item, request, attempts, step, self._next_attempt_number(attempts, step),
+                LineRichMenuStepAttemptOutcome.LOST_ACK, None, "line_rich_menu_create_dispatch_started",
+            )
         attempt_number = self._next_attempt_number(attempts, step)
         try:
             outcome = call()
@@ -295,6 +316,8 @@ class LineRichMenuWorker:
                 provider_menu_id,
                 outcome.error_code,
             )
+            if step is LineRichMenuPublicationStep.CREATE:
+                return self._unknown_create_outcome(), None
             return outcome, provider_menu_id
         acknowledged_provider_id = outcome.provider_menu_id or provider_menu_id
         attempt_outcome = LineRichMenuStepAttemptOutcome(outcome.outcome_type.value)
@@ -316,6 +339,8 @@ class LineRichMenuWorker:
                 provider_menu_id,
                 missing_id.error_code,
             )
+            if step is LineRichMenuPublicationStep.CREATE:
+                return self._unknown_create_outcome(), None
             return missing_id, provider_menu_id
         acknowledged_ids = {
             event.provider_menu_id
@@ -340,6 +365,11 @@ class LineRichMenuWorker:
             acknowledged_provider_id=acknowledged_provider_id,
         )
         if outcome.outcome_type is not LineRichMenuProviderOutcomeType.SUCCESS:
+            if step is LineRichMenuPublicationStep.CREATE and outcome.outcome_type in {
+                LineRichMenuProviderOutcomeType.TIMEOUT,
+                LineRichMenuProviderOutcomeType.UNAVAILABLE,
+            }:
+                return self._unknown_create_outcome(), None
             return outcome, provider_menu_id
         self._append_step_receipt(
             item,
@@ -512,68 +542,27 @@ class LineRichMenuWorker:
                     "line_rich_menu_cleanup_receipt_provider_id_conflict"
                 )
             return
-        if not previous_provider_menu_id or previous_provider_menu_id == provider_menu_id:
-            self._append_step_receipt(
-                item,
-                request,
-                LineRichMenuPublicationStep.CLEANUP,
-                provider_menu_id,
-                fingerprint_provider_id=provider_menu_id,
-            )
-            return
-        attempt_number = self._next_attempt_number(
-            attempts,
-            LineRichMenuPublicationStep.CLEANUP,
-        )
-        try:
-            outcome = self._provider.delete(previous_provider_menu_id)
-        except Exception:
-            outcome = self._manual_recovery(
-                "line_rich_menu_cleanup_exception",
-                "LINE Rich Menu cleanup outcome was not acknowledged",
-            )
-            attempt_outcome = LineRichMenuStepAttemptOutcome.LOST_ACK
-        else:
-            attempt_outcome = LineRichMenuStepAttemptOutcome(outcome.outcome_type.value)
-        self._append_step_attempt(
+        # A previous menu can still be assigned to users while the rebindings run.
+        # Close the legacy cleanup step without deleting a published LINE asset.
+        self._append_step_receipt(
             item,
             request,
-            attempts,
             LineRichMenuPublicationStep.CLEANUP,
-            attempt_number,
-            attempt_outcome,
-            previous_provider_menu_id,
-            outcome.error_code,
-            acknowledged_provider_id=previous_provider_menu_id,
+            cleanup_target,
+            fingerprint_provider_id=cleanup_target,
         )
-        if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
-            self._append_step_receipt(
-                item,
-                request,
-                LineRichMenuPublicationStep.CLEANUP,
-                previous_provider_menu_id,
-                fingerprint_provider_id=previous_provider_menu_id,
-            )
-            return
-        with self._unit_of_work_factory() as unit_of_work:
-            repository = unit_of_work.rich_menu_publications
-            append_anomaly = getattr(repository, "append_cleanup_anomaly", None)
-            if not callable(append_anomaly):
-                raise RuntimeError("line_rich_menu_cleanup_anomaly_store_unavailable")
-            append_anomaly(
-                LineRichMenuCleanupAnomaly(
-                    item.publication.publication_id,
-                    outcome.error_code or "line_rich_menu_cleanup_failed",
-                    self._now(),
-                )
-            )
-            unit_of_work.commit()
 
     def _manual_recovery(self, error_code, error_message):
         return LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.REJECTED,
             error_code=error_code,
             error_message=error_message,
+        )
+
+    def _unknown_create_outcome(self):
+        return self._manual_recovery(
+            "line_rich_menu_create_outcome_unknown",
+            "LINE 選單建立結果不明，請先核對官方帳號的選單清單",
         )
 
     def _retryable_unknown_outcome(self, error_code, error_message):

@@ -37,12 +37,10 @@ from subsystems.contract_signing.client_contract_application import (
     ClientContractSigningApplication,
     ManualClientContractAttestationCommand,
     RecordClientSignedReturnCommand,
-    SendClientContractCommand,
 )
 from subsystems.contract_signing.staff_contract_application import (
     ManualStaffContractAttestationCommand,
     RecordStaffSignedReturnCommand,
-    SendStaffContractCommand,
     StaffContractSigningApplication,
 )
 from subsystems.contract_signing.document_query import (
@@ -53,12 +51,6 @@ from subsystems.contract_signing.document_query import (
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Contract Signing"])
 _MAXIMUM_DOCUMENT_SIZE = 20 * 1024 * 1024
-
-
-class SendContractBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    download_url: str = Field(min_length=9, max_length=500)
 
 
 class ManualContractAttestationBody(BaseModel):
@@ -88,20 +80,6 @@ def query_contract_signing(
         raise typed_http_error(404, "not_found", str(error), "找不到案件的契約簽署資料。", f"contract-signing-query:{case_no}") from error
     except Exception as error:
         raise typed_http_error(500, "internal", "contract_signing_query_failed", "契約簽署狀態查詢失敗。", f"contract-signing-query:{case_no}") from error
-
-
-@router.post("/{case_no}/contract-signing/staff-segments/{segment_id}/send", response_model=BaseResponse[ContractSigningReceiptView])
-def send_staff_contract(
-    body: SendContractBody,
-    case_no: str = Path(..., min_length=1, max_length=50),
-    segment_id: int = Path(..., gt=0),
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
-    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
-    application: StaffContractSigningApplication = Depends(get_staff_contract_signing_application),
-):
-    command = SendStaffContractCommand(case_no, segment_id, _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id), body.download_url)
-    return _response(lambda: application.send(command), "已建立月嫂契約 LINE 寄送任務", correlation_id)
 
 
 @router.post("/{case_no}/contract-signing/staff-segments/{segment_id}/signed-return", response_model=BaseResponse[ContractSigningReceiptView])
@@ -164,19 +142,6 @@ def record_manual_staff_contract_attestation(
         reason, preview_fingerprint, _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id),
     )
     return _response(lambda: application.record_manual_attestation(command), "已記錄人工月嫂簽約證據", correlation_id)
-
-
-@router.post("/{case_no}/contract-signing/client/send", response_model=BaseResponse[ContractSigningReceiptView])
-def send_client_contract(
-    body: SendContractBody,
-    case_no: str = Path(..., min_length=1, max_length=50),
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
-    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
-    application: ClientContractSigningApplication = Depends(get_client_contract_signing_application),
-):
-    command = SendClientContractCommand(case_no, _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id), body.download_url)
-    return _response(lambda: application.send(command), "已建立客戶契約 LINE 寄送任務", correlation_id)
 
 
 @router.post("/{case_no}/contract-signing/client/signed-return", response_model=BaseResponse[ContractSigningReceiptView])
@@ -360,8 +325,6 @@ def _contract_signing_status_view(status: ContractSigningStatus) -> ContractSign
 
 
 _DOMAIN_BLOCKER_CODES = frozenset({
-    "contract_line_recipient_unbound",
-    "contract_line_recipient_subject_mismatch",
     "contract_signing_segment_not_found",
     "staff_contract_not_sent",
     "staff_commitment_required_before_client_contract",

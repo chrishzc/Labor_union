@@ -26,6 +26,8 @@ class ReadCursor:
     def __exit__(self, *args): self.cursor.close()
     def execute(self, sql, params=()):
         assert sql.strip().upper().startswith('SELECT'), 'query attempted a write'
+        assert 'aggregate_identity=CAST(menu.id AS CHAR)' not in sql
+        assert 'aggregate_identity=CAST(reset.id AS CHAR)' not in sql
         self.cursor.execute(sql.replace('%s', '?').replace(' AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci', ' AS TEXT)').replace(' AS CHAR)', ' AS TEXT)'), params)
     def fetchone(self):
         row = self.cursor.fetchone()
@@ -74,12 +76,69 @@ def test_explicit_role_detail_never_follows_the_other_role_or_its_revocation(rep
 
 
 def test_menu_sync_requires_verified_completion_and_uses_latest_job(repository):
-    failed = repository.detail(LineUserId('U-shared'), Role.CUSTOMER)
-    verified = repository.detail(LineUserId('U-other'), Role.CUSTOMER)
+    page = repository.list(LineIdentityBindingListQuery(subject_type=Role.CUSTOMER))
+    assert page.total == 2
+    by_user = {item.line_user_id: item for item in page.items}
+    failed = by_user['U-shared']
+    verified = by_user['U-other']
     assert failed.status == verified.status == Status.BOUND
     assert failed.rich_menu_sync_status == 'failed'
     assert failed.rich_menu_sync_error_code == 'line_http_401'
     assert verified.rich_menu_sync_status == 'synced'
+
+
+def test_delete_revoked_binding_removes_role_records_in_foreign_key_order():
+    conn = sqlite3.connect(':memory:')
+    conn.executescript("""
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE line_identity_role_bindings(
+            line_user_id TEXT, subject_type TEXT, binding_status TEXT, aggregate_version INT, updated_at_utc TEXT,
+            PRIMARY KEY (line_user_id,subject_type));
+        CREATE TABLE line_identity_role_binding_events(
+            line_user_id TEXT, subject_type TEXT,
+            FOREIGN KEY(line_user_id,subject_type) REFERENCES line_identity_role_bindings);
+        CREATE TABLE line_identity_revocation_requests(
+            id INTEGER PRIMARY KEY,line_user_id TEXT,subject_type TEXT,
+            FOREIGN KEY(line_user_id,subject_type) REFERENCES line_identity_role_bindings);
+        CREATE TABLE line_domain_outbox(
+            intent_type TEXT,aggregate_type TEXT,aggregate_identity TEXT,
+            idempotency_identity TEXT,payload_snapshot TEXT);
+        CREATE TABLE line_platform_users(
+            line_user_id TEXT,selected_identity_role TEXT,aggregate_version INT);
+        INSERT INTO line_identity_role_bindings VALUES
+            ('U-fixture','customer','revoked',4,'2026-11-13 00:00:00'),
+            ('U-fixture','staff','bound',8,'2026-11-13 00:00:00');
+        INSERT INTO line_identity_role_binding_events VALUES ('U-fixture','customer'),('U-fixture','staff');
+        INSERT INTO line_identity_revocation_requests VALUES (7,'U-fixture','customer');
+        INSERT INTO line_domain_outbox VALUES
+            ('line.identity.revocation.menu_reset','line_identity_revocation','7','reset','{}'),
+            ('line.rich_menu.bind','line_identity','U-fixture','customer','{"menu_definition_id":"customer_menu"}'),
+            ('line.rich_menu.bind','line_identity','U-fixture','staff','{"menu_definition_id":"staff_menu"}');
+        INSERT INTO line_platform_users VALUES ('U-fixture','customer',2);
+    """)
+
+    class DeleteCursor(ReadCursor):
+        def execute(self, sql, params=()):
+            if sql.startswith('DELETE job'):
+                sql = (
+                    "DELETE FROM line_domain_outbox WHERE intent_type=%s AND aggregate_type='line_identity_revocation' "
+                    "AND aggregate_identity IN (SELECT CAST(id AS TEXT) FROM line_identity_revocation_requests "
+                    "WHERE line_user_id=%s AND subject_type=%s)"
+                )
+            sql = sql.replace('%s', '?').replace('%%', '%').replace('JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,\'$.menu_definition_id\'))', "JSON_EXTRACT(payload_snapshot,'$.menu_definition_id')")
+            self.cursor.execute(sql, params)
+            self.rowcount = self.cursor.rowcount
+
+    try:
+        repo = MySqlLineIdentityManagementRepository(SimpleNamespace(cursor=lambda: DeleteCursor(conn)))
+        repo.delete_revoked_binding(LineUserId('U-fixture'), Role.CUSTOMER, ExpectedVersion(4), datetime(2026, 11, 13), 'customer_menu')
+        assert conn.execute('SELECT subject_type FROM line_identity_role_bindings').fetchall() == [('staff',)]
+        assert conn.execute('SELECT subject_type FROM line_identity_role_binding_events').fetchall() == [('staff',)]
+        assert conn.execute('SELECT id FROM line_identity_revocation_requests').fetchall() == []
+        assert conn.execute('SELECT idempotency_identity FROM line_domain_outbox').fetchall() == [('staff',)]
+        assert conn.execute('SELECT selected_identity_role,aggregate_version FROM line_platform_users').fetchone() == (None, 3)
+    finally:
+        conn.close()
 
 
 @pytest.fixture

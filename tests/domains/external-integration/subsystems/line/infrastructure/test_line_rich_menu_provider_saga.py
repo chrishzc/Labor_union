@@ -5,8 +5,8 @@ Description: 驗證 Rich Menu provider 分步 saga、cleanup crash redrive 與�
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 import requests
@@ -297,7 +297,7 @@ def test_restore_default_menu_requires_readback_after_a_successful_delete() -> N
     assert result.outcome_type is LineRichMenuProviderOutcomeType.UNAVAILABLE
 
 
-def test_adapter_exposes_stepwise_calls_with_stable_retry_keys():
+def test_adapter_omits_unsupported_retry_header_from_all_publication_steps():
     session = _Session(
         [
             _Response(200, {"richMenuId": "richmenu-7"}),
@@ -315,18 +315,14 @@ def test_adapter_exposes_stepwise_calls_with_stable_retry_keys():
     assert adapter.upsert_alias(request, "richmenu-7").provider_menu_id == "richmenu-7"
     assert adapter.switch_default(request, "richmenu-7").provider_menu_id == "richmenu-7"
     assert adapter.delete("old-menu").provider_menu_id == "old-menu"
-    assert session.calls[0][2]["headers"]["X-Line-Retry-Key"] == str(
-        uuid5(NAMESPACE_URL, "line-rich-menu:7:create")
-    )
-    assert session.calls[1][2]["headers"]["X-Line-Retry-Key"] == str(
-        uuid5(NAMESPACE_URL, "line-rich-menu:7:upload")
-    )
+    assert all("X-Line-Retry-Key" not in call[2]["headers"] for call in session.calls)
 
 
-def test_alias_conflict_is_idempotent_only_when_existing_target_matches():
+@pytest.mark.parametrize("status", [400, 409])
+def test_alias_conflict_is_idempotent_only_when_existing_target_matches(status):
     session = _Session(
         [
-            _Response(409),
+            _Response(status),
             _Response(200, {"richMenuId": "richmenu-7"}),
         ]
     )
@@ -345,6 +341,24 @@ def test_alias_conflict_is_idempotent_only_when_existing_target_matches():
 
     assert outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
     assert [call[0] for call in session.calls] == ["post", "get"]
+
+
+@pytest.mark.parametrize("stored_image", [b"png", b"different"])
+def test_upload_recovery_accepts_only_the_same_image(stored_image):
+    image = _Response(200)
+    image.content = stored_image
+    session = _Session([_Response(400), image])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"png", "image/png"), session=session)
+    request = LineRichMenuProviderRequest(LineRichMenuPublicationId(7), _definition(), "image/ref")
+    result = adapter.upload(request, "richmenu-7")
+    assert [call[0] for call in session.calls] == ["post", "get"]
+    assert (result.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS) == (stored_image == b"png")
+
+
+def test_cleanup_accepts_a_menu_that_is_already_absent():
+    session = _Session([_Response(404)])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"", "image/png"), session=session)
+    assert adapter.delete("old-menu").outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
 
 
 def test_alias_conflict_with_different_target_fails_closed_without_overwrite():
@@ -445,6 +459,7 @@ def test_worker_retries_only_failed_step_without_recreating_asset():
         "switch",
     ]
     assert [event.outcome for event in repository.attempts] == [
+        LineRichMenuStepAttemptOutcome.LOST_ACK,
         LineRichMenuStepAttemptOutcome.SUCCESS,
         LineRichMenuStepAttemptOutcome.RATE_LIMITED,
         LineRichMenuStepAttemptOutcome.SUCCESS,
@@ -468,7 +483,7 @@ def test_worker_retries_only_failed_step_without_recreating_asset():
         ),
     ],
 )
-def test_worker_reclaims_timeout_or_unavailable_with_same_provider_retry_key(
+def test_worker_stops_ambiguous_create_without_resending(
     failure,
     expected_outcome,
 ):
@@ -492,18 +507,16 @@ def test_worker_reclaims_timeout_or_unavailable_with_same_provider_retry_key(
 
     assert worker.run_once() == 1
     assert repository.attempts[-1].outcome is expected_outcome
-    assert repository.recorded[-1].provider_outcome.outcome_type.value == expected_outcome.value
+    assert repository.recorded[-1].provider_outcome.error_code == "line_rich_menu_create_outcome_unknown"
 
     assert worker.run_once() == 1
     create_calls = [call for call in session.calls if call[1].endswith("/richmenu")]
-    assert len(create_calls) == 2
-    assert create_calls[0][2]["headers"]["X-Line-Retry-Key"] == create_calls[1][2][
-        "headers"
-    ]["X-Line-Retry-Key"]
-    assert repository.recorded[-1].provider_outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+    assert len(create_calls) == 1
+    assert "X-Line-Retry-Key" not in create_calls[0][2]["headers"]
+    assert repository.recorded[-1].provider_outcome.error_code == "line_rich_menu_create_outcome_unknown"
 
 
-def test_worker_unknown_provider_exception_is_lost_ack_and_retries_without_leaking():
+def test_worker_unknown_create_exception_stops_without_leaking():
     item = _item()
     repository = _PublicationRepository(item, batches=[(item,), (item,)])
     session = _Session(
@@ -525,100 +538,63 @@ def test_worker_unknown_provider_exception_is_lost_ack_and_retries_without_leaki
     assert worker.run_once() == 1
     assert repository.attempts[-1].outcome is LineRichMenuStepAttemptOutcome.LOST_ACK
     first_outcome = repository.recorded[-1].provider_outcome
-    assert first_outcome.outcome_type is LineRichMenuProviderOutcomeType.UNAVAILABLE
+    assert first_outcome.outcome_type is LineRichMenuProviderOutcomeType.REJECTED
     assert "sensitive-provider-token" not in (first_outcome.error_message or "")
 
     assert worker.run_once() == 1
     create_calls = [call for call in session.calls if call[1].endswith("/richmenu")]
-    assert len(create_calls) == 2
-    assert create_calls[0][2]["headers"]["X-Line-Retry-Key"] == create_calls[1][2][
-        "headers"
-    ]["X-Line-Retry-Key"]
-    assert repository.recorded[-1].provider_outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+    assert len(create_calls) == 1
+    assert "X-Line-Retry-Key" not in create_calls[0][2]["headers"]
+    assert repository.recorded[-1].provider_outcome.error_code == "line_rich_menu_create_outcome_unknown"
 
 
-def test_cleanup_failure_keeps_publication_published_and_records_anomaly():
+def test_process_loss_during_create_never_reissues_the_post():
+    item = _item()
+    repository = _PublicationRepository(item, batches=[(item,), (item,)])
+    session = _Session([SystemExit("simulated process loss")])
+    provider = LineRichMenuApiAdapter(
+        "token", lambda _: (b"png", "image/png"), session=session,
+    )
+    worker = _worker(repository, provider)
+
+    with pytest.raises(SystemExit, match="simulated process loss"):
+        worker.run_once()
+    assert repository.attempts[-1].error_code == "line_rich_menu_create_dispatch_started"
+    assert worker.run_once() == 1
+    assert len(session.calls) == 1
+    assert repository.recorded[-1].provider_outcome.error_code == "line_rich_menu_create_outcome_unknown"
+
+
+def test_publication_keeps_old_menu_available_for_users_waiting_for_rebinding():
     item = _item()
     repository = _PublicationRepository(item, previous_provider_menu_id="old-menu")
-    provider = _Provider(
-        None,
-        {
-            "create": [_outcome(LineRichMenuProviderOutcomeType.SUCCESS, "new-menu")],
-            "upload": [_outcome(LineRichMenuProviderOutcomeType.SUCCESS, "new-menu")],
-            "link": [_outcome(LineRichMenuProviderOutcomeType.SUCCESS, "new-menu")],
-            "switch": [_outcome(LineRichMenuProviderOutcomeType.SUCCESS, "new-menu")],
-            "cleanup": [_outcome(LineRichMenuProviderOutcomeType.UNAVAILABLE)],
-        },
-    )
+    provider = _Provider(None, {
+        step: [_outcome(LineRichMenuProviderOutcomeType.SUCCESS, "new-menu")]
+        for step in ("create", "upload", "link", "switch")
+    })
 
     assert _worker(repository, provider).run_once() == 1
+
     assert repository.recorded[-1].provider_outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
-    assert len(repository.anomalies) == 1
-    assert repository.attempts[-1].step is LineRichMenuPublicationStep.CLEANUP
-    assert repository.attempts[-1].outcome is LineRichMenuStepAttemptOutcome.UNAVAILABLE
-    assert [step for step, _ in provider.calls] == ["create", "upload", "link", "switch", "cleanup"]
-
-
-def test_cleanup_only_redrive_never_replays_publication_steps_and_remains_published():
-    item = _cleanup_item()
-    repository = _PublicationRepository(item, batches=[(item,), (item,)])
-    provider = _Provider(
-        None,
-        {
-            "create": [],
-            "upload": [],
-            "link": [],
-            "switch": [],
-            "cleanup": [
-                _outcome(LineRichMenuProviderOutcomeType.UNAVAILABLE),
-                _outcome(LineRichMenuProviderOutcomeType.SUCCESS, "old-menu"),
-            ],
-        },
-    )
-    worker = _worker(repository, provider)
-
-    assert worker.run_once() == 1
-    assert worker.run_once() == 1
-
-    assert [step for step, _ in provider.calls] == ["cleanup", "cleanup"]
-    assert repository.recorded == []
-    assert item.publication.status is LineRichMenuPublicationStatus.PUBLISHED
-    assert [event.outcome for event in repository.attempts] == [
-        LineRichMenuStepAttemptOutcome.UNAVAILABLE,
-        LineRichMenuStepAttemptOutcome.SUCCESS,
-    ]
-    assert len(repository.anomalies) == 1
+    assert [step for step, _ in provider.calls] == ["create", "upload", "link", "switch"]
     assert repository.receipts[-1].step is LineRichMenuPublicationStep.CLEANUP
+    assert repository.receipts[-1].provider_menu_id == "old-menu"
 
 
-def test_cleanup_only_crash_is_durable_and_can_be_redriven_without_republishing():
+def test_legacy_cleanup_redrive_records_retention_without_calling_line():
     item = _cleanup_item()
-    repository = _PublicationRepository(item, batches=[(item,), (item,)])
-    provider = _Provider(
-        None,
-        {
-            "create": [],
-            "upload": [],
-            "link": [],
-            "switch": [],
-            "cleanup": [
-                TimeoutError("provider response lost"),
-                _outcome(LineRichMenuProviderOutcomeType.SUCCESS, "old-menu"),
-            ],
-        },
-    )
+    repository = _PublicationRepository(item, batches=[(item,), (item,)], receipt_failures=1)
+    provider = _Provider(None, {})
     worker = _worker(repository, provider)
 
-    assert worker.run_once() == 1
+    with pytest.raises(RuntimeError, match="simulated_process_crash"):
+        worker.run_once()
     assert worker.run_once() == 1
 
-    assert [step for step, _ in provider.calls] == ["cleanup", "cleanup"]
+    assert provider.calls == []
     assert repository.recorded == []
-    assert [event.outcome for event in repository.attempts] == [
-        LineRichMenuStepAttemptOutcome.LOST_ACK,
-        LineRichMenuStepAttemptOutcome.SUCCESS,
-    ]
-    assert repository.anomalies[0].error_code == "line_rich_menu_cleanup_exception"
+    assert repository.attempts == []
+    assert repository.receipts[-1].step is LineRichMenuPublicationStep.CLEANUP
 
 
 def test_cleanup_only_with_existing_ack_is_a_provider_zero_write_noop():
@@ -681,7 +657,7 @@ def test_cleanup_only_fails_closed_when_ack_fingerprint_does_not_match():
     assert repository.recorded == []
 
 
-def test_success_attempt_without_ack_retries_same_step_and_then_advances():
+def test_success_attempt_without_receipt_recovers_known_menu_id():
     item = _item()
     event = LineRichMenuStepAttemptEvent(
         item.publication.publication_id,
@@ -715,17 +691,17 @@ def test_success_attempt_without_ack_retries_same_step_and_then_advances():
     )
 
     assert _worker(repository, provider).run_once() == 1
-    assert [step for step, _ in provider.calls] == ["create", "upload", "link", "switch"]
+    assert [step for step, _ in provider.calls] == ["upload", "link", "switch"]
     outcome = repository.recorded[-1].provider_outcome
     assert outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
     assert [
         event.attempt_number
         for event in repository.attempts
         if event.step is LineRichMenuPublicationStep.CREATE
-    ] == [1, 2]
+    ] == [1]
 
 
-def test_process_crash_after_success_attempt_reclaims_same_key_and_does_not_skip_step():
+def test_process_crash_after_success_attempt_recovers_without_creating_again():
     item = _item()
     repository = _PublicationRepository(
         item,
@@ -734,7 +710,6 @@ def test_process_crash_after_success_attempt_reclaims_same_key_and_does_not_skip
     )
     session = _Session(
         [
-            _Response(200, {"richMenuId": "richmenu-7"}),
             _Response(200, {"richMenuId": "richmenu-7"}),
             _Response(200),
             _Response(200),
@@ -756,10 +731,8 @@ def test_process_crash_after_success_attempt_reclaims_same_key_and_does_not_skip
 
     assert worker.run_once() == 1
     create_calls = [call for call in session.calls if call[1].endswith("/richmenu")]
-    assert len(create_calls) == 2
-    assert create_calls[0][2]["headers"]["X-Line-Retry-Key"] == create_calls[1][2][
-        "headers"
-    ]["X-Line-Retry-Key"]
+    assert len(create_calls) == 1
+    assert "X-Line-Retry-Key" not in create_calls[0][2]["headers"]
     assert repository.recorded[-1].provider_outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
 
 
@@ -792,7 +765,7 @@ def test_reclaim_fails_closed_when_attempt_fingerprint_does_not_match_request():
     assert repository.recorded == []
 
 
-def test_reclaim_fails_closed_when_success_retry_returns_different_provider_id():
+def test_reclaim_fails_closed_when_persisted_create_ids_conflict():
     item = _item()
     event = LineRichMenuStepAttemptEvent(
         item.publication.publication_id,
@@ -813,7 +786,11 @@ def test_reclaim_fails_closed_when_success_retry_returns_different_provider_id()
         item.correlation_id,
         "richmenu-7",
     )
-    repository = _PublicationRepository(item, attempts=(event,))
+    conflict = replace(
+        event, attempt_number=2, idempotency_key=IdempotencyKey("line-rich-menu:7:create:attempt:2"),
+        provider_menu_id="different-menu",
+    )
+    repository = _PublicationRepository(item, attempts=(event, conflict))
     provider = _Provider(
         None,
         {
@@ -833,6 +810,6 @@ def test_reclaim_fails_closed_when_success_retry_returns_different_provider_id()
     ):
         _worker(repository, provider).run_once()
 
-    assert [step for step, _ in provider.calls] == ["create"]
+    assert [step for step, _ in provider.calls] == []
     assert repository.receipts == []
     assert repository.recorded == []

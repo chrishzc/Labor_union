@@ -32,6 +32,7 @@ def _intent(*, id_number: str | None) -> ProvisionalRegistrationIntent:
         id_number=id_number,
         liff_config_revision=None,
         survey_details={"特殊計費:胎數": "單胞胎"},
+        passbook_image_id="pbk_test_001",
     )
 
 

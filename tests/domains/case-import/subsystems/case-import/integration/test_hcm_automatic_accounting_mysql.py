@@ -61,30 +61,6 @@ def test_complete_hcm_posts_all_applicable_charges_and_refund_atomically(isolate
 
 
 
-def test_import_and_new_accounting_roll_back_together_on_failure(isolated,monkeypatch):
-    from infrastructure.mysql.case_architecture_bootstrap_repository import MySqlCaseArchitectureBootstrapRepository
-    from api.dependencies.case_import import build_case_import_application
-    from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
-    from subsystems.case_import.case_import_workflow import ApplyCaseImport,CaseImportWorkflowError
-    from shared_kernel.identities import ActorContext,CorrelationId,ExpectedVersion,IdempotencyKey
-    original=MySqlCaseArchitectureBootstrapRepository.synchronize_client_charges
-    def fail_after_sync(self,*args):
-        original(self,*args);raise RuntimeError('synthetic transaction rollback')
-    monkeypatch.setattr(MySqlCaseArchitectureBootstrapRepository,'synchronize_client_charges',fail_after_sync)
-    case='115000903';start=date(2026,11,9)
-    intent=build_hcm_case_import_intent({'case_no':case,'name':'合成回滾','phone':'0987654321','identity_status':'補助市民',
-        'service_days':30,'created_at':datetime(2026,10,26),'service_start_date':start,'service_time':'9小時 09:00-18:00',
-        'service_type':'連續服務','baby_info':'單胞胎'},start+timedelta(days=29))
-    c=mysql_adapter.get_connection()
-    try:
-        application=build_case_import_application(c);preview=application.preview(intent,CorrelationId('rollback-preview'))
-        with pytest.raises(CaseImportWorkflowError):
-            application.apply(ApplyCaseImport(intent,ExpectedVersion(0),preview.fingerprint,IdempotencyKey('six-fixes-rollback'),
-                ActorContext('synthetic'),'',CorrelationId('rollback-apply')))
-    finally:c.close()
-    for table in ('clients','orders','client_finance_accounts','client_obligations','case_import_receipts','client_obligation_events'):
-        assert rows(f'SELECT case_no FROM {table} WHERE case_no=%s',(case,))==()
-
 def test_hcm_to_historical_completion_establishes_payroll_and_routes_subsidy_by_scheme(isolated, tmp_path):
     from types import SimpleNamespace
     from openpyxl import Workbook

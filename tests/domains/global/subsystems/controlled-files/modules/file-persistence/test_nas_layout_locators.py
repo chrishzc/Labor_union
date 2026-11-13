@@ -43,15 +43,18 @@ def test_staff_files_finalize_to_named_owner_directory_and_download_by_old_stagi
     assert download.content == content
 
 
-@pytest.mark.parametrize("purpose,kind,label", [(Purpose.BABY_LOG_PHOTO, "baby_log_photo", "寶寶"), (Purpose.MEAL_PHOTO, "meal_photo", "餐點")])
-def test_care_media_keeps_scheduling_key_and_uses_case_date_directory(production, purpose, kind, label):
-    digest = hashlib.sha256(b"fixture photo").hexdigest()
-    key = canonical_scheduling_object_key(case_no="2026-A001", service_date=date(2026, 10, 30), attachment_kind=kind, sequence=2, sha256_digest=digest)
-    candidate = SimpleNamespace(owner=Owner.SCHEDULING, purpose=purpose, subject_reference="2026-A001", object_key=key,
-                                mime_type="image/jpeg", sha256_digest=digest)
+def test_client_passbook_cover_uses_passbook_directory(production):
+    digest = hashlib.sha256(b"fixture passbook").hexdigest()
+    candidate = SimpleNamespace(
+        owner=Owner.CLIENTS,
+        purpose=Purpose.CLIENT_PASSBOOK_COVER,
+        subject_reference="42",
+        object_key="clients/42/passbook_cover",
+        mime_type="image/jpeg",
+        sha256_digest=digest,
+    )
     locator = _storage_locator_for(candidate, {})
-    assert locator == f"{layout.SCHEDULING_DIRECTORY}/2026-A001/2026-10-30/照護照片_2026-10-30_{label}_2_{digest[:6]}.jpg"
-    assert candidate.object_key == key
+    assert locator == f"{layout.CLIENT_PASSBOOK_DIRECTORY}/42/存摺封面_42_v1_{digest[:6]}.jpg"
 
 
 def test_contract_pdf_and_menu_have_their_business_directories(production):
@@ -107,9 +110,20 @@ def test_development_files_do_not_gain_new_finalize_jobs(production, monkeypatch
     MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(candidate, "unused", datetime.now(timezone.utc))
 
 
-def test_scheduling_keeps_its_existing_attachment_owned_finalize_intent(production):
-    connection = SimpleNamespace(cursor=lambda: pytest.fail("Scheduling already owns its finalize queue write"))
-    MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(SimpleNamespace(owner=Owner.SCHEDULING, purpose=Purpose.BABY_LOG_PHOTO), "unused", datetime.now(timezone.utc))
+def test_client_passbook_cover_enqueues_finalize_intent(production, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    calls = []
+    class Cursor:
+        rowcount = 1
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, sql, parameters): calls.append((sql, parameters))
+    connection = SimpleNamespace(cursor=lambda: Cursor(), commit=lambda: pytest.fail("no hidden commit"))
+    candidate = SimpleNamespace(owner=Owner.CLIENTS, purpose=Purpose.CLIENT_PASSBOOK_COVER,
+                                staging_id="cfs_" + "a" * 32, sha256_digest="c" * 64)
+    file_id = "cf_" + "b" * 32
+    MySqlControlledFileWorkflowRepository(connection)._enqueue_nas_finalize(candidate, file_id, datetime.now(timezone.utc))
+    assert len(calls) == 1 and "INSERT INTO controlled_file_finalize_intents" in calls[0][0]
 
 
 @pytest.mark.parametrize("local_documents_only", [False, True])
@@ -133,6 +147,7 @@ def test_new_layout_runner_filters_out_all_existing_legacy_locators(production, 
             "staff", "staff_certificate", layout.STAFF_DIRECTORY,
             "staff", "staff_health_exam", layout.STAFF_DIRECTORY,
             "contract_signing", "final_signed_contract", layout.ORDERS_DIRECTORY,
+            "clients", "client_passbook_cover", layout.CLIENT_PASSBOOK_DIRECTORY,
         )
     else:
         assert calls[0][1][1:-1] == layout.BUSINESS_DIRECTORIES[:4]

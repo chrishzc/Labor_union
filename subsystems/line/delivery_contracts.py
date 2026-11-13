@@ -29,7 +29,9 @@ _MAXIMUM_CLAIM_BATCH_SIZE = 100
 
 # Webhook-bound replies use this source for one-shot delivery and audit.
 REPLY_ONLY_WEBHOOK_SOURCE = "line_webhook_reply"
-RETIRED_SIGNING_REMINDER_SOURCES = frozenset({"contract_external_signing_session", "contract_signing_case"})
+RETIRED_CONTRACT_DELIVERY_SOURCES = frozenset({
+    "contract_external_signing_session", "contract_signing_case", "contract_document_version",
+})
 RETIRED_CANDIDATE_COORDINATION_SOURCES = (
     "candidate_contact_adjustment",
     "candidate_contact_answer",

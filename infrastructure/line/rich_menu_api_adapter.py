@@ -1,19 +1,20 @@
 """
 File: rich_menu_api_adapter.py
-Description: 提供 LINE Rich Menu 分步 provider 操作與穩定重試識別。
+Description: 提供 LINE Rich Menu 分步發布與個人選單讀回。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import json
+import re
 from typing import Any
 
 import requests
-from uuid import NAMESPACE_URL, uuid5
 
 from domains.line.identities import LineUserId
-from infrastructure.line.http_outcomes import response_failure
+from infrastructure.line.http_outcomes import response_failure, response_request_id
 from subsystems.line.rich_menu_contracts import (
     LineRichMenuProviderOutcome,
     LineRichMenuProviderOutcomeType,
@@ -73,7 +74,6 @@ class LineRichMenuApiAdapter:
     ) -> LineRichMenuProviderOutcome:
         created = self._create(
             rich_menu_provider_definition(request.definition_json),
-            retry_key=_step_retry_key(request, "create"),
         )
         if isinstance(created, str):
             return LineRichMenuProviderOutcome(
@@ -92,7 +92,6 @@ class LineRichMenuApiAdapter:
             provider_menu_id,
             image_bytes,
             content_type,
-            retry_key=_step_retry_key(request, "upload"),
         ) or LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.SUCCESS,
             provider_menu_id=provider_menu_id,
@@ -106,7 +105,6 @@ class LineRichMenuApiAdapter:
         result = self._set_alias(
             _rich_menu_alias_id(request.definition_json),
             provider_menu_id,
-            retry_key=_step_retry_key(request, "link"),
         )
         return result or LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.SUCCESS,
@@ -123,36 +121,54 @@ class LineRichMenuApiAdapter:
                 LineRichMenuProviderOutcomeType.SUCCESS,
                 provider_menu_id=provider_menu_id,
             )
-        return self._empty_success_operation(
-            "post",
-            f"{_API_ROOT}/user/all/richmenu/{provider_menu_id}",
-            provider_menu_id,
-            retry_key=_step_retry_key(request, "switch"),
-        )
+        return self.set_default(provider_menu_id)
 
     def delete(self, provider_menu_id: str) -> LineRichMenuProviderOutcome:
-        return self._empty_success_operation(
+        outcome = self._empty_success_operation(
             "delete",
             f"{_API_ROOT}/richmenu/{provider_menu_id}",
             provider_menu_id,
-            retry_key=_cleanup_retry_key(provider_menu_id),
         )
+        if outcome.error_code == "line_http_404":
+            return LineRichMenuProviderOutcome(
+                LineRichMenuProviderOutcomeType.SUCCESS, provider_menu_id=provider_menu_id,
+            )
+        return outcome
 
     def link_to_user(
         self,
         provider_menu_id: str,
         line_user_id: LineUserId,
     ) -> LineRichMenuProviderOutcome:
-        return self._empty_success_operation(
+        response = self._request(
             "post",
             f"{_API_ROOT}/user/{line_user_id.value}/richmenu/{provider_menu_id}",
-            provider_menu_id,
         )
+        if _successful(response):
+            return LineRichMenuProviderOutcome(
+                LineRichMenuProviderOutcomeType.SUCCESS, provider_menu_id=provider_menu_id,
+            )
+        if response.status_code == 404:
+            return _personal_menu_failure(response, "link", "line_rich_menu_link_menu_missing")
+        if response.status_code == 400:
+            # LINE documents both invalid user IDs and missing menu images for link 400.
+            current = self.get_user_rich_menu(line_user_id)
+            if current.error_code == "line_rich_menu_readback_user_invalid":
+                return _personal_menu_failure(response, "link", "line_rich_menu_readback_user_invalid")
+            if current.provider_menu_id is not None or current.error_code == "line_http_404":
+                image = self._request("get", f"{_DATA_ROOT}/richmenu/{provider_menu_id}/content", stream=True)
+                if not isinstance(image, _SyntheticFailure):
+                    image.close()
+                if image.status_code == 404:
+                    return _personal_menu_failure(response, "link", "line_rich_menu_image_unavailable")
+        return _personal_menu_failure(response, "link")
 
     def get_user_rich_menu(self, line_user_id: LineUserId) -> LineRichMenuProviderOutcome:
         response = self._request("get", f"{_API_ROOT}/user/{line_user_id.value}/richmenu")
+        if response.status_code == 400:
+            return _personal_menu_failure(response, "readback", "line_rich_menu_readback_user_invalid")
         if not _successful(response):
-            return _rich_menu_failure(response)
+            return _personal_menu_failure(response, "readback")
         try:
             return LineRichMenuProviderOutcome(
                 LineRichMenuProviderOutcomeType.SUCCESS,
@@ -201,15 +217,12 @@ class LineRichMenuApiAdapter:
             "post",
             f"{_API_ROOT}/user/all/richmenu/{provider_menu_id}",
             provider_menu_id,
-            retry_key=_cleanup_retry_key(provider_menu_id),
         )
 
     def _set_alias(
         self,
         alias_id: str | None,
         provider_menu_id: str,
-        *,
-        retry_key: str | None = None,
     ):
         if not alias_id:
             return None
@@ -223,17 +236,17 @@ class LineRichMenuApiAdapter:
             f"{_API_ROOT}/richmenu/alias",
             data=payload,
             content_type="application/json",
-            retry_key=retry_key,
         )
         if _successful(response):
             return None
-        if int(getattr(response, "status_code")) != 409:
+        if response.status_code not in (400, 409):
             return _rich_menu_failure(response)
         lookup = self._request(
             "get",
             f"{_API_ROOT}/richmenu/alias/{alias_id}",
-            retry_key=retry_key,
         )
+        if lookup.status_code == 404:
+            return _rich_menu_failure(response)
         if not _successful(lookup):
             return _rich_menu_failure(lookup)
         try:
@@ -248,13 +261,12 @@ class LineRichMenuApiAdapter:
             error_message="LINE Rich Menu alias points to a different provider menu",
         )
 
-    def _create(self, definition_json: str, *, retry_key: str | None = None):
+    def _create(self, definition_json: str):
         response = self._request(
             "post",
             f"{_API_ROOT}/richmenu",
             data=definition_json,
             content_type="application/json",
-            retry_key=retry_key,
         )
         if not _successful(response):
             return _rich_menu_failure(response)
@@ -266,18 +278,23 @@ class LineRichMenuApiAdapter:
             return _adapter_failure("line_rich_menu_response_invalid")
         return provider_menu_id
 
-    def _upload(self, menu_id, image_bytes, content_type, *, retry_key: str | None = None):
+    def _upload(self, menu_id, image_bytes, content_type):
         response = self._request(
             "post",
             f"{_DATA_ROOT}/richmenu/{menu_id}/content",
             data=image_bytes,
             content_type=content_type,
-            retry_key=retry_key,
         )
-        return None if _successful(response) else _rich_menu_failure(response)
+        if _successful(response):
+            return None
+        if response.status_code == 400:
+            current = self._request("get", f"{_DATA_ROOT}/richmenu/{menu_id}/content")
+            if _successful(current) and current.content == image_bytes:
+                return None
+        return _rich_menu_failure(response)
 
-    def _empty_success_operation(self, method, url, provider_menu_id, *, retry_key=None):
-        response = self._request(method, url, retry_key=retry_key)
+    def _empty_success_operation(self, method, url, provider_menu_id):
+        response = self._request(method, url)
         if not _successful(response):
             return _rich_menu_failure(response)
         return LineRichMenuProviderOutcome(
@@ -285,12 +302,10 @@ class LineRichMenuApiAdapter:
             provider_menu_id=provider_menu_id,
         )
 
-    def _request(self, method, url, *, data=None, content_type=None, retry_key=None):
+    def _request(self, method, url, *, data=None, content_type=None, stream=False):
         headers = {"Authorization": f"Bearer {self._access_token}"}
         if content_type is not None:
             headers["Content-Type"] = content_type
-        if retry_key is not None:
-            headers["X-Line-Retry-Key"] = retry_key
         try:
             return self._session.request(
                 method,
@@ -298,6 +313,7 @@ class LineRichMenuApiAdapter:
                 headers=headers,
                 data=data,
                 timeout=self._timeout_seconds,
+                **({"stream": True} if stream else {}),
             )
         except requests.Timeout:
             return _SyntheticFailure("timeout")
@@ -317,14 +333,6 @@ class _SyntheticFailure:
 
 def _successful(response: object) -> bool:
     return 200 <= int(getattr(response, "status_code")) < 300
-
-
-def _step_retry_key(request: LineRichMenuProviderRequest, step: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"line-rich-menu:{request.publication_id.value}:{step}"))
-
-
-def _cleanup_retry_key(provider_menu_id: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"line-rich-menu:cleanup:{provider_menu_id}"))
 
 
 def _rich_menu_alias_id(definition_json: str) -> str | None:
@@ -363,6 +371,23 @@ def _adapter_failure(code: str) -> LineRichMenuProviderOutcome:
         LineRichMenuProviderOutcomeType.UNAVAILABLE,
         error_code=code,
         error_message=code.replace("_", " "),
+    )
+
+
+def _personal_menu_failure(response, operation, code=None):
+    outcome = _rich_menu_failure(response)
+    if isinstance(response, _SyntheticFailure):
+        return outcome
+    request_id = response_request_id(response)
+    trace = (
+        f" (x-line-request-id: {request_id})"
+        if request_id and re.fullmatch(r"[a-zA-Z0-9-]{1,64}", request_id)
+        else ""
+    )
+    return replace(
+        outcome,
+        error_code=code or outcome.error_code,
+        error_message=f"LINE rich menu {operation} HTTP {response.status_code}{trace}",
     )
 
 

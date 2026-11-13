@@ -18,7 +18,7 @@ from subsystems.line.delivery_contracts import (
     LineProviderOutcomeType,
     LineReplyOpportunity,
     REPLY_ONLY_WEBHOOK_SOURCE,
-    RETIRED_SIGNING_REMINDER_SOURCES,
+    RETIRED_CONTRACT_DELIVERY_SOURCES,
     RecordLineDeliveryAttemptCommand,
     candidate_coordination_delivery_retired,
 )
@@ -99,6 +99,7 @@ class LineDeliveryWorker:
             "line_admin_push_retired": "retired-admin-push",
             "candidate_coordination_retired": "retired-candidate-coordination",
             "contract_signing_reminder_retired": "retired-contract-signing-reminder",
+            "contract_document_delivery_retired": "retired-contract-document-delivery",
         }.get(validation_failure)
         if retired_key_prefix is not None:
             with self._unit_of_work_factory() as unit:
@@ -261,7 +262,7 @@ class LineDeliveryWorker:
                     and payment_overdue_delivery_is_current(unit_of_work, task, self._now())
                     and payment_reminder_delivery_is_current(unit_of_work, task, self._now())
                     and payment_receipt_delivery_is_current(unit_of_work, task, self._now())
-                    and service_day_log_reminder_delivery_is_current(unit_of_work, task, self._now())
+                    and service_day_log_reminder_delivery_is_current(unit_of_work, task)
                     and second_payment_delivery_is_current(unit_of_work, task, self._now())
                     and start_day_delivery_is_current(unit_of_work, task, self._now())
                     and deposit_delivery_is_current(unit_of_work, task, self._now())
@@ -271,7 +272,9 @@ class LineDeliveryWorker:
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
-        if task.request.source_aggregate_type in RETIRED_SIGNING_REMINDER_SOURCES:
+        if task.request.source_aggregate_type in RETIRED_CONTRACT_DELIVERY_SOURCES:
+            if task.request.source_aggregate_type == "contract_document_version":
+                return "contract_document_delivery_retired"
             return "contract_signing_reminder_retired"
         if candidate_coordination_delivery_retired(task.request):
             return "candidate_coordination_retired"

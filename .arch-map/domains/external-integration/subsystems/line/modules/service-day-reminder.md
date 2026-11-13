@@ -17,6 +17,7 @@
   - `line/static/mobile_admin.html` — 已移除日誌連續缺漏工作流按鈕與載入邏輯。
   - `ui_react/src/components/LineOrderGroupWorkbench.tsx` — 已移除缺漏標籤與發送提醒介面。
 - retained history/cancellation:
+  - `subsystems/line/service_day_log_reminders.py` — 自動及人工的殘留提醒在呼叫 LINE 前取消。
   - 歷史通知任務與資料庫既有 outbox/checkpoint 記錄完整保留存查。
   - `subsystems/line/scheduling_checkpoint_notification_source.py`
   - `subsystems/line/service_day_log_notification_stop.py`
@@ -31,14 +32,11 @@
   - `infrastructure/mysql/line_notification_repository.py`
 
 ## Dependencies
-- inbound: `scheduling/service-day-log` — current generation 正式服務日、已結束時段及日誌缺漏 typed Query；完成／rebuild outbox 僅沿用既有取消與歷史處理。
+- inbound: 既有完成及 rebuild outbox — 沿既有取消及歷史處理。
 - outbound: LINE delivery task owner — committed task 與 provider 前 fresh cancellation gate。
 
 ## Contracts
-- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.5 — 日曆連續至少四個已結束且未填的正式服務日、工會逐次決定、原案件群組及群組版本複核；Scheduling 保留事實 owner。
-- Query 不 commit；人工命令只由 application 的 outer UoW 提交 durable task，HTTP 不直接呼叫 provider。公版預覽共用 `reminder_text`，不建立工作且沒有獨立啟用設定。
-- 提醒文案沿規格 17 LINE-COPY 維護；repository 的 `message` reader 借用原 connection，供待辦 Query 及依賴組裝注入的寄送 copy reader 共用。仍由原 `MySqlUnitOfWork` 唯一提交，不為文字設定建立新交易。
-- 通知事項 Query 以同一 `reminder_text` 及目前月嫂名稱提供實際提醒文案；仍以原送前 fresh read 決定收件群組及最終內容，不因預覽建立工作。
+- [LINE 客服與月嫂自助服務 §4.3](../../../../../document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md) — 缺漏催繳退役。
 
 ## Verification
 - layout_status: `custom_current`
@@ -49,7 +47,6 @@
   - `test_service_day_log_reminders.py` — 人工決定、唯讀、退役自動提醒與寄送前門禁。
   - `test_service_day_log_reminder_mysql.py` — current generation、連續日、補填及 fake provider 整合。
 - ui_test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/service-day-reminder/`
-- dependency: `infrastructure/mysql/service_day_log_repository.py::missing_runs` — Scheduling typed 缺漏區間，非服務日及已填日切斷區間。
 - test_root: `tests/domains/external-integration/subsystems/line/modules/service-day-reminder/test_line_service_day_reminder_acceptance.py`
 - integration: `tests/domains/external-integration/subsystems/line/integration/test_service_day_reminder_disposable_mysql.py`
 

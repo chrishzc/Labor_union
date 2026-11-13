@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import timedelta
+from hashlib import sha256
 from typing import Any
 
 from pymysql.err import IntegrityError
@@ -214,6 +216,23 @@ class MySqlLineOutboxWriter:
             if cursor.fetchone() is None:
                 raise LookupError("line_platform_user_not_found")
 
+    @contextmanager
+    def menu_provider_lock(self, line_user_id: LineUserId):
+        digest = sha256(line_user_id.value.encode("utf-8")).hexdigest()
+        name = f"line-menu:{digest[:54]}"
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s,0) AS acquired", (name,))
+            acquired = bool((cursor.fetchone() or {}).get("acquired"))
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                try:
+                    with self._connection.cursor() as cursor:
+                        cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
+                finally:
+                    self._connection.rollback()
+
     def lock_menu_lease(self, item: LineOutboxWorkItem, now: datetime) -> bool:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -231,7 +250,8 @@ class MySqlLineOutboxWriter:
                 "SELECT id FROM line_domain_outbox WHERE aggregate_type='line_identity' "
                 "AND aggregate_identity=%s AND intent_type=%s "
                 "UNION ALL SELECT reset.id FROM line_identity_revocation_requests request "
-                "JOIN line_domain_outbox reset ON reset.aggregate_identity=CAST(request.id AS CHAR) "
+                "JOIN line_domain_outbox reset ON reset.aggregate_identity="
+                "CAST(request.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
                 "AND reset.aggregate_type='line_identity_revocation' AND reset.intent_type=%s "
                 "WHERE request.line_user_id=%s) intents",
                 (line_user_id.value, RICH_MENU_BINDING_INTENT, IDENTITY_MENU_RESET_INTENT, line_user_id.value),

@@ -1,14 +1,13 @@
 """Union-only log reminder actions; queries never enqueue or call LINE."""
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineGroupId
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
-from subsystems.scheduling.service_day_log_workflow import ServiceDayLogGap
 
 SOURCE_TYPE = "manual_service_day_log_reminder"
 PREFIX = "service-day-log-reminder:"
@@ -20,7 +19,7 @@ def reminder_text(staff_name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ServiceDayLogReminder:
-    gap: ServiceDayLogGap
+    gap: Any
     group_label: str
     can_send: bool
     message: str | None = None
@@ -80,14 +79,11 @@ class ServiceDayLogReminderApplication:
             return result
 
 
-def service_day_log_reminder_delivery_is_current(unit, task, now):
+def service_day_log_reminder_delivery_is_current(unit, task):
     request = task.request
-    # Retired automatic private reminders must never cross the provider boundary.
+    # Both retired reminder sources can still have queued tasks.
     automatic = request.correlation_id.value.startswith("line-notification:scheduling-service-day-checkpoint-outbox:")
     if not automatic and request.source_aggregate_type != SOURCE_TYPE:
-        return True
-    repository = getattr(unit, "service_day_log_reminders", None)
-    if not automatic and repository is not None and repository.delivery_is_current(task, now):
         return True
     unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
         task.task_id, ActorContext("line-service-day-log-reminder"),

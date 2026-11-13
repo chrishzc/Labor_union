@@ -56,7 +56,6 @@ from api.schemas.assignment_plan import (
 )
 from api.schemas.base import BaseResponse
 from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
-from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
 from api.routes import line_payment_overdue_reminders as overdue_reminder_routes
 from api.routes import line_order_groups as order_group_routes
 from api.schemas.line_order_groups import PaidOrderGroupTodoPageView
@@ -426,8 +425,8 @@ class _CustomerRecommendationFollowupView(BaseModel):
     plan_id: int = Field(gt=0)
     status: Literal["contact_requested", "awaiting_signing", "reply_reminder", "response_failed"]
     reminder_due_at: datetime | None
-    failure_reason: str | None = None
     ticket_id: int | None = Field(default=None, gt=0)
+    failure_reason: str | None = None
 
 
 class _CustomerRecommendationFollowupPageView(BaseModel):

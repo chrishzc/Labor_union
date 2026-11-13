@@ -49,7 +49,7 @@ from subsystems.line.delivery_admin_contracts import (
     ControlLineDeliveryTaskCommand,
     LineDeliveryAdminQuery,
 )
-from subsystems.line.delivery_contracts import RETIRED_SIGNING_REMINDER_SOURCES
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE, RETIRED_CONTRACT_DELIVERY_SOURCES
 from subsystems.line.runtime_health import classify_line_worker_health
 
 LOGGER = logging.getLogger(__name__)
@@ -194,7 +194,10 @@ def task_detail(
         data = LineDeliveryPublicDetailView(
             task=_public_item(task),
             attempts=[_public_attempt(item) for item in attempts],
-            retry_allowed=task.source_aggregate_type not in RETIRED_SIGNING_REMINDER_SOURCES,
+            retry_allowed=(
+                task.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE
+                and task.source_aggregate_type not in RETIRED_CONTRACT_DELIVERY_SOURCES
+            ),
         )
     except Exception as error:
         _raise_query_error(
@@ -242,7 +245,7 @@ _SOURCE_TYPE_GROUPS = {
     LineDeliveryPublicSourceType.RICH_MENU: ("rich_menu_link", "rich_menu_unlink"),
     LineDeliveryPublicSourceType.RICH_MENU_LINK: ("rich_menu_link",),
     LineDeliveryPublicSourceType.RICH_MENU_UNLINK: ("rich_menu_unlink",),
-    LineDeliveryPublicSourceType.WEBHOOK: ("line_webhook_event",),
+    LineDeliveryPublicSourceType.WEBHOOK: ("line_webhook_event", REPLY_ONLY_WEBHOOK_SOURCE),
     LineDeliveryPublicSourceType.GROUP_INVITATION: ("line_order_group_invitation", "service_start_invitation"),
     LineDeliveryPublicSourceType.RUNTIME: ("runtime_health_event",),
     LineDeliveryPublicSourceType.MATCHING: (

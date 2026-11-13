@@ -20,7 +20,7 @@ from api.schemas.line_rich_menus import (
     RichMenuImageUploadResponse,
     RichMenuImageUploadResult,
 )
-from infrastructure.file.storage_layout import MEDIA_DIRECTORY, SCHEDULING_DIRECTORY
+from infrastructure.file.storage_layout import CLIENT_PASSBOOK_DIRECTORY, MEDIA_DIRECTORY
 from subsystems.line import media_archive
 
 
@@ -143,4 +143,4 @@ def test_new_local_menu_upload_reads_from_04_and_legacy_asset_still_reads(tmp_pa
     archive_file = root / MEDIA_DIRECTORY / asset["storage_key"]
     assert media_archive.read_media_asset(2)[1] == archive_file.read_bytes()
     assert media_archive.read_media_asset(1)[1] == old_path.read_bytes() == b"old menu"
-    assert not (root / SCHEDULING_DIRECTORY).exists()
+    assert not (root / CLIENT_PASSBOOK_DIRECTORY).exists()

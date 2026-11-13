@@ -80,8 +80,6 @@ from api.routes import (
     line_onboarding,
     line_ai_events,
     line_feedback,
-    staff_service_day_media,
-    staff_service_day_logs,
     line_identity,
     line_service_help,
     line_staff_self_service,
@@ -285,8 +283,6 @@ app.include_router(line_message_preview.router)
 app.include_router(line_onboarding.router)
 app.include_router(line_ai_events.router)
 app.include_router(line_feedback.router)
-app.include_router(staff_service_day_media.router)
-app.include_router(staff_service_day_logs.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_media_assets.router)
@@ -343,12 +339,12 @@ app.include_router(official_service_date_correction.router)
 app.include_router(service_before_replacement.router)
 app.include_router(matching_schedule_confirmation.router)
 app.include_router(matching_coordination.router)
-app.include_router(matches.resume_router)
-app.include_router(matches.resume_page_router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 
 app.include_router(matches.router)
+app.include_router(matches.resume_router)
+app.include_router(matches.resume_page_router)
 from api.routes.line_table_images import router as line_table_images_router
 app.include_router(line_table_images_router)
 app.include_router(candidate_contact_pool.router)

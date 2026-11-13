@@ -235,7 +235,7 @@ def test_candidate_payment_preview_without_plan_or_payroll(
     assert payments["樓層費預計繳款日"] == ("2026-09-20" if floor_fee else "不適用")
 
 
-def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monkeypatch):
+def test_precontract_projection_exposes_installment_dates_from_finance_stage_plan(monkeypatch):
     from contextlib import nullcontext
     from datetime import timedelta
     from infrastructure.mysql import contract_full_preview_repository as adapter
@@ -258,9 +258,11 @@ def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monk
         SimpleNamespace(cursor=lambda: nullcontext(None)), "CASE-PRECONTRACT-SECOND", facts, {}, plan,
     )
     assert facts["second_payment_amount"] == 32000
+    assert facts["first_payment_due_date"] == date(2026, 11, 5)
     assert facts["second_payment_due_date"] == date(2026, 11, 20)
     sections = _candidate_line_sections(1, facts, {}, audience="customer")
     payments = dict(next(section.rows for section in sections if section.title == "客戶付款約定"))
+    assert payments["預計第一期繳款日"] == "2026-11-05"
     assert payments["第二期金額"] == "NT$ 32,000"
     assert payments["預計第二期繳款日"] == "2026-11-20"
 

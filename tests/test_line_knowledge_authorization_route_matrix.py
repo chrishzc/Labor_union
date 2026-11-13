@@ -381,12 +381,8 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
         inventory = _route_inventory(filename)
         nodes = _route_endpoint_nodes(filename)
         if filename == "matches.py":
-            # This is the customer-facing, signed file-reference route, not an admin endpoint.
-            assert inventory.pop("download_matching_confirmation_resume") == {"get_controlled_file_workflow"}
-            download = nodes.pop("download_matching_confirmation_resume")
-            assert "verify_resume_download_token" in ast.unparse(download)
-            assert "ControlledFilePurpose.STAFF_RESUME" in ast.unparse(download)
-            assert "readback.subject_reference != str(staff_id)" in ast.unparse(download)
+            assert inventory.pop("download_matching_confirmation_resume") == set()
+            assert "status_code=410" in ast.unparse(nodes.pop("download_matching_confirmation_resume"))
         assert set(inventory) == set(expected_routes), filename
         assert set(nodes) == set(expected_routes), filename
         for route_name, (expected_dependencies, expected_side_effect) in expected_routes.items():

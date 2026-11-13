@@ -4,6 +4,7 @@ Description: 驗證 Rich Menu 發布後的 durable identity binding 與 worker �
 """
 
 import json
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -36,6 +37,9 @@ NOW = datetime(2026, 8, 11, 4, tzinfo=timezone.utc)
 
 
 class RecordingOutbox:
+    def menu_provider_lock(self, line_user_id):
+        return nullcontext(True)
+
     def __init__(self, claimed=(), *, latest=7, lease_valid=True, reset_pending=False) -> None:
         self.appended = []
         self.claimed = tuple(claimed)
@@ -280,11 +284,15 @@ def _bound_staff():
     )
 
 
-def _response(status, menu_id=None, retry_after=None):
+def _response(status, menu_id=None, retry_after=None, request_id=None):
+    headers = {"Retry-After": retry_after} if retry_after else {}
+    if request_id:
+        headers["x-line-request-id"] = request_id
     return SimpleNamespace(
         status_code=status,
         json=lambda: {"richMenuId": menu_id} if menu_id else {},
-        headers={"Retry-After": retry_after} if retry_after else {},
+        headers=headers,
+        close=lambda: None,
     )
 
 
@@ -368,12 +376,32 @@ def test_retry_with_unavailable_readback_never_blindly_posts():
     assert result.retryable and 30 <= result.retry_after_seconds <= 45
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404])
+@pytest.mark.parametrize("status", [401, 403, 404])
 def test_permanent_link_failure_stops(status):
     calls, result = _run_http_attempt(_work_item(), [_response(status)])
     assert calls == ["post"]
     assert not result.retryable
-    assert result.error_code == f"line_http_{status}"
+    assert result.error_code == (
+        "line_rich_menu_link_menu_missing" if status == 404 else f"line_http_{status}"
+    )
+
+
+@pytest.mark.parametrize(("diagnostics", "expected_code", "expected_calls"), [
+    ([_response(400)], "line_rich_menu_readback_user_invalid", ["post", "get"]),
+    ([_response(404), _response(404)], "line_rich_menu_image_unavailable", ["post", "get", "get"]),
+    ([_response(404), _response(200)], "line_http_400", ["post", "get", "get"]),
+    ([_response(503)], "line_http_400", ["post", "get"]),
+])
+def test_link_bad_request_uses_read_only_checks_and_keeps_line_request_id(
+    diagnostics, expected_code, expected_calls,
+):
+    calls, result = _run_http_attempt(
+        _work_item(), [_response(400, request_id="test-line-request"), *diagnostics],
+    )
+    assert calls == expected_calls
+    assert not result.retryable
+    assert result.error_code == expected_code
+    assert result.error_message == "LINE rich menu link HTTP 400 (x-line-request-id: test-line-request)"
 
 
 @pytest.mark.parametrize(("attempt_count", "retry_after", "code"), [
@@ -400,6 +428,23 @@ def test_personal_link_waits_for_an_active_revocation_to_restore_default():
     calls, result = _run_http_attempt(_work_item(), [], reset_pending=True)
     assert calls == []
     assert result.retryable and result.error_code == "rich_menu_binding_waiting_for_reset"
+
+
+def test_manual_resync_reads_back_before_reapplying():
+    item = replace(_work_item(), idempotency_identity="rich-menu-manual-resync:1:test")
+    calls, result = _run_http_attempt(item, [_response(200, "richmenu-staff")])
+    assert calls == ["get"]
+    assert result.succeeded
+    calls, result = _run_http_attempt(
+        item, [_response(200, "old-menu"), _response(200), _response(200, "richmenu-staff")],
+    )
+    assert calls == ["get", "post", "get"]
+    assert result.succeeded
+
+    calls, result = _run_http_attempt(item, [_response(400)])
+    assert calls == ["get"]
+    assert not result.retryable
+    assert result.error_code == "line_rich_menu_readback_user_invalid"
 
 
 def _bound_admin(line_user_id):

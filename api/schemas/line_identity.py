@@ -156,6 +156,7 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
     baby_info: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=1000)
     line_id: str | None = Field(default=None, max_length=50)
+    passbook_image_id: str = Field(min_length=1, max_length=128)
 
     @field_validator("id_number")
     @classmethod

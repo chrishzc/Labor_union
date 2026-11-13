@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineOutboxWriter
+from domains.line.identities import LineUserId
 from subsystems.line.outbox_contracts import (
     ClaimLineOutboxQuery,
     CompleteLineOutboxCommand,
@@ -41,6 +42,31 @@ class RecordingConnection:
 
     def cursor(self):
         return self.cursor_instance
+
+
+def test_menu_provider_lock_releases_on_error(monkeypatch):
+    connection = RecordingConnection()
+    cursor = connection.cursor_instance
+    monkeypatch.setattr(cursor, "fetchone", lambda: {"acquired": 1})
+    monkeypatch.setattr(connection, "rollback", lambda: None, raising=False)
+    repository = MySqlLineOutboxWriter(connection)
+    with pytest.raises(ValueError, match="fixture failure"):
+        with repository.menu_provider_lock(LineUserId("U-fixture")) as acquired:
+            assert acquired
+            raise ValueError("fixture failure")
+    acquire, release = cursor.calls
+    assert "GET_LOCK" in acquire[0] and "RELEASE_LOCK" in release[0]
+    assert acquire[1] == release[1]
+    assert len(acquire[1][0]) == 64
+
+
+def test_latest_menu_intent_compares_request_id_with_outbox_column_collation(monkeypatch):
+    connection = RecordingConnection()
+    cursor = connection.cursor_instance
+    monkeypatch.setattr(cursor, "fetchone", lambda: {"id": 9})
+    assert MySqlLineOutboxWriter(connection).latest_menu_intent_id(LineUserId("U-fixture")) == 9
+    sql, _ = cursor.calls[-1]
+    assert "CAST(request.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci" in sql
 
 
 def test_claim_and_due_query_are_scoped_to_requested_intent() -> None:

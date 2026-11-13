@@ -120,6 +120,15 @@ class LineIdentityRevocationActionRequest(_StrictModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class LineIdentityBindingActionRequest(_StrictModel):
+    expected_version: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+
+
+class LineIdentityDeleteRevokedRequest(LineIdentityBindingActionRequest):
+    expected_updated_at: datetime
+
+
 class LineIdentityReplacementRequest(_StrictModel):
     expected_version: int = Field(ge=0)
     target_subject_reference: str = Field(min_length=1, max_length=191)
@@ -144,6 +153,7 @@ class UnboundProvisionalCandidateView(_StrictModel):
     line_user_id: str
     client_id: int | None = None
     submitted_at: str | None = None
+    version: int
 
 
 class UnboundPairingCandidatesResponseView(_StrictModel):

@@ -51,8 +51,8 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
       { id: 'customer-response', title: '接受配對／專人協助／其他選擇受理', delivery: ['reply'], ids: ['matching-customer-accepted', 'matching-customer-assistance', 'matching-customer-response'] },
     ] },
     { title: '簽約', nodes: [
-      { id: 'signing-reminders', title: '簽署提醒', summary: '工會人員在 LINE 官方帳號聊天後台手動選用範本，發給需要提醒的客戶或月嫂。簽約完成以確認簽回文件為準。' },
-      { id: 'contract-documents', title: '寄送客戶及月嫂契約文件', delivery: ['manual'], ids: ['contract-document-client', 'contract-document-staff'], previewOnly: true, summary: '工會人員發起寄送後，系統分別私訊客戶或月嫂，提供對應契約的下載連結。' },
+      { id: 'external-signing', title: '契約送交與簽回', summary: '工會人員在瀏覽器預覽、列印或另存契約 PDF，送交第三方平台簽署並在工作台記錄送交。收回並確認客戶與所有現行月嫂的簽署文件後，才記錄簽約完成。' },
+      { id: 'signing-reminders', title: '簽署提醒', summary: '工會人員在 LINE 官方帳號聊天後台手動選用範本，發給需要提醒的客戶或月嫂。' },
     ] },
     { title: '收款與建群', nodes: [
       { id: 'deposit-reminder', title: '訂金繳費提醒', delivery: ['automatic', 'manual'], ids: ['deposit-reminder'], summary: '雙方簽約完成且資料齊備後，依排程自動私訊客戶；工會人員也可從待辦手動發送。' },

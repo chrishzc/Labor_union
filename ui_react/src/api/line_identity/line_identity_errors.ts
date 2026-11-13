@@ -22,12 +22,15 @@ export type LineIdentityDomainErrorCode =
   | 'line_identity_menu_reset_failed'
   | 'line_identity_manual_completion_forbidden'
   | 'line_identity_binding_not_bound'
+  | 'line_identity_binding_not_revoked'
+  | 'line_identity_menu_role_not_active'
   | 'line_identity_subject_unchanged'
   | 'line_identity_replacement_subject_not_found'
   | 'line_identity_replacement_subject_already_bound'
   | 'line_identity_revocation_not_retryable'
   | 'line_review_state_conflict'
   | 'line_review_version_conflict'
+  | 'line_provisional_registration_has_history'
   | 'line_review_data_conflict';
 
 export type LineIdentityClientErrorCode =
@@ -52,12 +55,15 @@ const DOMAIN_ERROR_CODES = new Set<LineIdentityDomainErrorCode>([
   'line_identity_menu_reset_failed',
   'line_identity_manual_completion_forbidden',
   'line_identity_binding_not_bound',
+  'line_identity_binding_not_revoked',
+  'line_identity_menu_role_not_active',
   'line_identity_subject_unchanged',
   'line_identity_replacement_subject_not_found',
   'line_identity_replacement_subject_already_bound',
   'line_identity_revocation_not_retryable',
   'line_review_state_conflict',
   'line_review_version_conflict',
+  'line_provisional_registration_has_history',
   'line_review_data_conflict',
 ]);
 

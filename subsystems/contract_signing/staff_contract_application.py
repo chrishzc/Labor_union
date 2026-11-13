@@ -12,16 +12,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from domains.line.identities import LineDeliveryTaskId
-from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
-from subsystems.contract_signing.document_access import (
-    create_document_access_credential,
-)
-from subsystems.contract_signing.line_delivery import (
-    ContractLineBinding,
-    build_contract_delivery_request,
-    require_contract_line_recipient,
-)
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.contract_signing.template_catalog import (
     TEMPLATE_DIRECTORY,
     TemplateCatalogPort,
@@ -39,16 +30,6 @@ def _missing_adapter(*_args, **_kwargs):
 archive_contract_document = _missing_adapter
 discard_uncommitted_contract_document = lambda **_kwargs: None
 select_order = _missing_adapter
-
-
-@dataclass(frozen=True, slots=True)
-class SendStaffContractCommand:
-    case_no: str
-    matching_segment_id: int
-    actor_id: str
-    idempotency_key: IdempotencyKey
-    correlation_id: CorrelationId
-    download_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +94,6 @@ class StaffContractSigningApplication:
         now: Callable[[], datetime],
         archive_document: Callable[..., object] | None = None,
         discard_document: Callable[..., None] | None = None,
-        line_delivery_repository_factory: Callable[[object], object] | None = None,
         order_selector: Callable[..., object] | None = None,
         external_template_facts_loader: Callable[..., tuple[dict[str, object], str]] | None = None,
         templates: TemplateCatalogPort | None = None,
@@ -124,7 +104,6 @@ class StaffContractSigningApplication:
         self._now = now
         self._archive_document = archive_document
         self._discard_document = discard_document
-        self._line_delivery_repository_factory = line_delivery_repository_factory
         self._order_selector = order_selector
         self._external_template_facts_loader = external_template_facts_loader
 
@@ -138,10 +117,6 @@ class StaffContractSigningApplication:
     def _discard(self, storage_key: str) -> None:
         fn = self._discard_document or discard_uncommitted_contract_document
         fn(storage_root=self._archive_root, storage_key=storage_key)
-
-    def _line_delivery_repository(self, connection):
-        factory = self._line_delivery_repository_factory or _missing_line_delivery_repository
-        return factory(connection)
 
     def _run_in_application_unit_of_work(self, operation: Callable[[object], object]):
         connection = self._connection_factory()
@@ -162,13 +137,6 @@ class StaffContractSigningApplication:
                 connection.close()
             except BaseException:
                 pass
-
-    def send(self, command: SendStaffContractCommand) -> StaffContractWorkflowReceipt:
-        existing = self._existing_receipt(command.idempotency_key)
-        if existing is not None:
-            return existing
-        template = self._template("contract_staff_service")
-        return self._persist_sent_contract(command, template)
 
     def prepare_external_document(
         self, command: PrepareExternalStaffContractCommand
@@ -342,69 +310,6 @@ class StaffContractSigningApplication:
         finally:
             connection.close()
 
-    def _existing_receipt(self, key: IdempotencyKey) -> StaffContractWorkflowReceipt | None:
-        connection = self._connection_factory()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT document_version_id,id,line_delivery_task_id FROM contract_signing_events "
-                    "WHERE event_key=%s",
-                    (key.value,),
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    return None
-                return StaffContractWorkflowReceipt(
-                    int(row["document_version_id"]),
-                    int(row["id"]),
-                    _optional_integer(row["line_delivery_task_id"]),
-                    _commitment_id(cursor, int(row["document_version_id"])),
-                )
-        finally:
-            connection.close()
-
-    def _persist_sent_contract(self, command, template):
-        archive = None
-        try:
-            def persist(connection):
-                nonlocal archive
-                segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
-                content = render_contract_template(
-                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
-                    facts=_staff_template_facts(connection, command.case_no, segment),
-                )
-                archive = self._archive(content, _staff_template_storage_key(command))
-                binding = _line_binding(connection, "staff", str(segment["staff_id"]))
-                recipient = require_contract_line_recipient(binding, subject_type="staff", subject_reference=str(segment["staff_id"]))
-                document_id = _insert_generated_document(connection, command, segment, template, content, archive)
-                grant_id, raw_token = _insert_access_grant(
-                    connection,
-                    command,
-                    document_id,
-                    binding,
-                    now=self._now(),
-                )
-                request = build_contract_delivery_request(
-                    recipient,
-                    case_no=command.case_no,
-                    document_version_id=document_id,
-                    download_url=_tokenized_download_url(command.download_url, raw_token),
-                    audience_label="服務人員契約",
-                    scheduled_at=self._now(),
-                    idempotency_key=command.idempotency_key,
-                    correlation_id=command.correlation_id,
-                )
-                delivery = self._line_delivery_repository(connection).enqueue(request)
-                event_id = _insert_sent_event(connection, command, segment, document_id, int(delivery.task_id.value), grant_id)
-                _append_command_outcome(connection, command, "send_staff_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
-                return StaffContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
-            return self._run_in_application_unit_of_work(persist)
-        except Exception:
-            if archive is not None:
-                self._discard(archive.storage_key)
-            raise
-
     def _persist_signed_return(self, command, archive):
         try:
             def persist(connection):
@@ -420,10 +325,6 @@ class StaffContractSigningApplication:
         except Exception:
             self._discard(archive.storage_key)
             raise
-
-
-def _staff_template_storage_key(command: SendStaffContractCommand) -> str:
-    return f"{command.case_no}/staff/{command.matching_segment_id}/{command.idempotency_key.value}.xlsx"
 
 
 def _external_staff_template_storage_key(
@@ -508,24 +409,6 @@ def _staff_template_facts(connection, case_no: str, segment: dict[str, object]) 
     return result
 
 
-def _line_binding(connection, subject_type: str, subject_reference: str) -> ContractLineBinding:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT line_user_id,binding_status,subject_type,subject_reference "
-            "FROM line_identity_role_bindings WHERE subject_type=%s AND subject_reference=%s",
-            (subject_type, subject_reference),
-        )
-        row = cursor.fetchone()
-    if row is None:
-        return ContractLineBinding(None, None, None, None)
-    return ContractLineBinding(
-        str(row["line_user_id"]),
-        str(row["binding_status"]),
-        str(row["subject_type"]),
-        str(row["subject_reference"]),
-    )
-
-
 def _insert_generated_document(
     connection,
     command,
@@ -586,28 +469,6 @@ def _existing_external_generated_document(
         )
         row = cursor.fetchone()
     return None if row is None else int(row["id"])
-
-
-def _insert_access_grant(connection, command, document_id, binding, *, now):
-    credential = create_document_access_credential(now=now, ttl=timedelta(days=7))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO contract_document_access_grants (document_version_id,case_no,recipient_line_user_id,recipient_subject_type,recipient_subject_reference,token_sha256,expires_at,created_by) "
-            "VALUES (%s,%s,%s,'staff',%s,%s,%s,%s)",
-            (document_id, command.case_no, binding.line_user_id, binding.subject_reference, credential.token_sha256, credential.expires_at.replace(tzinfo=None), command.actor_id),
-        )
-        return int(cursor.lastrowid), credential.raw_token
-
-
-def _insert_sent_event(connection, command, segment, document_id, task_id, grant_id):
-    payload = _canonical_json({"command": "send_staff_contract", "correlation_id": command.correlation_id.value})
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO contract_signing_events (case_no,document_version_id,matching_plan_id,matching_segment_id,event_type,delivery_channel,line_delivery_task_id,document_access_grant_id,event_key,actor,payload) "
-            "VALUES (%s,%s,%s,%s,'sent','line',%s,%s,%s,%s,%s)",
-            (command.case_no, document_id, segment["plan_id"], segment["id"], task_id, grant_id, command.idempotency_key.value, command.actor_id, payload),
-        )
-        return int(cursor.lastrowid)
 
 
 def _sent_staff_document(connection, case_no: str, segment_id: int) -> int:
@@ -741,10 +602,6 @@ def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):
         return commitment_id
 
 
-def _missing_line_delivery_repository(_connection):
-    raise RuntimeError("line_delivery_adapter_not_configured")
-
-
 def _plan_has_unsigned_segment(connection, case_no, plan_id):
     with connection.cursor() as cursor:
         cursor.execute(
@@ -858,13 +715,6 @@ def _commitment_id(cursor, document_id):
     )
     row = cursor.fetchone()
     return None if row is None else int(row["id"])
-
-
-def _tokenized_download_url(base_url: str, raw_token: str) -> str:
-    if not base_url.startswith("https://"):
-        raise ValueError("contract document download URL must use HTTPS")
-    separator = "&" if "?" in base_url else "?"
-    return f"{base_url}{separator}token={raw_token}"
 
 
 def _sha256(value: bytes) -> str:

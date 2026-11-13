@@ -30,6 +30,7 @@ class ControlledFileOwner(str, Enum):
     SCHEDULING = "scheduling"
     ORDERS = "orders"
     STAFF = "staff"
+    CLIENTS = "clients"
     LINE_INTEGRATION = "line_integration"
 
 
@@ -37,12 +38,11 @@ class ControlledFilePurpose(str, Enum):
     UNSIGNED_CONTRACT = "unsigned_contract"
     FINAL_SIGNED_CONTRACT = "final_signed_contract"
     SERVICE_DATE_CONFIRMATION = "service_date_confirmation"
-    BABY_LOG_PHOTO = "baby_log_photo"
-    MEAL_PHOTO = "meal_photo"
     ORDER_NOTICE = "order_notice"
     STAFF_RESUME = "staff_resume"
     STAFF_CERTIFICATE = "staff_certificate"
     STAFF_HEALTH_EXAM = "staff_health_exam"
+    CLIENT_PASSBOOK_COVER = "client_passbook_cover"
     RICH_MENU_BACKGROUND = "rich_menu_background"
 
 
@@ -74,8 +74,6 @@ _ALLOWED_PURPOSES = {
     ControlledFileOwner.SCHEDULING: frozenset(
         {
             ControlledFilePurpose.SERVICE_DATE_CONFIRMATION,
-            ControlledFilePurpose.BABY_LOG_PHOTO,
-            ControlledFilePurpose.MEAL_PHOTO,
         }
     ),
     ControlledFileOwner.ORDERS: frozenset({ControlledFilePurpose.ORDER_NOTICE}),
@@ -84,6 +82,11 @@ _ALLOWED_PURPOSES = {
             ControlledFilePurpose.STAFF_RESUME,
             ControlledFilePurpose.STAFF_CERTIFICATE,
             ControlledFilePurpose.STAFF_HEALTH_EXAM,
+        }
+    ),
+    ControlledFileOwner.CLIENTS: frozenset(
+        {
+            ControlledFilePurpose.CLIENT_PASSBOOK_COVER,
         }
     ),
     ControlledFileOwner.LINE_INTEGRATION: frozenset(

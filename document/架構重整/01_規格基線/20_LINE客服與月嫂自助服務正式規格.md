@@ -55,9 +55,9 @@ LINE 官方帳號回應依是否具備有效一次性 `replyToken` 嚴格區分�
 
 ### 3.3 `line_push_worker` 保留範圍
 
-LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「只在聊天室回覆」。契約下載、需求申請核准、請假排班完成、客訴轉接及人工客服回覆使用實際訊息組裝及合成資料提供唯讀公版，契約下載使用無效範例網址，人工回覆顯示一則範例內容。取消結算的人工發送及人工升級客服結案通知各有節點，一般客服工單結案則呈現為內部操作。
+LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「只在聊天室回覆」。需求申請核准、請假排班完成、客訴轉接及人工客服回覆使用實際訊息組裝及合成資料提供唯讀公版，人工回覆顯示一則範例內容。取消結算的人工發送及人工升級客服結案通知各有節點，一般客服工單結案則呈現為內部操作。
 
-主動通知、定時提醒、LIFF 送出後跨請求確認、卡片主體與多氣泡組合仍維持 durable outbox → `line_push_worker`：含 Flex 媒合／推薦／請假／完工卡片、簽約與訂金催繳、繳款收據、人工客服回覆與取消／退款／追償通知。
+主動通知、定時提醒、LIFF 送出後跨請求確認、卡片主體與多氣泡組合仍維持 durable outbox → `line_push_worker`：含 Flex 媒合／推薦／請假／完工卡片、訂金催繳、繳款收據、人工客服回覆與取消／退款／追償通知。
 
 ## 4. 月嫂端 LINE 自助服務
 
@@ -75,10 +75,10 @@ LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「
   - **需代班或存在衝突**：自動建立工會內部待辦；工會另行徵詢代班人選（Postback ack 走 `line_webhook_reply`），確定願意且實際加入原服務群組後由工會補記新日期與群組日期表。
 - 歷史雙邊確認 API `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 永久回傳 `410 Gone`。
 
-### 4.3 寶寶日誌、餐食照片與缺漏催繳退役規則
+### 4.3 寶寶日誌與餐食照片移除規則
 
-- **日誌與照片機制**：`staff_baby_log.html`、`/api/v1/line/staff-self-service/service-day-logs` 及 `/api/v1/line/staff-self-service/service-day-media` **一律永久回傳 `410 Gone`**。寶寶日誌與餐食照片維持由月嫂直接於各案件 LINE 服務群組相簿上傳新增，系統端不建立表單、不接收圖檔上傳、不驗證相簿數量，亦不作為排班、完工、請款或付款之前置門檻。
-- **缺漏催繳退役**：基於系統日誌計算之連續缺漏（原 3 天計算與每日催繳推播／待辦清單）已全面退役，不得於資料庫無日誌時發出誤報催繳；日常督導改由工會於服務群組相簿人工查閱。
+- **日誌與照片機制移除**：`staff_baby_log.html`、`/api/v1/line/staff-self-service/service-day-logs`、`/api/v1/line/staff-self-service/service-day-media` 及相關照護照片（寶寶／餐點）規格、程式碼與 LIFF 頁面全面移除；寶寶日誌與餐食照片由月嫂直接於各案件 LINE 服務群組相簿上傳新增，系統端不建立表單、不接收圖檔上傳、不驗證相簿數量，亦不作為排班、完工、請款或付款之前置門檻。
+- **缺漏催繳移除**：基於系統日誌計算之連續缺漏（原 3 天計算與每日催繳推播／待辦清單）已全面移除，日常督導由工會於服務群組相簿人工查閱。
 
 ### 4.4 正常完工滿意度通知（已退役）
 
@@ -110,7 +110,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - **入口分流與非市民 LIFF 設定契約**：
   - `/line-gateway` 的正式畫面與後台預覽依 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 呈現兩步分流。市民已登記與非市民已建案共用 `/line-bind`，各自依 §2 處理核對不到或資料不完整的結果。既有直接連結仍到原目的地。一般需求問卷使用 `/line-registration`。非市民專用合併表單固定由 `/line-non-citizen-registration`（後端於 `<body>` 注入 `data-registration-kind="non_citizen"`）開啟，管理端表單工作室則透過同源 `/api/v1/line/identity/studio-preview/gateway` 與 `/api/v1/line/identity/studio-preview/non-citizen-registration` 渲染唯讀預覽，且頁面內執行期設定查詢依當前預覽前綴解析 `/api/config/liff/runtime`。
   - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留相容自訂文案、其他設定及歷史版本。後端非市民申請設定 API 維持提供 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 供版本化查詢與寫入；前台 `#line-interface` 之「非市民服務申請」僅顯示唯讀互動預覽，不內嵌頁面欄位編輯表單。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
-  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
+  - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；市民與非市民皆於銀行帳號欄位固定顯示「**請填入產婦本人銀行帳號**」備註，並新增必填「**存摺封面**」圖片上傳欄位（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼，並一併歸檔至 NAS `02_客戶存摺封面` 資料夾。非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
 
 ### 5.3 資料異動審核（`profile_update` / `order_update`）
 

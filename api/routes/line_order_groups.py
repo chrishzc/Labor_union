@@ -28,10 +28,8 @@ from datetime import date
 from dataclasses import asdict
 from pydantic import BaseModel, ConfigDict, Field
 from api.dependencies.admin_auth import require_customer_service_handler
-from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
-from subsystems.line.service_day_log_reminders import SendServiceDayLogReminder
 
 router = APIRouter(prefix="/api/v1/line/order-groups", tags=["LINE Order Groups"])
 

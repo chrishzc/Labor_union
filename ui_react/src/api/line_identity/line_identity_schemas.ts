@@ -103,6 +103,17 @@ export const LineIdentityRevocationApplyRequestSchema = z
   })
   .strict();
 
+export const LineIdentityBindingActionRequestSchema = z.object({
+  expected_version: z.number().int().nonnegative(),
+  idempotency_key: z.string().min(1).max(191),
+}).strict();
+
+export type LineIdentityBindingActionRequest = z.infer<typeof LineIdentityBindingActionRequestSchema>;
+export const LineIdentityDeleteRevokedRequestSchema = LineIdentityBindingActionRequestSchema.extend({
+  expected_updated_at: z.string().min(1),
+});
+export type LineIdentityDeleteRevokedRequest = z.infer<typeof LineIdentityDeleteRevokedRequestSchema>;
+
 export const LineIdentityReplacementApplyRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
@@ -340,6 +351,7 @@ export const UnboundProvisionalCandidateSchema = z
     line_user_id: z.string(),
     client_id: z.number().int().nullable().optional(),
     submitted_at: z.string().nullable().optional(),
+    version: z.number().int().nonnegative().optional(),
   })
   .strict();
 

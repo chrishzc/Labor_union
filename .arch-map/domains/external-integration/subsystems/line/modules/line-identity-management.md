@@ -9,7 +9,10 @@
 
 ## Implementation
 - query transport: `api/routes/line_identity_management.py` — role-scoped detail／Preview／Apply 與 bounded replacement-candidates reader。
+- 個人選單修復入口為 `POST /api/v1/line/identity-bindings/{line_user_id}/menu/resync`，由身分管理 application 驗證目前有效角色並入列既有選單工作。
+- 停用綁定刪除入口為 `POST /api/v1/line/identity-bindings/{line_user_id}/delete-revoked`，由身分管理 application 驗證角色與版本，並在同一交易刪除對應綁定及其紀錄。
 - schema: `api/schemas/line_identity_management.py`
+- 待審核與待配對分別由原管理 API 驗證狀態、版本及權限後永久刪除申請或登記；NAS 透過限域刪除程序執行。
 - contract: `subsystems/line/identity_management_contracts.py`
 - review query contract: `subsystems/line/review_contracts.py` — bounded numbered review search，審核 state machine 不變。
 - review transport projection: `api/schemas/line_identity.py` — 審核對象姓名、案件及 canonical 綁定的唯讀展示欄位。
@@ -36,7 +39,7 @@
   - `subsystems/line/terminal_closure_worker.py` — canonical LINE worker bridge for the read-only Orders handoff.
   - `subsystems/line/rich_menu_binding.py` — 個人選單 outbox worker，依最新有效工作與 LINE 讀回確認同步。
   - `subsystems/line/outbox_contracts.py` — 共用 LINE outbox 工作契約，含個人選單工作期限、嘗試上限及同步結果。
-  - `infrastructure/mysql/line_receipt_outbox_audit.py` — 沿用共用 LINE outbox 租約，個人選單領取時保存嘗試次數，完成時保存讀回證據。
+  - `infrastructure/mysql/line_receipt_outbox_audit.py` — 共用 LINE outbox 租約及帳號選單操作鎖，個人選單領取時保存嘗試次數，完成時保存讀回證據。
   - `infrastructure/mysql/orders_terminal_closure_source.py` — read-only Orders outbox handoff adapter; LINE never acknowledges or mutates Orders.
   - `db/schema_parts/1019_line_identity_role_scope.sql`
   - `db/releases/labor_union_validation_schema_v1.sql` — generated Global validation composition; listed as an exact touched artifact, not LINE-owned business semantics.

@@ -135,8 +135,6 @@ _IDENTITY_TEMPLATES = (
     "staff_verification_rejected",
 )
 _CURRENT_FLOW_PREVIEWS = (
-    ("contract-document-client", "客戶契約下載通知", "text"),
-    ("contract-document-staff", "月嫂契約下載通知", "text"),
     ("registration-approved-citizen", "市民需求申請核准通知", "text"),
     ("registration-approved-non-citizen", "非市民需求申請核准通知", "text"),
     ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),

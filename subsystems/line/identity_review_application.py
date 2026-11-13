@@ -15,6 +15,7 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
+from domains.line.identities import LineReviewRequestId
 from domains.line.identity_binding import LineIdentityBindingStatus, LineIdentityClaim
 from domains.line.review import (
     LineReviewDecision,
@@ -24,7 +25,7 @@ from domains.line.review import (
     build_review_decision_candidate,
 )
 from shared_kernel.fingerprints import fingerprint_payload
-from shared_kernel.identities import ExpectedVersion, IdempotencyKey, IdempotencyReceipt
+from shared_kernel.identities import ActorContext, ExpectedVersion, IdempotencyKey, IdempotencyReceipt
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import (
@@ -97,6 +98,36 @@ class LineIdentityReviewApplication:
                 reason=command.reason,
             )
         return PreviewLineReviewDecisionResult(snapshot, candidate)
+
+    def delete_pending(
+        self, request_id: LineReviewRequestId, version: ExpectedVersion,
+        actor: ActorContext, idempotency_key: IdempotencyKey,
+    ) -> None:
+        require_line_capability(actor, LineCapability.IDENTITY_REVIEW)
+        fingerprint = fingerprint_payload({
+            "action": "delete-pending-line-review", "id": request_id.value,
+            "version": version.value, "actor": actor.actor_id,
+        })
+        with self._unit_of_work_factory() as unit_of_work:
+            existing = unit_of_work.receipts.get(idempotency_key)
+            if existing is not None:
+                if existing.payload_fingerprint != fingerprint:
+                    raise LineReviewDataConflictError("刪除請求識別碼已被使用", code="line_review_idempotency_conflict")
+                return
+            try:
+                unit_of_work.reviews.delete_pending(request_id, version)
+            except RuntimeError as error:
+                if str(error) != "line_review_version_conflict":
+                    raise
+                replay = unit_of_work.receipts.get(idempotency_key, for_update=True)
+                if replay is not None and replay.payload_fingerprint == fingerprint:
+                    return
+                raise
+            unit_of_work.receipts.append(IdempotencyReceipt(idempotency_key, fingerprint, f"line-review-deleted:{request_id.value}"))
+            unit_of_work.audit.append(LineAuditIntent(
+                "line.identity.review.deleted", actor.actor_id, "line_review_request", str(request_id.value),
+            ))
+            unit_of_work.commit()
 
     # Kept cohesive to show every side effect inside the caller-owned review transaction.
     def decide(self, command: DecideLineReviewCommand) -> ApplyLineReviewDecisionResult:

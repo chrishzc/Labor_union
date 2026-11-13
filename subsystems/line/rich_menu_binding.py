@@ -22,6 +22,7 @@ from subsystems.line.outbox_contracts import (
     RICH_MENU_BINDING_MAX_ATTEMPTS,
     RICH_MENU_BINDING_VERIFIED,
 )
+_MANUAL_RESYNC_PREFIX = "rich-menu-manual-resync:"
 from subsystems.line.ports import LineAuditIntent, LineRichMenuProviderPort, LineUnitOfWorkPort
 from subsystems.line.rich_menu_contracts import (
     LineRichMenuProviderOutcome,
@@ -52,10 +53,22 @@ def schedule_rich_menu_binding(unit_of_work, binding: LineIdentityBindingSnapsho
     unit_of_work.outbox.append(_binding_intent(binding))
 
 
+def schedule_manual_menu_resync(unit_of_work, binding, request_identity: str) -> None:
+    payload = _binding_payload(binding, _MENU_BY_SUBJECT[binding.subject_type])
+    unit_of_work.outbox.append(OutboxIntent(
+        "line_identity", binding.line_user_id.value, RICH_MENU_BINDING_INTENT, payload,
+        f"{_MANUAL_RESYNC_PREFIX}{binding.version.value}:{request_identity}",
+    ))
+
+
+def role_menu_definition_id(subject_type: LineBindingSubjectType) -> str:
+    return _MENU_BY_SUBJECT[subject_type]
+
+
 def schedule_resolved_identity_menu(unit_of_work, line_user_id, *, selection_version=None) -> bool:
     """Queue one menu only when the LINE-owned active role is unambiguous."""
 
-    binding = _resolved_identity_binding(unit_of_work, line_user_id)
+    binding = resolved_identity_binding(unit_of_work, line_user_id)
     if binding is None:
         return False
     unit_of_work.outbox.append(
@@ -67,7 +80,7 @@ def schedule_resolved_identity_menu(unit_of_work, line_user_id, *, selection_ver
 def schedule_revocation_successor_menu(unit_of_work, line_user_id, request_id) -> bool:
     """Queue one post-revocation menu without colliding with an older role bind."""
 
-    binding = _resolved_identity_binding(unit_of_work, line_user_id)
+    binding = resolved_identity_binding(unit_of_work, line_user_id)
     if binding is None:
         return False
     unit_of_work.outbox.append(
@@ -116,7 +129,7 @@ def schedule_staff_default_restore_menu(
     return intent_identity
 
 
-def _resolved_identity_binding(unit_of_work, line_user_id, *, lock=False):
+def resolved_identity_binding(unit_of_work, line_user_id, *, lock=False):
     read_options = {"lock": True} if lock else {}
     scoped = tuple(
         binding
@@ -155,7 +168,7 @@ def schedule_published_menu_rebindings(
     scheduled = 0
     for binding in bindings:
         unit_of_work.outbox.lock_menu_user(binding.line_user_id)
-        current = _resolved_identity_binding(unit_of_work, binding.line_user_id, lock=True)
+        current = resolved_identity_binding(unit_of_work, binding.line_user_id, lock=True)
         if current is None or current.subject_type is not subject_type:
             continue
         unit_of_work.outbox.append(
@@ -257,10 +270,17 @@ class LineRichMenuBindingWorker:
         return items
 
     def _process(self, item) -> None:
+        line_user_id = LineUserId(item.aggregate_identity)
+        with self._unit_of_work_factory() as guard:
+            with guard.outbox.menu_provider_lock(line_user_id) as acquired:
+                guard.commit()
+                if acquired:
+                    self._process_locked(item, line_user_id)
+
+    def _process_locked(self, item, line_user_id) -> None:
         # Claim has committed its attempt count. Hold the per-user and exact lease
         # locks through the provider operation so competing workers cannot overtake it.
         with self._unit_of_work_factory() as unit_of_work:
-            line_user_id = LineUserId(item.aggregate_identity)
             unit_of_work.outbox.lock_menu_user(line_user_id)
             if not unit_of_work.outbox.lock_menu_lease(item, self._now()):
                 return
@@ -295,7 +315,11 @@ class LineRichMenuBindingWorker:
         ) or payload.get("provider_menu_id")
         if not provider_menu_id:
             return _failure("rich_menu_binding_not_published", "圖文選單尚未發布")
-        if item.attempt_count > 1 or item.maximum_attempts < RICH_MENU_BINDING_MAX_ATTEMPTS:
+        if (
+            item.attempt_count > 1
+            or item.maximum_attempts < RICH_MENU_BINDING_MAX_ATTEMPTS
+            or item.idempotency_identity.startswith(_MANUAL_RESYNC_PREFIX)
+        ):
             current = self._provider.get_user_rich_menu(line_user_id)
             if current.provider_menu_id == provider_menu_id:
                 return current
@@ -348,10 +372,10 @@ class LineRichMenuBindingWorker:
             backoff = 15 * 2 ** (item.attempt_count - 1)
             delay = max(backoff + randint(0, backoff // 2), outcome.retry_after_seconds or 0)
             if item.attempt_count >= item.maximum_attempts:
-                code, message = "rich_menu_binding_attempts_exhausted", f"已達重試上限（{code}）"
+                code, message = "rich_menu_binding_attempts_exhausted", f"已達重試上限（{code}） {message}"
                 retryable = False
             elif delay >= (item.deadline - completed_at).total_seconds():
-                code, message = "rich_menu_binding_deadline_exhausted", f"重試已超過時限（{code}）"
+                code, message = "rich_menu_binding_deadline_exhausted", f"重試已超過時限（{code}） {message}"
                 retryable = False
         unit_of_work.outbox.complete(CompleteLineOutboxCommand(
             item, completed_at, code, message, retry_after_seconds=delay, retryable=retryable,
@@ -375,7 +399,7 @@ def _is_current_target(unit_of_work, item, line_user_id, payload):
         if unit_of_work.identity_management.active_client_cases(line_user_id):
             return False
     else:
-        binding = _resolved_identity_binding(unit_of_work, line_user_id)
+        binding = resolved_identity_binding(unit_of_work, line_user_id)
     return (
         binding is not None
         and binding.status is LineIdentityBindingStatus.BOUND
@@ -385,6 +409,8 @@ def _is_current_target(unit_of_work, item, line_user_id, payload):
 
 
 def _binding_version_matches(identity, binding):
+    if identity.startswith(_MANUAL_RESYNC_PREFIX):
+        return identity.removeprefix(_MANUAL_RESYNC_PREFIX).split(":", 1)[0] == str(binding.version.value)
     prefix = f"rich-menu-bind:{binding.line_user_id.value}:"
     if not identity.startswith(prefix):
         return True
@@ -407,6 +433,8 @@ __all__ = [
     "schedule_published_menu_rebindings",
     "schedule_rich_menu_binding",
     "schedule_resolved_identity_menu",
+    "schedule_manual_menu_resync",
+    "resolved_identity_binding",
     "schedule_revocation_successor_menu",
     "schedule_staff_default_restore_menu",
 ]

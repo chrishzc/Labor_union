@@ -29,8 +29,12 @@
 .identity-table tbody tr:hover{background:#fffdfc}
 .identity-table td:first-child{width:29%}
 .identity-table th:last-child,.identity-table td:last-child{text-align:right;width:110px}
-.identity-table td.identity-binding-actions{width:1%;white-space:nowrap}
-.identity-binding-actions>div{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.identity-binding-table th:last-child,.identity-binding-table td.identity-binding-actions{width:228px;text-align:left}
+.identity-binding-actions>div,.identity-binding-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.identity-binding-table td:first-child{width:25%}
+.identity-binding-table td[data-label=更新時間]{white-space:nowrap}
+.identity-delete-action{color:#fff}
+.identity-pending-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .identity-confirmation{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(420px,calc(100% - 32px));max-height:calc(100% - 32px);padding:24px;border:1px solid var(--line-color-border-subtle);border-radius:16px;background:var(--line-color-surface,#fff);color:var(--line-color-text,#211814)}
 .identity-confirmation::backdrop{background:rgb(30 18 12 / 45%)}
 .identity-confirmation h2{margin:0 0 16px;font-size:1.25rem}
@@ -94,6 +98,7 @@
  .identity-table td[data-label=狀態]{margin-bottom:14px}
  .identity-table td[data-label=更新時間],.identity-table td[data-label=申請時間],.identity-table td[data-label=登記時間]{display:inline-block;padding-top:10px;color:var(--line-color-text-muted);font-size:.8125rem}
  .identity-table td:last-child{float:right;margin-top:0}
+ .identity-binding-table td.identity-binding-actions{float:none;margin-top:12px}
  .identity-table td[data-label=申請事項],.identity-table td[data-label=待配對事項]{margin-bottom:12px}
  .identity-table tr:after{content:"";display:block;clear:both}
  .identity-pagination{padding:14px;flex-wrap:wrap}

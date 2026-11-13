@@ -38,6 +38,11 @@ function errorText(error: unknown) {
     if (error.outcomeUnknown) return '操作結果尚未確認，請重新查詢最新狀態，避免重複提交。';
     if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入。';
     if (error.code === 'FORBIDDEN') return '目前帳號沒有執行這項操作的權限。';
+    if (error.domainCode === 'line_identity_menu_role_not_active') return '這個帳號目前未使用此身分，請先在 LINE 選擇要使用的身分。';
+    if (error.domainCode === 'line_identity_binding_not_revoked') return '只能永久刪除已完成停用的綁定。';
+    if (error.domainCode === 'line_identity_owner_projection_conflict') return '對象資料仍連結這個 LINE 帳號，請先確認解除已完成。';
+    if (error.domainCode === 'line_identity_revocation_in_progress') return '這個帳號正在解除身分綁定，請等選單回復後再試。';
+    if (error.domainCode === 'line_provisional_registration_has_history') return '這筆登記已有案件或匯入紀錄，無法刪除。';
     if (error.code === 'CONFLICT') return '資料已變更，請重新查詢後再次確認。';
     if (error.code === 'NOT_FOUND') return '找不到這筆資料，請重新整理清單。';
   }
@@ -51,10 +56,13 @@ const menuSyncLabels = {
   unverified: '選單同步未確認',
 };
 const menuSyncErrors: Record<string, string> = {
-  line_http_400: 'LINE 拒絕此選單設定',
+  line_http_400: 'LINE 拒絕此選單設定，請核對使用者 ID 與選單圖片',
   line_http_401: 'LINE 憑證無效',
   line_http_403: 'LINE 憑證權限不足',
   line_http_404: 'LINE 找不到指定選單或使用者',
+  line_rich_menu_link_menu_missing: '目前發布的選單已不存在於這個 LINE 官方帳號',
+  line_rich_menu_image_unavailable: '目前官方帳號的選單圖片無法讀取，請核對發布設定',
+  line_rich_menu_readback_user_invalid: '目前的 LINE 官方帳號無法辨識此使用者 ID',
   rich_menu_binding_not_published: '圖文選單尚未發布',
   rich_menu_binding_attempts_exhausted: '已達重試上限',
   rich_menu_binding_deadline_exhausted: '已超過重試時限',
@@ -137,6 +145,7 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<LineIdentityReplacementPreviewView | null>(null);
   const [confirmation, setConfirmation] = useState<LineIdentityBindingView | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowBusy, setRowBusy] = useState(false);
   const [rowNotice, setRowNotice] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -268,7 +277,7 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     return current;
   };
 
-  const runRowAction = async (item: LineIdentityBindingView, action: 'revoke' | 'restore' | 'read') => {
+  const runRowAction = async (item: LineIdentityBindingView, action: 'revoke' | 'restore' | 'resync' | 'delete' | 'read') => {
     if (rowController.current) return;
     const abort = new AbortController();
     rowController.current = abort;
@@ -279,6 +288,17 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     let version = action === 'read' ? unverifiedRow?.version ?? item.version : item.version;
     try {
       const options = { subjectType: item.subject_type, signal: abort.signal };
+      if (action === 'delete') {
+        if (!item.updated_at) throw unavailable();
+        await (client.deleteRevokedBinding?.(item.line_user_id, {
+          expected_version: item.version, expected_updated_at: item.updated_at, idempotency_key: identity(),
+        }, options) ?? Promise.reject(unavailable()));
+        if (abort.signal.aborted) return;
+        setRowNotice('已永久刪除停用綁定資料。');
+        if (result?.items.length === 1 && page > 1) setPage(page - 1);
+        onChanged();
+        return;
+      }
       if (action === 'revoke') {
         const value = await (client.previewRevocation?.(item.line_user_id, options) ?? Promise.reject(unavailable()));
         if (abort.signal.aborted) return;
@@ -305,7 +325,17 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
         submitted = true;
         setRowNotice('已重新安排訪客選單回復。');
       }
-      const current = await readBinding(item, abort.signal, version);
+      let current: LineIdentityBindingView;
+      if (action === 'resync') {
+        current = await (client.resyncMenu?.(item.line_user_id, {
+          expected_version: item.version, idempotency_key: identity(),
+        }, options) ?? Promise.reject(unavailable()));
+        submitted = true;
+        if (current.line_user_id !== item.line_user_id || current.subject_type !== item.subject_type) throw unavailable();
+        setRowNotice('選單同步已受理，請重新整理查看結果。');
+      } else {
+        current = await readBinding(item, abort.signal, version);
+      }
       if (abort.signal.aborted) return;
       setUnverifiedRow(null);
       setResult(previous => previous && {
@@ -316,7 +346,9 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     } catch (error) {
       if (!abort.signal.aborted) {
         setRowError(errorText(error));
-        if (submitted || (error instanceof LineIdentityClientError && error.outcomeUnknown)) {
+        if (action === 'delete' && error instanceof LineIdentityClientError && error.outcomeUnknown) {
+          onChanged();
+        } else if (submitted || (error instanceof LineIdentityClientError && error.outcomeUnknown)) {
           setUnverifiedRow({ item, version: !submitted && action === 'revoke' ? item.version + 1 : version });
         }
       }
@@ -338,24 +370,35 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     {rowError && !confirmation && <p className="identity-message identity-error" role="alert">{rowError}</p>}
     {unverifiedRow && <button type="button" className="identity-button" disabled={rowBusy} onClick={() => void runRowAction(unverifiedRow.item, 'read')}>重新查詢綁定狀態</button>}
     {loading && <p className="identity-message" role="status">正在載入身分綁定…</p>}{listError && <p className="identity-message identity-error" role="alert">{listError}</p>}
-    {result && (result.items.length ? <><div className="identity-table-scroll"><table className="identity-table" data-control-id="line.identity.table"><caption className="sr-only">LINE 身分綁定清單</caption><thead><tr><th>對象</th><th>角色</th><th>狀態</th><th>更新時間</th><th>操作</th></tr></thead><tbody>{result.items.map(item=><tr key={`${item.line_user_id}:${item.subject_type}`}><td><strong>{subjectLabel(item)}</strong><small className="identity-secondary">{item.subject_type === 'staff' ? '' : reference(item)}</small></td><td data-label="角色">{roles[item.subject_type]}</td><td data-label="狀態"><Status item={item} /></td><td data-label="更新時間">{date(item.updated_at)}</td><td className="identity-binding-actions"><div>
+    {result && (result.items.length ? <><div className="identity-table-scroll"><table className="identity-table identity-binding-table" data-control-id="line.identity.table"><caption className="sr-only">LINE 身分綁定清單</caption><thead><tr><th>對象</th><th>角色</th><th>狀態</th><th>更新時間</th><th>操作</th></tr></thead><tbody>{result.items.map(item=><tr key={`${item.line_user_id}:${item.subject_type}`}><td><strong>{subjectLabel(item)}</strong><small className="identity-secondary">{item.subject_type === 'staff' ? '' : reference(item)}</small></td><td data-label="角色">{roles[item.subject_type]}</td><td data-label="狀態"><div className="identity-binding-status"><div><Status item={item} /></div>
+        {item.status === 'bound' && client.resyncMenu && <button type="button" className="identity-button"
+          disabled={rowBusy || !!unverifiedRow || item.rich_menu_sync_status === 'pending'}
+          onClick={() => void runRowAction(item, 'resync')}>重新同步選單</button>}
+        {!!item.revocation_request_id && (item.revocation_status === 'menu_reset_failed' || item.revocation_status === 'manual_completed') &&
+          <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.retryRevocation} onClick={() => void runRowAction(item, 'restore')}>修復訪客選單</button>}
+      </div></td><td data-label="更新時間">{date(item.updated_at)}</td><td className="identity-binding-actions"><div>
       {item.status === 'bound' && <>
-        <button type="button" className="identity-row-action" disabled={rowBusy || !!unverifiedRow || !client.previewRevocation || !client.applyRevocation} onClick={() => { setRowError(null); setConfirmation(item); }}>解除綁定</button>
         {client.previewReplacement && client.applyReplacement && <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow} onClick={() => open(item)}>更正綁定對象</button>}
+        <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.previewRevocation || !client.applyRevocation} onClick={() => { setRowError(null); setConfirmDelete(false); setConfirmation(item); }}>解除綁定</button>
       </>}
-      {!!item.revocation_request_id && (item.revocation_status === 'menu_reset_failed' || item.revocation_status === 'manual_completed') &&
-        <button type="button" className="identity-row-action" disabled={rowBusy || !!unverifiedRow || !client.retryRevocation} onClick={() => void runRowAction(item, 'restore')}>修復訪客選單</button>}
+      {item.status === 'revoked' && client.deleteRevokedBinding && <button type="button" className="identity-button identity-delete-action"
+        disabled={rowBusy || !!unverifiedRow || !item.updated_at}
+        onClick={() => { setRowError(null); setConfirmDelete(true); setConfirmation(item); }}>刪除停用資料</button>}
     </div></td></tr>)}</tbody></table></div><Pagination page={result.page} pageSize={result.page_size} total={result.total} onPage={setPage} /></> : <Empty filtered={!!search.trim()||role!=='all'} label="目前沒有身分綁定紀錄" onClear={()=>{setSearch('');setRole('all');setPage(1);}} />)}
     {confirmation && <dialog ref={confirmationDialog} className="identity-confirmation" aria-labelledby="identity-confirmation-title"
       onCancel={event => { event.preventDefault(); if (!rowBusy) setConfirmation(null); }}>
-      <h2 id="identity-confirmation-title">是否確認解除綁定？</h2>
+      <h2 id="identity-confirmation-title">{confirmDelete ? '永久刪除停用綁定資料？' : '是否確認解除綁定？'}</h2>
       <dl className="identity-facts">
         <dt>姓名</dt><dd>{subjectLabel(confirmation)}</dd>
         <dt>綁定身分</dt><dd>{roles[confirmation.subject_type]}</dd>
       </dl>
+      {confirmDelete && <p>這會永久刪除這個身分的綁定、綁定事件與解除紀錄。</p>}
       <div className="identity-confirmation-actions">
         <button type="button" className="identity-button" disabled={rowBusy} onClick={() => setConfirmation(null)}>取消</button>
-        <button type="button" className="identity-row-action" disabled={rowBusy} onClick={() => void runRowAction(confirmation, 'revoke')}>{rowBusy ? '正在提交…' : '確認解除綁定'}</button>
+        <button type="button" className="identity-row-action" disabled={rowBusy}
+          onClick={() => void runRowAction(confirmation, confirmDelete ? 'delete' : 'revoke')}>
+          {rowBusy ? '正在提交…' : confirmDelete ? '永久刪除' : '確認解除綁定'}
+        </button>
       </div>
     </dialog>}
     <Drawer className="identity-drawer" isOpen={selected !== null} onClose={close} closeDisabled={busy} closeLabel="關閉更正綁定對象" title="更正綁定對象"
@@ -387,6 +430,54 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
   </>;
 }
 
+function DeletePendingRequest({ label, title, remove, onChanged }: {
+  label: string;
+  title: string;
+  remove: (key: string) => Promise<void>;
+  onChanged: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const key = useRef<string | null>(null);
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!key.current || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await remove(key.current);
+      dialog.current?.close();
+      onChanged();
+    } catch (error) {
+      setError(errorText(error));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+  return <>
+    <button type="button" className="identity-button identity-delete-action" aria-label={title} onClick={() => {
+      key.current ??= identity();
+      setError(null);
+      dialog.current?.showModal();
+    }}>刪除</button>
+    <dialog ref={dialog} className="identity-confirmation" aria-label={title}
+      onCancel={event => { if (busy) event.preventDefault(); }}>
+      <h2>{title}？</h2>
+      <p>確認後會永久刪除「{label}」的這筆請求。</p>
+      {error && <p role="alert" className="identity-error">{error}</p>}
+      <div className="identity-confirmation-actions">
+        <button type="button" className="identity-button" disabled={busy} onClick={() => dialog.current?.close()}>取消</button>
+        <button type="button" className="identity-button identity-delete-action" disabled={busy} onClick={() => void submit()}>
+          {busy ? '正在刪除…' : '永久刪除'}
+        </button>
+      </div>
+    </dialog>
+  </>;
+}
+
 function ReviewPanel({ client, reload, onChanged }: { client: Client; reload: number; onChanged: () => void }) {
   const subjectLabel = useLineSubjectLabels();
   const [search,setSearch]=useState(''); const [type,setType]=useState<'all'|LineIdentityReviewType>('all'); const [page,setPage]=useState(1);
@@ -405,7 +496,11 @@ function ReviewPanel({ client, reload, onChanged }: { client: Client; reload: nu
 
   return <><div className="identity-filters"><SearchField value={search} onChange={value=>{setSearch(value);setPage(1);}} label="搜尋申請人或案件編號" /><select aria-label="篩選審核類型" value={type} onChange={event=>{setType(event.target.value as typeof type);setPage(1);}}><option value="all">全部審核類型</option>{Object.entries(reviewTypes).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></div>
     {loading&&<p className="identity-message" role="status">正在載入待審核申請…</p>}{listError&&<p className="identity-message identity-error" role="alert">{listError}</p>}
-    {result&&(result.items.length?<><table className="identity-table"><caption className="sr-only">LINE 待審核清單</caption><thead><tr><th>申請對象</th><th>申請事項</th><th>申請時間</th><th>操作</th></tr></thead><tbody>{result.items.map(item=><tr key={item.request_id}><td><strong>{subjectLabel(item)}</strong><small className="identity-secondary">{item.subject_display_reference||`申請 #${item.request_id}`}</small></td><td data-label="申請事項">{reviewTypes[item.review_type]}</td><td data-label="申請時間">{date(item.created_at)}</td><td><button type="button" className="identity-row-action" aria-label={`審核${subjectLabel(item)}的綁定申請`} onClick={()=>open(item.request_id)}>審核</button></td></tr>)}</tbody></table><Pagination page={result.page} pageSize={result.page_size} total={result.total} onPage={setPage} /></>:<Empty filtered={!!search.trim()||type!=='all'} label="目前沒有待審核申請" onClear={()=>{setSearch('');setType('all');setPage(1);}} />)}
+    {result&&(result.items.length?<><table className="identity-table"><caption className="sr-only">LINE 待審核清單</caption><thead><tr><th>申請對象</th><th>申請事項</th><th>申請時間</th><th>操作</th></tr></thead><tbody>{result.items.map(item=><tr key={item.request_id}><td><strong>{subjectLabel(item)}</strong><small className="identity-secondary">{item.subject_display_reference||`申請 #${item.request_id}`}</small></td><td data-label="申請事項">{reviewTypes[item.review_type]}</td><td data-label="申請時間">{date(item.created_at)}</td><td><div className="identity-pending-actions"><button type="button" className="identity-row-action" aria-label={`審核${subjectLabel(item)}的綁定申請`} onClick={()=>open(item.request_id)}>審核</button>
+      {client.deletePendingReview && <DeletePendingRequest label={subjectLabel(item)} title={`刪除${subjectLabel(item)}的待審核申請`}
+        remove={key => client.deletePendingReview!(item.request_id, {expected_version: item.version, idempotency_key: key})}
+        onChanged={() => { if (result.items.length === 1 && page > 1) setPage(page - 1); onChanged(); }} />}
+    </div></td></tr>)}</tbody></table><Pagination page={result.page} pageSize={result.page_size} total={result.total} onPage={setPage} /></>:<Empty filtered={!!search.trim()||type!=='all'} label="目前沒有待審核申請" onClear={()=>{setSearch('');setType('all');setPage(1);}} />)}
     <Drawer className="identity-drawer" isOpen={requestId!==null} onClose={close} closeDisabled={busy} closeLabel="關閉審核明細" title="審核綁定申請" footer={detail?.status==='pending'&&!uncertain?<button type="button" className="identity-button primary" disabled={busy||!decision} onClick={()=>void runPreview()}>{applying?'正在提交…':'提交審核決定'}</button>:undefined}>
       {busy&&<p role="status">{applying?'正在提交審核…':'正在查詢審核資料…'}</p>}{error&&<p className="identity-error" role="alert">{error}</p>}{notice&&<p className="identity-note" role="status">{notice}</p>}{requestId!==null&&(error||uncertain||notice)&&!busy&&<button type="button" className="identity-button" onClick={()=>void load(requestId)}>重新查詢審核結果</button>}
       {detail&&<><div className="identity-person"><div><h3>{subjectLabel(detail)}</h3><small className="identity-secondary">{reviewTypes[detail.review_type]} · {detail.subject_display_reference||`申請 #${detail.request_id}`}</small></div><span className="identity-status attention">{detail.status==='pending'?'待審核':detail.status==='approved'?'已核准':detail.status==='rejected'?'已拒絕':detail.status==='cancelled'?'已取消':'已到期'}</span></div><div className="identity-comparison"><div><span>目前 LINE</span><strong>{detail.current_line_user_id?maskLineUserId(detail.current_line_user_id):'尚無可確認的綁定資料'}</strong></div><div><span>申請帳號</span><strong>{maskLineUserId(detail.line_user_id)}</strong></div></div>
@@ -431,7 +526,11 @@ function PairingPanel({client,reload,onChanged}:{client:Client;reload:number;onC
   useUnsavedDraft('LINE 報名配對', { '已選報名': !!registration, '已選案件': !!order, '原因': reason }, { busy: busy || uncertain, resetKey: notice });
 
   return <><div className="identity-filters"><SearchField value={search} onChange={value=>{setSearch(value);setPage(1);}} label="搜尋登記姓名或電話末碼" /></div>{loading&&<p className="identity-message" role="status">正在載入待配對登記…</p>}{listError&&<p className="identity-message identity-error" role="alert">{listError}</p>}{notice&&<p className="identity-message" role="status">{notice}</p>}
-    {result&&(rows.length?<><table className="identity-table"><caption className="sr-only">LINE 待配對登記清單</caption><thead><tr><th>登記對象</th><th>待配對事項</th><th>登記時間</th><th>操作</th></tr></thead><tbody>{rows.map(item=><tr key={item.registration_id}><td><strong>{item.name}</strong><small className="identity-secondary">{phone(item.phone)}</small></td><td data-label="待配對事項">尚未對應正式訂單</td><td data-label="登記時間">{date(item.submitted_at)}</td><td><button type="button" className="identity-row-action" aria-label={`為${item.name}尋找對應訂單`} onClick={()=>open(item)}>配對</button></td></tr>)}</tbody></table><Pagination page={page} pageSize={pageSize} total={candidates.length} onPage={setPage} /></>:<Empty filtered={!!search.trim()} label="目前沒有待配對登記" onClear={()=>{setSearch('');setPage(1);}} />)}
+    {result&&(rows.length?<><table className="identity-table"><caption className="sr-only">LINE 待配對登記清單</caption><thead><tr><th>登記對象</th><th>待配對事項</th><th>登記時間</th><th>操作</th></tr></thead><tbody>{rows.map(item=><tr key={item.registration_id}><td><strong>{item.name}</strong><small className="identity-secondary">{phone(item.phone)}</small></td><td data-label="待配對事項">尚未對應正式訂單</td><td data-label="登記時間">{date(item.submitted_at)}</td><td><div className="identity-pending-actions"><button type="button" className="identity-row-action" aria-label={`為${item.name}尋找對應訂單`} onClick={()=>open(item)}>配對</button>
+      {client.deletePendingPairing && item.version !== undefined && <DeletePendingRequest label={item.name} title={`刪除${item.name}的待配對登記`}
+        remove={key => client.deletePendingPairing!(item.registration_id, {expected_version: item.version!, idempotency_key: key})}
+        onChanged={() => { if (rows.length === 1 && page > 1) setPage(page - 1); onChanged(); }} />}
+    </div></td></tr>)}</tbody></table><Pagination page={page} pageSize={pageSize} total={candidates.length} onPage={setPage} /></>:<Empty filtered={!!search.trim()} label="目前沒有待配對登記" onClear={()=>{setSearch('');setPage(1);}} />)}
     <Drawer className="identity-drawer" isOpen={registration!==null} onClose={close} closeDisabled={busy} closeLabel="關閉配對明細" title="配對客戶與訂單" footer={order&&!uncertain?<><button type="button" className="identity-button" disabled={busy} onClick={()=>{setOrder(null);}}>重新選擇</button><button type="button" className="identity-button primary" disabled={busy} onClick={()=>void apply()}>{busy?'正在配對…':'配對並綁定'}</button></>:undefined}>
       {error&&<p className="identity-error" role="alert">{error}</p>}{uncertain&&<button type="button" className="identity-button" disabled={busy} onClick={()=>void readBack()}>重新查詢配對結果</button>}
       {registration&&<><p className="identity-secondary">{order?'2 核對配對':'1 選擇訂單'}</p><div className="identity-person"><div><h3>{registration.name}</h3><small className="identity-secondary">LINE 登記 · {phone(registration.phone)}</small></div></div>

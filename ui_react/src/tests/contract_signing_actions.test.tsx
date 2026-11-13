@@ -54,21 +54,17 @@ describe('ContractSigningActions', () => {
     vi.unstubAllGlobals();
   });
 
-  it('以 HTTPS 文件網址建立月嫂寄送任務並顯示 server receipt', async () => {
-    const sendStaff = vi.spyOn(contractSigningMutationClient, 'sendStaff').mockResolvedValue(receipt);
+  it('保留人工證據入口並移除客戶與月嫂的契約寄送操作', () => {
     render(<ContractSigningActions
       caseNo="CASE-1"
-      signing={{ ...waitingForStaffReturn, staff_segments: [{ segment_id: 3, staff_id: 9, sent: false, signed_received: false }] }}
+      signing={{ ...waitingForStaffReturn, commitment_id: 7, client_document_sent: false, staff_segments: [{ segment_id: 3, staff_id: 9, sent: false, signed_received: false }] }}
       onCommitted={vi.fn()}
     />);
 
-    fireEvent.change(screen.getByLabelText('受控 HTTPS 文件下載網址'), { target: { value: 'https://contracts.example/file.pdf' } });
-    fireEvent.click(screen.getByRole('button', { name: /確認建立月嫂契約寄送任務/ }));
-
-    await waitFor(() => expect(sendStaff).toHaveBeenCalledWith(
-      'CASE-1', 3, 'https://contracts.example/file.pdf', expect.objectContaining({ idempotencyKey: expect.any(String), correlationId: expect.any(String) }),
-    ));
-    expect(await screen.findByText(/已排入 LINE 寄送佇列，尚未代表對方已收到/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('受控 HTTPS 文件下載網址')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /建立.*契約寄送任務/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('人工月嫂簽約證據檔')).toBeInTheDocument();
+    expect(screen.getByLabelText('人工客戶簽約證據檔')).toBeInTheDocument();
   });
 
   it('只以目前已寄送的文件版本記錄月嫂簽回檔', async () => {
@@ -162,16 +158,19 @@ describe('ContractSigningActions', () => {
   });
 
   it('Apply receipt 已提交但 fresh readback 失敗時保留 receipt 並提示可重試觀察', async () => {
-    vi.spyOn(contractSigningMutationClient, 'sendStaff').mockResolvedValue(receipt);
+    vi.spyOn(contractSigningMutationClient, 'uploadStaffSignedReturn').mockResolvedValue({ ...receipt, line_delivery_task_id: null });
     const onCommitted = vi.fn().mockRejectedValue(new Error('重新查詢失敗'));
     render(<ContractSigningActions
       caseNo="CASE-1"
-      signing={{ ...waitingForStaffReturn, staff_segments: [{ segment_id: 3, staff_id: 9, sent: false, signed_received: false }] }}
+      signing={waitingForStaffReturn}
       onCommitted={onCommitted}
     />);
 
-    fireEvent.change(screen.getByLabelText('受控 HTTPS 文件下載網址'), { target: { value: 'https://contracts.example/file.pdf' } });
-    fireEvent.click(screen.getByRole('button', { name: /確認建立月嫂契約寄送任務/ }));
+    const file = new File(['signed'], 'signed.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('月嫂簽回檔'), {
+      target: { files: { 0: file, length: 1, item: () => file } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /確認記錄月嫂簽回/ }));
 
     await waitFor(() => expect(onCommitted).toHaveBeenCalledOnce());
     expect(screen.getByRole('status')).toHaveTextContent('簽署紀錄已建立');

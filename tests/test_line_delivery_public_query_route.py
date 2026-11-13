@@ -162,7 +162,7 @@ def test_delivery_source_groups_are_safe_and_bounded() -> None:
 @pytest.mark.parametrize(('source', 'retry_allowed'), [
     ('contract_signing_case', False),
     ('contract_external_signing_session', False),
-    ('contract_document_version', True),
+    ('contract_document_version', False),
 ])
 def test_contract_delivery_detail_keeps_history_and_reports_retry_availability(monkeypatch, source, retry_allowed):
     class ContractApplication(_Application):
@@ -189,6 +189,7 @@ def test_contract_delivery_detail_keeps_history_and_reports_retry_availability(m
         'order': ('order_service_start_day','order_service_start_day_response','order_service_completion'),
         'assignment': ('manual_service_day_log_reminder', 'service_start_schedule'),
         'group_invitation': ('service_start_invitation',),
+        'webhook': ('line_webhook_reply',),
     }.items() for name in names],
 )
 def test_matching_schedule_sources_project_to_bounded_matching_label(
@@ -216,6 +217,8 @@ def test_matching_schedule_sources_project_to_bounded_matching_label(
     assert "provider-secret" not in response.text
     detail=client.get('/api/v1/line/tasks/7')
     assert detail.status_code==200 and detail.json()['data']['task']['source_type']==expected_type
+    if source_aggregate_type == 'line_webhook_reply':
+        assert detail.json()['data']['retry_allowed'] is False
 
 
 @pytest.mark.parametrize('category,required,excluded',[

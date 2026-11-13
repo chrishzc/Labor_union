@@ -130,56 +130,64 @@ def _success():
 
 
 class DeliveryRegressionTests(unittest.TestCase):
-    def test_retired_signing_reminders_cancel_without_sending_and_preserve_history(self):
-        repository = DeliveryRepository(count=5)
+    def test_retired_contract_tasks_cancel_without_sending_and_preserve_history(self):
+        repository = DeliveryRepository(count=6)
         sources = ("contract_external_signing_session", "contract_signing_case",
-                   "contract_document_version", "review", "contract_external_signing_session")
+                   "contract_document_version", "review", "contract_external_signing_session",
+                   "contract_document_version")
         for task_id, source in enumerate(sources, start=1):
             task = repository.tasks[task_id]
             repository.tasks[task_id] = replace(task, request=replace(task.request, source_aggregate_type=source))
         # Reclaimed jobs may already have an attempt with an uncertain provider outcome.
         repository.tasks[2] = replace(repository.tasks[2], completed_attempts=1)
-        historical = repository.tasks[5] = replace(repository.tasks[5], status=LineDeliveryStatus.SENT, completed_attempts=1)
+        repository.tasks[3] = replace(repository.tasks[3], completed_attempts=2)
+        historical = {
+            task_id: replace(repository.tasks[task_id], status=LineDeliveryStatus.SENT, completed_attempts=1)
+            for task_id in (5, 6)
+        }
+        repository.tasks.update(historical)
         provider = Mock()
         provider.send.return_value = _success()
         worker = LineDeliveryWorker(lambda: Uow(delivery_tasks=repository), provider, "worker:regression", lambda: NOW)
 
         self.assertEqual(worker.run_once(), 4)
 
-        self.assertEqual([command.task_id.value for command in repository.cancelled], [1, 2])
+        self.assertEqual([command.task_id.value for command in repository.cancelled], [1, 2, 3])
         self.assertEqual(repository.tasks[2].completed_attempts, 1)
-        self.assertEqual(repository.tasks[5], historical)
+        self.assertEqual(repository.tasks[3].completed_attempts, 2)
+        self.assertEqual({task_id: repository.tasks[task_id] for task_id in historical}, historical)
         self.assertEqual([call.args[0].source_aggregate_type for call in provider.send.call_args_list],
-                         ["contract_document_version", "review"])
-        self.assertEqual([command.task.task_id.value for command in repository.recorded], [3, 4])
+                         ["review"])
+        self.assertEqual([command.task.task_id.value for command in repository.recorded], [4])
 
-    def test_retired_signing_reminders_reject_manual_rescheduling(self):
-        for action, status in (("retry", LineDeliveryStatus.FAILED), ("run_now", LineDeliveryStatus.PENDING)):
-            with self.subTest(action=action):
-                task = _task(1)
-                task = replace(task, status=status, request=replace(task.request, source_aggregate_type="contract_signing_case"))
-                repository = Mock()
-                repository.get.return_value = task
-                receipts = Mock()
-                receipts.get.return_value = None
-                application = LineDeliveryTaskAdminApplication(lambda: Uow(delivery_tasks=repository, receipts=receipts))
-                command = ControlLineDeliveryTaskCommand(task.task_id, ActorContext("admin:1", ("line.task.control",)),
-                                                         "", IdempotencyKey("test:retired"), task.request.correlation_id)
+    def test_retired_contract_tasks_reject_manual_rescheduling(self):
+        for source in ("contract_signing_case", "contract_external_signing_session", "contract_document_version"):
+            for action, status in (("retry", LineDeliveryStatus.FAILED), ("run_now", LineDeliveryStatus.PENDING)):
+                with self.subTest(source=source, action=action):
+                    task = _task(1)
+                    task = replace(task, status=status, request=replace(task.request, source_aggregate_type=source))
+                    repository = Mock()
+                    repository.get.return_value = task
+                    receipts = Mock()
+                    receipts.get.return_value = None
+                    application = LineDeliveryTaskAdminApplication(lambda: Uow(delivery_tasks=repository, receipts=receipts))
+                    command = ControlLineDeliveryTaskCommand(task.task_id, ActorContext("admin:1", ("line.task.control",)),
+                                                             "", IdempotencyKey("test:retired"), task.request.correlation_id)
 
-                with self.assertRaises(LineDeliveryTaskStateConflictError):
-                    getattr(application, action)(command)
+                    with self.assertRaises(LineDeliveryTaskStateConflictError):
+                        getattr(application, action)(command)
 
-                receipts.get.return_value = IdempotencyReceipt(
-                    command.idempotency_key,
-                    fingerprint_payload({"action": action, "task_id": 1, "reason": ""}),
-                    f"line-delivery:1:{action}",
-                )
-                with self.assertRaises(LineDeliveryTaskStateConflictError):
-                    getattr(application, action)(command)
+                    receipts.get.return_value = IdempotencyReceipt(
+                        command.idempotency_key,
+                        fingerprint_payload({"action": action, "task_id": 1, "reason": ""}),
+                        f"line-delivery:1:{action}",
+                    )
+                    with self.assertRaises(LineDeliveryTaskStateConflictError):
+                        getattr(application, action)(command)
 
-                repository.retry_failed.assert_not_called()
-                repository.run_now.assert_not_called()
-                receipts.append.assert_not_called()
+                    repository.retry_failed.assert_not_called()
+                    repository.run_now.assert_not_called()
+                    receipts.append.assert_not_called()
 
     def test_reply_server_errors_do_not_push_or_allow_automatic_retry(self):
         for status in (500, 502, 503, 504):

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from dataclasses import replace
+import base64
 import hashlib
 import json
 import time
@@ -27,6 +28,12 @@ PREFIX = "registration:"
 
 # Keys are deliberately explicit so the public Redis ACL can write intake keys,
 # read published results, and never write the private decision namespace.
+_STAGE_PASSBOOK = """
+redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[3])
+redis.call('SET',KEYS[2],ARGV[2],'PX',ARGV[3])
+return {'staged'}
+"""
+
 _SUBMIT = """
 local ready=tonumber(redis.call('GET',KEYS[1]))
 local counter=tonumber(redis.call('GET',KEYS[2]))
@@ -44,6 +51,9 @@ if active then
  end
  return {'active',active}
 end
+if KEYS[7] and KEYS[8] then
+ if redis.call('EXISTS',KEYS[7])==0 or redis.call('EXISTS',KEYS[8])==0 then return {'missing_passbook'} end
+end
 local id=redis.call('INCR',KEYS[2])
 if id>9007199254740991 then return {'uninitialized'} end
 local suffix=tostring(id)
@@ -54,6 +64,10 @@ redis.call('ZADD',KEYS[5],id,suffix)
 redis.call('ZADD',KEYS[6],ARGV[4],suffix)
 redis.call('SET',KEYS[4],suffix,'PXAT',ARGV[4])
 redis.call('SET',KEYS[3],suffix)
+if KEYS[7] and KEYS[8] then
+ redis.call('PEXPIREAT',KEYS[7],ARGV[4])
+ redis.call('PEXPIREAT',KEYS[8],ARGV[4])
+end
 return {'created',suffix}
 """
 
@@ -75,11 +89,18 @@ elseif ARGV[1]=='reject' then status='rejected'
 elseif ARGV[1]=='expire' then return {'pending'}
 else
  if redis.call('EXISTS',KEYS[2])==0 then return {'missing_content'} end
+ if KEYS[10] and KEYS[11] then
+  if redis.call('EXISTS',KEYS[10])==0 or redis.call('EXISTS',KEYS[11])==0 then return {'missing_passbook'} end
+ end
  local decision={status='approving',operation_id=ARGV[4],actor=ARGV[5],decided_ms=tonumber(ARGV[3])}
  redis.call('SET',KEYS[4],cjson.encode(decision))
  redis.call('SET',KEYS[3],cjson.encode({status='approving',operation_id=ARGV[4]}))
  redis.call('PERSIST',KEYS[2])
  redis.call('PERSIST',KEYS[5])
+ if KEYS[10] and KEYS[11] then
+  redis.call('PERSIST',KEYS[10])
+  redis.call('PERSIST',KEYS[11])
+ end
  redis.call('ZADD',KEYS[8],meta.registration_id,tostring(meta.registration_id))
  redis.call('ZREM',KEYS[6],tostring(meta.registration_id))
  redis.call('ZREM',KEYS[7],tostring(meta.registration_id))
@@ -89,6 +110,7 @@ local decision={status=status,actor=ARGV[5],decided_ms=tonumber(ARGV[3])}
 redis.call('SET',KEYS[4],cjson.encode(decision))
 redis.call('SET',KEYS[3],cjson.encode({status=status}))
 redis.call('DEL',KEYS[2])
+if KEYS[10] and KEYS[11] then redis.call('DEL',KEYS[10],KEYS[11]) end
 if redis.call('GET',KEYS[5])==tostring(meta.registration_id) then redis.call('DEL',KEYS[5]) end
 redis.call('ZREM',KEYS[6],tostring(meta.registration_id))
 redis.call('ZREM',KEYS[7],tostring(meta.registration_id))
@@ -106,6 +128,7 @@ decision.status='approved';decision.receipt=result
 redis.call('SET',KEYS[1],cjson.encode(decision))
 redis.call('SET',KEYS[2],cjson.encode(result))
 redis.call('DEL',KEYS[3])
+if KEYS[9] and KEYS[10] then redis.call('DEL',KEYS[9],KEYS[10]) end
 if redis.call('GET',KEYS[4])==ARGV[3] then redis.call('DEL',KEYS[4]) end
 redis.call('ZREM',KEYS[5],ARGV[3]);redis.call('ZREM',KEYS[6],ARGV[3]);redis.call('ZREM',KEYS[7],ARGV[3])
 redis.call('INCR',KEYS[8])
@@ -162,12 +185,16 @@ class RedisRegistrationStagingRepository:
         payload = _json({"client": dict(candidate.client_payload), "beclass": dict(candidate.beclass_payload)})
         if len(payload.encode("utf-8")) > MAX_PAYLOAD_BYTES:
             raise ProvisionalRegistrationConflictError("registration_payload_too_large")
-        result = self._eval(_SUBMIT,
-            [PREFIX + "ready", PREFIX + "counter", PREFIX + f"submission:{subject}:{submission_id}",
-             PREFIX + "active:" + subject, PREFIX + "pending", PREFIX + "deadlines"],
-            [PREFIX, _json(meta), payload, meta["expires_ms"]])
+        keys = [PREFIX + "ready", PREFIX + "counter", PREFIX + f"submission:{subject}:{submission_id}",
+                PREFIX + "active:" + subject, PREFIX + "pending", PREFIX + "deadlines"]
+        image_id = candidate.client_payload.get("passbook_image_id")
+        if isinstance(image_id, str) and image_id.startswith("pbk_"):
+            keys.extend([PREFIX + f"passbook:meta:{image_id}", PREFIX + f"passbook:data:{image_id}"])
+        result = self._eval(_SUBMIT, keys, [PREFIX, _json(meta), payload, meta["expires_ms"]])
         if result[0] == "uninitialized":
             raise ProvisionalRegistrationStorageError("registration_redis_initialization_required")
+        if result[0] == "missing_passbook":
+            raise ProvisionalRegistrationConflictError("registration_passbook_image_not_found")
         registration_id = int(result[1])
         saved = self._metadata(registration_id)
         if saved["subject"] != subject or saved["fingerprint"] != candidate.payload_fingerprint.value:
@@ -252,14 +279,29 @@ class RedisRegistrationStagingRepository:
                     return tuple(items)
         return tuple(items)
 
+    def _passbook_keys_for_registration(self, registration_id: int) -> list[str]:
+        raw = self._call("get", PREFIX + f"content:{registration_id}")
+        if not raw:
+            return []
+        try:
+            image_id = json.loads(_text(raw)).get("client", {}).get("passbook_image_id")
+        except (ValueError, AttributeError):
+            return []
+        if isinstance(image_id, str) and image_id.startswith("pbk_"):
+            return [PREFIX + f"passbook:meta:{image_id}", PREFIX + f"passbook:data:{image_id}"]
+        return []
+
     def _decide(self, registration_id, expected_version, action, actor):
         meta = self._metadata(registration_id)
-        result = self._eval(_DECIDE,
-            [PREFIX + f"meta:{registration_id}", PREFIX + f"content:{registration_id}",
-             PREFIX + f"result:{registration_id}", PREFIX + f"decision:{registration_id}",
-             PREFIX + "active:" + meta["subject"], PREFIX + "pending", PREFIX + "deadlines",
-             PREFIX + "processing", PREFIX + "deletion-generation"],
+        keys = [PREFIX + f"meta:{registration_id}", PREFIX + f"content:{registration_id}",
+                PREFIX + f"result:{registration_id}", PREFIX + f"decision:{registration_id}",
+                PREFIX + "active:" + meta["subject"], PREFIX + "pending", PREFIX + "deadlines",
+                PREFIX + "processing", PREFIX + "deletion-generation"]
+        keys.extend(self._passbook_keys_for_registration(registration_id))
+        result = self._eval(_DECIDE, keys,
             [action, expected_version, self._now_ms(), uuid4().hex, actor])
+        if result[0] == "missing_passbook":
+            raise ProvisionalRegistrationConflictError("registration_passbook_image_missing")
         if result[0] in {"conflict", "missing", "missing_content"}:
             raise ProvisionalRegistrationConflictError("registration_application_stale")
         return self.get(registration_id)
@@ -279,10 +321,11 @@ class RedisRegistrationStagingRepository:
         if set(receipt) != allowed or not receipt["client_id"] or not receipt["beclass_record_id"]:
             raise ProvisionalRegistrationStorageError("registration_approval_receipt_invalid")
         meta = self._metadata(registration_id)
-        result = self._eval(_COMPLETE,
-            [PREFIX + f"decision:{registration_id}", PREFIX + f"result:{registration_id}",
-             PREFIX + f"content:{registration_id}", PREFIX + "active:" + meta["subject"],
-             PREFIX + "pending", PREFIX + "deadlines", PREFIX + "processing", PREFIX + "deletion-generation"],
+        keys = [PREFIX + f"decision:{registration_id}", PREFIX + f"result:{registration_id}",
+                PREFIX + f"content:{registration_id}", PREFIX + "active:" + meta["subject"],
+                PREFIX + "pending", PREFIX + "deadlines", PREFIX + "processing", PREFIX + "deletion-generation"]
+        keys.extend(self._passbook_keys_for_registration(registration_id))
+        result = self._eval(_COMPLETE, keys,
             [operation_id, _json(receipt), registration_id])
         if result != ["approved"]:
             raise ProvisionalRegistrationConflictError("registration_approval_operation_mismatch")
@@ -296,6 +339,46 @@ class RedisRegistrationStagingRepository:
         for value in ids:
             self._decide(int(value), 1, "expire", "system:expiry")
         return len(ids)
+
+    def stage_passbook_image(self, *, line_user_id: str, filename: str, mime_type: str, content: bytes):
+        image_id = f"pbk_{uuid4().hex}"
+        sha256 = hashlib.sha256(content).hexdigest()
+        meta = {
+            "passbook_image_id": image_id,
+            "subject": _subject(line_user_id),
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": len(content),
+            "sha256": sha256,
+        }
+        encoded = base64.b64encode(content).decode("ascii")
+        self._eval(
+            _STAGE_PASSBOOK,
+            [PREFIX + f"passbook:meta:{image_id}", PREFIX + f"passbook:data:{image_id}"],
+            [_json(meta), encoded, str(RETENTION_MS)],
+        )
+        return meta
+
+    def get_passbook_image(self, passbook_image_id: str, *, line_user_id: str | None = None):
+        if not passbook_image_id or not passbook_image_id.startswith("pbk_"):
+            return None
+        raw_meta = self._call("get", PREFIX + f"passbook:meta:{passbook_image_id}")
+        raw_data = self._call("get", PREFIX + f"passbook:data:{passbook_image_id}")
+        if not raw_meta or not raw_data:
+            return None
+        meta = json.loads(_text(raw_meta))
+        if line_user_id is not None and meta.get("subject") != _subject(line_user_id):
+            return None
+        content = base64.b64decode(_text(raw_data))
+        if hashlib.sha256(content).hexdigest() != meta.get("sha256"):
+            raise ProvisionalRegistrationStorageError("registration_passbook_corrupted")
+        return meta, content
+
+    def delete_passbook_image(self, passbook_image_id: str) -> None:
+        if not passbook_image_id or not passbook_image_id.startswith("pbk_"):
+            return
+        self._call("delete", PREFIX + f"passbook:meta:{passbook_image_id}")
+        self._call("delete", PREFIX + f"passbook:data:{passbook_image_id}")
 
 
 def _json(value):

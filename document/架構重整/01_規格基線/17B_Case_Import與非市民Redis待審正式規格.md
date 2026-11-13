@@ -35,7 +35,7 @@
 ### 3.1 非市民進件與配號（`NC-ENTRY`、`NC-FORM`、`NC-APPROVAL`、`NC-NUMBER`、`NC-STAT`）
 
 - **進件獨立性（`NC-ENTRY-01～03`）**：非市民由 [服務閘道 §2](29_LINE服務說明、客服互動與選單角色正式規格.md#2-服務閘道gateway與登記入口規則) 的「非新竹市民 → 尚未申請」進入專屬 LINE LIFF 合併表單；因補助資格不符而作廢之原 HCM 報名保留原記錄與審核失敗統計，另申請自費者須走本專用 LIFF 與工會審核取得新 `A` 案號（禁止沿用原 HCM 案號或假借補件覆活已作廢之補助案件）。
-- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
+- **必填與用語（`NC-FORM-01～02`）**：合併表單套用全部 HCM 必填欄位 ＋ BeClass 既有規則；統一稱「退款帳戶」供一般退款使用；送出僅存待審申請編號，經工會核准方建立正式 Client／BeClass／Order 與非市民費率綁定。一般需求調查（`/line-registration`）與非市民服務申請（`/line-non-citizen-registration`）皆於銀行帳號欄位固定備註「**請填入產婦本人銀行帳號**」，並皆須必填上傳「**存摺封面**」圖片（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼並一併歸檔至 NAS `02_客戶存摺封面` 資料夾；皆強制要求填選閉鎖**胎數**（`survey_details["特殊計費:胎數"]`，僅接受 `單胞胎` 或 `雙胞胎`）；非市民 LIFF 不重複渲染舊「寶寶資訊」文字欄位，亦不再向客戶索取 `LINE ID`（由客戶主動加入官方帳號並以 LIFF Token 識別；系統保留 `clients.line_id` 欄位供選填／相容）；`baby_info` 由所選胎數（`單胞胎`／`雙胞胎`）同步填入，`ProvisionalRegistration`／非市民檢核於 Preview／Apply 邊界拒絕缺漏、非「單胞胎／雙胞胎」或不一致之 `baby_info` 與「第幾胎」等其他文字，並於核准建檔時寫入 `beclass_records.survey_details` 供雙胞胎費率與整合名冊消費。
 - **後台手動新案必填**。客戶姓名、連絡電話、預計服務開始日、服務天數、服務時段、胎數、電子郵件、退款銀行代號（含分行共 7 碼）及退款銀行帳號均為必填。胎數只接受單胞胎或雙胞胎；同一建案交易寫入 BeClass「特殊計費:胎數」，並以此胎數初始化客戶帳務及月嫂薪資。後台表單與建案 API 均拒絕缺漏或只有空白的值。
 - **需求調查時薪與假日意願**。市民與非市民 LIFF 在單胞胎及雙胞胎選項旁顯示 [Client Finance 計價政策](04_Client_Finance_Domain.md#2-核心不變量與計價規則) 的服務時薪。市民以一般市民費率為參考，區分不同的補助內及用盡後費率，非市民顯示自費費率。兩種 LIFF 的「費用與同意條款」及後台手動非市民新案皆選填遇端午、中秋、除夕、初一或初二是否願意支付雙倍薪水，答案為「是」或「否」。此答案只保存於需求調查。
 - **非市民表單服務時段**。LIFF 與後台手動新案提供相同的服務方式、生產方式及居住型態選項。每日服務時段提供 08:30–12:30（4 小時）、08:30–16:30（8 小時）、09:00–17:00（8 小時）、13:00–17:00（4 小時）。LIFF 表單及 Preview／Apply 僅接受這四個時段。後台手動新案可調整每日開始與結束時間，同日起訖時間差須等於所選的 4 或 8 小時，不扣午休。LIFF 依預計服務開始日、天數及休假規則推算結束日。退款帳號正規化後須有數字。
@@ -48,7 +48,7 @@
 - **`REG-BOUNDARY-01～06`（儲存與邊界隔離）**：
   - 核准前待審問卷內容與完整申請候選**嚴禁寫入 MySQL 任何資料表、outbox、通知或稽核**。
   - 對外收件容器 `registration-intake` 僅持 LIFF token 驗證與專用 `registration-redis` 受限 ACL（僅可讀寫待審內容與計數器命名空間，完全不配置 MySQL 憑證、網路路徑或審核決策權限）；瀏覽器僅呼叫 bounded API。
-  - 管理員審核核准於 MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，確認完成後方清除 Redis 問卷原文。
+  - 管理員審核核准於 MySQL 唯一 outer UoW 透過各 owning Domain writer 原子建立正式 Client／BeClass（含同步保存 `beclass_records.refund_bank_code` 與 `refund_account_no`，依 `REG-REFUND-01～03`）／Orders（含非市民建檔）與 LINE binding，並透過 Controlled File Storage boundary 將暫存的存摺封面歸檔至 NAS `02_客戶存摺封面` 資料夾，確認完成後方清除 Redis 問卷原文與暫存圖檔。
 - **`REG-REDIS-01～04`（持久化設定與編號）**：專用 `registration-redis`（Redis 7 獨立實例＋持久化卷，禁與 cache 共用；關閉 host port；設定 `appendonly yes`、`appendfsync always`、`noeviction`、`maxmemory 256mb`、`auto-aof-rewrite-percentage 100`、`auto-aof-rewrite-min-size 64mb`）。容量滿或 AOF 錯誤一律拒收而不退回 MySQL。專用 Redis 持久化計數器須於還原後與 MySQL 核對最大已用編號（禁擅自以空庫或已核准值重設）。
 - **`REG-REDIS-05` & `REG-EXPIRY-01～04`（14 天自動清除與拒絕終態）**：
   - 待審申請自伺服器提交時起算固定 **14 × 24 小時（14 天）**，設定不可延長之絕對 `expires_at` 與 Redis TTL（重開／查詢不延長；到期立即清除問卷並釋放主體占用，保留最小「已到期」狀態供查「申請已到期，請重新申請」；轉入核准處理中立即解除 TTL 改受恢復索引保護以防 MySQL 交易中途遺失）。

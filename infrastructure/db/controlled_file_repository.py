@@ -12,11 +12,10 @@ import json
 from typing import Any
 import uuid
 from infrastructure.file.storage_layout import (
-    ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY,
+    ORDERS_DIRECTORY, CLIENT_PASSBOOK_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY,
     LOCAL_DOCUMENT_ARCHIVES, absolute_storage_root, safe_filename_component, unified_storage_enabled,
 )
 
-from domains.controlled_files.reference_finalize import canonical_scheduling_storage_locator
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.controlled_files.contracts import (
@@ -57,6 +56,10 @@ _OWNER_SUBJECT_SQL = {
     ControlledFileOwner.ORDERS: "SELECT 1 AS present FROM orders WHERE case_no=%s",
     ControlledFileOwner.STAFF: (
         "SELECT 1 AS present FROM staff WHERE %s REGEXP '^[1-9][0-9]*$' "
+        "AND id=CAST(%s AS UNSIGNED)"
+    ),
+    ControlledFileOwner.CLIENTS: (
+        "SELECT 1 AS present FROM clients WHERE %s REGEXP '^[1-9][0-9]*$' "
         "AND id=CAST(%s AS UNSIGNED)"
     ),
     ControlledFileOwner.LINE_INTEGRATION: (
@@ -145,7 +148,7 @@ class MySqlControlledFileWorkflowRepository:
         statement = _OWNER_SUBJECT_SQL[intent.owner] + _lock_suffix(for_update)
         parameters = (
             (intent.subject_reference, intent.subject_reference)
-            if intent.owner is ControlledFileOwner.STAFF
+            if intent.owner in {ControlledFileOwner.STAFF, ControlledFileOwner.CLIENTS}
             else (intent.subject_reference,)
         )
         with self._connection.cursor() as cursor:
@@ -268,11 +271,7 @@ class MySqlControlledFileWorkflowRepository:
     def _enqueue_nas_finalize(self, candidate, file_id, applied_at) -> None:
         # Existing development objects retain their original locations. New
         # production objects use the existing committed finalize queue.
-        # Scheduling already queues its own finalize intent together with the
-        # authoritative service-day attachment reference. Do not duplicate it.
-        if not _uses_archive_layout(candidate) or (candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {
-            ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
-        }):
+        if not _uses_archive_layout(candidate):
             return
         from domains.controlled_files.reference_finalize import ControlledFileFinalizeIntent
         from infrastructure.db.controlled_file_reference_finalize_repository import MySqlControlledFileReferenceFinalizeRepository
@@ -698,16 +697,11 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
         subject = safe_filename_component(candidate.subject_reference)
         digest = candidate.sha256_digest[:6]
         extension = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png",
+                     "image/webp": ".webp",
                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}.get(candidate.mime_type, ".bin")
-        if candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}:
-            # Canonical key is still owned by Scheduling; only its physical
-            # presentation changes, using facts already validated by that owner.
-            canonical_scheduling_storage_locator(object_key=candidate.object_key, mime_type=candidate.mime_type)
-            parts = candidate.object_key.split("/")
-            service_date, sequence = parts[4], parts[6]
-            kind = "餐點" if candidate.purpose is ControlledFilePurpose.MEAL_PHOTO else "寶寶"
-            return f"{SCHEDULING_DIRECTORY}/{subject}/{service_date}/照護照片_{service_date}_{kind}_{sequence}_{digest}{extension}"
+        if candidate.owner is ControlledFileOwner.CLIENTS and candidate.purpose is ControlledFilePurpose.CLIENT_PASSBOOK_COVER:
+            return f"{CLIENT_PASSBOOK_DIRECTORY}/{subject}/存摺封面_{subject}_v{version}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.STAFF:
             if staff_record is None:
                 raise RuntimeError("controlled_file_staff_storage_subject_missing")
@@ -725,18 +719,7 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
             label = "客戶合約" if "client" in candidate.object_key else "月嫂承攬協議" if "staff" in candidate.object_key else "案件合約"
             status = "已簽署" if candidate.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT else "未簽署"
             return f"{ORDERS_DIRECTORY}/{subject}/{label}_{subject}_v{version}_{status}_{digest}{extension}"
-        if candidate.owner is ControlledFileOwner.SCHEDULING:
-            return f"{SCHEDULING_DIRECTORY}/{subject}/服務確認_{subject}_v{version}_{digest}{extension}"
         return f"{ORDERS_DIRECTORY}/{subject}/文件_{subject}_v{version}_{digest}{extension}"
-    if (
-        candidate.owner is ControlledFileOwner.SCHEDULING
-        and candidate.purpose
-        in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}
-    ):
-        return canonical_scheduling_storage_locator(
-            object_key=candidate.object_key,
-            mime_type=candidate.mime_type,
-        )
     return str(staging["storage_locator"])
 
 

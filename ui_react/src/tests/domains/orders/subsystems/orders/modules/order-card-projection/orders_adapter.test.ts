@@ -236,7 +236,7 @@ describe('Orders Drawer adapters', () => {
     expect(view.staffContractSigned).toBe(false);
     expect(view.clientContractSigned).toBe(false);
     expect(view.staffContractSignedText).toBe('尚無月嫂契約分段');
-    expect(view.clientContractSignedText).toBe('尚未寄送客戶契約');
+    expect(view.clientContractSignedText).toBe('尚未確認客戶契約簽回');
   });
 
   it('keeps the cancellation Drawer visible without calculating a refund', () => {

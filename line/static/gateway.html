@@ -276,6 +276,10 @@
     }
 
     async function initLiff() {
+        if (!studioPreview && (targetPage === 'matching_resume' || /^\/line-matching-resume(?:\?|$)/.test(directPath))) {
+            document.getElementById('loaderText').textContent = '履歷下載已退役。請向工會索取新版確認資訊。';
+            return;
+        }
         try {
             const studioPreviewMatch = (window.location?.pathname || '').match(/^(.*)\/api\/v1\/line\/identity\/studio-preview(?:\/|$)/);
             const studioApiPrefix = studioPreviewMatch ? studioPreviewMatch[1] : '';

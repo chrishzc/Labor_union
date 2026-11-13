@@ -33,16 +33,20 @@ class LineIdentityRevocationWorker:
         self._application = LineIdentityManagementApplication(unit_of_work_factory, now)
 
     def run_once(self) -> int:
-        items = self._claim()
-        for item in items:
-            self._process(item)
-        return len(items)
+        processed = 0
+        for _ in range(self._batch_size):
+            items = self._claim()
+            if not items:
+                break
+            self._process(items[0])
+            processed += 1
+        return processed
 
     def _claim(self):
         query = ClaimLineOutboxQuery(
             self._worker_identity,
             self._now(),
-            self._batch_size,
+            1,
             IDENTITY_MENU_RESET_INTENT,
         )
         with self._unit_of_work_factory() as unit_of_work:
@@ -66,35 +70,65 @@ class LineIdentityRevocationWorker:
                     ))
                     unit_of_work.commit()
             return
+        with self._unit_of_work_factory() as guard:
+            with guard.outbox.menu_provider_lock(line_user_id) as acquired:
+                guard.commit()
+                if acquired:
+                    self._process_locked(item, line_user_id, request_id)
+
+    def _process_locked(self, item, line_user_id, request_id) -> None:
         with self._unit_of_work_factory() as unit_of_work:
-            unit_of_work.outbox.lock_menu_user(line_user_id)
-            if not unit_of_work.outbox.lock_menu_lease(item, self._now()):
+            request = self._current_request(unit_of_work, item, line_user_id, request_id)
+            if request is None:
                 return
-            request = unit_of_work.identity_management.get_request(request_id, lock=True)
-            if request.line_user_id != line_user_id:
-                raise RuntimeError("line_identity_menu_reset_user_mismatch")
-            command = CompleteLineOutboxCommand(item, self._now())
-            if request.status is not LineIdentityRevocationStatus.COMPLETED:
-                latest = unit_of_work.outbox.latest_menu_intent_id(line_user_id)
-                if (
-                    request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
-                    and latest is not None and latest > item.outbox_id
-                ):
-                    command = CompleteLineOutboxCommand(
-                        item, self._now(), "line_identity_menu_reset_superseded",
-                        "已有較新的圖文選單切換工作", retryable=False,
-                    )
-                    self._record_failure(unit_of_work, request, command, terminal=True)
-                else:
-                    command = self._restore(
-                        unit_of_work, item, request,
-                        schedule_successor=latest is None or latest <= item.outbox_id,
-                    )
+            if self._finish_if_superseded(unit_of_work, item, request):
+                return
+            unit_of_work.commit()
+
+        outcome = self._provider.restore_default_for_user(line_user_id)
+
+        with self._unit_of_work_factory() as unit_of_work:
+            request = self._current_request(unit_of_work, item, line_user_id, request_id)
+            if request is None:
+                return
+            if self._finish_if_superseded(unit_of_work, item, request):
+                return
+            latest = unit_of_work.outbox.latest_menu_intent_id(line_user_id)
+            command = self._record_outcome(
+                unit_of_work, item, request, outcome,
+                schedule_successor=latest is None or latest <= item.outbox_id,
+            )
             unit_of_work.outbox.complete(command)
             unit_of_work.commit()
 
-    def _restore(self, unit_of_work, item, request, *, schedule_successor) -> CompleteLineOutboxCommand:
-        outcome = self._provider.restore_default_for_user(request.line_user_id)
+    def _current_request(self, unit_of_work, item, line_user_id, request_id):
+        unit_of_work.outbox.lock_menu_user(line_user_id)
+        if not unit_of_work.outbox.lock_menu_lease(item, self._now()):
+            return None
+        request = unit_of_work.identity_management.get_request(request_id, lock=True)
+        if request.line_user_id != line_user_id:
+            raise RuntimeError("line_identity_menu_reset_user_mismatch")
+        return request
+
+    def _finish_if_superseded(self, unit_of_work, item, request) -> bool:
+        if request.status is LineIdentityRevocationStatus.COMPLETED:
+            command = CompleteLineOutboxCommand(item, self._now())
+        elif request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED:
+            latest = unit_of_work.outbox.latest_menu_intent_id(request.line_user_id)
+            if latest is None or latest <= item.outbox_id:
+                return False
+            command = CompleteLineOutboxCommand(
+                item, self._now(), "line_identity_menu_reset_superseded",
+                "已有較新的圖文選單切換工作", retryable=False,
+            )
+            self._record_failure(unit_of_work, request, command, terminal=True)
+        else:
+            return False
+        unit_of_work.outbox.complete(command)
+        unit_of_work.commit()
+        return True
+
+    def _record_outcome(self, unit_of_work, item, request, outcome, *, schedule_successor):
         if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
             self._application.finalize_in_unit_of_work(
                 unit_of_work, request, schedule_successor=schedule_successor,

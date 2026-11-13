@@ -158,11 +158,10 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     fireEvent.click(await screen.findByRole('button',{name:/3 簽約/}));
     expect(screen.getByText(/LINE 官方帳號聊天後台手動選用範本/)).toBeVisible();
     expect(screen.queryByRole('button', { name: /簽署提醒/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /寄送客戶及月嫂契約文件/ }));
-    fireEvent.click(screen.getByRole('button', { name: /客戶契約下載通知/ }));
-    expect(onOpen).toHaveBeenCalledWith('contract-document-client');
-    fireEvent.click(screen.getByRole('button', { name: /月嫂契約下載通知/ }));
-    expect(onOpen).toHaveBeenCalledWith('contract-document-staff');
+    expect(screen.getByText(/瀏覽器預覽、列印或另存契約 PDF/)).toBeVisible();
+    expect(screen.getByText(/確認客戶與所有現行月嫂的簽署文件/)).toBeVisible();
+    expect(screen.queryByText(/寄送客戶及月嫂契約文件|契約下載通知/)).not.toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button',{name:/4 收款與建群/}));
     expect(screen.getByRole('button',{name:/訂金逾期－私訊補寄與人工提醒/})).toBeEnabled();
     fireEvent.click(screen.getByRole('button',{name:/5 開始服務/}));
@@ -194,7 +193,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
       'payment-first-settled', 'cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection',
       'service-profile-update', 'service-order-update', 'order-update-menu', 'matching-willing-received',
       'matching-customer-response', 'service-registration-unavailable', 'identity-staff-link', 'identity-admin-link',
-      'service-resolved', 'contract-document-client', 'contract-document-staff',
+      'service-resolved',
       'registration-approved-citizen', 'registration-approved-non-citizen',
     ];
     vi.mocked(previews.catalog).mockResolvedValue([
@@ -215,14 +214,6 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
       fireEvent.click(cancellationGroup.getByRole('button', { name: new RegExp(id) }));
       expect(onOpen).toHaveBeenLastCalledWith(id);
     }
-    fireEvent.click(screen.getByRole('button', { name: /3 簽約/ }));
-    const contractButton = screen.getByRole('button', { name: /寄送客戶及月嫂契約文件/ });
-    const contracts = within(contractButton.parentElement!);
-    expect(contracts.getByText('人工發送')).toBeInTheDocument();
-    fireEvent.click(contractButton);
-    fireEvent.click(contracts.getByRole('button', { name: /contract-document-staff/ }));
-    expect(onOpen).toHaveBeenLastCalledWith('contract-document-staff');
-
     fireEvent.click(screen.getByRole('tab', { name: '登記與身分' }));
     fireEvent.click(screen.getByRole('button', { name: /2 登記需求/ }));
     const approval = screen.getByRole('button', { name: /需求申請核准通知/ });

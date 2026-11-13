@@ -113,9 +113,6 @@ function safeErrorMessage(error: unknown): string {
     if (error.code === 'contract_pdf_external_reference_unresolved') return '契約模板缺少舊版引用內容，尚不能產生可簽署 PDF；請先補齊模板。';
     if (error.code === 'contract_pdf_required_mapping_missing') return '契約必要資料尚未齊全，請先在契約欄位預覽核對案件資料與收款設定。';
     if (error.code === 'contract_unsigned_pdf_missing') return message || '客戶或服務人員的契約 PDF 尚未備妥，請重新查詢簽約狀態。';
-    if (error.code === 'contract_line_recipient_unbound' || error.code === 'contract_line_recipient_subject_mismatch') {
-      return message || '客戶或服務人員的 LINE 身分尚未完成正確綁定，無法建立簽約提醒。';
-    }
     if (error.code === 'final_signed_contract_documents_incomplete') return '仍缺少客戶服務契約或月嫂委任契約，請分別上傳並檢查。';
     if (error.code === 'final_signed_contract_target_mismatch') return '簽回文件的契約對象不一致，請重新選擇對應文件。';
     if (['external_staff_report_document_stale', 'external_client_report_document_stale'].includes(error.code)) return '本案契約版本已更新，請重新讀取並核對新版契約。';
@@ -598,7 +595,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       if (fresh.case_no !== command.caseNo || !fresh.handoff_logged) throw new Error('交接紀錄尚未回讀確認。');
       await loadQuery();
       orderMutationFlowStore.clearExternalSigningHandoff(command.caseNo);
-      setNotice('已記錄送交外部簽署平台，尚未發送簽署提醒。');
+      setNotice('已記錄送交外部簽署平台。');
       return;
     }
     if (
@@ -607,7 +604,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       || fresh.session_id !== receipt.session_id
       || !fresh.handoff_recorded
       || fresh.status_version < receipt.resulting_status_version
-      || JSON.stringify(fresh.manual_notification_targets ?? []) !== JSON.stringify(receipt.manual_notification_targets ?? [])
     ) {
       throw new Error('交接收據後回讀與原案件、簽約工作或版本不一致；只能重新讀取。');
     }
@@ -1003,6 +999,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const testingCompleted = completedReadback?.filename.startsWith('TEST-ONLY-') ?? false;
   const handoffRecorded = query?.handoff_recorded || query?.handoff_logged || preparation?.handoff_logged;
   const awaitingReturnSession = handoffRecorded && !query?.handoff_recorded;
+  const returnActionsAvailable = query?.handoff_recorded && query.state !== 'completed' && query.state !== 'superseded';
   const renderReturn = (target: SignedDocumentTarget) => {
     const key = signedTargetKey(target), draft = fileReturns[key], meta = contractMetadata[key];
     const name = metadataLabel(key);
@@ -1054,20 +1051,34 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </section>
       {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文可透過瀏覽器列印查看，並另存為 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void printContract(reviewTarget.scope, reviewTarget.segmentId)}>瀏覽器列印</button></footer></CandidateInquiryDialog>}
 
-      {query?.handoff_recorded && query.state !== 'completed' && query.state !== 'superseded' && <section className="contract-return-card" aria-label="回收簽署文件">
-        <header className="contract-documents-heading"><h3>回收簽署文件</h3><span className="contract-document-status">{selectedCount}／{requiredReturnTargets.length} 份已選擇</span></header>
-        <p>客戶服務契約與月嫂委任契約分開上傳。每位月嫂的委任契約各自回收。</p>
-        <p>選擇簽署文件後按「儲存簽署文件」，完成後可在本案查看文件。</p>
-        {returnReadError && <div role="alert"><p>簽回文件暫時無法讀取：{returnReadError}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取簽回文件</button></div>}
-        <section className="contract-return-group"><h4>客戶服務契約</h4>{requiredReturnTargets.filter(row => row.scope === 'client').map(renderReturn)}</section>
-        <section className="contract-return-group"><h4>月嫂委任契約</h4>{requiredReturnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
-        {query.testing_skip_allowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || testingPreview} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button></div></details>}
-        <div className="contract-final-confirmation"><p>{testingPreview ? '測試占位文件已備妥。' : '選妥客戶與所有月嫂的簽署文件後，即可儲存。'}</p>
-          {uiState.type === 'preview_ready' && uiState.preview.blockers.length > 0 && <ul role="alert">{uiState.preview.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
-          <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || requiredReturnTargets.length === 0 || requiredReturnTargets.some(target => { const draft = fileReturns[signedTargetKey(target)]; return !draft?.file && !draft?.staged; })} onClick={() => void applyFinalDocument()}>{testingPreview ? '確認跳過並完成測試簽約' : '儲存簽署文件'}</button>
-        </div>
-      </section>}
-      {query?.state === 'completed' && <section className="contract-return-card" aria-label="契約完成"><div className="contract-completed-notice"><strong>{testingCompleted ? '測試簽約已完成' : '所有月嫂簽約完成、客戶簽約完成'}</strong><p>{testingCompleted ? '已手動跳過真實簽署文件回收，保存 TEST ONLY 占位文件，可接續測試訂金與案件群組流程。' : completedMembers.length > 0 ? '客戶服務契約與所有月嫂委任契約已分別回收，並確認簽署完整。' : '既有簽署文件已驗收完成。'}</p></div>{completedReadback ? <div className="contract-signed-list">{(completedMembers.length > 0 ? completedMembers.map(member => ({ fileId: member.controlled_file_id, filename: member.filename })) : [{ fileId: completedReadback.controlled_file_id, filename: completedReadback.filename }]).map(row => <div key={row.fileId}><span>{row.filename}</span><button type="button" disabled={busy} onClick={() => void downloadSigned(row.fileId)}>{testingCompleted ? '查看測試文件' : '查看已簽文件'}</button></div>)}</div> : <p>正在讀取已簽文件…</p>}{(onOpenServiceDates || onOpenFinance) && <button className="formal-recommendation-primary" type="button" disabled={busy} onClick={onOpenServiceDates ?? onOpenFinance}>查看服務日期與排班 →</button>}<p>訂金已核銷後，建立案件群組並邀請加入。雙方在群組自行協調，由月嫂提交開始日，系統檢查通過即更新正式日期與排班。</p></section>}
+      <section className="contract-return-card" aria-label="回收簽署文件">
+        <header className="contract-documents-heading">
+          <h3>回收簽署文件</h3>
+          {returnActionsAvailable && <span className="contract-document-status">{selectedCount}／{requiredReturnTargets.length} 份已選擇</span>}
+        </header>
+        {returnActionsAvailable ? <>
+          <p>客戶服務契約與月嫂委任契約分開上傳。每位月嫂的委任契約各自回收。</p>
+          <p>選擇簽署文件後按「儲存簽署文件」，完成後可在本案查看文件。</p>
+          {returnReadError && <div role="alert"><p>簽回文件暫時無法讀取：{returnReadError}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取簽回文件</button></div>}
+          <section className="contract-return-group"><h4>客戶服務契約</h4>{requiredReturnTargets.filter(row => row.scope === 'client').map(renderReturn)}</section>
+          <section className="contract-return-group"><h4>月嫂委任契約</h4>{requiredReturnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
+          {query.testing_skip_allowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || testingPreview} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button></div></details>}
+          <div className="contract-final-confirmation"><p>{testingPreview ? '測試占位文件已備妥。' : '選妥客戶與所有月嫂的簽署文件後，即可儲存。'}</p>
+            {uiState.type === 'preview_ready' && uiState.preview.blockers.length > 0 && <ul role="alert">{uiState.preview.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
+            <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || requiredReturnTargets.length === 0 || requiredReturnTargets.some(target => { const draft = fileReturns[signedTargetKey(target)]; return !draft?.file && !draft?.staged; })} onClick={() => void applyFinalDocument()}>{testingPreview ? '確認跳過並完成測試簽約' : '儲存簽署文件'}</button>
+          </div>
+        </> : query?.state === 'completed' ? (
+          <section aria-label="契約完成">
+            <div className="contract-completed-notice">
+              <strong>{testingCompleted ? '測試簽約已完成' : '所有月嫂簽約完成、客戶簽約完成'}</strong>
+              <p>{testingCompleted ? '已手動跳過真實簽署文件回收，保存 TEST ONLY 占位文件，可接續測試訂金與案件群組流程。' : completedMembers.length > 0 ? '客戶服務契約與所有月嫂委任契約已分別回收，並確認簽署完整。' : '既有簽署文件已驗收完成。'}</p>
+            </div>
+            {completedReadback ? <div className="contract-signed-list">{(completedMembers.length > 0 ? completedMembers.map(member => ({ fileId: member.controlled_file_id, filename: member.filename })) : [{ fileId: completedReadback.controlled_file_id, filename: completedReadback.filename }]).map(row => <div key={row.fileId}><span>{row.filename}</span><button type="button" disabled={busy} onClick={() => void downloadSigned(row.fileId)}>{testingCompleted ? '查看測試文件' : '查看已簽文件'}</button></div>)}</div> : <p>正在讀取已簽文件…</p>}
+            {(onOpenServiceDates || onOpenFinance) && <button className="formal-recommendation-primary" type="button" disabled={busy} onClick={onOpenServiceDates ?? onOpenFinance}>查看服務日期與排班 →</button>}
+            <p>訂金已核銷後，建立案件群組並邀請加入。雙方在群組自行協調，由月嫂提交開始日，系統檢查通過即更新正式日期與排班。</p>
+          </section>
+        ) : <p>{query?.state === 'superseded' ? '此簽署工作已被取代。' : awaitingReturnSession ? '待回收用文件備妥後，即可上傳已簽契約。' : '記錄送交簽署後，即可上傳已簽契約。'}</p>}
+      </section>
 
       {bootstrapReasons.length > 0 && <p role="alert">{bootstrapReasons.join(' ')} <a href={`#clients?case=${encodeURIComponent(caseNo)}&from=workbench`} aria-disabled={busy || finalProtected || undefined} onClick={event => { if (busy || finalProtected) event.preventDefault(); }}>前往客戶名冊補齊資料 →</a></p>}
       {uiState.type === 'error' && <div role="alert"><p>{uiState.message}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取契約狀態</button></div>}

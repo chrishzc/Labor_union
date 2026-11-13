@@ -6,17 +6,18 @@ import re
 from pathlib import Path, PureWindowsPath
 
 ORDERS_DIRECTORY = "01_案件合約 (orders)"
-SCHEDULING_DIRECTORY = "02_照護日誌 (scheduling)"
+CLIENT_PASSBOOK_DIRECTORY = "02_客戶存摺封面 (passbooks)"
 STAFF_DIRECTORY = "03_月嫂檔案與資格 (staff)"
 MEDIA_DIRECTORY = "04_LINE選單資源 (media)"
 DATABASE_BACKUP_DIRECTORY = "05_資料庫冷備份 (db_backups)"
 STAGING_DIRECTORY = "_staging"
-BUSINESS_DIRECTORIES = (ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY, DATABASE_BACKUP_DIRECTORY)
+BUSINESS_DIRECTORIES = (ORDERS_DIRECTORY, CLIENT_PASSBOOK_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY, DATABASE_BACKUP_DIRECTORY)
 LOCAL_DOCUMENT_ARCHIVES = (
     ("staff", "staff_resume", STAFF_DIRECTORY),
     ("staff", "staff_certificate", STAFF_DIRECTORY),
     ("staff", "staff_health_exam", STAFF_DIRECTORY),
     ("contract_signing", "final_signed_contract", ORDERS_DIRECTORY),
+    ("clients", "client_passbook_cover", CLIENT_PASSBOOK_DIRECTORY),
 )
 
 

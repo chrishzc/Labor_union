@@ -135,8 +135,6 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.service_starts = MySqlServiceStartRepository(connection, deliveries=self.delivery_tasks)
         from infrastructure.mysql.service_start_day_repository import MySqlServiceStartDayRepository
         self.service_start_days = MySqlServiceStartDayRepository(connection)
-        from infrastructure.mysql.service_day_log_reminder_repository import MySqlServiceDayLogReminderRepository
-        self.service_day_log_reminders = MySqlServiceDayLogReminderRepository(connection)
         from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
         self.payment_overdue_reminders = MySqlPaymentOverdueReminderRepository(connection)
         from infrastructure.mysql.payment_reminder_notification_repository import MySqlPaymentReminderNotificationRepository

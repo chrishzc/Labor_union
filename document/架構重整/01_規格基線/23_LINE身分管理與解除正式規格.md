@@ -12,7 +12,7 @@
 1. `line_identity_role_bindings` 與 role binding events 是 LINE User ID 與 `customer`、`staff`、`admin` subject 關係的 SSOT（由 LINE Identity application 作唯一 writer）。
 2. `clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 僅作 owner projection，不得取代 binding root fact。
 3. 解除不刪除個人、訂單、排班、客服、審核或歷史事件；只停用 binding，並在 Rich Menu 回復成功後清除 owner projection。
-4. 外部 LINE API 與 MySQL 不能假設原子交易；解除採 durable saga，不把 provider call 包進 DB transaction。
+4. 外部 LINE API 與 MySQL 不能假設原子交易；解除採 durable saga，以同帳號的 provider 操作鎖序列化選單設定與解除。解除在交易外呼叫 LINE，並在呼叫前與保存結果前核對租約及最新工作。
 5. 管理端 UI 只呼叫 Identity Binding bounded API 並顯示 typed views，不直接讀寫 binding 或 owner table。
 6. 同一 LINE User ID 可同時具有 `customer` 與 `staff` 兩個 active binding，雙角色合法且不構成 conflict 或 `LINE-004`；每個 binding 以各自的 subject type/reference、version、capability 與 owner projection 獨立驗證，request context 必須明確選定角色，不得合併或反向繼承權限。只有同一 subject type 指向互斥／多個 active subject、owner projection 不一致或 replacement lineage 斷裂時才是 binding conflict。
 7. 需求問卷 registration 由 Case Import 擁有，儲存與清除依 [Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)（核准前不進 MySQL）；onboarding 是 binding projection outcome，不得直接提升角色或覆蓋其他 Domain root。
@@ -57,7 +57,7 @@ bound
 ## 5. Commands、Queries 與 typed errors
 
 - Queries：binding list、binding detail、revocation detail、`GET /api/v1/line/identity-bindings/replacement-candidates`（依 `subject_type` 查同角色可替換候選，排除已有 active binding 者）。
-- Commands：replacement preview/apply（同 subject type 修正 subject reference）、revocation preview/apply、retry、manual complete。
+- Commands：replacement preview/apply（同 subject type 修正 subject reference）、revocation preview/apply、retry、manual complete、個人選單重新同步及停用綁定永久刪除。
 - Typed errors：`line_identity_binding_not_found`、`line_identity_binding_version_conflict`、`line_identity_revocation_in_progress`、`line_identity_default_menu_not_published`、`line_identity_owner_projection_conflict`、`line_identity_menu_reset_failed`、`line_identity_manual_completion_forbidden`。
 
 ## 6. 解除交易、冪等、Retry 與 Rich Menu SSOT
@@ -66,9 +66,11 @@ bound
 2. **worker 與 retry**：以解除 request ID claim，向目前設定的 LINE 帳號確認已設定 Messaging API 預設選單，再解除該使用者的個人圖文選單，讓 LINE 顯示帳號現行預設。背景服務回讀個人選單，確認已無個人選單才完成回復。timeout／429／5xx 沿既有重試機制處理。手動重試保留最新 canonical `default_menu` 發布參照，實際回復以 LINE 當前預設為準。
 3. **完成與 crash replay**：provider 確認回復後鎖 request、binding 與 owner projection，清除 owner User ID、轉 `revoked` 並完成 request。未完成的 request 可重試解除個人選單；已完成的 request 只確認待辦完成。
 4. **人工緊急覆寫**：限 `line.identity.binding.override` 於後端在 nonretryable／重試耗盡後填寫原因並留存 audit，不在一般管理 UI 呈現；只撤銷系統授權，後續重新發布可用 `default_menu` 時仍可再排入選單修復。
-5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
+5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。個人同步、結案回復與解除優先使用已發布的 canonical 設定版本，由設定版本及發布 ID 依序降冪選取。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
 
 ### 6.1 個人圖文選單同步
+
+- 個人選單使用同一 Messaging API channel 的憑證讀回與套用。套用回傳 400 時，可用唯讀的個人選單及選單圖片查詢區分無效使用者 ID 與圖片無法讀取。套用回傳 404 表示該 channel 查無指定選單。失敗工作保留操作階段、HTTP 狀態與 LINE request ID 供查證。
 
 - 身分綁定與個人選單同步分別保存結果。綁定交易將切換工作寫入既有 LINE outbox，背景 worker 以 LINE 個人選單 GET 讀回預期選單 ID 後才記錄同步完成。POST 回應成功只代表 LINE 接受請求。讀回確認 LINE 端的連結，手機顯示由 LINE App 決定。個人選單 link 不使用 `X-Line-Retry-Key`。
 - 首次設定後讀回。逾時、網路失敗或 5xx 結果不明時先讀回。每次重試或租約回收後先讀回，確認不符或未設定才再次 link。429、5xx、網路故障及讀回未確認可有限重試，使用 15 秒起算的指數退避與 jitter，合法 `Retry-After` 為最早重試時間。
@@ -93,10 +95,13 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 
 ### 8.1 權限與操作介面
 
-- 權限分層：`line.identity.binding.read`（查詢）、`line.identity.binding.manage`（replacement／正常解除／retry）、`line.identity.binding.override`（僅後端緊急覆寫）。
+- 權限分層：`line.identity.binding.read`（查詢）、`line.identity.binding.manage`（replacement／正常解除／retry／重新同步選單／永久刪除停用綁定）、`line.identity.binding.override`（僅後端緊急覆寫）。
 - 管理端以「身分綁定／待審核／待配對」分頁呈現，一次僅掛載目前任務，依使用者點選列傳遞 `subject_type`，LINE User ID 僅於明細遮罩顯示；審核不預選核准，申請受理、系統停用與選單回復完成分開呈現。
 - 綁定列表直接提供「解除綁定」與「修復訪客選單」。解除需在置中視窗核對姓名與綁定身分後確認，回復失敗才顯示修復按鈕。兩項操作皆不需填寫原因。
 - 綁定列表分別顯示「已綁定」與該 LINE 帳號的選單同步狀態。同步工作待處理或重試時顯示「選單同步中」，LINE 讀回相符時顯示「選單已同步」，終止失敗時顯示「選單同步失敗」及原因。無讀回證據的歷史結果顯示「選單同步未確認」。
+- 已綁定列提供「重新同步選單」。操作送出該列角色、綁定版本與冪等鍵。伺服器重新確認該角色目前生效且沒有進行中的解除，同一操作或已有同步工作時不重複排入。人工同步沿用個人選單 outbox，先讀回目前選單，只有不一致或未連結才套用目前發布的角色選單。受理與同步完成分開顯示。
+- 已完成停用（`revoked`）的列可由具身分管理權限的人員確認後永久刪除。伺服器鎖定 LINE 帳號並驗證所選角色、版本、更新時間及已清除的對象綁定投影。刪除涵蓋該角色的綁定根、綁定事件、解除請求及所屬選單工作。保留其他角色、LINE 平台帳號、業務資料與刪除稽核。解除中的列仍須先完成解除。
+- 待審核與待配對清單提供逐筆確認的永久刪除。刪除依原審核或配對權限核對請求狀態與版本，保留稽核及重送收據。待審核只移除申請，保留已消耗的驗證流程與現有身分。待配對只移除登記及其衝突明細，保留客戶、表單和訂單。仍有正式案件或匯入紀錄引用的登記回傳衝突。
 
 ### 8.2 驗收標準
 
@@ -106,3 +111,5 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 4. Staff retirement 與 staff-role 解除同一 commit 提交並保留 customer role；Orders 結案自動回復嚴格驗證全部 active client case 皆 terminal，replay 回原 decision receipt。
 5. 管理工作區搜尋／分頁由 server 執行，角色隔離、replace candidate 查詢零寫入，且不預選核准或於未知結果時盲目重送。
 6. 以隔離替身驗證 link 200 後讀回一致／不一致、逾時已生效、429／5xx 恢復、永久錯誤、次數／期限耗盡、重啟及租約回收、舊工作晚到及 A→B→A 切換。後台同步狀態以讀回證據為準。
+7. 後台可對已綁定但選單未同步的客戶單筆排入修復。重複送出只保留一筆同步工作，角色或版本已變更時拒絕操作。
+8. 永久刪除只接受已停用且對象投影已清除的角色。同一帳號的其他角色不受影響，重送同一確認不會再次刪除。

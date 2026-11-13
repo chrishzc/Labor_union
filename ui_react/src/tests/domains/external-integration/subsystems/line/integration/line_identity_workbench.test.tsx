@@ -43,6 +43,63 @@ async function confirmReason(label: string, reason: string) { fireEvent.change(s
 afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 describe('身分與授權精簡工作區', () => {
+  it('把同步操作放在狀態欄，只有已停用列可確認永久刪除', async () => {
+    const revoked = { ...staff, status: 'revoked' as const };
+    const pending = { ...staff, line_user_id: 'U-pending', subject_name: '解除中月嫂', status: 'revocation_pending' as const };
+    const api = {
+      ...client([binding, revoked, pending]),
+      resyncMenu: vi.fn(),
+      deleteRevokedBinding: vi.fn().mockResolvedValue(undefined),
+    };
+    render(<LineIdentityWorkbench client={api} />);
+    const sync = await screen.findByRole('button', { name: '重新同步選單' });
+    expect(sync.closest('td')).toHaveAttribute('data-label', '狀態');
+    const button = screen.getByRole('button', { name: '刪除停用資料' });
+    expect(within(button.closest('tr')!).getByText(staff.subject_name, { exact: false })).toBeInTheDocument();
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: '永久刪除停用綁定資料？' });
+    expect(api.deleteRevokedBinding).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: '永久刪除' }));
+    await screen.findByText('已永久刪除停用綁定資料。');
+    expect(api.deleteRevokedBinding).toHaveBeenCalledExactlyOnceWith(
+      staff.line_user_id,
+      { expected_version: staff.version, expected_updated_at: staff.updated_at, idempotency_key: expect.any(String) },
+      expect.objectContaining({ subjectType: 'staff' }),
+    );
+  });
+
+  it('對選單未切換的客戶排入單筆同步，並停用處理中的按鈕', async () => {
+    const failed = { ...binding, rich_menu_sync_status: 'failed' as const };
+    const pending = { ...binding, rich_menu_sync_status: 'pending' as const };
+    const api = { ...client([failed]), resyncMenu: vi.fn().mockResolvedValue(pending) };
+    api.listBindings.mockResolvedValueOnce({ items: [failed], total: 1, page: 1, page_size: 25 })
+      .mockResolvedValue({ items: [pending], total: 1, page: 1, page_size: 25 });
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新同步選單' }));
+    await screen.findByText('選單同步中');
+    expect(api.resyncMenu).toHaveBeenCalledExactlyOnceWith(
+      binding.line_user_id,
+      { expected_version: binding.version, idempotency_key: expect.any(String) },
+      expect.objectContaining({ subjectType: 'customer' }),
+    );
+    expect(await screen.findByRole('button', { name: '重新同步選單' })).toBeDisabled();
+    expect(screen.queryByText('選單已同步')).toBeNull();
+  });
+
+  it('重新同步送到單筆角色限定的 API 並解碼受理狀態', async () => {
+    const pending = { ...binding, rich_menu_sync_status: 'pending' as const };
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('test-session');
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({ success: true, data: pending, message: 'ok', error: null });
+    const payload = { expected_version: binding.version, idempotency_key: 'test-resync' };
+    await expect(lineIdentityClient.resyncMenu(binding.line_user_id, payload, { subjectType: 'customer' }))
+      .resolves.toEqual(pending);
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      `/api/v1/line/identity-bindings/${binding.line_user_id}/menu/resync`,
+      payload,
+      expect.objectContaining({ params: { subject_type: 'customer' } }),
+    );
+  });
+
   it.each([
     ['pending', null, '選單同步中'],
     ['synced', null, '選單已同步'],
@@ -156,6 +213,32 @@ describe('身分與授權精簡工作區', () => {
     fireEvent.click(await screen.findByRole('button', { name: '選擇邱珮瑜的訂單' })); expect(screen.getByText(/兩側姓名有差異/)).toBeInTheDocument(); expect(screen.getByRole('button', { name: '配對並綁定' })).toBeEnabled(); expect(api.pairProvisionalRegistration).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole('textbox', { name: '配對原因（選填）' }), { target: { value: '已核對姓名用字差異' } }); expect(screen.queryByRole('checkbox')).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('button', { name: '配對並綁定' }));
     await screen.findByText('目前沒有待配對登記'); expect(api.pairProvisionalRegistration).toHaveBeenCalledWith(expect.objectContaining({ provisional_registration_id: 81, target_case_no: 'ORD-086', reason: '已核對姓名用字差異' }), expect.any(Object)); expect(document.body.textContent).not.toContain('0912345382');
+  });
+  it('確認後刪除待審核申請，重新讀取清單', async () => {
+    const api = { ...client(), deletePendingReview: vi.fn().mockResolvedValue(undefined) };
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(screen.getByRole('tab', { name: /待審核/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '刪除審核對象甲的待審核申請' }));
+    expect(api.deletePendingReview).not.toHaveBeenCalled();
+    api.listReviews.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25, pending_total: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '永久刪除' }));
+    await screen.findByText('目前沒有待審核申請');
+    expect(api.deletePendingReview).toHaveBeenCalledWith(71, { expected_version: 3, idempotency_key: expect.any(String) });
+    expect(api.applyReviewDecision).not.toHaveBeenCalled();
+  });
+  it('確認後刪除待配對登記，重新讀取清單', async () => {
+    const api = { ...client(), deletePendingPairing: vi.fn().mockResolvedValue(undefined) };
+    api.listUnboundCandidates
+      .mockResolvedValueOnce({ ...paired, provisional_registrations: [{ ...paired.provisional_registrations[0], version: 2 }] })
+      .mockResolvedValue({ ...paired, provisional_registrations: [] });
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(screen.getByRole('tab', { name: '待配對' }));
+    fireEvent.click(await screen.findByRole('button', { name: '刪除邱佩瑜的待配對登記' }));
+    expect(api.deletePendingPairing).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '永久刪除' }));
+    await screen.findByText('目前沒有待配對登記');
+    expect(api.deletePendingPairing).toHaveBeenCalledWith(81, { expected_version: 2, idempotency_key: expect.any(String) });
+    expect(api.pairProvisionalRegistration).not.toHaveBeenCalled();
   });
   it('loading 或錯誤不偽裝成零筆；合法空清單有明確狀態', async () => {
     const api = client(); api.listBindings.mockRejectedValueOnce(new Error('private SQL')).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });

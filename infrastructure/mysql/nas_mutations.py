@@ -34,6 +34,21 @@ def _staff_guard() -> str:
 
 # name -> (SQL parameters, body, allowed execution profiles).
 PROCEDURES = {
+    "lu_nas_delete_pending_line_review_v1": (
+        "IN p_id BIGINT, IN p_version BIGINT", """
+        DELETE FROM line_review_requests
+          WHERE id=p_id AND review_status='pending' AND aggregate_version=p_version;
+        IF ROW_COUNT()<>1 THEN SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT='line_review_version_conflict'; END IF;
+        """, ("management",)),
+    "lu_nas_delete_pending_line_pairing_v1": (
+        "IN p_id BIGINT, IN p_version BIGINT", """
+        IF NOT EXISTS(SELECT id FROM provisional_client_registrations
+          WHERE id=p_id AND status='submitted' AND application_version=p_version FOR UPDATE)
+          THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='line_provisional_registration_stale'; END IF;
+        DELETE FROM provisional_registration_conflicts WHERE registration_id=p_id;
+        DELETE FROM provisional_client_registrations WHERE id=p_id;
+        """, ("management",)),
     # Fixed case-owned cascade; only the root-gated management caller can invoke it.
     "lu_nas_delete_unsigned_case_v2": (
         "IN p_case VARCHAR(50), IN p_version BIGINT, IN p_client BIGINT, IN p_client_version BIGINT, IN p_command_key VARCHAR(191)",

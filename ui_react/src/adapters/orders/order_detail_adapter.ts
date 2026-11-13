@@ -305,9 +305,7 @@ export function adaptOrderTermsContractDrawer(params: {
     depositSettledText:
       depositSettled === null ? unavailable('客戶定金核銷') : depositSettled ? '✅ 已核銷' : '⏳ 待核銷',
     clientContractSigned,
-    clientContractSignedText: clientContractSigned
-      ? '✅ 客戶契約已簽回'
-      : signing?.client_document_sent ? '⏳ 已寄送，待客戶簽回' : '尚未寄送客戶契約',
+    clientContractSignedText: clientContractSigned ? '✅ 客戶契約已簽回' : '尚未確認客戶契約簽回',
     domainBlockers: (completion?.domain_blockers ?? []).map(localizeDomainBlocker),
   };
 }

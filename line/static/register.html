@@ -510,6 +510,16 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         <div class="form-group">
             <label class="form-label required">銀行帳號</label>
             <input type="text" class="form-input" id="refund_bank_account" data-survey="銀行帳號" required placeholder="請輸入完整帳號">
+            <div class="form-hint">請填入產婦本人銀行帳號。</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label required" for="passbook_cover">存摺封面</label>
+            <input type="file" class="form-input" id="passbook_cover" accept="image/jpeg,image/png,image/webp" required>
+            <div class="form-hint">請上傳清晰的產婦本人存摺封面照片（JPG、PNG 或 WebP，5 MB 以內），供人員核對銀行帳號與分行代碼。</div>
+            <div id="passbookPreviewBox" style="display:none; margin-top:8px;">
+                <img id="passbookPreviewImg" alt="存摺封面預覽" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid #d1d5db;">
+                <div id="passbookUploadStatus" class="form-hint" style="margin-top:4px;"></div>
+            </div>
         </div>
         <div class="form-group">
             <label class="form-label">確認條款</label>
@@ -764,7 +774,38 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         setupIdNumberAutoUppercase();
         setupEmailTypoHint();
         setupServiceDaysIntegerInput();
+        setupPassbookCoverPreview();
     });
+
+    let uploadedPassbookFile = null;
+    let uploadedPassbookImageId = null;
+
+    function setupPassbookCoverPreview() {
+        const input = document.getElementById('passbook_cover');
+        const box = document.getElementById('passbookPreviewBox');
+        const img = document.getElementById('passbookPreviewImg');
+        const status = document.getElementById('passbookUploadStatus');
+        if (!input) return;
+        input.addEventListener('change', () => {
+            uploadedPassbookImageId = null;
+            const file = input.files && input.files[0];
+            uploadedPassbookFile = file || null;
+            if (!file) {
+                box.style.display = 'none';
+                img.removeAttribute('src');
+                status.textContent = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                img.src = String(reader.result || '');
+                box.style.display = 'block';
+                status.textContent = `已選擇：${file.name}（${Math.max(1, Math.round(file.size / 1024))} KB）`;
+            };
+            reader.readAsDataURL(file);
+            setFieldError(input, '');
+        });
+    }
 
     function setupServiceDaysIntegerInput() {
         const input = document.getElementById('service_days');
@@ -1230,6 +1271,15 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         } else if (isNonCitizen && !/^[0-9０-９]{1,50}$/.test(refundBankAccount.value.replace(/[\s-]/g, ''))) {
             addError(errors, refundBankAccount, '退款帳戶請輸入 1 至 50 碼數字。');
         }
+        const passbookInput = document.getElementById('passbook_cover');
+        const passbookFile = passbookInput && passbookInput.files && passbookInput.files[0];
+        if (!passbookFile) {
+            addError(errors, passbookInput, '請上傳存摺封面照片。');
+        } else if (passbookFile.size > 5 * 1024 * 1024) {
+            addError(errors, passbookInput, '存摺封面圖片大小不可超過 5 MB。');
+        } else if (passbookFile.type && !['image/jpeg', 'image/png', 'image/webp'].includes(passbookFile.type)) {
+            addError(errors, passbookInput, '存摺封面只接受 JPG、PNG 或 WebP 圖片。');
+        }
 
         if (isNonCitizen) {
             for (const id of [...nonCitizenFields, 'city', 'gender', 'birth_date']) {
@@ -1391,6 +1441,30 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
 
             loader.style.display = "flex";
             statusMsg.style.display = "none";
+
+            // 0. 上傳存摺封面圖片取得暫存識別碼
+            const passbookFile = document.getElementById('passbook_cover').files[0];
+            if (!uploadedPassbookImageId || uploadedPassbookFile !== passbookFile) {
+                const formData = new FormData();
+                formData.append('file', passbookFile);
+                formData.append('line_id_token', currentIdToken || '');
+                formData.append('development_line_user_id', '');
+                const uploadRes = await fetch('/api/v1/line/identity/registration/passbook', {
+                    method: 'POST',
+                    body: formData
+                });
+                const uploadResult = await uploadRes.json();
+                if (!uploadRes.ok || !uploadResult.data || !uploadResult.data.passbook_image_id) {
+                    loader.style.display = "none";
+                    statusMsg.textContent = registrationErrorMessage(uploadResult, uploadRes.status);
+                    statusMsg.className = "status-message error";
+                    statusMsg.style.display = "block";
+                    return;
+                }
+                uploadedPassbookFile = passbookFile;
+                uploadedPassbookImageId = uploadResult.data.passbook_image_id;
+            }
+            payload.passbook_image_id = uploadedPassbookImageId;
 
             // 1. 建立背景預覽取得安全指紋與版號
             const previewRes = await fetch('/api/v1/line/identity/registration/preview', {

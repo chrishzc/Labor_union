@@ -1,8 +1,8 @@
-import { useUnsavedDraft, useUnsavedChanges } from './UnsavedChanges';
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: ContractSigningActions.tsx
- * Description: 顯示契約寄送、簽回及人工簽約操作，保留已提交 receipt 並區分後續 readback 失敗。
+ * Description: 顯示歷史文件、簽回及人工簽約操作，保留已提交 receipt 並區分後續 readback 失敗。
  */
 import { useRef, useState } from 'react';
 import { contractSigningClient, type ContractSigningStatus } from '../api/orders/contract_signing_client';
@@ -72,8 +72,6 @@ function sentDocumentVersion(signing: ContractSigningStatus, scope: string, targ
 export function ContractSigningActions({ caseNo, signing, onCommitted }: ContractSigningActionsProps) {
   const intents = useRef(new Map<string, Intent>());
   const staffIdentity = useStaffIdentityLabels();
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [submittedDownloadUrl, setSubmittedDownloadUrl] = useState('');
   const [staffFiles, setStaffFiles] = useState<Record<number, File | null>>({});
   const [clientFile, setClientFile] = useState<File | null>(null);
   const [staffManualDrafts, setStaffManualDrafts] = useState<Record<number, ManualAttestationDraft>>({});
@@ -109,9 +107,6 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
   };
 
   const resetIntent = (key: string): void => { intents.current.delete(key); };
-  const validDownloadUrl = (() => {
-    try { return new URL(downloadUrl).protocol === 'https:'; } catch { return false; }
-  })();
   const run = async (operation: () => Promise<ContractSigningReceipt>, onSaved?: () => void) => {
     setState('working');
     setResult(null);
@@ -133,40 +128,13 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
       setResult(`${receiptText(receipt)} 重新載入結果失敗，可再按查詢確認；不需重複送出：${message(error)}`);
     }
   };
-  useUnsavedChanges('契約寄送網址', downloadUrl !== submittedDownloadUrl ? [{ label: '受控下載網址', before: submittedDownloadUrl ? '原下載網址（不顯示內容）' : '未填寫', after: downloadUrl ? '已輸入或修改下載網址（不顯示內容）' : '清空' }] : [], { busy: state === 'working' });
   useUnsavedDraft('契約簽署文件', { '客戶文件': clientFile?.name ?? '', '月嫂文件': Object.values(staffFiles).map(file => file?.name ?? '').filter(Boolean), '客戶人工證據檔': clientManualDraft.file?.name ?? '', '客戶人工確認方式': clientManualDraft.confirmationMethod, '客戶人工確認原因': clientManualDraft.reason, '月嫂人工證據': Object.values(staffManualDrafts).map(draft => ({ '檔案': draft.file?.name ?? '', '方式': draft.confirmationMethod, '原因': draft.reason })) }, { busy: state === 'working' });
 
 
   return (
-    <section className="contract-signing-panel" aria-label="契約寄送與簽回文件操作" data-control-id="orders.contract-signing.actions">
+    <section className="contract-signing-panel" aria-label="契約簽回文件操作" data-control-id="orders.contract-signing.actions">
       <div className="contract-signing-header">
-        <h3 className="contract-signing-title">📦 契約寄送與簽回文件操作</h3>
-        <p className="contract-signing-desc">
-          寄送前會核對目前契約狀態。確認後只建立待寄送工作，並不代表 LINE 已送達。人工簽約證據選檔後可直接補登，且不會建立 LINE 寄送工作。
-        </p>
-        <div className="contract-signing-url-box">
-          <label htmlFor="contract-signing-download-url">受控 HTTPS 文件下載網址</label>
-          <input
-            id="contract-signing-download-url"
-            className="contract-signing-url-input"
-            type="url"
-            value={downloadUrl}
-            placeholder="請輸入受控 HTTPS 下載網址 (例如：https://storage.labor-union.org/cases/...)"
-            disabled={state === 'working'}
-            onChange={(event) => {
-              setDownloadUrl(event.target.value);
-              for (const segment of signing.staff_segments) resetIntent(`staff-send-${segment.segment_id}`);
-              resetIntent('client-send');
-              setState('idle');
-              setResult(null);
-            }}
-          />
-          {!validDownloadUrl && (
-            <p className="contract-signing-hint">
-              ⚠️ 寄送前須填寫 HTTPS 文件下載網址；本機網址不可送入 LINE 任務。
-            </p>
-          )}
-        </div>
+        <h3 className="contract-signing-title">📦 契約簽回文件操作</h3>
       </div>
 
       {/* 已封存契約文件版本 */}
@@ -223,30 +191,16 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong>{staffIdentity.label(segment.staff_id)}／分段 #{segment.segment_id}</strong>
                   <span className={`contract-status-pill ${segment.signed_received ? 'success' : segment.sent ? 'pending' : 'pending'}`}>
-                    {segment.signed_received ? '🟢 已簽回' : segment.sent ? '🟡 等待簽回' : '⚪ 尚未寄送'}
+                    {segment.signed_received ? '🟢 已簽回' : segment.sent ? '🟡 等待簽回' : '⚪ 尚無寄送紀錄'}
                   </span>
                 </div>
                 <p>
                   {segment.signed_received
                     ? '已簽回。'
                     : segment.sent
-                    ? '已建立寄送工作，等待簽回；這不代表 LINE 已送達。'
-                    : '尚未寄送。'}
+                    ? '等待既有契約簽回。'
+                    : '尚無寄送紀錄。'}
                 </p>
-                {!segment.sent && (
-                  <div>
-                    <button
-                      type="button"
-                      className="contract-btn-primary"
-                      disabled={state === 'working' || !validDownloadUrl}
-                      onClick={() => void run(() =>
-                        contractSigningMutationClient.sendStaff(caseNo, segment.segment_id, downloadUrl, currentIntent(`staff-send-${segment.segment_id}`))
-                      , () => setSubmittedDownloadUrl(downloadUrl))}
-                    >
-                      🚀 確認建立月嫂契約寄送任務
-                    </button>
-                  </div>
-                )}
                 {segment.sent && !segment.signed_received && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
                     <div className="contract-signing-field">
@@ -370,32 +324,16 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong>客戶正式服務契約</strong>
                 <span className={`contract-status-pill ${signing.client_signed_received ? 'success' : signing.client_document_sent ? 'pending' : 'pending'}`}>
-                  {signing.client_signed_received ? '🟢 已簽回' : signing.client_document_sent ? '🟡 等待簽回' : '⚪ 尚未寄送'}
+                  {signing.client_signed_received ? '🟢 已簽回' : signing.client_document_sent ? '🟡 等待簽回' : '⚪ 尚無寄送紀錄'}
                 </span>
               </div>
               <p>
                 {signing.client_signed_received
                   ? '客戶契約已簽回。'
                   : signing.client_document_sent
-                  ? '已建立寄送工作，等待客戶簽回；這不代表 LINE 已送達。'
-                  : signing.commitment_id === null
-                  ? '尚未建立有效服務承諾，不能寄送客戶契約。'
-                  : '可建立客戶契約寄送任務。'}
+                  ? '等待既有客戶契約簽回。'
+                  : '尚無寄送紀錄。'}
               </p>
-              {!signing.client_document_sent && (
-                <div>
-                  <button
-                    type="button"
-                    className="contract-btn-primary"
-                    disabled={state === 'working' || !validDownloadUrl || signing.commitment_id === null}
-                    onClick={() => void run(() =>
-                      contractSigningMutationClient.sendClient(caseNo, downloadUrl, currentIntent('client-send'))
-                    , () => setSubmittedDownloadUrl(downloadUrl))}
-                  >
-                    🚀 確認建立客戶契約寄送任務
-                  </button>
-                </div>
-              )}
               {signing.client_document_sent && !signing.client_signed_received && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
                   <div className="contract-signing-field">

@@ -44,9 +44,8 @@
 | `staff_menu` | `staff`（已綁定在職月嫂） | `我的訂單`、`我的排班`、`我的資料`、`我的薪資` | 我的訂單 → `staff_order_search` LIFF；我的排班 → `staff_schedule` LIFF；我的資料 → [月嫂更新個人資料](20_LINE客服與月嫂自助服務正式規格.md#月嫂更新個人資料)；我的薪資 → `staff_payout` LIFF |
 | `union_staff_menu` | `union_staff`（已綁定工會後台人員） | `待辦工作台`、`客服中心`、`狀態追蹤`、`營運摘要` | 分別開啟 `line-mobile-admin` 對應視圖：`staff_review`、`customer_service`、`order_tracking`、`dashboard` |
 
-- **雙角色與切換規則**：月嫂同時以產婦身分申請服務並完成二次驗證時，可於專用雙頁籤選單（`staff_customer_menu`）在「月嫂工作」與「我的月子」間切換視圖；當所屬產婦案件全數達到終結狀態（取消／完工結案歸檔）後，依 `R1-LIFECYCLE` 由 Orders closure outbox 驅動 LINE Identity 自動恢復為單一 `staff_menu`。
+- **雙角色、結案回復與月嫂退役**依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 的角色選擇及回復流程。
 - **工會選單退役路由防呆**：`union_staff` 端原 `anomalies_center` 選單路徑自動重導至 `order_tracking`；`dashboard` 只消費經 server 遮罩且符合 [`34_營運報表與統計口徑正式規格.md`](34_營運報表與統計口徑正式規格.md) 口徑之本週營運摘要（`WeeklyOperationsReportQuery`／`operations-report.v4` 相容彙總），不揭露客戶或員工明碼個資。
-- **身分退役回收**：工會於後台將月嫂辦理退役後，立即清除有效 `staff_id` 投影，並透過 Rich Menu saga 將其官方選單降級為 `customer_menu`（若具活躍客戶案）或 `default_menu`，同步回收 `staff_order_search`、`staff_schedule` 與 `staff_payout` 查詢授權。
 
 ## 6. 官方聊天室客服互動與狀態一致規則
 

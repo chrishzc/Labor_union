@@ -369,6 +369,28 @@ def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
         application.decide(denied)
 
 
+def test_delete_pending_review_records_audit_and_replays_without_delivery() -> None:
+    snapshot = _pending_staff_review()
+    calls = []
+    reviews = SimpleNamespace(delete_pending=lambda *args: calls.append(args))
+
+    class ReplayReceipts(RecordingRepository):
+        def get(self, key):
+            return next((item for item in self.items if item.key == key), None)
+
+    uow = FakeUow(reviews=reviews, receipts=ReplayReceipts(), audit=RecordingRepository())
+    app = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
+    actor = ActorContext("admin:1", (LineCapability.IDENTITY_REVIEW.value,))
+    key = IdempotencyKey("remove-review")
+    app.delete_pending(snapshot.request_id, snapshot.version, actor, key)
+    app.delete_pending(snapshot.request_id, snapshot.version, actor, key)
+
+    assert calls == [(snapshot.request_id, snapshot.version)]
+    assert len(uow.audit.items) == 1
+    with pytest.raises(LineReviewDataConflictError, match="刪除請求識別碼已被使用"):
+        app.delete_pending(snapshot.request_id, ExpectedVersion(2), actor, key)
+
+
 def test_review_rejection_exact_replay_keeps_one_receipt_and_delivery_task() -> None:
     snapshot = _pending_staff_review()
 

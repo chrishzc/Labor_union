@@ -29,5 +29,6 @@ def registration_intent(payload, line_user_id):
         baby_info=payload.baby_info,
         notes=payload.notes,
         line_id=payload.line_id,
+        passbook_image_id=payload.passbook_image_id,
     )
 

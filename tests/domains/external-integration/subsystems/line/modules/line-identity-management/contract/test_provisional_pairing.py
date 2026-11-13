@@ -127,6 +127,7 @@ class _MockIdentityManagementRepo:
                 line_user_id=p["line_user_id"],
                 client_id=p["client_id"],
                 submitted_at=None,
+                version=1,
             )
             for p in self.provisionals.values()
             if p["status"] == "submitted"
@@ -138,6 +139,12 @@ class _MockIdentityManagementRepo:
 
     def get_provisional_registration(self, registration_id: int) -> dict | None:
         return self.provisionals.get(registration_id)
+
+    def delete_pending_provisional_registration(self, registration_id, version):
+        row = self.provisionals.get(registration_id)
+        if row is None or row["status"] != "submitted" or version != ExpectedVersion(1):
+            raise RuntimeError("line_provisional_registration_stale")
+        del self.provisionals[registration_id]
 
     def consume_provisional_registration(
         self,
@@ -164,6 +171,7 @@ class _MockUnitOfWork:
         self.configurations = self
         self.order_audiences = self
         self.receipts = self
+        self.saved_receipts = {}
         self.commits = 0
 
     def __enter__(self):
@@ -176,10 +184,10 @@ class _MockUnitOfWork:
         self.commits += 1
 
     def append(self, item) -> None:
-        pass
+        self.saved_receipts[item.key] = item
 
-    def get(self, key):
-        return None
+    def get(self, key, *, for_update=False):
+        return self.saved_receipts.get(key)
 
     def default_publication(self, target):
         return None
@@ -213,6 +221,23 @@ def test_unbound_pairing_candidates_listing() -> None:
     assert view.orders[0].case_no == "115000008"
     assert len(view.provisional_registrations) == 1
     assert view.provisional_registrations[0].registration_id == 1
+
+
+def test_delete_pairing_checks_version_and_replays_without_side_effects() -> None:
+    repo, identities, customers = _MockIdentityManagementRepo(), _MockIdentities(), _MockCustomers()
+    app, uow = _make_app(repo, identities, customers)
+    actor = ActorContext("admin:1", (LineCapability.IDENTITY_BINDING_MANAGE.value,))
+    key = IdempotencyKey("remove-pairing")
+
+    with pytest.raises(RuntimeError, match="line_provisional_registration_stale"):
+        app.delete_pending_provisional_registration(1, ExpectedVersion(0), actor, key)
+    app.delete_pending_provisional_registration(1, ExpectedVersion(1), actor, key)
+    app.delete_pending_provisional_registration(1, ExpectedVersion(1), actor, key)
+
+    assert app.unbound_pairing_candidates().provisional_registrations == ()
+    assert uow.commits == 1 and len(uow.audit) == 1
+    assert not customers.bound_customers and not identities.bound_calls
+    assert not uow.outbox
 
 
 def test_pair_provisional_registration_success() -> None:

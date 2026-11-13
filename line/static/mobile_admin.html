@@ -1617,6 +1617,7 @@ async function loadCustomerRecommendationFollowups() {
     contact_requested: "客戶希望進一步了解，請查看留言並回覆。",
     awaiting_signing: "客戶已接受配對，請至案件頁面準備契約並發起簽署；簽約與訂金付款可先後發生，訂金核銷後即可建群。",
     reply_reminder: "確認資訊送達滿 7 天尚未接受；客戶仍可要求協助或接受配對。",
+    response_failed: "已收到客戶回覆，請工會核對方案及檔期。",
   };
   if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)
       || data.items.some(item => !Number.isInteger(item.plan_id) || !Object.hasOwn(labels, item.status))) {
@@ -1635,7 +1636,7 @@ async function loadCustomerRecommendationFollowups() {
     const title = document.createElement("strong");
     title.textContent = `案件 ${item.case_no}`;
     const summary = document.createElement("p");
-    summary.textContent = labels[item.status];
+    summary.textContent = item.failure_reason || labels[item.status];
     card.append(title, summary);
     if (item.status === "contact_requested" && item.reminder_due_at && new Date(item.reminder_due_at) <= new Date()) {
       const reminder = document.createElement("p");

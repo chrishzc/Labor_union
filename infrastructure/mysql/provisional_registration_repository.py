@@ -84,7 +84,13 @@ class MySqlProvisionalRegistrationRepository:
 
     def registration_id_high_water(self):
         with _cursor(self._connection) as cursor:
-            cursor.execute("SELECT COALESCE(MAX(id),0) AS high_water FROM provisional_client_registrations")
+            cursor.execute(
+                "SELECT GREATEST("
+                "(SELECT COALESCE(MAX(id),0) FROM provisional_client_registrations),"
+                "(SELECT COALESCE(MAX(CAST(aggregate_identity AS UNSIGNED)),0) FROM line_domain_audit_events "
+                "WHERE action='line.identity.provisional.deleted' AND aggregate_type='provisional_client_registration')"
+                ") AS high_water"
+            )
             return int(cursor.fetchone()["high_water"])
 
     def approval_receipt(self, registration_id, operation_id):

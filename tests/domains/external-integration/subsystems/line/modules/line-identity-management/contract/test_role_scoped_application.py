@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 import json
@@ -343,6 +344,81 @@ def test_role_a_to_b_to_a_creates_a_new_menu_work_item():
     ]
 
 
+def test_manual_resync_queues_bound_customer_once_and_keeps_identity_unchanged():
+    from subsystems.line.identity_management_contracts import LineIdentityBindingActionCommand
+    from subsystems.line.outbox_contracts import LineRichMenuSyncStatus
+
+    user = LineUserId("U-customer-resync")
+    identities = _Identities(user)
+    customer, staff = identities.bindings
+    identities.bindings = (customer,)
+    unit = _UnitOfWork(identities)
+    unit.outbox.menu_reset_pending = lambda _: False
+    unit.identity_management = SimpleNamespace(detail=lambda *_: SimpleNamespace(
+        version=customer.version.value,
+        status=LineIdentityBindingStatus.BOUND,
+        rich_menu_sync_status=(
+            LineRichMenuSyncStatus.PENDING if unit.outbox.items else LineRichMenuSyncStatus.FAILED
+        ),
+    ))
+    app = LineIdentityManagementApplication(lambda: unit, lambda: datetime.now(timezone.utc))
+    command = LineIdentityBindingActionCommand(
+        user, LineBindingSubjectType.CUSTOMER, customer.version,
+        ActorContext("admin:1", ("line.identity.binding.manage",)), IdempotencyKey("resync-click"),
+    )
+    with pytest.raises(RuntimeError, match="line_identity_binding_version_conflict"):
+        app.resync_menu(replace(command, expected_version=ExpectedVersion(9)))
+    assert app.resync_menu(command).rich_menu_sync_status is LineRichMenuSyncStatus.PENDING
+    app.resync_menu(command)
+    app.resync_menu(replace(command, idempotency_key=IdempotencyKey("second-click")))
+    assert len(unit.outbox.items) == len(unit.audit.items) == 1
+    assert json.loads(unit.outbox.items[0].payload_json)["menu_definition_id"] == "customer_menu"
+    assert identities.bindings == (customer,)
+
+    identities.bindings = (customer, staff)
+    identities.selected = LineBindingSubjectType.STAFF
+    with pytest.raises(RuntimeError, match="line_identity_menu_role_not_active"):
+        app.resync_menu(replace(command, idempotency_key=IdempotencyKey("wrong-role")))
+    assert len(unit.outbox.items) == 1
+
+
+def test_delete_revoked_binding_is_role_scoped_and_idempotent():
+    from subsystems.line.identity_management_contracts import LineIdentityBindingActionCommand
+
+    user = LineUserId("U-delete-fixture")
+    identities = _Identities(user)
+    customer, staff = identities.bindings
+    identities.get = lambda _, role: next((item for item in identities.bindings if item.subject_type is role), None)
+    unit = _UnitOfWork(identities)
+    calls = []
+    owner = {"line_user_id": user.value}
+
+    def delete(user_id, role, version, updated_at, menu_id):
+        calls.append((user_id, role, version, updated_at, menu_id))
+        identities.bindings = (staff,)
+
+    unit.identity_management = SimpleNamespace(
+        subject_candidate=lambda *_: owner, delete_revoked_binding=delete,
+    )
+    app = LineIdentityManagementApplication(lambda: unit, lambda: datetime.now(timezone.utc))
+    command = LineIdentityBindingActionCommand(
+        user, LineBindingSubjectType.CUSTOMER, customer.version,
+        ActorContext("admin:1", ("line.identity.binding.manage",)), IdempotencyKey("delete-click"),
+        expected_updated_at=datetime(2026, 11, 13),
+    )
+    with pytest.raises(RuntimeError, match="line_identity_binding_not_revoked"):
+        app.delete_revoked_binding(command)
+    identities.bindings = (replace(customer, status=LineIdentityBindingStatus.REVOKED), staff)
+    with pytest.raises(RuntimeError, match="line_identity_owner_projection_conflict"):
+        app.delete_revoked_binding(command)
+    owner["line_user_id"] = None
+    app.delete_revoked_binding(command)
+    app.delete_revoked_binding(command)
+    assert calls == [(user, LineBindingSubjectType.CUSTOMER, customer.version, datetime(2026, 11, 13), "customer_menu")]
+    assert identities.bindings == (staff,)
+    assert unit.commits == len(unit.audit.items) == 1
+
+
 def test_staff_revocation_queues_a_distinct_customer_successor_menu() -> None:
     line_user_id = LineUserId("U-role-context")
     identities = _Identities(line_user_id)
@@ -590,6 +666,10 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     class CompletingOutbox(_AppendOnly):
         lease_valid = True
         latest_intent_id = 7
+        guard_available = True
+
+        def menu_provider_lock(self, line_user_id):
+            return nullcontext(self.guard_available)
 
         def lock_menu_lease(self, item, now):
             return self.lease_valid
@@ -604,15 +684,26 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     unit_of_work.identity_management = management
     unit_of_work.outbox = CompletingOutbox()
     now = datetime(2026, 9, 9, tzinfo=timezone.utc)
-    provider = SimpleNamespace(
-        restore_default_for_user=lambda _: LineRichMenuProviderOutcome(
+    active_transactions = []
+    @contextmanager
+    def factory():
+        active_transactions.append(unit_of_work.commits)
+        try:
+            yield unit_of_work
+        finally:
+            active_transactions.pop()
+
+    def restore(_):
+        assert len(active_transactions) == 1
+        assert unit_of_work.commits > active_transactions[0]
+        return LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.REJECTED,
             error_code="line_http_404",
             error_message="richmenu not found",
         )
-    )
+    provider = SimpleNamespace(restore_default_for_user=restore)
     worker = LineIdentityRevocationWorker(
-        lambda: unit_of_work,
+        factory,
         provider,
         "identity-worker",
         lambda: now,
@@ -640,7 +731,12 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     assert failures == [(91, "line_http_404", "richmenu not found")]
     assert management.request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
     assert unit_of_work.outbox.items[0].retryable is False
-    assert unit_of_work.commits == 1
+    assert unit_of_work.commits == 3
+
+    unit_of_work.outbox.guard_available = False
+    worker._process(item)
+    assert len(failures) == 1
+    unit_of_work.outbox.guard_available = True
 
     unit_of_work.outbox.lease_valid = False
     worker._process(item)
@@ -665,6 +761,18 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     worker._process(item)
     assert finalized == [(91, False)]
     assert unit_of_work.outbox.items[-1].succeeded
+
+    def expire_lease_during_restore(_):
+        unit_of_work.outbox.lease_valid = False
+        return LineRichMenuProviderOutcome(
+            LineRichMenuProviderOutcomeType.SUCCESS, provider_menu_id="richmenu-visitor-current",
+        )
+
+    provider.restore_default_for_user = expire_lease_during_restore
+    completions = len(unit_of_work.outbox.items)
+    worker._process(item)
+    assert len(unit_of_work.outbox.items) == completions
+    assert finalized == [(91, False)]
 
 
 @pytest.mark.parametrize("command,role", [("切換客戶", LineBindingSubjectType.CUSTOMER), ("切換月嫂", LineBindingSubjectType.STAFF)])

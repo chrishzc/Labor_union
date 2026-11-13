@@ -11,7 +11,7 @@
 外部簽約案件 Query 在簽約 facts 尚未備齊時回傳零寫入 `preparing` 文件投影；預覽與未簽 PDF 準備不依賴已接受方案、簽約 session 或正式排班。交接／最終簽回命令沿用原 Domain 條件。
 完整契約投影另提供候選資訊限定的 current-order-payment 查詢：未執行指派時使用 Orders current confirmed／預計日期投影 Finance，不要求舊方案仍有效或借用舊 commitment 服務量；一般完整契約查詢保留原方案／commitment 驗證。
 
-外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`。簽署提醒由人員在 LINE 官方帳號聊天後台手動選用範本。工會系統移除提醒寫入與案件畫面狀態，歷史提醒回執仍可唯讀查閱，舊提醒由 LINE worker 在呼叫 provider 前取消。契約下載通知沿用既有文件投遞。
+外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`。簽署提醒由人員在 LINE 官方帳號聊天後台手動選用範本。工會系統移除提醒寫入與案件畫面狀態，歷史提醒回執仍可唯讀查閱，舊提醒與舊契約下載通知由 LINE worker 在呼叫 provider 前取消，投遞歷史保留。
 工作區同案推薦變更後，已掛載的契約下載及欄位預覽依 owner revision 重讀 current targets；舊服務段落不沿用至新推薦。既有檔案、進行中命令及結果未明的原操作保留，待可安全重讀時才更新，不因 revision 清除 recovery flow。
 
 管理端使用「瀏覽器列印 → 送交簽署 → 回收簽署文件」單一工作區；瀏覽器列印可另存 PDF，送交時缺少的回收用文件沿用正式生成命令，核對資料使用 exact-target 側邊抽屜。客戶與每段月嫂各自選擇簽回文件，簽署內容由人員自行檢查；不提供逐份檢查／重新檢查按鈕，直接儲存時沿用上傳、格式／完整性與完整文件集合驗證及回讀；未完整回收時只保存受控 staging，不推進簽約。最終 Preview 綁定完整文件集合，Apply 在既有 outer UoW 納管各文件並於既有 immutable receipt 保存 typed members，同時完成 Orders／Commitment／Client Finance 協作。已完成文件下載重新授權並限制為該案保存的 members；歷史單一最終 PDF 仍可讀取，不作新提交的替代。
@@ -32,6 +32,9 @@
 - `ui_react/src/components/OrderContractPreview.tsx`
 - page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
 - `api/routes/contract_external_signing.py`
+- `api/routes/contract_signing.py`
+- `ui_react/src/api/orders/contract_signing_mutation_client.ts`
+- `ui_react/src/components/ContractSigningActions.tsx`
 - `api/dependencies/contract_external_signing.py`
 - `api/schemas/full_contract_preview.py`
 - `domains/contract_signing/external_signing.py`
@@ -45,7 +48,6 @@
 - `subsystems/contract_signing/full_contract_preview.py`
 - `subsystems/contract_signing/external_signing_workflow.py`
 - `subsystems/contract_signing/final_document_workflow.py`
-- `subsystems/contract_signing/line_delivery.py`
 - `subsystems/contract_signing/unsigned_contract_pdf.py`
 - `subsystems/orders/contract_completion_workflow.py`
 - `infrastructure/mysql/order_contract_completion_repository.py`
@@ -58,7 +60,7 @@
 
 ## Contracts
 - 瀏覽器列印與案件層級交接後的同次回收銜接見正式規格 21 §3.2／§3.3；工作台沿用既有產製、交接及回讀入口。
-- 管理端文件清單、核對摘要與回收以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與寄送 payload 保留原內容。
+- 管理端文件清單、核對摘要與回收以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與歷史寄送 payload 保留原內容。
 - `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md`
 
@@ -67,6 +69,7 @@
 - test_root: `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_actions.test.tsx`
 - `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_external_signing_client.test.ts`
+- `ui_react/src/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation/contract_signing_mutation_client.test.ts`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_browser_contract_renderer.py`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_external_signing_workflow.py`

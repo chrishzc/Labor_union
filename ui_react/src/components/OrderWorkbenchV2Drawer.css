@@ -43,9 +43,7 @@
 .formal-confirmation-preview-heading { margin: 14px 0 0; }
 .formal-confirmation-resume-image { display: block; max-width: 100%; height: auto; margin-inline: auto; }
 .formal-recommendation-customer-info { padding-top: 20px; margin-top: 20px; border-top: 1px solid #e9ded6; }
-.formal-recommendation-sheets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
-.formal-recommendation-sheets article { display: grid; align-content: start; justify-items: start; gap: 8px; padding: 14px; border-radius: 9px; background: #faf6f1; border: 1px solid #eee5dc; }
-.formal-recommendation-sheets small, .formal-recommendation-hint { color: #806d60; font-size: .8rem; }
+.formal-recommendation-hint { color: #806d60; font-size: .8rem; }
 .formal-recommendation-inline-form { padding: 18px; margin-top: 14px; border: 1px solid #e8d4c4; border-radius: 10px; background: #fffaf6; }
 .order-case-page .formal-recommendation-inline-form > label { display: grid; gap: 7px; margin: 12px 0; }
 .formal-recommendation-inline-form textarea { width: 100%; min-height: 76px; }

@@ -1,5 +1,6 @@
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from types import SimpleNamespace
 
 from api.routes.contract_signing import _response, router
@@ -89,6 +90,30 @@ def test_contract_signing_success_endpoints_use_closed_output_views():
             ContractSigningManualAttestationPreviewView,
         )
     )
+
+
+@pytest.mark.parametrize(("path", "openapi_path"), [
+    ("client/send", "client/send"),
+    ("staff-segments/71/send", "staff-segments/{segment_id}/send"),
+])
+def test_contract_download_link_send_routes_are_unreachable(path, openapi_path):
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/v1/orders/SYNTHETIC/contract-signing/{path}",
+        json={"download_url": "https://example.invalid/contract"},
+        headers={"Idempotency-Key": "retired-send-test", "X-Correlation-ID": "retired-send-test"},
+    )
+
+    assert response.status_code == 404
+    paths = client.get("/openapi.json").json()["paths"]
+    base = "/api/v1/orders/{case_no}/contract-signing"
+    assert f"{base}/{openapi_path}" not in paths
+    assert f"{base}/{openapi_path.removesuffix('send')}signed-return" in paths
+    assert f"{base}/{openapi_path.removesuffix('send')}manual-attestation" in paths
+    assert base + "/documents/{document_version_id}/download" in paths
 
 
 def test_contract_signing_receipt_preserves_nullable_json_keys():

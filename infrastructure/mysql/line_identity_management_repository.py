@@ -5,10 +5,15 @@ Description: LINE 身分管理讀取模型與現狀事實 adapter，支援角色
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from pymysql import MySQLError
 
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
+from infrastructure.mysql.line_configuration_publication_repository import CURRENT_CANONICAL_MENU_PUBLICATION_SQL
+from infrastructure.mysql.nas_mutations import call_mutation
 from shared_kernel.identities import ExpectedVersion
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
@@ -99,7 +104,7 @@ class MySqlLineIdentityManagementRepository:
                 "COALESCE(b.name, c.name, '-') AS name, "
                 "COALESCE(b.phone, c.phone, '-') AS phone, "
                 "COALESCE(r.active_line_user_id, r.line_user_id) AS line_user_id, "
-                "r.client_id, "
+                "r.client_id, r.application_version, "
                 "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at "
                 "FROM provisional_client_registrations r "
                 "LEFT JOIN beclass_records b ON r.beclass_record_id = b.id "
@@ -116,6 +121,7 @@ class MySqlLineIdentityManagementRepository:
                     line_user_id=str(r["line_user_id"]),
                     client_id=int(r["client_id"]) if r.get("client_id") is not None else None,
                     submitted_at=str(r["submitted_at"]) if r.get("submitted_at") else None,
+                    version=int(r["application_version"]),
                 )
                 for r in reg_rows
                 if r.get("line_user_id")
@@ -141,10 +147,32 @@ class MySqlLineIdentityManagementRepository:
                 "FROM provisional_client_registrations r "
                 "LEFT JOIN beclass_records b ON r.beclass_record_id = b.id "
                 "LEFT JOIN clients c ON r.client_id = c.id "
-                "WHERE r.id = %s",
+                "WHERE r.id = %s FOR UPDATE OF r",
                 (registration_id,),
             )
             return cursor.fetchone()
+
+    def delete_pending_provisional_registration(self, registration_id: int, version: ExpectedVersion) -> None:
+        with self._connection.cursor() as cursor:
+            try:
+                if os.getenv("DEPLOYMENT_PROFILE") == "nas":
+                    call_mutation(cursor, "lu_nas_delete_pending_line_pairing_v1", registration_id, version.value)
+                    return
+                cursor.execute(
+                    "SELECT id FROM provisional_client_registrations WHERE id=%s "
+                    "AND status='submitted' AND application_version=%s FOR UPDATE",
+                    (registration_id, version.value),
+                )
+                if cursor.fetchone() is None:
+                    raise RuntimeError("line_provisional_registration_stale")
+                cursor.execute("DELETE FROM provisional_registration_conflicts WHERE registration_id=%s", (registration_id,))
+                cursor.execute("DELETE FROM provisional_client_registrations WHERE id=%s", (registration_id,))
+            except MySQLError as error:
+                if error.args[0] == 1451:
+                    raise RuntimeError("line_provisional_registration_has_history") from error
+                if error.args[:2] == (1644, "line_provisional_registration_stale"):
+                    raise RuntimeError("line_provisional_registration_stale") from error
+                raise
 
     def consume_provisional_registration(
         self,
@@ -163,9 +191,11 @@ class MySqlLineIdentityManagementRepository:
             cursor.execute(
                 "UPDATE provisional_client_registrations "
                 "SET status='case_issued', active_line_user_id=NULL, client_id=%s "
-                "WHERE id=%s",
+                "WHERE id=%s AND status='submitted'",
                 (client_id, registration_id),
             )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_provisional_registration_stale")
 
     def list(self, query: LineIdentityBindingListQuery) -> LineIdentityBindingPage:
         clauses, parameters = _filters(query)
@@ -227,12 +257,12 @@ class MySqlLineIdentityManagementRepository:
 
     def default_menu_publication(self) -> dict[str, Any] | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_DEFAULT_MENU_SQL)
+            cursor.execute(CURRENT_CANONICAL_MENU_PUBLICATION_SQL, ("default_menu",))
             return cursor.fetchone()
 
     def staff_menu_publication(self) -> dict[str, Any] | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_STAFF_MENU_SQL)
+            cursor.execute(CURRENT_CANONICAL_MENU_PUBLICATION_SQL, ("staff_menu",))
             return cursor.fetchone()
 
     def terminal_closure_case(self, case_no: str) -> dict[str, Any] | None:
@@ -323,6 +353,38 @@ class MySqlLineIdentityManagementRepository:
         if not row:
             raise LookupError("line_identity_revocation_not_found")
         return _revocation_request(row)
+
+    def delete_revoked_binding(self, line_user_id, subject_type, expected_version, expected_updated_at, menu_definition_id):
+        params = (line_user_id.value, subject_type.value)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE job FROM line_domain_outbox job JOIN line_identity_revocation_requests r "
+                "ON job.aggregate_identity=CAST(r.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                "WHERE job.intent_type=%s AND job.aggregate_type='line_identity_revocation' "
+                "AND r.line_user_id=%s AND r.subject_type=%s",
+                (IDENTITY_MENU_RESET_INTENT, *params),
+            )
+            cursor.execute(
+                "DELETE FROM line_domain_outbox WHERE intent_type=%s AND aggregate_type='line_identity' "
+                "AND aggregate_identity=%s AND idempotency_identity NOT LIKE 'line-menu-command:%%' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$.menu_definition_id'))=%s",
+                (RICH_MENU_BINDING_INTENT, line_user_id.value, menu_definition_id),
+            )
+            for table in ("line_identity_revocation_requests", "line_identity_role_binding_events"):
+                cursor.execute(f"DELETE FROM {table} WHERE line_user_id=%s AND subject_type=%s", params)
+            cursor.execute(
+                "DELETE FROM line_identity_role_bindings WHERE line_user_id=%s AND subject_type=%s "
+                "AND binding_status='revoked' AND aggregate_version=%s AND updated_at_utc=%s",
+                (*params, expected_version.value, expected_updated_at),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_binding_version_conflict")
+            if subject_type in (LineBindingSubjectType.CUSTOMER, LineBindingSubjectType.STAFF):
+                cursor.execute(
+                    "UPDATE line_platform_users SET selected_identity_role=NULL,aggregate_version=aggregate_version+1 "
+                    "WHERE line_user_id=%s AND selected_identity_role=%s",
+                    params,
+                )
 
     def get_request_by_key(self, key: str) -> LineIdentityRevocationRequest | None:
         with self._connection.cursor() as cursor:
@@ -691,7 +753,8 @@ _BASE_SELECT = (
     f"'{IDENTITY_MENU_RESET_INTENT}' AND menu.processing_status='completed' "
     "THEN NULL ELSE menu.processing_status END AS menu_status,menu.error_code AS menu_error_code,"
     "EXISTS(SELECT 1 FROM line_domain_audit_events audit "
-    "WHERE audit.aggregate_type='line_domain_outbox' AND audit.aggregate_identity=CAST(menu.id AS CHAR) "
+    "WHERE audit.aggregate_type='line_domain_outbox' "
+    "AND audit.aggregate_identity=CAST(menu.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     f"AND audit.action='{RICH_MENU_BINDING_VERIFIED}') AS menu_verified "
     + _BINDINGS_FROM_SQL
     + "LEFT JOIN line_identity_revocation_requests r ON r.id = ("
@@ -707,7 +770,8 @@ _BASE_SELECT = (
     "OR (latest.aggregate_type='line_identity_revocation' "
     f"AND latest.intent_type='{IDENTITY_MENU_RESET_INTENT}' AND EXISTS("
     "SELECT 1 FROM line_identity_revocation_requests reset "
-    "WHERE reset.line_user_id=b.line_user_id AND latest.aggregate_identity=CAST(reset.id AS CHAR))) "
+    "WHERE reset.line_user_id=b.line_user_id "
+    "AND latest.aggregate_identity=CAST(reset.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci)) "
     "ORDER BY latest.id DESC LIMIT 1) "
 )
 _LIST_SQL = _BASE_SELECT + "WHERE {where} ORDER BY b.updated_at_utc DESC LIMIT %s OFFSET %s"
@@ -716,18 +780,6 @@ _SELECTED_ROLE_SQL = (
     "SELECT selected_identity_role FROM line_platform_users WHERE line_user_id=%s"
 )
 _COUNT_SQL = "SELECT COUNT(*) AS total " + _BINDINGS_FROM_SQL + "WHERE {where}"
-_DEFAULT_MENU_SQL = (
-    "SELECT id,provider_menu_id AS line_rich_menu_id "
-    "FROM line_rich_menu_publication_tasks "
-    "WHERE menu_definition_id='default_menu' AND publication_status='published' "
-    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
-)
-_STAFF_MENU_SQL = (
-    "SELECT id,provider_menu_id AS line_rich_menu_id "
-    "FROM line_rich_menu_publication_tasks "
-    "WHERE menu_definition_id='staff_menu' AND publication_status='published' "
-    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
-)
 _TERMINAL_CLOSURE_CASE_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,c.line_user_id "
     "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s"

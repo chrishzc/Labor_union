@@ -59,6 +59,7 @@ from domains.case_import.provisional_registration import (
     ProvisionalRegistrationDomainError,
     ProvisionalRegistrationIntent,
 )
+from api.schemas.line_identity_management import LineIdentityBindingActionRequest
 from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.review import LineReviewDecision, LineReviewStatus, LineReviewType
@@ -177,17 +178,6 @@ def staff_orders_page():
 @page_router.get("/line-staff-schedule")
 def staff_schedule_page():
     return FileResponse(_STAFF_SCHEDULE_PAGE, headers=_NO_CACHE_HEADERS)
-
-
-@page_router.get("/line-staff-baby-log", status_code=410)
-def staff_baby_log_page():
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "code": "staff_baby_log_retired",
-            "message": "寶寶日誌與餐食照片網頁已退役，請維持於 LINE 群組相簿新增。",
-        },
-    )
 
 
 @page_router.get("/line-staff-payout")
@@ -644,6 +634,24 @@ def decide_review(
             ),
         )
     )
+
+
+@review_router.post("/{request_id}/delete", response_model=BaseResponse[None])
+def delete_pending_review(
+    request_id: int,
+    payload: LineIdentityBindingActionRequest,
+    principal: AdminPrincipal = Depends(require_line_identity_reviewer),
+):
+    try:
+        get_line_identity_review_application().delete_pending(
+            LineReviewRequestId(request_id), ExpectedVersion(payload.expected_version),
+            admin_actor_context(principal), IdempotencyKey(payload.idempotency_key),
+        )
+    except LineReviewDataConflictError as error:
+        raise _review_http_conflict(error.code, str(error)) from error
+    except (ValueError, RuntimeError) as error:
+        raise _review_http_conflict("line_review_version_conflict", "待審核申請已變更，請重新整理。") from error
+    return BaseResponse(data=None)
 
 
 @review_router.post("/{request_id}/{decision}", include_in_schema=False)

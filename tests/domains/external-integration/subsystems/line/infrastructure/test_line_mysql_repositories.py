@@ -639,6 +639,7 @@ def test_rich_menu_claim_returns_typed_cleanup_only_work_without_downgrading_pub
 
 def test_newest_canonical_publication_wins_over_imported_and_late_older_publications():
     from infrastructure.mysql.line_configuration_publication_repository import (
+        CURRENT_CANONICAL_MENU_PUBLICATION_SQL,
         _MENU_PREVIOUS_PROVIDER_ID_SQL,
         _MENU_PUBLISHED_PROVIDER_ID_SQL,
     )
@@ -660,9 +661,14 @@ def test_newest_canonical_publication_wins_over_imported_and_late_older_publicat
         sql = _MENU_PUBLISHED_PROVIDER_ID_SQL.replace("%s", "?")
         params = ("staff_menu", "staff_menu")
         assert connection.execute(sql, params).fetchone() == ("canonical-current",)
+        canonical_sql = CURRENT_CANONICAL_MENU_PUBLICATION_SQL.replace("%s", "?")
+        assert connection.execute(canonical_sql, ("staff_menu",)).fetchone() == (24, "canonical-current")
         previous_sql = _MENU_PREVIOUS_PROVIDER_ID_SQL.replace("%s", "?")
-        assert connection.execute(previous_sql, (*params, 25)).fetchone() == ("legacy-current",)
+        assert connection.execute(previous_sql, (*params, 25)).fetchone() == ("legacy-import",)
         connection.execute("DELETE FROM line_rich_menu_publication_tasks WHERE configuration_revision > 0")
+        assert connection.execute(sql, params).fetchone() == ("legacy-import",)
+        assert connection.execute(canonical_sql, ("staff_menu",)).fetchone() == (20, "legacy-import")
+        connection.execute("DELETE FROM line_rich_menu_publication_tasks")
         assert connection.execute(sql, params).fetchone() == ("legacy-current",)
 
 

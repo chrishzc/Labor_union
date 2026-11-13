@@ -20,7 +20,7 @@
   - `subsystems/line/configuration_contracts.py`
   - `domains/line/rich_menu_draft.py` — 草稿 Action 驗證拒絕已退役 `?target=staff_baby_log`。
   - `subsystems/line/rich_menu_publication_workflow.py`
-  - `subsystems/line/rich_menu_worker.py` — publication saga and cleanup of earlier published revisions.
+  - `subsystems/line/rich_menu_worker.py` — publication saga retains earlier published LINE menus and closes legacy cleanup jobs. Persisted create outcomes recover the provider menu ID or stop for reconciliation when LINE acknowledgement is unknown.
   - `subsystems/line/rich_menu_application.py` — publication queue application reads the current Rich Menu revision.
   - `api/routes/line_rich_menus.py`
   - `api/schemas/line_rich_menu_drafts.py` — 草稿專用 typed Q/P/A、選填備註與版本／receipt 公開契約。

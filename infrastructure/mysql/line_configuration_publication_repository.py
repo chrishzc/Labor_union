@@ -1242,19 +1242,27 @@ _MENU_RETRY_SQL = (
 )
 _MENU_LIST_SQL = f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks"
 _MENU_COUNT_SQL = "SELECT COUNT(*) AS total FROM line_rich_menu_publication_tasks"
+_PUBLISHED_MENU_FILTER = (
+    "menu_definition_id=%s AND publication_status='published' "
+    "AND operation='publish' AND provider_menu_id IS NOT NULL"
+)
+_PUBLISHED_MENU_ORDER = "configuration_revision DESC,id DESC"
 _MENU_PUBLISHED_PROVIDER_ID_SQL = (
     "SELECT provider_menu_id FROM ("
-    "SELECT line_rich_menu_id AS provider_menu_id,2 AS priority,0 AS revision,id "
+    "SELECT line_rich_menu_id AS provider_menu_id,0 AS priority,0 AS configuration_revision,id "
     "FROM line_rich_menu_publications "
     "WHERE menu_config_id=%s AND status='published' AND is_current=TRUE "
     "AND line_rich_menu_id IS NOT NULL "
     "UNION ALL "
-    "SELECT provider_menu_id,CASE WHEN configuration_revision>0 THEN 3 ELSE 1 END AS priority,"
-    "configuration_revision AS revision,id "
+    "SELECT provider_menu_id,1 AS priority,"
+    "configuration_revision,id "
     "FROM line_rich_menu_publication_tasks "
-    "WHERE menu_definition_id=%s AND publication_status='published' "
-    "AND operation='publish' AND provider_menu_id IS NOT NULL"
-    ") published_menus ORDER BY priority DESC,revision DESC,id DESC LIMIT 1"
+    "WHERE " + _PUBLISHED_MENU_FILTER +
+    ") published_menus ORDER BY priority DESC," + _PUBLISHED_MENU_ORDER + " LIMIT 1"
+)
+CURRENT_CANONICAL_MENU_PUBLICATION_SQL = (
+    "SELECT id,provider_menu_id AS line_rich_menu_id FROM line_rich_menu_publication_tasks "
+    "WHERE " + _PUBLISHED_MENU_FILTER + " ORDER BY " + _PUBLISHED_MENU_ORDER + " LIMIT 1"
 )
 _MENU_PREVIOUS_PROVIDER_ID_SQL = _MENU_PUBLISHED_PROVIDER_ID_SQL.replace(
     "AND operation='publish'",

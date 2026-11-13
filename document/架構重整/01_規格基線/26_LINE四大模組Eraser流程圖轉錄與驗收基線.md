@@ -86,7 +86,7 @@ flowchart TD
 | `Profile_Update_Page` / `order_update` | 聯絡資訊與退費欄位由 `profile_update` 負責；服務地址、縣市、居住型態由 `order_update`（純 URI 入口，無五按鈕與服務天數）申請並產生 Diff 工單，依訂單鎖定狀態檢核，經工會核准後方更新對應 owner（不適用 14 天 Redis 清理）。 |
 | `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、`staff_schedule`（`leave-v1`／`SSTART-01`～`08`）與 `staff_payout`（`staff_payout.html`）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
 | `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 綁定 `union_staff_menu` 開啟 `line-mobile-admin` 四頁籤；群組輸入拒絕發放。 |
-| 雙身分與退役回收 | 月嫂兼產婦啟用 `staff_customer_menu` 雙頁籤切換；所屬客戶案全數終結後依 `R1-LIFECYCLE` 自動恢復 `staff_menu`。後台辦理月嫂退役時清除有效 `staff_id` 投影，選單降回 `customer_menu` 或 `default_menu` 並回收查詢權限。 |
+| 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
 
 ## 4. 模組二（M2）：自助導覽、FAQ LIFF 與明確呼叫專員
 
@@ -115,12 +115,14 @@ flowchart TD
   A["工會推薦意願人選給客戶"] --> B{"客戶回應"}
   B -->|專人協助| C["line_webhook_reply 確認，建立待辦保留原卡可再接受"]
   B -->|接受配對| D["保存接受決策；待辦轉簽約，簽約與訂金可交錯；滿 7 天未接僅內部提醒"]
+  D --> S["外部平台簽署與簽回確認（依簽約規格）"]
   D --> E["訂金正式核銷後由工會建置案件服務群組"]
   E --> F["開工前／當日雙方於群組協調日期 → 月嫂由 LIFF 提交（SSTART-01～08）"]
   F -->|無衝突| G["同交易更新排班／帳務／一期款到期日並寄群組日期表"]
   F -->|衝突或需代班| H["工會待辦尋人 → 願意 → 寄群組邀請 → 入群後工會登錄日期與日期表"]
 ```
 
+- 簽約節點依 [簽約正式規格 §3.2–3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#32-目前資料投影缺值提醒與瀏覽器-a4-列印) 驗收，並核對 LINE 流程圖的官方帳號手動範本指引。
 - 正式服務中請假同樣採 `leave-v1`（見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §4.2）；任何排班與協調決策不得跨過 Scheduling／Orders canonical writer 直接修改表單根欄位。
 
 ## 6. 模組四（M4）：工會雙管理端、個人告警與代班拆帳

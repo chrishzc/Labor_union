@@ -158,6 +158,22 @@ def test_retired_candidate_work_is_cancelled_before_provider_delivery(source, id
     sender.reply.assert_not_called()
 
 
+def test_line_unit_of_work_opens_and_cancels_retired_log_reminder_before_delivery():
+    from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
+    from subsystems.line.service_day_log_reminders import SOURCE_TYPE
+
+    unit = Unit()
+    assert isinstance(LineMySqlUnitOfWork(object()), LineMySqlUnitOfWork)
+    sender = provider()
+    unit.delivery_tasks.cancel = Mock()
+    unit.delivery_tasks.enqueue(request(SOURCE_TYPE))
+
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+    unit.delivery_tasks.cancel.assert_called_once()
+    sender.send.assert_not_called()
+    sender.reply.assert_not_called()
+
+
 @pytest.mark.parametrize("text", ["服務說明", "服務流程", "收費與補助", "查詢服務進度", "服務登記", "其他問題", "恢復AI"])
 def test_information_and_disabled_prompts_are_new_reply_only_work(text):
     unit = Unit()

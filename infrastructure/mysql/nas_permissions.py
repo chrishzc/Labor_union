@@ -23,6 +23,7 @@ DELETE_TABLES = frozenset({
     "client_legacy_virtual_accounts", "scheduling_effective_occupancy", "current_anomaly_issues",
     "admin_audit_logs", "knowledge_answer_requests", "knowledge_answer_receipts",
     "knowledge_answer_sources", "knowledge_jobs", "knowledge_indexes",
+    "line_review_requests", "provisional_client_registrations", "provisional_registration_conflicts",
 })
 ACCESS_TABLES = frozenset({
     "admin_users", "admin_root_account", "admin_sessions", "admin_totp_factors",
@@ -207,7 +208,13 @@ def permission_plan(connection, database: str) -> dict:
             or parameters.get(name) != [part.strip().lower() for part in signature.split(",")]
         ):
             raise ValueError("NAS security procedure drift; no changes applied")
-    if len(set(states.values())) > 1:
+    additive_line_procedures = {
+        "lu_nas_delete_pending_line_review_v1", "lu_nas_delete_pending_line_pairing_v1",
+    }
+    baseline_states = {state for name, state in states.items() if name not in additive_line_procedures}
+    if len(baseline_states) > 1 or (
+        baseline_states == {"absent"} and "exact" in states.values()
+    ):
         raise ValueError("partial NAS security installation; preserve state for explicit recovery")
     return {"database": database, "locking_scope": locking_scope, "accounts": names, "existing_accounts": sorted(existing_accounts),
             "tables": sorted(tables), "views": sorted(views), "procedures": states}

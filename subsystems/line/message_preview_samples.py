@@ -195,12 +195,7 @@ def current_message_sample(key):
         return value
     def case(): return field("案件編號", "case_no", CASE.case_no)
     def text(value): return {"type": "text", "text": value}
-    if key in {"contract-document-client", "contract-document-staff"}:
-        from subsystems.contract_signing.line_delivery import contract_delivery_text
-        audience = field("文件對象", "audience_label", "客戶契約" if key.endswith("client") else "服務人員契約")
-        url = field("公版下載連結", "download_url", "https://preview.invalid/contract")
-        payload = text(contract_delivery_text(case(), audience, url))
-    elif key in {"registration-approved-citizen", "registration-approved-non-citizen"}:
+    if key in {"registration-approved-citizen", "registration-approved-non-citizen"}:
         from subsystems.case_import.provisional_registration_application import registration_confirmation_text
         name = field("客戶姓名", "name", CASE.client_name)
         case_no = field("公版案件編號", "case_no", "A000000") if key == "registration-approved-non-citizen" else None

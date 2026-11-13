@@ -11,33 +11,6 @@ import json
 
 import pytest
 
-
-@pytest.mark.parametrize('audience_label', ['客戶契約', '月嫂委任契約'])
-def test_contract_download_reaches_provider_as_a_valid_line_message(audience_label):
-    from types import SimpleNamespace
-    from domains.line.delivery import LineRecipient, LineRecipientType
-    from domains.line.identities import LineUserId
-    from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
-    from subsystems.contract_signing.line_delivery import build_contract_delivery_request
-    recipient = LineRecipient(LineRecipientType.USER, LineUserId('U' + 'a' * 32))
-    common = dict(case_no='SYNTHETIC-CASE', document_version_id=12,
-                  scheduled_at=datetime(2026, 10, 25, tzinfo=timezone.utc),
-                  idempotency_key=IdempotencyKey('synthetic-signing-message'),
-                  correlation_id=CorrelationId('synthetic-signing-message'))
-    request = build_contract_delivery_request(
-        recipient, **common, download_url='https://preview.invalid/contract', audience_label=audience_label,
-    )
-    captured = []
-    class LocalSession:
-        def post(self, _url, **kwargs):
-            captured.append(json.loads(kwargs['data']))
-            return SimpleNamespace(status_code=200, headers={}, json=lambda: {'sentMessages': [{'id': 'synthetic-message'}]})
-    LineMessagingApiAdapter('synthetic-token', session=LocalSession()).send(request)
-    assert len(captured) == 1
-    assert captured[0]['to'] == recipient.identity.value
-    assert captured[0]['messages'] == [{'type': 'text', 'text': json.loads(request.payload_json)['text']}]
-    assert captured[0]['messages'][0]['text']
-
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
     ExternalSigningState,

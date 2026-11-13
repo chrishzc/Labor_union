@@ -74,7 +74,7 @@ const WORK_GROUPS = [
   { id: 'intake', title: '確認客戶與服務需求', description: '確認基本服務需求；待補資料與可先辦事項分開處理。', stages: ['intake_validation'] },
   { id: 'matching', title: '尋找月嫂與詢問意願', description: '新增人選、寄送案件資訊，再記錄初步接案意願。', stages: ['matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply'] },
   { id: 'recommendation', title: '推薦月嫂給客戶確認', description: '工會選定推薦人選，核對月嫂正式方案意願，再送交客戶確認接受或拒絕。', stages: ['formal_recommendation'] },
-  { id: 'contracts', title: '辦理契約與簽署', description: '下載未簽署的客戶與月嫂契約，送交外部平台簽署後，分別回收簽署文件。', stages: ['external_signing_dispatch', 'external_signing_completion'] },
+  { id: 'contracts', title: '辦理契約與簽署', description: '在瀏覽器預覽、列印或另存契約 PDF，送交外部平台簽署後，回收客戶與所有現行月嫂的簽署文件。', stages: ['external_signing_dispatch', 'external_signing_completion'] },
   { id: 'service', title: '確認服務日期與排班', description: '', stages: ['confirmed_service_dates', 'formal_service', 'service_completion'] },
 ] as const;
 type WorkGroup = typeof WORK_GROUPS[number]['id'];

@@ -486,9 +486,9 @@ def test_current_group_preview_names_use_case_group_terminology():
 def test_signing_reminder_preview_is_retired_and_other_messages_remain_available():
     application = app()
     ids = {item.id for item in application.catalog(actor())}
-    assert {'contract-document-client', 'contract-document-staff'} <= ids
-    assert ids.isdisjoint({'contract-signing-client', 'contract-signing-staff'})
-    for key in ('contract-signing-client', 'contract-signing-staff'):
+    retired = {'contract-signing-client', 'contract-signing-staff', 'contract-document-client', 'contract-document-staff'}
+    assert ids.isdisjoint(retired)
+    for key in retired:
         with pytest.raises(MessagePreviewNotFound):
             application.render(key, None, None, None, actor(), sample=True)
 
@@ -499,8 +499,6 @@ def test_signing_reminder_preview_is_retired_and_other_messages_remain_available
 
 
 _READ_ONLY_FLOW_MESSAGES = {
-    "contract-document-client": "客戶契約已備妥",
-    "contract-document-staff": "服務人員契約已備妥",
     "registration-approved-citizen": "服務登記與綁定成功",
     "registration-approved-non-citizen": "案件編號：A000000",
     "staff-leave-completed": "您的請假申請已完成正式排班處理。",
@@ -514,8 +512,6 @@ def test_read_only_flow_previews_show_delivery_text_and_sample_facts(key, expect
     result = app().render(key, None, None, None, actor(), sample=True)
     assert expected in result.text
     assert result.facts
-    if key.startswith("contract-document-"):
-        assert "https://preview.invalid/contract" in result.text
 
 
 def test_candidate_willingness_reply_preview_shows_fixed_copy():

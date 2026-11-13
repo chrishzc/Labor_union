@@ -25,7 +25,7 @@ def snapshot():
         triggers=[], views=[], show_create_tables={})
 
 
-def test_release_is_hash_bound_schema_only_latest_and_in_fresh_assembly():
+def test_release_is_hash_bound_schema_only_and_in_both_schema_chains():
     release = load_migration_release_manifest(MANIFEST, ROOT)
     owned = release.owned_object_descriptors(ROOT)[ARTIFACT]
     canonical = migration._canonical_artifact_descriptor(ARTIFACT)
@@ -36,7 +36,7 @@ def test_release_is_hash_bound_schema_only_latest_and_in_fresh_assembly():
     assert fresh.read_bytes() == (ROOT / 'db/schema_parts' / ARTIFACT).read_bytes()
     assert fresh in load_schema_assembly().active_artifact_paths
     entries = migration._local_ordered_upgrade_entries()
-    assert entries[-1]['artifact']['name'] == ARTIFACT
+    assert sum(entry['artifact']['name'] == ARTIFACT for entry in entries) == 1
     sql = migration.split_sql(fresh.read_text(encoding='utf-8'))
     assert len(sql) == 1
     assert migration._local_classify_statement(sql[0]) == 'alter_add_only'

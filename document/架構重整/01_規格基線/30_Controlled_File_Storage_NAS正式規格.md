@@ -27,8 +27,7 @@
 - `staff_resume`：月嫂正式履歷書（PDF）
 - `staff_certificate`：月嫂專業證照（PDF / JPG）
 - `staff_health_exam`：月嫂體檢合格證明與良民證（PDF / JPG）
-- `baby_log_photo`：寶寶照護日誌照片（JPG / PNG；由 Scheduling 服務紀錄使用，公開 LIFF `staff_baby_log.html` 已退役回傳 `410`）
-- `meal_photo`：每日月子餐點照片（JPG / PNG）
+- `client_passbook_cover`：客戶存摺封面照片（JPG / PNG / WebP；由客戶需求 LIFF `register.html` 市民／非市民申請時必填上傳，供工會人員核對銀行帳號與分行代碼，並於人員審核／建檔時歸檔至 NAS）
 - `rich_menu_background`：LINE 圖文選單底圖（PNG）
 - `database_backup`：資料庫 SQL 快照備份（`SQL.GZ + SHA256`，正式 Windows 每日預設 18:00 觸發並寫至 NAS，時間可於 `database-backup` 修改，復原契約由 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md) 擁有）
 
@@ -110,9 +109,8 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 ├── 01_案件合約 (orders)/{案件編號}/
 │   ├── 客戶合約_{案件編號}_v1_已簽署_{短Hash}.pdf
 │   └── 月嫂承攬協議_{案件編號}_{月嫂編號}_已簽署_{短Hash}.pdf
-├── 02_照護日誌 (scheduling)/{案件編號}/{服務日期_YYYY-MM-DD}/
-│   ├── 照護照片_{服務日期}_寶寶_{序號}_{短Hash}.jpg
-│   └── 照護照片_{服務日期}_餐點_{序號}_{短Hash}.jpg
+├── 02_客戶存摺封面 (passbooks)/{客戶或案件識別}/
+│   └── 存摺封面_{客戶或案件識別}_v{版本號}_{短Hash}.{副檔名}
 ├── 03_月嫂檔案與資格 (staff)/{月嫂編號}_{姓名}/
 │   ├── resume/月嫂履歷_{月嫂編號}_{月嫂姓名}_v{版本號}_{短Hash}.pdf
 │   ├── certificates/證照_{月嫂編號}_{證照名稱}_{短Hash}.pdf
@@ -129,7 +127,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 - Windows 正式環境單一設定 `.env` 之 `CONTROLLED_FILE_STORAGE_ROOT` 為唯一 NAS 共用根設定（未設定時不得回存專案或本機預設路徑），優先於 `APP_ENV=development` 等啟動標記。
 - 共用根目錄由 NAS 管理者預建並授予子目錄建立 ACL；程式於首次寫入時自動建立 `01`～`05`（含 `04_LINE選單資源 (media)/rich_menus`）與 `_staging` 並繼承 NAS ACL（唯讀 Query 與 dry run 不建立資料夾）；未填 `union_no` 之月嫂以 `ID{staff.id}` 命名快照（後續更名不搬移舊檔）；不合法路徑字元轉底線且嚴防 root escape。
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
-- 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
+- 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
 - `05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`），Global migration 使用 `_partial/` 與 `_maintenance/`，備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取既有 `_receipts/YYYY-MM/` 舊三檔備份）；一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
 - 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。
 

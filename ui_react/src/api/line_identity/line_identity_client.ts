@@ -16,6 +16,10 @@ import {
   LineIdentityBindingListQuerySchema,
   LineIdentityBindingPageViewSchema,
   LineIdentityBindingViewSchema,
+  LineIdentityBindingActionRequestSchema,
+  type LineIdentityBindingActionRequest,
+  LineIdentityDeleteRevokedRequestSchema,
+  type LineIdentityDeleteRevokedRequest,
   LineIdentityReplacementApplyRequestSchema,
   LineIdentityReplacementPreviewViewSchema,
   LineIdentityReviewApplyRequestSchema,
@@ -81,6 +85,18 @@ export interface LineIdentityClient {
     lineUserId: string,
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityBindingView>;
+  resyncMenu(
+    lineUserId: string,
+    payload: LineIdentityBindingActionRequest,
+    options: LineIdentityRequestOptions & { subjectType: LineBindingSubjectType },
+  ): Promise<LineIdentityBindingView>;
+  deleteRevokedBinding(
+    lineUserId: string,
+    payload: LineIdentityDeleteRevokedRequest,
+    options: LineIdentityRequestOptions & { subjectType: LineBindingSubjectType },
+  ): Promise<void>;
+  deletePendingReview(requestId: number, payload: LineIdentityBindingActionRequest): Promise<void>;
+  deletePendingPairing(registrationId: number, payload: LineIdentityBindingActionRequest): Promise<void>;
   previewReplacement(
     lineUserId: string,
     targetSubjectReference: string,
@@ -493,6 +509,24 @@ export async function listLineIdentityReplacementCandidates(query: LineIdentityC
 }
 
 class DefaultLineIdentityClient implements LineIdentityClient {
+  deletePendingReview(requestId: number, payload: LineIdentityBindingActionRequest): Promise<void> {
+    return this.deletePendingRequest(`${reviewPath(requestId)}/delete`, payload);
+  }
+
+  deletePendingPairing(registrationId: number, payload: LineIdentityBindingActionRequest): Promise<void> {
+    return this.deletePendingRequest(`/api/v1/line/identity-bindings/provisional-registrations/${registrationId}/delete`, payload);
+  }
+
+  private async deletePendingRequest(path: string, payload: LineIdentityBindingActionRequest): Promise<void> {
+    try {
+      const raw = await transport.post(path, LineIdentityBindingActionRequestSchema.parse(payload), requestOptions());
+      const result = decodePayload(createLineIdentityEnvelopeSchema(z.null()), raw);
+      if (!result.success) throw new LineIdentityClientError('BACKEND_REJECTED', '刪除失敗。');
+    } catch (error) {
+      throw mapLineIdentityError(error, 'apply');
+    }
+  }
+
   listReplacementCandidates(query: LineIdentityCandidateQuery, options?: LineIdentityRequestOptions) {
     return listLineIdentityReplacementCandidates(query, options);
   }
@@ -521,6 +555,41 @@ class DefaultLineIdentityClient implements LineIdentityClient {
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityBindingView> {
     return getLineIdentityBinding(lineUserId, options);
+  }
+
+  async resyncMenu(
+    lineUserId: string,
+    payload: LineIdentityBindingActionRequest,
+    options: LineIdentityRequestOptions & { subjectType: LineBindingSubjectType },
+  ): Promise<LineIdentityBindingView> {
+    try {
+      const raw = await transport.post(
+        `${bindingPath(lineUserId)}/menu/resync`,
+        LineIdentityBindingActionRequestSchema.parse(payload),
+        { ...requestOptions(options), ...roleParams(options) },
+      );
+      return decodeEnvelope(LineIdentityBindingViewSchema, raw);
+    } catch (error) {
+      throw mapLineIdentityError(error, 'apply');
+    }
+  }
+
+  async deleteRevokedBinding(
+    lineUserId: string,
+    payload: LineIdentityDeleteRevokedRequest,
+    options: LineIdentityRequestOptions & { subjectType: LineBindingSubjectType },
+  ): Promise<void> {
+    try {
+      const raw = await transport.post(
+        `${bindingPath(lineUserId)}/delete-revoked`,
+        LineIdentityDeleteRevokedRequestSchema.parse(payload),
+        { ...requestOptions(options), ...roleParams(options) },
+      );
+      const result = decodePayload(createLineIdentityEnvelopeSchema(z.null()), raw);
+      if (!result.success) throw new LineIdentityClientError('BACKEND_REJECTED', '刪除失敗。');
+    } catch (error) {
+      throw mapLineIdentityError(error, 'apply');
+    }
   }
 
   previewReplacement(

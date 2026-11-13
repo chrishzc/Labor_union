@@ -260,6 +260,16 @@ class LineIdentityReplacementPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class LineIdentityBindingActionCommand:
+    line_user_id: LineUserId
+    subject_type: LineBindingSubjectType
+    expected_version: ExpectedVersion
+    actor: ActorContext
+    idempotency_key: IdempotencyKey
+    expected_updated_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RequestLineIdentityRevocationCommand:
     line_user_id: LineUserId
     expected_version: ExpectedVersion
@@ -320,6 +330,7 @@ class UnboundProvisionalCandidate:
     line_user_id: str
     client_id: int | None
     submitted_at: str | None
+    version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +368,7 @@ __all__ = [
     "LineIdentityRevocationStatus",
     "RequestLineIdentityRevocationCommand",
     "ReplaceLineIdentitySubjectCommand",
+    "LineIdentityBindingActionCommand",
     "SelectLineIdentityRoleCommand",
     "UnboundOrderCandidate",
     "UnboundProvisionalCandidate",

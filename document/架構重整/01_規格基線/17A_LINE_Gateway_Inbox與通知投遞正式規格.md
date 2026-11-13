@@ -9,14 +9,14 @@
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
 
-- **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_bindings`／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
+- **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_role_bindings`／role binding events／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
 - **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
 - **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）。明確人工／誤判標記優先於自動比對。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **同事件即時與背景處理**。同一事件兼有即時 Reply 與背景業務時，保留 Inbox 租約至 Reply 嘗試結束後交回背景。程序中斷時沿既有租約逾期回收，詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
   - **業務通知投影規則**：
-    - 簽署提醒由工會人員在 LINE 官方帳號聊天後台手動選用範本。工會系統停止建立提醒任務，舊提醒在呼叫 LINE 前取消，且不得補送。提醒回執與投遞歷史保留。「寄送客戶及月嫂契約文件」沿用既有下載通知流程。見 [簽約規格 §3.3](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#33-檔期衝突檢核送交記錄與官方帳號提醒)。
+    - 契約簽署與 LINE 通知分工見 [簽約規格 §3.3](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#33-檔期衝突檢核送交記錄與官方帳號提醒)。
     - `order.service_start_day`（開工當天原群組詢問）：**2026-11-12 退役**。不再投影來源事件或 Push；規則儲存拒絕（`order.service_start_day`／`order.service_completed`）；殘留工作於 provider 前取消。舊訊息按鈕（`start-day:` postback）仍只以 Reply 確認。`order.pre_start_reminder` 已完全停用取消。
     - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：**2026-11-12 改為私訊**，流程與第一期一致。到期當天由客戶私訊繳款提醒排程（`payment_reminder_notifications`）發送；核銷成功通知由財務待辦人工確認後寄客戶私訊（`payment_receipt_notifications`）。群組來源不再投影、預設不含群組規則，殘留群組工作於 provider 前取消；規則儲存不另行封鎖。
     - `order.service_completed`（服務完工群組問卷通知）：**2026-11-12 退役**。不再消費 `line_service_completion_notification` 標記或 Push；規則儲存拒絕（與 `order.service_start_day` 相同）；殘留工作於 provider 前取消。Orders 完工事實與標記寫入不受影響。
@@ -42,12 +42,12 @@
 
 ## 5. Rich Menu、通知文案編輯與表格圖片
 
-- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以 NAS 唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。
+- **Rich Menu 草稿與發布 saga**：`QueryRichMenuDraft`／`PreviewRichMenuDraftChange`／`ApplyRichMenuDraftChange` 依 `(menu_definition_id, configuration_revision)` 區分 `editable | processing | published`（published 快照只讀可由此建立下一草稿）；管理台可改背景圖（含 `image_asset_id`／`sha256`／`image_asset_version` 檢查）、按鈕名稱與動作（`uri | message | postback | richmenuswitch` 互斥清空舊欄位），並以 NAS 唯讀預覽結合記憶體即時手機模擬。發布 saga 由 `line_rich_menu_publication_step_acknowledgements`、`attempt_events` 與 `cleanup_anomalies` 保存斷點與冪等重試，發布成功後依角色 fan-out 綁定既有合法身分（不阻擋身分審核原子提交）。Rich Menu API 不送 `X-Line-Retry-Key`。建立請求送出前保存 durable 記錄，已有成功回應時沿用其選單 ID，結果不明時停下來核對官方帳號，避免重複建立。 發布新版本及接續未完成的清理工作時均保留前一版 LINE 選單，清理收據只結束背景工作。前一版仍可能被尚未完成同步的使用者引用。
 - **Notification Rules Admin**：規則管理以 `configuration → intent → task` 順序加鎖；禁用未知 event 或 `{} -> {"rules":[]}` 漂移；儲存／停用同交易取消相應排程任務。
 - **通知文案編輯器與公版預覽（`LINE-PREVIEW-01～08`、`LINE-COPY-01～05`、`LINE-COPY-EDITOR-01～02`、`LINE-COPY-CATALOG-01`）**：
   - 由 `GET /api/v1/line/message-previews/catalog`、`GET /api/v1/line/message-previews/subjects` 與 `POST /api/v1/line/message-previews/preview` 提供公版索引、對象搜尋與即時渲染；目錄依 `MESSAGE_TEMPLATES` 維護全部通知文字與確認卡片（編輯框統一寬度 `504px`、每頁 `6` 則、正式媒合僅列「正式媒合－客戶完整推薦確認包」，保留各身分獨立成功文案 `identity_bound_customer | _staff | _admin` 與 `PUT` CAS 版本防衝突）。
   - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作）。「寄送案件資訊」節點以整包呈現，頁面內容見 [媒合候選池規格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
-  - LINE 流程圖「簽約」以文字呈現官方帳號聊天後台的手動範本操作。工會通知公版目錄移除客戶及月嫂簽署提醒，保留兩種契約下載通知。
+  - LINE 流程圖「簽約」以文字呈現外部簽署、回收文件及官方帳號聊天後台的手動範本操作。
 - **三張表格圖片渲染（`LINE-COPY-TABLE-01`、`LINE-TABLE-IMAGE-01～04`）**：
   - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦一次 Push 只含一則 Flex 輪播訊息，依序呈現各履歷 PNG 頁面、「訂單資訊一、資訊二、每週服務安排」三張表格 PNG。客戶版資訊一的財務欄位限於客戶費用與繳款約定。客戶回覆按鈕放在每週服務安排同一頁。已提交的任務重試時沿用提交時保存的投遞格式。
   - 圖片快照與投遞任務在同一交易提交。`GET /api/v1/line/table-images/{token}` 以七日有效的圖片連結讀取快照，表格按快照渲染，履歷回傳提交時保存的 PNG。履歷連結使用 `LINE_CHANNEL_SECRET`，回應含 `private, no-store, nosniff, no-referrer`。圖片服務異常回 `503`。

@@ -1,6 +1,6 @@
 /**
  * File: contract_signing_mutation_client.ts
- * Description: 以既有 Contract Signing typed API 建立寄送與簽回文件命令，不直接呼叫 LINE provider。
+ * Description: 以既有 Contract Signing typed API 提交簽回文件與人工簽約證據。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -105,14 +105,6 @@ function manualAttestationBody(document: File, confirmationMethod: ManualConfirm
 }
 
 export const contractSigningMutationClient = {
-  sendStaff(caseNo: string, segmentId: number, downloadUrl: string, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
-    if (!(segmentId > 0)) throw new Error('月嫂服務分段無效。');
-    return command(
-      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/staff-segments/${segmentId}/send`,
-      { download_url: downloadUrl },
-      options,
-    );
-  },
   uploadStaffSignedReturn(caseNo: string, segmentId: number, document: File, expectedDocumentVersionId: number, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
     if (!(segmentId > 0)) throw new Error('月嫂服務分段無效。');
     return command(
@@ -134,13 +126,6 @@ export const contractSigningMutationClient = {
     return command(
       `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/staff-segments/${segmentId}/manual-attestation`,
       manualAttestationBody(document, confirmationMethod, reason, previewFingerprint),
-      options,
-    );
-  },
-  sendClient(caseNo: string, downloadUrl: string, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
-    return command(
-      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/client/send`,
-      { download_url: downloadUrl },
       options,
     );
   },

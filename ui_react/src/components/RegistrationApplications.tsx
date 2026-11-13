@@ -248,6 +248,18 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
             <dd>{field.value}</dd>
           </div>)}
         </dl>
+        {selected.passbook_image_url && (
+          <div className="registration-applications__passbook">
+            <h4>存摺封面（供核對銀行帳號與分行代碼）</h4>
+            <a href={selected.passbook_image_url} target="_blank" rel="noopener noreferrer">
+              <img
+                src={selected.passbook_image_url}
+                alt={`申請 ${selected.registration_id} 存摺封面`}
+                style={{ maxWidth: '100%', maxHeight: '280px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+              />
+            </a>
+          </div>
+        )}
         <footer className="registration-applications__actions">
           {selected.status === 'pending' && !unknown && <>
             <button type="button" className="registration-applications__approve" disabled={busy} onClick={approve}>

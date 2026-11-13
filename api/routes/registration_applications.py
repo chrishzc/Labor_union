@@ -10,6 +10,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.admin_auth import require_admin, admin_actor_context
@@ -47,6 +48,7 @@ class ApplicationView(BaseModel):
     registration_kind: str = "subsidy"
     case_no: str | None = None
     approved_at_utc: str | None = None
+    passbook_image_url: str | None = None
 
 
 class ApprovalRequest(BaseModel):
@@ -116,8 +118,15 @@ def _view(snapshot) -> ApplicationView:
     fields = [ApplicationField(label=labels.get(key, key), value=("未填寫" if value is None else
               json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)))
               for key, value in values.items()]
+    meta = candidate.beclass_payload["survey_details"].get("_liff_meta", {})
+    passbook_url = (
+        f"/api/v1/admin/registration-applications/{snapshot.registration_id}/passbook-image"
+        if isinstance(meta, dict) and meta.get("passbook_image_id")
+        else None
+    )
     return ApplicationView(**common, name=str(candidate.client_payload["name"]),
-                           phone=str(candidate.client_payload["phone"]), fields=fields)
+                           phone=str(candidate.client_payload["phone"]), fields=fields,
+                           passbook_image_url=passbook_url)
 
 
 
@@ -145,6 +154,24 @@ def pending_applications(after_id: int = Query(default=0, ge=0), limit: int = Qu
                          principal=Depends(require_admin),
                          application: RegistrationReviewApplication = Depends(get_registration_review_application)):
     return BaseResponse(data=_translate(lambda: [_view(item) for item in application.pending_registrations(after_id=after_id, limit=limit)]))
+
+
+@router.get("/{registration_id}/passbook-image")
+def application_passbook_image(
+    registration_id: int,
+    principal=Depends(require_admin),
+    application: RegistrationReviewApplication = Depends(get_registration_review_application),
+):
+    del principal
+    result = _translate(lambda: application.passbook_image(registration_id))
+    if result is None:
+        raise typed_http_error(404, "not_found", "passbook_image_not_found", "查無待審存摺封面圖片。", uuid4().hex)
+    meta, content = result
+    return Response(
+        content=content,
+        media_type=meta.get("mime_type", "image/jpeg"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/{registration_id}", response_model=BaseResponse[ApplicationView])

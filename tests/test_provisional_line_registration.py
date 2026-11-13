@@ -43,6 +43,7 @@ def _intent(*, name="王小美"):
         zip_code="104",
         id_number="A123456789",
         liff_config_revision="revision-1",
+        passbook_image_id="pbk_synthetic_test",
         survey_details={"特殊計費:胎數": "單胞胎", "餐點": "一般"},
     )
 

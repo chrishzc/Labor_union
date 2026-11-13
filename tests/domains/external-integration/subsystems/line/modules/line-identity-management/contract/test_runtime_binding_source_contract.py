@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[8]
 
 
 RUNTIME_BINDING_CONSUMERS = (
-    "api/dependencies/contract_external_signing.py",
     "infrastructure/db/contract_external_signing_repository.py",
     "infrastructure/mysql/service_before_replacement_loader.py",
+)
+NON_SQL_BINDING_CONSUMERS = (
+    "api/dependencies/contract_external_signing.py",
     "subsystems/contract_signing/client_contract_application.py",
     "subsystems/contract_signing/staff_contract_application.py",
 )
@@ -34,6 +36,8 @@ def _source(relative_path: str) -> str:
 
 
 def test_runtime_consumers_do_not_read_legacy_single_role_binding_table() -> None:
+    for relative_path in NON_SQL_BINDING_CONSUMERS:
+        assert "line_identity_bindings" not in _source(relative_path), relative_path
     for relative_path in RUNTIME_BINDING_CONSUMERS:
         source = _source(relative_path)
         assert "line_identity_bindings" not in source, relative_path
