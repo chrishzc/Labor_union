@@ -1092,6 +1092,9 @@ SELECT p.id AS plan_id,p.case_no,
 (SELECT CASE WHEN inbox.processing_status='terminal_failed' THEN
   CASE WHEN inbox.error_message IN ('automatic_waiting_deposit_occupancy_conflict','正式方案中的月嫂目前檔期已有衝突，請重新確認。')
        THEN '月嫂檔期已被占用，請核對衝突及推薦方案。'
+       WHEN inbox.error_message LIKE '正式方案中的月嫂目前檔期已有衝突：%%'
+         OR inbox.error_message LIKE '時段待確認：%%'
+       THEN inbox.error_message
        WHEN inbox.error_message='正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。'
        THEN inbox.error_message
        WHEN inbox.error_message='客戶確認內容已變更，請重新寄送後再請客戶確認。'

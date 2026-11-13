@@ -159,17 +159,27 @@ def test_single_recommendation_uses_all_saved_dates_without_rewriting_inquiry():
     assert result["conflicts"] == []
 
 
-@pytest.mark.parametrize("source,row", [
-    ("schedule_rows", {"assignment_id": 90, "staff_id": 7, "work_date": "2026-12-02", "service_time": ServiceTimeTerms(time(11), time(15), 0)}),
-    ("active_lock_rows", {"staff_id": 7, "lock_date": "2026-12-02", "active_marker": 1, "service_time": ServiceTimeTerms(time(11), time(15), 0)}),
-    ("staff_unavailability_rows", {"id": 90, "staff_id": 7, "start_date": "2026-12-02", "end_date": "2026-12-02"}),
+@pytest.mark.parametrize("source,row,period", [
+    ("schedule_rows", {"assignment_id": 90, "staff_id": 7, "work_date": "2026-12-01",
+                       "service_time": ServiceTimeTerms(time(21), time(9), 1)},
+     "服務班次）2026-12-01 21:00 至 2026-12-02 09:00"),
+    ("active_lock_rows", {"staff_id": 7, "lock_date": "2026-12-02", "active_marker": 1,
+                          "service_time": ServiceTimeTerms(time(11), time(15), 0)},
+     "其他案件保留）2026-12-02 11:00 至 2026-12-02 15:00"),
+    ("staff_unavailability_rows", {"id": 90, "staff_id": 7, "start_date": "2026-12-02", "end_date": None},
+     "不可服務期間）2026-12-02 至 未定"),
+    ("historical_reservation_rows", {"case_no": "OTHER", "staff_id": 7,
+                                     "start_date": "2026-12-02", "end_date": "2026-12-06"},
+     "歷史預定）2026-12-02 至 2026-12-06"),
 ])
-def test_actual_occupancy_after_original_inquiry_end_still_blocks(source, row):
+def test_actual_occupancy_after_original_inquiry_end_names_caregiver_and_period(source, row, period):
     facts = _ExtendedDates()
     facts.facts[source] = [row]
     with pytest.raises(MatchingDecisionNotReadyError) as caught:
         _validate_availability(_recommendation(), facts)
-    assert "檔期已有衝突" in _availability_blocker(caught.value)
+    message = _availability_blocker(caught.value)
+    assert "檔期已有衝突" in message
+    assert f"測試月嫂（{period}" in message
 
 
 def test_disjoint_same_day_shift_and_reservation_keep_recommendation_available():
@@ -179,7 +189,7 @@ def test_disjoint_same_day_shift_and_reservation_keep_recommendation_available()
     facts.facts["active_lock_rows"] = [{"staff_id": 7, "lock_date": "2026-12-03", "active_marker": 1, "service_time": afternoon}]
     _validate_availability(_recommendation(), facts)
     facts.facts["assignments"] = [{"id": 90, "staff_id": 7, "assigned_start_date": "2026-12-02", "assigned_end_date": "2026-12-02"}]
-    with pytest.raises(ValueError, match="requires review"):
+    with pytest.raises(ValueError, match="時段待確認"):
         _validate_availability(_recommendation(), facts)
 
 
@@ -191,7 +201,8 @@ def test_buffer_is_advisory_but_unowned_schedule_is_not_reported_as_proven_occup
     with pytest.raises(ValueError) as caught:
         _validate_availability(_recommendation(), facts)
     assert not isinstance(caught.value, MatchingDecisionNotReadyError)
-    assert "無法驗證" in _availability_blocker(caught.value)
+    assert "時段待確認" in _availability_blocker(caught.value)
+    assert "檔期已有衝突" not in _availability_blocker(caught.value)
 
 
 def test_multiple_caregiver_date_gap_is_a_plan_problem_not_occupancy():
@@ -210,5 +221,6 @@ def test_multiple_caregiver_date_gap_is_a_plan_problem_not_occupancy():
 def test_invalid_saved_date_count_fails_as_date_validation():
     facts = _ExtendedDates()
     facts.facts["confirmed_service_dates"].pop()
-    with pytest.raises(ValueError, match="current confirmed service dates mismatch"):
+    with pytest.raises(ValueError, match="current confirmed service dates mismatch") as caught:
         _validate_availability(_recommendation(), facts)
+    assert "服務日期與分段" in _availability_blocker(caught.value)

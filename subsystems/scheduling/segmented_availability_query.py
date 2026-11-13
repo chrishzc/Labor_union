@@ -91,6 +91,8 @@ def search_segmented_caregiver_availability(
     facts_port: SegmentedAvailabilityFactsPort | None = None,
     filter_policy: dict[str, Any] | None = None,
     include_candidate_options: bool = True,
+    *,
+    include_occupancy_periods: bool = False,
 ) -> Dict[str, Any]:
     return _search_availability(
         case_no,
@@ -102,6 +104,7 @@ def search_segmented_caregiver_availability(
         inquiry=False,
         include_candidate_options=include_candidate_options,
         include_waiting_deposit_locks=True,
+        include_occupancy_periods=include_occupancy_periods,
     )
 
 
@@ -139,6 +142,7 @@ def _search_availability(
     inquiry,
     include_candidate_options,
     include_waiting_deposit_locks,
+    include_occupancy_periods=False,
 ):
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
@@ -192,6 +196,12 @@ def _search_availability(
     }
     candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
     assignments = loaded_facts["assignments"]
+    occupancy_periods: dict[tuple[int, str, str], set[tuple[str, str]]] = {}
+
+    def add_period(staff_id, day, reason, start, end):
+        if include_occupancy_periods:
+            key = (int(staff_id), day, reason)
+            occupancy_periods.setdefault(key, set()).add((start, end))
 
     assignment_schedule_days: list[dict[str, Any]] = []
     for assignment in assignments:
@@ -204,13 +214,15 @@ def _search_availability(
     for row in loaded_facts["schedule_rows"]:
         if row.get("case_no") == case_no:
             continue
-        for day in _matching_shift_dates(row, "work_date", wanted_time, planned_start, planned_end):
+        for day, interval in _matching_shifts(row, "work_date", wanted_time, planned_start, planned_end):
             assignment_schedule_days.append({
                 "assignment_id": row["assignment_id"] if wanted_time and row.get("service_time") else None,
                 "staff_id": row["staff_id"],
                 "work_date": day.isoformat(),
                 "reason_code": "schedule",
             })
+            if include_occupancy_periods and interval is not None:
+                add_period(row["staff_id"], day.isoformat(), "schedule", *map(_format_shift_time, interval))
     for row in loaded_facts["legacy_schedule_rows"]:
         assignment_schedule_days.append(
             {
@@ -231,9 +243,14 @@ def _search_availability(
             }
         )
     for row in loaded_facts.get("staff_unavailability_rows") or []:
-        assignment_schedule_days.extend(
-            _expand_staff_unavailability_days(row, planned_start, planned_end, wanted_time)
-        )
+        blocks = _expand_staff_unavailability_days(row, planned_start, planned_end, wanted_time)
+        assignment_schedule_days.extend(blocks)
+        if include_occupancy_periods and blocks:
+            start = _as_optional_date(row["start_date"], "staff_unavailability.start_date")
+            end = _as_optional_date(row["end_date"], "staff_unavailability.end_date") if row.get("end_date") is not None else None
+            for block in blocks:
+                add_period(block["staff_id"], block["work_date"], "staff_unavailability",
+                           start.isoformat(), end.isoformat() if end else "未定")
     for row in loaded_facts.get("historical_reservation_rows") or []:
         if row["case_no"] == case_no:
             continue
@@ -250,14 +267,18 @@ def _search_availability(
                     "work_date": day.isoformat(),
                     "reason_code": "historical_reservation",
                 })
+                add_period(fact.staff_id, day.isoformat(), "historical_reservation",
+                           first.isoformat(), last.isoformat())
 
     active_lock_days = []
     for row in loaded_facts["active_lock_rows"] if include_waiting_deposit_locks else ():
         if row.get("case_no") == case_no or not row["active_marker"]:
             continue
-        for day in _matching_shift_dates(row, "lock_date", wanted_time, planned_start, planned_end):
+        for day, interval in _matching_shifts(row, "lock_date", wanted_time, planned_start, planned_end):
             if wanted_time and row.get("service_time"):
                 active_lock_days.append({"staff_id": row["staff_id"], "lock_date": day.isoformat(), "active_marker": row["active_marker"]})
+                if include_occupancy_periods and interval is not None:
+                    add_period(row["staff_id"], day.isoformat(), "active_lock", *map(_format_shift_time, interval))
             else:
                 assignment_schedule_days.append({"staff_id": row["staff_id"], "work_date": day.isoformat(), "assignment_id": None})
     active_lock_days.extend(
@@ -311,6 +332,7 @@ def _search_availability(
             else []
         ),
         "conflicts": result["conflicts"],
+        **({"occupancy_periods": occupancy_periods} if include_occupancy_periods else {}),
     }
 
 
@@ -325,15 +347,21 @@ def _required_service_dates(confirmed_rows, planned_start, planned_end):
     raise ValueError("official_service_dates_incomplete")
 
 
-def _matching_shift_dates(row, date_field, wanted_time, first, last):
+def _matching_shifts(row, date_field, wanted_time, first, last):
     service_date = _as_optional_date(row[date_field], date_field)
     fact = StaffOccupancyFact(
         int(row["staff_id"]), service_date, str(row.get("case_no") or "legacy_schedule"), row.get("service_time")
     )
+    interval = fact.service_time.service_interval(service_date) if fact.service_time else None
     for offset in (-1, 0, 1):
         day = service_date + timedelta(days=offset)
         if first <= day <= last and service_shift_may_overlap(day, wanted_time, fact):
-            yield day
+            yield day, interval
+
+
+def _format_shift_time(value: datetime) -> str:
+    precision = "auto" if value.second or value.microsecond else "minutes"
+    return value.replace(tzinfo=None).isoformat(sep=" ", timespec=precision)
 
 
 def _expand_staff_unavailability_days(row, window_start, window_end, wanted_time=None):

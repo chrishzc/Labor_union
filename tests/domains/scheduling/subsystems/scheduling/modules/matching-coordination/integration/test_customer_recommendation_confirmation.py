@@ -3,14 +3,18 @@ from copy import deepcopy
 from hashlib import sha256
 import re
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from api.routes import matches
 from domains.line.identities import LineSourceType, LineUserId
+from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.matching_communication import (
     CaregiverWillingness, CustomerMatchingDecision, MatchingCommunicationConflictError,
     MatchingCommunicationStaleError, MatchingPlanReference, MatchingRecipientMismatchError,
@@ -19,7 +23,9 @@ from infrastructure.mysql.matching_notification_repository import MySqlMatchingN
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
 from subsystems.line.webhook_event_consumer import TerminalLineEventError
-from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
+from subsystems.scheduling.matching_notification_application import (
+    MatchingNotificationApplication, MatchingOccupancyConflictError, MatchingOccupancyTimePendingError,
+)
 from subsystems.scheduling.matching_notification_contracts import (
     MatchingContactState, MatchingResponseResult, MatchingSegmentContact, RequestCustomerProfilesCommand,
 )
@@ -151,17 +157,20 @@ def test_customer_receipt_defers_business_and_background_never_adds_reply(decisi
     assert len(uow.customer_service.messages) == (1 if decision == "contact_requested" else 0)
 
 
-def test_background_conflict_preserves_receipt_without_accepting_or_adding_reply():
-    from domains.scheduling.matching_communication import MatchingDecisionNotReadyError
-
+@pytest.mark.parametrize("error_type,message", [
+    (MatchingOccupancyConflictError,
+     "正式方案中的月嫂目前檔期已有衝突：測試月嫂（服務班次）2026-11-03 09:00 至 2026-11-03 17:00。請重新確認。"),
+    (MatchingOccupancyTimePendingError, "時段待確認：既有占用缺少可追溯的服務時段，請核對月嫂檔期。"),
+])
+def test_background_conflict_preserves_receipt_without_accepting_or_adding_reply(error_type, message):
     uow = _Uow()
     def occupied(_state):
-        raise MatchingDecisionNotReadyError("occupied")
+        raise error_type(message)
     application = MatchingNotificationApplication(lambda: uow, lambda: NOW, availability_validator=occupied)
     handler = LineMatchingPostbackApplication(application)
     event = _postback("accepted")
     assert handler.handle(event, uow, reply_only=True) is False
-    with pytest.raises(TerminalLineEventError, match="檔期已有衝突"):
+    with pytest.raises(TerminalLineEventError, match=f"^{re.escape(message)}$"):
         handler.handle(event, uow)
     assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.PENDING
     assert uow.matching_notifications.events == {}
@@ -182,6 +191,69 @@ def test_background_cannot_accept_a_package_after_its_customer_terms_changed():
         handler.handle(event, uow)
     assert uow.matching_notifications.events == {}
     assert len(uow.deliveries) == 1
+
+
+@pytest.mark.parametrize("scenario,expected_hint", [
+    ("occupancy", "測試月嫂（服務班次）2026-11-03 11:00 至 2026-11-03 15:00"),
+    ("unknown_time", "時段待確認"),
+    ("date_mismatch", "正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。"),
+])
+def test_customer_confirmation_http_preview_and_send_share_blocker(monkeypatch, scenario, expected_hint):
+    uow = _Uow()
+    repository = uow.matching_notifications
+    plan = repository.state.plan
+    repository.get_intent_result = lambda *args, **kwargs: None
+    repository.customer_confirmation_package = lambda *args: pytest.fail("blocked confirmation cannot build a package")
+    repository.customer_confirmation_preview = lambda *args: {
+        "order_information_1_ready": True, "order_information_2_ready": True,
+        "weekly_service_ready": True, "weekly_service_row_count": 1,
+        "order_information_1": (), "order_information_2": (), "weekly_service_rows": (),
+        "caregiver_resumes": ({"staff_id": 30, "staff_name": "測試月嫂", "ready": True,
+                               "filename": "synthetic.pdf", "version": 1, "blocker": None},),
+        "blockers": (),
+    }
+    day = "2026-11-03"
+    schedule_rows = []
+    if scenario != "date_mismatch":
+        occupied_time = ServiceTimeTerms(time(11), time(15), 0) if scenario == "occupancy" else None
+        schedule_rows.append({
+            "assignment_id": 9, "staff_id": 30, "work_date": day, "service_time": occupied_time,
+        })
+    facts = SimpleNamespace(load_case_facts=lambda _: {
+        "order": {"case_no": plan.case_no, "status": "洽談中", "start_date": day, "end_date": day,
+                  "service_days": 2 if scenario == "date_mismatch" else 1,
+                  "service_time": ServiceTimeTerms(time(8), time(12), 0)},
+        "confirmed_service_dates": [{"service_date": day}],
+        "staff_rows": [{"id": 30, "name": "測試月嫂"}],
+        "schedule_rows": schedule_rows,
+        "assignments": [], "legacy_schedule_rows": [], "buffer_rows": [],
+        "active_lock_rows": [], "waiting_buffer_rows": [],
+    })
+    application = MatchingNotificationApplication(lambda: uow, lambda: NOW, availability_facts_port=facts)
+    monkeypatch.setattr(matches, "matching_notifications", application)
+    principal = SimpleNamespace(
+        id=1, username="operator",
+        effective_capabilities=lambda: frozenset({"line.matching.read", "line.matching.send"}),
+    )
+    api = FastAPI()
+    api.include_router(matches.router)
+    api.dependency_overrides[matches.require_line_matching_reader] = lambda: principal
+    api.dependency_overrides[matches.require_line_matching_sender] = lambda: principal
+    path = f"/api/v1/orders/{plan.case_no}/matching-plans/{plan.plan_id}/customer-confirmation"
+    with TestClient(api) as client:
+        preview = client.get(f"{path}/preview", params={"expected_version": plan.version})
+        send = client.post(path, json={
+            "actor": "operator", "note": "確認資訊", "expected_version": plan.version, "event_key": "blocked",
+        })
+
+    assert preview.status_code == 200, preview.text
+    data = preview.json()["data"]
+    [blocker] = data["blockers"]
+    assert expected_hint in blocker
+    assert data["send_allowed"] is False
+    assert send.status_code == 409, send.text
+    assert send.json()["detail"] == blocker
+    assert uow.deliveries == {} and uow.commits == 0
 
 
 def test_background_accepts_a_package_after_only_its_resume_changed():
@@ -417,7 +489,15 @@ def test_reminder_uses_actual_delivery_and_replaces_help_with_signing_until_both
     assert query() == ()
 
 
-def test_failed_customer_response_is_an_immediate_staff_todo(followups):
+@pytest.mark.parametrize("inbox_error,expected_hint", [
+    ("automatic_waiting_deposit_occupancy_conflict", "檔期已被占用"),
+    ("正式方案中的月嫂目前檔期已有衝突，請重新確認。", "檔期已被占用"),
+    ("正式方案中的月嫂目前檔期已有衝突：測試月嫂（服務班次）2026-11-03 09:00 至 2026-11-03 17:00。請重新確認。",
+     "測試月嫂（服務班次）2026-11-03 09:00 至 2026-11-03 17:00"),
+    ("時段待確認：既有占用缺少可追溯的服務時段，請核對月嫂檔期。", "時段待確認"),
+    ("正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。", "重新確認服務日期與分段"),
+])
+def test_failed_customer_response_is_an_immediate_staff_todo(followups, inbox_error, expected_hint):
     connection, query = followups
     connection.execute("UPDATE line_delivery_tasks SET sent_at_utc=?", ((NOW - timedelta(days=1)).replace(tzinfo=None).isoformat(" "),))
     token = "synthetic-recommendation-token"
@@ -425,10 +505,10 @@ def test_failed_customer_response_is_an_immediate_staff_todo(followups):
                        (CUSTOMER.value, sha256(token.encode()).hexdigest()))
     payload = json.dumps({"postback": {"data": f"matching:{token}:accepted"}})
     connection.execute("INSERT INTO line_inbox_events VALUES(1,?,'postback',?,'terminal_failed',?)",
-                       (CUSTOMER.value, payload, "automatic_waiting_deposit_occupancy_conflict"))
+                       (CUSTOMER.value, payload, inbox_error))
     [todo] = query()
     assert todo.status == "response_failed"
-    assert "檔期已被占用" in todo.failure_reason
+    assert expected_hint in todo.failure_reason
     connection.execute("UPDATE matching_line_interactions SET interaction_status='revoked'")
     assert query() == ()
 

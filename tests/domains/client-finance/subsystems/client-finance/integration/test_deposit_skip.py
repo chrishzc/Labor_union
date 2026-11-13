@@ -108,7 +108,7 @@ def test_fully_settled_deposit_does_not_need_override() -> None:
 def test_assignment_gate_accepts_override_without_marking_deposit_settled() -> None:
     workflow_facts = SimpleNamespace(
         assignment_plan=SimpleNamespace(
-            current_waiting_lock_ids=(1,), effective_assignments=()
+            current_waiting_lock_ids=(1,), effective_assignments=(), office_schedule=False
         ),
         lifecycle=SimpleNamespace(contract_completed=True),
         order_terms=SimpleNamespace(service_time=SimpleNamespace(complete=True)),

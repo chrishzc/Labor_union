@@ -292,11 +292,16 @@ def test_formal_plan_notification_distinguishes_date_drift_from_schedule_conflic
     monkeypatch.setattr(
         matching_notification_application,
         "search_segmented_caregiver_availability",
-        lambda **_kwargs: {"feasibility": "partial", "conflicts": []},
+        lambda **_kwargs: {
+            "feasibility": "partial",
+            "conflicts": [
+                {"segment_index": 0, "staff_id": 1, "work_date": "2026-12-05", "reason_code": "coverage_gap"},
+            ],
+        },
     )
     with pytest.raises(
         matching_notification_application.MatchingPlanDateMismatchError
-    ):
+    ) as date_mismatch:
         matching_notification_application._validate_availability(state, object())
 
     monkeypatch.setattr(
@@ -304,20 +309,25 @@ def test_formal_plan_notification_distinguishes_date_drift_from_schedule_conflic
         "search_segmented_caregiver_availability",
         lambda **_kwargs: {
             "feasibility": "partial",
-            "conflicts": [{"date": "2026-12-05"}],
+            "conflicts": [
+                {"segment_index": 0, "staff_id": 1, "work_date": "2026-12-05", "reason_code": "schedule"},
+            ],
         },
     )
     with pytest.raises(
         matching_notification_application.MatchingDecisionNotReadyError
-    ):
+    ) as occupancy_conflict:
         matching_notification_application._validate_availability(state, object())
 
-    assert matching_notification_application._availability_blocker(
-        matching_notification_application.MatchingPlanDateMismatchError()
-    ) == "正式方案日期與目前案件服務日期不一致，請重新建立方案。"
-    assert matching_notification_application._availability_blocker(
-        matching_notification_application.MatchingDecisionNotReadyError()
-    ) == "正式方案中的月嫂目前檔期已有衝突，請重新確認。"
+    date_message = matching_notification_application._availability_blocker(date_mismatch.value)
+    assert "日期或分段" in date_message
+    assert "服務日期不一致" in date_message
+    assert "重新確認服務日期與分段" in date_message
+    assert "檔期" not in date_message
+    occupancy_message = matching_notification_application._availability_blocker(occupancy_conflict.value)
+    assert "月嫂" in occupancy_message
+    assert "檔期已有衝突" in occupancy_message
+    assert "日期不一致" not in occupancy_message
 
 
 def test_multi_caregiver_plan_fresh_check_does_not_reapply_discovery_preferences(monkeypatch):

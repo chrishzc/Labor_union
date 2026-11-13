@@ -78,6 +78,23 @@ class MatchingPlanDateMismatchError(ValueError):
     """The saved formal plan no longer covers the current Orders dates."""
 
 
+class MatchingOccupancyConflictError(MatchingDecisionNotReadyError):
+    """The selected caregiver has confirmed overlapping occupancy."""
+
+
+class MatchingOccupancyTimePendingError(ValueError):
+    """Existing occupancy lacks a traceable service time."""
+
+
+_OCCUPANCY_LABELS = {
+    "assignment": "正式排班",
+    "schedule": "服務班次",
+    "active_lock": "其他案件保留",
+    "staff_unavailability": "不可服務期間",
+    "historical_reservation": "歷史預定",
+}
+
+
 class MatchingNotificationApplication:
     def __init__(
         self,
@@ -497,7 +514,10 @@ class MatchingNotificationApplication:
         if replay is not None:
             return replay
         _require_sendable_state(state, command.plan.version)
-        self._availability_validator(state)
+        try:
+            self._availability_validator(state)
+        except ValueError as error:
+            raise MatchingDecisionNotReadyError(_availability_blocker(error)) from error
         if not state.all_willing:
             raise MatchingDecisionNotReadyError("all caregivers must be willing")
         if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
@@ -1018,6 +1038,7 @@ def _validate_availability(
         as_of=datetime.now().date().isoformat(),
         facts_port=facts_port,
         include_candidate_options=False,
+        include_occupancy_periods=True,
         # The formal plan already owns the selected recipients. Revalidate
         # schedule occupancy without reapplying candidate-search preferences.
         filter_policy={
@@ -1027,13 +1048,31 @@ def _validate_availability(
             "daily_service_hours": False,
         },
     )
-    reasons = {item.get("reason_code") for item in result.get("conflicts", ())}
-    if reasons & {"assignment", "schedule", "active_lock", "staff_unavailability", "historical_reservation"}:
+    conflicts = result.get("conflicts", ())
+    reasons = {item.get("reason_code") for item in conflicts}
+    if reasons & _OCCUPANCY_LABELS.keys():
+        periods = result.get("occupancy_periods", {})
+        details = []
+        for segment in state.segments:
+            occupied = {
+                (start, end, _OCCUPANCY_LABELS[reason])
+                for item in conflicts
+                if item.get("staff_id") == segment.staff_id
+                and (reason := item.get("reason_code")) in _OCCUPANCY_LABELS
+                for start, end in periods.get((segment.staff_id, item["work_date"], reason), ())
+            }
+            if occupied:
+                start, end, label = min(occupied)
+                more = f"（另有 {len(occupied) - 1} 個衝突區間）" if len(occupied) > 1 else ""
+                details.append(f"{segment.staff_name}（{label}）{start} 至 {end}{more}")
+        if details:
+            raise MatchingOccupancyConflictError(
+                f"正式方案中的月嫂目前檔期已有衝突：{'；'.join(details)}。請重新確認。"
+            )
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")
-    if "requires_review" in reasons or reasons - {
-        "assignment", "schedule", "active_lock", "staff_unavailability", "historical_reservation", "buffer",
-        "coverage_gap", "draft_overlap", "outside_case_period",
-    }:
+    if "requires_review" in reasons:
+        raise MatchingOccupancyTimePendingError("時段待確認：既有占用缺少可追溯的服務時段，請核對月嫂檔期。")
+    if reasons - {"buffer", "coverage_gap", "draft_overlap", "outside_case_period"}:
         raise ValueError("matching availability source requires review")
     if reasons & {"coverage_gap", "draft_overlap", "outside_case_period"} or result.get("feasibility") != "complete":
         raise MatchingPlanDateMismatchError(
@@ -1042,8 +1081,10 @@ def _validate_availability(
 
 
 def _availability_blocker(error: ValueError) -> str:
-    if isinstance(error, MatchingPlanDateMismatchError):
+    if isinstance(error, MatchingPlanDateMismatchError) or str(error) == "current confirmed service dates mismatch":
         return "正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。"
+    if isinstance(error, (MatchingOccupancyConflictError, MatchingOccupancyTimePendingError)):
+        return str(error)
     if isinstance(error, MatchingDecisionNotReadyError):
         return "正式方案中的月嫂目前檔期已有衝突，請重新確認。"
     return "案件服務日期或正式方案資料無法驗證，請重新確認服務日期。"

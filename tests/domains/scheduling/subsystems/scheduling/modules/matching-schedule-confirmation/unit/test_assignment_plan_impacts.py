@@ -15,6 +15,7 @@ def _facts(*, assignments=(), waiting_lock_ids=(), completed=True, service_compl
             effective_assignments=assignments,
             current_waiting_lock_ids=waiting_lock_ids,
             explicit_service_start_result=False,
+            office_schedule=False,
         ),
         SimpleNamespace(service_time=SimpleNamespace(complete=service_complete)),
         object(),

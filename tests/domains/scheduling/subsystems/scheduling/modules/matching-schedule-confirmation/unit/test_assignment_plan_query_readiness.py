@@ -49,6 +49,9 @@ def test_saved_historical_assignment_is_the_same_identity_used_by_accounting(mon
             assigned_start_date TEXT,assigned_end_date TEXT,status TEXT,generation_id INTEGER);
         CREATE TABLE historical_order_adoption_receipts (id INTEGER,case_no TEXT,outcome TEXT);
         CREATE TABLE historical_order_pairing_evidence (receipt_id INTEGER,assignment_id INTEGER,staff_id INTEGER);
+        CREATE TABLE historical_service_day_projections (case_no TEXT PRIMARY KEY,current_event_id INTEGER);
+        CREATE TABLE historical_service_day_items (event_id INTEGER,assignment_id INTEGER,staff_id INTEGER,
+            PRIMARY KEY (event_id,assignment_id));
         CREATE TABLE staff (id INTEGER,name TEXT);
         CREATE TABLE case_payroll_rate_policy_snapshots (case_no TEXT,policy_version TEXT,policy_kind TEXT,hourly_rate_ntd INTEGER);
         CREATE TABLE assignment_payroll_rate_snapshots (assignment_id INTEGER,policy_version TEXT,policy_kind TEXT,hourly_rate_ntd INTEGER);
@@ -92,7 +95,7 @@ def test_saved_historical_assignment_is_the_same_identity_used_by_accounting(mon
         assert [(item.assignment_id, item.staff_id) for item in view.assignments] == [(91, 9)]
         assert view.assignments[0].official_service_dates == []
         assert view.scheduling_generation == 0
-        accounting = connection.execute(_ASSIGNMENTS_SQL.replace("%s", "?"), (2,)).fetchall()
+        accounting = connection.execute(_ASSIGNMENTS_SQL.replace("%s", "?"), ("H-1", 2)).fetchall()
         assert [(row["assignment_id"], row["staff_id"]) for row in accounting] == [(91, 9)]
         connection.execute("UPDATE orders SET status='訂單成立'")
         assert repository.MySqlAssignmentPlanRepository(SimpleNamespace(cursor=Cursor)).load_for_query("H-1").assignment_plan.effective_assignments == ()
