@@ -9,11 +9,14 @@ interface Props {
   onToggle: (date: string) => void;
   hint?: string;
   showHolidaySelectionHint?: boolean;
+  showHolidays?: boolean;
+  monthRange?: readonly [string, string];
+  dayLabel?: (date: string) => string;
   dayDetails?: (date: string) => { holidayName?: string | null; rest?: boolean; laterSegment?: boolean };
 }
 
 // The same case calendar is used before service and for audited corrections after completion.
-export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, showHolidaySelectionHint, dayDetails }) => {
+export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, showHolidaySelectionHint, showHolidays = true, monthRange, dayLabel, dayDetails }) => {
   const [year, monthNumber] = month.split('-').map(Number);
   const [holidayNames, setHolidayNames] = useState<Record<string, string>>({});
   const [holidayLoading, setHolidayLoading] = useState(true);
@@ -21,6 +24,7 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
   const [holidayReload, setHolidayReload] = useState(0);
 
   useEffect(() => {
+    if (!showHolidays) return;
     const controller = new AbortController();
     setHolidayNames({});
     setHolidayLoading(true);
@@ -35,28 +39,29 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
       })
       .finally(() => { if (!controller.signal.aborted) setHolidayLoading(false); });
     return () => controller.abort();
-  }, [month, year, monthNumber, holidayReload]);
+  }, [month, year, monthNumber, holidayReload, showHolidays]);
 
   return <div className="service-calendar-workbench-layout">
     <div className="calendar-matrix-card">
       <div className="calendar-month-header">
         <h3>{year} 年 {monthNumber} 月</h3>
-        <div className="order-case-action-row">{[-1, 1].map(delta => <button type="button" key={delta} aria-label={delta < 0 ? '上一個月' : '下一個月'} onClick={() => {
+        <div className="order-case-action-row">{[-1, 1].map(delta => <button type="button" key={delta} aria-label={delta < 0 ? '上一個月' : '下一個月'}
+          disabled={monthRange && (delta < 0 ? month <= monthRange[0] : month >= monthRange[1])} onClick={() => {
           const next = new Date(Date.UTC(year, monthNumber - 1 + delta, 1));
           onMonthChange(`${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}`);
         }}>{delta < 0 ? '‹' : '›'}</button>)}</div>
       </div>
-      {holidayLoading && <small role="status">正在讀取當月國定假日…</small>}
-      {holidayError && <div role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></div>}
+      {showHolidays && holidayLoading && <small role="status">正在讀取當月國定假日…</small>}
+      {showHolidays && holidayError && <div role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></div>}
       <div className="calendar-days-grid" role="group" aria-label="服務日期月曆" data-surface-id="orders.date.service-date-selection">
         {['日', '一', '二', '三', '四', '五', '六'].map(weekday => <span key={weekday} className="service-date-weekday" aria-hidden="true">{weekday}</span>)}
         {Array.from({ length: new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() }, (_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
         {Array.from({ length: new Date(Date.UTC(year, monthNumber, 0)).getUTCDate() }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`).map(date => {
           const selected = selectedDates.includes(date);
           const details = dayDetails?.(date);
-          const holidayName = holidayNames[date];
-          return <button key={date} data-control-id="orders.date.service-date-select" type="button" aria-label={`服務日期 ${date}`} aria-pressed={selected}
-            title={`${date}${holidayName ? ` ${holidayName}` : details?.rest ? ' 建議休假' : ''}${selected ? '（已選服務日）' : ''}`}
+          const holidayName = showHolidays ? holidayNames[date] : undefined;
+          return <button key={date} data-control-id="orders.date.service-date-select" type="button" aria-label={dayLabel?.(date) ?? `服務日期 ${date}`} aria-pressed={selected}
+            title={dayLabel?.(date) ?? `${date}${holidayName ? ` ${holidayName}` : details?.rest ? ' 建議休假' : ''}${selected ? '（已選服務日）' : ''}`}
             className={`calendar-date-cell${selected ? ' selected' : ''}${selected && details?.laterSegment ? ' later-segment' : ''}`}
             disabled={isDateDisabled(date)} onClick={() => onToggle(date)}>
             <time dateTime={date} title={date}>{Number(date.slice(8))}</time>

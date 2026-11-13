@@ -159,6 +159,7 @@ class AssignmentPlanSegmentIntent:
 @dataclass(frozen=True, slots=True)
 class AssignmentPlanIntent:
     segments: tuple[AssignmentPlanSegmentIntent, ...]
+    office_day_allocation: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.segments, tuple):
@@ -170,7 +171,8 @@ class AssignmentPlanIntent:
             for segment in self.segments
         ):
             raise TypeError("assignment plan contains an invalid segment")
-        _validate_consecutive_intervals(self.segments)
+        if not self.office_day_allocation:
+            _validate_consecutive_intervals(self.segments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +223,8 @@ def build_assignment_plan_candidate(
     facts: AssignmentPlanFacts,
     intent: AssignmentPlanIntent,
 ) -> AssignmentPlanCandidate:
+    if intent.office_day_allocation and not facts.office_schedule:
+        _raise_invalid("daily allocation requires office first scheduling")
     _validate_service_conservation(facts, intent)
     assignments = _build_assignments(facts, intent)
     buffers = _build_buffers(assignments, active=not facts.service_started)

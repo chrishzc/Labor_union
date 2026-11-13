@@ -8,18 +8,25 @@ from fastapi import HTTPException
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter, ValidationError
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.official_service_date_correction import (
     get_official_service_date_correction_workflow,
 )
-from api.routes.official_service_date_correction import router
-from api.routes.official_service_date_correction import _call
+from api.routes.official_service_date_correction import (
+    AttributionBatchApplyBody, AttributionBatchPreviewBody, AttributionApplyBody,
+    AttributionPreviewBody, _call, router,
+)
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.official_service_date_correction_workflow import (
+    AttributionDayMove,
     OfficialAssignmentDates,
     OfficialDateFacts,
     OfficialDateHistoryRecord,
     OfficialDateMonetaryImpactBlocked,
+    OfficialServiceDateCorrectionWorkflow,
+    ServiceAttributionChange,
 )
 
 
@@ -78,6 +85,89 @@ def _client():
     app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="admin")
     app.dependency_overrides[get_official_service_date_correction_workflow] = _Workflow
     return TestClient(app)
+
+
+def test_batch_attribution_previews_and_commits_one_generation_for_four_staff(monkeypatch):
+    from unittest.mock import MagicMock
+    from subsystems.orders import official_service_date_correction_workflow as module
+
+    days = tuple(date(2026, 9, day) for day in range(14, 20))
+    facts = replace(_Workflow().query("ISSUE-346"), service_days=6, actual_start_date=days[0],
+                    actual_end_date=days[-1], assignments=tuple(
+                        OfficialAssignmentDates(13 + i, 7 + i, i + 1, "completed", days[i * 2:i * 2 + 2])
+                        for i in range(3)
+                    ))
+    payroll = SimpleNamespace(blockers=(), actions=(), fingerprint=fingerprint_payload({"payroll": 1}),
+                              payroll=SimpleNamespace(assignments=()))
+    monkeypatch.setattr(module, "build_payroll_handover_impact", lambda *_args, **_kwargs: payroll)
+    monkeypatch.setattr(module, "_scope_attribution_payroll", lambda value, _affected: value)
+    repository = MagicMock()
+    terms = SimpleNamespace(payroll=SimpleNamespace(source_terms=()), order=SimpleNamespace(terms=None))
+    repository.load_attribution.return_value = facts, terms, (), (), module.AttributionFundingFacts()
+    repository.replay_attribution.return_value = None
+    unit_of_work = MagicMock()
+    workflow = OfficialServiceDateCorrectionWorkflow(repository, unit_of_work)
+    change = ServiceAttributionChange(0, 0, (), "confirmed", moves=(
+        AttributionDayMove(13, 10, days[1], days[1]),
+        AttributionDayMove(14, 10, days[3], days[3]),
+    ))
+
+    preview = workflow.preview_attribution(facts.case_no, change)
+    assert {item.staff_id: item.service_dates for item in preview.scheduling.assignments} == {
+        7: (days[0],), 8: (days[2],), 9: days[4:], 10: (days[1], days[3]),
+    }
+    repository.persist_attribution.assert_not_called()
+    kwargs = dict(expected_order_version=1, expected_scheduling_version=1,
+                  preview_fingerprint=preview.fingerprint.value, actor="admin",
+                  reason="confirmed", idempotency_key="batch-1", correlation_id="correlation-1")
+    with pytest.raises(ValueError, match="official_date_preview_stale"):
+        workflow.apply_attribution(facts.case_no, replace(change, moves=change.moves[:1]), **kwargs)
+    repository.persist_attribution.assert_not_called()
+    receipt = workflow.apply_attribution(facts.case_no, change, **kwargs)
+    repository.persist_attribution.assert_called_once()
+    unit_of_work.return_value.__enter__.return_value.commit.assert_called_once()
+    repository.replay_attribution.return_value = receipt
+    assert workflow.apply_attribution(facts.case_no, change, **kwargs) == receipt
+    repository.persist_attribution.assert_called_once()
+
+
+def test_batch_request_contract_accepts_moves_and_rejects_mixed_request():
+    body = {"scope": "served", "evidence": "confirmed", "moves": [
+        {"source_assignment_id": 13, "staff_id": 8, "source_date": "2026-09-19",
+         "replacement_date": "2026-09-19", "target_assignment_id": 14},
+    ]}
+    preview = TypeAdapter(AttributionPreviewBody | AttributionBatchPreviewBody)
+    apply = TypeAdapter(AttributionApplyBody | AttributionBatchApplyBody)
+    expected = (AttributionDayMove(13, 8, date(2026, 9, 19), date(2026, 9, 19), 14),)
+    assert preview.validate_python(body).change().moves == expected
+    assert apply.validate_python({**body, "reason": "confirmed", "expected_order_version": 1,
+                                  "expected_scheduling_version": 1, "preview_fingerprint": "a" * 64}).change().moves == expected
+    with pytest.raises(ValidationError):
+        preview.validate_python({**body, "staff_id": 8})
+
+
+@pytest.mark.parametrize("lock", [False, True], ids=["preview", "apply"])
+def test_attribution_rejects_retired_staff_even_when_staff_status_is_active(monkeypatch, lock):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql import official_service_date_correction_repository as module
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [None] * (2 if lock else 1) + [{"status": "active", "lifecycle_state": "retired"}]
+    repository = module.MySqlOfficialServiceDateCorrectionRepository(connection)
+    monkeypatch.setattr(repository, "load", lambda *_args, **_kwargs: _Workflow().query("ISSUE-346"))
+    monkeypatch.setattr(module, "preflight_staff_ids", lambda *_args: (7,))
+    monkeypatch.setattr(module, "load_preview_facts", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_locked_facts", lambda *_args: None)
+    day = date(2026, 9, 19)
+    change = ServiceAttributionChange(0, 0, (), "confirmed", moves=(AttributionDayMove(13, 8, day, day),))
+
+    with pytest.raises(ValueError, match="service_attribution_retired_staff_blocked"):
+        repository.load_attribution("ISSUE-346", change, lock=lock)
+
+    statement = cursor.execute.call_args.args[0]
+    assert "staff_lifecycle_states" in statement
+    assert statement.endswith("FOR UPDATE") is lock
 
 
 def test_query_exposes_effective_assignment_dates_and_lock():

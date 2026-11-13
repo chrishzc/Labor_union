@@ -26,8 +26,9 @@
   - `ui_react/src/components/OrderServiceDatesPanel.tsx`
     - 顯示 Case Import 原始服務方式；人工休假星期僅作當次 server 精算參數，即時更新建議。歷史重啟在同一表單選日期、分配月嫂並儲存班表，成功後回讀正式排班。
   - `ui_react/src/components/OrderServiceDateCalendar.tsx` — 案件內既有月曆，事前日期確認與完工後日期更正共用呈現；不擁有日期寫入規則。
+  - `ui_react/src/components/OrderCaregiverScheduleCalendars.tsx` — 首排與正式排班調整共用的逐人月曆區塊，分配結果委派各自的既有寫入流程。
   - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 初步候選每週說明的單一保存預計日期操作，重用 Service Dates flow；不串接 Actual Start，星期僅為當次試算。
-  - `ui_react/src/components/HistoricalRestartArrangementPanel.tsx` — 一般首排與歷史重啟共用「月嫂分配」版型，允許編輯人選時在同區新增並在各人日期區塊移除。
+  - `ui_react/src/components/HistoricalRestartArrangementPanel.tsx` — 歷史重啟及一般首排的基本「月嫂分配」版型。
   - `ui_react/src/api/orders/order_mutation_client.ts`
 
 ## Dependencies
@@ -43,7 +44,7 @@
 ## Contracts
 - `GET／POST /api/v1/orders/{case_no}/service-dates` — confirmed-date Query／Preview／Apply。
 - `POST /api/v1/orders/{case_no}/service-dates/schedule/apply` — 歷史重啟一次儲存班表。Query 的 `historical_schedule_pending` 投影有效空重啟世代。
-- `POST /api/v1/orders/{case_no}/service-dates/office-schedule/{preview,apply}` — 一般案件從「多月嫂排班」預覽及首次儲存正式班表。經辦記錄調整原因可重新分配原承諾服務量，保留原承諾與契約，委派 `scheduling/service-start` 共用正式排班 writer。
+- `POST /api/v1/orders/{case_no}/service-dates/office-schedule/{preview,apply}` — 一般案件從「多月嫂排班」預覽及首次儲存正式班表。允許交錯日期，預覽即核對原承諾與調整原因，委派 `scheduling/service-start` 共用正式排班 writer。
 - `POST /api/v1/orders/{case_no}/service-dates/arrangement/{preview,apply}` — 既有獨立正式安排 API。`arrangement_pending` 投影有效空重啟世代與已確認日期版本。
 - `document/架構重整/01_規格基線/01A_訂單看板與事前日期及歷史採納規格.md` §3.2 — 日期確認與歷史重啟儲存班表。
 

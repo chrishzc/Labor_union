@@ -468,6 +468,10 @@ def _raise_value_error(
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
         message = "本案的舊月嫂指派未連到本案的有效班表。請先核對原指派及相關核銷，再建立班表。"
+    elif code == "office_schedule_reallocation_reason_required":
+        category = ErrorCategory.DOMAIN_BLOCKED
+        status_code = 409
+        message = "月嫂人選或分配天數與原簽約方案不同，請填寫調整原因及協調依據後重新預覽。"
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409

@@ -258,6 +258,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     render(<OrderServiceDatesPanel caseNo={CASE} />);
     const saveSchedule = await screen.findByRole('button', { name: '儲存班表' });
     expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('正在讀取當月國定假日…')).not.toBeInTheDocument());
     expect(saveSchedule).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /王月嫂 2026-10-01/ }));
     expect(screen.getByRole('button', { name: /林月嫂 2026-10-01/ })).toBeDisabled();
@@ -303,8 +304,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     fireEvent.click(await screen.findByRole('button', { name: '多月嫂排班' }));
     expect(mocks.previewOfficeSchedule).not.toHaveBeenCalled();
     expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
-    await screen.findByRole('button', { name: '服務日期 2026-10-02' });
-    changeSelection();
+    expect(screen.queryByLabelText('服務日期選擇')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '預覽班表及應付' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('請核對原指派');
     fireEvent.click(screen.getByRole('button', { name: '取消多月嫂編輯' }));
@@ -314,6 +314,54 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+  });
+
+  it('多月嫂模式只顯示個人月曆，交錯排班可預覽並儲存', async () => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
+    const fingerprint = 'c'.repeat(64);
+    mocks.previewOfficeSchedule
+      .mockRejectedValueOnce(new ApiHttpError(409, 'office_schedule_reallocation_reason_required', '請填寫調整原因及協調依據'))
+      .mockResolvedValue({ preview_fingerprint: fingerprint, staff_entitlements: [] });
+    mocks.saveHistoricalSchedule.mockImplementation(async () => {
+      currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
+      return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5, 6] };
+    });
+    mocks.getAssignmentPlan.mockResolvedValue({
+      case_no: CASE, scheduling_version: 8, scheduling_generation: 2,
+      assignments: [
+        { assignment_id: 5, staff_id: 12, official_service_dates: [initialDates[0], initialDates[2]] },
+        { assignment_id: 6, staff_id: 13, official_service_dates: [initialDates[1]] },
+      ],
+    });
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart officeScheduleStaff={[
+      { staff_id: 12, staff_name: '王月嫂' }, { staff_id: 13, staff_name: '林月嫂' },
+    ]} />);
+    fireEvent.click(await screen.findByRole('button', { name: '多月嫂排班' }));
+    expect(screen.queryByLabelText('服務日期選擇')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('group', { name: '服務日期月曆' })).toHaveLength(2);
+    const saveButton = screen.getByRole('button', { name: '儲存班表' });
+    const previewButton = screen.getByRole('button', { name: '預覽班表及應付' });
+    expect(saveButton).toBeDisabled();
+    const first = within(screen.getByRole('region', { name: /王月嫂/ }));
+    const second = within(screen.getByRole('region', { name: /林月嫂/ }));
+    fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-01/ }));
+    fireEvent.click(second.getByRole('button', { name: /^服務日期 2026-10-02/ }));
+    fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-04/ }));
+    expect(previewButton).toBeEnabled();
+    fireEvent.click(previewButton);
+    expect(await screen.findByRole('alert')).toHaveTextContent('請填寫調整原因及協調依據');
+    expect(saveButton).toBeDisabled();
+    expect(previewButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('調整原因及協調依據（必填）'), { target: { value: '已與兩位月嫂確認' } });
+    fireEvent.click(previewButton);
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
+    fireEvent.click(saveButton);
+    await screen.findByText('班表已儲存並回讀正式排班。');
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
+      reason: '已與兩位月嫂確認',
+      segments: [{ staff_id: 12, service_dates: [initialDates[0], initialDates[2]] }, { staff_id: 13, service_dates: [initialDates[1]] }],
+    }), expect.anything(), true, fingerprint);
   });
 
   it('正式實際開始日變更後自動重算，人工選日須明確採用新建議', async () => {

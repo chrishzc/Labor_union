@@ -178,7 +178,7 @@ class MySqlOfficialServiceDateCorrectionRepository:
                 return None
             staff_ids = set(preflight_staff_ids(cursor, case_no))
             if change is not None:
-                staff_ids.add(change.staff_id)
+                staff_ids.update(change.target_staff_ids)
             if pending:
                 staff_ids.update(pending[1])
             staff_ids = tuple(sorted(staff_ids))
@@ -200,17 +200,34 @@ class MySqlOfficialServiceDateCorrectionRepository:
                     return None
             else:
                 terms = load_preview_facts(cursor, case_no)
-            if change is not None:
-                cursor.execute("SELECT id FROM staff WHERE id=%s AND (status='active' OR id=("
-                               "SELECT staff_id FROM case_staff_assignments WHERE id=%s AND case_no=%s))" + suffix,
-                               (change.staff_id, change.source_assignment_id, case_no))
-                if cursor.fetchone() is None:
-                    raise ValueError("service_attribution_staff_required")
             facts = self.load(case_no, lock=lock, include_special_pay=True)
+            if change is not None:
+                current_owners = {item.assignment_id: item.staff_id for item in facts.assignments}
+                required_active = {move.staff_id for move in change.moves if (
+                    current_owners.get(move.source_assignment_id) != move.staff_id
+                    or move.source_assignment_id != move.target_assignment_id
+                    or move.source_date != move.replacement_date
+                )}
+                if not change.moves and (
+                    current_owners.get(change.source_assignment_id) != change.staff_id
+                    or (change.replacement_dates and change.replacement_dates != change.service_dates)
+                ):
+                    required_active.add(change.staff_id)
+                for staff_id in sorted(required_active):
+                    cursor.execute(
+                        "SELECT s.status, COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
+                        "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
+                        "WHERE s.id=%s" + suffix, (staff_id,),
+                    )
+                    person = cursor.fetchone()
+                    if person is None or person["status"] != "active":
+                        raise ValueError("service_attribution_staff_required")
+                    if person["lifecycle_state"] == "retired":
+                        raise ValueError("service_attribution_retired_staff_blocked")
             affected = set(pending[1]) if pending else set()
             if change is not None:
-                affected.add(change.staff_id)
-                affected.update(a.staff_id for a in facts.assignments if a.assignment_id == change.source_assignment_id)
+                affected.update(change.target_staff_ids)
+                affected.update(a.staff_id for a in facts.assignments if a.assignment_id in change.source_assignment_ids)
             affected_ids = tuple(sorted(affected))
             affected_slots = ",".join("%s" for _ in affected_ids)
             cursor.execute(

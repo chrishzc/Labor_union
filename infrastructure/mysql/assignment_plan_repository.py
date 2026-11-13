@@ -484,7 +484,8 @@ def _require_exact_commitment_execution(cursor, candidate, lock_ids, *, executio
     return _require_exact_commitment_days(cursor, candidate.case_no, days, lock_ids, lock=True, execution_reader=execution_reader)
 
 
-def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *, lock, execution_reader=None) -> int:
+def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *, lock,
+                                   execution_reader=None, office_preview=False) -> int:
     suffix = ' FOR UPDATE' if lock else ''
     cursor.execute(
         "SELECT commitment.id,commitment.matching_plan_id,event.id AS terminal_event_id "
@@ -511,16 +512,25 @@ def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *,
     proof, confirmed_days = (execution_reader or _current_confirmed_execution)(
         cursor, case_no, int(commitment["matching_plan_id"]), lock=lock
     )
-    require_exact_commitment_execution(
+    verification = (
         int(commitment["matching_plan_id"]),
         lock_plan_ids,
         commitment_days,
         execution_days,
+    )
+    options = dict(
         confirmed_days=confirmed_days,
         authorized_substitutions=tuple(proof["substitutions"].items()),
         service_start_plan_id=int(commitment["matching_plan_id"]),
-        office_reallocation=bool(proof.get("office_reallocation_reason")),
     )
+    office_reallocation = bool(proof.get("office_reallocation_reason"))
+    try:
+        require_exact_commitment_execution(*verification, **options, office_reallocation=office_reallocation)
+    except CommitmentExecutionMismatch:
+        if not office_preview or office_reallocation:
+            raise
+        require_exact_commitment_execution(*verification, **options, office_reallocation=True)
+        raise ValueError("office_schedule_reallocation_reason_required") from None
     return commitment_id
 
 

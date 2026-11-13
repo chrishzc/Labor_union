@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import infrastructure.mysql.assignment_plan_repository as assignment_repository
-from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
+from domains.scheduling.commitment_execution import CommitmentExecutionMismatch, ExecutionServiceDay
 from infrastructure.mysql.assignment_plan_repository import MySqlAssignmentPlanRepository
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, IdempotencyKey
@@ -24,13 +24,14 @@ class _Cursor:
     def __init__(self) -> None:
         self.statements: list[str] = []
         self._rows: list[dict[str, object]] = []
+        self.commitment_days = [{"staff_id": 9, "service_date": date(2030, 1, 1)}]
 
     def execute(self, statement, _parameters=()) -> None:
         self.statements.append(statement)
         if "FROM precontract_service_commitments commitment" in statement:
             self._rows = [{"id": 11, "matching_plan_id": 5, "terminal_event_id": None}]
         elif "FROM precontract_service_commitment_days" in statement:
-            self._rows = [{"staff_id": 9, "service_date": date(2030, 1, 1)}]
+            self._rows = self.commitment_days
         elif "FROM caregiver_availability_locks" in statement:
             self._rows = [{"plan_id": 5}]
         elif "FROM scheduling_service_start_requests" in statement:
@@ -58,6 +59,28 @@ def test_commitment_mismatch_stops_before_execution_persistence(monkeypatch):
         repository.replace_scheduling_generation(_candidate(), _context())
 
     assert all(not statement.lstrip().upper().startswith(("INSERT", "UPDATE")) for statement in connection.cursor_instance.statements)
+
+
+def test_office_preview_requires_reason_when_signed_allocation_changes():
+    cursor = _Cursor()
+    days = tuple(date(2030, 1, day) for day in (1, 2, 3))
+    cursor.commitment_days = [{"staff_id": staff_id, "service_date": day} for staff_id, day in zip((7, 8, 8), days)]
+    execution_days = tuple(ExecutionServiceDay(staff_id, day) for staff_id, day in zip((7, 8, 7), days))
+    reason = ""
+
+    def execution_reader(*_args, **_kwargs):
+        return {"substitutions": {}, "office_reallocation_reason": reason}, execution_days
+
+    def verify(days):
+        return assignment_repository._require_exact_commitment_days(
+            cursor, "CASE-1", days, (17,), lock=False, execution_reader=execution_reader, office_preview=True,
+        )
+
+    with pytest.raises(ValueError, match="office_schedule_reallocation_reason_required"):
+        verify(execution_days)
+    reason = "已協調"
+    assert verify(execution_days) == 11
+    assert all("FOR UPDATE" not in statement for statement in cursor.statements)
 
 
 def _candidate():

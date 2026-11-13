@@ -150,8 +150,11 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
                 aria-label={`第 ${segment.sequence} 段正式指派`}
               >
                 <div><dt>月嫂</dt><dd>{names[segment.staff_id] ?? '月嫂資料待確認'}</dd></div>
-                <div><dt>指派期間</dt><dd>{segment.assigned_start_date} ~ {segment.assigned_end_date}</dd></div>
+                <div><dt>指派起訖</dt><dd>{segment.assigned_start_date} ~ {segment.assigned_end_date}</dd></div>
                 <div><dt>服務日</dt><dd>{segment.official_service_dates.length > 0 ? `${segment.official_service_dates.length} 天` : '尚未回傳'}</dd></div>
+                {segment.official_service_dates.length > 0 && <div>
+                  <dt>實際排班日期</dt><dd>{segment.official_service_dates.join('、')}</dd>
+                </div>}
               </dl>
             ))
           )}

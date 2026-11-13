@@ -18,6 +18,7 @@ from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.official_service_date_correction_workflow import (
     AttributionFundingChange,
+    AttributionDayMove,
     OfficialDateMonetaryImpactBlocked,
     OfficialDateOccupancyConflict,
     OfficialDateSelection,
@@ -60,12 +61,40 @@ class AttributionPreviewBody(BaseModel):
                                         self.replacement_dates, self.scope)
 
 
-class AttributionApplyBody(AttributionPreviewBody):
+class AttributionMoveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_assignment_id: int = Field(gt=0)
+    source_date: date
+    staff_id: int = Field(gt=0)
+    replacement_date: date
+    target_assignment_id: int | None = Field(default=None, gt=0)
+
+
+class AttributionBatchPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    moves: tuple[AttributionMoveBody, ...] = Field(min_length=1, max_length=366)
+    evidence: str = Field(min_length=1, max_length=500)
+    scope: Literal["served", "upcoming"]
+
+    def change(self) -> ServiceAttributionChange:
+        moves = tuple(AttributionDayMove(**move.model_dump()) for move in self.moves)
+        return ServiceAttributionChange(0, 0, (), self.evidence, scope=self.scope, moves=moves)
+
+
+class AttributionConfirmation(BaseModel):
     expected_order_version: int = Field(ge=0)
     expected_scheduling_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
     adopt_calculated_amounts: bool = False
+
+
+class AttributionApplyBody(AttributionPreviewBody, AttributionConfirmation):
+    pass
+
+
+class AttributionBatchApplyBody(AttributionBatchPreviewBody, AttributionConfirmation):
+    pass
 
 
 class AttributionFundingSelectionBody(BaseModel):
@@ -146,7 +175,7 @@ def _funding_payload(review):
 
 @router.post("/{case_no}/service-attribution/preview", response_model=BaseResponse[dict[str, Any]])
 def preview_service_attribution(
-    body: AttributionPreviewBody,
+    body: AttributionPreviewBody | AttributionBatchPreviewBody,
     case_no: str = Path(..., min_length=1, max_length=50),
     principal: AdminPrincipal = Depends(require_system_admin),
     workflow=Depends(get_official_service_date_correction_workflow),
@@ -157,7 +186,7 @@ def preview_service_attribution(
 
 @router.post("/{case_no}/service-attribution/apply", response_model=BaseResponse[dict[str, Any]])
 def apply_service_attribution(
-    body: AttributionApplyBody,
+    body: AttributionApplyBody | AttributionBatchApplyBody,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
     correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
@@ -316,6 +345,8 @@ _VALIDATION_MESSAGES = {
     'service_attribution_unperformed_date_blocked': '請選擇已服務的日期。後續服務請使用換人或代班。',
     'service_attribution_upcoming_date_blocked': '後續排班只能調整今天起的服務日期。',
     'service_attribution_assignment_conflict': '所選日期或月嫂與目前指派不符，請重新讀取排班。',
+    'service_attribution_assignment_limit': '最多可配置四個服務區段，請調整後重新預覽。',
+    'service_attribution_retired_staff_blocked': '退役月嫂的既有班次可保留。新增或移動班次時，請選擇在職月嫂。',
     'service_attribution_target_assignment_ambiguous': '該月嫂已有多個區段，請先核對應承接的區段。',
     'service_attribution_special_pay_review_required': '本案有特殊薪資紀錄，請先核對特殊薪資與服務歸屬。',
     'service_attribution_manual_amount_review_required': '本案有人工更正的薪資金額，請先在帳務工作台核對處置。',

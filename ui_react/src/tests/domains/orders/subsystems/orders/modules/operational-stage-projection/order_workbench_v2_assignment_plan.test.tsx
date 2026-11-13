@@ -138,6 +138,7 @@ describe('正式指派自動回讀與排班明細', () => {
     expect(await within(first).findByText('A010 同名月嫂')).toBeInTheDocument();
     expect(within(first).getByText('2026-09-10 ~ 2026-09-11')).toBeInTheDocument();
     expect(within(first).getByText('2 天')).toBeInTheDocument();
+    expect(within(first).getByText('2026-09-10、2026-09-11')).toBeInTheDocument();
 
     const second = screen.getByLabelText('第 2 段正式指派');
     expect(await within(second).findByText('A002 同名月嫂')).toBeInTheDocument();

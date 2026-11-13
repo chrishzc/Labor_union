@@ -129,8 +129,9 @@ def test_normal_start_atomic_dates_finance_group_result_and_replay(http):
     assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==0
 
 
-@pytest.mark.parametrize('placeholder', [False, True], ids=['first-assignment', 'empty-assignment'])
-def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder):
+@pytest.mark.parametrize(('placeholder', 'interleaved'), [(False, False), (True, False), (False, True)],
+                         ids=['first-assignment', 'empty-assignment', 'interleaved'])
+def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, interleaved):
     from api.routes.service_date_confirmation import router
 
     if not getattr(http.app.state, 'service_dates_registered', False):
@@ -157,13 +158,18 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder):
     endpoint = f'/api/v1/orders/{case}/service-dates'
     before = checked(http.get(endpoint))
     days = tuple(date(2027, 1, 5) + timedelta(days=i) for i in range(count*30))
+    allocations = [days[i::count] if interleaved else days[i*30:(i+1)*30] for i in range(count)]
     body = {
         'actual_start_date': str(days[0]), 'expected_order_version': before['order_version'],
         'expected_scheduling_version': before['scheduling_version'],
         'expected_confirmed_version': before['current_version'], 'reason': '',
-        'segments': [{'staff_id': staff[i][0], 'service_dates': list(map(str, days[i*30:(i+1)*30]))}
-                     for i in range(count)],
+        'segments': [{'staff_id': staff[i][0], 'service_dates': list(map(str, dates))}
+                     for i, dates in enumerate(allocations)],
     }
+    if interleaved:
+        body['reason'] = '確認兩位月嫂交錯服務'
+        quote = checked(http.post(endpoint + '/office-schedule/preview', json=body))
+        body['preview_fingerprint'] = quote['preview_fingerprint']
     headers = {'Idempotency-Key': case + ':office'}
     saved = checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers))
     assert checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers)) == saved
@@ -173,7 +179,7 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder):
     work_days = rows("SELECT staff_id,work_date FROM staff_schedule WHERE case_no=%s "
                      "AND effective_marker=1 AND is_work_day=1 ORDER BY work_date", (case,))
     assert [(row['staff_id'], row['work_date']) for row in work_days] == [
-        (staff[i//30][0], day) for i, day in enumerate(days)
+        (staff[i % count if interleaved else i//30][0], day) for i, day in enumerate(days)
     ]
     assert len(saved['assignment_ids']) == count
     if placeholder:

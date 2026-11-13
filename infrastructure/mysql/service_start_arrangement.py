@@ -14,6 +14,9 @@ from domains.payroll.installments import payroll_installments
 from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
 from domains.scheduling.service_start import ServiceStartConflict
 from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
+from infrastructure.mysql.assignment_plan_repository import (
+    _require_exact_commitment_days, _require_retired_staff_assignment_preservation,
+)
 from infrastructure.mysql.historical_actual_start_date_planner import _canonical_service_mode
 from infrastructure.mysql.mysql_adapter import calculate_attendance_schedule
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -23,7 +26,7 @@ from subsystems.scheduling.leave_substitution_workflow import LeaveSubstitutionA
 from infrastructure.mysql.leave_result_repository import leave_context
 from infrastructure.mysql.service_handover_repository import handover_context
 from infrastructure.mysql.scheduling_occupancy_facts import _unavailability_rows, load_case_service_time, load_occupancy_snapshot
-from infrastructure.mysql.order_terms_read_model import load_preview_facts
+from infrastructure.mysql.order_terms_read_model import load_preview_facts, preflight_staff_ids
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -303,20 +306,50 @@ def _require_office_assignment_ownership(cursor, case_no, *, lock):
         raise ValueError("office_schedule_assignment_ownership_blocked")
 
 
+def _office_schedule_dates(segments, actual_start_date):
+    dates = tuple(sorted(day for segment in segments for day in segment.service_dates))
+    if (not dates or len(dates) != len(set(dates)) or dates[0] < actual_start_date
+            or any(not segment.service_dates or segment.service_dates != tuple(sorted(segment.service_dates))
+                   for segment in segments)):
+        raise ValueError("office_schedule_dates_invalid")
+    if len({segment.staff_id for segment in segments}) != len(segments):
+        raise ValueError("office_schedule_segments_invalid")
+    return dates
+
+
+def _office_assignment_intent(segments, dates, actual_start_date):
+    ordered = sorted(segments, key=lambda segment: segment.service_dates[0])
+    interleaved = tuple(day for segment in ordered for day in segment.service_dates) != dates
+    interval_start = actual_start_date
+    intents = []
+    for segment in ordered:
+        interval_end = segment.service_dates[-1]
+        start = segment.service_dates[0] if interleaved else interval_start
+        intents.append(AssignmentPlanSegmentIntent(segment.staff_id, start, interval_end, segment.service_dates))
+        interval_start = interval_end + timedelta(days=1)
+    return AssignmentPlanIntent(tuple(intents), office_day_allocation=interleaved)
+
+
+def _office_execution_days(segments):
+    return tuple(ExecutionServiceDay(segment.staff_id, day) for segment in segments for day in segment.service_dates)
+
+
 def preview_office_schedule(connection, case_no, segments, *, actual_start_date, reason, lock=False):
     with connection.cursor() as cursor:
         facts = load_preview_facts(cursor, case_no, office_first_schedule=True)
-        dates = tuple(day for segment in segments for day in segment.service_dates)
         staff_ids = tuple(segment.staff_id for segment in segments)
         if (facts.lifecycle.current_status.value != '訂單成立' or facts.order.service_data_locked
                 or any(item.official_service_dates for item in facts.scheduling.segments)):
             raise ValueError('office_schedule_not_pending_blocked')
         _require_office_assignment_ownership(cursor, case_no, lock=lock)
-        if (len(dates) != facts.order.terms.service_days or dates != tuple(sorted(set(dates)))
-                or not dates or dates[0] < actual_start_date):
+        dates = _office_schedule_dates(segments, actual_start_date)
+        if len(dates) != facts.order.terms.service_days:
             raise ValueError('office_schedule_dates_invalid')
-        if len(set(staff_ids)) != len(staff_ids):
-            raise ValueError('office_schedule_segments_invalid')
+        intent = _office_assignment_intent(segments, dates, actual_start_date)
+        _require_retired_staff_assignment_preservation(cursor, facts, intent, lock=lock)
+        existing_staff = {item.staff_id for item in facts.scheduling.segments}
+        if existing_staff and existing_staff != set(staff_ids) and not reason.strip():
+            raise ValueError('office_schedule_reallocation_reason_required')
         existing = {item.staff_id: item.assignment_id for item in facts.scheduling.segments}
         assignments = tuple(AssignmentCandidate(
             f'office-preview:{index}', existing.get(segment.staff_id), segment.staff_id, index,
@@ -327,7 +360,15 @@ def preview_office_schedule(connection, case_no, segments, *, actual_start_date,
             case_no, facts.scheduling.generation_number + 1, facts.scheduling.aggregate_version,
             facts.scheduling.aggregate_version + 1, tuple(existing.values()), assignments, (),
         )
-        occupied, _ = load_occupancy_snapshot(cursor, tuple(sorted(staff_ids)), case_no, lock=lock)
+        impacted_staff = tuple(sorted(set(staff_ids) | set(preflight_staff_ids(cursor, case_no))))
+        occupied, lock_ids = load_occupancy_snapshot(cursor, impacted_staff, case_no, lock=lock)
+        execution_days = _office_execution_days(segments)
+
+        def preview_execution(_cursor, _case, _plan, *, lock):
+            return {"substitutions": {}, "office_reallocation_reason": reason.strip()}, execution_days
+
+        _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, lock=lock,
+                                       execution_reader=preview_execution, office_preview=True)
         conflict = first_shift_conflict(case_no, load_case_service_time(cursor, case_no, lock=lock), assignments, occupied)
         if conflict:
             raise ServiceStartConflict('office_schedule_occupancy_conflict',
@@ -360,7 +401,7 @@ def save_office_schedule(
     key = IdempotencyKey(idempotency_key)
     who = ActorContext(actor)
     cid = CorrelationId(correlation_id)
-    dates = tuple(day for segment in segments for day in segment.service_dates)
+    dates = _office_schedule_dates(segments, actual_start_date)
     digest = fingerprint_payload({
         "case": case_no, "start": str(actual_start_date), "actor": actor, "reason": reason,
         "versions": (expected_order_version, expected_scheduling_version, expected_confirmed_version),
@@ -376,11 +417,6 @@ def save_office_schedule(
         date_repository, units, MySqlMatchingScheduleConfirmationRepository(connection),
     )
     actual_workflow = ActualStartWorkflow(actual_repository, units, SystemBusinessClock())
-    if not dates or dates != tuple(sorted(set(dates))) or dates[0] < actual_start_date:
-        raise ValueError("office_schedule_dates_invalid")
-    if len({segment.staff_id for segment in segments}) != len(segments):
-        raise ValueError("office_schedule_segments_invalid")
-
     with units() as unit:
         MySqlServiceStartRepository(connection).lock_case(case_no, tuple(segment.staff_id for segment in segments))
         with connection.cursor() as cursor:
@@ -462,15 +498,9 @@ def save_office_schedule(
                 "substitutions": {}, "service_start_response_ids": (), "confirmed_version_id": match["version_id"],
                 "office_command_key": key.value, "office_command_fingerprint": digest,
                 "office_reallocation_reason": reallocation_reason,
-            }, tuple(ExecutionServiceDay(segment.staff_id, day) for segment in segments for day in segment.service_dates)
+            }, _office_execution_days(segments)
 
-        interval_start = actual_start_date
-        intents = []
-        for segment in segments:
-            interval_end = segment.service_dates[-1]
-            intents.append(AssignmentPlanSegmentIntent(segment.staff_id, interval_start, interval_end, segment.service_dates))
-            interval_start = interval_end + timedelta(days=1)
-        intent = AssignmentPlanIntent(tuple(intents))
+        intent = _office_assignment_intent(segments, dates, actual_start_date)
         workflow = assignment_application_factory(connection, office_execution=execution).workflow
         preview = workflow.preview(AssignmentPlanPreviewRequest(case_no, intent, cid))
         receipt = workflow.apply_in_current_unit_of_work(AssignmentPlanApplyRequest(

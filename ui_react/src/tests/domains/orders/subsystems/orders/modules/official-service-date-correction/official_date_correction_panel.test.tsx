@@ -1,13 +1,18 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { OrderOfficialDateCorrectionPanel } from '../../../../../../../components/OrderOfficialDateCorrectionPanel';
+import { OrderServiceAttributionPanel } from '../../../../../../../components/OrderServiceAttributionPanel';
 vi.mock('../../../../../../../api/scheduling/holiday_client', () => ({ holidayClient: { query: vi.fn(async () => ({ holidays: [] })) } }));
+vi.mock('../../../../../../../components/StaffIdentityProvider', () => ({
+  useStaffIdentityDirectory: () => ({ people: new Map([7, 8, 9, 10].map(id => [id, { id, name: `月嫂 ${id}` }])) }),
+  useStaffIdentityLabels: () => ({ label: (id: number) => `月嫂 ${id}`, compare: (a: number, b: number) => a - b }),
+}));
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), preview: vi.fn(), apply: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), preview: vi.fn(), apply: vi.fn(), previewAttribution: vi.fn(), applyAttribution: vi.fn() }));
 vi.mock('../../../../../../../api/orders/official_service_date_correction_client', () => ({
   officialServiceDateCorrectionClient: mocks,
 }));
@@ -24,6 +29,64 @@ const changed = {
   actual_end_date: '2026-09-21',
   assignments: [{ assignment_id: 14, staff_id: 7, staff_name: '王月嫂', service_dates: ['2026-09-19', '2026-09-21'] }],
 };
+
+it('makes date changes explicit and previews only the affected days before saving', async () => {
+  const serviceDates = ['2099-11-25', '2099-11-26'];
+  mocks.previewAttribution.mockResolvedValue({
+    proposed_assignments: [{ staff_id: 7, service_dates: ['2099-11-26', '2099-11-28'] }],
+    staff_entitlements: [], funding: [], paid_obligations: [], manual_amounts: [],
+  });
+  render(<OrderServiceAttributionPanel caseNo="ISSUE-346" upcomingOnly onSaved={vi.fn()} onBusyChange={vi.fn()}
+    segments={[{ assignment_id: 13, staff_id: 7, candidate_key: null, sequence: 1, assigned_start_date: serviceDates[0],
+      assigned_end_date: serviceDates[1], official_service_dates: serviceDates, actual_hours: null, lineage_source_assignment_ids: [] }]} />);
+  expect(screen.getByText(/已分配 2／2 日/)).toBeVisible();
+  expect(screen.queryByLabelText('2099-11-25 改至')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('調整依據（必填）'), { target: { value: '電話確認' } });
+  fireEvent.change(screen.getByLabelText('調整原因（必填）'), { target: { value: '改期' } });
+  const preview = screen.getByRole('button', { name: '預覽排班與帳務' });
+  expect(preview).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', { name: '調整服務日期' }));
+  fireEvent.change(screen.getByLabelText('2099-11-25 改至'), { target: { value: '2099-11-28' } });
+  fireEvent.click(preview);
+  expect(await screen.findByRole('row', { name: /2099-11-25.*2099-11-28/ })).toBeVisible();
+  expect(screen.queryByRole('row', { name: /2099-11-26/ })).not.toBeInTheDocument();
+  expect(mocks.previewAttribution).toHaveBeenCalledWith('ISSUE-346', expect.objectContaining({
+    moves: [{ source_assignment_id: 13, source_date: '2099-11-25', staff_id: 7,
+      replacement_date: '2099-11-28', target_assignment_id: 13 }],
+  }));
+  expect(mocks.applyAttribution).not.toHaveBeenCalled();
+});
+
+it('adds a fourth calendar and previews transfers from multiple source blocks in one request', async () => {
+  const dates = ['2099-11-25', '2099-11-26', '2099-11-27', '2099-11-28'];
+  mocks.previewAttribution.mockClear().mockResolvedValue({
+    proposed_assignments: [], staff_entitlements: [], funding: [], paid_obligations: [], manual_amounts: [],
+  });
+  render(<OrderServiceAttributionPanel caseNo="ISSUE-346" upcomingOnly onSaved={vi.fn()} onBusyChange={vi.fn()}
+    segments={[7, 8, 9].map((id, index) => ({
+      assignment_id: 13 + index, staff_id: id, candidate_key: null, sequence: index + 1,
+      assigned_start_date: dates[index], assigned_end_date: index === 2 ? dates[3] : dates[index],
+      official_service_dates: index === 2 ? dates.slice(2) : [dates[index]], actual_hours: null, lineage_source_assignment_ids: [],
+    }))} />);
+  fireEvent.click(screen.getByRole('button', { name: '＋ 新增月嫂' }));
+  fireEvent.change(screen.getByLabelText('選擇月嫂'), { target: { value: '10' } });
+  const fourth = within(screen.getByRole('region', { name: '月嫂 10' }));
+  fireEvent.click(fourth.getByRole('button', { name: /2099-11-25.*目前由 月嫂 7/ }));
+  fireEvent.click(fourth.getByRole('button', { name: /2099-11-26.*目前由 月嫂 8/ }));
+  expect(fourth.getByText('負責 2 日')).toBeVisible();
+  expect(within(screen.getByRole('region', { name: '月嫂 7' })).getByText('負責 0 日')).toBeVisible();
+  expect(screen.getByRole('button', { name: '＋ 新增月嫂' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('調整依據（必填）'), { target: { value: '電話確認' } });
+  fireEvent.change(screen.getByLabelText('調整原因（必填）'), { target: { value: '交接' } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽排班與帳務' }));
+  expect(await screen.findByRole('row', { name: /2099-11-25.*月嫂 7.*月嫂 10/ })).toBeVisible();
+  expect(mocks.previewAttribution).toHaveBeenCalledOnce();
+  expect(mocks.previewAttribution).toHaveBeenCalledWith('ISSUE-346', {
+    scope: 'upcoming', evidence: '電話確認', moves: dates.slice(0, 2).map((date, index) => ({
+      source_assignment_id: 13 + index, source_date: date, staff_id: 10, replacement_date: date, target_assignment_id: null,
+    })),
+  });
+});
 
 describe('official date correction panel', () => {
   beforeEach(() => {

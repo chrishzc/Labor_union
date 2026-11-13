@@ -1068,6 +1068,36 @@
 .order-case-page :is(.order-service-dates-panel, .order-service-attribution-panel) :is(label, legend, input:not([type="checkbox"]), select, textarea, button, summary) {
   font-size: 16px;
 }
+.order-service-attribution-panel .service-attribution-form { display: grid; gap: 16px; margin: 12px 0; }
+.order-service-attribution-panel :is(.service-attribution-form, .service-attribution-days) { min-inline-size: 0; }
+.order-service-attribution-panel .service-attribution-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.order-service-attribution-panel .service-attribution-fields label { display: grid; gap: 4px; }
+.caregiver-schedule-calendars > header, .caregiver-schedule-block > header {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+}
+.caregiver-schedule-calendars :is(h4, header p) { margin: 0; }
+.caregiver-schedule-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.caregiver-schedule-block { min-width: 0; padding: 12px; border: 1px solid #e8d4c4; border-radius: 10px; background: #fff; }
+.order-case-page .caregiver-schedule-block .service-calendar-workbench-layout { display: block; margin-top: 8px; }
+.order-case-page .caregiver-schedule-block .calendar-matrix-card { border: 0; padding: 0; }
+.caregiver-schedule-block .calendar-month-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+.caregiver-schedule-block .calendar-month-header h3 { margin: 0; font-size: 16px; }
+.caregiver-schedule-block .calendar-days-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.caregiver-schedule-block .service-date-weekday { text-align: center; }
+.order-case-page .caregiver-schedule-block .calendar-date-cell { min-width: 0; min-height: 42px; padding: 2px; justify-content: center; }
+.order-case-page .caregiver-schedule-block .calendar-date-cell.selected { background: #f7e6d9 !important; color: #973b17; border-color: #e9c5ad !important; }
+@media (max-width: 680px) { .caregiver-schedule-blocks { grid-template-columns: minmax(0, 1fr); } }
+.service-attribution-preview { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.service-attribution-preview :is(th, td) {
+  padding: 8px;
+  border-bottom: 1px solid #e8d4c4;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
 .service-date-heading { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .service-date-heading:empty { display: none; }
 .service-date-settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 22px; margin-bottom: 20px; }
@@ -1106,13 +1136,6 @@
 .service-date-reason textarea { width: min(100%, 40ch); box-sizing: border-box; }
 .historical-schedule-allocation { display: grid; gap: var(--space-2); margin: 16px 0; }
 .historical-schedule-allocation h3, .historical-schedule-allocation p { margin: 0; }
-.schedule-allocation-controls, .schedule-allocation-add, .schedule-allocation-person-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-}
-.schedule-allocation-add select { min-width: 0; max-width: 100%; }
 .historical-schedule-allocation .schedule-allocation-person {
   min-width: 0;
   margin: 0;
@@ -1120,13 +1143,7 @@
   border: 1px solid #eadbd0;
   border-radius: 8px;
 }
-.schedule-allocation-person-heading { justify-content: space-between; }
 .schedule-allocation-person-heading p { overflow-wrap: anywhere; }
-.order-case-page .schedule-allocation-person-heading .schedule-allocation-remove:not(:disabled) {
-  background: #fffaf5;
-  color: #794b2e;
-  border-color: #d8c7b9;
-}
 .schedule-allocation-person-heading + .historical-schedule-date-choices { margin-top: 8px; }
 .historical-schedule-date-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .order-case-page .historical-schedule-date-choices .calendar-date-cell { min-width: 44px; padding: 5px 8px; }

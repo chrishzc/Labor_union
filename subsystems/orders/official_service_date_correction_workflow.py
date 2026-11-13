@@ -113,6 +113,38 @@ class ServiceAttributionChange:
     evidence: str
     replacement_dates: tuple[date, ...] = ()
     scope: Literal["served", "upcoming"] = "served"
+    moves: tuple[AttributionDayMove, ...] = ()
+
+    @property
+    def target_staff_ids(self) -> set[int]:
+        return {move.staff_id for move in self.moves} if self.moves else {self.staff_id}
+
+    @property
+    def source_assignment_ids(self) -> set[int]:
+        return {move.source_assignment_id for move in self.moves} if self.moves else {self.source_assignment_id}
+
+    def selection_payload(self):
+        if self.moves:
+            return {"moves": tuple(
+                (move.source_assignment_id, move.source_date.isoformat(), move.staff_id,
+                 move.replacement_date.isoformat(), move.target_assignment_id)
+                for move in self.moves
+            ), "scope": self.scope}
+        return {
+            "source_assignment_id": self.source_assignment_id,
+            "staff_id": self.staff_id, "dates": tuple(day.isoformat() for day in self.service_dates),
+            **({"replacement_dates": tuple(day.isoformat() for day in self.replacement_dates), "scope": self.scope}
+               if self.replacement_dates or self.scope != "served" else {}),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionDayMove:
+    source_assignment_id: int
+    staff_id: int
+    source_date: date
+    replacement_date: date
+    target_assignment_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,10 +250,7 @@ class OfficialServiceDateCorrectionWorkflow:
         if not reason.strip():
             raise ValueError("service_attribution_reason_required")
         command_fingerprint = fingerprint_payload({
-            "case_no": case_no, "source_assignment_id": change.source_assignment_id,
-            "staff_id": change.staff_id, "dates": tuple(day.isoformat() for day in change.service_dates),
-            **({"replacement_dates": tuple(day.isoformat() for day in change.replacement_dates), "scope": change.scope}
-               if change.replacement_dates or change.scope != "served" else {}),
+            "case_no": case_no, **change.selection_payload(),
             **({"adopt_calculated_amounts": True} if adopt_calculated_amounts else {}),
             "evidence": change.evidence.strip(), "reason": reason.strip(), "actor": actor,
             "order_version": expected_order_version, "scheduling_version": expected_scheduling_version,
@@ -352,10 +381,10 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
         raise ValueError("official_date_schedule_incomplete")
     if "source_rate_snapshot_missing_or_ambiguous" in facts.monetary_blockers:
         raise ValueError("service_attribution_source_rate_required")
-    selected = change.service_dates
+    selected = tuple(move.source_date for move in change.moves) if change.moves else change.service_dates
     if not selected or tuple(sorted(set(selected))) != selected:
         raise ValueError("official_date_dates_not_canonical")
-    replacement = change.replacement_dates or selected
+    replacement = tuple(move.replacement_date for move in change.moves) if change.moves else change.replacement_dates or selected
     if len(replacement) != len(selected):
         raise ValueError("official_date_service_days_changed")
     if len(set(replacement)) != len(replacement):
@@ -368,11 +397,20 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
     elif (facts.order_status == "訂單成立" or any(day > today for day in changed_dates)
           or (facts.order_status == "服務中" and any(day == today for day in changed_dates))):
         raise ValueError("service_attribution_unperformed_date_blocked")
-    source = next((item for item in facts.assignments if item.assignment_id == change.source_assignment_id), None)
-    if source is None or not set(selected).issubset(source.service_dates):
-        raise ValueError("service_attribution_assignment_conflict")
-    if source.staff_id == change.staff_id and selected == replacement:
-        raise ValueError("official_date_no_change")
+    by_id = {item.assignment_id: item for item in facts.assignments}
+    if change.moves:
+        day_moves = change.moves
+    else:
+        source = by_id.get(change.source_assignment_id)
+        candidates = [item for item in facts.assignments if item.staff_id == change.staff_id]
+        if source and source.staff_id == change.staff_id:
+            target_id = source.assignment_id
+        elif len(candidates) > 1:
+            raise ValueError("service_attribution_target_assignment_ambiguous")
+        else:
+            target_id = candidates[0].assignment_id if candidates else None
+        day_moves = tuple(AttributionDayMove(change.source_assignment_id, change.staff_id, old, new, target_id)
+                          for old, new in zip(selected, replacement))
     resulting_dates = (set(official_days) - set(selected)) | set(replacement)
     if len(resulting_dates) != facts.service_days:
         raise ValueError("official_date_service_days_changed")
@@ -380,23 +418,32 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
         raise ValueError("official_date_actual_start_change_unsupported")
     if terms.payroll is None:
         raise ValueError("service_attribution_payroll_required")
-    target = source if source.staff_id == change.staff_id else next((item for item in facts.assignments if item.staff_id == change.staff_id), None)
-    if target != source and sum(item.staff_id == change.staff_id for item in facts.assignments) > 1:
-        raise ValueError("service_attribution_target_assignment_ambiguous")
+    segment_days = {(item.assignment_id, item.staff_id): set(item.service_dates) for item in facts.assignments}
+    affected = set(funding.pending_staff)
+    changed = False
+    for move in day_moves:
+        source = by_id.get(move.source_assignment_id)
+        target = by_id.get(move.target_assignment_id)
+        if source is None or move.source_date not in source.service_dates:
+            raise ValueError("service_attribution_assignment_conflict")
+        if move.target_assignment_id is not None and (target is None or target.staff_id != move.staff_id):
+            raise ValueError("service_attribution_assignment_conflict")
+        if target is None and any(item.staff_id == move.staff_id for item in facts.assignments):
+            raise ValueError("service_attribution_target_assignment_ambiguous")
+        changed |= source != target or move.source_date != move.replacement_date
+        affected.update((source.staff_id, move.staff_id))
+        segment_days[(source.assignment_id, source.staff_id)].remove(move.source_date)
+    if not changed:
+        raise ValueError("official_date_no_change")
+    for move in day_moves:
+        segment_days.setdefault((move.target_assignment_id, move.staff_id), set()).add(move.replacement_date)
+    segments = [(assignment_id, staff_id, tuple(sorted(days)))
+                for (assignment_id, staff_id), days in segment_days.items() if days]
+    if change.moves and len(segments) > max(4, len(facts.assignments)):
+        raise ValueError("service_attribution_assignment_limit")
     moves = set(selected)
     flagged = {day for item in facts.assignments for day in item.double_pay_dates}
     effective_flags = (flagged - moves) | {new for old, new in zip(selected, replacement) if old in flagged}
-    segments = []
-    for item in facts.assignments:
-        days = set(item.service_dates)
-        if item == source:
-            days -= moves
-        if item == target:
-            days.update(replacement)
-        if days:
-            segments.append((item.assignment_id, item.staff_id, tuple(sorted(days))))
-    if target is None:
-        segments.append((None, change.staff_id, replacement))
     assignments = tuple(
         AssignmentCandidate(
             f"service-attribution:{facts.case_no}:{facts.scheduling_version + 1}:{index}",
@@ -413,9 +460,8 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
         facts.scheduling_version + 1, tuple(item.assignment_id for item in facts.assignments),
         assignments, (),
     )
-    affected = set(funding.pending_staff) | {source.staff_id, change.staff_id}
-    manual_split = any(item.kind != "unsplit" for item in funding.sources) and not any(
-        item.tiered for item in terms.payroll.source_terms if item.staff_id in affected)
+    tiered_staff = {item.staff_id for item in terms.payroll.source_terms if item.tiered}
+    manual_split = any(item.kind != "unsplit" and item.staff_id not in tiered_staff for item in funding.sources)
     review_staff = tuple(sorted(affected)) if funding.pending_event_id is not None or manual_split else ()
     review_roots = tuple(sorted({item.identity for item in funding.sources})) if review_staff else ()
     payroll = build_payroll_handover_impact(
@@ -433,10 +479,13 @@ def _attribution_preview(facts, terms, payable_versions, change, manual_amounts=
         "case": facts.case_no, "status": facts.order_status, "order": facts.order_version,
         "scheduling": facts.scheduling_version, "generation": facts.generation_id,
         "client_finance": facts.client_finance_version, "staff_payables": payable_versions,
-        "payroll": payroll.fingerprint.value, "source": source.assignment_id,
-        "staff": change.staff_id, "dates": tuple(day.isoformat() for day in selected),
-        **({"replacement_dates": tuple(day.isoformat() for day in replacement), "scope": change.scope}
-           if change.replacement_dates or change.scope != "served" else {}),
+        "payroll": payroll.fingerprint.value,
+        **(change.selection_payload() if change.moves else {
+            "source": change.source_assignment_id,
+            "staff": change.staff_id, "dates": tuple(day.isoformat() for day in selected),
+            **({"replacement_dates": tuple(day.isoformat() for day in replacement), "scope": change.scope}
+               if change.replacement_dates or change.scope != "served" else {}),
+        }),
         "evidence": change.evidence.strip(),
         **({"manual_amounts": manual_amounts} if manual_amounts else {}),
         **({"funding": funding_rows} if funding_rows else {}),

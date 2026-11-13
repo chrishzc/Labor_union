@@ -30,6 +30,7 @@ import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
 import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
 import { OrderServiceDateCalendar } from './OrderServiceDateCalendar';
+import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
 import { OrderOfficialDateCorrectionPanel } from './OrderOfficialDateCorrectionPanel';
 
 interface OrderServiceDatesPanelProps {
@@ -111,10 +112,12 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const [officeStaff, setOfficeStaff] = useState<typeof officeScheduleStaff | null>(null);
   const [officeEditing, setOfficeEditing] = useState(false);
   const [officeQuote, setOfficeQuote] = useState<{ payload: string; quote: OfficeScheduleQuote } | null>(null);
+  const [officeReasonRequired, setOfficeReasonRequired] = useState(false);
   useEffect(() => {
     setOfficeEditing(false);
     setOfficeStaff(null);
     setOfficeQuote(null);
+    setOfficeReasonRequired(false);
   }, [caseNo]);
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
@@ -650,8 +653,20 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   };
 
   const selectedOfficeStaff = officeStaff ?? officeScheduleStaff;
+  const multiCaregiverEditing = officeSchedule && officeEditing;
+  const officeSegments = officeSchedule && selectedOfficeStaff.length > 1
+    ? selectedOfficeStaff.map(person => ({
+      staff_id: person.staff_id,
+      service_dates: selectedDates.filter(date => allocation[date] === person.staff_id).sort(),
+    })).sort((left, right) => (left.service_dates[0] ?? '').localeCompare(right.service_dates[0] ?? ''))
+    : null;
   const scheduleSegments = schedulePending && queryView
-    ? historicalScheduleSegments(officeSchedule ? selectedOfficeStaff : queryView.bound_staff, selectedDates, allocation) : null;
+    ? officeSegments
+      ? officeSegments.every(segment => segment.service_dates.length > 0)
+        && officeSegments.reduce((count, segment) => count + segment.service_dates.length, 0) === selectedDates.length
+        ? officeSegments : null
+      : historicalScheduleSegments(officeSchedule ? selectedOfficeStaff : queryView.bound_staff, selectedDates, allocation)
+    : null;
   const schedulePayload = queryView && scheduleSegments && selectedDates.length === queryView.contracted_service_days ? {
     actual_start_date: startDate,
     segments: scheduleSegments,
@@ -666,6 +681,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     setOfficeEditing(false);
     setOfficeStaff(null);
     setOfficeQuote(null);
+    setOfficeReasonRequired(false);
     setAllocation({});
     setRestWeekdays(null);
     setSuccess(null);
@@ -673,26 +689,31 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     void loadServiceDates('read');
   };
 
+  const runOfficeSchedulePreview = async () => {
+    if (!schedulePayload || readController.current !== null || actionInFlight.current.has(caseNo)) return;
+    actionInFlight.current.add(caseNo);
+    setWorking('preview');
+    setError(null);
+    try {
+      const quote = await previewOfficeSchedule(caseNo, schedulePayload);
+      if (renderedCaseNo.current === caseNo) setOfficeQuote({ payload: JSON.stringify(schedulePayload), quote });
+    } catch (caught) {
+      if (renderedCaseNo.current === caseNo) {
+        if ((caught instanceof OrderMutationError || caught instanceof ApiHttpError)
+          && caught.code === 'office_schedule_reallocation_reason_required') setOfficeReasonRequired(true);
+        setError(errorMessage(caught));
+      }
+    } finally {
+      actionInFlight.current.delete(caseNo);
+      if (renderedCaseNo.current === caseNo) setWorking(null);
+    }
+  };
+
   const runScheduleSave = async () => {
     if (!queryView || readController.current !== null || actionInFlight.current.has(caseNo)) return;
     let request = scheduleRequests.current.get(caseNo);
     if (!request) {
-      if (!schedulePayload) return;
-      if (officeSchedule && officeEditing && !currentQuote) {
-        actionInFlight.current.add(caseNo);
-        setWorking('preview');
-        setError(null);
-        try {
-          const quote = await previewOfficeSchedule(caseNo, schedulePayload);
-          if (renderedCaseNo.current === caseNo) setOfficeQuote({ payload: JSON.stringify(schedulePayload), quote });
-        } catch (caught) {
-          if (renderedCaseNo.current === caseNo) setError(errorMessage(caught));
-        } finally {
-          actionInFlight.current.delete(caseNo);
-          if (renderedCaseNo.current === caseNo) setWorking(null);
-        }
-        return;
-      }
+      if (!schedulePayload || (multiCaregiverEditing && !currentQuote)) return;
       request = {
         key: crypto.randomUUID(),
         office: officeSchedule,
@@ -742,6 +763,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         order_version: observed.order_version, has_formal_assignments: true,
       } : value);
       setSuccess('班表已儲存並回讀正式排班。');
+      setOfficeEditing(false);
+      setOfficeStaff(null);
       setOfficeQuote(null);
       onObserved?.();
     } catch (caught) {
@@ -773,6 +796,12 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     && !needsBasisUpdate && !inputInvalid && !manualNeedsReview && !startUnresolved && !actualStart?.service_data_locked;
   const canSaveSchedule = canSave && !!startDate && scheduleSegments !== null
     && selectedDates.length === requiredDateCount;
+  const scheduleReasonRequired = officeSchedule && (officeStaff !== null || officeReasonRequired);
+  const needsScheduleReason = scheduleReasonRequired && !reason.trim();
+  const missingOfficeDates = multiCaregiverEditing && selectedOfficeStaff.length > 1
+    && selectedDates.some(date => !selectedOfficeStaff.some(person => person.staff_id === allocation[date]));
+  const emptyOfficeBlock = multiCaregiverEditing && selectedOfficeStaff.length > 1
+    && selectedOfficeStaff.some(person => !selectedDates.some(date => allocation[date] === person.staff_id));
 
   useEffect(() => {
     if (initialCalculation.current === caseNo || queryView?.case_no !== caseNo || queryView.current_dates.length > 0
@@ -931,7 +960,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             {displayedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{displayedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - displayedDates.length}` : `超出 ${displayedDates.length - requiredDateCount}`} 天</dd></div>}
           </dl>
 
-          <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
+          {!multiCaregiverEditing && <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
             isDateDisabled={date => effectiveServiceDates !== null || !!scheduleRecovery || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
@@ -952,30 +981,45 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             showHolidaySelectionHint={effectiveServiceDates === null}
           />
 
-          </div>
+          </div>}
 
-          {schedulePending && <HistoricalRestartArrangementPanel key={caseNo}
+          {schedulePending && multiCaregiverEditing ? <fieldset disabled={working !== null || !!scheduleRecovery || isRecoveryActive}>
+            <OrderCaregiverScheduleCalendars key={caseNo}
+              blocks={selectedOfficeStaff.map(person => ({ key: person.staff_id, staffId: person.staff_id, name: person.staff_name }))}
+              dates={selectedDates}
+              allocation={selectedOfficeStaff.length === 1
+                ? Object.fromEntries(selectedDates.map(date => [date, selectedOfficeStaff[0].staff_id])) : allocation}
+              onSelect={(date, id) => setAllocation(current => {
+                if (selectedOfficeStaff.length === 1) return current;
+                const next = { ...current };
+                if (next[date] === id) delete next[date];
+                else next[date] = id;
+                return next;
+              })}
+              management={{
+                options: [...(staffDirectory?.people.values() ?? [])].map(person => ({ staffId: person.id, name: person.name ?? undefined })),
+                limit: 4,
+                onAdd: id => {
+                  if (selectedOfficeStaff.length === 1) {
+                    setAllocation(Object.fromEntries(selectedDates.map(date => [date, selectedOfficeStaff[0].staff_id])));
+                  }
+                  setOfficeStaff([...selectedOfficeStaff, { staff_id: id, staff_name: staffDirectory?.people.get(id)?.name ?? '' }]);
+                },
+                onRemove: selectedOfficeStaff.length > 1 ? id => {
+                  setOfficeStaff(selectedOfficeStaff.filter(person => person.staff_id !== id));
+                  setAllocation(current => Object.fromEntries(Object.entries(current).filter(([, owner]) => owner !== id)));
+                } : undefined,
+              }} />
+          </fieldset> : schedulePending && <HistoricalRestartArrangementPanel key={caseNo}
             staff={officeSchedule ? selectedOfficeStaff : queryView.bound_staff} dates={selectedDates} allocation={allocation}
             disabled={working !== null || !!scheduleRecovery}
-            staffManagement={officeSchedule && officeEditing ? {
-              options: [...(staffDirectory?.people.values() ?? [])].map(person => ({
-                staff_id: person.id, staff_name: person.name ?? '',
-              })),
-              limit: 4,
-              disabled: isRecoveryActive,
-              onAdd: person => setOfficeStaff([...selectedOfficeStaff, person]),
-              onRemove: staffId => {
-                setOfficeStaff(selectedOfficeStaff.filter(item => item.staff_id !== staffId));
-                setAllocation(current => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== staffId)));
-              },
-            } : undefined}
             onSelect={(date, staffId) => setAllocation(current => {
               const next = { ...current };
               if (next[date] === staffId) delete next[date];
               else next[date] = staffId;
               return next;
             })} />}
-          {effectiveServiceDates === null && <label className="service-date-reason">{officeSchedule && officeStaff ? '調整原因及協調依據' : '原因（選填）'}<textarea maxLength={500} value={reason} disabled={working !== null || !!scheduleRecovery || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
+          {effectiveServiceDates === null && <label className="service-date-reason">{scheduleReasonRequired ? '調整原因及協調依據（必填）' : '原因（選填）'}<textarea required={scheduleReasonRequired} maxLength={500} value={reason} disabled={working !== null || !!scheduleRecovery || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
           {currentQuote && <section aria-label="核對首份班表及應付">
             <h4>核對首份班表及應付</h4>
             {currentQuote.staff_entitlements.map(item => <div key={item.staff_id}>
@@ -984,16 +1028,27 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             </div>)}
           </section>}
           <div className="service-date-footer">
-            {schedulePending && (officeSchedule ? selectedOfficeStaff : queryView.bound_staff).length > 1 && !scheduleSegments &&
+            {schedulePending && multiCaregiverEditing && !scheduleRecovery && working === null && <p>
+              {selectedDates.length !== requiredDateCount ? `請先回到服務日期月曆選滿 ${requiredDateCount} 個服務日，再進行月嫂分配。`
+                : missingOfficeDates ? '請分配所有服務日。'
+                : emptyOfficeBlock ? '請為每位月嫂分配服務日，或移除未排班的月嫂。'
+                : needsScheduleReason ? '請填寫調整原因及協調依據。'
+                : currentQuote ? '核對班表和應付金額後，即可儲存。'
+                : '請先預覽班表及應付，再確認儲存。'}
+            </p>}
+            {schedulePending && !multiCaregiverEditing && (officeSchedule ? selectedOfficeStaff : queryView.bound_staff).length > 1 && !scheduleSegments &&
               <p>請完成每位月嫂的日期分配。</p>}
             {!schedulePending && effectiveServiceDates === null && queryView.current_dates.length > 0 &&
               <p>雙方確認後會依服務日期自動排班。</p>}
+            {schedulePending && multiCaregiverEditing && !scheduleRecovery &&
+              <button type="button" disabled={!canSaveSchedule || needsScheduleReason || currentQuote !== null}
+                onClick={() => void runOfficeSchedulePreview()}>{working === 'preview' ? '預覽中…' : '預覽班表及應付'}</button>}
             {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看排班結果 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary"
-              disabled={schedulePending ? working !== null || (!scheduleRecovery && (!canSaveSchedule || (officeSchedule && officeStaff !== null && !reason.trim()))) : !canSave}
+              disabled={schedulePending ? working !== null || (!scheduleRecovery && (!canSaveSchedule || needsScheduleReason || (multiCaregiverEditing && !currentQuote))) : !canSave}
               onClick={() => void (schedulePending ? runScheduleSave() : runApply(true))}>
               {working === 'apply' ? '儲存並確認中…' : schedulePending
                 ? scheduleRecovery ? scheduleRecovery.receipt ? '重新讀取班表' : '確認原儲存結果'
-                  : officeSchedule && officeEditing && !currentQuote ? '預覽班表及應付' : '儲存班表'
+                  : '儲存班表'
                 : '儲存服務日期'}
             </button>}
           </div>

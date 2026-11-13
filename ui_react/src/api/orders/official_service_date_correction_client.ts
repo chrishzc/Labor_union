@@ -100,6 +100,13 @@ const FundingReviewSchema = z.discriminatedUnion('pending', [
 ]);
 export type AttributionFundingReview = Extract<z.infer<typeof FundingReviewSchema>, { pending: true }>;
 export type AttributionFundingInput = { selections: { assignment_id: number; subsidy_ntd: number }[]; evidence: string };
+export type AttributionMove = {
+  source_assignment_id: number;
+  source_date: string;
+  staff_id: number;
+  replacement_date: string;
+  target_assignment_id: number | null;
+};
 export type AttributionChange = {
   source_assignment_id: number;
   staff_id: number;
@@ -107,7 +114,7 @@ export type AttributionChange = {
   evidence: string;
   replacement_dates?: string[];
   scope?: 'served' | 'upcoming';
-};
+} | { moves: AttributionMove[]; evidence: string; scope: 'served' | 'upcoming' };
 
 export type OfficialDateQuery = z.infer<typeof QuerySchema>;
 export type OfficialDatePreview = z.infer<typeof PreviewSchema>;
