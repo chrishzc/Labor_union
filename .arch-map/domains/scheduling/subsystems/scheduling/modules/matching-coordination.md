@@ -37,9 +37,9 @@
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
   - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
-  - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
+  - `api/routes/matches.py` — 正式推薦包讀取受控履歷 PDF，經共用 LINE 圖片服務逐頁轉圖，與確認卡同一次寄送。客戶履歷下載入口回 410。
   - `subsystems/line/candidate_contact_postback_application.py` — 將兩種候選意願交給 recipient-bound owner adapter，在原 UoW 提交意願與固定回覆紀錄後，由 Webhook 立即 Reply。按 webhook identity 冪等，失敗不補 Push。
-  - `subsystems/scheduling/matching_notification_application.py` — 正式媒合月嫂意願與客戶推薦確認 Postback 確認回覆依 `line-event:{event_id}` 走 `line_webhook_reply`（Reply-only）。
+  - `subsystems/scheduling/matching_notification_application.py`、`subsystems/line/matching_postback_application.py` — 客戶推薦回覆依 `line-event:{event_id}` 先確認收件，背景從 Inbox 處理決策及客服；新版寄送停用前包互動。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 取消尚未送出的退役協調、群組與重新詢問工作，並提供 24 小時未回覆的唯讀提醒；R-04 資格沿用既有 case gate。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
 - `subsystems/scheduling/matching_coordination_workflow.py` — 舊 Preview／ApplyZeroCandidateAlternative 回 typed retired error，不再產生固定協調通知；一般零候選確認／歷史查詢保留。
@@ -66,7 +66,8 @@
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
-  - `api/routes/matches.py`、`api/schemas/matches.py` — Stage 5 customer confirmation、matching-plan create immutable receipt Query 與到期履歷 download contract。
+  - `api/routes/matches.py`、`api/schemas/matches.py` — Stage 5 customer confirmation 唯讀預覽回傳客戶版訂單資訊分組欄位及履歷就緒狀態，並提供 matching-plan create immutable receipt Query。
+  - `ui_react/src/api/scheduling/matching_plan_communication_client.ts`、`ui_react/src/api/scheduling/order_information_sections_schema.ts` — 正式媒合 transport 與兩種預覽共用欄位驗證。
   - `db/schema_parts/1032_matching_holiday_work_agreements.sql` — 已退休 agreement 的保留資料 schema；不再有 current writer 或精算 readback consumer。
   - `db/schema_parts/222_matching_plan_create_receipts.sql` — fresh-bootstrap immutable receipt root for formal matching-plan create commands; preserve upgrade uses byte-equivalent migration-only part `1039`.
   - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
@@ -91,6 +92,7 @@
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 
 ## Contracts
+- `document/架構重整/01_規格基線/02A_媒合候選池與客戶決定及通勤規格.md` — 候選詢問與客戶推薦確認。
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling ownership.
 - `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preference/unavailability facts.
 

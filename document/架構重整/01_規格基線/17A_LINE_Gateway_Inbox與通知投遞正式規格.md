@@ -12,6 +12,7 @@
 - **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_bindings`／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
 - **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
 - **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）。明確人工／誤判標記優先於自動比對。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
+- **同事件即時與背景處理**。同一事件兼有即時 Reply 與背景業務時，保留 Inbox 租約至 Reply 嘗試結束後交回背景。程序中斷時沿既有租約逾期回收，詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
   - **業務通知投影規則**：
@@ -48,8 +49,8 @@
   - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作）。「寄送案件資訊」節點以整包呈現，頁面內容見 [媒合候選池規格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
   - LINE 流程圖「簽約」以文字呈現官方帳號聊天後台的手動範本操作。工會通知公版目錄移除客戶及月嫂簽署提醒，保留兩種契約下載通知。
 - **三張表格圖片渲染（`LINE-COPY-TABLE-01`、`LINE-TABLE-IMAGE-01～04`）**：
-  - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦產生「訂單資訊一、資訊二、每週服務安排」三張表格 PNG，客戶版資訊一的財務欄位限於客戶費用與繳款約定，確認按鈕留存於獨立互動卡。
-  - 圖片快照凍結於 outer UoW 投遞資料；端點 `GET /api/v1/line/table-images/{token}` 以 7 日不依賴外部排班金鑰的內部短效 opaque token 動態產出 PNG（`private, no-store, nosniff, no-referrer`），缺少系統中文字型或金鑰異常回 `503` 而不退回純文字。
+  - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦一次 Push 只含一則 Flex 輪播訊息，依序呈現各履歷 PNG 頁面、「訂單資訊一、資訊二、每週服務安排」三張表格 PNG。客戶版資訊一的財務欄位限於客戶費用與繳款約定。客戶回覆按鈕放在每週服務安排同一頁。已提交的任務重試時沿用提交時保存的投遞格式。
+  - 圖片快照與投遞任務在同一交易提交。`GET /api/v1/line/table-images/{token}` 以七日有效的圖片連結讀取快照，表格按快照渲染，履歷回傳提交時保存的 PNG。履歷連結使用 `LINE_CHANNEL_SECRET`，回應含 `private, no-store, nosniff, no-referrer`。圖片服務異常回 `503`。
 
 ## 6. 私人日誌照片媒體傳輸（`NAS-LINE-04`）
 

@@ -10,6 +10,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
+from api.schemas.candidate_contact_pool import CandidateInformationSectionView
+
 
 class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -157,6 +159,7 @@ class CustomerConfirmationInformationPreviewView(_ClosedModel):
     staff_id: PositiveInt
     staff_name: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=5000)
+    line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
 
 
 class CustomerConfirmationWeeklyServicePreviewView(_ClosedModel):
@@ -187,6 +190,7 @@ class CustomerConfirmationPreviewView(_ClosedModel):
         min_length=1,
         max_length=4,
     )
+    resume_images: list[str] = Field(default_factory=list, max_length=4)
     blockers: list[str]
     send_allowed: bool
 

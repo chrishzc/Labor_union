@@ -424,8 +424,9 @@ class _CustomerRecommendationFollowupView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     case_no: str = Field(min_length=1, max_length=50)
     plan_id: int = Field(gt=0)
-    status: Literal["contact_requested", "awaiting_signing", "reply_reminder"]
+    status: Literal["contact_requested", "awaiting_signing", "reply_reminder", "response_failed"]
     reminder_due_at: datetime | None
+    failure_reason: str | None = None
     ticket_id: int | None = Field(default=None, gt=0)
 
 

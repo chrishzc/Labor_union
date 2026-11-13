@@ -13,13 +13,15 @@ _PURPOSE = b'line-table-image-v1'
 _INTERNAL_KEY = hashlib.sha256(b'labor-union-internal-line-table-image-key-v1').digest()
 
 
-def _cipher():
-    configured = (
-        os.getenv('LINE_CHANNEL_SECRET', '').strip()
-        or os.getenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', '').strip()
-    )
+def _cipher(*, require_configured=False):
+    configured = os.getenv('LINE_CHANNEL_SECRET', '').strip()
+    if not configured and not require_configured:
+        # Keep previously issued table image URLs readable.
+        configured = os.getenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', '').strip()
     if configured and not configured.startswith('replace_with_'):
         return AESGCM(hashlib.sha256(_PURPOSE + configured.encode('utf-8')).digest())
+    if require_configured:
+        raise TableImageUnavailable('履歷圖片服務尚未設定簽署金鑰。')
     return AESGCM(_INTERNAL_KEY)
 
 
@@ -35,7 +37,7 @@ def image_url(key, index, now):
         raise TableImageUnavailable('圖片服務尚未設定安全網址。')
     nonce = os.urandom(12)
     claim = json.dumps({'key': key, 'index': index, 'exp': int((now + timedelta(days=7)).timestamp())}, separators=(',', ':')).encode()
-    token = base64.urlsafe_b64encode(nonce + _cipher().encrypt(nonce, claim, _PURPOSE)).decode().rstrip('=')
+    token = base64.urlsafe_b64encode(nonce + _cipher(require_configured=index >= 3).encrypt(nonce, claim, _PURPOSE)).decode().rstrip('=')
     return f'{base}/api/v1/line/table-images/lti_{token}'
 
 
@@ -51,6 +53,11 @@ def image_claim(token, now):
         raise ValueError('table image link is invalid') from error
     if (not isinstance(value, dict) or set(value) != {'key', 'index', 'exp'} or not isinstance(value['key'], str)
             or not 1 <= len(value['key']) <= 191 or type(value['index']) is not int
-            or not 0 <= value['index'] <= 2 or type(value['exp']) is not int or now.timestamp() >= value['exp']):
+            or not 0 <= value['index'] <= 6 or type(value['exp']) is not int or now.timestamp() >= value['exp']):
         raise ValueError('table image link is invalid or expired')
+    if value['index'] >= 3:
+        try:
+            _cipher(require_configured=True)
+        except TableImageUnavailable as error:
+            raise ValueError('resume image link is invalid') from error
     return value

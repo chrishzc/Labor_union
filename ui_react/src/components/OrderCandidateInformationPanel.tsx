@@ -1,5 +1,5 @@
 import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { candidateContactPoolClient, createCandidateInformationSendCommand, type CandidateContactPool, type CandidateInformationPackagePreview,
   type CandidateInformationKind, type CandidateInformationSendCommand, type CaseInformationPreview,
   type CaseWeeklyServicePreview } from '../api/scheduling/candidate_contact_pool_client';
@@ -70,16 +70,44 @@ export function OrderCandidateInformationPanel({ caseNo, initialKind = 1, onClos
 type ReplyCard = Pick<CandidateInformationPackagePreview, 'reply_text' | 'reply_actions'>;
 type InformationDocument = Pick<CaseInformationPreview, 'info_type' | 'line_sections'>;
 
+export function OrderPreviewSections({ sections }: { sections: InformationDocument['line_sections'] }) {
+  return sections.map((section, index) => <section key={index}>
+    <h5>{section.title}</h5>
+    <dl>{section.rows.map(([label, value], row) => <div key={row}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+  </section>);
+}
+
 export function CandidateInformationPages({ documents, reply }: { documents: InformationDocument[]; reply?: ReplyCard }) {
   const [page, setPage] = useState(0);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
   const pages = ['訂單資訊一', '訂單資訊二', '每週服務說明'];
   if (reply) pages.push('共用回覆卡');
   const current = Math.min(page, pages.length - 1);
   const document = documents.find(part => part.info_type === current + 1);
+  return <OrderPreviewPages labels={pages} page={current} onPageChange={setPage}
+    title="LINE 訊息預覽" navigationLabel="選擇訊息頁面" paginationLabel="訊息翻頁">
+    {document && <OrderPreviewSections sections={document.line_sections} />}
+    {current === 2 && !document && <p role="status">服務日期尚未保存或與約定天數不符，暫無可寄送的週安排。</p>}
+    {current === 3 && reply && <>
+      <h5>接案意願確認</h5>
+      {reply.reply_text.map((line, index) => <p key={index}>{line}</p>)}
+      {reply.reply_actions.map((label, index) => <span className="candidate-package-reply" key={index}>{label}</span>)}
+    </>}
+  </OrderPreviewPages>;
+}
+
+export function OrderPreviewPages({ labels, page, onPageChange, title, navigationLabel, paginationLabel, children }: {
+  labels: readonly string[];
+  page: number;
+  onPageChange: (page: number) => void;
+  title: string;
+  navigationLabel: string;
+  paginationLabel: string;
+  children: ReactNode;
+}) {
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
   return <div className="candidate-package-pages">
-    <nav className="candidate-information-tabs" aria-label="選擇訊息頁面">
-      {pages.map((label, index) => <button key={label} type="button" aria-pressed={current === index} onClick={() => setPage(index)}>{label}</button>)}
+    <nav className="candidate-information-tabs" aria-label={navigationLabel}>
+      {labels.map((label, index) => <button key={label} type="button" aria-pressed={page === index} onClick={() => onPageChange(index)}>{label}</button>)}
     </nav>
     <div className="candidate-package-message"
       onTouchStart={event => { const touch = event.touches[0]; touchStart.current = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null; }}
@@ -91,25 +119,14 @@ export function CandidateInformationPages({ documents, reply }: { documents: Inf
         if (!start || !touch) return;
         const dx = touch.clientX - start.x;
         if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(touch.clientY - start.y)) {
-          setPage(Math.max(0, Math.min(pages.length - 1, current + (dx < 0 ? 1 : -1))));
+          onPageChange(Math.max(0, Math.min(labels.length - 1, page + (dx < 0 ? 1 : -1))));
         }
       }}>
-      <div className="candidate-package-header"><span>LINE 訊息預覽</span><span aria-live="polite">第 {current + 1} 頁，共 {pages.length} 頁</span></div>
-      <div className="candidate-package-bubble">
-        {document?.line_sections.map((section, index) => <section key={index}>
-          <h5>{section.title}</h5>
-          <dl>{section.rows.map(([label, value], row) => <div key={row}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        </section>)}
-        {current === 2 && !document && <p role="status">服務日期尚未保存或與約定天數不符，暫無可寄送的週安排。</p>}
-        {current === 3 && reply && <>
-          <h5>接案意願確認</h5>
-          {reply.reply_text.map((line, index) => <p key={index}>{line}</p>)}
-          {reply.reply_actions.map((label, index) => <span className="candidate-package-reply" key={index}>{label}</span>)}
-        </>}
-      </div>
-      <nav className="candidate-package-header" aria-label="訊息翻頁">
-        <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>上一頁</button>
-        <button type="button" disabled={current === pages.length - 1} onClick={() => setPage(current + 1)}>下一頁</button>
+      <div className="candidate-package-header"><span>{title}</span><span aria-live="polite">第 {page + 1} 頁，共 {labels.length} 頁</span></div>
+      <div className="candidate-package-bubble">{children}</div>
+      <nav className="candidate-package-header" aria-label={paginationLabel}>
+        <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>上一頁</button>
+        <button type="button" disabled={page === labels.length - 1} onClick={() => onPageChange(page + 1)}>下一頁</button>
       </nav>
     </div>
   </div>;

@@ -54,7 +54,7 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **政府補助舊逐案入口**：改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷；原 claim planning／submission／approval、逐案 receipt、offset 與 advance settlement POST 端點回 410，durable worker 拒絕建立舊命令；歷史 Query 與原交易沖正保留。
 - **舊帳戶維護端點**：`/api/v1/client-finance/payment-destination`（GET、`/preview`、`/apply`）已自路由與 OpenAPI 移除。
 - **LINE 簽署提醒**。`/api/v1/orders/{case_no}/contract-external-signing` 下的 `POST /reminders`、`POST /staff-segments/{segment_id}/reminders` 及 `GET /staff-segments/{segment_id}/reminder-readiness` 自路由與 OpenAPI 移除。工會人員在 LINE 官方帳號聊天後台手動選用範本，送交記錄與簽回確認繼續使用既有工會系統入口。
-- **月嫂履歷暫存下載**：`GET /api/v1/matching-confirmation-files/{token}` 回 typed 410 Gone；履歷改由業務線下傳送，LINE 排班確認卡片不嵌入下載連結。
+- **客戶確認包履歷下載退役**。舊入口 `GET /api/v1/matching-confirmation-files/{token}`、`GET /line-matching-resume` 與 `POST /api/v1/line/matching-resume/download` 均回 410。履歷圖片直接顯示於 LINE 確認包輪播首頁起的各頁。
 - **Data Browser 原始資料表端點**：僅依名冊契約保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 之 authenticated bounded archive Query；移除 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 路由。
 - **非市民歷史補登**：移除表單與 `POST /api/v1/admin/registration-applications/manual-non-citizen/check`，手動建案只接受後端正式配號的新案。既有案件及虛擬帳號對照保留。
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。

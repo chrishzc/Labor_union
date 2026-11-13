@@ -159,8 +159,8 @@ def _read_source(source, cursor, principal):
         with open_line_unit_of_work() as unit:
             total = unit.matching_notifications.customer_recommendation_followup_count(now)
             rows = unit.matching_notifications.customer_recommendation_followups(now, limit=SIZE, offset=cursor*SIZE)
-        titles = {'contact_requested':'客戶要求專人協助', 'awaiting_signing':'客戶已接受配對，待辦簽約', 'reply_reminder':'推薦確認待跟進'}
-        items = [_item(source, f'{r.plan_id}:{r.status}', titles[r.status], '請接續本案原有工作流程。',
+        titles = {'contact_requested':'客戶要求專人協助', 'awaiting_signing':'客戶已接受配對，待辦簽約', 'reply_reminder':'推薦確認待跟進', 'response_failed':'客戶回覆待工會處理'}
+        items = [_item(source, f'{r.plan_id}:{r.status}', titles[r.status], r.failure_reason or '請接續本案原有工作流程。',
                        '7 天只作內部提醒，仍可接受配對；簽約與訂金付款可先後發生。', case_no=r.case_no,
                        reference_id=r.ticket_id if r.status=='contact_requested' else None, tag='待簽約' if r.status=='awaiting_signing' else '待跟進',
                        time=str(r.reminder_due_at or '')) for r in rows]

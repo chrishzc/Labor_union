@@ -343,7 +343,7 @@ def test_confirmation_uses_read_only_owner_projection_without_generating_resume_
     assert len(payload["contents"]["contents"]) == 5
     from subsystems.line.message_preview import _project_node
     display = json.dumps([asdict(_project_node(b)) for b in payload["contents"]["contents"]], ensure_ascii=False)
-    assert "正式資訊一" in display and "下載履歷 PDF" in display
+    assert "正式資訊一" in display and "下載履歷 PDF" not in display
     assert "preview.invalid" not in display and "preview-only" not in display
 
 
@@ -663,7 +663,7 @@ def test_new_customer_description_is_only_added_to_the_final_decision_with_multi
     from subsystems.line.message_copy_catalog import default_copy_templates, render_copy_payload
     from subsystems.scheduling.matching_line_cards import customer_confirmation_card
     profiles = tuple({'id': index, 'name': f'月嫂{index}'} for index in range(1, 5))
-    payload = json.loads(customer_confirmation_card('CASE-7', profiles, (), (), (), {}, 'real-token', '本案說明'))
+    payload = json.loads(customer_confirmation_card('CASE-7', profiles, (), (), (), 'real-token', '本案說明'))
     template = default_copy_templates()['card-customer-confirmation']
     values = json.loads(template['content'])
     body = next(field for field in template['copy_fields'] if field['kind'] == 'body')

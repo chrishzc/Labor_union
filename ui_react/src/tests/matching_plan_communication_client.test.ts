@@ -94,8 +94,10 @@ describe('matchingPlanCommunicationClient', () => {
         order_information_2_ready: true,
         weekly_service_ready: true,
         weekly_service_row_count: 1,
-        order_information_1: [{ segment_id: 31, staff_id: 21, staff_name: '王小美', text: '訂單資訊－1' }],
-        order_information_2: [{ segment_id: 31, staff_id: 21, staff_name: '王小美', text: '訂單資訊－2' }],
+        order_information_1: [{ segment_id: 31, staff_id: 21, staff_name: '王小美', text: '訂單資訊－1',
+          line_sections: [{ title: '客戶付款約定', rows: [['客戶應付總額', 'NT$ 48,000']] }] }],
+        order_information_2: [{ segment_id: 31, staff_id: 21, staff_name: '王小美', text: '訂單資訊－2',
+          line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
         weekly_service_rows: [{ serial_number: 1, staff_name: '王小美', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
         caregiver_resumes: [{
           staff_id: 21,

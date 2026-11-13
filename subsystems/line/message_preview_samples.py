@@ -89,7 +89,7 @@ class PublicPreviewReader:
                 return ({"text": text, 'line_sections': tuple({'title': section.title, 'rows': section.rows}
                     for section in build_formal_information_sections(number, ORDER_FACTS, {}))},)
             payload = customer_confirmation_card(CASE.case_no, (asdict(STAFF),), information(1), information(2),
-                ({key: VALUES[key] for key in WEEKLY},), {STAFF.id: "https://preview.invalid/resume"}, "preview-only", "")
+                ({key: VALUES[key] for key in WEEKLY},), "preview-only", "")
             documents = (information_document('訂單資訊－1｜客戶費用', CASE.case_no, information(1), info_type=1),
                 information_document('訂單資訊－2', CASE.case_no, information(2), info_type=2),
                 weekly_document(CASE.case_no, ({key: VALUES[key] for key in WEEKLY},)))
@@ -133,7 +133,7 @@ def sample_bindings(descriptor, template, content, rendered_text):
             keys.append("description")
         if key == "card-customer-confirmation":
             keys.extend((*WEEKLY, "resume"))
-            values["resume"] = "範例履歷 PDF（僅顯示按鈕，不提供檔案或下載連結）"
+            values["resume"] = "寄送時將月嫂履歷 PDF 逐頁轉為圖片"
     elif key in {"card-caregiver-information", "card-caregiver-information-2"}:
         keys.extend(INFO_1 if key == "card-caregiver-information" else ("case_no", "start_date", "end_date", "city", "service_time", "multi_birth_count", "residence_type"))
     elif key.startswith("card-candidate-information-"):

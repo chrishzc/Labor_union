@@ -343,6 +343,8 @@ app.include_router(official_service_date_correction.router)
 app.include_router(service_before_replacement.router)
 app.include_router(matching_schedule_confirmation.router)
 app.include_router(matching_coordination.router)
+app.include_router(matches.resume_router)
+app.include_router(matches.resume_page_router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 

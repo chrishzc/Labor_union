@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
@@ -32,6 +32,7 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
 vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', async importOriginal => ({
   ...await importOriginal<typeof import('../../../../../../../api/scheduling/matching_candidate_workflow_client')>(), matchingCandidateWorkflowClient: {
   createSingleCaregiverPlan: mocks.createSingleCaregiverPlan, queryMatchingPlanReceipt: mocks.queryMatchingPlanReceipt,
+  searchInquiryCandidates: vi.fn(async (caseNo: string) => ({ case_no: caseNo, conflicts: [], candidate_options: [] })),
 } }));
 vi.mock('../../../../../../../api/scheduling/matching_plan_communication_client', () => ({ matchingPlanCommunicationClient: {
   queryContactState: mocks.queryContactState, recordCustomerDecision: mocks.recordCustomerDecision,
@@ -140,8 +141,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       case_no: CASE, plan_id: 51, expected_version: expectedVersion,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
-      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1\n總薪資：預估 48000 元' }],
-      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2\n飲食習慣：清淡' }],
+      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1',
+        line_sections: [{ title: '客戶付款約定', rows: [['客戶應付總額', 'NT$ 48,000']] }] }],
+      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2',
+        line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
       caregiver_resumes: [{ staff_id: 8892, staff_name: '月嫂甲', ready: true, filename: 'resume-A.pdf', version: 3, blocker: null }],
       blockers: [], send_allowed: true,
@@ -525,6 +528,18 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     );
   });
 
+  it('已寄送後可人工寄新版並使用不同操作識別', async () => {
+    contact.customer_profiles_status = null;
+    await openExisting();
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
+    const resend = await screen.findByRole('button', { name: '重新寄送確認資訊給客戶' });
+    await waitFor(() => expect(resend).toBeEnabled());
+    fireEvent.click(resend);
+    await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalledTimes(2));
+    expect(mocks.sendCustomerConfirmation.mock.calls[1][4]).not.toBe(mocks.sendCustomerConfirmation.mock.calls[0][4]);
+  });
+
   it('多段已同意人選不要求再次正式同意，未同意者則導回詢問而不冒充同意', async () => {
     contact = { ...contact, all_willing: false, segments: [{ segment_id: 71, willingness: 'willing' }, { segment_id: 72, willingness: 'pending' }] };
     await openExisting();
@@ -745,30 +760,71 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(mocks.replacementApply).toHaveBeenCalledTimes(1);
   });
 
-  it('共用內容在唯讀抽屜查看，客戶人工回覆及換人入口不重複展開', async () => {
+  it('依寄送順序預覽履歷圖片與三份案件資訊', async () => {
     contact.customer_profiles_status = null;
+    const loadPreview = mocks.previewCustomerConfirmation.getMockImplementation()!;
+    mocks.previewCustomerConfirmation.mockImplementation(async (...args) => ({
+      ...await loadPreview(...args),
+      resume_images: ['data:image/png;base64,cGFnZTE=', 'data:image/png;base64,cGFnZTI='],
+    }));
     await openExisting();
-    const view = await screen.findByRole('button', { name: '查看服務條件與費用' });
+    const view = await screen.findByRole('button', { name: '查看客戶確認資訊' });
     await waitFor(() => expect(view).toBeEnabled());
     expect(screen.queryByLabelText('方案 51 客戶決策依據')).not.toBeInTheDocument();
     fireEvent.click(view);
-    expect(await screen.findByRole('dialog', { name: '客戶確認資訊' })).toBeInTheDocument();
-    expect(screen.getByText(/總薪資：預估 48000 元/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '每週服務說明' }));
-    expect(screen.getByRole('table')).toHaveTextContent('40 小時');
+    const info = screen.getByRole('region', { name: '客戶確認資訊' });
+    const preview = within(info).getByRole('region', { name: '客戶確認資訊預覽' });
+    expect(await within(preview).findByRole('img', { name: '月嫂履歷 1' })).toHaveAttribute('src', 'data:image/png;base64,cGFnZTE=');
+    expect(within(preview).getByRole('button', { name: '上一頁' })).toBeDisabled();
+    fireEvent.click(within(preview).getByRole('button', { name: '下一頁' }));
+    expect(within(preview).getByRole('img', { name: '月嫂履歷 2' })).toHaveAttribute('src', 'data:image/png;base64,cGFnZTI=');
+    fireEvent.click(within(preview).getByRole('button', { name: '下一頁' }));
+    expect(within(preview).getByText('客戶付款約定')).toBeInTheDocument();
+    expect(within(preview).getByText('NT$ 48,000')).toBeInTheDocument();
+    fireEvent.click(within(preview).getByRole('button', { name: '下一頁' }));
+    expect(within(preview).getByText('清淡')).toBeInTheDocument();
+    fireEvent.click(within(preview).getByRole('button', { name: '每週服務說明' }));
+    expect(within(preview).getByRole('table')).toHaveTextContent('40 小時');
+    expect(within(preview).getByText('接受此配對')).toBeInTheDocument();
+    expect(within(preview).getByText('專人協助／進一步了解')).toBeInTheDocument();
+    expect(within(preview).getByRole('button', { name: '下一頁' })).toBeDisabled();
+    expect(within(preview).queryByRole('button', { name: '共用回覆卡' })).not.toBeInTheDocument();
+    fireEvent.click(within(info).getByRole('button', { name: '收起客戶確認資訊預覽' }));
+    expect(within(info).queryByRole('region', { name: '客戶確認資訊預覽' })).not.toBeInTheDocument();
+    expect(view).toHaveFocus();
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
     expect(screen.queryByText('其他處理')).not.toBeInTheDocument();
     expect(screen.queryByText('更換推薦人選')).not.toBeInTheDocument();
+  });
+
+  it('客戶尚未綁定 LINE 時仍可查看訂單資訊，寄送按鈕停用', async () => {
+    contact.customer_profiles_status = 'sent';
+    const preview = mocks.previewCustomerConfirmation.getMockImplementation()!;
+    mocks.previewCustomerConfirmation.mockImplementation(async (...args) => ({
+      ...await preview(...args), resume_images: ['data:image/png;base64,cGFnZTE='],
+      blockers: ['客戶尚未完成 LINE 綁定。'], send_allowed: false,
+    }));
+    await openExisting();
+    expect(await screen.findByText('客戶尚未完成 LINE 綁定。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看客戶確認資訊' }));
+    const region = screen.getByRole('region', { name: '客戶確認資訊預覽' });
+    expect(await within(region).findByRole('img', { name: '月嫂履歷' })).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('button', { name: '下一頁' }));
+    expect(within(region).getByText('客戶付款約定')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新寄送確認資訊給客戶' })).toBeDisabled();
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
 
   it('保存日期更新即使方案及溝通版本相同，也重讀確認內容且保留訊息草稿', async () => {
     exists = true;
     contact.customer_profiles_status = null;
     const view = render(<OrderFormalRecommendationPanel caseNo={CASE} revision={0} />);
-    const information = await screen.findByRole('button', { name: '查看每週服務說明' });
+    const information = await screen.findByRole('button', { name: '查看客戶確認資訊' });
     await waitFor(() => expect(information).toBeEnabled());
     fireEvent.click(screen.getByText('調整寄送訊息'));
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '保留這次確認訊息' } });
     fireEvent.click(information);
+    fireEvent.click(await screen.findByRole('button', { name: '每週服務說明' }));
     expect(screen.getByRole('table')).toHaveTextContent('40 小時');
 
     const previous = mocks.previewCustomerConfirmation.mock.results.at(-1)!;
@@ -777,36 +833,63 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
       ...data.weekly_service_rows[0], service_hours_per_day: 8.5, weekly_work_days: 1, weekly_hours: 8.5,
     }] });
     view.rerender(<OrderFormalRecommendationPanel caseNo={CASE} revision={1} />);
-    await screen.findByText('8.5 小時');
+    await waitFor(() => expect(screen.getByRole('table')).toHaveTextContent('8.5 小時'));
     expect(screen.getByLabelText('方案 51 確認資訊備註')).toHaveValue('保留這次確認訊息');
     expect(mocks.previewCustomerConfirmation).toHaveBeenLastCalledWith(CASE, 51, 4, expect.anything());
     expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
 
-  it('缺月嫂履歷時顯示人工傳送提醒但仍允許寄送確認資訊', async () => {
+  it('分段方案保留各段欄位並提示尚未就緒的週說明', async () => {
+    contact.segments.push({ segment_id: 72, willingness: 'willing' });
+    const preview = mocks.previewCustomerConfirmation.getMockImplementation()!;
+    mocks.previewCustomerConfirmation.mockImplementation(async (...args) => {
+      const data = await preview(...args);
+      return {
+        ...data,
+        order_information_1: [...data.order_information_1, {
+          ...data.order_information_1[0], segment_id: 72, staff_id: 8893, staff_name: '月嫂乙',
+          line_sections: [{ title: '客戶付款約定', rows: [['客戶應付總額', 'NT$ 24,000']] }],
+        }],
+        weekly_service_ready: false, weekly_service_row_count: 0, weekly_service_rows: [],
+        blockers: ['每週服務說明尚未就緒。'], send_allowed: false,
+      };
+    });
+    await openExisting();
+    fireEvent.click(await screen.findByRole('button', { name: '查看客戶確認資訊' }));
+    const region = screen.getByRole('region', { name: '客戶確認資訊預覽' });
+    fireEvent.click(await within(region).findByRole('button', { name: '下一頁' }));
+    expect(within(region).getByRole('heading', { name: /月嫂甲/ })).toBeInTheDocument();
+    expect(within(region).getByRole('heading', { name: /月嫂乙/ })).toBeInTheDocument();
+    expect(within(region).getByText('NT$ 24,000')).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('button', { name: '每週服務說明' }));
+    expect(within(region).getByRole('status')).toHaveTextContent('每週服務說明尚未就緒');
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('缺月嫂履歷時顯示原因並停用寄送', async () => {
     contact.customer_profiles_status = null;
     mocks.previewCustomerConfirmation.mockResolvedValue({
       case_no: CASE, plan_id: 51, expected_version: 4,
       order_information_1_ready: true, order_information_2_ready: true,
       weekly_service_ready: true, weekly_service_row_count: 1,
-      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1' }],
-      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2' }],
+      order_information_1: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－1',
+        line_sections: [{ title: '客戶付款約定', rows: [['客戶應付總額', 'NT$ 48,000']] }] }],
+      order_information_2: [{ segment_id: 71, staff_id: 8892, staff_name: '月嫂甲', text: '訂單資訊－2',
+        line_sections: [{ title: '飲食與照護需求', rows: [['飲食習慣', '清淡']] }] }],
       weekly_service_rows: [{ serial_number: 1, staff_name: '月嫂甲', week_start_date: '2026-09-01', week_end_date: '2026-09-07', service_hours_per_day: 8, weekly_work_days: 5, weekly_hours: 40 }],
       caregiver_resumes: [{
         staff_id: 8892, staff_name: '月嫂甲', ready: false, filename: null, version: null,
-        blocker: '月嫂 月嫂甲 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。',
+        blocker: '月嫂 月嫂甲 未附履歷 PDF，請先上傳。',
       }],
-      blockers: [],
-      send_allowed: true,
+      blockers: ['月嫂 月嫂甲 未附履歷 PDF，請先上傳。'],
+      send_allowed: false,
     });
 
     await openExisting();
 
-    expect(await screen.findByText(/履歷 PDF 未附/)).toBeInTheDocument();
+    expect(await screen.findByText(/未附履歷 PDF/)).toBeInTheDocument();
     const send = screen.getByRole('button', { name: '寄送確認資訊給客戶' });
-    expect(send).toBeEnabled();
-    await prepareSending();
-    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
-    await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalled());
+    expect(send).toBeDisabled();
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
 });

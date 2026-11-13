@@ -26,6 +26,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.validation import require_canonical_text, require_positive_half_hour, require_positive_integer
+from subsystems.orders.order_information import CandidateInformationSection
 
 _REASON_MAXIMUM_LENGTH = 500
 
@@ -125,6 +126,7 @@ class CustomerConfirmationInformationPreview:
     staff_id: int
     staff_name: str
     text: str
+    line_sections: tuple[CandidateInformationSection, ...]
 
     def __post_init__(self) -> None:
         require_positive_integer(self.segment_id, "matching information segment ID")
@@ -168,6 +170,7 @@ class CustomerConfirmationPreview:
     blockers: tuple[str, ...]
     service_period_start: str | None = None
     service_period_end: str | None = None
+    resume_images: tuple[bytes, ...] = ()
 
     @property
     def send_allowed(self) -> bool:
@@ -303,9 +306,10 @@ class MatchingSegmentContact:
 class CustomerRecommendationFollowup:
     case_no: str
     plan_id: int
-    status: Literal["contact_requested", "awaiting_signing", "reply_reminder"]
+    status: Literal["contact_requested", "awaiting_signing", "reply_reminder", "response_failed"]
     reminder_due_at: datetime | None
     ticket_id: int | None
+    failure_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

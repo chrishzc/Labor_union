@@ -6,7 +6,7 @@ from api.dependencies.internal_service_auth import require_internal_service, req
 from api.error_contracts import typed_http_error
 from api.routes import (
     line_candidate_contact, line_deposit_payment, line_feedback, line_mobile_admin,
-    line_mobile_staff_leave_coordination, line_service_help, notification_task_actions,
+    line_mobile_staff_leave_coordination, line_service_help, matches, notification_task_actions,
 )
 from infrastructure.http.line_operations_client import LineOperationsClient, LineOperationsUnavailable, PREFIX
 from infrastructure.runtime.worker_credentials import LINE_OPERATIONS_SERVICE
@@ -36,7 +36,7 @@ async def forward_line_operation(request: Request, client=Depends(get_line_opera
         raise typed_http_error(503, "unavailable", "line_operations_unavailable",
                                "LINE 功能暫時無法連線，請稍後重試", "line-operations", retryable=False) from None
     headers = {key: value for key, value in response.headers.items()
-               if key.lower() in {"content-type", "x-correlation-id", "retry-after"}}
+               if key.lower() in {"content-type", "content-disposition", "x-content-type-options", "x-correlation-id", "retry-after"}}
     headers["Cache-Control"] = "private, no-store"
     return Response(response.content, status_code=response.status_code, headers=headers)
 
@@ -48,6 +48,7 @@ _OPERATIONS = (
     line_deposit_payment.router, line_service_help.public_router,
     line_feedback.router, line_mobile_admin.router, line_mobile_staff_leave_coordination.router,
     notification_task_actions.mobile_router,
+    matches.resume_router,
 )
 private_router = APIRouter(prefix=PREFIX, include_in_schema=False,
                           dependencies=[Depends(require_private_line_operations)])
@@ -58,5 +59,5 @@ for original in _OPERATIONS:
         public_router.add_api_route(route.path, forward_line_operation, methods=sorted(route.methods),
                                     name=route.name, include_in_schema=route.include_in_schema)
 for pages in (line_candidate_contact.page_router, line_deposit_payment.page_router,
-              line_service_help.page_router, line_mobile_admin.page_router):
+              line_service_help.page_router, line_mobile_admin.page_router, matches.resume_page_router):
     public_router.include_router(pages)

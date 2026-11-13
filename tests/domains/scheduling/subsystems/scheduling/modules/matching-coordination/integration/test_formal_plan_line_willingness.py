@@ -42,7 +42,7 @@ class _Repository:
         }
         self.events = []
 
-    def interaction(self, token_hash):
+    def interaction(self, token_hash, *, lock=True):
         return self.interaction_data
 
     def get_contact_state(self, case_no, plan_id, *, lock=False):

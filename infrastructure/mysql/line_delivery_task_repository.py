@@ -108,7 +108,11 @@ class MySqlLineDeliveryTaskRepository:
             raise LookupError('table image not found')
         payload = json.loads(canonical_json_value(row['payload_snapshot']))
         try:
-            return TableDocument.from_mapping(payload[DOCUMENTS_KEY][index]['document'])
+            picture = payload[DOCUMENTS_KEY][index]
+            if index >= 3 and 'png' in picture:
+                from base64 import b64decode
+                return b64decode(picture['png'], validate=True)
+            return TableDocument.from_mapping(picture['document'])
         except (KeyError, IndexError, TypeError) as error:
             raise LookupError('table image not found') from error
 
@@ -415,12 +419,20 @@ class MySqlLineDeliveryTaskRepository:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM line_delivery_tasks" + where, parameters)
             total_row = optional_row(cursor.fetchone()) or {"total": 0}
+            # Sort and paginate only IDs. A resume PNG in payload_snapshot can
+            # exceed MySQL's sort buffer by itself.
             cursor.execute(
-                f"SELECT {_ADMIN_COLUMNS} FROM line_delivery_tasks{where} "
-                "ORDER BY scheduled_at_utc DESC,id DESC LIMIT %s OFFSET %s",
+                f"SELECT {_ADMIN_COLUMNS} FROM line_delivery_tasks JOIN ("
+                f"SELECT id FROM line_delivery_tasks{where} "
+                "ORDER BY scheduled_at_utc DESC,id DESC LIMIT %s OFFSET %s"
+                ") AS task_page USING (id)",
                 [*parameters, query.page_size, offset],
             )
-            rows = tuple(cursor.fetchall() or ())
+            rows = sorted(
+                cursor.fetchall() or (),
+                key=lambda row: (row["scheduled_at_utc"], row["id"]),
+                reverse=True,
+            )
         return LineDeliveryAdminPage(
             tuple(_admin_record(row) for row in rows),
             int(total_row["total"]),
@@ -781,7 +793,7 @@ _INFORMATION_REPLY_OPPORTUNITY_SQL = (
     "OR (event_type='follow' AND source_type='user'))"
 )
 _CLAIM_CANDIDATES_SQL = (
-    f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE "
+    "SELECT id,source_aggregate_type,created_at_utc FROM line_delivery_tasks WHERE "
     "source_aggregate_type NOT IN ('legacy_line_task','line_follow_schedule') AND "
     "((processing_status='pending' AND scheduled_at_utc<=%s) OR "
     "(processing_status='retryable_failed' AND next_attempt_at_utc<=%s) OR "

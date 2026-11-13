@@ -5,10 +5,12 @@
 ================================================================================
 """
 
+from contextlib import contextmanager
+from base64 import b64encode
+from dataclasses import asdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
 from subsystems.scheduling.matching_plan_workflow import (
@@ -82,18 +84,37 @@ from subsystems.scheduling.matching_notification_contracts import (
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
 )
-from subsystems.scheduling.customer_confirmation_download import verify_resume_download_token
+from infrastructure.line.table_image_renderer import render_resume_pages
+from infrastructure.file.storage_layout import StorageLayoutError
+from pymysql.err import OperationalError
+from subsystems.controlled_files.contracts import ControlledFileStorageError
 from subsystems.line.table_image_contracts import TableImageUnavailable
 from api.dependencies.controlled_files import get_controlled_file_workflow
-from subsystems.controlled_files.workflow import (
-    ControlledFileOwner, ControlledFilePurpose, ControlledFileWorkflow,
-)
+from subsystems.controlled_files.workflow import ControlledFileWorkflowError
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
+resume_router = APIRouter(tags=["LINE Matching Resume"])
+resume_page_router = APIRouter(tags=["LINE Matching Resume Page"])
+
+
+def _render_matching_resume(file_id: str, page_budget: int) -> tuple[bytes, ...]:
+    try:
+        with contextmanager(get_controlled_file_workflow)() as workflow:
+            file = workflow.download(file_id)
+    except ControlledFileWorkflowError as error:
+        raise ValueError("履歷檔案無法讀取，請重新上傳。") from error
+    except (ControlledFileStorageError, StorageLayoutError, OperationalError) as error:
+        raise TableImageUnavailable("履歷儲存服務暫時無法使用。") from error
+    if file.content_type != "application/pdf":
+        raise ValueError("履歷檔案格式無效，請重新上傳 PDF。")
+    return render_resume_pages(file.content, page_budget)
+
+
 matching_notifications = MatchingNotificationApplication(
     open_line_unit_of_work,
     lambda: datetime.now(timezone.utc),
     availability_facts_port=_matching_facts_port,
+    resume_page_renderer=_render_matching_resume,
 )
 
 
@@ -188,13 +209,18 @@ def get_matching_plan_contact_state_route(
 def preview_matching_plan_customer_confirmation_route(
     case_no: str,
     plan_id: int,
+    response: Response,
     expected_version: int = Query(..., ge=0),
     principal: AdminPrincipal = Depends(require_line_matching_reader),
+    include_resume_images: bool = False,
 ):
+    if include_resume_images:
+        response.headers["Cache-Control"] = "private, no-store"
     try:
         preview = matching_notifications.preview_customer_confirmation(
             admin_actor_context(principal),
             MatchingPlanReference(case_no, plan_id, expected_version),
+            include_resume_images=include_resume_images,
         )
         return BaseResponse(
             data=CustomerConfirmationPreviewView.model_validate(
@@ -432,8 +458,13 @@ def send_matching_plan_customer_confirmation_route(
 
 @router.get("/matching-confirmation-files/{token}")
 def download_matching_confirmation_resume(token: str):
-    """Customer-facing resume download retired; resumes are handled offline."""
-    raise HTTPException(status_code=410, detail="履歷下載功能已退役，改由專人線下提供。")
+    raise HTTPException(status_code=410, detail="履歷下載已退役。請向工會索取新版確認資訊。")
+
+
+@resume_page_router.get("/line-matching-resume", include_in_schema=False)
+@resume_router.post("/api/v1/line/matching-resume/download", include_in_schema=False)
+def retired_customer_resume():
+    raise HTTPException(status_code=410, detail="履歷下載已退役。請向工會索取新版確認資訊。")
 
 
 @router.post(
@@ -776,24 +807,8 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
         "weekly_service_row_count": preview.weekly_service_row_count,
         "service_period_start": preview.service_period_start,
         "service_period_end": preview.service_period_end,
-        "order_information_1": [
-            {
-                "segment_id": item.segment_id,
-                "staff_id": item.staff_id,
-                "staff_name": item.staff_name,
-                "text": item.text,
-            }
-            for item in preview.order_information_1
-        ],
-        "order_information_2": [
-            {
-                "segment_id": item.segment_id,
-                "staff_id": item.staff_id,
-                "staff_name": item.staff_name,
-                "text": item.text,
-            }
-            for item in preview.order_information_2
-        ],
+        "order_information_1": [asdict(item) for item in preview.order_information_1],
+        "order_information_2": [asdict(item) for item in preview.order_information_2],
         "weekly_service_rows": [
             {
                 "serial_number": item.serial_number,
@@ -819,6 +834,9 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
             for item in preview.caregiver_resumes
         ],
         "blockers": list(preview.blockers),
+        "resume_images": [
+            "data:image/png;base64," + b64encode(image).decode("ascii") for image in preview.resume_images
+        ],
         "send_allowed": preview.send_allowed,
     }
 

@@ -19,6 +19,7 @@ from domains.line.webhook import LineWebhookInboxSnapshot, build_line_webhook_ev
 from shared_kernel.identities import CorrelationId
 from subsystems.line.ports import LineUnitOfWorkPort, LineWakeupPublisherPort
 from subsystems.line.webhook_contracts import ClaimLineWebhookEventsQuery, LineWebhookRegistrationOutcome
+from subsystems.line.webhook_event_consumer import RegisteredReply
 
 
 class InvalidLineWebhookSignatureError(ValueError):
@@ -42,17 +43,20 @@ class LineWebhookIntake:
         unit_of_work_factory: Callable[[], LineUnitOfWorkPort],
         wakeup_publisher: LineWakeupPublisherPort,
         *,
-        reply_consumer: Callable[[LineWebhookInboxSnapshot], tuple[LineDeliveryTaskSnapshot, ...]] | None = None,
+        reply_consumer: Callable[[LineWebhookInboxSnapshot], RegisteredReply] | None = None,
         reply_delivery: Callable[[LineDeliveryTaskSnapshot], None] | None = None,
+        release_after_reply: Callable[[LineWebhookInboxSnapshot], None] | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
-        if (reply_consumer is None) != (reply_delivery is None):
-            raise ValueError("LINE webhook Reply requires both processing and delivery")
+        configured = (reply_consumer is not None, reply_delivery is not None, release_after_reply is not None)
+        if any(configured) and not all(configured):
+            raise ValueError("LINE webhook Reply requires processing, delivery and inbox release")
         self._signature_verifier = signature_verifier
         self._unit_of_work_factory = unit_of_work_factory
         self._wakeup_publisher = wakeup_publisher
         self._reply_consumer = reply_consumer
         self._reply_delivery = reply_delivery
+        self._release_after_reply = release_after_reply
         self._now = now
 
     def accept(
@@ -69,14 +73,20 @@ class LineWebhookIntake:
         replies = []
         for event in reserved:
             try:
-                replies.extend(self._reply_consumer(event))
+                replies.append(self._reply_consumer(event))
             except Exception as error:
                 print(f"[LINE Webhook] Reply processing unavailable: {type(error).__name__}")
-        for task in replies:
-            try:
-                self._reply_delivery(task)
-            except Exception as error:
-                print(f"[LINE Webhook] Reply delivery unavailable: {type(error).__name__}")
+        for reply in replies:
+            for task in reply.tasks:
+                try:
+                    self._reply_delivery(task)
+                except Exception as error:
+                    print(f"[LINE Webhook] Reply delivery unavailable: {type(error).__name__}")
+            if reply.deferred_event is not None and self._release_after_reply is not None:
+                try:
+                    self._release_after_reply(reply.deferred_event)
+                except Exception as error:
+                    print(f"[LINE Webhook] Reply event release unavailable: {type(error).__name__}")
         if created_count:
             self._publish_wakeup_best_effort()
         return LineWebhookIntakeResult(created_count, len(events) - created_count)

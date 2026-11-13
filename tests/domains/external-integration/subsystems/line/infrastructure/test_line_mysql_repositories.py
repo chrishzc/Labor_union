@@ -220,7 +220,9 @@ def test_delivery_claim_cancels_retired_follow_schedule_before_claiming() -> Non
     assert "source_aggregate_type='line_follow_schedule'" in retirement_sql
     assert "processing_status='cancelled'" in retirement_sql
     assert retirement_parameters == ()
-    parameters = cursor.executed[1][1]
+    claim_sql, parameters = cursor.executed[1]
+    assert "payload_snapshot" not in claim_sql
+    assert claim_sql.endswith("FOR UPDATE SKIP LOCKED")
     assert parameters[0] == parameters[1] == parameters[2]
     assert parameters[3] == 10
 
@@ -280,13 +282,15 @@ def _delivery_admin_row(*, missing: str | None = None, extra: bool = False) -> d
 
 def test_delivery_admin_projection_selects_only_contract_columns() -> None:
     row = _delivery_admin_row()
-    cursor = ScriptedCursor(one_rows=({"total": 1},), all_rows=((row,),))
+    later_row = {**row, "id": 8}
+    cursor = ScriptedCursor(one_rows=({"total": 2},), all_rows=((row, later_row),))
     page = MySqlLineDeliveryTaskRepository(FakeConnection(cursor)).list_admin(
         LineDeliveryAdminQuery(page=1, page_size=25)
     )
 
-    assert len(page.items) == 1
+    assert [item.task_id.value for item in page.items] == [8, 7]
     admin_sql = cursor.executed[1][0]
+    assert "JOIN (SELECT id FROM line_delivery_tasks ORDER BY" in admin_sql
     for internal_column in (
         "payload_fingerprint",
         "idempotency_key",

@@ -1,5 +1,7 @@
 """Customer assistance retains acceptance; reminders never expire a recommendation."""
 from copy import deepcopy
+from hashlib import sha256
+import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
@@ -8,17 +10,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from domains.line.identities import LineUserId
+from domains.line.identities import LineSourceType, LineUserId
 from domains.scheduling.matching_communication import (
     CaregiverWillingness, CustomerMatchingDecision, MatchingCommunicationConflictError,
     MatchingCommunicationStaleError, MatchingPlanReference, MatchingRecipientMismatchError,
 )
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
-from shared_kernel.identities import CorrelationId, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
+from subsystems.line.webhook_event_consumer import TerminalLineEventError
 from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
 from subsystems.scheduling.matching_notification_contracts import (
-    MatchingContactState, MatchingResponseResult, MatchingSegmentContact,
+    MatchingContactState, MatchingResponseResult, MatchingSegmentContact, RequestCustomerProfilesCommand,
 )
 
 NOW = datetime(2026, 10, 22, 4, tzinfo=timezone.utc)
@@ -38,12 +41,17 @@ class _Repository:
                            expires_at_utc=NOW - timedelta(days=30), action_scope="customer_decision")
         self.events = {}
 
-    def interaction(self, token):
+    def interaction(self, token, *, lock=True):
         return self.action
 
     def get_contact_state(self, case_no, plan_id, *, lock=False):
-        assert lock
         return self.state
+
+    def pending_customer_assistance(self, *_args):
+        return False
+
+    def customer_confirmation_snapshot(self, *_args):
+        return None
 
     def append_response(self, **args):
         key = args["idempotency_key"].value
@@ -113,6 +121,143 @@ def _reply(uow, decision, key="one", user=CUSTOMER):
         line_user_id=user, idempotency_key=IdempotencyKey(key), correlation_id=CorrelationId(key), occurred_at=NOW)
 
 
+def _postback(decision, event_id="customer-event"):
+    data = f"matching:synthetic-recommendation-token:{decision}"
+    return SimpleNamespace(event=SimpleNamespace(
+        source=SimpleNamespace(source_type=LineSourceType.USER, user_id=CUSTOMER),
+        occurred_at=NOW, event_id=SimpleNamespace(value=event_id),
+        payload_json=json.dumps({"postback": {"data": data}}),
+    ))
+
+
+@pytest.mark.parametrize(("decision", "text"), [
+    ("accepted", "已收到您接受配對的回覆，後續由工會安排簽約。"),
+    ("contact_requested", "已收到您的聯絡需求，請留下您的疑問"),
+])
+def test_customer_receipt_defers_business_and_background_never_adds_reply(decision, text):
+    uow = _Uow()
+    handler = LineMatchingPostbackApplication(_app(uow))
+    event = _postback(decision)
+    assert handler.handle(event, uow, reply_only=True) is False
+    assert handler.handle(event, uow, reply_only=True) is False
+    assert uow.matching_notifications.events == {}
+    assert uow.customer_service.messages == {}
+    [reply] = uow.deliveries.values()
+    assert reply.source_aggregate_type == "line_webhook_reply"
+    assert json.loads(reply.payload_json)["text"] == text
+    assert handler.handle(event, uow) is True
+    assert uow.matching_notifications.state.customer_decision.value == decision
+    assert len(uow.deliveries) == 1
+    assert len(uow.customer_service.messages) == (1 if decision == "contact_requested" else 0)
+
+
+def test_background_conflict_preserves_receipt_without_accepting_or_adding_reply():
+    from domains.scheduling.matching_communication import MatchingDecisionNotReadyError
+
+    uow = _Uow()
+    def occupied(_state):
+        raise MatchingDecisionNotReadyError("occupied")
+    application = MatchingNotificationApplication(lambda: uow, lambda: NOW, availability_validator=occupied)
+    handler = LineMatchingPostbackApplication(application)
+    event = _postback("accepted")
+    assert handler.handle(event, uow, reply_only=True) is False
+    with pytest.raises(TerminalLineEventError, match="檔期已有衝突"):
+        handler.handle(event, uow)
+    assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.PENDING
+    assert uow.matching_notifications.events == {}
+    assert len(uow.deliveries) == 1
+
+
+def test_background_cannot_accept_a_package_after_its_customer_terms_changed():
+    uow = _Uow()
+    original = {"order_information_1": ({"payment": 48000},), "order_information_2": (), "weekly_service_rows": ()}
+    uow.matching_notifications.customer_confirmation_snapshot = lambda *_: original
+    uow.matching_notifications.customer_confirmation_package = lambda *_: {
+        **original, "order_information_1": ({"payment": 52000},),
+    }
+    handler = LineMatchingPostbackApplication(_app(uow))
+    event = _postback("accepted")
+    assert handler.handle(event, uow, reply_only=True) is False
+    with pytest.raises(TerminalLineEventError, match="客戶確認內容已變更"):
+        handler.handle(event, uow)
+    assert uow.matching_notifications.events == {}
+    assert len(uow.deliveries) == 1
+
+
+def test_background_accepts_a_package_after_only_its_resume_changed():
+    uow = _Uow()
+    original = {"confirmation_reference": "sent", "order_information_1": (),
+                "order_information_2": (), "weekly_service_rows": (),
+                "caregiver_resumes": ({"staff_id": 30, "file_id": "cf_previous"},)}
+    uow.matching_notifications.customer_confirmation_snapshot = lambda *_: original
+    uow.matching_notifications.customer_confirmation_package = lambda *_: {
+        **original, "caregiver_resumes": ({"staff_id": 30, "file_id": "cf_current"},),
+    }
+    handler = LineMatchingPostbackApplication(_app(uow))
+    event = _postback("accepted")
+    assert handler.handle(event, uow, reply_only=True) is False
+    handler.handle(event, uow)
+    assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.ACCEPTED
+    assert len(uow.matching_notifications.events) == 1
+    assert len(uow.deliveries) == 1
+
+
+def test_revoked_package_cannot_acknowledge_or_commit_acceptance():
+    uow = _Uow()
+    uow.matching_notifications.action["interaction_status"] = "revoked"
+    handler = LineMatchingPostbackApplication(_app(uow))
+    event = _postback("accepted")
+    assert handler.handle(event, uow, reply_only=True) is True
+    with pytest.raises(TerminalLineEventError, match="no longer active"):
+        handler.handle(event, uow)
+    assert not uow.deliveries and not uow.matching_notifications.events
+
+
+def test_resend_uses_current_snapshot_and_replay_does_not_revoke_again(monkeypatch):
+    uow = _Uow()
+    repository = uow.matching_notifications
+    receipts = {}
+    revocations = []
+    repository.get_intent_result = lambda key, fingerprint, **_: receipts.get((key.value, fingerprint))
+    repository.revoke_customer_interactions = revocations.append
+    snapshots = []
+    current = {"fee": 48000}
+    repository.customer_confirmation_package = lambda *_: {
+        "profiles": ({"id": 30},), "order_information_1": ({"fee": current["fee"]},),
+        "order_information_2": (), "weekly_service_rows": (), "caregiver_resumes": ({"staff_id": 30, "file_id": "cf_demo"},),
+    }
+    app = _app(uow)
+    rendered = []
+    app._resume_page_renderer = lambda file, budget: rendered.append((file, budget)) or (b"page",)
+    def append(_unit, command, _recipient, _segment, _kind, snapshot, *_args, resume_pages):
+        assert resume_pages == (b"page",)
+        snapshots.append(snapshot)
+        receipt = object()
+        receipts[command.idempotency_key.value, command.fingerprint.value] = receipt
+        return receipt
+    monkeypatch.setattr(app, "_append_notification", append)
+    def command(key):
+        return RequestCustomerProfilesCommand(repository.state.plan, "確認資訊",
+            ActorContext("admin:1", ("line.matching.send",)),
+            ExpectedVersion(0), IdempotencyKey(key), CorrelationId(key))
+    original = app.request_customer_confirmation(command("original"))
+    current["fee"] = 52000
+    assert app.request_customer_confirmation(command("original")) is original
+    assert app.request_customer_confirmation(command("updated")) is not original
+    assert [snapshot["order_information_1"][0]["fee"] for snapshot in snapshots] == [48000, 52000]
+    assert revocations == [10, 10]
+    assert rendered == [("cf_demo", 4), ("cf_demo", 4)]
+    original_package = repository.customer_confirmation_package
+    repository.customer_confirmation_package = lambda *args: {**original_package(*args), "caregiver_resumes": ()}
+    with pytest.raises(ValueError, match="皆須上傳履歷 PDF"):
+        app.request_customer_confirmation(command("missing-resume"))
+    assert revocations == [10, 10] and len(snapshots) == 2
+    repository = uow.matching_notifications
+    repository.state = replace(repository.state, customer_decision=CustomerMatchingDecision.ACCEPTED)
+    with pytest.raises(MatchingCommunicationConflictError, match="already decided"):
+        app.request_customer_confirmation(command("after-acceptance"))
+
+
 def test_assistance_then_acceptance_after_7_days_keeps_original_card_and_unique_staff_request():
     uow = _Uow()
     _reply(uow, "contact_requested")
@@ -120,7 +265,7 @@ def test_assistance_then_acceptance_after_7_days_keeps_original_card_and_unique_
     assert len(uow.customer_service.messages) == 1
     assert len(uow.deliveries) == 1
     assert uow.matching_notifications.action["interaction_status"] == "active"
-    assert json.loads(next(iter(uow.deliveries.values())).payload_json)["text"] == "已收到您的聯絡需求，請留下您的疑問。"
+    assert json.loads(next(iter(uow.deliveries.values())).payload_json)["text"] == "已收到您的聯絡需求，請留下您的疑問"
     _reply(uow, "accepted", "two")
     assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.ACCEPTED
     assert uow.matching_notifications.action["interaction_status"] == "consumed"
@@ -178,7 +323,7 @@ def test_leaving_question_reuses_customer_service_ticket_without_auto_reply_or_g
     _reply(uow, "contact_requested")
     uow.matching_schedule_confirmations = SimpleNamespace(confirm_line_rejection_reason=lambda *_: False)
     adapter = LineMatchingPostbackApplication(_app(uow))
-    inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value="question-1")))
+    inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value="question-1"), occurred_at=NOW))
     assert adapter.handle_message(inbox, uow, CUSTOMER, "請問月嫂是否有照顧雙胞胎的經驗？")
     message = uow.customer_service.messages["matching-assistance-message:question-1"]
     assert message.message == "請問月嫂是否有照顧雙胞胎的經驗？"
@@ -226,6 +371,11 @@ def followups():
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     connection.create_function("CONCAT", -1, lambda *args: "".join(map(str, args)))
+    connection.create_function("REGEXP", 2, lambda pattern, value: bool(value and re.search(pattern, value)))
+    connection.create_function("SHA2", 2, lambda value, _: sha256(value.encode()).hexdigest() if value else None)
+    connection.create_function("JSON_UNQUOTE", 1, lambda value: value)
+    connection.create_function("SUBSTRING_INDEX", 3, lambda value, separator, count:
+        separator.join(value.split(separator)[:count] if count > 0 else value.split(separator)[count:]) if value else None)
     connection.executescript("""
     CREATE TABLE orders(case_no TEXT,status TEXT);
     CREATE TABLE caregiver_matching_plans(id INTEGER,case_no TEXT,is_active INTEGER,status TEXT);
@@ -233,6 +383,8 @@ def followups():
     CREATE TABLE matching_response_events(id INTEGER,plan_id INTEGER,response_type TEXT,response_value TEXT,occurred_at_utc TIMESTAMP);
     CREATE TABLE matching_notification_intents(plan_id INTEGER,notification_kind TEXT,delivery_task_id INTEGER);
     CREATE TABLE line_delivery_tasks(id INTEGER,processing_status TEXT,sent_at_utc TIMESTAMP);
+    CREATE TABLE matching_line_interactions(plan_id INTEGER,recipient_line_user_id TEXT,token_hash TEXT,action_scope TEXT,interaction_status TEXT);
+    CREATE TABLE line_inbox_events(id INTEGER,source_user_id TEXT,event_type TEXT,payload_snapshot TEXT,processing_status TEXT,error_message TEXT);
     CREATE TABLE customer_service_tickets(id INTEGER,status TEXT DEFAULT 'waiting');
     CREATE TABLE customer_service_ticket_events(ticket_id INTEGER,event_key TEXT);
     CREATE TABLE contract_document_versions(id INTEGER,document_scope TEXT);
@@ -262,6 +414,22 @@ def test_reminder_uses_actual_delivery_and_replaces_help_with_signing_until_both
     connection.executescript("INSERT INTO contract_document_versions VALUES(1,'client_contract'); INSERT INTO contract_signing_events VALUES(1,10,NULL,'signed_received');")
     assert query()[0].status == "awaiting_signing"
     connection.executescript("INSERT INTO contract_document_versions VALUES(2,'staff_segment'); INSERT INTO contract_signing_events VALUES(2,10,20,'signed_received');")
+    assert query() == ()
+
+
+def test_failed_customer_response_is_an_immediate_staff_todo(followups):
+    connection, query = followups
+    connection.execute("UPDATE line_delivery_tasks SET sent_at_utc=?", ((NOW - timedelta(days=1)).replace(tzinfo=None).isoformat(" "),))
+    token = "synthetic-recommendation-token"
+    connection.execute("INSERT INTO matching_line_interactions VALUES(10,?,?,'customer_decision','active')",
+                       (CUSTOMER.value, sha256(token.encode()).hexdigest()))
+    payload = json.dumps({"postback": {"data": f"matching:{token}:accepted"}})
+    connection.execute("INSERT INTO line_inbox_events VALUES(1,?,'postback',?,'terminal_failed',?)",
+                       (CUSTOMER.value, payload, "automatic_waiting_deposit_occupancy_conflict"))
+    [todo] = query()
+    assert todo.status == "response_failed"
+    assert "檔期已被占用" in todo.failure_reason
+    connection.execute("UPDATE matching_line_interactions SET interaction_status='revoked'")
     assert query() == ()
 
 
@@ -357,3 +525,39 @@ def test_actual_consume_sql_allows_time_expired_customer_action_only(scope, stat
                 repository._consume_interaction("token", CUSTOMER, NOW)
     finally:
         connection.close()
+
+
+def test_resend_replaces_only_target_customer_actions_and_sent_pdf_is_recipient_scoped():
+    with sqlite3.connect(":memory:") as connection:
+        connection.row_factory = sqlite3.Row
+        connection.create_function("JSON_UNQUOTE", 1, lambda value: value)
+        connection.executescript("""
+        CREATE TABLE matching_line_interactions(
+            token_hash TEXT, plan_id INTEGER, segment_id INTEGER, action_scope TEXT,
+            recipient_line_user_id TEXT, expires_at_utc TEXT, interaction_status TEXT DEFAULT 'active'
+        );
+        CREATE TABLE matching_notification_intents(
+            plan_id INTEGER, notification_kind TEXT, recipient_line_user_id TEXT,
+            payload_snapshot TEXT, delivery_task_id INTEGER
+        );
+        CREATE TABLE line_delivery_tasks(id INTEGER, processing_status TEXT);
+        INSERT INTO line_delivery_tasks VALUES (1,'sent'),(2,'pending');
+        """)
+        repository = MySqlMatchingNotificationRepository(SimpleNamespace(cursor=lambda: _Cursor(connection)))
+        for token, plan_id, scope in (("old", 10, "customer_decision"),
+                                      ("caregiver", 10, "caregiver_willingness"),
+                                      ("other", 11, "customer_decision")):
+            repository.open_interaction(token_hash=token, plan_id=plan_id, segment_id=None,
+                                        action_scope=scope, recipient=CUSTOMER, expires_at=NOW)
+        repository.revoke_customer_interactions(10)
+        repository.open_interaction(token_hash="new", plan_id=10, segment_id=None,
+                                    action_scope="customer_decision", recipient=CUSTOMER, expires_at=NOW)
+        statuses = dict(connection.execute("SELECT token_hash, interaction_status FROM matching_line_interactions"))
+        assert statuses == {"old": "revoked", "caregiver": "active", "other": "active", "new": "active"}
+        for task, ref, file_id in ((1, "old", "old-pdf"), (2, "new", "new-pdf")):
+            snapshot = {("resume_reference" if ref == "old" else "confirmation_reference"): ref, "caregiver_resumes": [{"staff_id": 30, "file_id": file_id}]}
+            connection.execute("INSERT INTO matching_notification_intents VALUES (10,'customer_profiles',?,?,?)",
+                               (CUSTOMER.value, json.dumps(snapshot), task))
+        assert repository.customer_confirmation_snapshot(10, "new", CUSTOMER)["caregiver_resumes"][0]["file_id"] == "new-pdf"
+        assert repository.customer_confirmation_snapshot(10, "old", CUSTOMER)["caregiver_resumes"][0]["file_id"] == "old-pdf"
+        assert repository.customer_confirmation_snapshot(10, "new", LineUserId("U-other")) is None

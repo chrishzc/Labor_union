@@ -18,6 +18,9 @@ class _MatchingApplicationSpy:
     def append_customer_assistance_message_in_unit_of_work(self, *_args):
         return False
 
+    def has_pending_customer_assistance(self, *_args):
+        return False
+
     def record_line_response_in_unit_of_work(self, unit_of_work, **arguments):
         self.calls.append((unit_of_work, arguments))
 

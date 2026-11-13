@@ -141,9 +141,11 @@ class MySqlMatchingNotificationRepository:
         self,
         key: IdempotencyKey,
         fingerprint: str,
+        *,
+        lock: bool = False,
     ) -> MatchingNotificationResult | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_INTENT_BY_KEY_SQL, (key.value,))
+            cursor.execute(_INTENT_BY_KEY_SQL + (" FOR UPDATE" if lock else ""), (key.value,))
             row = cursor.fetchone()
         if not isinstance(row, Mapping):
             return None
@@ -219,11 +221,73 @@ class MySqlMatchingNotificationRepository:
                 ),
             )
 
-    def interaction(self, token_hash: str) -> Mapping[str, Any] | None:
+    def revoke_customer_interactions(self, plan_id: int) -> None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_INTERACTION_BY_TOKEN_SQL, (token_hash,))
+            cursor.execute(
+                "UPDATE matching_line_interactions SET interaction_status='revoked' "
+                "WHERE plan_id=%s AND action_scope='customer_decision' AND interaction_status<>'revoked'",
+                (plan_id,),
+            )
+
+    def customer_confirmation_delivery_is_current(self, intent_id: str) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT i.recipient_line_user_id, p.case_no, i.plan_id, "
+                "JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.confirmation_reference')) AS reference "
+                "FROM matching_notification_intents i JOIN caregiver_matching_plans p ON p.id=i.plan_id "
+                "WHERE i.id=%s AND JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.package_type'))='customer_confirmation'",
+                (intent_id,),
+            )
+            intent = cursor.fetchone()
+        if not intent:
+            return True
+        state = self.get_contact_state(intent["case_no"], int(intent["plan_id"]))
+        if state is None or not state.plan_is_active or state.plan_status != "proposed" or not state.all_willing:
+            return False
+        if state.customer_line_user_id is None or state.customer_line_user_id.value != intent["recipient_line_user_id"]:
+            return False
+        if not intent["reference"]:
+            return False
+        interaction = self.interaction(intent["reference"], lock=False)
+        return interaction is not None and interaction["interaction_status"] == "active"
+
+    def pending_customer_assistance(self, line_user_id: LineUserId, before: datetime) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM line_inbox_events inbox JOIN matching_line_interactions interaction "
+                "ON interaction.recipient_line_user_id=inbox.source_user_id "
+                "AND interaction.token_hash=SHA2(SUBSTRING_INDEX(SUBSTRING_INDEX("
+                "JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')),':',2),':',-1),256) "
+                "WHERE inbox.source_user_id=%s AND inbox.event_type='postback' "
+                "AND inbox.occurred_at_utc<=%s AND inbox.processing_status IN ('pending','processing','retryable_failed') "
+                "AND interaction.action_scope='customer_decision' AND interaction.interaction_status<>'revoked' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')) LIKE 'matching:%%:contact_requested' LIMIT 1",
+                (line_user_id.value, database_utc(before)),
+            )
+            return cursor.fetchone() is not None
+
+    def interaction(self, token_hash: str, *, lock: bool = True) -> Mapping[str, Any] | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_INTERACTION_BY_TOKEN_SQL + (" FOR UPDATE" if lock else ""), (token_hash,))
             row = cursor.fetchone()
         return dict(row) if isinstance(row, Mapping) else None
+
+    def customer_confirmation_snapshot(self, plan_id, reference, recipient):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT i.payload_snapshot FROM matching_notification_intents i "
+                "JOIN line_delivery_tasks t ON t.id=i.delivery_task_id "
+                "WHERE i.plan_id=%s AND i.notification_kind='customer_profiles' "
+                "AND i.recipient_line_user_id=%s "
+                "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.confirmation_reference')), "
+                "JSON_UNQUOTE(JSON_EXTRACT(i.payload_snapshot,'$.resume_reference')))=%s",
+                (plan_id, recipient.value, reference),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, Mapping):
+            return None
+        snapshot = row["payload_snapshot"]
+        return json.loads(snapshot) if isinstance(snapshot, str) else snapshot
 
     def append_response(
         self,
@@ -484,6 +548,7 @@ class MySqlMatchingNotificationRepository:
             "order_information_2": info_2,
             "weekly_service_rows": weekly,
             "caregiver_resumes": resumes,
+            "resume_files": _current_resumes(segments, resume_rows),
             "blockers": tuple(dict.fromkeys(blockers)),
         }
 
@@ -503,9 +568,10 @@ class MySqlMatchingNotificationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(CustomerRecommendationFollowup(
             case_no=str(row["case_no"]), plan_id=int(row["plan_id"]),
-            status="contact_requested" if row["decision"] == "contact_requested" and row["ticket_status"] != "resolved" else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
+            status="response_failed" if row["response_failure"] else "contact_requested" if row["decision"] == "contact_requested" and row["ticket_status"] != "resolved" else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
             reminder_due_at=(aware_utc(row["sent_at_utc"]) + timedelta(days=7)) if row.get("sent_at_utc") else None,
             ticket_id=int(row["ticket_id"]) if row.get("ticket_id") is not None else None,
+            failure_reason=row["response_failure"],
         ) for row in rows)
 
     def _plan_row(self, cursor, case_no, plan_id, lock):
@@ -746,7 +812,7 @@ def _resume_previews(segments, rows):
     for staff_id, name in expected.items():
         row = by_staff.get(staff_id)
         if row is None:
-            blocker = f"月嫂 {name} 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。"
+            blocker = f"月嫂 {name} 未附履歷 PDF，請先上傳。"
             result.append({
                 "staff_id": staff_id,
                 "staff_name": name,
@@ -758,7 +824,7 @@ def _resume_previews(segments, rows):
             blockers.append(blocker)
             continue
         if str(row.get("mime_type")) != "application/pdf":
-            blocker = f"月嫂 {name} 未附有效 PDF 履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。"
+            blocker = f"月嫂 {name} 未附有效的履歷 PDF，請重新上傳。"
             result.append({
                 "staff_id": staff_id,
                 "staff_name": name,
@@ -958,7 +1024,7 @@ _INTERACTION_BY_TOKEN_SQL = """SELECT i.*,p.case_no,p.communication_version,p.st
 p.is_active FROM matching_line_interactions i JOIN caregiver_matching_plans p ON p.id=i.plan_id
 LEFT JOIN caregiver_matching_plan_segments s ON s.id=i.segment_id LEFT JOIN staff st ON st.id=s.staff_id
 LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=st.id WHERE i.token_hash=%s
-AND (i.segment_id IS NULL OR (st.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active')) FOR UPDATE"""
+AND (i.segment_id IS NULL OR (st.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'))"""
 _RESPONSE_BY_KEY_SQL = """SELECT e.*,p.case_no,p.communication_version
 FROM matching_response_events e JOIN caregiver_matching_plans p ON p.id=e.plan_id
 WHERE e.idempotency_key=%s"""
@@ -1023,6 +1089,22 @@ __all__ = ["MySqlMatchingNotificationRepository"]
 
 _CUSTOMER_FOLLOWUPS_SOURCE_SQL = """FROM (
 SELECT p.id AS plan_id,p.case_no,
+(SELECT CASE WHEN inbox.processing_status='terminal_failed' THEN
+  CASE WHEN inbox.error_message IN ('automatic_waiting_deposit_occupancy_conflict','正式方案中的月嫂目前檔期已有衝突，請重新確認。')
+       THEN '月嫂檔期已被占用，請核對衝突及推薦方案。'
+       WHEN inbox.error_message='正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。'
+       THEN inbox.error_message
+       WHEN inbox.error_message='客戶確認內容已變更，請重新寄送後再請客戶確認。'
+       THEN inbox.error_message
+       ELSE '客戶回覆未能完成處理，請核對案件與收件紀錄。' END END
+FROM matching_line_interactions interaction
+JOIN line_inbox_events inbox ON inbox.source_user_id=interaction.recipient_line_user_id
+AND inbox.event_type='postback'
+AND JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')) REGEXP '^matching:[A-Za-z0-9_-]+:(accepted|contact_requested)$'
+AND SHA2(SUBSTRING_INDEX(SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')),':',2),':',-1),256)=interaction.token_hash
+WHERE interaction.plan_id=p.id AND interaction.action_scope='customer_decision'
+AND interaction.interaction_status<>'revoked'
+ORDER BY inbox.id DESC LIMIT 1) AS response_failure,
 COALESCE((SELECT response_value FROM matching_response_events r
 WHERE r.plan_id=p.id AND r.response_type='customer_decision'
 ORDER BY r.occurred_at_utc DESC,r.id DESC LIMIT 1),'pending') AS decision,
@@ -1049,7 +1131,8 @@ AND d.document_scope='staff_segment'))) AS signing_complete
 FROM caregiver_matching_plans p JOIN orders ON orders.case_no=p.case_no
 WHERE p.is_active=1 AND p.status IN ('proposed','accepted')
 AND orders.status IN ('洽談中','訂單成立')
-) followup WHERE (decision='contact_requested' AND (ticket_status IS NULL OR ticket_status<>'resolved'))
+) followup WHERE (response_failure IS NOT NULL AND decision IN ('pending','contact_requested'))
+OR (decision='contact_requested' AND (ticket_status IS NULL OR ticket_status<>'resolved'))
 OR (decision='accepted' AND signing_complete=0)
 OR ((decision='pending' OR (decision='contact_requested' AND ticket_status='resolved')) AND sent_at_utc<=%s)"""
 

@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -165,9 +166,16 @@ def test_stage5_customer_profiles_payload_reaches_route_without_request_validati
     assert command.note == "請查收正式推薦月嫂履歷。"
 
 
-def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(monkeypatch):
+@pytest.mark.parametrize("include_resume_images", [False, True])
+def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(monkeypatch, include_resume_images):
+    from subsystems.orders.order_information import CandidateInformationSection
+    from subsystems.scheduling.matching_notification_contracts import CustomerConfirmationInformationPreview
+
+    requested_images = include_resume_images
+
     class Notifications:
-        def preview_customer_confirmation(self, actor, plan):
+        def preview_customer_confirmation(self, actor, plan, *, include_resume_images):
+            assert include_resume_images is requested_images
             assert actor.actor_id == "admin:7"
             assert plan.case_no == "CASE-001"
             assert plan.plan_id == 51
@@ -180,8 +188,14 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                 weekly_service_row_count=3,
                 service_period_start="2026-09-14",
                 service_period_end="2026-09-18",
-                order_information_1=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－1\n總薪資：預估 48000 元"),),
-                order_information_2=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－2\n飲食習慣：清淡"),),
+                order_information_1=(CustomerConfirmationInformationPreview(
+                    71, 12, "王小美", "訂單資訊－1",
+                    (CandidateInformationSection("客戶付款約定", (("客戶應付總額", "NT$ 48,000"),)),),
+                ),),
+                order_information_2=(CustomerConfirmationInformationPreview(
+                    71, 12, "王小美", "訂單資訊－2",
+                    (CandidateInformationSection("飲食與照護需求", (("飲食習慣", "清淡"),)),),
+                ),),
                 weekly_service_rows=(SimpleNamespace(serial_number=1, staff_id=12, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
                 caregiver_resumes=(SimpleNamespace(
                     staff_id=12,
@@ -191,6 +205,7 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                     version=2,
                     blocker=None,
                 ),),
+                resume_images=(b"page",) if include_resume_images else (),
                 blockers=(),
                 send_allowed=True,
             )
@@ -212,10 +227,11 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
 
     response = client.get(
         "/api/v1/orders/CASE-001/matching-plans/51/customer-confirmation/preview",
-        params={"expected_version": 4},
+        params={"expected_version": 4, "include_resume_images": include_resume_images},
     )
 
     assert response.status_code == 200, response.text
+    assert response.headers.get("cache-control") == ("private, no-store" if include_resume_images else None)
     assert response.json()["data"] == {
         "case_no": "CASE-001",
         "plan_id": 51,
@@ -226,8 +242,10 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
         "weekly_service_row_count": 3,
         "service_period_start": "2026-09-14",
         "service_period_end": "2026-09-18",
-        "order_information_1": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－1\n總薪資：預估 48000 元"}],
-        "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2\n飲食習慣：清淡"}],
+        "order_information_1": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－1",
+            "line_sections": [{"title": "客戶付款約定", "rows": [["客戶應付總額", "NT$ 48,000"]]}]}],
+        "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2",
+            "line_sections": [{"title": "飲食與照護需求", "rows": [["飲食習慣", "清淡"]]}]}],
         "weekly_service_rows": [{"serial_number": 1, "staff_id": 12, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],
         "caregiver_resumes": [{
             "staff_id": 12,
@@ -237,6 +255,7 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
             "version": 2,
             "blocker": None,
         }],
+        "resume_images": ["data:image/png;base64,cGFnZQ=="] if include_resume_images else [],
         "blockers": [],
         "send_allowed": True,
     }

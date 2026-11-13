@@ -80,6 +80,7 @@ def get_line_webhook_intake() -> LineWebhookIntake:
         _wakeup_publisher(),
         reply_consumer=lambda event: consumer.consume_registered(event, dispatch),
         reply_delivery=deliver_reply,
+        release_after_reply=consumer.release_after_reply,
         now=now,
     )
 

@@ -179,7 +179,7 @@ class LineWebhookIdentityHandlers:
             return False
         if (
             self._matching_postback_application is not None
-            and self._matching_postback_application.has_active_assistance(unit_of_work, line_user_id)
+            and self._matching_postback_application.has_active_assistance(unit_of_work, line_user_id, inbox.event.occurred_at)
         ):
             return False
         purpose = _identity_purpose_for_text(text)

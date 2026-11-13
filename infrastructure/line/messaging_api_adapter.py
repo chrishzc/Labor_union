@@ -141,9 +141,8 @@ class LineMessagingApiAdapter:
 
 
 def _request_body(request: LineDeliveryRequest) -> str:
-    from subsystems.line.table_image_messages import provider_message
-    message = provider_message(json.loads(request.payload_json))
-    payload = {"messages": [message], "to": request.recipient.identity.value}
+    from subsystems.line.table_image_messages import provider_messages
+    payload = {"messages": provider_messages(json.loads(request.payload_json)), "to": request.recipient.identity.value}
     return json.dumps(
         payload,
         ensure_ascii=False,

@@ -100,7 +100,7 @@ def _card_defaults():
                "service_regions": ["{business_value}"], "special_skills": ["{business_value}"], "has_massage_cert": False}
     result["card-customer-profiles"] = json.loads(customer_profiles_card("{case_no}", [profile], "not-a-token", "{business_value}"))
     result["card-customer-confirmation"] = json.loads(customer_confirmation_card("{case_no}", [profile],
-        [{"text": "{business_value}"}], [{"text": "{business_value}"}], [], {1: "https://invalid.local"}, "not-a-token", "{business_value}"))
+        [{"text": "{business_value}"}], [{"text": "{business_value}"}], [], "not-a-token", "{business_value}"))
     return result
 
 

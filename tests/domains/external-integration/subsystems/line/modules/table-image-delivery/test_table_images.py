@@ -25,7 +25,7 @@ NOW = datetime(2026, 10, 30, tzinfo=timezone.utc)
 @pytest.fixture(autouse=True)
 def configuration(monkeypatch):
     monkeypatch.setenv('LINE_PUBLIC_BASE_URL', 'https://pictures.example.invalid')
-    monkeypatch.setenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', 'table-image-test-key-not-a-production-secret')
+    monkeypatch.setenv('LINE_CHANNEL_SECRET', 'table-image-test-key-not-a-production-secret')
 
 
 def document():
@@ -56,6 +56,16 @@ def test_invalid_link_never_opens_a_database():
         LineTableImageQuery(forbidden, render_table_image, lambda: NOW).read('invalid')
 
 
+def test_retired_download_key_only_keeps_existing_table_images_working(monkeypatch):
+    from subsystems.line.table_image_contracts import TableImageUnavailable
+
+    monkeypatch.delenv('LINE_CHANNEL_SECRET')
+    monkeypatch.setenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', 'legacy-test-key')
+    assert image_claim(token(index=2), NOW)['index'] == 2
+    with pytest.raises(TableImageUnavailable):
+        token(index=3)
+
+
 @pytest.mark.parametrize('environment', ['production', 'development'])
 def test_picture_links_work_with_internal_cipher_without_env_secret(monkeypatch, environment):
     monkeypatch.setenv('APP_ENV', environment)
@@ -77,6 +87,7 @@ def test_send_route_returns_a_closed_unavailable_result_when_image_setup_is_miss
     if flow == 'candidate':
         monkeypatch.setattr(candidate_contact_pool, '_require_actor', lambda *_: None)
         monkeypatch.setattr(candidate_contact_pool, 'workflow', SimpleNamespace(send_information=unavailable))
+        request.resend = False
         operation = lambda: candidate_contact_pool.send_candidate_information('DEMO-001', 1, request, principal)
     else:
         monkeypatch.setattr(matches, '_require_matching_actor', lambda *_: None)
@@ -162,14 +173,13 @@ def test_weekly_picture_has_no_spurious_action_card():
     assert len(result['contents']['contents']) == 1
 
 
-def test_formal_package_keeps_profiles_three_pictures_and_independent_customer_decision():
-    old = json.loads(customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), {}, 'interaction', '確認說明'))
+def test_formal_package_removes_profile_text_and_attaches_customer_actions_to_third_picture():
+    old = json.loads(customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), 'interaction', '確認說明'))
     result = with_table_images(old, (document(), document(), document()), 'delivery:demo', NOW)
     cards = result['contents']['contents']
-    assert len(cards) == 5
-    assert [card['hero']['type'] for card in cards[1:4]] == ['image'] * 3
-    assert cards[0] == old['contents']['contents'][0]
-    assert cards[-1] == old['contents']['contents'][-1]
+    assert [card['hero']['type'] for card in cards] == ['image'] * 3
+    assert '範例月嫂' not in str(cards)
+    assert cards[-1]['footer'] == old['contents']['contents'][-1]['footer']
     assert len(result[DOCUMENTS_KEY]) == 3
 
 
@@ -199,7 +209,7 @@ def test_formal_composition_enqueues_one_snapshot_whose_capabilities_resolve_its
     snapshot = dict(package_type='customer_confirmation', order_information_1=({'line_sections': (
         {'title': '客戶付款約定', 'rows': (('客戶應付總額', 'NT$ 99,999'),)},)},),
         order_information_2=(), weekly_service_rows=())
-    payload = customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), {}, 'interaction', '確認說明')
+    payload = customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), 'interaction', '確認說明')
     application = MatchingNotificationApplication(None, lambda: NOW, availability_validator=lambda _: None)
     application._append_notification(unit, command, LineUserId('U-demo'), None,
         MatchingNotificationKind.CUSTOMER_PROFILES, snapshot, payload, 'interaction', 'customer_decision')
@@ -208,12 +218,12 @@ def test_formal_composition_enqueues_one_snapshot_whose_capabilities_resolve_its
     result = json.loads(delivery.payload_json)
     cards = result['contents']['contents']
     assert len(result[DOCUMENTS_KEY]) == 3
-    for index, card in enumerate(cards[1:4]):
+    for index, card in enumerate(cards):
         claim = image_claim(urlsplit(card['hero']['url']).path.rsplit('/', 1)[-1], NOW)
         assert (claim['key'], claim['index']) == (delivery.idempotency_key.value, index)
     original = json.loads(payload)['contents']['contents'][-1]
     assert cards[-1]['footer'] == original['footer']
-    assert cards[-1]['body']['contents'][:-1] == original['body']['contents']
+    assert cards[-1]['body']['contents'][1:-1] == original['body']['contents'][1:]
     assert cards[-1]['body']['contents'][-1]['text'] == '本案 DEMO-001 的額外說明。\n\n請先核對服務日期。'
     assert 'NT$ 99,999' in str(result[DOCUMENTS_KEY])
 
@@ -246,7 +256,7 @@ def test_compact_service_and_payment_layout_keeps_owner_values_without_recalcula
 
 def test_provider_receives_pictures_and_actions_but_never_private_document_metadata():
     from infrastructure.line.messaging_api_adapter import _request_body
-    old = json.loads(customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), {}, 'interaction', '確認說明'))
+    old = json.loads(customer_confirmation_card('DEMO-001', ({'id': 1, 'name': '範例月嫂'},), (), (), (), 'interaction', '確認說明'))
     result = with_table_images(old, (document(), document(), document()), 'delivery:demo', NOW)
     request = SimpleNamespace(payload_json=json.dumps(result), recipient=SimpleNamespace(identity=SimpleNamespace(value='U-demo')))
     wire = json.loads(_request_body(request))
@@ -261,6 +271,63 @@ def test_provider_receives_pictures_and_actions_but_never_private_document_metad
     assert DOCUMENTS_KEY in request.payload_json  # Original committed request is unchanged.
 
 
+def test_confirmation_pdf_pages_reuse_committed_image_read_and_single_push():
+    from domains.line.canonical_payload import canonical_line_payload_json
+    from infrastructure.line.messaging_api_adapter import _request_body
+    from infrastructure.line.table_image_renderer import render_resume_pages
+    from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+    from subsystems.line.table_image_messages import with_resume_images
+
+    pdf = BytesIO()
+    Image.new('RGB', (90, 140), 'red').save(pdf, 'PDF', save_all=True,
+                                            append_images=[Image.new('RGB', (140, 90), 'blue')])
+    pages = render_resume_pages(pdf.getvalue(), 4)
+    assert len(pages) == 2
+    assert Image.open(BytesIO(pages[0])).height == 1024
+    assert Image.open(BytesIO(pages[1])).width == 1024
+    with pytest.raises(ValueError, match='四頁'):
+        render_resume_pages(pdf.getvalue(), 1)
+    with pytest.raises(ValueError, match='重新上傳'):
+        render_resume_pages(b'not a PDF', 4)
+
+    payload = json.loads(customer_confirmation_card('DEMO-001', ({'id': 1},), (), (), (), 'token', '確認'))
+    pictured = with_table_images(payload, (document(), document(), document()), 'delivery:demo', NOW)
+    stored = canonical_line_payload_json(with_resume_images(pictured, pages, 'delivery:demo', NOW))
+    request = SimpleNamespace(payload_json=stored, recipient=SimpleNamespace(identity=SimpleNamespace(value='U-demo')))
+    messages = json.loads(_request_body(request))['messages']
+    assert [message['type'] for message in messages] == ['flex']
+    slides = messages[0]['contents']['contents']
+    assert len(slides) == 5
+    assert all(slide['hero']['type'] == 'image' for slide in slides)
+    assert slides[-1]['footer'] == payload['contents']['contents'][-1]['footer']
+    assert DOCUMENTS_KEY not in messages[0]
+    assert '下載履歷' not in json.dumps(messages, ensure_ascii=False)
+
+    @contextmanager
+    def cursor():
+        yield SimpleNamespace(execute=lambda *_: None, fetchone=lambda: {'payload_snapshot': stored})
+
+    @contextmanager
+    def unit():
+        yield SimpleNamespace(delivery_tasks=MySqlLineDeliveryTaskRepository(SimpleNamespace(cursor=cursor)))
+
+    query = LineTableImageQuery(unit, render_table_image, lambda: NOW)
+    for slide, page in zip(slides[:2], pages, strict=True):
+        url = slide['hero']['url']
+        assert slide['hero']['action']['uri'] == url
+        assert query.read(url.rsplit('/', 1)[1]) == page
+
+    previous = json.loads(stored)
+    previous['contents']['contents'] = [payload['contents']['contents'][0], *slides[2:]]
+    request.payload_json = canonical_line_payload_json(previous)
+    previous_messages = json.loads(_request_body(request))['messages']
+    assert previous_messages == [
+        {key: value for key, value in previous.items() if key != DOCUMENTS_KEY},
+        *[{'type': 'image', 'originalContentUrl': slide['hero']['url'], 'previewImageUrl': slide['hero']['url']}
+          for slide in slides[:2]],
+    ]
+
+
 @pytest.mark.parametrize('info_type', [1, 2])
 def test_initial_picture_projection_stays_redacted_while_formal_sheet_retains_its_fields(info_type):
     from subsystems.orders.order_information import build_case_information, build_formal_information_sections
@@ -268,7 +335,9 @@ def test_initial_picture_projection_stays_redacted_while_formal_sheet_retains_it
     candidate = build_case_information('DEMO-001', info_type, facts, {})
     initial = information_document('資訊', 'DEMO-001', ({'line_sections': tuple(asdict(section) for section in candidate.line_sections)},))
     formal = build_formal_information_sections(info_type, facts, {})
-    assert '客戶私密' not in str(asdict(initial))
+    initial_text = str(asdict(initial))
+    assert '客戶私密姓名' not in initial_text and '客戶私密電話' not in initial_text
+    assert ('客戶私密地址' in initial_text) == (info_type == 1)
     assert '客戶私密姓名' in str(formal) and '客戶私密地址' in str(formal)
 
 

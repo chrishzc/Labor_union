@@ -63,7 +63,7 @@ class _MatchingRepository:
     def get_response_result(self, key, fingerprint):
         return None
 
-    def interaction(self, token_hash):
+    def interaction(self, token_hash, *, lock=True):
         return getattr(self, "_interaction_data", None)
 
     def get_contact_state(self, case_no, plan_id, *, lock=False):
@@ -330,6 +330,7 @@ def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:
 
 def test_record_line_response_accepted_only_acknowledges_customer_without_group_notification() -> None:
     state = _state()
+    state = replace(state, segments=(replace(state.segments[0], willingness=CaregiverWillingness.WILLING),))
     unit_of_work = _UnitOfWork(
         state,
         active_group_targets=({"group_id": "C-group-target"},),

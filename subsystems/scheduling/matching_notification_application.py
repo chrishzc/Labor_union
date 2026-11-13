@@ -44,14 +44,11 @@ from subsystems.line.capabilities import (
     LineCapability,
     require_line_capability,
 )
+from subsystems.orders.order_information import CandidateInformationSection
 from subsystems.scheduling.matching_line_cards import (
     caregiver_information_card,
     customer_confirmation_card,
     customer_profiles_card,
-)
-from subsystems.scheduling.customer_confirmation_download import (
-    confirmation_download_url,
-    issue_resume_download_token,
 )
 from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
@@ -91,6 +88,7 @@ class MatchingNotificationApplication:
         interaction_lifetime: timedelta = timedelta(days=7),
         availability_validator: Callable[[MatchingContactState], None] | None = None,
         availability_facts_port: SegmentedAvailabilityFactsPort | None = None,
+        resume_page_renderer: Callable[[str, int], tuple[bytes, ...]] | None = None,
     ) -> None:
         if availability_validator is None and availability_facts_port is None:
             raise RuntimeError("matching availability facts port is not configured")
@@ -98,6 +96,7 @@ class MatchingNotificationApplication:
         self._now = now
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
         self._interaction_lifetime = interaction_lifetime
+        self._resume_page_renderer = resume_page_renderer
         self._availability_validator = availability_validator or (
             lambda state: _validate_availability(state, availability_facts_port)
         )
@@ -119,6 +118,8 @@ class MatchingNotificationApplication:
         self,
         actor: ActorContext,
         plan: MatchingPlanReference,
+        *,
+        include_resume_images: bool = False,
     ) -> CustomerConfirmationPreview:
         """Return the complete, read-only Stage 5 readiness projection."""
         require_line_capability(actor, LineCapability.MATCHING_READ)
@@ -134,8 +135,8 @@ class MatchingNotificationApplication:
                 blockers.append("案件已不在洽談中，不能寄送確認資訊。")
             if not state.all_willing:
                 blockers.append("仍有月嫂尚未確認願意承接正式方案。")
-            if state.customer_profiles_are_available:
-                blockers.append("確認資訊已建立，不可重複寄送。")
+            if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
+                blockers.append("客戶已決定原方案，請先處理原確認及檔期。")
             if state.customer_line_user_id is None:
                 blockers.append("客戶尚未完成 LINE 綁定。")
             try:
@@ -158,30 +159,24 @@ class MatchingNotificationApplication:
                 )
                 for item in raw["caregiver_resumes"]
             )
+            blockers.extend(item.blocker for item in resumes if not item.ready and item.blocker)
+        resume_images = ()
+        if include_resume_images and all(item.ready for item in resumes):
+            from subsystems.line.table_image_contracts import TableImageUnavailable
+            try:
+                resume_images = self._render_resume_images(raw["resume_files"])
+            except ValueError as error:
+                blockers.append(str(error))
+            except TableImageUnavailable:
+                blockers.append("履歷圖片服務暫時無法使用，請稍後再試。")
         return CustomerConfirmationPreview(
             plan=state.plan,
             order_information_1_ready=bool(raw["order_information_1_ready"]),
             order_information_2_ready=bool(raw["order_information_2_ready"]),
             weekly_service_ready=bool(raw["weekly_service_ready"]),
             weekly_service_row_count=int(raw["weekly_service_row_count"]),
-            order_information_1=tuple(
-                CustomerConfirmationInformationPreview(
-                    segment_id=int(item["segment_id"]),
-                    staff_id=int(item["staff_id"]),
-                    staff_name=str(item["staff_name"]),
-                    text=str(item["text"]),
-                )
-                for item in raw["order_information_1"]
-            ),
-            order_information_2=tuple(
-                CustomerConfirmationInformationPreview(
-                    segment_id=int(item["segment_id"]),
-                    staff_id=int(item["staff_id"]),
-                    staff_name=str(item["staff_name"]),
-                    text=str(item["text"]),
-                )
-                for item in raw["order_information_2"]
-            ),
+            order_information_1=_customer_information_preview(raw["order_information_1"]),
+            order_information_2=_customer_information_preview(raw["order_information_2"]),
             weekly_service_rows=tuple(
                 CustomerConfirmationWeeklyServicePreview(
                     serial_number=int(item["serial_number"]),
@@ -199,6 +194,7 @@ class MatchingNotificationApplication:
             blockers=tuple(dict.fromkeys(blockers)),
             service_period_start=raw.get("service_period_start"),
             service_period_end=raw.get("service_period_end"),
+            resume_images=resume_images,
         )
 
     def request_caregiver_information(
@@ -333,6 +329,7 @@ class MatchingNotificationApplication:
         idempotency_key: IdempotencyKey,
         correlation_id: CorrelationId,
         occurred_at: datetime,
+        send_reply: bool = True,
     ) -> MatchingResponseResult:
         result = self._record_line_response(
             unit_of_work,
@@ -341,10 +338,12 @@ class MatchingNotificationApplication:
             line_user_id,
             idempotency_key,
             occurred_at,
+            check_snapshot=not send_reply,
         )
-        unit_of_work.delivery_tasks.enqueue(
-            _response_confirmation(result, line_user_id, correlation_id, occurred_at, unit_of_work)
-        )
+        if send_reply:
+            unit_of_work.delivery_tasks.enqueue(
+                _response_confirmation(result, line_user_id, correlation_id, occurred_at, unit_of_work)
+            )
         if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
             unit_of_work.customer_service.create_or_append(
                 CreateCustomerServiceMessage(
@@ -356,8 +355,33 @@ class MatchingNotificationApplication:
             )
         return result
 
+    def acknowledge_customer_postback(self, unit_of_work, token, decision, line_user_id, event):
+        interaction = unit_of_work.matching_notifications.interaction(_token_hash(token), lock=False)
+        if interaction is None or interaction.get("action_scope") != "customer_decision":
+            raise LookupError("customer matching interaction not found")
+        state = _required_state(unit_of_work, str(interaction["case_no"]), int(interaction["plan_id"]), False)
+        _require_active_interaction(interaction, line_user_id, event.occurred_at, state)
+        _require_customer_response_pending(state)
+        if state.customer_line_user_id != line_user_id:
+            raise MatchingRecipientMismatchError("LINE responder is no longer bound to the case")
+        event_id = event.event_id.value
+        text = matching_response_text(None, CustomerMatchingDecision(decision))
+        unit_of_work.delivery_tasks.enqueue(LineDeliveryRequest(
+            LineRecipient(LineRecipientType.USER, line_user_id),
+            LineMessageKind.TEXT,
+            canonical_line_payload_json({"type": "text", "text": text}),
+            event.occurred_at,
+            IdempotencyKey(f"matching-customer-receipt:{event_id}"),
+            CorrelationId(f"line-event:{event_id}"),
+            REPLY_ONLY_WEBHOOK_SOURCE,
+            event_id,
+        ))
+
     def has_active_customer_assistance(self, unit_of_work, line_user_id) -> bool:
         return unit_of_work.customer_service.active_matching_assistance(line_user_id.value) is not None
+
+    def has_pending_customer_assistance(self, unit_of_work, line_user_id, occurred_at) -> bool:
+        return unit_of_work.matching_notifications.pending_customer_assistance(line_user_id, occurred_at)
 
     def append_customer_assistance_message_in_unit_of_work(
         self, unit_of_work, line_user_id, text, event_key,
@@ -467,12 +491,17 @@ class MatchingNotificationApplication:
 
     def _create_customer_confirmation(self, unit_of_work, command):
         state = _required_state(unit_of_work, command.plan.case_no, command.plan.plan_id, True)
+        replay = unit_of_work.matching_notifications.get_intent_result(
+            command.idempotency_key, command.fingerprint.value, lock=True,
+        )
+        if replay is not None:
+            return replay
         _require_sendable_state(state, command.plan.version)
         self._availability_validator(state)
         if not state.all_willing:
             raise MatchingDecisionNotReadyError("all caregivers must be willing")
-        if state.customer_profiles_are_available:
-            raise MatchingCommunicationConflictError("customer confirmation is already available")
+        if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
+            raise MatchingCommunicationConflictError("customer recommendation was already decided")
         if state.customer_line_user_id is None:
             raise MatchingDecisionNotReadyError("customer has no LINE binding")
         package = unit_of_work.matching_notifications.customer_confirmation_package(
@@ -481,14 +510,15 @@ class MatchingNotificationApplication:
         profiles = package["profiles"]
         if not 1 <= len(profiles) <= 4:
             raise MatchingDecisionNotReadyError("customer profile count must be between 1 and 4")
-        now = self._now()
-        # 履歷下載連結已退役，改由業務線下直接傳送，卡片不嵌入下載按鈕
-        resume_urls: dict[int, str] = {}
         token = self._token_factory()
+        resumes = package["caregiver_resumes"]
+        if {int(resume["staff_id"]) for resume in resumes} != {int(profile["id"]) for profile in profiles}:
+            raise MatchingDecisionNotReadyError("推薦月嫂皆須上傳履歷 PDF 才能寄送。")
+        resume_pages = self._render_resume_images(resumes)
         payload_json = customer_confirmation_card(
             command.plan.case_no, profiles, package["order_information_1"],
             package["order_information_2"], package["weekly_service_rows"],
-            resume_urls, token, command.note,
+            token, command.note,
         )
         snapshot = {
             "package_type": "customer_confirmation",
@@ -497,28 +527,41 @@ class MatchingNotificationApplication:
             "order_information_2": package["order_information_2"],
             "weekly_service_rows": package["weekly_service_rows"],
             "caregiver_resumes": package["caregiver_resumes"],
+            "confirmation_reference": _token_hash(token),
         }
+        unit_of_work.matching_notifications.revoke_customer_interactions(command.plan.plan_id)
         return self._append_notification(
             unit_of_work, command, state.customer_line_user_id, None,
             MatchingNotificationKind.CUSTOMER_PROFILES, snapshot, payload_json,
-            token, "customer_decision",
+            token, "customer_decision", resume_pages=resume_pages,
         )
+
+    def _render_resume_images(self, resumes) -> tuple[bytes, ...]:
+        from subsystems.line.table_image_contracts import TableImageUnavailable
+        if self._resume_page_renderer is None:
+            raise TableImageUnavailable("履歷圖片轉換服務尚未設定。")
+        pages = []
+        for resume in resumes:
+            pages.extend(self._resume_page_renderer(resume["file_id"], 4 - len(pages)))
+        return tuple(pages)
 
     # Intent, one-time action, delivery task, and projection are one transaction.
     def _append_notification(self, unit_of_work, command, recipient, segment_id,
-                             kind, snapshot, payload_json, token, action_scope):
+                             kind, snapshot, payload_json, token, action_scope, *, resume_pages=()):
         repository = unit_of_work.matching_notifications
         import json
         key = ("card-customer-confirmation" if snapshot.get("package_type") == "customer_confirmation" else "card-customer-profiles") if kind is MatchingNotificationKind.CUSTOMER_PROFILES else "card-caregiver-information" + ("-2" if kind is MatchingNotificationKind.CAREGIVER_INFO_2 else "")
         payload_json = canonical_line_payload_json(configured_payload(unit_of_work, key, json.loads(payload_json), {"case_no": command.plan.case_no}))
         if snapshot.get('package_type') == 'customer_confirmation':
             from subsystems.line.table_image_contracts import information_document, weekly_document
-            from subsystems.line.table_image_messages import with_table_images
+            from subsystems.line.table_image_messages import with_resume_images, with_table_images
             documents = (information_document('訂單資訊－1｜客戶費用', command.plan.case_no, snapshot['order_information_1'], info_type=1),
                          information_document('訂單資訊－2', command.plan.case_no, snapshot['order_information_2'], info_type=2),
                          weekly_document(command.plan.case_no, snapshot['weekly_service_rows']))
-            payload_json = canonical_line_payload_json(with_table_images(json.loads(payload_json), documents,
-                f'matching-delivery:{command.idempotency_key.value}', self._now()))
+            delivery_key = f'matching-delivery:{command.idempotency_key.value}'
+            now = self._now()
+            pictured = with_table_images(json.loads(payload_json), documents, delivery_key, now)
+            payload_json = canonical_line_payload_json(with_resume_images(pictured, resume_pages, delivery_key, now))
         intent_id = repository.append_notification_intent(
             plan=command.plan,
             segment_id=segment_id,
@@ -550,9 +593,10 @@ class MatchingNotificationApplication:
         )
 
     def _record_line_response(self, unit_of_work, token, decision, line_user_id,
-                              idempotency_key, occurred_at):
+                              idempotency_key, occurred_at, *, check_snapshot=False):
         token_hash = _token_hash(token)
-        interaction = unit_of_work.matching_notifications.interaction(token_hash)
+        repository = unit_of_work.matching_notifications
+        interaction = repository.interaction(token_hash, lock=False)
         if interaction is None:
             raise LookupError("matching interaction not found")
         state = _required_state(
@@ -561,11 +605,29 @@ class MatchingNotificationApplication:
             int(interaction["plan_id"]),
             True,
         )
+        interaction = repository.interaction(token_hash)
+        if interaction is None:
+            raise LookupError("matching interaction not found")
         _require_active_interaction(interaction, line_user_id, occurred_at, state)
         if interaction.get("action_scope") == "customer_decision":
-            _require_sendable_state(state, state.plan.version)
-            if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
-                raise MatchingCommunicationConflictError("customer recommendation was already decided")
+            _require_customer_response_pending(state)
+            if decision == "accepted" and not state.all_willing:
+                raise MatchingDecisionNotReadyError("all caregivers must be willing")
+            if decision == "accepted":
+                try:
+                    self._availability_validator(state)
+                except ValueError as error:
+                    raise MatchingDecisionNotReadyError(_availability_blocker(error)) from error
+                if check_snapshot:
+                    snapshot = repository.customer_confirmation_snapshot(state.plan.plan_id, token_hash, line_user_id)
+                    if snapshot is not None:
+                        current = repository.customer_confirmation_package(state.plan.case_no, state.plan.plan_id)
+                        content_keys = ("order_information_1", "order_information_2", "weekly_service_rows")
+                        # JSON normalization preserves the comparison across tuple/list serialization.
+                        sent_content = {key: snapshot[key] for key in content_keys}
+                        current_content = {key: current[key] for key in content_keys}
+                        if fingerprint_payload(sent_content) != fingerprint_payload(current_content):
+                            raise MatchingCommunicationStaleError("客戶確認內容已變更，請重新寄送後再請客戶確認。")
         return _append_line_response(
             unit_of_work,
             interaction,
@@ -576,6 +638,22 @@ class MatchingNotificationApplication:
             occurred_at,
             token_hash,
         )
+
+
+def _customer_information_preview(items) -> tuple[CustomerConfirmationInformationPreview, ...]:
+    return tuple(
+        CustomerConfirmationInformationPreview(
+            segment_id=int(item["segment_id"]),
+            staff_id=int(item["staff_id"]),
+            staff_name=str(item["staff_name"]),
+            text=str(item["text"]),
+            line_sections=tuple(
+                CandidateInformationSection(section["title"], section["rows"])
+                for section in item["line_sections"]
+            ),
+        )
+        for item in items
+    )
 
 
 def _required_state(unit_of_work, case_no, plan_id, lock):
@@ -623,6 +701,12 @@ def _require_sendable_state(state, expected_version):
         raise MatchingCommunicationStaleError("matching plan is not active and proposed")
     if not matching_order_is_open(state.order_status, replacement_round=state.replacement_matching_open):
         raise MatchingCommunicationStaleError("order is no longer in negotiation")
+
+
+def _require_customer_response_pending(state):
+    _require_sendable_state(state, state.plan.version)
+    if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
+        raise MatchingCommunicationConflictError("customer recommendation was already decided")
 
 
 def _require_expected_state(state, expected_version):
@@ -972,7 +1056,7 @@ def matching_response_text(caregiver_willingness, customer_decision):
     if caregiver_willingness is not None:
         text = "已收到您的承接意願，工會人員會依流程與您聯繫。"
     elif customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
-        text = "已收到您的聯絡需求，請留下您的疑問。"
+        text = "已收到您的聯絡需求，請留下您的疑問"
     elif customer_decision is CustomerMatchingDecision.ACCEPTED:
         text = "已收到您接受配對的回覆，後續由工會安排簽約。"
     else:

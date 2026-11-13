@@ -87,7 +87,7 @@ class _MatchingNotifications:
     def __init__(self):
         self.rows = {}
 
-    def interaction(self, token_hash):
+    def interaction(self, token_hash, *, lock=True):
         return self.rows.get(token_hash)
 
     def open_interaction(self, **values):

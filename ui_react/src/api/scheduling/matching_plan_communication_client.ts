@@ -7,6 +7,7 @@ import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
+import { OrderInformationSectionsSchema } from './order_information_sections_schema';
 
 const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -77,6 +78,14 @@ const CustomerProfilesNotificationReceiptSchema = z.strictObject({
   }
 });
 
+const CustomerConfirmationInformationSchema = z.strictObject({
+  segment_id: z.number().int().positive(),
+  staff_id: z.number().int().positive(),
+  staff_name: z.string().min(1).max(100),
+  text: z.string().min(1).max(5000),
+  line_sections: OrderInformationSectionsSchema,
+});
+
 const CustomerConfirmationPreviewSchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   plan_id: z.number().int().positive(),
@@ -87,14 +96,8 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
   weekly_service_row_count: z.number().int().nonnegative(),
   service_period_start: IsoDateSchema.nullable().optional(),
   service_period_end: IsoDateSchema.nullable().optional(),
-  order_information_1: z.array(z.strictObject({
-    segment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
-    staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),
-  })),
-  order_information_2: z.array(z.strictObject({
-    segment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
-    staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),
-  })),
+  order_information_1: z.array(CustomerConfirmationInformationSchema),
+  order_information_2: z.array(CustomerConfirmationInformationSchema),
   weekly_service_rows: z.array(z.strictObject({
     staff_id: z.number().int().positive().nullable().optional(),
     serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
@@ -110,6 +113,7 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
     version: z.number().int().positive().nullable(),
     blocker: z.string().min(1).nullable(),
   })).min(1).max(4),
+  resume_images: z.array(z.string().startsWith('data:image/png;base64,')).max(4).optional(),
   blockers: z.array(z.string().min(1)),
   send_allowed: z.boolean(),
 }).superRefine((preview, context) => {
@@ -307,7 +311,7 @@ export const matchingPlanCommunicationClient = {
     caseNo: string,
     planId: number,
     expectedVersion: number,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; includeResumeImages?: boolean },
   ): Promise<CustomerConfirmationPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const token = sessionClient.getToken();
@@ -317,7 +321,7 @@ export const matchingPlanCommunicationClient = {
     const decoded = decodePayload(
       CustomerConfirmationPreviewEnvelopeSchema,
       await transport.get(
-        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}`,
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/customer-confirmation/preview?expected_version=${expectedVersion}${options?.includeResumeImages ? '&include_resume_images=true' : ''}`,
         { token, signal: options?.signal },
       ),
     );

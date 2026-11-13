@@ -5,6 +5,7 @@ Description: 以獨立交易隔離 LINE webhook 業務處理與失敗完成紀�
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
@@ -30,6 +31,12 @@ class TerminalLineEventError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class RegisteredReply:
+    tasks: tuple[LineDeliveryTaskSnapshot, ...] = ()
+    deferred_event: LineWebhookInboxSnapshot | None = None
+
+
 class LineWebhookEventConsumer:
     def __init__(
         self,
@@ -49,28 +56,34 @@ class LineWebhookEventConsumer:
         self,
         event: LineWebhookInboxSnapshot,
         dispatch_reply: Callable[[LineWebhookInboxSnapshot, LineUnitOfWorkPort], bool],
-    ) -> tuple[LineDeliveryTaskSnapshot, ...]:
+    ) -> RegisteredReply:
         """Process just the Reply portion of a reserved event, then deliver after commit."""
         if event.lease is None or self._now() >= event.lease.expires_at:
-            return ()
+            return RegisteredReply()
         try:
             with self._unit_of_work_factory() as unit:
                 completed = dispatch_reply(event, unit)
-                if completed:
-                    unit.webhook_inbox.complete(_completion(event, self._now(), "processed"))
-                else:
-                    unit.webhook_inbox.defer(event)
                 query = ClaimLineDeliveryTasksQuery(self._worker_identity, self._now(), 1)
                 replies = tuple(unit.delivery_tasks.claim_webhook_reply(task_id, query)
                                 for task_id in unit.delivery_tasks.new_reply_task_ids())
+                if completed:
+                    unit.webhook_inbox.complete(_completion(event, self._now(), "processed"))
+                elif not replies:
+                    unit.webhook_inbox.defer(event)
                 unit.commit()
         except TerminalLineEventError as error:
             self._record_failure(event, "terminal_failed", error)
-            return ()
+            return RegisteredReply()
         except Exception as error:
             self._record_failure(event, "retryable_failed", error)
-            return ()
-        return replies
+            return RegisteredReply()
+        return RegisteredReply(replies, event if replies and not completed else None)
+
+    def release_after_reply(self, event: LineWebhookInboxSnapshot) -> None:
+        if event.lease is not None and self._now() < event.lease.expires_at:
+            with self._unit_of_work_factory() as unit:
+                unit.webhook_inbox.defer(event)
+                unit.commit()
 
     def run_once(self) -> int:
         claimed = self._claim()

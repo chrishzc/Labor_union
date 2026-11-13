@@ -246,6 +246,16 @@ class LineDeliveryWorker:
                     unit_of_work.payment_receipt_notifications.mark_cancellation_notice_provider_started(task.task_id.value)
                     unit_of_work.commit()
                 return lease_valid and source_current
+            if (lease_valid and task.request.source_aggregate_type == "matching_notification_intent"
+                    and not unit_of_work.matching_notifications.customer_confirmation_delivery_is_current(
+                        task.request.source_aggregate_identity,
+                    )):
+                unit_of_work.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
+                    task.task_id, ActorContext(self._worker_identity),
+                    IdempotencyKey(f"matching-confirmation-stale:{task.task_id.value}"), task.request.correlation_id,
+                ))
+                unit_of_work.commit()
+                return False
             return (lease_valid
                     and service_completion_delivery_is_current(unit_of_work, task)
                     and payment_overdue_delivery_is_current(unit_of_work, task, self._now())

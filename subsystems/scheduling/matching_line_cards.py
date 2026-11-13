@@ -106,16 +106,15 @@ def customer_confirmation_card(
     order_information_1: Sequence[Mapping[str, object]],
     order_information_2: Sequence[Mapping[str, object]],
     weekly_service_rows: Sequence[Mapping[str, object]],
-    resume_urls: Mapping[int, str],
     interaction_token: str,
     note: str,
 ) -> str:
-    """One durable LINE package with optional resume download actions."""
+    """Build the confirmation Flex card for the single delivery package."""
     unique_profiles: dict[int, Mapping[str, object]] = {}
     for profile in profiles:
         staff_id = int(profile["id"])
         unique_profiles.setdefault(staff_id, profile)
-    bubbles = [_profile_bubble(profile, resume_urls.get(staff_id)) for staff_id, profile in unique_profiles.items()]
+    bubbles = [_profile_bubble(profile) for profile in unique_profiles.values()]
     bubbles.extend((
         _text_bubble("訂單資訊－1", _package_text(order_information_1)),
         _text_bubble("訂單資訊－2", _package_text(order_information_2)),
@@ -146,7 +145,7 @@ def _caregiver_fact_rows(kind, facts):
     )
 
 
-def _profile_bubble(profile, resume_url=None):
+def _profile_bubble(profile):
     name = str(profile.get("name") or "月嫂")
     rows = (
         ("居住地", profile.get("city") or "未提供"),
@@ -156,12 +155,7 @@ def _profile_bubble(profile, resume_url=None):
         ("技能與偏好", _list_text(profile.get("special_skills"))),
     )
     body = [_title(name), *(_fact_row(label, value) for label, value in rows)]
-    footer = None
-    if resume_url:
-        footer = [{"type": "button", "style": "primary", "action": {
-            "type": "uri", "label": "下載履歷 PDF", "uri": str(resume_url),
-        }}]
-    return _bubble(body, footer)
+    return _bubble(body)
 
 
 def _text_bubble(title, text):

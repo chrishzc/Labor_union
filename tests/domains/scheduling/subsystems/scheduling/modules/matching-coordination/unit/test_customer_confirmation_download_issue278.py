@@ -1,14 +1,10 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from subsystems.scheduling import candidate_contact_pool_workflow as candidate_workflow
 
-from subsystems.scheduling.customer_confirmation_download import (
-    issue_resume_download_token,
-    verify_resume_download_token,
-)
 from infrastructure.mysql.matching_notification_repository import (
     _CURRENT_RESUMES_SQL,
     _current_resumes,
@@ -19,19 +15,6 @@ from domains.scheduling.matching_communication import MatchingPlanReference
 from shared_kernel.identities import ActorContext
 from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
 from subsystems.scheduling.matching_line_cards import customer_confirmation_card
-
-
-def test_confirmation_download_token_is_file_scoped_and_expires(monkeypatch):
-    monkeypatch.setenv("MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET", "test-secret")
-    now = datetime(2026, 9, 12, tzinfo=timezone.utc)
-    token = issue_resume_download_token(
-        case_no="CASE-278", plan_id=51, staff_id=100,
-        file_id="cf_" + "a" * 32, now=now,
-    )
-
-    assert verify_resume_download_token(token, now=now)["file_id"] == "cf_" + "a" * 32
-    with pytest.raises(ValueError, match="expired"):
-        verify_resume_download_token(token, now=now + timedelta(days=8))
 
 
 def test_confirmation_package_omits_missing_resume_without_blocking_other_content():
@@ -117,7 +100,6 @@ def test_confirmation_card_without_resume_keeps_customer_decision_action():
         (),
         (),
         ({"week_number": 1, "case_no": "CASE-278"},),
-        {},
         "decision-token",
         "請確認配對方案。",
     ))
@@ -132,7 +114,7 @@ def test_current_resume_query_compares_numeric_staff_identity_without_collation_
     assert "object.subject_reference=CAST(segment.staff_id AS CHAR)" not in _CURRENT_RESUMES_SQL
 
 
-def test_confirmation_preview_lists_missing_resume_as_non_blocking_manual_notice():
+def test_confirmation_preview_reports_missing_resume():
     segments = (
         {"staff_id": 100, "staff_name": "王小美"},
         {"staff_id": 200, "staff_name": "李小華"},
@@ -162,14 +144,16 @@ def test_confirmation_preview_lists_missing_resume_as_non_blocking_manual_notice
             "ready": False,
             "filename": None,
             "version": None,
-            "blocker": "月嫂 李小華 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。",
+            "blocker": "月嫂 李小華 未附履歷 PDF，請先上傳。",
         },
     )
-    assert blockers == ("月嫂 李小華 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。",)
+    assert blockers == ("月嫂 李小華 未附履歷 PDF，請先上傳。",)
 
 
 @pytest.mark.parametrize("hours_per_day,work_days", [(8, 5), (8.5, 1)])
-def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_day, work_days):
+@pytest.mark.parametrize("line_bound", [True, False])
+@pytest.mark.parametrize("has_resume", [True, False])
+def test_confirmation_preview_is_readable_with_or_without_line_binding(hours_per_day, work_days, line_bound, has_resume):
     plan = MatchingPlanReference("CASE-278", 51, 4)
     state = SimpleNamespace(
         plan=plan,
@@ -178,8 +162,8 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_
         order_status="洽談中",
         replacement_matching_open=False,
         all_willing=True,
-        customer_profiles_are_available=False,
-        customer_line_user_id=object(),
+        customer_decision="pending",
+        customer_line_user_id=object() if line_bound else None,
     )
 
     class Notifications:
@@ -194,17 +178,20 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_
                 "order_information_2_ready": True,
                 "weekly_service_ready": True,
                 "weekly_service_row_count": 2,
-                "order_information_1": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－1"},),
-                "order_information_2": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－2"},),
+                "order_information_1": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－1",
+                    "line_sections": ({"title": "客戶付款約定", "rows": (("客戶應付總額", "NT$ 48,000"),)},)},),
+                "order_information_2": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－2",
+                    "line_sections": ({"title": "飲食與照護需求", "rows": (("飲食習慣", "清淡"),)},)},),
                 "weekly_service_rows": ({"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": hours_per_day, "weekly_work_days": work_days, "weekly_hours": hours_per_day * work_days},),
                 "caregiver_resumes": ({
                     "staff_id": 100,
                     "staff_name": "王小美",
-                    "ready": False,
-                    "filename": None,
-                    "version": None,
-                    "blocker": "月嫂 王小美 尚未上傳履歷 PDF。",
+                    "ready": has_resume,
+                    "filename": "demo.pdf" if has_resume else None,
+                    "version": 1 if has_resume else None,
+                    "blocker": None if has_resume else "月嫂 王小美 尚未上傳履歷 PDF。",
                 },),
+                "resume_files": ({"file_id": "demo"},) if has_resume else (),
                 "blockers": (),
             }
 
@@ -217,21 +204,32 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_
         def __exit__(self, *_args):
             return None
 
+    def render_resume(file_id, budget):
+        assert (file_id, budget) == ("demo", 4)
+        return (b"page1", b"page2")
+
     application = MatchingNotificationApplication(
         UnitOfWork,
         lambda: datetime(2026, 9, 12, tzinfo=timezone.utc),
         availability_validator=lambda _state: None,
+        resume_page_renderer=render_resume,
     )
 
     preview = application.preview_customer_confirmation(
         ActorContext("admin:7", ("line.matching.read",)),
         plan,
+        include_resume_images=True,
     )
 
-    assert preview.send_allowed is True
-    assert preview.blockers == ()
+    binding_blockers = () if line_bound else ("客戶尚未完成 LINE 綁定。",)
+    resume_blockers = () if has_resume else ("月嫂 王小美 尚未上傳履歷 PDF。",)
+    assert preview.blockers == (*binding_blockers, *resume_blockers)
+    assert preview.send_allowed is (line_bound and has_resume)
+    assert preview.resume_images == ((b"page1", b"page2") if has_resume else ())
     assert preview.caregiver_resumes[0].staff_name == "王小美"
     assert preview.order_information_1[0].text == "訂單資訊－1"
+    assert preview.order_information_1[0].line_sections[0].rows == (("客戶應付總額", "NT$ 48,000"),)
+    assert preview.order_information_2[0].line_sections[0].rows == (("飲食習慣", "清淡"),)
     assert preview.weekly_service_rows[0].weekly_hours == hours_per_day * work_days
 
 
@@ -243,3 +241,16 @@ def test_download_matching_confirmation_resume_is_retired_410():
         download_matching_confirmation_resume("mcf_test_token")
     assert exc.value.status_code == 410
     assert "退役" in str(exc.value.detail)
+
+
+def test_liff_resume_page_and_download_are_retired():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes import matches
+
+    app = FastAPI()
+    app.include_router(matches.resume_page_router)
+    app.include_router(matches.resume_router)
+    client = TestClient(app)
+    assert client.get("/line-matching-resume").status_code == 410
+    assert client.post("/api/v1/line/matching-resume/download", json={}).status_code == 410

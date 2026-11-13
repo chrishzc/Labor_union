@@ -119,13 +119,11 @@ class MySqlLineMessagePreviewReader:
             if projection["blockers"]:
                 return None
             profiles = repository.customer_profile_facts(int(plan["id"]))
-            # Only show the download action when an actual current resume exists; never issue a download token.
-            resumes = {int(item["staff_id"]): "https://preview.invalid/resume" for item in projection["caregiver_resumes"]}
             documents = (information_document('訂單資訊－1｜客戶費用', case_no, projection['order_information_1'], info_type=1),
                 information_document('訂單資訊－2', case_no, projection['order_information_2'], info_type=2),
                 weekly_document(case_no, projection['weekly_service_rows']))
             return PreviewCardSource(customer_confirmation_card(case_no, profiles, projection["order_information_1"],
-                projection["order_information_2"], projection["weekly_service_rows"], resumes, "preview-only", ""),
+                projection["order_information_2"], projection["weekly_service_rows"], "preview-only", ""),
                 json.dumps([asdict(item) for item in documents], ensure_ascii=False))
 
         entry = self._one(

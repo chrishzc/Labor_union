@@ -1,9 +1,51 @@
 """Render owner-projected text into a compact PNG without browser or file writes."""
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 from PIL import Image, ImageDraw, ImageFont
 from subsystems.line.table_image_contracts import TableDocument, TableImageUnavailable
+
+
+_PDF_RENDER_LOCK = Lock()
+
+
+def render_resume_pages(content: bytes, page_budget: int) -> tuple[bytes, ...]:
+    """Render every PDF page within the remaining LINE image budget."""
+    try:
+        from pypdfium2 import PdfDocument, PdfiumError
+    except ImportError as error:
+        raise TableImageUnavailable('履歷圖片轉換服務尚未安裝。') from error
+    with _PDF_RENDER_LOCK:
+        try:
+            with PdfDocument(content) as pdf:
+                if not 1 <= len(pdf) <= page_budget:
+                    raise ValueError('同一次 LINE 寄送最多附四頁履歷，請縮短 PDF 後重試。')
+                pages = []
+                for page in pdf:
+                    try:
+                        width, height = page.get_size()
+                        if min(width, height) <= 0 or min(width, height) / max(width, height) < 0.01:
+                            raise ValueError('履歷 PDF 的頁面尺寸無法轉換。')
+                        bitmap = page.render(scale=1024 / max(width, height))
+                        try:
+                            image = bitmap.to_pil().convert('RGB')
+                        finally:
+                            bitmap.close()
+                        for longest in (1024, 900, 680):
+                            image.thumbnail((longest, longest))
+                            buffer = BytesIO()
+                            image.save(buffer, format='PNG', optimize=True)
+                            if buffer.tell() <= 1_000_000:
+                                pages.append(buffer.getvalue())
+                                break
+                        else:
+                            raise ValueError('履歷圖片超過 LINE 大小限制。')
+                    finally:
+                        page.close()
+                return tuple(pages)
+        except PdfiumError as error:
+            raise ValueError('履歷 PDF 無法讀取，請重新上傳。') from error
 
 
 def _font(size):

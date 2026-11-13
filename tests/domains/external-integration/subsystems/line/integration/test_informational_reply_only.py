@@ -500,6 +500,38 @@ def test_deposit_assistance_replies_in_webhook_and_leaves_ticket_for_worker():
     assert list(unit.delivery_tasks.tasks.values()) == [reply]
 
 
+def test_deferred_inbox_event_remains_leased_until_reply_attempt_finishes():
+    from subsystems.line.event_dispatcher import LineEventDispatcher
+    from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
+    from subsystems.line.webhook_intake import LineWebhookIntake
+
+    order = []
+    reserved = SimpleNamespace(lease=SimpleNamespace(expires_at=NOW + timedelta(seconds=30)))
+    task = object()
+    unit = Unit()
+    unit.webhook_inbox = SimpleNamespace(defer=lambda event: order.append(("defer", event)))
+    unit.delivery_tasks = SimpleNamespace(
+        new_reply_task_ids=lambda: (1,),
+        claim_webhook_reply=lambda *_: task,
+    )
+    consumer = LineWebhookEventConsumer(lambda: unit, LineEventDispatcher(), "test", lambda: NOW)
+
+    def fail_reply(claimed):
+        assert claimed is task
+        assert order == []
+        order.append(("reply", claimed))
+        raise RuntimeError("provider unavailable")
+
+    intake = LineWebhookIntake(
+        SimpleNamespace(verify=lambda *_: True), lambda: unit, SimpleNamespace(publish=lambda: None),
+        reply_consumer=lambda event: consumer.consume_registered(event, lambda *_: False),
+        reply_delivery=fail_reply, release_after_reply=consumer.release_after_reply,
+    )
+    intake._store = lambda _events: (1, (reserved,))
+    intake.accept(b'{"events":[]}', None, CorrelationId("ordering"))
+    assert order == [("reply", task), ("defer", reserved)]
+
+
 def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     from domains.scheduling.matching_communication import CaregiverWillingness, CustomerMatchingDecision, MatchingPlanReference
     from subsystems.line.candidate_contact_postback_application import LineCandidateContactPostbackApplication
@@ -543,7 +575,7 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     assert LineCandidateContactPostbackApplication().handle(postback_inbox(f"candidate-contact:{'a' * 64}:willing", event_id="ev-cand"), unit)
     # 2) Formal matching caregiver willingness & customer acceptance/help acks
     repo = SimpleNamespace(
-        interaction=lambda _token: {"case_no": "CASE-1", "plan_id": 10, "segment_id": None, "recipient_line_user_id": USER.value,
+        interaction=lambda _token, **_: {"case_no": "CASE-1", "plan_id": 10, "segment_id": None, "recipient_line_user_id": USER.value,
                                     "interaction_status": "active", "expires_at_utc": NOW + timedelta(days=1), "action_scope": "customer_decision"},
         get_contact_state=lambda *_a, **_kw: MatchingContactState(
             MatchingPlanReference("CASE-1", 10, 0), "proposed", True, "洽談中",
@@ -558,10 +590,12 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     )
     unit.matching_notifications = repo
     matching_app = MatchingNotificationApplication(lambda: unit, lambda: NOW, availability_validator=lambda _s: None)
-    LineMatchingPostbackApplication(matching_app).handle(postback_inbox("matching:safe-token-12345678901234567890:accepted", event_id="ev-match"), unit)
+    assert not LineMatchingPostbackApplication(matching_app).handle(
+        postback_inbox("matching:safe-token-12345678901234567890:accepted", event_id="ev-match"), unit, reply_only=True,
+    )
     # 2b) Formal matching caregiver willingness postback ack
     repo_cg = SimpleNamespace(
-        interaction=lambda _token: {"case_no": "CASE-1", "plan_id": 10, "segment_id": 20, "recipient_line_user_id": USER.value,
+        interaction=lambda _token, **_: {"case_no": "CASE-1", "plan_id": 10, "segment_id": 20, "recipient_line_user_id": USER.value,
                                     "interaction_status": "active", "expires_at_utc": NOW + timedelta(days=1), "action_scope": "caregiver_willingness"},
         get_contact_state=lambda *_a, **_kw: MatchingContactState(
             MatchingPlanReference("CASE-1", 10, 0), "proposed", True, "洽談中",

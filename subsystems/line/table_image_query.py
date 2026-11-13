@@ -20,4 +20,4 @@ class LineTableImageQuery:
                 document = unit.delivery_tasks.table_image_document(claim['key'], claim['index'])
             except LookupError as error:
                 raise TableImageNotFound() from error
-        return self._renderer(document)
+        return document if isinstance(document, bytes) else self._renderer(document)
