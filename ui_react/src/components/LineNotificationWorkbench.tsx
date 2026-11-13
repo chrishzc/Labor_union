@@ -27,8 +27,6 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import './LineNotificationWorkbench.css';
 
 const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }> = {
-  'contract-signing-client': { recipient: '客戶私人聊天室', trigger: '人員點「發送簽署提醒」後建立工作，無再次確認視窗' },
-  'contract-signing-staff': { recipient: '月嫂私人聊天室', trigger: '人員點「發送簽署提醒」後建立工作，無再次確認視窗' },
   'payment-overdue-deposit': { recipient: '客戶私人聊天室', trigger: '訂金逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
   'deposit-reminder': { recipient: '客戶私人聊天室', trigger: '雙方簽約完成、繳費資料齊備後，依帳務提醒排程自動寄送' },
   'deposit-settled': { recipient: '客戶私人聊天室', trigger: '正式核銷後，由人員在帳務入帳通知待辦確認並發送' },

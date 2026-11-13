@@ -496,17 +496,6 @@ export const contractExternalSigningClient = {
     return value;
   },
 
-  async sendSigningReminders(caseNo: string, input: { session_id: string | null; expected_status_version: number }, identity: ExternalSigningCommandIdentity): Promise<SigningReminderReceipt> {
-    SessionIdSchema.nullable().parse(input.session_id);
-    const value = decodePayload(envelope(SigningReminderReceiptSchema), await transport.post(
-      `${basePath(caseNo)}/reminders`, input, commandOptions(identity),
-    )).data;
-    if (value.receipt_id !== identity.receiptId || value.session_id !== input.session_id || value.status_version !== input.expected_status_version) {
-      throw new ApiHttpError(409, 'SIGNING_REMINDER_RECEIPT_MISMATCH', '簽署提醒結果與原操作不一致。');
-    }
-    return value;
-  },
-
   async previewLegacyRecovery(
     caseNo: string,
     input: LegacyRecoveryPreviewInput,

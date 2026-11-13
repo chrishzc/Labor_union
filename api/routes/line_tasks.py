@@ -49,6 +49,7 @@ from subsystems.line.delivery_admin_contracts import (
     ControlLineDeliveryTaskCommand,
     LineDeliveryAdminQuery,
 )
+from subsystems.line.delivery_contracts import RETIRED_SIGNING_REMINDER_SOURCES
 from subsystems.line.runtime_health import classify_line_worker_health
 
 LOGGER = logging.getLogger(__name__)
@@ -193,6 +194,7 @@ def task_detail(
         data = LineDeliveryPublicDetailView(
             task=_public_item(task),
             attempts=[_public_attempt(item) for item in attempts],
+            retry_allowed=task.source_aggregate_type not in RETIRED_SIGNING_REMINDER_SOURCES,
         )
     except Exception as error:
         _raise_query_error(
@@ -210,6 +212,7 @@ _SOURCE_TYPE_GROUPS = {
         "customer_service_ticket",
         "contract_document_version",
         "contract_external_signing_session",
+        "contract_signing_case",
         "line_follow_schedule",
         "line_identity",
         "line_review_request",
@@ -228,6 +231,7 @@ _SOURCE_TYPE_GROUPS = {
     LineDeliveryPublicSourceType.CONTRACT: (
         "contract_document_version",
         "contract_external_signing_session",
+        "contract_signing_case",
     ),
     LineDeliveryPublicSourceType.FOLLOW_SCHEDULE: ("line_follow_schedule",),
     LineDeliveryPublicSourceType.IDENTITY: (

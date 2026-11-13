@@ -34,7 +34,13 @@ from infrastructure.mysql.line_platform_identity_repository import (
     MySqlLinePlatformUserRepository,
     _friend_event_result,
 )
-from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey, IdempotencyReceipt
+from subsystems.line.delivery_admin_application import (
+    LineDeliveryTaskAdminApplication,
+    LineDeliveryTaskStateConflictError,
+)
+from subsystems.line.delivery_admin_contracts import ControlLineDeliveryTaskCommand
 from subsystems.line.delivery_contracts import (
     LineProviderOutcome,
     LineProviderOutcomeType,
@@ -66,6 +72,7 @@ class DeliveryRepository:
         self.tasks = {index: _task(index, knowledge) for index in range(1, count + 1)}
         self.claims = []
         self.recorded = []
+        self.cancelled = []
 
     def claim(self, query):
         self.claims.append(query)
@@ -82,6 +89,11 @@ class DeliveryRepository:
 
     def get(self, task_id):
         return self.tasks.get(task_id.value)
+
+    def cancel(self, command):
+        task = self.tasks[command.task_id.value]
+        self.cancelled.append(command)
+        self.tasks[command.task_id.value] = replace(task, status=LineDeliveryStatus.CANCELLED, lease=None)
 
     def reply_opportunity(self, _correlation_id, *, recipient=None):
         return LineReplyOpportunity("synthetic-reply-token", NOW + timedelta(seconds=45))
@@ -118,6 +130,57 @@ def _success():
 
 
 class DeliveryRegressionTests(unittest.TestCase):
+    def test_retired_signing_reminders_cancel_without_sending_and_preserve_history(self):
+        repository = DeliveryRepository(count=5)
+        sources = ("contract_external_signing_session", "contract_signing_case",
+                   "contract_document_version", "review", "contract_external_signing_session")
+        for task_id, source in enumerate(sources, start=1):
+            task = repository.tasks[task_id]
+            repository.tasks[task_id] = replace(task, request=replace(task.request, source_aggregate_type=source))
+        # Reclaimed jobs may already have an attempt with an uncertain provider outcome.
+        repository.tasks[2] = replace(repository.tasks[2], completed_attempts=1)
+        historical = repository.tasks[5] = replace(repository.tasks[5], status=LineDeliveryStatus.SENT, completed_attempts=1)
+        provider = Mock()
+        provider.send.return_value = _success()
+        worker = LineDeliveryWorker(lambda: Uow(delivery_tasks=repository), provider, "worker:regression", lambda: NOW)
+
+        self.assertEqual(worker.run_once(), 4)
+
+        self.assertEqual([command.task_id.value for command in repository.cancelled], [1, 2])
+        self.assertEqual(repository.tasks[2].completed_attempts, 1)
+        self.assertEqual(repository.tasks[5], historical)
+        self.assertEqual([call.args[0].source_aggregate_type for call in provider.send.call_args_list],
+                         ["contract_document_version", "review"])
+        self.assertEqual([command.task.task_id.value for command in repository.recorded], [3, 4])
+
+    def test_retired_signing_reminders_reject_manual_rescheduling(self):
+        for action, status in (("retry", LineDeliveryStatus.FAILED), ("run_now", LineDeliveryStatus.PENDING)):
+            with self.subTest(action=action):
+                task = _task(1)
+                task = replace(task, status=status, request=replace(task.request, source_aggregate_type="contract_signing_case"))
+                repository = Mock()
+                repository.get.return_value = task
+                receipts = Mock()
+                receipts.get.return_value = None
+                application = LineDeliveryTaskAdminApplication(lambda: Uow(delivery_tasks=repository, receipts=receipts))
+                command = ControlLineDeliveryTaskCommand(task.task_id, ActorContext("admin:1", ("line.task.control",)),
+                                                         "", IdempotencyKey("test:retired"), task.request.correlation_id)
+
+                with self.assertRaises(LineDeliveryTaskStateConflictError):
+                    getattr(application, action)(command)
+
+                receipts.get.return_value = IdempotencyReceipt(
+                    command.idempotency_key,
+                    fingerprint_payload({"action": action, "task_id": 1, "reason": ""}),
+                    f"line-delivery:1:{action}",
+                )
+                with self.assertRaises(LineDeliveryTaskStateConflictError):
+                    getattr(application, action)(command)
+
+                repository.retry_failed.assert_not_called()
+                repository.run_now.assert_not_called()
+                receipts.append.assert_not_called()
+
     def test_reply_server_errors_do_not_push_or_allow_automatic_retry(self):
         for status in (500, 502, 503, 504):
             with self.subTest(status=status):

@@ -11,6 +11,8 @@
 - primary: `ui_react/src/components/LineDeliveryTaskWorkbench.tsx`
 - `ui_react/src/components/LineDeliveryOperationsWorkbench.tsx`、`ui_react/src/components/LineDeliveryTaskActions.tsx`、`ui_react/src/components/LineNotificationFailureActions.tsx` — LINE 正式「寄送與異常」頁；`tab=delivery&task=<id>` 單筆讀取寄送工作，`tab=delivery&view=failures&issue=<key>` 單筆核對原異常。清單分頁不影響選定 ID，重試／取消／補送仍沿既有 writer；不以通知設定頁替代原工作。
 - transport: `api/routes/line_tasks.py` — 現行訂金、各期逾期、日誌、資訊問答與服務日期／代班來源映射到既有公開分類；list／detail 不回傳 raw recipient、payload 或 provider error。未知來源仍 fail closed。
+- public detail schema: `api/schemas/line_tasks.py`、`ui_react/src/api/line_delivery/line_delivery_query_schemas.ts`。既有簽署提醒沿契約類別讀取投遞歷史，detail 回傳 `retry_allowed=false`，畫面不提供重試。
+- control dependency: `subsystems/line/delivery_admin_application.py` — 驗權後執行任務控制，拒絕已退役的簽署提醒重試及立即執行。
 
 - client: `ui_react/src/api/line_delivery/line_delivery_query_client.ts` — category 審核／款項／客服篩選在伺服器分頁前套用，總數同一集合。
 - 現行來源含 service-start-day／response／completion 與 second-payment reminder／settled，沿原 order／finance 公開分類。

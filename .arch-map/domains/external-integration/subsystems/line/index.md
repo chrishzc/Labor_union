@@ -76,6 +76,7 @@
 
 `delivery_worker.py` 每次只 claim 即將處理的一筆，保留每輪預設25筆上限；送出前確認
 同一未過期lease及取消狀態。Reply 5xx不確定結果不得立即Push，亦不自動重試該不確定回答。
+既有簽署提醒任務（`contract_external_signing_session`、`contract_signing_case`）於呼叫 provider 前取消，拒絕人工立即執行與重試。兩種來源仍可查閱投遞歷史。契約文件下載通知沿用 `contract_document_version`。
 
 `infrastructure/mysql/line_platform_identity_repository.py`保存晚到的好友事件與版本紀錄，
 同一 adapter 內的 canonical 狀態與 legacy `line_users` 投影都不倒退；

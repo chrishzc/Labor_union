@@ -51,7 +51,7 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
       { id: 'customer-response', title: '接受配對／專人協助／其他選擇受理', delivery: ['reply'], ids: ['matching-customer-accepted', 'matching-customer-assistance', 'matching-customer-response'] },
     ] },
     { title: '簽約', nodes: [
-      { id: 'signing-reminders', title: '人工發送簽署提醒', delivery: ['manual'], ids: ['contract-signing-client', 'contract-signing-staff'], summary: '人員點擊後建立客戶及月嫂私人提醒工作，無再次確認視窗；簽約完成仍以簽回文件為準。' },
+      { id: 'signing-reminders', title: '簽署提醒', summary: '工會人員在 LINE 官方帳號聊天後台手動選用範本，發給需要提醒的客戶或月嫂。簽約完成以確認簽回文件為準。' },
       { id: 'contract-documents', title: '寄送客戶及月嫂契約文件', delivery: ['manual'], ids: ['contract-document-client', 'contract-document-staff'], previewOnly: true, summary: '工會人員發起寄送後，系統分別私訊客戶或月嫂，提供對應契約的下載連結。' },
     ] },
     { title: '收款與建群', nodes: [

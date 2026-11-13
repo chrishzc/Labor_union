@@ -19,8 +19,9 @@ export function LineDeliveryTaskActions({id,onCommitted}:{id:number;onCommitted:
       intent.current=null;setView(await lineDeliveryQueryClient.detail(id));await onCommitted();
     }catch(e){setError(notificationFailure(e));}finally{locked.current=false;setBusy(false);}
   };
+  const retryAllowed = view?.retry_allowed !== false;
   return <section aria-label="寄送工作處理"><h3>寄送工作 #{id}</h3>{error && <p role="alert">{error}</p>}{view && <><p>已嘗試 {view.task.completed_attempts}／{view.task.max_attempts} 次</p>
-    <p>排程時間：{view.task.scheduled_at}</p>{view.task.next_retry_at && <p>下次重試：{view.task.next_retry_at}</p>}
-    <div className="notification-preview-actions">{['failed','retryable_failed'].includes(view.task.status) && <button className="np-button primary" disabled={busy} onClick={()=>void control('retry')}>重試寄送工作</button>}
-      {['pending','retryable_failed'].includes(view.task.status) && <button className="np-button" disabled={busy} onClick={()=>void control('cancel')}>取消寄送工作</button>}</div><p>重試僅接續原寄送工作，不重做核銷或案件作業。</p></>}</section>;
+    <p>排程時間：{view.task.scheduled_at}</p>{retryAllowed && view.task.next_retry_at && <p>下次重試：{view.task.next_retry_at}</p>}
+    <div className="notification-preview-actions">{retryAllowed && ['failed','retryable_failed'].includes(view.task.status) && <button className="np-button primary" disabled={busy} onClick={()=>void control('retry')}>重試寄送工作</button>}
+      {['pending','retryable_failed'].includes(view.task.status) && <button className="np-button" disabled={busy} onClick={()=>void control('cancel')}>取消寄送工作</button>}</div>{retryAllowed && <p>重試僅接續原寄送工作，不重做核銷或案件作業。</p>}</>}</section>;
 }

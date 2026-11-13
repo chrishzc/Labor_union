@@ -47,7 +47,6 @@ from subsystems.contract_signing.external_signing_contracts import (
 )
 from subsystems.contract_signing.external_signing_workflow import (
     RecordExternalSigningHandoff,
-    SendExternalSigningReminders,
 )
 from subsystems.contract_signing.final_document_workflow import (
     ApplyFinalSignedContractUpload,
@@ -296,12 +295,6 @@ class SigningSessionVersionBody(BaseModel):
     expected_status_version: int = Field(ge=1)
 
 
-class SigningReminderBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    session_id: str | None = Field(default=None, pattern=_SESSION)
-    expected_status_version: int = Field(default=0, ge=0)
-
-
 class UnsignedDocumentView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -312,30 +305,6 @@ class UnsignedDocumentView(BaseModel):
 
 
 class PreparedUnsignedDocumentView(UnsignedDocumentView):
-    replayed: bool
-
-
-class StaffReminderReadinessView(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    matching_segment_id: int = Field(ge=1)
-    document_version_id: int = Field(ge=1)
-    message: str = Field(min_length=1, max_length=1000)
-    blockers: list[str]
-    ready: bool
-
-    @model_validator(mode="after")
-    def require_closed_readiness(self):
-        if self.ready != (not self.blockers):
-            raise ValueError("staff reminder readiness does not match blockers")
-        return self
-
-
-class StaffReminderTaskView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    task_id: int = Field(ge=1)
-    status: Literal["pending", "processing", "sent", "retryable_failed", "failed", "cancelled"]
     replayed: bool
 
 
@@ -539,22 +508,6 @@ def record_external_signing_handoff(
         )
 
     return _call(action, correlation_id)
-
-
-@router.post("/{case_no}/contract-external-signing/reminders")
-def send_signing_reminders(
-    body: SigningReminderBody,
-    case_no: str = ApiPath(pattern=_CASE),
-    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
-    receipt_id: str = Header(alias="X-Receipt-ID", pattern=_RECEIPT),
-    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    application: ContractExternalSigningApplication = Depends(_application),
-):
-    _require_receipt_identity(idempotency_key, receipt_id, correlation_id)
-    return _call(lambda: BaseResponse(data=_public_reminder(application.reports.send_signing_reminders(
-        SendExternalSigningReminders(case_no, body.session_id, ExpectedVersion(body.expected_status_version), admin_actor_context(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id), receipt_id)
-    ))), correlation_id)
 
 
 @router.post(
@@ -764,54 +717,6 @@ def prepare_staff_unsigned_pdf(
             data=application.prepare_staff_unsigned(
                 case_no,
                 segment_id,
-                admin_actor_context(principal),
-                IdempotencyKey(idempotency_key),
-                CorrelationId(correlation_id),
-            )
-        ),
-        correlation_id,
-    )
-
-
-@router.get(
-    "/{case_no}/contract-external-signing/staff-segments/{segment_id}/reminder-readiness",
-    response_model=BaseResponse[StaffReminderReadinessView],
-)
-def query_staff_reminder_readiness(
-    case_no: str = ApiPath(pattern=_CASE),
-    segment_id: int = ApiPath(ge=1),
-    _: AdminPrincipal = Depends(require_persisted_admin),
-    application: ContractExternalSigningApplication = Depends(_application),
-):
-    return _call(
-        lambda: BaseResponse(
-            data=application.staff_reminder_readiness(case_no, segment_id)
-        ),
-        "query",
-    )
-
-
-@router.post(
-    "/{case_no}/contract-external-signing/staff-segments/{segment_id}/reminders",
-    response_model=BaseResponse[StaffReminderTaskView],
-)
-def enqueue_staff_reminder(
-    case_no: str = ApiPath(pattern=_CASE),
-    segment_id: int = ApiPath(ge=1),
-    expected_document_version: int = Header(
-        alias="X-Expected-Document-Version", ge=1
-    ),
-    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
-    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-    application: ContractExternalSigningApplication = Depends(_application),
-):
-    return _call(
-        lambda: BaseResponse(
-            data=application.enqueue_staff_reminder(
-                case_no,
-                segment_id,
-                expected_document_version,
                 admin_actor_context(principal),
                 IdempotencyKey(idempotency_key),
                 CorrelationId(correlation_id),

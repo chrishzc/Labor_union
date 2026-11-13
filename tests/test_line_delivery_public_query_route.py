@@ -152,10 +152,31 @@ def test_delivery_source_groups_are_safe_and_bounded() -> None:
     assert contract == (
         "contract_document_version",
         "contract_external_signing_session",
+        "contract_signing_case",
     )
     assert line_tasks._public_source_type(
         "contract_external_signing_session"
     ) is LineDeliveryPublicSourceType.CONTRACT
+
+
+@pytest.mark.parametrize(('source', 'retry_allowed'), [
+    ('contract_signing_case', False),
+    ('contract_external_signing_session', False),
+    ('contract_document_version', True),
+])
+def test_contract_delivery_detail_keeps_history_and_reports_retry_availability(monkeypatch, source, retry_allowed):
+    class ContractApplication(_Application):
+        def get(self, task_id, actor):
+            task, attempts = super().get(task_id, actor)
+            return replace(task, source_aggregate_type=source), attempts
+
+    response = _client(monkeypatch, ContractApplication()).get('/api/v1/line/tasks/7')
+
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['task']['source_type'] == 'contract'
+    assert data['retry_allowed'] is retry_allowed
+    assert len(data['attempts']) == 1
 
 
 @pytest.mark.parametrize(

@@ -150,14 +150,19 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     const { configuration, previews, templates } = flowWorkbench(); const onOpen=vi.fn();
     const current=await previews.catalog();
     const additions=[['contract-signing-client','簽署提醒－客戶'],['contract-signing-staff','簽署提醒－月嫂'],
+      ['contract-document-client','客戶契約下載通知'],['contract-document-staff','月嫂契約下載通知'],
       ['payment-overdue-deposit','訂金逾期－人工提醒客戶'],['payment-overdue-first','第一期款逾期－人工提醒案件群組'],['payment-overdue-second','第二期款逾期－人工提醒案件群組']];
     vi.mocked(previews.catalog).mockResolvedValue([...current,...additions.map(([id,name])=>({id,name,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen}/>);
     expect(screen.getByText(/簽約與訂金付款可先後交錯/)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button',{name:/3 簽約/}));
-    fireEvent.click(screen.getByRole('button',{name:/人工發送簽署提醒/}));
-    fireEvent.click(screen.getByRole('button',{name:/簽署提醒－客戶/}));
-    expect(onOpen).toHaveBeenCalledWith('contract-signing-client');
+    expect(screen.getByText(/LINE 官方帳號聊天後台手動選用範本/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /簽署提醒/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /寄送客戶及月嫂契約文件/ }));
+    fireEvent.click(screen.getByRole('button', { name: /客戶契約下載通知/ }));
+    expect(onOpen).toHaveBeenCalledWith('contract-document-client');
+    fireEvent.click(screen.getByRole('button', { name: /月嫂契約下載通知/ }));
+    expect(onOpen).toHaveBeenCalledWith('contract-document-staff');
     fireEvent.click(screen.getByRole('button',{name:/4 收款與建群/}));
     expect(screen.getByRole('button',{name:/訂金逾期－私訊補寄與人工提醒/})).toBeEnabled();
     fireEvent.click(screen.getByRole('button',{name:/5 開始服務/}));

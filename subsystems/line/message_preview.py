@@ -14,7 +14,8 @@ from shared_kernel.identities import ActorContext
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import render_message_template
 from subsystems.line.message_copy_catalog import (
-    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, default_copy_templates, effective_copy_definition, render_copy_payload,
+    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_SIGNING_REMINDER_TEMPLATE_IDS,
+    default_copy_templates, effective_copy_definition, render_copy_payload,
 )
 
 
@@ -141,8 +142,6 @@ _CURRENT_FLOW_PREVIEWS = (
     ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),
     ("complaint-handoff-received", "客訴已轉接真人客服通知", "text"),
     ("customer-service-ticket-reply", "工會人員回覆客服工單", "text"),
-    ("contract-signing-client", "簽署提醒－客戶", "text"),
-    ("contract-signing-staff", "簽署提醒－月嫂", "text"),
     ("payment-overdue-deposit", "訂金逾期－人工提醒客戶", "text"),
     ("payment-overdue-first", "第一期款逾期－客戶私訊補寄與人工提醒", "text"),
     ("payment-overdue-second", "第二期款逾期－客戶私訊補寄與人工提醒", "text"),
@@ -226,6 +225,7 @@ class LineMessagePreviewApplication:
         references = [
             (r["id"], r["template_id"]) for r in rules.get("rules", [])
             if r["template_id"] not in _RETIRED and r["template_id"] not in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
+            and r["template_id"] not in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS
             and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)
         ]
         referenced = {template_id for _, template_id in references}

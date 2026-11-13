@@ -13,7 +13,10 @@ from subsystems.line.delivery_admin_contracts import (
     ControlLineDeliveryTaskCommand,
     LineDeliveryAdminQuery,
 )
-from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
+from subsystems.line.delivery_contracts import (
+    CancelLineDeliveryTaskCommand,
+    RETIRED_SIGNING_REMINDER_SOURCES,
+)
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
 
@@ -77,24 +80,22 @@ class LineDeliveryTaskAdminApplication:
         result_reference = f"line-delivery:{command.task_id.value}:{action}"
         with self._unit_of_work_factory() as unit_of_work:
             existing = unit_of_work.receipts.get(command.idempotency_key)
-            if existing is not None:
-                if (
-                    existing.payload_fingerprint != fingerprint
-                    or existing.result_reference != result_reference
-                ):
-                    raise LineDeliveryTaskStateConflictError(
-                        "LINE delivery control idempotency conflict"
-                    )
-                task = unit_of_work.delivery_tasks.get(command.task_id)
-                if task is None:
-                    raise LineDeliveryTaskNotFoundError(
-                        f"找不到 LINE 發送任務 #{command.task_id.value}"
-                    )
-                return task
-            if unit_of_work.delivery_tasks.get(command.task_id) is None:
+            if existing is not None and (
+                existing.payload_fingerprint != fingerprint
+                or existing.result_reference != result_reference
+            ):
+                raise LineDeliveryTaskStateConflictError(
+                    "LINE delivery control idempotency conflict"
+                )
+            current = unit_of_work.delivery_tasks.get(command.task_id)
+            if current is None:
                 raise LineDeliveryTaskNotFoundError(
                     f"找不到 LINE 發送任務 #{command.task_id.value}"
                 )
+            if action != "cancel" and current.request.source_aggregate_type in RETIRED_SIGNING_REMINDER_SOURCES:
+                raise LineDeliveryTaskStateConflictError("簽署提醒已停用，無法發送或重試。")
+            if existing is not None:
+                return current
             try:
                 task = self._apply_action(unit_of_work, action, command)
             except (ValueError, RuntimeError) as error:

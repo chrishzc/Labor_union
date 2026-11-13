@@ -4,7 +4,7 @@ import { useStaffIdentityLabels } from './StaffIdentityProvider';
  * File: ContractExternalSigningActions.tsx
  * Description: 呈現外部簽約 successor closed states、完成回報與最終 PDF 確認、Apply、receipt/readback。
  */
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   contractExternalSigningClient,
   createExternalSigningCommandIdentity,
@@ -203,7 +203,6 @@ function unsignedPreparationReadbackMatches(
 }
 
 export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitted, onOpenFinance, onOpenServiceDates, onOpenRecommendation }: ContractExternalSigningActionsProps) {
-  const reminderReasonId = useId();
   const staffIdentity = useStaffIdentityLabels();
   const observedRevision = useRef(revision);
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
@@ -211,7 +210,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const unsignedDownloadController = useRef<AbortController | null>(null);
   const activeHandoffOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const activeUnsignedPreparationOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
-  const activeReminderOperation = useRef<ExternalSigningHandoffCommand | null>(null);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
   const [preparation, setPreparation] = useState<ContractPreparationQuery | null>(null);
   const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
@@ -235,22 +233,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     subscribeExternalSigningHandoff,
     () => orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo),
   );
-  const reminderFlow = useSyncExternalStore(
-    subscribeExternalSigningHandoff,
-    () => orderMutationFlowStore.getExternalSigningReminder(caseNo),
-  );
-
-  useEffect(() => {
-    if (reminderFlow?.status !== 'received') return;
-    const receipt = reminderFlow.receipt;
-    if (receipt && receipt.session_id === null) {
-      setPreparation(current => current && { ...current, signing_reminder: receipt });
-      setQuery(current => current && { ...current, signing_reminder: receipt });
-    } else if (query && receipt?.session_id === query.session_id) {
-      setQuery(current => current && current.session_id === receipt.session_id ? { ...current, signing_reminder: receipt } : current);
-    }
-    orderMutationFlowStore.clearExternalSigningReminder(caseNo);
-  }, [reminderFlow, query?.session_id, caseNo]);
 
   const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery | null> => {
     const generation = ++requestGeneration.current;
@@ -350,12 +332,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       if (!controller.signal.aborted) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
     return () => {
-      const activeReminder = activeReminderOperation.current;
-      const savedReminder = activeReminder && orderMutationFlowStore.getExternalSigningReminder(activeReminder.caseNo);
-      if (activeReminder && savedReminder?.command.identity.idempotencyKey === activeReminder.identity.idempotencyKey && savedReminder.status === 'applying') {
-        orderMutationFlowStore.setExternalSigningReminder(activeReminder.caseNo, { ...savedReminder, status: 'outcome_unknown', error: '簽署提醒在畫面離開時尚未確認；請重新確認原提醒結果。' });
-      }
-      activeReminderOperation.current = null;
       const activeHandoff = activeHandoffOperation.current;
       const savedHandoff = activeHandoff && orderMutationFlowStore.getExternalSigningHandoff(activeHandoff.caseNo);
       if (activeHandoff && savedHandoff?.operationToken === activeHandoff.operationToken) {
@@ -399,7 +375,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   }, [caseNo, loadQuery]);
 
   useEffect(() => {
-    if (observedRevision.current === revision || handoffFlow || unsignedPreparationFlow || reminderFlow?.status === 'applying' || reminderFlow?.status === 'outcome_unknown' || Object.values(fileReturns).some(row => row.file)
+    if (observedRevision.current === revision || handoffFlow || unsignedPreparationFlow || Object.values(fileReturns).some(row => row.file)
       || !['ready', 'error'].includes(uiState.type)) return;
     observedRevision.current = revision;
     setQuery(null); setPreparationSegments([]); setNotice(null);
@@ -409,7 +385,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     void pending.catch(error => {
       if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
-  }, [revision, loadQuery, handoffFlow, unsignedPreparationFlow, reminderFlow, fileReturns, uiState.type]);
+  }, [revision, loadQuery, handoffFlow, unsignedPreparationFlow, fileReturns, uiState.type]);
 
   const ownsHandoffOperation = (caseNumber: string, operationToken: number): boolean => {
     const active = activeHandoffOperation.current;
@@ -639,9 +615,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     if (request !== requestGeneration.current) return;
     setQuery(fresh);
     setUiState({ type: 'ready' });
-    setNotice(receipt.handoff_included_reminders
-      ? '已重新確認既有交接與通知紀錄；未建立新的提醒工作。'
-      : '已記錄送交外部簽署平台，尚未發送簽署提醒。');
+    setNotice('已記錄送交外部簽署平台。');
   };
 
   const submitHandoff = async (command: ExternalSigningHandoffCommand, recovery: boolean) => {
@@ -782,46 +756,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       if (request === requestGeneration.current) setUiState({ type: 'error', message });
     }
     releaseHandoffOperation(operationToken);
-  };
-
-  const submitReminders = async (command: ExternalSigningHandoffCommand) => {
-    const actor = sessionClient.getUser()?.username.trim();
-    if (!actor || actor !== command.actor) {
-      setNotice('請由原帳號重新確認簽署提醒結果。');
-      return;
-    }
-    const generation = requestGeneration.current;
-    activeReminderOperation.current = command;
-    orderMutationFlowStore.setExternalSigningReminder(command.caseNo, { status: 'applying', command, receipt: null, error: null });
-    try {
-      const receipt = await contractExternalSigningClient.sendSigningReminders(command.caseNo, {
-        session_id: command.sessionId, expected_status_version: command.expectedStatusVersion,
-      }, command.identity);
-      if (orderMutationFlowStore.getExternalSigningReminder(command.caseNo)?.command.identity.idempotencyKey !== command.identity.idempotencyKey) return;
-      if (receipt.receipt_id !== command.identity.receiptId || receipt.session_id !== command.sessionId || receipt.status_version !== command.expectedStatusVersion) {
-        throw new ApiHttpError(409, 'SIGNING_REMINDER_RECEIPT_MISMATCH', '簽署提醒結果與原操作不一致。');
-      }
-      orderMutationFlowStore.setExternalSigningReminder(command.caseNo, { status: 'received', command, receipt, error: null });
-      if (generation === requestGeneration.current) setNotice(receipt.replayed ? '已確認原簽署提醒結果，未重複建立提醒。' : '簽署提醒處理已記錄；未綁定 LINE 的對象請人工通知。');
-    } catch (error) {
-      if (orderMutationFlowStore.getExternalSigningReminder(command.caseNo)?.command.identity.idempotencyKey !== command.identity.idempotencyKey) return;
-      const unknown = outcomeCouldBeUnknown(error) || (error instanceof ApiHttpError && error.code === 'SIGNING_REMINDER_RECEIPT_MISMATCH');
-      orderMutationFlowStore.setExternalSigningReminder(command.caseNo, { status: unknown ? 'outcome_unknown' : 'failed', command, receipt: null,
-        error: unknown ? '簽署提醒結果尚未確認，請重新確認原提醒結果。' : safeErrorMessage(error) });
-    } finally {
-      if (activeReminderOperation.current?.identity.idempotencyKey === command.identity.idempotencyKey) activeReminderOperation.current = null;
-    }
-  };
-
-  const sendReminders = async () => {
-    if (!handoffRecorded || busy || finalProtected || signingBlocked || query?.state === 'completed' || query?.state === 'superseded' || reminderFlow?.status === 'outcome_unknown') return;
-    const currentFlow = orderMutationFlowStore.getExternalSigningReminder(caseNo);
-    if (currentFlow?.status === 'applying' || currentFlow?.status === 'outcome_unknown') return;
-    const actor = sessionClient.getUser()?.username.trim();
-    if (!actor) { setNotice('請先登入後再發送簽署提醒。'); return; }
-    await submitReminders({ caseNo, sessionId: query?.handoff_recorded ? query.session_id : null,
-      expectedStatusVersion: query?.handoff_recorded ? query.status_version : 0,
-      actor, identity: createExternalSigningCommandIdentity('signing-reminders') });
   };
 
   const printContract = async (scope: 'client' | 'staff', segmentId: number | null) => {
@@ -1050,7 +984,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     } catch (error) { if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) }); }
   };
 
-  const busy = uiState.type === 'working' || uiState.type === 'querying' || reminderFlow?.status === 'applying';
+  const busy = uiState.type === 'working' || uiState.type === 'querying';
   const finalProtected = uiState.type === 'outcome_unknown' || uiState.type === 'receipt_committed';
   const signingBlockers = query?.signing_blockers ?? preparation?.signing_blockers ?? [];
   const signingBlocked = signingBlockers.length > 0;
@@ -1069,15 +1003,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const testingCompleted = completedReadback?.filename.startsWith('TEST-ONLY-') ?? false;
   const handoffRecorded = query?.handoff_recorded || query?.handoff_logged || preparation?.handoff_logged;
   const awaitingReturnSession = handoffRecorded && !query?.handoff_recorded;
-  const reminderReceipt = query?.signing_reminder ?? preparation?.signing_reminder;
-  const reminderManualTargets = reminderReceipt?.manual_notification_targets ?? (query?.handoff_included_reminders ? query.manual_notification_targets ?? [] : []);
-  const reminderTargets = query ? [
-    { scope: 'client' as const, subject: query.client_target.client_subject_reference, name: contractMetadata.client?.name || '客戶' },
-    ...query.staff_targets.map(target => ({ scope: 'staff' as const, subject: target.staff_subject_reference, name: metadataLabel(`staff:${target.matching_segment_id}`) || '月嫂' })),
-  ] : [];
-  const allReminderTargetsManual = query
-    ? reminderTargets.length > 0 && reminderTargets.every(target => reminderManualTargets.some(manual => manual.scope === target.scope && manual.subject_reference === target.subject))
-    : reminderManualTargets.some(target => target.scope === 'client') && (preparation?.staff_segments ?? []).every(segment => reminderManualTargets.some(target => target.scope === 'staff' && target.subject_reference === String(segment.staff_id)));
   const renderReturn = (target: SignedDocumentTarget) => {
     const key = signedTargetKey(target), draft = fileReturns[key], meta = contractMetadata[key];
     const name = metadataLabel(key);
@@ -1114,8 +1039,8 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
           </div>
         </article>)}</div>
       </section>
-      <section className="contract-signing-actions-card" aria-label="送交簽署與提醒">
-        <header className="contract-documents-heading"><h3>送交簽署與提醒</h3></header>
+      <section className="contract-signing-actions-card" aria-label="送交簽署">
+        <header className="contract-documents-heading"><h3>送交簽署</h3></header>
         {signingBlocked && <div role="alert" className="contract-manual-notice">
           {signingBlockers.map(code => <p key={code}>{contractCheckReason(code)}</p>)}
           <div className="order-case-action-row">
@@ -1126,11 +1051,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
         <div className="contract-platform-action-row"><div><strong>外部平台交接</strong><p>{awaitingReturnSession
           ? '交接已記錄，可用原按鈕接續文件回收。'
           : '確認契約已送交外部簽署平台，記錄後即可回收簽署文件。'}</p></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${handoffRecorded ? 'complete' : ''}`}>{handoffRecorded ? '交接已記錄' : '待記錄'}</span>{!handoffFlow && <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && !preparation) || signingBlocked} onClick={() => void recordHandoff()}>記錄已送交簽署平台</button>}</div></div>
-        <div className="contract-platform-action-row"><div><strong>簽署提醒</strong><p>需要時另行發送 LINE 提醒，不影響簽署文件回收。</p><small>通知對象：本案客戶及所有月嫂</small></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${reminderReceipt && !allReminderTargetsManual ? 'complete' : ''}`}>{reminderFlow?.status === 'outcome_unknown' ? '結果待確認' : reminderReceipt ? allReminderTargetsManual ? '需人工通知' : '提醒工作已建立' : query?.handoff_included_reminders ? '已有交接通知紀錄' : '尚未發送'}</span><button type="button" disabled={busy || finalProtected || signingBlocked || !handoffRecorded || query?.state === 'completed' || query?.state === 'superseded' || reminderFlow?.status === 'outcome_unknown'} aria-describedby={!handoffRecorded ? reminderReasonId : undefined} onClick={() => void sendReminders()}>發送簽署提醒</button></div></div>
-        <p id={reminderReasonId} className="contract-signing-action-hint">{handoffRecorded ? '交接已記錄。簽署提醒需另按「發送簽署提醒」，不會自動發送。' : '尚未記錄外部平台交接，暫時無法發送簽署提醒。請先點選上方「記錄已送交簽署平台」。'}</p>
-        {reminderManualTargets.length > 0 && <div className="contract-manual-notice" aria-label="需人工通知的簽約對象"><strong>需人工通知簽約</strong><p>{reminderManualTargets.map(target => reminderTargets.find(row => row.scope === target.scope && row.subject === target.subject_reference)?.name || (target.scope === 'client' ? '客戶' : '月嫂')).join('、')}在這次通知紀錄中尚未綁定 LINE，請人工通知前往外部平台簽署。</p></div>}
-        {reminderFlow?.status === 'outcome_unknown' && <div role="alert"><p>{reminderFlow.error}</p><button type="button" disabled={busy} onClick={() => void submitReminders(reminderFlow.command)}>重新確認原提醒結果</button></div>}
-        {reminderFlow?.status === 'failed' && <div role="alert"><p>{reminderFlow.error}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取契約狀態</button></div>}
       </section>
       {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文可透過瀏覽器列印查看，並另存為 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void printContract(reviewTarget.scope, reviewTarget.segmentId)}>瀏覽器列印</button></footer></CandidateInquiryDialog>}
 

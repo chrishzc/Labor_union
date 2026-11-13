@@ -15,6 +15,7 @@
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
   - **業務通知投影規則**：
+    - 簽署提醒由工會人員在 LINE 官方帳號聊天後台手動選用範本。工會系統停止建立提醒任務，舊提醒在呼叫 LINE 前取消，且不得補送。提醒回執與投遞歷史保留。「寄送客戶及月嫂契約文件」沿用既有下載通知流程。見 [簽約規格 §3.3](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#33-檔期衝突檢核送交記錄與官方帳號提醒)。
     - `order.service_start_day`（開工當天原群組詢問）：**2026-11-12 退役**。不再投影來源事件或 Push；規則儲存拒絕（`order.service_start_day`／`order.service_completed`）；殘留工作於 provider 前取消。舊訊息按鈕（`start-day:` postback）仍只以 Reply 確認。`order.pre_start_reminder` 已完全停用取消。
     - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：**2026-11-12 改為私訊**，流程與第一期一致。到期當天由客戶私訊繳款提醒排程（`payment_reminder_notifications`）發送；核銷成功通知由財務待辦人工確認後寄客戶私訊（`payment_receipt_notifications`）。群組來源不再投影、預設不含群組規則，殘留群組工作於 provider 前取消；規則儲存不另行封鎖。
     - `order.service_completed`（服務完工群組問卷通知）：**2026-11-12 退役**。不再消費 `line_service_completion_notification` 標記或 Push；規則儲存拒絕（與 `order.service_start_day` 相同）；殘留工作於 provider 前取消。Orders 完工事實與標記寫入不受影響。
@@ -45,6 +46,7 @@
 - **通知文案編輯器與公版預覽（`LINE-PREVIEW-01～08`、`LINE-COPY-01～05`、`LINE-COPY-EDITOR-01～02`、`LINE-COPY-CATALOG-01`）**：
   - 由 `GET /api/v1/line/message-previews/catalog`、`GET /api/v1/line/message-previews/subjects` 與 `POST /api/v1/line/message-previews/preview` 提供公版索引、對象搜尋與即時渲染；目錄依 `MESSAGE_TEMPLATES` 維護全部通知文字與確認卡片（編輯框統一寬度 `504px`、每頁 `6` 則、正式媒合僅列「正式媒合－客戶完整推薦確認包」，保留各身分獨立成功文案 `identity_bound_customer | _staff | _admin` 與 `PUT` CAS 版本防衝突）。
   - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作）。「寄送案件資訊」節點以整包呈現，頁面內容見 [媒合候選池規格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
+  - LINE 流程圖「簽約」以文字呈現官方帳號聊天後台的手動範本操作。工會通知公版目錄移除客戶及月嫂簽署提醒，保留兩種契約下載通知。
 - **三張表格圖片渲染（`LINE-COPY-TABLE-01`、`LINE-TABLE-IMAGE-01～04`）**：
   - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦產生「訂單資訊一、資訊二、每週服務安排」三張表格 PNG，客戶版資訊一的財務欄位限於客戶費用與繳款約定，確認按鈕留存於獨立互動卡。
   - 圖片快照凍結於 outer UoW 投遞資料；端點 `GET /api/v1/line/table-images/{token}` 以 7 日不依賴外部排班金鑰的內部短效 opaque token 動態產出 PNG（`private, no-store, nosniff, no-referrer`），缺少系統中文字型或金鑰異常回 `503` 而不退回純文字。

@@ -48,12 +48,6 @@ class FakeReports:
         self.command = command
         return SimpleNamespace(replayed=False)
 
-    def send_signing_reminders(self, command):
-        self.command = command
-        return SimpleNamespace(receipt_id=command.receipt_id, session_id=command.session_id,
-                               status_version=command.expected_status_version.value, replayed=False,
-                               manual_notification_targets=())
-
     def record_handoff(self, command):
         self.command = command
         return SimpleNamespace(
@@ -228,24 +222,6 @@ class FakeApplication:
             "replayed": False,
         }
 
-    def staff_reminder_readiness(self, case_no, segment_id):
-        assert (case_no, segment_id) == (CASE_NO, 71)
-        return {
-            "matching_segment_id": 71,
-            "document_version_id": 81,
-            "message": f"案件 {CASE_NO} 的契約已放到工會既定的外部簽約平台。",
-            "blockers": [],
-            "ready": True,
-        }
-
-    def enqueue_staff_reminder(
-        self, case_no, segment_id, document_version_id, actor, idempotency_key, correlation_id
-    ):
-        assert (case_no, segment_id, document_version_id) == (CASE_NO, 71, 81)
-        assert actor.actor_id == "admin:7"
-        assert idempotency_key.value == KEY
-        return {"task_id": 91, "status": "pending", "replayed": False}
-
     def query_case(self, case_no):
         assert case_no == CASE_NO
         return {
@@ -347,7 +323,7 @@ def _preparing_application(status):
     return ContractExternalSigningApplication(
         connection=SimpleNamespace(commit=must_not_mutate, rollback=must_not_mutate),
         repository=SimpleNamespace(
-            load_reminder_context=lambda *_args, **_kwargs: SimpleNamespace(matching_plan_id=17),
+            load_case_signing_context=lambda *_args, **_kwargs: SimpleNamespace(matching_plan_id=17),
             load_handoff_notification_facts=lambda *_args: None,
             load_latest_reminder_receipt=lambda *_args: None,
             load_active_session_by_case=lambda *_args, **_kwargs: None,
@@ -396,17 +372,6 @@ def test_preparation_query_reads_back_case_level_handoff_and_reminder_without_a_
     assert data['state'] == 'preparing' and data['handoff_logged'] is True
     assert data['signing_reminder']['session_id'] is None
     assert data['signing_reminder']['status_version'] == 0
-
-
-def test_reminder_api_accepts_case_level_action_without_a_signing_session():
-    application = FakeApplication()
-    response = _client(application).post(f'/api/v1/orders/{CASE_NO}/contract-external-signing/reminders',
-        headers={'Idempotency-Key': 'contract-external.signing-reminders:'+UUID,
-                 'X-Correlation-ID': 'corr-reminder', 'X-Receipt-ID': RECEIPT_ID},
-        json={'session_id': None, 'expected_status_version': 0})
-    assert response.status_code == 200
-    assert application.reports.command.session_id is None
-    assert response.json()['data']['session_id'] is None
 
 
 def test_preparation_query_reads_generated_client_pdf_before_all_staff_documents_exist():
@@ -493,43 +458,6 @@ def test_prepare_staff_unsigned_pdf_uses_exact_segment_and_returns_safe_metadata
         "replayed": False,
     }
     assert all(term not in response.text.lower() for term in ("locator", "path", "storage"))
-
-
-def test_staff_reminder_readiness_returns_message_without_enqueuing_delivery() -> None:
-    response = _client(FakeApplication()).get(
-        f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/reminder-readiness"
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"] == {
-        "matching_segment_id": 71,
-        "document_version_id": 81,
-        "message": f"案件 {CASE_NO} 的契約已放到工會既定的外部簽約平台。",
-        "blockers": [],
-        "ready": True,
-    }
-
-
-def test_staff_reminder_enqueue_uses_exact_document_and_returns_safe_task_identity() -> None:
-    response = _client(FakeApplication()).post(
-        f"/api/v1/orders/{CASE_NO}/contract-external-signing/staff-segments/71/reminders",
-        headers={
-            "Idempotency-Key": KEY,
-            "X-Correlation-ID": "corr-reminder-001",
-            "X-Expected-Document-Version": "81",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"] == {
-        "task_id": 91,
-        "status": "pending",
-        "replayed": False,
-    }
-    assert all(
-        term not in response.text.lower()
-        for term in ("line_user_id", "payload_snapshot", "recipient_id")
-    )
 
 
 def test_full_contract_preview_preserves_not_found_target_and_blocker_mapping() -> None:
@@ -1122,24 +1050,19 @@ def test_testing_skip_rejects_stale_version_before_staging(monkeypatch):
     assert application.controlled_files.command is None
 
 
-def test_independent_reminder_api_uses_persisted_actor_and_exact_session():
+@pytest.mark.parametrize(('method', 'suffix', 'route_suffix'), [
+    ('POST', '/reminders', '/reminders'),
+    ('POST', '/staff-segments/71/reminders', '/staff-segments/{segment_id}/reminders'),
+    ('GET', '/staff-segments/71/reminder-readiness', '/staff-segments/{segment_id}/reminder-readiness'),
+])
+def test_retired_signing_reminder_routes_are_unreachable(method, suffix, route_suffix):
     application = FakeApplication()
-    response = _client(application).post(f"/api/v1/orders/{CASE_NO}/contract-external-signing/reminders",
-        headers={"Idempotency-Key": "contract-external.signing-reminders:" + UUID, "X-Correlation-ID": "corr-reminder", "X-Receipt-ID": RECEIPT_ID},
-        json={"session_id": SESSION_ID, "expected_status_version": 1})
-    assert response.status_code == 200, response.text
-    assert response.json()["data"] == {"receipt_id": RECEIPT_ID, "session_id": SESSION_ID, "status_version": 1, "replayed": False, "manual_notification_targets": []}
-    assert application.reports.command.actor.actor_id == "admin:7"
-    assert application.reports.command.case_no == CASE_NO
+    client = _client(application)
+    base = '/api/v1/orders'
+    response = client.request(method, f'{base}/{CASE_NO}/contract-external-signing{suffix}')
 
-
-def test_reminder_api_does_not_accept_recipient_filter_or_anonymous_operator():
-    application = FakeApplication()
-    path = f"/api/v1/orders/{CASE_NO}/contract-external-signing/reminders"
-    headers = {"Idempotency-Key": "contract-external.signing-reminders:" + UUID, "X-Correlation-ID": "corr-reminder", "X-Receipt-ID": RECEIPT_ID}
-    body = {"session_id": SESSION_ID, "expected_status_version": 1}
-    assert _client(application).post(path, headers=headers, json={**body, "staff_ids": [9]}).status_code == 422
-    assert _local_bypass_client(application).post(path, headers=headers, json=body).status_code in {401, 403}
+    assert response.status_code == 404
+    assert f'{base}/{{case_no}}/contract-external-signing{route_suffix}' not in client.app.openapi()['paths']
     assert application.reports.command is None
 
 

@@ -61,17 +61,6 @@ class RecordExternalSigningHandoff:
 
 
 @dataclass(frozen=True, slots=True)
-class SendExternalSigningReminders:
-    case_no: str
-    session_id: str | None
-    expected_status_version: ExpectedVersion
-    actor: ActorContext
-    idempotency_key: IdempotencyKey
-    correlation_id: CorrelationId
-    receipt_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class ManualSigningNotificationTarget:
     scope: ExternalCompletionReportScope
     subject_reference: str
@@ -108,26 +97,17 @@ class ExternalSigningReminderReceipt:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredExternalSigningReminderReceipt:
-    command_fingerprint: PreviewFingerprint
-    receipt: ExternalSigningReminderReceipt
-
-
-@dataclass(frozen=True, slots=True)
-class SigningReminderStaffTarget:
+class CaseSigningStaffTarget:
     matching_segment_id: int
     staff_subject_reference: str
-    document_version_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class SigningReminderContext:
+class CaseSigningContext:
     case_no: str
     client_subject_reference: str
-    staff_targets: tuple[SigningReminderStaffTarget, ...]
+    staff_targets: tuple[CaseSigningStaffTarget, ...]
     matching_plan_id: int
-    session_id: str | None = None
-    client_document_version_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,20 +195,8 @@ class ExternalStaffCompletionPort(Protocol):
     ) -> StaffCompletionPrerequisites: ...
 
 
-class ExternalSigningHandoffNotificationPort(Protocol):
-    """Creates durable notification tasks inside the caller-owned transaction."""
-
-    def validate_documents(self, facts: ExternalSigningSessionFacts) -> None: ...
-
-    def enqueue_notifications(
-        self,
-        command: SendExternalSigningReminders,
-        facts: ExternalSigningSessionFacts | SigningReminderContext,
-    ) -> tuple[ManualSigningNotificationTarget, ...]: ...
-
-
 class ExternalSigningWorkflowRepository(Protocol):
-    def load_reminder_context(self, case_no: str, *, for_update: bool) -> SigningReminderContext | None: ...
+    def load_case_signing_context(self, case_no: str, *, for_update: bool) -> CaseSigningContext | None: ...
 
     def load_handoff_notification_facts(self, case_no: str, session_id: str | None) -> ExternalSigningHandoffReceipt | None: ...
 
@@ -266,10 +234,6 @@ class ExternalSigningWorkflowRepository(Protocol):
     def find_handoff_receipt(
         self, key: IdempotencyKey, *, for_update: bool
     ) -> StoredExternalSigningHandoffReceipt | None: ...
-
-    def find_reminder_receipt(self, key: IdempotencyKey, *, for_update: bool) -> StoredExternalSigningReminderReceipt | None: ...
-
-    def save_reminder_receipt(self, key: IdempotencyKey, stored: StoredExternalSigningReminderReceipt, command: SendExternalSigningReminders) -> None: ...
 
     def save_handoff_receipt(
         self,
@@ -323,12 +287,10 @@ class ExternalSigningWorkflow:
         repository: ExternalSigningWorkflowRepository,
         staff_completion_port: ExternalStaffCompletionPort,
         unit_of_work_factory: Callable[[], UnitOfWork],
-        handoff_notification_port: ExternalSigningHandoffNotificationPort | None = None,
     ) -> None:
         self._repository = repository
         self._staff_completion_port = staff_completion_port
         self._unit_of_work_factory = unit_of_work_factory
-        self._handoff_notification_port = handoff_notification_port
 
     def query(self, session_id: str) -> ExternalSigningSessionQuery:
         facts = self._require_session(session_id, for_update=False)
@@ -405,7 +367,7 @@ class ExternalSigningWorkflow:
                 # Browser printing does not persist PDFs or a signing session.
                 if command.expected_status_version.value != 0:
                     raise _typed_error("external_signing_status_version_stale", "簽約狀態版本已變更。")
-                context = self._repository.load_reminder_context(command.case_no, for_update=True)
+                context = self._repository.load_case_signing_context(command.case_no, for_update=True)
                 if context is None:
                     raise _typed_error('signing_accepted_plan_required', '請先完成客戶接受目前推薦方案。')
                 self._require_signing_available(context)
@@ -462,57 +424,12 @@ class ExternalSigningWorkflow:
                 facts.session_id, resulting_version, False, manual_targets
             )
 
-    def send_signing_reminders(self, command: SendExternalSigningReminders) -> ExternalSigningReminderReceipt:
-        fingerprint = fingerprint_payload({
-            "kind": "send_external_signing_reminders.v1", "case_no": command.case_no,
-            "session_id": command.session_id, "expected_status_version": command.expected_status_version.value,
-            "actor": command.actor.actor_id, "receipt_id": command.receipt_id,
-        })
-        with self._unit_of_work_factory() as unit_of_work:
-            if not self._repository.lock_case(command.case_no):
-                raise ExternalSigningTypedError(category="not_found", code="external_signing_session_not_found", message="找不到指定案件。")
-            stored = self._repository.find_reminder_receipt(command.idempotency_key, for_update=True)
-            if stored is not None:
-                if stored.command_fingerprint != fingerprint:
-                    raise _typed_error("contract_signature_idempotency_conflict", "相同命令識別對應不同簽署提醒內容。")
-                unit_of_work.commit()
-                return replace(stored.receipt, replayed=True)
-            facts = self._repository.load_active_session_by_case(command.case_no, for_update=True)
-            if command.session_id is None and command.expected_status_version.value != 0:
-                raise _typed_error("external_signing_status_version_stale", "簽約狀態版本已變更。")
-            if command.session_id is not None:
-                if facts is None or facts.session_id != command.session_id:
-                    raise _typed_error("external_signing_handoff_required", "請先記錄已送交簽署平台，再發送提醒。")
-                if facts.status_version != command.expected_status_version.value:
-                    raise _typed_error("external_signing_status_version_stale", "簽約狀態版本已變更。")
-                if facts.state in {ExternalSigningState.COMPLETED, ExternalSigningState.SUPERSEDED}:
-                    raise _typed_error("external_signing_reminders_closed", "已完成或已被取代的簽約不可發送簽署提醒。")
-                context = facts
-            else:
-                if facts is not None:
-                    raise _typed_error('external_signing_status_version_stale', '簽約狀態版本已變更。')
-                context = self._repository.load_reminder_context(command.case_no, for_update=True)
-                if context is None:
-                    raise _typed_error('signing_accepted_plan_required', '請先完成客戶接受目前推薦方案。')
-                handoff = self._repository.load_handoff_notification_facts(command.case_no, None)
-                if handoff is None or handoff.matching_plan_id != context.matching_plan_id:
-                    raise _typed_error('external_signing_handoff_required', '請先記錄目前方案已送交簽署平台，再發送提醒。')
-            self._require_signing_available(context)
-            if self._handoff_notification_port is None:
-                raise RuntimeError("external_signing_handoff_notification_port_missing")
-            manual_targets = self._handoff_notification_port.enqueue_notifications(command, context)
-            receipt = ExternalSigningReminderReceipt(command.receipt_id, command.session_id, command.expected_status_version.value, manual_targets,
-                matching_plan_id=context.matching_plan_id)
-            self._repository.save_reminder_receipt(command.idempotency_key, StoredExternalSigningReminderReceipt(fingerprint, receipt), command)
-            unit_of_work.commit()
-            return receipt
-
-    def signing_blockers(self, facts: ExternalSigningSessionFacts | SigningReminderContext, *, for_update: bool = False) -> tuple[str, ...]:
+    def signing_blockers(self, facts: ExternalSigningSessionFacts | CaseSigningContext, *, for_update: bool = False) -> tuple[str, ...]:
         if isinstance(facts, ExternalSigningSessionFacts) and facts.state is ExternalSigningState.COMPLETED:
             return ()
         return self._staff_completion_port.signing_blockers(facts, for_update=for_update)
 
-    def _require_signing_available(self, facts: ExternalSigningSessionFacts | SigningReminderContext) -> None:
+    def _require_signing_available(self, facts: ExternalSigningSessionFacts | CaseSigningContext) -> None:
         blockers = self.signing_blockers(facts, for_update=True)
         if blockers:
             raise _typed_error(blockers[0], "目前推薦月嫂的檔期或服務日期不符合簽約條件，請先更換月嫂或調整日期。")
@@ -1061,9 +978,7 @@ def _require_recovery_replay_request_matches(command, snapshot):
 __all__ = [
     "ExternalSigningHandoffReceipt",
     "StoredExternalSigningHandoffReceipt",
-    "SendExternalSigningReminders",
     "ExternalSigningReminderReceipt",
-    "StoredExternalSigningReminderReceipt",
     "ExternalSigningSessionQuery",
     "ExternalSigningWorkflow",
     "ExternalSigningWorkflowRepository",

@@ -79,16 +79,6 @@ describe('contractExternalSigningClient', () => {
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('session-token');
   });
 
-  it('sends an independent reminder with all-target session context and the original command identity', async () => {
-    const identity = createExternalSigningCommandIdentity('signing-reminders');
-    const result = { receipt_id: identity.receiptId, session_id: sessionId, status_version: 3, replayed: false, manual_notification_targets: [] };
-    const post = vi.spyOn(transport, 'post').mockResolvedValue(envelope(result));
-    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', { session_id: sessionId, expected_status_version: 3 }, identity)).resolves.toEqual(result);
-    expect(post).toHaveBeenCalledWith('/api/v1/orders/CASE-001/contract-external-signing/reminders', { session_id: sessionId, expected_status_version: 3 }, expect.objectContaining({ headers: { 'Idempotency-Key': identity.idempotencyKey, 'X-Correlation-ID': identity.correlationId, 'X-Receipt-ID': identity.receiptId } }));
-    post.mockResolvedValueOnce(envelope({ ...result, status_version: 4 }));
-    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', { session_id: sessionId, expected_status_version: 3 }, identity)).rejects.toMatchObject({ code: 'SIGNING_REMINDER_RECEIPT_MISMATCH' });
-  });
-
   it('strictly decodes the privacy-safe query and rejects storage locator drift', async () => {
     const get = vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope(query));
     await expect(contractExternalSigningClient.query('CASE-001')).resolves.toEqual(query);
@@ -413,20 +403,16 @@ describe('contractExternalSigningClient', () => {
     }
   });
 
-  it('transports case-level handoff and reminder receipts without a signing session', async () => {
-    const identity = createExternalSigningCommandIdentity('signing-reminders');
+  it('transports case-level handoff without a signing session', async () => {
+    const identity = createExternalSigningCommandIdentity('handoff');
     const handoff = { session_id: null, resulting_status_version: 0, replayed: false, handoff_included_reminders: false };
-    const reminder = { receipt_id: identity.receiptId, session_id: null, status_version: 0,
-      replayed: false, manual_notification_targets: [] };
-    vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope(handoff)).mockResolvedValueOnce(envelope(reminder));
+    const post = vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope(handoff));
     await expect(contractExternalSigningClient.recordHandoff('CASE-001', 0, identity)).resolves.toEqual(handoff);
-    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', {
-      session_id: null, expected_status_version: 0,
-    }, identity)).resolves.toEqual(reminder);
+    expect(post).toHaveBeenCalledTimes(1);
     vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope({ case_no: 'CASE-001', state: 'preparing',
-      handoff_logged: true, signing_reminder: reminder, staff_segments: [], documents: [] }));
+      handoff_logged: true, staff_segments: [], documents: [] }));
     await expect(contractExternalSigningClient.query('CASE-001')).resolves.toMatchObject({
-      state: 'preparing', handoff_logged: true, signing_reminder: reminder,
+      state: 'preparing', handoff_logged: true,
     });
   });
 

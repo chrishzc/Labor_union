@@ -217,10 +217,6 @@ def current_message_sample(key):
         from subsystems.customer_service.application import customer_service_reply_payload
         message = field("人員輸入的回覆（範例）", "reply_text", "您好，已收到您的需求，工會會再與您確認服務安排。")
         payload = customer_service_reply_payload(message)
-    elif key in {"contract-signing-client", "contract-signing-staff"}:
-        from subsystems.contract_signing.line_delivery import external_platform_staff_reminder_text
-        field("收件人", "recipient", "客戶私人聊天室" if key.endswith("client") else "月嫂私人聊天室")
-        payload = text(external_platform_staff_reminder_text(case()))
     elif key=='payment-first-settled':
         from subsystems.line.payment_receipt_notifications import first_receipt_message
         amount=field('本次核銷入帳金額','amount_ntd',12000)

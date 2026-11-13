@@ -483,13 +483,15 @@ def test_current_group_preview_names_use_case_group_terminology():
     assert set(names) == {'案件群組邀請卡－客戶', '案件群組邀請卡－月嫂'}
 
 
-def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_period_amounts():
-    application=app()
-    client=application.render('contract-signing-client',None,None,None,actor(),sample=True)
-    staff=application.render('contract-signing-staff',None,None,None,actor(),sample=True)
-    assert client.text == staff.text and '外部簽約平台' in client.text
-    assert any(fact.label=='客戶私人聊天室' for fact in client.facts)
-    assert any(fact.label=='月嫂私人聊天室' for fact in staff.facts)
+def test_signing_reminder_preview_is_retired_and_other_messages_remain_available():
+    application = app()
+    ids = {item.id for item in application.catalog(actor())}
+    assert {'contract-document-client', 'contract-document-staff'} <= ids
+    assert ids.isdisjoint({'contract-signing-client', 'contract-signing-staff'})
+    for key in ('contract-signing-client', 'contract-signing-staff'):
+        with pytest.raises(MessagePreviewNotFound):
+            application.render(key, None, None, None, actor(), sample=True)
+
     for stage,label,amount,recipient in [('deposit','訂金','6,000','客戶私人聊天室'),('first','第一期款','12,000','客戶私人聊天室'),('second','第二期款','8,000','客戶私人聊天室')]:
         result=application.render('payment-overdue-'+stage,None,None,None,actor(),sample=True)
         assert label in result.text and amount in result.text

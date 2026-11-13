@@ -69,6 +69,7 @@ export const LineDeliveryPageSchema = z.strictObject({
 export const LineDeliveryDetailSchema = z.strictObject({
   task: LineDeliveryItemSchema,
   attempts: z.array(LineDeliveryAttemptSchema),
+  retry_allowed: z.boolean().optional(),
 });
 
 function envelope<T extends z.ZodTypeAny>(data: T) {

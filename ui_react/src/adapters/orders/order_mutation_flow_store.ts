@@ -287,13 +287,6 @@ export interface ExternalSigningHandoffFlowState {
   error: string | null;
 }
 
-export interface ExternalSigningReminderFlowState {
-  status: 'applying' | 'outcome_unknown' | 'received' | 'failed';
-  command: ExternalSigningHandoffCommand;
-  receipt: import('../../api/orders/contract_external_signing_client').SigningReminderReceipt | null;
-  error: string | null;
-}
-
 /** Unsigned-PDF preparation keeps the exact original target and authenticated actor until its owner readback succeeds. */
 export interface ExternalSigningUnsignedPreparationCommand {
   kind: 'client' | 'staff';
@@ -428,7 +421,6 @@ export class OrderMutationFlowStore {
   private formalPlanCreations = new Map<string, FormalPlanCreationFlowState>();
   private recommendationReplacements = new Map<string, RecommendationReplacementFlowState>();
   private externalSigningHandoffs = new Map<string, ExternalSigningHandoffFlowState>();
-  private externalSigningReminders = new Map<string, ExternalSigningReminderFlowState>();
   private externalSigningUnsignedPreparations = new Map<string, ExternalSigningUnsignedPreparationFlowState>();
   private historicalClientPayments = new Map<string, HistoricalClientPaymentFlowState>();
   private historicalStaffPayouts = new Map<string, HistoricalStaffPayoutFlowState>();
@@ -644,20 +636,6 @@ export class OrderMutationFlowStore {
 
   public getExternalSigningHandoff(caseNo: string): ExternalSigningHandoffFlowState | undefined {
     return this.externalSigningHandoffs.get(caseNo);
-  }
-
-  public getExternalSigningReminder(caseNo: string): ExternalSigningReminderFlowState | undefined {
-    return this.externalSigningReminders.get(caseNo);
-  }
-
-  public setExternalSigningReminder(caseNo: string, state: ExternalSigningReminderFlowState): void {
-    this.externalSigningReminders.set(caseNo, state);
-    this.notify();
-  }
-
-  public clearExternalSigningReminder(caseNo: string): void {
-    this.externalSigningReminders.delete(caseNo);
-    this.notify();
   }
 
   public setExternalSigningHandoff(caseNo: string, state: ExternalSigningHandoffFlowState): void {
@@ -1148,7 +1126,6 @@ export class OrderMutationFlowStore {
     this.formalPlanCreations.clear();
     this.recommendationReplacements.clear();
     this.externalSigningHandoffs.clear();
-    this.externalSigningReminders.clear();
     this.externalSigningUnsignedPreparations.clear();
     this.historicalClientPayments.clear();
     this.historicalStaffPayouts.clear();

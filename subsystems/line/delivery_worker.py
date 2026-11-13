@@ -18,6 +18,7 @@ from subsystems.line.delivery_contracts import (
     LineProviderOutcomeType,
     LineReplyOpportunity,
     REPLY_ONLY_WEBHOOK_SOURCE,
+    RETIRED_SIGNING_REMINDER_SOURCES,
     RecordLineDeliveryAttemptCommand,
     candidate_coordination_delivery_retired,
 )
@@ -94,12 +95,16 @@ class LineDeliveryWorker:
         validation_failure = self._manual_replay_validation_failure(task)
         if not self._still_sendable(task):
             return
-        if validation_failure in {"line_admin_push_retired", "candidate_coordination_retired"}:
-            key_prefix = "retired-admin-push" if validation_failure == "line_admin_push_retired" else "retired-candidate-coordination"
+        retired_key_prefix = {
+            "line_admin_push_retired": "retired-admin-push",
+            "candidate_coordination_retired": "retired-candidate-coordination",
+            "contract_signing_reminder_retired": "retired-contract-signing-reminder",
+        }.get(validation_failure)
+        if retired_key_prefix is not None:
             with self._unit_of_work_factory() as unit:
                 unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
                     task.task_id, ActorContext(self._worker_identity),
-                    IdempotencyKey(f"{key_prefix}:{task.task_id.value}"), task.request.correlation_id,
+                    IdempotencyKey(f"{retired_key_prefix}:{task.task_id.value}"), task.request.correlation_id,
                 ))
                 unit.commit()
             return
@@ -256,6 +261,8 @@ class LineDeliveryWorker:
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
+        if task.request.source_aggregate_type in RETIRED_SIGNING_REMINDER_SOURCES:
+            return "contract_signing_reminder_retired"
         if candidate_coordination_delivery_retired(task.request):
             return "candidate_coordination_retired"
         if task.request.source_aggregate_type in {"runtime_health_event", "customer_service_escalation"}:

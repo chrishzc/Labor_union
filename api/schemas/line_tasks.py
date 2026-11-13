@@ -101,6 +101,7 @@ class LineDeliveryPublicPageView(_StrictModel):
 class LineDeliveryPublicDetailView(_StrictModel):
     task: LineDeliveryPublicItemView
     attempts: list[LineDeliveryPublicAttemptView]
+    retry_allowed: bool
 
 
 class LineDeliveryTaskActionResultView(_StrictModel):

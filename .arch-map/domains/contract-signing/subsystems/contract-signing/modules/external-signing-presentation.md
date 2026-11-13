@@ -6,12 +6,12 @@
 
 ## Responsibility
 簽約文件缺少 Client Finance／Payroll 初始資料時，只顯示實際缺漏原因及帶同案識別的客戶名冊連結；由既有名冊頁補齊，不在簽約頁嵌入帳務與排班操作面板，也不由契約 Query 自動建立其他 owner roots。
-呈現外部平台交接、獨立簽署提醒、最終 PDF 納管，以及客戶／服務人員 exact-target 完整契約自動套值。管理端不顯示或背景查詢歷史簽回人工修復；歷史 API／receipt 保留。Preview 只回傳 typed values；React 不擁有簽約、文件或帳務根事實。
+呈現外部平台交接、最終 PDF 納管，以及客戶／服務人員 exact-target 完整契約自動套值。管理端不顯示或背景查詢歷史簽回人工修復；歷史 API／receipt 保留。Preview 只回傳 typed values；React 不擁有簽約、文件或帳務根事實。
 
 外部簽約案件 Query 在簽約 facts 尚未備齊時回傳零寫入 `preparing` 文件投影；預覽與未簽 PDF 準備不依賴已接受方案、簽約 session 或正式排班。交接／最終簽回命令沿用原 Domain 條件。
 完整契約投影另提供候選資訊限定的 current-order-payment 查詢：未執行指派時使用 Orders current confirmed／預計日期投影 Finance，不要求舊方案仍有效或借用舊 commitment 服務量；一般完整契約查詢保留原方案／commitment 驗證。
 
-外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`；案件層級提醒僅能依相同目前方案的交接紀錄建立，方案變動須重新交接。提醒及交接皆不要求系統未簽 PDF，原狀態／身分／重播／完成條件保留。獨立提醒按鈕點擊後直接建立寄送工作，不再顯示確認視窗；一次涵蓋客戶及所有 current 月嫂，fresh-lock 後以既有 committed delivery tasks 及 generic command receipt 同一 outer UoW 保存；未綁定對象保留當時的人工通知清單，身分錯配與版本衝突仍 typed 拒絕。提醒不推進簽約版本、不影響文件驗收；Query 回讀最後提醒，新交接標示未包含提醒，舊交接保留歷史通知事實。
+外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`。簽署提醒由人員在 LINE 官方帳號聊天後台手動選用範本。工會系統移除提醒寫入與案件畫面狀態，歷史提醒回執仍可唯讀查閱，舊提醒由 LINE worker 在呼叫 provider 前取消。契約下載通知沿用既有文件投遞。
 工作區同案推薦變更後，已掛載的契約下載及欄位預覽依 owner revision 重讀 current targets；舊服務段落不沿用至新推薦。既有檔案、進行中命令及結果未明的原操作保留，待可安全重讀時才更新，不因 revision 清除 recovery flow。
 
 管理端使用「瀏覽器列印 → 送交簽署 → 回收簽署文件」單一工作區；瀏覽器列印可另存 PDF，送交時缺少的回收用文件沿用正式生成命令，核對資料使用 exact-target 側邊抽屜。客戶與每段月嫂各自選擇簽回文件，簽署內容由人員自行檢查；不提供逐份檢查／重新檢查按鈕，直接儲存時沿用上傳、格式／完整性與完整文件集合驗證及回讀；未完整回收時只保存受控 staging，不推進簽約。最終 Preview 綁定完整文件集合，Apply 在既有 outer UoW 納管各文件並於既有 immutable receipt 保存 typed members，同時完成 Orders／Commitment／Client Finance 協作。已完成文件下載重新授權並限制為該案保存的 members；歷史單一最終 PDF 仍可讀取，不作新提交的替代。
@@ -22,12 +22,12 @@
 本機測試可透過後端 `testing_skip_allowed` 能力與 `final-document/testing-skip` 產生各 current target 的 TEST ONLY 占位文件，經原 Preview 與明確測試確認完成後續流程；production／未知環境、遠端 DB 及 deployment profile 拒絕此能力。Apply 區分真實簽署確認與測試確認，fresh-lock 後拒絕文件模式不符，原 receipt 重播綁定確認模式。測試 reason／檔名與完成回讀保留「未驗證真實簽署」識別，不呼叫外部簽署／LINE provider。
 若 Orders 已完成而目前 session 尚未回收文件，完整 TEST ONLY 集合的 Preview／Apply 借用 Orders typed Query（Apply 使用鎖定讀取）與 current plan 既有 commitment，沿用原契約 identity 完成測試文件納管及 session，不重複執行 Orders completion、Finance writer 或 commitment writer。原完整文件 Preview token 綁定既有 identity、Orders version、commitment 及文件集合；一般簽署文件不走此分支。
 新案件正常建立契約並完成；已有 identity 而未完成者，TEST ONLY 流程沿用原 identity 執行正式 completion，Preview 與 Apply 均以同一 candidate identity 為準。這三種測試完成路徑依 owner facts 判定，不依案件編號。
-簽約 Query 回傳 current `signing_blockers`，工作區在送交前顯示檔期／日期衝突與既有換人、改日期入口；瀏覽器列印維持可用。送交、提醒及新 completion 在原 UoW fresh-read；`MySqlExternalStaffCompletionPort` 借用 Scheduling canonical occupancy 與 segmented availability 核對跨案正式占用、有效 lock、不可服務期間，排除同案占用及 buffer。已完成 session／既有完成結果的測試文件回收不重簽；最後檔期鎖與排班 gate 保留。
+簽約 Query 回傳 current `signing_blockers`，工作區在送交前顯示檔期／日期衝突與既有換人、改日期入口；瀏覽器列印維持可用。送交及新 completion 在原 UoW fresh-read；`MySqlExternalStaffCompletionPort` 借用 Scheduling canonical occupancy 與 segmented availability 核對跨案正式占用、有效 lock、不可服務期間，排除同案占用及 buffer。已完成 session／既有完成結果的測試文件回收不重簽；最後檔期鎖與排班 gate 保留。
 
 ## Implementation
 - primary: `ui_react/src/components/ContractExternalSigningActions.tsx`
 - client: `ui_react/src/api/orders/contract_external_signing_client.ts`
-- recovery state: `ui_react/src/adapters/orders/order_mutation_flow_store.ts` (per-case handoff、unsigned-PDF preparation and signing-reminder identities survive unknown outcomes/remount; receipts preserve the original result)
+- recovery state: `ui_react/src/adapters/orders/order_mutation_flow_store.ts` (per-case handoff and unsigned-PDF preparation identities survive unknown outcomes/remount; receipts preserve the original result)
 - `ui_react/src/api/orders/contract_full_preview_client.ts`
 - `ui_react/src/components/OrderContractPreview.tsx`
 - page: `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
@@ -38,7 +38,6 @@
 - `infrastructure/db/contract_external_signing_repository.py`
 - `infrastructure/db/contract_unsigned_pdf_repository.py`
 - `infrastructure/db/external_staff_completion_port.py`
-- `infrastructure/db/external_signing_handoff_notification_port.py`
 - `infrastructure/file/browser_contract_renderer.py`
 - `infrastructure/mysql/contract_context_repository.py`
 - `infrastructure/mysql/contract_full_preview_repository.py`
@@ -59,7 +58,7 @@
 
 ## Contracts
 - 瀏覽器列印與案件層級交接後的同次回收銜接見正式規格 21 §3.2／§3.3；工作台沿用既有產製、交接及回讀入口。
-- 管理端文件清單、核對摘要、回收與提醒確認以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與寄送 payload 保留原內容。
+- 管理端文件清單、核對摘要與回收以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與寄送 payload 保留原內容。
 - `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md`
 

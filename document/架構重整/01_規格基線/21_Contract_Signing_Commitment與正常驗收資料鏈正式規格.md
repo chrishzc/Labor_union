@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Contract Signing Integration（`domains/contract_signing/`、`subsystems/contract_signing/`）
-- 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、未簽 PDF 下載／重複產生、送交外部平台交接記錄與獨立簽署提醒（LINE ＋未綁定人工名單）、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
+- 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、未簽 PDF 下載／重複產生、送交外部平台交接記錄、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. 核心架構、SSOT 與狀態機
@@ -12,7 +12,7 @@
 ```text
 完整案件／服務條件保存 → 自動計算訂金與各期客戶應付（可先核銷）
 月嫂承接意願 → 客戶接受推薦方案 → 齊備確認服務日期後自動鎖定 waiting-deposit 檔期
-→ 契約瀏覽器列印（可另存為 PDF）→ 記錄已送交外部簽署平台 → 獨立發送 LINE 簽署提醒
+→ 契約瀏覽器列印（可另存為 PDF）→ 人員送交外部簽署平台並在工會系統記錄送交
 → 分別上傳回收全部月嫂與客戶已簽署 PDF（或本機受控 TEST-ONLY 跳過）
 → Apply 納管受控文件、建立 commitment 與 Orders contract_completed
 →（訂金已核銷使訂單成立 AND contract_completed AND commitment_ready）
@@ -23,13 +23,13 @@
 
 | Owner | Root facts／責任 | 不擁有 |
 |---|---|---|
-| Contract Signing | `template-catalog/` 核准版本、不可變 `contract_document_version`（opaque NAS reference + digest）、`contract_signing_event`、外部交接／提醒 receipt、檔案 access grant | Orders status、應收金額、execution schedule、LINE delivery 結果 |
+| Contract Signing | `template-catalog/` 核准版本、不可變 `contract_document_version`（opaque NAS reference + digest）、`contract_signing_event`、外部交接 receipt、檔案 access grant | Orders status、應收金額、execution schedule、LINE delivery 結果 |
 | Scheduling Commitment | `precontract_service_commitment` 與服務日、`waiting-deposit` 自動鎖定與 exact conversion、正式排班／occupancy | 契約文件、應收、LINE |
 | Client Finance | 訂金／第一二期應付／到期日與專屬虛擬帳號（`CLIENT_DEPOSIT_BANK_CODE` + 本案虛擬帳號） | 簽署證據、Orders status |
 | Orders | `contract_completed` 事件、`contract_identity`、訂單生命週期 | 外部簽署檔案、assignment 日 |
 | LINE Integration | 身分綁定、committed delivery task 與試送狀態 | 契約完成或 Orders 成立條件 |
 
-- **嚴格分離原則**：訂金核銷（`訂單成立`）、簽約完成（`contract_completed`）、commitment 成立與 execution conversion 為四個正交事實；LINE 送達、檔案下載或瀏覽器列印均不構成簽署完成。
+- **嚴格分離原則**：訂金核銷（`訂單成立`）、簽約完成（`contract_completed`）、commitment 成立與 execution conversion 為四個正交事實。簽約完成以人員回收並確認客戶及所有現行月嫂的簽署文件為準。訊息發送、送達、LINE 回覆、檔案下載及瀏覽器列印均不構成簽署完成。
 - **統一用詞**：介面與流程區分「**所有月嫂簽約完成**」與「**客戶簽約完成**」；`commitment` 為內部人員與精確服務日記錄，不得作為額外人工簽約關卡；應收一律於資料齊全時由系統自動同步（資料缺漏顯示「待確認」，不另設「建立付款義務」操作）。
 - **雙方簽約完成作為通知前提**：客戶與所有月嫂皆完成簽約（Orders `contract_completed` 且 `contract_identity` 吻合現行契約）始可發送訂金繳費提醒與各期逾期待辦；未完成前不阻擋各期應付計算、到期日確定或合法銀行核銷。
 - **非市民契約**：完全接受 [Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md) 之 `A＋民國年＋3碼流水號`、非市民自費政策與 5 天訂金／專屬虛擬帳號（禁止套用一般 9 碼公式或要求 HCM 來源）。
@@ -57,20 +57,19 @@
   - 版面契約：A4 直向、8 mm 頁邊、194 mm 內容寬，等待字型載入後呈現完整條文與套值（維持合併格比例，避免列內斷頁）；列印不建檔案版本、receipt 或簽署狀態。
 - **`preparing` 準備查詢**：`GET /api/v1/orders/{case_no}/contract-external-signing` 於尚無簽約工作時回傳 `HTTP 200`（`state=preparing`、`staff_segments` 與 `documents`），零虛構 session（案件不存在回 404）。
 
-### 3.3 檔期衝突檢核、送交記錄與獨立提醒
+### 3.3 檔期衝突檢核、送交記錄與官方帳號提醒
 
-- **簽約前檔期衝突檢核**：契約工作區 Query 即時投影 Scheduling canonical 占用、等待檔期鎖與不可服務期間，存在 hard conflict 時回傳 typed `signing_blockers`（提示「更換推薦月嫂／調整服務日期」並停用送交）；送交、提醒與完成命令在各自 UoW fresh-read 遭遇衝突固定回 `signing_staff_occupancy_conflict` 或 `signing_service_dates_unavailable`（零寫入；同案既有 waiting lock 不自相衝突，buffer 僅警示）。
+- **簽約前檔期衝突檢核**：契約工作區 Query 即時投影 Scheduling canonical 占用、等待檔期鎖與不可服務期間，存在 hard conflict 時回傳 typed `signing_blockers`（提示「更換推薦月嫂／調整服務日期」並停用送交）；送交與完成命令在各自 UoW fresh-read 遭遇衝突固定回 `signing_staff_occupancy_conflict` 或 `signing_service_dates_unavailable`（零寫入；同案既有 waiting lock 不自相衝突，buffer 僅警示）。
 - **不阻塞下載與重複送交**：
   - 客戶與每段月嫂未簽 PDF 缺失時由下載觸發生成（已簽署、有 `contract_identity` 或已完約亦允許再次下載；資料 snapshot 變動則 append 新版未簽 PDF 並保留原已簽檔案）。
-  - 「記錄已送交簽署平台」不以所有系統 PDF 已生成為前置（支持瀏覽器列印工作流：無系統 PDF／session 時保存案件層級 receipt `session_id=null, version=0, matching_plan_id`），**不檢查 LINE 綁定亦不建立提醒**（允許重複記錄送交、append receipt 並保留目前狀態與版本；`handoff_included_reminders=false`）。
+  - 「記錄已送交簽署平台」不以所有系統 PDF 已生成或 LINE 綁定為前置（支持瀏覽器列印工作流：無系統 PDF／session 時保存案件層級 receipt `session_id=null, version=0, matching_plan_id`）。允許重複記錄送交，每次追加 receipt 並保留目前狀態與版本。
   - 工作台透過「瀏覽器列印」輸出未簽契約，可在列印視窗另存為 PDF。點選「記錄已送交簽署平台」後，若只有案件層級交接紀錄，工作台在同次操作準備缺少的回收用文件並啟用簽署工作，回讀成功即顯示回收區。若準備失敗，保留交接紀錄，操作人可用同一按鈕接續。
-- **獨立簽署提醒（`POST .../contract-external-signing/reminders`）**：
-  - 點擊「發送簽署提醒」直接執行（無額外確認視窗），依現行方案對象範圍鎖定 session／expected version（未交接、版本過期或身分錯配回 typed 拒絕），於獨立 outer UoW 建立已綁定對象之 committed LINE 文字訊息任務（含 `type: text` 與 `text`）與人工通知名單（未綁定對象不建虛構 job，介面明確標示「需人工通知」）；同鍵重播回原 receipt，提醒失敗或執行不影響契約文件與簽署版本。
+- **簽署提醒**。需要提醒時，工會人員在 LINE 官方帳號聊天後台手動選用範本，發給對應的客戶或月嫂。LINE 流程圖以文字說明此操作。工會系統無提醒發送入口或投遞，案件畫面不呈現提醒狀態。既有提醒回執及投遞歷史保留供唯讀查閱，尚可執行的舊提醒不得投遞或重送。「寄送客戶及月嫂契約文件」沿用既有契約下載通知流程。
 
 ### 3.4 分開文件回收、手工證明與本機測試跳過
 
 - **分開回收與完整集合完約**：
-  - 介面僅提供「契約文件 → 送交簽署與提醒 → 回收簽署文件」（移除「檢查簽署文件」按鈕與「歷史簽回人工修復」區塊）；各目標（1 份客戶契約 ＋ 所有 current 月嫂契約）分別上傳經 Controlled Files staging 保存。
+  - 介面僅提供「契約文件 → 送交簽署 → 回收簽署文件」（移除「檢查簽署文件」按鈕與「歷史簽回人工修復」區塊）；各目標（1 份客戶契約 ＋ 所有 current 月嫂契約）分別上傳經 Controlled Files staging 保存。
   - 最終 Preview（opaque token 綁定完整檔案集合與各 owner version）→ 明確確認簽署 → Apply 於單一 outer UoW 納管全部受控 NAS PDF（DB 僅存 opaque object reference ＋ SHA-256，嚴禁暴露實體路徑／UNC／presigned URL，下載限 authenticated attachment 並寫 security audit）、完成 session、建立 `precontract_service_commitment`、寫入 `orders.contract_identity` 與 `contract_completed`，並核對沿用 Client Finance 已同步之訂金及各期義務（計價未變不遞增 Finance version、不覆寫既成 `訂單成立`）。錯誤訊息直接回傳繁中具體業務原因，不掩蓋版本／檔期／測試門禁原因，且不遺棄已選檔案。
 - **手工證明（`manual_attested`）**：線下紙本／現場簽回時，管理員可透過獨立人工認證 Preview／Apply 上傳真實簽回證據並填寫 `confirmation_method` 與必填 `reason`，形成 `staff_signed_received`／`client_signed_received` 與完約（不宣稱 LINE 送達）。
 - **本機受控測試跳過（`testing_skip_allowed`）**：以 `APP_ENV=development|dev|local|test`、loopback MySQL 與無 deployment profile 判定。符合條件的本機資料庫（含還原庫）共用相同操作。呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
@@ -85,5 +84,5 @@
 ## 4. 驗收標準
 
 1. **`CTM` 模板管理與列印**：`.xlsx` 合併格／樣式檢視、巨集拒絕、沿用／缺件攔截、示範套值零寫入、版本啟用不改既有檔案、A4 8mm 194mm 瀏覽器列印雙模板驗證與 `state=preparing` 查詢。
-2. **主流程與分離邊界**：檔期衝突在送交與提醒前精確阻擋；瀏覽器列印後不預存系統 PDF 仍可記錄送交；送交與獨立 LINE 提醒完全解耦（含未綁定人員工名單、文字欄位 `type/text` 正確性、同鍵防重）；分開簽回／`manual_attested`／`testing_skip` 於單一 UoW 原子建立 commitment、Orders 完成與訂金核銷銜接（下載不暴露實體儲存路徑）。
+2. **主流程與分離邊界**。檔期衝突在送交及新完約前精確阻擋。瀏覽器列印後不預存系統 PDF 仍可記錄送交。LINE 流程圖指引官方帳號人工操作，工會系統無提醒入口，舊工作不得觸發 LINE 投遞，歷史保留。驗證客戶及所有現行月嫂的簽回集合、`manual_attested` 與 `testing_skip` 於單一 UoW 原子建立 commitment、Orders 完成與訂金核銷銜接（下載不暴露實體儲存路徑）。
 3. **本機受控 DB 驗收**：依 [Global Migration §6.1](10_Global_保留資料Migration與Cutover_Subsystem.md#61-本機開發-db-受控驗收91) 於受控 `union_db`／`lu_test_*` 通過 Module、Subsystem、Domain（訂金→訂單成立＋簽約→conversion、代班不重簽）與 Browser E2E。

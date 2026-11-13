@@ -8,6 +8,24 @@ import { sessionClient } from '../../../../../../api/auth/session_client';
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'notification_failure:1',source:'notification_failure',group:'support',title:'LINE 通知建立異常',case_no:'116000001',reference_id:null,person:'',summary:'原通知受阻',reason:'設定未齊',time:'',tag:'待處理',recipient:null,message:null,unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,...patch});
 beforeEach(()=>{vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session');vi.spyOn(client,'list').mockResolvedValue({items:[],total:0,next_cursor:null});vi.spyOn(lineDeliveryQueryClient,'list').mockResolvedValue({items:[],total:0,page:1,page_size:25,total_pages:1});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
+it('保留舊簽署提醒的寄送紀錄，但不提供重試', async () => {
+  const time = '2026-10-26T00:00:00Z';
+  vi.spyOn(lineDeliveryQueryClient, 'detail').mockResolvedValue({
+    task: {
+      id: 7, task_id: 7, task_type: 'contract', source_type: 'contract', status: 'retryable_failed',
+      scheduled_at: time, created_at: time, updated_at: time, completed_attempts: 1,
+      max_attempts: 3, next_retry_at: time, sent_at: null, failed_at: time,
+    },
+    attempts: [],
+    retry_allowed: false,
+  });
+  window.location.hash = '#line-management?tab=delivery&task=7';
+  render(<LineDeliveryOperationsWorkbench />);
+  expect(await screen.findByText('已嘗試 1／3 次')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '重試寄送工作' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/下次重試/)).not.toBeInTheDocument();
+});
+
   it('建立前受阻的通知可核對與補送；排送中保留待辦，成功後由原來源移除',async()=>{
     vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session');
     const key='ci_'+'1'.repeat(64);
