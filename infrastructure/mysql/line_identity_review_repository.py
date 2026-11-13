@@ -59,15 +59,15 @@ class MySqlLineIdentityRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _identity_snapshot(row)
 
-    def list_by_user(self, line_user_id):
+    def list_by_user(self, line_user_id, *, lock=False):
         with self._connection.cursor() as cursor:
-            cursor.execute(_IDENTITY_LIST_BY_USER_SQL, (line_user_id.value,))
+            cursor.execute(_IDENTITY_LIST_BY_USER_SQL + (" FOR UPDATE" if lock else ""), (line_user_id.value,))
             rows = tuple(cursor.fetchall() or ())
         return tuple(_identity_snapshot(row) for row in rows)
 
-    def selected_role(self, line_user_id):
+    def selected_role(self, line_user_id, *, lock=False):
         with self._connection.cursor() as cursor:
-            cursor.execute(_IDENTITY_SELECTED_ROLE_SQL, (line_user_id.value,))
+            cursor.execute(_IDENTITY_SELECTED_ROLE_SQL + (" FOR UPDATE" if lock else ""), (line_user_id.value,))
             row = optional_row(cursor.fetchone())
         if row is None:
             raise LookupError("line_platform_user_not_found")
@@ -84,6 +84,7 @@ class MySqlLineIdentityRepository:
         }:
             raise ValueError("line_identity_selected_role_invalid")
         with self._connection.cursor() as cursor:
+            self._lock_user(cursor, line_user_id)
             cursor.execute(
                 _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
                 (line_user_id.value, subject_type.value),
@@ -369,6 +370,7 @@ class MySqlLineIdentityRepository:
                 raise LookupError("line_identity_binding_not_found")
             resolved_type = current.subject_type
         with self._connection.cursor() as cursor:
+            self._lock_user(cursor, line_user_id)
             existing = self._existing_event(cursor, idempotency_key.value)
             if existing is not None:
                 snapshot = self.get(line_user_id, resolved_type)
@@ -495,13 +497,16 @@ class MySqlLineIdentityRepository:
             claim.subject_reference,
         )
 
-    def _lock_role_scope(self, cursor, claim, *, existing_role_replacement=False):
+    def _lock_user(self, cursor, line_user_id):
         cursor.execute(
             _IDENTITY_ROLE_SCOPE_LOCK_SQL,
-            (claim.line_user_id.value,),
+            (line_user_id.value,),
         )
         if optional_row(cursor.fetchone()) is None:
             raise LookupError("line_platform_user_not_found")
+
+    def _lock_role_scope(self, cursor, claim, *, existing_role_replacement=False):
+        self._lock_user(cursor, claim.line_user_id)
         cursor.execute(
             _IDENTITY_ROLE_SCOPE_COUNTS_SQL,
             (claim.line_user_id.value,),

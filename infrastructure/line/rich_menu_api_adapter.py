@@ -149,6 +149,18 @@ class LineRichMenuApiAdapter:
             provider_menu_id,
         )
 
+    def get_user_rich_menu(self, line_user_id: LineUserId) -> LineRichMenuProviderOutcome:
+        response = self._request("get", f"{_API_ROOT}/user/{line_user_id.value}/richmenu")
+        if not _successful(response):
+            return _rich_menu_failure(response)
+        try:
+            return LineRichMenuProviderOutcome(
+                LineRichMenuProviderOutcomeType.SUCCESS,
+                provider_menu_id=response.json()["richMenuId"],
+            )
+        except (KeyError, TypeError, ValueError):
+            return _adapter_failure("line_rich_menu_readback_invalid")
+
     def unlink_from_user(
         self,
         line_user_id: LineUserId,
@@ -337,11 +349,12 @@ def _rich_menu_failure(response: object) -> LineRichMenuProviderOutcome:
             error_code=f"line_rich_menu_{response.category}",
             error_message=f"LINE Rich Menu provider {response.category}",
         )
-    failure = response_failure(response)
+    failure = response_failure(response, retry_after_on_unavailable=True)
     return LineRichMenuProviderOutcome(
         LineRichMenuProviderOutcomeType(failure.category),
         error_code=failure.code,
         error_message=failure.message,
+        retry_after_seconds=failure.retry_after_seconds,
     )
 
 

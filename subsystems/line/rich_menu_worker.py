@@ -174,7 +174,8 @@ class LineRichMenuWorker:
             for event in list_attempts(item.publication.publication_id):
                 attempts.setdefault(event.step, []).append(event)
             previous_provider_menu_id = repository.published_provider_menu_id(
-                item.publication.menu_definition_id
+                item.publication.menu_definition_id,
+                before_publication_id=item.publication.publication_id.value,
             )
         return receipts, attempts, previous_provider_menu_id
 
@@ -626,7 +627,12 @@ class LineRichMenuWorker:
                     self._now(),
                 )
             )
-            if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
+            if (
+                outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+                and unit_of_work.rich_menu_publications.published_provider_menu_id(
+                    item.publication.menu_definition_id,
+                ) == outcome.provider_menu_id
+            ):
                 schedule_published_menu_rebindings(
                     unit_of_work,
                     item.definition_json,

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import pytest
 from pymysql.err import IntegrityError
@@ -630,6 +631,35 @@ def test_rich_menu_claim_returns_typed_cleanup_only_work_without_downgrading_pub
     assert "publication_status='published'" in claim_sql
     assert "step_name='cleanup'" in claim_sql
     assert "NOT EXISTS" in claim_sql
+
+
+def test_newest_canonical_publication_wins_over_imported_and_late_older_publications():
+    from infrastructure.mysql.line_configuration_publication_repository import (
+        _MENU_PREVIOUS_PROVIDER_ID_SQL,
+        _MENU_PUBLISHED_PROVIDER_ID_SQL,
+    )
+
+    with sqlite3.connect(":memory:") as connection:
+        connection.executescript("""
+            CREATE TABLE line_rich_menu_publications
+                (id INTEGER, menu_config_id TEXT, status TEXT, is_current INTEGER, line_rich_menu_id TEXT);
+            CREATE TABLE line_rich_menu_publication_tasks
+                (id INTEGER, menu_definition_id TEXT, publication_status TEXT,
+                operation TEXT, configuration_revision INTEGER, provider_menu_id TEXT);
+            INSERT INTO line_rich_menu_publications VALUES (9, 'staff_menu', 'published', 1, 'legacy-current');
+            INSERT INTO line_rich_menu_publication_tasks VALUES
+                (20, 'staff_menu', 'published', 'publish', 0, 'legacy-import'),
+                (24, 'staff_menu', 'published', 'publish', 5, 'canonical-current'),
+                (25, 'staff_menu', 'published', 'publish', 4, 'late-older'),
+                (26, 'staff_menu', 'published', 'delete', 6, 'deleted-menu');
+        """)
+        sql = _MENU_PUBLISHED_PROVIDER_ID_SQL.replace("%s", "?")
+        params = ("staff_menu", "staff_menu")
+        assert connection.execute(sql, params).fetchone() == ("canonical-current",)
+        previous_sql = _MENU_PREVIOUS_PROVIDER_ID_SQL.replace("%s", "?")
+        assert connection.execute(previous_sql, (*params, 25)).fetchone() == ("legacy-current",)
+        connection.execute("DELETE FROM line_rich_menu_publication_tasks WHERE configuration_revision > 0")
+        assert connection.execute(sql, params).fetchone() == ("legacy-current",)
 
 
 def test_rich_menu_cleanup_claim_fails_closed_when_lease_update_is_lost() -> None:

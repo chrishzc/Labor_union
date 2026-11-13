@@ -18,6 +18,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+from subsystems.line.outbox_contracts import LineRichMenuSyncStatus
 
 
 class LineIdentityRevocationStatus(StrEnum):
@@ -151,6 +152,8 @@ class LineIdentityBindingManagementView:
     revocation_status: LineIdentityRevocationStatus | None = None
     revoked_at: datetime | None = None
     subject_display_reference: str | None = None
+    rich_menu_sync_status: LineRichMenuSyncStatus | None = None
+    rich_menu_sync_error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

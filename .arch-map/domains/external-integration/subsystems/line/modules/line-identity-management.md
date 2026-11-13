@@ -34,7 +34,9 @@
   - `subsystems/line/terminal_closure_contracts.py`
   - `subsystems/line/terminal_closure_application.py`
   - `subsystems/line/terminal_closure_worker.py` — canonical LINE worker bridge for the read-only Orders handoff.
-  - `subsystems/line/rich_menu_binding.py`
+  - `subsystems/line/rich_menu_binding.py` — 個人選單 outbox worker，依最新有效工作與 LINE 讀回確認同步。
+  - `subsystems/line/outbox_contracts.py` — 共用 LINE outbox 工作契約，含個人選單工作期限、嘗試上限及同步結果。
+  - `infrastructure/mysql/line_receipt_outbox_audit.py` — 沿用共用 LINE outbox 租約，個人選單領取時保存嘗試次數，完成時保存讀回證據。
   - `infrastructure/mysql/orders_terminal_closure_source.py` — read-only Orders outbox handoff adapter; LINE never acknowledges or mutates Orders.
   - `db/schema_parts/1019_line_identity_role_scope.sql`
   - `db/releases/labor_union_validation_schema_v1.sql` — generated Global validation composition; listed as an exact touched artifact, not LINE-owned business semantics.
@@ -60,12 +62,14 @@
 
 ## Verification
 - layout_status: `custom_current`
-- layout_basis: LINE identity frontend adapter tests mirror this module under the React test domain tree; backend behavior remains in the existing Python module root.
+- layout_basis: LINE identity frontend adapter tests mirror this module under the React test domain tree. Python tests use the existing module root and the two existing focused files for personal menu binding and its outbox lease.
 - static:
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
 - higher_boundary: `tests/domains/external-integration/subsystems/line/integration/test_line_friend_feedback_regressions.py` — 由上位 LINE Subsystem 擁有；canonical webhook friend-state（follow 不再開啟流程或發送歡迎訊息）、binding link 與客服 feedback continuation 的交易 regression。
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_menu_command_application.py` — 既有 scoped menu command／admin 視角與訪客回復 regression；雙角色選擇的新驗證沿用本 Module contract root。
+- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_binding.py` — 個人選單讀回與有限重試。
+- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_outbox_intent_claim.py` — 個人選單工作領取、嘗試上限與租約回收。
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 
 ## Provenance

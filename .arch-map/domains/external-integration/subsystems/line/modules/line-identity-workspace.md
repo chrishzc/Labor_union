@@ -16,6 +16,7 @@ React 身分綁定、待審核、待配對三任務工作區；只呈現 owner-b
 
 ## Contracts
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §8 2026-10-15 React 介面裁決。
+- 身分綁定列表獨立顯示 LINE 端個人選單同步結果，使用既有 binding query。
 - depends_on: `line-identity-management`, `line-identity-review-presentation` — canonical role/query/command contracts。
 - LINE 管理頁其他 tabs、舊 standalone review／maintenance／pairing 元件與其直接 consumer 不退役。
 

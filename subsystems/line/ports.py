@@ -439,6 +439,8 @@ class LineIdentityRepositoryPort(Protocol):
     def list_by_user(
         self,
         line_user_id: LineUserId,
+        *,
+        lock: bool = False,
     ) -> tuple[LineIdentityBindingSnapshot, ...]: ...
 
     def list_bound_by_subject_type(
@@ -509,6 +511,8 @@ class LineIdentityRepositoryPort(Protocol):
     def selected_role(
         self,
         line_user_id: LineUserId,
+        *,
+        lock: bool = False,
     ) -> tuple[LineBindingSubjectType | None, ExpectedVersion]: ...
 
     def select_role(
@@ -749,7 +753,9 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
         configuration_revision: LineConfigurationRevision,
     ) -> tuple[LineRichMenuPublicationSnapshot, ...]: ...
 
-    def published_provider_menu_id(self, menu_definition_id: str) -> str | None: ...
+    def published_provider_menu_id(
+        self, menu_definition_id: str, *, before_publication_id: int | None = None,
+    ) -> str | None: ...
 
     def queue(
         self,
@@ -899,6 +905,14 @@ class LineIdempotencyReceiptPort(Protocol):
 class LineOutboxRepositoryPort(OutboxWriter, Protocol):
     def claim(self, query: ClaimLineOutboxQuery) -> tuple[LineOutboxWorkItem, ...]: ...
 
+    def lock_menu_user(self, line_user_id: LineUserId) -> None: ...
+
+    def lock_menu_lease(self, item: LineOutboxWorkItem, now: datetime) -> bool: ...
+
+    def latest_menu_intent_id(self, line_user_id: LineUserId) -> int | None: ...
+
+    def menu_reset_pending(self, line_user_id: LineUserId) -> bool: ...
+
     def complete(self, command: CompleteLineOutboxCommand) -> None: ...
 
     def next_due_at(self, intent_type: str = "line.media.archive") -> datetime | None: ...
@@ -954,6 +968,8 @@ class LineRichMenuProviderPort(Protocol):
         provider_menu_id: str,
         line_user_id: LineUserId,
     ) -> LineRichMenuProviderOutcome: ...
+
+    def get_user_rich_menu(self, line_user_id: LineUserId) -> LineRichMenuProviderOutcome: ...
 
 
 class LineMediaProviderPort(Protocol):

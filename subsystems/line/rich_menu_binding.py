@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
+from random import randint
 from typing import Callable
 
 from domains.line.identities import LineRichMenuPublicationId, LineUserId
@@ -16,11 +18,16 @@ from shared_kernel.ports import OutboxIntent
 from subsystems.line.outbox_contracts import (
     ClaimLineOutboxQuery,
     CompleteLineOutboxCommand,
+    RICH_MENU_BINDING_INTENT,
+    RICH_MENU_BINDING_MAX_ATTEMPTS,
+    RICH_MENU_BINDING_VERIFIED,
 )
-from subsystems.line.ports import LineRichMenuProviderPort, LineUnitOfWorkPort
-from subsystems.line.rich_menu_contracts import LineRichMenuProviderOutcomeType
+from subsystems.line.ports import LineAuditIntent, LineRichMenuProviderPort, LineUnitOfWorkPort
+from subsystems.line.rich_menu_contracts import (
+    LineRichMenuProviderOutcome,
+    LineRichMenuProviderOutcomeType,
+)
 
-RICH_MENU_BINDING_INTENT = "line.rich_menu.bind"
 _MENU_BY_SUBJECT = {
     LineBindingSubjectType.CUSTOMER: "customer_menu",
     LineBindingSubjectType.STAFF: "staff_menu",
@@ -45,13 +52,15 @@ def schedule_rich_menu_binding(unit_of_work, binding: LineIdentityBindingSnapsho
     unit_of_work.outbox.append(_binding_intent(binding))
 
 
-def schedule_resolved_identity_menu(unit_of_work, line_user_id) -> bool:
+def schedule_resolved_identity_menu(unit_of_work, line_user_id, *, selection_version=None) -> bool:
     """Queue one menu only when the LINE-owned active role is unambiguous."""
 
     binding = _resolved_identity_binding(unit_of_work, line_user_id)
     if binding is None:
         return False
-    unit_of_work.outbox.append(_binding_intent(binding, role_scoped=True))
+    unit_of_work.outbox.append(
+        _binding_intent(binding, role_scoped=True, selection_version=selection_version)
+    )
     return True
 
 
@@ -107,10 +116,11 @@ def schedule_staff_default_restore_menu(
     return intent_identity
 
 
-def _resolved_identity_binding(unit_of_work, line_user_id):
+def _resolved_identity_binding(unit_of_work, line_user_id, *, lock=False):
+    read_options = {"lock": True} if lock else {}
     scoped = tuple(
         binding
-        for binding in unit_of_work.identities.list_by_user(line_user_id)
+        for binding in unit_of_work.identities.list_by_user(line_user_id, **read_options)
         if binding.status is LineIdentityBindingStatus.BOUND
     )
     if not scoped:
@@ -119,7 +129,7 @@ def _resolved_identity_binding(unit_of_work, line_user_id):
         return scoped[0]
     if any(binding.subject_type is LineBindingSubjectType.ADMIN for binding in scoped):
         raise RuntimeError("line_identity_admin_role_exclusive")
-    selected_role, _ = unit_of_work.identities.selected_role(line_user_id)
+    selected_role, _ = unit_of_work.identities.selected_role(line_user_id, **read_options)
     if selected_role is None:
         return None
     selected = tuple(
@@ -140,20 +150,27 @@ def schedule_published_menu_rebindings(
     subject_type = _SUBJECT_BY_AUDIENCE.get(str(definition["audience_role"]))
     if subject_type is None:
         return 0
+    menu_definition_id = str(definition["id"])
     bindings = unit_of_work.identities.list_bound_by_subject_type(subject_type)
+    scheduled = 0
     for binding in bindings:
+        unit_of_work.outbox.lock_menu_user(binding.line_user_id)
+        current = _resolved_identity_binding(unit_of_work, binding.line_user_id, lock=True)
+        if current is None or current.subject_type is not subject_type:
+            continue
         unit_of_work.outbox.append(
             _publication_binding_intent(
-                binding,
-                str(definition["id"]),
+                current,
+                menu_definition_id,
                 publication_id,
                 provider_menu_id,
             )
         )
-    return len(bindings)
+        scheduled += 1
+    return scheduled
 
 
-def _binding_intent(binding, *, role_scoped=False, revocation_request_id=None):
+def _binding_intent(binding, *, role_scoped=False, revocation_request_id=None, selection_version=None):
     menu_definition_id = _MENU_BY_SUBJECT[binding.subject_type]
     role_segment = f":{binding.subject_type.value}" if role_scoped else ""
     revocation_segment = (
@@ -161,13 +178,14 @@ def _binding_intent(binding, *, role_scoped=False, revocation_request_id=None):
         if revocation_request_id is not None
         else ""
     )
+    selection_segment = f":selection:{selection_version.value}" if selection_version is not None else ""
     return OutboxIntent(
         "line_identity",
         binding.line_user_id.value,
         RICH_MENU_BINDING_INTENT,
         _binding_payload(binding, menu_definition_id),
         f"rich-menu-bind:{binding.line_user_id.value}{role_segment}:"
-        f"{binding.version.value}{revocation_segment}",
+        f"{binding.version.value}{revocation_segment}{selection_segment}",
     )
 
 
@@ -208,7 +226,7 @@ class LineRichMenuBindingWorker:
         provider: LineRichMenuProviderPort,
         worker_identity: str,
         now: Callable[[], datetime],
-        batch_size: int = 10,
+        batch_size: int = 1,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._provider = provider
@@ -217,16 +235,20 @@ class LineRichMenuBindingWorker:
         self._batch_size = batch_size
 
     def run_once(self) -> int:
-        items = self._claim()
-        for item in items:
-            self._process(item)
-        return len(items)
+        processed = 0
+        for _ in range(self._batch_size):
+            items = self._claim()
+            if not items:
+                break
+            self._process(items[0])
+            processed += 1
+        return processed
 
     def _claim(self):
         query = ClaimLineOutboxQuery(
             self._worker_identity,
             self._now(),
-            self._batch_size,
+            1,
             RICH_MENU_BINDING_INTENT,
         )
         with self._unit_of_work_factory() as unit_of_work:
@@ -235,64 +257,148 @@ class LineRichMenuBindingWorker:
         return items
 
     def _process(self, item) -> None:
-        try:
-            outcome = self._bind(item.payload_json)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            self._complete(
-                item,
-                "rich_menu_binding_payload_invalid",
-                str(error),
-                retryable=False,
+        # Claim has committed its attempt count. Hold the per-user and exact lease
+        # locks through the provider operation so competing workers cannot overtake it.
+        with self._unit_of_work_factory() as unit_of_work:
+            line_user_id = LineUserId(item.aggregate_identity)
+            unit_of_work.outbox.lock_menu_user(line_user_id)
+            if not unit_of_work.outbox.lock_menu_lease(item, self._now()):
+                return
+            try:
+                outcome = self._bind(unit_of_work, item, line_user_id)
+            except (KeyError, TypeError, ValueError):
+                outcome = _failure("rich_menu_binding_payload_invalid", "圖文選單工作資料無效")
+            self._complete(unit_of_work, item, outcome)
+            unit_of_work.commit()
+
+    def _bind(self, unit_of_work, item, line_user_id):
+        if unit_of_work.outbox.latest_menu_intent_id(line_user_id) != item.outbox_id:
+            return _failure("rich_menu_binding_superseded", "已有較新的圖文選單切換工作")
+        if self._now() >= item.deadline:
+            return _failure("rich_menu_binding_deadline_exhausted", "圖文選單同步已逾時")
+        if unit_of_work.outbox.menu_reset_pending(line_user_id):
+            return LineRichMenuProviderOutcome(
+                LineRichMenuProviderOutcomeType.UNAVAILABLE,
+                error_code="rich_menu_binding_waiting_for_reset",
+                error_message="等待身分解除回復圖文選單",
             )
-            return
-        except Exception as error:
-            self._complete(item, "rich_menu_binding_unavailable", str(error), retryable=True)
-            return
-        self._record_outcome(item, outcome)
-
-    def _record_outcome(self, item, outcome) -> None:
-        if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
-            self._complete(item)
-            return
-        self._complete(
-            item,
-            outcome.error_code,
-            outcome.error_message,
-            retryable=outcome.outcome_type in _RETRYABLE_OUTCOMES,
-        )
-
-    def _bind(self, payload_json):
-        payload = json.loads(payload_json)
-        line_user_id = LineUserId(str(payload["line_user_id"]))
-        menu_definition_id = str(payload["menu_definition_id"])
-        if menu_definition_id not in _MENU_BY_SUBJECT.values() and menu_definition_id != "default_menu":
+        payload = json.loads(item.payload_json)
+        menu_definition_id = payload["menu_definition_id"]
+        if payload["line_user_id"] != line_user_id.value or menu_definition_id not in (
+            *_MENU_BY_SUBJECT.values(), "default_menu"
+        ):
             raise ValueError("Rich Menu binding target is invalid")
-        provider_menu_id = str(payload.get("provider_menu_id") or "")
+        if not _is_current_target(unit_of_work, item, line_user_id, payload):
+            return _failure("rich_menu_binding_superseded", "身分或選單意圖已變更")
+        provider_menu_id = unit_of_work.rich_menu_publications.published_provider_menu_id(
+            menu_definition_id
+        ) or payload.get("provider_menu_id")
         if not provider_menu_id:
-            provider_menu_id = self._provider_menu_id(menu_definition_id)
-        return self._provider.link_to_user(provider_menu_id, line_user_id)
-
-    def _provider_menu_id(self, menu_definition_id: str) -> str:
-        with self._unit_of_work_factory() as unit_of_work:
-            provider_menu_id = unit_of_work.rich_menu_publications.published_provider_menu_id(
-                menu_definition_id
+            return _failure("rich_menu_binding_not_published", "圖文選單尚未發布")
+        if item.attempt_count > 1 or item.maximum_attempts < RICH_MENU_BINDING_MAX_ATTEMPTS:
+            current = self._provider.get_user_rich_menu(line_user_id)
+            if current.provider_menu_id == provider_menu_id:
+                return current
+            if current.provider_menu_id is None and current.error_code != "line_http_404":
+                return current
+        if self._now() >= item.deadline:
+            return _failure("rich_menu_binding_deadline_exhausted", "圖文選單同步已逾時")
+        linked = self._provider.link_to_user(provider_menu_id, line_user_id)
+        if linked.outcome_type not in {
+            LineRichMenuProviderOutcomeType.SUCCESS,
+            LineRichMenuProviderOutcomeType.TIMEOUT,
+            LineRichMenuProviderOutcomeType.UNAVAILABLE,
+        }:
+            return linked
+        if self._now() >= item.deadline:
+            return _failure("rich_menu_binding_deadline_exhausted", "圖文選單同步已逾時")
+        current = self._provider.get_user_rich_menu(line_user_id)
+        if current.provider_menu_id == provider_menu_id:
+            return current
+        if current.provider_menu_id is None and current.error_code != "line_http_404":
+            if current.outcome_type not in _RETRYABLE_OUTCOMES:
+                return current
+            return replace(
+                current,
+                retry_after_seconds=max(current.retry_after_seconds or 0, linked.retry_after_seconds or 0),
             )
-            unit_of_work.commit()
-        if provider_menu_id is None:
-            raise LookupError(f"Rich Menu {menu_definition_id} 尚未發布")
-        return provider_menu_id
-
-    def _complete(self, item, error_code=None, error_message=None, *, retryable=True):
-        command = CompleteLineOutboxCommand(
-            item,
-            self._now(),
-            str(error_code)[:191] if error_code else None,
-            str(error_message or error_code)[:1000] if error_code else None,
-            retryable=retryable,
+        if linked.outcome_type is not LineRichMenuProviderOutcomeType.SUCCESS:
+            return linked
+        return LineRichMenuProviderOutcome(
+            LineRichMenuProviderOutcomeType.UNAVAILABLE,
+            error_code="rich_menu_binding_readback_mismatch",
+            error_message="LINE 讀回的選單與預期不符",
         )
-        with self._unit_of_work_factory() as unit_of_work:
-            unit_of_work.outbox.complete(command)
-            unit_of_work.commit()
+
+    def _complete(self, unit_of_work, item, outcome):
+        completed_at = self._now()
+        if completed_at >= item.deadline:
+            outcome = _failure("rich_menu_binding_deadline_exhausted", "圖文選單同步已逾時")
+        if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
+            unit_of_work.audit.append(LineAuditIntent(
+                RICH_MENU_BINDING_VERIFIED, "system:line-worker", "line_domain_outbox", str(item.outbox_id)
+            ))
+            unit_of_work.outbox.complete(CompleteLineOutboxCommand(item, completed_at))
+            return
+        retryable = outcome.outcome_type in _RETRYABLE_OUTCOMES
+        code = outcome.error_code
+        message = outcome.error_message
+        delay = 0
+        if retryable:
+            backoff = 15 * 2 ** (item.attempt_count - 1)
+            delay = max(backoff + randint(0, backoff // 2), outcome.retry_after_seconds or 0)
+            if item.attempt_count >= item.maximum_attempts:
+                code, message = "rich_menu_binding_attempts_exhausted", f"已達重試上限（{code}）"
+                retryable = False
+            elif delay >= (item.deadline - completed_at).total_seconds():
+                code, message = "rich_menu_binding_deadline_exhausted", f"重試已超過時限（{code}）"
+                retryable = False
+        unit_of_work.outbox.complete(CompleteLineOutboxCommand(
+            item, completed_at, code, message, retry_after_seconds=delay, retryable=retryable,
+        ))
+
+
+def _is_current_target(unit_of_work, item, line_user_id, payload):
+    menu_definition_id = payload["menu_definition_id"]
+    if menu_definition_id == "default_menu":
+        return True
+    if item.idempotency_identity.startswith("line-menu-command:"):
+        roles = {
+            binding.subject_type for binding in unit_of_work.identities.list_by_user(line_user_id)
+            if binding.status is LineIdentityBindingStatus.BOUND
+        }
+        return LineBindingSubjectType.ADMIN in roles or any(
+            _MENU_BY_SUBJECT[role] == menu_definition_id for role in roles
+        )
+    if payload.get("restore_reason") == "case_terminal_closure":
+        binding = unit_of_work.identities.get(line_user_id, LineBindingSubjectType.STAFF)
+        if unit_of_work.identity_management.active_client_cases(line_user_id):
+            return False
+    else:
+        binding = _resolved_identity_binding(unit_of_work, line_user_id)
+    return (
+        binding is not None
+        and binding.status is LineIdentityBindingStatus.BOUND
+        and _MENU_BY_SUBJECT[binding.subject_type] == menu_definition_id
+        and _binding_version_matches(item.idempotency_identity, binding)
+    )
+
+
+def _binding_version_matches(identity, binding):
+    prefix = f"rich-menu-bind:{binding.line_user_id.value}:"
+    if not identity.startswith(prefix):
+        return True
+    parts = identity.removeprefix(prefix).split(":")
+    if parts[0] in {role.value for role in _MENU_BY_SUBJECT}:
+        return len(parts) > 1 and parts[0] == binding.subject_type.value and parts[1] == str(binding.version.value)
+    version = parts[0]
+    return version == str(binding.version.value)
+
+
+def _failure(code, message):
+    return LineRichMenuProviderOutcome(
+        LineRichMenuProviderOutcomeType.REJECTED, error_code=code, error_message=message
+    )
 
 
 __all__ = [

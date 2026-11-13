@@ -235,9 +235,17 @@ class MySqlLineRichMenuPublicationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(_publication_snapshot(row) for row in rows)
 
-    def published_provider_menu_id(self, menu_definition_id: str) -> str | None:
+    def published_provider_menu_id(
+        self, menu_definition_id: str, *, before_publication_id: int | None = None,
+    ) -> str | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id, menu_definition_id))
+            if before_publication_id is None:
+                cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id, menu_definition_id))
+            else:
+                cursor.execute(
+                    _MENU_PREVIOUS_PROVIDER_ID_SQL,
+                    (menu_definition_id, menu_definition_id, before_publication_id),
+                )
             row = optional_row(cursor.fetchone())
         if row is None or not row.get("provider_menu_id"):
             return None
@@ -1236,16 +1244,24 @@ _MENU_LIST_SQL = f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks"
 _MENU_COUNT_SQL = "SELECT COUNT(*) AS total FROM line_rich_menu_publication_tasks"
 _MENU_PUBLISHED_PROVIDER_ID_SQL = (
     "SELECT provider_menu_id FROM ("
-    "SELECT line_rich_menu_id AS provider_menu_id,2 AS priority,id "
+    "SELECT line_rich_menu_id AS provider_menu_id,2 AS priority,0 AS revision,id "
     "FROM line_rich_menu_publications "
     "WHERE menu_config_id=%s AND status='published' AND is_current=TRUE "
     "AND line_rich_menu_id IS NOT NULL "
     "UNION ALL "
-    "SELECT provider_menu_id,1 AS priority,id "
+    "SELECT provider_menu_id,CASE WHEN configuration_revision>0 THEN 3 ELSE 1 END AS priority,"
+    "configuration_revision AS revision,id "
     "FROM line_rich_menu_publication_tasks "
     "WHERE menu_definition_id=%s AND publication_status='published' "
-    "AND provider_menu_id IS NOT NULL"
-    ") published_menus ORDER BY priority DESC,id DESC LIMIT 1"
+    "AND operation='publish' AND provider_menu_id IS NOT NULL"
+    ") published_menus ORDER BY priority DESC,revision DESC,id DESC LIMIT 1"
+)
+_MENU_PREVIOUS_PROVIDER_ID_SQL = _MENU_PUBLISHED_PROVIDER_ID_SQL.replace(
+    "AND operation='publish'",
+    "AND EXISTS (SELECT 1 FROM line_rich_menu_publication_tasks incoming WHERE incoming.id=%s "
+    "AND (line_rich_menu_publication_tasks.configuration_revision < incoming.configuration_revision "
+    "OR (line_rich_menu_publication_tasks.configuration_revision = incoming.configuration_revision "
+    "AND line_rich_menu_publication_tasks.id < incoming.id))) AND operation='publish'",
 )
 _MENU_CONFIGURATION_SELECT_SQL = (
     "SELECT revision.definition_snapshot "

@@ -43,6 +43,24 @@ async function confirmReason(label: string, reason: string) { fireEvent.change(s
 afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 describe('身分與授權精簡工作區', () => {
+  it.each([
+    ['pending', null, '選單同步中'],
+    ['synced', null, '選單已同步'],
+    ['failed', 'line_http_401', '選單同步失敗（LINE 憑證無效）'],
+    ['unverified', null, '選單同步未確認'],
+  ] as const)('分別顯示已綁定及選單 %s', async (status, errorCode, label) => {
+    const api = client();
+    api.listBindings.mockResolvedValue({
+      items: [{ ...binding, rich_menu_sync_status: status, rich_menu_sync_error_code: errorCode }],
+      total: 1, page: 1, page_size: 25,
+    });
+    render(<LineIdentityWorkbench client={api} />);
+    const row = await screen.findByRole('row', { name: new RegExp(binding.subject_name) });
+    expect(within(row).getByText('已綁定')).toBeInTheDocument();
+    expect(within(row).getByText(label)).toBeInTheDocument();
+    if (status !== 'synced') expect(within(row).queryByText('選單已同步')).toBeNull();
+  });
+
   it('三分頁只掛載目前任務，主清單不顯示原始 LINE ID、KPI 或操作表單', async () => {
     const api = client(); render(<LineIdentityWorkbench client={api} />); await screen.findByText(binding.subject_name);
     expect(screen.getAllByRole('tab')).toHaveLength(3); expect(screen.getAllByRole('columnheader')).toHaveLength(5);

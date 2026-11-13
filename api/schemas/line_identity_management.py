@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
+from subsystems.line.outbox_contracts import LineRichMenuSyncStatus
 from subsystems.line.identity_management_contracts import (
     LineIdentityCurrentFactFinding,
     LineIdentityCurrentFactReadbackStatus,
@@ -28,6 +29,8 @@ class LineIdentityBindingView(_StrictModel):
     revocation_request_id: int | None = None
     revocation_status: LineIdentityRevocationStatus | None = None
     revoked_at: datetime | None = None
+    rich_menu_sync_status: LineRichMenuSyncStatus | None = None
+    rich_menu_sync_error_code: str | None = None
 
 
 class LineIdentityBindingPageView(_StrictModel):

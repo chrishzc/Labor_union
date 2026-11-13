@@ -42,9 +42,9 @@ from subsystems.line.rich_menu_binding import (
     schedule_resolved_identity_menu,
     schedule_revocation_successor_menu,
 )
+from subsystems.line.outbox_contracts import IDENTITY_MENU_RESET_INTENT
 
 
-IDENTITY_MENU_RESET_INTENT = "line.identity.revocation.menu_reset"
 
 
 def _management_detail(unit_of_work, line_user_id, subject_type):
@@ -272,7 +272,9 @@ class LineIdentityManagementApplication:
                 command.line_user_id.value,
             )
         )
-        schedule_resolved_identity_menu(unit_of_work, command.line_user_id)
+        schedule_resolved_identity_menu(
+            unit_of_work, command.line_user_id, selection_version=resulting_version
+        )
         result = _role_context(unit_of_work, command.line_user_id)
         return LineIdentityRoleSelectionReceipt(result, False, receipt_identity)
 
@@ -363,6 +365,7 @@ class LineIdentityManagementApplication:
                     command.line_user_id.value,
                 )
             )
+            schedule_resolved_identity_menu(unit_of_work, command.line_user_id)
             result = _management_detail(unit_of_work, command.line_user_id, command.subject_type)
             unit_of_work.commit()
         return result
@@ -380,6 +383,8 @@ class LineIdentityManagementApplication:
         require_line_capability(actor, LineCapability.IDENTITY_BINDING_MANAGE)
         _require_reason(reason)
         with self._unit_of_work_factory() as unit_of_work:
+            request = unit_of_work.identity_management.get_request(request_id)
+            unit_of_work.outbox.lock_menu_user(request.line_user_id)
             request = unit_of_work.identity_management.get_request(request_id, lock=True)
             if request.status not in {
                 LineIdentityRevocationStatus.MENU_RESET_FAILED,
@@ -407,48 +412,41 @@ class LineIdentityManagementApplication:
                 LineCapability.IDENTITY_BINDING_OVERRIDE,
             )
             _require_reason(reason or "")
-        actor_id = manual_actor.actor_id if manual else "system:line-worker"
         with self._unit_of_work_factory() as unit_of_work:
+            request = unit_of_work.identity_management.get_request(request_id)
+            unit_of_work.outbox.lock_menu_user(request.line_user_id)
             request = unit_of_work.identity_management.get_request(request_id, lock=True)
-            if (
-                not manual
-                and request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
-            ):
-                unit_of_work.identity_management.complete_manual_menu_repair(request_id)
-                unit_of_work.audit.append(_audit("menu_repaired", actor_id, request))
-                result = unit_of_work.identity_management.get_request(request_id)
-                unit_of_work.commit()
-                return result
-            if request.status in _COMPLETED_STATUSES:
-                unit_of_work.commit()
-                return request
-            if manual and request.status is not LineIdentityRevocationStatus.MENU_RESET_FAILED:
-                raise RuntimeError("line_identity_manual_completion_forbidden")
-            completed = unit_of_work.identities.complete_revocation(
-                request.line_user_id,
-                request.pending_binding_version,
-                actor_id,
-                _completion_key(request, manual),
-                f"line-identity-revocation:{request.request_id}",
-                request.subject_type,
-            )
-            _clear_owner_projection(unit_of_work, request)
-            unit_of_work.identity_management.complete(
-                request,
-                completed.version,
-                actor_id,
-                manual=manual,
-                reason=reason,
-            )
-            unit_of_work.audit.append(_audit("completed", actor_id, request))
-            schedule_revocation_successor_menu(
-                unit_of_work,
-                request.line_user_id,
-                request.request_id,
-            )
-            result = unit_of_work.identity_management.get_request(request_id)
+            result = self.finalize_in_unit_of_work(unit_of_work, request, manual_actor=manual_actor, reason=reason)
             unit_of_work.commit()
         return result
+
+    def finalize_in_unit_of_work(
+        self, unit_of_work, request, *, manual_actor=None, reason=None, schedule_successor=True,
+    ):
+        """Complete using the caller's locked request and outer transaction."""
+        manual = manual_actor is not None
+        actor_id = manual_actor.actor_id if manual else "system:line-worker"
+        request_id = request.request_id
+        if not manual and request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED:
+            unit_of_work.identity_management.complete_manual_menu_repair(request_id)
+            unit_of_work.audit.append(_audit("menu_repaired", actor_id, request))
+            return unit_of_work.identity_management.get_request(request_id)
+        if request.status in _COMPLETED_STATUSES:
+            return request
+        if manual and request.status is not LineIdentityRevocationStatus.MENU_RESET_FAILED:
+            raise RuntimeError("line_identity_manual_completion_forbidden")
+        completed = unit_of_work.identities.complete_revocation(
+            request.line_user_id, request.pending_binding_version, actor_id,
+            _completion_key(request, manual), f"line-identity-revocation:{request_id}", request.subject_type,
+        )
+        _clear_owner_projection(unit_of_work, request)
+        unit_of_work.identity_management.complete(
+            request, completed.version, actor_id, manual=manual, reason=reason,
+        )
+        unit_of_work.audit.append(_audit("completed", actor_id, request))
+        if schedule_successor:
+            schedule_revocation_successor_menu(unit_of_work, request.line_user_id, request_id)
+        return unit_of_work.identity_management.get_request(request_id)
 
 
 def request_staff_retirement_revocation(

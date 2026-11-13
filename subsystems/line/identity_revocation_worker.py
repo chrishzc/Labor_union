@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from typing import Callable
 
+from domains.line.identities import LineUserId
 from subsystems.line.identity_management_application import (
     IDENTITY_MENU_RESET_INTENT,
     LineIdentityManagementApplication,
@@ -53,89 +54,69 @@ class LineIdentityRevocationWorker:
         try:
             payload = json.loads(item.payload_json)
             request_id = int(payload["request_id"])
+            line_user_id = LineUserId(payload["line_user_id"])
+            if str(request_id) != item.aggregate_identity:
+                raise ValueError("LINE menu reset request mismatch")
+        except (KeyError, TypeError, ValueError):
             with self._unit_of_work_factory() as unit_of_work:
-                request = unit_of_work.identity_management.get_request(request_id)
-            if request.status is LineIdentityRevocationStatus.COMPLETED:
-                self._complete(item)
+                if unit_of_work.outbox.lock_menu_lease(item, self._now()):
+                    unit_of_work.outbox.complete(CompleteLineOutboxCommand(
+                        item, self._now(), "line_identity_menu_reset_payload_invalid",
+                        "圖文選單回復工作資料無效", retryable=False,
+                    ))
+                    unit_of_work.commit()
+            return
+        with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.outbox.lock_menu_user(line_user_id)
+            if not unit_of_work.outbox.lock_menu_lease(item, self._now()):
                 return
-            outcome = self._provider.restore_default_for_user(request.line_user_id)
-            if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
-                self._application.finalize(request_id)
-                self._complete(item)
-                return
-            self._fail(item, request_id, outcome)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            self._record_exception_failure(item, error, retryable=False)
-        except Exception as error:
-            self._record_exception_failure(item, error, retryable=True)
+            request = unit_of_work.identity_management.get_request(request_id, lock=True)
+            if request.line_user_id != line_user_id:
+                raise RuntimeError("line_identity_menu_reset_user_mismatch")
+            command = CompleteLineOutboxCommand(item, self._now())
+            if request.status is not LineIdentityRevocationStatus.COMPLETED:
+                latest = unit_of_work.outbox.latest_menu_intent_id(line_user_id)
+                if (
+                    request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
+                    and latest is not None and latest > item.outbox_id
+                ):
+                    command = CompleteLineOutboxCommand(
+                        item, self._now(), "line_identity_menu_reset_superseded",
+                        "已有較新的圖文選單切換工作", retryable=False,
+                    )
+                    self._record_failure(unit_of_work, request, command, terminal=True)
+                else:
+                    command = self._restore(
+                        unit_of_work, item, request,
+                        schedule_successor=latest is None or latest <= item.outbox_id,
+                    )
+            unit_of_work.outbox.complete(command)
+            unit_of_work.commit()
 
-    def _fail(self, item, request_id: int, outcome) -> None:
+    def _restore(self, unit_of_work, item, request, *, schedule_successor) -> CompleteLineOutboxCommand:
+        outcome = self._provider.restore_default_for_user(request.line_user_id)
+        if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
+            self._application.finalize_in_unit_of_work(
+                unit_of_work, request, schedule_successor=schedule_successor,
+            )
+            return CompleteLineOutboxCommand(item, self._now())
         retryable = outcome.outcome_type in _RETRYABLE_OUTCOMES
         code = str(outcome.error_code or "line_identity_menu_reset_failed")
         message = str(outcome.error_message or "Rich Menu reset failed")[:1000]
-        self._record_failure(item, request_id, code, message, retryable)
-
-    def _record_exception_failure(self, item, error: Exception, *, retryable: bool) -> None:
-        code = (
-            "line_identity_menu_reset_unavailable"
-            if retryable
-            else "line_identity_menu_reset_payload_invalid"
-        )
-        try:
-            request_id = int(item.aggregate_identity)
-        except (TypeError, ValueError):
-            self._complete(item, code, str(error)[:1000], retryable)
-            return
-        self._record_failure(item, request_id, code, str(error)[:1000], retryable)
-
-    # Request failure state and outbox attempt must commit together.
-    def _record_failure(
-        self,
-        item,
-        request_id: int,
-        code: str,
-        message: str,
-        retryable: bool,
-    ) -> None:
         terminal = not retryable or item.attempt_count + 1 >= item.maximum_attempts
-        with self._unit_of_work_factory() as unit_of_work:
-            request = unit_of_work.identity_management.get_request(request_id, lock=True)
-            if request.status.value == "manual_completed":
-                unit_of_work.identity_management.mark_manual_menu_repair_failure(
-                    request_id,
-                    code,
-                    message,
-                )
-            else:
-                unit_of_work.identity_management.mark_failure(
-                    request_id,
-                    code,
-                    message,
-                    terminal=terminal,
-                )
-            unit_of_work.outbox.complete(
-                CompleteLineOutboxCommand(
-                    item,
-                    self._now(),
-                    code,
-                    message,
-                    retryable=retryable,
-                )
-            )
-            unit_of_work.commit()
+        command = CompleteLineOutboxCommand(item, self._now(), code, message, retryable=retryable)
+        self._record_failure(unit_of_work, request, command, terminal=terminal)
+        return command
 
-    def _complete(self, item, code=None, message=None, retryable=True) -> None:
-        with self._unit_of_work_factory() as unit_of_work:
-            unit_of_work.outbox.complete(
-                CompleteLineOutboxCommand(
-                    item,
-                    self._now(),
-                    code,
-                    message,
-                    retryable=retryable,
-                )
+    def _record_failure(self, unit_of_work, request, command, *, terminal):
+        if request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED:
+            unit_of_work.identity_management.mark_manual_menu_repair_failure(
+                request.request_id, command.error_code, command.error_message,
             )
-            unit_of_work.commit()
+        else:
+            unit_of_work.identity_management.mark_failure(
+                request.request_id, command.error_code, command.error_message, terminal=terminal,
+            )
 
 
 _RETRYABLE_OUTCOMES = {

@@ -2,7 +2,7 @@
  * File: line_management_page_real_data.test.tsx
  * Description: 驗證 LINE 管理頁以 typed client 呈現工作分頁與遮罩身分，且不把未知資料偽裝為零。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
@@ -59,15 +59,18 @@ function clients(): { customer: CustomerServiceClient; identity: Pick<LineIdenti
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 管理頁真實資料呈現', () => {
-  it('切到身分頁才查詢清單，LINE ID 僅在明細以遮罩呈現', async () => {
+  it('切到身分頁才查詢清單，解除確認只顯示姓名與身分', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
     fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText(BOUND_IDENTITY_FIXTURE.subject_name);
     expect(screen.queryByText(BOUND_IDENTITY_FIXTURE.line_user_id)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看測試客戶甲的客戶身分' }));
-    await screen.findByText('U123••••cdef');
+    fireEvent.click(screen.getByRole('button', { name: '解除綁定' }));
+    const dialog = await screen.findByRole('dialog', { name: '是否確認解除綁定？' });
+    expect(within(dialog).getByText(BOUND_IDENTITY_FIXTURE.subject_name)).toBeInTheDocument();
+    expect(within(dialog).getByText('客戶')).toBeInTheDocument();
+    expect(dialog.textContent).not.toContain(BOUND_IDENTITY_FIXTURE.line_user_id);
     expect(screen.queryByText(REVOCATION_PREVIEW_FIXTURE.provider_menu_id ?? '')).not.toBeInTheDocument();
     expect(identity.listBindings).toHaveBeenCalledTimes(1);
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -84,20 +87,23 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.getByText('訪客選單待修復')).toBeInTheDocument();
   });
 
-  it('篩選後以正確的 LINE 與角色查詢明細，不因索引錯位開啟他人資料', async () => {
+  it('篩選後以正確的 LINE 與角色查詢解除預覽，不因索引錯位操作他人資料', async () => {
     const { customer, identity } = clients();
     const staffLineUserId = 'Ustaff567890abcdef1234567890abcdef';
-    const staff = { ...BOUND_IDENTITY_FIXTURE, line_user_id: staffLineUserId, subject_type: 'staff' as const, subject_name: '測試月嫂乙', status: 'pending_review' as const };
+    const staff = { ...BOUND_IDENTITY_FIXTURE, line_user_id: staffLineUserId, subject_type: 'staff' as const, subject_name: '測試月嫂乙' };
     vi.mocked(identity.listBindings).mockImplementation(async query => ({ items: query?.subject_type === 'staff' ? [staff] : [BOUND_IDENTITY_FIXTURE, staff], total: query?.subject_type === 'staff' ? 1 : 2, page: 1, page_size: 25 }));
-    vi.mocked(identity.getBinding).mockResolvedValue(staff);
+    vi.mocked(identity.previewRevocation).mockResolvedValue({ ...REVOCATION_PREVIEW_FIXTURE, binding: staff, blockers: ['line_identity_revocation_in_progress'] });
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
     fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('測試月嫂乙');
     fireEvent.change(screen.getByRole('combobox', { name: '篩選身分角色' }), { target: { value: 'staff' } });
     await waitFor(() => expect(identity.listBindings).toHaveBeenLastCalledWith(expect.objectContaining({ subject_type: 'staff' }), expect.any(Object)));
-    fireEvent.click(await screen.findByRole('button', { name: '查看測試月嫂乙的月嫂身分' }));
-    await waitFor(() => expect(identity.getBinding).toHaveBeenCalledWith(staffLineUserId, expect.objectContaining({ subjectType: 'staff' })));
-    expect(screen.queryByRole('button', { name: '解除此身分' })).not.toBeInTheDocument();
+    const row = await screen.findByRole('row', { name: /測試月嫂乙/ });
+    fireEvent.click(within(row).getByRole('button', { name: '解除綁定' }));
+    const dialog = await screen.findByRole('dialog', { name: '是否確認解除綁定？' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '確認解除綁定' }));
+    await waitFor(() => expect(identity.previewRevocation).toHaveBeenCalledWith(staffLineUserId, expect.objectContaining({ subjectType: 'staff' })));
+    expect(identity.applyRevocation).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain(staffLineUserId);
   });
 

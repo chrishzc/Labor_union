@@ -98,6 +98,9 @@ class _AppendOnly:
     def append(self, item) -> None:
         self.items.append(item)
 
+    def lock_menu_user(self, line_user_id):
+        pass
+
 
 class _Receipts(_AppendOnly):
     def get(self, key):
@@ -308,13 +311,36 @@ def test_customer_and_staff_share_one_context_and_one_selected_role_state() -> N
     assert receipt.readback.effective_role is LineBindingSubjectType.STAFF
     assert len(unit_of_work.outbox.items) == 1
     assert unit_of_work.outbox.items[0].idempotency_identity == (
-        "rich-menu-bind:U-role-context:staff:1"
+        "rich-menu-bind:U-role-context:staff:1:selection:1"
     )
 
     replay = application.select_role(command)
     assert replay.replayed is True
     assert replay.receipt_identity == receipt.receipt_identity
     assert len(unit_of_work.outbox.items) == 1
+
+
+def test_role_a_to_b_to_a_creates_a_new_menu_work_item():
+    user = LineUserId("U-role-context")
+    unit_of_work = _UnitOfWork(_Identities(user))
+    application = LineIdentityManagementApplication(
+        lambda: unit_of_work, lambda: datetime(2026, 8, 30, tzinfo=timezone.utc),
+    )
+    for version, role in enumerate(
+        (LineBindingSubjectType.STAFF, LineBindingSubjectType.CUSTOMER, LineBindingSubjectType.STAFF),
+        start=1,
+    ):
+        preview = application.preview_role_selection(user, role)
+        application.select_role(SelectLineIdentityRoleCommand(
+            user, role, preview.readback.context_version, preview.preview_fingerprint,
+            ActorContext("staff:operator"), IdempotencyKey(f"select-role:{version}"),
+            CorrelationId("select-role:u-role-context"),
+        ))
+    assert [item.idempotency_identity for item in unit_of_work.outbox.items] == [
+        "rich-menu-bind:U-role-context:staff:1:selection:1",
+        "rich-menu-bind:U-role-context:customer:1:selection:2",
+        "rich-menu-bind:U-role-context:staff:1:selection:3",
+    ]
 
 
 def test_staff_revocation_queues_a_distinct_customer_successor_menu() -> None:
@@ -562,6 +588,15 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     )
 
     class CompletingOutbox(_AppendOnly):
+        lease_valid = True
+        latest_intent_id = 7
+
+        def lock_menu_lease(self, item, now):
+            return self.lease_valid
+
+        def latest_menu_intent_id(self, line_user_id):
+            return self.latest_intent_id
+
         def complete(self, command):
             self.items.append(command)
 
@@ -606,6 +641,30 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     assert management.request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
     assert unit_of_work.outbox.items[0].retryable is False
     assert unit_of_work.commits == 1
+
+    unit_of_work.outbox.lease_valid = False
+    worker._process(item)
+    assert len(unit_of_work.outbox.items) == 1
+    assert len(failures) == 1
+
+    unit_of_work.outbox.lease_valid = True
+    unit_of_work.outbox.latest_intent_id = 8
+    worker._process(item)
+    assert unit_of_work.outbox.items[-1].error_code == "line_identity_menu_reset_superseded"
+    assert failures[-1][1] == "line_identity_menu_reset_superseded"
+
+    # A valid pending revocation still restores the default before a newer link.
+    management.request = replace(management.request, status=LineIdentityRevocationStatus.PENDING_MENU_RESET)
+    provider.restore_default_for_user = lambda _: LineRichMenuProviderOutcome(
+        LineRichMenuProviderOutcomeType.SUCCESS, provider_menu_id="richmenu-visitor-current",
+    )
+    finalized = []
+    worker._application.finalize_in_unit_of_work = (
+        lambda uow, request, *, schedule_successor: finalized.append((request.request_id, schedule_successor))
+    )
+    worker._process(item)
+    assert finalized == [(91, False)]
+    assert unit_of_work.outbox.items[-1].succeeded
 
 
 @pytest.mark.parametrize("command,role", [("切換客戶", LineBindingSubjectType.CUSTOMER), ("切換月嫂", LineBindingSubjectType.STAFF)])

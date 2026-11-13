@@ -10,6 +10,7 @@
 ## Implementation
 - primary: `subsystems/line/delivery_contracts.py`
 - provider adapter: `infrastructure/line/messaging_api_adapter.py`
+- shared HTTP outcome mapping: `infrastructure/line/http_outcomes.py`
 
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — committed delivery、Reply 優先與 uncertain outcome 禁止 Push fallback。

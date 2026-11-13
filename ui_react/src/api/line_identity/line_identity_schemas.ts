@@ -62,6 +62,8 @@ export const LineIdentityBindingViewSchema = z
     revocation_request_id: z.number().int().nullable().optional(),
     revocation_status: LineIdentityRevocationStatusSchema.nullable().optional(),
     revoked_at: NullableDateTimeSchema.optional(),
+    rich_menu_sync_status: z.enum(['pending', 'synced', 'failed', 'unverified']).nullable().optional(),
+    rich_menu_sync_error_code: z.string().nullable().optional(),
   })
   .strict();
 

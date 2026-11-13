@@ -170,6 +170,7 @@ class LineRichMenuProviderOutcome:
     provider_menu_id: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    retry_after_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.outcome_type, LineRichMenuProviderOutcomeType):

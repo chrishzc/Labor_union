@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
+from math import ceil
 
 _ERROR_MESSAGE_MAXIMUM_LENGTH = 500
 
@@ -17,14 +20,16 @@ class LineHttpFailure:
     retry_after_seconds: int | None
 
 
-def response_failure(response: object) -> LineHttpFailure:
+def response_failure(response: object, *, retry_after_on_unavailable: bool = False) -> LineHttpFailure:
     status_code = int(getattr(response, "status_code"))
     category = _failure_category(status_code)
     return LineHttpFailure(
         category,
         f"line_http_{status_code}",
         _response_message(response),
-        _retry_after(response) if status_code == 429 else None,
+        _retry_after(response)
+        if status_code == 429 or (retry_after_on_unavailable and 500 <= status_code < 600)
+        else None,
     )
 
 
@@ -76,15 +81,18 @@ def _response_payload(response: object) -> dict[str, object]:
 
 
 def _retry_after(response: object) -> int | None:
-    headers = getattr(response, "headers", {})
-    if not isinstance(headers, Mapping):
+    value = _header_text(response, "Retry-After", "retry-after")
+    if value is None:
         return None
-    value = headers.get("Retry-After") or headers.get("retry-after")
     try:
-        seconds = int(value)
-    except (TypeError, ValueError):
+        if value.isascii() and value.isdecimal():
+            return int(value)
+        date = parsedate_to_datetime(value)
+        if date.tzinfo is None:
+            return None
+        return max(0, ceil((date - datetime.now(timezone.utc)).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
         return None
-    return max(0, seconds)
 
 
 __all__ = [

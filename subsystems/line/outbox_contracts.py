@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import StrEnum
 
 from shared_kernel.validation import require_canonical_text, require_positive_integer
+
+RICH_MENU_BINDING_INTENT = "line.rich_menu.bind"
+IDENTITY_MENU_RESET_INTENT = "line.identity.revocation.menu_reset"
+RICH_MENU_BINDING_MAX_ATTEMPTS = 5
+RICH_MENU_BINDING_WINDOW = timedelta(minutes=10)
+RICH_MENU_BINDING_VERIFIED = "line.rich_menu.binding.verified"
+
+
+class LineRichMenuSyncStatus(StrEnum):
+    PENDING = "pending"
+    SYNCED = "synced"
+    FAILED = "failed"
+    UNVERIFIED = "unverified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +50,9 @@ class LineOutboxWorkItem:
     maximum_attempts: int
     lease_owner: str
     lease_expires_at: datetime
+    deadline: datetime | None = None
+    attempt_reserved: bool = False
+    idempotency_identity: str = ""
 
 
 @dataclass(frozen=True, slots=True)

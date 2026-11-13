@@ -46,12 +46,19 @@ def repository():
       CREATE TABLE line_identity_role_binding_events(line_user_id TEXT,subject_type TEXT,action TEXT,occurred_at_utc TEXT);
       CREATE TABLE line_identity_revocation_requests(id INTEGER,line_user_id TEXT,subject_type TEXT,active_marker INTEGER,request_status TEXT);
       CREATE TABLE line_platform_users(line_user_id TEXT,selected_identity_role TEXT);
+      CREATE TABLE line_domain_outbox(id INTEGER,aggregate_type TEXT,aggregate_identity TEXT,intent_type TEXT,processing_status TEXT,error_code TEXT);
+      CREATE TABLE line_domain_audit_events(action TEXT,aggregate_type TEXT,aggregate_identity TEXT);
       INSERT INTO clients VALUES(1,'已綁客戶','U-shared'),(2,'可選客戶',NULL),(3,'根事實已有綁定',NULL);
       INSERT INTO staff VALUES(1,'同帳號月嫂','U-shared'),(2,'可選月嫂',NULL);
       INSERT INTO admin_users VALUES(1,'可選內部人員',NULL);
       INSERT INTO orders VALUES('ORD-001',1,'2026-10-15'),('ORD-002',2,'2026-10-15');
       INSERT INTO line_identity_role_bindings VALUES('U-shared','customer','1','bound',7,'2026-10-15'),('U-shared','staff','1','bound',4,'2026-10-15'),('U-other','customer','3','bound',1,'2026-10-15');
       INSERT INTO line_identity_revocation_requests VALUES(9,'U-shared','staff',1,'menu_reset_failed');
+      INSERT INTO line_domain_outbox VALUES
+        (1,'line_identity','U-shared','line.rich_menu.bind','completed',NULL),
+        (2,'line_identity','U-other','line.rich_menu.bind','completed',NULL),
+        (3,'line_identity_revocation','9','line.identity.revocation.menu_reset','dead','line_http_401');
+      INSERT INTO line_domain_audit_events VALUES('line.rich_menu.binding.verified','line_domain_outbox','2');
     ''')
     repo = MySqlLineIdentityManagementRepository(SimpleNamespace(cursor=lambda: ReadCursor(conn)))
     yield repo
@@ -64,6 +71,15 @@ def test_explicit_role_detail_never_follows_the_other_role_or_its_revocation(rep
     assert (customer.subject_name, customer.version, customer.subject_display_reference) == ('已綁客戶', 7, 'ORD-001')
     assert customer.revocation_request_id is None
     assert (staff.subject_name, staff.version, staff.revocation_request_id) == ('同帳號月嫂', 4, 9)
+
+
+def test_menu_sync_requires_verified_completion_and_uses_latest_job(repository):
+    failed = repository.detail(LineUserId('U-shared'), Role.CUSTOMER)
+    verified = repository.detail(LineUserId('U-other'), Role.CUSTOMER)
+    assert failed.status == verified.status == Status.BOUND
+    assert failed.rich_menu_sync_status == 'failed'
+    assert failed.rich_menu_sync_error_code == 'line_http_401'
+    assert verified.rich_menu_sync_status == 'synced'
 
 
 @pytest.fixture
@@ -195,7 +211,11 @@ def test_management_command_changes_only_the_explicit_role(role, action):
     def create_request(command, pending, publication):
         return LineIdentityRevocationRequest(91,user,role,pending.subject_reference,LineIdentityRevocationStatus.PENDING_MENU_RESET,command.expected_version,pending.version,5,'test-menu','admin:1',command.reason,command.idempotency_key.value,command.correlation_id.value,0,None,None)
     unit = SimpleNamespace(
-        identities=SimpleNamespace(get=get,replace_subject=replace_subject,request_revocation=revoke),
+        identities=SimpleNamespace(
+            get=get, replace_subject=replace_subject, request_revocation=revoke,
+            list_by_user=lambda _: tuple(roots.values()),
+            selected_role=lambda _: (role, ExpectedVersion(1)),
+        ),
         identity_management=SimpleNamespace(subject_candidate=lambda *args:{'subject_name':'更正對象','line_user_id':None},detail=lambda uid,selected_role:get(uid,selected_role),get_request_by_key=lambda key:None,default_menu_publication=lambda:{'id':5,'line_rich_menu_id':'test-menu'},create_request=create_request),
         customers=SimpleNamespace(clear_customer=lambda *args:writes.append(Role.CUSTOMER),bind_customer=lambda *args:writes.append(Role.CUSTOMER)),
         staff=SimpleNamespace(clear_staff=lambda *args:writes.append(Role.STAFF),bind_staff=lambda *args:writes.append(Role.STAFF)),
@@ -208,6 +228,7 @@ def test_management_command_changes_only_the_explicit_role(role, action):
     if action == 'replace':
         app.replace_subject(ReplaceLineIdentitySubjectCommand(user,ExpectedVersion(7),'9',actor,'已核對',IdempotencyKey('replace'),CorrelationId('corr'),role))
         assert roots[role].subject_reference == '9' and writes == [role,role]
+        assert outbox[0].idempotency_identity == f'rich-menu-bind:{user.value}:{role.value}:8'
     else:
         app.request_revocation(RequestLineIdentityRevocationCommand(user,ExpectedVersion(7),actor,'已核對',IdempotencyKey('revoke'),CorrelationId('corr'),role))
         assert roots[role].status is Status.REVOCATION_PENDING and len(outbox) == 1

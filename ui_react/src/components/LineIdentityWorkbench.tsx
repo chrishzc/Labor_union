@@ -44,10 +44,38 @@ function errorText(error: unknown) {
   return '目前無法完成這項操作，請稍後重新查詢。';
 }
 const unavailable = () => new Error('identity client method unavailable');
+const menuSyncLabels = {
+  pending: '選單同步中',
+  synced: '選單已同步',
+  failed: '選單同步失敗',
+  unverified: '選單同步未確認',
+};
+const menuSyncErrors: Record<string, string> = {
+  line_http_400: 'LINE 拒絕此選單設定',
+  line_http_401: 'LINE 憑證無效',
+  line_http_403: 'LINE 憑證權限不足',
+  line_http_404: 'LINE 找不到指定選單或使用者',
+  rich_menu_binding_not_published: '圖文選單尚未發布',
+  rich_menu_binding_attempts_exhausted: '已達重試上限',
+  rich_menu_binding_deadline_exhausted: '已超過重試時限',
+  rich_menu_binding_payload_invalid: '圖文選單工作資料無效',
+};
 function Status({ item }: { item: LineIdentityBindingView }) {
   const disabled = item.status === 'revocation_pending' || item.status === 'revoked';
   const label = item.status === 'bound' ? '已綁定' : disabled ? '身分已停用' : item.status === 'pending_review' ? '待審核' : '未綁定';
-  return <><span className={`identity-status ${item.status === 'bound' ? 'good' : 'muted'}`}>{label}</span>{item.revocation_status === 'menu_reset_failed' || item.revocation_status === 'manual_completed' ? <small className="identity-secondary identity-warning-text">訪客選單待修復</small> : item.revocation_status === 'pending_menu_reset' ? <small className="identity-secondary">訪客選單回復中</small> : null}</>;
+  const sync = item.status === 'bound' ? item.rich_menu_sync_status ?? 'unverified' : null;
+  const reason = sync === 'failed' && item.rich_menu_sync_error_code
+    ? menuSyncErrors[item.rich_menu_sync_error_code] ?? 'LINE 圖文選單設定失敗'
+    : null;
+  return <>
+    <span className={`identity-status ${item.status === 'bound' ? 'good' : 'muted'}`}>{label}</span>
+    {sync && <small className={`identity-secondary${sync === 'failed' ? ' identity-warning-text' : ''}`}>
+      {menuSyncLabels[sync]}{reason && `（${reason}）`}
+    </small>}
+    {item.revocation_status === 'menu_reset_failed' || item.revocation_status === 'manual_completed'
+      ? <small className="identity-secondary identity-warning-text">訪客選單待修復</small>
+      : item.revocation_status === 'pending_menu_reset' ? <small className="identity-secondary">訪客選單回復中</small> : null}
+  </>;
 }
 function Pagination({ page, pageSize: size, total, onPage }: { page: number; pageSize: number; total: number; onPage: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / size));

@@ -30,6 +30,12 @@ from subsystems.line.identity_management_contracts import (
     UnboundProvisionalCandidate,
     UnboundPairingCandidatesView,
 )
+from subsystems.line.outbox_contracts import (
+    IDENTITY_MENU_RESET_INTENT,
+    LineRichMenuSyncStatus,
+    RICH_MENU_BINDING_INTENT,
+    RICH_MENU_BINDING_VERIFIED,
+)
 
 
 class MySqlLineIdentityManagementRepository:
@@ -461,6 +467,16 @@ def _filters(query: LineIdentityBindingListQuery) -> tuple[list[str], tuple[Any,
 # Kept cohesive because this is one database-row-to-typed-view mapping boundary.
 def _binding_view(row: dict[str, Any]) -> LineIdentityBindingManagementView:
     revocation_status = row.get("request_status")
+    menu_error_code = row.get("menu_error_code")
+    menu_status = None
+    if row["binding_status"] == LineIdentityBindingStatus.BOUND:
+        menu_status = LineRichMenuSyncStatus.UNVERIFIED
+        if row.get("menu_status") in {"pending", "processing"}:
+            menu_status = LineRichMenuSyncStatus.PENDING
+        elif row.get("menu_status") == "dead" and menu_error_code != "rich_menu_binding_superseded":
+            menu_status = LineRichMenuSyncStatus.FAILED
+        elif row.get("menu_status") == "completed" and row.get("menu_verified"):
+            menu_status = LineRichMenuSyncStatus.SYNCED
     return LineIdentityBindingManagementView(
         line_user_id=str(row["line_user_id"]),
         status=LineIdentityBindingStatus(str(row["binding_status"])),
@@ -481,6 +497,8 @@ def _binding_view(row: dict[str, Any]) -> LineIdentityBindingManagementView:
             else None
         ),
         revoked_at=row.get("revoked_at_utc"),
+        rich_menu_sync_status=menu_status,
+        rich_menu_sync_error_code=menu_error_code if menu_status is LineRichMenuSyncStatus.FAILED else None,
     )
 
 
@@ -653,6 +671,12 @@ _CURRENT_FACT_SQL = (
     "a.linked_line_user_id AS owner_line_user_id FROM admin_users a "
     "WHERE a.linked_line_user_id=%s AND a.linked_line_user_id<>''"
 )
+_BINDINGS_FROM_SQL = (
+    "FROM line_identity_role_bindings b "
+    "LEFT JOIN clients c ON b.subject_type='customer' AND c.id=CAST(b.subject_reference AS UNSIGNED) "
+    "LEFT JOIN staff s ON b.subject_type='staff' AND s.id=CAST(b.subject_reference AS UNSIGNED) "
+    "LEFT JOIN admin_users a ON b.subject_type='admin' AND a.id=CAST(b.subject_reference AS UNSIGNED) "
+)
 _BASE_SELECT = (
     "SELECT b.line_user_id,b.binding_status,b.aggregate_version,b.subject_type,"
     "b.subject_reference,b.updated_at_utc,"
@@ -662,24 +686,36 @@ _BASE_SELECT = (
     "ELSE NULL END AS subject_display_reference,r.id AS revocation_request_id,r.request_status,"
     "(SELECT MAX(e.occurred_at_utc) FROM line_identity_role_binding_events e "
     "WHERE e.line_user_id=b.line_user_id AND e.subject_type=b.subject_type "
-    "AND e.action='revoked') AS revoked_at_utc "
-    "FROM line_identity_role_bindings b "
-    "LEFT JOIN clients c ON b.subject_type='customer' AND c.id=CAST(b.subject_reference AS UNSIGNED) "
-    "LEFT JOIN staff s ON b.subject_type='staff' AND s.id=CAST(b.subject_reference AS UNSIGNED) "
-    "LEFT JOIN admin_users a ON b.subject_type='admin' AND a.id=CAST(b.subject_reference AS UNSIGNED) "
-    "LEFT JOIN line_identity_revocation_requests r ON r.id = ("
+    "AND e.action='revoked') AS revoked_at_utc,"
+    "CASE WHEN menu.intent_type="
+    f"'{IDENTITY_MENU_RESET_INTENT}' AND menu.processing_status='completed' "
+    "THEN NULL ELSE menu.processing_status END AS menu_status,menu.error_code AS menu_error_code,"
+    "EXISTS(SELECT 1 FROM line_domain_audit_events audit "
+    "WHERE audit.aggregate_type='line_domain_outbox' AND audit.aggregate_identity=CAST(menu.id AS CHAR) "
+    f"AND audit.action='{RICH_MENU_BINDING_VERIFIED}') AS menu_verified "
+    + _BINDINGS_FROM_SQL
+    + "LEFT JOIN line_identity_revocation_requests r ON r.id = ("
     "SELECT r2.id FROM line_identity_revocation_requests r2 "
     "WHERE r2.line_user_id=b.line_user_id AND r2.subject_type=b.subject_type "
     "AND (r2.active_marker=1 OR (b.binding_status IN ('revoked','revocation_pending') "
     "AND r2.request_status IN ('completed','manual_completed','pending_menu_reset','menu_reset_failed'))) "
     "ORDER BY (r2.active_marker IS NOT NULL) DESC, r2.id DESC LIMIT 1) "
+    "LEFT JOIN line_domain_outbox menu ON menu.id=("
+    "SELECT latest.id FROM line_domain_outbox latest "
+    "WHERE (latest.aggregate_type='line_identity' AND latest.aggregate_identity=b.line_user_id "
+    f"AND latest.intent_type='{RICH_MENU_BINDING_INTENT}') "
+    "OR (latest.aggregate_type='line_identity_revocation' "
+    f"AND latest.intent_type='{IDENTITY_MENU_RESET_INTENT}' AND EXISTS("
+    "SELECT 1 FROM line_identity_revocation_requests reset "
+    "WHERE reset.line_user_id=b.line_user_id AND latest.aggregate_identity=CAST(reset.id AS CHAR))) "
+    "ORDER BY latest.id DESC LIMIT 1) "
 )
 _LIST_SQL = _BASE_SELECT + "WHERE {where} ORDER BY b.updated_at_utc DESC LIMIT %s OFFSET %s"
 _DETAIL_SQL = _BASE_SELECT + "WHERE b.line_user_id=%s"
 _SELECTED_ROLE_SQL = (
     "SELECT selected_identity_role FROM line_platform_users WHERE line_user_id=%s"
 )
-_COUNT_SQL = "SELECT COUNT(*) total FROM (" + _BASE_SELECT + "WHERE {where}) counted"
+_COUNT_SQL = "SELECT COUNT(*) AS total " + _BINDINGS_FROM_SQL + "WHERE {where}"
 _DEFAULT_MENU_SQL = (
     "SELECT id,provider_menu_id AS line_rich_menu_id "
     "FROM line_rich_menu_publication_tasks "

@@ -12,6 +12,8 @@ test_root: tests/domains/external-integration/subsystems/line/modules/line-ident
 - `contract/test_line_identity_api_routes.py` — authenticated exact-match API binding and typed not-found response.
 - `regression/test_same_type_replacement.py` — same-type replacement against the shared role-scoped root/event stream.
 - `contract/test_terminal_closure_restore.py` — Orders closure handoff, fresh owner/binding/menu gates, dual-role no-op, replay and typed stale/revocation failures.
+- `tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_binding.py` — 個人選單讀回與有限重試。
+- `tests/domains/external-integration/subsystems/line/infrastructure/test_line_outbox_intent_claim.py` — 個人選單工作領取、嘗試上限與租約回收。
 
 # Boundary
 Release-chain and disposable-MySQL qualification remain at their declared higher verification roots. This Module owns only the LINE-side Staff retirement adaptation and post-revocation role menu intent; Staff lifecycle remains under the Staff Module root. Provider transport, existing revocation retry/success semantics and LINE-006 remain outside this slice.

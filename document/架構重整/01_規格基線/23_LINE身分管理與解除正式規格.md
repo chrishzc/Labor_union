@@ -68,6 +68,13 @@ bound
 4. **人工緊急覆寫**：限 `line.identity.binding.override` 於後端在 nonretryable／重試耗盡後填寫原因並留存 audit，不在一般管理 UI 呈現；只撤銷系統授權，後續重新發布可用 `default_menu` 時仍可再排入選單修復。
 5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
 
+### 6.1 個人圖文選單同步
+
+- 身分綁定與個人選單同步分別保存結果。綁定交易將切換工作寫入既有 LINE outbox，背景 worker 以 LINE 個人選單 GET 讀回預期選單 ID 後才記錄同步完成。POST 回應成功只代表 LINE 接受請求。讀回確認 LINE 端的連結，手機顯示由 LINE App 決定。個人選單 link 不使用 `X-Line-Retry-Key`。
+- 首次設定後讀回。逾時、網路失敗或 5xx 結果不明時先讀回。每次重試或租約回收後先讀回，確認不符或未設定才再次 link。429、5xx、網路故障及讀回未確認可有限重試，使用 15 秒起算的指數退避與 jitter，合法 `Retry-After` 為最早重試時間。
+- 新工作最多五次總嘗試，期限為 outbox 建立後十分鐘。領取租約時即持久化計入本次嘗試，租約回收與重複入列沿用原工作及上限。無效憑證、未發布選單、永久 HTTP 拒絕、次數耗盡或期限耗盡進入終止狀態並保留錯誤原因。新綁定、有效角色選擇或選單重新發布可產生新工作。
+- 同一 LINE 使用者的個人選單設定與解除在送出前檢查租約與已提交工作的順序。正常解除待回復時，較新的設定工作等待解除回復結果。較新的有效意圖可取代舊設定或舊的手動修復工作。角色選擇的工作以選擇版本識別，切回同一角色仍是新意圖。重新發布只重新套用目前生效角色的選單。LINE 已收到的在途請求沒有可用的遠端版本鎖。
+
 ## 7. Orders 結案自動回復與 Staff 退役連動
 
 ### 7.1 Staff 退役連動
@@ -89,6 +96,7 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 - 權限分層：`line.identity.binding.read`（查詢）、`line.identity.binding.manage`（replacement／正常解除／retry）、`line.identity.binding.override`（僅後端緊急覆寫）。
 - 管理端以「身分綁定／待審核／待配對」分頁呈現，一次僅掛載目前任務，依使用者點選列傳遞 `subject_type`，LINE User ID 僅於明細遮罩顯示；審核不預選核准，申請受理、系統停用與選單回復完成分開呈現。
 - 綁定列表直接提供「解除綁定」與「修復訪客選單」。解除需在置中視窗核對姓名與綁定身分後確認，回復失敗才顯示修復按鈕。兩項操作皆不需填寫原因。
+- 綁定列表分別顯示「已綁定」與該 LINE 帳號的選單同步狀態。同步工作待處理或重試時顯示「選單同步中」，LINE 讀回相符時顯示「選單已同步」，終止失敗時顯示「選單同步失敗」及原因。無讀回證據的歷史結果顯示「選單同步未確認」。
 
 ### 8.2 驗收標準
 
@@ -97,3 +105,4 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 3. 綁定連續失敗僅記錄上限 2 筆 streak，不自動開單或告警；只有明確「呼叫專員」才建客服單。
 4. Staff retirement 與 staff-role 解除同一 commit 提交並保留 customer role；Orders 結案自動回復嚴格驗證全部 active client case 皆 terminal，replay 回原 decision receipt。
 5. 管理工作區搜尋／分頁由 server 執行，角色隔離、replace candidate 查詢零寫入，且不預選核准或於未知結果時盲目重送。
+6. 以隔離替身驗證 link 200 後讀回一致／不一致、逾時已生效、429／5xx 恢復、永久錯誤、次數／期限耗盡、重啟及租約回收、舊工作晚到及 A→B→A 切換。後台同步狀態以讀回證據為準。

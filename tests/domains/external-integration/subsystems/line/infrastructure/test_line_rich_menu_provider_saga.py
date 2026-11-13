@@ -124,7 +124,7 @@ class _PublicationRepository:
         self.cleanup_targets = getattr(self, "cleanup_targets", [])
         self.cleanup_targets.append((publication_id, lease_owner, provider_menu_id))
 
-    def published_provider_menu_id(self, _menu_definition_id):
+    def published_provider_menu_id(self, _menu_definition_id, *, before_publication_id=None):
         return self.previous_provider_menu_id
 
     def record(self, command):
