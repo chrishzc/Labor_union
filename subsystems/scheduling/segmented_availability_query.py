@@ -234,6 +234,22 @@ def _search_availability(
         assignment_schedule_days.extend(
             _expand_staff_unavailability_days(row, planned_start, planned_end, wanted_time)
         )
+    for row in loaded_facts.get("historical_reservation_rows") or []:
+        if row["case_no"] == case_no:
+            continue
+        first = _as_optional_date(row["start_date"], "historical_reservation.start_date")
+        last = _as_optional_date(row["end_date"], "historical_reservation.end_date")
+        fact = StaffOccupancyFact(int(row["staff_id"]), first, row["case_no"], all_day=True, block_end=last)
+        start = max(first - timedelta(days=1), planned_start)
+        end = min(last, planned_end)
+        for offset in range((end - start).days + 1):
+            day = start + timedelta(days=offset)
+            if service_shift_may_overlap(day, wanted_time, fact):
+                assignment_schedule_days.append({
+                    "staff_id": fact.staff_id,
+                    "work_date": day.isoformat(),
+                    "reason_code": "historical_reservation",
+                })
 
     active_lock_days = []
     for row in loaded_facts["active_lock_rows"] if include_waiting_deposit_locks else ():

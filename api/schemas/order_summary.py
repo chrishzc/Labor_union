@@ -17,6 +17,7 @@ class OrderSummaryItemView(BaseModel):
     staff_name: str | None
     staff_display_label: str | None = None
     scheduled_staff_display_label: str | None = None
+    recommended_staff_display_label: str | None = None
     identity_status: str | None
     start_date: date | None
     end_date: date | None

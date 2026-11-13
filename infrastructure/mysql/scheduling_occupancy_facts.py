@@ -1,5 +1,6 @@
 """MySQL facts shared by Scheduling availability and the locked generation writer."""
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.scheduling.assignment_plan import StaffOccupancyFact
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
 
@@ -30,8 +31,69 @@ def load_occupancy_snapshot(cursor, staff_ids, case_no, *, lock):
         )
         for row in (*schedules, *waiting)
     ) + _unavailability_occupancy(cursor, staff_ids, lock) + _legacy_assignment_occupancy(cursor, staff_ids, lock)
+    facts += tuple(
+        historical_reservation_occupancy(row)
+        for row in load_historical_reservation_rows(cursor, staff_ids=staff_ids, lock=lock)
+    )
     lock_ids = tuple(sorted({int(row["lock_id"]) for row in waiting if str(row["case_no"]) == case_no}))
     return facts, lock_ids
+
+
+def load_historical_reservation_rows(cursor, *, staff_ids=None, window_start=None, window_end=None, lock=False):
+    """Read planned occupancy until cancellation or replacement of the restart generation."""
+    conditions = [
+        "(o.status=%s OR (o.status=%s AND restart_event.before_status=%s))",
+        "o.start_date<=o.end_date",
+        "pairing.staff_id IS NOT NULL",
+        "pairing.resolution IN ('evidence_only','assignment_candidate','assignment_reused')",
+    ]
+    params = [
+        OrderLifecycleStatus.HISTORICAL_UNSERVED.value,
+        OrderLifecycleStatus.ESTABLISHED.value,
+        OrderLifecycleStatus.HISTORICAL_UNSERVED.value,
+    ]
+    if staff_ids is not None:
+        if not staff_ids:
+            return ()
+        placeholders = ",".join("%s" for _ in staff_ids)
+        conditions.append(f"pairing.staff_id IN ({placeholders})")
+        params.extend(staff_ids)
+    if window_start is not None:
+        conditions.append("o.end_date>=%s")
+        params.append(window_start)
+    if window_end is not None:
+        conditions.append("o.start_date<=%s")
+        params.append(window_end)
+    cursor.execute(
+        "SELECT receipt.id AS source_id,pairing.staff_id,o.case_no,o.status AS order_status,"
+        "o.start_date,o.end_date,c.name AS client_name,s.name AS staff_name "
+        "FROM orders o "
+        "JOIN historical_order_adoption_receipts receipt ON receipt.case_no=o.case_no AND receipt.outcome='adopted' "
+        "LEFT JOIN historical_order_adoption_receipts newer ON newer.case_no=receipt.case_no "
+        "AND newer.outcome='adopted' AND newer.id>receipt.id "
+        "JOIN historical_order_pairing_evidence pairing ON pairing.receipt_id=receipt.id "
+        "JOIN clients c ON c.id=o.client_id JOIN staff s ON s.id=pairing.staff_id "
+        "LEFT JOIN scheduling_aggregates aggregate ON aggregate.case_no=o.case_no "
+        "LEFT JOIN scheduling_generations generation ON generation.id=aggregate.effective_generation_id "
+        "AND generation.effective_marker=1 "
+        "LEFT JOIN scheduling_command_receipts restart ON restart.resulting_generation_id=generation.id "
+        "AND restart.case_no=aggregate.case_no AND restart.command_family='orders_historical_precision_restart' "
+        "LEFT JOIN order_lifecycle_state_events restart_event ON restart_event.case_no=aggregate.case_no "
+        "AND restart_event.idempotency_key=restart.idempotency_key "
+        "AND restart_event.trigger_event=restart.command_family "
+        f"WHERE newer.id IS NULL AND {' AND '.join(conditions)} "
+        "ORDER BY pairing.staff_id,o.start_date,o.case_no,pairing.caregiver_ordinal" + _lock_suffix(lock),
+        tuple(params),
+    )
+    rows = cursor.fetchall()
+    return tuple({(row["case_no"], row["staff_id"]): row for row in rows}.values())
+
+
+def historical_reservation_occupancy(row):
+    return StaffOccupancyFact(
+        int(row["staff_id"]), row["start_date"], str(row["case_no"]),
+        all_day=True, block_end=row["end_date"],
+    )
 
 
 def _effective_occupancy_rows(cursor, staff_ids, lock):

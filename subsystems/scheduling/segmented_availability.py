@@ -128,7 +128,7 @@ def _extract_blocked_days(
         work_date = _as_strict_date(row.get("work_date"), "assignment_schedule_days.work_date")
         assignment_id = row.get("assignment_id")
         reason_code = row.get("reason_code", "schedule")
-        if reason_code not in {"assignment", "schedule", "staff_unavailability", "buffer"}:
+        if reason_code not in {"assignment", "schedule", "staff_unavailability", "buffer", "historical_reservation"}:
             raise ValueError("assignment_schedule_days.reason_code is invalid")
         if reason_code == "buffer":
             requires_review.append((staff_id_int, work_date, "buffer"))
@@ -141,9 +141,9 @@ def _extract_blocked_days(
                 "assignment_schedule_days.availability_block_id",
             )
             reason_code = "staff_unavailability"
-        elif assignment_id is None:
+        elif assignment_id is None and reason_code != "historical_reservation":
             reason_code = "requires_review"
-        else:
+        elif assignment_id is not None:
             _as_positive_int(assignment_id, "assignment_schedule_days.assignment_id")
             reason_code = str(reason_code)
 

@@ -22,7 +22,7 @@
 - outbound: `scheduling/staff-availability` — React 訂閱成功異動通知，只失效受影響日曆列並重查當前案件資格；中斷中的批次列不得留下已載入快取。
 - outbound: `scheduling/current-service-projection` — 正式 assignment 與 daily schedule 是 current service 的主要投影。
 - outbound: `orders/operational-stage-projection` — 排查案件選項依十三核心階段的正式 current ordinal 限定在第 8「訂金」之前。
-- outbound: `orders/historical-precision-restart` — precision restart event 使舊歷史指派區段失效，不得再覆蓋 restarted case。
+- outbound: `orders/historical-precision-restart` — 重啟使舊歷史指派區段失效。歷史未服務案的唯讀預定沿目前有效的重啟世代保留，待正式班表接手。
 - inbound: Scheduling UI — 只透過 typed monthly endpoint 讀取投影，不直接讀 persistence facts。
 
 ## Contracts
@@ -31,6 +31,7 @@
 - `GET /api/v1/staff/{staff_id}/monthly-schedule` — `api/routes/staff_monthly_schedule.py` 與 `api/schemas/staff_monthly_schedule.py`。
 - 多筆逐日班次及可追溯的起訖共供工會甘特與 `line/static/staff_schedule.html`；跨日續班沿用原服務日。LINE 用同案、指派及服務日定位既有請假表單。
 - `historical_assignment` — completed legacy assignment 的唯讀 provenance projection；不宣稱 daily schedule ownership。
+- `historical_reservation` — 工會月曆以共用檔期資料呈現歷史未服務案的唯讀預定區段，涵蓋重啟後待排班期間。
 - `SchedulingPage` 對日曆、案件選項及資格投影分別最多同時查詢 3 位人員；日曆每列完成即顯示，兩個 projection 同時接收成功／失敗，避免無上限 fan-out 及未處理的 rejected Promise，不自動重送失敗列。
 
 ## Verification

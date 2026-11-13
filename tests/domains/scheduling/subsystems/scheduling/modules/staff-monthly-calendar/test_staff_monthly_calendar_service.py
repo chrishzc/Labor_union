@@ -39,8 +39,8 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, responses):
-        self.cursor_obj = FakeCursor(responses)
+    def __init__(self, responses, reservations=()):
+        self.cursor_obj = FakeCursor([*responses, reservations])
         self.closed = False
 
     def cursor(self):
@@ -62,6 +62,28 @@ def row(**overrides):
         "client_name": "客戶甲",
         **overrides,
     }
+
+
+def test_historical_reservation_spans_month_boundary_as_nonworking_occupancy(monkeypatch):
+    reservation = {
+        "case_no": "HIS-001",
+        "staff_id": 7,
+        "staff_name": "月嫂甲",
+        "client_name": "客戶甲",
+        "order_status": "歷史訂單－未服務",
+        "start_date": date(2026, 6, 30),
+        "end_date": date(2026, 7, 2),
+    }
+    connection = FakeConnection([{"id": 7}, [], [], [], [], []], [reservation])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(7, 2026, 7)
+
+    days = [row for row in result["days"] if row["status"] == "historical_reservation"]
+    assert [row["work_date"] for row in days] == ["2026-07-01", "2026-07-02"]
+    assert all(row["case_no"] == "HIS-001" and row["assignment_id"] is None and not row["is_work_day"] for row in days)
+    assert result["schedule_map"][1]["status"] == "historical_reservation"
+    assert result["schedule_map"][3]["status"] == "white"
 
 
 def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(monkeypatch):

@@ -1505,6 +1505,7 @@ function collisionKindLabel(kind: SchedulingEligibilityCollisionViewModel['colli
     waiting_deposit_lock: '等待定金確認，檔期暫時保留',
     seven_day_buffer: '7 天排班緩衝期',
     staff_unavailability: '不可服務期間',
+    historical_reservation: '歷史預定',
     legacy_schedule: '歷史排班資料',
     data_integrity: '排班資料完整性',
   };
@@ -1672,8 +1673,8 @@ function monthlyShiftSpans(schedule: StaffMonthlySchedule): GanttSpan[] {
     const time = shift.starts_at && shift.ends_at
       ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日 ' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
       : ['working', 'historical_assignment', 'waiting_deposit_lock'].includes(shift.status) ? '時段未確認' : '';
-    const tones = { working: 'active', resting: 'rest', historical_assignment: 'historical', waiting_deposit_lock: 'waiting', staff_unavailability: 'leave', buffer: 'buffer' } as const;
-    const labels = { working: '排班', resting: '休息日', historical_assignment: '歷史指派', waiting_deposit_lock: '等待訂金', staff_unavailability: '不可服務', buffer: '緩衝提醒' } as const;
+    const tones = { working: 'active', resting: 'rest', historical_assignment: 'historical', historical_reservation: 'historical', waiting_deposit_lock: 'waiting', staff_unavailability: 'leave', buffer: 'buffer' } as const;
+    const labels = { working: '排班', resting: '休息日', historical_assignment: '歷史指派', historical_reservation: '歷史預定', waiting_deposit_lock: '等待訂金', staff_unavailability: '不可服務', buffer: '緩衝提醒' } as const;
     const key = [shift.case_no, shift.assignment_id, shift.lock_id, shift.unavailability_block_id, shift.status, lane, time].join(':');
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
@@ -1682,7 +1683,7 @@ function monthlyShiftSpans(schedule: StaffMonthlySchedule): GanttSpan[] {
     }
     const span: GanttSpan = {
       id: `${key}:${day}`, startDay: day, endDay: day, lane,
-      tone: tones[shift.status], caseText: [shift.case_no, time].filter(Boolean).join('　') || labels[shift.status],
+      tone: tones[shift.status], caseText: [shift.status === 'historical_reservation' ? labels[shift.status] : null, shift.case_no, time].filter(Boolean).join('　') || labels[shift.status],
       statusLabel: labels[shift.status], shift,
     };
     spans.push(span);

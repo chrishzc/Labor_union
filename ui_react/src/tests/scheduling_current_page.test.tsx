@@ -536,6 +536,29 @@ describe('SchedulingPage query-only presentation', () => {
     expect(overlay).not.toHaveClass('span-ghost-clickable');
   });
 
+  it('shows an unserved historical reservation as a read-only calendar span', async () => {
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockResolvedValue(SCHEDULING_PROJECTION_EMPTY);
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
+      staff_id: staffId, year, month,
+      days: [4, 5].map(day => ({
+        work_date: `${year}-${String(month).padStart(2, '0')}-0${day}`,
+        status: 'historical_reservation' as const, assignment_id: null,
+        case_no: 'HIS-082', client_name: '歷史客戶', staff_id: staffId,
+        order_status: '歷史訂單－未服務', is_work_day: false, is_double_pay: false,
+      })),
+      schedule_map: {},
+    }));
+
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(document.querySelectorAll('.gantt-span-bar.span-historical')).toHaveLength(2));
+    const reservation = document.querySelector('.gantt-span-bar.span-historical');
+    expect(reservation).toHaveAttribute('data-start-day', '4');
+    expect(reservation).toHaveAttribute('data-end-day', '5');
+    expect(reservation).toHaveTextContent('歷史預定');
+    expect(reservation).not.toHaveClass('span-ghost-clickable');
+  });
+
   it('keeps canonical occupancy ahead on overlapping dates while retaining the remaining historical dates', async () => {
     vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
       staff_id: staffId, year, month,

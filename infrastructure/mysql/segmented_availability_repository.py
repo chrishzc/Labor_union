@@ -11,6 +11,7 @@ from typing import Any, Callable, Protocol
 
 from domains.orders.actual_start import calculate_service_dates
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+from infrastructure.mysql.scheduling_occupancy_facts import load_historical_reservation_rows
 from domains.orders.terms import canonical_service_mode
 
 
@@ -115,6 +116,9 @@ class MySqlSegmentedAvailabilityFactsRepository:
             "waiting_buffer_rows": self._load_waiting_buffer_rows(cursor, window_start, window_end),
             "staff_unavailability_rows": self._load_staff_unavailability_rows(
                 cursor, shift_start, shift_end
+            ),
+            "historical_reservation_rows": load_historical_reservation_rows(
+                cursor, window_start=shift_start, window_end=shift_end,
             ),
         }
 

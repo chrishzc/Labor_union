@@ -10,6 +10,9 @@ from datetime import date, datetime, timedelta
 import json
 from typing import Any
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+from infrastructure.mysql.scheduling_occupancy_facts import (
+    historical_reservation_occupancy, load_historical_reservation_rows,
+)
 
 from subsystems.scheduling.eligibility_collision_query import (
     SchedulingAssignmentFact,
@@ -17,6 +20,7 @@ from subsystems.scheduling.eligibility_collision_query import (
     SchedulingCaseFacts,
     SchedulingEligibilityCollisionFacts,
     SchedulingEligibilityCollisionQuery,
+    SchedulingHistoricalReservationFact,
     SchedulingLockFact,
     SchedulingPreferenceFact,
     SchedulingScheduleFact,
@@ -51,6 +55,9 @@ class MySqlSchedulingEligibilityCollisionRepository:
             locks = self._load_locks(cursor, shift_window, staff_ids)
             unavailability = self._load_unavailability(cursor, shift_window, staff_ids)
             self._attach_staff_collections(cursor, staff)
+            reservations = load_historical_reservation_rows(
+                cursor, staff_ids=staff_ids, window_start=shift_window[0], window_end=shift_window[1],
+            ) if shift_window else ()
             return SchedulingEligibilityCollisionFacts(
                 case=case,
                 staff=tuple(staff),
@@ -59,6 +66,10 @@ class MySqlSchedulingEligibilityCollisionRepository:
                 buffers=tuple(buffers),
                 locks=tuple(locks),
                 unavailability=tuple(unavailability),
+                historical_reservations=tuple(
+                    SchedulingHistoricalReservationFact(int(row["source_id"]), historical_reservation_occupancy(row))
+                    for row in reservations
+                ),
             )
         finally:
             cursor.close()

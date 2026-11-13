@@ -20,7 +20,7 @@
   - `infrastructure/mysql/matching_schedule_confirmation_repository.py`
   - `infrastructure/mysql/assignment_plan_repository.py` — fresh-lock actual occupancy；buffer 不構成 hard facts。
   - `api/dependencies/assignment_plan.py` — 組裝正式 Assignment Plan 與服務開始入口共用的 owner ports。
-  - `infrastructure/mysql/scheduling_occupancy_facts.py` — 共用工作日、等待訂金班次與不可服務事實的 MySQL 讀取。
+  - `infrastructure/mysql/scheduling_occupancy_facts.py` — 共用工作日、等待訂金班次、歷史預定與不可服務事實的 MySQL 讀取。
 - entrypoints:
   - `api/routes/matching_schedule_confirmation.py`
   - `api/routes/assignment_plan.py`

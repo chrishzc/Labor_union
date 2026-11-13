@@ -25,6 +25,7 @@ from domains.scheduling.staff_availability import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, IdempotencyKey
+from infrastructure.mysql.scheduling_occupancy_facts import load_historical_reservation_rows
 from subsystems.scheduling.occupancy_mutex import (
     lock_staff_occupancy_mutex as _lock_staff_occupancy_mutex,
 )
@@ -252,6 +253,13 @@ def _occupancy_conflicts(cursor, intent, for_update):
             (intent.staff_id, intent.start_date, intent.end_date, intent.end_date),
         )
         conflicts.extend(_conflict_from_row(source_kind, row) for row in _mapping_rows(cursor.fetchall()))
+    conflicts.extend(
+        StaffAvailabilityConflict("historical_reservation", str(row["case_no"]), row["start_date"], row["end_date"])
+        for row in load_historical_reservation_rows(
+            cursor, staff_ids=(intent.staff_id,), window_start=intent.start_date,
+            window_end=intent.end_date, lock=for_update,
+        )
+    )
     return conflicts
 
 

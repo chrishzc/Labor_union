@@ -32,7 +32,8 @@
 
 ## Contracts
 - 案件摘要保留純姓名 `staff_name`，另投影 `staff_display_label` 為 current Staff 公會編號及姓名；沿既有正式指派優先、歷史配對備援與分段順序，不以姓名查找人員；標籤改變參與 ETag。
-- 看板指派月嫂使用摘要的 `scheduled_staff_display_label`，只讀有效排班世代中有有效服務日的指派，依人員 ID 去重並保留首次服務分段順序；沒有有效指派時不回退至歷史配對。標籤改變參與 ETag。
+- 看板指派月嫂使用摘要的 `recommended_staff_display_label`，按有效正式推薦方案的分段順序讀取人員；標籤改變參與 ETag。見 [訂單看板規格 §2.2](../../../../../../document/架構重整/01_規格基線/01A_訂單看板與事前日期及歷史採納規格.md#22-未完成清單與-beta-看板wb-state-0105)。
+- 摘要的 `scheduled_staff_display_label` 投影有效排班世代中有有效服務日的指派，依人員 ID 去重並保留首次服務分段順序。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders root facts。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 管理端資訊層級與技術詳情邊界。
 

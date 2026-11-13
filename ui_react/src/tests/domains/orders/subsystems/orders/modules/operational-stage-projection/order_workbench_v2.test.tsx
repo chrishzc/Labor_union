@@ -351,12 +351,14 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       {
         ...orderSummary('CASE-PLAN-1', '林小芳', '歷史月嫂', '2026-10-01', '2026-10-20'),
         staff_display_label: 'A001 歷史月嫂',
-        scheduled_staff_display_label: null,
+        scheduled_staff_display_label: 'A005 已排班月嫂',
+        recommended_staff_display_label: null,
       },
       {
         ...orderSummary('CASE-ACTIVE-1', '王小明', '歷史月嫂', '2026-09-01', '2026-09-20'),
         staff_display_label: 'A001 歷史月嫂',
-        scheduled_staff_display_label: 'A010 陳月嫂、A020 林月嫂',
+        scheduled_staff_display_label: null,
+        recommended_staff_display_label: 'A010 陳月嫂、A020 林月嫂',
       },
     ]));
     clientMocks.getCoreStageTimelines.mockImplementation(async (params: OrderCoreStageProjectionQueryParams) => {
@@ -386,7 +388,8 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await waitFor(() => {
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('王小明')).toBeInTheDocument();
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('A010 陳月嫂、A020 林月嫂')).toBeInTheDocument();
-      expect(within(cardFor('CASE-PLAN-1')).getByText('尚未正式指派')).toBeInTheDocument();
+      expect(within(cardFor('CASE-PLAN-1')).getByText('尚無有效推薦方案')).toBeInTheDocument();
+      expect(within(cardFor('CASE-PLAN-1')).queryByText('A005 已排班月嫂')).not.toBeInTheDocument();
     });
 
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
@@ -399,6 +402,23 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await waitFor(() => expect(screen.getByText('CASE-PLAN-1')).toBeInTheDocument());
     expect(screen.getByText('CASE-ACTIVE-1')).toBeInTheDocument();
     expect(clientMocks.getCoreStageTimelines.mock.calls.at(-1)![0]).not.toHaveProperty('substatus_code');
+  });
+
+  it('客戶尚未確認時顯示現行推薦人選，重新整理後顯示替換方案', async () => {
+    const summary = orderSummary('CASE-RECOMMEND', '林小芳', null, '2026-12-10', '2026-12-29');
+    clientMocks.loadSummaries
+      .mockResolvedValueOnce(summaryPage([{ ...summary, recommended_staff_display_label: 'A010 陳月嫂' }]))
+      .mockResolvedValue(summaryPage([{ ...summary, recommended_staff_display_label: 'A020 林月嫂' }]));
+    clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
+      timeline('CASE-RECOMMEND', 'formal_recommendation', 'not_started', { lifecycle: '洽談中' }),
+    ], { stageCounts: { formal_recommendation: 1 } }));
+
+    render(<OrderWorkbenchV2Page />);
+
+    expect(await screen.findByText('A010 陳月嫂')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    expect(await screen.findByText('A020 林月嫂')).toBeInTheDocument();
+    expect(screen.queryByText('A010 陳月嫂')).not.toBeInTheDocument();
   });
 
   it('只查詢進行中案件，統計期間只查 Reporting、不改變待辦搜尋', async () => {

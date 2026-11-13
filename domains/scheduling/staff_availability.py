@@ -262,7 +262,7 @@ def _conflict_blocker(conflict):
 
 def error_code_for_blockers(blockers: tuple[str, ...]) -> StaffAvailabilityErrorCode:
     kinds = {value.split(":", 1)[0] for value in blockers}
-    if "assignment" in kinds:
+    if kinds & {"assignment", "historical_reservation"}:
         return StaffAvailabilityErrorCode.ASSIGNMENT_CONFLICT
     if "waiting_lock" in kinds:
         return StaffAvailabilityErrorCode.WAITING_LOCK_CONFLICT

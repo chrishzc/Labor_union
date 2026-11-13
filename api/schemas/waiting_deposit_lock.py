@@ -19,7 +19,7 @@ class WaitingDepositOccupancyView(_StrictModel):
 class WaitingDepositConflictView(_StrictModel):
     staff_id: int = Field(..., gt=0)
     lock_date: str
-    source_type: Literal["assignment", "schedule", "active_lock", "buffer", "staff_unavailability"]
+    source_type: Literal["assignment", "schedule", "active_lock", "buffer", "staff_unavailability", "historical_reservation"]
     source_id: int = Field(..., gt=0)
 
 

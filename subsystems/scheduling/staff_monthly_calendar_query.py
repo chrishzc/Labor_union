@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta
 import json
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import StaffUnavailabilityCurrentFact
+from infrastructure.mysql.scheduling_occupancy_facts import load_historical_reservation_rows
 from subsystems.scheduling.ports import unconfigured_connection_factory
 
 
@@ -44,6 +45,7 @@ def _priority_status(status: str) -> int:
         "green": 2,
         "yellow": 1,
         "historical": 1,
+        "historical_reservation": 1,
     }.get(status, 0)
 
 
@@ -87,6 +89,7 @@ def get_staff_monthly_calendar_schedule(
     month: int,
     *,
     clock: BusinessClock | None = None,
+    include_historical_reservations: bool = True,
 ) -> Dict[str, Any]:
     """
     查詢月嫂在指定年月的每日檔期排班視圖。
@@ -455,6 +458,31 @@ def get_staff_monthly_calendar_schedule(
                             "unavailability_reason": fact.reason,
                         }
                     current_date += timedelta(days=1)
+
+            reservations = load_historical_reservation_rows(
+                cursor, staff_ids=(staff_id,), window_start=month_start, window_end=month_end,
+            ) if include_historical_reservations else ()
+            for reservation in reservations:
+                start = max(reservation["start_date"], month_start)
+                end = min(reservation["end_date"], month_end)
+                for offset in range((end - start).days + 1):
+                    day = start + timedelta(days=offset)
+                    summary = {
+                        "status": "historical_reservation",
+                        "case_no": reservation["case_no"],
+                        "client_name": reservation["client_name"],
+                        "assignment_id": None,
+                        "is_work_day": False,
+                        "is_double_pay": False,
+                    }
+                    grouped_rows.setdefault(day.day, []).append({
+                        **summary,
+                        "work_date": day.isoformat(),
+                        "staff_id": staff_id,
+                        "staff_name": reservation["staff_name"],
+                        "order_status": reservation["order_status"],
+                    })
+                    schedule_map.setdefault(day.day, summary)
 
             for d in range(1, num_days + 1):
                 cur_d = date(year, month, d)

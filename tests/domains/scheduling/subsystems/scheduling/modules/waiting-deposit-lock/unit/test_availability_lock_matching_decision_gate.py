@@ -3,7 +3,7 @@ File: test_availability_lock_matching_decision_gate.py
 Description: 驗證工會確認正式配對時，以 current 正式服務日期建立等待訂金檔期鎖。
 """
 
-from datetime import date
+from datetime import date, time
 
 import pytest
 
@@ -151,23 +151,47 @@ def test_empty_dbapi_tuple_is_a_valid_empty_occupancy_result():
     assert workflow._rows(TupleCursor(), "invalid") == []
 
 
-@pytest.mark.parametrize("service_day,expected_allowed", [(12, False), (15, True)])
-def test_service_collision_blocks_but_proposed_buffer_collision_only_warns(service_day, expected_allowed):
+_SERVICE_TIME = {"service_start_time": time(8), "service_end_time": time(16), "service_end_day_offset": 0}
+
+
+def test_existing_assignment_interval_blocks_requested_service():
     snapshot = workflow._canonical_snapshot("CASE-1", 8, _order("訂單成立"), _plan(), [_segment()])
+    service_date = date(2026, 8, 12)
     cursor = _Cursor([
-        [{"source_id": 7, "staff_id": 99, "assigned_start_date": date(2026, 8, service_day),
-          "assigned_end_date": date(2026, 8, service_day)}],
-        [], [], [], [], [],
+        _SERVICE_TIME, [], [],
+        [{"id": 7, "case_no": "CASE-2", "staff_id": 99,
+          "assigned_start_date": service_date, "assigned_end_date": service_date}],
+        [], [], [], [],
     ])
     conflicts = workflow._occupancy_conflicts(cursor, snapshot)
-    preview = workflow._build_acquire_preview(snapshot, conflicts)
-    assert preview["apply_allowed"] is expected_allowed
-    assert conflicts[0]["source_type"] == ("buffer" if expected_allowed else "assignment")
+    assert workflow._build_acquire_preview(snapshot, conflicts)["apply_allowed"] is False
+    assert conflicts[0]["source_type"] == "assignment"
+
+
+@pytest.mark.parametrize(
+    ("reserved_case", "reserved_day", "allowed"),
+    [("HIS-1", 12, False), ("HIS-1", 9, True), ("CASE-1", 12, True)],
+)
+def test_historical_reservation_blocks_waiting_lock_for_another_case(reserved_case, reserved_day, allowed):
+    snapshot = workflow._canonical_snapshot("CASE-1", 8, _order("訂單成立"), _plan(), [_segment()])
+    reserved_date = date(2026, 8, reserved_day)
+    cursor = _Cursor([
+        _SERVICE_TIME, [], [], [], [],
+        [{"source_id": 7, "staff_id": 99, "case_no": reserved_case,
+          "start_date": reserved_date, "end_date": reserved_date}],
+        [], [],
+    ])
+    conflicts = workflow._occupancy_conflicts(cursor, snapshot)
+    assert workflow._build_acquire_preview(snapshot, conflicts)["apply_allowed"] is allowed
+    assert [conflict["source_type"] for conflict in conflicts] == ([] if allowed else ["historical_reservation"])
 
 
 def test_existing_buffer_on_requested_service_date_is_advisory():
     snapshot = workflow._canonical_snapshot("CASE-1", 8, _order("訂單成立"), _plan(), [_segment()])
-    cursor = _Cursor([[], [], [{"source_id": 7, "staff_id": 99, "lock_date": date(2026, 8, 12)}], [], [], []])
+    cursor = _Cursor([
+        _SERVICE_TIME, [], [], [], [], [],
+        [{"source_id": 7, "staff_id": 99, "lock_date": date(2026, 8, 12)}], [],
+    ])
     conflicts = workflow._occupancy_conflicts(cursor, snapshot)
     assert workflow._build_acquire_preview(snapshot, conflicts)["apply_allowed"] is True
     assert conflicts[0]["source_type"] == "buffer"

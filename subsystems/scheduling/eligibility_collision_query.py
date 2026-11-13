@@ -49,6 +49,7 @@ class CollisionKind(StrEnum):
     ASSIGNMENT_INTERVAL = "assignment_interval"
     OFFICIAL_SCHEDULE = "official_schedule"
     WAITING_DEPOSIT_LOCK = "waiting_deposit_lock"
+    HISTORICAL_RESERVATION = "historical_reservation"
     SEVEN_DAY_BUFFER = "seven_day_buffer"
     STAFF_UNAVAILABILITY = "staff_unavailability"
     LEGACY_SCHEDULE = "legacy_schedule"
@@ -175,6 +176,12 @@ class SchedulingUnavailabilityFact:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulingHistoricalReservationFact:
+    source_id: int
+    occupancy: StaffOccupancyFact
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulingEligibilityCollisionFacts:
     case: SchedulingCaseFacts | None
     staff: tuple[SchedulingStaffFacts, ...]
@@ -184,6 +191,7 @@ class SchedulingEligibilityCollisionFacts:
     locks: tuple[SchedulingLockFact, ...] = ()
     unavailability: tuple[SchedulingUnavailabilityFact, ...] = ()
     partial_data: tuple[str, ...] = ()
+    historical_reservations: tuple[SchedulingHistoricalReservationFact, ...] = ()
 
 
 class SchedulingEligibilityCollisionFactsPort(Protocol):
@@ -464,6 +472,7 @@ def _scope_temporal_facts(
         locks=scope_items(facts.locks, "waiting_lock"),
         unavailability=scope_items(facts.unavailability, "staff_unavailability"),
         partial_data=tuple(sorted(partial_data)),
+        historical_reservations=facts.historical_reservations,
     )
 
 
@@ -854,6 +863,22 @@ def _collisions(
                     "人員在該日為長假或暫停接案",
                 )
             )
+
+    for reservation in facts.historical_reservations:
+        occupied = reservation.occupancy
+        if occupied.staff_id != staff_id or occupied.source_case_no == facts.case.case_no:
+            continue
+        overlap = _overlap(occupied.occupancy_date - timedelta(days=1), occupied.block_end, period)
+        if overlap is None:
+            continue
+        for collision_date in _iter_dates(*overlap):
+            if service_shift_may_overlap(collision_date, facts.case.service_time, occupied):
+                collisions.append(CollisionResult(
+                    CollisionKind.HISTORICAL_RESERVATION, CollisionSeverity.HARD_BLOCK,
+                    staff_id, occupied.source_case_no, None, reservation.source_id, collision_date,
+                    occupied.occupancy_date, occupied.block_end, "Scheduling",
+                    f"historical_order_adoption_receipts:{reservation.source_id}", "其他案件已保留歷史預定檔期",
+                ))
 
     service_dates = frozenset(facts.case.confirmed_service_dates)
     return _dedupe_collisions(

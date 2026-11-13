@@ -18,7 +18,7 @@
 
 ## Contracts
 - `domains/orders/terms.py` — completion instant fallback。
-- 同人同日可並列不同案件班次。只把正式工作班、等待訂金保留及不可服務的實際相交時段視為占用衝突；休息日及緩衝可與班次並列。
+- 同人同日可並列不同案件班次。正式工作班、等待訂金保留、歷史預定及不可服務的相交時段視為占用衝突。休息日及緩衝可與班次並列。
 
 ## Provenance
 - Effective assignment current projection — `source_observed` — `domains/scheduling/current_projection.py`.

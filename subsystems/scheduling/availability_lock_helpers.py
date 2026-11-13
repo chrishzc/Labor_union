@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from typing import Any
 
 
-_ALLOWED_CONFLICT_TYPES = {"assignment", "schedule", "active_lock", "buffer", "staff_unavailability"}
+_ALLOWED_CONFLICT_TYPES = {"assignment", "schedule", "active_lock", "buffer", "staff_unavailability", "historical_reservation"}
 
 
 def _assert_strict_string(value: Any, field_name: str) -> str:

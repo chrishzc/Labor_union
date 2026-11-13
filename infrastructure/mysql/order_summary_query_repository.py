@@ -100,6 +100,23 @@ _SCHEDULED_STAFF_LABELS_SQL = """
        )
 """
 
+_RECOMMENDED_STAFF_LABELS_SQL = """
+       (
+           SELECT GROUP_CONCAT(
+                      CONCAT(COALESCE(recommended_staff.union_no, '未設定'), ' ',
+                             COALESCE(recommended_staff.name, '姓名未設定'))
+                      ORDER BY segment.segment_order
+                      SEPARATOR '、'
+                  )
+             FROM caregiver_matching_plans plan
+             JOIN caregiver_matching_plan_segments segment ON segment.plan_id = plan.id
+             JOIN staff recommended_staff ON recommended_staff.id = segment.staff_id
+            WHERE plan.case_no = o.case_no
+              AND plan.is_active = 1
+              AND plan.status IN ('proposed', 'accepted')
+       )
+"""
+
 _ORDER_SUMMARY_PAGE_SQL = f"""
 SELECT o.case_no,
        c.name AS client_name,
@@ -155,7 +172,8 @@ SELECT o.case_no,
        order_details.total_employer_self_pay_payable,
        {_STAFF_NAMES_SQL} AS staff_name,
        {_STAFF_LABELS_SQL} AS staff_display_label,
-       {_SCHEDULED_STAFF_LABELS_SQL} AS scheduled_staff_display_label
+       {_SCHEDULED_STAFF_LABELS_SQL} AS scheduled_staff_display_label,
+       {_RECOMMENDED_STAFF_LABELS_SQL} AS recommended_staff_display_label
   FROM orders o FORCE INDEX (PRIMARY)
   JOIN clients c ON c.id = o.client_id
   JOIN v_order_details order_details ON order_details.case_no = o.case_no

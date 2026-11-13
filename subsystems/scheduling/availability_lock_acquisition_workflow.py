@@ -11,7 +11,8 @@ from typing import Any, Callable
 from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
 from infrastructure.mysql.scheduling_occupancy_facts import (
-    _effective_occupancy_rows, _legacy_assignment_rows, _unavailability_rows, _waiting_lock_rows, load_case_service_time,
+    _effective_occupancy_rows, _legacy_assignment_rows, _unavailability_rows, _waiting_lock_rows,
+    historical_reservation_occupancy, load_case_service_time, load_historical_reservation_rows,
 )
 
 from domains.scheduling.waiting_deposit_lock import (
@@ -314,6 +315,11 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any], *, lock: bool = 
     waiting_rows = _waiting_lock_rows(cursor, staff_ids, lock)
     legacy_assignments = _legacy_assignment_rows(cursor, staff_ids, lock)
     blocks = _unavailability_rows(cursor, staff_ids, lock)
+    historical_reservations = tuple(
+        (row["source_id"], historical_reservation_occupancy(row))
+        for row in load_historical_reservation_rows(cursor, staff_ids=staff_ids, lock=lock)
+        if row["case_no"] != snapshot["case_no"]
+    )
     fixed_staff_params = _fixed_staff_params(staff_ids)
     conflicts: list[dict[str, Any]] = []
     for wanted in wanted_rows:
@@ -341,6 +347,9 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any], *, lock: bool = 
                                       possible_end=row["assigned_end_date"])
             if service_shift_may_overlap(day, service_time, fact):
                 conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "assignment", "source_id": row["id"]})
+        for source_id, fact in historical_reservations:
+            if fact.staff_id == staff_id and service_shift_may_overlap(day, service_time, fact):
+                conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "historical_reservation", "source_id": source_id})
     cursor.execute(
         "SELECT id AS source_id, staff_id, buffer_date AS lock_date "
         "FROM scheduling_buffer_days "

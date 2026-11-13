@@ -60,7 +60,9 @@ def monthly_schedule(
     line_user_id = _verified_line_user_id(payload)
     with open_line_unit_of_work() as unit_of_work:
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
-    schedule = get_staff_monthly_calendar_schedule(int(staff["staff_id"]), year, month)
+    schedule = get_staff_monthly_calendar_schedule(
+        int(staff["staff_id"]), year, month, include_historical_reservations=False,
+    )
     return BaseResponse(data={**schedule, "staff_name": staff["staff_name"]})
 
 

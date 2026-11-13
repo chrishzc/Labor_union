@@ -108,7 +108,7 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
     depositSettledText: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶款項）`,
     assignedDoulaName: staffName,
     assignedDoulaDisplay:
-      item.scheduled_staff_display_label ?? '尚未正式指派',
+      item.recommended_staff_display_label ?? '尚無有效推薦方案',
     serviceTimeTuple: null,
     requiresCooking: null,
     floorFee: null,

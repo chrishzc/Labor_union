@@ -944,10 +944,10 @@ def _validate_availability(
         },
     )
     reasons = {item.get("reason_code") for item in result.get("conflicts", ())}
-    if reasons & {"assignment", "schedule", "active_lock", "staff_unavailability"}:
+    if reasons & {"assignment", "schedule", "active_lock", "staff_unavailability", "historical_reservation"}:
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")
     if "requires_review" in reasons or reasons - {
-        "assignment", "schedule", "active_lock", "staff_unavailability", "buffer",
+        "assignment", "schedule", "active_lock", "staff_unavailability", "historical_reservation", "buffer",
         "coverage_gap", "draft_overlap", "outside_case_period",
     }:
         raise ValueError("matching availability source requires review")

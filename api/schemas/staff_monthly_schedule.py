@@ -16,6 +16,7 @@ class MonthlyScheduleDayView(_ClosedModel):
         "working",
         "resting",
         "historical_assignment",
+        "historical_reservation",
         "waiting_deposit_lock",
         "staff_unavailability",
         "buffer",
@@ -40,7 +41,7 @@ class MonthlyScheduleDayView(_ClosedModel):
 
 
 class MonthlyScheduleSummaryView(_ClosedModel):
-    status: Literal["white", "yellow", "red", "green", "historical", "unavailable"]
+    status: Literal["white", "yellow", "red", "green", "historical", "historical_reservation", "unavailable"]
     case_no: str | None = None
     client_name: str | None = None
     is_work_day: bool

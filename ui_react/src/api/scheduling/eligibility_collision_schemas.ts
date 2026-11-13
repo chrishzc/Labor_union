@@ -18,6 +18,7 @@ export const SchedulingCollisionKindSchema = z.enum([
   'waiting_deposit_lock',
   'seven_day_buffer',
   'staff_unavailability',
+  'historical_reservation',
   'legacy_schedule',
   'data_integrity',
 ]);

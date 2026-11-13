@@ -5,6 +5,7 @@ const reasonLabels: Record<string, string> = {
   assignment: '已有正式排班',
   schedule: '已有服務排程',
   staff_unavailability: '月嫂不可服務',
+  historical_reservation: '其他案件歷史預定',
   requires_review: '既有排程待核對',
   coverage_gap: '此段服務尚缺可用人選',
   outside_case_period: '超出本案服務期間',

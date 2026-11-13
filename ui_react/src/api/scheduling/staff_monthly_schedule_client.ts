@@ -6,7 +6,7 @@ import { ApiDecodeError } from '../shared/typed_errors';
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const DaySchema = z.strictObject({
   work_date: DateSchema,
-  status: z.enum(['available', 'working', 'resting', 'historical_assignment', 'waiting_deposit_lock', 'staff_unavailability', 'buffer']),
+  status: z.enum(['available', 'working', 'resting', 'historical_assignment', 'historical_reservation', 'waiting_deposit_lock', 'staff_unavailability', 'buffer']),
   assignment_id: z.number().int().positive().nullable().optional(),
   case_no: z.string().nullable().optional(),
   staff_id: z.number().int().positive(),
@@ -26,7 +26,7 @@ const DaySchema = z.strictObject({
   unavailability_reason: z.string().nullable().optional(),
 });
 const SummarySchema = z.strictObject({
-  status: z.enum(['white', 'yellow', 'red', 'green', 'historical', 'unavailable']),
+  status: z.enum(['white', 'yellow', 'red', 'green', 'historical', 'historical_reservation', 'unavailable']),
   case_no: z.string().nullable().optional(),
   client_name: z.string().nullable().optional(),
   is_work_day: z.boolean(),
@@ -70,6 +70,9 @@ export const staffMonthlyScheduleClient = {
         || !day.case_no
         || !day.client_name
         || day.is_work_day
+      ))
+      || (day.status === 'historical_reservation' && (
+        day.assignment_id != null || day.lock_id != null || !day.case_no || day.is_work_day
       ))
     ));
     if (invalidDay) throw new ApiDecodeError('歷史指派月曆回應結構異常。', [{ path: 'data.days', message: '日期、服務人員或歷史指派語意不符合 request contract。', code: 'custom' }], raw);

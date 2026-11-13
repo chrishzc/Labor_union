@@ -35,6 +35,7 @@ _SUMMARY_FIELDS = frozenset({
 _OPTIONAL_SUMMARY_FIELDS = frozenset({
     "staff_display_label",
     "scheduled_staff_display_label",
+    "recommended_staff_display_label",
     "historical_source_start_date",
     "historical_source_end_date",
 })
@@ -91,6 +92,7 @@ class OrderSummaryItem:
     historical_source_end_date: date | None = None
     staff_display_label: str | None = None
     scheduled_staff_display_label: str | None = None
+    recommended_staff_display_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,11 @@ def _summary_item(row: object) -> OrderSummaryItem:
         scheduled_staff_display_label=_optional_text(
             {"scheduled_staff_display_label": row.get("scheduled_staff_display_label")},
             "scheduled_staff_display_label",
+            2000,
+        ),
+        recommended_staff_display_label=_optional_text(
+            {"recommended_staff_display_label": row.get("recommended_staff_display_label")},
+            "recommended_staff_display_label",
             2000,
         ),
         identity_status=_optional_text(row, "identity_status", 100),
@@ -285,6 +292,8 @@ def _item_representation(item: OrderSummaryItem) -> dict[str, object]:
         representation["staff_display_label"] = item.staff_display_label
     if item.scheduled_staff_display_label is not None:
         representation["scheduled_staff_display_label"] = item.scheduled_staff_display_label
+    if item.recommended_staff_display_label is not None:
+        representation["recommended_staff_display_label"] = item.recommended_staff_display_label
     if item.historical_source_start_date is not None:
         representation["historical_source_start_date"] = _date_representation(
             item.historical_source_start_date

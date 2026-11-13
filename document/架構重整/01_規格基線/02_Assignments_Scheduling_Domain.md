@@ -14,7 +14,7 @@
 | 指派歸屬與區段歷史 | `case_staff_assignments`（`generation + effective` 版本模型） |
 | 每日正式服務 owner | effective `staff_schedule.assignment_id` |
 | 已完成案歷史指派 | `case_staff_assignments.status=completed` 及其正式起訖／時段（無日排班亦唯讀可視） |
-| 檔期占用 | 有效逐日服務班次的實際起訖時刻（Taipei `[start, end)`） |
+| 檔期占用 | 有效逐日服務班次的實際起訖時刻（Taipei `[start, end)`）、等待訂金保留、不可服務期間及歷史預定 |
 | actual hours | `有效正式服務日數 × Orders 每日服務時數` |
 | assignment status | 首／末正式服務時刻與 Business Clock 推導（`planned | active | completed`） |
 | leave／substitution lineage | `batch_key` header ＋ append-only `(batch_key, batch_item_index)` events |
@@ -23,7 +23,7 @@
 | 長假／不可服務期間 | 版本化不可服務期間與取消事件（[Staff Matching Preferences](24_Staff_Matching_Preferences與不可服務期間正式規格.md)） |
 
 - **嚴格禁止依賴**：`orders.staff_id`、`planned_hours`、`actual_hours_adjustments`、`replaced_assignment_id` 與 `original_assigned_*`。
-- **Generation 模型不變量**：同案同一時刻至多存在一個 `effective` generation；任何正式更動採 Preview → Apply `cancel-old / create-new`（僅改費用／計薪時數／下廚且排班形狀不變者沿用現行 generation）；取消或替換後保留不可變歷史並自目前投影排除；歷史訂單未重啟精算前不占現行排班資源。
+- **Generation 模型不變量**：同案同一時刻至多存在一個 `effective` generation；任何正式更動採 Preview → Apply `cancel-old / create-new`（僅改費用／計薪時數／下廚且排班形狀不變者沿用現行 generation）；取消或替換後保留不可變歷史並自目前投影排除。
 
 ## 3. 公開契約與流程
 
@@ -32,7 +32,8 @@
 - **`SHIFT-01／02`（班次與可用性）**：以 Orders 每日起訖時間與跨日標記（`0 | 1`）比較「含開始、不含結束」時間區間（首尾相接可排；跨午夜班次占兩曆日而班次與工時歸開始日一次；代班占用實際承接者；月嫂全日不可服務仍阻擋相交；缺時段且可能相交回「時段待確認」）。
 - **`SHIFT-03／04`**：候選排查、等待鎖、正式排班、開工、改期、請假／代班／換人共用同一判定；轉換或重建僅排除本次實際被替換來源；兩案各計服務量與工時（不可依人日去重）。
 - **`SHIFT-05` & Calendar Read（甘特圖）**：
-  - 逐月逐人顯示現役班次、等待訂金保留（非工作日）、七日緩衝（非工作日／非服務中）、不可服務與唯讀 `historical_assignment`（不Render無事件的空白灰塊）；連續日僅於同來源、時段與狀態一致時合併；同日多班上下並列並於跨日續班標示。
+  - 逐月逐人顯示現役班次、等待訂金保留（非工作日）、七日緩衝（非工作日／非服務中）、不可服務、唯讀歷史指派與歷史預定。連續日僅於同來源、時段與狀態一致時合併。同日多班上下並列並於跨日續班標示。
+  - **歷史預定**。工會排班日曆以「歷史預定」顯示「歷史訂單－未服務」及從該狀態重啟後仍待儲存正式班表的案件，取該案最新已採納紀錄中可確認的原月嫂，以及 Orders 預定起訖日。起訖日皆有效時，期間內每個曆日均為全日檔期保留。媒合、等待訂金鎖、排班、調班及長假／暫停接案的衝突判定讀取同一來源。跨午夜班次以實際跨入保留日判定衝突。此區段唯讀，逐日服務、出勤、計薪及訂金鎖各沿原有來源。重啟後沿用歷史預定，直到正式班表成功提交並接手占用。班表儲存失敗時維持原保留，案件取消則直接解除。
   - Calendar「可進行出勤精算案件」下拉選單採單一批次 `GET .../staff/{staff_id}/assignment-schedules` 交集 Orders 摘要（禁止 N+1 或 `orders.staff_id` fallback）。
   - 開案主責唯讀投影（`resolve_opening_primary_staff`）：取第一有效 segment 人員（追溯同人 generation 與首日代班原主責；服務前整案替換轉由新人，服務中換人保留原開案主責）。
 

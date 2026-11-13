@@ -49,13 +49,25 @@ class _Facts:
         }
 
 
-def test_candidate_coverage_uses_confirmed_service_dates_and_backend_ranges():
+@pytest.mark.parametrize("has_historical_reservation", [False, True])
+def test_candidate_coverage_uses_confirmed_service_dates_and_backend_ranges(has_historical_reservation):
+    class Facts(_Facts):
+        def load_case_facts(self, case_no):
+            facts = super().load_case_facts(case_no)
+            if has_historical_reservation:
+                facts["historical_reservation_rows"] = [
+                    {"case_no": "HIS-1", "staff_id": 7,
+                     "start_date": date(2026, 8, 2), "end_date": date(2026, 8, 2)},
+                ]
+            return facts
+
     result = search_segmented_caregiver_availability(
         "CASE-68",
         1,
-        [{"start_date": "2026-08-02", "end_date": "2026-08-04"}],
+        [{"start_date": "2026-08-02", "end_date": "2026-08-04",
+          **({"staff_id": 7} if has_historical_reservation else {})}],
         "2026-08-01",
-        _Facts(),
+        Facts(),
         filter_policy={
             "region": False,
             "preferred_service_days": False,
@@ -63,6 +75,11 @@ def test_candidate_coverage_uses_confirmed_service_dates_and_backend_ranges():
             "daily_service_hours": False,
         },
     )
+
+    if has_historical_reservation:
+        assert any(item["reason_code"] == "historical_reservation" for item in result["conflicts"])
+        assert result["feasibility"] != "complete"
+        return
 
     candidate = result["candidate_options"][0]
     assert candidate["staff_name"] == "月嫂甲"
