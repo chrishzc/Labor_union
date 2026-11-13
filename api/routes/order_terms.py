@@ -78,11 +78,13 @@ class OrderTermsInput(BaseModel):
 class TermsAllocationInput(BaseModel):
     assignment_id: int = Field(gt=0)
     service_days: int = Field(gt=0)
+    service_dates: list[date] | None = None
 
 
 class OrderTermsPreviewRequest(BaseModel):
     proposed_terms: OrderTermsInput
     floor_fee_correction: bool = False
+    allow_started_service_change: bool = Field(default=False, strict=True)
     replacement_service_dates: list[date] | None = None
     replacement_allocations: list[TermsAllocationInput] = Field(default_factory=list)
 
@@ -92,7 +94,12 @@ class OrderTermsPreviewRequest(BaseModel):
                                           if self.replacement_service_dates is not None else None),
             "replacement_allocations": tuple((a.assignment_id, a.service_days)
                                              for a in self.replacement_allocations),
+            **({"replacement_assignment_dates": tuple((a.assignment_id, tuple(a.service_dates))
+                                                       for a in self.replacement_allocations
+                                                       if a.service_dates is not None)}
+               if any(a.service_dates is not None for a in self.replacement_allocations) else {}),
             **({"floor_fee_correction": True} if self.floor_fee_correction else {}),
+            **({"allow_started_service_change": True} if self.allow_started_service_change else {}),
         }
 
 
@@ -229,12 +236,14 @@ def _query_payload(facts) -> dict[str, Any]:
         "client_finance_version": registry.client_finance_version,
         "payroll_version": registry.payroll_version,
         "service_data_locked": registry.order.service_data_locked,
+        "service_quantity_lock_reason": facts.service_quantity_lock_reason,
+        "actual_start_date": facts.actual_start_date,
         "floor_fee_correction_available": registry.order.service_data_locked or registry.order.historical_service_completed,
         "terms": registry.order.terms.canonical_payload(),
         "confirmed_service_dates": list(facts.confirmed_service_dates),
         "confirmed_service_date_version": facts.confirmed_service_date_version,
         "assignments": [{"assignment_id": s.assignment_id, "staff_id": s.staff_id,
-                         "service_days": s.service_day_count}
+                         "service_days": s.service_day_count, "service_dates": list(s.official_service_dates)}
                         for s in sorted(facts.assignments, key=lambda s: s.sequence)],
     }
 
@@ -328,7 +337,8 @@ def _raise_value_error(error, correlation_id) -> None:
     code = getattr(getattr(error, "issue", None), "value", str(error))
     if code == "order_not_found":
         category, status_code = ErrorCategory.NOT_FOUND, 404
-    elif code.endswith("_required") or code == "service_data_locked":
+    elif code in {"service_data_locked", "service_started_replacement_blocked",
+                  "started_service_change_unavailable"} or code.endswith("_required"):
         category, status_code = ErrorCategory.DOMAIN_BLOCKED, 409
     elif "conflict" in code or code == "stale_preview":
         category, status_code = ErrorCategory.CONFLICT, 409

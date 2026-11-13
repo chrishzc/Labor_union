@@ -1,8 +1,11 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
+import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
+import { OrderServiceDateCalendar } from './OrderServiceDateCalendar';
+import './OrderWorkbenchV2Drawer.css';
 /**
  * File: OrderTermsMutationPanel.tsx
- * Description: 訂單條款預覽與套用面板，支援常用班次快捷與30分鐘時段下拉並自動計算時數。
+ * Description: 訂單條款編輯、排班試算、預覽與套用。
  */
 
 import { useEffect, useRef, useState, type FC } from 'react';
@@ -33,6 +36,24 @@ interface OrderTermsDraft {
   startTime: string;
   endTime: string;
   endDayOffset: '0' | '1';
+}
+
+const TERMS_FIELD_LABELS: Record<keyof OrderTermsDraft, string> = {
+  plannedStartDate: '開始日期',
+  serviceDays: '服務天數',
+  serviceHoursPerDay: '每日服務時數',
+  requiresCooking: '需烹飪',
+  floorFeeNtd: '樓層費總額',
+  startTime: '開始時間',
+  endTime: '結束時間',
+  endDayOffset: '跨日',
+};
+
+function termsDraftValues(draft: OrderTermsDraft, hasDateDraft = false) {
+  return {
+    ...Object.fromEntries(Object.entries(draft).map(([field, value]) => [TERMS_FIELD_LABELS[field as keyof OrderTermsDraft], value])),
+    重新排班: hasDateDraft ? '已開始安排' : '',
+  };
 }
 
 export const COMMON_SHIFT_PRESETS = [
@@ -164,7 +185,16 @@ function conflictMessage(error: unknown): string | null {
   }
   if (code === 'scheduling_reallocation_required') return '請填寫每個既有指派的新服務天數，合計須等於新合約天數，再重新檢查。';
   if (code === 'service_data_locked') return '服務條件已鎖定，本次未儲存；請保留已完成服務與帳務歷史。';
-  if (code === 'service_started_replacement_blocked') return '本案已開始服務，不能由此替換完整日期；請由承辦人確認保留已履行服務的調整方案。本次未儲存。';
+  if (code === 'service_started_replacement_blocked' || code === 'started_service_change_unlock_required') {
+    return '服務已開始，本次未儲存。請重新讀取案件，若畫面提供「解除鎖定並修改」，請先解除再調整。';
+  }
+  if (code === 'started_service_change_unavailable') return '本案目前無法解除服務條件鎖定，請重新讀取案件確認狀態。';
+  if (code === 'started_service_change_scope') return '本次解鎖可改總天數、每日時數、每日時段與服務日期，請恢復其他欄位後再預覽。';
+  if (code === 'replacement_actual_start_conflict') return '新班表須包含原實際開始日，請核對月曆選取的日期。';
+  if (code === 'replacement_assignment_dates_invalid') return '請分配所有服務日期，並為每個既有指派保留至少一天。';
+  if (code === 'staff_occupancy_conflict') return '新班表與月嫂的既有檔期重疊。請檢查日期或時段後重新預覽。';
+  if (code === 'actual_start_leave_outcome_conflict') return '新班表與既有請假或代班安排衝突。請核對原安排後再調整。';
+  if (code === 'terms_impact_blocked') return '既有客戶帳務或月嫂薪資限制擋下變更。請先核對本案帳務，再重新預覽。';
   if (code === 'replacement_service_date_outside_selectable_range') return '替代日期超出可選期間，請重新精算日期並核對約定服務開始日。';
   if (code === 'stale_preview') {
     return '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。';
@@ -180,7 +210,7 @@ function conflictMessage(error: unknown): string | null {
 }
 
 export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = (props) => {
-  if (!props.fromRegistry) return <OrderTermsEditor {...props} />;
+  if (!props.fromRegistry) return <OrderTermsEditor key={props.caseNo} {...props} />;
   const { caseNo, query } = props;
   const revision = [caseNo, query.order_version, query.scheduling_version, query.scheduling_generation,
     query.client_finance_version, query.payroll_version].join(':');
@@ -220,7 +250,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
   const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
   const [ordinaryApplied, setOrdinaryApplied] = useState(false);
-  const [replacementDates, setReplacementDates] = useState<string[] | null>(null);
+  const [editedReplacementDates, setReplacementDates] = useState<string[] | null>(null);
   const [serviceMode, setServiceMode] = useState<SchedulePrecisionRequest['service_mode'] | ''>('');
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying' | 'calculating' | 'reading'>('idle');
@@ -229,6 +259,10 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
   const pendingCommand = useRef<{ payload: OrderTermsApplyPayload; key?: string } | null>(null);
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const [floorCorrection, setFloorCorrection] = useState(false);
+  const [startedServiceUnlocked, setStartedServiceUnlocked] = useState(false);
+  const [replanDates, setReplanDates] = useState(false);
+  const [dateAllocation, setDateAllocation] = useState<Record<string, number>>({});
+  const [scheduleMonth, setScheduleMonth] = useState('');
   useEffect(() => { setFloorCorrection(false); }, [caseNo]);
   const mounted = useRef(false);
   const activeCase = useRef(caseNo);
@@ -275,6 +309,10 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
     pendingCommand.current = null;
     submittedTarget.current = null;
     setOutcomeUnknown(false);
+    setStartedServiceUnlocked(false);
+    setReplanDates(false);
+    setDateAllocation({});
+    setScheduleMonth('');
     setServiceMode('');
     setReplacementDates(null);
     setAllocations({});
@@ -288,23 +326,37 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
     setStatus('idle');
   }, [caseNo, query, queryRevision, observedRevision, receipt, readback]);
 
-  const needsReplacement = Number(draft.serviceDays) !== currentQuery.terms.service_days
-    && ((currentQuery.confirmed_service_dates?.length ?? 0) > 0 || (currentQuery.assignments?.length ?? 0) > 0);
+  const assignments = currentQuery.assignments ?? [];
+  const dayCountChanged = Number(draft.serviceDays) !== currentQuery.terms.service_days;
+  const needsReplacement = (dayCountChanged && (!!currentQuery.confirmed_service_dates?.length || !!assignments.length))
+    || (startedServiceUnlocked && replanDates);
+  const actualStart = currentQuery.actual_start_date;
+  const targetDays = Number(draft.serviceDays);
+  const startedDateRangeReady = !!actualStart && Number.isInteger(targetDays) && targetDays > 0;
+  const lastSelectableDate = startedDateRangeReady
+    ? new Date(Math.min(Date.parse('9999-12-31'), Date.parse(actualStart) + (targetDays + 29) * 86_400_000))
+      .toISOString().slice(0, 10)
+    : '';
+  const currentAssignmentDates = assignments.flatMap(assignment => assignment.service_dates ?? []).sort();
+  const currentServiceDates = currentAssignmentDates.length ? currentAssignmentDates : currentQuery.confirmed_service_dates ?? [];
+  const replacementDates = editedReplacementDates ?? (startedServiceUnlocked && needsReplacement && startedDateRangeReady
+    ? Array.from(new Set([actualStart, ...currentServiceDates.filter(date => date >= actualStart && date <= lastSelectableDate)]))
+      .slice(0, targetDays)
+    : null);
+  const currentDateAllocation = assignments.length === 1
+    ? Object.fromEntries((replacementDates ?? []).map(date => [date, assignments[0].assignment_id]))
+    : Object.fromEntries(assignments.flatMap(assignment => (assignment.service_dates ?? [])
+      .map(date => [date, assignment.assignment_id])));
+  const effectiveAllocation = { ...currentDateAllocation, ...dateAllocation };
+  const datesForAssignment = (id: number) => (replacementDates ?? []).filter(date => effectiveAllocation[date] === id);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
-    setReplacementDates(null);
-    setDraft((current) => {
-      const next = { ...current, [key]: value };
-      if (key === 'startTime' || key === 'endTime' || key === 'endDayOffset') {
-        const calculated = calculateDailyServiceHours(next.startTime, next.endTime, next.endDayOffset);
-        if (calculated !== null) {
-          next.serviceHoursPerDay = String(calculated);
-        } else if (next.startTime && next.endTime) {
-          next.serviceHoursPerDay = '';
-        }
-      }
-      return next;
-    });
+    if (key === 'plannedStartDate' || key === 'serviceDays') {
+      setReplacementDates(null);
+      setDateAllocation({});
+      setScheduleMonth('');
+    }
+    setDraft((current) => ({ ...current, [key]: value }));
     setPreview(null);
     setReceipt(null);
     setError(null);
@@ -314,6 +366,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
     draft.startTime === preset.startTime
     && draft.endTime === preset.endTime
     && draft.endDayOffset === preset.endDayOffset
+    && Number(draft.serviceHoursPerDay) === calculateDailyServiceHours(preset.startTime, preset.endTime, preset.endDayOffset)
   );
 
   const applyPreset = (preset: typeof COMMON_SHIFT_PRESETS[number]) => {
@@ -337,18 +390,23 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
     && Number(draft.endDayOffset) === (currentQuery.terms.service_time.end_day_offset ?? 0);
 
   const termsDirty = Object.entries(draft).some(([field, value]) => value !== draftFromQuery(currentQuery)[field as keyof OrderTermsDraft]);
+  const hasDateDraft = startedServiceUnlocked && needsReplacement && (!!serviceMode || !!replacementDates);
   useEffect(() => {
-    onEditStateChange?.({ dirty: termsDirty, busy: status !== 'idle' });
-  }, [termsDirty, status, onEditStateChange]);
+    onEditStateChange?.({ dirty: termsDirty || hasDateDraft, busy: status !== 'idle' });
+  }, [termsDirty, hasDateDraft, status, onEditStateChange]);
 
   const proposedTermsPayload = (dates = replacementDates) => ({
     ...(floorCorrection ? { floor_fee_correction: true } : {}),
+    ...(startedServiceUnlocked ? { allow_started_service_change: true } : {}),
     ...(needsReplacement && dates ? {
       replacement_service_dates: dates,
-      replacement_allocations: (currentQuery.assignments ?? []).map((assignment) => ({
-        assignment_id: assignment.assignment_id,
-        service_days: Number(allocations[assignment.assignment_id] ?? ''),
-      })),
+      replacement_allocations: assignments.map(({ assignment_id }) => {
+        if (startedServiceUnlocked) {
+          const selected = datesForAssignment(assignment_id);
+          return { assignment_id, service_days: selected.length, service_dates: selected };
+        }
+        return { assignment_id, service_days: Number(allocations[assignment_id] ?? '') };
+      }),
     } : {}),
     proposed_terms: {
       planned_start_date: draft.plannedStartDate,
@@ -367,34 +425,44 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
   });
 
   const timeValidationError = validateServiceTimeWindow(draft.startTime, draft.endTime, draft.endDayOffset);
+  const suggestedHours = calculateDailyServiceHours(draft.startTime, draft.endTime, draft.endDayOffset);
 
   const draftReady = /^\d{4}-\d{2}-\d{2}$/.test(draft.plannedStartDate)
     && Number.isInteger(Number(draft.serviceDays))
     && Number(draft.serviceDays) > 0
     && Number.isInteger(Number(draft.serviceHoursPerDay) * 2)
     && Number(draft.serviceHoursPerDay) > 0
+    && Number(draft.serviceHoursPerDay) <= 24
     && Number.isInteger(Number(draft.floorFeeNtd))
     && Number(draft.floorFeeNtd) >= 0
     && ((!draft.startTime && !draft.endTime)
       || (/^\d{2}:\d{2}$/.test(draft.startTime) && /^\d{2}:\d{2}$/.test(draft.endTime)))
     && timeValidationError === null;
-  const replacementReady = !needsReplacement || (serviceMode !== ''
-    && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
-      && currentQuery.assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === Number(draft.serviceDays) : true));
+  const replacementReady = !needsReplacement || (startedServiceUnlocked
+    ? replacementDates?.length === targetDays && replacementDates.every(date => effectiveAllocation[date] !== undefined)
+      && assignments.every(assignment => datesForAssignment(assignment.assignment_id).length > 0)
+    : serviceMode !== '' && (!assignments.length || (assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
+      && assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === targetDays)));
   const savingLocked = status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
   const closedService = currentQuery.service_data_locked || currentQuery.floor_fee_correction_available === true;
   const locked = closedService || savingLocked;
+  const lockReason = currentQuery.service_quantity_lock_reason;
+  const quantityLocked = locked || (lockReason === 'service_started' && !startedServiceUnlocked);
+  const replacementLocked = quantityLocked || lockReason === 'service_started_replacement_blocked';
+  const startedChangeReady = !startedServiceUnlocked || termsDirty || needsReplacement;
 
   const calculateReplacement = async () => {
-    if (!serviceMode || !draftReady || locked) return;
+    if (!serviceMode || !draftReady || replacementLocked) return;
     const generation = ++previewGeneration.current;
     const isCurrent = () => mounted.current && generation === previewGeneration.current;
     setStatus('calculating'); setError(null); setPreview(null); setReplacementDates(null);
     try {
       const result = await schedulePrecisionClient.calculate({ case_no: caseNo,
-        actual_start_date: draft.plannedStartDate, target_service_days: Number(draft.serviceDays), service_mode: serviceMode });
+        actual_start_date: draft.plannedStartDate, target_service_days: targetDays, service_mode: serviceMode });
       if (!isCurrent()) return;
-      setReplacementDates(result.day_by_day.filter((day) => day.is_work_day).map((day) => day.date));
+      const dates = result.day_by_day.filter((day) => day.is_work_day).map((day) => day.date);
+      if (dates.length !== Number(draft.serviceDays)) throw new Error('替代日期未達約定服務天數，請調整條件。');
+      setReplacementDates(dates);
     } catch (caught) { if (isCurrent()) setError(errorMessage(caught, '替代日期精算失敗。')); }
     finally { if (isCurrent()) setStatus('idle'); }
   };
@@ -420,18 +488,24 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           : refreshed.terms[key as keyof typeof expected] !== value);
         const datesDiffer = target.replacement_service_dates
           && JSON.stringify(refreshed.confirmed_service_dates) !== JSON.stringify(target.replacement_service_dates);
-        if (termsDiffer || datesDiffer) throw new Error('正式讀回內容與已提交條款／日期不一致。');
+        const assignmentsDiffer = target.allow_started_service_change && target.replacement_allocations?.some(
+          (allocation, index) => JSON.stringify(refreshed.assignments?.[index]?.service_dates) !== JSON.stringify(allocation.service_dates),
+        );
+        if (termsDiffer || datesDiffer || assignmentsDiffer) throw new Error('正式讀回內容與已提交條款／排班不一致。');
       }
       await onObserved?.();
       if (!mounted.current || activeCase.current !== caseNo) return;
       setReadback(refreshed); setDraft(draftFromQuery(refreshed)); setReplacementDates(null);
       setFloorCorrection(false);
+      setStartedServiceUnlocked(false);
+      setReplanDates(false);
     } catch (caught) { if (mounted.current && activeCase.current === caseNo) setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`); }
     finally { if (mounted.current && activeCase.current === caseNo) setStatus('idle'); }
   };
 
   const previewTerms = async () => {
-    if (!draftReady || !replacementReady || (floorCorrection ? savingLocked : locked)) return;
+    if (!draftReady || !replacementReady || !startedChangeReady || (needsReplacement && replacementLocked)
+      || (floorCorrection ? savingLocked : locked)) return;
     const generation = ++previewGeneration.current;
     previewAbort.current?.abort();
     const controller = new AbortController();
@@ -460,7 +534,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
       const nextPreview = await orderTermsMutationClient.preview(caseNo, proposedPayload, { signal: controller.signal });
       if (!isCurrentPreview()) return;
       setPreview(nextPreview);
-      await applyTerms(nextPreview, proposedPayload);
+      if (!startedServiceUnlocked) await applyTerms(nextPreview, proposedPayload);
     } catch (caught) {
       if (!isCurrentPreview() || controller.signal.aborted) return;
       setPreview(null);
@@ -508,6 +582,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
       if (!mounted.current || activeCase.current !== caseNo) return;
       pendingCommand.current = null; setOutcomeUnknown(false);
       setReceipt(nextReceipt);
+      setStartedServiceUnlocked(false);
       setOrdinaryApplied(!command.payload.requires_formal_apply);
       setPreview(null);
       setReason('');
@@ -519,7 +594,6 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
       if (conflict) {
         pendingCommand.current = null; setOutcomeUnknown(false);
         setPreview(null);
-        setReason('');
         setError(conflict);
       } else if (pendingCommand.current?.payload.requires_formal_apply === false) {
         const target = pendingCommand.current.payload;
@@ -556,48 +630,74 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
       if (mounted.current && activeCase.current === caseNo) setStatus('idle');
     }
   };
-  useUnsavedDraft('訂單條件', Object.fromEntries(Object.entries(draft).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), { baseline: Object.fromEntries(Object.entries(draftFromQuery(currentQuery)).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), busy: status !== 'idle' });
+  useUnsavedDraft('訂單條件', termsDraftValues(draft, hasDateDraft),
+    { baseline: termsDraftValues(draftFromQuery(currentQuery)), busy: status !== 'idle' });
 
 
   return (
-    <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
+    <section className="order-v2-drawer-section order-terms-editor" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">預覽與儲存服務條件</h3>
-      <p className="order-v2-drawer-note">尚未建立服務日期時，可先修正進件條款；已有日期或排班且需改天數時，請在下方計算替代服務日期並填寫人員分配，再確認儲存。預覽不會修改訂單。</p>
+      <p className="order-v2-drawer-note">先調整總天數、每日時數和時段。若已有服務日期或排班，改總天數後請先安排新日期，再一併儲存。</p>
       {closedService && (
-        <div><p role="status">本案服務已完成；漏填或誤填樓層費可正式更正，原服務日期與收付款紀錄保留，差額由帳務承接。</p>
+        <div><p role="status">目前鎖定原因：本案服務已完成。漏填或誤填樓層費可正式更正，差額由帳務承接。</p>
           {!floorCorrection && <button type="button" disabled={savingLocked} onClick={()=>{setDraft(draftFromQuery(currentQuery));setFloorCorrection(true);}}>更正結案樓層費</button>}
+        </div>
+      )}
+      {!closedService && lockReason && (
+        <div>
+          <p className="order-terms-lock-status" role="status">{lockReason === 'service_started_replacement_blocked'
+            ? '目前鎖定原因：本案已開始服務，目前案件狀態限制全案重新排班。'
+            : startedServiceUnlocked
+            ? '本次已解除鎖定。調整條件後請先預覽，再確認儲存。'
+            : '目前鎖定原因：本案已開始服務，總天數、每日時數與時段目前鎖定。'}</p>
+          {lockReason === 'service_started' ? <>
+            <p className="order-v2-drawer-note">新條件會套用到全案，包含已服務日期的有效排班與統計，並可能重算客戶應付和月嫂薪資。請先確認本案適合整案調整。</p>
+            <button type="button" disabled={savingLocked} onClick={() => {
+              setDraft(draftFromQuery(currentQuery));
+              setStartedServiceUnlocked(!startedServiceUnlocked);
+              setReplacementDates(null);
+              setReplanDates(false);
+              setDateAllocation({});
+              setScheduleMonth('');
+              setAllocations({});
+              setServiceMode('');
+              setPreview(null);
+              setReason('');
+              setError(null);
+            }}>{startedServiceUnlocked ? '取消本次解鎖' : '解除鎖定並修改'}</button>
+          </> : <p className="order-v2-drawer-note">此案件狀態無法在這裡解除鎖定。請先核對案件目前的服務狀態。</p>}
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
         <label>約定服務開始日
-          <input aria-label="約定服務開始日" type="date" value={draft.plannedStartDate} disabled={locked} onChange={(event) => updateDraft('plannedStartDate', event.target.value)} />
+          <input aria-label="約定服務開始日" type="date" value={draft.plannedStartDate} disabled={locked || lockReason === 'service_started'} onChange={(event) => updateDraft('plannedStartDate', event.target.value)} />
         </label>
-        <label>服務天數
-          <input aria-label="服務天數" type="number" min="1" value={draft.serviceDays} disabled={locked} onChange={(event) => updateDraft('serviceDays', event.target.value)} />
+        <label>總服務天數
+          <input aria-label="服務天數" type="number" min="1" value={draft.serviceDays} disabled={quantityLocked} onChange={(event) => updateDraft('serviceDays', event.target.value)} />
         </label>
         <label>每日服務時數
           <input
             aria-label="每日服務時數"
             type="number"
-            min="1"
+            min="0.5"
             max="24"
             step="0.5"
             value={draft.serviceHoursPerDay}
-            readOnly
-            disabled={locked}
-            title="由每日開始時間、結束時間與結束時間是否跨日自動計算"
+            disabled={quantityLocked}
+            aria-describedby="terms-hours-help"
+            onChange={(event) => updateDraft('serviceHoursPerDay', event.target.value)}
           />
         </label>
         <label>下廚料理需求
-          <select aria-label="下廚料理需求" value={draft.requiresCooking} disabled={locked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+          <select aria-label="下廚料理需求" value={draft.requiresCooking} disabled={locked || startedServiceUnlocked} onChange={(event) => updateDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
             <option value="">尚未確認（可先保留）</option>
             <option value="yes">需要下廚</option>
             <option value="no">不需下廚</option>
           </select>
         </label>
         <label>樓層加給（NTD）
-          <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={floorCorrection?savingLocked:locked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
+          <input aria-label="樓層加給" type="number" min="0" value={draft.floorFeeNtd} disabled={floorCorrection ? savingLocked : locked || startedServiceUnlocked} onChange={(event) => updateDraft('floorFeeNtd', event.target.value)} />
         </label>
         <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', background: '#faf6f0', borderRadius: '8px', border: '1px solid #ebdcd0', marginTop: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
@@ -607,7 +707,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
                 <button
                   key={preset.label}
                   type="button"
-                  disabled={locked}
+                  disabled={quantityLocked}
                   className="btn-secondary-action order-shift-preset"
                   aria-pressed={isPresetActive(preset)}
                   style={{
@@ -615,7 +715,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
                     padding: '3px 8px',
                     borderRadius: '4px',
                     fontWeight: isPresetActive(preset) ? 600 : 400,
-                    cursor: locked ? 'not-allowed' : 'pointer',
+                    cursor: quantityLocked ? 'not-allowed' : 'pointer',
                   }}
                   onClick={() => applyPreset(preset)}
                 >
@@ -630,7 +730,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           <select
             aria-label="每日開始時間"
             value={draft.startTime}
-            disabled={locked}
+            disabled={quantityLocked}
             onChange={(event) => updateDraft('startTime', event.target.value)}
           >
             <option value="">請選擇開始時間</option>
@@ -643,7 +743,7 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           <select
             aria-label="每日結束時間"
             value={draft.endTime}
-            disabled={locked}
+            disabled={quantityLocked}
             onChange={(event) => updateDraft('endTime', event.target.value)}
           >
             <option value="">請選擇結束時間</option>
@@ -653,25 +753,74 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
           </select>
         </label>
         <label>結束時間是否跨日
-          <select aria-label="結束時間是否跨日" value={draft.endDayOffset} disabled={locked} onChange={(event) => updateDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
+          <select aria-label="結束時間是否跨日" value={draft.endDayOffset} disabled={quantityLocked} onChange={(event) => updateDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
             <option value="0">同日</option>
             <option value="1">隔日</option>
           </select>
         </label>
+        <div style={{ gridColumn: 'span 2' }}>
+          <p id="terms-hours-help" className="order-v2-drawer-note">
+            時數可直接輸入，每 0.5 小時一格。起訖時間用於排班，常用班次會一併填入時間與時數。
+            {suggestedHours !== null && ` 目前時段建議 ${suggestedHours} 小時。`}
+          </p>
+          {suggestedHours !== null && suggestedHours !== Number(draft.serviceHoursPerDay) &&
+            <button type="button" disabled={quantityLocked} onClick={() => updateDraft('serviceHoursPerDay', String(suggestedHours))}>採用建議時數</button>}
+        </div>
       </div>
 
-      {needsReplacement && <fieldset disabled={locked}>
-        <legend>新天數的替代服務安排</legend>
+      {startedServiceUnlocked && !dayCountChanged && !replanDates &&
+        <button type="button" disabled={quantityLocked} onClick={() => { setReplanDates(true); setPreview(null); }}>重新排班</button>}
+      {needsReplacement && <fieldset disabled={replacementLocked}>
+        <legend>重新排班</legend>
+        {startedServiceUnlocked && replanDates && !dayCountChanged &&
+          <button type="button" onClick={() => { setReplanDates(false); setReplacementDates(null); setDateAllocation({}); setPreview(null); }}>沿用目前日期</button>}
+        {!startedServiceUnlocked && <>
         <label>替代日期排休方式<select aria-label="替代日期排休方式" value={serviceMode} onChange={(event) => { setServiceMode(event.target.value as typeof serviceMode); setReplacementDates(null); setPreview(null); }}>
           <option value="">請選擇排休方式</option>
           {(['休周六', '休周日', '週休2日', '連續服務'] as const).map((mode) => <option key={mode}>{mode}</option>)}
         </select></label>
         <button type="button" disabled={!serviceMode || !draftReady} onClick={() => void calculateReplacement()}>試算替代日期（選用）</button>
+        </>}
+        {startedServiceUnlocked && actualStart && replacementDates ? <>
+          <dl className="order-terms-schedule-summary">
+            <div><dt>服務開始</dt><dd>{replacementDates[0]}</dd></div>
+            <div><dt>最後服務日</dt><dd>{replacementDates.at(-1)}</dd></div>
+            <div><dt>服務天數</dt><dd>{replacementDates.length}／{targetDays} 天</dd></div>
+          </dl>
+          <p>在月曆選滿 {targetDays} 個服務日。原開工日 {actualStart} 已保留。</p>
+          <div className="caregiver-schedule-block">
+          <OrderServiceDateCalendar month={scheduleMonth || actualStart.slice(0, 7)}
+            onMonthChange={setScheduleMonth}
+            monthRange={[actualStart.slice(0, 7), lastSelectableDate.slice(0, 7)]}
+            selectedDates={replacementDates}
+            showHolidays={false}
+            isDateDisabled={date => date <= actualStart || date > lastSelectableDate
+              || (replacementDates.length >= targetDays && !replacementDates.includes(date))}
+            onToggle={date => {
+              setReplacementDates(replacementDates.includes(date)
+                ? replacementDates.filter(selected => selected !== date)
+                : [...replacementDates, date].sort());
+              setPreview(null);
+              setError(null);
+            }}
+          />
+          </div>
+          {assignments.length > 1 && <OrderCaregiverScheduleCalendars
+            blocks={assignments.map(assignment => ({ key: assignment.assignment_id, staffId: assignment.staff_id }))}
+            dates={replacementDates}
+            allocation={effectiveAllocation}
+            onSelect={(date, id) => {
+              setDateAllocation(current => ({ ...current, [date]: id }));
+              setPreview(null);
+            }}
+          />}
+        </> : !startedServiceUnlocked && <>
         {replacementDates && <p>替代服務日期（{replacementDates.length} 天）：{replacementDates.join('、')}</p>}
-        {(currentQuery.assignments ?? []).map((assignment) => <label key={assignment.assignment_id}>{staffIdentity.label(assignment.staff_id)}（原 {assignment.service_days} 天）的新服務天數
+        {assignments.map((assignment) => <label key={assignment.assignment_id}>{staffIdentity.label(assignment.staff_id)}（原 {assignment.service_days} 天）的新服務天數
           <input aria-label={`指派 ${assignment.assignment_id} 新服務天數`} type="number" min="1" value={allocations[assignment.assignment_id] ?? ''} onChange={(event) => { setAllocations((current) => ({ ...current, [assignment.assignment_id]: event.target.value })); setPreview(null); }} />
         </label>)}
         <p>依原指派順序分配上述日期，合計須等於新合約天數；不會自動分配。日期與條款將同時保存。</p>
+        </>}
       </fieldset>}
 
       {timeValidationError && (
@@ -682,8 +831,8 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
             <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={floorCorrection?savingLocked:locked} onChange={(event) => setReason(event.target.value)} />
           </label></>
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
-        <button type="button" disabled={(floorCorrection?savingLocked:locked) || !draftReady || !replacementReady || (floorCorrection&&Number(draft.floorFeeNtd)===currentQuery.terms.floor_fee_ntd)} onClick={() => void previewTerms()}>
-          {status === 'previewing' ? '正在儲存服務條件…' : floorCorrection?'儲存樓層費更正':'儲存服務條件'}
+        <button type="button" disabled={(floorCorrection?savingLocked:locked) || !draftReady || !replacementReady || !startedChangeReady || (needsReplacement && replacementLocked) || (floorCorrection&&Number(draft.floorFeeNtd)===currentQuery.terms.floor_fee_ntd)} onClick={() => void previewTerms()}>
+          {status === 'previewing' ? '正在檢查服務條件…' : floorCorrection ? '儲存樓層費更正' : startedServiceUnlocked ? '預覽服務條件與排班' : '儲存服務條件'}
         </button>
       </div>
 
@@ -695,6 +844,11 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
             <p>每日時數：{preview.before.service_hours_per_day} 小時 → {preview.after.service_hours_per_day} 小時</p>
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
+          {startedServiceUnlocked && <div>
+            <p>全案約定時數：{preview.before.service_days * preview.before.service_hours_per_day} → {preview.after.service_days * preview.after.service_hours_per_day} 小時</p>
+            <p>確認後，新條件將套用到已服務及後續日期的有效資料。請核對既有排班、統計及帳務影響。</p>
+            {!outcomeUnknown && <button type="button" disabled={savingLocked || !startedChangeReady} onClick={() => void applyTerms()}>確認並儲存</button>}
+          </div>}
           <details><summary>技術資訊</summary><p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p></details>
 
         </div>

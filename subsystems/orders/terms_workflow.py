@@ -16,6 +16,7 @@ from domains.client_finance.obligation_planning import (
     deposit_gate_override_survives_terms_impact,
 )
 from domains.orders.lifecycle import (
+    OrderLifecycleStatus,
     build_financial_correction_lifecycle_impact,
     build_preassignment_terms_lifecycle_impact,
     build_terms_lifecycle_impact,
@@ -83,6 +84,8 @@ class OrderTermsQueryFacts:
     assignments: tuple[EffectiveAssignmentSegment, ...]
     confirmed_service_date_version: int | None
     confirmed_service_dates: tuple[date, ...]
+    service_quantity_lock_reason: str | None = None
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +126,8 @@ class OrderTermsApplyRequest:
     replacement_allocations: tuple[tuple[int, int], ...] = ()
     requires_formal_apply: bool = True
     floor_fee_correction: bool = False
+    allow_started_service_change: bool = False
+    replacement_assignment_dates: tuple[tuple[int, tuple[date, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -309,10 +314,12 @@ class OrderTermsWorkflow:
         return facts.version + 1
 
     def preview(self, case_no: str, proposed_terms: Any, *,
-                replacement_service_dates=None, replacement_allocations=(), floor_fee_correction=False) -> Any:
+                replacement_service_dates=None, replacement_allocations=(), floor_fee_correction=False,
+                allow_started_service_change=False, replacement_assignment_dates=()) -> Any:
         return self._build_preview(
             self._repository.load_for_preview(case_no, proposed_terms=proposed_terms), proposed_terms,
             replacement_service_dates, replacement_allocations, floor_fee_correction,
+            allow_started_service_change, replacement_assignment_dates,
         )
 
     def apply(self, request: OrderTermsApplyRequest) -> Any:
@@ -382,7 +389,8 @@ class OrderTermsWorkflow:
         _validate_versions(request, facts)
         preview = self._build_preview(facts, request.proposed_terms,
                                       request.replacement_service_dates,
-                                      request.replacement_allocations, request.floor_fee_correction)
+                                      request.replacement_allocations, request.floor_fee_correction,
+                                      request.allow_started_service_change, request.replacement_assignment_dates)
         if preview.requires_formal_apply != request.requires_formal_apply:
             raise _workflow_error(
                 request,
@@ -401,8 +409,14 @@ class OrderTermsWorkflow:
         return preview
 
     def _build_preview(self, facts, proposed_terms, replacement_service_dates=None,
-                       replacement_allocations=(), floor_fee_correction=False):
+                       replacement_allocations=(), floor_fee_correction=False,
+                       allow_started_service_change=False, replacement_assignment_dates=()):
         validate_terms_change(facts.order, proposed_terms, floor_fee_correction=floor_fee_correction)
+        _validate_started_service_change(
+            facts, proposed_terms, replacement_service_dates, allow_started_service_change,
+        )
+        if replacement_assignment_dates and (not allow_started_service_change or replacement_service_dates is None):
+            raise ValueError("started_service_change_scope")
         if floor_fee_correction and (replacement_service_dates is not None or replacement_allocations):
             raise ValueError("floor_fee_correction_must_only_change_fee")
         if facts.historical_correction is not None:
@@ -418,9 +432,13 @@ class OrderTermsWorkflow:
                     'after': proposed_terms.canonical_payload(), 'order_version': facts.order.version,
                     'scheduling_version': facts.scheduling.aggregate_version}), True, plan)
         candidate_facts = _replacement_facts(
-            facts, proposed_terms, replacement_service_dates, replacement_allocations
+            facts, proposed_terms, replacement_service_dates, replacement_allocations,
+            actual_start_date=facts.lifecycle.actual_start_date if allow_started_service_change else None,
+            assignment_dates=replacement_assignment_dates,
         )
-        scheduling = _scheduling_candidate(candidate_facts, proposed_terms)
+        scheduling = _scheduling_candidate(
+            candidate_facts, proposed_terms, preserve_assignment_dates=allow_started_service_change,
+        )
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
         reuses_assignments = bool(scheduling.assignments) and (
             proposed_terms.service_time == facts.order.terms.service_time
@@ -494,6 +512,10 @@ class OrderTermsWorkflow:
                              fingerprint=fingerprint_payload({"floor_fee_correction": True,
                                  "preview": result.fingerprint.value, "before": facts.order.terms.canonical_payload(),
                                  "planned_end_date": facts.planned_end_date.isoformat() if facts.planned_end_date else None}))
+        if allow_started_service_change:
+            result = replace(result, requires_formal_apply=True, fingerprint=fingerprint_payload({
+                "allow_started_service_change": True, "preview": result.fingerprint.value,
+            }))
         return result
 
     def _persist_ordinary(self, request, preview, receipt):
@@ -527,6 +549,7 @@ class OrderTermsWorkflow:
                     reason=request.reason,
                     correlation_id=request.correlation_id,
                     service_time=request.proposed_terms.service_time,
+                    preserve_leave_occupancy=request.allow_started_service_change,
                 )
             )
             scheduling_receipt_id = scheduling_result.scheduling_receipt_id
@@ -605,20 +628,52 @@ class OrderTermsWorkflow:
             )
         )
 
-def _replacement_facts(facts, terms, dates, allocations):
+def service_quantity_lock_reason(service_started, status):
+    if not service_started:
+        return None
+    return ("service_started" if status == OrderLifecycleStatus.IN_SERVICE
+            else "service_started_replacement_blocked")
+
+
+def _validate_started_service_change(facts, terms, replacement_dates, allow_change):
+    current = facts.order.terms
+    quantity_changed = (
+        terms.service_days != current.service_days
+        or terms.service_hours_per_day != current.service_hours_per_day
+        or terms.service_time != current.service_time
+        or replacement_dates is not None
+    )
+    lock_reason = service_quantity_lock_reason(facts.scheduling.service_started, facts.lifecycle.current_status)
+    if allow_change:
+        if (lock_reason != "service_started" or facts.lifecycle.cancellation_effective
+                or facts.lifecycle.actual_start_date is None):
+            raise ValueError("started_service_change_unavailable")
+        if replace(terms, service_days=current.service_days, service_hours_per_day=current.service_hours_per_day,
+                   service_time=current.service_time) != current:
+            raise ValueError("started_service_change_scope")
+        if not quantity_changed:
+            raise ValueError("started_service_change_required")
+    elif lock_reason and replacement_dates is not None:
+        raise ValueError("service_started_replacement_blocked")
+    elif lock_reason == "service_started" and (quantity_changed or terms.planned_start_date != current.planned_start_date):
+        raise ValueError("started_service_change_unlock_required")
+
+
+def _replacement_facts(facts, terms, dates, allocations, *, actual_start_date=None, assignment_dates=()):
     if dates is None:
         if allocations:
             raise ValueError("confirmed_service_dates_reconfirmation_required")
         return facts
-    if facts.scheduling.service_started:
-        raise ValueError("service_started_replacement_blocked")
     if facts.confirmed_service_date_version is None and not facts.scheduling.segments:
         raise ValueError("preassignment_replacement_not_required")
     # The same target count is used for dates and Scheduling, before any writer runs.
     ConfirmedServiceDateCandidate(facts.order.case_no, facts.order.version,
                                  facts.scheduling.aggregate_version, dates, terms.service_days)
-    if any(d < terms.planned_start_date or
-           d >= terms.planned_start_date + timedelta(days=terms.service_days + 30)
+    anchor_date = actual_start_date or terms.planned_start_date
+    if actual_start_date is not None and dates[0] != actual_start_date:
+        raise ValueError("replacement_actual_start_conflict")
+    if any(d < anchor_date or
+           d >= anchor_date + timedelta(days=terms.service_days + 30)
            for d in dates):
         raise ValueError("replacement_service_date_outside_selectable_range")
     segments = facts.scheduling.segments
@@ -629,11 +684,20 @@ def _replacement_facts(facts, terms, dates, allocations):
                 or any(type(n) is not int or n <= 0 for n in counts.values())
                 or sum(counts.values()) != terms.service_days):
             raise ValueError("scheduling_reallocation_required")
+        dates_by_assignment = dict(assignment_dates)
+        if actual_start_date is not None and (
+            len(dates_by_assignment) != len(assignment_dates)
+            or dates_by_assignment.keys() != counts.keys()
+            or any(len(selected) != counts[key] for key, selected in dates_by_assignment.items())
+            or tuple(sorted(day for selected in dates_by_assignment.values() for day in selected)) != dates
+        ):
+            raise ValueError("replacement_assignment_dates_invalid")
         rebuilt = []
         offset = 0
         for segment in sorted(segments, key=lambda s: s.sequence):
             count = counts[segment.assignment_id]
-            segment_dates = dates[offset:offset + count]
+            segment_dates = (tuple(sorted(dates_by_assignment[segment.assignment_id]))
+                             if actual_start_date is not None else dates[offset:offset + count])
             offset += count
             rebuilt.append(replace(segment, service_day_count=count,
                                    assigned_start_date=segment_dates[0],
@@ -648,7 +712,7 @@ def _replacement_facts(facts, terms, dates, allocations):
         scheduling=replace(facts.scheduling, segments=segments), planned_service_dates=dates)
 
 
-def _scheduling_candidate(facts, proposed_terms):
+def _scheduling_candidate(facts, proposed_terms, *, preserve_assignment_dates=False):
     if not facts.scheduling.segments:
         if is_unique_cooking_requirement_correction(
             facts.order.terms, proposed_terms
@@ -685,6 +749,7 @@ def _scheduling_candidate(facts, proposed_terms):
         replace(facts.scheduling, segments=shifted_segments),
         proposed_terms,
         shifted_dates,
+        preserve_assignment_dates=preserve_assignment_dates,
     )
 
 
@@ -1055,6 +1120,11 @@ def _command_fingerprint(request):
         "actor": request.actor.actor_id,
         "reason": request.reason,
         **({"floor_fee_correction": True} if request.floor_fee_correction else {}),
+        **({"allow_started_service_change": True} if request.allow_started_service_change else {}),
+        **({"replacement_assignment_dates": [
+            (assignment_id, [day.isoformat() for day in dates])
+            for assignment_id, dates in request.replacement_assignment_dates
+        ]} if request.replacement_assignment_dates else {}),
         **({"replacement_service_dates": ([d.isoformat() for d in request.replacement_service_dates]
                                              if request.replacement_service_dates is not None else None),
             "replacement_allocations": request.replacement_allocations}

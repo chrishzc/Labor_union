@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +31,7 @@ class TermsAssignmentView(BaseModel):
     assignment_id: int
     staff_id: int
     service_days: int
+    service_dates: list[date] = Field(default_factory=list)
 
 
 class OrderTermsQueryView(BaseModel):
@@ -43,6 +44,8 @@ class OrderTermsQueryView(BaseModel):
     client_finance_version: int | None = Field(ge=0)
     payroll_version: int | None = Field(ge=0)
     service_data_locked: bool
+    service_quantity_lock_reason: Literal["service_started", "service_started_replacement_blocked"] | None = None
+    actual_start_date: date | None = None
     floor_fee_correction_available: bool = False
     terms: OrderTermsView
     confirmed_service_dates: list[date] = Field(default_factory=list)

@@ -43,6 +43,8 @@ def order_row():
         "case_no": "TERMS-NULL-TEST",
         "lifecycle_version": 0,
         "start_date": date(2026, 10, 1),
+        "actual_start_date": None,
+        "status": "訂單成立",
         "service_days": 5,
         "service_hours_per_day": 8,
         "floor_fee": 0,
@@ -62,6 +64,7 @@ def registry_client(order_row):
         case_no=case_no,
         order_dates=None,
         service_type=None,
+        identity_change_available=False,
         client=SimpleNamespace(client_id=1, version=0, values={"name": "測試客戶"}),
         beclass=SimpleNamespace(
             status="unbound", record_id=None, source_kind=None, version=None, values=None,
@@ -184,16 +187,19 @@ class _QueryCursor(_OrderCursor):
         return self.current
 
 
-@pytest.mark.parametrize("accounts,locked,scheduled", [
-    (False, False, False),
-    (True, False, False),
-    (True, True, False),
-    (True, False, True),
+@pytest.mark.parametrize("accounts,locked,scheduled,started", [
+    (False, False, False, False),
+    (True, False, False, False),
+    (True, True, False, False),
+    (True, False, True, False),
+    (True, False, True, True),
 ])
 def test_terms_query_reads_saved_facts_without_mutation_eligibility(
-    order_row, accounts, locked, scheduled,
+    order_row, accounts, locked, scheduled, started,
 ):
     order_row.update(service_data_locked=locked, scheduled=scheduled)
+    if started:
+        order_row.update(status="服務中", actual_start_date=date(2026, 10, 1))
     if accounts:
         order_row.update(
             finance_account={"aggregate_version": 7},
@@ -217,6 +223,8 @@ def test_terms_query_reads_saved_facts_without_mutation_eligibility(
     payload = response.json()["data"]
     assert payload["terms"]["service_days"] == 5
     assert payload["service_data_locked"] is locked
+    assert payload["service_quantity_lock_reason"] == ("service_started" if started else None)
+    assert payload["actual_start_date"] == ("2026-10-01" if started else None)
     assert payload["client_finance_version"] == (7 if accounts else None)
     assert payload["payroll_version"] == (8 if accounts else None)
     assert payload["confirmed_service_date_version"] == 2
@@ -224,4 +232,5 @@ def test_terms_query_reads_saved_facts_without_mutation_eligibility(
     assert payload["scheduling_generation"] == (1 if scheduled else 0)
     assert payload["assignments"] == ([{
         "assignment_id": 21, "staff_id": 9, "service_days": 5,
+        "service_dates": [f"2026-10-{day:02d}" for day in range(1, 6)],
     }] if scheduled else [])

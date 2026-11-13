@@ -53,11 +53,16 @@ export const OrderTermsQuerySchema = z.strictObject({
   client_finance_version: VersionSchema.nullable(),
   payroll_version: VersionSchema.nullable(),
   service_data_locked: z.boolean(),
+  service_quantity_lock_reason: z.enum(['service_started', 'service_started_replacement_blocked']).nullish(),
+  actual_start_date: DateSchema.nullish(),
   floor_fee_correction_available: z.boolean().optional(),
   terms: OrderTermsViewSchema,
   confirmed_service_dates: z.array(DateSchema).optional(),
   confirmed_service_date_version: VersionSchema.nullable().optional(),
-  assignments: z.array(z.strictObject({ assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
+  assignments: z.array(z.strictObject({
+    assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
+    service_days: z.number().int().positive(), service_dates: z.array(DateSchema).optional(),
+  })).optional(),
 });
 
 export const OrderTermsPreviewSchema = z.strictObject({
@@ -95,8 +100,13 @@ export const OrderTermsReceiptSchema = z.strictObject({
 export const OrderTermsPreviewPayloadSchema = z.strictObject({
   proposed_terms: OrderTermsInputSchema,
   floor_fee_correction: z.boolean().optional(),
+  allow_started_service_change: z.boolean().optional(),
   replacement_service_dates: z.array(DateSchema).optional(),
-  replacement_allocations: z.array(z.strictObject({ assignment_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
+  replacement_allocations: z.array(z.strictObject({
+    assignment_id: z.number().int().positive(),
+    service_days: z.number().int().positive(),
+    service_dates: z.array(DateSchema).optional(),
+  })).optional(),
 });
 
 export const OrderTermsApplyPayloadSchema = OrderTermsPreviewPayloadSchema.extend({

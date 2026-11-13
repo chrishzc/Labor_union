@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pymysql
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_admin, require_system_admin
 from api.dependencies.admin_auth import require_persisted_admin
 from api.dependencies.order_intake_terms_bootstrap import get_order_intake_terms_bootstrap_application
 from api.dependencies.order_terms import OrderTermsApplication, get_order_terms_application
@@ -22,18 +22,21 @@ from domains.case_import.case_import import (
     ClientImportAttribute,
     ImportedOrderRootFacts,
 )
+from domains.scheduling.assignment_plan import StaffOccupancyFact
 from infrastructure.mysql.case_import_repository import CaseImportMySqlUnitOfWork, MySqlCaseImportRepository
 from infrastructure.mysql import mysql_adapter
 from infrastructure.mysql.mysql_adapter import DB_CONFIG
 from infrastructure.mysql.nas_mutations import ensure_nas_procedures
 from infrastructure.mysql.order_intake_terms_bootstrap_repository import MySqlOrderIntakeTermsBootstrapRepository
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
+from infrastructure.mysql.case_manual_supplement_repository import MySqlCaseManualSupplementRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from subsystems.case_import.case_import_workflow import ApplyCaseImport, CaseImportWorkflow
+from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
 from subsystems.orders.terms_workflow import OrderTermsWorkflow
 from subsystems.orders.order_intake_terms_bootstrap import OrderIntakeTermsBootstrapApplication
 
@@ -364,7 +367,7 @@ def _preview(client, terms, **replacement):
     ))
 
 
-def _apply(client, query, preview, terms, key, **replacement):
+def _apply(client, query, preview, terms, key, *, reason="Issue 337 disposable acceptance", **replacement):
     requires_formal_apply = preview["requires_formal_apply"]
     return client.post(
         f"/api/v1/orders/{_CASE_NO}/terms/apply",
@@ -379,8 +382,8 @@ def _apply(client, query, preview, terms, key, **replacement):
             "preview_fingerprint": preview["preview_fingerprint"],
             "requires_formal_apply": requires_formal_apply,
             **(
-                {"reason": "Issue 337 disposable acceptance"}
-                if requires_formal_apply
+                {"reason": reason}
+                if requires_formal_apply and reason is not None
                 else {}
             ),
         },
@@ -722,6 +725,122 @@ def test_assigned_hours_change_keeps_effective_scheduling_and_real_assignment_id
                 (_CASE_NO,),
             )
             assert cursor.fetchone()["assignment_id"] == assignment_id
+    finally:
+        connection.close()
+        _drop_database()
+
+
+def test_started_service_change_relocks_and_rebuilds_from_actual_start(monkeypatch):
+    bootstrap(_arguments())
+    connection = _connect()
+    try:
+        ensure_nas_procedures(connection)
+        _seed(connection, service_days=30, empty_service_time=False)
+        assignment_id = _seed_effective_assignment(connection, service_days=30)
+        endpoint = f"/api/v1/orders/{_CASE_NO}/terms"
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET start_date='2026-09-30' WHERE case_no=%s",
+                (_CASE_NO,),
+            )
+        connection.commit()
+        with _client(connection) as client:
+            initial = _data(client.get(endpoint))
+            initial_terms = {**initial["terms"], "service_hours_per_day": 4}
+            _data(_apply(client, initial, _preview(client, initial_terms), initial_terms, "initial-120-hours"))
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s AND status='open' AND obligation_type='deposit'", (_CASE_NO,))
+            deposit = cursor.fetchone()["obligation_identity"]
+            cursor.execute("SELECT obligation_identity FROM staff_obligations WHERE case_no=%s AND assignment_id=%s", (_CASE_NO, assignment_id))
+            payroll = cursor.fetchone()["obligation_identity"]
+        supplement = CaseManualSupplementService(MySqlCaseManualSupplementRepository(connection))
+        for direction, obligation in (("client_receipt", deposit), ("staff_salary", payroll)):
+            with MySqlUnitOfWork(connection) as unit:
+                supplement.execute(_CASE_NO, "sinopac", direction, obligation, 1000, "2026-10-02",
+                                   "合成原收付款", f"started-terms-{direction}", "test", settlement_mode="partial")
+                unit.commit()
+        tables = ("client_ledger_entries", "client_ledger_obligation_allocations",
+                  "staff_payout_events", "staff_payout_obligation_links")
+        with connection.cursor() as cursor:
+            cash_before = {}
+            for table in tables:
+                cursor.execute(f"SELECT * FROM {table} ORDER BY id")
+                cash_before[table] = cursor.fetchall()
+                assert cash_before[table]
+            cursor.execute(
+                "UPDATE orders SET status='服務中',actual_start_date='2026-10-01',"
+                "service_end_time='13:00:00' WHERE case_no=%s", (_CASE_NO,),
+            )
+        connection.commit()
+        dates = [(date(2026, 10, 1) + timedelta(days=day)).isoformat() for day in range(25)]
+        replacement = {
+            "replacement_service_dates": dates,
+            "replacement_allocations": [
+                {"assignment_id": assignment_id, "service_days": 25, "service_dates": dates},
+            ],
+        }
+        with _client(connection) as client:
+            before = _data(client.get(endpoint))
+            assert before["service_quantity_lock_reason"] == "service_started"
+            assert before["actual_start_date"] == dates[0]
+            assert before["terms"]["service_days"] * before["terms"]["service_hours_per_day"] == 120
+            terms = {**before["terms"], "service_days": 25, "service_hours_per_day": 8,
+                     "service_time": {"start_time": "08:30:00", "end_time": "17:00:00", "end_day_offset": 0}}
+            blocked = client.post(f"{endpoint}/preview", json={"proposed_terms": terms, **replacement})
+            assert blocked.status_code == 409
+            assert blocked.json()["detail"]["error"]["code"] == "service_started_replacement_blocked"
+            replacement["allow_started_service_change"] = True
+            invalid_allocation = {**replacement, "replacement_allocations": [
+                {"assignment_id": assignment_id, "service_days": 25, "service_dates": [dates[0]] * 25},
+            ]}
+            invalid = client.post(f"{endpoint}/preview", json={"proposed_terms": terms, **invalid_allocation})
+            assert invalid.status_code == 422
+            assert invalid.json()["detail"]["error"]["code"] == "replacement_assignment_dates_invalid"
+            admin_override = client.app.dependency_overrides.pop(require_system_admin)
+            client.app.dependency_overrides[require_admin] = lambda: SimpleNamespace(effective_capabilities=lambda: ())
+            forbidden = client.post(f"{endpoint}/preview", json={"proposed_terms": terms, **replacement})
+            assert forbidden.status_code == 403
+            client.app.dependency_overrides[require_system_admin] = admin_override
+            client.app.dependency_overrides.pop(require_admin)
+            preview = _preview(client, terms, **replacement)
+            assert _data(client.get(endpoint)) == before
+            assert preview["scheduling"]["assignments"][0]["actual_hours"] == 200
+            assert preview["scheduling"]["assignments"][0]["service_dates"] == dates
+            assert sum(stage["amount"]["amount"] for stage in preview["client_finance_impact"]["stage_plans"]) == 80_000
+            assert preview["payroll_impact"]["payroll"]["total_payable"]["amount"] == 60_000
+            assert any(action["amount"]["amount"] == 59_000 for action in preview["payroll_impact"]["actions"])
+            stale = _apply(client, {**before, "order_version": before["order_version"] + 1}, preview,
+                           terms, "started-terms-stale", **replacement)
+            assert stale.status_code == 409
+            assert _data(client.get(endpoint)) == before
+            from infrastructure.mysql import scheduling_replacement_writer
+            occupied = StaffOccupancyFact(
+                before["assignments"][0]["staff_id"], date.fromisoformat(dates[0]), "OTHER-TEST-CASE", all_day=True,
+            )
+            with monkeypatch.context() as patch:
+                patch.setattr(scheduling_replacement_writer, "load_occupancy_snapshot",
+                              lambda *_args, **_kwargs: ((occupied,), ()))
+                conflict = _apply(client, before, preview, terms, "started-terms-occupied", **replacement)
+            assert conflict.status_code == 409
+            assert conflict.json()["detail"]["error"]["code"] == "staff_occupancy_conflict"
+            assert _data(client.get(endpoint)) == before
+            receipt = _data(_apply(client, before, preview, terms, "started-terms-change", reason=None, **replacement))
+        with _connect() as read_connection, _client(read_connection) as reader:
+            after = _data(reader.get(endpoint))
+            with read_connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) AS days FROM staff_schedule WHERE assignment_id=%s AND effective_marker IS NULL", (assignment_id,))
+                assert cursor.fetchone()["days"] == 30
+                for table in tables:
+                    cursor.execute(f"SELECT * FROM {table} ORDER BY id")
+                    assert cursor.fetchall() == cash_before[table]
+        assert after["service_quantity_lock_reason"] == "service_started"
+        assert after["actual_start_date"] == before["actual_start_date"]
+        assert after["terms"] == terms
+        assert after["confirmed_service_dates"] == dates
+        assert after["assignments"][0]["service_dates"] == dates
+        assert receipt["official_service_hours"] == 200
+        assert receipt["cancelled_assignment_ids"] == [assignment_id]
+        assert receipt["lifecycle_status"] == "服務中"
     finally:
         connection.close()
         _drop_database()

@@ -183,9 +183,19 @@ def build_generation_candidate(
     facts: SchedulingGenerationFacts,
     terms: OrderTerms,
     planned_service_dates: tuple[date, ...],
+    *,
+    preserve_assignment_dates: bool = False,
 ) -> SchedulingGenerationCandidate:
     _validate_generation_inputs(facts, terms, planned_service_dates)
-    assignments = _build_assignments(facts, terms, planned_service_dates)
+    assignments = (
+        tuple(_build_assignment(facts, terms, segment, segment.official_service_dates)
+              for segment in _ordered_segments(facts))
+        if preserve_assignment_dates else _build_assignments(facts, terms, planned_service_dates)
+    )
+    if preserve_assignment_dates and tuple(sorted(
+        day for assignment in assignments for day in assignment.service_dates
+    )) != planned_service_dates:
+        raise ValueError("replacement_assignment_dates_invalid")
     buffers = tuple(
         _build_buffer(assignment, active=not facts.service_started)
         for assignment in assignments

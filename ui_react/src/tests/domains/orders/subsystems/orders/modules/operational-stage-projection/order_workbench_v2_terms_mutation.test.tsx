@@ -386,20 +386,20 @@ describe('名冊沿用訂單條款操作', () => {
     expect(mocks.queryTerms).not.toHaveBeenCalled();
   });
 
-  it('每日服務時數欄位為 readOnly，由開始與結束時間自動推算，且變更時段時自動更新時數', async () => {
+  it('直接輸入的時數保留，並可明確採用目前時段的建議時數', async () => {
     const panel = await openTermsPanel();
     const hoursInput = within(panel).getByLabelText('每日服務時數');
-    expect(hoursInput).toHaveAttribute('readonly');
-    // Fixture start: 08:00, end: 17:00 (offset 0) -> 9 hours
-    expect(hoursInput).toHaveValue(9);
+    fireEvent.change(hoursInput, { target: { value: '7.5' } });
+    expect(hoursInput).toHaveValue(7.5);
 
     // Change start time to 09:00 (09:00~17:00 = 8 hours)
     fireEvent.change(within(panel).getByLabelText('每日開始時間'), { target: { value: '09:00' } });
-    expect(hoursInput).toHaveValue(8);
+    expect(hoursInput).toHaveValue(7.5);
+    expect(within(panel).getByText(/目前時段建議 8 小時/)).toBeInTheDocument();
 
     // Change end time to 18:00 (09:00~18:00 = 9 hours)
     fireEvent.change(within(panel).getByLabelText('每日結束時間'), { target: { value: '18:00' } });
-    expect(hoursInput).toHaveValue(9);
+    expect(hoursInput).toHaveValue(7.5);
 
     // Change end time earlier than start time on same day -> invalid
     fireEvent.change(within(panel).getByLabelText('每日結束時間'), { target: { value: '08:00' } });
@@ -408,6 +408,7 @@ describe('名冊沿用訂單條款操作', () => {
 
     // Switch offset to 隔日 -> 09:00 to 08:00 (+1 day) = 23 hours
     fireEvent.change(within(panel).getByLabelText('結束時間是否跨日'), { target: { value: '1' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '採用建議時數' }));
     expect(hoursInput).toHaveValue(23);
     expect(within(panel).queryByText('每日結束時間須晚於開始時間；若為跨日服務，請將「結束時間是否跨日」設為隔日。')).not.toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: '儲存服務條件' })).not.toBeDisabled();
@@ -435,7 +436,7 @@ describe('名冊沿用訂單條款操作', () => {
       expect.objectContaining({
         proposed_terms: expect.objectContaining({
           requires_cooking: null,
-          service_hours_per_day: 8,
+          service_hours_per_day: 9,
           service_time: {
             start_time: '09:00:00',
             end_time: '17:00:00',

@@ -7,6 +7,8 @@
 ## Responsibility
 從 current Scheduling generation facts 產生版本化 assignment／buffer candidate。Orders Terms caller 必須先比對 candidate 與 current effective assignment 的 identity／人員／日期／區間形狀；形狀未變時 candidate 只供 Finance／Payroll 計算與真實 assignment identity mapping，不得持久化新 generation。尚無 assignment／buffer 時，開始日／服務天數 candidate 不虛構 segment；已有服務日期或排班事實時仍 fail closed，分別要求替換日期或正式重新分配。
 
+服務中 Orders Terms 使用每個既有指派的明確服務日，Scheduling 核對其合計恰為完整正式日期，再產生同一 generation candidate。
+
 ## Implementation
 - primary:
   - `db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql` — 保留排班、檔期鎖、有效占用及請假血緣資料，允許同人同日多筆；正式寫入仍依月嫂 mutex 與時段重疊規則驗證。

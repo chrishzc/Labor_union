@@ -62,9 +62,12 @@
 - **Pre-assignment vs Formal Apply**：
   - Preview 輸出 before/after、排班重建形狀是否變動、`planned/actual end`、hours、樓層費、實際受影響未核銷帳務差額、`requires_formal_apply`、`fingerprint` 與版本（Terms 畫面計算每日時數時 `4h` 班不扣休息、`8.5h` 班如 `08:30～17:00` 扣 30 分鐘休息計 `service_hours_per_day = 8`）。
   - **普通保存（`requires_formal_apply=false`）**：不影響 Scheduling／confirmed dates／Finance／Payroll／lifecycle 時，僅更新 Orders Terms 與 version（無須 reason／idempotency key 或永久 receipt；結果未明由 Query 比對版本）。
-  - **正式 Apply（`requires_formal_apply=true`）**：強制要求 reason／idempotency key，依實際影響委派 Client Finance／Payroll／Scheduling（僅金額／計薪時數／下廚等不改排班形狀時保留現行 generation、`scheduling_command_receipt_id = NULL`，不建立無意義空 generation）。尚未開始且已有排班而改 `service_days` 時，須於同一 Apply 附上精算之完整 `replacement_service_dates` 與逐段 `replacement_allocations.service_days`（已開始服務則禁止全案天數重排）。
+  - **正式 Apply（`requires_formal_apply=true`）**：沿用正式變更的原因欄與 idempotency key，依實際影響委派 Client Finance／Payroll／Scheduling。僅金額／計薪時數／下廚等變更且排班形狀相同時，保留現行 generation 與 assignment identity，`scheduling_command_receipt_id = NULL`。已有確認日期或排班而改總天數時，同一 Apply 須附完整 `replacement_service_dates`，已有排班時亦須附逐段 `replacement_allocations.service_days`。
+- **開工後的服務條件鎖定與單次解除**。一般「服務中」案件已有實際開始日與正式排班時，預設鎖定總服務天數、每日服務時數、每日時段及全案日期替換。Terms Query 以 `service_quantity_lock_reason` 回傳 `service_started`（一般服務中）、`service_started_replacement_blocked`（其他已開始分支維持原日期替換限制）或 null。一般服務中、無完工服務資料鎖且無有效取消的案件，具有既有 Terms 管理權限者可選「解除鎖定並修改」。Preview 與 Apply 均須帶 `allow_started_service_change=true`，變更原因選填，並以正式 Preview／確認／Apply 保存。此選擇限本次變更，存檔後恢復鎖定。約定開始日、下廚、樓層費及人員名單不納入此解鎖操作，完工資料鎖與其他權限及衝突檢查仍適用。
+- **開工後全案影響**。畫面在解除與確認前顯示，新條件會套用到全案，包含已服務日期的有效排班及統計，並可能重算客戶應付與月嫂薪資。由承辦人先核對影響並選擇是否儲存。Query 提供已確認的 `actual_start_date`，新班表首日須與原實際開始日相同。沿用 [Scheduling 世代](02_Assignments_Scheduling_Domain.md#2-核心不變量與資料模型ssot) 及既有 Finance／Payroll 差額規則，保留舊排班及收付紀錄。日期或時段改變時才依排班形狀重建。未提供解鎖、資料或檔期衝突、版本過期、帳務阻擋均不得留下部分寫入。
+- **月曆分配**。解鎖後可開啟重新排班，改總天數時必須完成。直接在月曆選取新班表日期，保留原實際開工日。初始沿用現行正式日期，縮減天數時預先取原班表最早的對應天數，增加天數時由承辦人補選。畫面顯示首日、末日與已選天數，每個既有指派以一張月曆顯示負責日期，並預填仍在新班表中的現行分配。點選可將日期分配給該指派，包含把已分配的日期轉給另一既有指派。單一指派承接全部日期。解鎖替換須在每筆 `replacement_allocations` 帶入 `service_dates`，每個替代服務日恰分配一次、每段至少一日，筆數與該段服務天數一致。未啟用解鎖的既有按天數分配契約可繼續使用。解鎖後未選擇替換日期時，沿用各指派的現行正式服務日。
 - **已結案漏填樓層費更正**。具 `order_service_data_locks` 或符合 [規格 27 §6.3](27_歷史訂單生命週期與服務天數帳務正式規格.md#63-人工發起服務天數更正與已結案樓層費個案計價更正) 的已完成案件，以 `floor_fee_correction=true` 發起更正。Query 回報 `floor_fee_correction_available`。Apply 保留服務鎖、日期與排班 generation。歷史已完成案件的訂金更正由 Orders 與 Client Finance 同交易完成。一般訂單結案後的樓層費更正由 Finance 與 Payroll 在同一交易承接各自差額。
-- **每日服務時間與下廚需求**：三欄必須「全空或全有」（新案於契約完成、waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
+- **每日服務時間與下廚需求**：時段三欄必須「全空或全有」（新案於契約完成、waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
 - **Contract Completion 協調（`Orders` ＋ `Client Finance`）**：Preview 驗證簽回證據、commitment 服務日數守恆（缺日回 `official_service_dates_incomplete`）、完整時段與雙方版本；Apply 於單一 outer UoW 寫入 `contract_completed` 並委派 Client Finance 保留既成訂金後補建其餘期款（若有舊義務卻缺完成事件回 `client_obligation_history_conflict`）。
 
 ### 3.5 Actual Start Preview／Apply
@@ -91,4 +94,5 @@
 ## 4. 驗收標準
 
 1. 涵蓋全生命週期狀態轉移、`service_time_terms` 三欄缺漏 fail closed、跨日 offset 拒絕猜測、訂金於開工前後沖正之差異行為、已鎖定案退款不解鎖，以及完工後 `floor_fee_correction` 與 `official-service-dates` 守恆。
+   服務中以每日 4 小時、30 天的測試案件驗證預設鎖定、逐次解除、直接改為每日 8 小時、調整總天數與替代班表、確認保存與回讀。核對有效日期、工時、客戶應付、月嫂薪資及既有收付紀錄，並涵蓋未解鎖、無權限、已完工、檔期或版本衝突的拒絕。
 2. 驗證 `AutoCompleteOrderService` 與 `leave-substitution` 搶鎖 CAS 衝突零部分寫入、取消與違約金全案結算及 `direction` enum 一致、代班不重開簽約與不影響原月嫂合法薪資。

@@ -95,11 +95,16 @@ export const OrderTermsSchema = z.strictObject({
   client_finance_version: z.number().int().nonnegative().nullable(),
   payroll_version: z.number().int().nonnegative().nullable(),
   service_data_locked: z.boolean(),
+  service_quantity_lock_reason: z.enum(['service_started', 'service_started_replacement_blocked']).nullish(),
+  actual_start_date: DateOnlySchema.nullish(),
   floor_fee_correction_available: z.boolean().optional(),
   terms: OrderTermsDetailSchema,
   confirmed_service_dates: z.array(DateOnlySchema).optional(),
   confirmed_service_date_version: z.number().int().nonnegative().nullable().optional(),
-  assignments: z.array(z.strictObject({ assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(), service_days: z.number().int().positive() })).optional(),
+  assignments: z.array(z.strictObject({
+    assignment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
+    service_days: z.number().int().positive(), service_dates: z.array(DateOnlySchema).optional(),
+  })).optional(),
 });
 export type OrderTerms = z.infer<typeof OrderTermsSchema>;
 

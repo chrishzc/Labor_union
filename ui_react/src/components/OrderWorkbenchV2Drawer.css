@@ -1090,6 +1090,27 @@
 .caregiver-schedule-block .service-date-weekday { text-align: center; }
 .order-case-page .caregiver-schedule-block .calendar-date-cell { min-width: 0; min-height: 42px; padding: 2px; justify-content: center; }
 .order-case-page .caregiver-schedule-block .calendar-date-cell.selected { background: #f7e6d9 !important; color: #973b17; border-color: #e9c5ad !important; }
+.order-terms-editor .order-terms-lock-status {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff3ed;
+  color: #914421;
+}
+.order-terms-schedule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0;
+}
+.order-terms-schedule-summary dt { color: #756358; font-size: .83rem; }
+.order-terms-schedule-summary dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.order-terms-editor .caregiver-schedule-block .calendar-date-cell.selected {
+  background: #f7e6d9;
+  color: #973b17;
+  border-color: #e9c5ad;
+}
 @media (max-width: 680px) { .caregiver-schedule-blocks { grid-template-columns: minmax(0, 1fr); } }
 .service-attribution-preview { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .service-attribution-preview :is(th, td) {

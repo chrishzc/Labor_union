@@ -41,6 +41,7 @@ from infrastructure.mysql.effective_case_service_rate import (
 )
 from subsystems.orders.terms_workflow import (
     OrderTermsQueryFacts, OrderTermsRegistryFacts, TermsWorkflowFacts,
+    service_quantity_lock_reason,
 )
 from subsystems.orders.actual_start_workflow import ActualStartPayrollVersionFacts
 from subsystems.payroll.terms_impact import (
@@ -87,19 +88,24 @@ def load_terms_preview_facts(cursor: Any, case_no: str, proposed_terms=None) -> 
 def load_terms_query_facts(cursor: Any, case_no: str) -> OrderTermsQueryFacts:
     """Read current terms without enforcing mutation eligibility."""
 
-    registry = load_registry_terms_facts(cursor, case_no)
+    order_row = select_order(cursor, case_no, lock=False)
     aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
     generation = _select_generation(cursor, aggregate, lock=False)
     assignments = _select_assignments(cursor, generation, lock=False)
     schedules = _select_schedules(cursor, generation, lock=False)
+    segments = _segments(assignments, _service_dates_by_assignment(schedules))
     confirmed_version, confirmed_dates = _select_confirmed_service_dates(
         cursor, case_no, False,
     )
     return OrderTermsQueryFacts(
-        registry=registry,
-        assignments=_segments(assignments, _service_dates_by_assignment(schedules)),
+        registry=_registry_terms_facts(cursor, order_row, aggregate, generation),
+        assignments=segments,
         confirmed_service_date_version=confirmed_version,
         confirmed_service_dates=confirmed_dates,
+        service_quantity_lock_reason=service_quantity_lock_reason(
+            _service_started(order_row["actual_start_date"], segments), order_row["status"],
+        ),
+        actual_start_date=order_row["actual_start_date"],
     )
 
 
@@ -114,9 +120,14 @@ def load_order_facts(
 def load_registry_terms_facts(cursor: Any, case_no: str) -> OrderTermsRegistryFacts:
     """Read persisted terms and versions without mutation eligibility checks."""
 
-    order = load_order_facts(cursor, case_no)
+    order_row = select_order(cursor, case_no, lock=False)
     aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
     generation = _select_generation(cursor, aggregate, lock=False)
+    return _registry_terms_facts(cursor, order_row, aggregate, generation)
+
+
+def _registry_terms_facts(cursor, order_row, aggregate, generation):
+    case_no = str(order_row["case_no"])
     cursor.execute(
         "SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s",
         (case_no,),
@@ -128,7 +139,7 @@ def load_registry_terms_facts(cursor: Any, case_no: str) -> OrderTermsRegistryFa
     )
     payroll = cursor.fetchone()
     return OrderTermsRegistryFacts(
-        order=order,
+        order=_order_facts(order_row),
         scheduling_version=int(aggregate["aggregate_version"]),
         scheduling_generation=int(generation["generation_number"]) if generation else 0,
         client_finance_version=int(finance["aggregate_version"]) if finance else None,

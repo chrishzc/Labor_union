@@ -80,6 +80,38 @@ async function submittedTerms() {
   return vi.mocked(orderTermsMutationClient.preview).mock.calls[0][1].proposed_terms;
 }
 
+it('replaces started-service dates directly in the calendar and previews with an empty reason', async () => {
+  const originalDates = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05', '2026-10-06'];
+  const query = OrderTermsQuerySchema.parse({
+    ...queryFixture(),
+    actual_start_date: originalDates[0],
+    service_quantity_lock_reason: 'service_started',
+    confirmed_service_dates: originalDates,
+    assignments: [{ assignment_id: 42, staff_id: 7, service_days: 5, service_dates: originalDates }],
+  });
+  const calculate = vi.spyOn(schedulePrecisionClient, 'calculate');
+  render(<OrderTermsMutationPanel caseNo={query.case_no} query={query} />);
+  fireEvent.click(screen.getByRole('button', { name: '解除鎖定並修改' }));
+  fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '6' } });
+  expect(screen.queryByLabelText('替代日期排休方式')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /試算.*日期/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '服務日期 2026-10-01' })).toBeDisabled();
+  const preview = screen.getByRole('button', { name: '預覽服務條件與排班' });
+  expect(preview).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-10-07' }));
+  expect(screen.getByLabelText('條款變更原因')).toHaveValue('');
+  expect(preview).toBeEnabled();
+  fireEvent.click(preview);
+  await screen.findByRole('button', { name: '確認並儲存' });
+  const expected = [...originalDates, '2026-10-07'];
+  expect(vi.mocked(orderTermsMutationClient.preview).mock.calls[0][1]).toMatchObject({
+    allow_started_service_change: true,
+    replacement_service_dates: expected,
+    replacement_allocations: [{ assignment_id: 42, service_days: 6, service_dates: expected }],
+  });
+  expect(calculate).not.toHaveBeenCalled();
+});
+
 it('saves 15 to 10 service days from the registry and reads back the replacement', async () => {
   const fixture = queryFixture();
   const registry = { ...fixture, terms: { ...fixture.terms, service_days: 15 } };
@@ -127,7 +159,7 @@ it('saves 15 to 10 service days from the registry and reads back the replacement
   expect(days).toHaveValue(15);
   fireEvent.change(days, { target: { value: '10' } });
 
-  expect(screen.getByRole('group', { name: '新天數的替代服務安排' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '重新排班' })).toBeInTheDocument();
   expect(previewButton()).toBeDisabled();
   fireEvent.change(screen.getByLabelText('替代日期排休方式'), { target: { value: '連續服務' } });
   expect(previewButton()).toBeDisabled();
@@ -241,6 +273,7 @@ describe('Issue #337 empty service time', () => {
 
     fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: '09:00' } });
     fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '13:30' } });
+    fireEvent.click(screen.getByRole('button', { name: '採用建議時數' }));
     fireEvent.click(previewButton());
 
     const proposed = await submittedTerms();
