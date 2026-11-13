@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import { StaffCasePreferenceManualEditor, StaffCasePreferenceManualPreview, updateManualDraftRow } from '../../../../../../../pages/StaffPage';
 import { staffCasePreferenceManualClient } from '../../../../../../../api/staff_case_preferences/staff_case_preferences_client';
 import { StaffCasePreferenceRelationsSchema } from '../../../../../../../api/staff_case_preferences/staff_case_preferences_schemas';
@@ -122,5 +123,26 @@ describe('two informational service preferences and preserved imported facts', (
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
     await screen.findByLabelText('可承接區域值1');
+  });
+
+  it('只修改單一偏好後直接離開時，離開防護只顯示被修改的偏好欄位與正確前後值', async () => {
+    function PreferenceLeaveHost() {
+      const { requestLeave } = useUnsavedNavigation();
+      return <>
+        <StaffCasePreferenceManualEditor staffId={531} directEditing />
+        <button type="button" onClick={() => requestLeave(vi.fn())}>離開月嫂抽屜</button>
+      </>;
+    }
+    render(<UnsavedChangesProvider><PreferenceLeaveHost /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('可承接區域值1'), { target: { value: '東區' } });
+    fireEvent.click(screen.getByRole('button', { name: '離開月嫂抽屜' }));
+
+    const dialog = within(screen.getByRole('dialog', { name: '尚有未儲存的變更' }));
+    expect(dialog.getByRole('rowheader', { name: '可承接區域' })).toBeInTheDocument();
+    expect(dialog.getByRole('cell', { name: '北區（原區域說明）' })).toBeInTheDocument();
+    expect(dialog.getByRole('cell', { name: '東區' })).toBeInTheDocument();
+    expect(dialog.queryByRole('rowheader', { name: '接案能力' })).not.toBeInTheDocument();
+    expect(dialog.queryByRole('rowheader', { name: '週間服務' })).not.toBeInTheDocument();
+    expect(dialog.queryByText(/8小時|家常料理|中秋節|雙胞胎/)).not.toBeInTheDocument();
   });
 });

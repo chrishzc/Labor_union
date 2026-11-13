@@ -1,4 +1,4 @@
-import { useUnsavedDraft } from './UnsavedChanges';
+import { useUnsavedChanges, type UnsavedChange } from './UnsavedChanges';
 /**
  * File: LineNotificationRulesMutationPanel.tsx
  * Description: 提供通知規則欄位編輯、零寫入檢查、一次點擊 Save 與安全 Delete 操作。
@@ -326,7 +326,36 @@ export const LineNotificationRulesMutationPanel: React.FC<
       setMessage(displayError(error));
     }
   };
-  useUnsavedDraft('通知發送設定', { '規則': draft }, { baseline: { '規則': baseline }, busy });
+  const recipientLabel = (value: LineNotificationRecipientSelector) => RECIPIENT_OPTIONS.find((item) => item.value === value)?.label ?? value;
+  const scheduleLabel = (schedule: LineNotificationRule['schedule']) => {
+    switch (schedule.kind) {
+      case 'immediate': return '立即通知';
+      case 'service_end': return '服務結束時';
+      case 'relative_service_time': return `服務時間後 ${schedule.offset_seconds} 秒`;
+    }
+  };
+  const frequencyLabel = (frequency: LineNotificationRule['frequency']) =>
+    frequency?.kind === 'recurring_bounded'
+      ? `每 ${frequency.interval_days} 天（最多 ${frequency.maximum_occurrences} 次）`
+      : '僅一次';
+  const predicatesLabel = (predicates: readonly LineNotificationPredicate[] = []) =>
+    predicates.map((item) => PREDICATE_OPTIONS.find((option) => option.value === item)?.label ?? item).join('、') || '無';
+  const ruleChanges: UnsavedChange[] = draft.rules.flatMap((rule) => {
+    const previous = baseline.rules.find((item) => item.id === rule.id);
+    const ruleName = NOTIFICATION_RULE_LABELS[rule.event_code] ?? rule.id;
+    if (!previous) return [{ label: `${ruleName}（新增規則）`, before: '無', after: '已新增' }];
+    const fields: Array<[string, string, string]> = [
+      ['啟用狀態', previous.enabled ? '啟用' : '停用', rule.enabled ? '啟用' : '停用'],
+      ['接收對象', recipientLabel(previous.recipient_selector), recipientLabel(rule.recipient_selector)],
+      ['寄送時機', scheduleLabel(previous.schedule), scheduleLabel(rule.schedule)],
+      ['發送頻率', frequencyLabel(previous.frequency), frequencyLabel(rule.frequency)],
+      ['觸發條件', predicatesLabel(previous.predicates), predicatesLabel(rule.predicates)],
+    ];
+    return fields
+      .filter(([, before, after]) => before !== after)
+      .map(([fieldLabel, before, after]) => ({ label: `${ruleName}／${fieldLabel}`, before, after }));
+  });
+  useUnsavedChanges('通知發送設定', ruleChanges, { busy });
 
 
   return (

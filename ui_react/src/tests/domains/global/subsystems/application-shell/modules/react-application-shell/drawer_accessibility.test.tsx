@@ -43,4 +43,54 @@ describe('Drawer 無障礙互動', () => {
     expect(document.body).not.toHaveClass('modal-open');
     expect(trigger).toHaveFocus();
   });
+
+  it('closeDisabled 切換時不會重設焦點或跳到底部可聚焦元素，且仍依最新狀態控制 Escape', async () => {
+    function BusyDrawerHarness() {
+      const [open, setOpen] = useState(true);
+      const [busy, setBusy] = useState(false);
+      return (
+        <Drawer
+          isOpen={open}
+          onClose={() => setOpen(false)}
+          title="忙碌狀態抽屜"
+          closeLabel="關閉忙碌狀態抽屜"
+          closeDisabled={busy}
+        >
+          <input aria-label="抽屜欄位" disabled={busy} />
+          <button type="button" disabled={busy} onClick={() => setBusy(true)}>模擬儲存</button>
+          <button type="button" onClick={() => setBusy(false)}>模擬完成</button>
+          <details>
+            <summary tabIndex={0}>底部變更歷程</summary>
+          </details>
+        </Drawer>
+      );
+    }
+
+    render(<BusyDrawerHarness />);
+    const closeBtn = screen.getByRole('button', { name: '關閉忙碌狀態抽屜' });
+    await waitFor(() => expect(closeBtn).toHaveFocus());
+
+    const input = screen.getByLabelText('抽屜欄位');
+    input.focus();
+    expect(input).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '模擬儲存' }));
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    expect(screen.getByText('底部變更歷程')).not.toHaveFocus();
+
+    const blockedEscape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true });
+    fireEvent(window, blockedEscape);
+    expect(blockedEscape.defaultPrevented).toBe(false);
+    expect(screen.getByRole('dialog', { name: '忙碌狀態抽屜' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '模擬完成' }));
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    expect(closeBtn).not.toHaveFocus();
+    expect(screen.getByText('底部變更歷程')).not.toHaveFocus();
+
+    const allowedEscape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true });
+    fireEvent(window, allowedEscape);
+    expect(allowedEscape.defaultPrevented).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
 });

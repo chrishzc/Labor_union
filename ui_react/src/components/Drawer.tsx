@@ -39,6 +39,8 @@ export const Drawer: React.FC<DrawerProps> = ({
   const close = () => { if (!closeDisabled) requestLeave(onClose); };
   const closeRef = useRef(close);
   closeRef.current = close;
+  const closeDisabledRef = useRef(closeDisabled);
+  closeDisabledRef.current = closeDisabled;
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -49,11 +51,11 @@ export const Drawer: React.FC<DrawerProps> = ({
       containerRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
     );
     const firstTarget = focusableElements()[0] ?? containerRef.current;
-    window.requestAnimationFrame(() => firstTarget?.focus());
+    const frameId = window.requestAnimationFrame(() => firstTarget?.focus());
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (leavePendingRef.current) return;
-      if (e.key === 'Escape' && isOpen && !closeDisabled) {
+      if (e.key === 'Escape' && !closeDisabledRef.current) {
         e.preventDefault();
         closeRef.current();
       }
@@ -77,12 +79,13 @@ export const Drawer: React.FC<DrawerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(frameId);
       window.removeEventListener('keydown', handleKeyDown);
       document.body.classList.remove('modal-open');
       if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});
       else document.querySelector<HTMLInputElement>('[data-ongoing-focus]')?.focus({preventScroll:true});
     };
-  }, [closeDisabled, isOpen]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

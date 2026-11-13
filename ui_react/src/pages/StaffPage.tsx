@@ -287,7 +287,23 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setPreview(null); setStatus(''); setPhase('editing');
     setDraft(current => { const next = updateManualDraftRow(current, key, index, field, value); if (field === 'value' && value !== current[key][index].value) next[key][index].detail = null; return next; });
   };
-  useUnsavedDraft('服務偏好', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: phase === 'previewing' || applying });
+  const preferenceSummary = (values: readonly { value: string; detail: string | null }[]) =>
+    values.map((item) => item.value ? (item.detail ? `${item.value}（${item.detail}）` : item.value) : '尚未選擇條件').join('、') || '尚未登錄';
+  useUnsavedDraft(
+    '服務偏好',
+    {
+      ...Object.fromEntries(PREFERENCE_RELATION_KEYS.map((key) => [MANUAL_RELATION_LABELS[key], preferenceSummary(draft[key])])),
+      '備註': reason,
+    },
+    {
+      enabled: !!snapshot,
+      baseline: snapshot ? {
+        ...Object.fromEntries(PREFERENCE_RELATION_KEYS.map((key) => [MANUAL_RELATION_LABELS[key], preferenceSummary(snapshot.after[key])])),
+        '備註': '',
+      } : null,
+      busy: phase === 'previewing' || applying,
+    },
+  );
 
   const importedInformation = <section className="staff-imported-service-information" aria-label="匯入服務資訊">
     <h4>匯入服務資訊</h4>

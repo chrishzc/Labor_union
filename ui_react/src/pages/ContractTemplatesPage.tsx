@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Download, FileSpreadsheet, Link2, List, MousePointer2, Save, Search, ShieldCheck, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { contractTemplatesClient as client, type TemplateCatalog, type TemplateCell, type TemplateKey, type TemplateMutation, type TemplatePreview, type TemplateSave, type TemplateSource } from '../api/contract_templates/contract_templates_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
-import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
+import { useUnsavedChanges, useUnsavedNavigation, type UnsavedChange } from '../components/UnsavedChanges';
 import './ContractTemplatesPage.css';
 
 const COMMAND_STORAGE = 'contract-template-pending-command';
@@ -39,10 +39,20 @@ export function ContractTemplatesPage() {
   const fields = useMemo(() => new Map(catalog?.fields.map(field => [field.key, field]) ?? []), [catalog]);
   const field = fields.get(fieldKey);
   const source: TemplateSource = { file, sourceVersionId, worksheetName: preview?.worksheet_name ?? null, assignments };
-  const draft = { 'Excel 模板': file?.name ?? preview?.filename ?? '', '工作表': preview?.worksheet_name ?? '', '欄位映射': assignments };
-  const dirty = !!preview && JSON.stringify(draft) !== JSON.stringify(baseline);
+  const baselineAssignments = (baseline['欄位映射'] as Record<string, string> | undefined) ?? {};
+  const fieldName = (mappedKey: string | undefined) => mappedKey ? (fields.get(mappedKey)?.label ?? mappedKey) : '未映射';
+  const unsavedChanges: UnsavedChange[] = !preview ? [] : [
+    ...((file?.name ?? preview.filename ?? '') !== String(baseline['Excel 模板'] ?? '')
+      ? [{ label: 'Excel 模板', before: String(baseline['Excel 模板'] ?? '') || '未填寫', after: (file?.name ?? preview.filename ?? '') || '未填寫' }] : []),
+    ...((preview.worksheet_name ?? '') !== String(baseline['工作表'] ?? '')
+      ? [{ label: '工作表', before: String(baseline['工作表'] ?? '') || '未填寫', after: (preview.worksheet_name ?? '') || '未填寫' }] : []),
+    ...Array.from(new Set([...Object.keys(baselineAssignments), ...Object.keys(assignments)])).sort()
+      .filter((cell) => (assignments[cell] ?? '') !== (baselineAssignments[cell] ?? ''))
+      .map((cell) => ({ label: `儲存格 ${cell} 欄位映射`, before: fieldName(baselineAssignments[cell]), after: fieldName(assignments[cell]) })),
+  ];
+  const dirty = unsavedChanges.length > 0;
   const locked = busy || !!pending;
-  const unsaved = useUnsavedDraft('契約模板與欄位映射', draft, { baseline, enabled: !!preview, busy: locked });
+  const unsaved = useUnsavedChanges('契約模板與欄位映射', unsavedChanges, { busy: locked });
   const missing = catalog?.fields.filter(field => field.requiredness === 'required' && !Object.values(assignments).includes(field.key)) ?? [];
   const currentVersion = catalog?.versions.find(version => version.version_id === sourceVersionId);
   const activeVersion = catalog?.versions.find(version => version.version_id === catalog.active_version_id);

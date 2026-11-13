@@ -13,7 +13,7 @@ export function DatabaseBackupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  useUnsavedDraft('每日資料庫備份時間', { time }, { baseline: { time: status?.time ?? '18:00' }, enabled: !!status, busy });
+  useUnsavedDraft('每日資料庫備份時間', { '備份時間': time }, { baseline: { '備份時間': status?.time ?? '18:00' }, enabled: !!status, busy });
 
   useEffect(() => {
     let active = true;

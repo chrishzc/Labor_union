@@ -49,6 +49,20 @@ export function useUnsavedChanges(name: string, changes: UnsavedChange[], option
 }
 
 type Draft = Record<string, unknown>;
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+const deepEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((item, index) => deepEqual(item, right[index]));
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const leftKeys = Object.keys(left).filter(key => left[key] !== undefined);
+    const rightKeys = Object.keys(right).filter(key => right[key] !== undefined);
+    return leftKeys.length === rightKeys.length && leftKeys.every(key => Object.prototype.hasOwnProperty.call(right, key) && deepEqual(left[key], right[key]));
+  }
+  return false;
+};
 const valueText = (value: unknown): string => value === null || value === undefined || value === '' ? '未填寫'
   : typeof value === 'boolean' ? value ? '是' : '否'
   : Array.isArray(value) ? value.map(valueText).join('、') || '無' : typeof value === 'object'
@@ -69,7 +83,7 @@ export function useUnsavedDraft(name: string, draft: Draft, options: {
   wasEnabled.current = options.enabled !== false;
   reset.current = options.resetKey;
   const baseline = options.baseline ?? initial.current;
-  const changes = options.enabled === false ? [] : Object.keys(draft).filter(key => JSON.stringify(draft[key]) !== JSON.stringify(baseline[key]))
+  const changes = options.enabled === false ? [] : Object.keys(draft).filter(key => !deepEqual(draft[key], baseline[key]))
     .map(key => ({ label: key, before: valueText(baseline[key]), after: valueText(draft[key]) }));
   const ref = useUnsavedChanges(name, changes, options);
   return Object.assign(ref, { markSaved: () => { initial.current = draft; recheck(value => value + 1); } });

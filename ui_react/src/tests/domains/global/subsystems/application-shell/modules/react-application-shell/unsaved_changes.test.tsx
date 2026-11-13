@@ -217,4 +217,19 @@ describe('未儲存變更離開防護', () => {
     expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
     expect(leave).toHaveBeenCalledOnce();
   });
+
+  it('物件屬性順序不同但內容相同時不誤判為未儲存變更', () => {
+    const leave = vi.fn();
+    function KeyOrderHost() {
+      const { requestLeave } = useUnsavedNavigation();
+      useUnsavedDraft('物件順序測試', { '設定': { alpha: '1', beta: '2' } }, {
+        baseline: { '設定': { beta: '2', alpha: '1' } },
+      });
+      return <button type="button" onClick={() => requestLeave(leave)}>離開</button>;
+    }
+    render(<UnsavedChangesProvider><KeyOrderHost /></UnsavedChangesProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '離開' }));
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(leave).toHaveBeenCalledOnce();
+  });
 });

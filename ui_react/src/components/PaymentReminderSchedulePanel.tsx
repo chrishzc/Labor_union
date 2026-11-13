@@ -47,7 +47,14 @@ export function PaymentReminderSchedulePanel({client=paymentReminderScheduleClie
       setCurrent(result);setDraft({...result.schedule});operation.current=null;setNotice('提醒排程已儲存，新建的提醒會套用這組時間。');
     }catch(error){setError(copyError(error,true));}finally{sending.current=false;setBusy(false);}
   }
-  const guard=useUnsavedDraft('繳款提醒排程',draft??{}, {baseline:current?.schedule??null,enabled:!!draft,busy,save,discard:()=>{if(current)setDraft({...current.schedule});operation.current=null;}});
+  const scheduleDraft = (schedule: PaymentReminderSchedule | null | undefined) => schedule ? {
+    '訂金提醒時機': schedule.deposit_mode === 'immediate' ? '資格齊備後立即寄送' : '齊備後的下一個固定時間',
+    '訂金寄送時間': schedule.deposit_time,
+    '第一期寄送時間': schedule.first_time,
+    '第二期寄送時間': schedule.second_time,
+    '逾期補寄檢查時間': schedule.overdue_time,
+  } : {};
+  const guard=useUnsavedDraft('繳款提醒排程',scheduleDraft(draft), {baseline:current?scheduleDraft(current.schedule):null,enabled:!!draft,busy,save,discard:()=>{if(current)setDraft({...current.schedule});operation.current=null;}});
   function change<K extends keyof PaymentReminderSchedule>(field:K,value:PaymentReminderSchedule[K]){setDraft(previous=>previous?{...previous,[field]:value}:null);operation.current=null;setNotice('');}
   if(loading)return <p role="status">正在讀取提醒排程…</p>;
   if(!draft||!current)return <div><p role="alert">{error}</p><button type="button" className="finance-btn-secondary" onClick={()=>setReload(value=>value+1)}>重新載入提醒排程</button></div>;

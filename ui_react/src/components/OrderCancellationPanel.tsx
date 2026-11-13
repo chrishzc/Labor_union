@@ -287,7 +287,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     }
     finally { inFlight.current.delete(caseNo); }
   };
-  useUnsavedDraft('取消訂單', { '服務天數確認': days, '取消原因': reason, chargeFee, feeAmount, feeNote }, { enabled: !!query, resetKey: query, busy });
+  useUnsavedDraft('取消訂單', { '服務天數確認': days.map((item) => `${item.service_date || '未填日期'}（月嫂 ${item.staff_id || '未填'}）`).join('、') || '無', '取消原因': reason, '收取違約金': chargeFee, '違約金金額': feeAmount, '違約金說明': feeNote }, { enabled: !!query, resetKey: query, busy });
 
   const settlement = preview?.client_finance_impact?.cancellation_settlement;
   const blocked = !!preview?.client_finance_impact?.blockers.length || !!preview?.payroll_impact?.blockers.length;
