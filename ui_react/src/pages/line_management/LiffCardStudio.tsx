@@ -136,25 +136,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
-  if (item.id === 'candidate_contact_customer') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">媒合條件協調</div>
-        <p>請依工會提出的問題，填寫更新後的服務條件。</p>
-        <div className="mock-placeholder-box">
-          <strong>可協調項目</strong>
-          <small>此處顯示工會人員自行輸入的詢問文案。</small>
-        </div>
-        <label>更新後的條件</label>
-        <textarea rows={2} placeholder="請填寫更新後的條件" readOnly />
-        <label>補充說明（選填）</label>
-        <textarea rows={2} placeholder="可補充能調整的方式" readOnly />
-        <button type="button" className="mock-primary-btn" disabled>送出回答</button>
-        <small>工會審核通過即更新案件條件；未通過時由人員再次詢問。</small>
-      </div>
-    );
-  }
-
   if (item.id === 'staff_order_search') {
     return (
       <div className="mock-form-inputs">
@@ -222,24 +203,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
           <strong>案件編號｜應付金額｜付款狀態</strong>
           <small>目標付款日｜實際付款日｜逐筆交易紀錄</small>
         </div>
-      </div>
-    );
-  }
-
-  if (item.id === 'candidate_contact') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">候選月嫂案件回覆</div>
-        <p>可複選需要確認的資訊或希望客戶調整的條件，也可以直接選擇沒有意願。</p>
-        <div className="mock-change-options">
-          <span><CheckSquare aria-hidden="true" /> 服務地區</span>
-          <span><CheckSquare aria-hidden="true" /> 服務日期／檔期</span>
-          <span><CheckSquare aria-hidden="true" /> 每日服務時段／時數</span>
-          <span><CheckSquare aria-hidden="true" /> 下廚、交通或個人因素</span>
-          <span><CheckSquare aria-hidden="true" /> 沒有意願</span>
-        </div>
-        <button type="button" className="mock-primary-btn" disabled>送出回應</button>
-        <small>調整條件只表示修改後可重新詢問，不會直接標示為願意承接。</small>
       </div>
     );
   }

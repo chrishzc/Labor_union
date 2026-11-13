@@ -157,6 +157,6 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
     {unresolved && <p role="status">保存結果尚未完成回讀，請先接續原操作。</p>}
     {draft?.status === 'outcome_unknown' && <button type="button" disabled={busy !== null} onClick={() => void save('apply')}>接續保存預計日期</button>}
     {draft?.status === 'observation_failed' && <button type="button" disabled={busy !== null} onClick={() => void save('observe')}>重新取得保存結果</button>}
-    <button type="button" disabled={!facts || busy !== null || unresolved || formal || !dates.length || sameDates(dates, facts.dates.current_dates)} onClick={() => void save()}>保存預計日期</button>
+    <button type="button" className="candidate-save-planned-dates" disabled={!facts || busy !== null || unresolved || formal || !dates.length || sameDates(dates, facts.dates.current_dates)} onClick={() => void save()}>保存預計日期</button>
   </section>;
 }

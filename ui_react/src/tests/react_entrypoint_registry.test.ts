@@ -26,10 +26,10 @@ const LIFF_ASSETS = [
   ['非市民服務申請', '非市民服務申請'],
   ['bind.html', '連結客戶資料'], ['profile_guard.html', '修改資料前的身分確認'],
   ['profile_update.html', '修改個人資料'], ['order_update.html', '申請訂單異動'],
-  ['candidate_contact_customer.html', '媒合條件協調'], ['staff_order_search.html', '我的案件'],
+  ['staff_order_search.html', '我的案件'],
   ['staff_schedule.html', '班表與請假'],
   ['staff_profile_update.html', '更新個人資料'],
-  ['staff_payout.html', '薪資與付款紀錄'], ['candidate_contact.html', '接案回覆'],
+  ['staff_payout.html', '薪資與付款紀錄'],
   ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],
   ['mobile_admin.html · 客服中心', '客服中心'], ['mobile_admin.html · 狀態追蹤', '訂單進度'],
   ['mobile_admin.html · 營運摘要', '營運摘要'],
@@ -124,12 +124,10 @@ describe('React entrypoint registry', () => {
         'profile_guard.html',
         'profile_update.html',
         'order_update.html',
-        'candidate_contact_customer.html',
         'staff_order_search.html',
         'staff_schedule.html',
         'staff_profile_update.html',
         'staff_payout.html',
-        'candidate_contact.html',
         'identity.html',
         'mobile_admin.html',
         'mobile_admin.html',
@@ -193,10 +191,7 @@ describe('React entrypoint registry', () => {
       'https://line-test.example.dev/line-order-update?studio_preview=1',
     );
 
-    fireEvent.click(liffAsset('candidate_contact_customer.html'));
-    expect(within(screen.getByRole('region', { name: '所選項目預覽' })).getByRole('heading', { name: '媒合條件協調', level: 3 })).toBeInTheDocument();
-    expect(screen.getByText(/必須由客戶收到的案件協調卡帶入專屬識別碼/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /正式 LIFF 入口|安全展示頁/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /候選月嫂案件回覆|媒合條件協調/ })).not.toBeInTheDocument();
 
     fireEvent.click(liffAsset('staff_profile_update.html'));
     const staffProfilePreview = within(screen.getByRole('region', { name: '所選項目預覽' }));
@@ -210,13 +205,6 @@ describe('React entrypoint registry', () => {
     expect(staffProfilePreview.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-staff-profile-update',
-    );
-
-    fireEvent.click(liffAsset('candidate_contact.html'));
-    expect(screen.getByText('候選月嫂案件回覆')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
-      'href',
-      'https://line-test.example.dev/line-candidate-contact?studio_preview=1',
     );
 
     fireEvent.click(liffAsset('mobile_admin.html · 待辦工作台'));
@@ -275,12 +263,12 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'customer' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'profile_guard.html', 'profile_update.html', 'order_update.html', 'candidate_contact_customer.html', 'identity.html', '非市民服務申請',
+      'profile_guard.html', 'profile_update.html', 'order_update.html', 'identity.html', '非市民服務申請',
     ].sort()));
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'staff_order_search.html', 'staff_schedule.html', 'staff_profile_update.html', 'staff_payout.html', 'candidate_contact.html', 'identity.html',
+      'staff_order_search.html', 'staff_schedule.html', 'staff_profile_update.html', 'staff_payout.html', 'identity.html',
     ].sort()));
   });
 

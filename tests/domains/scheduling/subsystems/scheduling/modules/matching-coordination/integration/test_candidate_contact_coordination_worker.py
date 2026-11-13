@@ -1,4 +1,4 @@
-"""Retired automatic effects are cancelled without creating outbound messages."""
+"""Retired coordination effects are cancelled without creating outbound messages."""
 import pytest
 from subsystems.line.candidate_contact_coordination_worker import CandidateContactCoordinationWorker
 
@@ -17,7 +17,7 @@ class Connection:
     def __exit__(self, *_):
         return False
     def execute(self, sql, args):
-        self.statements.append(sql)
+        self.statements.append((sql, args))
         if self.fail:
             raise RuntimeError('storage unavailable')
     def commit(self):
@@ -28,15 +28,19 @@ class Connection:
         pass
 
 
-def test_worker_only_retires_automatic_effects_and_preserves_staff_authored_questions():
+def test_worker_cancels_all_pending_retired_coordination_sources():
     connection = Connection()
-    assert CandidateContactCoordinationWorker(lambda: connection, lambda: None).run_once() == 2
+    assert CandidateContactCoordinationWorker(lambda: connection, lambda: None).run_once() == 1
     assert connection.committed
-    assert all(sql.startswith('UPDATE line_delivery_tasks') for sql in connection.statements)
-    assert "'candidate_contact_adjustment','candidate_contact_manual_followup','candidate_contact_staff_review'" in connection.statements[0]
-    assert "'matching_plan_decision'" in connection.statements[0]
-    assert "information_question_sent" in connection.statements[1] and "adjustment_question_sent" in connection.statements[1]
-    assert all('timed_out' not in sql for sql in connection.statements)
+    [(sql, params)] = connection.statements
+    assert sql.startswith('UPDATE line_delivery_tasks')
+    assert "processing_status IN ('pending','retryable_failed')" in sql
+    assert set(params) == {
+        'candidate_contact_adjustment', 'candidate_contact_answer',
+        'candidate_contact_manual_followup', 'candidate_contact_question',
+        'candidate_contact_staff_review', 'matching_plan_decision',
+        'mobile-matching-followup:%',
+    }
 
 
 def test_worker_storage_failure_is_rolled_back():

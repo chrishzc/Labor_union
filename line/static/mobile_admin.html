@@ -122,7 +122,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
       .toolbar { align-items:stretch; }
       .field-grid { grid-template-columns:1fr; }
     }
-    #matchingOperation .toolbar { flex-wrap:wrap; }
     #matchingCandidates label { display:flex; align-items:center; gap:10px; }
     #matchingCandidates input[type="checkbox"] { width:auto; min-height:auto; flex-shrink:0; }
   </style>
@@ -200,14 +199,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
       </div>
       <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="serviceStartWorkstream"><span class="workstream-copy"><strong>服務開始、請假、代班與換人</strong><small id="serviceStartMeta">待處理 — 件</small></span><span class="workstream-count" id="serviceStartCount">—</span><span class="workstream-action">查看</span></button>
       <div id="serviceStartWorkstream" class="workstream-panel hidden"><div id="serviceStartTodos" class="surface-list"></div></div>
-      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="candidateInformationWorkstream">
-        <span class="workstream-copy"><strong>月嫂確認與條件協調</strong><small id="candidateInformationMeta">待處理 — 件</small></span>
-        <span class="workstream-count" id="candidateInformationCount">—</span>
-        <span class="workstream-action">查看</span>
-      </button>
-      <div id="candidateInformationWorkstream" class="workstream-panel hidden">
-        <div id="candidateInformationQuestions" class="surface-list"></div>
-      </div>
       <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="customerRecommendationWorkstream">
         <span class="workstream-copy"><strong>客戶推薦確認與簽約</strong><small id="customerRecommendationMeta">待處理 — 件</small></span>
         <span class="workstream-count" id="customerRecommendationCount">—</span>
@@ -249,37 +240,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
       </button>
       <div id="matchingWorkstream" class="workstream-panel hidden">
         <div id="matchingFollowups" class="surface-list"></div>
-        <section id="matchingOperation" class="hidden" aria-live="polite">
-          <article class="card step-card">
-            <div class="row"><strong id="matchingOperationTitle">媒合條件處理</strong><span class="pill">步驟 1 / 2</span></div>
-            <p class="muted">核對客戶提出的變更並填入下方欄位。審核通過後會直接更新案件。</p>
-            <p id="matchingCustomerConditions"></p>
-            <div id="matchingIssues"></div>
-            <div class="field-grid">
-              <label>預計開始日期<input id="matchingStartDate" type="date"></label>
-              <label>服務天數<input id="matchingServiceDays" type="number" min="1"></label>
-              <label>每日服務時數<input id="matchingDailyHours" type="number" min="1"></label>
-              <label>是否需要下廚<select id="matchingCooking"><option value="unknown">待確認</option><option value="true">需要下廚</option><option value="false">不需要下廚</option></select></label>
-              <label>樓層費<input id="matchingFloorFee" type="number" min="0"></label>
-              <label>每日開始時間<input id="matchingStartTime" type="time"></label>
-              <label>每日結束時間<input id="matchingEndTime" type="time"></label>
-              <label>結束日<select id="matchingEndOffset"><option value="0">同日</option><option value="1">翌日</option></select></label>
-            </div>
-            <div class="toolbar">
-              <button id="reconsiderMatchingConditions" type="button">不通過，繼續協調</button>
-              <button id="applyMatchingTerms" type="button" class="secondary hidden">審核通過並更新案件條件</button>
-            </div>
-          </article>
-          <article class="card step-card">
-            <div class="row"><strong>選擇月嫂重新詢問</strong><span class="pill">步驟 2 / 2</span></div>
-            <p class="muted" id="matchingRecontactGate">完成正式修改後，才能預覽並傳送更新後的案件資訊。</p>
-            <div id="matchingCandidates"></div>
-            <div class="toolbar">
-              <button id="previewMatchingRecontact" type="button" disabled>重新詢問所選月嫂</button>
-            </div>
-
-          </article>
-        </section>
       </div>
     </div>
     <div class="section-heading"><div><h2>工作工具</h2><p class="muted">獨立操作工具，不計入待辦總數。</p></div></div>
@@ -344,9 +304,7 @@ const reviewPageState = {page: 1, pageSize: 50, total: 0};
 let ticketQuerySequence = 0;
 let reviewQuerySequence = 0;
 let profileReviewQuerySequence = 0;
-let candidateInformationQuerySequence = 0;
 let profileReviewPage = 1;
-let candidateInformationPage = 1;
 let matchingFollowupPage = 1;
 let customerRecommendationPage = 1;
 let matchingFollowupQuerySequence = 0;
@@ -358,8 +316,6 @@ let groupTodoQuerySequence = 0;
 let paymentOverduePage = 1;
 let paymentOverdueSequence = 0;
 let reminderActorId = null;
-let matchingOperation = null;
-let matchingRecontactPreview = null;
 let orderTrackingQuerySequence = 0;
 let operationsQuerySequence = 0;
 let orderTrackingCursor = null;
@@ -421,7 +377,7 @@ function showEmpty(root, message) {
 
 function updateReviewTotal() {
   if (document.getElementById('notificationSources')?.dataset.loaded === 'true') return;
-  const countIds = ["identityReviewCount", "profileReviewCount", "serviceStartCount", "matchingFollowupCount", "candidateInformationCount", "customerRecommendationCount", "depositCount", "groupTodoCount", "paymentOverdueCount"];
+  const countIds = ["identityReviewCount", "profileReviewCount", "serviceStartCount", "matchingFollowupCount", "customerRecommendationCount", "depositCount", "groupTodoCount", "paymentOverdueCount"];
   const counts = countIds.map(id => Number.parseInt(document.getElementById(id).dataset.pendingCount || "", 10));
   document.getElementById("reviewTotal").textContent = counts.every(Number.isInteger)
     ? String(counts.reduce((sum, count) => sum + count, 0))
@@ -613,7 +569,6 @@ function renderStudioPreview(next) {
     setWorkstreamCount("identityReviewCount", "identityReviewMeta", 1, "待審核");
     setWorkstreamCount("profileReviewCount", "profileReviewMeta", 3, "待審核");
     setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", 1, "待提醒");
-    setWorkstreamCount("candidateInformationCount", "candidateInformationMeta", 0, "待處理");
     setWorkstreamCount("customerRecommendationCount", "customerRecommendationMeta", 0, "待處理");
     setWorkstreamCount("depositCount", "depositMeta", 0, "待處理");
     setWorkstreamCount("groupTodoCount", "groupTodoMeta", 0, "待建群");
@@ -622,7 +577,6 @@ function renderStudioPreview(next) {
       ["profileReviews", "安全預覽不載入正式客戶資料異動申請。"],
       ["reviews", "安全預覽不載入正式身分重綁與異常申請。"],
       ["matchingFollowups", "安全預覽不載入正式媒合人工跟進案件。"],
-      ["candidateInformationQuestions", "安全預覽不載入正式月嫂確認問題。"],
       ["paymentOverdueReminders", "安全預覽不載入正式逾期款項或建立提醒。"],
     ];
     previewGroups.forEach(([id, message]) => {
@@ -1235,143 +1189,6 @@ async function applySchedulingReview() {
   } catch (error) { showStatus(error.message, true); }
 }
 
-async function loadCandidateInformation() {
-  const notificationVersion=notificationSequence;
-  const sequence = ++candidateInformationQuerySequence;
-  const page = candidateInformationPage;
-  const data = requireTodoPage(await postJson("/api/v1/line/mobile-admin/candidate-information", {page, page_size:25}), page);
-  if (notificationVersion!==notificationSequence || sequence !== candidateInformationQuerySequence || target !== "staff_review") return;
-  if (page > data.totalPages) { candidateInformationPage = data.totalPages; return loadCandidateInformation(); }
-  const root = document.getElementById("candidateInformationQuestions");
-  root.replaceChildren();
-  renderPagination(root, data, page => { candidateInformationPage = page; loadCandidateInformation().catch(error => showStatus(error.message, true)); });
-  setWorkstreamCount("candidateInformationCount", "candidateInformationMeta", data.total, "待處理");
-  if (!data.items.length) return showEmpty(root, "目前沒有待處理的月嫂確認問題。");
-  if(notificationVersion!==notificationSequence)return;
-  data.items=focusNotificationItems('information',data.items);
-  data.items.forEach(item => root.appendChild(candidateInformationCard(item)));
-}
-
-function candidateInformationCard(item) {
-  const card = document.createElement("article");
-  card.className = "card";
-  card.dataset.questionId = item.question_id;
-  const adjustment = item.request_kind === "condition_adjustment";
-  const heading = document.createElement("h3");
-  heading.textContent = `${item.case_no}・${item.staff_name}`;
-  card.appendChild(heading);
-  item.issues.forEach(issue => {
-    const question = document.createElement("p");
-    question.textContent = `${issue.label}：${issue.detail}`;
-    card.appendChild(question);
-  });
-  const customerMessage = document.createElement("p");
-  customerMessage.className = "muted";
-  customerMessage.textContent = item.customer_message ? `已詢問客戶：${item.customer_message}` : "";
-  card.appendChild(customerMessage);
-  const answer = document.createElement("p");
-  answer.textContent = item.customer_answer ? `${adjustment ? "客戶更新後的條件" : "客戶回答"}：${item.customer_answer}` : "";
-  card.appendChild(answer);
-  const label = document.createElement("label");
-  label.textContent = adjustment ? "詢問客戶的文案" : "發送文案";
-  const text = document.createElement("textarea");
-  text.rows = 4;
-  text.maxLength = 1000;
-  text.placeholder = "請自行輸入要發送的內容";
-  label.appendChild(text);
-  card.appendChild(label);
-  const status = document.createElement("p");
-  status.setAttribute("role", "status");
-  status.setAttribute("aria-live", "polite");
-  const actions = document.createElement("div");
-  actions.className = "actions";
-  let intent = null;
-  const review = document.createElement("button");
-  review.type = "button";
-  review.textContent = item.review_completed ? "選擇月嫂重新詢問" : "審核客戶新條件";
-  review.hidden = !adjustment;
-  review.disabled = !item.customer_answer_event_id;
-  review.addEventListener("click", () => openMatchingFollowup(item).catch(error => { status.textContent = error.message; }));
-  const choices = adjustment ? [["customer", "發送給客戶"]] : [["caregiver", "發送給月嫂"], ["customer", "發送給客戶"]];
-  let eligibilityKnown=true, rechecking=false, sending=false;
-  const canSend = recipient => eligibilityKnown && !rechecking && !sending && !item.review_completed && (recipient !== "customer" || (item.customer_available && (!item.customer_message || (adjustment && item.customer_answer!==null))));
-  const buttons = choices.map(([recipient, title]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = title;
-    button.disabled = !canSend(recipient);
-    button.addEventListener("click", async () => {
-      const message = text.value.trim();
-      if (!message) { status.textContent = "請先輸入發送文案。"; text.focus(); return; }
-      if (!intent || intent.recipient !== recipient || intent.message_text !== message) {
-        intent = {recipient, message_text: message, idempotency_key: `candidate-information:${crypto.randomUUID()}`};
-      }
-      sending=true;updateInformationControls();
-      text.disabled = true;
-      const current=notificationViewCurrent(card);
-      try {
-        await postJson(`/api/v1/line/mobile-admin/candidate-information/${item.question_id}/send`, {...intent});
-        if(!current())return;
-        status.textContent = "文案已排入傳送，尚未證明送達。";
-        showStatus("文案已排入傳送，尚未證明送達。");
-        await loadReviewWorkbench();
-      } catch (error) {
-        if(!current())return;
-        status.textContent = error.message || "尚無法確認寄送結果，請以原文案重試。";
-      }
-      text.disabled = false;sending=false;
-      updateInformationControls();
-    });
-    actions.appendChild(button);
-    return button;
-  });
-  actions.appendChild(review);
-  card.appendChild(actions);
-  const blockers=document.createElement('div');blockers.setAttribute('role','note');blockers.id='candidate-information-blocker-'+item.question_id;card.appendChild(blockers);
-  buttons.forEach(button=>button.setAttribute('aria-describedby',blockers.id));
-  const binding=document.createElement('details');binding.appendChild(notificationText('summary','查看客戶綁定方式'));
-  binding.appendChild(notificationText('p','請先聯絡客戶加入工會 LINE 官方帳號，點選身分綁定，並依畫面填寫姓名與電話。'));
-  card.appendChild(binding);
-  const recheck=notificationButton('重新核對',async()=>{
-    const current=notificationViewCurrent(card);rechecking=true;updateInformationControls();
-    try{
-      const page=await postJson('/api/v1/line/mobile-admin/notification-tasks/information',{cursor:notificationSelection?.cursor ?? candidateInformationPage-1});
-      if(!current())return;
-      const fresh=page.items.find(row=>row.reference_id===item.question_id);
-      eligibilityKnown=!!fresh?.information;
-      if(eligibilityKnown)item=fresh.information;
-      status.textContent=eligibilityKnown?'已重新核對；原文案保留。':'這筆需求已更新或不在目前頁，請返回通知事項重新整理；原文案仍保留在此。';
-    }catch(error){if(current()){eligibilityKnown=false;status.textContent=error.message;}}
-    finally{if(current()){rechecking=false;updateInformationControls();}}
-  });
-  card.appendChild(recheck);
-  function updateInformationControls(){
-    blockers.replaceChildren();
-    const reasons=[];
-    if(!eligibilityKnown)reasons.push('目前無法核對這筆需求，暫時不能發送。請重新核對，或返回通知事項重新整理。');
-    else if(item.review_completed)reasons.push('這筆需求已完成審核，無需再次發送；請接續重新詢問月嫂的步驟。');
-    else{
-      if(!item.customer_available)reasons.push('這位客戶尚未綁定 LINE，目前無法發送訊息給客戶。請先聯絡客戶完成綁定，再按「重新核對」。');
-      if(item.customer_message && !(adjustment && item.customer_answer!==null))reasons.push('已詢問客戶，請等待客戶回答後再接續處理。');
-      if(!text.value.trim())reasons.push('請先輸入要發送的文案，再選擇收件人。');
-      if(adjustment && !item.customer_answer_event_id)reasons.push('尚未收到客戶更新後的條件，目前不能審核；請等待客戶回答後重新核對。');
-    }
-    if(rechecking)reasons.push('正在重新核對，請稍候。');
-    if(sending)reasons.push('正在建立寄送工作，請稍候；請勿重複發送。');
-    for(const reason of reasons)blockers.appendChild(notificationText('p',reason));
-    binding.hidden=!!item.customer_available;
-    customerMessage.textContent=item.customer_message?`已詢問客戶：${item.customer_message}`:'';
-    answer.textContent=item.customer_answer!==null?`${adjustment?'客戶更新後的條件':'客戶回答'}：${item.customer_answer || '未填文字'}`:'';
-    buttons.forEach((button,index)=>{button.disabled=!canSend(choices[index][0]);});
-    review.disabled=rechecking || sending || !eligibilityKnown || !item.customer_answer_event_id;
-    recheck.disabled=rechecking || sending;
-  }
-  text.addEventListener('input',updateInformationControls);
-  updateInformationControls();
-  card.appendChild(status);
-  return card;
-}
-
 let notificationSequence = 0;
 let notificationSelection = null;
 function notificationViewCurrent(node) {
@@ -1382,7 +1199,7 @@ function notificationViewCurrent(node) {
 function focusNotificationItems(source,items) {
   if(!notificationSelection || notificationSelection.item.source!==source)return items;
   const selected=notificationSelection.item;
-  const keys={profile:r=>r.request_id,information:r=>r.question_id,
+  const keys={profile:r=>r.request_id,
     recommendation:r=>r.plan_id,service_start:r=>r.request_id,group:r=>r.case_no,
     overdue:r=>r.payment.obligation_identity,
     log:r=>`${r.case_no}:${r.staff_id}:${r.missing_from}`};
@@ -1493,7 +1310,6 @@ async function openNotificationItem(item,cursor) {
   notificationSelection={item,cursor,matched:false};
   const original={
     profile:['profileReviews',()=>{profileReviewPage=cursor+1;return loadProfileReviews();}],
-    information:['candidateInformationQuestions',()=>{candidateInformationPage=cursor+1;return loadCandidateInformation();}],
     recommendation:item.reference_id?null:['customerRecommendationFollowups',()=>{customerRecommendationPage=cursor+1;return loadCustomerRecommendationFollowups();}],
     service_start:['serviceStartTodos',()=>{serviceStartPage=cursor+1;return loadServiceStartTodos();}],
     deposit:['depositPayments',()=>{depositPage=1;document.getElementById('depositStatus').value=item.tag==='已核銷待通知'?'settled':'unpaid';document.getElementById('depositStatus').disabled=true;return loadDepositPayments();}],
@@ -1503,9 +1319,6 @@ async function openNotificationItem(item,cursor) {
   if(original) {
     const panel=document.getElementById(original[0]).closest('.workstream-panel');
     notificationParents.set(panel,panel.parentElement);root.appendChild(panel);panel.classList.remove('hidden');
-    if(item.source==='information') {
-      const matching=document.getElementById('matchingWorkstream');notificationParents.set(matching,matching.parentElement);root.appendChild(matching);
-    }
     await original[1]();
     if(!current())return;
     if(!notificationSelection.matched)changed();
@@ -1635,185 +1448,6 @@ function requireMatchingFollowupPage(data) {
     throw new Error("月嫂回覆提醒格式不完整。");
   }
   return data;
-}
-
-function requestedMatchingCaseNo() {
-  const params = new URLSearchParams(location.search);
-  const state = liffStateParams();
-  return (params.get("case_no") || state.get("case_no") || "").trim();
-}
-
-function matchingTermsFromForm() {
-  return {
-    planned_start_date: document.getElementById("matchingStartDate").value,
-    service_days: Number(document.getElementById("matchingServiceDays").value),
-    service_hours_per_day: Number(document.getElementById("matchingDailyHours").value),
-    requires_cooking: document.getElementById("matchingCooking").value === "unknown" ? null : document.getElementById("matchingCooking").value === "true",
-    floor_fee_ntd: Number(document.getElementById("matchingFloorFee").value),
-    service_time: {
-      start_time: document.getElementById("matchingStartTime").value || null,
-      end_time: document.getElementById("matchingEndTime").value || null,
-      end_day_offset: document.getElementById("matchingStartTime").value || document.getElementById("matchingEndTime").value ? Number(document.getElementById("matchingEndOffset").value) : null,
-    },
-  };
-}
-
-function fillMatchingTerms(terms) {
-  document.getElementById("matchingStartDate").value = terms.planned_start_date;
-  document.getElementById("matchingServiceDays").value = String(terms.service_days);
-  document.getElementById("matchingDailyHours").value = String(terms.service_hours_per_day);
-  document.getElementById("matchingCooking").value = terms.requires_cooking === null ? "unknown" : String(terms.requires_cooking);
-  document.getElementById("matchingFloorFee").value = String(terms.floor_fee_ntd);
-  document.getElementById("matchingStartTime").value = String(terms.service_time.start_time).slice(0, 5);
-  document.getElementById("matchingEndTime").value = String(terms.service_time.end_time).slice(0, 5);
-  document.getElementById("matchingEndOffset").value = String(terms.service_time.end_day_offset);
-}
-
-function invalidateMatchingTermsPreview() {
-  matchingApprovalIntent = null;
-}
-
-function invalidateMatchingRecontactPreview() {
-  matchingRecontactPreview = null;
-}
-
-function selectedMatchingCandidateIds() {
-  return [...document.querySelectorAll('#matchingCandidates input[type="checkbox"]:checked')]
-    .map(input => Number(input.value));
-}
-
-let matchingApprovalIntent = null;
-function renderMatchingOperation(data) {
-  matchingOperation = data;
-  matchingApprovalIntent = null;
-  invalidateMatchingRecontactPreview();
-  document.getElementById("matchingOperation").classList.remove("hidden");
-  document.getElementById("matchingOperationTitle").textContent = `案件 ${data.case_no} 的新條件審核`;
-  document.getElementById("matchingCustomerConditions").textContent = `客戶更新後的條件：${data.customer_new_conditions}`;
-  const issues = document.getElementById("matchingIssues");
-  issues.replaceChildren();
-  data.issues.forEach(item => {
-    const block = document.createElement("p");
-    block.textContent = `${item.label}：${item.detail}`;
-    issues.appendChild(block);
-  });
-  fillMatchingTerms(data.order_terms.terms);
-  const candidates = document.getElementById("matchingCandidates");
-  candidates.replaceChildren();
-  data.candidates.forEach(item => {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = String(item.candidate_id);
-    input.disabled = !data.recontact_allowed || item.recontact_queued;
-    input.addEventListener("change", invalidateMatchingRecontactPreview);
-    label.append(input, document.createTextNode(item.staff_name + (item.recontact_queued ? "（已排入詢問）" : "")));
-    candidates.appendChild(label);
-  });
-  document.getElementById("applyMatchingTerms").classList.remove("hidden");
-  document.getElementById("applyMatchingTerms").disabled = data.terms_change_completed;
-  document.getElementById("applyMatchingTerms").textContent = data.terms_change_completed ? "已審核通過並更新" : "審核通過並更新案件條件";
-  document.getElementById("previewMatchingRecontact").disabled = !data.recontact_allowed;
-  document.getElementById("matchingRecontactGate").textContent = data.recontact_allowed
-    ? "案件新條件已更新，請選擇月嫂重新詢問。" : "人員審核通過並更新案件條件後，才能重新詢問月嫂。";
-  const reconsider = document.getElementById("reconsiderMatchingConditions");
-  reconsider.disabled = data.terms_change_completed;
-}
-
-async function openMatchingFollowup(item) {
-  const operationVersion=notificationSequence;
-  try {
-  const data = await postJson(`/api/v1/line/mobile-admin/matching-followups/${item.pool_id}/operation`, {
-    case_no: item.case_no, customer_answer_event_id: item.customer_answer_event_id,
-  });
-  if(operationVersion!==notificationSequence)return;
-  const trigger = document.querySelector('[aria-controls="matchingWorkstream"]');
-  if (trigger.getAttribute("aria-expanded") !== "true") toggleWorkstream(trigger);
-  renderMatchingOperation(data);
-  document.getElementById("matchingOperation").scrollIntoView({block: "start"});
-  }catch(error){if(operationVersion===notificationSequence)throw error;}
-}
-
-async function applyMatchingTerms() {
-  const operationVersion=notificationSequence;
-  if (!matchingOperation) return;
-  const operation = matchingOperation;
-  const body = {case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id,
-    proposed_terms: matchingTermsFromForm(), expected_order_version: operation.order_terms.order_version};
-  const signature = JSON.stringify(body);
-  if (!matchingApprovalIntent || matchingApprovalIntent.signature !== signature) {
-    matchingApprovalIntent = {signature, key: crypto.randomUUID()};
-  }
-  const button = document.getElementById("applyMatchingTerms");
-  button.disabled = true;
-  try {
-    await postJson(`/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/terms/apply`, {
-      ...body, idempotency_key: matchingApprovalIntent.key,
-    });
-    const refreshed = await postJson(`/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/operation`, {
-      case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id,
-    });
-    if(operationVersion!==notificationSequence)return;
-    renderMatchingOperation(refreshed);
-    await loadCandidateInformation();
-    if(operationVersion===notificationSequence)await loadReviewWorkbench(true);
-    showStatus("審核通過，系統已更新新的案件條件。請選擇月嫂重新詢問。");
-  }catch(error){if(operationVersion===notificationSequence)throw error;} finally { if(operationVersion===notificationSequence)button.disabled = Boolean(matchingOperation?.terms_change_completed); }
-}
-
-function reconsiderMatchingConditions() {
-  if (!matchingOperation) return;
-  const questionId = matchingOperation.question_id;
-  document.getElementById("matchingOperation").classList.add("hidden");
-  matchingOperation = null;
-  const trigger = document.querySelector('[aria-controls="candidateInformationWorkstream"]');
-  if (trigger.getAttribute("aria-expanded") !== "true") toggleWorkstream(trigger);
-  const editor = document.querySelector(`[data-question-id="${questionId}"] textarea`);
-  editor?.focus();
-  showStatus("請重新輸入詢問文案，再次詢問客戶。尚未修改案件條件。");
-}
-
-async function previewMatchingRecontact() {
-  const operationVersion=notificationSequence;
-  if(!matchingOperation)return;
-  const button=document.getElementById('previewMatchingRecontact');
-  if(button.dataset.submitting==='true')return;
-  const candidateIds=selectedMatchingCandidateIds();
-  if(!candidateIds.length)throw new Error('請至少選擇一位要重新詢問的月嫂。');
-  button.dataset.submitting='true';button.disabled=true;
-  try {
-    const data=await postJson(`/api/v1/line/mobile-admin/matching-followups/${matchingOperation.pool_id}/recontact/preview`,{case_no:matchingOperation.case_no,customer_answer_event_id:matchingOperation.customer_answer_event_id,candidate_ids:candidateIds});
-    if(operationVersion!==notificationSequence)return;
-    matchingRecontactPreview=data;
-    await applyMatchingRecontact();
-  }catch(error){if(operationVersion===notificationSequence)throw error;}finally{button.dataset.submitting='false';if(operationVersion===notificationSequence)button.disabled=false;}
-}
-
-async function applyMatchingRecontact() {
-  const operationVersion=notificationSequence;
-  try {
-  if (!matchingOperation || !matchingRecontactPreview) return;
-  const operation = matchingOperation;
-  const data = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/recontact/apply`,
-    {
-      case_no: operation.case_no,
-      customer_answer_event_id: operation.customer_answer_event_id,
-      items: matchingRecontactPreview.map(item => ({
-        candidate_id: item.candidate_id,
-        preview_fingerprint: item.preview_fingerprint,
-      })),
-    },
-  );
-  if(operationVersion===notificationSequence)showStatus(`已將更新後資料排入 ${data.length} 位月嫂的 LINE 傳送。`);
-  const refreshed = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/operation`,
-    {case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id},
-  );
-  if(operationVersion!==notificationSequence)return;
-  renderMatchingOperation(refreshed);
-  await loadReviewWorkbench();
-  }catch(error){if(operationVersion===notificationSequence)throw error;}
 }
 
 async function loadGroupTodos() {
@@ -2524,13 +2158,6 @@ document.getElementById("orderStatusSearchForm").addEventListener("submit", even
 document.getElementById("refreshOperations").addEventListener("click", loadOperationsSummary);
 document.getElementById("backToWorkQueue").addEventListener("click", () => switchPane("staff_review"));
 document.getElementById("openSchedulingTool").addEventListener("click", () => switchPane("scheduling_review"));
-document.getElementById("reconsiderMatchingConditions").addEventListener("click", reconsiderMatchingConditions);
-document.getElementById("applyMatchingTerms").addEventListener("click", () => applyMatchingTerms().catch(error => showStatus(error.message, true)));
-document.getElementById("previewMatchingRecontact").addEventListener("click", () => previewMatchingRecontact().catch(error => showStatus(error.message, true)));
-[
-  "matchingStartDate", "matchingServiceDays", "matchingDailyHours", "matchingCooking",
-  "matchingFloorFee", "matchingStartTime", "matchingEndTime", "matchingEndOffset",
-].forEach(id => document.getElementById(id).addEventListener("change", invalidateMatchingTermsPreview));
 document.getElementById("loadSchedule").addEventListener("click", loadSchedulingReview);
 document.getElementById("scheduleCaseNo").addEventListener("change", () => {
   schedulingQuerySequence += 1;

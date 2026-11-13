@@ -69,3 +69,10 @@ def weekly_document(case_no, rows):
             f"{row['week_start_date']} ～ {row['week_end_date']}",
             str(row['service_hours_per_day']), str(row['weekly_work_days']), str(row['weekly_hours']),
         ) for row in rows)),))
+
+
+def candidate_information_document(case_no, info_type, sections):
+    title = ('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務說明')[info_type - 1]
+    return information_document(title, case_no, ({'line_sections': tuple(
+        {'title': title, 'rows': rows} for title, rows in sections
+    )},), info_type=info_type)

@@ -8,11 +8,9 @@ from domains.line.canonical_payload import canonical_line_payload_json
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Mapping
-from urllib.parse import urlencode
 
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -27,6 +25,9 @@ from infrastructure.mysql.order_information_repository import MySqlOrderInformat
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.table_image_contracts import candidate_information_document
+from subsystems.line.table_image_messages import candidate_action_bubble, with_table_images
+from subsystems.orders.order_information import CandidateInformationPreview
 from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.matching_line_cards import candidate_contact_information_card
 from subsystems.scheduling.segmented_availability_query import (
@@ -82,6 +83,7 @@ class CandidateInformationState:
     information_1: CandidateInformationDelivery | None = None
     information_2: CandidateInformationDelivery | None = None
     information_3: CandidateInformationDelivery | None = None
+    package: CandidateInformationDelivery | None = None
 
     def __post_init__(self) -> None:
         if self.information_1 is not None and not isinstance(
@@ -94,6 +96,19 @@ class CandidateInformationState:
             raise TypeError("information_2_invalid")
         if self.information_3 is not None and not isinstance(self.information_3, CandidateInformationDelivery):
             raise TypeError("information_3_invalid")
+        if self.package is not None and not isinstance(self.package, CandidateInformationDelivery):
+            raise TypeError("information_package_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateInformationPackagePreview:
+    case_no: str
+    candidate_id: int
+    staff_name: str
+    documents: tuple[CandidateInformationPreview, ...]
+    reply_text: tuple[str, ...]
+    reply_actions: tuple[str, ...]
+    preview_fingerprint: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,7 +341,6 @@ def _add_candidates_in_transaction(
             cursor.execute("INSERT INTO caregiver_candidate_contact_pools (case_no, created_by) VALUES (%s,%s)", (case_no, actor))
             pool_id = _positive_int(cursor.lastrowid, "pool_id")
         created_ids = []
-        new_candidate_created = False
         for candidate in validated:
             cursor.execute("SELECT id,status,service_start_date,service_end_date FROM caregiver_candidate_contact_entries WHERE pool_id=%s AND staff_id=%s AND active_marker=1 FOR UPDATE", (pool_id, candidate["staff_id"]))
             existing = cursor.fetchone()
@@ -349,7 +363,6 @@ def _add_candidates_in_transaction(
                 continue
             cursor.execute("INSERT INTO caregiver_candidate_contact_entries (pool_id, staff_id, service_start_date, service_end_date, coverage_fingerprint, active_marker) VALUES (%s,%s,%s,%s,%s,1)", (pool_id, candidate["staff_id"], candidate["case_period_start"], candidate["case_period_end"], candidate["coverage_fingerprint"]))
             created_ids.append(_positive_int(cursor.lastrowid, "candidate_id"))
-            new_candidate_created = True
         payload = {
             "candidate_ids": created_ids,
             "candidate_coverage_fingerprints": [
@@ -381,8 +394,6 @@ def _add_candidates_in_transaction(
                 }
             raise ValueError("candidate_contact_idempotency_conflict")
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id, candidate_id, event_type, event_key, actor, payload) VALUES (%s,NULL,'candidates_added',%s,%s,%s)", (pool_id, event_key, actor, json.dumps(payload, sort_keys=True)))
-        if new_candidate_created:
-            _cancel_pending_manual_followup(cursor, pool_id)
         return {"pool_id": pool_id, "candidate_ids": created_ids, "status": "recorded"}
     finally:
         pass
@@ -694,7 +705,6 @@ def _apply_manual_information_confirmation_in_transaction(
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        _cancel_pending_manual_followup(cursor, state.pool_id)
         return {
             "status": "recorded",
             "event_id": event_id,
@@ -745,6 +755,51 @@ def preview_information(case_no: str, candidate_id: int, info_type: int):
         return MySqlOrderInformationRepository(connection).preview_candidate_information(case_no, candidate_id, info_type)
     finally:
         _close(connection)
+
+
+def preview_information_package(case_no: str, candidate_id: int):
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    connection = get_connection()
+    try:
+        preview, _ = _information_package_preview(connection, case_no, candidate_id)
+        return preview
+    finally:
+        _close(connection)
+
+
+def _information_package_card(connection, case_no, document, reference):
+    payload = candidate_contact_information_card(
+        case_no, 1, tuple((section.title, section.rows) for section in document.line_sections), reference,
+    )
+    return configured_message_payload(connection, "card-candidate-information-package", json.loads(payload), {"case_no": case_no})
+
+
+def _information_package_preview(
+    connection, case_no, candidate_id, *, service_period=None,
+    reference="preview-only",
+):
+    repository = MySqlOrderInformationRepository(connection)
+    options = {"for_update": service_period is not None, "service_period": service_period}
+    documents = tuple(repository.preview_candidate_information(case_no, candidate_id, kind, **options) for kind in (1, 2))
+    try:
+        documents += (repository.preview_candidate_information(case_no, candidate_id, 3, **options),)
+    except ValueError as error:
+        if str(error) != "candidate_weekly_service_dates_not_ready" or service_period is not None:
+            raise
+    card = _information_package_card(connection, case_no, documents[0], reference)
+    bubble = candidate_action_bubble(card["contents"])
+    reply_text = tuple(node["text"] for node in bubble["body"]["contents"])
+    reply_actions = tuple(node["action"]["label"] for node in bubble["footer"]["contents"])
+    fingerprint = fingerprint_payload({
+        "documents": [document.preview_fingerprint for document in documents],
+        "reply_text": reply_text,
+        "reply_actions": reply_actions,
+    }).value if len(documents) == 3 else None
+    preview = CandidateInformationPackagePreview(
+        case_no, candidate_id, documents[0].staff_name, documents, reply_text, reply_actions, fingerprint,
+    )
+    return preview, card
 
 
 def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple[date, ...] | None = None):
@@ -813,88 +868,25 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
         _close(connection)
 
 
-def preview_recontact_information(case_no: str, candidate_id: int, info_type: int):
-    """Preview current Orders dates and recheck the original candidate against them."""
-
-    case_no = _required_text(case_no, "case_no", 50)
-    candidate_id = _positive_int(candidate_id, "candidate_id")
-    if info_type not in {1, 2}:
-        raise ValueError("info_type_invalid")
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT orders.status,orders.start_date,orders.end_date,entry.staff_id "
-                "FROM orders JOIN caregiver_candidate_contact_pools pool "
-                "ON pool.case_no=orders.case_no "
-                "JOIN caregiver_candidate_contact_entries entry ON entry.pool_id=pool.id "
-                "WHERE orders.case_no=%s AND entry.id=%s "
-                "AND entry.active_marker=1 AND entry.status='active'",
-                (case_no, candidate_id),
-            )
-            row = cursor.fetchone()
-        if not isinstance(row, Mapping):
-            raise ValueError("candidate_contact_not_found")
-        if row.get("status") != "洽談中":
-            raise ValueError("candidate_contact_order_not_negotiating")
-        service_period = _current_service_period(row)
-        _require_current_candidate(
-            case_no,
-            int(row["staff_id"]),
-            service_period[0].isoformat(),
-            service_period[1].isoformat(),
-        )
-        return MySqlOrderInformationRepository(connection).preview_candidate_information(
-            case_no,
-            candidate_id,
-            info_type,
-            service_period=service_period,
-        )
-    finally:
-        _close(connection)
-
-
-def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any, preview_fingerprint: str | None = None) -> dict[str, Any]:
+def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any, preview_fingerprint: str) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
     actor = _required_text(actor, "actor", 100)
     event_key = _required_text(event_key, "event_key", 100)
-    if info_type not in {1, 2, 3}:
-        raise ValueError("info_type_invalid")
     return _run_in_application_uow(
         lambda connection, cursor: _send_information_in_transaction(
-            connection, cursor, case_no, candidate_id, info_type, actor, event_key, preview_fingerprint
+            connection, cursor, case_no, candidate_id, actor, event_key, preview_fingerprint
         )
     )
 
 
-def send_recontact_information(
-    case_no: Any,
-    candidate_id: Any,
-    info_type: Any,
-    actor: Any,
-    event_key: Any,
-    preview_fingerprint: str | None = None,
-) -> dict[str, Any]:
-    case_no = _required_text(case_no, "case_no", 50)
-    candidate_id = _positive_int(candidate_id, "candidate_id")
-    actor = _required_text(actor, "actor", 100)
-    event_key = _required_text(event_key, "event_key", 93)
-    if info_type not in {1, 2}:
-        raise ValueError("info_type_invalid")
-    return _run_in_application_uow(
-        lambda connection, cursor: _send_information_in_transaction(
-            connection,
-            cursor,
-            case_no,
-            candidate_id,
-            info_type,
-            actor,
-            event_key,
-            preview_fingerprint,
-            refresh_period_from_order=True,
-        )
-    )
+def _candidate_line_recipient(cursor, case_no, entry):
+    if not candidate_contact_open(cursor, case_no, entry.get("order_status")):
+        raise ValueError("candidate_contact_order_not_negotiating")
+    recipient = entry.get("line_user_id")
+    if not isinstance(recipient, str) or not recipient.strip():
+        raise ValueError("caregiver_has_no_line_delivery_identity")
+    return recipient.strip()
 
 
 def _send_information_in_transaction(
@@ -902,15 +894,16 @@ def _send_information_in_transaction(
     cursor: Any,
     case_no: str,
     candidate_id: int,
-    info_type: int,
     actor: str,
     event_key: str,
-    preview_fingerprint: str | None = None,
-    refresh_period_from_order: bool = False,
+    preview_fingerprint: str,
 ) -> dict[str, Any]:
+    # Use the existing willingness event identity for callbacks and follow-up.
+    event_type = "info_1_sent"
     try:
         cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, "
                        "e.coverage_fingerprint,"
+                       "e.active_marker,e.status AS candidate_status,"
                        "staff_binding.line_user_id,o.status AS order_status,o.start_date AS order_start_date,"
                        "o.end_date AS order_end_date FROM caregiver_candidate_contact_pools p "
                        "JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id "
@@ -921,35 +914,42 @@ def _send_information_in_transaction(
                        "AND staff_binding.binding_status='bound' "
                        "AND staff_binding.line_user_id=s.line_user_id "
                        "JOIN orders o ON o.case_no=p.case_no "
-                       "WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 "
-                       "AND e.status='active' FOR UPDATE", (case_no, candidate_id))
+                       "WHERE p.case_no=%s AND e.id=%s FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()
         if not isinstance(entry, Mapping): raise ValueError("candidate_contact_not_found")
-        if not candidate_contact_open(cursor, case_no, entry.get("order_status")):
-            raise ValueError("candidate_contact_order_not_negotiating")
-        recipient = entry.get("line_user_id")
-        if not isinstance(recipient, str) or not recipient.strip(): raise ValueError("caregiver_has_no_line_delivery_identity")
         cursor.execute("SELECT id,pool_id,candidate_id,event_type,actor,payload FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
         if isinstance(existing, Mapping):
+            existing_payload = _event_payload(existing.get("payload"))
             if (
                 existing.get("pool_id") != entry.get("pool_id")
                 or existing.get("candidate_id") != candidate_id
-                or existing.get("event_type") != f"info_{info_type}_sent"
+                or existing.get("event_type") != event_type
                 or existing.get("actor") != actor
-                or _event_payload(existing.get("payload")).get("preview_fingerprint")
-                != preview_fingerprint
+                or existing_payload.get("information_package") is not True
+                or existing_payload.get("preview_fingerprint") != preview_fingerprint
             ):
                 raise ValueError("candidate_information_idempotency_conflict")
-            existing_payload = _event_payload(existing.get("payload"))
             task_id = existing_payload.get("line_task_id")
             return {
                 "status": "idempotent_replay",
                 "event_id": existing["id"],
                 "line_task_id": _positive_int(task_id, "line_task_id") if task_id is not None else None,
             }
+        if entry["active_marker"] != 1 or entry["candidate_status"] != "active":
+            raise ValueError("candidate_contact_not_found")
+        recipient = _candidate_line_recipient(cursor, case_no, entry)
+        cursor.execute(
+            "SELECT id FROM caregiver_candidate_contact_events "
+            "WHERE candidate_id=%s AND event_type='info_1_sent' "
+            "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.information_package'))='true' "
+            "LIMIT 1 FOR UPDATE",
+            (candidate_id,),
+        )
+        if cursor.fetchone() is not None:
+            raise ValueError("candidate_information_package_already_queued")
         service_period = _current_service_period(entry)
-        refresh_period_from_order = refresh_period_from_order or service_period != (
+        refresh_period_from_order = service_period != (
             entry["service_start_date"], entry["service_end_date"],
         )
         coverage = _require_current_candidate(
@@ -958,12 +958,9 @@ def _send_information_in_transaction(
             str(service_period[0]),
             str(service_period[1]),
         )
-        preview = MySqlOrderInformationRepository(connection).preview_candidate_information(
-            case_no,
-            candidate_id,
-            info_type,
-            for_update=True,
-            service_period=service_period,
+        reference = hashlib.sha256(event_key.encode("utf-8")).hexdigest()
+        preview, card = _information_package_preview(
+            connection, case_no, candidate_id, service_period=service_period, reference=reference,
         )
         if preview_fingerprint != preview.preview_fingerprint:
             raise ValueError("candidate_information_preview_stale")
@@ -1016,39 +1013,33 @@ def _send_information_in_transaction(
                     ),
                 ),
             )
-        message = candidate_contact_information_card(
-            case_no,
-            info_type,
-            tuple((section.title, section.rows) for section in preview.line_sections),
-            hashlib.sha256(event_key.encode("utf-8")).hexdigest(),
-            None if info_type == 3 else _candidate_contact_liff_url(
-                hashlib.sha256(event_key.encode("utf-8")).hexdigest()
-            ),
-        )
-        message = canonical_line_payload_json(configured_message_payload(connection, "card-candidate-information-" + str(info_type), json.loads(message), {"case_no": case_no}))
-        from subsystems.line.table_image_contracts import information_document
-        from subsystems.line.table_image_messages import with_table_images
-        document = information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[info_type - 1], case_no,
-            ({'line_sections': tuple({'title': section.title, 'rows': section.rows} for section in preview.line_sections)},), info_type=info_type)
-        message = canonical_line_payload_json(with_table_images(json.loads(message), (document,),
-            event_key, datetime.now(timezone.utc), candidate=True))
+        table_documents = tuple(candidate_information_document(
+            case_no, document.info_type, tuple((section.title, section.rows) for section in document.line_sections),
+        ) for document in preview.documents)
+        now = datetime.now(timezone.utc)
+        message = canonical_line_payload_json(with_table_images(card, table_documents, event_key, now, candidate=True))
         delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(
             LineDeliveryRequest(
-                LineRecipient(LineRecipientType.USER, LineUserId(recipient.strip())),
+                LineRecipient(LineRecipientType.USER, LineUserId(recipient)),
                 LineMessageKind.FLEX,
                 message,
-                datetime.now(timezone.utc),
+                now,
                 IdempotencyKey(event_key),
                 CorrelationId(f"candidate-contact:{event_key}"),
-                "candidate_weekly_service_information" if info_type == 3 else "candidate_matching_willingness_card",
+                "candidate_matching_willingness_card",
                 event_key,
             )
         )
         task_id = delivery.task_id.value
-        cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued", "preview_fingerprint": preview_fingerprint}, sort_keys=True)))
+        event_payload = {
+            "line_task_id": task_id, "delivery_status": "queued",
+            "preview_fingerprint": preview_fingerprint, "information_package": True,
+        }
+        cursor.execute(
+            "INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)",
+            (entry["pool_id"], candidate_id, event_type, event_key, actor, json.dumps(event_payload, sort_keys=True)),
+        )
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        if info_type != 3:
-            _cancel_pending_manual_followup(cursor, int(entry["pool_id"]))
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}
     finally:
         pass
@@ -1060,22 +1051,6 @@ def _current_service_period(row: Mapping[str, object]) -> tuple[date, date]:
     if type(start) is not date or type(end) is not date or start > end:
         raise ValueError("candidate_contact_current_service_period_invalid")
     return start, end
-
-
-def _candidate_contact_liff_url(interaction_reference: str) -> str:
-    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
-    if liff_id and liff_id != "your_liff_id_here":
-        return (
-            f"https://liff.line.me/{liff_id}/?"
-            + urlencode({"target": "candidate_contact", "ref": interaction_reference})
-        )
-    public_base = (
-        os.getenv("LINE_PUBLIC_BASE_URL", "").strip()
-        or os.getenv("BASE_URL", "").strip()
-    ).rstrip("/")
-    if public_base.startswith("https://"):
-        return f"{public_base}/line-candidate-contact?{urlencode({'ref': interaction_reference})}"
-    raise ValueError("candidate_contact_liff_not_configured")
 
 
 def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason: Any, actor: Any, event_key: Any) -> dict[str, Any]:
@@ -1130,38 +1105,9 @@ def _record_willingness_in_transaction(
             raise ValueError("candidate_contact_idempotency_conflict")
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)", (row["pool_id"], candidate_id, event_key, actor, json.dumps(payload, ensure_ascii=False, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        if willingness == "willing":
-            _cancel_pending_candidate_coordination(cursor, int(row["pool_id"]))
         return {"status":"recorded", "event_id":event_id}
     finally:
         pass
-
-
-def _cancel_pending_candidate_coordination(cursor: Any, pool_id: int) -> None:
-    cursor.execute(
-        "UPDATE line_delivery_tasks SET processing_status='cancelled',"
-        "error_code='candidate_contact_pool_resolved',"
-        "error_message='candidate contact pool already has a willing caregiver',"
-        "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-        "WHERE processing_status IN ('pending','retryable_failed') "
-        "AND source_aggregate_type='candidate_contact_adjustment' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s",
-        (pool_id,),
-    )
-    _cancel_pending_manual_followup(cursor, pool_id)
-
-
-def _cancel_pending_manual_followup(cursor: Any, pool_id: int) -> None:
-    cursor.execute(
-        "UPDATE line_delivery_tasks SET processing_status='cancelled',"
-        "error_code='candidate_contact_pool_changed',"
-        "error_message='candidate contact pool changed before manual follow-up delivery',"
-        "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-        "WHERE source_aggregate_type='candidate_contact_manual_followup' "
-        "AND CAST(SUBSTRING_INDEX(source_aggregate_identity,':',1) AS UNSIGNED)=%s "
-        "AND processing_status IN ('pending','retryable_failed')",
-        (pool_id,),
-    )
 
 
 def _candidate_projection(events: list[dict[str, Any]]):
@@ -1176,7 +1122,7 @@ def _candidate_projection(events: list[dict[str, Any]]):
         payload = _event_payload(event["payload"])
         if event_type == "willingness_changed":
             if payload.get("response_kind") == "candidate_period_refreshed" and payload.get("willingness") == "pending":
-                information = {"1": None, "2": None, "3": None}
+                information.update({"1": None, "2": None, "3": None})
             if payload.get("willingness") in {"pending", "willing", "unwilling"}:
                 willingness, reason = payload["willingness"], payload.get("reason")
                 if payload.get("response_kind") == "no_interest":
@@ -1198,7 +1144,7 @@ def _candidate_projection(events: list[dict[str, Any]]):
             info_dict["event_id"] = event["id"]
         if payload.get("line_task_id") is not None:
             info_dict["line_task_id"] = payload.get("line_task_id")
-        information[event_type[5]] = info_dict
+        information["package" if payload.get("information_package") is True else event_type[5]] = info_dict
     return willingness, reason, latest_willingness_event_id, information
 
 
@@ -1236,6 +1182,7 @@ def _typed_candidate_projection(
             information_1=typed_information["1"],
             information_2=typed_information["2"],
             information_3=typed_information["3"],
+            package=typed_information.get("package"),
         ),
     )
 

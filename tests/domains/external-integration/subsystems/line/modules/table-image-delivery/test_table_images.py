@@ -125,12 +125,14 @@ def test_picture_reads_only_the_committed_delivery_snapshot_without_mutation():
 
 def test_candidate_picture_keeps_willingness_actions_in_a_separate_card():
     sections = (('服務約定', (('每日時數', '8'),)),)
-    old = json.loads(candidate_contact_information_card('DEMO-001', 1, sections, 'interaction', 'https://example.invalid/reply'))
+    old = json.loads(candidate_contact_information_card('DEMO-001', 1, sections, 'interaction'))
     result = with_table_images(old, (document(),), 'delivery:demo', NOW, candidate=True)
     cards = result['contents']['contents']
     assert len(cards) == 2 and cards[0]['hero']['type'] == 'image'
     assert cards[1]['footer'] == old['contents']['footer']
-    assert len(cards[1]['body']['contents']) == 2
+    assert [node['text'] for node in cards[1]['body']['contents']] == [
+        '訂單編號：DEMO-001', '請確認檔期與條件後回覆是否願意承接。', '有疑問請直接聯絡工會。',
+    ]
     assert result[DOCUMENTS_KEY][0]['document'] == asdict(document())
     assert '每日時數' not in json.dumps(cards[1], ensure_ascii=False)
 
@@ -143,17 +145,19 @@ def test_clearing_candidate_description_does_not_copy_owner_rows_into_the_action
     field = next(field for field in template['copy_fields'] if field['kind'] == 'body')
     values[field['id']] = ''
     payload = json.loads(candidate_contact_information_card('DEMO-001', 1,
-        (('月嫂薪資', (('預估總薪資', 'NT$ 50,000'),)),), 'interaction', 'https://example.invalid/reply'))
+        (('月嫂薪資', (('預估總薪資', 'NT$ 50,000'),)),), 'interaction'))
     updated = render_copy_payload({'templates': []}, key, payload, {'case_no': 'DEMO-001'}, json.dumps(values))
     result = with_table_images(updated, (document(),), 'delivery:demo', NOW, candidate=True)
     action = result['contents']['contents'][-1]
     assert action['footer'] == payload['contents']['footer']
-    assert len(action['body']['contents']) == 1
+    assert [node['text'] for node in action['body']['contents']] == [
+        '訂單編號：DEMO-001', '有疑問請直接聯絡工會。',
+    ]
     assert 'NT$ 50,000' not in str(action)
 
 
 def test_weekly_picture_has_no_spurious_action_card():
-    old = json.loads(candidate_contact_information_card('DEMO-001', 3, (('每週服務', (('週一', '8'),)),), 'interaction', None))
+    old = json.loads(candidate_contact_information_card('DEMO-001', 3, (('每週服務', (('週一', '8'),)),), 'interaction'))
     result = with_table_images(old, (document(),), 'delivery:demo', NOW, candidate=True)
     assert len(result['contents']['contents']) == 1
 

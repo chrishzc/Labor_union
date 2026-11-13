@@ -15,6 +15,13 @@ def table_image_bubble(document, url):
                 {'type': 'text', 'text': document.title, 'weight': 'bold', 'wrap': True}]}}
 
 
+def candidate_action_bubble(container):
+    action = deepcopy(container)
+    content = action['body']['contents']
+    action['body']['contents'] = [content[0], *(node for node in content[1:] if node.get('type') == 'text')]
+    return action
+
+
 def with_table_images(payload, documents, key=None, now=None, *, candidate=False):
     result = deepcopy(payload)
     links = [image_url(key, index, now) if key is not None else f'https://preview.invalid/table/{index}'
@@ -23,12 +30,7 @@ def with_table_images(payload, documents, key=None, now=None, *, candidate=False
     container = result['contents']
     if candidate:
         # Preserve the already-configured title, explanation and actual actions.
-        actions = []
-        if container.get('footer'):
-            action_card = deepcopy(container)
-            content = action_card['body']['contents']
-            action_card['body']['contents'] = [content[0], *(node for node in content[1:] if node.get('type') == 'text')]
-            actions.append(action_card)
+        actions = [candidate_action_bubble(container)] if container.get('footer') else []
         result['contents'] = {'type': 'carousel', 'contents': pictures + actions}
     else:
         cards = container['contents']

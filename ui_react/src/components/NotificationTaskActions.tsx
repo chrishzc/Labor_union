@@ -7,7 +7,6 @@ export function notificationHref(item:NotificationItem):string | null {
     case 'registration': return `#clients?tab=applications&registration=${item.reference_id}`;
     case 'profile': return `#clients?tab=profile-requests&request=${item.reference_id}`;
     case 'staff_profile': return `#staff?profile_request=${item.reference_id}`;
-    case 'information': return `#order-workbench-v2?case=${caseNo}&work=matching&question=${item.reference_id}`;
     case 'service_start': return `#scheduling?tab=coordination&case_no=${caseNo}&request=${item.reference_id}`;
     case 'delivery': return `#line-management?tab=delivery&task=${item.reference_id}`;
     case 'payment_receipt': return '#finance?'+new URLSearchParams({tab:'accounting-warnings',case_no:item.case_no??'',

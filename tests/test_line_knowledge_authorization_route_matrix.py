@@ -44,6 +44,7 @@ MATCHING_ROUTE_CONTRACT = {
             "none",
         ),
         "preview_candidate_information": ({"require_line_matching_sender"}, "none"),
+        "preview_candidate_information_package": ({"require_line_matching_sender"}, "none"),
         "preview_candidate_weekly_service": ({"require_line_matching_reader"}, "none"),
         "send_candidate_information": (
             {"require_line_matching_sender"},
@@ -404,7 +405,7 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
             )
             route_count += 1
 
-    assert route_count == 42
+    assert route_count == 43
 
 
 def test_identity_public_liff_and_page_static_routes_are_explicit_exclusions() -> None:

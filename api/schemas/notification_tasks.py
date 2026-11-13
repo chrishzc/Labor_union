@@ -4,7 +4,6 @@ from datetime import date
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, BeforeValidator
 from api.routes.line_payment_overdue_reminders import PaymentSnapshot
-from api.schemas.line_candidate_contact import CandidateInformationStaffItemView
 
 
 class LogReminderContext(BaseModel):
@@ -50,7 +49,6 @@ class NotificationSource(StrEnum):
     STAFF_BINDING = 'staff_binding'
     PROFILE = 'profile'
     STAFF_PROFILE = 'staff_profile'
-    INFORMATION = 'information'
     FOLLOWUP = 'followup'
     RECOMMENDATION = 'recommendation'
     SERVICE_START = 'service_start'
@@ -92,7 +90,6 @@ class NotificationItem(BaseModel):
     delivery_status: str | None = None
     payment: PaymentSnapshot | None = None
     log: LogReminderContext | None = None
-    information: CandidateInformationStaffItemView | None = None
     failure: NotificationFailureContext | None = None
     receipt: ReceiptNotificationContext | None = None
 

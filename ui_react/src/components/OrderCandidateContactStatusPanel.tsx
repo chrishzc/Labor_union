@@ -1,18 +1,21 @@
 import { useUnsavedChanges } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useEffect, useId, useRef, useState, type FC } from 'react';
 import {
   candidateContactPoolClient,
   createCandidateInformationSendCommand,
   createCandidateWillingnessCommand,
   type CandidateContactPool,
   type CandidateInformationSendCommand,
-  type CandidateInformationPreview,
   type CandidateInformationKind,
+  type CandidateInformationPackagePreview,
+  type CaseInformationPreview,
+  type CaseWeeklyServicePreview,
 } from '../api/scheduling/candidate_contact_pool_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
-import { OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
+import { CandidateInformationPages, CandidateWeeklyServiceTable, OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
+import { CandidatePlannedServiceDates } from './CandidatePlannedServiceDates';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { CaregiverCommuteQuery } from './CaregiverCommute';
 
@@ -21,7 +24,6 @@ interface OrderCandidateContactStatusPanelProps {
   onObserved?: () => void;
   onAddCandidates?: () => void;
   focusWillingness?: boolean;
-  onPreviewInformation?: (kind: 1 | 2) => void;
   revision?: number;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
   presentation?: 'legacy' | 'workbench';
@@ -36,33 +38,6 @@ type ContactStatusState =
   | { status: 'error'; message: string };
 
 type CandidateContact = CandidateContactPool['candidates'][number];
-
-function CandidateInformationSend({ caseNo, candidateId, kind, recipientLabel, onClose, onSubmit }: {
-  caseNo: string; candidateId: number; kind: 1 | 2; recipientLabel: string; onClose: () => void;
-  onSubmit: (command: CandidateInformationSendCommand) => void;
-}) {
-  const [preview, setPreview] = useState<CandidateInformationPreview | null>(null);
-  const [status, setStatus] = useState('loading');
-  const [message, setMessage] = useState('');
-  useEffect(() => {
-    const controller = new AbortController();
-    candidateContactPoolClient.previewInformation(caseNo, candidateId, kind, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) {
-        setPreview(data); setStatus('ready');
-        onSubmit(createCandidateInformationSendCommand(caseNo, candidateId, kind, data.preview_fingerprint));
-        onClose();
-      } })
-      .catch((error) => { if (!controller.signal.aborted) { setMessage(errorMessage(error)); setStatus('error'); } });
-    return () => controller.abort();
-  }, [caseNo, candidateId, kind]);
-  return <section className="order-case-review-note" aria-label="寄送前確認">
-    <h4>寄送訂單資訊－{kind}</h4>
-    {status === 'loading' && <p role="status">正在讀取寄送內容…</p>}
-    {preview && <><p>收件月嫂：{recipientLabel}；案件：{preview.case_no}</p><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{preview.text}</pre></>}
-    {message && <p role={status === 'error' ? 'alert' : 'status'}>{message}</p>}
-    <button type="button" onClick={onClose}>關閉</button>
-  </section>;
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -82,12 +57,23 @@ function deliveryStatus(
 export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange, presentation = 'legacy', onOpenCustomerConfirmation, focusedCandidateId }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const [sendPreview, setSendPreview] = useState<{ candidateId: number; kind: 1 | 2 } | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
   const [sharedInformation, setSharedInformation] = useState<{ kind?: CandidateInformationKind } | null>(null);
-  const [informationTarget, setInformationTarget] = useState<{ candidateId: number; kind: CandidateInformationKind } | null>(null);
-  const [informationBusy, setInformationBusy] = useState(false);
+  const [informationTarget, setInformationTarget] = useState<number | null>(null);
+  const [datesReady, setDatesReady] = useState<boolean | null>(null);
+  const [weeklyStartDate, setWeeklyStartDate] = useState<string | null>(null);
+  const [weekly, setWeekly] = useState<CaseWeeklyServicePreview | null>(null);
+  const [dateEdit, setDateEdit] = useState<{ dirty: boolean; busy: boolean } | null>(null);
+  const [dateLoadError, setDateLoadError] = useState<string | null>(null);
+  const [weeklyOpen, setWeeklyOpen] = useState(true);
+  const [previewMode, setPreviewMode] = useState<'idle' | 'open' | 'collapsed'>('idle');
+  const [selectionOpen, setSelectionOpen] = useState(true);
+  const [previewDocuments, setPreviewDocuments] = useState<CaseInformationPreview[] | null>(null);
+  const [previewReply, setPreviewReply] = useState<CandidateInformationPackagePreview | undefined>();
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [preparingSend, setPreparingSend] = useState<number | null>(null);
+  const [sendError, setSendError] = useState<{ candidateId: number; message: string } | null>(null);
   const [informationRevision, setInformationRevision] = useState(0);
   const [responseTarget, setResponseTarget] = useState<{ id: number; name: string } | null>(null);
   const [responseChoice, setResponseChoice] = useState<'willing' | 'unwilling' | ''>('');
@@ -106,21 +92,34 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     candidateId: number;
   }>());
   const informationInFlight = useRef(new Set<string>());
+  const preparingSendRef = useRef(false);
   const focusedCandidate = useRef<string | null>(null);
+  const sectionId = useId();
+  const workbench = presentation === 'workbench';
   useEffect(() => {
     const identity = `${caseNo}:${focusedCandidateId}`;
     if (presentation === 'workbench' && focusedCandidateId !== undefined && state.status === 'ready' && focusedCandidate.current !== identity) {
       const card = document.getElementById(`candidate-inquiry-${caseNo}-${focusedCandidateId}`);
-      if (card) { card.focus(); card.scrollIntoView({ block: 'nearest' }); focusedCandidate.current = identity; }
+      if (!card) return;
+      if (!selectionOpen) {
+        setSelectionOpen(true);
+        return;
+      }
+      card.focus(); card.scrollIntoView({ block: 'nearest' }); focusedCandidate.current = identity;
     }
-  }, [caseNo, focusedCandidateId, state, presentation]);
+  }, [caseNo, focusedCandidateId, state, presentation, selectionOpen]);
   const candidateInformationFlows = orderMutationFlowStore.getCandidateInformationForCase(caseNo);
   const pendingStatus = (status: string) => ['applying', 'observing', 'outcome_unknown', 'observation_failed'].includes(status);
   const mutationPending = candidateInformationFlows.some((flow) => pendingStatus(flow.status))
     || orderMutationFlowStore.getCandidateWillingnessForCase(caseNo).some((flow) => pendingStatus(flow.status));
-  const protectedOperation = mutationPending || informationBusy;
+  const protectedOperation = mutationPending || preparingSend !== null;
   const hasDraft = Object.values(reasonDrafts).some((value) => value.trim().length > 0);
-  useEffect(() => { onEditStateChange?.({ dirty: hasDraft, busy: protectedOperation }); }, [hasDraft, protectedOperation, onEditStateChange]);
+  const datesDirty = dateEdit?.dirty ?? false;
+  const datesBusy = dateEdit?.busy ?? false;
+  const previewOpen = previewMode === 'open';
+  const previewRequested = previewMode !== 'idle';
+  useEffect(() => { onEditStateChange?.({ dirty: hasDraft || datesDirty, busy: protectedOperation || datesBusy }); },
+    [hasDraft, datesDirty, datesBusy, protectedOperation, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
   const cancelWillingnessReadbacks = () => {
     willingnessReadbackControllers.current.forEach(({ controller, caseNo: pendingCaseNo, candidateId }) => {
@@ -149,6 +148,14 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     cancelWillingnessReadbacks();
     setWillingnessNotices({});
     setMutationError(null);
+    setInformationTarget(null);
+    setSharedInformation(null);
+    setWeeklyStartDate(null);
+    setWeekly(null);
+    setWeeklyOpen(true);
+    setPreviewMode('idle');
+    setSelectionOpen(true);
+    setSendError(null);
   }, [caseNo]);
   useEffect(() => orderMutationFlowStore.subscribe(() => {
     if (mounted.current) setFlowRevision((value) => value + 1);
@@ -192,13 +199,48 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     return () => controller.abort();
   }, [caseNo, revision]);
 
+  useEffect(() => {
+    if (presentation !== 'workbench') return;
+    const controller = new AbortController();
+    setDatesReady(null);
+    setDateLoadError(null);
+    void Promise.resolve().then(() => candidateContactPoolClient.previewCaseInformation(caseNo, 3, { signal: controller.signal }))
+      .then(data => { if (!controller.signal.aborted) { setDatesReady(data.send_allowed); setWeeklyStartDate(data.start_date); } })
+      .catch(reason => { if (!controller.signal.aborted) setDateLoadError(errorMessage(reason)); });
+    return () => controller.abort();
+  }, [caseNo, revision, informationRevision, presentation]);
+
+  const representativeId = state.status === 'ready' ? state.data.candidates.find(candidate => candidate.status === 'active')?.id : undefined;
+  useEffect(() => {
+    setPreviewDocuments(null);
+    setPreviewError(null);
+    if (!previewRequested || datesReady !== true || presentation !== 'workbench') return;
+    const controller = new AbortController();
+    void Promise.all(([1, 2, 3] as const).map(kind =>
+      candidateContactPoolClient.previewCaseInformation(caseNo, kind, { signal: controller.signal })))
+      .then(data => { if (!controller.signal.aborted) setPreviewDocuments(data); })
+      .catch(error => { if (!controller.signal.aborted) setPreviewError(errorMessage(error)); });
+    return () => controller.abort();
+  }, [caseNo, datesReady, informationRevision, previewRequested, presentation, revision]);
+
+  useEffect(() => {
+    setPreviewReply(undefined);
+    if (!previewRequested || datesReady !== true || representativeId === undefined || presentation !== 'workbench') return;
+    const controller = new AbortController();
+    void candidateContactPoolClient.previewInformationPackage(caseNo, representativeId, { signal: controller.signal })
+      .then(data => { if (!controller.signal.aborted) setPreviewReply(data); })
+      .catch(() => { /* The case documents remain available if the optional reply card cannot be read. */ });
+    return () => controller.abort();
+  }, [caseNo, datesReady, informationRevision, previewRequested, presentation, representativeId, revision]);
+
   const loadStatus = () => {
+    setInformationRevision(value => value + 1);
     startStatusQuery(caseNo);
   };
 
   const observeInformation = async (command: CandidateInformationSendCommand) => {
     const current = orderMutationFlowStore.getCandidateInformation(
-      command.caseNo, command.candidateId, command.infoType,
+      command.caseNo, command.candidateId,
     );
     if (!current?.receipt) return;
     if (!mounted.current || activeCaseNo.current !== command.caseNo) return;
@@ -209,7 +251,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     try {
       const readback = await candidateContactPoolClient.query(command.caseNo);
       const candidates = readback.candidates.filter((candidate) => candidate.id === command.candidateId);
-      const delivery = candidates[0]?.information[String(command.infoType) as '1' | '2' | '3'];
+      const delivery = candidates[0]?.information.package;
       if (readback.case_no !== command.caseNo || candidates.length !== 1 || !delivery) {
         throw new Error('寄送任務回讀與本次操作不一致。');
       }
@@ -220,7 +262,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         throw new Error('寄送結果與剛才的寄送不一致；請重新讀取投遞狀態。');
       }
       orderMutationFlowStore.clearCandidateInformation(
-        command.caseNo, command.candidateId, command.infoType,
+        command.caseNo, command.candidateId,
       );
       if (mounted.current && activeCaseNo.current === command.caseNo) {
         if (poolPresentationGeneration.current === presentationGeneration) {
@@ -230,7 +272,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       }
     } catch (error) {
       const saved = orderMutationFlowStore.getCandidateInformation(
-        command.caseNo, command.candidateId, command.infoType,
+        command.caseNo, command.candidateId,
       );
       if (saved?.receipt) {
         orderMutationFlowStore.setCandidateInformation(command.caseNo, {
@@ -243,9 +285,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const submitInformation = async (command: CandidateInformationSendCommand) => {
     const key = command.eventKey;
     const current = orderMutationFlowStore.getCandidateInformation(
-      command.caseNo, command.candidateId, command.infoType,
+      command.caseNo, command.candidateId,
     );
-    if (informationInFlight.current.has(key) || current?.status === 'applying' || current?.status === 'observing') return;
+    if (informationInFlight.current.has(key) || (current && (current.command.eventKey !== key || current.status !== 'outcome_unknown'))) return;
     const recoveringUnknown = current?.status === 'outcome_unknown';
     informationInFlight.current.add(key);
     if (mounted.current && activeCaseNo.current === command.caseNo) setMutationError(null);
@@ -263,9 +305,15 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       const rejected = error instanceof ApiHttpError
         && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
       if (rejected && !recoveringUnknown) {
-        orderMutationFlowStore.clearCandidateInformation(command.caseNo, command.candidateId, command.infoType);
+        orderMutationFlowStore.clearCandidateInformation(command.caseNo, command.candidateId);
         if (mounted.current && activeCaseNo.current === command.caseNo) {
-          setMutationError(errorMessage(error));
+          if (presentation === 'workbench') {
+            const stale = error.code === 'candidate_information_preview_stale';
+            if (stale) setPreviewMode('idle');
+            setSendError({ candidateId: command.candidateId, message: stale
+              ? '訂單內容或月嫂的 LINE 綁定資料已更新。請重新開啟案件預覽，再確認寄送。'
+              : errorMessage(error) });
+          } else setMutationError(errorMessage(error));
         }
       } else {
         orderMutationFlowStore.setCandidateInformation(command.caseNo, {
@@ -281,13 +329,13 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     }
   };
 
-  const retryInformation = (candidateId: number, infoType: CandidateInformationKind) => {
-    const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId, infoType);
+  const retryInformation = (candidateId: number) => {
+    const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId);
     if (current?.status === 'outcome_unknown') void submitInformation(current.command);
   };
 
-  const retryInformationReadback = (candidateId: number, infoType: CandidateInformationKind) => {
-    const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId, infoType);
+  const retryInformationReadback = (candidateId: number) => {
+    const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId);
     if (current?.status === 'observation_failed' && current.receipt) void observeInformation(current.command);
   };
 
@@ -454,22 +502,130 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       ? [{ label: `${responseTarget.name} 接案意願`, before: willingnessText(originalResponse?.willingness), after: willingnessText(responseChoice) }] : []),
   ], { busy: protectedOperation });
 
+  const canUseDates = datesReady === true && dateEdit !== null && !datesDirty && !datesBusy && !protectedOperation;
+  const confirmCandidateSend = async (candidate: CandidateContact) => {
+    if (!canUseDates || !previewRequested || !previewDocuments || preparingSendRef.current) return;
+    preparingSendRef.current = true;
+    setPreparingSend(candidate.id);
+    setSendError(null);
+    try {
+      const preview = await candidateContactPoolClient.previewInformationPackage(caseNo, candidate.id);
+      if (!mounted.current || activeCaseNo.current !== caseNo) return;
+      if (!preview.preview_fingerprint) throw new Error('請先保存每週服務說明的日期。');
+      const sameDocuments = previewDocuments.every(part => JSON.stringify(part.line_sections) ===
+        JSON.stringify(preview.documents.find(document => document.info_type === part.info_type)?.line_sections));
+      const sameReply = !previewReply ||
+        JSON.stringify([previewReply.reply_text, previewReply.reply_actions]) === JSON.stringify([preview.reply_text, preview.reply_actions]);
+      if (!sameDocuments || !sameReply) {
+        setPreviewMode('idle');
+        throw new Error('案件資訊已更新，請重新核對預覽後再確認寄送。');
+      }
+      await submitInformation(createCandidateInformationSendCommand(caseNo, candidate.id, preview.preview_fingerprint));
+    } catch (error) {
+      if (mounted.current && activeCaseNo.current === caseNo) setSendError({ candidateId: candidate.id, message: errorMessage(error) });
+    } finally {
+      preparingSendRef.current = false;
+      if (mounted.current) setPreparingSend(null);
+    }
+  };
+
+  const renderInformationHistory = (candidate: CandidateContact) => {
+    const history = ([1, 2, 3] as const).filter(kind => candidate.information[kind]);
+    return history.length > 0 && <details className="candidate-package-history">
+      <summary>查看分開寄送紀錄</summary>
+      <dl>{history.map(kind => <div key={kind}>
+        <dt>{CANDIDATE_INFORMATION_LABELS[kind]}</dt><dd>{deliveryStatus(candidate.information[kind], presentation === 'workbench')}</dd>
+      </div>)}</dl>
+    </details>;
+  };
+  const renderInformation = (candidate: CandidateContact) => {
+    const expanded = informationTarget === candidate.id;
+    const previewLabel = candidate.information.package ? '預覽案件資訊' : '預覽並寄送';
+    const openerId = `candidate-package-${caseNo}-${candidate.id}`;
+    return <>
+      <div className="candidate-package-entry">
+        <div>
+          <strong>寄送案件資訊</strong>
+          <p>訂單資訊一、訂單資訊二、每週服務說明、共用回覆卡</p>
+          {candidate.information.package && <p>{deliveryStatus(candidate.information.package, true)}</p>}
+        </div>
+        <button id={openerId} type="button" className="btn-primary-action" aria-expanded={expanded}
+          aria-label={`${previewLabel}（${candidate.staff_name}）`}
+          disabled={candidate.status !== 'active' || protectedOperation}
+          onClick={() => { setMutationError(null); setInformationTarget(candidate.id); }}>
+          {previewLabel}
+        </button>
+      </div>
+      {expanded && <OrderCandidateInformationSendPanel
+        key={openerId} caseNo={caseNo} candidate={candidate} revision={informationRevision}
+        blocked={mutationPending} onSubmit={submitInformation} sendError={mutationError}
+        onClose={() => { setMutationError(null); setInformationTarget(null); document.getElementById(openerId)?.focus(); }}
+        onViewDates={() => setSharedInformation({ kind: 3 })} />}
+      {renderInformationHistory(candidate)}
+    </>;
+  };
 
   return (
     <section className="order-candidate-list" aria-label={`案件 ${caseNo} 候選聯絡狀態`}>
-      <header className="order-candidate-list-heading"><div><h3>候選月嫂</h3><p>人選、聯絡紀錄與回覆集中在這裡。</p></div>
-      <div className="order-case-action-row">{presentation === 'workbench' && <>
-        <button type="button" disabled={protectedOperation} onClick={() => setSharedInformation({})}>查看訂單資訊</button>
-        <button type="button" className="btn-primary-action" disabled={protectedOperation} onClick={onAddCandidates}>新增候選月嫂</button>
-      </>}
+      {workbench && <section className="candidate-inquiry-step" aria-label="設定每週服務說明">
+        <header className="candidate-package-header candidate-inquiry-step-heading">
+          <h3>1. 設定每週服務說明</h3>
+          <button type="button" aria-expanded={weeklyOpen} aria-controls={`${sectionId}-weekly`}
+            aria-label={`${weeklyOpen ? '收起' : '展開'}每週服務說明設定`}
+            onClick={() => setWeeklyOpen(open => !open)}>{weeklyOpen ? '收起' : '展開'}</button>
+        </header>
+        <div id={`${sectionId}-weekly`} hidden={!weeklyOpen}>
+        {weeklyStartDate ? <fieldset className="candidate-weekly-editor" disabled={protectedOperation}><CandidatePlannedServiceDates key={caseNo} caseNo={caseNo} startDate={weeklyStartDate}
+          onSharedPreview={setWeekly} onEditStateChange={setDateEdit} onSaved={() => {
+            setPreviewMode('idle');
+            setInformationRevision(value => value + 1);
+            onObserved?.();
+          }} /></fieldset>
+          : datesReady === null && !dateLoadError ? <p role="status">正在讀取服務日期…</p>
+          : !dateLoadError && <p role="status">請先確認案件的約定服務開始日。</p>}
+        {dateLoadError && <p role="alert">{dateLoadError} <button type="button"
+          onClick={() => setInformationRevision(value => value + 1)}>重新讀取服務日期</button></p>}
+        {weekly && <CandidateWeeklyServiceTable weekly={weekly} />}
+        </div>
+      </section>}
+      {workbench && <section className="candidate-information-send" aria-label="預覽案件資訊">
+        <header className="candidate-package-header candidate-inquiry-step-heading">
+          <h3>2. 預覽案件資訊</h3>
+          <button type="button" aria-expanded={previewOpen} aria-controls={`${sectionId}-preview`}
+            aria-label={`${previewOpen ? '收起' : '展開'}案件資訊預覽`}
+            onClick={() => {
+              if (!previewOpen && previewError) setInformationRevision(value => value + 1);
+              setPreviewMode(previewOpen ? 'collapsed' : 'open');
+            }}>{previewOpen ? '收起' : '展開'}</button>
+        </header>
+        <div id={`${sectionId}-preview`} hidden={!previewOpen}>
+          {datesReady === true && !datesDirty && !datesBusy
+            ? previewDocuments ? <CandidateInformationPages documents={previewDocuments} reply={previewReply} />
+              : previewError ? <p role="alert">{previewError}</p> : <p role="status">正在讀取案件資訊…</p>
+            : <p>保存每週服務說明後，即可預覽案件資訊。</p>}
+        </div>
+      </section>}
+      {workbench && <header className="candidate-package-header candidate-inquiry-step-heading">
+        <h3>3. 選擇月嫂</h3>
+        <button type="button" aria-expanded={selectionOpen} aria-controls={`${sectionId}-selection`}
+          aria-label={`${selectionOpen ? '收起' : '展開'}月嫂選擇`}
+          onClick={() => setSelectionOpen(open => !open)}>{selectionOpen ? '收起' : '展開'}</button>
+      </header>}
+      <div id={workbench ? `${sectionId}-selection` : undefined} className={workbench ? 'candidate-selection-body' : undefined}
+        hidden={workbench && !selectionOpen}>
+      <header className="order-candidate-list-heading">{!workbench && <h3>候選月嫂</h3>}
+      <div className="order-case-action-row">
+      {presentation === 'workbench' && onAddCandidates && <button type="button" className="btn-primary-action"
+        disabled={!canUseDates} onClick={onAddCandidates}>新增候選月嫂</button>}
+      {(presentation !== 'workbench' || state.status === 'error') &&
       <button
         type="button"
         className="order-v2-open-drawer"
         onClick={loadStatus}
-        disabled={state.status === 'loading' || sendPreview !== null}
+        disabled={state.status === 'loading' || mutationPending}
       >
-        {state.status === 'loading' ? '讀取中…' : '重新讀取候選清單'}
-      </button>
+        {state.status === 'loading' ? '讀取中…' : presentation === 'workbench' ? '重試讀取人選' : '重新讀取候選清單'}
+      </button>}
       </div>
       </header>
       {state.status === 'idle' && <div className="order-case-empty"><h4>查看已加入的人選</h4><p>讀取候選清單以查看意願與聯絡紀錄；要加入人選，請切換「新增候選月嫂」。</p></div>}
@@ -488,35 +644,35 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         const candidateName = state.status === 'ready'
           ? (() => { const candidate = state.data.candidates.find(value => value.id === command.candidateId); return candidate ? staffDisplayLabel(candidate.staff_union_no, candidate.staff_name) : undefined; })()
           : undefined;
-        const deliveryLabel = `${candidateName ? `${candidateName}的` : ''}寄送資訊－${command.infoType}`;
+        const deliveryLabel = `${candidateName ? `${candidateName}的` : ''}寄送案件資訊`;
         if (information.status === 'outcome_unknown') return <div key={command.eventKey} className="order-v2-notice blocked" role="alert">
           <strong>{deliveryLabel}</strong>
           <span>{information.error}</span>
-          <button type="button" onClick={() => retryInformation(command.candidateId, command.infoType)}>確認{deliveryLabel}結果</button>
+          <button type="button" onClick={() => retryInformation(command.candidateId)}>確認{deliveryLabel}結果</button>
         </div>;
         if (information.status === 'observation_failed') return <div key={command.eventKey} className="order-v2-notice blocked" role="alert">
           <strong>{deliveryLabel}</strong>
           <span>{information.error ?? '寄送任務已建立，尚不代表月嫂已收到；請重新讀取投遞狀態。'}</span>
-          <button type="button" onClick={() => retryInformationReadback(command.candidateId, command.infoType)}>重新讀取{deliveryLabel}投遞狀態</button>
+          <button type="button" onClick={() => retryInformationReadback(command.candidateId)}>重新讀取{deliveryLabel}投遞狀態</button>
         </div>;
         return information.status === 'applying' || information.status === 'observing'
-          ? <p key={command.eventKey} role="status">寄送資訊－{command.infoType} 建立／回讀中…</p>
+          ? <p key={command.eventKey} role="status">正在建立並確認案件資訊投遞任務…</p>
           : null;
       })}
 
       {state.status === 'ready' && state.data.candidates.length === 0 && (
         <div className="order-case-review-note" role="status">
           <strong>尚未加入候選月嫂</strong>
-          <p>查詢合適人選，加入清單後即可寄送資訊與記錄回覆。</p>
-          {onAddCandidates && <button type="button" className="btn-primary-action" onClick={onAddCandidates}>尋找並新增候選月嫂</button>}
+          {presentation === 'legacy' && onAddCandidates && <button type="button" className="btn-primary-action"
+            onClick={onAddCandidates}>尋找並新增候選月嫂</button>}
         </div>
       )}
 
+      {presentation === 'workbench' && datesReady === false &&
+        <p>請先保存每週服務說明的日期。</p>}
+      {presentation === 'workbench' && state.status === 'loading' && <p role="status">正在讀取人選…</p>}
       {state.status === 'ready' && state.data.candidates.length > 0 && (
         <>
-          <div className="order-v2-case-meta">
-            <span>共 {state.data.candidates.length} 位人選</span>
-          </div>
           <div className="order-candidate-cards" aria-label="候選聯絡正式狀態">
             {[...state.data.candidates].sort((left, right) => compareStaffUnionNumbers(
               { id: left.staff_id, unionNo: left.staff_union_no },
@@ -527,24 +683,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 || willingnessFlow?.status === 'outcome_unknown'
                 || willingnessFlow?.status === 'observation_failed'
                 || willingnessFlow?.status === 'observing';
-              const informationOne = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 1);
-              const informationTwo = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 2);
               if (presentation === 'workbench') return <article className="order-candidate-card compact" key={candidate.id} id={`candidate-inquiry-${caseNo}-${candidate.id}`} tabIndex={-1}>
                 <div className="candidate-card-identity"><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
-                  <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
-                </div>
-                <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
-                <dl className="order-candidate-delivery">{([1, 2, 3] as const).map(value => <div key={value}>
-                  <dt>{CANDIDATE_INFORMATION_LABELS[value]}</dt><dd><span>{deliveryStatus(candidate.information[String(value) as '1' | '2' | '3'], true)}</span>
-                  <button type="button" aria-label={`寄送${CANDIDATE_INFORMATION_LABELS[value]}給 ${candidate.staff_name}`}
-                    disabled={candidate.status !== 'active' || protectedOperation} onClick={() => { setMutationError(null); setInformationTarget({ candidateId: candidate.id, kind: value }); }}>寄送</button></dd>
-                </div>)}</dl>
-                {informationTarget?.candidateId === candidate.id && <OrderCandidateInformationSendPanel
-                  key={`${caseNo}:${candidate.id}:${informationTarget.kind}`} caseNo={caseNo} candidate={candidate} kind={informationTarget.kind}
-                  revision={informationRevision} blocked={mutationPending} onSubmit={submitInformation} onClose={() => setInformationTarget(null)}
-                  onBusyChange={setInformationBusy} onViewInformation={kind => setSharedInformation({ kind })} sendError={mutationError} />}
-                {candidate.reason && <p>詢問備註：{candidate.reason}</p>}
-                <div className="order-case-action-row">
+                  <div className="candidate-card-actions">
                   <button type="button" aria-label={`手動記錄接案意願（${candidate.staff_name}）`} aria-expanded={responseTarget?.id === candidate.id}
                     aria-controls={`candidate-willingness-${caseNo}-${candidate.id}`} disabled={candidate.status !== 'active' || protectedOperation} onClick={() => {
                     if (responseTarget?.id === candidate.id) { setResponseTarget(null); return; }
@@ -553,8 +694,23 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                     setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: drafts[candidate.id] ?? candidate.reason ?? '' }));
                     setMutationError(null);
                   }}>手動記錄接案意願</button>
-                  {candidate.willingness === 'willing' && candidate.status === 'active' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
+                  <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information.package && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
+                  </div>
                 </div>
+                <div className="candidate-card-operations">
+                  <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} compact />
+                  <div className="candidate-card-footer">
+                    {candidate.information.package && <p>{deliveryStatus(candidate.information.package, true)}</p>}
+                    {candidate.status === 'active' && <>
+                      {candidate.willingness === 'willing' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
+                      {!candidate.information.package && <button type="button" className="btn-primary-action"
+                        aria-label={`確認寄送（${candidate.staff_name}）`} disabled={!canUseDates || !previewRequested || !previewDocuments}
+                        onClick={() => { void confirmCandidateSend(candidate); }}>{preparingSend === candidate.id ? '寄送處理中…' : '確認寄送'}</button>}
+                    </>}
+                  </div>
+                </div>
+                {renderInformationHistory(candidate)}
+                {candidate.reason && <p>詢問備註：{candidate.reason}</p>}
                 {responseTarget?.id === candidate.id && <form noValidate className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
                   aria-label={`手動記錄接案意願（${candidate.staff_name}）`} onSubmit={event => {
                     event.preventDefault();
@@ -582,20 +738,14 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 {willingnessFlow?.status === 'outcome_unknown' && <p role="alert">{willingnessFlow.error}<button type="button" onClick={() => retryWillingness(candidate.id)}>確認目前回覆</button></p>}
                 {willingnessFlow?.status === 'observation_failed' && <p role="alert">{willingnessFlow.error}<button type="button" onClick={() => retryWillingnessReadback(candidate.id)}>重新讀取最新結果</button></p>}
                 {willingnessNotices[candidate.id] && <p role="status">{willingnessNotices[candidate.id]}</p>}
+                {sendError?.candidateId === candidate.id && <p className="order-v2-drawer-error" role="alert">{sendError.message}</p>}
               </article>;
               return (
                 <article className="order-candidate-card" key={candidate.id}>
                   <header><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : ({ pending: '待回覆', willing: '願意承接', unwilling: '不願承接' })[candidate.willingness]}</span></header>
                   <p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
                   {candidate.reason && <p>回覆說明：{candidate.reason}</p>}
-                  <dl className="order-candidate-delivery"><div><dt>訂單資訊－1</dt><dd>{deliveryStatus(candidate.information['1'])}</dd></div><div><dt>訂單資訊－2</dt><dd>{deliveryStatus(candidate.information['2'])}</dd></div></dl>
-                  <div className="order-case-action-row">
-                    <button type="button" className="order-v2-open-drawer" disabled={candidate.status !== 'active' || sendPreview !== null || informationOne !== undefined} onClick={() => setSendPreview({ candidateId: candidate.id, kind: 1 })}>寄送訂單資訊－1</button>
-                    <button type="button" className="order-v2-open-drawer" disabled={candidate.status !== 'active' || sendPreview !== null || informationTwo !== undefined} onClick={() => setSendPreview({ candidateId: candidate.id, kind: 2 })}>寄送訂單資訊－2</button>
-                  </div>
-                  {sendPreview?.candidateId === candidate.id && <CandidateInformationSend
-                    key={`${caseNo}:${candidate.id}:${sendPreview.kind}`} caseNo={caseNo} candidateId={candidate.id} kind={sendPreview.kind} recipientLabel={staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}
-                    onClose={() => setSendPreview(null)} onSubmit={(command) => { void submitInformation(command); }} />}
+                  {renderInformation(candidate)}
                   <details open={focusWillingness || willingnessProtected || willingnessNotices[candidate.id] !== undefined}>
                     <summary>記錄電話或現場詢問結果</summary>
                     <label htmlFor={`candidate-${candidate.id}-willingness-reason`}>
@@ -653,8 +803,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           </div>
         </>
       )}
-      {presentation === 'workbench' && sharedInformation && <OrderCandidateInformationPanel caseNo={caseNo} initialKind={sharedInformation.kind}
-        onDatesSaved={onObserved}
+      </div>
+      {sharedInformation && <OrderCandidateInformationPanel caseNo={caseNo} initialKind={sharedInformation.kind}
+        onDatesSaved={() => { setInformationRevision(value => value + 1); onObserved?.(); }}
         onClose={() => { setSharedInformation(null); setInformationRevision(value => value + 1); }} />}
     </section>
   );

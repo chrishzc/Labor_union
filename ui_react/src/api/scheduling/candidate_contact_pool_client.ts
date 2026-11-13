@@ -44,6 +44,7 @@ const CandidateContactSchema = z.strictObject({
     '1': CandidateInformationDeliverySchema.nullable(),
     '2': CandidateInformationDeliverySchema.nullable(),
     '3': CandidateInformationDeliverySchema.nullable().optional(),
+    package: CandidateInformationDeliverySchema.nullable().optional(),
   }),
 }).superRefine((candidate, context) => {
   if (candidate.service_start_date > candidate.service_end_date) {
@@ -140,6 +141,15 @@ const InformationPreviewSchema = z.strictObject({
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type CandidateInformationPreview = z.infer<typeof InformationPreviewSchema>;
+const InformationPackagePreviewSchema = z.strictObject({
+  case_no: z.string().min(1), candidate_id: z.number().int().positive(),
+  staff_name: z.string().min(1),
+  documents: z.array(InformationPreviewSchema.pick({ info_type: true, line_sections: true })).min(2).max(3),
+  reply_text: z.array(z.string()),
+  reply_actions: z.array(z.string()).length(2),
+  preview_fingerprint: InformationPreviewSchema.shape.preview_fingerprint.nullable(),
+});
+export type CandidateInformationPackagePreview = z.infer<typeof InformationPackagePreviewSchema>;
 const WeeklyServicePreviewSchema = z.strictObject({
   case_no: z.string().min(1).max(50), candidate_id: z.number().int().positive(),
   required_service_days: z.number().int().nonnegative().nullable(),
@@ -189,7 +199,6 @@ export interface CandidateAddCommand {
 export interface CandidateInformationSendCommand {
   caseNo: string;
   candidateId: number;
-  infoType: CandidateInformationKind;
   previewFingerprint: string;
   actor: string;
   eventKey: string;
@@ -272,7 +281,6 @@ export function createCandidateAddCommand(
 export function createCandidateInformationSendCommand(
   caseNo: string,
   candidateId: number,
-  infoType: CandidateInformationKind,
   previewFingerprint: string,
 ): CandidateInformationSendCommand {
   const canonical = canonicalCaseNo(caseNo);
@@ -283,10 +291,9 @@ export function createCandidateInformationSendCommand(
   return {
     caseNo: canonical,
     candidateId,
-    infoType,
     previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
     actor,
-    eventKey: `candidate-info-${candidateId}-${infoType}-${crypto.randomUUID()}`,
+    eventKey: `candidate-information-${candidateId}-${crypto.randomUUID()}`,
   };
 }
 
@@ -457,6 +464,23 @@ export const candidateContactPoolClient = {
     return data;
   },
 
+  async previewInformationPackage(caseNo: string, candidateId: number, options?: { signal?: AbortSignal }): Promise<CandidateInformationPackagePreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { token } = mutationIdentity();
+    const envelope = decodePayload(mutationEnvelope(InformationPackagePreviewSchema), await transport.get(
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/package/preview`,
+      { token, signal: options?.signal },
+    ));
+    const data = envelope.data;
+    if (!envelope.success || !data) throw new Error('無法讀取寄送內容。');
+    if (data.case_no !== canonical || data.candidate_id !== candidateId
+      || data.documents.some((item, index) => item.info_type !== index + 1)
+      || (data.preview_fingerprint !== null) !== (data.documents.length === 3)) {
+      throw new Error('寄送預覽對象或內容不一致。');
+    }
+    return data;
+  },
+
   async previewCaseInformation(caseNo: string, infoType: CandidateInformationKind, options?: { signal?: AbortSignal }): Promise<CaseInformationPreview> {
     const canonical = canonicalCaseNo(caseNo);
     const { token } = mutationIdentity();
@@ -510,7 +534,6 @@ export const candidateContactPoolClient = {
       await transport.post(
         `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${command.candidateId}/information`,
         {
-          info_type: command.infoType,
           actor: command.actor,
           preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(command.previewFingerprint),
           event_key: z.string().min(1).max(100).parse(command.eventKey),

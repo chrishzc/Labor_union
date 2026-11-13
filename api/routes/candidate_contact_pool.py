@@ -17,6 +17,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.candidate_contact_pool import (
     AddCandidatesRequest,
+    CandidateInformationPackagePreviewView,
     CandidateInformationPreviewView,
     CandidateWeeklyServicePreviewView,
     CandidateWeeklyServiceDatesPreviewRequest,
@@ -76,6 +77,10 @@ def _information_error(error: ValueError) -> HTTPException:
         "candidate_information_idempotency_conflict": (
             GlobalErrorCategory.IDEMPOTENCY_MISMATCH,
             "本次寄送與原寄送操作不一致。請先確認原寄送結果，避免重複寄送。",
+        ),
+        "candidate_information_package_already_queued": (
+            GlobalErrorCategory.CONFLICT,
+            "這位候選月嫂已有案件資訊投遞任務。請重新讀取候選清單確認寄送狀態。",
         ),
     }
     code = str(error)
@@ -162,7 +167,21 @@ def preview_candidate_information(case_no: str, candidate_id: int, info_type: in
     del principal
     try:
         return BaseResponse(data=CandidateInformationPreviewView.model_validate(
-            workflow.preview_information(case_no, candidate_id, info_type)), message="已讀取寄送內容")
+            workflow.preview_information(case_no, candidate_id, info_type)), message="已讀取訂單資訊")
+    except ValueError as error:
+        raise _information_error(error) from error
+
+
+@router.get(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/package/preview",
+    response_model=BaseResponse[CandidateInformationPackagePreviewView],
+)
+def preview_candidate_information_package(case_no: str, candidate_id: int,
+                                  principal: AdminPrincipal = Depends(require_line_matching_sender)):
+    del principal
+    try:
+        return BaseResponse(data=CandidateInformationPackagePreviewView.model_validate(
+            workflow.preview_information_package(case_no, candidate_id)), message="已讀取寄送內容")
     except ValueError as error:
         raise _information_error(error) from error
 
@@ -217,11 +236,11 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
     _require_actor(principal, req.actor)
     try:
         result = workflow.send_information(
-            case_no, candidate_id, req.info_type, req.actor, req.event_key, req.preview_fingerprint
+            case_no, candidate_id, req.actor, req.event_key, req.preview_fingerprint
         )
         return BaseResponse(
             data=SendCandidateInformationResult.model_validate(result),
-            message=f"候選月嫂的訂單資訊-{req.info_type} 已建立可靠發送任務",
+            message="已建立候選月嫂的案件資訊投遞任務",
         )
     except TableImageUnavailable:
         raise typed_http_error(503, 'unavailable', 'line_table_image_unavailable', '圖片服務目前無法使用，請確認服務設定後再寄送。', 'candidate-information') from None

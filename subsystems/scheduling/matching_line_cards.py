@@ -27,7 +27,6 @@ def candidate_contact_information_card(
     info_type: int,
     information_sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
     interaction_reference: str,
-    response_url: str | None,
 ) -> str:
     """Render redacted candidate information as readable table sections."""
     if not isinstance(case_no, str) or not case_no.strip():
@@ -38,8 +37,6 @@ def candidate_contact_information_card(
         raise ValueError("candidate information sections are required")
     if not isinstance(interaction_reference, str) or not interaction_reference.strip():
         raise ValueError("candidate interaction reference is required")
-    if info_type != 3 and (not isinstance(response_url, str) or not response_url.startswith("https://")):
-        raise ValueError("candidate response URL must use HTTPS")
     title = f"訂單編號：{case_no.strip()}"
     body = [_title(title)]
     body.extend(_information_table_section(section_title, rows) for section_title, rows in information_sections)
@@ -53,42 +50,12 @@ def candidate_contact_information_card(
         body.append(_notice("預計服務日期說明；正式排班仍須由工會確認。"))
         return canonical_line_payload_json(_bubble_payload(title, body, []))
     body.append(_notice("請確認檔期與條件後回覆是否願意承接。"))
+    body.append(_notice("有疑問請直接聯絡工會。"))
     actions = [
-        _candidate_contact_button("願意承接", interaction_reference, "willing", "#06C755"),
-        _candidate_contact_liff_button(
-            "提出疑問或無法承接", response_url, "#6B7280"
-        ),
+        _candidate_contact_button("可以接案", interaction_reference, "willing", "#06C755"),
+        _candidate_contact_button("無法接案", interaction_reference, "unwilling", "#6B7280"),
     ]
     return canonical_line_payload_json(_bubble_payload(title, body, actions))
-
-
-def candidate_customer_question_card(case_no: str, text: str, response_url: str) -> str:
-    return canonical_line_payload_json({
-        "type": "flex", "altText": f"案件 {case_no} 的工會詢問",
-        "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": [
-            {"type": "text", "text": "工會詢問", "weight": "bold", "size": "xl", "wrap": True},
-            {"type": "text", "text": text, "wrap": True},
-        ]}, "footer": {"type": "box", "layout": "vertical", "contents": [
-            {"type": "button", "style": "primary", "action": {
-                "type": "uri", "label": "回答問題", "uri": response_url,
-            }},
-        ]}},
-    })
-
-
-def candidate_caregiver_answer_card(case_no: str, answer: str, reference: str, response_url: str) -> str:
-    return canonical_line_payload_json({
-        "type": "flex", "altText": f"案件 {case_no} 的客戶回覆",
-        "contents": {"type": "bubble", "body": {
-            "type": "box", "layout": "vertical", "spacing": "md", "contents": [
-                {"type": "text", "text": "工會回覆", "weight": "bold", "size": "xl", "wrap": True},
-                {"type": "text", "text": answer, "size": "sm", "wrap": True},
-            ],
-        }, "footer": {"type": "box", "layout": "vertical", "contents": [
-            _candidate_contact_button("願意承接", reference, "willing", "#06C755"),
-            {"type": "button", "action": {"type": "uri", "label": "提出疑問或無法承接", "uri": response_url}},
-        ]}},
-    })
 
 
 def _information_table_section(title: str, rows: Sequence[tuple[str, str]]) -> dict[str, object]:
@@ -305,19 +272,6 @@ def _candidate_contact_button(label, reference, willingness, color):
     }
 
 
-def _candidate_contact_liff_button(label, uri, color):
-    return {
-        "type": "button",
-        "style": "primary",
-        "color": color,
-        "action": {
-            "type": "uri",
-            "label": label,
-            "uri": uri,
-        },
-    }
-
-
 def _list_text(value):
     if isinstance(value, (list, tuple)):
         return "、".join(str(item) for item in value if item) or "未提供"
@@ -325,8 +279,6 @@ def _list_text(value):
 
 
 __all__ = [
-    "candidate_customer_question_card",
-    "candidate_caregiver_answer_card",
     "candidate_contact_information_card",
     "caregiver_information_card",
     "customer_profiles_card",

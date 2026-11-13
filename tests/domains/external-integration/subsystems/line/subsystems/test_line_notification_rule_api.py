@@ -427,6 +427,14 @@ def test_notification_rule_message_template_can_be_queried_and_updated(monkeypat
     app.dependency_overrides[require_line_configuration_manager] = _principal
     client = TestClient(app)
 
+    retired_template_id = "LINE-COPY-card-union-question"
+    rules["rules"].append({**rules["rules"][0], "id": "old_candidate_question", "template_id": retired_template_id})
+    templates["templates"].append({**templates["templates"][0], "id": retired_template_id})
+    retired_url = "/api/v1/line/notification-rules/old_candidate_question/message-template"
+    assert client.get(retired_url).status_code == 404
+    assert client.put(retired_url, json={"content": "舊訊息", "expected_revision": 7, "reason": "退役測試"}).status_code == 404
+    assert applied == []
+
     queried = client.get(
         "/api/v1/line/notification-rules/deposit_notice/message-template"
     )

@@ -15,9 +15,6 @@ import { adaptOrderSummaryPage } from '../../../../../../../adapters/orders/orde
 import { OrderConflictError } from '../../../../../../../api/orders/order_query_errors';
 
 vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: ({ completedCorrection }: { completedCorrection?: boolean }) => <p>{completedCorrection ? '完工更正月曆' : '服務日期工作區'}</p> }));
-vi.mock('../../../../../../../components/MatchingInformationWorkbench',()=>({
-  MatchingInformationWorkbench:({caseNo,questionId}:{caseNo:string;questionId?:string})=><section aria-label="指定問題作業">{caseNo} · 問題 {questionId}</section>,
-}));
 vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班工作區</p> }));
 vi.mock('../../../../../../../components/OrderMultiCaregiverPlanPanel', () => ({
   OrderMultiCaregiverPlanPanel: ({ filters, onObserved }: { filters: Record<string, boolean>; onObserved?: () => void }) => <section aria-label="正式分段工作區">
@@ -261,14 +258,14 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     }));
   });
 
-  it('資訊通知深連結在同案媒合作業開啟指定問題',async()=>{
+  it('既有問題深連結只開啟同案候選月嫂',async()=>{
     const caseNo='CASE-QUESTION';window.history.replaceState(null,'',`#order-workbench-v2?case=${caseNo}&work=matching&question=73`);
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo,'matching_pool',{lifecycle:'洽談中'})]));
     setOwnerFacts(caseNo);
     render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()}/>);
-    const panel=await screen.findByRole('region',{name:'指定問題作業'});
-    expect(panel).toHaveTextContent('CASE-QUESTION · 問題 73');
-    expect(screen.getByRole('button',{name:'確認資訊與調整條件'})).toHaveAttribute('aria-pressed','true');
+    expect(await screen.findByRole('button',{name:'候選月嫂'})).toHaveAttribute('aria-pressed','true');
+    expect(screen.queryByRole('region',{name:'指定問題作業'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'確認資訊與調整條件'})).not.toBeInTheDocument();
     window.history.replaceState(null,'','/');
   });
 

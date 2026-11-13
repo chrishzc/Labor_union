@@ -13,7 +13,9 @@ from domains.line.configuration import LineConfigurationKind
 from shared_kernel.identities import ActorContext
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import render_message_template
-from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition, render_copy_payload
+from subsystems.line.message_copy_catalog import (
+    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, default_copy_templates, effective_copy_definition, render_copy_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -180,11 +182,10 @@ _BUILTINS = (
     ("card-caregiver-information-2", "正式媒合－月嫂案件資訊卡（二）", "flex", True, True, False),
     ("card-customer-profiles", "正式媒合－月嫂資料與客戶確認卡", "flex", True, True, False),
     ("card-customer-confirmation", "正式媒合－客戶完整推薦確認包", "flex", True, True, False),
+    ("card-candidate-information-package", "初步候選聯絡－案件資訊整包", "flex", True, True, False),
     ("card-candidate-information-1", "初步候選聯絡－訂單資訊一", "flex", True, True, False),
     ("card-candidate-information-2", "初步候選聯絡－訂單資訊二", "flex", True, True, False),
     ("card-candidate-information-3", "初步候選聯絡－每週服務說明", "flex", True, True, False),
-    ("card-union-question", "初步候選聯絡－工會詢問客戶卡", "flex", True, False, True),
-    ("card-union-answer", "初步候選聯絡－工會回覆月嫂卡", "flex", True, True, True),
     ("service-menu", "服務與問答導覽卡", "flex", False, False, False),
     ("order-update-menu", "修改訂單資訊導覽卡", "flex", False, False, False),
     ("service-contact", "呼叫專員－需求受理", "text", False, False, False),
@@ -224,7 +225,7 @@ class LineMessagePreviewApplication:
         by_id = {t["id"]: t for t in templates.get("templates", [])}
         references = [
             (r["id"], r["template_id"]) for r in rules.get("rules", [])
-            if r["template_id"] not in _RETIRED
+            if r["template_id"] not in _RETIRED and r["template_id"] not in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
             and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)
         ]
         referenced = {template_id for _, template_id in references}
@@ -354,17 +355,6 @@ class LineMessagePreviewApplication:
             if card_source is None:
                 return PreviewResult("unavailable", "所選案件與月嫂沒有此卡片所需的正式方案、候選紀錄或完整訂單／服務日期資料，請選擇其他對象。", "flex", facts=tuple(facts))
             payload = json.loads(card_source.payload_json)
-        elif key in {"card-union-question", "card-union-answer"}:
-            if content and content.lstrip().startswith("{"):
-                # Stored reusable card copy is independent of per-case authored text.
-                authored_content = "工會於案件中輸入的詢問或回覆內容（公版範例）"
-            else:
-                authored_content = content
-            if not content or not content.strip():
-                return PreviewResult("unavailable", "請輸入僅供預覽的工會詢問或回覆文案，不會儲存或發送。", "flex", facts=tuple(facts))
-            from subsystems.scheduling.matching_line_cards import candidate_customer_question_card, candidate_caregiver_answer_card
-            payload = json.loads(candidate_customer_question_card(case.case_no, authored_content, "https://preview.invalid/question")
-                if key == "card-union-question" else candidate_caregiver_answer_card(case.case_no, authored_content, "preview-only", "https://preview.invalid/answer"))
         elif key in {"service-menu", "order-update-menu"}:
             from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
             payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
@@ -421,8 +411,7 @@ class LineMessagePreviewApplication:
             payload["text"] += "\n\n" + cancellation_notice_sample(key)
         if sample:
             from subsystems.line.message_preview_samples import sample_bindings
-            binding_content = authored_content if key in {"card-union-question", "card-union-answer"} else content
-            facts = flow_facts if flow_facts is not None else sample_bindings(descriptor, template, binding_content, rendered_payload.get("text", "") if rendered_payload else "")
+            facts = flow_facts if flow_facts is not None else sample_bindings(descriptor, template, content, rendered_payload.get("text", "") if rendered_payload else "")
         if payload.get("type") == "text":
             return PreviewResult("ready", "公版範例資料，非真實案件或月嫂；不會儲存或發送。" if sample else "使用資料庫資訊預覽；不會實際發送。", "text", str(payload["text"]), facts=tuple(facts))
         documents = {}

@@ -27,7 +27,7 @@ const GROUPS = [
 ] as const;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
-  registration:'查看申請',identity:'審核身分綁定',profile:'審核資料異動',information:'處理確認與條件',
+  registration:'查看申請',identity:'審核身分綁定',profile:'審核資料異動',
   staff_profile:'審核月嫂資料異動',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
@@ -98,7 +98,7 @@ export function NotificationTasksPage() {
       .then(result=>{if(abort.signal.aborted)return;setRecordTotal(result.total);setRecords(result.items.map(task=>row({id:`delivery:${task.task_id}`,source:'delivery',group:deliveryGroup(task.source_type),
         title:'LINE 寄送工作',case_no:null,reference_id:task.task_id,person:'',summary:`寄送工作 #${task.task_id}・${DELIVERY_LABELS[task.status]}`,
         reason:'查看原寄送工作與目前允許的處理方式。',time:task.updated_at,tag:DELIVERY_LABELS[task.status],recipient:null,message:null,
-        unavailable_reason:null,expected_version:null,delivery_status:task.status,payment:null,log:null,information:null},true)));})
+        unavailable_reason:null,expected_version:null,delivery_status:task.status,payment:null,log:null},true)));})
       .catch(error=>{if(!abort.signal.aborted)setRecordError(notificationFailure(error));}).finally(()=>{if(!abort.signal.aborted)setRecordLoading(false);});
     return()=>abort.abort();
   },[tab,recordPage,deliveryFilter,revision,group,recordRevision]);

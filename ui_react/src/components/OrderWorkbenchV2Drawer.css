@@ -167,9 +167,6 @@
 .order-candidate-willingness { border-radius: 20px; padding: 5px 10px; font-size: .75rem; background: #f6eee1; color: #896a30; }
 .order-candidate-willingness.willing { background: #eaf2e8; color: #476943; }
 .order-candidate-willingness.unwilling { background: #f3eeee; color: #816a64; }
-.order-candidate-delivery { margin: 18px 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
-.order-candidate-delivery > div { padding: 12px; background: #faf7f2; border-radius: 8px; font-size: .8rem; }
-.order-candidate-delivery dd { margin: 6px 0 0; color: #887767; overflow-wrap: anywhere; }
 .order-candidate-card details { border-top: 1px solid #e9dfd5; padding-top: 16px; }
 .order-candidate-card details[open] > summary { margin-bottom: 14px; }
 .order-case-action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; font-size: .8rem; color: #8a7767; }
@@ -208,7 +205,7 @@
 .order-information-ingredients span { display: grid; align-content: start; gap: 6px; padding: 12px; border: 1px solid #e5dbd0; border-radius: 6px; background: #fff; line-height: 1.6; }
 .order-information-ingredients span strong { color: #4f463f; }
 @media (max-width: 640px) {
-  .order-case-document-grid, .order-candidate-delivery, .order-information-choice, .order-information-paper dl, .order-information-contract-shot dl, .order-information-ingredients > div { grid-template-columns: 1fr; }
+  .order-case-document-grid, .order-information-choice, .order-information-paper dl, .order-information-contract-shot dl, .order-information-ingredients > div { grid-template-columns: 1fr; }
   .order-information-contract-shot dl > div { grid-template-columns: 1fr; gap: 4px; }
   .order-candidate-list-heading { flex-direction: column; gap: 8px; }
   .order-information-paper { padding: 16px; }
@@ -903,13 +900,50 @@
 .candidate-inquiry-dialog fieldset label { display: inline-flex; gap: 10px; margin: 8px 18px 8px 0; align-items: center; }
 .candidate-inquiry-dialog textarea { display: block; width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #dcbba7; border-radius: 6px; font: inherit; }
 .candidate-inquiry-dialog fieldset label:has(textarea) { display: block; }
-.order-candidate-card.compact { padding: 20px; }
-.order-candidate-card.compact .order-candidate-delivery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.order-candidate-card.compact .order-candidate-delivery dd { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.order-candidate-card.compact .order-candidate-delivery dd > span { min-width: 0; }
-.order-candidate-card.compact .order-candidate-delivery button { flex-shrink: 0; }
+.order-candidate-card.compact { padding: 16px; }
 .candidate-information-send { margin: 16px 0; padding: 16px; border: 1px solid #ead5c8; border-radius: 10px; background: #fffaf5; }
 .candidate-information-send h4 { margin: 0 0 8px; }
+.candidate-package-entry, .candidate-package-header, .candidate-package-footer {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px;
+}
+.candidate-package-entry { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: #faf7f2; }
+.candidate-package-entry .btn-primary-action, .candidate-package-footer .btn-primary-action { flex: 0 0 auto; min-height: 38px; padding-inline: 12px; }
+.candidate-package-entry p, .candidate-package-header p { margin: 3px 0 0; color: #695344; font-size: .85rem; }
+.candidate-inquiry-step { margin: 0 0 20px; padding: 0 0 16px; border-bottom: 1px solid #eadbd0; }
+.candidate-weekly-editor { min-width: 0; margin: 0; padding: 0; border: 0; }
+.candidate-weekly-editor fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.candidate-weekly-editor label { display: inline-flex; align-items: center; gap: 5px; }
+.candidate-weekly-editor .candidate-save-planned-dates { display: block; margin-inline-start: auto; }
+.candidate-inquiry-step-heading h3 { margin: 0; }
+.candidate-selection-body > .order-candidate-list-heading { justify-content: flex-end; }
+.candidate-package-history { margin: 10px 0; font-size: .85rem; }
+.candidate-package-pages { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 12px; margin: 12px 0; }
+.candidate-package-pages > nav { display: grid; grid-template-columns: 1fr; align-content: start; margin: 0; padding: 0; border: 0; }
+.candidate-inquiry-step-heading > button, .candidate-information-send button:not(.btn-primary-action) {
+  min-height: 38px; padding: 6px 10px; border: 1px solid #e4d2c4; border-radius: 7px; background: #fff; color: #37261d; font: inherit;
+}
+.candidate-information-send .candidate-information-tabs button { text-align: start; }
+.candidate-information-send .candidate-information-tabs button[aria-pressed="true"] {
+  border-color: #bb430e; background: #fff0e5; color: #9f3508; font-weight: 700; box-shadow: none;
+}
+.candidate-information-send button:disabled {
+  background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); cursor: not-allowed;
+}
+.candidate-package-message { padding: 10px; border-radius: 8px; background: #e9eff6; touch-action: pan-y; }
+.candidate-package-message > div:first-child { color: #495464; font-size: .85rem; }
+.candidate-package-bubble { margin: 8px 0; padding: 12px; border-radius: 8px; background: #fff; }
+.candidate-package-bubble h5 { margin: 0 0 6px; }
+.candidate-package-bubble dl { margin: 0 0 8px; }
+.candidate-package-bubble dl > div { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 8px; border-top: 1px solid #e9ddd3; padding: 5px 0; }
+.candidate-package-bubble dd { margin: 0; }
+.candidate-package-bubble :is(dt, dd) { overflow-wrap: anywhere; }
+.candidate-package-reply { display: block; margin-top: 6px; padding: 5px; border-radius: 6px; background: #edf5ed; color: #23513c; text-align: center; }
+.candidate-package-reply + .candidate-package-reply { background: #f8f2ec; color: #37261d; }
+.candidate-package-footer { justify-content: flex-end; }
+@media (max-width: 600px) {
+  .candidate-package-pages { grid-template-columns: 1fr; }
+  .candidate-package-pages > nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .candidate-willingness-form { margin: 16px 0; padding: 16px; border: 1px solid #ead5c8; border-radius: 10px; background: #fffaf5; }
 .candidate-willingness-form h4 { margin: 0 0 12px; }
 .candidate-willingness-form fieldset > label { margin: 8px 18px 8px 0; }
@@ -922,7 +956,12 @@
 .order-candidate-card.compact:focus { outline: 2px solid #b95125; outline-offset: 3px; }
 .candidate-card-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
 .candidate-card-identity h4, .candidate-card-identity p { margin: 0; }
-.candidate-card-identity .order-candidate-willingness { margin-left: auto; }
+.candidate-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+.candidate-card-operations { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; margin-top: 8px; }
+.candidate-card-operations > .caregiver-commute { flex: 1 1 280px; min-width: 0; }
+.candidate-card-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+.candidate-card-footer:empty { display: none; }
+.candidate-card-footer p { margin: 0; }
 .candidate-confirmation-link { margin-left: auto; }
 .formal-recommendation-candidate.highlighted { border-color: #bd430d; background: #fff3e9; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
@@ -936,8 +975,7 @@
   .candidate-inquiry-dialog-footer, .candidate-inquiry-dialog-footer > div { flex-wrap: wrap; }
   .candidate-inquiry-dialog-footer { padding: 16px; }
   .candidate-recipient-row { flex-wrap: wrap; }
-  .candidate-card-identity .order-candidate-willingness, .candidate-confirmation-link { margin-left: 0; }
-  .order-candidate-card.compact .order-candidate-delivery { grid-template-columns: 1fr; }
+  .candidate-card-actions, .candidate-confirmation-link { margin-inline-start: 0; }
 }
 
 /* Approved contract workbench: direct downloads and independent signed returns. */

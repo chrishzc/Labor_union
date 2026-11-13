@@ -8,7 +8,7 @@ import { transport } from '../../../../../../api/shared/transport';
 
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'overdue:deposit',source:'overdue',group:'reminder',title:'訂金逾期未清',case_no:'116000001',reference_id:null,
   person:'',summary:'本期未繳 NT$ 3,000',reason:'各期獨立判斷',time:'2026-10-24',tag:'待處理',recipient:'客戶私人聊天室',message:'目前訂金餘額',unavailable_reason:'客戶尚未綁定 LINE',expected_version:null,
-  delivery_status:null,payment:{case_no:'116000001',payment_stage:'deposit',obligation_identity:'case1:deposit',projection_version:1,obligation_event_id:10,due_date:'2026-10-24',remaining_amount_ntd:3000},log:null,information:null,...patch});
+  delivery_status:null,payment:{case_no:'116000001',payment_stage:'deposit',obligation_identity:'case1:deposit',projection_version:1,obligation_event_id:10,due_date:'2026-10-24',remaining_amount_ntd:3000},log:null,...patch});
 beforeEach(()=>{
   window.matchMedia=vi.fn().mockReturnValue({matches:false}) as unknown as typeof matchMedia;
   vi.spyOn(client,'catalog').mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'}]);

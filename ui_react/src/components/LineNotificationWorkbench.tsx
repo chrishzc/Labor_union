@@ -61,10 +61,10 @@ const RECEIPT_TEMPLATE = 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1';
 
 const CARD_RECIPIENTS: Record<string, string> = {
   'card-customer-confirmation': '客戶私人聊天室', 'card-customer-profiles': '客戶私人聊天室',
+  'card-candidate-information-package': '候選月嫂私人聊天室',
   'card-candidate-information-1': '候選月嫂私人聊天室', 'card-candidate-information-2': '候選月嫂私人聊天室',
   'card-candidate-information-3': '候選月嫂私人聊天室', 'card-caregiver-information': '正式媒合月嫂私人聊天室',
   'card-caregiver-information-2': '正式媒合月嫂私人聊天室',
-  'card-union-question': '客戶私人聊天室', 'card-union-answer': '月嫂私人聊天室',
   'group-invitation-customer': '客戶私人聊天室', 'group-invitation-staff': '月嫂私人聊天室',
 };
 
@@ -363,9 +363,9 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const automaticImage = selected?.id === 'card-candidate-information-3';
   const previewOnly = selected ? FLOW_PREVIEW_ONLY_IDS.has(selected.id) : false;
   const contentLoading = selected?.kind === 'card' && !automaticImage && !previewOnly && !builtinContents[selected.id];
-  const confirmationFlows = ['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected?.id ?? '') ? [
+  const confirmationFlows = ['card-customer-confirmation', 'card-candidate-information-package', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected?.id ?? '') ? [
     { id: 'card-customer-confirmation', label: '正式媒合 · 客戶確認' },
-    { id: selected?.id === 'card-candidate-information-2' ? selected.id : 'card-candidate-information-1', label: '初步候選 · 月嫂承接' },
+    { id: selected?.id === 'card-candidate-information-1' || selected?.id === 'card-candidate-information-2' ? selected.id : 'card-candidate-information-package', label: '初步候選 · 月嫂承接' },
   ] : [];
 
   return (
@@ -405,7 +405,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
             </section> : <>
               {selected.error && !(selected.textEditingUnsupported && formatOf(selected) === 'flex') && <p className="notification-feedback error" role="alert">{selected.error}</p>}
               {selected.textEditingUnsupported && formatOf(selected) === 'flex' && <p className="notification-help">此卡片使用結構化內容，請查看右側預覽；可在「發送設定」調整啟用狀態。</p>}
-              {['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected.id) && <p className="notification-help">表格圖片由系統資料自動產生；這裡只編輯最後確認卡片的文案與按鈕名稱。</p>}
+              {selected.id === 'card-candidate-information-package' && <p className="notification-help">表格圖片由系統資料自動產生。這裡可編輯最後一張卡片的文案。</p>}
+              {['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected.id) && <p className="notification-help">表格圖片由系統資料自動產生。這裡可編輯最後一張卡片的文案與按鈕名稱。</p>}
               {automaticImage && <p className="notification-help">每週服務安排圖片由系統資料自動產生，無需編輯文案。</p>}
               {confirmationFlows.length > 0 && <nav className="notification-card-flow-tabs" aria-label="確認卡流程">{confirmationFlows.map(flow => {
                 const entry = allEntries.find(item => item.id === flow.id);

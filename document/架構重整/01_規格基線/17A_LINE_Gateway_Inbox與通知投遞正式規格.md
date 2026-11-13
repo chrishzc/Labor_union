@@ -44,9 +44,9 @@
 - **Notification Rules Admin**：規則管理以 `configuration → intent → task` 順序加鎖；禁用未知 event 或 `{} -> {"rules":[]}` 漂移；儲存／停用同交易取消相應排程任務。
 - **通知文案編輯器與公版預覽（`LINE-PREVIEW-01～08`、`LINE-COPY-01～05`、`LINE-COPY-EDITOR-01～02`、`LINE-COPY-CATALOG-01`）**：
   - 由 `GET /api/v1/line/message-previews/catalog`、`GET /api/v1/line/message-previews/subjects` 與 `POST /api/v1/line/message-previews/preview` 提供公版索引、對象搜尋與即時渲染；目錄依 `MESSAGE_TEMPLATES` 維護全部通知文字與確認卡片（編輯框統一寬度 `504px`、每頁 `6` 則、正式媒合僅列「正式媒合－客戶完整推薦確認包」，保留各身分獨立成功文案 `identity_bound_customer | _staff | _admin` 與 `PUT` CAS 版本防衝突）。
-  - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作），僅工會詢問／回覆卡開放純瀏覽器記憶體草稿預覽。
+  - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作）。「寄送案件資訊」節點以整包呈現，頁面內容見 [媒合候選池規格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
 - **三張表格圖片渲染（`LINE-COPY-TABLE-01`、`LINE-TABLE-IMAGE-01～04`）**：
-  - 初步候選聯絡與正式推薦皆產生「訂單資訊一、資訊二、每週服務安排」三張表格 PNG（月嫂版資訊一僅含薪資單價／預估總薪資／預計付款日；客戶版僅含客戶費用與繳款約定；確認按鈕留存獨立互動卡）。
+  - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦產生「訂單資訊一、資訊二、每週服務安排」三張表格 PNG，客戶版資訊一的財務欄位限於客戶費用與繳款約定，確認按鈕留存於獨立互動卡。
   - 圖片快照凍結於 outer UoW 投遞資料；端點 `GET /api/v1/line/table-images/{token}` 以 7 日不依賴外部排班金鑰的內部短效 opaque token 動態產出 PNG（`private, no-store, nosniff, no-referrer`），缺少系統中文字型或金鑰異常回 `503` 而不退回純文字。
 
 ## 6. 私人日誌照片媒體傳輸（`NAS-LINE-04`）

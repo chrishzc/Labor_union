@@ -94,12 +94,12 @@ class PublicPreviewReader:
                 information_document('訂單資訊－2', CASE.case_no, information(2), info_type=2),
                 weekly_document(CASE.case_no, ({key: VALUES[key] for key in WEEKLY},)))
         else:
-            number = int(kind.rsplit("-", 1)[1])
+            from subsystems.line.table_image_contracts import candidate_information_document
+            numbers = (1, 2, 3) if kind == "card-candidate-information-package" else (int(kind.rsplit("-", 1)[1]),)
+            number = numbers[0]
             payload = candidate_contact_information_card(CASE.case_no, number, _sections(number),
-                "preview-only", None if number == 3 else "https://preview.invalid/candidate")
-            from subsystems.line.table_image_contracts import information_document
-            documents = (information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[number - 1], CASE.case_no,
-                ({'line_sections': tuple({'title': title, 'rows': rows} for title, rows in _sections(number))},), info_type=number),)
+                "preview-only")
+            documents = tuple(candidate_information_document(CASE.case_no, value, _sections(value)) for value in numbers)
         return PreviewCardSource(payload, json.dumps([asdict(item) for item in documents], ensure_ascii=False))
 
 
@@ -147,8 +147,10 @@ def sample_bindings(descriptor, template, content, rendered_text):
         if field in values:
             bindings.append(PreviewOption(f"{label}（{field}）", str(values[field])))
     if key.startswith("card-candidate-information-"):
-        for section, rows in _sections(int(key[-1])):
-            bindings.extend(PreviewOption(f"{section}／{label}", value) for label, value in rows)
+        numbers = (1, 2, 3) if key == "card-candidate-information-package" else (int(key[-1]),)
+        for number in numbers:
+            for section, rows in _sections(number):
+                bindings.extend(PreviewOption(f"{section}／{label}", value) for label, value in rows)
     elif key == "card-customer-confirmation":
         from subsystems.orders.order_information import _project_fields, _candidate_field_value, OrderInformationTemplate
         for number, template_id in ((1, OrderInformationTemplate.INFO_01), (2, OrderInformationTemplate.INFO_02)):

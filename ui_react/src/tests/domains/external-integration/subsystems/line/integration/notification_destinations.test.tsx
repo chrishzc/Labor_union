@@ -5,7 +5,7 @@ import { notificationTasksClient as client,type NotificationItem,type Notificati
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { transport } from '../../../../../../api/shared/transport';
 const key='ci_'+'1'.repeat(64);
-const item=(source:NotificationSource):NotificationItem=>({id:`${source}:73`,source,group:'review',title:'指定事項',case_no:'116000001',reference_id:73,person:'測試對象',summary:'摘要',reason:'待辦原因',time:'',tag:'待處理',recipient:null,message:'人工操作指引',unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,information:null,failure:source==='notification_failure'?{issue_key:key,notification_reason:'recipient_unavailable',related_task_ids:[]}:null});
+const item=(source:NotificationSource):NotificationItem=>({id:`${source}:73`,source,group:'review',title:'指定事項',case_no:'116000001',reference_id:73,person:'測試對象',summary:'摘要',reason:'待辦原因',time:'',tag:'待處理',recipient:null,message:'人工操作指引',unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,failure:source==='notification_failure'?{issue_key:key,notification_reason:'recipient_unavailable',related_task_ids:[]}:null});
 beforeEach(()=>{
  window.matchMedia=vi.fn().mockReturnValue({matches:false}) as unknown as typeof matchMedia;
  vi.spyOn(client,'catalog');vi.spyOn(client,'list');
@@ -26,7 +26,6 @@ it.each(['deposit','first','second'] as const)('%s 入帳通知只引導到帳�
 it.each([
  ['registration','查看申請','#clients?tab=applications&registration=73'],
  ['profile','審核資料異動','#clients?tab=profile-requests&request=73'],
- ['information','處理確認與條件','#order-workbench-v2?case=116000001&work=matching&question=73'],
  ['service_start','處理日期與代班','#scheduling?tab=coordination&case_no=116000001&request=73'],
  ['delivery','查看寄送工作','#line-management?tab=delivery&task=73'],
  ['notification_failure','處理通知建立異常',`#line-management?tab=delivery&view=failures&issue=${key}`],

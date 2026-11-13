@@ -34,7 +34,6 @@ class AddCandidatesRequest(_EventIdentity):
 
 
 class SendCandidateInformationRequest(_EventIdentity):
-    info_type: Literal[1, 2, 3]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -54,6 +53,25 @@ class CandidateInformationPreviewView(BaseModel):
     text: str
     line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CandidateInformationPackageDocumentView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    info_type: Literal[1, 2, 3]
+    line_sections: list[CandidateInformationSectionView] = Field(min_length=1, max_length=4)
+
+
+class CandidateInformationPackagePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    case_no: str
+    candidate_id: int = Field(gt=0)
+    staff_name: str
+    documents: list[CandidateInformationPackageDocumentView] = Field(min_length=2, max_length=3)
+    reply_text: list[str]
+    reply_actions: list[str]
+    preview_fingerprint: str | None = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class CaseInformationPreviewView(BaseModel):
@@ -162,6 +180,7 @@ class CandidateInformationMap(BaseModel):
         default=None, alias="2"
     )
     information_3: CandidateInformationDeliveryView | None = Field(default=None, alias="3")
+    package: CandidateInformationDeliveryView | None = None
 
 
 class CandidateContactView(BaseModel):

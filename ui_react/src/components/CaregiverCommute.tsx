@@ -147,26 +147,39 @@ export function CommuteUsagePanel() {
   </aside>;
 }
 
-export function CaregiverCommuteQuery(props: { caseNo: string; staffId: number; staffName: string }) {
+type CaregiverCommuteQueryProps = { caseNo: string; staffId: number; staffName: string; compact?: boolean };
+
+export function CaregiverCommuteQuery(props: CaregiverCommuteQueryProps) {
   return <SingleCommuteQuery key={`${props.caseNo}:${props.staffId}`} {...props} />;
 }
-function SingleCommuteQuery({ caseNo, staffId, staffName }: { caseNo: string; staffId: number; staffName: string }) {
+function SingleCommuteQuery({ caseNo, staffId, staffName, compact = false }: CaregiverCommuteQueryProps) {
   const current = useSyncExternalStore(subscribe, getSnapshot);
   const { busy, result, error, pendingKey } = current.queries.get(`${caseNo}:${staffId}`) ?? emptyQuery;
-  return <div className="caregiver-commute" aria-label={`${staffName}機車通勤`}>
-    <button type="button" disabled={busy || current.usage?.configured === false} onClick={() => { void queryCommute(caseNo, staffId); }}>
-      {busy ? '查詢機車通勤中…' : pendingKey ? '確認原查詢操作' : result ? '重新查詢機車通勤（增加用量）' : '查詢機車通勤'}
-    </button>
-    {error && <p role="alert">{error}</p>}
-    {result && <div role="status">
-      {result.status === 'ready' && result.distance_meters !== null && result.duration_seconds !== null
-        ? <p><strong>機車單程 {(result.distance_meters / 1000).toFixed(1)} 公里 · 預估 {Math.ceil(result.duration_seconds / 60)} 分鐘</strong></p>
-        : <p>{result.message}</p>}
+  const minutes = result?.status === 'ready' && result.duration_seconds !== null ? Math.ceil(result.duration_seconds / 60) : null;
+  const distance = result?.status === 'ready' && result.distance_meters !== null ? (result.distance_meters / 1000).toFixed(1) : null;
+  const details = result && <>
       {result.status === 'ready' && result.message && <p>{result.message}</p>}
       <p>查詢時間：{time(result.queried_at)} · Google Maps</p>
       <p>同一分頁內保留上次結果；地址或路況改變時，請手動重新查詢。</p>
       {result.status === 'ready' && <p>機車路線仍在測試，可能有路線資訊不完整；請依現場道路標誌確認。</p>}
+  </>;
+  return <div className={`caregiver-commute${compact ? ' caregiver-commute-compact' : ''}`} aria-label={`${staffName}機車通勤`}>
+    {compact && <div className="caregiver-commute-field">
+      <span>機車通勤（單程）</span>
+      <strong role="status">{minutes !== null ? <>預估 {minutes} 分鐘{distance !== null && ` · ${distance} 公里`}</>
+        : result?.message || (busy ? '查詢中…' : error ? '查詢未完成' : '未查詢')}</strong>
     </div>}
-    {!result && !error && <span>月嫂名冊地址 → 本案客戶地址；逐位手動查詢。</span>}
+    <button type="button" disabled={busy || current.usage?.configured === false} onClick={() => { void queryCommute(caseNo, staffId); }}>
+      {busy ? '查詢機車通勤中…' : pendingKey ? '確認原查詢操作' : result ? '重新查詢機車通勤（增加用量）' : '查詢機車通勤'}
+    </button>
+    {error && <p role="alert">{error}</p>}
+    {result && (compact ? <details><summary>查詢明細</summary>{details}</details>
+      : <div role="status">
+        {minutes !== null && distance !== null
+          ? <p><strong>機車單程 {distance} 公里 · 預估 {minutes} 分鐘</strong></p>
+          : <p>{result.message}</p>}
+        {details}
+      </div>)}
+    {!compact && !result && !error && <span>月嫂名冊地址 → 本案客戶地址；逐位手動查詢。</span>}
   </div>;
 }

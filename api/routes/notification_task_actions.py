@@ -4,27 +4,20 @@ The owner applications retain validation, concurrency, idempotency and commits.
 These endpoints never execute a provider or publish menus.
 """
 from typing import Annotated, Literal
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
-from api.dependencies.admin_auth import require_capability, require_line_matching_sender, require_line_matching_override, admin_actor_context, has_required_capability
+from api.dependencies.admin_auth import require_capability, admin_actor_context, has_required_capability
 from subsystems.line.capabilities import LineCapability
 from api.dependencies.line_deposit import get_deposit_notifications
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity import CanonicalLineReviewResponse
 from api.schemas.notification_tasks import NotificationFailureDetailView
-from api.schemas.line_candidate_contact import CandidateInformationStaffSendView, CandidateInformationStaffItemView, CandidateInformationStaffPageView
 from api.routes.line_deposit_payment import DepositReminderReceipt
 from api.error_contracts import typed_http_error
-from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.deposit_notifications import DepositNotificationConflict
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from domains.line.identities import LineDeliveryTaskId
-from subsystems.line.candidate_contact_response_application import CandidateContactResponseApplication, CandidateContactResponseError
-from api.dependencies.order_terms import get_order_terms_application
-from api.routes.order_terms import OrderTermsInput
-from api.routes import order_terms as terms_routes
-from shared_kernel.identities import CorrelationId
 
 router = APIRouter(prefix='/api/v1/line/notification-task-actions', tags=['Notification Workbench'])
 mobile_router = APIRouter(prefix='/api/v1/line/mobile-admin/notification-task-actions', tags=['Notification Workbench'])
@@ -114,13 +107,6 @@ class DepositReminder(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=128)
 
 
-class InformationSend(BaseModel):
-    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    recipient: Literal['caregiver', 'customer']
-    message_text: str = Field(min_length=1, max_length=1000)
-    idempotency_key: str = Field(min_length=1, max_length=100)
-
-
 @router.post('/deposit-reminder', response_model=BaseResponse[DepositReminderReceipt])
 def deposit_reminder(body: DepositReminder, principal=Depends(require_capability(LineCapability.TASK_SEND))):
     try:
@@ -136,102 +122,6 @@ def deposit_reminder(body: DepositReminder, principal=Depends(require_capability
         }
         raise typed_http_error(409, 'conflict', str(error), messages.get(str(error),
             '繳費資料或狀態已更新，請重新整理後再操作。'), 'notification-deposit') from error
-
-
-@router.get('/information', response_model=BaseResponse[CandidateInformationStaffPageView])
-def information_list(case_no: str = Query(min_length=1,max_length=50), page: int = Query(default=1,ge=1),
-                     principal=Depends(require_capability(LineCapability.MATCHING_READ))):
-    return BaseResponse(data=CandidateContactResponseApplication(get_connection).query_staff_questions(
-        case_no=case_no,page=page,page_size=25))
-
-
-@router.get('/information/{question_id}/query', response_model=BaseResponse[CandidateInformationStaffItemView])
-def information_query(question_id: Annotated[int,Path(gt=0)], case_no: str = Query(min_length=1,max_length=50),
-                      principal=Depends(require_capability(LineCapability.MATCHING_READ))):
-    result=CandidateContactResponseApplication(get_connection).query_staff_questions(case_no=case_no,question_id=question_id)
-    if not result['items']:
-        raise typed_http_error(404,'not_found','candidate_contact_question_unavailable',
-                               '這筆需求已處理、已更新或不屬於此案件，請重新查詢。','notification-information')
-    return BaseResponse(data=result['items'][0])
-
-
-@router.post('/information/{question_id}/send', response_model=BaseResponse[CandidateInformationStaffSendView])
-def information_send(question_id: int, body: InformationSend, principal=Depends(require_line_matching_sender)):
-    try:
-        result = CandidateContactResponseApplication(get_connection).send_staff_information(question_id,
-            body.recipient, body.message_text, admin_actor_context(principal).actor_id, IdempotencyKey(body.idempotency_key))
-        return BaseResponse(data=result, message='已建立寄送工作，尚未證明送達。')
-    except CandidateContactResponseError as error:
-        messages = {
-            'candidate_contact_recipient_unavailable':'月嫂尚未綁定 LINE，請先完成身分綁定。',
-            'candidate_contact_customer_unavailable':'客戶尚未綁定 LINE，請先完成身分綁定。',
-        }
-        raise typed_http_error(409, 'conflict', str(error), messages.get(str(error),
-            '問題或寄送狀態已更新，請重新整理後再操作。'), 'notification-information') from error
-
-
-class AdjustmentContext(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    case_no: str = Field(min_length=1, max_length=50)
-    customer_answer_event_id: int = Field(gt=0)
-
-
-class AdjustmentTerms(AdjustmentContext):
-    proposed_terms: OrderTermsInput
-
-
-class AdjustmentApproval(AdjustmentTerms):
-    expected_order_version: int = Field(ge=0)
-    idempotency_key: str = Field(min_length=1, max_length=191)
-
-
-class AdjustmentRecontact(AdjustmentContext):
-    candidate_ids: list[int] = Field(min_length=1, max_length=100)
-
-
-class RecontactItem(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    candidate_id: int = Field(gt=0)
-    preview_fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
-
-
-class AdjustmentRecontactApply(AdjustmentContext):
-    items: list[RecontactItem] = Field(min_length=1, max_length=100)
-
-
-@router.get('/adjustments/{pool_id}')
-def adjustment_query(pool_id:int,case_no:str=Query(min_length=1,max_length=50),customer_answer_event_id:int=Query(gt=0),
-                     principal=Depends(require_line_matching_override),application=Depends(get_order_terms_application)):
-    from api.routes.line_mobile_admin import _matching_operation, _matching_operation_payload, _MobileMatchingFollowupOperationView
-    operation = _matching_operation(pool_id,case_no,customer_answer_event_id)
-    return BaseResponse(data=_MobileMatchingFollowupOperationView.model_validate({**_matching_operation_payload(operation),
-        'order_terms':terms_routes._query_payload(application.query(case_no))}))
-
-
-@router.post('/adjustments/{pool_id}/preview')
-def adjustment_preview(pool_id:int,body:AdjustmentTerms,principal=Depends(require_line_matching_override),application=Depends(get_order_terms_application)):
-    from api.routes.line_mobile_admin import _matching_operation, _mobile_matching_terms_preview_payload
-    _matching_operation(pool_id,body.case_no,body.customer_answer_event_id)
-    return terms_routes._call_endpoint(lambda:_mobile_matching_terms_preview_payload(application.preview(body.case_no,body.proposed_terms.to_domain())),
-        '條件預覽已建立，尚未寫入。',CorrelationId('notification-adjustment-preview'))
-
-
-@router.post('/adjustments/{pool_id}/approve')
-def adjustment_approve(pool_id:int,body:AdjustmentApproval,principal=Depends(require_line_matching_override),application=Depends(get_order_terms_application)):
-    from api.routes.line_mobile_admin import _approve_matching_terms
-    return _approve_matching_terms(pool_id,body,application,admin_actor_context(principal))
-
-
-@router.post('/adjustments/{pool_id}/recontact/preview')
-def adjustment_recontact_preview(pool_id:int,body:AdjustmentRecontact,principal=Depends(require_line_matching_override)):
-    from api.routes.line_mobile_admin import _preview_matching_recontact
-    return _preview_matching_recontact(pool_id,body)
-
-
-@router.post('/adjustments/{pool_id}/recontact/apply')
-def adjustment_recontact_apply(pool_id:int,body:AdjustmentRecontactApply,principal=Depends(require_line_matching_override)):
-    from api.routes.line_mobile_admin import _apply_matching_recontact
-    return _apply_matching_recontact(pool_id,body,admin_actor_context(principal))
 
 
 @mobile_router.post('/registrations/{identity}/query')

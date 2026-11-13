@@ -7,7 +7,7 @@ import {lineDeliveryQueryClient as delivery} from '../../../../../../api/line_de
 import type {LineDeliveryItem} from '../../../../../../api/line_delivery/line_delivery_query_schemas';
 const item=(source:NotificationItem['source']):NotificationItem=>({id:'customer_service:7',source,group:'support',title:'同一聯絡需求',case_no:'115000001',
  reference_id:7,person:'合成人物',summary:'待處理',reason:'原 owner 待辦',time:'',tag:'待處理',recipient:null,message:null,
- unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,information:null});
+ unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null});
 const task:LineDeliveryItem={task_id:1,id:1,task_type:'finance',source_type:'finance',status:'failed',updated_at:'2026-10-26T00:00:00Z',
  scheduled_at:'2026-10-26T00:00:00Z',created_at:'2026-10-26T00:00:00Z',completed_attempts:1,max_attempts:3,next_retry_at:null,sent_at:null,failed_at:'2026-10-26T00:00:00Z'};
 beforeEach(()=>{
@@ -78,35 +78,4 @@ it('手機空候選頁不顯示已無事項，跨多個空頁後只計算實際�
    '/api/v1/line/mobile-admin/notification-tasks/notification_failure',
    '/api/v1/line/mobile-admin/notification-tasks/notification_failure']);
  }finally{host.remove();}
-});
-
-
-it('LIFF 說明客戶未綁定並提供核對，核對保留草稿且不送出；讀取失敗不誤開放發送',async()=>{
- const source=readFileSync('../line/static/mobile_admin.html','utf8');
- const helpers=source.slice(source.indexOf('let notificationSequence = 0;'),source.indexOf('async function openNotificationItem(item,cursor)'));
- const factory=source.slice(source.indexOf('function candidateInformationCard(item)'),source.indexOf('let notificationSequence = 0;'));
- const info={question_id:7,pool_id:1,request_kind:'information_question',customer_answer_event_id:null,review_completed:false,
-  case_no:'SYNTHETIC',staff_name:'合成月嫂',issues:[],customer_answer:null,customer_message:null,customer_available:false};
- const post=vi.fn().mockResolvedValue({items:[{reference_id:7,information:{...info,customer_available:true}}]});
- const card=new Function('document','postJson','initial',"const target='staff_review';let candidateInformationPage=1;const showStatus=()=>{};"+
-  helpers+factory+';return candidateInformationCard(initial);')(document,post,info) as HTMLElement;
- document.body.appendChild(card);
- try{
-  fireEvent.input(within(card).getByRole('textbox'),{target:{value:'原文案保留'}});
-  expect(within(card).getByRole('button',{name:'發送給客戶'})).toBeDisabled();
-  expect(within(card).getByRole('button',{name:'發送給月嫂'})).toBeEnabled();
-  expect(within(card).getByText(/這位客戶尚未綁定 LINE/)).toHaveTextContent('請先聯絡客戶完成綁定');
-  fireEvent.click(within(card).getByRole('button',{name:'重新核對'}));
-  await waitFor(()=>expect(within(card).getByRole('button',{name:'發送給客戶'})).toBeEnabled());
-  expect(within(card).getByRole('textbox')).toHaveValue('原文案保留');
-  expect(post).toHaveBeenCalledWith('/api/v1/line/mobile-admin/notification-tasks/information',{cursor:0});
-  post.mockRejectedValueOnce(new Error('暫時無法讀取資料，請重試。'));
-  fireEvent.click(within(card).getByRole('button',{name:'重新核對'}));
-  await within(card).findByText('暫時無法讀取資料，請重試。');
-  expect(within(card).getByRole('button',{name:'發送給客戶'})).toBeDisabled();
-  expect(within(card).getByRole('button',{name:'發送給月嫂'})).toBeDisabled();
-  expect(within(card).getByText(/目前無法核對這筆需求/)).toBeVisible();
-  expect(within(card).getByRole('textbox')).toHaveValue('原文案保留');
-  expect(post.mock.calls.every(call=>!String(call[0]).endsWith('/send'))).toBe(true);
- }finally{card.remove();}
 });

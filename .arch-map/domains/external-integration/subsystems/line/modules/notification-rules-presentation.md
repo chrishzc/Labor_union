@@ -24,7 +24,7 @@
 - primary: `ui_react/src/components/LineNotificationWorkbench.tsx`
   - `ui_react/src/components/LineCardCopyEditor.tsx` — 整張卡片標題／自由說明／按鈕集中編輯、插入顯示資料及同次儲存，不接收 provider actions。
   - `ui_react/src/components/LineMessageFlow.tsx`、`ui_react/src/components/LineMessageFlow.css` — 同一 LINE 專區的精簡流程導覽；只讀正式目錄與規則，點選步驟才展開訊息，返回時保留步驟並重新查詢狀態。
-  - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 流程分類引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；不保存文案或業務 gate。
+  - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 流程分類引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；「寄送案件資訊」引用單一整包公版。
   - `ui_react/src/components/LineMessagePreviewWorkspace.tsx` — 公版欄位值表、abort／generation 與 display-only Flex／carousel renderer。
   - `ui_react/src/api/line_notification_rules/line_message_preview_client.ts` — authenticated closed preview catalog／subjects／preview transport。
   - `subsystems/line/message_preview.py` — LINE-owned typed preview contracts、純渲染協調與移除可執行 action 的 projection。
@@ -47,7 +47,7 @@
   - `subsystems/line/message_configuration.py` — notification_description 消費同一版本化文字設定；genesis 沿用既有設定檔。
   - `subsystems/line/staff_leave_customer_coordination.py` — 新請假確認卡片只替換說明文字，不變更日期、對象或 postback。
 
-服務完工滿意度問卷邀請沿現有流程導覽、可編輯文字模板及公版預覽；問卷網址先留空，不提供無網址按鈕，後續可直接加入文字內容。
+服務完工滿意度問卷群組邀請已於 2026-11-12 退役，不再提供規則維護；歷史設定僅供讀取。
 
 流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」舊連結及 API 解析至唯一 `service-menu` 設定，目錄不再列獨立 `service-other`；訂單異動導覽只提供正式 LIFF URI，舊五按鈕文案作唯讀投影，服務流程及收費補助統一導向 AI 客服 LIFF；`service-flow`／`service-payment` 不再列入公版、文案編輯或預設模板，客服流程只保留維護位置說明。資料修改與訂單修改受理通知仍可編輯，歷史設定不刪除。
 

@@ -37,7 +37,6 @@ import { defaultMatchingFilterPolicy, type MatchingFilterPolicy } from '../api/s
 import { matchingPlanCommunicationClient } from '../api/scheduling/matching_plan_communication_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
-import { MatchingInformationWorkbench } from './MatchingInformationWorkbench';
 import { OrderFormalRecommendationPanel } from './OrderFormalRecommendationPanel';
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderAutomaticCompletionStatus } from './OrderAutomaticCompletionStatus';
@@ -73,7 +72,7 @@ type HistoricalRestartState =
 
 const WORK_GROUPS = [
   { id: 'intake', title: '確認客戶與服務需求', description: '確認基本服務需求；待補資料與可先辦事項分開處理。', stages: ['intake_validation'] },
-  { id: 'matching', title: '尋找月嫂與詢問意願', description: '新增人選、分開寄送訂單資訊，再記錄初步接案意願。', stages: ['matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply'] },
+  { id: 'matching', title: '尋找月嫂與詢問意願', description: '新增人選、寄送案件資訊，再記錄初步接案意願。', stages: ['matching_pool', 'caregiver_line_delivery', 'caregiver_willingness_reply'] },
   { id: 'recommendation', title: '推薦月嫂給客戶確認', description: '工會選定推薦人選，核對月嫂正式方案意願，再送交客戶確認接受或拒絕。', stages: ['formal_recommendation'] },
   { id: 'contracts', title: '辦理契約與簽署', description: '下載未簽署的客戶與月嫂契約，送交外部平台簽署後，分別回收簽署文件。', stages: ['external_signing_dispatch', 'external_signing_completion'] },
   { id: 'service', title: '確認服務日期與排班', description: '', stages: ['confirmed_service_dates', 'formal_service', 'service_completion'] },
@@ -165,7 +164,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [addingCandidates, setAddingCandidates] = useState(false);
   const [candidateAddState, setCandidateAddState] = useState({ dirty: false, busy: false });
   const [candidateContactState, setCandidateContactState] = useState({ dirty: false, busy: false });
-  const [matchingView, setMatchingView] = useState<'candidates' | 'multi' | 'information'>(()=>new URLSearchParams(window.location.hash.split('?')[1]).has('question')?'information':'candidates');
+  const [matchingView, setMatchingView] = useState<'candidates' | 'multi'>('candidates');
   const [multiOpened, setMultiOpened] = useState(false);
   const [multiBusy, setMultiBusy] = useState(false);
   const [multiFilters, setMultiFilters] = useState<MatchingFilterPolicy>(() => ({ ...defaultMatchingFilterPolicy }));
@@ -566,16 +565,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <nav className="order-case-subnav" aria-label="尋找月嫂方式">
                   <button type="button" aria-pressed={matchingView === 'candidates'} disabled={navigationLocked} onClick={() => requestLeave(()=>setMatchingView('candidates'))}>候選月嫂</button>
                   <button type="button" aria-pressed={matchingView === 'multi'} disabled={navigationLocked} onClick={() => requestLeave(() => { setMultiOpened(true); setMatchingView('multi'); })}>多月嫂分段</button>
-                  <button type="button" aria-pressed={matchingView === 'information'} disabled={navigationLocked} onClick={()=>requestLeave(()=>setMatchingView('information'))}>確認資訊與調整條件</button>
                 </nav>
-                {matchingView === 'information' && <MatchingInformationWorkbench key={caseNo} caseNo={caseNo} questionId={new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('question') ?? undefined}/>}
                 <div hidden={matchingView !== 'candidates'}>
                 <OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={() => { setSelectedGroup('matching'); refreshFacts(); }}
                   presentation="workbench" focusedCandidateId={focusedCandidateId} onEditStateChange={setCandidateContactState} onAddCandidates={() => setAddingCandidates(true)}
                   onOpenCustomerConfirmation={id => { setRecommendedCandidateId(id); openGroup('recommendation'); }} />
                 {addingCandidates && <CandidateInquiryDialog title="新增候選月嫂" wide busy={candidateAddState.busy}
                   onClose={() => { requestLeave(() => setAddingCandidates(false)); }}>
-                  <div className="candidate-inquiry-dialog-content"><p>人選會自動載入，點選人選旁的「加入候選池」即可加入。已加入的人選會標示「已加入」；加入候選池尚未形成排班。</p>
+                  <div className="candidate-inquiry-dialog-content">
                     <OrderCandidateQueryPanel caseNo={caseNo} presentation="workbench" includeMultiCaregiver={false} onEditStateChange={setCandidateAddState}
                       onPoolReadback={ids => { setFocusedCandidateId(ids?.[0]); refreshFacts(); }} />
                   </div>

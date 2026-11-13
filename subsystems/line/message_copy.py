@@ -11,7 +11,7 @@ CONTACT_RESOLVED = "您的客服案件已處理完成。如仍有問題，請再
 IDENTITY_PENDING = "您的身分申請已送出，請等待工會人員確認。"
 IDENTITY_BOUND = "綁定成功，專屬選單將稍後更新。"
 
-CANDIDATE_WILLING_RECEIVED = "已收到您願意承接的回覆，後續由工會安排媒合。"
+CANDIDATE_WILLING_RECEIVED = "感謝回復!!已記錄"
 
 IDENTITY_SUCCESS_TEMPLATES = {
     "customer": "identity_bound_customer",

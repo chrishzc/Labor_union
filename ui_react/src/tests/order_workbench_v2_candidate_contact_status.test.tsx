@@ -87,10 +87,9 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
       actor: 'operator-1',
       eventKey: 'candidate-willingness-test-key',
     }));
-    mocks.createCandidateInformationSendCommand.mockImplementation((caseNo, candidateId, infoType, previewFingerprint) => ({
+    mocks.createCandidateInformationSendCommand.mockImplementation((caseNo, candidateId, previewFingerprint) => ({
       caseNo,
       candidateId,
-      infoType,
       previewFingerprint,
       actor: 'operator-1',
       eventKey: 'candidate-information-test-key',
@@ -111,7 +110,7 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     expect(screen.getByText('未設定 月嫂乙')).toBeInTheDocument();
     expect(screen.getByText('已選定')).toBeInTheDocument();
     expect(screen.getByText('回覆說明：日期不合')).toBeInTheDocument();
-    expect(screen.getAllByText('尚無紀錄')).toHaveLength(2);
+    expect(screen.getByText('查看分開寄送紀錄')).toBeInTheDocument();
     expect(mocks.sendInformation).not.toHaveBeenCalled();
     expect(mocks.recordWillingness).not.toHaveBeenCalled();
     expect(mocks.addCandidates).not.toHaveBeenCalled();

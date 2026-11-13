@@ -6,6 +6,12 @@
 .commute-usage summary { cursor: pointer; }
 .caregiver-commute { margin-block: 8px; font-size: .9rem; text-align: left; }
 .caregiver-commute > span { display: block; margin-top: 4px; }
+.caregiver-commute-compact { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0; }
+.caregiver-commute-compact > :is(p, details) { flex-basis: 100%; margin: 0; }
+.order-candidate-card .caregiver-commute-compact > details:not([open]) { flex-basis: auto; border: 0; padding: 0; }
+.caregiver-commute-compact summary { cursor: pointer; }
+.caregiver-commute-field { display: grid; gap: 2px; padding: 6px 10px; border-radius: 6px; background: var(--md-sys-color-surface-container, #f8f0e9); }
+.caregiver-commute-field > span { font-size: .85rem; color: var(--md-sys-color-on-surface-variant, #655448); }
 .order-multi-selectors > fieldset { align-content: start; }
 .commute-history { margin-block: 12px; padding: 12px; border: 1px solid var(--md-sys-color-outline, #b5b5b5); border-radius: 8px; text-align: left; font-size: .9rem; }
 .commute-history p { margin-block: 6px; }

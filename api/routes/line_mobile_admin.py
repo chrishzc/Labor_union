@@ -34,10 +34,6 @@ from api.dependencies.orders_stage_projection import (
     OrdersStageProjectionApplication,
     get_orders_stage_projection_application,
 )
-from api.dependencies.order_terms import (
-    OrderTermsApplication,
-    get_order_terms_application,
-)
 from api.dependencies.assignment_plan import (
     AssignmentPlanApplication,
     get_assignment_plan_application,
@@ -52,9 +48,7 @@ from api.routes.assignment_plan import (
 )
 from api.routes.customer_service import _call_update_endpoint
 from api.routes import client_profile as client_profile_routes
-from api.routes import order_terms as order_terms_routes
 from api.routes import staff_leave_management as staff_leave_management_routes
-from api.routes.order_terms import OrderTermsInput
 from api.schemas.assignment_plan import (
     AssignmentPlanQueryView,
     AssignmentPlanReceiptView,
@@ -88,17 +82,6 @@ from api.schemas.line_identity import (
     CanonicalLineReviewDecisionPreviewResponse,
     CanonicalLineReviewNumberedPageResponse,
     CanonicalLineReviewResponse,
-)
-from api.schemas.line_candidate_contact import (
-    CandidateInformationStaffPageView,
-    CandidateInformationStaffQueryRequest,
-    CandidateInformationStaffSendRequest,
-    CandidateInformationStaffSendView,
-)
-from api.schemas.order_terms import (
-    OrderTermsPreviewView,
-    OrderTermsQueryView,
-    OrderTermsReceiptView,
 )
 from api.schemas.staff_leave_management import (
     StaffLeaveInboxItemView,
@@ -143,14 +126,7 @@ from subsystems.line.review_contracts import (
     LineReviewListQuery,
     PreviewLineReviewDecisionCommand,
 )
-from subsystems.line.candidate_contact_coordination_worker import (
-    query_manual_followup_operation,
-    query_manual_followups,
-)
-from subsystems.line.candidate_contact_response_application import (
-    CandidateContactResponseApplication,
-    CandidateContactResponseError,
-)
+from subsystems.line.candidate_contact_coordination_worker import query_manual_followups
 from subsystems.orders.core_stage_filter_query import (
     CoreStageProjectionFilterQuery,
     query_core_stage_page,
@@ -163,7 +139,6 @@ from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanApplyRequest,
     AssignmentPlanPreviewRequest,
 )
-from subsystems.scheduling.candidate_adjustment_review import CandidateAdjustmentReviewApplication
 from subsystems.scheduling import candidate_contact_pool_workflow
 from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeApplication
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
@@ -481,110 +456,6 @@ class _MobileMatchingFollowupPageView(BaseModel):
     page_size: int = Field(ge=1, le=50)
 
 
-class _MobileMatchingFollowupIssueView(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    category: str = Field(min_length=1, max_length=50)
-    label: str = Field(min_length=1, max_length=100)
-    detail: str = Field(min_length=1, max_length=500)
-    candidate_ids: list[int] = Field(min_length=1, max_length=50)
-
-
-class _MobileMatchingFollowupCandidateView(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    candidate_id: int = Field(gt=0)
-    staff_name: str = Field(min_length=1, max_length=100)
-    recontact_queued: bool
-
-
-class _MobileMatchingFollowupOperationView(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    pool_id: int = Field(gt=0)
-    case_no: str = Field(min_length=1, max_length=50)
-    customer_answer_event_id: int = Field(gt=0)
-    customer_answered_at: datetime
-    question_id: int = Field(gt=0)
-    customer_new_conditions: str
-    issues: list[_MobileMatchingFollowupIssueView] = Field(min_length=1, max_length=50)
-    candidates: list[_MobileMatchingFollowupCandidateView] = Field(min_length=1, max_length=50)
-    terms_change_completed: bool
-    terms_change_receipt_at: datetime | None
-    recontact_allowed: bool
-    order_terms: OrderTermsQueryView
-
-
-class _MobileMatchingTermsPreviewRequest(_LiffAuthRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    case_no: str = Field(min_length=1, max_length=50)
-    proposed_terms: OrderTermsInput
-    customer_answer_event_id: int = Field(gt=0)
-
-
-class _MobileMatchingTermsApplyRequest(_MobileMatchingTermsPreviewRequest):
-    expected_order_version: int = Field(ge=0)
-    idempotency_key: str = Field(min_length=1, max_length=191)
-
-
-class _MobileMatchingTermsPreviewView(OrderTermsPreviewView):
-    planned_end_date: date
-
-
-class _MobileMatchingTermsApplyView(BaseModel):
-    status: Literal['approved', 'idempotent_replay']
-    approval_event_id: int = Field(gt=0)
-    order_version: int = Field(ge=0)
-    readback: OrderTermsQueryView
-
-
-class _MobileMatchingOperationRequest(_LiffAuthRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    case_no: str = Field(min_length=1, max_length=50)
-    customer_answer_event_id: int = Field(gt=0)
-
-
-class _MobileMatchingRecontactPreviewRequest(_MobileMatchingOperationRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    case_no: str = Field(min_length=1, max_length=50)
-    candidate_ids: list[int] = Field(min_length=1, max_length=50)
-
-
-class _MobileMatchingRecontactPreviewItemView(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    candidate_id: int = Field(gt=0)
-    staff_name: str = Field(min_length=1, max_length=100)
-    text: str = Field(min_length=1, max_length=5000)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class _MobileMatchingRecontactApplyItem(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    candidate_id: int = Field(gt=0)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class _MobileMatchingRecontactApplyRequest(_MobileMatchingOperationRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    case_no: str = Field(min_length=1, max_length=50)
-    items: list[_MobileMatchingRecontactApplyItem] = Field(min_length=1, max_length=50)
-
-
-class _MobileMatchingRecontactApplyResultView(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    candidate_id: int = Field(gt=0)
-    status: Literal["queued", "idempotent_replay"]
-    event_id: int = Field(gt=0)
-    line_task_id: int | None = Field(default=None, gt=0)
-
-
 @page_router.get("/line-mobile-admin", include_in_schema=False)
 def mobile_admin_page():
     return FileResponse(_PAGE, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
@@ -596,14 +467,6 @@ def profile(
 ):
     principal, _ = _mobile_admin_context(payload.line_id_token)
     return BaseResponse(data=_admin_view(principal))
-
-
-@router.post("/candidate-information", response_model=BaseResponse[CandidateInformationStaffPageView])
-def candidate_information_questions(payload: CandidateInformationStaffQueryRequest):
-    _mobile_admin_context(payload.line_id_token, LineCapability.MATCHING_READ)
-    return BaseResponse(data=CandidateContactResponseApplication(get_connection).query_staff_questions(
-        page=payload.page, page_size=payload.page_size,
-    ))
 
 
 @router.post('/payment-overdue-reminders', response_model=BaseResponse[overdue_reminder_routes.ReminderPageView])
@@ -643,25 +506,6 @@ def mobile_send_log_reminder(payload: _MobileLogReminderSend):
         "服務日誌缺漏催繳提醒已依高齡友善裁決退役，日誌維持於 LINE 群組相簿新增。",
         "line-mobile-admin",
     )
-
-@router.post("/candidate-information/{question_id}/send", response_model=BaseResponse[CandidateInformationStaffSendView])
-def candidate_information_send(question_id: int, payload: CandidateInformationStaffSendRequest):
-    principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.MATCHING_SEND)
-    try:
-        result = CandidateContactResponseApplication(get_connection).send_staff_information(
-            question_id, payload.recipient, payload.message_text,
-            f"admin:{principal.id}", IdempotencyKey(payload.idempotency_key),
-        )
-    except CandidateContactResponseError as error:
-        code = str(error)
-        conflict = any(marker in code for marker in ("closed", "already_sent", "conflict"))
-        raise typed_http_error(
-            409 if conflict else 422, "conflict" if conflict else "validation", code,
-            "問題狀態已變更，請重新讀取待辦。" if conflict else "無法建立寄送任務，請確認文案及收件人的 LINE 綁定。",
-            "line-mobile-admin:candidate-information",
-        ) from error
-    return BaseResponse(data=result, message="文案已排入傳送，尚未證明送達。")
-
 
 @router.post("/customer-recommendation-followups", response_model=BaseResponse[_CustomerRecommendationFollowupPageView])
 def customer_recommendation_followups(payload: _MobileTodoPageRequest):
@@ -753,275 +597,6 @@ def matching_followups(payload: _MobileTodoPageRequest):
         },
         message="成功取得媒合人工跟進清單",
     )
-
-
-@router.post(
-    "/matching-followups/{pool_id}/operation",
-    response_model=BaseResponse[_MobileMatchingFollowupOperationView],
-)
-def matching_followup_operation(
-    pool_id: int,
-    payload: _MobileMatchingOperationRequest,
-    application: OrderTermsApplication = Depends(get_order_terms_application),
-):
-    _matching_followup_editor_context(payload.line_id_token)
-    operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
-    terms = order_terms_routes._query_payload(application.query(payload.case_no))
-    return BaseResponse(
-        data={
-            **_matching_operation_payload(operation),
-            "order_terms": terms,
-        },
-        message="成功取得客戶同意的調整內容與目前正式案件條件",
-    )
-
-
-@router.post(
-    "/matching-followups/{pool_id}/terms/preview",
-    response_model=BaseResponse[_MobileMatchingTermsPreviewView],
-)
-def matching_followup_terms_preview(
-    pool_id: int,
-    payload: _MobileMatchingTermsPreviewRequest,
-    application: OrderTermsApplication = Depends(get_order_terms_application),
-):
-    _matching_followup_editor_context(payload.line_id_token)
-    operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
-    current = application.query(payload.case_no)
-    correlation = CorrelationId(f"mobile-matching-followup-preview:{pool_id}:{uuid4()}")
-    return order_terms_routes._call_endpoint(
-        lambda: _mobile_matching_terms_preview_payload(
-            application.preview(payload.case_no, payload.proposed_terms.to_domain())
-        ),
-        "正式案件條件變更預覽已建立，尚未寫入",
-        correlation,
-    )
-
-
-@router.post(
-    "/matching-followups/{pool_id}/terms/apply",
-    response_model=BaseResponse[_MobileMatchingTermsApplyView],
-)
-def matching_followup_terms_apply(
-    pool_id: int,
-    payload: _MobileMatchingTermsApplyRequest,
-    application: OrderTermsApplication = Depends(get_order_terms_application),
-):
-    _, actor = _matching_followup_editor_context(payload.line_id_token)
-    return _approve_matching_terms(pool_id, payload, application, actor)
-
-
-def _approve_matching_terms(pool_id, payload, application, actor):
-    def approve():
-        try:
-            result = CandidateAdjustmentReviewApplication(application.connection, application.workflow).approve(
-                payload.case_no, pool_id, payload.customer_answer_event_id, payload.proposed_terms.to_domain(),
-                payload.expected_order_version, actor, IdempotencyKey(payload.idempotency_key),
-            )
-        except ValueError as error:
-            raise typed_http_error(409, 'conflict', str(error), '協調內容或案件條件已變更，請重新讀取後審核。',
-                                   'candidate-adjustment:approve') from error
-        return {**result, 'readback': order_terms_routes._query_payload(application.query(payload.case_no))}
-    return order_terms_routes._call_endpoint(
-        approve, '審核通過，新的案件條件已更新。', CorrelationId('candidate-adjustment:approve')
-    )
-
-
-@router.post(
-    "/matching-followups/{pool_id}/recontact/preview",
-    response_model=BaseResponse[list[_MobileMatchingRecontactPreviewItemView]],
-)
-def matching_followup_recontact_preview(
-    pool_id: int,
-    payload: _MobileMatchingRecontactPreviewRequest,
-):
-    _matching_followup_editor_context(payload.line_id_token)
-    return _preview_matching_recontact(pool_id, payload)
-
-
-def _preview_matching_recontact(pool_id, payload):
-    operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
-    candidate_ids = _validated_recontact_candidates(operation, payload.candidate_ids)
-    try:
-        previews = [
-            candidate_contact_pool_workflow.preview_recontact_information(
-                payload.case_no, candidate_id, 1
-            )
-            for candidate_id in candidate_ids
-        ]
-    except ValueError as error:
-        raise typed_http_error(
-            409,
-            "conflict",
-            str(error),
-            "重新詢問內容目前無法建立，請確認案件資料與月嫂可服務期間。",
-            "line-mobile-admin:matching-followup-recontact-preview",
-        ) from error
-    return BaseResponse(
-        data=[
-            {
-                "candidate_id": item.candidate_id,
-                "staff_name": item.staff_name,
-                "text": item.text,
-                "preview_fingerprint": item.preview_fingerprint,
-            }
-            for item in previews
-        ],
-        message="重新詢問內容預覽已建立，尚未排入傳送",
-    )
-
-
-@router.post(
-    "/matching-followups/{pool_id}/recontact/apply",
-    response_model=BaseResponse[list[_MobileMatchingRecontactApplyResultView]],
-)
-def matching_followup_recontact_apply(
-    pool_id: int,
-    payload: _MobileMatchingRecontactApplyRequest,
-):
-    _, actor = _matching_followup_editor_context(payload.line_id_token)
-    return _apply_matching_recontact(pool_id, payload, actor)
-
-
-def _apply_matching_recontact(pool_id, payload, actor):
-    operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
-    candidate_ids = _validated_recontact_candidates(
-        operation, [item.candidate_id for item in payload.items]
-    )
-    fingerprints = {item.candidate_id: item.preview_fingerprint for item in payload.items}
-    results = []
-    try:
-        for candidate_id in candidate_ids:
-            event_key = (
-                f"mobile-matching-followup:{pool_id}:"
-                f"{operation.customer_answer_event_id}:"
-                f"{candidate_id}:info1"
-            )
-            results.append(
-                {
-                    "candidate_id": candidate_id,
-                    **candidate_contact_pool_workflow.send_recontact_information(
-                        payload.case_no,
-                        candidate_id,
-                        1,
-                        actor.actor_id,
-                        event_key,
-                        fingerprints[candidate_id],
-                    ),
-                }
-            )
-    except ValueError as error:
-        raise typed_http_error(
-            409,
-            "conflict",
-            str(error),
-            "重新詢問未完整排入傳送；可使用相同確認識別重試，已建立的項目不會重複。",
-            "line-mobile-admin:matching-followup-recontact-apply",
-        ) from error
-    publish_line_wakeup_best_effort()
-    return BaseResponse(
-        data=results,
-        message="已依預覽把更新後的案件資訊排入月嫂 LINE 傳送",
-    )
-
-
-def _matching_followup_editor_context(
-    line_id_token: str,
-) -> tuple[AdminPrincipal, ActorContext]:
-    principal, actor = _mobile_admin_context(
-        line_id_token, LineCapability.MATCHING_OVERRIDE
-    )
-    return principal, actor
-
-
-def _matching_operation(pool_id: int, case_no: str, answer_id: int):
-    try:
-        return query_manual_followup_operation(get_connection, pool_id, case_no, answer_id)
-    except ValueError as error:
-        raise typed_http_error(
-            409,
-            "conflict",
-            str(error),
-            "這筆媒合待辦已變更或不再符合直接處理條件，請重新整理。",
-            "line-mobile-admin:matching-followup-operation",
-        ) from error
-    except OperationalError as error:
-        raise typed_http_error(
-            503,
-            "unavailable",
-            "mobile_matching_followup_operation_unavailable",
-            "媒合待辦操作資料暫時無法查詢。",
-            "line-mobile-admin:matching-followup-operation",
-            retryable=True,
-        ) from error
-
-
-def _matching_operation_payload(operation) -> dict:
-    return {
-        "pool_id": operation.pool_id,
-        "case_no": operation.case_no,
-        "customer_answer_event_id": operation.customer_answer_event_id,
-        "customer_answered_at": operation.customer_answered_at,
-        "question_id": operation.question_id,
-        "customer_new_conditions": operation.customer_new_conditions,
-        "issues": [
-            {
-                "category": item.category,
-                "label": item.label,
-                "detail": item.detail,
-                "candidate_ids": list(item.candidate_ids),
-            }
-            for item in operation.issues
-        ],
-        "candidates": [
-            {
-                "candidate_id": item.candidate_id,
-                "staff_name": item.staff_name,
-                "recontact_queued": item.recontact_queued,
-            }
-            for item in operation.candidates
-        ],
-        "terms_change_completed": operation.terms_change_completed,
-        "terms_change_receipt_at": operation.terms_change_receipt_at,
-        "recontact_allowed": operation.recontact_allowed,
-    }
-
-
-def _mobile_matching_terms_preview_payload(preview) -> dict:
-    return {
-        **order_terms_routes._preview_payload(preview),
-        "planned_end_date": preview.planned_end_date,
-    }
-
-
-def _validated_recontact_candidates(operation, candidate_ids: list[int]) -> tuple[int, ...]:
-    if not operation.recontact_allowed:
-        raise typed_http_error(
-            409,
-            "domain_blocked",
-            "candidate_contact_terms_receipt_required",
-            "必須先完成並讀回本次客戶同意之後的正式案件條件修改，才能重新詢問月嫂。",
-            "line-mobile-admin:matching-followup-recontact-gate",
-        )
-    if len(candidate_ids) != len(set(candidate_ids)):
-        raise typed_http_error(
-            422,
-            "validation",
-            "candidate_contact_recontact_candidates_duplicate",
-            "重新詢問名單不可重複。",
-            "line-mobile-admin:matching-followup-recontact-candidates",
-        )
-    allowed = {item.candidate_id for item in operation.candidates}
-    selected = tuple(sorted(candidate_ids))
-    if not selected or any(candidate_id not in allowed for candidate_id in selected):
-        raise typed_http_error(
-            422,
-            "validation",
-            "candidate_contact_recontact_candidates_invalid",
-            "只能選擇曾提出本次調整條件的原月嫂。",
-            "line-mobile-admin:matching-followup-recontact-candidates",
-        )
-    return selected
 
 
 @router.post(

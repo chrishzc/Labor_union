@@ -118,14 +118,15 @@ it('保存結果未明時沿用原冪等鍵，不能重新試算覆蓋原操作'
   expect(onSaved).toHaveBeenCalledTimes(1);
 });
 
-it('共用資訊保存完成回讀後，經詢問面板通知工作台刷新；僅查閱不通知', async () => {
-  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
-  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+it('詢問面板先顯示每週服務說明，保存完成回讀後通知工作台刷新', async () => {
   const onObserved = vi.fn();
   render(<OrderCandidateContactStatusPanel caseNo={CASE} presentation="workbench" onObserved={onObserved} />);
-  fireEvent.click(await screen.findByRole('button', { name: '查看訂單資訊' }));
-  fireEvent.click(await screen.findByRole('button', { name: '每週服務說明' }));
+  expect(screen.getByRole('heading', { name: '1. 設定每週服務說明' })).toBeInTheDocument();
   await choose();
+  fireEvent.click(screen.getByRole('button', { name: '收起每週服務說明設定' }));
+  expect(screen.queryByRole('button', { name: '保存預計日期' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '展開每週服務說明設定' }));
+  expect(screen.getByRole('checkbox', { name: '星期五' })).toBeChecked();
   expect(onObserved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
   await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));

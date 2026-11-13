@@ -8,7 +8,9 @@ from dataclasses import asdict
 from pathlib import Path
 import re
 from uuid import uuid4
-from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
+from subsystems.line.message_copy_catalog import (
+    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, default_copy_templates, effective_copy_definition,
+)
 from subsystems.line.message_copy import validate_copy_content, copy_fields, apply_copy_payload
 from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
 
@@ -456,6 +458,8 @@ def _message_template_view(
         template_id = {"bind_success_new_order": IDENTITY_SUCCESS_TEMPLATES["customer"], "staff_switch_success": IDENTITY_SUCCESS_TEMPLATES["staff"]}.get(template_id, template_id)
     else:
         raise HTTPException(status_code=404, detail="找不到這筆訊息設定。")
+    if template_id in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS:
+        raise HTTPException(status_code=404, detail="此訊息已停止編輯。")
     templates = templates_definition.get("templates", [])
     template = next(
         (

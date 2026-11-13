@@ -5,7 +5,7 @@ import { notificationTasksClient as client,type NotificationItem } from '../../.
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { transport } from '../../../../../../api/shared/transport';
 import { sessionClient } from '../../../../../../api/auth/session_client';
-const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'notification_failure:1',source:'notification_failure',group:'support',title:'LINE 通知建立異常',case_no:'116000001',reference_id:null,person:'',summary:'原通知受阻',reason:'設定未齊',time:'',tag:'待處理',recipient:null,message:null,unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,information:null,...patch});
+const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'notification_failure:1',source:'notification_failure',group:'support',title:'LINE 通知建立異常',case_no:'116000001',reference_id:null,person:'',summary:'原通知受阻',reason:'設定未齊',time:'',tag:'待處理',recipient:null,message:null,unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,...patch});
 beforeEach(()=>{vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session');vi.spyOn(client,'list').mockResolvedValue({items:[],total:0,next_cursor:null});vi.spyOn(lineDeliveryQueryClient,'list').mockResolvedValue({items:[],total:0,page:1,page_size:25,total_pages:1});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
   it('建立前受阻的通知可核對與補送；排送中保留待辦，成功後由原來源移除',async()=>{

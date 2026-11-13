@@ -21,7 +21,7 @@ class Cursor:
             "line_user_id": "U" + "a" * 32,
             "service_start_date": date(2026, 9, 1), "service_end_date": date(2026, 9, 20),
             "order_start_date": date(2026, 11, 20), "order_end_date": date(2026, 12, 19),
-            "coverage_fingerprint": "old-coverage",
+            "coverage_fingerprint": "old-coverage", "active_marker": 1, "candidate_status": "active",
         }
 
     def execute(self, statement, parameters):
@@ -30,6 +30,8 @@ class Cursor:
             self.current = self.entry
         elif "SELECT id,pool_id,candidate_id,event_type" in statement:
             self.current = self.existing
+        elif statement.startswith('SELECT id FROM caregiver_candidate_contact_events'):
+            self.current = None
 
     def fetchone(self):
         return self.current
@@ -50,7 +52,7 @@ def ports(monkeypatch):
         def preview_candidate_information(self, case, candidate, info_type, **kwargs):
             calls.append(("preview", kwargs["service_period"]))
             start, end = kwargs["service_period"]
-            return SimpleNamespace(preview_fingerprint="current", line_sections=(
+            return SimpleNamespace(info_type=info_type, staff_name="月嫂甲", preview_fingerprint="current", line_sections=(
                 SimpleNamespace(title="服務約定", rows=(("預計服務開始日", str(start)), ("預計服務結束日", str(end)))),
             ))
 
@@ -64,17 +66,19 @@ def ports(monkeypatch):
 
     monkeypatch.setattr(workflow, "_require_current_candidate", require)
     monkeypatch.setattr(workflow, "_coverage_fingerprint", lambda *args: "current-coverage")
-    monkeypatch.setattr(workflow, "_candidate_contact_liff_url", lambda reference: f"https://example.invalid/candidate?ref={reference}")
     monkeypatch.setattr(workflow, "MySqlOrderInformationRepository", Information)
     monkeypatch.setattr(workflow, "MySqlLineDeliveryTaskRepository", Delivery)
-    monkeypatch.setattr(workflow, "_cancel_pending_manual_followup", lambda *args: None)
+    monkeypatch.setattr(workflow, "configured_message_payload", lambda _connection, _key, card, _values: card)
+    monkeypatch.setattr("subsystems.line.table_image_messages.image_url", lambda _key, index, _now: f"https://example.test/image/{index}")
     return calls
 
 
 def test_standard_send_refreshes_changed_period_and_preserves_history(ports):
     cursor = Cursor()
+    preview, _ = workflow._information_package_preview(object(), "CASE-1", 17, service_period=(date(2026, 11, 20), date(2026, 12, 19)))
+    ports.clear()
     receipt = workflow._send_information_in_transaction(
-        object(), cursor, "CASE-1", 17, 1, "admin", "send-current", "current",
+        object(), cursor, "CASE-1", 17, "admin", "send-current", preview.preview_fingerprint,
     )
     assert receipt["line_task_id"] == 10
     assert ("coverage", "2026-11-20", "2026-12-19") in ports
@@ -91,41 +95,17 @@ def test_old_preview_is_rejected_before_any_send_or_period_write(ports):
     cursor = Cursor()
     with pytest.raises(ValueError, match="candidate_information_preview_stale"):
         workflow._send_information_in_transaction(
-            object(), cursor, "CASE-1", 17, 1, "admin", "stale-current", "old",
+            object(), cursor, "CASE-1", 17, "admin", "stale-current", "old",
         )
     assert not any(call[0] == "enqueue" for call in ports)
     assert all(sql.startswith("SELECT") for sql, _ in cursor.statements)
 
 
-def test_weekly_supplement_sends_independently_without_restarting_followup(ports, monkeypatch):
-    def forbidden(*args):
-        raise AssertionError("weekly supplement must not create willingness interactions or cancel followup")
-    monkeypatch.setattr(workflow, "_cancel_pending_manual_followup", forbidden)
-    monkeypatch.setattr(workflow, "_candidate_contact_liff_url", forbidden)
-    cursor = Cursor()
-    cursor.entry.update(service_start_date=cursor.entry["order_start_date"], service_end_date=cursor.entry["order_end_date"])
-    receipt = workflow._send_information_in_transaction(object(), cursor, "CASE-1", 17, 3, "admin", "send-weekly", "current")
-    assert receipt["line_task_id"] == 10
-    events = [values for sql, values in cursor.statements if sql.startswith("INSERT INTO caregiver_candidate_contact_events")]
-    assert len(events) == 1 and events[0][2] == "info_3_sent"
-
-
-def test_weekly_receipt_replays_exactly_and_old_preview_never_enqueues(ports):
-    cursor = Cursor({"id": 20, "pool_id": 3, "candidate_id": 17, "event_type": "info_3_sent",
-                     "actor": "admin", "payload": {"preview_fingerprint": "old", "line_task_id": 10}})
-    receipt = workflow._send_information_in_transaction(object(), cursor, "CASE-1", 17, 3, "admin", "replay-weekly", "old")
-    assert receipt == {"status": "idempotent_replay", "event_id": 20, "line_task_id": 10}
-    assert ports == []
-    with pytest.raises(ValueError, match="candidate_information_preview_stale"):
-        workflow._send_information_in_transaction(object(), Cursor(), "CASE-1", 17, 3, "admin", "stale-weekly", "old")
-    assert not any(call[0] == "enqueue" for call in ports)
-
-
 def test_existing_receipt_replays_without_refreshing_or_sending(ports):
     cursor = Cursor({"id": 20, "pool_id": 3, "candidate_id": 17, "event_type": "info_1_sent",
-                     "actor": "admin", "payload": {"preview_fingerprint": "old", "line_task_id": 10}})
+                     "actor": "admin", "payload": {"preview_fingerprint": "old", "line_task_id": 10, "information_package": True}})
     receipt = workflow._send_information_in_transaction(
-        object(), cursor, "CASE-1", 17, 1, "admin", "replay-old", "old",
+        object(), cursor, "CASE-1", 17, "admin", "replay-old", "old",
     )
     assert receipt["status"] == "idempotent_replay"
     assert ports == []

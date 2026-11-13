@@ -6,10 +6,15 @@ from copy import deepcopy
 import json
 
 from subsystems.line.message_copy import (
-    CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING, CANDIDATE_WILLING_RECEIVED,
+    CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING,
     IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, copy_fields, copy_template_id,
     message_definition, apply_copy_payload,
 )
+
+
+INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS = frozenset(copy_template_id(key) for key in (
+    "card-union-question", "card-union-answer", "candidate-willing-received",
+))
 
 
 def _text_defaults():
@@ -35,7 +40,6 @@ def _text_defaults():
         "payment-first-settled": "案件 {case_no} 第一期款 {amount_ntd} 元已確認入帳，謝謝。",
         "payment-second-reminder": "案件 {case_no} 第二期款尚待確認入帳 {amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
         "service-day-log-reminder": log_reminder("{staff_name}"),
-        "candidate-willing-received": CANDIDATE_WILLING_RECEIVED,
         "service-start-normal-received": start_day_response_text("normal"),
         "service-start-help-received": start_day_response_text("help"),
         "service-start-result": "服務日期安排\n案件：{case_no}\n{assignments}",
@@ -82,7 +86,7 @@ def _card_defaults():
     from domains.scheduling.matching_communication import MatchingNotificationKind
     from subsystems.scheduling.matching_line_cards import (
         caregiver_information_card, candidate_contact_information_card, customer_profiles_card,
-        customer_confirmation_card, candidate_customer_question_card, candidate_caregiver_answer_card,
+        customer_confirmation_card,
     )
     facts = {key: "{business_value}" for key in ("case_no", "start_date", "end_date", "city", "service_type", "service_time", "multi_birth_count", "residence_type")}
     for number in (1, 2):
@@ -90,14 +94,13 @@ def _card_defaults():
         result["card-caregiver-information" + ("-2" if number == 2 else "")] = json.loads(caregiver_information_card(kind, facts, "not-a-token"))
     for number in (1, 2, 3):
         result["card-candidate-information-" + str(number)] = json.loads(candidate_contact_information_card(
-            "{case_no}", number, [("{business_value}", [("{business_value}", "{business_value}")])], "not-a-token", "https://invalid.local"))
+            "{case_no}", number, [("{business_value}", [("{business_value}", "{business_value}")])], "not-a-token"))
+    result["card-candidate-information-package"] = result["card-candidate-information-1"]
     profile = {"id": 1, "name": "{business_value}", "city": "{business_value}", "care_babies": 1,
                "service_regions": ["{business_value}"], "special_skills": ["{business_value}"], "has_massage_cert": False}
     result["card-customer-profiles"] = json.loads(customer_profiles_card("{case_no}", [profile], "not-a-token", "{business_value}"))
     result["card-customer-confirmation"] = json.loads(customer_confirmation_card("{case_no}", [profile],
         [{"text": "{business_value}"}], [{"text": "{business_value}"}], [], {1: "https://invalid.local"}, "not-a-token", "{business_value}"))
-    result["card-union-question"] = json.loads(candidate_customer_question_card("{case_no}", "{business_value}", "https://invalid.local"))
-    result["card-union-answer"] = json.loads(candidate_caregiver_answer_card("{case_no}", "{business_value}", "not-a-token", "https://invalid.local"))
     return result
 
 
@@ -118,10 +121,12 @@ def default_copy_templates():
                       and f["content"] not in {"目前無法產生每周服務中說明。", "目前無法產生資料。"}]
             if key == 'card-customer-confirmation':
                 fields = [field for field in fields if field['id'].startswith('contents/contents/4/')]
-            elif key in {'card-candidate-information-1', 'card-candidate-information-2'}:
+            elif key.startswith('card-candidate-information-'):
                 fields = [field for field in fields if field['id'].startswith('contents/footer/')
                     or field['id'] == 'contents/body/contents/0/text'
                     or field['content'] == '請確認檔期與條件後回覆是否願意承接。']
+                if key == 'card-candidate-information-package':
+                    fields = [field for field in fields if not field['id'].startswith('contents/footer/')]
             if key in {"card-customer-profiles", "card-customer-confirmation"}:
                 for field in fields:
                     parts = field["id"].split("/")
@@ -170,8 +175,8 @@ def effective_copy_definition(definition):
                 if isinstance(current, dict) and not set(current) <= set(defaults):
                     # Project the former five-button menu without rewriting its history.
                     template['content'] = specs[template['id']]['content']
-            if key in {'card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'}:
-                # Preserve saved action wording while retiring image-body copy.
+            if key in {'card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2', 'card-candidate-information-package'}:
+                # Preserve only text fields still editable in the current card.
                 current = json.loads(template['content'])
                 legacy_ids = {field['id'] for field in copy_fields(_card_defaults()[key])}
                 if isinstance(current, dict) and set(current) <= legacy_ids:

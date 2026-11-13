@@ -10,6 +10,7 @@ from infrastructure.mysql.candidate_contact_pool_line_reply_repository import (
     MySqlCandidateContactPoolLineReplyRepository,
 )
 from shared_kernel.identities import IdempotencyKey
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.candidate_contact_postback_application import (
     LineCandidateContactPostbackApplication,
 )
@@ -88,7 +89,8 @@ def test_postback_adapter_passes_only_the_opaque_reference_and_event_identity():
     reply_spy = _ReplySpy()
     handled = LineCandidateContactPostbackApplication().handle(
         _inbox(f"candidate-contact:{'a' * 64}:unwilling"),
-        SimpleNamespace(candidate_contact_pool_replies=reply_spy),
+        SimpleNamespace(candidate_contact_pool_replies=reply_spy,
+                        delivery_tasks=SimpleNamespace(exists_for_key=lambda _: False, enqueue=lambda _: None)),
     )
 
     assert handled is True
@@ -135,23 +137,8 @@ def test_records_reply_only_for_the_line_user_bound_to_the_sent_information():
     binding_sql = cursor.executed[0][0]
     assert "UNHEX(SHA2(source_event.event_key,256))=UNHEX(%s)" in binding_sql
     assert "SHA2(source_event.event_key,256)=%s" not in binding_sql
-    assert (
-        "CAST(answer_delivery.source_aggregate_identity AS UNSIGNED)=entry.id"
-        in binding_sql
-    )
-    assert (
-        "answer_delivery.source_aggregate_identity=CAST(entry.id AS CHAR)"
-        not in binding_sql
-    )
-    cancellation_sql, cancellation_args = next(
-        (sql, args)
-        for sql, args in cursor.writes
-        if sql.startswith("UPDATE line_delivery_tasks")
-    )
-    assert "CAST(source_aggregate_identity AS UNSIGNED)=%s" in cancellation_sql
-    assert "source_aggregate_identity=CAST(%s AS CHAR)" not in cancellation_sql
-    assert cancellation_args == (4,)
-    assert "candidate_contact_question" not in cancellation_sql
+    assert "delivery.sent_at_utc" in binding_sql
+    assert len(cursor.writes) == 1
 
 
 def test_rejects_a_forged_reply_from_a_different_line_user():
@@ -243,57 +230,54 @@ def test_accepts_other_candidate_responses_when_another_caregiver_is_willing(wil
     assert json.loads(inserted[4])["willingness"] == willingness
 
 
-def test_candidate_can_replace_their_own_willing_response_with_unwilling():
-    cursor = _Cursor(
-        [_binding(), None],
-        all_reads=[
-            (
-                {
-                    "candidate_id": 7,
-                    "payload": json.dumps({"willingness": "willing"}),
-                },
-            )
-        ],
-    )
-    repository = MySqlCandidateContactPoolLineReplyRepository(
-        _Connection(cursor),
-        now=lambda: datetime(2026, 9, 10, 12, tzinfo=timezone.utc),
-    )
+def test_candidate_can_change_their_willingness_repeatedly_using_the_same_card():
+    choices = ("willing", "unwilling", "willing")
+    cursor = _Cursor([value for _ in choices for value in (_binding(), None)])
+    repository = MySqlCandidateContactPoolLineReplyRepository(_Connection(cursor))
+    reference = "a" * 64
 
-    event_id = repository.record_willingness(
-        "a" * 64,
-        "unwilling",
-        LineUserId("U-caregiver"),
-        IdempotencyKey("candidate-contact-postback:webhook-revision"),
-    )
+    for index, choice in enumerate(choices, start=1):
+        repository.record_willingness(
+            reference, choice, LineUserId("U-caregiver"),
+            IdempotencyKey(f"candidate-contact-postback:webhook-{index}"),
+        )
 
-    assert event_id == 44
-    inserted = next(args for sql, args in cursor.writes if sql.startswith("INSERT"))
-    assert json.loads(inserted[4])["willingness"] == "unwilling"
+    inserts = [args for sql, args in cursor.writes if sql.startswith("INSERT")]
+    assert [json.loads(args[4])["willingness"] for args in inserts] == list(choices)
+    assert {json.loads(args[4])["source_information_event_id"] for args in inserts} == {12}
+    assert len({args[2] for args in inserts}) == len(choices)
 
 
-@pytest.mark.parametrize("rejection", [None, ValueError("candidate contact response expired"), LookupError("recipient mismatch")])
-def test_willing_acknowledgement_has_one_uniform_message_and_stable_delivery_identity(rejection):
+@pytest.mark.parametrize("willingness", ["willing", "unwilling"])
+@pytest.mark.parametrize("rejection", [None, ValueError("candidate contact closed"), LookupError("recipient mismatch")])
+def test_both_choices_only_acknowledge_success_once(willingness, rejection):
     requests = []
+
     class Replies:
         def record_willingness(self, *args):
             if rejection is not None:
                 raise rejection
             return 91
+
     unit_of_work = SimpleNamespace(
         candidate_contact_pool_replies=Replies(),
-        delivery_tasks=SimpleNamespace(enqueue=requests.append),
+        delivery_tasks=SimpleNamespace(
+            exists_for_key=lambda key: any(request.idempotency_key == key for request in requests),
+            enqueue=requests.append,
+        ),
     )
     application = LineCandidateContactPostbackApplication()
-    inbox = _inbox(f"candidate-contact:{'a' * 64}:willing")
+    inbox = _inbox(f"candidate-contact:{'a' * 64}:{willingness}")
     assert application.handle(inbox, unit_of_work) is True
-    assert len(requests) == 1
-    assert json.loads(requests[0].payload_json) == {
-        "type": "text", "text": "已收到您願意承接的回覆，後續由工會安排媒合。"
-    }
-    assert requests[0].recipient.identity == LineUserId("U-caregiver")
-    application.handle(inbox, unit_of_work)
-    assert requests[0].idempotency_key == requests[1].idempotency_key
+    assert application.handle(inbox, unit_of_work) is True
+    if rejection is not None:
+        assert requests == []
+        return
+    (request,) = requests
+    assert json.loads(request.payload_json) == {"type": "text", "text": "感謝回復!!已記錄"}
+    assert request.recipient.identity == LineUserId("U-caregiver")
+    assert request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+    assert request.source_aggregate_identity == "webhook-event-1"
 
 
 def test_uncommitted_willing_reply_does_not_enqueue_an_acknowledgement():

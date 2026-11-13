@@ -2,173 +2,24 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter
-from fastapi.responses import FileResponse
-
-from api.dependencies.line_identity import get_liff_token_verifier
-from api.error_contracts import typed_http_error
-from api.schemas.base import BaseResponse
-from api.schemas.line_candidate_contact import (
-    CandidateContactFormView,
-    CandidateContactIdentityRequest,
-    CandidateContactSubmitRequest,
-    CandidateContactSubmitView,
-    CandidateContactCustomerFormView,
-    CandidateContactCustomerQueryRequest,
-    CandidateContactCustomerSubmitRequest,
-    CandidateContactCustomerSubmitView,
-)
-from domains.scheduling.candidate_contact_response import parse_candidate_response
-from infrastructure.line.liff_token_verifier import (
-    InvalidLiffTokenError,
-    LiffVerificationUnavailableError,
-)
-from infrastructure.mysql.mysql_adapter import get_connection
-from shared_kernel.identities import IdempotencyKey
-from subsystems.line.candidate_contact_response_application import (
-    CandidateContactResponseApplication,
-    CandidateContactResponseError,
-)
+from fastapi.responses import HTMLResponse
 
 
-router = APIRouter(prefix="/api/v1/line/candidate-contact", tags=["LINE Candidate Contact"])
 page_router = APIRouter(tags=["LINE Candidate Contact Page"])
-_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "candidate_contact.html"
-_CUSTOMER_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "candidate_contact_customer.html"
-_NO_CACHE_HEADERS = {"Cache-Control": "no-store"}
 
 
-def _application() -> CandidateContactResponseApplication:
-    return CandidateContactResponseApplication(get_connection)
-
-
-@page_router.get("/line-candidate-contact")
-def candidate_contact_page():
-    return FileResponse(_PAGE, headers=_NO_CACHE_HEADERS)
-
-
-@page_router.get("/line-candidate-contact-customer")
-def candidate_contact_customer_page():
-    return FileResponse(_CUSTOMER_PAGE, headers=_NO_CACHE_HEADERS)
-
-
-@router.post("/query", response_model=BaseResponse[CandidateContactFormView])
-def query_candidate_contact(payload: CandidateContactIdentityRequest):
-    try:
-        identity = get_liff_token_verifier().verify(payload.line_id_token)
-        return BaseResponse(
-            data=CandidateContactFormView.model_validate(
-                _application().query(payload.interaction_reference, identity.line_user_id)
-            )
-        )
-    except _ROUTE_ERRORS as error:
-        _raise_error(error, "line-candidate-contact:query")
-
-
-@router.post("/submit", response_model=BaseResponse[CandidateContactSubmitView])
-def submit_candidate_contact(payload: CandidateContactSubmitRequest):
-    try:
-        identity = get_liff_token_verifier().verify(payload.line_id_token)
-        response = parse_candidate_response(
-            no_interest=payload.no_interest,
-            issues=[item.model_dump(mode="json") for item in payload.issues],
-        )
-        result = _application().submit(
-            payload.interaction_reference,
-            identity.line_user_id,
-            response,
-            IdempotencyKey(payload.idempotency_key),
-        )
-        return BaseResponse(
-            data=CandidateContactSubmitView.model_validate(result),
-            message=(
-                "已收到您的問題，待工會確認後回覆。"
-                if result["union_followup_required"]
-                else "已記錄回應。"
-            ),
-        )
-    except _ROUTE_ERRORS as error:
-        _raise_error(error, "line-candidate-contact:submit")
-
-
-@router.post("/customer/query", response_model=BaseResponse[CandidateContactCustomerFormView])
-def query_candidate_contact_customer(payload: CandidateContactCustomerQueryRequest):
-    try:
-        identity = get_liff_token_verifier().verify(payload.line_id_token)
-        return BaseResponse(
-            data=CandidateContactCustomerFormView.model_validate(
-                _application().query_customer(payload.interaction_reference, identity.line_user_id)
-            )
-        )
-    except _ROUTE_ERRORS as error:
-        _raise_error(error, "line-candidate-contact-customer:query")
-
-
-@router.post("/customer/submit", response_model=BaseResponse[CandidateContactCustomerSubmitView])
-def submit_candidate_contact_customer(payload: CandidateContactCustomerSubmitRequest):
-    try:
-        identity = get_liff_token_verifier().verify(payload.line_id_token)
-        result = _application().submit_customer_answer(
-            payload.interaction_reference,
-            identity.line_user_id,
-            payload.answer,
-            IdempotencyKey(payload.idempotency_key),
-        )
-        return BaseResponse(
-            data=CandidateContactCustomerSubmitView.model_validate(
-                result
-            ),
-            message="已收到您的回答，待工會人員審核處理。",
-        )
-    except _ROUTE_ERRORS as error:
-        _raise_error(error, "line-candidate-contact-customer:submit")
-
-
-def _raise_error(error: Exception, correlation_id: str):
-    if isinstance(error, LiffVerificationUnavailableError):
-        raise typed_http_error(
-            503,
-            "unavailable",
-            "liff_verification_unavailable",
-            "LINE 身分驗證服務暫時無法連線，請稍後再試。",
-            correlation_id,
-            retryable=True,
-        ) from error
-    if isinstance(error, InvalidLiffTokenError):
-        raise typed_http_error(
-            401,
-            "forbidden",
-            "liff_token_invalid",
-            "LINE 登入狀態已失效，請重新開啟此頁。",
-            correlation_id,
-        ) from error
-    code = str(error)
-    status = (
-        410
-        if any(marker in code for marker in ("expired", "closed", "resolved"))
-        else 403
-        if "recipient" in code
-        else 404
-        if "not_found" in code
-        else 422
+@page_router.get("/line-candidate-contact", include_in_schema=False)
+@page_router.get("/line-candidate-contact-customer", include_in_schema=False)
+def retired_candidate_contact_page():
+    return HTMLResponse(
+        '<!doctype html><html lang="zh-Hant"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>候選聯絡表單已停止受理</title><main><h1>候選聯絡表單已停止受理</h1>'
+        '<p>有疑問請直接聯絡工會。</p></main></html>',
+        status_code=410,
+        headers={"Cache-Control": "no-store"},
     )
-    raise typed_http_error(
-        status,
-        "expired" if status == 410 else "forbidden" if status == 403 else "not_found" if status == 404 else "validation",
-        code,
-        "回應未送出，請重新從案件卡片開啟表單。",
-        correlation_id,
-    ) from error
 
 
-_ROUTE_ERRORS = (
-    CandidateContactResponseError,
-    InvalidLiffTokenError,
-    LiffVerificationUnavailableError,
-    ValueError,
-)
-
-
-__all__ = ["page_router", "router"]
+__all__ = ["page_router"]

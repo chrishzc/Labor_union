@@ -37,10 +37,10 @@ const fixture = {
   candidates: [candidate],
 };
 
-const informationCommand = (infoType: 1 | 2): CandidateInformationSendCommand => ({
-  caseNo: 'CASE-POOL-001', candidateId: 17, infoType, previewFingerprint: 'a'.repeat(64),
-  actor: 'operator-1', eventKey: `test-send-${infoType}`,
-});
+const informationCommand: CandidateInformationSendCommand = {
+  caseNo: 'CASE-POOL-001', candidateId: 17, previewFingerprint: 'a'.repeat(64),
+  actor: 'operator-1', eventKey: 'test-package-send',
+};
 
 const successEnvelope = (data: unknown) => ({
   success: true,
@@ -160,19 +160,18 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation(informationCommand(2))).resolves.toEqual({
+    await expect(candidateContactPoolClient.sendInformation(informationCommand)).resolves.toEqual({
       status: 'queued',
       event_id: 31,
       line_task_id: 52,
     });
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/information',
-      expect.objectContaining({
-        info_type: 2,
+      {
         actor: 'operator-1',
-        event_key: 'test-send-2',
+        event_key: 'test-package-send',
         preview_fingerprint: 'a'.repeat(64),
-      }),
+      },
       { token: 'volatile-token' },
     );
   });
@@ -292,7 +291,7 @@ describe('candidateContactPoolClient', () => {
     vi.mocked(sessionClient.getUser).mockReturnValue(null);
     const post = vi.spyOn(transport, 'post');
 
-    await expect(candidateContactPoolClient.sendInformation(informationCommand(1))).rejects.toBeInstanceOf(
+    await expect(candidateContactPoolClient.sendInformation(informationCommand)).rejects.toBeInstanceOf(
       ApiHttpError,
     );
     expect(post).not.toHaveBeenCalled();
@@ -306,6 +305,6 @@ describe('candidateContactPoolClient', () => {
       error: null,
     });
 
-    await expect(candidateContactPoolClient.sendInformation(informationCommand(1))).rejects.toThrow();
+    await expect(candidateContactPoolClient.sendInformation(informationCommand)).rejects.toThrow();
   });
 });

@@ -98,32 +98,8 @@ class MySqlLineMessagePreviewReader:
         return _text(row["service_date"]) if row and row["service_date"] else None
 
     def payment_values(self, case_no):
-        from infrastructure.mysql.order_pre_start_notification_source_repository import MySqlOrderPreStartNotificationSourceRepository
-        from subsystems.line.notification_source_adapters import from_order_pre_start_checkpoint, from_order_second_payment_checkpoint
-
-        row = self._one(
-            "SELECT COALESCE(p.first_payment_due_date,o.start_date) AS first_due,p.second_payment_due_date AS second_due "
-            "FROM orders o LEFT JOIN client_payment_terms p ON p.case_no=o.case_no WHERE o.case_no=%s", (case_no,))
-        result = {}
-        source = MySqlOrderPreStartNotificationSourceRepository(self._connection)
-        if row and row["first_due"]:
-            candidate = next((c for c in source.find_due_candidates(row["first_due"]) if c.case_no == case_no), None)
-            if candidate:
-                event = from_order_pre_start_checkpoint(case_no=case_no, planned_start_date=candidate.planned_start_date,
-                    first_payment_amount=candidate.first_payment_amount, already_settled=candidate.already_settled,
-                    occurred_at=datetime.now(timezone.utc))
-                result.update({k: str(v) for k, v in event.facts.items() if k in {
-                    "first_payment_amount", "first_payment_status", "planned_start_date"}})
-                result["first_payment_due_date"] = _text(row["first_due"])
-        if row and row["second_due"]:
-            candidate = next((c for c in source.find_second_payment_due_candidates(row["second_due"]) if c.case_no == case_no), None)
-            if candidate:
-                event = from_order_second_payment_checkpoint(case_no=case_no, second_payment_due_date=candidate.second_payment_due_date,
-                    second_payment_amount=candidate.second_payment_amount, already_settled=candidate.already_settled,
-                    occurred_at=datetime.now(timezone.utc))
-                result.update({k: str(v) for k, v in event.facts.items() if k in {
-                    "second_payment_amount", "second_payment_status", "second_payment_due_date"}})
-        return result
+        # 繳款提醒改走客戶私訊排程；預覽不再從群組來源掃描帶入金額。
+        return {}
 
     def card(self, case_no, staff_id, kind):
         from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
@@ -157,18 +133,21 @@ class MySqlLineMessagePreviewReader:
             "WHERE p.case_no=%s AND e.staff_id=%s AND e.active_marker=1 ORDER BY e.id DESC LIMIT 1", (case_no, staff_id))
         if not entry:
             return None
-        info_type = int(kind.rsplit("-", 1)[1])
+        numbers = (1, 2, 3) if kind == "card-candidate-information-package" else (int(kind.rsplit("-", 1)[1]),)
         try:
-            preview = MySqlOrderInformationRepository(self._connection).preview_candidate_information(case_no, int(entry["id"]), info_type)
+            order_information = MySqlOrderInformationRepository(self._connection)
+            previews = tuple(order_information.preview_candidate_information(case_no, int(entry["id"]), value) for value in numbers)
         except (LookupError, ValueError):
             return None
         from dataclasses import asdict
-        from subsystems.line.table_image_contracts import information_document
-        document = information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[info_type - 1], case_no,
-            ({'line_sections': tuple({'title': section.title, 'rows': section.rows} for section in preview.line_sections)},), info_type=info_type)
+        from subsystems.line.table_image_contracts import candidate_information_document
+        documents = tuple(candidate_information_document(
+            case_no, item.info_type, tuple((section.title, section.rows) for section in item.line_sections),
+        ) for item in previews)
+        preview = previews[0]
+        info_type = preview.info_type
         return PreviewCardSource(candidate_contact_information_card(case_no, info_type,
-            tuple((section.title, section.rows) for section in preview.line_sections), "preview-only",
-            None if info_type == 3 else "https://preview.invalid/candidate"), json.dumps([asdict(document)], ensure_ascii=False))
+            tuple((section.title, section.rows) for section in preview.line_sections), "preview-only"), json.dumps([asdict(document) for document in documents], ensure_ascii=False))
 
 
 def _text(value):

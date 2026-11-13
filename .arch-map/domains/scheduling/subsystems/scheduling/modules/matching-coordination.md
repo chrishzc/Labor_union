@@ -8,7 +8,6 @@
 維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，向 API 暴露可驗證的 current coordination state；React workbench 目前僅保留 isolated-tested、尚未接入 App route 的 transport/presentation。
 
 ## Implementation
-- `ui_react/src/components/MatchingInformationWorkbench.tsx`、`ui_react/src/components/MatchingInformationActions.tsx` — 同案媒合作業的資訊／條件工作面；`question` 深連結以案件＋問題 ID 單筆 Query，未找到不選取其他問題。發送／審核／重新詢問重用原 writer，重新核對保留草稿。後端 `query_staff_questions` 在原 eligibility SQL 內套用 case／question filter，再執行 count／分頁。
 - manual commute: `subsystems/scheduling/commute_query.py` — 單次人工觸發、Google 計費月、metadata-only 用量與人工全帳戶核對；既有 `background_jobs` 承接 committed inline claim，零新 schema、零自動 provider retry。
 - adapters: `infrastructure/http/google_routes.py`、`infrastructure/mysql/commute_query_repository.py` — 固定官方 TWO_WHEELER／TRAFFIC_AWARE_OPTIMAL transport（查詢當下路況）、Staff/Client 地址唯讀來源、用量 metadata；不保存地址或 Google 距離。
 - entrypoint: `api/routes/commute.py` — admin-only single caregiver POST、usage GET、manual billing reconciliation POST、case-scoped `GET /orders/{case_no}/commute-history`（最新 50 筆 metadata-only 紀錄）；由 `api/main.py` 組裝。
@@ -17,13 +16,13 @@
 - `api/schemas/candidate_contact_pool.py`
 - primary:
   - `ui_react/src/components/CandidateInquiryDialog.tsx` — 候選新增與共用資訊的 native modal；保留焦點與操作期間保護。接案意願改在月嫂卡片內展開填寫。
-  - `ui_react/src/components/OrderCandidateInformationPanel.tsx` — case-only 共用文件，不要求候選；三份各自選收件人、逐人 recipient-bound Preview／Apply 與 exact receipt 回讀。每週只寄送已保存的 Orders 日期。
-  - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 既有 Orders 日期 writer 的共用／個別週說明入口，試算零寫入，未保存不可寄送。
+  - `ui_react/src/components/OrderCandidateInformationPanel.tsx` — case-only 共用文件預覽與逐人整包寄送確認，三張資料圖及共用回覆卡；Orders 日期未保存時禁止整包寄送。
+  - `ui_react/src/components/CandidatePlannedServiceDates.tsx` — 尋找月嫂工作區先設定共用每週服務說明，沿既有 Orders 日期 writer 保存後才可選收件人。試算零寫入。
+  - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderCandidateInformationPanel.tsx` — 工作台先顯示案件共用預覽，之後從指定月嫂卡片確認寄送，沿用該收件人的 preview fingerprint、原寄送 writer 與 receipt 回讀。
   - `db/schema_parts/232_candidate_weekly_information.sql` — fresh supplemental `info_3_sent` 事件，不重新啟動資訊-1／2 的意願期限與全池完成 gate。
   - `db/schema_parts/1051_candidate_weekly_information.sql` — byte-equivalent preserve-only enum widening；保留歷史事件與 ordinal。
   - `domains/scheduling/matching_coordination.py`
   - `domains/scheduling/staff_matching_preferences.py` — 區域／週間服務的純提示比對，回傳 matched／not_matched／pending 與月嫂原登錄值；不讀或同步數字偏好副本。
-  - `domains/scheduling/candidate_contact_response.py` — 候選確認資訊、條件調整、沒有意願與受影響 criteria 的 typed 規則。
   - `subsystems/scheduling/matching_coordination_contracts.py`
   - `subsystems/scheduling/matching_notification_contracts.py` — formal matching contact、customer confirmation preview 與 durable notification typed contracts。
   - `subsystems/scheduling/matching_notification_application.py` — 正式月嫂 LINE 意願在客戶尚未決定時允許雙向更正；接受後可通知不承接以產生換人待辦。月嫂互動在原期限內可重用（含舊 consumed），客戶協助不消耗接受資格，舊 consumed 且 current contact_requested 的卡片仍可接受；7 天僅作實際送達後的內部提醒。移除推薦群組通知；逐次鎖定 current plan、核對本人並追加原版本 writer 的事件。
@@ -33,17 +32,15 @@
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/matching_recommendation_application.py` — 以有效班次及需求時段協調候選檔期判定。
   - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；以需求班次對應的日期投影 actual conflict、待確認與 buffer，分時比較由 query 使用 Scheduling 的占用規則。
-  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；一般寄送與重聯絡都使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史，不建立正式服務日期。衝突候選仍可協調。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；初次整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史，不建立正式服務日期。衝突候選仍可協調。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
   - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
   - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
-  - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter；願意按鈕在原 UoW 建立固定 `line_webhook_reply`（Reply-only）確認回覆，webhook identity 冪等，不補發 Push 或發送逾期／失敗提示。
+  - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter；兩種意願成功記錄後在原 UoW 建立固定 `line_webhook_reply`（Reply-only）確認回覆，webhook identity 冪等，不補發 Push 或發送逾期／失敗提示。
   - `subsystems/scheduling/matching_notification_application.py` — 正式媒合月嫂意願與客戶推薦確認 Postback 確認回覆依 `line-event:{event_id}` 走 `line_webhook_reply`（Reply-only）。
-  - `subsystems/line/candidate_contact_response_application.py` — 驗證 candidate/customer LIFF recipient；確認資訊及調整條件保存後衍生工會人員待辦；人員自行輸入文案，客戶提供本輪更新後的條件，可反覆詢問直到審核通過。沒有草稿、自動轉問或群組通知；收件人／本輪引用與冪等仍逐次驗證，不另建 root。
-  - `subsystems/line/candidate_contact_coordination_worker.py` — 只取消舊自動協商／群組投遞，提供 24 小時內部提醒與 exact answer／審核／current Orders version 的重新詢問 Query；不產生 timeout 意願事件或自動客戶訊息，R-04 資格沿用既有 case gate。
-  - `subsystems/scheduling/candidate_adjustment_review.py` — 工會審核當輪客戶新條件，借用既有 Orders Terms `apply_in_current_uow`，在同一外層交易更新案件與保存協調審核事件；普通保存不偽造 Orders 永久 receipt，失敗全部 rollback，exact replay 不重複更新。
+  - `subsystems/line/candidate_contact_coordination_worker.py` — 取消尚未送出的退役協調、群組與重新詢問工作，並提供 24 小時未回覆的唯讀提醒；R-04 資格沿用既有 case gate。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
 - `subsystems/scheduling/matching_coordination_workflow.py` — 舊 Preview／ApplyZeroCandidateAlternative 回 typed retired error，不再產生固定協調通知；一般零候選確認／歷史查詢保留。
 - `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
@@ -53,15 +50,14 @@
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
   - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py` — fresh-read Client-owned 地區／`clients.service_type`、Staff-owned `staff_regions`／`staff_weekly_rest`，供兩項提示；不再查詢料理、時數或數字偏好，保留原 facts 與正式檔期資格。
-  - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；24 小時只作內部提醒，本人仍可用新事件更正意願，current projection 採每位候選最新回覆，本人或其他候選已願意不阻擋回覆；仍由人員決定推薦人選。原詢問期間失效仍須重新開啟新卡，逾時不阻擋回覆。
+  - `infrastructure/mysql/candidate_contact_pool_line_reply_repository.py` — 以已送出資訊事件和 staff LINE identity 重新驗證回覆後，追加意願事件；24 小時只作內部提醒，本人仍可用新事件更正意願，current projection 採每位候選最新回覆，本人或其他候選已願意不阻擋回覆；仍由人員決定推薦人選。詢問期間變更後原卡失效。
   - `infrastructure/mysql/matching_notification_repository.py` — current Stage 5 confirmation package 的 plan/履歷/order-information/proposed-weekly preflight projection，以及 active plan／最新決定／實際送達／雙方簽回衍生的 typed 客戶聯絡、簽約與 7 天提醒待辦。
     - 同案 active 候選的詢問期間涵蓋區段時，原 willing／unwilling 供無正式回覆區段唯讀使用；已有正式回覆優先，不新增同意或送達事件。
   - `infrastructure/mysql/matching_recommendation_repository.py` — 候選月嫂與占用日期的 read adapter；LINE 收件人只採 canonical bound staff identity。
 - entrypoints:
   - `api/routes/caregiver_segment_availability.py` — 候選詢問 `/candidate-contact-pool/availability/search` 與正式分段查詢分離；詢問只接受單人查詢。
-  - `api/routes/line_candidate_contact.py`、`api/schemas/line_candidate_contact.py` — recipient-bound candidate/customer query/submit contract 與 LIFF page；schema 亦提供工會確認資訊清單與人工文案 Send 的 bounded typed contracts。
-  - `api/routes/line_mobile_admin.py`、`line/static/mobile_admin.html` — 工會媒合人工跟進清單、通知狀態及正式排班工具入口；`system_admin` 綁定者可在同一 LIFF 先經 Orders Terms Query／Preview／Apply，再以 server-verified receipt gate 預覽及重送受影響原候選，初次搜尋零候選不列為通知待辦。
-  - `line/static/candidate_contact.html`、`line/static/candidate_contact_customer.html` — 月嫂結構化回應與人員撰寫詢問的客戶回答介面；LINE identity 只來自 verified ID token。
+  - `api/routes/line_candidate_contact.py` — 退役表單的舊連結回 410 並提示直接聯絡工會。
+  - `api/routes/line_mobile_admin.py`、`line/static/mobile_admin.html` — 工會媒合人工跟進清單、通知狀態及正式排班工具入口；初次搜尋零候選不列為通知待辦。
   - `ui_react/src/api/scheduling/matching_candidate_workflow_client.ts`、`ui_react/src/components/OrderCandidateQueryPanel.tsx` — 待辦工作台初步候選查詢走預計期間入口；多月嫂正式查詢仍走原入口。
   - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — 客戶名冊接任續辦重用既有操作；可回報草稿／pending command 給外層關閉保護。候選保存與意願異動後正式推薦刷新 current 候選，推薦不等於正式指派。
   - `ui_react/src/components/OrderRecommendationReplacementPanel.tsx` — 推薦頁統一換人入口；無正式指派借用原 Release／Cancel／Create writer，每步原鍵與回條保留；已有指派重用 RPRE，已服務轉介代班。單一換人原因，不捏造 evidence。
@@ -81,7 +77,7 @@
 
 - outbound: `scheduling/waiting-deposit-lock` — 人工或 LINE 的正式客戶接受回覆，在原 UoW 借用 canonical 自動保留；先取得人員占用 mutex，current 日期齊備才保存唯一等待訂金鎖，衝突與配對回覆一同 rollback。
 - outbound: `scheduling/service-before-replacement` — 已提交 R-04 收據綁定 current 零指派 generation 時，訂單成立案件可由原候選及客戶確認 writer 續辦；不回寫 Orders lifecycle，不復用舊推薦的客戶決定。
-- outbound: `external-integration/line` — 候選三份投遞狀態與提醒的 sent time 讀 canonical `line_delivery_tasks`，以 event key／task ID 綁定；保留原 candidate event，不改 LINE writer 或意願 gate。
+- outbound: `external-integration/line` — 候選整包以一筆 `line_delivery_tasks` 投遞，`info_1_sent` 的 `information_package` payload 標記用於整包回讀。事件鍵、任務 ID、回覆驗證與跟進沿既有來源，既有逐份紀錄保留。
 - outbound: `customer-service` — 推薦協助借用既有 create-or-append ticket writer；`subsystems/line/matching_postback_application.py` 將後續留言轉交同一客服需求，不建立 escalation 或群組通知。
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
@@ -89,7 +85,7 @@
 - outbound: `staff/case-preference-manual` — 姓名旁的兩項提示使用同一份 `staff_regions`／`staff_weekly_rest` canonical facts；名冊保存後下次查詢直接反映，原值與明確未知狀態經 typed `matching_conditions` 投影，偏好不排除候選或禁止加入。
 - outbound: `orders/service-date-confirmation` — 初步候選週說明的當次日期先經 Orders Preview 驗證，保存沿用既有 Q/P/A；客戶寄送內容以 current 日期組成既有不可變快照。
 - outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
-- inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench remain isolated-tested without a current App route consumer；candidate LIFF 與 recipient-bound postback 則為 current live LINE inbound，經 application／adapter 追加 candidate-contact events。
+- inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench remain isolated-tested without a current App route consumer；候選共用回覆卡使用 recipient-bound postback，經 application／adapter 追加 candidate-contact events。
 - inbound: `orders/historical-adoption` — 只有 discussion、開始日空白且月嫂唯一可辨識的來源列，才在同一 outer UoW 建立 proposed plan。
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 
@@ -125,7 +121,7 @@
 - Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
 - Segmented availability query/repository 的 lifecycle gate 與 assignment occupancy filtering — `source_observed` — current Scheduling query and MySQL facts adapter.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
-- Candidate direct-coordination LIFF、24-hour worker、工會人工跟進 LIFF／群組通知、recipient-bound reply adapter 與 canonical module tests — `source_observed` — current source and architecture-aligned test root.
+- 候選共用回覆卡、24 小時未回覆提醒、工會人工跟進 LIFF、recipient-bound reply adapter 與 canonical module tests — `source_observed` — current source and architecture-aligned test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 
 ## Change triggers

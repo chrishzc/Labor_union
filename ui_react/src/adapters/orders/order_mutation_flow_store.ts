@@ -546,8 +546,8 @@ export class OrderMutationFlowStore {
     this.notify();
   }
 
-  private candidateInformationKey(caseNo: string, candidateId: number, infoType: 1 | 2 | 3): string {
-    return `${caseNo}:${candidateId}:${infoType}`;
+  private candidateInformationKey(caseNo: string, candidateId: number): string {
+    return `${caseNo}:${candidateId}`;
   }
 
   private candidateWillingnessKey(caseNo: string, candidateId: number): string {
@@ -581,19 +581,17 @@ export class OrderMutationFlowStore {
   public getCandidateInformation(
     caseNo: string,
     candidateId: number,
-    infoType: 1 | 2 | 3,
   ): CandidateInformationFlowState | undefined {
-    return this.candidateInformation.get(this.candidateInformationKey(caseNo, candidateId, infoType));
+    return this.candidateInformation.get(this.candidateInformationKey(caseNo, candidateId));
   }
 
   public setCandidateInformation(caseNo: string, state: CandidateInformationFlowState): void {
-    const { candidateId, infoType } = state.command;
-    this.candidateInformation.set(this.candidateInformationKey(caseNo, candidateId, infoType), state);
+    this.candidateInformation.set(this.candidateInformationKey(caseNo, state.command.candidateId), state);
     this.notify();
   }
 
-  public clearCandidateInformation(caseNo: string, candidateId: number, infoType: 1 | 2 | 3): void {
-    this.candidateInformation.delete(this.candidateInformationKey(caseNo, candidateId, infoType));
+  public clearCandidateInformation(caseNo: string, candidateId: number): void {
+    this.candidateInformation.delete(this.candidateInformationKey(caseNo, candidateId));
     this.notify();
   }
 

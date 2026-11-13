@@ -30,6 +30,24 @@ _MAXIMUM_CLAIM_BATCH_SIZE = 100
 # New informational replies have a distinct source; historical queued tasks
 # retain their original delivery policy.
 REPLY_ONLY_WEBHOOK_SOURCE = "line_webhook_reply"
+RETIRED_CANDIDATE_COORDINATION_SOURCES = (
+    "candidate_contact_adjustment",
+    "candidate_contact_answer",
+    "candidate_contact_manual_followup",
+    "candidate_contact_question",
+    "candidate_contact_staff_review",
+)
+CANDIDATE_RECONTACT_SOURCE_PREFIX = "mobile-matching-followup:"
+
+
+def candidate_coordination_delivery_retired(request: LineDeliveryRequest) -> bool:
+    return (
+        request.source_aggregate_type in RETIRED_CANDIDATE_COORDINATION_SOURCES
+        or (
+            request.source_aggregate_type == "candidate_matching_willingness_card"
+            and request.source_aggregate_identity.startswith(CANDIDATE_RECONTACT_SOURCE_PREFIX)
+        )
+    )
 
 
 class LineDeliveryCommandOutcome(StrEnum):

@@ -4,21 +4,17 @@ import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 import { sessionClient } from '../auth/session_client';
 
-export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','profile','staff_profile','information','followup','recommendation',
+export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','profile','staff_profile','followup','recommendation',
   'service_start','deposit','payment_receipt','group','overdue','customer_service','delivery','notification_failure','runtime']);
 export type NotificationSource = z.infer<typeof sourceSchema>;
 const groupSchema = z.enum(['review','reminder','support']);
 const paymentSchema = z.object({case_no:z.string(),payment_stage:z.enum(['deposit','first','second']),obligation_identity:z.string(),
   projection_version:z.number().int(),obligation_event_id:z.number().int(),due_date:z.string(),remaining_amount_ntd:z.number().int()}).strict();
 const logSchema = z.object({case_no:z.string(),staff_id:z.number().int(),missing_from:z.string(),missing_through:z.string()}).strict();
-export const informationSchema = z.object({question_id:z.number().int(),pool_id:z.number().int(),request_kind:z.enum(['information_question','condition_adjustment']),
-  customer_answer_event_id:z.number().int().nullable(),review_completed:z.boolean(),case_no:z.string(),staff_name:z.string(),
-  issues:z.array(z.object({label:z.string(),detail:z.string()}).strict()),customer_answer:z.string().nullable(),customer_message:z.string().nullable(),
-  customer_available:z.boolean()}).strict();
 const itemSchema = z.object({id:z.string(),source:sourceSchema,group:groupSchema,title:z.string(),case_no:z.string().nullable(),
   reference_id:z.number().int().nullable(),person:z.string(),summary:z.string(),reason:z.string(),time:z.string(),tag:z.string(),
   recipient:z.string().nullable(),message:z.string().nullable(),unavailable_reason:z.string().nullable(),expected_version:z.number().int().nullable(),
-  delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),information:informationSchema.nullable(),
+  delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),
   failure:z.object({issue_key:z.string().regex(/^ci_[0-9a-f]{64}$/),notification_reason:z.enum(['recipient_unavailable','template_or_schedule_invalid']),related_task_ids:z.array(z.number().int().positive())}).strict().nullable().optional(),
   receipt:z.object({payment_stage:z.enum(['deposit','first','second']),settlement_identity:z.string().min(1).max(128)}).strict().nullable().optional()}).strict();
 const pageSchema = z.object({items:z.array(itemSchema),total:z.number().int().nonnegative().nullable(),next_cursor:z.union([z.number().int().nonnegative(),z.string().min(1).max(2048)]).nullable()}).strict();

@@ -10,7 +10,7 @@
 
 ## Implementation
 - `subsystems/line/table_image_contracts.py` — immutable display documents from owner projections.
-- `subsystems/line/table_image_messages.py` — existing Flex task contains image bubbles and independent action card; private document metadata never reaches provider.
+- `subsystems/line/table_image_messages.py` — a single initial candidate Flex task contains three image bubbles and one shared action bubble; private document metadata never reaches provider.
 - `subsystems/line/table_image_links.py` — purpose-bound opaque bearer reference, same seven-day lifetime and existing confirmation secret configuration.
 - `subsystems/line/table_image_query.py` — verify reference before readonly committed snapshot lookup.
 - `infrastructure/line/table_image_renderer.py` — in-memory PNG, installed Chinese font, no file writes or browser execution.

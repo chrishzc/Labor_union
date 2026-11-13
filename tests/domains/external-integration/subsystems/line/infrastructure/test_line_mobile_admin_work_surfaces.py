@@ -10,8 +10,7 @@ import pytest
 from fastapi import HTTPException
 from PIL import Image
 
-from api.dependencies.order_terms import get_order_terms_application
-from api.routes import line_mobile_admin, order_terms
+from api.routes import line_mobile_admin
 from subsystems.anomalies.current_issue_query import CurrentIssueListRequest
 
 
@@ -124,7 +123,7 @@ def test_leave_pending_page_is_complete_and_processed_requests_leave_the_total(m
     raw.close()
 
 
-def test_mobile_todo_runtime_refreshes_pending_counts_and_removes_answered_cards():
+def test_mobile_todo_runtime_refreshes_pending_identity_counts():
     import subprocess
     script = r'''
 import fs from 'node:fs'; import vm from 'node:vm'; import assert from 'node:assert/strict';
@@ -137,32 +136,17 @@ class Element {
 }
 const nodes=new Map(); const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id)};
 const ctx=vm.createContext({document:{getElementById:get,createElement:t=>new Element(t)},crypto});
-for(const id of ['identityReviewCount','profileReviewCount','leaveReviewCount','serviceStartCount','matchingFollowupCount','candidateInformationCount','customerRecommendationCount','depositCount','groupTodoCount','paymentOverdueCount','logReminderCount'])get(id).dataset.pendingCount='0';
-vm.runInContext(`let reviewQuerySequence=0,candidateInformationQuerySequence=0,candidateInformationPage=1; const target='staff_review';
+for(const id of ['identityReviewCount','profileReviewCount','leaveReviewCount','serviceStartCount','matchingFollowupCount','customerRecommendationCount','depositCount','groupTodoCount','paymentOverdueCount','logReminderCount'])get(id).dataset.pendingCount='0';
+vm.runInContext(`let reviewQuerySequence=0; const target='staff_review';
  let notificationSequence=0;let notificationSelection=null;const focusNotificationItems=(source,items)=>items;const reviewPageState={page:1,pageSize:50}; let pendingTotal=1;
- let questionReads=0;let commonReads=0;const loadReviewWorkbench=async()=>{commonReads++;await loadCandidateInformation();};
- const postJson=async(url,body)=>url.endsWith('identity-reviews')?{items:body.review_status==='pending'&&pendingTotal?[{}]:[],total:body.review_status==='pending'?pendingTotal:0,page:body.page,page_size:body.page_size}:url.endsWith('candidate-information')?(questionReads++,{items:[],total:0,page:1,page_size:25}):url.endsWith('/recontact/apply')?[]:{status:'queued'};
- const reviewCard=()=>({});const showEmpty=()=>{};const showStatus=()=>{};const openMatchingFollowup=()=>{};`,ctx);
+ const postJson=async(url,body)=>url.endsWith('identity-reviews')?{items:body.review_status==='pending'&&pendingTotal?[{}]:[],total:body.review_status==='pending'?pendingTotal:0,page:body.page,page_size:body.page_size}:{status:'queued'};
+ const reviewCard=()=>({});const showEmpty=()=>{};const showStatus=()=>{};`,ctx);
 vm.runInContext(source.slice(source.indexOf('function notificationText('),source.indexOf('function updateNotificationCards(')),ctx);
 vm.runInContext(extract('function notificationButton('),ctx);
-for(const header of ['function notificationViewCurrent(','function updateReviewTotal()','function setWorkstreamCount(','function requireReviewPage(','function requireTodoPage(','function renderPagination(','async function loadIdentityReviews()','async function loadCandidateInformation()','function candidateInformationCard('])vm.runInContext(extract(header),ctx);
+for(const header of ['function notificationViewCurrent(','function updateReviewTotal()','function setWorkstreamCount(','function requireReviewPage(','function requireTodoPage(','function renderPagination(','async function loadIdentityReviews()'])vm.runInContext(extract(header),ctx);
 get('reviewStatus').value='pending';await vm.runInContext('loadIdentityReviews()',ctx);assert.equal(get('identityReviewCount').textContent,'1');
 vm.runInContext('pendingTotal=0',ctx);get('reviewStatus').value='approved';await vm.runInContext('loadIdentityReviews()',ctx);assert.equal(get('identityReviewCount').textContent,'0');
-get('candidateInformationCount').dataset.pendingCount='1';
-const card=vm.runInContext("candidateInformationCard({question_id:1,pool_id:1,case_no:'PUBLIC',staff_name:'Public staff',issues:[],request_kind:'information_question',review_completed:false,customer_available:false})",ctx);
-get('candidateInformationQuestions').appendChild(card);
-const all=n=>[n,...n.children.flatMap(x=>x instanceof Element?all(x):[])];
-all(card).find(x=>x.tag==='textarea').value='Public answer';
-await all(card).find(x=>x.textContent==='發送給月嫂').listeners.click();
-assert.equal(get('candidateInformationCount').textContent,'0');
-assert.equal(get('candidateInformationQuestions').children.filter(x=>x.tag==='article').length,0);
 assert.equal(get('reviewTotal').textContent,'0');
-assert.equal(vm.runInContext('commonReads',ctx),1);
-vm.runInContext("let matchingOperation={pool_id:1,case_no:'PUBLIC',customer_answer_event_id:1};let matchingRecontactPreview=[{candidate_id:1,preview_fingerprint:'public'}];let reminderReads=0;const loadMatchingFollowups=async()=>{reminderReads++};const renderMatchingOperation=()=>{};",ctx);
-vm.runInContext(extract('async function applyMatchingRecontact()'),ctx);
-await vm.runInContext('applyMatchingRecontact()',ctx);
-assert.equal(vm.runInContext('questionReads',ctx),2);
-assert.equal(vm.runInContext('commonReads',ctx),2);
 '''
     subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True, timeout=20)
 
@@ -202,62 +186,6 @@ def test_unbound_customer_cannot_query_recommendation_staff_tasks(monkeypatch):
     assert caught.value.status_code == 403
 
 
-def test_candidate_information_staff_routes_require_matching_read_and_send(monkeypatch):
-    from api.schemas.line_candidate_contact import CandidateInformationStaffQueryRequest, CandidateInformationStaffSendRequest
-    from subsystems.line.capabilities import LineCapability
-    capabilities = []
-    commands = []
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_context", lambda token, capability: (
-        capabilities.append(capability) or SimpleNamespace(id=3), None
-    ))
-    class Application:
-        def __init__(self, factory):
-            pass
-
-        def query_staff_questions(self, *, page, page_size):
-            return {"items": [], "total": 0, "page": page, "page_size": page_size}
-
-        def send_staff_information(self, *args):
-            commands.append(args)
-            return {"status": "queued", "event_id": 51}
-
-    monkeypatch.setattr(line_mobile_admin, "CandidateContactResponseApplication", Application)
-    line_mobile_admin.candidate_information_questions(CandidateInformationStaffQueryRequest(line_id_token="test-token"))
-    line_mobile_admin.candidate_information_send(10, CandidateInformationStaffSendRequest(
-        line_id_token="test-token", recipient="caregiver", message_text="人員輸入", idempotency_key="send-key"
-    ))
-    assert capabilities == [LineCapability.MATCHING_READ, LineCapability.MATCHING_SEND]
-    assert commands[0][:4] == (10, "caregiver", "人員輸入", "admin:3")
-
-
-def test_candidate_information_denied_staff_cannot_reach_the_writer(monkeypatch):
-    from api.schemas.line_candidate_contact import CandidateInformationStaffSendRequest
-    def deny(*args):
-        raise HTTPException(403, "capability required")
-    def unexpected(*args):
-        pytest.fail("unauthorized request reached the application")
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_context", deny)
-    monkeypatch.setattr(line_mobile_admin, "CandidateContactResponseApplication", unexpected)
-    with pytest.raises(HTTPException) as error:
-        line_mobile_admin.candidate_information_send(10, CandidateInformationStaffSendRequest(
-            line_id_token="test-token", recipient="customer", message_text="人員輸入", idempotency_key="send-key"
-        ))
-    assert error.value.status_code == 403
-
-
-def test_mobile_and_admin_terms_routes_share_the_same_owner_application_dependency() -> None:
-    endpoints = (
-        line_mobile_admin.matching_followup_terms_preview,
-        line_mobile_admin.matching_followup_terms_apply,
-        order_terms.preview_order_terms,
-        order_terms.apply_order_terms,
-    )
-
-    for endpoint in endpoints:
-        dependency = inspect.signature(endpoint).parameters["application"].default
-        assert dependency.dependency is get_order_terms_application
-
-
 def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None:
     source = (ROOT / "line" / "static" / "mobile_admin.html").read_text(
         encoding="utf-8"
@@ -279,7 +207,7 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert "客戶／月嫂身分重綁與異常" in source
     assert "服務開始、請假、代班與換人" in source
     assert "月嫂回覆提醒" in source
-    assert "月嫂確認與條件協調" in source
+    assert "月嫂確認與條件協調" not in source
     assert "待提醒" in source
     assert "開啟正式排班調整" not in source
     assert 'review_type: null' in source
@@ -551,122 +479,12 @@ def test_mobile_matching_followups_requires_matching_read_and_projects_safe_coun
     }
 
 
-@pytest.mark.parametrize('role', ['line_agent', 'line_manager', 'system_admin'])
-def test_matching_review_accepts_verified_union_staff_with_matching_capability(monkeypatch, role):
-    captured = []
-    def context(token, capability):
-        captured.append(capability)
-        return SimpleNamespace(role=role), SimpleNamespace(actor_id='union:1')
-    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', context)
-    principal, actor = line_mobile_admin._matching_followup_editor_context('verified-token')
-    assert principal.role == role and actor.actor_id == 'union:1'
-    assert captured == [line_mobile_admin.LineCapability.MATCHING_OVERRIDE]
-
-
-def test_matching_review_denied_identity_cannot_reach_the_orders_writer(monkeypatch):
-    from api.schemas.line_candidate_contact import CandidateInformationStaffQueryRequest
-    def deny(*args):
-        raise HTTPException(403, 'unbound or missing capability')
-    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', deny)
-    with pytest.raises(HTTPException) as error:
-        line_mobile_admin._matching_followup_editor_context('untrusted-token')
-    assert error.value.status_code == 403
-
-
-def test_matching_review_preserves_canonical_orders_conflict(monkeypatch):
-    from shared_kernel.errors import TypedError, ErrorCategory
-    from shared_kernel.identities import ActorContext, CorrelationId
-    from subsystems.orders.terms_workflow import TermsWorkflowError
-    monkeypatch.setattr(line_mobile_admin, '_matching_followup_editor_context', lambda *_: (
-        SimpleNamespace(role='line_agent'), ActorContext('union:1')
-    ))
-    class Review:
-        def __init__(self, *args):
-            pass
-        def approve(self, *args):
-            raise TermsWorkflowError(TypedError(ErrorCategory.CONFLICT, 'orders_version_conflict',
-                '案件已更新，請重新讀取。', CorrelationId('test-review')))
-    monkeypatch.setattr(line_mobile_admin, 'CandidateAdjustmentReviewApplication', Review)
-    payload = line_mobile_admin._MobileMatchingTermsApplyRequest(
-        line_id_token='verified-token', case_no='CASE-TEST', customer_answer_event_id=22,
-        expected_order_version=1, idempotency_key='test-approval', proposed_terms={
-            'planned_start_date': '2026-11-01', 'service_days': 14, 'service_hours_per_day': 6,
-            'requires_cooking': False, 'floor_fee_ntd': 0,
-            'service_time': {'start_time': '09:00:00', 'end_time': '15:00:00', 'end_day_offset': 0},
-        },
-    )
-    with pytest.raises(HTTPException) as error:
-        line_mobile_admin.matching_followup_terms_apply(100, payload, SimpleNamespace(connection=object(), workflow=object()))
-    assert error.value.status_code == 409
-    assert error.value.detail['error']['code'] == 'orders_version_conflict'
-
-
-def test_matching_recontact_uses_accepted_answer_as_stable_idempotency_anchor(
-    monkeypatch,
-) -> None:
-    captured = []
-    operation = SimpleNamespace(
-        pool_id=14,
-        case_no="CASE-14",
-        customer_answer_event_id=31,
-        recontact_allowed=True,
-        candidates=(
-            SimpleNamespace(candidate_id=7, staff_name="王月嫂"),
-            SimpleNamespace(candidate_id=8, staff_name="李月嫂"),
-        ),
-    )
-    monkeypatch.setattr(
-        line_mobile_admin,
-        "_matching_followup_editor_context",
-        lambda *_: (
-            SimpleNamespace(role="system_admin"),
-            SimpleNamespace(actor_id="admin:root"),
-        ),
-    )
-    monkeypatch.setattr(line_mobile_admin, "_matching_operation", lambda *_: operation)
-    monkeypatch.setattr(
-        line_mobile_admin.candidate_contact_pool_workflow,
-        "send_recontact_information",
-        lambda case_no, candidate_id, info_type, actor, event_key, fingerprint: captured.append(
-            (case_no, candidate_id, info_type, actor, event_key, fingerprint)
-        )
-        or {"status": "queued", "event_id": candidate_id + 100, "line_task_id": candidate_id + 200},
-    )
-    monkeypatch.setattr(line_mobile_admin, "publish_line_wakeup_best_effort", lambda: None)
-
-    response = line_mobile_admin.matching_followup_recontact_apply(
-        14,
-        line_mobile_admin._MobileMatchingRecontactApplyRequest(
-            line_id_token="verified-token",
-            case_no="CASE-14",
-            customer_answer_event_id=31,
-            items=[
-                {"candidate_id": 8, "preview_fingerprint": "b" * 64},
-                {"candidate_id": 7, "preview_fingerprint": "a" * 64},
-            ],
-        ),
-    )
-
-    assert [item[1] for item in captured] == [7, 8]
-    assert captured[0][4] == "mobile-matching-followup:14:31:7:info1"
-    assert captured[1][4] == "mobile-matching-followup:14:31:8:info1"
-    assert response.data[0]["candidate_id"] == 7
-    assert response.data[1]["candidate_id"] == 8
-
-
-def test_mobile_followup_surface_has_two_step_terms_and_recontact_controls() -> None:
-    source = (ROOT / "line" / "static" / "mobile_admin.html").read_text(
-        encoding="utf-8"
-    )
-
-    assert "審核通過並更新案件條件" in source
-    assert "不通過，繼續協調" in source
-    assert "客戶更新後的條件" in source
-    assert "/terms/apply" in source
-    assert "/recontact/preview" in source and "/recontact/apply" in source
-    assert 'previewMatchingTerms' not in source
-    assert '群組通知' not in source
-    assert 'matchingApprovalIntent' in source
+def test_mobile_followup_surface_only_shows_internal_reminders():
+    source = (ROOT / "line" / "static" / "mobile_admin.html").read_text(encoding="utf-8")
+    assert "/api/v1/line/mobile-admin/matching-followups" in source
+    assert "月嫂回覆提醒" in source
+    assert "/candidate-information" not in source and "/recontact/" not in source
+    assert "/terms/apply" not in source
     assert "正式排班重建工具" in source
 
 

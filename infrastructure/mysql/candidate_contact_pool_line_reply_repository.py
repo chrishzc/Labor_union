@@ -41,10 +41,7 @@ class MySqlCandidateContactPoolLineReplyRepository:
                 "AND refreshed.event_type='willingness_changed' "
                 "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.response_kind'))='candidate_period_refreshed') AS period_stale, "
                 "staff_binding.line_user_id, orders.status AS order_status, "
-                "COALESCE((SELECT MAX(answer_delivery.sent_at_utc) FROM line_delivery_tasks answer_delivery "
-                "WHERE answer_delivery.source_aggregate_type='candidate_contact_answer' "
-                "AND CAST(answer_delivery.source_aggregate_identity AS UNSIGNED)=entry.id "
-                "AND answer_delivery.processing_status='sent'), delivery.sent_at_utc) AS sent_at_utc "
+                "delivery.sent_at_utc "
                 "FROM caregiver_candidate_contact_events source_event "
                 "JOIN caregiver_candidate_contact_pools pool ON pool.id=source_event.pool_id "
                 "JOIN caregiver_candidate_contact_entries entry "
@@ -100,14 +97,8 @@ class MySqlCandidateContactPoolLineReplyRepository:
 
             if binding.get("period_stale"):
                 raise ValueError("candidate contact period has changed")
-            sent_at = binding.get("sent_at_utc")
-            if not isinstance(sent_at, datetime):
+            if not isinstance(binding.get("sent_at_utc"), datetime):
                 raise ValueError("candidate contact information was not delivered")
-            sent_at = (
-                sent_at.replace(tzinfo=timezone.utc)
-                if sent_at.tzinfo is None
-                else sent_at.astimezone(timezone.utc)
-            )
             cursor.execute(
                 "INSERT INTO caregiver_candidate_contact_events "
                 "(pool_id,candidate_id,event_type,event_key,actor,payload) "
@@ -120,22 +111,6 @@ class MySqlCandidateContactPoolLineReplyRepository:
                     json.dumps(payload, ensure_ascii=False, sort_keys=True),
                 ),
             )
-            event_id = int(cursor.lastrowid)
-            if willingness == "willing":
-                _cancel_pending_coordination(cursor, int(binding["pool_id"]))
-            return event_id
-
-
-def _cancel_pending_coordination(cursor, pool_id: int) -> None:
-    cursor.execute(
-        "UPDATE line_delivery_tasks SET processing_status='cancelled',"
-        "error_code='candidate_contact_pool_resolved',"
-        "error_message='candidate contact pool already has a willing caregiver',"
-        "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-        "WHERE processing_status IN ('pending','retryable_failed') "
-        "AND source_aggregate_type='candidate_contact_adjustment' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s",
-        (pool_id,),
-    )
+            return int(cursor.lastrowid)
 
 __all__ = ["MySqlCandidateContactPoolLineReplyRepository"]

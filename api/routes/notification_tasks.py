@@ -28,7 +28,6 @@ from infrastructure.mysql.runtime_monitor_repository import MySqlRuntimeMonitorR
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.line.capabilities import LineCapability as Cap
 from subsystems.line.review_contracts import LineReviewListQuery
-from subsystems.line.candidate_contact_response_application import CandidateContactResponseApplication
 from subsystems.line.candidate_contact_coordination_worker import query_manual_followups
 from subsystems.line.delivery_admin_contracts import LineDeliveryAdminQuery
 from subsystems.line.payment_overdue_reminders import reminder_text as payment_text
@@ -48,7 +47,6 @@ SOURCES = {
     Source.STAFF_BINDING: ('月嫂綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.PROFILE: ('客戶資料異動', 'review', Cap.CUSTOMER_SERVICE_READ),
     Source.STAFF_PROFILE: ('月嫂資料異動', 'review', 'data_browser.write'),
-    Source.INFORMATION: ('確認資訊與調整條件', 'review', Cap.MATCHING_READ),
     Source.FOLLOWUP: ('月嫂回覆待跟進', 'review', Cap.MATCHING_READ),
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
     Source.SERVICE_START: ('開工、順延與代班', 'review', Cap.MATCHING_OVERRIDE),
@@ -151,14 +149,6 @@ def _read_source(source, cursor, principal):
         rows, total = get_client_profile_application().list_requests(status='pending', page=page, page_size=SIZE)
         items = [_item(source, r.request_id, '客戶資料異動待審核', '客戶已提出資料異動。', r.reason or '請核對異動前後內容。',
                        reference_id=r.request_id, person=f'客戶 #{r.client_id}', expected_version=r.request_version) for r in rows]
-    elif source == Source.INFORMATION:
-        result = CandidateContactResponseApplication(get_connection).query_staff_questions(page=page, page_size=SIZE)
-        total = result['total']
-        items = [_item(source, r['question_id'], '調整條件待處理' if r['request_kind']=='condition_adjustment' else '確認資訊待處理',
-                       r['customer_answer'] or '月嫂提出需求，請由人員輸入文案後處理。',
-                       '；'.join(f"{v['label']}：{v['detail']}" for v in r['issues']) or '人員查看後自行輸入回覆，不自動轉問客戶。',
-                       reference_id=r['question_id'], case_no=r['case_no'], person=r['staff_name'], information=r,
-                       unavailable_reason=None if r['customer_available'] else '客戶尚未綁定 LINE，請先完成身分綁定再詢問客戶。') for r in result['items']]
     elif source == Source.FOLLOWUP:
         result = query_manual_followups(get_connection, now, page=page, limit=SIZE)
         total = result.total
