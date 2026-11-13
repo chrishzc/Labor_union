@@ -665,3 +665,88 @@ def test_any_member_staging_change_invalidates_whole_confirmed_preview():
     assert captured.value.code == "final_document_preview_stale"
     assert repository.writes == controlled.applies == orders.applies == []
     assert uows.instances[0].commits == 0
+
+@pytest.mark.parametrize("segments", [(), ({"segment_id": 71, "staff_id": 9},)])
+def test_signed_archive_requires_only_the_existing_case_and_selected_pdf_files(segments):
+    events = []
+    saved = {}
+
+    def find_archive(_case, key=None, **_):
+        return next(iter(saved.values()), None) if key is None else saved.get(key)
+
+    def save_archive(_case, key, fingerprint, files, _correlation):
+        events.append("archive:receipt")
+        saved[key] = (fingerprint, {"files": files})
+
+    repository = SimpleNamespace(
+        signed_archive_segments=lambda _case, **_: segments,
+        signed_archive=find_archive,
+        lock_case=lambda _case: True,
+        save_signed_archive=save_archive,
+    )
+    controlled = FakeControlledFiles(events)
+    uploads = []
+
+    def stage(command):
+        uploads.append(command)
+        return SimpleNamespace(staging_id="cfs_" + str(len(uploads)).zfill(32))
+
+    controlled.stage = stage
+    units = FakeUowFactory()
+    workflow = FinalSignedContractWorkflow(
+        repository, controlled, None, None, units, SimpleNamespace(today=lambda: NOW.date()), None,
+        archive_orders=SimpleNamespace(record_archived_completion=lambda *_args, **_kwargs: events.append("orders:complete")),
+    )
+    # This fixture has no embedded signature, and no corresponding unsigned document exists.
+    pdf = b"%PDF-1.4\n%%EOF"
+    files = (("client", "customer.pdf", pdf),) + tuple(
+        (f"staff:{segment['segment_id']}", "caregiver.pdf", pdf) for segment in segments
+    )
+    options = dict(actor=ActorContext("admin:1"), idempotency_key=IdempotencyKey("archive-1"),
+                   correlation_id=CorrelationId("archive-1"))
+    if segments:
+        with pytest.raises(FinalDocumentWorkflowError, match="documents_incomplete"):
+            workflow.archive_signed_files("CASE-001", files[:1], **options)
+        assert uploads == []
+
+    result = workflow.archive_signed_files("CASE-001", files, **options)
+
+    assert [item["target"] for item in result["files"]] == [item[0] for item in files]
+    assert [upload.content for upload in uploads] == [pdf] * len(files)
+    assert events[-3:] == ["file:apply", "orders:complete", "archive:receipt"]
+    assert units.instances[0].commits == 1
+    assert workflow.signed_archive_status("CASE-001")["files"] == result["files"]
+    assert workflow.archive_signed_files("CASE-001", files, **options) == result
+    assert len(uploads) == len(files)
+    with pytest.raises(FinalDocumentWorkflowError, match="idempotency_conflict"):
+        workflow.archive_signed_files("CASE-001", (("client", "different.pdf", pdf),), **options)
+
+
+def test_archive_storage_failure_rolls_back_without_recording_completion():
+    events = []
+    repository = SimpleNamespace(
+        signed_archive_segments=lambda _case, **_: (),
+        signed_archive=lambda _case, *_args, **_kwargs: None,
+        lock_case=lambda _case: True,
+        save_signed_archive=lambda *_args: pytest.fail("failed archive wrote a receipt"),
+    )
+    controlled = FakeControlledFiles(events)
+    controlled.stage = lambda _command: SimpleNamespace(staging_id="cfs_" + "0" * 32)
+
+    def failed_apply(_command):
+        raise OSError("storage unavailable")
+
+    controlled.apply_borrowed = failed_apply
+    units = FakeUowFactory()
+    workflow = FinalSignedContractWorkflow(
+        repository, controlled, None, None, units, SimpleNamespace(today=lambda: NOW.date()), None,
+        archive_orders=SimpleNamespace(record_archived_completion=lambda *_args, **_kwargs: pytest.fail("failed archive marked complete")),
+    )
+    with pytest.raises(OSError, match="storage unavailable"):
+        workflow.archive_signed_files(
+            "CASE-001", (("client", "customer.pdf", b"%PDF-1.4"),),
+            actor=ActorContext("admin:1"), idempotency_key=IdempotencyKey("archive-failure"),
+            correlation_id=CorrelationId("archive-failure"),
+        )
+    assert units.instances[0].commits == 0
+    assert units.instances[0].rollbacks == 1

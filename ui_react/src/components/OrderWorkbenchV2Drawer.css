@@ -1039,7 +1039,7 @@
 .contract-return-file { display: grid; gap: 9px; margin: 16px 0; font-size: 14px; }
 .contract-return-file input { width: 100%; }
 .contract-return-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-.contract-return-actions strong, .contract-signed-list span { overflow-wrap: anywhere; min-width: 0; }
+.contract-return-actions strong, .contract-signed-list li { overflow-wrap: anywhere; min-width: 0; }
 .contract-return-checked { color: #436849; font-size: 14px; }
 .contract-final-confirmation { border-top: 1px solid #e9ded6; padding-top: 18px; margin-top: 20px; }
 .contract-final-confirmation > p { font-size: 14px; color: #806d60; }
@@ -1048,9 +1048,8 @@
 .contract-manual-notice { border: 1px solid #efbd9e; border-radius: 9px; background: #fff2e9; color: #8d4020; padding: 14px; margin: 16px 0; }
 .contract-completed-notice { background: #f1f6ef; border: 1px solid #d1dfca; color: #426149; padding: 15px; border-radius: 9px; }
 .contract-completed-notice p { margin-bottom: 0; }
-.contract-signed-list { margin: 14px 0 16px; }
-.contract-signed-list > div { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid #e9ded6; }
-.contract-signed-list button { flex-shrink: 0; }
+.contract-signed-list { list-style: none; margin: 14px 0 16px; padding: 0; }
+.contract-signed-list > li { padding: 12px 0; border-bottom: 1px solid #e9ded6; }
 .candidate-inquiry-dialog.side { inset: 0 0 0 auto; margin: 0; width: min(650px, calc(100vw - 20px)); max-width: none; height: 100dvh; max-height: 100dvh; border-radius: 0; }
 .contract-review-body { flex: 1; overflow-y: auto; min-height: 0; padding: 24px; }
 .contract-review-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 24px; border-top: 1px solid #e9ded6; }
@@ -1248,7 +1247,6 @@
   .contract-document-actions { grid-column: 1 / -1; }
   .contract-document-actions button { flex: 1; }
   .contract-handoff-actions > button, .contract-final-confirmation > button { width: 100%; }
-  .contract-signed-list > div { align-items: start; flex-wrap: wrap; }
   .contract-review-body { padding: 18px; }
   .contract-review-footer { padding: 14px; flex-wrap: wrap; }
   .contract-review-footer button { width: 100%; }

@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：Contract Signing Integration（`domains/contract_signing/`、`subsystems/contract_signing/`）
-- 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、未簽 PDF 下載／重複產生、送交外部平台交接記錄、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
+- 單一負責範圍：契約 Excel 模板上傳與欄位映射版本管理（`CTM-01～06`）、兩類契約現行欄位投影與瀏覽器 A4 列印、送交外部平台交接記錄、分開文件簽回與完整集合完約、本機測試手動跳過門禁（`testing_skip_allowed`）、`precontract_service_commitment` 守恆與 execution conversion，以及簽約前 Scheduling 檔期衝突檢核（`signing_blockers`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md)、[Client Finance Domain](04_Client_Finance_Domain.md)、[Global Migration 與 Cutover Subsystem](10_Global_保留資料Migration與Cutover_Subsystem.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)、[案件與月嫂整合名冊](33_案件與月嫂整合名冊正式規格.md)。
 
 ## 2. 核心架構、SSOT 與狀態機
@@ -14,7 +14,7 @@
 月嫂承接意願 → 客戶接受推薦方案 → 齊備確認服務日期後自動鎖定 waiting-deposit 檔期
 → 契約瀏覽器列印（可另存為 PDF）→ 人員送交外部簽署平台並在工會系統記錄送交
 → 分別上傳回收全部月嫂與客戶已簽署 PDF（或本機受控 TEST-ONLY 跳過）
-→ Apply 納管受控文件、建立 commitment 與 Orders contract_completed
+→ 歸檔人員已確認的簽署 PDF，同一交易記錄 Orders contract_completed
 →（訂金已核銷使訂單成立 AND contract_completed AND commitment_ready）
 → commitment exact conversion → execution assignment／schedule
 ```
@@ -59,19 +59,19 @@
 
 ### 3.3 檔期衝突檢核、送交記錄與官方帳號提醒
 
-- **簽約前檔期衝突檢核**：契約工作區 Query 即時投影 Scheduling canonical 占用、等待檔期鎖與不可服務期間，存在 hard conflict 時回傳 typed `signing_blockers`（提示「更換推薦月嫂／調整服務日期」並停用送交）；送交與完成命令在各自 UoW fresh-read 遭遇衝突固定回 `signing_staff_occupancy_conflict` 或 `signing_service_dates_unavailable`（零寫入；同案既有 waiting lock 不自相衝突，buffer 僅警示）。
-- **不阻塞下載與重複送交**：
-  - 客戶與每段月嫂未簽 PDF 缺失時由下載觸發生成（已簽署、有 `contract_identity` 或已完約亦允許再次下載；資料 snapshot 變動則 append 新版未簽 PDF 並保留原已簽檔案）。
-  - 「記錄已送交簽署平台」不以所有系統 PDF 已生成或 LINE 綁定為前置（支持瀏覽器列印工作流：無系統 PDF／session 時保存案件層級 receipt `session_id=null, version=0, matching_plan_id`）。允許重複記錄送交，每次追加 receipt 並保留目前狀態與版本。
-  - 工會人員在瀏覽器預覽並列印未簽契約，可在列印視窗另存為 PDF，再將文件交由第三方平台簽署。點選「記錄已送交簽署平台」後，若只有案件層級交接紀錄，工作台在同次操作準備缺少的回收用文件並啟用簽署工作。若準備失敗，保留交接紀錄，操作人可用同一按鈕接續。
+- **簽約前檔期衝突檢核**：契約工作區 Query 即時投影 Scheduling canonical 占用、等待檔期鎖與不可服務期間，存在 hard conflict 時回傳 typed `signing_blockers`（提示「更換推薦月嫂／調整服務日期」並停用送交）；送交命令在 UoW fresh-read 遭遇衝突固定回 `signing_staff_occupancy_conflict` 或 `signing_service_dates_unavailable`（零寫入；同案既有 waiting lock 不自相衝突，buffer 僅警示）。
+- **瀏覽器列印與送交記錄**：
+  - 工作台以「瀏覽器列印」提供未簽契約，可在列印視窗另存為 PDF，再由工會人員交第三方平台簽署。工作台不提供重新產生或直接下載契約的按鈕。
+  - 「記錄已送交簽署平台」核對現行簽約條件並保存交接，不產製未簽 PDF，也不以 LINE 綁定為前置。缺少簽約工作時，保存案件層級 receipt（`session_id=null, version=0, matching_plan_id`）。已有工作時沿用既有交接與重複記錄規則。
+  - 送交紀錄供人員追蹤。已簽 PDF 可從回收區直接上傳。
 - **簽署提醒**。需要提醒時，工會人員在 LINE 官方帳號聊天後台手動選用範本，發給對應的客戶或月嫂。LINE 流程圖以文字說明此操作。工會系統記錄送交與簽回，不發送簽署提醒或契約下載連結，案件畫面不呈現提醒狀態。既有提醒回執、契約寄送與投遞歷史保留供查閱。簽署提醒及契約下載通知的既有工作不得投遞或重試。
 
 ### 3.4 分開文件回收、手工證明與本機測試跳過
 
-- **分開回收與完整集合完約**：
-  - 簽署契約頁面自開啟起持續顯示「回收簽署文件」區塊。未記錄送交、文件準備中或準備失敗、已送交、已完成及簽署工作已被取代時，區塊均可見。選檔、上傳與儲存依現行簽回條件啟用。
-  - 介面僅提供「契約文件 → 送交簽署 → 回收簽署文件」（移除「檢查簽署文件」按鈕與「歷史簽回人工修復」區塊）；各目標（1 份客戶契約 ＋ 所有 current 月嫂契約）分別上傳經 Controlled Files staging 保存。
-  - 最終 Preview（opaque token 綁定完整檔案集合與各 owner version）→ 明確確認簽署 → Apply 於單一 outer UoW 納管全部受控 NAS PDF（DB 僅存 opaque object reference ＋ SHA-256，嚴禁暴露實體路徑／UNC／presigned URL，下載限 authenticated attachment 並寫 security audit）、完成 session、建立 `precontract_service_commitment`、寫入 `orders.contract_identity` 與 `contract_completed`，並核對沿用 Client Finance 已同步之訂金及各期義務（計價未變不遞增 Finance version、不覆寫既成 `訂單成立`）。錯誤訊息直接回傳繁中具體業務原因，不掩蓋版本／檔期／測試門禁原因，且不遺棄已選檔案。
+- **人工確認後歸檔即完約**：
+  - 人員自行核對簽名與契約內容，確認完約後選擇已簽 PDF。回收區從頁面開啟即顯示。按客戶與案件目前可列出的月嫂分段歸檔，一個欄位一份 PDF。沒有可列出的月嫂分段時，仍可歸檔客戶 PDF。
+  - 系統驗證案件存取權、檔案格式與大小，以及檔案能否完整保存。簽名與內容由人員核對。歸檔不要求送交記錄、LINE 綁定、未簽文件、內部契約版本、簽約工作、客戶接受推薦、檔期、服務時段、服務承諾、訂金或帳務就緒。
+  - 歸檔命令在同一交易納管全部檔案、保存歸檔回執及記錄 Orders `contract_completed`。已有完約事實與契約識別時保留原值。歸檔失敗保留選檔，且不記錄完約。完約後列出已歸檔檔名。排班及帳務依各自規格判定是否可進行。
 - **手工證明（`manual_attested`）**：線下紙本／現場簽回時，管理員可透過獨立人工認證 Preview／Apply 上傳真實簽回證據並填寫 `confirmation_method` 與必填 `reason`，形成 `staff_signed_received`／`client_signed_received` 與完約（不宣稱 LINE 送達）。
 - **本機受控測試跳過（`testing_skip_allowed`）**：以 `APP_ENV=development|dev|local|test`、loopback MySQL 與無 deployment profile 判定。符合條件的本機資料庫（含還原庫）共用相同操作。呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
 
@@ -85,6 +85,6 @@
 ## 4. 驗收標準
 
 1. **`CTM` 模板管理與列印**：`.xlsx` 合併格／樣式檢視、巨集拒絕、沿用／缺件攔截、示範套值零寫入、版本啟用不改既有檔案、A4 8mm 194mm 瀏覽器列印雙模板驗證與 `state=preparing` 查詢。
-2. **主流程與分離邊界**。檔期衝突在送交及新完約前精確阻擋。瀏覽器列印後不預存系統 PDF 仍可記錄送交。LINE 流程圖指引官方帳號人工操作，工會系統無提醒或契約下載連結寄送入口，兩類既有工作皆不得觸發 LINE 投遞或重試，歷史保留。驗證客戶及所有現行月嫂的簽回集合、`manual_attested` 與 `testing_skip` 於單一 UoW 原子建立 commitment、Orders 完成與訂金核銷銜接（下載不暴露實體儲存路徑）。
+2. **直接歸檔**。沒有送交、簽約工作、未簽文件或排班／帳務就緒資料時，人員仍可上傳已簽 PDF 並記錄完約。故障或欠缺應上傳的檔案時，零完約寫入。重送同一操作回原歸檔結果。工會系統不發送簽署提醒或契約下載連結，歷史投遞保留。
 3. **本機受控 DB 驗收**：依 [Global Migration §6.1](10_Global_保留資料Migration與Cutover_Subsystem.md#61-本機開發-db-受控驗收91) 於受控 `union_db`／`lu_test_*` 通過 Module、Subsystem、Domain（訂金→訂單成立＋簽約→conversion、代班不重簽）與 Browser E2E。
-4. **回收區塊持續顯示**。首次開啟頁面、送交前後、準備失敗、完約後及簽署工作被取代後，均可看到「回收簽署文件」區塊。切換狀態或重新開啟頁面時仍可見，操作按現行簽回條件啟用。
+4. **回收區塊持續顯示**。首次開啟頁面即顯示「回收簽署文件」。案件載入後可直接選檔，完約後可讀回檔名。

@@ -178,6 +178,7 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
 export const ContractPreparationQuerySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   state: z.literal('preparing'),
+  testing_skip_allowed: z.boolean().optional(),
   handoff_logged: z.boolean().optional(),
   signing_reminder: SigningReminderReceiptSchema.nullable().optional(),
   signing_blockers: z.array(z.string()).optional(),
@@ -456,7 +457,37 @@ function basePath(caseNo: string): string {
   return `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-external-signing`;
 }
 
+const SignedArchiveFileSchema = z.strictObject({
+  target: z.string(),
+  filename: z.string(),
+  file_id: z.string().regex(/^cf_[0-9a-f]{32}$/),
+});
+const SignedArchiveSchema = z.strictObject({ files: z.array(SignedArchiveFileSchema) });
+const SignedArchiveStatusSchema = z.strictObject({
+  staff_segments: z.array(z.strictObject({ segment_id: z.number().int().positive(), staff_id: z.number().int().positive() })),
+  files: z.array(SignedArchiveFileSchema).nullable(),
+});
+export type SignedArchiveFile = z.infer<typeof SignedArchiveFileSchema>;
+
 export const contractExternalSigningClient = {
+  async querySignedArchive(caseNo: string, signal?: AbortSignal) {
+    return decodePayload(envelope(SignedArchiveStatusSchema), await transport.get(
+      basePath(caseNo) + '/signed-archive', { token: authToken(), signal },
+    )).data;
+  },
+
+  async archiveSignedFiles(caseNo: string, client: File, staff: { segmentId: number; file: File }[], identity: ExternalSigningCommandIdentity) {
+    const form = new FormData();
+    form.set('client', client);
+    for (const row of staff) {
+      form.append('staff_segment_ids', String(row.segmentId));
+      form.append('staff', row.file);
+    }
+    return decodePayload(envelope(SignedArchiveSchema), await transport.post(
+      basePath(caseNo) + '/signed-archive', form, stagingCommandOptions(identity),
+    )).data.files;
+  },
+
   async query(caseNo: string, options?: { signal?: AbortSignal }): Promise<ContractExternalSigningQuery | ContractPreparationQuery> {
     const expectedCaseNo = canonicalCaseNo(caseNo);
     const value = decodePayload(

@@ -65,6 +65,17 @@ def test_contract_pdf_and_menu_have_their_business_directories(production):
     assert _storage_locator_for(candidate, {}).startswith(layout.MEDIA_DIRECTORY + "/rich_menus/")
 
 
+def test_signed_archive_separates_identical_pdfs_for_distinct_caregiver_slots(production):
+    candidate = SimpleNamespace(owner=Owner.CONTRACT_SIGNING, purpose=Purpose.FINAL_SIGNED_CONTRACT,
+                                subject_reference="CASE-1", object_key="signed-archive:staff:41",
+                                mime_type="application/pdf", sha256_digest="a" * 64)
+    first = _storage_locator_for(candidate, {})
+    candidate.object_key = "signed-archive:staff:42"
+    second = _storage_locator_for(candidate, {})
+    assert first != second
+    assert "月嫂承攬協議_41" in first and "月嫂承攬協議_42" in second
+
+
 @pytest.mark.parametrize(("target", "label"), [("client", "客戶合約"), ("staff:42", "月嫂承攬協議")])
 def test_returned_contract_on_local_drive_remains_downloadable(production, monkeypatch, target, label):
     monkeypatch.setenv("APP_ENV", "development")

@@ -84,8 +84,8 @@ SELECT o.case_no,
        external_session.external_signing_session_id,
        external_session.aggregate_version AS external_signing_status_version,
        external_session.created_at_utc AS external_signing_handoff_at,
-       final_contract.final_document_id AS final_contract_document_id,
-       final_contract.created_at_utc AS final_contract_completed_at,
+       COALESCE(final_contract.final_document_id, signed_archive.archive_id) AS final_contract_document_id,
+       COALESCE(final_contract.created_at_utc, signed_archive.archived_at) AS final_contract_completed_at,
        contract_fact.contract_event_id,
        contract_fact.contract_created_at,
        finance.aggregate_version AS finance_version,
@@ -351,6 +351,11 @@ SELECT o.case_no,
        SELECT case_no, MAX(id) AS contract_event_id, MAX(created_at) AS contract_created_at
          FROM order_contract_flow_events GROUP BY case_no
   ) contract_fact ON contract_fact.case_no = o.case_no
+  LEFT JOIN (
+       SELECT case_no, MAX(idempotency_key) AS archive_id, MAX(created_at) AS archived_at
+       FROM contract_signing_command_receipts WHERE command_kind = 'archive_signed_contract'
+       GROUP BY case_no
+  ) signed_archive ON signed_archive.case_no = o.case_no
   LEFT JOIN client_finance_accounts finance ON finance.case_no = o.case_no
   LEFT JOIN client_payment_terms payment_terms ON payment_terms.case_no = o.case_no
   LEFT JOIN client_payment_terms_events payment_terms_event

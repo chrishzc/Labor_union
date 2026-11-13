@@ -67,8 +67,8 @@
 - **開工後全案影響**。畫面在解除與確認前顯示，新條件會套用到全案，包含已服務日期的有效排班及統計，並可能重算客戶應付與月嫂薪資。由承辦人先核對影響並選擇是否儲存。Query 提供已確認的 `actual_start_date`，新班表首日須與原實際開始日相同。沿用 [Scheduling 世代](02_Assignments_Scheduling_Domain.md#2-核心不變量與資料模型ssot) 及既有 Finance／Payroll 差額規則，保留舊排班及收付紀錄。日期或時段改變時才依排班形狀重建。未提供解鎖、資料或檔期衝突、版本過期、帳務阻擋均不得留下部分寫入。
 - **月曆分配**。解鎖後可開啟重新排班，改總天數時必須完成。直接在月曆選取新班表日期，保留原實際開工日。初始沿用現行正式日期，縮減天數時預先取原班表最早的對應天數，增加天數時由承辦人補選。畫面顯示首日、末日與已選天數，每個既有指派以一張月曆顯示負責日期，並預填仍在新班表中的現行分配。點選可將日期分配給該指派，包含把已分配的日期轉給另一既有指派。單一指派承接全部日期。解鎖替換須在每筆 `replacement_allocations` 帶入 `service_dates`，每個替代服務日恰分配一次、每段至少一日，筆數與該段服務天數一致。未啟用解鎖的既有按天數分配契約可繼續使用。解鎖後未選擇替換日期時，沿用各指派的現行正式服務日。
 - **已結案漏填樓層費更正**。具 `order_service_data_locks` 或符合 [規格 27 §6.3](27_歷史訂單生命週期與服務天數帳務正式規格.md#63-人工發起服務天數更正與已結案樓層費個案計價更正) 的已完成案件，以 `floor_fee_correction=true` 發起更正。Query 回報 `floor_fee_correction_available`。Apply 保留服務鎖、日期與排班 generation。歷史已完成案件的訂金更正由 Orders 與 Client Finance 同交易完成。一般訂單結案後的樓層費更正由 Finance 與 Payroll 在同一交易承接各自差額。
-- **每日服務時間與下廚需求**：時段三欄必須「全空或全有」（新案於契約完成、waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
-- **Contract Completion 協調（`Orders` ＋ `Client Finance`）**：Preview 驗證簽回證據、commitment 服務日數守恆（缺日回 `official_service_dates_incomplete`）、完整時段與雙方版本；Apply 於單一 outer UoW 寫入 `contract_completed` 並委派 Client Finance 保留既成訂金後補建其餘期款（若有舊義務卻缺完成事件回 `client_obligation_history_conflict`）。
+- **每日服務時間與下廚需求**：時段三欄必須「全空或全有」（新案於 waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
+- **已簽 PDF 歸檔與完約**。依 [簽約正式規格 §3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#34-分開文件回收手工證明與本機測試跳過)，Orders 在歸檔交易登記 `contract_completed`，並依訂金核銷事實投影成立狀態。服務時段、承諾服務日與期款資格由各自 owner 判定。
 
 ### 3.5 Actual Start Preview／Apply
 

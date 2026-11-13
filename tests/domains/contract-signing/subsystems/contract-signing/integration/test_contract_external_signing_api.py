@@ -348,14 +348,16 @@ def _preparing_status(documents=()):
     )
 
 
-def test_existing_case_without_ready_signing_facts_returns_zero_write_preparation_data():
+@pytest.mark.parametrize("testing_allowed", [False, True])
+def test_existing_case_without_ready_signing_facts_returns_zero_write_preparation_data(monkeypatch, testing_allowed):
+    monkeypatch.setattr(route, "testing_signing_skip_allowed", lambda: testing_allowed)
     response = _client(_preparing_application(_preparing_status())).get(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing"
     )
     assert response.status_code == 200
     assert response.json()["data"] == {
         "case_no": CASE_NO, "state": "preparing",
-        "handoff_logged": False, "signing_reminder": None,
+        "handoff_logged": False, "signing_reminder": None, "testing_skip_allowed": testing_allowed,
         "signing_blockers": [],
         "staff_segments": [{"segment_id": 71, "staff_id": 9}], "documents": [],
     }
@@ -1082,3 +1084,20 @@ def test_production_works_with_internal_preview_secret(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("CONTRACT_FINAL_PREVIEW_TOKEN_SECRET", raising=False)
     assert _preview_token_secret() == _LOCAL_PREVIEW_SECRET
+
+def test_signed_archive_multipart_does_not_require_unsigned_version_or_signing_session():
+    application = FakeApplication()
+    captured = []
+    application.final_documents = SimpleNamespace(
+        archive_signed_files=lambda *args, **kwargs: captured.append((args, kwargs)) or {
+            "files": [{"target": "client", "filename": "customer.pdf", "file_id": "cf_" + "a" * 32}]
+        },
+    )
+    path = f"/api/v1/orders/{CASE_NO}/contract-external-signing/signed-archive"
+    response = _client(application).post(
+        path, files={"client": ("customer.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")},
+        headers={"Idempotency-Key": "archive-1", "X-Correlation-ID": "archive-1"},
+    )
+    assert response.status_code == 200, response.text
+    assert captured[0][0] == (CASE_NO, (("client", "customer.pdf", b"%PDF-1.4\n%%EOF"),))
+    assert response.json()["data"]["files"][0]["filename"] == "customer.pdf"

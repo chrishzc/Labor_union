@@ -14,9 +14,9 @@
 外部平台交接不以 LINE 綁定或完整 current 未簽 PDF 備妥為門禁，只保存交接，不建立提醒。已有 current session（含已完成）可再次記錄，只 append receipt，不改簽署狀態或 status version；初次交接在 current session facts 可用時啟用；只有 PDF 尚未生成時，通過既有已接受方案、檔期及日期檢查後保存真實方案的案件層級 receipt（null session、版本 0），不虛構文件或簽約 facts。preparing Query 提前投影相同 blockers 與 `handoff_logged`。簽署提醒由人員在 LINE 官方帳號聊天後台手動選用範本。工會系統移除提醒寫入與案件畫面狀態，歷史提醒回執仍可唯讀查閱，舊提醒與舊契約下載通知由 LINE worker 在呼叫 provider 前取消，投遞歷史保留。
 工作區同案推薦變更後，已掛載的契約下載及欄位預覽依 owner revision 重讀 current targets；舊服務段落不沿用至新推薦。既有檔案、進行中命令及結果未明的原操作保留，待可安全重讀時才更新，不因 revision 清除 recovery flow。
 
-管理端使用「瀏覽器列印 → 送交簽署 → 回收簽署文件」單一工作區；瀏覽器列印可另存 PDF，送交時缺少的回收用文件沿用正式生成命令，核對資料使用 exact-target 側邊抽屜。客戶與每段月嫂各自選擇簽回文件，簽署內容由人員自行檢查；不提供逐份檢查／重新檢查按鈕，直接儲存時沿用上傳、格式／完整性與完整文件集合驗證及回讀；未完整回收時只保存受控 staging，不推進簽約。最終 Preview 綁定完整文件集合，Apply 在既有 outer UoW 納管各文件並於既有 immutable receipt 保存 typed members，同時完成 Orders／Commitment／Client Finance 協作。已完成文件下載重新授權並限制為該案保存的 members；歷史單一最終 PDF 仍可讀取，不作新提交的替代。
+管理端提供瀏覽器列印、選用送交紀錄與獨立已簽 PDF 歸檔。歸檔查詢只依現行案件與可列出的月嫂分段取得欄位及已歸檔檔名。已確認的 PDF 由 Controlled Files 保存，與 Orders 完約事實及歸檔回執同交易提交；無未簽版本、送交、session、排班或帳務前置。舊 final-document API 保留歷史相容。
 
-客戶 PDF 可在已回報簽署或簽約完成後再次下載／重新產生，沿既有 prepare 命令重讀 current facts；虛擬帳號改變會產生新來源 snapshot 及新 PDF。回讀後準備中／已交接畫面均保留新版 document ID，未知結果沿用原命令核對。客戶簽回草稿停用重新產生入口；client source writer 在原 UoW 鎖定案件，只 append 新文件或重用相同 snapshot，不覆寫歷史簽回與業務完成事實。最後簽約遭拒顯示具體原因，已選擇的文件保留。
+未簽契約由瀏覽器列印或另存 PDF。工作台不提供重產或直接下載按鈕，完約區塊顯示已簽檔名。已授權歷史讀取及版本保存契約沿用原入口。最後簽約遭拒顯示具體原因，已選文件保留。
 舊交接文件集合 hash 可由同案／方案的保存客戶版本證明，並維持 current staff set 相同；回讀新版客戶 PDF 不改舊 session hash，月嫂文件變更仍拒絕。
 
 本機測試可透過後端 `testing_skip_allowed` 能力與 `final-document/testing-skip` 產生各 current target 的 TEST ONLY 占位文件，經原 Preview 與明確測試確認完成後續流程；production／未知環境、遠端 DB 及 deployment profile 拒絕此能力。Apply 區分真實簽署確認與測試確認，fresh-lock 後拒絕文件模式不符，原 receipt 重播綁定確認模式。測試 reason／檔名與完成回讀保留「未驗證真實簽署」識別，不呼叫外部簽署／LINE provider。
@@ -38,6 +38,7 @@
 - `api/dependencies/contract_external_signing.py`
 - `api/schemas/full_contract_preview.py`
 - `domains/contract_signing/external_signing.py`
+- `domains/orders/contract_completion.py` — 歸檔完成的 Orders 投影
 - `infrastructure/db/contract_external_signing_repository.py`
 - `infrastructure/db/contract_unsigned_pdf_repository.py`
 - `infrastructure/db/external_staff_completion_port.py`
@@ -75,6 +76,7 @@
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_external_signing_workflow.py`
 - `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py`
 - integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_completion_workflow.py`
+- integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/test_final_document_workflow.py`
 - routing: `.arch-map/tests/domains/contract-signing/subsystems/contract-signing/modules/external-signing-presentation.md`
 
 ## Change triggers

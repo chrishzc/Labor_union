@@ -335,8 +335,9 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
             unit_of_work_factory,
             clock,
         )
+        orders_repository = MySqlOrderContractCompletionRepository(connection)
         orders_completion = ContractCompletionWorkflow(
-            MySqlOrderContractCompletionRepository(connection),
+            orders_repository,
             unit_of_work_factory,
             clock,
         )
@@ -369,6 +370,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 unit_of_work_factory,
                 clock,
                 HmacFinalDocumentPreviewTokenCodec(_preview_token_secret()),
+                archive_orders=orders_repository,
             ),
             unsigned_documents=unsigned_documents,
             full_preview=FullContractPreviewApplication(

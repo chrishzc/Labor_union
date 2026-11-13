@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import time, timedelta
+from dataclasses import replace
 import json
 from typing import Any
 
@@ -11,6 +12,7 @@ from pymysql.err import IntegrityError
 
 from domains.orders.contract_completion import (
     ContractCompletionFacts,
+    record_archived_contract_completion,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.orders.terms import ServiceTimeTerms
@@ -87,6 +89,40 @@ class MySqlOrderContractCompletionRepository:
                     "UPDATE orders SET contract_identity=%s WHERE case_no=%s",
                     (identity, case_no),
                 )
+
+    def record_archived_completion(
+        self, case_no, identity, *, actor, idempotency_key, business_date
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            order = _select_order(cursor, case_no, lock=True)
+            if _select_contract_completion(cursor, case_no, lock=True):
+                return
+            facts = _facts(order, False, _select_deposit_settlement(cursor, case_no, lock=True))
+            identity = facts.contract_identity or identity
+            candidate = record_archived_contract_completion(replace(facts, contract_identity=identity))
+            if facts.contract_identity is None:
+                cursor.execute("UPDATE orders SET contract_identity=%s WHERE case_no=%s", (identity, case_no))
+            cursor.execute(_CONTRACT_EVENT_INSERT_SQL, (
+                case_no, identity, "contract_completed", actor.actor_id,
+                "工會人員確認完約並歸檔已簽 PDF", idempotency_key.value,
+            ))
+            cursor.execute(_LIFECYCLE_EVENT_INSERT_SQL, (
+                case_no, "contract_completed", candidate.before_status.value,
+                candidate.after_status.value, actor.actor_id, business_date,
+                candidate.expected_order_version, idempotency_key.value,
+                _canonical_json(_lifecycle_snapshot(candidate)),
+            ))
+            lifecycle_event_id = int(cursor.lastrowid)
+            cursor.execute(_ORDER_UPDATE_SQL, (
+                candidate.after_status.value, candidate.resulting_order_version,
+                case_no, candidate.expected_order_version,
+            ))
+            if cursor.rowcount != 1:
+                raise RuntimeError("order_version_conflict")
+            cursor.execute(_OUTBOX_INSERT_SQL, (
+                case_no, lifecycle_event_id, f"contract-completed:{idempotency_key.value}",
+                "lifecycle_projection_changed", _canonical_json(_lifecycle_snapshot(candidate)),
+            ))
 
     def append_contract_completion_event(
         self,

@@ -94,6 +94,13 @@ def contract_completion_blockers(
     return tuple(sorted(blockers, key=lambda blocker: blocker.value))
 
 
+def record_archived_contract_completion(facts: ContractCompletionFacts) -> ContractCompletionCandidate:
+    """Project an operator's completed contract without a service-readiness gate."""
+    return _candidate(
+        facts, ContractCompletionIntent.CONFIRM_COMPLETED, _derived_status(facts)
+    )
+
+
 def build_contract_completion_candidate(
     facts: ContractCompletionFacts,
     intent: ContractCompletionIntent,

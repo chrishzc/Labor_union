@@ -15,9 +15,8 @@ import {
   type FinalDocumentPreview,
   type FinalDocumentReadback,
   type SignedDocumentTarget,
-  type SignedDocumentPreview,
   type SignedDocumentUpload,
-  type PreparedUnsignedDocument,
+  type SignedArchiveFile,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { sessionClient } from '../api/auth/session_client';
@@ -28,8 +27,6 @@ import {
   orderMutationFlowStore,
   type ExternalSigningHandoffCommand,
   type ExternalSigningHandoffFlowState,
-  type ExternalSigningUnsignedPreparationCommand,
-  type ExternalSigningUnsignedPreparationFlowState,
 } from '../adapters/orders/order_mutation_flow_store';
 
 export interface ContractExternalSigningActionsProps {
@@ -41,10 +38,9 @@ export interface ContractExternalSigningActionsProps {
   onOpenRecommendation?: () => void;
 }
 
-type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
+type WorkingOperation = 'query' | 'download' | 'handoff' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
 interface ContractMetadata { name: string; period: string; staffId?: number }
-interface SignedReturnDraft { file: File | null; staged: SignedDocumentPreview | null }
 const signedTargetKey = (target: Pick<SignedDocumentTarget, 'scope' | 'matching_segment_id'>) => target.scope === 'client' ? 'client' : `staff:${target.matching_segment_id}`;
 const uploadInput = (row: SignedDocumentUpload): SignedDocumentUpload => ({ scope: row.scope, matching_segment_id: row.matching_segment_id, document_version_id: row.document_version_id, staging_id: row.staging_id, expected_staging_version: row.expected_staging_version });
 
@@ -59,7 +55,6 @@ export type ContractExternalSigningUiState =
   | { type: 'querying' }
   | { type: 'ready' }
   | { type: 'working'; operation: WorkingOperation }
-  | { type: 'preview_ready'; preview: FinalDocumentPreview }
   | { type: 'receipt_committed'; receipt: ExternalSigningReceipt; message: string }
   | { type: 'outcome_unknown'; identity: ExternalSigningCommandIdentity; expected: ReceiptExpectation; message: string }
   | { type: 'observed'; receipt: ExternalSigningReceipt; readback: FinalDocumentReadback }
@@ -138,17 +133,6 @@ function outcomeCouldBeUnknown(error: unknown): boolean {
     || (error instanceof ApiHttpError && error.retryable);
 }
 
-function stateLabel(query: ContractExternalSigningQuery): string {
-  if (!query.handoff_recorded) return '待送交';
-  switch (query.state) {
-    case 'staff_reporting': return '已送交外部平台，等待最終簽署 PDF';
-    case 'staff_reports_complete': return '已送交外部平台，等待最終簽署 PDF';
-    case 'client_reported_final_pdf_pending': return '最終簽署 PDF 待回收';
-    case 'completed': return '契約完成';
-    case 'superseded': return '此簽約工作已被新版取代';
-  }
-}
-
 function currentIdentity(
   identities: Map<string, ExternalSigningCommandIdentity>,
   key: string,
@@ -162,17 +146,13 @@ function currentIdentity(
 
 const subscribeExternalSigningHandoff = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 let handoffOperationSequence = 0;
-let unsignedPreparationOperationSequence = 0;
 
 function nextHandoffOperationToken(): number {
   handoffOperationSequence += 1;
   return handoffOperationSequence;
 }
 
-function nextUnsignedPreparationOperationToken(): number {
-  unsignedPreparationOperationSequence += 1;
-  return unsignedPreparationOperationSequence;
-}
+
 
 function handoffReceiptMatches(
   command: ExternalSigningHandoffCommand,
@@ -183,53 +163,58 @@ function handoffReceiptMatches(
       || receipt.resulting_status_version === command.expectedStatusVersion + 1);
 }
 
-function unsignedPreparationReadbackMatches(
-  command: ExternalSigningUnsignedPreparationCommand,
-  receipt: PreparedUnsignedDocument,
-  fresh: ContractExternalSigningQuery,
-): boolean {
-  if (
-    fresh.case_no !== command.caseNo
-    || (command.sessionId !== null && fresh.session_id !== command.sessionId)
-  ) return false;
-  if (command.kind === 'client') {
-    return fresh.client_target.document_version_id === receipt.document_version_id;
-  }
-  return command.segmentId !== null
-    && fresh.staff_targets.some((target) => target.matching_segment_id === command.segmentId);
-}
-
 export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitted, onOpenFinance, onOpenServiceDates, onOpenRecommendation }: ContractExternalSigningActionsProps) {
   const staffIdentity = useStaffIdentityLabels();
   const observedRevision = useRef(revision);
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
-  const unsignedDownloadController = useRef<AbortController | null>(null);
+  const printController = useRef<AbortController | null>(null);
   const activeHandoffOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
-  const activeUnsignedPreparationOperation = useRef<{ caseNo: string; operationToken: number } | null>(null);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
   const [preparation, setPreparation] = useState<ContractPreparationQuery | null>(null);
   const [preparationSegments, setPreparationSegments] = useState<number[]>([]);
   const [uiState, setUiState] = useState<ContractExternalSigningUiState>({ type: 'querying' });
+  const [archiveSegments, setArchiveSegments] = useState<{ segment_id: number; staff_id: number }[] | null>(null);
+  const [archivedFiles, setArchivedFiles] = useState<SignedArchiveFile[] | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveUnknown, setArchiveUnknown] = useState(false);
+  const archiveRequest = useRef<AbortController | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [fileReturns, setFileReturns] = useState<Record<string, SignedReturnDraft>>({});
+  const [fileReturns, setFileReturns] = useState<Record<string, File | null>>({});
   const [contractMetadata, setContractMetadata] = useState<Record<string, ContractMetadata>>({});
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [bootstrapReasons, setBootstrapReasons] = useState<string[]>([]);
-  const [returnReadError, setReturnReadError] = useState<string | null>(null);
+  const [testingFiles, setTestingFiles] = useState<string[]>([]);
   const [completedReadback, setCompletedReadback] = useState<FinalDocumentReadback | null>(null);
   const [reviewTarget, setReviewTarget] = useState<{ scope: 'client' | 'staff'; segmentId: number | null } | null>(null);
-  const [, setHandoffConfirmationOpen] = useState(false);
-  const [preparationStaffDocuments, setPreparationStaffDocuments] = useState<Record<number, number>>({});
-  const [preparationClientDocument, setPreparationClientDocument] = useState<number | null>(null);
   const handoffFlow = useSyncExternalStore(
     subscribeExternalSigningHandoff,
     () => orderMutationFlowStore.getExternalSigningHandoff(caseNo),
   );
-  const unsignedPreparationFlow = useSyncExternalStore(
-    subscribeExternalSigningHandoff,
-    () => orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo),
-  );
+  useEffect(() => {
+    const controller = new AbortController();
+    archiveRequest.current = controller;
+    setArchiveSegments(null);
+    setArchivedFiles(null);
+    setArchiveError(null);
+    setArchiveBusy(false);
+    setArchiveUnknown(false);
+    return () => controller.abort();
+  }, [caseNo]);
+
+  useEffect(() => {
+    if (archiveBusy || archiveUnknown) return;
+    const controller = new AbortController();
+    void contractExternalSigningClient.querySignedArchive(caseNo, controller.signal).then(value => {
+      if (controller.signal.aborted) return;
+      setArchiveSegments(value.staff_segments);
+      setArchivedFiles(previous => value.files ?? previous);
+    }).catch(error => {
+      if (!controller.signal.aborted) setArchiveError(safeErrorMessage(error));
+    });
+    return () => controller.abort();
+  }, [caseNo, revision, archiveBusy, archiveUnknown]);
 
   const loadQuery = useCallback(async (signal?: AbortSignal): Promise<ContractExternalSigningQuery | null> => {
     const generation = ++requestGeneration.current;
@@ -258,33 +243,11 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       const code = [result.reason.code, result.reason.message].find(value => ['client_finance_bootstrap_required', 'payroll_bootstrap_required', 'payroll_case_policy_bootstrap_required'].includes(value));
       return code ? [contractCheckReason(code)] : [];
     }))]);
-    if (value.state !== 'preparing' && value.handoff_recorded && value.state !== 'completed' && value.state !== 'superseded') {
-      try {
-        const returns = await contractExternalSigningClient.getSignedDocumentReturns(caseNo, signal);
-        if (returns.session_id !== value.session_id || returns.status_version !== value.status_version) throw new Error('簽回文件與本次簽約工作不一致，請重新讀取。');
-        if (signal?.aborted || generation !== requestGeneration.current) return null;
-        const targets: SignedDocumentTarget[] = [
-          ...(value.client_target.document_version_id === null ? [] : [{ scope: 'client' as const, matching_segment_id: null, document_version_id: value.client_target.document_version_id }]),
-          ...value.staff_targets.map(row => ({ scope: 'staff' as const, matching_segment_id: row.matching_segment_id, document_version_id: row.document_version_id })),
-        ];
-        for (const row of returns.documents) {
-          if (!targets.some(target => signedTargetKey(target) === signedTargetKey(row) && target.document_version_id === row.document_version_id)) throw new Error('簽回文件的契約對象或版本不一致。');
-        }
-        setFileReturns(previous => Object.fromEntries(targets.map(target => {
-          const key = signedTargetKey(target), staged = returns.documents.find(row => signedTargetKey(row) === key) ?? null, old = previous[key];
-          return [key, old?.file ? old : { file: null, staged }];
-        })));
-        setReturnReadError(null);
-      } catch (error) { if (!signal?.aborted && generation === requestGeneration.current) setReturnReadError(safeErrorMessage(error)); }
-    }
-
     if (value.state === 'preparing') {
       setPreparation(value);
       if (signal?.aborted || generation !== requestGeneration.current) return null;
       setQuery(null);
       setPreparationSegments(value.staff_segments.map((segment) => segment.segment_id));
-      setPreparationStaffDocuments(Object.fromEntries(value.staff_segments.flatMap(segment => { const stored = value.documents.filter(row => row.scope === 'staff_segment' && row.role === 'template_generated' && row.mime_type === 'application/pdf' && row.target_key === `staff-segment:${segment.segment_id}`).sort((left, right) => right.document_version_id - left.document_version_id)[0]; return stored ? [[segment.segment_id, stored.document_version_id]] : []; })));
-      setPreparationClientDocument(value.documents.filter(row => row.scope === 'client_contract' && row.role === 'template_generated' && row.mime_type === 'application/pdf').sort((left, right) => right.document_version_id - left.document_version_id)[0]?.document_version_id ?? null);
       setUiState({ type: 'ready' });
       return null;
     }
@@ -298,14 +261,16 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
 
   useEffect(() => {
     observedRevision.current = revision;
-    unsignedDownloadController.current?.abort();
+    printController.current?.abort();
     const controller = new AbortController();
     setQuery(null);
     setPreparation(null);
     setPreparationSegments([]);
+
     setNotice(null);
     setFileReturns({});
-    setContractMetadata({}); setMetadataError(null); setBootstrapReasons([]); setReturnReadError(null); setCompletedReadback(null); setReviewTarget(null); setHandoffConfirmationOpen(false); setPreparationClientDocument(null); setPreparationStaffDocuments({});
+    setTestingFiles([]);
+    setCompletedReadback(null);
     identities.current.clear();
     void loadQuery(controller.signal).then(async (value) => {
       if (controller.signal.aborted || value === null || value.state !== 'completed') return;
@@ -347,32 +312,14 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
         }
       }
       activeHandoffOperation.current = null;
-      const activePreparation = activeUnsignedPreparationOperation.current;
-      const savedPreparation = activePreparation && orderMutationFlowStore.getExternalSigningUnsignedPreparation(activePreparation.caseNo);
-      if (activePreparation && savedPreparation?.operationToken === activePreparation.operationToken) {
-        if (savedPreparation.status === 'applying') {
-          orderMutationFlowStore.setExternalSigningUnsignedPreparation(activePreparation.caseNo, {
-            ...savedPreparation,
-            status: 'outcome_unknown',
-            error: '未簽契約準備請求在畫面離開時仍未確認；請以原操作重新確認。',
-          });
-        } else if (savedPreparation.status === 'observing') {
-          orderMutationFlowStore.setExternalSigningUnsignedPreparation(activePreparation.caseNo, {
-            ...savedPreparation,
-            status: 'observation_failed',
-            error: '未簽契約準備收據已收到，但畫面離開前尚未完成狀態讀取；只能重新讀取。',
-          });
-        }
-      }
-      activeUnsignedPreparationOperation.current = null;
       requestGeneration.current += 1;
       controller.abort();
-      unsignedDownloadController.current?.abort();
+      printController.current?.abort();
     };
   }, [caseNo, loadQuery]);
 
   useEffect(() => {
-    if (observedRevision.current === revision || handoffFlow || unsignedPreparationFlow || Object.values(fileReturns).some(row => row.file)
+    if (observedRevision.current === revision || archiveBusy || handoffFlow || Object.values(fileReturns).some(Boolean)
       || !['ready', 'error'].includes(uiState.type)) return;
     observedRevision.current = revision;
     setQuery(null); setPreparationSegments([]); setNotice(null);
@@ -382,7 +329,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     void pending.catch(error => {
       if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
     });
-  }, [revision, loadQuery, handoffFlow, unsignedPreparationFlow, fileReturns, uiState.type]);
+  }, [revision, loadQuery, archiveBusy, handoffFlow, fileReturns, uiState.type]);
 
   const ownsHandoffOperation = (caseNumber: string, operationToken: number): boolean => {
     const active = activeHandoffOperation.current;
@@ -397,190 +344,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     }
   };
 
-  const ownsUnsignedPreparationOperation = (caseNumber: string, operationToken: number): boolean => {
-    const active = activeUnsignedPreparationOperation.current;
-    return active?.caseNo === caseNumber
-      && active.operationToken === operationToken
-      && orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNumber)?.operationToken === operationToken;
-  };
-
-  const releaseUnsignedPreparationOperation = (operationToken: number) => {
-    if (activeUnsignedPreparationOperation.current?.operationToken === operationToken) {
-      activeUnsignedPreparationOperation.current = null;
-    }
-  };
-
-  const observeUnsignedPreparation = async (
-    state: ExternalSigningUnsignedPreparationFlowState,
-    request: number,
-  ) => {
-    if (state.receipt === null) throw new Error('未簽契約準備尚未收到收據，不能只讀取狀態。');
-    const { command, receipt } = state;
-    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
-    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, { ...state, status: 'observing', error: null });
-    const fresh = await contractExternalSigningClient.query(command.caseNo);
-    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
-    if (fresh.state === 'preparing') {
-      const targetObserved = command.kind === 'staff'
-        ? command.segmentId !== null
-          && fresh.staff_segments.some((segment) => segment.segment_id === command.segmentId)
-        : true;
-      const documentObserved = fresh.documents.some((document) => (
-        document.document_version_id === receipt.document_version_id
-        && document.scope === (command.kind === 'client' ? 'client_contract' : 'staff_segment')
-        && document.role === 'template_generated'
-        && document.mime_type === 'application/pdf'
-        && document.target_key === (command.kind === 'client' ? 'client-contract' : `staff-segment:${command.segmentId}`)
-      ));
-      if (fresh.case_no !== command.caseNo || command.sessionId !== null || !targetObserved || !documentObserved) {
-        throw new Error('未簽契約收據尚未出現在正式契約狀態；只能重新讀取。');
-      }
-      orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
-      if (request !== requestGeneration.current) return;
-      setQuery(null);
-      setPreparationSegments(fresh.staff_segments.map((segment) => segment.segment_id));
-      if (command.kind === 'client') setPreparationClientDocument(receipt.document_version_id);
-      else if (command.segmentId !== null) setPreparationStaffDocuments(previous => ({ ...previous, [command.segmentId!]: receipt.document_version_id }));
-      setUiState({ type: 'ready' });
-      setNotice(command.kind === 'client'
-        ? `${receipt.replayed ? '已重新確認' : '已產生'}客戶未簽契約 PDF。`
-        : `${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
-      return;
-    }
-    if (!ownsUnsignedPreparationOperation(command.caseNo, state.operationToken)) return;
-    if (!unsignedPreparationReadbackMatches(command, receipt, fresh)) {
-      throw new Error('未簽契約準備收據與原案件、簽約工作或服務區段不一致；只能重新讀取。');
-    }
-    orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
-    if (request !== requestGeneration.current) return;
-    setQuery(fresh);
-    setPreparationSegments([]);
-    setUiState({ type: 'ready' });
-    setNotice(command.kind === 'client'
-      ? `客戶未簽契約 PDF「${receipt.filename}」已準備完成。`
-      : `${receipt.replayed ? '已重新確認' : '已產生'}月嫂分段 #${command.segmentId} 未簽 PDF。`);
-  };
-
-  const submitUnsignedPreparation = async (
-    command: ExternalSigningUnsignedPreparationCommand,
-    recovery: boolean,
-    downloadAfterObserved: boolean,
-  ) => {
-    const request = requestGeneration.current;
-    const operationToken = nextUnsignedPreparationOperationToken();
-    activeUnsignedPreparationOperation.current = { caseNo: command.caseNo, operationToken };
-    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
-      status: 'applying', operationToken, command, receipt: null, error: null,
-    });
-    let receipt: PreparedUnsignedDocument;
-    try {
-      receipt = command.kind === 'client'
-        ? await contractExternalSigningClient.prepareClientUnsignedPdf(command.caseNo, command.identity)
-        : await contractExternalSigningClient.prepareStaffUnsignedPdf(command.caseNo, command.segmentId!, command.identity);
-    } catch (error) {
-      if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
-      if (!recovery && error instanceof ApiHttpError && !error.retryable) {
-        orderMutationFlowStore.clearExternalSigningUnsignedPreparation(command.caseNo);
-        if (request === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
-      } else {
-        const message = recovery
-          ? '原未簽契約準備結果仍未確認；請恢復原帳號權限後以原操作重新確認。'
-          : '未簽契約準備結果尚未確認；請以原操作重新確認。';
-        orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
-          status: 'outcome_unknown', operationToken, command, receipt: null, error: message,
-        });
-        if (request === requestGeneration.current) setUiState({ type: 'error', message });
-      }
-      releaseUnsignedPreparationOperation(operationToken);
-      return;
-    }
-    if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
-    const received: ExternalSigningUnsignedPreparationFlowState = {
-      status: 'observation_failed', operationToken, command, receipt, error: null,
-    };
-    orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, received);
-    try {
-      await observeUnsignedPreparation(received, request);
-      if (downloadAfterObserved && request === requestGeneration.current) {
-        await downloadUnsigned(
-          receipt.document_version_id,
-          command.kind === 'client' ? '客戶' : `月嫂分段 #${command.segmentId}`,
-        );
-      }
-    } catch (error) {
-      if (!ownsUnsignedPreparationOperation(command.caseNo, operationToken)) return;
-      const message = safeErrorMessage(error);
-      const saved = orderMutationFlowStore.getExternalSigningUnsignedPreparation(command.caseNo);
-      if (saved?.receipt) orderMutationFlowStore.setExternalSigningUnsignedPreparation(command.caseNo, {
-        ...saved, status: 'observation_failed', error: message,
-      });
-      if (request === requestGeneration.current) setUiState({ type: 'error', message });
-    }
-    releaseUnsignedPreparationOperation(operationToken);
-    return !orderMutationFlowStore.getExternalSigningUnsignedPreparation(command.caseNo);
-  };
-
-  const prepareUnsigned = async (
-    kind: 'client' | 'staff',
-    segmentId: number | null,
-    downloadAfterObserved = kind === 'client',
-  ) => {
-    if (unsignedPreparationFlow) return;
-    const actor = sessionClient.getUser()?.username.trim() ?? '';
-    if (!actor) {
-      setUiState({ type: 'error', message: '請先登入後再準備未簽契約。' });
-      return;
-    }
-    const command: ExternalSigningUnsignedPreparationCommand = {
-      kind,
-      caseNo,
-      sessionId: query?.handoff_recorded ? query.session_id : null,
-      segmentId,
-      actor,
-      identity: createExternalSigningCommandIdentity(kind === 'client' ? 'prepare-client' : `prepare-${segmentId}`),
-    };
-    setUiState({ type: 'working', operation: kind === 'client' ? 'prepare_client' : 'prepare_staff' });
-    setNotice(null);
-    return submitUnsignedPreparation(command, false, downloadAfterObserved);
-  };
-
-  const retryUnsignedPreparationOriginal = async () => {
-    if (unsignedPreparationFlow?.status !== 'outcome_unknown') return;
-    const actor = sessionClient.getUser()?.username.trim() ?? '';
-    if (!actor || actor !== unsignedPreparationFlow.command.actor) {
-      setUiState({ type: 'error', message: '原未簽契約準備必須由原帳號重新確認；未確認結果會保留。' });
-      return;
-    }
-    setUiState({ type: 'working', operation: unsignedPreparationFlow.command.kind === 'client' ? 'prepare_client' : 'prepare_staff' });
-    setNotice(null);
-    await submitUnsignedPreparation(unsignedPreparationFlow.command, true, false);
-  };
-
-  const retryUnsignedPreparationReadback = async () => {
-    if (unsignedPreparationFlow?.status !== 'observation_failed' || unsignedPreparationFlow.receipt === null) return;
-    const request = requestGeneration.current;
-    const operationToken = nextUnsignedPreparationOperationToken();
-    const state: ExternalSigningUnsignedPreparationFlowState = {
-      ...unsignedPreparationFlow, status: 'observing', operationToken, error: null,
-    };
-    activeUnsignedPreparationOperation.current = { caseNo, operationToken };
-    orderMutationFlowStore.setExternalSigningUnsignedPreparation(caseNo, state);
-    setUiState({ type: 'working', operation: 'readback' });
-    setNotice(null);
-    try {
-      await observeUnsignedPreparation(state, request);
-    } catch (error) {
-      if (!ownsUnsignedPreparationOperation(caseNo, operationToken)) return;
-      const message = safeErrorMessage(error);
-      const saved = orderMutationFlowStore.getExternalSigningUnsignedPreparation(caseNo);
-      if (saved?.receipt) orderMutationFlowStore.setExternalSigningUnsignedPreparation(caseNo, {
-        ...saved, status: 'observation_failed', error: message,
-      });
-      if (request === requestGeneration.current) setUiState({ type: 'error', message });
-    }
-    releaseUnsignedPreparationOperation(operationToken);
-  };
-
   const observeHandoff = async (state: ExternalSigningHandoffFlowState, request: number) => {
     if (state.receipt === null) throw new Error('外部平台交接尚未收到收據，不能只讀取狀態。');
     const { command, receipt } = state;
@@ -593,8 +356,17 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     if (!ownsHandoffOperation(command.caseNo, state.operationToken)) return;
     if (receipt.session_id === null) {
       if (fresh.case_no !== command.caseNo || !fresh.handoff_logged) throw new Error('交接紀錄尚未回讀確認。');
-      await loadQuery();
       orderMutationFlowStore.clearExternalSigningHandoff(command.caseNo);
+      if (request !== requestGeneration.current) return;
+      if (fresh.state === 'preparing') {
+        setPreparation(fresh);
+        setPreparationSegments(fresh.staff_segments.map(segment => segment.segment_id));
+      } else {
+        setQuery(fresh);
+        setPreparation(null);
+        setPreparationSegments([]);
+      }
+      setUiState({ type: 'ready' });
       setNotice('已記錄送交外部簽署平台。');
       return;
     }
@@ -677,7 +449,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   };
 
   const recordHandoff = async () => {
-    if (handoffFlow || unsignedPreparationFlow || busy || finalProtected || (!query && !preparation) || signingBlocked) return;
+    if (handoffFlow || busy || finalProtected || (!query && !preparation) || signingBlocked) return;
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) {
       setUiState({ type: 'error', message: '請先登入後再記錄外部平台交接。' });
@@ -685,41 +457,16 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     }
     setUiState({ type: 'working', operation: 'handoff' });
     setNotice(null);
-    const submit = (session: ContractExternalSigningQuery | null) => submitHandoff({
-      caseNo,
-      sessionId: session?.session_id ?? null,
-      expectedStatusVersion: session?.status_version ?? 0,
-      actor,
-      identity: createExternalSigningCommandIdentity('handoff'),
-    }, false);
-    let ready = query;
-    if ((!ready && preparation) || (ready && !ready.handoff_recorded && ready.client_target.document_version_id === null)) {
-      if (!ready && preparation && !preparation.handoff_logged) {
-        const receipt = await submit(null);
-        if (!receipt || receipt.session_id !== null) return;
-      }
-      const generation = requestGeneration.current;
-      for (const row of documentRows) {
-        if (row.documentId !== null) continue;
-        const prepared = await prepareUnsigned(row.scope, row.segmentId, false);
-        if (!prepared || generation !== requestGeneration.current) return;
-      }
-      const readGeneration = requestGeneration.current + 1;
-      try {
-        ready = await loadQuery();
-      } catch (error) {
-        if (readGeneration === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
-        return;
-      }
-      if (readGeneration !== requestGeneration.current) return;
-      if (!ready || ready.case_no !== caseNo) {
-        setUiState({ type: 'error', message: '尚未讀到可回收文件的簽約工作，請重新查詢。' });
-        return;
-      }
-    }
-    setUiState({ type: 'working', operation: 'handoff' });
-    await submit(ready);
+    await submitCurrentHandoff(query, actor);
   };
+
+  const submitCurrentHandoff = (session: ContractExternalSigningQuery | null, actor: string) => submitHandoff({
+    caseNo,
+    sessionId: session?.session_id ?? null,
+    expectedStatusVersion: session?.status_version ?? 0,
+    actor,
+    identity: createExternalSigningCommandIdentity('handoff'),
+  }, false);
 
   const retryHandoffOriginal = async () => {
     if (handoffFlow?.status !== 'outcome_unknown') return;
@@ -755,9 +502,9 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   };
 
   const printContract = async (scope: 'client' | 'staff', segmentId: number | null) => {
-    unsignedDownloadController.current?.abort();
+    printController.current?.abort();
     const controller = new AbortController();
-    unsignedDownloadController.current = controller;
+    printController.current = controller;
     const generation = requestGeneration.current;
     setUiState({ type: 'working', operation: 'download' });
     setNotice(null);
@@ -772,41 +519,10 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     }
   };
 
-  const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
-    unsignedDownloadController.current?.abort();
-    const controller = new AbortController();
-    unsignedDownloadController.current = controller;
-    const generation = requestGeneration.current;
-    setUiState({ type: 'working', operation: 'download' });
-    setNotice(null);
-    try {
-      const artifact = await contractExternalSigningClient.downloadUnsignedPdf(
-        caseNo,
-        documentVersionId,
-        controller.signal,
-      );
-      if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      const url = URL.createObjectURL(artifact.blob);
-      try {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = artifact.filename;
-        link.click();
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-      setNotice(`${targetLabel}未簽契約 PDF「${artifact.filename}」已下載。`);
-      setUiState({ type: 'ready' });
-    } catch (error) {
-      if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      setUiState({ type: 'error', message: safeErrorMessage(error) });
-    }
-  };
-
-  const requiredReturnTargets: SignedDocumentTarget[] = query ? [
-    ...(query.client_target.document_version_id === null ? [] : [{ scope: 'client' as const, matching_segment_id: null, document_version_id: query.client_target.document_version_id }]),
-    ...query.staff_targets.map(row => ({ scope: 'staff' as const, matching_segment_id: row.matching_segment_id, document_version_id: row.document_version_id })),
-  ] : [];
+  const targetsForSession = (session: ContractExternalSigningQuery): SignedDocumentTarget[] => [
+    ...(session.client_target.document_version_id === null ? [] : [{ scope: 'client' as const, matching_segment_id: null, document_version_id: session.client_target.document_version_id }]),
+    ...session.staff_targets.map(row => ({ scope: 'staff' as const, matching_segment_id: row.matching_segment_id, document_version_id: row.document_version_id })),
+  ];
 
   const observeFinalReceipt = async (receipt: ExternalSigningReceipt) => {
     setUiState({ type: 'receipt_committed', receipt, message: '最終文件已受理；正在確認簽約完成結果。' });
@@ -819,6 +535,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       if (readback.documents.length > 0 && query && readback.documents.length !== query.staff_targets.length + 1) throw new Error('完成結果仍缺少客戶或月嫂簽署文件；不得視為全部完成。');
       setCompletedReadback(readback);
       setFileReturns({});
+      setTestingFiles([]);
       setUiState({ type: 'observed', receipt, readback });
       const refreshed = await loadQuery();
       if (
@@ -840,43 +557,27 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     }
   };
 
-  const applyFinalDocument = async (prepared?: FinalDocumentPreview) => {
-    if (!query || finalProtected || (busy && !prepared)) return;
-    let preview = prepared ?? (uiState.type === 'preview_ready' ? uiState.preview : null);
+  const applyTestingFinalDocument = async (preview: FinalDocumentPreview, session: ContractExternalSigningQuery) => {
+    const requiredReturnTargets = targetsForSession(session);
     const identity = currentIdentity(identities.current, 'final-apply');
     setUiState({ type: 'working', operation: 'final_apply' });
     try {
-      if (!preview) {
-        const documents = [];
-        for (const target of requiredReturnTargets) {
-          const key = signedTargetKey(target), draft = fileReturns[key];
-          if (!draft || (!draft.file && !draft.staged)) throw new Error('請選擇客戶及所有月嫂的簽署文件。');
-          const staged = draft.file
-            ? await contractExternalSigningClient.stageFinalDocument(caseNo, draft.file, currentIdentity(identities.current, `final-stage-${key.replace(':', '-')}`), target, { session_id: query.session_id, expected_status_version: query.status_version })
-            : draft.staged!;
-          const checked = await contractExternalSigningClient.previewSignedDocument(caseNo, { ...uploadInput(staged), session_id: query.session_id, expected_status_version: query.status_version });
-          if (!checked.can_apply || signedTargetKey(checked) !== key || checked.document_version_id !== target.document_version_id || checked.staging_id !== staged.staging_id) throw new Error('簽署文件檢查未通過。');
-          documents.push(uploadInput(checked));
-        }
-        preview = await contractExternalSigningClient.previewFinalDocument(caseNo, { session_id: query.session_id, expected_status_version: query.status_version, documents });
-      }
-      if (!preview.can_apply || preview.session_id !== query.session_id || preview.expected_status_version !== query.status_version || preview.documents.length !== requiredReturnTargets.length
+      if (!preview.can_apply || preview.session_id !== session.session_id || preview.expected_status_version !== session.status_version || preview.documents.length !== requiredReturnTargets.length
         || preview.documents.some(row => !requiredReturnTargets.some(target => signedTargetKey(target) === signedTargetKey(row) && target.document_version_id === row.document_version_id))) throw new Error('簽約完成檢查未通過，請重新查詢文件。');
       const receipt = await contractExternalSigningClient.applyFinalDocument(caseNo, {
         session_id: preview.session_id,
         documents: preview.documents.map(uploadInput),
-        ...(preview.documents.every(row => row.filename.startsWith('TEST-ONLY-'))
-          ? { signatures_confirmed: false as const, testing_skip_confirmed: true as const }
-          : { signatures_confirmed: true as const }),
+        signatures_confirmed: false,
+        testing_skip_confirmed: true,
         preview_token: preview.preview_token,
         expected_status_version: preview.expected_status_version,
       }, identity);
       if (
         receipt.receipt_id !== identity.receiptId
-        || receipt.session_id !== query.session_id
+        || receipt.session_id !== session.session_id
         || receipt.command_type !== 'apply_final_signed_contract'
         || receipt.matching_segment_id !== null
-        || receipt.resulting_status_version !== query.status_version + 1
+        || receipt.resulting_status_version !== session.status_version + 1
       ) {
         throw new Error('最終 PDF 受理結果與原操作或目前狀態不一致；不得視為完成。');
       }
@@ -889,9 +590,9 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
           identity,
           expected: {
             commandType: 'apply_final_signed_contract',
-            sessionId: query.session_id,
+            sessionId: session.session_id,
             matchingSegmentId: null,
-            resultingStatusVersion: query.status_version + 1,
+            resultingStatusVersion: session.status_version + 1,
           },
           message: '最終 PDF 處理結果未明；不得重送，請使用原操作重新確認。',
         });
@@ -902,27 +603,28 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   };
 
   const prepareTestingSkip = async () => {
-    if (!query?.testing_skip_allowed || !query.handoff_recorded || busy || finalProtected) return;
+    if (!testingSkipAllowed || !handoffRecorded || busy || finalProtected || handoffFlow) return;
     const generation = requestGeneration.current;
+    const session = query;
+    if (!session?.testing_skip_allowed || generation !== requestGeneration.current) return;
+    const requiredReturnTargets = targetsForSession(session);
     setNotice(null);
     setUiState({ type: 'working', operation: 'final_preview' });
     try {
       const preview = await contractExternalSigningClient.prepareTestingSkip(caseNo, {
-        session_id: query.session_id, expected_status_version: query.status_version,
+        session_id: session.session_id, expected_status_version: session.status_version,
       }, currentIdentity(identities.current, 'testing-skip'));
       if (generation !== requestGeneration.current) return;
-      if (preview.session_id !== query.session_id || preview.expected_status_version !== query.status_version
+      if (preview.session_id !== session.session_id || preview.expected_status_version !== session.status_version
         || preview.documents.length !== requiredReturnTargets.length
         || new Set(preview.documents.map(signedTargetKey)).size !== requiredReturnTargets.length
         || preview.documents.some(row => !row.filename.startsWith('TEST-ONLY-') || !requiredReturnTargets.some(target => signedTargetKey(row) === signedTargetKey(target) && row.document_version_id === target.document_version_id))) {
         throw new Error('測試文件與本次契約對象或版本不一致。');
       }
-      setFileReturns(Object.fromEntries(preview.documents.map(row => [signedTargetKey(row), { file: null, staged: row }])));
-      setReturnReadError(null);
+      setTestingFiles(preview.documents.map(row => row.filename));
       identities.current.delete('testing-skip');
       identities.current.delete('final-apply');
-      setUiState({ type: 'preview_ready', preview });
-      await applyFinalDocument(preview);
+      await applyTestingFinalDocument(preview, session);
     } catch (error) {
       if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) });
     }
@@ -967,57 +669,77 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     await observeFinalReceipt(receipt);
   };
 
-  const downloadSigned = async (fileId: string) => {
-    const generation = requestGeneration.current;
-    setUiState({ type: 'working', operation: 'download' });
-    try {
-      const artifact = await contractExternalSigningClient.downloadSignedPdf(caseNo, fileId);
-      if (generation !== requestGeneration.current) return;
-      const url = URL.createObjectURL(artifact.blob);
-      try { const link = document.createElement('a'); link.href = url; link.download = artifact.filename; link.click(); }
-      finally { URL.revokeObjectURL(url); }
-      setUiState({ type: 'ready' });
-    } catch (error) { if (generation === requestGeneration.current) setUiState({ type: 'error', message: safeErrorMessage(error) }); }
-  };
-
   const busy = uiState.type === 'working' || uiState.type === 'querying';
   const finalProtected = uiState.type === 'outcome_unknown' || uiState.type === 'receipt_committed';
   const signingBlockers = query?.signing_blockers ?? preparation?.signing_blockers ?? [];
   const signingBlocked = signingBlockers.length > 0;
-  const unsignedDocumentId = (scope: 'client' | 'staff', segmentId: number | null) => query ? query.unsigned_documents?.find(row => row.scope === scope && row.matching_segment_id === segmentId)?.document_version_id ?? (query.unsigned_document && query.unsigned_document.document_version_id === (scope === 'client' ? query.client_target.document_version_id : query.staff_targets.find(row => row.matching_segment_id === segmentId)?.document_version_id) ? query.unsigned_document.document_version_id : null) : scope === 'client' ? preparationClientDocument : preparationStaffDocuments[segmentId!] ?? null;
-  const documentsReady = query !== null && unsignedDocumentId('client', null) !== null && query.staff_targets.every(row => unsignedDocumentId('staff', row.matching_segment_id) !== null);
   const metadataLabel = (key: string) => { const meta = contractMetadata[key]; return key === 'client' ? meta?.name : staffIdentity.label(meta?.staffId ?? (Number(query?.staff_targets.find(target => `staff:${target.matching_segment_id}` === key)?.staff_subject_reference) || null), meta?.name); };
   const documentRows = [
-    { key: 'client', scope: 'client' as const, segmentId: null, title: '客戶服務契約', documentId: unsignedDocumentId('client', null) },
-    ...(query ? query.staff_targets.map(row => ({ key: `staff:${row.matching_segment_id}`, scope: 'staff' as const, segmentId: row.matching_segment_id, title: '月嫂委任契約', documentId: unsignedDocumentId('staff', row.matching_segment_id) }))
-      : preparationSegments.map(segmentId => ({ key: `staff:${segmentId}`, scope: 'staff' as const, segmentId, title: '月嫂委任契約', documentId: unsignedDocumentId('staff', segmentId) }))),
+    { key: 'client', scope: 'client' as const, segmentId: null, title: '客戶服務契約' },
+    ...(query ? query.staff_targets.map(row => ({ key: `staff:${row.matching_segment_id}`, scope: 'staff' as const, segmentId: row.matching_segment_id, title: '月嫂委任契約' }))
+      : preparationSegments.map(segmentId => ({ key: `staff:${segmentId}`, scope: 'staff' as const, segmentId, title: '月嫂委任契約' }))),
   ];
-  const phase = query?.state === 'completed' ? 3 : query?.handoff_recorded ? 2 : documentsReady || query?.handoff_logged || preparation?.handoff_logged ? 1 : 0;
   const completedMembers = completedReadback?.documents ?? [];
-  const selectedCount = requiredReturnTargets.filter(row => { const draft = fileReturns[signedTargetKey(row)]; return draft?.file || draft?.staged; }).length;
-  const testingPreview = uiState.type === 'preview_ready' && uiState.preview.documents.every(row => row.filename.startsWith('TEST-ONLY-'));
+  const returnTargets = [
+    { scope: 'client' as const, matching_segment_id: null },
+    ...(archiveSegments ?? []).map(segment => ({ scope: 'staff' as const, matching_segment_id: segment.segment_id })),
+  ];
+  const saveSignedArchive = async () => {
+    if (archiveBusy || archiveSegments === null || archivedFiles !== null) return;
+    const client = fileReturns.client;
+    if (!client) return;
+    const staff = archiveSegments.flatMap(segment => {
+      const file = fileReturns['staff:' + segment.segment_id];
+      return file ? [{ segmentId: segment.segment_id, file }] : [];
+    });
+    if (staff.length !== archiveSegments.length) return;
+    const identity = currentIdentity(identities.current, 'signed-archive');
+    const signal = archiveRequest.current?.signal;
+    setArchiveBusy(true);
+    setArchiveError(null);
+    try {
+      const files = await contractExternalSigningClient.archiveSignedFiles(caseNo, client, staff, identity);
+      if (signal?.aborted) return;
+      setArchivedFiles(files);
+      setFileReturns({});
+      setArchiveUnknown(false);
+    } catch (error) {
+      if (signal?.aborted) return;
+      setArchiveUnknown(outcomeCouldBeUnknown(error));
+      setArchiveError(safeErrorMessage(error));
+      return;
+    } finally {
+      if (!signal?.aborted) setArchiveBusy(false);
+    }
+    try { await onCommitted?.(); }
+    catch (error) { if (!signal?.aborted) setArchiveError(safeErrorMessage(error)); }
+  };
+  const selectedCount = returnTargets.filter(row => fileReturns[signedTargetKey(row)]).length;
   const testingCompleted = completedReadback?.filename.startsWith('TEST-ONLY-') ?? false;
   const handoffRecorded = query?.handoff_recorded || query?.handoff_logged || preparation?.handoff_logged;
-  const awaitingReturnSession = handoffRecorded && !query?.handoff_recorded;
-  const returnActionsAvailable = query?.handoff_recorded && query.state !== 'completed' && query.state !== 'superseded';
-  const renderReturn = (target: SignedDocumentTarget) => {
-    const key = signedTargetKey(target), draft = fileReturns[key], meta = contractMetadata[key];
-    const name = metadataLabel(key);
+  const phase = archivedFiles !== null || query?.state === 'completed' ? 3 : handoffRecorded ? 2 : 1;
+  const testingSkipAllowed = query?.handoff_recorded && query.testing_skip_allowed;
+  const returnActionsAvailable = archiveSegments !== null && archivedFiles === null && !completedReadback && query?.state !== 'completed';
+  const renderReturn = (target: Pick<SignedDocumentTarget, 'scope' | 'matching_segment_id'>) => {
+    const key = signedTargetKey(target), file = fileReturns[key], meta = contractMetadata[key];
+    const name = metadataLabel(key) || (target.scope === 'staff' ? staffIdentity.label(archiveSegments?.find(segment => segment.segment_id === target.matching_segment_id)?.staff_id ?? null) : undefined);
     const title = target.scope === 'client' ? '客戶服務契約' : '月嫂委任契約';
     return <article className="contract-return-row" key={key} aria-label={`${title}簽回${name ? ` ${name}` : ''}`}>
-      <header><div><strong>{name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${draft?.file || draft?.staged ? 'complete' : ''}`}>{draft?.file || draft?.staged ? '已選擇' : '待回收'}</span></header>
+      <header><div><strong>{name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${file ? 'complete' : ''}`}>{file ? '已選擇' : '待回收'}</span></header>
       <label className="contract-return-file">{target.scope === 'client' ? '客戶服務契約 PDF' : `${name || '月嫂'} 委任契約 PDF`}
-        {!draft?.file && !draft?.staged && <input type="file" accept="application/pdf,.pdf" disabled={busy || finalProtected || !!returnReadError} onChange={event => {
+        {!file && <input type="file" accept="application/pdf,.pdf" disabled={archiveBusy || archiveUnknown} onChange={event => {
           const file = event.target.files?.item(0) ?? null;
-          setFileReturns(previous => ({ ...previous, [key]: { file, staged: null } }));
-          identities.current.delete(`final-stage-${key.replace(':', '-')}`); identities.current.delete('final-apply'); setUiState({ type: 'ready' });
+          setFileReturns(previous => ({ ...previous, [key]: file }));
+          identities.current.delete('signed-archive');
         }} />}
       </label>
-      {(draft?.file || draft?.staged) && <div className="contract-return-actions"><strong>{draft.file?.name || draft.staged?.filename}</strong><button type="button" disabled={busy || finalProtected} onClick={() => { setFileReturns(previous => ({ ...previous, [key]: { file: null, staged: null } })); identities.current.delete(`final-stage-${key.replace(':', '-')}`); identities.current.delete('final-apply'); setUiState({ type: 'ready' }); }}>重新選擇檔案</button></div>}
-      {draft?.staged && draft.staged.blockers.length > 0 && <ul role="alert">{draft.staged.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
+      {file && <div className="contract-return-actions"><strong>{file.name}</strong><button type="button" disabled={archiveBusy || archiveUnknown} onClick={() => {
+        setFileReturns(previous => ({ ...previous, [key]: null }));
+        identities.current.delete('signed-archive');
+      }}>重新選擇檔案</button></div>}
     </article>;
   };
-  useUnsavedDraft('紙本契約回傳', { '待確認文件': Object.values(fileReturns).map(draft => draft.file?.name ?? draft.staged?.filename ?? '').filter(Boolean) }, { baseline: { '待確認文件': [] }, busy: busy || finalProtected, enabled: !completedReadback });
+  useUnsavedDraft('紙本契約回傳', { '待確認文件': returnTargets.flatMap(target => { const file = fileReturns[signedTargetKey(target)]; return file ? [file.name] : []; }) }, { baseline: { '待確認文件': [] }, busy: busy || archiveBusy || finalProtected, enabled: !completedReadback && archivedFiles === null });
 
 
 
@@ -1025,14 +747,12 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     <section aria-label="外部平台簽約與最終 PDF" data-control-id="orders.contract-external-signing.actions" className="contract-signing-workflow">
       <section className="contract-documents-card" aria-label="契約文件">
         <ol className="contract-signing-progress" aria-label="簽約進度">{['列印契約', '送交簽署', '回收簽署文件'].map((label, index) => <li key={label} className={index < phase ? 'complete' : index === phase ? 'current' : ''} aria-current={index === phase ? 'step' : undefined}><span>{index < phase ? '✓' : index + 1}</span>{label}</li>)}</ol>
-        <header className="contract-documents-heading"><h3>契約文件</h3>{query && documentsReady && <span className="contract-document-status complete" aria-label={stateLabel(query)}>{documentRows.length} 份已備妥</span>}</header>
+        <header className="contract-documents-heading"><h3>契約文件</h3></header>
         {metadataError && <p role="alert">{metadataError}</p>}
         {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚未選定可列印契約的月嫂，請先建立推薦方案。</p>}
         <div className="contract-documents-list">{documentRows.map(row => <article className="contract-document-row" key={row.key}>
           <div><strong>{row.title}{metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}</strong><p>{contractMetadata[row.key]?.period || '服務期間待核對'}</p></div>
-          {row.documentId !== null && <span className="contract-document-status complete">已備妥</span>}
           <div className="contract-document-actions"><button type="button" aria-label={`瀏覽器列印 · ${row.title}${metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}`} disabled={busy} onClick={() => void printContract(row.scope, row.segmentId)}>瀏覽器列印</button><button type="button" disabled={busy || finalProtected} onClick={() => setReviewTarget({ scope: row.scope, segmentId: row.segmentId })}>核對資料</button>
-            {row.scope === 'client' && row.documentId !== null && <button type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || !!fileReturns.client?.file || !!fileReturns.client?.staged} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
           </div>
         </article>)}</div>
       </section>
@@ -1045,44 +765,50 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
             {onOpenServiceDates && <button type="button" disabled={busy || finalProtected} onClick={onOpenServiceDates}>調整服務日期</button>}
           </div>
         </div>}
-        <div className="contract-platform-action-row"><div><strong>外部平台交接</strong><p>{awaitingReturnSession
-          ? '交接已記錄，可用原按鈕接續文件回收。'
-          : '確認契約已送交外部簽署平台，記錄後即可回收簽署文件。'}</p></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${handoffRecorded ? 'complete' : ''}`}>{handoffRecorded ? '交接已記錄' : '待記錄'}</span>{!handoffFlow && <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && !preparation) || signingBlocked} onClick={() => void recordHandoff()}>記錄已送交簽署平台</button>}</div></div>
+        <div className="contract-platform-action-row"><div><strong>外部平台交接</strong><p>{handoffRecorded
+          ? '交接已記錄。'
+          : '可記錄已送交外部簽署平台。'}</p></div><div className="contract-signing-action-controls"><span className={`contract-document-status ${handoffRecorded ? 'complete' : ''}`}>{handoffRecorded ? '交接已記錄' : '待記錄'}</span>{!handoffFlow && <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || (!query && !preparation) || signingBlocked} onClick={() => void recordHandoff()}>記錄已送交簽署平台</button>}</div></div>
       </section>
       {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文可透過瀏覽器列印查看，並另存為 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void printContract(reviewTarget.scope, reviewTarget.segmentId)}>瀏覽器列印</button></footer></CandidateInquiryDialog>}
 
       <section className="contract-return-card" aria-label="回收簽署文件">
         <header className="contract-documents-heading">
           <h3>回收簽署文件</h3>
-          {returnActionsAvailable && <span className="contract-document-status">{selectedCount}／{requiredReturnTargets.length} 份已選擇</span>}
+          {returnActionsAvailable && <span className="contract-document-status">{selectedCount}／{returnTargets.length} 份已選擇</span>}
         </header>
         {returnActionsAvailable ? <>
           <p>客戶服務契約與月嫂委任契約分開上傳。每位月嫂的委任契約各自回收。</p>
-          <p>選擇簽署文件後按「儲存簽署文件」，完成後可在本案查看文件。</p>
-          {returnReadError && <div role="alert"><p>簽回文件暫時無法讀取：{returnReadError}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取簽回文件</button></div>}
-          <section className="contract-return-group"><h4>客戶服務契約</h4>{requiredReturnTargets.filter(row => row.scope === 'client').map(renderReturn)}</section>
-          <section className="contract-return-group"><h4>月嫂委任契約</h4>{requiredReturnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
-          {query.testing_skip_allowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || testingPreview} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button></div></details>}
-          <div className="contract-final-confirmation"><p>{testingPreview ? '測試占位文件已備妥。' : '選妥客戶與所有月嫂的簽署文件後，即可儲存。'}</p>
-            {uiState.type === 'preview_ready' && uiState.preview.blockers.length > 0 && <ul role="alert">{uiState.preview.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
-            <button className="formal-recommendation-primary" type="button" disabled={busy || finalProtected || requiredReturnTargets.length === 0 || requiredReturnTargets.some(target => { const draft = fileReturns[signedTargetKey(target)]; return !draft?.file && !draft?.staged; })} onClick={() => void applyFinalDocument()}>{testingPreview ? '確認跳過並完成測試簽約' : '儲存簽署文件'}</button>
+          <p>人員確認完約後，選擇並儲存已簽 PDF。</p>
+          <section className="contract-return-group"><h4>客戶服務契約</h4>{returnTargets.filter(row => row.scope === 'client').map(renderReturn)}</section>
+          <section className="contract-return-group"><h4>月嫂委任契約</h4>{returnTargets.filter(row => row.scope === 'staff').map(renderReturn)}</section>
+          {testingSkipAllowed && <details className="contract-signing-test-tools"><summary>測試模式 · 跳過文件回收</summary><div><p>使用 TEST ONLY 占位文件跳過回收。確認後可繼續測試簽約完成與後續收款。</p><button type="button" disabled={busy || finalProtected || !!handoffFlow} onClick={() => void prepareTestingSkip()}>測試用：跳過文件回收</button>{testingFiles.length > 0 && <ul>{testingFiles.map(name => <li key={name}>{name}</li>)}</ul>}</div></details>}
+          <div className="contract-final-confirmation">
+            {archiveBusy && <p role="status">正在歸檔已簽 PDF…</p>}
+            <button className="formal-recommendation-primary" type="button"
+              disabled={archiveBusy || returnTargets.some(target => !fileReturns[signedTargetKey(target)])}
+              onClick={() => void saveSignedArchive()}>{archiveUnknown ? '重新確認歸檔結果' : '儲存簽署文件'}</button>
           </div>
-        </> : query?.state === 'completed' ? (
+        </> : archivedFiles !== null || completedReadback ? (
           <section aria-label="契約完成">
             <div className="contract-completed-notice">
-              <strong>{testingCompleted ? '測試簽約已完成' : '所有月嫂簽約完成、客戶簽約完成'}</strong>
-              <p>{testingCompleted ? '已手動跳過真實簽署文件回收，保存 TEST ONLY 占位文件，可接續測試訂金與案件群組流程。' : completedMembers.length > 0 ? '客戶服務契約與所有月嫂委任契約已分別回收，並確認簽署完整。' : '既有簽署文件已驗收完成。'}</p>
+              <strong>{testingCompleted ? '測試簽約已完成' : '簽約已完成'}</strong>
+              <p>{testingCompleted ? '已保存 TEST ONLY 占位文件。' : '已歸檔工會人員確認的已簽契約。'}</p>
             </div>
-            {completedReadback ? <div className="contract-signed-list">{(completedMembers.length > 0 ? completedMembers.map(member => ({ fileId: member.controlled_file_id, filename: member.filename })) : [{ fileId: completedReadback.controlled_file_id, filename: completedReadback.filename }]).map(row => <div key={row.fileId}><span>{row.filename}</span><button type="button" disabled={busy} onClick={() => void downloadSigned(row.fileId)}>{testingCompleted ? '查看測試文件' : '查看已簽文件'}</button></div>)}</div> : <p>正在讀取已簽文件…</p>}
+            <ul className="contract-signed-list">{archivedFiles !== null
+              ? archivedFiles.map(file => <li key={file.file_id}>{file.filename}</li>)
+              : completedMembers.length > 0
+                ? completedMembers.map(member => <li key={member.controlled_file_id}>{member.filename}</li>)
+                : <li>{completedReadback?.filename}</li>}</ul>
             {(onOpenServiceDates || onOpenFinance) && <button className="formal-recommendation-primary" type="button" disabled={busy} onClick={onOpenServiceDates ?? onOpenFinance}>查看服務日期與排班 →</button>}
             <p>訂金已核銷後，建立案件群組並邀請加入。雙方在群組自行協調，由月嫂提交開始日，系統檢查通過即更新正式日期與排班。</p>
           </section>
-        ) : <p>{query?.state === 'superseded' ? '此簽署工作已被取代。' : awaitingReturnSession ? '待回收用文件備妥後，即可上傳已簽契約。' : '記錄送交簽署後，即可上傳已簽契約。'}</p>}
+        ) : !archiveError && <p>正在讀取歸檔資料…</p>}
+        {archiveError && <p role="alert">{archiveError}</p>}
       </section>
 
       {bootstrapReasons.length > 0 && <p role="alert">{bootstrapReasons.join(' ')} <a href={`#clients?case=${encodeURIComponent(caseNo)}&from=workbench`} aria-disabled={busy || finalProtected || undefined} onClick={event => { if (busy || finalProtected) event.preventDefault(); }}>前往客戶名冊補齊資料 →</a></p>}
       {uiState.type === 'error' && <div role="alert"><p>{uiState.message}</p><button type="button" disabled={busy || finalProtected} onClick={() => void loadQuery()}>重新讀取契約狀態</button></div>}
-      {busy && <p role="status">正在處理契約資料…</p>}
+      {busy && <p role="status">{uiState.type === 'working' && uiState.operation === 'handoff' ? '正在記錄送交…' : '正在處理契約資料…'}</p>}
 
       {uiState.type === 'outcome_unknown' && (
         <div role="alert">
@@ -1100,18 +826,6 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
         <div role="status">
           <div>{handoffFlow.error ?? '交接收據已收到，但目前狀態尚未讀取成功。'}</div>
           <button type="button" onClick={() => void retryHandoffReadback()}>重新讀取交接狀態</button>
-        </div>
-      )}
-      {unsignedPreparationFlow?.status === 'outcome_unknown' && (
-        <div role="alert">
-          <div>{unsignedPreparationFlow.error ?? '未簽契約準備結果尚未確認。'}</div>
-          <button type="button" onClick={() => void retryUnsignedPreparationOriginal()}>以原未簽契約準備操作重新確認</button>
-        </div>
-      )}
-      {unsignedPreparationFlow?.status === 'observation_failed' && unsignedPreparationFlow.receipt !== null && (
-        <div role="status">
-          <div>{unsignedPreparationFlow.error ?? '未簽契約準備收據已收到，但目前狀態尚未讀取成功。'}</div>
-          <button type="button" onClick={() => void retryUnsignedPreparationReadback()}>重新讀取未簽契約準備狀態</button>
         </div>
       )}
       {uiState.type === 'receipt_committed' && (

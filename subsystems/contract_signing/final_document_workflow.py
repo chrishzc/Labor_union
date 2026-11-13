@@ -35,6 +35,7 @@ from subsystems.contract_signing.final_document_preview_token import (
 )
 from subsystems.controlled_files.workflow import (
     ApplyControlledFile,
+    StageControlledFile,
     ControlledFileApplyReceipt,
     ControlledFileIntent,
     ControlledFilePreview,
@@ -201,6 +202,14 @@ class FinalDocumentWorkflowError(RuntimeError):
 
 
 class FinalDocumentRepository(Protocol):
+    def lock_case(self, case_no: str) -> bool: ...
+
+    def signed_archive_segments(self, case_no: str, *, for_update: bool = False): ...
+
+    def signed_archive(self, case_no: str, key: str | None = None, *, for_update: bool = False): ...
+
+    def save_signed_archive(self, case_no, key, fingerprint, files, correlation_id) -> None: ...
+
     def load_final_session(
         self, case_no: str, session_id: str, *, for_update: bool
     ) -> ExternalSigningSessionFacts | None: ...
@@ -249,6 +258,8 @@ class FinalDocumentRepository(Protocol):
 
 
 class BorrowedControlledFileWorkflow(Protocol):
+    def stage(self, command: StageControlledFile): ...
+
     def preview(self, intent: ControlledFileIntent) -> ControlledFilePreview: ...
 
     def apply_borrowed(
@@ -292,6 +303,10 @@ class FinalSigningPrerequisitePort(Protocol):
     ): ...
 
 
+class ArchivedContractOrdersPort(Protocol):
+    def record_archived_completion(self, case_no, identity, *, actor, idempotency_key, business_date) -> None: ...
+
+
 class FinalSignedContractWorkflow:
     def __init__(
         self,
@@ -302,6 +317,7 @@ class FinalSignedContractWorkflow:
         unit_of_work_factory: Callable[[], UnitOfWork],
         clock: BusinessClock,
         token_codec: HmacFinalDocumentPreviewTokenCodec,
+        *, archive_orders: ArchivedContractOrdersPort | None = None,
     ) -> None:
         self._repository = repository
         self._controlled_files = controlled_files
@@ -310,6 +326,94 @@ class FinalSignedContractWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._token_codec = token_codec
+        self._archive_orders = archive_orders
+
+    def signed_archive_status(self, case_no: str):
+        segments = self._repository.signed_archive_segments(case_no)
+        if segments is None:
+            raise FinalDocumentWorkflowError("contract_signing_case_not_found", category="not_found")
+        stored = self._repository.signed_archive(case_no)
+        return {
+            "staff_segments": segments,
+            "files": None if stored is None else stored[1]["files"],
+        }
+
+    def archive_signed_files(
+        self, case_no, files, *, actor, idempotency_key, correlation_id
+    ):
+        """Archive the PDFs selected by the operator, without issuing unsigned contracts."""
+        if self._archive_orders is None:
+            raise RuntimeError("signed_archive_orders_port_missing")
+        key = "signed-archive:" + hashlib.sha256(idempotency_key.value.encode()).hexdigest()
+        fingerprint = fingerprint_payload({
+            "actor": actor.actor_id,
+            "case_no": case_no,
+            "files": [(target, filename, hashlib.sha256(content).hexdigest())
+                      for target, filename, content in files],
+        }).value
+
+        def replay(stored):
+            stored_fingerprint, snapshot = stored
+            if stored_fingerprint != fingerprint:
+                raise FinalDocumentWorkflowError("contract_signature_idempotency_conflict")
+            return snapshot
+
+        status = self.signed_archive_status(case_no)
+        stored = self._repository.signed_archive(case_no, key)
+        if stored is not None:
+            return replay(stored)
+        self._require_archive_targets(status["staff_segments"], files)
+        if status["files"] is not None:
+            raise FinalDocumentWorkflowError("final_signed_contract_already_applied")
+
+        staged = []
+        for target, filename, content in files:
+            staging_key = IdempotencyKey(f"{key}:{target}")
+            object_key = f"signed-archive:{target}"
+            folder = f"contract-signing/{case_no}"
+            uploaded = self._controlled_files.stage(StageControlledFile(
+                ControlledFileOwner.CONTRACT_SIGNING, ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+                case_no, object_key, folder, filename, "application/pdf", content,
+                staging_key, actor, correlation_id,
+            ))
+            intent = ControlledFileIntent(
+                uploaded.staging_id, ControlledFileOwner.CONTRACT_SIGNING,
+                ControlledFilePurpose.FINAL_SIGNED_CONTRACT, case_no, object_key, folder,
+            )
+            preview = self._controlled_files.preview(intent)
+            staged.append((target, ApplyControlledFile(
+                intent, preview.expected_staging_version, preview.preview_fingerprint,
+                IdempotencyKey(f"{staging_key.value}:archive"), actor, correlation_id,
+            )))
+
+        with self._unit_of_work_factory() as unit_of_work:
+            if not self._repository.lock_case(case_no):
+                raise FinalDocumentWorkflowError("contract_signing_case_not_found", category="not_found")
+            stored = self._repository.signed_archive(case_no, key, for_update=True)
+            if stored is not None:
+                return replay(stored)
+            if self._repository.signed_archive(case_no, for_update=True) is not None:
+                raise FinalDocumentWorkflowError("final_signed_contract_already_applied")
+            segments = self._repository.signed_archive_segments(case_no, for_update=True)
+            self._require_archive_targets(segments, files)
+            members = []
+            for target, command in staged:
+                readback = self._controlled_files.apply_borrowed(command).readback
+                members.append({"target": target, "filename": readback.filename, "file_id": readback.file_id})
+            self._archive_orders.record_archived_completion(
+                case_no, f"signed-archive:{fingerprint}", actor=actor,
+                idempotency_key=IdempotencyKey(key), business_date=self._clock.today(),
+            )
+            self._repository.save_signed_archive(case_no, key, fingerprint, members, correlation_id.value)
+            unit_of_work.commit()
+            return {"files": members}
+
+    @staticmethod
+    def _require_archive_targets(segments, files) -> None:
+        expected = {"client", *(f"staff:{segment['segment_id']}" for segment in segments)}
+        keys = [target for target, _, _ in files]
+        if len(keys) != len(expected) or set(keys) != expected:
+            raise FinalDocumentWorkflowError("final_signed_contract_documents_incomplete")
 
     def validate_target(self, case_no: str, session_id: str, expected_status_version: ExpectedVersion, target: SignedContractDocumentTarget) -> ExternalSigningSessionFacts:
         session = self._load_session(case_no, session_id, expected_status_version, for_update=False)

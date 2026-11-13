@@ -718,6 +718,9 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
         if candidate.owner is ControlledFileOwner.CONTRACT_SIGNING:
             label = "客戶合約" if "client" in candidate.object_key else "月嫂承攬協議" if "staff" in candidate.object_key else "案件合約"
             status = "已簽署" if candidate.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT else "未簽署"
+            if candidate.object_key.startswith("signed-archive:staff:"):
+                segment = safe_filename_component(candidate.object_key.rsplit(":", 1)[1])
+                label = f"{label}_{segment}"
             return f"{ORDERS_DIRECTORY}/{subject}/{label}_{subject}_v{version}_{status}_{digest}{extension}"
         return f"{ORDERS_DIRECTORY}/{subject}/文件_{subject}_v{version}_{digest}{extension}"
     return str(staging["storage_locator"])

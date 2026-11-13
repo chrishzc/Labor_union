@@ -400,6 +400,7 @@ class ContractPreparationQueryView(BaseModel):
     staff_segments: list[ContractPreparationSegmentView]
     documents: list[ContractPreparationDocumentView]
     handoff_logged: bool = False
+    testing_skip_allowed: bool = False
     signing_reminder: SigningReminderView | None = None
     signing_blockers: list[str] = Field(default_factory=list)
 
@@ -816,6 +817,49 @@ def record_client_report(
     return _call(action, correlation_id)
 
 
+@router.get("/{case_no}/contract-external-signing/signed-archive")
+def query_signed_archive(
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(lambda: BaseResponse(data=application.final_documents.signed_archive_status(case_no)), "signed-archive")
+
+
+@router.post("/{case_no}/contract-external-signing/signed-archive")
+def archive_signed_contract(
+    case_no: str = ApiPath(pattern=_CASE),
+    client: UploadFile = File(),
+    staff: list[UploadFile] = File(default_factory=list),
+    staff_segment_ids: list[int] = Form(default_factory=list),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        if len(staff) != len(staff_segment_ids):
+            raise ValueError("請將每份月嫂契約放入對應欄位。")
+        files = []
+        for target, file in [("client", client), *(
+            (f"staff:{segment}", upload)
+            for segment, upload in sorted(zip(staff_segment_ids, staff), key=lambda pair: pair[0])
+        )]:
+            filename = Path(file.filename or "").name
+            content = file.file.read(_MAX_PDF_BYTES + 1)
+            if (not filename.lower().endswith(".pdf") or file.content_type != "application/pdf"
+                    or not content.startswith(b"%PDF-") or len(content) > _MAX_PDF_BYTES):
+                raise ValueError("請上傳 PDF 檔案，每份上限 20 MB。")
+            files.append((target, filename, content))
+        result = application.final_documents.archive_signed_files(
+            case_no, tuple(files), actor=admin_actor_context(principal),
+            idempotency_key=IdempotencyKey(idempotency_key), correlation_id=CorrelationId(correlation_id),
+        )
+        return BaseResponse(data=result)
+
+    return _call(action, correlation_id)
+
+
 @router.post("/{case_no}/contract-external-signing/final-document/staging")
 def stage_final_document(
     case_no: str = ApiPath(pattern=_CASE),
@@ -1073,10 +1117,11 @@ def _require_facts(application, case_no):
 
 def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
     reminder = value.get("signing_reminder")
-    value = {**value, "signing_reminder": None if reminder is None else _public_reminder(reminder)}
+    value = {**value, "signing_reminder": None if reminder is None else _public_reminder(reminder),
+             "testing_skip_allowed": testing_signing_skip_allowed()}
     if value.get("state") == "preparing":
         return ContractPreparationQueryView.model_validate(value).model_dump(mode="json")
-    return ExternalSigningQueryView.model_validate({**value, "testing_skip_allowed": testing_signing_skip_allowed()}).model_dump(mode="json")
+    return ExternalSigningQueryView.model_validate(value).model_dump(mode="json")
 
 
 def _public_reminder(receipt):

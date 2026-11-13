@@ -196,6 +196,48 @@ class MySqlContractExternalSigningRepository:
     def lock_case(self, case_no: str) -> bool:
         return self._one(_HANDOFF_CASE_LOCK_SQL, (case_no,)) is not None
 
+    def signed_archive_segments(self, case_no: str, *, for_update: bool = False):
+        suffix = _lock_suffix(for_update)
+        if self._one(_CURRENT_ORDER_SQL + suffix, (case_no,)) is None:
+            return None
+        return tuple(
+            {"segment_id": int(row["segment_id"]), "staff_id": int(row["staff_id"])}
+            for row in self._all(
+                "SELECT segment.id AS segment_id,segment.staff_id "
+                "FROM caregiver_matching_plan_segments segment "
+                "JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
+                "WHERE plan.case_no=%s AND plan.is_active=1 AND plan.status IN ('proposed','accepted') "
+                "ORDER BY segment.segment_order,segment.id" + suffix,
+                (case_no,),
+            )
+        )
+
+    def signed_archive(self, case_no: str, key: str | None = None, *, for_update: bool = False):
+        where = "case_no=%s AND command_kind='archive_signed_contract'"
+        params = (case_no,)
+        if key is not None:
+            where += " AND idempotency_key=%s"
+            params += (key,)
+        row = self._one(
+            "SELECT command_fingerprint,result_snapshot FROM contract_signing_command_receipts "
+            "WHERE " + where + " ORDER BY id DESC LIMIT 1" + (" FOR UPDATE" if for_update else ""),
+            params,
+        )
+        if row is None:
+            return None
+        snapshot = _json_mapping(row["result_snapshot"])
+        if snapshot is None or not isinstance(snapshot.get("files"), list):
+            raise RuntimeError("signed_archive_receipt_invalid")
+        return str(row["command_fingerprint"]), snapshot
+
+    def save_signed_archive(self, case_no, key, fingerprint, files, correlation_id) -> None:
+        self._insert(
+            "INSERT INTO contract_signing_command_receipts "
+            "(case_no,idempotency_key,command_kind,command_fingerprint,result_snapshot,correlation_id) "
+            "VALUES (%s,%s,'archive_signed_contract',%s,%s,%s)",
+            (case_no, key, fingerprint, _canonical_json({"files": files}), correlation_id),
+        )
+
     def load_active_session_by_case(
         self, case_no: str, *, for_update: bool
     ) -> ExternalSigningSessionFacts | None:
