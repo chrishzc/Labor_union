@@ -27,62 +27,6 @@
         "kind": "once"
       },
       "predicates": []
-    },
-    {
-      "id": "LINE-ORDER-SERVICE-START-DAY-V1",
-      "event_code": "order.service_start_day",
-      "recipient_selector": "case_group",
-      "template_id": "LINE-ORDER-SERVICE-START-DAY-CARD-V1",
-      "enabled": true,
-      "schedule": {
-        "kind": "immediate"
-      },
-      "frequency": {
-        "kind": "once"
-      },
-      "predicates": []
-    },
-    {
-      "id": "LINE-SECOND-PAYMENT-DUE-V1",
-      "event_code": "client.second_payment_due",
-      "recipient_selector": "case_group",
-      "template_id": "LINE-SECOND-PAYMENT-DUE-TEXT-V1",
-      "enabled": true,
-      "schedule": {
-        "kind": "immediate"
-      },
-      "frequency": {
-        "kind": "once"
-      },
-      "predicates": []
-    },
-    {
-      "id": "LINE-SECOND-PAYMENT-SETTLED-V1",
-      "event_code": "client.second_payment_settled",
-      "recipient_selector": "case_group",
-      "template_id": "LINE-SECOND-PAYMENT-SETTLED-TEXT-V1",
-      "enabled": true,
-      "schedule": {
-        "kind": "immediate"
-      },
-      "frequency": {
-        "kind": "once"
-      },
-      "predicates": []
-    },
-    {
-      "id": "LINE-SERVICE-COMPLETION-V1",
-      "event_code": "order.service_completed",
-      "recipient_selector": "case_group",
-      "template_id": "LINE-SERVICE-COMPLETION-TEXT-V1",
-      "enabled": true,
-      "schedule": {
-        "kind": "immediate"
-      },
-      "frequency": {
-        "kind": "once"
-      },
-      "predicates": []
     }
   ]
 }

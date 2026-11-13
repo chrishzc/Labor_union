@@ -160,6 +160,30 @@ class LineRichMenuApiAdapter:
             line_user_id.value,
         )
 
+    def restore_default_for_user(self, line_user_id: LineUserId) -> LineRichMenuProviderOutcome:
+        default = self._request("get", f"{_API_ROOT}/user/all/richmenu")
+        if not _successful(default):
+            return _rich_menu_failure(default)
+        try:
+            menu_id = default.json()["richMenuId"]
+        except (KeyError, TypeError, ValueError):
+            return _adapter_failure("line_rich_menu_default_response_invalid")
+        if not isinstance(menu_id, str) or not menu_id or menu_id != menu_id.strip() or len(menu_id) > 191:
+            return _adapter_failure("line_rich_menu_default_response_invalid")
+
+        outcome = self.unlink_from_user(line_user_id)
+        if outcome.outcome_type is not LineRichMenuProviderOutcomeType.SUCCESS:
+            return outcome
+        personal = self._request("get", f"{_API_ROOT}/user/{line_user_id.value}/richmenu")
+        if personal.status_code == 404:
+            return LineRichMenuProviderOutcome(
+                LineRichMenuProviderOutcomeType.SUCCESS,
+                provider_menu_id=menu_id,
+            )
+        if _successful(personal):
+            return _adapter_failure("line_rich_menu_personal_link_still_present")
+        return _rich_menu_failure(personal)
+
     def set_default(self, provider_menu_id: str) -> LineRichMenuProviderOutcome:
         return self._empty_success_operation(
             "post",

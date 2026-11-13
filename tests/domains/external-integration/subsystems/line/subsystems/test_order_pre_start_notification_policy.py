@@ -1,56 +1,43 @@
-"""Current group start-day card and unchanged second-payment reminder contracts."""
+"""Retired group notifications: start-day, service-completion and second-payment rules cannot be saved."""
 import json
-from datetime import date, datetime, timezone
 from pathlib import Path
 import pytest
 from subsystems.line.message_configuration import render_message_template
-from subsystems.line.notification_policy import evaluate_notification_rules
-from subsystems.line.notification_source_adapters import from_order_service_start_day
-from subsystems.line.service_start_day import ServiceStartDayCandidate, StartDayCaregiver
 
 
-@pytest.mark.parametrize('amount',[24000,0])
-def test_start_day_group_rule_and_full_card(amount):
-    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
-    templates=json.loads(Path('config/message_templates.json').read_text(encoding='utf-8'))
-    candidate=ServiceStartDayCandidate('CASE-001',date(2026,8,20),'C_SERVICE',7,amount,(StartDayCaregiver(1,'測試月嫂'),))
-    event=from_order_service_start_day(candidate,occurred_at=datetime(2026,8,20,tzinfo=timezone.utc))
-    rule=next(r for r in rules['rules'] if r['event_code']==event.event_code)
-    assert rule['recipient_selector']=='case_group'
-    assert evaluate_notification_rules(event,rules)[0].status=='intent_created'
-    variables={v['name']:event.facts[v['name']] for v in next(t for t in templates['templates'] if t['id']==rule['template_id'])['variables']}
-    payload=json.loads(render_message_template(templates,rule['template_id'],variables).payload_json)
-    assert payload['type']=='flex'
-    text=payload['contents']['body']['contents'][0]['text']
-    assert '今天是本案的服務開始日' in text and '測試月嫂，請問今天的服務是否順利？' in text
-    assert '第一期款尚待繳納' not in text
-    assert '3 天後' not in text and '留言聯繫專員' not in text
-    buttons=payload['contents']['footer']['contents']
-    assert [b['action']['label'] for b in buttons]==['服務正常','需要協助']
-    assert [b['action']['data'] for b in buttons]==[f'start-day:{candidate.token}:normal',f'start-day:{candidate.token}:help']
+def _rule(event_code):
+    return {'id': 'R1', 'event_code': event_code, 'recipient_selector': 'case_group', 'template_id': 'T1',
+            'enabled': True, 'schedule': {'kind': 'immediate'}, 'frequency': {'kind': 'once'}, 'predicates': []}
 
 
-@pytest.mark.parametrize('override',[
-    {'recipient_selector':'client.bound_case'},
-    {'frequency':{'kind':'recurring_bounded','maximum_occurrences':2,'interval_days':1}},
-    {'schedule':{'kind':'relative_service_time','offset_seconds':60}},
-    {'event_code':'order.pre_start_reminder'},
+@pytest.mark.parametrize('event_code', [
+    'order.service_start_day', 'order.service_completed',
+    'order.pre_start_reminder', 'order.second_payment_reminder',
 ])
-def test_rule_writer_cannot_restore_private_early_or_repeated_reminders(override):
+def test_rule_writer_cannot_restore_retired_group_or_private_reminders(event_code):
     from domains.line.notification_rules import validate_notification_rules, LineNotificationRuleError
-    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
-    rule=next(r for r in rules['rules'] if r['event_code']=='order.service_start_day')
-    rule.update(override)
-    with pytest.raises(LineNotificationRuleError):validate_notification_rules(rules)
+    with pytest.raises(LineNotificationRuleError):
+        validate_notification_rules({'rules': [_rule(event_code)]})
+
+
+def test_second_payment_rules_are_not_blocked_by_writer():
+    from domains.line.notification_rules import validate_notification_rules
+    for code in ('client.second_payment_due', 'client.second_payment_settled'):
+        validate_notification_rules({'rules': [{**_rule(code), 'recipient_selector': 'client.bound_case'}]})
+
+
+def test_default_rules_contain_no_retired_group_push():
+    rules = json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
+    retired = {'order.service_start_day', 'order.service_completed',
+               'client.second_payment_due', 'client.second_payment_settled'}  # 第二期款走私訊排程，不再有預設群組規則
+    assert not retired & {r['event_code'] for r in rules['rules']}
+    assert all(r['recipient_selector'] != 'case_group' for r in rules['rules'])
 
 
 def test_historical_config_is_readable_but_retired_template_cannot_send():
     from api.schemas.line_notification_rules import LineNotificationRulesDefinition
     from subsystems.line.message_configuration import LineMessageConfigurationError
-    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
-    rule=next(r for r in rules['rules'] if r['event_code']=='order.service_start_day')
-    rule['event_code']='order.pre_start_reminder'
-    assert LineNotificationRulesDefinition.model_validate(rules)
+    assert LineNotificationRulesDefinition.model_validate({'rules': [_rule('order.pre_start_reminder')]})
     templates={'templates':[{'id':'LU96-ORDER-PRE-START-REMINDER-CARD-V1','message_type':'text','content':'舊提醒'},
                              {'id':'unrelated','message_type':'text','content':'其他現行通知'}]}
     assert json.loads(render_message_template(templates,'unrelated').payload_json)['text']=='其他現行通知'

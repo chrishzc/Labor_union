@@ -28,6 +28,7 @@ The adapter reuses immutable `line_notification_source_events` and `line_command
 - `api/routes/line_feedback.py`
 - `api/schemas/line_feedback.py`
 - `ui_react/src/pages/line_management/AiEventStudio.tsx`
+- `ui_react/src/api/line_configuration/line_guidance_client.ts` — shared read-only guidance catalog and router preview for LINE interface settings and AI answer testing.
 
 ## Verification
 

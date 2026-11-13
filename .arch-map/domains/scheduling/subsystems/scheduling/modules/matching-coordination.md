@@ -38,7 +38,7 @@
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
   - `ui_react/src/api/scheduling/candidate_contact_pool_client.ts` — weekly GET 讀保存日期；同一路徑 POST Preview 接受當次日期，經 Orders Preview 驗證後零寫入投影每週時數。
   - `subsystems/scheduling/customer_confirmation_download.py` — 由 confirmation package 簽發、到期即失效且檔案範圍受限的客戶履歷下載 reference。
-  - `subsystems/line/candidate_contact_postback_application.py` — 將候選資訊卡片回覆轉交給 recipient-bound owner adapter；兩種意願成功記錄後在原 UoW 建立固定 `line_webhook_reply`（Reply-only）確認回覆，webhook identity 冪等，不補發 Push 或發送逾期／失敗提示。
+  - `subsystems/line/candidate_contact_postback_application.py` — 將兩種候選意願交給 recipient-bound owner adapter，在原 UoW 提交意願與固定回覆紀錄後，由 Webhook 立即 Reply。按 webhook identity 冪等，失敗不補 Push。
   - `subsystems/scheduling/matching_notification_application.py` — 正式媒合月嫂意願與客戶推薦確認 Postback 確認回覆依 `line-event:{event_id}` 走 `line_webhook_reply`（Reply-only）。
   - `subsystems/line/candidate_contact_coordination_worker.py` — 取消尚未送出的退役協調、群組與重新詢問工作，並提供 24 小時未回覆的唯讀提醒；R-04 資格沿用既有 case gate。
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。

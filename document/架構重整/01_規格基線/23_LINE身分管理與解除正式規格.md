@@ -63,8 +63,8 @@ bound
 ## 6. 解除交易、冪等、Retry 與 Rich Menu SSOT
 
 1. **解除 apply**：鎖 binding，驗證 `bound` 與 expected version，建立解除 root、轉 `revocation_pending`、追加事件/audit/outbox，同交易 commit。
-2. **worker 與 retry**：以解除 request ID claim，link 最新已發布 `default_menu`；timeout／429／5xx retry；明確 retry 須在交易內重讀最新 canonical `default_menu` publication，不重送已失效之 provider ID。
-3. **完成與 crash replay**：provider 成功後鎖 request、binding 與 owner projection，清除 owner User ID、轉 `revoked` 並完成 request；crash replay 可重複 link 同一 menu 後再完成 DB。
+2. **worker 與 retry**：以解除 request ID claim，向目前設定的 LINE 帳號確認已設定 Messaging API 預設選單，再解除該使用者的個人圖文選單，讓 LINE 顯示帳號現行預設。背景服務回讀個人選單，確認已無個人選單才完成回復。timeout／429／5xx 沿既有重試機制處理。手動重試保留最新 canonical `default_menu` 發布參照，實際回復以 LINE 當前預設為準。
+3. **完成與 crash replay**：provider 確認回復後鎖 request、binding 與 owner projection，清除 owner User ID、轉 `revoked` 並完成 request。未完成的 request 可重試解除個人選單；已完成的 request 只確認待辦完成。
 4. **人工緊急覆寫**：限 `line.identity.binding.override` 於後端在 nonretryable／重試耗盡後填寫原因並留存 audit，不在一般管理 UI 呈現；只撤銷系統授權，後續重新發布可用 `default_menu` 時仍可再排入選單修復。
 5. **Rich Menu publication SSOT**：`config/line_menu.json` 僅供 bootstrap；既有環境由 MySQL `line_configuration_current` 決定。新解除請求固定指向 `line_rich_menu_publication_tasks`，訪客選單依 [LINE 服務說明與選單角色 §5](29_LINE服務說明、客服互動與選單角色正式規格.md) 四格名稱維護；已由人工修改之 divergent revision 不得自動覆蓋。
 
@@ -88,6 +88,7 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 
 - 權限分層：`line.identity.binding.read`（查詢）、`line.identity.binding.manage`（replacement／正常解除／retry）、`line.identity.binding.override`（僅後端緊急覆寫）。
 - 管理端以「身分綁定／待審核／待配對」分頁呈現，一次僅掛載目前任務，依使用者點選列傳遞 `subject_type`，LINE User ID 僅於明細遮罩顯示；審核不預選核准，申請受理、系統停用與選單回復完成分開呈現。
+- 綁定列表直接提供「解除綁定」與「修復訪客選單」。解除需在置中視窗核對姓名與綁定身分後確認，回復失敗才顯示修復按鈕。兩項操作皆不需填寫原因。
 
 ### 8.2 驗收標準
 

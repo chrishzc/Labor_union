@@ -32,7 +32,8 @@ describe('真實 M2 測試題來源', () => {
     expect(screen.getByRole('button', { name: '測試回答' })).toBeDisabled();
   });
   it('快捷題限制三題，其餘保留選題，並使用真實測試 client 與回饋 endpoint', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => new Response(JSON.stringify(
+      String(url).endsWith('/router/preview') ? { data: { kind: 'menu_fallback', route_key: null } } :
       Array.from({ length: 5 }, (_, i) => ({ content: JSON.stringify({ schema: 'line.common_qa.v1', question: `正式問題 ${i + 1}`, answer: `核准答案 ${i + 1}` }) })),
     ), { status: 200 }));
     const testSpy = vi.spyOn(llmClient, 'testLlmSemantics').mockResolvedValue({ outcome: 'answered', provider: 'google', model: 'configured-model', index_version: 3, qa_id: 'QA-005', source_identity: 'line-common-qa:QA-005', answer_text: '核准答案 5', code: null });
@@ -45,11 +46,38 @@ describe('真實 M2 測試題來源', () => {
     fireEvent.click(screen.getByRole('button', { name: '測試回答' }));
     await waitFor(() => expect(testSpy).toHaveBeenCalledWith('正式問題 5'));
     expect(await screen.findByText('核准答案 5')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '前往引導動作設定' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '編輯命中問答' }));
     expect(openQa).toHaveBeenCalledWith('QA-005');
     expect(fetchSpy.mock.calls.some(([url]) => String(url) === '/api/v1/line/feedback')).toBe(false);
     fireEvent.click(screen.getByText('回饋操作（會正式送出）'));
     fireEvent.click(screen.getByRole('button', { name: '有幫助' }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/v1/line/feedback', expect.objectContaining({ method: 'POST' })));
+  });
+
+  it('命中引導動作時顯示服務入口與設定連結，並略過模型測試', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const path = String(url);
+      if (path.endsWith('/router/preview')) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ text: '綁定訂單', apply_manual_fallback: false });
+        return new Response(JSON.stringify({ data: { kind: 'deterministic_route', route_key: 'customer_binding' } }));
+      }
+      if (path.endsWith('/ai-events/catalog')) {
+        return new Response(JSON.stringify({ data: { entries: [
+          { route_key: 'customer_binding', alias: '綁定訂單', public_route: '/line-identity' },
+        ] } }));
+      }
+      return new Response('[]');
+    });
+    const testSpy = vi.spyOn(llmClient, 'testLlmSemantics');
+    render(<RealLlmSemanticTestPanel />);
+    fireEvent.change(screen.getByLabelText('測試問題'), { target: { value: '綁定訂單' } });
+    fireEvent.click(screen.getByRole('button', { name: '測試回答' }));
+
+    const destination = await screen.findByRole('region', { name: '導向結果' });
+    expect(destination).toHaveTextContent('綁定訂單');
+    expect(destination).toHaveTextContent('/line-identity');
+    expect(screen.getByRole('link', { name: '前往引導動作設定' })).toHaveAttribute('href', '#line-interface?tab=guidance');
+    expect(testSpy).not.toHaveBeenCalled();
   });
 });

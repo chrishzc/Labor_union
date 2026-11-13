@@ -19,38 +19,13 @@ import {
 } from 'lucide-react';
 import { applicationFetch } from '../../api/shared/application_fetch';
 import { sessionClient } from '../../api/auth/session_client';
+import {
+  loadLineGuidanceCatalog,
+  previewLineGuidance,
+  type NavigationCatalog,
+  type RouterPreview,
+} from '../../api/line_configuration/line_guidance_client';
 import '../LineManagementPage.css';
-
-interface NavigationCatalogEntry {
-  alias: string;
-  route_key: string;
-  tier: string;
-  public_route?: string | null;
-  postback_identity?: string | null;
-  source_identity: string;
-  revision: number;
-}
-
-interface NavigationCatalog {
-  revision: number;
-  entries: NavigationCatalogEntry[];
-}
-
-interface RouterPreview {
-  kind: string;
-  source_event_id: string;
-  source_identity: string;
-  source_revision: number;
-  semantic_bucket: string;
-  confidence: number;
-  score_band: string | null;
-  reason_code: string | null;
-  route_key: string | null;
-  options: string[];
-  answer_text: string | null;
-  ticket_id: number | null;
-  apply_ready: boolean;
-}
 
 interface CatalogGroup {
   routeKey: string;
@@ -77,7 +52,6 @@ export const AiEventStudio: React.FC = () => {
   const [selectedTier, setSelectedTier] = useState<TierCategory>('all');
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
   const [routerInput, setRouterInput] = useState('我想修改登記資料');
-  const routerScore = '90';
   const [routerPreview, setRouterPreview] = useState<RouterPreview | null>(null);
   const [routerNotice, setRouterNotice] = useState<string | null>(null);
   const [routerNoticeKind, setRouterNoticeKind] = useState<'success' | 'info' | 'error' | null>(null);
@@ -93,12 +67,6 @@ export const AiEventStudio: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    const token = sessionClient.getToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
     applicationFetch('/api/v1/line/identity/runtime-config')
       .then((res) => (res.ok ? res.json() : null))
       .then((payload: { data?: { liff_id?: string; public_base_url?: string } } | null) => {
@@ -107,18 +75,13 @@ export const AiEventStudio: React.FC = () => {
       })
       .catch(() => {});
 
-    applicationFetch('/api/v1/line/ai-events/catalog', {
-      headers,
-      credentials: 'include',
-    })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('catalog_readback_failed')))
-      .then((payload: { data?: NavigationCatalog }) => {
-        if (!active || !payload.data) return;
-        setCatalog(payload.data);
+    loadLineGuidanceCatalog()
+      .then((nextCatalog) => {
+        if (!active) return;
+        setCatalog(nextCatalog);
         setCatalogNotice(null);
-        if (payload.data.entries.length > 0) {
-          setSelectedRouteKey((prev) => prev ?? payload.data!.entries[0].route_key);
-        }
+        const firstRouteKey = nextCatalog.entries[0]?.route_key;
+        if (firstRouteKey) setSelectedRouteKey((prev) => prev ?? firstRouteKey);
       })
       .catch(() => {
         if (active) setCatalogNotice('引導動作讀取失敗，請稍後重新整理。');
@@ -301,36 +264,15 @@ export const AiEventStudio: React.FC = () => {
 
   const executePreview = async (testText: string) => {
     if (routerBusy || !testText.trim()) return;
-    const score = routerScore.trim() === '' ? null : Number(routerScore);
-    const sourceEventId = `studio-router-${Date.now()}`;
     setRouterNotice(null);
     setRouterNoticeKind(null);
     setRouterPreview(null);
     setRouterBusy(true);
     try {
-      const token = sessionClient.getToken();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const response = await applicationFetch('/api/v1/line/ai-events/router/preview', {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({
-          text: testText,
-          source_event_id: sourceEventId,
-          score: Number.isNaN(score) ? null : score,
-          development_line_user_id: import.meta.env.DEV
-            ? import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID ?? '' : '',
-          apply_manual_fallback: false,
-        }),
-      });
-      const payload = await response.json() as { data?: RouterPreview; detail?: string };
-      if (!response.ok || !payload.data) throw new Error(payload.detail ?? 'router_preview_failed');
-      setRouterPreview(payload.data);
+      const preview = await previewLineGuidance(testText);
+      setRouterPreview(preview);
 
-      const matchedRoute = payload.data.route_key;
+      const matchedRoute = preview.route_key;
       if (matchedRoute) {
         setSelectedRouteKey(matchedRoute);
         const cardElement = document.getElementById(`rule-card-${matchedRoute}`);

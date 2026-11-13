@@ -12,7 +12,7 @@
 ```text
 完整案件／服務條件保存 → 自動計算訂金與各期客戶應付（可先核銷）
 月嫂承接意願 → 客戶接受推薦方案 → 齊備確認服務日期後自動鎖定 waiting-deposit 檔期
-→ 契約瀏覽器列印或下載未簽 PDF → 記錄已送交外部簽署平台 → 獨立發送 LINE 簽署提醒
+→ 契約瀏覽器列印（可另存為 PDF）→ 記錄已送交外部簽署平台 → 獨立發送 LINE 簽署提醒
 → 分別上傳回收全部月嫂與客戶已簽署 PDF（或本機受控 TEST-ONLY 跳過）
 → Apply 納管受控文件、建立 commitment 與 Orders contract_completed
 →（訂金已核銷使訂單成立 AND contract_completed AND commitment_ready）
@@ -63,6 +63,7 @@
 - **不阻塞下載與重複送交**：
   - 客戶與每段月嫂未簽 PDF 缺失時由下載觸發生成（已簽署、有 `contract_identity` 或已完約亦允許再次下載；資料 snapshot 變動則 append 新版未簽 PDF 並保留原已簽檔案）。
   - 「記錄已送交簽署平台」不以所有系統 PDF 已生成為前置（支持瀏覽器列印工作流：無系統 PDF／session 時保存案件層級 receipt `session_id=null, version=0, matching_plan_id`），**不檢查 LINE 綁定亦不建立提醒**（允許重複記錄送交、append receipt 並保留目前狀態與版本；`handoff_included_reminders=false`）。
+  - 工作台透過「瀏覽器列印」輸出未簽契約，可在列印視窗另存為 PDF。點選「記錄已送交簽署平台」後，若只有案件層級交接紀錄，工作台在同次操作準備缺少的回收用文件並啟用簽署工作，回讀成功即顯示回收區。若準備失敗，保留交接紀錄，操作人可用同一按鈕接續。
 - **獨立簽署提醒（`POST .../contract-external-signing/reminders`）**：
   - 點擊「發送簽署提醒」直接執行（無額外確認視窗），依現行方案對象範圍鎖定 session／expected version（未交接、版本過期或身分錯配回 typed 拒絕），於獨立 outer UoW 建立已綁定對象之 committed LINE 文字訊息任務（含 `type: text` 與 `text`）與人工通知名單（未綁定對象不建虛構 job，介面明確標示「需人工通知」）；同鍵重播回原 receipt，提醒失敗或執行不影響契約文件與簽署版本。
 
@@ -72,7 +73,7 @@
   - 介面僅提供「契約文件 → 送交簽署與提醒 → 回收簽署文件」（移除「檢查簽署文件」按鈕與「歷史簽回人工修復」區塊）；各目標（1 份客戶契約 ＋ 所有 current 月嫂契約）分別上傳經 Controlled Files staging 保存。
   - 最終 Preview（opaque token 綁定完整檔案集合與各 owner version）→ 明確確認簽署 → Apply 於單一 outer UoW 納管全部受控 NAS PDF（DB 僅存 opaque object reference ＋ SHA-256，嚴禁暴露實體路徑／UNC／presigned URL，下載限 authenticated attachment 並寫 security audit）、完成 session、建立 `precontract_service_commitment`、寫入 `orders.contract_identity` 與 `contract_completed`，並核對沿用 Client Finance 已同步之訂金及各期義務（計價未變不遞增 Finance version、不覆寫既成 `訂單成立`）。錯誤訊息直接回傳繁中具體業務原因，不掩蓋版本／檔期／測試門禁原因，且不遺棄已選檔案。
 - **手工證明（`manual_attested`）**：線下紙本／現場簽回時，管理員可透過獨立人工認證 Preview／Apply 上傳真實簽回證據並填寫 `confirmation_method` 與必填 `reason`，形成 `staff_signed_received`／`client_signed_received` 與完約（不宣稱 LINE 送達）。
-- **本機受控測試跳過（`testing_skip_allowed`）**：僅於 `APP_ENV=development|dev|local|test`、loopback MySQL（`union_db`／`lu_test_*`）且無 deployment profile 時開放；呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
+- **本機受控測試跳過（`testing_skip_allowed`）**：以 `APP_ENV=development|dev|local|test`、loopback MySQL 與無 deployment profile 判定。符合條件的本機資料庫（含還原庫）共用相同操作。呼叫 `final-document/testing-skip` 產生完整目標 `TEST-ONLY-` 占位 PDF（明示未驗真實簽署），並搭配互斥 `testing_skip_confirmed=true` 完成完約（若案件既有 `contract_identity` 或 `commitment` 則予以沿用不覆蓋）。
 
 ### 3.5 Execution Conversion、Idempotency 與 Typed Errors
 

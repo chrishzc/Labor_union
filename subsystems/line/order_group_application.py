@@ -70,6 +70,12 @@ class LineOrderGroupApplication:
         self._now = now
         self._alert_group_registrar = alert_group_registrar
 
+    def handle_reply(self, inbox, unit_of_work) -> bool:
+        text = _message_text(inbox)
+        if text and text.startswith(("綁定訂單", "發送邀請")):
+            return self.handle_message(inbox, unit_of_work)
+        return False
+
     def handle_message(self, inbox, unit_of_work) -> bool:
         event = inbox.event
         if event.source.source_type is not LineSourceType.GROUP:

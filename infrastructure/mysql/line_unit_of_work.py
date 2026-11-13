@@ -132,13 +132,9 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
-        self.service_starts = MySqlServiceStartRepository(connection)
+        self.service_starts = MySqlServiceStartRepository(connection, deliveries=self.delivery_tasks)
         from infrastructure.mysql.service_start_day_repository import MySqlServiceStartDayRepository
         self.service_start_days = MySqlServiceStartDayRepository(connection)
-        from infrastructure.mysql.second_payment_notification_repository import MySqlSecondPaymentNotificationRepository
-        self.second_payment_notifications = MySqlSecondPaymentNotificationRepository(connection)
-        from infrastructure.mysql.service_completion_notification_repository import MySqlServiceCompletionNotificationRepository
-        self.service_completion_notifications = MySqlServiceCompletionNotificationRepository(connection)
         from infrastructure.mysql.service_day_log_reminder_repository import MySqlServiceDayLogReminderRepository
         self.service_day_log_reminders = MySqlServiceDayLogReminderRepository(connection)
         from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository

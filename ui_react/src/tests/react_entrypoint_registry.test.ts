@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import { HASH_ALIASES } from '../App';
 import { NAV_ITEMS } from '../components/MasterLayout';
+import { LineManagementPage } from '../pages/LineManagementPage';
 import { AiCustomerServiceStudioPage } from '../pages/line_management/AiCustomerServiceStudioPage';
 import {
   AlertGroupSecurity,
@@ -78,7 +79,7 @@ describe('React entrypoint registry', () => {
     });
   });
 
-  it('AI 工作頁以分頁顯示正式 catalog、server-owned router preview 與真實模型測試', async () => {
+  it('AI 工作頁保留回答測試，LINE 介面設定承載引導動作及深連結', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       const data = url === '/api/v1/line/ai-events/catalog'
@@ -86,9 +87,17 @@ describe('React entrypoint registry', () => {
         : url === '/api/v1/line/identity/runtime-config' ? { liff_id: 'test-liff-id' } : { items: [], next_cursor: null };
       return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
-    render(React.createElement(AiCustomerServiceStudioPage));
+    const studio = render(React.createElement(AiCustomerServiceStudioPage));
     expect(screen.getByRole('button', { name: '回饋分析' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '引導動作' }));
+    expect(screen.queryByRole('button', { name: '引導動作' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '回答測試' }));
+    expect(screen.getByRole('button', { name: '測試回答' })).toBeDisabled();
+    expect(screen.getByLabelText('測試問題')).toHaveValue('');
+    studio.unmount();
+
+    window.history.replaceState(null, '', '#line-interface?tab=guidance');
+    render(React.createElement(LineManagementPage, { scope: 'interface' }));
+    expect(screen.getByRole('button', { name: '引導動作' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('searchbox', { name: '搜尋引導動作' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '預覽引導動作' })).toBeEnabled();
     expect(await screen.findByRole('button', { name: '測試正式引導問句' })).toBeInTheDocument();
@@ -96,15 +105,13 @@ describe('React entrypoint registry', () => {
     expect(screen.queryByText(/INITIAL_RULES|本機示範資料/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('客服測試問句')).toHaveValue('我想修改登記資料');
 
-    fireEvent.click(screen.getByRole('button', { name: '回答測試' }));
-    expect(screen.getByRole('button', { name: '測試回答' })).toBeDisabled();
-    expect(screen.getByLabelText('測試問題')).toHaveValue('');
+    window.history.replaceState(null, '', window.location.pathname);
     fetchSpy.mockRestore();
   });
 
 
 
-  it('LIFF 視覺頁保留 18 個正式表單，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 16 個正式表單，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',

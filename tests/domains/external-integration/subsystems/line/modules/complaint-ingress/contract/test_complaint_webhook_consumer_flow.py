@@ -272,14 +272,10 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
         "redaction_version": "m4-mask.v1",
     }
 
-    assert len(state.escalations.alerts) == 1
-    alert = state.escalations.alerts[0]
-    assert alert.trigger_code is TriggerCode.COMPLAINT
-    assert alert.hold_state is AutomationHoldState.ACTIVE
-    assert alert.urgency == "high"
-    assert alert.safe_summary == "complaint_explicit"
-    assert "王小美" not in repr(alert)
-    assert "0912345678" not in repr(alert)
+    assert state.escalations.alerts == []
+    assert state.escalations.receipts[0][2].resulting_hold_state is AutomationHoldState.ACTIVE
+    assert "王小美" not in repr(command.context)
+    assert "0912345678" not in repr(command.context)
 
     assert len(state.customer_service.messages) == 1
     assert state.customer_service.messages[0].message == (
@@ -300,7 +296,7 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
     assert "AI" not in empathy
 
 
-def test_call_postback_reaches_ticket_hold_and_short_acknowledgement():
+def test_call_postback_background_consumer_records_ticket_hold_without_duplicate_reply():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     state = _State(_handoff_postback_event(now))
     unit_of_work_factory = _UnitOfWorkFactory(state)
@@ -322,6 +318,4 @@ def test_call_postback_reaches_ticket_hold_and_short_acknowledgement():
     assert consumer.run_once() == 1
     assert len(state.customer_service.messages) == 1
     assert len(state.escalations.commands) == 1
-    payload = json.loads(state.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。"
-    assert "quickReply" not in payload
+    assert state.delivery_tasks.requests == []

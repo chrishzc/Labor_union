@@ -85,7 +85,7 @@ def test_unrelated_or_malformed_postback_cannot_mutate():
     assert not unit.tasks
 
 
-@pytest.mark.parametrize('retired,current,expected',[(True,True,False),(False,False,False),(False,True,True)])
+@pytest.mark.parametrize('retired,current,expected',[(True,True,False),(False,False,False),(False,True,False)])
 def test_provider_guard_cancels_retired_or_stale_work(retired,current,expected):
     unit=Unit();cancelled=[]
     unit.delivery_tasks.cancel=cancelled.append

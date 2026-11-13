@@ -190,7 +190,7 @@ def deposit_delivery_is_current(uow, task, now) -> bool:
     return valid
 
 
-def handle_deposit_assistance(data, event, uow) -> bool:
+def handle_deposit_assistance(data, event, uow, *, reply_only=False) -> bool:
     if not data.startswith('deposit-assistance:'):
         return False
     case_no = data.removeprefix('deposit-assistance:')
@@ -200,10 +200,13 @@ def handle_deposit_assistance(data, event, uow) -> bool:
             or uow.deposit_payments.get(case_no, lock=True) is None):
         return True
     key = IdempotencyKey('deposit-assistance:' + sha256(event.event_id.value.encode()).hexdigest())
-    ticket = uow.customer_service.create_or_append(CreateCustomerServiceMessage(
-        line_user_id.value, CustomerServiceCategory.OTHER,
-        f'客戶詢問訂金繳費；案件 {case_no}，請查看後續留言。', key.value, case_no=case_no,
-    ))
+    if not reply_only:
+        uow.customer_service.create_or_append(CreateCustomerServiceMessage(
+            line_user_id.value, CustomerServiceCategory.OTHER,
+            f'客戶詢問訂金繳費；案件 {case_no}，請查看後續留言。', key.value, case_no=case_no,
+        ))
+        if uow.delivery_tasks.exists_for_key(key):
+            return True
     uow.delivery_tasks.enqueue(LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id), LineMessageKind.TEXT,
         canonical_line_payload_json(configured_payload(uow, 'deposit-assistance', {'type': 'text', 'text': ASSISTANCE_ACK})),

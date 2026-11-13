@@ -708,15 +708,9 @@ class MySqlLineNotificationRepository:
         self, source: NotificationSourceEvent, *, for_update: bool = False,
     ) -> bool:
         """Business applicability only; broken notification settings remain repairable."""
-        if source.event_code == 'order.service_completed':
-            from infrastructure.mysql.service_completion_notification_repository import MySqlServiceCompletionNotificationRepository
-            return bool(source.source_domain == 'orders' and
-                MySqlServiceCompletionNotificationRepository(self._connection).source_is_current(source.facts, lock=for_update))
-        if source.event_code in {'client.second_payment_due', 'client.second_payment_settled'}:
-            from infrastructure.mysql.second_payment_notification_repository import MySqlSecondPaymentNotificationRepository
-            return MySqlSecondPaymentNotificationRepository(self._connection).source_is_current(
-                source.facts, source.event_code, lock=for_update)
         if source.event_code in {'order.pre_start_reminder', 'order.second_payment_reminder',
+                'order.service_start_day', 'order.service_completed',
+                'client.second_payment_due', 'client.second_payment_settled',
                 'scheduling.leave.extension_requested', 'client.leave.extension_agreed', 'client.leave.extension_rejected'}:
             return False
         if source.event_code != 'service_time_checkpoint':

@@ -34,6 +34,10 @@ _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}
 
 
 class LineMenuCommandApplication:
+    def handle_reply(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
+        command = text.strip()
+        return command in _MENU_HELP_COMMANDS and self._queue_switch_help(inbox, unit_of_work, line_user_id)
+
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         source_type = getattr(getattr(inbox.event, 'source', None), 'source_type', None)
         if source_type is not None and source_type.value != 'user':

@@ -662,6 +662,17 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   } : null;
   const currentQuote = officeSchedule && officeQuote?.payload === JSON.stringify(schedulePayload) ? officeQuote.quote : null;
 
+  const cancelOfficeEditing = () => {
+    setOfficeEditing(false);
+    setOfficeStaff(null);
+    setOfficeQuote(null);
+    setAllocation({});
+    setRestWeekdays(null);
+    setSuccess(null);
+    orderMutationFlowStore.resetServiceDatesDraft(caseNo);
+    void loadServiceDates('read');
+  };
+
   const runScheduleSave = async () => {
     if (!queryView || readController.current !== null || actionInFlight.current.has(caseNo)) return;
     let request = scheduleRequests.current.get(caseNo);
@@ -796,8 +807,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       {saveValidation.feedback}
       <div className="service-date-heading">
         {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
-        {officeSchedule && !officeEditing && <button type="button" disabled={working !== null || !!scheduleRecovery || isRecoveryActive}
-          onClick={() => setOfficeEditing(true)}>多月嫂排班</button>}
+        {officeSchedule && <button type="button" disabled={working !== null || !!scheduleRecovery || isRecoveryActive || startUnresolved}
+          onClick={officeEditing ? cancelOfficeEditing : () => setOfficeEditing(true)}>
+          {officeEditing ? '取消多月嫂編輯' : '多月嫂排班'}
+        </button>}
       </div>
       {effectiveServiceDates === null && <div className="service-date-settings">
         <div className="service-date-start-field">

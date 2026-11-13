@@ -24,7 +24,6 @@ NOTIFICATION_RECIPIENT_CONSUMERS = (
     "infrastructure/mysql/order_auto_completion_repository.py",
     "infrastructure/mysql/order_cancellation_repository.py",
     "infrastructure/mysql/order_information_repository.py",
-    "subsystems/line/candidate_contact_response_application.py",
     "subsystems/scheduling/candidate_contact_pool_workflow.py",
     "subsystems/scheduling/matching_communication_workflow.py",
 )

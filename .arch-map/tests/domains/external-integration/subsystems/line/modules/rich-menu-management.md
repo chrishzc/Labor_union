@@ -3,6 +3,7 @@ parent_subsystem: line
 architecture: ../../../../../../domains/external-integration/subsystems/line/modules/rich-menu-management.md
 layout_status: custom_current
 test_root: tests/domains/external-integration/subsystems/line/subsystems/test_line_rich_menu_draft.py
+test_root: tests/domains/external-integration/subsystems/line/infrastructure/test_line_rich_menu_provider_saga.py
 test_root: ui_react/src/tests/line_rich_menu_draft_action_editor.test.tsx
 test_root: ui_react/src/tests/line_rich_menu_draft_appearance_editor.test.tsx
 test_root: ui_react/src/tests/line_rich_menu_publication_actions.test.tsx

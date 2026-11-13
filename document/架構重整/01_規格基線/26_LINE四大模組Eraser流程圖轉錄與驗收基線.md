@@ -10,15 +10,15 @@
 |---|---|---|
 | M1 | `9vI_ssJZUHa59Yw7LXc0d` | LINE LIFF 表單、身分綁定與角色選單切換（[`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md)、[`23_LINE身分管理與解除正式規格.md`](23_LINE身分管理與解除正式規格.md)、[`29_LINE服務說明、客服互動與選單角色正式規格.md`](29_LINE服務說明、客服互動與選單角色正式規格.md)） |
 | M2 | `xS5rOAuuQCUL139Tp4RA` | 自助導覽、專用 FAQ／AI LIFF 與明確客服升級（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)） |
-| M3 | `IXLp95YCVlOmYlkS1gBkl` | 雙向媒合協調、推薦確認、簽約訂金交錯與排班／代班閉環（[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[媒合候選池與客戶決定及通勤](02A_媒合候選池與客戶決定及通勤規格.md)、[Contract Signing 正式規格](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)） |
+| M3 | `IXLp95YCVlOmYlkS1gBkl` | 候選接案意願、推薦確認、簽約訂金交錯與排班／代班閉環（[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[媒合候選池與客戶決定及通勤](02A_媒合候選池與客戶決定及通勤規格.md)、[Contract Signing 正式規格](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)） |
 | M4 | `bYdfiEJlAm-XhTLuLoJ-` | 工會管理端（桌面／手機）、重大個人告警、客訴轉真人與代班帳務拆算（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)） |
 
 ### 1.2 現行可配置通知與人工提醒驗收邊界
 
-1. **Webhook Reply-Only vs Push 分工**：互動文字引導與五項互動 Postback 按鈕確認固定走純 `line_webhook_reply`（45 秒時窗、1 次嘗試、同事件／同聊天室檢核，禁止 fallback Push）；主動通知、卡片本體與定時排程走 `line_push_worker`（詳見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §3）。
+1. **Webhook Reply 與 Push 分工**：所有 Reply 在 Webhook 處理當次事件時發送（45 秒時窗、1 次嘗試、同事件／同聊天室檢核）。月嫂「可以接案」與「無法接案」皆先提交意願，再送原文案。逾時或失敗不補 Push；主動通知、卡片本體與定時排程由背景處理。詳見 [LINE 客服與月嫂自助服務規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 2. **現行可配置通知與退役項目**：
-   - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組）、`order.service_start_day` 服務開始當天原群組詢問、`second_payment_due`／`second_payment_settled`、正常完工通知（`LINE-SERVICE-COMPLETION-TEXT-V1`），以及獨立管理契約下的訂金／一期／二期人工逾期提醒與人工收據（`LINE-PAY-01`～`08`）。
-   - 已全面退役項目：加入好友即時歡迎訊息（改由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（改回 LINE 群組相簿人工查閱）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播，以及銀行核銷後自動代發收據。
+   - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組），以及獨立管理契約下的訂金／一期／二期人工逾期提醒與人工收據（`LINE-PAY-01`～`08`）。
+   - 已全面退役項目：加入好友即時歡迎訊息（改由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（改回 LINE 群組相簿人工查閱）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播、銀行核銷後自動代發收據、開工當天群組詢問 Push（`order.service_start_day`；舊訊息按鈕仍只以 Reply 確認）、正常完工滿意度群組問卷通知（`order.service_completed`），以及第二期款群組通知（`client.second_payment_due`／`client.second_payment_settled` 群組來源停止投影，改走客戶私訊排程與 `LINE-PAY-08` 人工收據，流程與第一期一致；規則儲存不另行封鎖）。
 3. **群組設定與合成 Fixture 驗收原則**：服務群組綁定指令（`綁定訂單 案件編號 邀請網址` 與 `發送邀請`）依 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；`development` 環境得依 [`10_Global_保留資料Migration與Cutover_Subsystem.md`](10_Global_保留資料Migration與Cutover_Subsystem.md) 於本機受控資料庫使用 owner typed fixture producer 建立含 canonical IDs 之測試實例，嚴禁由 Notification 端偽造媒合、請假或薪資業務決策。
 
 ## 2. 逐節點驗收欄位與通過基準
@@ -102,13 +102,11 @@ flowchart TD
 
 - 專用 AI／常見問答統一由 `?target=ai_assistant` 提供（6 大分類、`document/line/AI客服QA題庫.jsonl` 54 題、`authoritative=false`，未命中回 `UNSUPPORTED` 並提供轉專人按鍵）。詳見 [`29_LINE服務說明、客服互動與選單角色正式規格.md`](29_LINE服務說明、客服互動與選單角色正式規格.md)。
 
-## 5. 模組三（M3）：媒合重探、人工條件協調與簽約排班閉環
+## 5. 模組三（M3）：候選接案意願與簽約排班閉環
 
-### 5.1 條件差異重探與多人意願推薦
+### 5.1 寄送案件資訊與候選意願回覆
 
-- **條件更新重探（`Group_1_Willing` / `Group_2_Resolved` / `Group_3_Ignored`）**：客戶修改媒合需求（如調整下廚條款）後由系統比對歷史拒絕原因；原願意者重送確認卡、痛點已被排除者重送改善重探卡、無關痛點者靜默略過不打擾。
-- **多人意願與「沒有意願」**：同一案件可收多位願意人選並由工會決定推薦對象；月嫂送出「沒有意願」僅顯示「已送出，謝謝您的回應。」並記為無意願（Postback ack 走 `line_webhook_reply`），不通知客戶或另立協調待辦。
-- **人工條件協調閉環**：月嫂提出調整條件時建立工會待辦 → 工會檢視原文並自行撰文發問客戶 → 客戶答覆新條件 → 工會審核不通過可續問，審核通過時**與 Orders Terms canonical writer 在同交易更新 DB 正式條件**（不設二選一問項、不發群組通知），後續由工會選定月嫂重問意願。滿 24 小時未回覆僅顯示內部待辦提醒。
+- **初步候選聯絡**。寄送、接案意願回覆、工會人工處理疑問與退役範圍，見 [媒合候選池規格 §3.1](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
 
 ### 5.2 推薦確認、簽約訂金交錯與服務日排班閉環
 

@@ -57,6 +57,8 @@ _SERVICE_HELP_CATEGORY_KEYS = {
 _KNOWLEDGE_FEEDBACK_POSTBACK = re.compile(
     r"^feedback:knowledge:([1-9][0-9]*):(resolved|unresolved)$"
 )
+_FEEDBACK_RESOLVED_TEXTS = {"有幫助", "👍 有幫助", "很有幫助", "有解決"}
+_FEEDBACK_UNRESOLVED_TEXTS = {"未解決", "👎 未解決", "沒解決", "沒有幫助", "未解決（通報專人客服）"}
 
 
 class LineWebhookIdentityHandlers:
@@ -140,10 +142,10 @@ class LineWebhookIdentityHandlers:
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             normalized = text.strip()
-            if normalized in {"有幫助", "👍 有幫助", "很有幫助", "有解決"}:
+            if normalized in _FEEDBACK_RESOLVED_TEXTS:
                 self._handle_feedback_resolved(inbox, unit_of_work, line_user_id)
                 return
-            if normalized in {"未解決", "👎 未解決", "沒解決", "沒有幫助", "未解決（通報專人客服）"}:
+            if normalized in _FEEDBACK_UNRESOLVED_TEXTS:
                 self._handle_feedback_unresolved(inbox, unit_of_work, line_user_id)
                 return
             if self._menu_command_application is not None and self._menu_command_application.handle(
@@ -164,6 +166,53 @@ class LineWebhookIdentityHandlers:
         if source_type is not None and source_type.value != "user":
             return
         self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
+
+    def handle_reply_message(self, inbox, unit_of_work) -> bool:
+        """Run the existing response owners without processing unrelated inbound work."""
+        if self._group_application is not None and self._group_application.handle_reply(inbox, unit_of_work):
+            return True
+        line_user_id = _optional_user_id(inbox)
+        text = _message_text(inbox)
+        if line_user_id is None or text is None or inbox.event.source.source_type is not LineSourceType.USER:
+            return False
+        if text.strip() in _FEEDBACK_RESOLVED_TEXTS or text.strip() in _FEEDBACK_UNRESOLVED_TEXTS:
+            return False
+        if (
+            self._matching_postback_application is not None
+            and self._matching_postback_application.has_active_assistance(unit_of_work, line_user_id)
+        ):
+            return False
+        purpose = _identity_purpose_for_text(text)
+        if purpose is not None:
+            self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
+            handled = True
+        elif (
+            self._menu_command_application is not None
+            and self._menu_command_application.handle_reply(inbox, unit_of_work, line_user_id, text)
+        ):
+            handled = True
+        else:
+            handled = self._service_help_application is not None and self._service_help_application.handle(
+                inbox, unit_of_work, line_user_id, text, reply_only=True,
+            )
+        if handled:
+            unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
+        return handled
+
+    def handle_reply_postback(self, inbox, unit_of_work) -> bool:
+        data = _postback_data(inbox)
+        if data.startswith("customer-service:handoff:") and data != "customer-service:handoff:confirm":
+            return self._service_help_application is not None and self._service_help_application.handle_postback(
+                inbox, unit_of_work, _optional_user_id(inbox), data,
+            )
+        if (
+            self._candidate_contact_postback_application is not None
+            and self._candidate_contact_postback_application.handle(inbox, unit_of_work)
+        ):
+            return True
+        return self._matching_postback_application is not None and self._matching_postback_application.handle(
+            inbox, unit_of_work, reply_only=True,
+        )
 
     def _handle_service_help(self, inbox, unit_of_work, line_user_id, text) -> bool:
         if self._service_help_application is not None:

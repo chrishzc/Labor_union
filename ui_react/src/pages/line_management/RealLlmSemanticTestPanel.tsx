@@ -6,6 +6,7 @@ import { applicationFetch } from '../../api/shared/application_fetch';
 import React, { useEffect, useState } from 'react';
 import { CircleHelp, Pencil, Plus, Send } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
+import { loadLineGuidanceCatalog, previewLineGuidance } from '../../api/line_configuration/line_guidance_client';
 import {
   testLlmSemantics,
   type LlmSemanticTest,
@@ -51,6 +52,7 @@ export const RealLlmSemanticTestPanel: React.FC<{
   const [quickQuestions, setQuickQuestions] = useState<string[]>([]);
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [result, setResult] = useState<LlmSemanticTest | null>(null);
+  const [guidance, setGuidance] = useState<{ label: string; publicRoute: string | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [testedQuestion, setTestedQuestion] = useState('');
@@ -90,8 +92,21 @@ export const RealLlmSemanticTestPanel: React.FC<{
     setFeedbackStatus(null);
     setRunning(true);
     setResult(null);
+    setGuidance(null);
     setNotice(null);
     try {
+      const preview = await previewLineGuidance(normalized).catch(() => null);
+      if (!preview) {
+        setNotice('目前無法確認引導動作，請稍後再試。');
+        return;
+      }
+      if (preview.kind === 'deterministic_route' && preview.route_key) {
+        const catalog = await loadLineGuidanceCatalog().catch(() => null);
+        const destination = catalog?.entries.find((entry) => entry.route_key === preview.route_key);
+        setGuidance({ label: destination?.alias ?? preview.route_key, publicRoute: destination?.public_route ?? null });
+        setNotice('已命中引導動作。');
+        return;
+      }
       const next = await testLlmSemantics(normalized);
       setResult(next);
       setNotice(resultMessage(next));
@@ -139,18 +154,24 @@ export const RealLlmSemanticTestPanel: React.FC<{
         <p className="studio-description">輸入常見或可能遇到的問題，檢查回答是否清楚、合適。</p>
         <label className="studio-field-label" htmlFor="semantic-test-question">測試問題</label>
         <textarea id="semantic-test-question" aria-label="測試問題" placeholder="請從已發布題目選擇，或輸入民眾的測試提問" value={question} disabled={running} onChange={(event) => setQuestion(event.target.value)} rows={4} className="real-llm-input" />
-        <div className="studio-test-actions"><p className="studio-description"><CircleHelp aria-hidden="true" />使用目前模型設定與核准知識庫；執行會呼叫 AI，不代表 LINE 已送達。</p><button type="button" className="line-primary-btn" onClick={() => void run()} disabled={running || !question.trim()}><Send aria-hidden="true" />{running ? '測試中…' : '測試回答'}</button></div>
+        <div className="studio-test-actions"><p className="studio-description"><CircleHelp aria-hidden="true" />先檢查 LINE 引導動作，未命中時使用目前的 AI 模型與核准知識庫。</p><button type="button" className="line-primary-btn" onClick={() => void run()} disabled={running || !question.trim()}><Send aria-hidden="true" />{running ? '測試中…' : '測試回答'}</button></div>
         <div className="real-llm-quick-section"><small className="real-llm-quick-label">快速試試</small><div className="real-llm-quick-list">{quickQuestions.slice(0, 3).map((q) => <button key={q} type="button" disabled={running} onClick={() => setQuestion(q)} className="real-llm-quick-button">{q}</button>)}</div>
           {quickQuestions.length > 3 && <details className="studio-example-picker"><summary>選擇其他已發布題目（{quickQuestions.length} 題）</summary><label htmlFor="semantic-example" className="sr-only">選擇已發布題目</label><select id="semantic-example" value="" disabled={running} onChange={(event) => { if (event.target.value) setQuestion(event.target.value); }}><option value="">選擇一個問題</option>{quickQuestions.map((q) => <option key={q} value={q}>{q}</option>)}</select></details>}
           {catalogNotice && <div className="line-warning line-block-spacing-12" role="status">{catalogNotice}</div>}
         </div>
         {running && <p className="studio-test-pending" role="status">正在測試回答，請稍候…</p>}
-        {notice && <section className={`studio-test-result ${result?.outcome === 'answered' ? 'is-answered' : 'is-warning'}`} aria-label="回答測試結果">
+        {notice && <section className={`studio-test-result ${guidance || result?.outcome === 'answered' ? 'is-answered' : 'is-warning'}`} aria-label="回答測試結果">
           <header className="studio-result-heading">
             <h3>測試結果</h3>
             <p className="studio-result-status" role="status">{notice}</p>
           </header>
           <div className="studio-tested-question"><h4>本次問題</h4><p>{testedQuestion}</p></div>
+          {guidance && <section className="studio-approved-answer" aria-label="導向結果">
+            <h4>導向結果</h4>
+            <p>{guidance.label}</p>
+            {guidance.publicRoute && <p>{guidance.publicRoute}</p>}
+            <a href="#line-interface?tab=guidance">前往引導動作設定</a>
+          </section>}
           {result?.answer_text && <section className="studio-approved-answer" aria-label="客服回答"><h4>客服回答</h4><div className="real-llm-answer">{result.answer_text}</div></section>}
           {result && <>
           {((result.qa_id && onOpenQa) || (result.outcome === 'unsupported' && onCreateQa)) && <div className="studio-result-actions">

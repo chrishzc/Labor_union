@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -154,6 +155,32 @@ class MySqlLineWebhookInboxRepository:
             updated = cursor.fetchone()
         return _snapshot(updated)
 
+    def claim_registered(self, event_id: LineWebhookEventId, query: ClaimLineWebhookEventsQuery) -> LineWebhookInboxSnapshot:
+        """Reserve a newly registered event in the ingestion transaction."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CLAIM_UPDATE_SQL + " AND processing_status='pending' AND attempt_count=0", (
+                query.lease_owner, database_utc(query.now),
+                database_utc(query.now + self._lease_duration), event_id.value,
+            ))
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_webhook_claim_lost")
+            cursor.execute(_SELECT_SQL, (event_id.value,))
+            return _snapshot(cursor.fetchone())
+
+    def defer(self, event: LineWebhookInboxSnapshot) -> None:
+        if event.lease is None:
+            raise RuntimeError("line_webhook_lease_lost")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE line_inbox_events SET processing_status='pending',attempt_count=attempt_count-1,"
+                "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL,"
+                "aggregate_version=aggregate_version+1 WHERE event_identity=%s AND processing_status='processing' "
+                "AND lease_owner=%s AND aggregate_version=%s AND lease_expires_at_utc>UTC_TIMESTAMP(6)",
+                (event.event.event_id.value, event.lease.owner, event.version.value),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_webhook_lease_lost")
+
     def next_due_at(self):
         with self._connection.cursor() as cursor:
             cursor.execute(_NEXT_DUE_SQL)
@@ -197,7 +224,8 @@ class MySqlLineWebhookInboxRepository:
         snapshot = self.get(event.event_id)
         if snapshot is None:
             raise RuntimeError("line_webhook_duplicate_missing")
-        if snapshot.event.payload_fingerprint != event.payload_fingerprint:
+        if (snapshot.event.payload_fingerprint != event.payload_fingerprint
+                and not _same_provider_event(snapshot.event, event)):
             raise RuntimeError("line_webhook_idempotency_conflict")
         return AcceptLineWebhookEventResult(
             LineWebhookRegistrationOutcome.EXISTING,
@@ -205,6 +233,16 @@ class MySqlLineWebhookInboxRepository:
             snapshot.status,
             snapshot.version,
         )
+
+
+def _same_provider_event(stored: CanonicalLineWebhookEvent, received: CanonicalLineWebhookEvent) -> bool:
+    if not (stored.uses_provider_event_id and received.uses_provider_event_id
+            and stored.destination_id == received.destination_id):
+        return False
+    volatile = {"replyToken", "deliveryContext", "immediate_reply_sent"}
+    previous = {key: value for key, value in json.loads(stored.payload_json).items() if key not in volatile}
+    current = {key: value for key, value in json.loads(received.payload_json).items() if key not in volatile}
+    return previous == current
 
 
 def _snapshot(row: object) -> LineWebhookInboxSnapshot:

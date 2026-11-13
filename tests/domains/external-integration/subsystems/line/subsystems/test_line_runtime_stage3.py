@@ -213,7 +213,7 @@ def test_delivery_provider_call_occurs_between_claim_and_record_transactions() -
     assert repository.recorded.idempotency_key.value == "line-delivery-attempt:1:1"
 
 
-def test_fresh_knowledge_answer_uses_free_reply_instead_of_push() -> None:
+def test_async_chat_knowledge_answer_never_uses_reply_or_push() -> None:
     task = _claimed_knowledge_delivery_task()
     actions: list[str] = []
     repository = DeliveryRepository(
@@ -231,12 +231,12 @@ def test_fresh_knowledge_answer_uses_free_reply_instead_of_push() -> None:
     )
 
     assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "record", "commit"]
-    assert provider.reply_token == "reply-token"
-    assert provider.reply_message == {"type": "text", "text": "answer"}
+    assert actions == ["claim", "commit", "record", "commit"]
+    assert provider.reply_token is None
+    assert repository.recorded.provider_outcome.error_code == "line_chat_knowledge_reply_retired"
 
 
-def test_expired_knowledge_reply_opportunity_uses_push_fallback() -> None:
+def test_async_knowledge_answer_does_not_inspect_an_expired_reply_token() -> None:
     task = _claimed_knowledge_delivery_task()
     actions: list[str] = []
     repository = DeliveryRepository(
@@ -254,11 +254,11 @@ def test_expired_knowledge_reply_opportunity_uses_push_fallback() -> None:
     )
 
     assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "push", "record", "commit"]
+    assert actions == ["claim", "commit", "record", "commit"]
 
 
 def test_rejected_reply_does_not_duplicate_a_possibly_already_used_token() -> None:
-    task = _claimed_knowledge_delivery_task()
+    task = _claimed_webhook_reply_task()
     actions: list[str] = []
     repository = DeliveryRepository(
         task,
@@ -281,13 +281,13 @@ def test_rejected_reply_does_not_duplicate_a_possibly_already_used_token() -> No
         batch_size=1,
     )
 
-    assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "record", "commit"]
+    worker.deliver_webhook_reply(task)
+    assert actions == ["reply", "record", "commit"]
 
 
 @pytest.mark.parametrize("status_code", [500, 502, 503, 504])
 def test_reply_http_server_error_does_not_push_or_retry(status_code) -> None:
-    task = _claimed_knowledge_delivery_task()
+    task = _claimed_webhook_reply_task()
     actions: list[str] = []
     repository = DeliveryRepository(
         task,
@@ -310,14 +310,14 @@ def test_reply_http_server_error_does_not_push_or_retry(status_code) -> None:
         batch_size=1,
     )
 
-    assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "record", "commit"]
+    worker.deliver_webhook_reply(task)
+    assert actions == ["reply", "record", "commit"]
     assert repository.recorded.provider_outcome.error_code == "line_reply_outcome_uncertain"
     assert repository.recorded.retry_allowed is False
 
 
 def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
-    task = _claimed_knowledge_delivery_task()
+    task = _claimed_webhook_reply_task()
     actions: list[str] = []
     repository = DeliveryRepository(
         task,
@@ -340,8 +340,8 @@ def test_uncertain_reply_does_not_push_a_possibly_duplicate_answer() -> None:
         batch_size=1,
     )
 
-    assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "record", "commit"]
+    worker.deliver_webhook_reply(task)
+    assert actions == ["reply", "record", "commit"]
     assert repository.recorded.provider_outcome.outcome_type is LineProviderOutcomeType.TIMEOUT
     assert repository.recorded.retry_allowed is False
 
@@ -464,7 +464,7 @@ class DeliveryRepository:
     def get(self, task_id):
         return self.task if task_id == self.task.task_id else None
 
-    def reply_opportunity(self, correlation_id):
+    def reply_opportunity(self, correlation_id, *, recipient=None):
         return self._reply_opportunity
 
     def record_attempt(self, command):
@@ -575,6 +575,12 @@ def _claimed_delivery_task():
     )
     lease = LineDeliveryLease(task_id, "worker:1", NOW, NOW + timedelta(minutes=1))
     return LineDeliveryTaskSnapshot(task_id, request, LineDeliveryStatus.PROCESSING, 0, lease)
+
+
+def _claimed_webhook_reply_task():
+    task = _claimed_knowledge_delivery_task()
+    return replace(task, request=replace(task.request, source_aggregate_type="line_webhook_reply",
+                                        source_aggregate_identity="event:knowledge:1"))
 
 
 def _claimed_knowledge_delivery_task():
@@ -698,8 +704,8 @@ def test_cancellation_during_fresh_validation_prevents_delivery() -> None:
     assert repository.recorded is None
 
 
-def test_reply_rate_limit_retains_existing_push_behavior() -> None:
-    task = _claimed_knowledge_delivery_task()
+def test_webhook_reply_rate_limit_does_not_push() -> None:
+    task = _claimed_webhook_reply_task()
     actions = []
     repository = DeliveryRepository(
         task, actions,
@@ -716,5 +722,5 @@ def test_reply_rate_limit_retains_existing_push_behavior() -> None:
         lambda: TrackingUow(repository, actions), provider, "worker:1",
         lambda: NOW + timedelta(seconds=1), batch_size=1,
     )
-    assert worker.run_once() == 1
-    assert actions == ["claim", "commit", "reply", "push", "record", "commit"]
+    worker.deliver_webhook_reply(task)
+    assert actions == ["reply", "record", "commit"]

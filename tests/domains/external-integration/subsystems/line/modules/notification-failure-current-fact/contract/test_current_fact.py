@@ -311,35 +311,6 @@ def test_provider_rejects_old_receipt_replay_before_any_binding_or_provider_effe
     assert not any('line_order_group_bindings' in sql for sql,_ in cursor.executed)
 
 
-@pytest.mark.parametrize('remaining,required,configuration_valid,expected', [
-    (10000,10000,True,False), (0,10000,True,False),
-    (0,0,True,False), (10000,10000,False,False),
-])
-def test_retired_group_payment_failures_do_not_restore_an_automatic_source(
-    remaining,required,configuration_valid,expected,
-):
-    from datetime import date
-    from subsystems.line.second_payment_notifications import SecondPaymentNotification
-    original = SecondPaymentNotification('CASE-006','second-006',1,101,date(2026,10,26),10000,10000,'C-synthetic').event(datetime(2026,10,26,tzinfo=UTC))
-    row = {'source_event_id':11,'source_domain':original.source_domain,'event_code':original.event_code,
-        'source_event_identity':original.identity,'source_aggregate_type':original.source_aggregate_type,
-        'source_aggregate_identity':'CASE-006','source_version':1,'facts_snapshot':json.dumps(original.facts),
-        'rule_id':'rule-a','reason_code':'recipient_unavailable','is_latest_source_version':1,'source_case_current':1}
-    rule = {'id':'rule-a','event_code':original.event_code,'enabled':True,'predicates':[],
-        'recipient_selector':'case_group' if configuration_valid else 'client',
-        'schedule':{'kind':'immediate'} if configuration_valid else {'kind':'broken'}}
-    stages = ({'obligation_identity':'second-006','amount_due_ntd':remaining,'current_event_id':101,
-        'status':'settled' if remaining==0 else 'open','after_amount_ntd':required},)
-    cursor = _Cursor(all_rows=((row,),(),stages),one_rows=(
-        {'revision_id':7,'definition_snapshot':json.dumps({'rules':[rule]})},
-        {'status':'服務中'},{'aggregate_version':1,'second_payment_due_date':date(2026,10,26)},
-        {'group_id':'C-synthetic','aggregate_version':0},None))
-    readback = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(QUERY)
-    assert readback.authoritative_complete and readback.predicate_active is expected
-    assert not any('client_finance_accounts' in sql for sql,_ in cursor.executed)
-    assert all(sql.lstrip().startswith('SELECT') for sql,_ in cursor.executed)
-
-
 def test_failure_work_is_associated_with_its_original_source_only():
     original = {'source_event_id':11,'source_domain':'orders','event_code':'deposit_confirmed',
         'source_event_identity':'orders:11','source_aggregate_type':'order','source_aggregate_identity':'CASE-006',

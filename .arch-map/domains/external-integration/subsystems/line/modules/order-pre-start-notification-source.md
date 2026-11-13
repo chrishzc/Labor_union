@@ -4,55 +4,34 @@
 - subsystem: `external-integration/line`
 
 ## Responsibility
-Owns the read-only scan and immutable LINE notification source-event projection
-for formal start-day group caregiver-status inquiries. Committed second-payment settlement notices now require the explicit human receipt command in payment-overdue-reminders; this scanner does not project them. Financial reminder text is excluded from the group inquiry; initial/due payment reminders now use the private payment schedule worker. The
-worker also projects explicitly marked committed normal service completions into one original-case-group survey invitation. The
-worker owns its outer unit of work only when new source events are persisted;
-it does not mutate Orders or Client Finance facts and does not call the LINE
-provider directly. Verified group postbacks record replies in existing LINE receipts,
-enqueue `line_webhook_reply` Reply-only acks (preserving `delivery_is_current` checks on `start-day:` ack tokens without Push fallback),
-and create Customer Service service-progress todos only when assistance is requested.
+[RETIRED SOURCE] 2026-11-12 起，開工當天群組服務狀況詢問、正常結案問卷群組邀請與第二期款群組通知不再投影來源事件，也不再 Push 到任何群組；原 scanner／projector／worker 與兩個來源 repository 已移除，`order_pre_start_notification_sources` worker 不再註冊。
+
+仍保留的最小責任：
+- 舊群組訊息上的 `start-day:` 按鈕仍可被驗證並以 `line_webhook_reply` Reply-only 確認；選「需要協助」時照舊建立 Customer Service 服務進度待辦。不補 Push。
+- provider 前守門：殘留的 `order_service_start_day`／`order_service_start_day_response`（非 Reply ack）、`order_service_completion`、`client_second_payment_reminder`／`client_second_payment_settled` 工作一律取消。
+- 第二期款改走私訊：到期當天由 `payment-overdue-reminders` 的繳款提醒 worker 發客戶私訊；核銷成功通知由人員於財務待辦確認後寄客戶私訊。
+- `notification_rules` 拒絕儲存 `order.service_start_day`、`order.service_completed` 及 `order.pre_start_reminder`／`order.second_payment_reminder`；第二期款兩個事件不封鎖；`config/notification_rules.json` 預設不含群組規則。
 
 ## Implementation
-- `subsystems/line/order_pre_start_notification_source.py`
-- `subsystems/line/service_start_day.py`
-- `infrastructure/mysql/service_start_day_repository.py`
-- `subsystems/line/service_completion_notifications.py` — typed completion evidence and fresh delivery guard.
-- `infrastructure/mysql/service_completion_notification_repository.py` — committed normal-completion marker, original group, attempts and no historical backfill.
-- `subsystems/line/second_payment_notifications.py`
-- `infrastructure/mysql/second_payment_notification_repository.py`
-- `subsystems/line/notification_source_adapters.py`
-- `infrastructure/mysql/order_pre_start_notification_source_repository.py`
-- `infrastructure/mysql/order_pre_start_notification_source_worker.py`
+- `subsystems/line/service_start_day.py` — 舊按鈕 postback 與開工 Push 守門。
+- `infrastructure/mysql/service_start_day_repository.py` — 舊按鈕回覆 context 與 Reply ack 現行性。
+- `subsystems/line/service_completion_notifications.py` — 殘留結案問卷工作守門（取消）。
+- `subsystems/line/second_payment_notifications.py` — 殘留第二期款群組工作守門（取消）。
+- `subsystems/line/notification_source_adapters.py` — 僅保留 Orders／Finance／Scheduling committed outbox adapter。
+- `domains/line/notification_rules.py` — 開工詢問與結案問卷事件儲存拒絕。
 
 ## Dependencies
-- inbound: `orders` and `client-finance` typed persisted facts, read only
-- Finance reader: `SecondPaymentQueryPort` — required stage／remaining balance／valid settlement are Finance-owned facts, no LINE ledger reducer
-- second-payment success source: marked `projection_refresh` Finance outbox; no historical backfill or status consumption
-- missing original group: existing LINE-006 recipient-unavailable staff todo; no private fallback
-- outbound: existing LINE notification source registry and committed delivery intent
-- outbound: Customer Service `create_or_append`, caller-owned webhook transaction
-- ingress: `api/dependencies/line_worker_operation.py` routes verified `start-day:` group postbacks
-- provider guard: `subsystems/line/delivery_worker.py` cancels stale day/group/assignment/payment snapshots and retired private reminders
+- inbound: `api/dependencies/line_worker_operation.py` 路由已驗證 `start-day:` group postback。
+- outbound: Customer Service `create_or_append`（協助待辦）、既有 delivery task cancel。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md`
-- `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md`
+- `document/架構重整/01_規格基線/17A_LINE_Gateway_Inbox與通知投遞正式規格.md`
+- `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md`
 
 ## Verification routing
 layout_status: `custom_current`
 
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_source_adapters.py`
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_notification_recipient_resolution.py`
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_order_pre_start_notification_source_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_order_reminder_worker_wiring.py`
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_order_pre_start_notification_policy.py`
-- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_order_pre_start_notification_source.py`
-
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_service_start_day_postback.py`
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_service_start_day_mysql.py`
-
-- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_second_payment_notifications.py`
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_second_payment_notifications_mysql.py`
-
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_service_completion_notifications_mysql.py`

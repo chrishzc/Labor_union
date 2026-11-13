@@ -84,6 +84,7 @@ function flowWorkbench() {
     ...catalog.definition.rules.map(rule => ({ ...builtin(rule.id, rule.id === 'current-payment-rule' ? '目前正式第二期款提醒' : '目前正式請假卡'), template_id: rule.template_id, builtin: false })),
     builtin('service-start-inquiry', '服務開始－代班接案意願詢問'),
     builtin('staff-leave-completed', '月嫂請假完成正式排班通知'),
+    builtin('card-candidate-information-package', '目前案件資訊整包'),
     builtin('card-candidate-information-1', '目前訂單資訊一'), builtin('card-candidate-information-2', '目前訂單資訊二'), builtin('card-candidate-information-3', '目前每週說明'),
     builtin('deposit-reminder', '目前訂金提醒卡'), builtin('deposit-settled', '目前訂金入帳卡'),
   ]);
@@ -289,16 +290,16 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(document.querySelectorAll('.line-flow-step')).toHaveLength(7);
   });
 
-  it('預設顯示完整七個步驟；展開後使用目前目錄名稱，選定多則中的正確訊息', async () => {
+  it('預設顯示完整七個步驟，寄送案件資訊只列一則整包公版', async () => {
     const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
-    const first = await screen.findByRole('button', { name: '1 初步候選聯絡 3 則訊息' });
+    const first = await screen.findByRole('button', { name: '1 初步候選聯絡 1 則訊息' });
     expect(screen.queryByRole('button', { name: /目前訂單資訊/ })).not.toBeInTheDocument();
     expect(document.querySelectorAll('.line-flow-step')).toHaveLength(7);
     fireEvent.click(first);
-    fireEvent.click(screen.getByRole('button', { name: '寄送案件資訊 3 則訊息 查看訊息' }));
-    fireEvent.click(screen.getByRole('button', { name: /目前訂單資訊二/ }));
-    expect(onOpen).toHaveBeenCalledExactlyOnceWith('card-candidate-information-2');
+    fireEvent.click(screen.getByRole('button', { name: '寄送案件資訊 由流程控制 調整訊息' }));
+    expect(screen.queryByRole('button', { name: /目前訂單資訊/ })).not.toBeInTheDocument();
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith('card-candidate-information-package');
     expect(previews.render).not.toHaveBeenCalled(); expect(previews.subjects).not.toHaveBeenCalled();
   });
 
@@ -336,7 +337,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(document.body).not.toHaveTextContent('raw mysql');
     expect(document.querySelector('.line-flow-step')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '重新載入流程訊息' }));
-    await screen.findByRole('button', { name: '1 初步候選聯絡 3 則訊息' });
+    await screen.findByRole('button', { name: '1 初步候選聯絡 1 則訊息' });
   });
 
   it('流程圖已完全移除日誌缺漏提醒與加入好友系統歡迎訊息節點', async () => {
@@ -796,12 +797,12 @@ describe('通知內容統一工作區', () => {
       { id: 'contents/footer/contents/0/action/label', label: '按鈕名稱', content: '回答問題', max_length: 20 },
       { id: 'contents/body/contents/$description', label: '說明內容', content: '', max_length: 5000, kind: 'body' as const, optional: true },
     ];
-    vi.mocked(templates.get).mockImplementation(async (id, options) => id === 'card-union-question'
-      ? { rule_id: id, template_id: 'LINE-COPY-card-union-question', name: '初步候選聯絡－工會詢問客戶卡', revision: 7, variables: ['case_no'], sample_preview: '', fields, content: JSON.stringify(Object.fromEntries(fields.map(field => [field.id, field.content]))) }
+    vi.mocked(templates.get).mockImplementation(async (id, options) => id === 'card-customer-confirmation'
+      ? { rule_id: id, template_id: 'LINE-COPY-card-customer-confirmation', name: '正式媒合－客戶完整推薦確認包', revision: 7, variables: ['case_no'], sample_preview: '', fields, content: JSON.stringify(Object.fromEntries(fields.map(field => [field.id, field.content]))) }
       : originalGet(id, options));
     vi.mocked(previews.catalog).mockResolvedValue([
       { id: 'service-contact', template_id: null, name: '呼叫專員－需求受理', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false },
-      { id: 'card-union-question', template_id: null, name: '初步候選聯絡－工會詢問客戶卡', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
+      { id: 'card-customer-confirmation', template_id: null, name: '正式媒合－客戶完整推薦確認包', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
     ]);
     render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: '查看呼叫專員－需求受理內容' }));
@@ -809,7 +810,7 @@ describe('通知內容統一工作區', () => {
     fireEvent.change(fixedText, { target: { value: '請留下需要協助的內容。' } });
     expect(screen.getByRole('button', { name: '儲存內容' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '還原內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '查看初步候選聯絡－工會詢問客戶卡內容' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看正式媒合－客戶完整推薦確認包內容' }));
     fireEvent.change(await screen.findByRole('textbox', { name: '卡片標題' }), { target: { value: '請確認服務條件' } });
     fireEvent.change(screen.getByRole('textbox', { name: '主要按鈕' }), { target: { value: '填寫回覆' } });
     const body = screen.getByRole('textbox', { name: '說明內容' });
@@ -821,9 +822,9 @@ describe('通知內容統一工作區', () => {
     expect(screen.queryByRole('combobox', { name: '編輯欄位' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '下一個欄位' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '卡片標題' })).toHaveValue('請確認服務條件');
-    await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-union-question', content: expect.stringContaining('填寫回覆'), data_source: 'sample' }, expect.any(Object)));
+    await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-customer-confirmation', content: expect.stringContaining('填寫回覆'), data_source: 'sample' }, expect.any(Object)));
     fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
-    await waitFor(() => expect(templates.update).toHaveBeenCalledWith('card-union-question', { content: expect.stringContaining('請確認服務條件'), expected_revision: 7 }, expect.any(Object)));
+    await waitFor(() => expect(templates.update).toHaveBeenCalledWith('card-customer-confirmation', { content: expect.stringContaining('請確認服務條件'), expected_revision: 7 }, expect.any(Object)));
     expect(JSON.parse(vi.mocked(templates.update).mock.calls[0][1].content)[fields[3].id]).toBe('第一段說明\n\n自行增加的第二段提醒。\n\n{case_no}');
   });
 

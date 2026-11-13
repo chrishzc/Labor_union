@@ -2,23 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-from subsystems.line.service_start_day import ServiceStartDayCandidate, StartDayCaregiver
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from api.dependencies import line_worker_operation
-from infrastructure.mysql.line_notification_repository import (
-    MySqlLineNotificationRepository,
-)
-from infrastructure.mysql.order_pre_start_notification_source_worker import (
-    MySqlOrderPreStartNotificationSourceWorker,
-)
-from subsystems.line.notification_source_adapters import (
-    from_order_service_start_day,
-)
-from subsystems.line.second_payment_notifications import SecondPaymentNotification
 from subsystems.line.runtime_contracts import LineRuntimeMode
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 
@@ -37,7 +26,7 @@ def test_canonical_group_postback_routes_to_start_day_application(monkeypatch):
     assert calls==[(event,unit)]
 
 
-def test_order_reminder_source_worker_is_registered_in_canonical_additional_workers(
+def test_retired_order_group_source_worker_is_not_registered(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -54,10 +43,8 @@ def test_order_reminder_source_worker_is_registered_in_canonical_additional_work
         object(),
     )
 
-    worker = workers["order_pre_start_notification_sources"]
-    assert isinstance(worker, MySqlOrderPreStartNotificationSourceWorker)
-    assert worker._connection_factory is line_worker_operation.get_connection
-    assert worker._now is now
+    assert "order_pre_start_notification_sources" not in workers
+    assert "payment_reminder_notifications" in workers
 
 
 def test_run_line_cycle_executes_canonical_runtime_that_carries_reminder_worker(
@@ -71,7 +58,7 @@ def test_run_line_cycle_executes_canonical_runtime_that_carries_reminder_worker(
         or {
             "inbox_events": 0,
             "delivery_tasks": 0,
-            "order_pre_start_notification_sources": 2,
+            "payment_reminder_notifications": 2,
         }
     )
     monkeypatch.setattr(
@@ -113,7 +100,7 @@ def test_order_reminder_source_worker_failure_is_not_reported_as_healthy_cycle()
         heartbeats.append,
         "worker:test",
         additional_workers={
-            "order_pre_start_notification_sources": FailingOrderReminderWorker()
+            "payment_reminder_notifications": FailingOrderReminderWorker()
         },
     )
 
@@ -123,105 +110,3 @@ def test_order_reminder_source_worker_failure_is_not_reported_as_healthy_cycle()
     assert len(heartbeats) == 1
     assert heartbeats[0].last_error_code == "RuntimeError"
     assert "order reminder source scan failed" in heartbeats[0].last_error_message
-
-
-class ExistingReminderCursor:
-    def __init__(self, event) -> None:
-        self.event = event
-        self.executed: list[tuple[str, tuple[object, ...]]] = []
-        self.rowcount = 0
-        self.lastrowid = 0
-        self._one = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        return False
-
-    def execute(self, sql, parameters=()):
-        normalized = tuple(parameters)
-        self.executed.append((sql, normalized))
-        if sql.startswith("INSERT IGNORE INTO line_notification_source_events"):
-            self.rowcount = 0
-            self._one = None
-            return
-        if (
-            "FROM line_notification_source_events" in sql
-            and "source_event_identity=%s" in sql
-        ):
-            self._one = {
-                "id": 41,
-                "source_aggregate_type": self.event.source_aggregate_type,
-                "source_aggregate_identity": self.event.source_aggregate_identity,
-                "source_version": self.event.source_version,
-                "historical_silent": self.event.historical_silent,
-                "facts_snapshot": self.event.facts,
-            }
-            return
-        if "FROM line_configuration_current" in sql:
-            kind = normalized[0]
-            definition = (
-                {
-                    "rules": [
-                        {
-                            "id": "current-rule",
-                            "event_code": self.event.event_code,
-                            "recipient_selector": "client.bound_case",
-                            "template_id": "unused-template",
-                            "enabled": False,
-                            "predicates": [],
-                        }
-                    ]
-                }
-                if kind == "notification_rules"
-                else {"templates": []}
-            )
-            self._one = {"revision_id": 7, "definition_snapshot": definition}
-            return
-        if sql.startswith(
-            "SELECT 1 FROM line_notification_decisions WHERE source_event_id=%s"
-        ):
-            self._one = {"present": 1}
-            return
-        raise AssertionError(f"unexpected SQL during exact reminder replay: {sql}")
-
-    def fetchone(self):
-        value = self._one
-        self._one = None
-        return value
-
-
-class ExistingReminderConnection:
-    def __init__(self, event) -> None:
-        self.cursor_instance = ExistingReminderCursor(event)
-
-    def cursor(self):
-        return self.cursor_instance
-
-
-@pytest.mark.parametrize(
-    "event",
-    (
-        from_order_service_start_day(
-            ServiceStartDayCandidate('CASE-REPLAY-1',date(2026,9,20),'C_REPLAY',1,20000,(StartDayCaregiver(1,'測試月嫂'),)),
-            occurred_at=NOW,
-        ),
-        SecondPaymentNotification('CASE-REPLAY-2','second:replay',3,5,date(2026,9,20),30000,30000,'C_REPLAY').event(NOW),
-    ),
-)
-def test_exact_reminder_replay_with_existing_decision_creates_no_second_projection(
-    event,
-) -> None:
-    connection = ExistingReminderConnection(event)
-
-    source_event_id = MySqlLineNotificationRepository(connection).register_and_project(
-        event
-    )
-
-    assert source_event_id == 41
-    statements = [sql for sql, _parameters in connection.cursor_instance.executed]
-    assert any("line_notification_decisions" in sql for sql in statements)
-    assert not any(sql.startswith("INSERT INTO line_notification_decisions") for sql in statements)
-    assert not any("line_notification_intents" in sql for sql in statements)
-    assert not any("line_delivery_tasks" in sql for sql in statements)

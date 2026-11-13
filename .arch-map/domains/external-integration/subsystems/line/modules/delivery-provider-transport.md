@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-定義已提交 LINE delivery task 共用的 typed provider outcome，並將 Push／Reply 請求轉接至 LINE Messaging API。此模組不建立 delivery task、不選擇業務收件者，也不在 webhook transaction 執行 provider effect；Reply token 僅供 committed worker 的一次性短效投遞使用。
+定義已提交 LINE delivery task 共用的 typed provider outcome，並將 Push／Reply 請求轉接至 LINE Messaging API。此模組不建立 delivery task、不選擇業務收件者。Webhook 在業務交易提交後使用當次短效 Reply token，背景執行 Push。
 
 ## Implementation
 - primary: `subsystems/line/delivery_contracts.py`

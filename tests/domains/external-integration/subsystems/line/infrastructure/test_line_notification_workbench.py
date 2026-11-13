@@ -7,7 +7,6 @@ from api.dependencies.admin_auth import require_admin, require_line_matching_sen
 from api.routes import notification_tasks as query, notification_task_actions as actions, line_mobile_admin
 from api.schemas.notification_tasks import NotificationSource, NotificationPage, NotificationItem
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.line.candidate_contact_response_application import CandidateContactResponseError
 from subsystems.line.deposit_notifications import DepositNotificationConflict
 
 PRINCIPAL=AdminPrincipal(1,'synthetic-notifications','Synthetic','system_admin')
@@ -28,22 +27,6 @@ def test_first_receipt_notification_is_a_stable_internal_todo_and_never_sends(mo
     assert '前往帳務' in first.items[0].reason and first.items[0].case_no=='CASE-FIRST'
     sent[0]=True
     assert query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL).items==[]
-
-
-def test_information_deep_link_queries_exact_owner_question_and_case(monkeypatch):
-    calls=[]
-    monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda _:SimpleNamespace(
-        query_staff_questions=lambda **kwargs:(calls.append(kwargs) or {'items':[{'question_id':73,'case_no':'CASE'}]})))
-    result=actions.information_query(73,case_no='CASE',principal=PRINCIPAL)
-    assert result.data == {'question_id':73,'case_no':'CASE'}
-    assert calls == [{'question_id':73,'case_no':'CASE'}]
-
-
-def test_information_deep_link_returns_unavailable_instead_of_another_question(monkeypatch):
-    monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda _:SimpleNamespace(
-        query_staff_questions=lambda **kwargs:{'items':[]}))
-    with pytest.raises(HTTPException) as failure:actions.information_query(73,case_no='CASE',principal=PRINCIPAL)
-    assert failure.value.status_code == 404
 
 
 @pytest.mark.parametrize('name,expected', [('測試客戶','測試客戶'),(None,'未具名使用者')])
@@ -342,16 +325,6 @@ def test_deposit_failures_are_actionable_without_enqueue(monkeypatch,code,messag
     assert captured[0][2].value=='same-intent'
 
 
-@pytest.mark.parametrize('recipient,code,person',[('customer','candidate_contact_customer_unavailable','客戶'),('caregiver','candidate_contact_recipient_unavailable','月嫂')])
-def test_information_missing_binding_remains_original_owner_conflict(monkeypatch,recipient,code,person):
-    def send(*args):raise CandidateContactResponseError(code)
-    monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda factory:SimpleNamespace(send_staff_information=send))
-    with pytest.raises(HTTPException) as failure:
-        actions.information_send(6,actions.InformationSend(recipient=recipient,message_text='人員文案',idempotency_key='same-intent'),PRINCIPAL)
-    assert failure.value.status_code==409
-    assert person+'尚未綁定 LINE' in failure.value.detail['error']['message']
-
-
 def test_mobile_registration_uses_binding_auth_and_original_approval(monkeypatch):
     monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda *args:(_ for _ in ()).throw(HTTPException(403,'unbound')))
     monkeypatch.setattr(actions,'get_registration_review_application',lambda:pytest.fail('must not create writer'))
@@ -362,13 +335,12 @@ def test_mobile_registration_uses_binding_auth_and_original_approval(monkeypatch
 def test_invalid_source_cursor_and_unknown_command_fields_are_rejected():
     app=FastAPI();app.include_router(query.router);app.include_router(actions.router)
     app.dependency_overrides[require_admin]=lambda:PRINCIPAL
-    app.dependency_overrides[require_line_matching_sender]=lambda:PRINCIPAL
     with TestClient(app) as client:
         assert client.get('/api/v1/line/notification-tasks/not-a-source').status_code==422
         assert client.get('/api/v1/line/notification-tasks/deposit?cursor=-1').status_code==422
         response=client.post('/api/v1/line/notification-task-actions/information/3/send',json={
             'recipient':'customer','message_text':'text','idempotency_key':'key','line_id_token':'cannot-change-auth-boundary'})
-        assert response.status_code==422
+        assert response.status_code==404
 
 
 def test_mobile_ticket_read_ignores_a_removed_card_without_touching_its_replacement():
@@ -533,15 +505,6 @@ assert.equal(statuses.at(-1),'new screen','old failure must not overwrite new sc
 const oldSuccess=vm.runInContext("previewProfileDecision({request_id:2,request_version:1},'reject')",ctx);
 vm.runInContext('++notificationSequence',ctx);deferPreview.resolve({current_version:1,preview_fingerprint:'c'.repeat(64),apply_ready:true});await oldSuccess;
 assert(!calls.some(([u])=>u.includes('/client-profile/')&&!u.endsWith('/preview')),'leaving before preview completes must not submit an Apply');
-document.body.insertAdjacentHTML('beforeend','<button id="applyMatchingTerms"></button>');
-vm.runInContext("let matchingOperation={case_no:'CASE-1',pool_id:1,customer_answer_event_id:1,order_terms:{order_version:1}},matchingApprovalIntent=null;const matchingTermsFromForm=()=>({});",ctx);
-let rejectTerms;ctx.postJson=()=>new Promise((_resolve,reject)=>{rejectTerms=reject});
-vm.runInContext(extract('async function applyMatchingTerms('),ctx);
-const oldTerms=vm.runInContext('applyMatchingTerms()',ctx);
-vm.runInContext('++notificationSequence',ctx);document.getElementById('applyMatchingTerms').disabled=true;
-rejectTerms(Error('late terms error'));await oldTerms;
-assert.equal(document.getElementById('applyMatchingTerms').disabled,true,'old finally must not change current controls');
-assert.equal(statuses.at(-1),'new screen');
 window.happyDOM.abort();
 '''
     result=subprocess.run(['node','--input-type=module','-e',script],capture_output=True,text=True,timeout=25)

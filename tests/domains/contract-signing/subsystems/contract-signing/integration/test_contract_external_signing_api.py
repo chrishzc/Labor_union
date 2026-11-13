@@ -1053,7 +1053,8 @@ def test_final_readback_uses_only_opaque_identities() -> None:
     ("prod", "127.0.0.1", "union_db", "", False),
     ("", "127.0.0.1", "union_db", "", False),
     ("development", "remote.example", "union_db", "", False),
-    ("development", "127.0.0.1", "production_db", "", False),
+    ("development", "127.0.0.1", "lu_nas_restore_example", "", True),
+    ("development", "127.0.0.1", "local_business_copy", "", True),
     ("development", "127.0.0.1", "union_db", "development_gce_iap_reverse_ssh", False),
 ])
 def test_testing_skip_is_bounded_to_local_test_runtime(monkeypatch, environment, host, database, profile, allowed):

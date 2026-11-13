@@ -21,6 +21,9 @@ describe('真實 AI 測試回饋狀態', () => {
       answer_text: '核准答案',
     });
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).endsWith('/router/preview')) {
+        return new Response(JSON.stringify({ data: { kind: 'menu_fallback', route_key: null } }));
+      }
       if (String(url).includes('/knowledge/items?')) {
         return new Response(JSON.stringify([{
           content: JSON.stringify({ schema: 'line.common_qa.v1', question: '已發布問題', answer: '核准答案' }),

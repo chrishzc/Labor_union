@@ -116,14 +116,13 @@ class MySqlLineDeliveryTaskRepository:
         self,
         correlation_id: CorrelationId,
         *,
-        recipient: LineRecipient | None = None,
+        recipient: LineRecipient,
     ) -> LineReplyOpportunity | None:
         event_identity = _line_event_identity(correlation_id)
         if event_identity is None:
             return None
         with self._connection.cursor() as cursor:
-            sql = _INFORMATION_REPLY_OPPORTUNITY_SQL if recipient is not None else _REPLY_OPPORTUNITY_SQL
-            cursor.execute(sql, (event_identity,))
+            cursor.execute(_INFORMATION_REPLY_OPPORTUNITY_SQL, (event_identity,))
             row = optional_row(cursor.fetchone())
         if row is None:
             return None
@@ -136,15 +135,14 @@ class MySqlLineDeliveryTaskRepository:
             return None
         if payload.get("mode") == "standby":
             return None
-        if recipient is not None:
-            source = payload.get("source")
-            source_type = recipient.recipient_type.value
-            identity_key = {"user": "userId", "group": "groupId", "room": "roomId"}[source_type]
-            if (payload.get("immediate_reply_sent") is True
-                    or not isinstance(source, dict)
-                    or source.get("type") != source_type
-                    or source.get(identity_key) != recipient.identity.value):
-                return None
+        source = payload.get("source")
+        source_type = recipient.recipient_type.value
+        identity_key = {"user": "userId", "group": "groupId", "room": "roomId"}[source_type]
+        if (payload.get("immediate_reply_sent") is True
+                or not isinstance(source, dict)
+                or source.get("type") != source_type
+                or source.get(identity_key) != recipient.identity.value):
+            return None
         return LineReplyOpportunity(
             reply_token.strip(),
             aware_utc(row["received_at_utc"]) + timedelta(seconds=45),
@@ -214,6 +212,21 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_SELECT_SQL, (task_id.value,))
             updated = optional_row(cursor.fetchone())
         return None if updated is None else _snapshot(updated)
+
+    def claim_webhook_reply(self, task_id: LineDeliveryTaskId, query: ClaimLineDeliveryTasksQuery) -> LineDeliveryTaskSnapshot:
+        """Reserve a new Reply in its business transaction before it becomes visible to workers."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE line_delivery_tasks SET processing_status='processing',lease_owner=%s,"
+                "lease_acquired_at_utc=%s,lease_expires_at_utc=%s,max_attempts=1 "
+                "WHERE id=%s AND source_aggregate_type=%s AND processing_status='pending'",
+                (query.lease_owner, database_utc(query.now), database_utc(query.now + self._lease_duration),
+                 task_id.value, REPLY_ONLY_WEBHOOK_SOURCE),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_webhook_reply_reservation_failed")
+            cursor.execute(_SELECT_SQL, (task_id.value,))
+            return _snapshot(cursor.fetchone())
 
     def record_attempt(
         self,
@@ -460,6 +473,8 @@ class MySqlLineDeliveryTaskRepository:
     def retry_failed(self, task_id: LineDeliveryTaskId, now) -> LineDeliveryTaskSnapshot:
         with self._connection.cursor() as cursor:
             row = self._locked_task(cursor, task_id)
+            if str(row["source_aggregate_type"]) == REPLY_ONLY_WEBHOOK_SOURCE:
+                raise ValueError("line_webhook_reply_not_retryable")
             if str(row["source_aggregate_type"]) in {"line_order_group_invitation", "service_start_invitation"}:
                 raise ValueError("line_group_invitation_requires_new_command")
             status = LineDeliveryStatus(str(row["processing_status"]))
@@ -758,10 +773,6 @@ _INSERT_SQL = (
 _SELECT_SQL = f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE id=%s"
 _SELECT_BY_KEY_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE idempotency_key=%s"
-)
-_REPLY_OPPORTUNITY_SQL = (
-    "SELECT payload_snapshot,received_at_utc FROM line_inbox_events "
-    "WHERE event_identity=%s AND event_type='message' AND source_type='user'"
 )
 _INFORMATION_REPLY_OPPORTUNITY_SQL = (
     "SELECT payload_snapshot,received_at_utc FROM line_inbox_events "

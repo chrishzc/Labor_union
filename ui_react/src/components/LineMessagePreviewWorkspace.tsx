@@ -51,7 +51,7 @@ export function LineMessagePreviewWorkspace({ descriptor, entryId, content, clie
   const lastBubble = Math.max(0, (result?.bubbles.length ?? 1) - 1);
   const visibleBubble = bubbleIndex === 'last' ? lastBubble : Math.min(bubbleIndex, lastBubble);
   const selectBubble = (index: number) => { setBubbleIndex(index); setAction(''); };
-  useEffect(() => { setBubbleIndex(['card-customer-confirmation', 'card-customer-profiles', 'card-candidate-information-1', 'card-candidate-information-2'].includes(entryId) ? 'last' : 0); }, [entryId]);
+  useEffect(() => { setBubbleIndex(['card-customer-confirmation', 'card-customer-profiles', 'card-candidate-information-package', 'card-candidate-information-1', 'card-candidate-information-2'].includes(entryId) ? 'last' : 0); }, [entryId]);
   useEffect(() => {
     if (!descriptor) return;
     const controller = new AbortController(), request = ++generation.current;

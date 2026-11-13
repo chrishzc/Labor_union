@@ -23,7 +23,7 @@
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`
-- `order-pre-start-notification-source` — 正式開工當天原群組繳款／月嫂服務狀況詢問、工會協助待辦及第二期款提醒的來源投影與 worker UoW；path: `modules/order-pre-start-notification-source.md`
+- `order-pre-start-notification-source` — [RETIRED SOURCE] 開工當天詢問、結案問卷、第二期款群組通知已停止 Push；僅保留舊按鈕 Reply-only 確認與殘留工作取消守門；path: `modules/order-pre-start-notification-source.md`
 - `test-fixture-bootstrap` — development-only LINE 身分、訂單情境與 Rich Menu 測試前置資料；path: `modules/test-fixture-bootstrap.md`
 - `feedback` — M2 immutable LINE feedback root／receipt／aggregate與Customer Service ticket linkage；path: `modules/feedback.md`
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation、masked empathy、告警與客戶結案通知的分離投遞；path: `modules/complaint-ingress.md`
@@ -58,11 +58,11 @@
 
 ### 第一批資訊回覆（2026-10-30 人工核准）
 
-綁定入口、服務導覽說明查詢、選單說明、停用及群組錯誤提示的新工作使用 `line_webhook_reply`；由原 committed delivery worker 讀取同事件、同聊天室的短效 Reply 機會，失敗不補 Push、不自動重試。`delivery_contracts.py` 定義來源標記，`ports.py`／`infrastructure/mysql/line_delivery_task_repository.py` 的 Reply 查詢可核對原收件者。`infrastructure/mysql/line_notification_repository.py` 的近期導覽回覆 Query 同時辨識新舊來源並保留原收件者隔離。業務結果確認仍 Push，既有排隊工作不轉換／取消。正式語意由規格 20 §3.2A 擁有。
+綁定入口、服務導覽、選單說明、客服受理、群組指令及接案等互動確認使用 `line_webhook_reply`。Webhook 核對原事件及原聊天室，在提交必要的業務寫入後發送，失敗不重試或補 Push。背景 worker 只結清遺留 Reply 任務。聊天室 AI 入口已停用，遺留聊天室知識回答任務亦停止投遞。正式語意見規格 20 §3.2。
 
-`infrastructure/mysql/line_delivery_task_repository.py::new_reply_task_ids` 只回傳本次 UoW 新 insert 的資訊工作，排除重複 enqueue 回讀的既有工作。`webhook_event_consumer.py` 在 commit 後交由 `delivery_worker.py::run_new_reply_tasks` 逐筆取得新租約並投遞；`api/dependencies/line_worker_operation.py` 負責接線。快速路徑最多使用每輪 batch 的一半，其餘保留原佇列與原排序，總量及 heartbeat 計數仍沿原上限。資訊 Token 查詢支援 user follow 與 user／group／room message／postback，舊 Knowledge 查詢條件不變。
+`webhook_intake.py` 在驗簽並保存事件時保留新事件的處理租約。`webhook_event_consumer.py::consume_registered` 呼叫同一組業務 owner，保留本次交易新增的 Reply 任務租約，提交後交 `delivery_worker.py::deliver_webhook_reply`；未處理的業務交回 Inbox。HTTP 接線由 `api/dependencies/line_runtime.py` 組合。
 
-- integration_test: `tests/domains/external-integration/subsystems/line/integration/test_informational_reply_only.py` — 新舊工作分流、保留業務確認、實際 SQL 事件／來源條件、Token／聊天室核對、commit 後快速投遞與原佇列預算及失敗零 Push。
+- integration_test: `tests/domains/external-integration/subsystems/line/integration/test_informational_reply_only.py` — Webhook 即時投遞、兩種初步候選意願先提交、重複事件、Token／聊天室核對、失敗零 Push 與背景工作分流。
 
 ### 加好友歡迎訊息退役（2026-11-11 人工核准）
 
@@ -99,7 +99,7 @@ layout_status: `custom_current`
 - integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_registration_atomicity.py`
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/`
 - higher_boundary: LINE Identity first-release living baseline由Global schema/release routing分類；Anomalies consumer保留在其canonical integration root。
-- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py` — 跨 Webhook、好友狀態、業務回覆與投遞 worker 的整合回歸。
 - integration_test: `tests/domains/external-integration/subsystems/line/integration/test_line_m4_continuation_regressions.py` — 客服 SQL、LINE 投遞及群組告警退役後的跨 owner 邊界。
 - integration_root: `ui_react/src/tests/line_successor_clients.test.ts`
 

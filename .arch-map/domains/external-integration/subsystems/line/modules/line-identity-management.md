@@ -14,6 +14,7 @@
 - review query contract: `subsystems/line/review_contracts.py` — bounded numbered review search，審核 state machine 不變。
 - review transport projection: `api/schemas/line_identity.py` — 審核對象姓名、案件及 canonical 綁定的唯讀展示欄位。
 - primary:
+  - `line/static/identity.html` — 月嫂及工會帳號 LIFF 身分核對與綁定結果，並提供客戶綁定導流。
   - `line/static/bind.html` — 客戶綁定／已綁定／改綁申請分流、取消與明確呼叫專員。
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`

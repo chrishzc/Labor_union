@@ -23,9 +23,6 @@ from infrastructure.line.redis_wakeup import SleepingLineWakeupSubscriber
 from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
 from infrastructure.mysql.line_notification_anomaly_worker import MySqlLineNotificationAnomalyWorker
-from infrastructure.mysql.order_pre_start_notification_source_worker import (
-    MySqlOrderPreStartNotificationSourceWorker,
-)
 from infrastructure.mysql.service_day_checkpoint_worker import MySqlServiceDayCheckpointWorker
 from infrastructure.mysql.scheduling_checkpoint_notification_source_worker import (
     MySqlSchedulingCheckpointNotificationSourceWorker,
@@ -58,7 +55,6 @@ from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.feedback_application import LineFeedbackApplication
 from subsystems.line.identity_management_application import IDENTITY_MENU_RESET_INTENT
 from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
-from subsystems.line.knowledge_question_application import enqueue_line_knowledge_question
 from subsystems.line.candidate_contact_postback_application import (
     LineCandidateContactPostbackApplication,
 )
@@ -132,7 +128,7 @@ def _canonical_runtime(
         worker_identity,
         now,
     )
-    event_consumer = _event_consumer(worker_identity, now, delivery_worker.run_new_reply_tasks)
+    event_consumer = _event_consumer(worker_identity, now)
     rich_menu_images = FileSystemRichMenuImageStore(_rich_menu_storage_root())
     rich_menu_provider = LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load)
     return CanonicalLineWorkerRuntime(
@@ -149,7 +145,7 @@ def _canonical_runtime(
     )
 
 
-def _event_consumer(worker_identity: str, now, on_new_reply_tasks=None) -> LineWebhookEventConsumer:
+def _event_handlers(now):
     leave_coordination = StaffLeaveCustomerCoordinationApplication(
         get_connection,
         open_line_unit_of_work,
@@ -193,13 +189,31 @@ def _event_consumer(worker_identity: str, now, on_new_reply_tasks=None) -> LineW
         return default_postback(inbox, unit_of_work)
 
     handlers["postback"] = handle_postback
+    return handlers, identity_handlers
+
+
+def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
+    handlers, _ = _event_handlers(now)
     return LineWebhookEventConsumer(
         open_line_unit_of_work,
         LineEventDispatcher(handlers),
         worker_identity,
         now,
-        on_new_reply_tasks=on_new_reply_tasks,
     )
+
+
+def webhook_reply_dispatcher(now, handoff):
+    _, handlers = _event_handlers(now)
+    start_day = ServiceStartDayPostbackApplication()
+
+    def dispatch(event, unit):
+        if handoff(event, unit):
+            return False
+        if event.event.event_type == "message":
+            return handlers.handle_reply_message(event, unit)
+        return start_day.handle(event, unit) or handlers.handle_reply_postback(event, unit)
+
+    return dispatch
 
 
 def _additional_workers(worker_identity: str, now, images, provider) -> dict[str, object]:
@@ -210,7 +224,6 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
         "deposit_settlement_notifications": get_deposit_notifications(),
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
         "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),
-        "order_pre_start_notification_sources": MySqlOrderPreStartNotificationSourceWorker(get_connection, now),
         "service_day_log_notification_stops": MySqlServiceDayLogNotificationStopWorker(get_connection, now),
         "scheduling_rebuild_notification_invalidations": MySqlSchedulingRebuildNotificationInvalidationWorker(get_connection, now),
         "notification_anomalies": MySqlLineNotificationAnomalyWorker(get_connection),

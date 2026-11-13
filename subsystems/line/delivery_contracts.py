@@ -27,8 +27,7 @@ _PROVIDER_ERROR_MAXIMUM_LENGTH = 500
 _REPLY_TOKEN_MAXIMUM_LENGTH = 512
 _MAXIMUM_CLAIM_BATCH_SIZE = 100
 
-# New informational replies have a distinct source; historical queued tasks
-# retain their original delivery policy.
+# Webhook-bound replies use this source for one-shot delivery and audit.
 REPLY_ONLY_WEBHOOK_SOURCE = "line_webhook_reply"
 RETIRED_CANDIDATE_COORDINATION_SOURCES = (
     "candidate_contact_adjustment",

@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from domains.line.canonical_payload import canonical_line_payload_json
-from domains.line.identities import LineRichMenuPublicationId
+from domains.line.identities import LineRichMenuPublicationId, LineUserId
 from domains.line.rich_menu import (
     LineRichMenuPublicationSnapshot,
     LineRichMenuPublicationStatus,
@@ -256,6 +256,45 @@ def _worker(repository, provider):
         "worker-1",
         lambda: NOW,
     )
+
+
+def test_restore_default_menu_checks_live_default_and_removes_only_the_personal_link() -> None:
+    session = _Session(
+        [_Response(200, {"richMenuId": "richmenu-current"}), _Response(200), _Response(404)]
+    )
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"", "image/png"), session=session)
+
+    result = adapter.restore_default_for_user(LineUserId("U-customer"))
+
+    assert result.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+    assert [(method, url.removeprefix("https://api.line.me/v2/bot")) for method, url, _ in session.calls] == [
+        ("get", "/user/all/richmenu"),
+        ("delete", "/user/U-customer/richmenu"),
+        ("get", "/user/U-customer/richmenu"),
+    ]
+
+
+def test_restore_default_menu_keeps_personal_link_when_no_api_default_is_set() -> None:
+    session = _Session([_Response(404)])
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"", "image/png"), session=session)
+
+    result = adapter.restore_default_for_user(LineUserId("U-customer"))
+
+    assert result.outcome_type is LineRichMenuProviderOutcomeType.REJECTED
+    assert [method for method, _, _ in session.calls] == ["get"]
+
+
+def test_restore_default_menu_requires_readback_after_a_successful_delete() -> None:
+    session = _Session(
+        [_Response(200, {"richMenuId": "richmenu-current"}), _Response(200),
+         _Response(200, {"richMenuId": "richmenu-personal"})]
+    )
+    adapter = LineRichMenuApiAdapter("token", lambda _: (b"", "image/png"), session=session)
+
+    result = adapter.restore_default_for_user(LineUserId("U-customer"))
+
+    assert result.error_code == "line_rich_menu_personal_link_still_present"
+    assert result.outcome_type is LineRichMenuProviderOutcomeType.UNAVAILABLE
 
 
 def test_adapter_exposes_stepwise_calls_with_stable_retry_keys():

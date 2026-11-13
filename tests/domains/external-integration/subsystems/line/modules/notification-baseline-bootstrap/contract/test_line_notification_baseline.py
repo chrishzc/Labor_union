@@ -52,10 +52,6 @@ def test_current_catalog_keeps_only_required_notifications_and_real_reminders() 
     assert tuple(rule.event_code for rule in typed_definition.rules) == (
         "runtime.alert.review_required",
         "complaint.ingress.hold_high_ticket",
-        "order.service_start_day",
-        "client.second_payment_due",
-        "client.second_payment_settled",
-        "order.service_completed",
     )
     assert all(rule.event_code != "service_time_checkpoint" for rule in typed_definition.rules)
 

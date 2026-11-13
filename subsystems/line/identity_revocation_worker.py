@@ -6,11 +6,11 @@ import json
 from datetime import datetime
 from typing import Callable
 
-from domains.line.identities import LineUserId
 from subsystems.line.identity_management_application import (
     IDENTITY_MENU_RESET_INTENT,
     LineIdentityManagementApplication,
 )
+from subsystems.line.identity_management_contracts import LineIdentityRevocationStatus
 from subsystems.line.outbox_contracts import ClaimLineOutboxQuery, CompleteLineOutboxCommand
 from subsystems.line.rich_menu_contracts import LineRichMenuProviderOutcomeType
 
@@ -53,10 +53,12 @@ class LineIdentityRevocationWorker:
         try:
             payload = json.loads(item.payload_json)
             request_id = int(payload["request_id"])
-            outcome = self._provider.link_to_user(
-                str(payload["provider_menu_id"]),
-                LineUserId(str(payload["line_user_id"])),
-            )
+            with self._unit_of_work_factory() as unit_of_work:
+                request = unit_of_work.identity_management.get_request(request_id)
+            if request.status is LineIdentityRevocationStatus.COMPLETED:
+                self._complete(item)
+                return
+            outcome = self._provider.restore_default_for_user(request.line_user_id)
             if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
                 self._application.finalize(request_id)
                 self._complete(item)

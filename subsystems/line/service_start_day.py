@@ -125,8 +125,10 @@ def start_day_delivery_is_current(unit, task, now):
     from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
     from shared_kernel.identities import ActorContext
 
-    retired = task.request.correlation_id.value.startswith('line-notification:order-pre-start-reminder:')
     is_reply_ack = start_day_reply_token(task) is not None
+    # 開工當天群組詢問已停止 Push；殘留的 Push 工作一律取消，只保留 Reply ack。
+    retired = task.request.correlation_id.value.startswith('line-notification:order-pre-start-reminder:')
+    retired = retired or (not is_reply_ack and task.request.source_aggregate_type in {SOURCE_TYPE, 'order_service_start_day_response'})
     if not retired and not is_reply_ack and task.request.source_aggregate_type not in {SOURCE_TYPE, 'order_service_start_day_response'}:
         return True
     if not retired and unit.service_start_days.delivery_is_current(task, now):

@@ -290,6 +290,19 @@ def current_service_start_execution(cursor,case_no,plan_id=None,*,lock=False):
         'confirmed_version_id':rows[0]['confirmed_version_id'],'substitutions':substitutions},tuple(days)
 
 
+def _require_office_assignment_ownership(cursor, case_no, *, lock):
+    cursor.execute(
+        "SELECT a.id FROM case_staff_assignments a "
+        "LEFT JOIN scheduling_aggregates g ON g.case_no=a.case_no "
+        "WHERE a.case_no=%s AND a.status IN ('planned','active','completed') "
+        "AND (a.generation_id IS NULL OR NOT (a.generation_id <=> g.effective_generation_id))"
+        + (" FOR UPDATE" if lock else ""),
+        (case_no,),
+    )
+    if cursor.fetchone() is not None:
+        raise ValueError("office_schedule_assignment_ownership_blocked")
+
+
 def preview_office_schedule(connection, case_no, segments, *, actual_start_date, reason, lock=False):
     with connection.cursor() as cursor:
         facts = load_preview_facts(cursor, case_no, office_first_schedule=True)
@@ -298,6 +311,7 @@ def preview_office_schedule(connection, case_no, segments, *, actual_start_date,
         if (facts.lifecycle.current_status.value != '訂單成立' or facts.order.service_data_locked
                 or any(item.official_service_dates for item in facts.scheduling.segments)):
             raise ValueError('office_schedule_not_pending_blocked')
+        _require_office_assignment_ownership(cursor, case_no, lock=lock)
         if (len(dates) != facts.order.terms.service_days or dates != tuple(sorted(set(dates)))
                 or not dates or dates[0] < actual_start_date):
             raise ValueError('office_schedule_dates_invalid')
@@ -402,16 +416,9 @@ def save_office_schedule(
         current = assignment_application_factory(connection).query(case_no).assignment_plan
         if facts.restart_generation_number is not None or any(a.official_service_dates for a in current.effective_assignments):
             raise ValueError("office_schedule_not_pending_blocked")
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT a.id FROM case_staff_assignments a "
-                "LEFT JOIN scheduling_aggregates g ON g.case_no=a.case_no "
-                "WHERE a.case_no=%s AND a.status IN ('planned','active','completed') "
-                "AND (a.generation_id IS NULL OR NOT (a.generation_id <=> g.effective_generation_id)) FOR UPDATE",
-                (case_no,),
-            )
-            if cursor.fetchone() is not None:
-                raise ValueError("office_schedule_assignment_ownership_blocked")
+        if preview_fingerprint is None:
+            with connection.cursor() as cursor:
+                _require_office_assignment_ownership(cursor, case_no, lock=True)
         staff_ids = {segment.staff_id for segment in segments}
         if (current.effective_assignments and {a.staff_id for a in current.effective_assignments} != staff_ids
                 and not reallocation_reason):

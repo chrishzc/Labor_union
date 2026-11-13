@@ -8,16 +8,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Mapping
 
+from domains.line.delivery import LineDeliveryTaskSnapshot
 from domains.line.identities import (
     LineDestinationId,
     LineSourceIdentity,
     LineSourceType,
     LineUserId,
 )
-from domains.line.webhook import build_line_webhook_event
+from domains.line.webhook import LineWebhookInboxSnapshot, build_line_webhook_event
 from shared_kernel.identities import CorrelationId
 from subsystems.line.ports import LineUnitOfWorkPort, LineWakeupPublisherPort
-from subsystems.line.webhook_contracts import LineWebhookRegistrationOutcome
+from subsystems.line.webhook_contracts import ClaimLineWebhookEventsQuery, LineWebhookRegistrationOutcome
 
 
 class InvalidLineWebhookSignatureError(ValueError):
@@ -40,12 +41,19 @@ class LineWebhookIntake:
         signature_verifier: object,
         unit_of_work_factory: Callable[[], LineUnitOfWorkPort],
         wakeup_publisher: LineWakeupPublisherPort,
-        immediate_reply_service: object | None = None,
+        *,
+        reply_consumer: Callable[[LineWebhookInboxSnapshot], tuple[LineDeliveryTaskSnapshot, ...]] | None = None,
+        reply_delivery: Callable[[LineDeliveryTaskSnapshot], None] | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
+        if (reply_consumer is None) != (reply_delivery is None):
+            raise ValueError("LINE webhook Reply requires both processing and delivery")
         self._signature_verifier = signature_verifier
         self._unit_of_work_factory = unit_of_work_factory
         self._wakeup_publisher = wakeup_publisher
-        self._immediate_reply_service = immediate_reply_service
+        self._reply_consumer = reply_consumer
+        self._reply_delivery = reply_delivery
+        self._now = now
 
     def accept(
         self,
@@ -56,37 +64,36 @@ class LineWebhookIntake:
         if not self._signature_verifier.verify(raw_body, signature):
             raise InvalidLineWebhookSignatureError("invalid LINE webhook signature")
         envelope = _parse_envelope(raw_body)
-        if self._immediate_reply_service is not None:
-            self._handle_immediate_replies(envelope)
         events = _canonical_events(envelope)
-        created_count = self._store(events, correlation_id)
+        created_count, reserved = self._store(events)
+        replies = []
+        for event in reserved:
+            try:
+                replies.extend(self._reply_consumer(event))
+            except Exception as error:
+                print(f"[LINE Webhook] Reply processing unavailable: {type(error).__name__}")
+        for task in replies:
+            try:
+                self._reply_delivery(task)
+            except Exception as error:
+                print(f"[LINE Webhook] Reply delivery unavailable: {type(error).__name__}")
         if created_count:
             self._publish_wakeup_best_effort()
         return LineWebhookIntakeResult(created_count, len(events) - created_count)
 
-    def _handle_immediate_replies(self, envelope: Mapping[str, object]) -> None:
-        raw_events = envelope.get("events")
-        if not isinstance(raw_events, list):
-            return
-        responder = getattr(self._immediate_reply_service, "try_immediate_reply", None)
-        if not callable(responder):
-            return
-        for raw_event in raw_events:
-            if isinstance(raw_event, dict):
-                try:
-                    responder(raw_event)
-                except Exception as error:
-                    print(f"[LINE Webhook] Immediate reply best-effort failed: {error}")
-
-    def _store(self, events, correlation_id: CorrelationId) -> int:
+    def _store(self, events):
         created_count = 0
+        reserved = []
+        query = ClaimLineWebhookEventsQuery("webhook-reply", self._now(), 1)
         with self._unit_of_work_factory() as unit_of_work:
             for event in events:
                 result = unit_of_work.webhook_inbox.register(event)
                 if result.outcome is LineWebhookRegistrationOutcome.CREATED:
                     created_count += 1
+                    if self._reply_consumer is not None and _can_dispatch_reply(event):
+                        reserved.append(unit_of_work.webhook_inbox.claim_registered(event.event_id, query))
             unit_of_work.commit()
-        return created_count
+        return created_count, reserved
 
     def _publish_wakeup_best_effort(self) -> None:
         try:
@@ -118,6 +125,7 @@ def _canonical_events(envelope: Mapping[str, object]):
 def _canonical_event(raw_event: object, destination: str):
     if not isinstance(raw_event, dict):
         raise InvalidLineWebhookPayloadError("LINE webhook event must be an object")
+    raw_event = {key: value for key, value in raw_event.items() if key != "immediate_reply_sent"}
     event_type = raw_event.get("type")
     timestamp = raw_event.get("timestamp")
     if not isinstance(event_type, str) or not isinstance(timestamp, int):
@@ -159,6 +167,14 @@ def _source_identity(raw_source: object) -> LineSourceIdentity:
 
 def _optional_text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _can_dispatch_reply(event) -> bool:
+    payload = json.loads(event.payload_json)
+    if event.event_type == "postback":
+        return True
+    message = payload.get("message")
+    return event.event_type == "message" and isinstance(message, dict) and message.get("type") == "text"
 
 
 def webhook_request_fingerprint(raw_body: bytes) -> str:

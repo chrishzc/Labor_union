@@ -117,10 +117,11 @@ import type {
   RichMenuDraftDefinition,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSaveActions';
+import { AiEventStudio } from './line_management/AiEventStudio';
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
-type LineTab = 'tickets' | 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'order_groups' | 'payment_overdue' | 'runtime';
+type LineTab = 'tickets' | 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'guidance' | 'order_groups' | 'payment_overdue' | 'runtime';
 /** 依責任邊界切分的頁面範圍：客服受理、通知寄送、LINE 介面設定。 */
 export type LineScope = 'service' | 'notifications' | 'interface';
 const LiffCardStudio = lazy(() => import('./line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio })));
@@ -222,12 +223,13 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['liff', '表單', 'line.tab.liff'],
   ['message_flow', 'LINE 流程圖', 'line.tab.message-flow'],
+  ['guidance', '引導動作', 'line.tab.guidance'],
 ];
 
 const SCOPE_VIEWS: Record<LineScope, { title: string; subtitle: string; tabs: readonly LineTab[]; fallback: LineTab }> = {
   service: { title: '客服與營運', subtitle: '處理客服案件、身分授權與案件群組。', tabs: ['tickets', 'binding', 'order_groups'], fallback: 'tickets' },
   notifications: { title: '通知與寄送', subtitle: '設定通知規則，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
-  interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單與 LINE 訊息流程。', tabs: ['richmenu', 'liff', 'message_flow'], fallback: 'richmenu' },
+  interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單、LINE 訊息流程與引導動作。', tabs: ['richmenu', 'liff', 'message_flow', 'guidance'], fallback: 'richmenu' },
 };
 
 const SAFE_CONFIGURATION_KINDS: readonly LineSafeConfigKind[] = [
@@ -1237,6 +1239,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       {activeTab === 'binding' && <LineIdentityWorkbench client={lineIdentity} />}
 
       {activeTab === 'liff' && <Suspense fallback={<p role="status">載入表單設計…</p>}><LiffCardStudio embedded /></Suspense>}
+
+      {activeTab === 'guidance' && (
+        <div className="line-guidance-panel">
+          <AiEventStudio />
+        </div>
+      )}
 
       {!runtimeOnly && scope === 'interface' && <LineMessageFlow active={activeTab === 'message_flow'} configuration={lineConfiguration} onOpenMessage={id => {
         window.location.hash = '#line-management?' + new URLSearchParams({ tab: 'push_queue', message: id });

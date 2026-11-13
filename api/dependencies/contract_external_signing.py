@@ -91,11 +91,9 @@ _LOCAL_PREVIEW_SECRET = "local-only-contract-final-preview-token-secret-v1"
 def testing_signing_skip_allowed() -> bool:
     """Only explicit local test runtimes may simulate signed returns."""
     environment = os.getenv("APP_ENV", "").strip().lower()
-    database = str(DB_CONFIG.get("database", ""))
     return (
         environment in {"development", "dev", "local", "test"}
         and DB_CONFIG.get("host") in {"127.0.0.1", "localhost", "::1"}
-        and (database == "union_db" or database.startswith("lu_test_"))
         and not os.getenv("DEPLOYMENT_PROFILE", "").strip()
     )
 

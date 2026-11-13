@@ -83,7 +83,7 @@ class DeliveryRepository:
     def get(self, task_id):
         return self.tasks.get(task_id.value)
 
-    def reply_opportunity(self, _correlation_id):
+    def reply_opportunity(self, _correlation_id, *, recipient=None):
         return LineReplyOpportunity("synthetic-reply-token", NOW + timedelta(seconds=45))
 
     def record_attempt(self, command):
@@ -104,8 +104,8 @@ def _task(index, knowledge=False):
         NOW,
         IdempotencyKey(f"regression-delivery:{index}"),
         CorrelationId(f"line-event:regression:{index}"),
-        "knowledge_answer_request" if knowledge else "review",
-        str(index),
+        "line_webhook_reply" if knowledge else "review",
+        f"regression:{index}" if knowledge else str(index),
     )
     return LineDeliveryTaskSnapshot(task_id, request, LineDeliveryStatus.PENDING, 0, None)
 
@@ -132,13 +132,13 @@ class DeliveryRegressionTests(unittest.TestCase):
                     lambda: Uow(delivery_tasks=repository), provider, "worker:regression",
                     lambda: repository.clock, batch_size=1,
                 )
-                self.assertEqual(worker.run_once(), 1)
+                worker.deliver_webhook_reply(repository.claim(SimpleNamespace(batch_size=1, lease_owner="worker:regression", now=NOW))[0])
                 provider.reply.assert_called_once()
                 provider.send.assert_not_called()
                 self.assertEqual(repository.recorded[0].provider_outcome.error_code, "line_reply_outcome_uncertain")
                 self.assertFalse(repository.recorded[0].retry_allowed)
 
-    def test_reply_rate_limit_keeps_existing_push_behavior(self):
+    def test_reply_rate_limit_does_not_push(self):
         repository = DeliveryRepository(knowledge=True)
         provider = Mock()
         provider.reply.return_value = LineProviderOutcome(
@@ -151,9 +151,9 @@ class DeliveryRegressionTests(unittest.TestCase):
             lambda: Uow(delivery_tasks=repository), provider, "worker:regression",
             lambda: repository.clock, batch_size=1,
         )
-        self.assertEqual(worker.run_once(), 1)
+        worker.deliver_webhook_reply(repository.claim(SimpleNamespace(batch_size=1, lease_owner="worker:regression", now=NOW))[0])
         provider.reply.assert_called_once()
-        provider.send.assert_called_once()
+        provider.send.assert_not_called()
 
     def test_slow_batch_leases_each_task_only_when_it_is_ready_to_send(self):
         repository = DeliveryRepository(count=25)

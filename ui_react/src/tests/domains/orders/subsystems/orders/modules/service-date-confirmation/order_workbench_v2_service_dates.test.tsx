@@ -11,13 +11,14 @@ const mocks = vi.hoisted(() => ({
   getActualStart: vi.fn(), getOrderCalendarDetail: vi.fn(), calculate: vi.fn(),
   getServiceDates: vi.fn(), previewServiceDates: vi.fn(), applyServiceDates: vi.fn(),
   previewActualStart: vi.fn(), applyActualStart: vi.fn(),
-  saveHistoricalSchedule: vi.fn(), getAssignmentPlan: vi.fn(),
+  previewOfficeSchedule: vi.fn(), saveHistoricalSchedule: vi.fn(), getAssignmentPlan: vi.fn(),
 }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getActualStart: mocks.getActualStart, getOrderCalendarDetail: mocks.getOrderCalendarDetail,
   getAssignmentPlan: mocks.getAssignmentPlan,
 } }));
 vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({
+  previewOfficeSchedule: mocks.previewOfficeSchedule,
   saveHistoricalSchedule: mocks.saveHistoricalSchedule,
   ordersMutationClient: {
   getServiceDates: mocks.getServiceDates, previewServiceDates: mocks.previewServiceDates, applyServiceDates: mocks.applyServiceDates,
@@ -271,6 +272,27 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
       expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.anything(), true, undefined);
+    expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+  });
+
+  it('多月嫂預覽失敗後可取消，重新讀取原日期，且未提交排班', async () => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
+    mocks.previewOfficeSchedule.mockRejectedValue(new ApiHttpError(409, 'office_schedule_assignment_ownership_blocked', '請核對原指派'));
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
+      officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
+    fireEvent.click(await screen.findByRole('button', { name: '多月嫂排班' }));
+    expect(mocks.previewOfficeSchedule).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
+    await screen.findByRole('button', { name: '服務日期 2026-10-02' });
+    changeSelection();
+    fireEvent.click(screen.getByRole('button', { name: '預覽班表及應付' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('請核對原指派');
+    fireEvent.click(screen.getByRole('button', { name: '取消多月嫂編輯' }));
+    expect(await screen.findByRole('button', { name: '多月嫂排班' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-03' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 

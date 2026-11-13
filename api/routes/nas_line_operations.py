@@ -45,7 +45,7 @@ async def forward_line_operation(request: Request, client=Depends(get_line_opera
 # proxy to management URLs. Original handlers enforce LINE identity, current
 # binding, capabilities, scope, versions and idempotency inside management-api.
 _OPERATIONS = (
-    line_candidate_contact.router, line_deposit_payment.router, line_service_help.public_router,
+    line_deposit_payment.router, line_service_help.public_router,
     line_feedback.router, line_mobile_admin.router, line_mobile_staff_leave_coordination.router,
     notification_task_actions.mobile_router,
 )

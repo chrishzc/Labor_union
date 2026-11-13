@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Mapping
 
 from subsystems.line.notification_policy import NotificationSourceEvent
-from subsystems.line.service_start_day import EVENT_CODE, EVENT_PREFIX, SOURCE_TYPE, ServiceStartDayCandidate
 
 
 def from_orders_lifecycle_outbox(
@@ -115,25 +114,6 @@ def from_scheduling_service_day_checkpoint_outbox(
     )
 
 
-def from_order_service_start_day(candidate: ServiceStartDayCandidate, *, occurred_at: datetime) -> NotificationSourceEvent:
-    """Freeze one current group/day/payment snapshot; no payment or service mutation."""
-    notice = ''  # Financial reminders are sent only to the customer's private chat.
-    facts = {**candidate.facts(), 'first_payment_notice': notice,
-             'caregiver_names': '、'.join(item.name for item in candidate.caregivers),
-             'response_token': candidate.token}
-    return NotificationSourceEvent(
-        identity=EVENT_PREFIX + candidate.token,
-        event_code=EVENT_CODE,
-        historical_silent=False,
-        facts=facts,
-        source_domain="orders",
-        source_aggregate_type=SOURCE_TYPE,
-        source_aggregate_identity=candidate.case_no,
-        source_version=candidate.generation_id,
-        occurred_at=occurred_at,
-    )
-
-
 def _positive(value: object, name: str) -> int:
     if not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} is invalid")
@@ -148,7 +128,6 @@ def _text(value: object, name: str) -> str:
 
 __all__ = [
     "from_client_finance_deposit_outbox",
-    "from_order_service_start_day",
     "from_orders_lifecycle_outbox",
     "from_scheduling_service_day_checkpoint_outbox",
 ]

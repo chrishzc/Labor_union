@@ -38,9 +38,9 @@ def _decoded(value):
 
 
 class MySqlServiceStartRepository:
-    def __init__(self, connection):
+    def __init__(self, connection, *, deliveries=None):
         self.connection = connection
-        self.deliveries = MySqlLineDeliveryTaskRepository(connection)
+        self.deliveries = deliveries if deliveries is not None else MySqlLineDeliveryTaskRepository(connection)
 
     def leave_cases(self, staff_id):
         return leave_cases(self.connection, staff_id)

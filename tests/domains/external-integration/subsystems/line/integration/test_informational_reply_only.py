@@ -51,6 +51,9 @@ class Deliveries:
             self.new_reply_ids.append(task.task_id)
         return SimpleNamespace(task_id=task.task_id)
 
+    def exists_for_key(self, key):
+        return any(task.request.idempotency_key == key for task in self.tasks.values())
+
     def new_reply_task_ids(self):
         return tuple(self.new_reply_ids)
 
@@ -61,6 +64,8 @@ class Deliveries:
         lease = LineDeliveryLease(task.task_id, query.lease_owner, query.now, query.now + timedelta(seconds=60))
         self.tasks[task_id.value] = replace(task, status=LineDeliveryStatus.PROCESSING, lease=lease)
         return self.tasks[task_id.value]
+
+    claim_webhook_reply = claim_specific
 
     def claim(self, query):
         for identifier, task in self.tasks.items():
@@ -124,11 +129,33 @@ def request(source=REPLY_ONLY_WEBHOOK_SOURCE, *, key="new-information"):
         CorrelationId("line-event:synthetic-event"), source, "synthetic-event")
 
 
+def deliver_reply(unit, sender):
+    from subsystems.line.delivery_contracts import ClaimLineDeliveryTasksQuery
+    task = unit.delivery_tasks.claim_webhook_reply(LineDeliveryTaskId(1), ClaimLineDeliveryTasksQuery("webhook-reply", NOW, 1))
+    LineDeliveryWorker(lambda: unit, sender, "webhook-reply", lambda: NOW).deliver_webhook_reply(task)
+
+
 def provider():
     result = Mock()
     result.reply.return_value = result.send.return_value = LineProviderOutcome(LineProviderOutcomeType.SUCCESS,
         provider_message_id=LineProviderMessageId("synthetic-message"))
     return result
+
+
+@pytest.mark.parametrize(("source", "identity"), [
+    ("candidate_contact_answer", "old-coordination"),
+    ("candidate_matching_willingness_card", "mobile-matching-followup:old-recontact"),
+])
+def test_retired_candidate_work_is_cancelled_before_provider_delivery(source, identity):
+    unit, sender = Unit(), provider()
+    unit.delivery_tasks.cancel = Mock()
+    unit.delivery_tasks.enqueue(replace(request(source), source_aggregate_identity=identity))
+
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+
+    unit.delivery_tasks.cancel.assert_called_once()
+    sender.send.assert_not_called()
+    sender.reply.assert_not_called()
 
 
 @pytest.mark.parametrize("text", ["服務說明", "服務流程", "收費與補助", "查詢服務進度", "服務登記", "其他問題", "恢復AI"])
@@ -140,7 +167,7 @@ def test_information_and_disabled_prompts_are_new_reply_only_work(text):
     assert task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
     unit.customer_service.create_or_append.assert_not_called()
     sender = provider()
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+    deliver_reply(unit, sender)
     sender.reply.assert_called_once_with("synthetic-token", json.loads(task.request.payload_json))
     sender.send.assert_not_called()
     assert unit.delivery_tasks.reply_reads[0][1] == task.request.recipient
@@ -228,7 +255,7 @@ def test_reply_only_failures_never_push_or_automatically_retry(outcome):
         sender.reply.side_effect = RuntimeError("synthetic failure")
     elif isinstance(outcome, LineProviderOutcomeType):
         sender.reply.return_value = LineProviderOutcome(outcome, error_code="synthetic-error", error_message="synthetic failure")
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+    deliver_reply(unit, sender)
     sender.send.assert_not_called()
     assert sender.reply.call_count <= 1
     assert unit.delivery_tasks.tasks[1].status is LineDeliveryStatus.FAILED
@@ -332,12 +359,10 @@ def test_production_reply_query_filters_event_type_source_and_event_identity(sql
     unit, sender = Unit(), provider()
     unit.delivery_tasks.reply_opportunity = repository.reply_opportunity
     unit.delivery_tasks.enqueue(replace(request(), recipient=recipient))
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+    deliver_reply(unit, sender)
     assert sender.reply.call_count == int(allowed)
     sender.send.assert_not_called()
     assert repository.reply_opportunity(CorrelationId("line-event:absent-event"), recipient=recipient) is None
-    # The existing knowledge path keeps its original private-message restriction.
-    assert (repository.reply_opportunity(CorrelationId("line-event:synthetic-event")) is not None) is (event_type == "message" and source_type == "user")
 
 
 @pytest.mark.parametrize("payload", [
@@ -363,85 +388,116 @@ def test_only_new_reply_inserts_are_expedited_not_duplicates_or_push(monkeypatch
     assert repository.new_reply_task_ids() == (LineDeliveryTaskId(11),)
 
 
-def test_commit_then_expedite_new_information_before_old_queue_with_bounded_budget():
+@pytest.mark.parametrize("choice", ["willing", "unwilling"])
+@pytest.mark.parametrize("failure", [None, "rejected", "expired", "commit"])
+def test_webhook_records_both_candidate_choices_and_replies_without_background_worker(monkeypatch, choice, failure):
+    from api.dependencies import line_runtime
+    from domains.line.webhook import LineWebhookInboxSnapshot, LineWebhookLease, LineWebhookProcessingStatus
+    from shared_kernel.identities import ExpectedVersion
+    from subsystems.line.webhook_contracts import LineWebhookRegistrationOutcome
+
     unit, sender = Unit(), provider()
-    old_push = unit.delivery_tasks.enqueue(request("line_webhook_event", key="old-push")).task_id
-    old_reply = unit.delivery_tasks.enqueue(request(key="old-reply")).task_id
-    unit.delivery_tasks.new_reply_ids.clear()
-    worker = LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW, batch_size=4)
+    persisted = {}
     trace = []
-    unit.commit = lambda: trace.append("commit")
-    unit.webhook_inbox = SimpleNamespace(complete=lambda command: trace.append("complete"))
-    def dispatch(event, uow):
-        uow.delivery_tasks.new_reply_ids.clear()  # Each real UoW has a fresh repository.
-        uow.delivery_tasks.enqueue(request(key=f"new-{len(uow.delivery_tasks.tasks)}"))
-        return SimpleNamespace(status=LineEventDispatchStatus.PROCESSED)
-    def reply(*args):
-        assert "commit" in trace
+    event_key = "synthetic-candidate-event"
+
+    def register(event):
+        if event.event_id in persisted:
+            return SimpleNamespace(outcome=LineWebhookRegistrationOutcome.EXISTING)
+        persisted[event.event_id] = event
+        return SimpleNamespace(outcome=LineWebhookRegistrationOutcome.CREATED)
+
+    def claim_registered(event_id, query):
+        event = persisted[event_id]
+        snapshot = LineWebhookInboxSnapshot(event, LineWebhookProcessingStatus.PROCESSING, ExpectedVersion(1), 1,
+            LineWebhookLease(event_id, query.lease_owner, query.now, query.now + timedelta(seconds=60)))
+        return snapshot
+
+    def complete(command):
+        trace.append(command.target_status.value)
+
+    def commit():
+        if failure == "commit" and trace[-1:] == ["processed"]:
+            raise RuntimeError("synthetic business commit failure")
+        trace.append("commit")
+
+    def record_willingness(reference, willingness, line_user_id, key):
+        assert trace[-1] == "commit"
+        assert reference == "a" * 64 and line_user_id == USER
+        trace.append(willingness)
+        return 41
+
+    def reply(token, message):
+        assert trace[-1] == "commit"
+        assert message == {"type": "text", "text": "感謝回復!!已記錄"}
         trace.append("reply")
-        return LineProviderOutcome(LineProviderOutcomeType.SUCCESS, provider_message_id=LineProviderMessageId("synthetic-message"))
+        if failure == "rejected":
+            return LineProviderOutcome(LineProviderOutcomeType.REJECTED, error_code="line_http_400", error_message="rejected")
+        return LineProviderOutcome(LineProviderOutcomeType.SUCCESS, provider_message_id=LineProviderMessageId("synthetic-reply"))
+
+    unit.webhook_inbox = SimpleNamespace(register=register, claim_registered=claim_registered, complete=complete)
+    unit.candidate_contact_pool_replies = SimpleNamespace(record_willingness=record_willingness)
+    unit.commit = commit
     sender.reply.side_effect = reply
-    consumer = LineWebhookEventConsumer(lambda: unit, SimpleNamespace(dispatch=dispatch), "synthetic-worker", lambda: NOW,
-        on_new_reply_tasks=worker.run_new_reply_tasks)
-    event = inbox()
-    event.lease = SimpleNamespace(event_id=event.event.event_id)
-    event.attempt_count, event.max_attempts = 1, 3
-    for _ in range(3):
-        consumer._consume(event)
-    assert trace[:3] == ["complete", "commit", "commit"]  # Business commit precedes fresh claim commit.
-    assert sender.reply.call_count == 2  # Half the cycle remains available to the original queue.
+    if failure == "expired":
+        unit.delivery_tasks.opportunity = LineReplyOpportunity("synthetic-token", NOW)
+    import infrastructure.line.messaging_api_adapter as adapter_module
+    monkeypatch.setattr(adapter_module, "LineMessagingApiAdapter", lambda token: sender)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "synthetic-channel")
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "synthetic-secret")
+    monkeypatch.setattr(line_runtime, "LineWebhookSignatureVerifier", lambda secret: SimpleNamespace(verify=lambda body, signature: True))
+    monkeypatch.setattr(line_runtime, "open_line_unit_of_work", lambda: unit)
+    monkeypatch.setattr(line_runtime, "_wakeup_publisher", lambda: SimpleNamespace(publish=lambda: None))
+    monkeypatch.setattr(line_runtime, "datetime", SimpleNamespace(now=lambda timezone: NOW))
+    line_runtime.get_line_webhook_intake.cache_clear()
+    try:
+        intake = line_runtime.get_line_webhook_intake()
+        payload = {"destination": "synthetic-bot", "events": [{
+            "webhookEventId": event_key, "type": "postback", "timestamp": int(NOW.timestamp() * 1000),
+            "source": {"type": "user", "userId": USER.value}, "replyToken": "synthetic-token",
+            "postback": {"data": f"candidate-contact:{'a' * 64}:{choice}"},
+        }]}
+        raw = json.dumps(payload).encode()
+        assert intake.accept(raw, "synthetic-signature", CorrelationId("test")).created_count == 1
+        assert intake.accept(raw, "synthetic-signature", CorrelationId("test")).duplicate_count == 1
+    finally:
+        line_runtime.get_line_webhook_intake.cache_clear()
+    assert trace.count(choice) == 1
+    assert sender.reply.call_count == int(failure in {None, "rejected"})
     sender.send.assert_not_called()
-    assert unit.delivery_tasks.tasks[old_push.value].status is LineDeliveryStatus.PENDING
-    assert unit.delivery_tasks.tasks[old_reply.value].status is LineDeliveryStatus.PENDING
-    assert worker.run_once() == 4  # Includes the two expedited replies in heartbeat/batch counts.
-    sender.send.assert_called_once()
-    assert unit.delivery_tasks.tasks[old_push.value].status is LineDeliveryStatus.SENT
-    assert unit.delivery_tasks.tasks[old_reply.value].status is LineDeliveryStatus.SENT
-    assert unit.delivery_tasks.tasks[5].status is LineDeliveryStatus.PENDING
+    if failure == "commit":
+        assert "retryable_failed" in trace
+        assert not unit.delivery_tasks.attempts
+    else:
+        assert "processed" in trace
+        assert len(unit.delivery_tasks.attempts) == 1
+        assert not unit.delivery_tasks.attempts[0].retry_allowed
 
 
-def test_failed_business_commit_never_triggers_early_delivery():
-    unit = Unit()
-    callback = Mock()
-    unit.delivery_tasks.enqueue(request())
-    unit.webhook_inbox = SimpleNamespace(complete=Mock())
-    unit.commit = Mock(side_effect=[RuntimeError("synthetic commit failure"), None])
-    consumer = LineWebhookEventConsumer(lambda: unit,
-        SimpleNamespace(dispatch=lambda *args: SimpleNamespace(status=LineEventDispatchStatus.PROCESSED)),
-        "synthetic-worker", lambda: NOW, on_new_reply_tasks=callback)
-    event = inbox()
-    event.lease = SimpleNamespace(event_id=event.event.event_id)
-    event.attempt_count, event.max_attempts = 1, 3
-    consumer._consume(event)
-    callback.assert_not_called()
-    assert unit.webhook_inbox.complete.call_args.args[0].target_status.value == "retryable_failed"
-
-
-def test_early_delivery_failure_cannot_retry_committed_webhook_business():
-    unit = Unit()
-    unit.delivery_tasks.enqueue(request())
-    unit.webhook_inbox = SimpleNamespace(complete=Mock())
-    consumer = LineWebhookEventConsumer(lambda: unit,
-        SimpleNamespace(dispatch=lambda *args: SimpleNamespace(status=LineEventDispatchStatus.PROCESSED)),
-        "synthetic-worker", lambda: NOW,
-        on_new_reply_tasks=Mock(side_effect=RuntimeError("synthetic delivery failure")))
-    event = inbox()
-    event.lease = SimpleNamespace(event_id=event.event.event_id)
-    with pytest.raises(RuntimeError, match="synthetic delivery failure"):
-        consumer._consume(event)
-    assert unit.webhook_inbox.complete.call_count == 1
-    assert unit.webhook_inbox.complete.call_args.args[0].target_status.value == "processed"
-
-
-def test_early_delivery_ignores_business_results_and_already_claimed_tasks():
+def test_background_worker_records_stranded_reply_without_provider_call():
     unit, sender = Unit(), provider()
-    business_id = unit.delivery_tasks.enqueue(request("line_webhook_event")).task_id
-    claimed_id = unit.delivery_tasks.enqueue(request()).task_id
-    unit.delivery_tasks.tasks[claimed_id.value] = replace(unit.delivery_tasks.tasks[claimed_id.value], status=LineDeliveryStatus.PROCESSING)
-    LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_new_reply_tasks((business_id, claimed_id))
+    unit.delivery_tasks.enqueue(request())
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
+    assert unit.delivery_tasks.attempts[0].provider_outcome.error_code == "line_reply_webhook_window_closed"
+    assert not unit.delivery_tasks.attempts[0].retry_allowed
     sender.send.assert_not_called()
     sender.reply.assert_not_called()
-    assert unit.delivery_tasks.tasks[business_id.value].status is LineDeliveryStatus.PENDING
+
+
+def test_deposit_assistance_replies_in_webhook_and_leaves_ticket_for_worker():
+    from subsystems.line.deposit_notifications import handle_deposit_assistance
+
+    unit = Unit()
+    unit.deposit_notifications = SimpleNamespace(customer_line_user_id=lambda *args, **kwargs: USER.value)
+    unit.deposit_payments = SimpleNamespace(get=lambda *args, **kwargs: object())
+    event = inbox(kind="postback").event
+    assert handle_deposit_assistance("deposit-assistance:CASE-1", event, unit, reply_only=True)
+    unit.customer_service.create_or_append.assert_not_called()
+    [reply] = unit.delivery_tasks.tasks.values()
+    assert reply.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+    assert handle_deposit_assistance("deposit-assistance:CASE-1", event, unit)
+    unit.customer_service.create_or_append.assert_called_once()
+    assert list(unit.delivery_tasks.tasks.values()) == [reply]
 
 
 def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):

@@ -18,7 +18,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 服務自助導覽只使用 `service-menu` 共用文案；訂單異動導覽只提供已設定的 `?target=order_update` URI，未設定時提示專員協助，不產生五分類按鈕或猜測連結。原資料／訂單受理及有效結果通知不變。
 
 ## Implementation
-  - `subsystems/line/webhook_immediate_reply.py` — 專人服務受理僅使用當次 Reply API；由 runtime 注入既有文案 reader，缺 Token／設定或 Reply 失敗不建立背景受理 Push，工單保存獨立。
+  - `subsystems/line/webhook_immediate_reply.py` — 專人服務受理沿用既有文案與 Webhook Reply 投遞紀錄；工單留給背景流程保存。
 
 - `subsystems/line/runtime_human_escalation_source.py`
 - `subsystems/line/service_help_application.py`

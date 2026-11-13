@@ -85,6 +85,19 @@ def test_missing_subject_does_not_open_database_or_invent_sample_facts():
     assert result.status == "needs_subject" and result.facts == ()
 
 
+def test_candidate_information_flow_preview_renders_three_images_and_one_shared_card():
+    def forbidden():
+        pytest.fail("sample preview must not open a database connection")
+
+    result = app(factory=forbidden).render(
+        "card-candidate-information-package", None, None, None, actor(), sample=True,
+    )
+    assert result.status == "ready"
+    one, two, weekly, reply = result.bubbles
+    assert [page.children[0].kind for page in (one, two, weekly)] == ["image", "image", "image"]
+    assert [button.text for button in reply.children[-1].children] == ["可以接案", "無法接案"]
+
+
 def test_render_uses_selected_facts_and_ephemeral_copy_without_saving():
     configuration = Configuration(variables=("case_no",))
     result = app(configuration).render("notice", "選擇案件 {case_no}", "CASE-1", None, actor())
@@ -226,7 +239,7 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
         {"id": "old-complaint", "template_id": "LU96-M4-COMPLAINT-HIGH-CARD-V1"},
     ]})
     ids = {entry.id for entry in catalog}
-    assert {"card-customer-confirmation", "card-union-question", "card-union-answer",
+    assert {"card-customer-confirmation", "card-candidate-information-package",
             "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3",
             "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
             "template-client_rebind_rejected", "template-staff_verification_rejected"} <= ids
@@ -251,42 +264,27 @@ def test_unused_identity_templates_are_hidden_without_removing_rule_backed_notif
     assert templates == before
 
 
-def test_start_day_group_card_public_preview_has_copy_and_inert_buttons_only():
-    from pathlib import Path
-    class CurrentConfiguration:
-        def get(self,kind,_actor):
-            definition=json.loads(Path(f'config/{kind.value}.json').read_text(encoding='utf-8'))
-            return LineConfigurationSnapshot(kind,LineConfigurationRevision(1),canonical_line_payload_json(definition))
-    def forbidden_reader():
-        pytest.fail('public preview must not access real identities or create an inquiry')
-    application=LineMessagePreviewApplication(CurrentConfiguration(),forbidden_reader)
-    result=application.render('LINE-ORDER-SERVICE-START-DAY-V1',None,None,None,actor(),sample=True)
-    public=json.dumps(asdict(result),ensure_ascii=False)
-    assert result.status=='ready'
-    assert '今天是本案的服務開始日' in public and '服務正常' in public and '需要協助' in public
-    assert '3 天後' not in public and 'start-day:' not in public
-    assert application.render('LINE-ORDER-SERVICE-START-DAY-V1',None,None,None,actor()).status=='unavailable'
-
-
-@pytest.mark.parametrize('key,phrase',[
-    ('LINE-SECOND-PAYMENT-DUE-V1','第二期款尚待繳納 24,000 元'),
-    ('LINE-SECOND-PAYMENT-SETTLED-V1','第二期款 24,000 元已確認入帳'),
-    ('LINE-SERVICE-COMPLETION-V1','請填寫服務滿意度問卷'),
+@pytest.mark.parametrize("key", [
+    "LINE-ORDER-SERVICE-START-DAY-V1",
+    "LINE-SECOND-PAYMENT-DUE-V1",
+    "LINE-SECOND-PAYMENT-SETTLED-V1",
+    "LINE-SERVICE-COMPLETION-V1",
 ])
-def test_second_payment_public_preview_is_short_group_copy_without_actions(key,phrase):
+def test_retired_group_notifications_are_absent_from_default_previews(key):
     from pathlib import Path
+
     class CurrentConfiguration:
-        def get(self,kind,_actor):
-            definition=json.loads(Path(f'config/{kind.value}.json').read_text(encoding='utf-8'))
-            return LineConfigurationSnapshot(kind,LineConfigurationRevision(1),canonical_line_payload_json(definition))
-    def forbidden_reader():pytest.fail('sample must not access identities, create jobs or call a provider')
-    application=LineMessagePreviewApplication(CurrentConfiguration(),forbidden_reader)
-    result=application.render(key,None,None,None,actor(),sample=True)
-    assert result.status=='ready' and result.format=='text' and phrase in result.text
-    if key=='LINE-SECOND-PAYMENT-DUE-V1':
-        assert key not in {descriptor.id for descriptor in application.catalog(actor())}
-    assert not result.bubbles
-    assert application.render(key,None,None,None,actor()).status=='unavailable'
+        def get(self, kind, _actor):
+            definition = json.loads(Path(f"config/{kind.value}.json").read_text(encoding="utf-8"))
+            return LineConfigurationSnapshot(kind, LineConfigurationRevision(1), canonical_line_payload_json(definition))
+
+    def forbidden_reader():
+        pytest.fail("retired preview must not access identities or create jobs")
+
+    application = LineMessagePreviewApplication(CurrentConfiguration(), forbidden_reader)
+    assert key not in {descriptor.id for descriptor in application.catalog(actor())}
+    with pytest.raises(MessagePreviewNotFound):
+        application.render(key, None, None, None, actor(), sample=True)
 
 
 @pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-profile-update", "service-order-update", "service-other"])
@@ -302,15 +300,16 @@ def test_fixed_runtime_messages_need_no_database_and_expose_no_actions(key):
         assert result.text == "綁定成功，專屬選單將稍後更新。"
 
 
-@pytest.mark.parametrize("key", ["card-union-question", "card-union-answer"])
-def test_manual_copy_is_only_a_preview_draft_using_the_real_case(key):
-    empty = app().render(key, "", "CASE-1", 7, actor())
-    assert empty.status == "unavailable" and not empty.bubbles
-    result = app().render(key, "請協助確認服務條件。", "CASE-1", 7, actor())
-    public = json.dumps(asdict(result), ensure_ascii=False)
-    assert result.status == "ready" and "請協助確認服務條件。" in public
-    assert "preview.invalid" not in public and "preview-only" not in public
-    assert "不會執行" in public
+@pytest.mark.parametrize("key", ["card-union-question", "card-union-answer", "candidate-willing-received"])
+def test_inactive_candidate_template_aliases_have_no_public_preview(key):
+    template_id = "LINE-COPY-" + key
+    templates = {"templates": [{"id": template_id, "message_type": "text"}]}
+    rules = {"rules": [{"id": "old-rule", "template_id": template_id}]}
+    descriptors = app()._catalog(templates, rules, include_unlisted=True)
+    assert not any(item.id == "old-rule" for item in descriptors)
+    if key != "candidate-willing-received":
+        with pytest.raises(MessagePreviewNotFound):
+            app().render(key, None, None, None, actor(), sample=True)
 
 
 @pytest.mark.parametrize("key", ["card-customer-confirmation", "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3"])
@@ -366,7 +365,7 @@ def test_bootstrap_copy_matches_current_registration_binding_and_welcome_retirem
 
 @pytest.mark.parametrize("key", ["notice", "card-caregiver-information", "card-caregiver-information-2",
     "card-customer-profiles", "card-customer-confirmation", "card-candidate-information-1",
-    "card-candidate-information-2", "card-candidate-information-3", "card-union-question", "card-union-answer"])
+    "card-candidate-information-2", "card-candidate-information-3", "card-candidate-information-package"])
 def test_public_examples_render_without_subject_database_or_eligibility(key):
     def forbidden():
         pytest.fail("public examples must never query real case or staff eligibility")
@@ -517,13 +516,18 @@ def test_read_only_flow_previews_show_delivery_text_and_sample_facts(key, expect
         assert "https://preview.invalid/contract" in result.text
 
 
+def test_candidate_willingness_reply_preview_shows_fixed_copy():
+    result = app().render("candidate-willing-received", None, None, None, actor(), sample=True)
+    assert result.text == "感謝回復!!已記錄"
+
+
 def test_all_editable_builtin_messages_have_copy_and_genesis_is_not_mutated():
     from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
     defaults = default_copy_templates()
     original = {"templates": []}
     effective = effective_copy_definition(original)
     for entry in app().catalog(actor()):
-        if entry.id == 'card-candidate-information-3' or entry.id in _READ_ONLY_FLOW_MESSAGES:
+        if entry.id in {'card-candidate-information-3', 'candidate-willing-received'} or entry.id in _READ_ONLY_FLOW_MESSAGES:
             assert entry.id not in defaults
             continue
         if entry.builtin and entry.template_id is None:

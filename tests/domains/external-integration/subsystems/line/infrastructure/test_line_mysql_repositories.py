@@ -5,6 +5,7 @@ Description: 驗證 LINE MySQL adapters 的交易、cleanup claim、owner 邊界
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -19,7 +20,10 @@ from domains.line.identities import (
     LineWebhookEventId,
 )
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityClaim
-from domains.line.webhook import LineWebhookProcessingStatus
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import LineRecipient, LineRecipientType
+from domains.line.webhook import LineWebhookInboxSnapshot, LineWebhookProcessingStatus, build_line_webhook_event
+from domains.line.identities import LineDestinationId, LineSourceIdentity, LineSourceType
 from domains.line.rich_menu import LineRichMenuPublicationStatus
 from infrastructure.mysql.line_delivery_task_repository import (
     MySqlLineDeliveryTaskRepository,
@@ -226,7 +230,7 @@ def test_delivery_reply_opportunity_reads_one_time_token_from_source_webhook() -
             {
                 "payload_snapshot": (
                     '{"mode":"active","replyToken":"reply-token-1",'
-                    '"type":"message"}'
+                    '"type":"message","source":{"type":"user","userId":"U-user"}}'
                 ),
                 "received_at_utc": NOW.replace(tzinfo=None),
             },
@@ -235,7 +239,7 @@ def test_delivery_reply_opportunity_reads_one_time_token_from_source_webhook() -
     repository = MySqlLineDeliveryTaskRepository(FakeConnection(cursor))
 
     opportunity = repository.reply_opportunity(
-        CorrelationId("line-event:event-knowledge-1")
+        CorrelationId("line-event:event-knowledge-1"), recipient=LineRecipient(LineRecipientType.USER, LineUserId("U-user")),
     )
 
     assert opportunity is not None
@@ -664,6 +668,28 @@ def test_webhook_claim_recovers_exhausted_leases_and_binds_due_clocks() -> None:
     assert exhausted_parameters[0] == exhausted_parameters[1]
     assert due_parameters[0] == due_parameters[1] == due_parameters[2]
     assert due_parameters[3] == 10
+
+
+def test_webhook_redelivery_ignores_new_token_but_rejects_changed_action(monkeypatch):
+    source = LineSourceIdentity(LineSourceType.USER, "U-user", LineUserId("U-user"))
+    payload = {"postback": {"data": "original-action"}, "replyToken": "synthetic-1"}
+
+    def event(body):
+        return build_line_webhook_event(
+            provider_event_id="postback-1", destination_id=LineDestinationId("test-bot"), event_type="postback",
+            source=source, occurred_at=NOW, canonical_payload=body,
+        )
+
+    original = event(payload)
+    repository = MySqlLineWebhookInboxRepository(FakeConnection(ScriptedCursor()))
+    stored = replace(original, payload_json=canonical_line_payload_json({**payload, "immediate_reply_sent": True}))
+    monkeypatch.setattr(repository, "get", lambda event_id: LineWebhookInboxSnapshot(
+        stored, LineWebhookProcessingStatus.PROCESSED, ExpectedVersion(2),
+    ))
+    redelivered = event({**payload, "replyToken": "synthetic-2", "deliveryContext": {"isRedelivery": True}})
+    assert repository._existing_registration(redelivered).outcome.value == "existing"
+    with pytest.raises(RuntimeError, match="line_webhook_idempotency_conflict"):
+        repository._existing_registration(event({**payload, "postback": {"data": "changed-action"}}))
 
 
 def test_role_claim_inserts_when_successor_role_is_absent() -> None:

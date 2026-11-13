@@ -29,6 +29,12 @@
 .identity-table tbody tr:hover{background:#fffdfc}
 .identity-table td:first-child{width:29%}
 .identity-table th:last-child,.identity-table td:last-child{text-align:right;width:110px}
+.identity-table td.identity-binding-actions{width:1%;white-space:nowrap}
+.identity-binding-actions>div{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.identity-confirmation{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(420px,calc(100% - 32px));max-height:calc(100% - 32px);padding:24px;border:1px solid var(--line-color-border-subtle);border-radius:16px;background:var(--line-color-surface,#fff);color:var(--line-color-text,#211814)}
+.identity-confirmation::backdrop{background:rgb(30 18 12 / 45%)}
+.identity-confirmation h2{margin:0 0 16px;font-size:1.25rem}
+.identity-confirmation-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .identity-table strong{font-size:1rem}
 .identity-secondary{display:block;margin-top:5px;font-size:.8125rem;line-height:1.7;color:var(--line-color-text-muted);overflow-wrap:anywhere}
 .identity-status{display:inline-flex;min-height:28px;align-items:center;padding:3px 10px;border:1px solid var(--line-color-border-subtle);border-radius:999px;background:var(--md-sys-color-surface-container-high);color:var(--line-color-text-muted);font-size:.8125rem;font-weight:700;white-space:nowrap}

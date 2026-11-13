@@ -83,7 +83,7 @@ class LineServiceHelpApplication:
         self._escalation_gateway = escalation_gateway
         self._router = DeterministicLineRouter()
 
-    def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
+    def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
         normalized = text.strip()
         if _normalized_resume_command(normalized) in _RESUME_AI_ALIASES:
             self._retired_ai_action(inbox, unit_of_work, line_user_id)
@@ -96,6 +96,8 @@ class LineServiceHelpApplication:
             except HumanEscalationError as error:
                 if error.code != "automation_hold_active":
                     raise
+                if reply_only:
+                    return False
                 self._append_to_active_ticket(
                     inbox, unit_of_work, line_user_id, normalized
                 )
@@ -103,6 +105,11 @@ class LineServiceHelpApplication:
         event_id = inbox.event.event_id.value
         outcome = self._router.route(normalized, source_event_id=event_id)
         complaint_context = normalize_complaint_text(normalized)
+        if reply_only and (
+            complaint_context is not None or isinstance(outcome, (TicketReferral, DeterministicAnswer))
+            or (isinstance(outcome, DeterministicRoute) and outcome.route_key in {"order_update_request", "profile_update"})
+        ):
+            return False
         if complaint_context is not None:
             self._create_complaint_escalation(
                 inbox,
@@ -139,9 +146,6 @@ class LineServiceHelpApplication:
             self._handle_category(inbox, unit_of_work, line_user_id, outcome.category, normalized)
             return True
         if isinstance(outcome, SafeMenu):
-            # Unknown text belongs to the canonical Knowledge fallback owned by
-            # the webhook composition. Consuming it here makes that durable
-            # request path unreachable.
             return False
         if isinstance(outcome, Clarification):
             self._reply_or_enqueue(

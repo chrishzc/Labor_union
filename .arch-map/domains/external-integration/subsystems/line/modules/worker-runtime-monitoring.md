@@ -10,7 +10,9 @@
 ## Implementation
 - primary:
   - `subsystems/line/worker_runtime.py`
-  - `subsystems/line/webhook_event_consumer.py` — 逐事件業務提交／失敗隔離；只在 commit 後將本次新建的資訊回覆 ID 交由既有 delivery worker 快速投遞，投遞失敗不得重試已提交業務。
+  - `subsystems/line/webhook_intake.py` — 驗簽、整批保存並保留當次即時回覆事件，按事件處理後交付其餘業務。
+  - `infrastructure/mysql/line_webhook_inbox_repository.py` — Webhook 事件保存、租約、轉交背景與結果記錄。
+  - `subsystems/line/webhook_event_consumer.py` — 逐事件業務提交與失敗隔離，原交易保留新 Reply 任務供 Webhook 提交後發送。
   - `subsystems/line/runtime_monitoring_application.py`
   - `subsystems/line/runtime_alert_application.py` — heartbeat／health observation 持久化與 RuntimeLineAlertProjector；2026-10-30 全部管理員告警退役後只保留監測與事件，projector 不產生 delivery intent／task。
 - primary: `subsystems/line/runtime_status_query.py` — 給已驗證管理員 LIFF 的唯讀去敏摘要、既有 freshness 與未知狀態；不探測外部服務或寫入。

@@ -40,3 +40,11 @@ def test_reply_adapter_uses_reply_endpoint_and_marks_provider_identity() -> None
         "replyToken": "reply-token-1",
         "messages": [{"type": "text", "text": "免費回覆"}],
     }
+
+
+def test_reply_missing_request_id_does_not_persist_token(monkeypatch) -> None:
+    monkeypatch.setattr(FakeResponse, "headers", {})
+    token = "synthetic-one-time-reply-token"
+    outcome = LineMessagingApiAdapter("token", session=ReplySession()).reply(token, {"type": "text", "text": "測試"})
+    assert outcome.outcome_type is LineProviderOutcomeType.SUCCESS
+    assert token[:16] not in outcome.provider_message_id.value

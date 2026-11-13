@@ -65,13 +65,14 @@ def bridge(tmp_path, monkeypatch):
                            credentials=credential_root, old=old, context=context, client=client)
 
 
-def test_five_restored_pages_are_served_and_management_surfaces_stay_private(bridge):
+def test_current_pages_and_retired_candidate_links_are_served_with_correct_status(bridge):
     async def check():
-        for path in ("/line-mobile-admin", "/line-candidate-contact", "/line-candidate-contact-customer",
-                     "/line-deposit-payment", "/line-service-help"):
+        for path in ("/line-mobile-admin", "/line-deposit-payment", "/line-service-help"):
             response = await bridge.request("GET", path)
             assert response.status_code == 200, path
             assert "text/html" in response.headers["content-type"]
+        for path in ("/line-candidate-contact", "/line-candidate-contact-customer"):
+            assert (await bridge.request("GET", path)).status_code == 410
         for path in ("/admin/", "/setup", "/api/v1/admin/accounts",
                      "/internal/v1/line-operations/api/v1/line/mobile-admin/profile"):
             assert (await bridge.request("GET", path)).status_code == 404

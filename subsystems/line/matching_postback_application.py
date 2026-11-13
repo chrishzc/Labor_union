@@ -27,28 +27,31 @@ class LineMatchingPostbackApplication:
     def __init__(self, matching_application) -> None:
         self._matching_application = matching_application
 
-    def handle(self, inbox, unit_of_work) -> None:
+    def handle(self, inbox, unit_of_work, *, reply_only: bool = False) -> bool:
         event = inbox.event
         if event.source.source_type is not LineSourceType.USER:
-            return
+            return False
         line_user_id = event.source.user_id
         if line_user_id is None:
-            return
+            return False
         postback_data = _postback_data(inbox)
         service_start_match = re.fullmatch(r"service-start:([A-Za-z0-9_-]{20,191}):(willing|unwilling)",postback_data)
         if service_start_match is not None:
             unit_of_work.service_starts.record_willingness(service_start_match.group(1),line_user_id.value,
                 service_start_match.group(2),f"service-start-reply:{event.event_id.value}")
-            return
+            return True
 
-        if handle_deposit_assistance(postback_data, event, unit_of_work):
-            return
+        if handle_deposit_assistance(postback_data, event, unit_of_work, reply_only=reply_only):
+            return not reply_only
         match = _MATCHING_POSTBACK.fullmatch(postback_data)
         if match is not None:
             self._handle_matching_postback(match, line_user_id, event, unit_of_work)
-            return
+            return True
         # Retired date-confirmation cards cannot authorize any new arrangement.
-        return
+        return False
+
+    def has_active_assistance(self, unit_of_work, line_user_id) -> bool:
+        return self._matching_application.has_active_customer_assistance(unit_of_work, line_user_id)
 
     def handle_message(self, inbox, unit_of_work, line_user_id, text) -> bool:
         return self._matching_application.append_customer_assistance_message_in_unit_of_work(

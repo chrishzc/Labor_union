@@ -570,7 +570,7 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     unit_of_work.outbox = CompletingOutbox()
     now = datetime(2026, 9, 9, tzinfo=timezone.utc)
     provider = SimpleNamespace(
-        link_to_user=lambda *_: LineRichMenuProviderOutcome(
+        restore_default_for_user=lambda _: LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.REJECTED,
             error_code="line_http_404",
             error_message="richmenu not found",

@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from infrastructure.mysql import mysql_adapter
 from api.dependencies.hcm_import import get_hcm_workbook_import_service
-from infrastructure.mysql.second_payment_notification_repository import MySqlSecondPaymentNotificationRepository
 
 DATABASE=os.getenv('LABOR_UNION_TEST_MYSQL_DATABASE')
 pytestmark=pytest.mark.skipif(not DATABASE,reason='requires explicitly prepared disposable localhost database')
@@ -60,39 +59,7 @@ def test_complete_hcm_posts_all_applicable_charges_and_refund_atomically(isolate
         assert rows('SELECT id FROM line_delivery_tasks')==()
     finally:dependency.close()
 
-def test_nonzero_second_stage_due_day_settlement_and_zero_stage_exclusion(isolated):
-    case='115000902';c=mysql_adapter.get_connection()
-    try:
-        repository=MySqlSecondPaymentNotificationRepository(c)
-        short=repository.current('115000901');assert short is None or short.required_amount==0
-        value=repository.current(case);assert value and value.required_amount==value.remaining_amount==27000
-        assert not any(r.case_no==case for r in repository.find_due_candidates(date(2026,11,23)))
-        due=next(r for r in repository.find_due_candidates(date(2026,11,24)) if r.case_no==case)
-        assert due.event(datetime(2026,11,24,tzinfo=timezone.utc)).event_code=='client.second_payment_due'
-        c.rollback()
-    finally:c.close()
-    from api.routes.finance_import import router
-    from api.dependencies import admin_auth
-    from subsystems.access.authentication_session import AdminPrincipal
-    app=FastAPI();app.include_router(router)
-    for name in ('require_admin','require_system_admin','require_persisted_admin'):
-        app.dependency_overrides[getattr(admin_auth,name)]=lambda:AdminPrincipal(1,'synthetic','Synthetic','system_admin')
-    # Reuse the existing real bank import -> durable job -> receipt verification.
-    support=runpy.run_path('tests/domains/scheduling/subsystems/scheduling/integration/test_complex_service_accounting_mysql.py')
-    with TestClient(app,headers={'X-Correlation-ID':'six-fixes-bank'}) as http:
-        for sequence,amount in ((25,13500),(26,40500),(27,27000)):
-            support['bank'](http,case,amount,sequence)
-    c=mysql_adapter.get_connection()
-    try:
-        repository=MySqlSecondPaymentNotificationRepository(c)
-        paid=repository.current(case);assert paid and paid.remaining_amount==0
-        assert not any(r.case_no==case for r in repository.find_due_candidates(date(2026,11,24)))
-        settled=next(r for r in repository.find_settlement_candidates() if r.case_no==case)
-        assert settled.settled_amount==27000
-        assert settled.event(datetime(2026,11,24,tzinfo=timezone.utc)).event_code=='client.second_payment_settled'
-        c.rollback()
-    finally:c.close()
-    assert rows('SELECT id FROM line_delivery_tasks')==()
+
 
 def test_import_and_new_accounting_roll_back_together_on_failure(isolated,monkeypatch):
     from infrastructure.mysql.case_architecture_bootstrap_repository import MySqlCaseArchitectureBootstrapRepository
@@ -117,7 +84,6 @@ def test_import_and_new_accounting_roll_back_together_on_failure(isolated,monkey
     finally:c.close()
     for table in ('clients','orders','client_finance_accounts','client_obligations','case_import_receipts','client_obligation_events'):
         assert rows(f'SELECT case_no FROM {table} WHERE case_no=%s',(case,))==()
-
 
 def test_hcm_to_historical_completion_establishes_payroll_and_routes_subsidy_by_scheme(isolated, tmp_path):
     from types import SimpleNamespace

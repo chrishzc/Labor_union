@@ -356,6 +356,9 @@ class MatchingNotificationApplication:
             )
         return result
 
+    def has_active_customer_assistance(self, unit_of_work, line_user_id) -> bool:
+        return unit_of_work.customer_service.active_matching_assistance(line_user_id.value) is not None
+
     def append_customer_assistance_message_in_unit_of_work(
         self, unit_of_work, line_user_id, text, event_key,
     ) -> bool:

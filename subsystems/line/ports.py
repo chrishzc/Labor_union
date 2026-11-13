@@ -12,8 +12,6 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from subsystems.line.service_day_log_reminders import ServiceDayLogReminderPort
-    from subsystems.line.second_payment_notifications import SecondPaymentNotificationPort
-    from subsystems.line.service_completion_notifications import ServiceCompletionNotificationPort
     from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationPort
     from subsystems.line.payment_receipt_notifications import PaymentReceiptPort
@@ -384,6 +382,10 @@ class LineWebhookInboxRepositoryPort(Protocol):
 
     def get(self, event_id: LineWebhookEventId) -> LineWebhookInboxSnapshot | None: ...
 
+    def claim_registered(self, event_id: LineWebhookEventId, query: ClaimLineWebhookEventsQuery) -> LineWebhookInboxSnapshot: ...
+
+    def defer(self, event: LineWebhookInboxSnapshot) -> None: ...
+
     def transition(
         self,
         event_id: LineWebhookEventId,
@@ -589,11 +591,13 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 
     def get(self, task_id: LineDeliveryTaskId, *, lock: bool = False) -> LineDeliveryTaskSnapshot | None: ...
 
+    def claim_webhook_reply(self, task_id: LineDeliveryTaskId, query: ClaimLineDeliveryTasksQuery) -> LineDeliveryTaskSnapshot: ...
+
     def reply_opportunity(
         self,
         correlation_id: CorrelationId,
         *,
-        recipient: LineRecipient | None = None,
+        recipient: LineRecipient,
     ) -> LineReplyOpportunity | None: ...
 
     def claim(
@@ -1054,8 +1058,6 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     identity_management: object
     service_starts: object
     service_start_days: "ServiceStartDayRepositoryPort"
-    second_payment_notifications: "SecondPaymentNotificationPort"
-    service_completion_notifications: "ServiceCompletionNotificationPort"
     service_day_log_reminders: "ServiceDayLogReminderPort"
     payment_overdue_reminders: "PaymentOverdueReminderPort"
     payment_reminder_notifications: "PaymentReminderNotificationPort"

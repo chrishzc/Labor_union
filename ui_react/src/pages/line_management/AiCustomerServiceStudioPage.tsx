@@ -1,18 +1,17 @@
 /**
  * File: AiCustomerServiceStudioPage.tsx
- * Description: AI 客服工作室，整合常見問答、引導動作、回答測試、回饋分析與 AI 模型設定。
+ * Description: AI 客服工作室，整合常見問答、回答測試、回饋分析與 AI 模型設定。
  */
 import { ManagementPageHeader } from '../../components/ManagementPageHeader';
 import React, { useState } from 'react';
 import { useUnsavedNavigation } from '../../components/UnsavedChanges';
-import { Bot, BookOpenText, FlaskConical, KeyRound, MessageSquareHeart, Workflow } from 'lucide-react';
-import { AiEventStudio } from './AiEventStudio';
+import { Bot, BookOpenText, FlaskConical, KeyRound, MessageSquareHeart } from 'lucide-react';
 import { CommonQaCatalogPanel } from './CommonQaCatalogPanel';
 import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
 import { KnowledgeFeedbackPanel } from './KnowledgeFeedbackPanel';
 import { LlmConfigurationPage } from './LlmConfigurationPage';
 
-type StudioTab = 'qa' | 'rules' | 'test' | 'feedback' | 'model';
+type StudioTab = 'qa' | 'test' | 'feedback' | 'model';
 
 export const AiCustomerServiceStudioPage: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
@@ -35,9 +34,6 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
         <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => requestLeave(() => { setQaTarget({}); setActiveTab('qa'); })}>
           <BookOpenText aria-hidden="true" />常見問答
         </button>
-        <button type="button" className={activeTab === 'rules' ? 'active' : ''} aria-current={activeTab === 'rules' ? 'page' : undefined} onClick={() => { if (('rules') !== activeTab) requestLeave(() => setActiveTab('rules')); }}>
-          <Workflow aria-hidden="true" />引導動作
-        </button>
         <button type="button" className={activeTab === 'test' ? 'active' : ''} aria-current={activeTab === 'test' ? 'page' : undefined} onClick={() => { if (('test') !== activeTab) requestLeave(() => setActiveTab('test')); }}>
           <FlaskConical aria-hidden="true" />回答測試
         </button>
@@ -51,7 +47,6 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
 
       <div className="line-hub-tab-panel">
         {activeTab === 'qa' && <CommonQaCatalogPanel initialQaId={qaTarget.id} initialQuestion={qaTarget.question} />}
-        {activeTab === 'rules' && <AiEventStudio />}
         {activeTab === 'test' && (
           <RealLlmSemanticTestPanel onOpenQa={openQa} onCreateQa={createQa} />
         )}

@@ -181,6 +181,43 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder):
     assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no':case}))['total'] == 0
 
 
+def test_office_schedule_preview_detects_assignment_linked_to_another_case(http):
+    from api.routes.service_date_confirmation import router
+
+    if not getattr(http.app.state, 'service_dates_registered', False):
+        http.app.include_router(router)
+        http.app.state.service_dates_registered = True
+    case, staff, _ = seed_case(http)
+    other_case, _, _ = seed_case(http)
+    generation = write(
+        "INSERT INTO scheduling_generations(case_no,generation_number,resulting_aggregate_version,"
+        "status,effective_marker,created_by,change_reason) VALUES(%s,1,1,'effective',1,'fixture','fixture')",
+        (other_case,),
+    )
+    assignment = write(
+        "INSERT INTO case_staff_assignments(case_no,generation_id,staff_id,assignment_sequence,status) "
+        "VALUES(%s,%s,%s,1,'active')", (case, generation, staff[0][0]),
+    )
+    write("UPDATE orders SET status='訂單成立' WHERE case_no=%s", (case,))
+    endpoint = f'/api/v1/orders/{case}/service-dates'
+    before = checked(http.get(endpoint))
+    days = [str(date(2027, 1, 5) + timedelta(days=index)) for index in range(30)]
+    body = {
+        'actual_start_date': days[0], 'expected_order_version': before['order_version'],
+        'expected_scheduling_version': before['scheduling_version'],
+        'expected_confirmed_version': before['current_version'], 'reason': '',
+        'segments': [{'staff_id': staff[0][0], 'service_dates': days}],
+    }
+    for action in ('preview', 'apply'):
+        response = http.post(f'{endpoint}/office-schedule/{action}', json=body,
+                             headers={'Idempotency-Key': case + ':office'})
+        assert response.status_code == 409, response.text
+        assert response.json()['detail']['error']['code'] == 'office_schedule_assignment_ownership_blocked'
+    assert checked(http.get(endpoint)) == before
+    assert rows('SELECT generation_id FROM case_staff_assignments WHERE id=%s', (assignment,))[0]['generation_id'] == generation
+    assert rows('SELECT COUNT(*) total FROM staff_schedule WHERE case_no=%s', (case,))[0]['total'] == 0
+
+
 def test_same_staff_same_day_nonoverlapping_shifts_commit_and_read_back(http):
     morning, staff, morning_segments = seed_case(http, clock=("08:00", "12:00"), hours=4)
     afternoon, _, afternoon_segments = seed_case(http, shared_staff=staff[0], clock=("13:00", "17:00"), hours=4)

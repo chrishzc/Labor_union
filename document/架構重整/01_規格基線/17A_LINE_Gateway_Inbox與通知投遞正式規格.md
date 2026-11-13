@@ -4,20 +4,20 @@
 
 - 狀態：`current-spec`
 - Owner：LINE Integration Domain（`domains/line/`、`subsystems/line/`）
-- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、服務開始／完工／二期／開工當天原群組通知、Rich Menu 草稿編輯與發布 saga、通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`），以及私人日誌照片傳輸代理（`NAS-LINE-04`）。
+- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、服務開始與換人結果日期表群組通知（開工當天詢問、完工問卷與第二期款群組通知已於 2026-11-12 退役，不再 Push 到群組）、Rich Menu 草稿編輯與發布 saga、通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`），以及私人日誌照片傳輸代理（`NAS-LINE-04`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
 
 - **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_bindings`／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
 - **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
-- **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）；明確人工／誤判標記優先於自動比對；Service Help 僅寫入 committed delivery task 而不在 webhook 交易直呼 provider。
+- **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）。明確人工／誤判標記優先於自動比對。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
   - **業務通知投影規則**：
-    - `order.service_start_day`（開工當天原群組通知）：見 [LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) §3.3／§4.1；包含未清第一期款提醒與服務狀況按鈕；`order.pre_start_reminder` 已完全停用取消。
-    - `client.second_payment_due`／`client.second_payment_settled`（二期群組純文字通知）：見 [LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) §6.2；送前重讀需求、金額、日期與群組；缺群組入 `LINE-006`；舊前三日私訊已停用。
-    - 服務完工群組通知：僅消費帶 `line_service_completion_notification=true` 的新完工 outbox，發送一次文字通知（問卷連結先保留空欄或既有網址配置）。
+    - `order.service_start_day`（開工當天原群組詢問）：**2026-11-12 退役**。不再投影來源事件或 Push；規則儲存拒絕（`order.service_start_day`／`order.service_completed`）；殘留工作於 provider 前取消。舊訊息按鈕（`start-day:` postback）仍只以 Reply 確認。`order.pre_start_reminder` 已完全停用取消。
+    - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：**2026-11-12 改為私訊**，流程與第一期一致。到期當天由客戶私訊繳款提醒排程（`payment_reminder_notifications`）發送；核銷成功通知由財務待辦人工確認後寄客戶私訊（`payment_receipt_notifications`）。群組來源不再投影、預設不含群組規則，殘留群組工作於 provider 前取消；規則儲存不另行封鎖。
+    - `order.service_completed`（服務完工群組問卷通知）：**2026-11-12 退役**。不再消費 `line_service_completion_notification` 標記或 Push；規則儲存拒絕（與 `order.service_start_day` 相同）；殘留工作於 provider 前取消。Orders 完工事實與標記寫入不受影響。
     - 服務開始與換人結果日期表：僅發送至本案群組（無「確認／拒絕日期表」按鈕），投遞失敗不回滾正式排班。
 - **安全觀察端點（Zero Commit／Zero Wakeup）**：
   - `GET /api/v1/line/configurations/{kind}/safe`（僅回傳 `kind`、`revision` 與 `state=empty | configured`，禁洩漏定義、URI 或任何 secret）。

@@ -463,7 +463,7 @@ def _raise_value_error(
     elif code == "office_schedule_assignment_ownership_blocked":
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
-        message = "本案的既有月嫂指派與有效排班世代不一致，請先核對指派歸屬再儲存班表。"
+        message = "本案的舊月嫂指派未連到本案的有效班表。請先核對原指派及相關核銷，再建立班表。"
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
