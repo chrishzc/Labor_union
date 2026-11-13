@@ -36,23 +36,21 @@ class MySqlWeeklyOperationsReportQueryAdapter:
 
     def list_non_citizen_case_years(self) -> list[int]:
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT DISTINCT YEAR(DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR)) AS application_year "
-                           + _NON_CITIZEN_APPROVAL_FROM_SQL + " ORDER BY application_year DESC")
+            cursor.execute("SELECT DISTINCT YEAR(created_local) AS application_year "
+                           + _NON_CITIZEN_CASES_FROM_SQL
+                           + " WHERE created_local IS NOT NULL ORDER BY application_year DESC")
             return [int(row["application_year"]) for row in cursor.fetchall()]
 
     def list_non_citizen_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
-        # Approval is stored as UTC; select/filter Taipei dates without inferring
-        # dates for legacy cases that have no traceable approval record.
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT c.id AS client_id,c.identity_status,o.status AS order_status,"
-                           "DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR) AS approved_local "
-                           + _NON_CITIZEN_APPROVAL_FROM_SQL
-                           + " AND r.approved_at_utc >= %s AND r.approved_at_utc < %s ORDER BY r.approved_at_utc,c.id",
-                           (datetime.combine(start_date, datetime.min.time()) - timedelta(hours=8),
-                            datetime.combine(end_date + timedelta(days=1), datetime.min.time()) - timedelta(hours=8)))
+            cursor.execute("SELECT client_id,identity_status,order_status,created_local "
+                           + _NON_CITIZEN_CASES_FROM_SQL
+                           + " WHERE created_local >= %s AND created_local < %s ORDER BY created_local,client_id",
+                           (datetime.combine(start_date, datetime.min.time()),
+                            datetime.combine(end_date + timedelta(days=1), datetime.min.time())))
             rows = cursor.fetchall()
         return [WeeklyCaseFact(
-            client_id=int(row["client_id"]), case_no=None, created_at=_datetime(row["approved_local"]),
+            client_id=int(row["client_id"]), case_no=None, created_at=_datetime(row["created_local"]),
             applicant_name=None, identity_status=_optional_text(row.get("identity_status")), hcm_review_status=None,
             district=None, order_status=_optional_text(row.get("order_status")), service_days=None,
             service_hours_per_day=None, planned_start_date=None, planned_end_date=None, case_category="non_citizen",
@@ -243,14 +241,25 @@ def _json_rest_days(value: object) -> list[int] | None:
     return None
 
 
-_NON_CITIZEN_APPROVAL_FROM_SQL = """FROM orders o JOIN clients c ON c.id=o.client_id
-JOIN provisional_registration_case_issue_events e ON e.case_no=o.case_no AND e.client_id=c.id
-JOIN provisional_client_registrations r ON r.id=e.registration_id
-WHERE r.approved_at_utc IS NOT NULL AND """ + CASE_CATEGORY_SQL + "='non_citizen'"
-
 _REPORT_CASE_CATEGORY_SQL = (
     "CASE WHEN c.hcm_review_status='不符合' THEN 'subsidy' ELSE " + CASE_CATEGORY_SQL + " END"
 )
+
+# LIFF approval is UTC. The manual import's immutable snapshot contains the
+# Taipei timestamp used to allocate the case number in the same transaction.
+_NON_CITIZEN_CASES_FROM_SQL = f"""FROM (
+    SELECT c.id AS client_id,c.identity_status,o.status AS order_status,
+           CASE WHEN e.registration_id IS NOT NULL
+                THEN DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR)
+                ELSE CAST(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(m.source_snapshot,'$.client_attributes.created_at')),'T',' ') AS DATETIME(6))
+           END AS created_local
+    FROM orders o JOIN clients c ON c.id=o.client_id
+    LEFT JOIN provisional_registration_case_issue_events e ON e.case_no=o.case_no AND e.client_id=c.id
+    LEFT JOIN provisional_client_registrations r ON r.id=e.registration_id
+    LEFT JOIN case_import_events m ON m.case_no=o.case_no AND m.client_id=c.id
+        AND m.idempotency_key=CONCAT('manual-non-citizen:',o.case_no)
+    WHERE {_REPORT_CASE_CATEGORY_SQL}='non_citizen'
+) AS formal_cases"""
 
 _CASE_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,

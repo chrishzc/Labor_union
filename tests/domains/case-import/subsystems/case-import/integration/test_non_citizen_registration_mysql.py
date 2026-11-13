@@ -273,7 +273,7 @@ def test_line_outer_uow_approves_complete_case_and_binding(nc_database):
     assert application.registration_application(pending.registration_id).case_no == receipt.case_no
 
 
-def test_approved_case_reuses_finance_contract_and_reporting(nc_database):
+def test_approved_case_reuses_finance_contract_and_reporting(nc_database, monkeypatch):
     from datetime import date
     from dataclasses import replace
     from domains.case_import.provisional_registration import build_provisional_registration_candidate
@@ -281,12 +281,20 @@ def test_approved_case_reuses_finance_contract_and_reporting(nc_database):
     from infrastructure.mysql.contract_full_preview_repository import MySqlFullContractProjectionRepository
     from infrastructure.mysql.client_payments_query_repository import MySqlClientFinanceQueryRepository
     from infrastructure.mysql.weekly_operations_report_query_adapter import MySqlWeeklyOperationsReportQueryAdapter
+    from subsystems.case_import import non_citizen_registration_application
     from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    class ManualCreationClock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return datetime(2026, 12, 31, 15, 59, 59, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(non_citizen_registration_application, "datetime", ManualCreationClock)
     with pymysql.connect(**nc_database) as connection:
         repository = MySqlProvisionalRegistrationRepository(connection, now=lambda: datetime(2026, 12, 31, 16, tzinfo=timezone.utc))
         pending = repository.apply(build_provisional_registration_candidate(replace(_registration_intent(), service_days=30,
-                    expected_date="2027-01-01", service_start_date="2027-01-02")))
+                    expected_date="2027-01-01", service_start_date="2027-01-02", passbook_image_id="pbk_report_approval")))
         receipt = repository.approve(pending.registration_id, 1, "synthetic-admin")
         connection.commit()
         assert receipt.case_no.startswith("A116")
@@ -302,8 +310,50 @@ def test_approved_case_reuses_finance_contract_and_reporting(nc_database):
         source = MySqlWeeklyOperationsReportQueryAdapter(connection)
         query = WeeklyOperationsReportQuery(source, lambda: datetime(2027, 1, 1, tzinfo=timezone.utc))
         assert receipt.case_no not in [fact.case_no for fact in source.list_case_facts(date(2027,1,1), date(2027,12,31))]
-        assert query.query_case_statistics(2027, month=1, case_category="non_citizen").summary.application_count == 1
-        assert query.query_case_statistics(2026, month=12, case_category="non_citizen").summary.application_count >= 0
+        december = date(2026, 12, 31)
+        january = date(2027, 1, 1)
+        before_manual = query.query_case_statistics(2026, month=12, case_category="non_citizen")
+        manual = non_citizen_registration_application.create_manual_non_citizen_case(connection, {
+            "name": "Synthetic reporting applicant",
+            "phone": "0900000000",
+            "email": "synthetic@example.test",
+            "baby_info": "單胞胎",
+            "refund_bank_code": "0000001",
+            "refund_account_no": "000000000001",
+            "service_start_date": "2027-01-02",
+            "service_days": 10,
+            "service_time": "08:30-16:30 (8小時)",
+        }, "synthetic-admin")
+        assert manual["case_no"].startswith("A115")
+        after_manual = query.query_case_statistics(2026, month=12, case_category="non_citizen")
+        assert (
+            after_manual.summary.application_count,
+            after_manual.annual_application_count,
+        ) == (
+            before_manual.summary.application_count + 1,
+            before_manual.annual_application_count + 1,
+        )
+
+        pending = repository.apply(build_provisional_registration_candidate(
+            replace(_registration_intent(), passbook_image_id="pbk_report_pending"),
+        ))
+        assert pending.case_no is None
+        assert repository.approve(receipt.registration_id, 1, "synthetic-admin").replayed
+        connection.commit()
+
+        assert [(fact.client_id, fact.created_at) for fact in source.list_non_citizen_case_statistics_facts(december, december)] == [
+            (manual["client_id"], datetime(2026, 12, 31, 23, 59, 59)),
+        ]
+        assert [(fact.client_id, fact.created_at) for fact in source.list_non_citizen_case_statistics_facts(january, january)] == [
+            (receipt.client_id, datetime(2027, 1, 1)),
+        ]
+        january_report = query.query_case_statistics(2027, month=1, case_category="non_citizen")
+        assert (january_report.summary.application_count, january_report.annual_application_count) == (1, 1)
+        december_report = query.query_case_statistics(2026, month=12, case_category="non_citizen")
+        assert (
+            december_report.summary.application_count,
+            december_report.annual_application_count,
+        ) == (after_manual.summary.application_count, after_manual.annual_application_count)
 
 
 def test_counter_preserve_upgrade_dump_restore_and_exact_replay(tmp_path, nc_database):
