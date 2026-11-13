@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from domains.client_finance.deposit_skip import (
+    DepositSkipCandidate,
     DepositSkipFacts,
     build_deposit_skip_candidate,
 )
@@ -36,7 +38,6 @@ def facts(*, identity_status: str = "一般市民", received: int = 0) -> Deposi
     (True, False, True), (True, True, False), (False, False, False),
 ])
 def test_payment_terms_change_expires_unpaid_override(active, changed, expected):
-    from dataclasses import replace
     from datetime import date
     from domains.client_finance.obligation_planning import (
         ClientPaymentTerms, deposit_gate_override_survives_terms_impact,
@@ -48,11 +49,8 @@ def test_payment_terms_change_expires_unpaid_override(active, changed, expected)
     assert deposit_gate_override_survives_terms_impact(source, candidate) is expected
 
 
-@pytest.mark.parametrize("identity_status", ["低收入戶", "中低收入戶", "非市民"])
-def test_only_general_citizen_can_use_manual_deposit_skip(
-    identity_status: str,
-) -> None:
-    candidate = build_deposit_skip_candidate(facts(identity_status=identity_status))
+def test_unknown_identity_cannot_use_manual_deposit_skip() -> None:
+    candidate = build_deposit_skip_candidate(facts(identity_status="未分類"))
 
     assert candidate.blockers == ("deposit_skip.general_citizen_required",)
     assert candidate.mutates is False
@@ -134,8 +132,8 @@ class UnitOfWork(AbstractContextManager["UnitOfWork"]):
 
 
 class Repository:
-    def __init__(self) -> None:
-        self.current = facts()
+    def __init__(self, identity_status: str = "一般市民") -> None:
+        self.current = facts(identity_status=identity_status)
         self.receipts: dict[str, StoredDepositSkipReceipt] = {}
         self.audit: tuple[str, str] | None = None
 
@@ -146,9 +144,13 @@ class Repository:
     def find_receipt(self, key: IdempotencyKey) -> StoredDepositSkipReceipt | None:
         return self.receipts.get(key.value)
 
-    def apply(self, candidate: object, request: DepositSkipApplyRequest) -> None:
+    def apply(self, candidate: DepositSkipCandidate, request: DepositSkipApplyRequest) -> None:
         self.audit = (request.actor.actor_id, request.reason)
-        self.current = DepositSkipFacts("CASE-001", 4, "一般市民", 12000, 0, True, "洽談中")
+        self.current = replace(
+            self.current,
+            account_version=candidate.resulting_account_version,
+            override_active=candidate.override_active,
+        )
 
     def save_receipt(
         self,
@@ -159,12 +161,18 @@ class Repository:
         self.receipts[key.value] = stored
 
 
-def test_apply_keeps_actor_reason_and_replays_same_command() -> None:
-    repository = Repository()
+@pytest.mark.parametrize(
+    "identity_status",
+    ["一般市民", "補助市民", "原住民", "非市民", "社福", "低收入戶", "中低收入戶", "原民", "原住民市民"],
+)
+def test_apply_keeps_actor_reason_and_replays_same_command(identity_status: str) -> None:
+    repository = Repository(identity_status)
     workflow = DepositSkipWorkflow(repository, UnitOfWork)
-    preview = workflow.preview(DepositSkipSelection("CASE-001"))
+    selection = DepositSkipSelection("CASE-001")
+    assert workflow.query(selection).blockers == ()
+    preview = workflow.preview(selection)
     request = DepositSkipApplyRequest(
-        selection=DepositSkipSelection("CASE-001"),
+        selection=selection,
         expected_account_version=ExpectedVersion(3),
         preview_fingerprint=preview.fingerprint,
         idempotency_key=IdempotencyKey("deposit-skip-001"),
@@ -179,6 +187,10 @@ def test_apply_keeps_actor_reason_and_replays_same_command() -> None:
     assert first == DepositSkipReceipt("CASE-001", 4, True, False)
     assert replay == DepositSkipReceipt("CASE-001", 4, True, True)
     assert repository.audit == ("system-admin", "公會突發狀況測試")
+    current = workflow.query(selection)
+    assert current.unpaid_progression_allowed is True
+    assert current.deposit_required_ntd == 12000
+    assert current.deposit_net_received_ntd == 0
 
 
 def test_apply_rejects_stale_preview() -> None:

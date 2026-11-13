@@ -60,7 +60,9 @@
 - **雙方簽約完成與 LINE 通知資格**：
   - 訂金繳費提醒與各期逾期待辦須同時滿足「客戶及所有月嫂簽約完成」（同案 `order_contract_flow_events.event_type = contract_completed` 且 `contract_identity` 等於現行 Orders 契約識別），逾期於臺灣到期日隔天起且餘額為正成立。
   - 正式訂金核銷於 `orders_deposit_reconciled` outbox payload 保存 `line_deposit_notification=true`；第一期正式核銷於 `projection_refresh` 保存 `line_first_payment_notification=true`（供 LINE 衍生內部通知待辦）；第二期正式核銷保存 `line_second_payment_notification=true`。所有 Query 與歷史無標記資料均不觸發通知。
-- **一般市民未付訂金人工放行（`GET /api/v1/orders/{case_no}/client-finance/deposit-skip`、`POST /api/v1/orders/{case_no}/client-finance/deposit-skip/preview`、`POST /api/v1/orders/{case_no}/client-finance/deposit-skip/apply`）**：遇突發狀況時，admin 可經專用 Preview／Apply 放行一般市民案件（不適用低收／中低收／非市民，且不允許 LINE 案件群組免訂金綁定；群組仍要求 `settlement_state = settled`）。放行透過 outbox 交 Orders 推至 `訂單成立`，Operational Stage 標示「定金未付，已人工放行」；payment terms 異動使放行失效。
+<a id="unpaid-deposit-override"></a>
+
+- **未付訂金人工放行（`GET /api/v1/orders/{case_no}/client-finance/deposit-skip`、`POST /api/v1/orders/{case_no}/client-finance/deposit-skip/preview`、`POST /api/v1/orders/{case_no}/client-finance/deposit-skip/apply`）**：遇突發狀況時，admin 可經專用 Preview／Apply 放行一般市民、補助市民、原住民及非市民案件。身分別名依 `IDENTITY-FIX-01／02／04` 對照，案件須有尚未付清的訂金應收。放行透過 outbox 交 Orders 推至 `訂單成立`，Operational Stage 標示「定金未付，已人工放行」。Payment terms 異動使放行失效。LINE 案件群組綁定仍要求 `settlement_state = settled`。
 
 <a id="client-cancellation-settlement"></a>
 

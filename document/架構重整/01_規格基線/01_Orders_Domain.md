@@ -30,7 +30,7 @@
 
 ### 3.1 Lifecycle 狀態機與 `case_terminal_closure`
 
-輸入僅接受：有效取消事件、契約完成事實、訂金有效核銷、Client Finance 有效一般市民訂金未付人工放行、actual start 確認、最後正式服務時刻、Domain blockers、客戶義務結清與不可逆服務資料鎖。評估優先序：
+輸入僅接受：有效取消事件、契約完成事實、訂金有效核銷、[Client Finance 有效未付訂金人工放行](04_Client_Finance_Domain.md#unpaid-deposit-override)、actual start 確認、最後正式服務時刻、Domain blockers、客戶義務結清與不可逆服務資料鎖。評估優先序：
 
 1. 未履約完成且存在有效取消事件 → **訂單取消**
 2. 全部約定服務已完成 → **訂單完成**（此後一律拒絕取消，回 `order_cancellation_after_full_service`）

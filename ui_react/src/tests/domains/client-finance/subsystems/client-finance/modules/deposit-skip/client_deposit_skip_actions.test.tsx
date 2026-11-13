@@ -51,7 +51,7 @@ describe('ClientDepositSkipActions', () => {
     fireEvent.change(screen.getByLabelText('放行原因（選填）'), { target: { value: '測試' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存未付訂金放行' }));
 
-    await screen.findByText('僅一般市民可由此入口人工跳過訂金。');
-    expect(screen.queryByRole('button', { name: '確認未付仍放行' })).not.toBeInTheDocument();
+    await screen.findByText('此案件類型尚不適用未付款放行。');
+    expect(depositSkipClient.apply).not.toHaveBeenCalled();
   });
 });

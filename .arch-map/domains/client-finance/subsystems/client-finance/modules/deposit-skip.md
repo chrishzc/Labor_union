@@ -5,7 +5,7 @@
 - subsystem: `client-finance`
 
 ## Responsibility
-提供僅限一般市民、由 system admin 明確操作的訂金未付放行 Preview／Apply；保存原因與冪等 receipt，維持原訂金條款、應收與未付狀態，並經 Orders writer 真實推進 lifecycle 與作業階段。
+提供 system admin 明確操作的訂金未付放行 Preview／Apply，資格依 Client Finance 正式規格；保存原因與冪等 receipt，維持原訂金條款、應收與未付狀態，並經 Orders writer 真實推進 lifecycle 與作業階段。
 
 ## Implementation
 - rule: `domains/client_finance/deposit_skip.py`

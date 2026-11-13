@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from subsystems.orders.core_stage_projection_query import project_core_stage_timeline
 from subsystems.orders.government_subsidy_projection_query import (
     OrderGovernmentSubsidyProjection,
 )
@@ -146,7 +147,7 @@ def _timeline(
     )
 
 
-def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
+def _matching_pool_cascade_timeline(plan_id=1, **root_overrides) -> OrderOperationalTimeline:
     """Build the matching-pool gap from current owner root-fact derivation."""
     baseline = _timeline()
     root_facts = {
@@ -189,7 +190,7 @@ def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
         "client_contract_sent_at": _AT,
         "deposit_updated_at": _AT,
     }
-    steps = _steps(root_facts, baseline.case_no, baseline.stages)
+    steps = _steps({**root_facts, **root_overrides}, baseline.case_no, baseline.stages)
     return OrderOperationalTimeline(
         case_no=baseline.case_no,
         base_revision=baseline.base_revision,
@@ -201,6 +202,21 @@ def _matching_pool_cascade_timeline(plan_id=1) -> OrderOperationalTimeline:
         sop_steps=steps,
         projection_digest=baseline.projection_digest,
     )
+
+
+def test_unpaid_override_projects_even_without_a_final_contract_document():
+    timeline = _matching_pool_cascade_timeline(
+        external_signing_session_id=None,
+        final_contract_document_id=None,
+        deposit_open_count=1,
+        deposit_gate_override_active=True,
+        deposit_gate_override_at=_AT,
+    )
+
+    signing, deposit = project_core_stage_timeline(timeline).core_stages[6:8]
+    assert signing.status == "not_started"
+    assert deposit.status == "completed"
+    assert deposit.substatus_code == "deposit_unpaid_override"
 
 
 def _subsidy(substatus_code: str, *, case_no: str = "CASE-TERMINAL-001") -> OrderGovernmentSubsidyProjection:

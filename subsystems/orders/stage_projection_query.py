@@ -605,9 +605,14 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     signing_status: StageStatus = "completed" if final_document_recorded else "in_progress" if handoff_recorded else "not_started" if plan_id is not None else "unavailable"
     deposit_count = _nonnegative_int(row, "deposit_obligation_count")
     deposit_open = _nonnegative_int(row, "deposit_open_count")
-    deposit_override = bool(row["deposit_gate_override_active"])
-    deposit_status: StageStatus = "completed" if final_document_recorded and deposit_count and (not deposit_open or deposit_override) else "blocked" if final_document_recorded else "not_started" if handoff_recorded else "unavailable"
-    deposit_warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if deposit_override and deposit_open else ()
+    unpaid_override = bool(row["deposit_gate_override_active"]) and deposit_open > 0
+    if unpaid_override or (final_document_recorded and deposit_count and not deposit_open):
+        deposit_status: StageStatus = "completed"
+    elif final_document_recorded:
+        deposit_status = "blocked"
+    else:
+        deposit_status = "not_started" if handoff_recorded else "unavailable"
+    deposit_warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if unpaid_override else ()
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
         _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, historical_binding_at if historical_binding else _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),

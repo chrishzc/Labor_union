@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
+from .subsidy_coverage import normalize_subsidy_policy_identity
+
+
+_ELIGIBLE_IDENTITIES = frozenset({"一般市民", "補助市民", "原住民", "非市民"})
+
 
 @dataclass(frozen=True, slots=True)
 class DepositSkipFacts:
@@ -42,7 +47,7 @@ class DepositSkipCandidate:
 
 def build_deposit_skip_candidate(facts: DepositSkipFacts) -> DepositSkipCandidate:
     blockers: list[str] = []
-    if facts.identity_status != "一般市民":
+    if normalize_subsidy_policy_identity(facts.identity_status) not in _ELIGIBLE_IDENTITIES:
         blockers.append("deposit_skip.general_citizen_required")
     if facts.deposit_required_ntd <= 0:
         blockers.append("deposit_skip.deposit_obligation_required")
