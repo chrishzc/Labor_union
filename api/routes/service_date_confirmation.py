@@ -452,6 +452,10 @@ def _raise_value_error(
         category = ErrorCategory.IDEMPOTENCY_MISMATCH
         status_code = 409
         message = "相同冪等鍵已被不同內容的請求使用。"
+    elif code == "historical_arrangement_occupancy_conflict":
+        category = ErrorCategory.CONFLICT
+        status_code = 409
+        message = "月嫂檔期衝突，無法儲存班表。請核對月嫂的檔期並調整服務日期。"
     elif "stale" in code or "conflict" in code:
         category = ErrorCategory.CONFLICT
         status_code = 409

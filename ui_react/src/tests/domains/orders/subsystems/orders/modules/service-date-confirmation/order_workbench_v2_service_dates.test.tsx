@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
+import { OrderMutationConflictError } from '../../../../../../../api/orders/order_mutation_errors';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { ServiceDateConfirmationQueryView, ServiceDateConfirmationPreviewView } from '../../../../../../../api/orders/order_mutation_schemas';
 import type { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
@@ -229,6 +230,25 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       actual_start_date: initialDates[0], expected_confirmed_version: null,
       segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('歷史班表儲存遇到月嫂檔期衝突，重新讀取後仍顯示阻擋原因', async () => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates,
+      bound_staff: [{ staff_id: 12, staff_name: '王月嫂' }],
+      arrangement_pending: true, historical_schedule_pending: true };
+    const message = '月嫂檔期衝突，無法儲存班表。請核對月嫂的檔期並調整服務日期。';
+    mocks.saveHistoricalSchedule.mockRejectedValue(new OrderMutationConflictError({
+      code: 'historical_arrangement_occupancy_conflict', message,
+    }));
+
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+    const saveSchedule = await screen.findByRole('button', { name: '儲存班表' });
+    await waitFor(() => expect(saveSchedule).toBeEnabled());
+    mocks.getServiceDates.mockClear();
+    fireEvent.click(saveSchedule);
+
+    await waitFor(() => expect(mocks.getServiceDates).toHaveBeenCalledWith(CASE, expect.anything()));
+    expect(await screen.findByText(message)).toBeVisible();
   });
 
   it('歷史案件帶入已保存日期，依月嫂選好日期後才能一次儲存', async () => {

@@ -7,9 +7,12 @@ from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from threading import Barrier, Lock
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
+from api.routes import service_date_confirmation as routes
 from domains.orders.lifecycle import (
     OrderLifecycleRootFacts,
     OrderLifecycleStatus,
@@ -505,6 +508,37 @@ def test_save_historical_schedule_commits_start_dates_and_multi_staff_generation
         assert repository.commits == 1
         assert repository.actual_start == start
         assert repository.facts.current_dates == original.current_dates
+
+
+@pytest.mark.parametrize(("code", "message"), [
+    (
+        "historical_arrangement_occupancy_conflict",
+        "月嫂檔期衝突，無法儲存班表。請核對月嫂的檔期並調整服務日期。",
+    ),
+    ("historical_arrangement_stale_version", "版本或預覽已過期，請重新查詢後重試。"),
+])
+def test_save_historical_schedule_returns_the_conflict_reason(code, message):
+    def save(*args, **kwargs):
+        raise ValueError(code)
+
+    service_date = date(2026, 10, 1)
+    body = routes.HistoricalScheduleSaveBody(
+        actual_start_date=service_date,
+        expected_order_version=1,
+        expected_scheduling_version=1,
+        expected_confirmed_version=None,
+        segments=[routes.HistoricalArrangementSegmentBody(staff_id=12, service_dates=[service_date])],
+    )
+    with pytest.raises(HTTPException) as raised:
+        routes.save_historical_restart_schedule(
+            body, "CASE-1", "schedule-test", "schedule-test", SimpleNamespace(username="admin"), save,
+        )
+
+    assert raised.value.status_code == 409
+    error = raised.value.detail["error"]
+    assert error["category"] == "conflict"
+    assert error["code"] == code
+    assert error["message"] == message
 
 
 def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
