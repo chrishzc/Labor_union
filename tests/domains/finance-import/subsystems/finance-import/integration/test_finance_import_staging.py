@@ -30,6 +30,11 @@ class FakeCursor:
             owners = self.staff_cases if "staff_id=%s" in statement else self.client_cases
             self._fetchall = tuple({"case_no": case} for case in owners.get(params[0], ()))
             return
+        if statement.startswith(("SELECT case_no,staff_id AS person_id FROM orders", "SELECT case_no,client_id AS person_id FROM orders")):
+            owners = self.staff_cases if "staff_id AS person_id" in statement else self.client_cases
+            self._fetchall = tuple({"case_no": case, "person_id": owner} for owner in dict.fromkeys(params)
+                                   for case in owners.get(owner, ()))
+            return
         if statement.startswith("SELECT DISTINCT case_no FROM case_staff_assignments"):
             return
         if statement.startswith("SELECT client_id FROM orders WHERE case_no=%s"):
@@ -624,8 +629,8 @@ def test_workbook_staging_skips_without_verified_memo_identity_when_multiple_cas
     assert not any("INSERT INTO finance_import_rows" in statement for statement, _ in cursor.executed)
 
 
-@pytest.mark.parametrize("staff_ids,retained", [([12], True), ([12, 13], False)])
-def test_workbook_staging_retains_name_only_taishin_staff_without_formal_accounting(staff_ids, retained):
+@pytest.mark.parametrize("staff_ids", [[12], [12, 13]])
+def test_workbook_staging_retains_name_only_taishin_staff_without_formal_accounting(staff_ids):
     name = "合成缺應付款月嫂"
     row = _normalized_row(direction="outgoing", debit=Decimal(12000), credit=None,
                           memo=name + " 　GB,轉入0000000000000003", bank_references={})
@@ -633,9 +638,7 @@ def test_workbook_staging_retains_name_only_taishin_staff_without_formal_account
         FakeCursor(staff_cases={12: ("115000001", "115000002")}), _normalized([row]),
         {"all_staff_names": (name,), "staff_name_identities": {name: staff_ids}}, business_only=True,
     )
-    assert bool(result["staged_rows"]) is retained
-    if retained:
-        assert result["staged_rows"][0]["classification_type"] == "staff_legacy_subsidy"
+    assert result["staged_rows"][0]["classification_type"] == "non_business_review"
 
 
 @pytest.mark.parametrize("resolved", [True, False])
@@ -705,6 +708,38 @@ def test_incoming_name_account_and_amount_without_a_virtual_account_is_not_persi
     assert not any('INSERT INTO finance_import_rows' in sql for sql, _ in cursor.executed)
 
 
+@pytest.mark.parametrize("bank", ["sinopac", "taishin"])
+@pytest.mark.parametrize("has_name", [True, False])
+def test_unknown_memo_suffix_requires_a_known_name_to_keep_source(monkeypatch, bank, has_name):
+    name = "合成客戶"
+    purpose_text = "雇主退款" if bank == "sinopac" else "雇主補助款"
+    row = _normalized_row(format_id=bank, direction="outgoing", debit=Decimal("5985"), credit=None,
+                          memo=f"HC115999{name if has_name else ''}{purpose_text}", bank_references={})
+    maps = {"known_case_suffixes": frozenset(), "client_name_identities": {name: (7, 8)}}
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
+                        lambda *_: {"result": "pending", "case_no": None, "reason": "case_not_found"})
+    cursor = FakeCursor(client_cases={7: ("115000001",), 8: ("115000002",)})
+    result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": bank}, maps, business_only=True)
+    assert len(result["staged_rows"]) == int(has_name)
+    if has_name:
+        assert result["staged_rows"][0]["classification_type"] == "non_business_review"
+        candidates = staging.bank_case_candidates(cursor, row, maps)
+        assert [item["case_no"] for item in candidates] == ["115000001", "115000002"]
+        assert {item["purpose"] for item in candidates} == {
+            "client_refund" if bank == "sinopac" else "client_subsidy_return"
+        }
+
+
+@pytest.mark.parametrize("memo", ["HC115001退訂金", "HC115001雇主退款合成客戶"])
+def test_taishin_does_not_admit_ordinary_refunds_even_with_known_case_or_name(memo):
+    row = _normalized_row(format_id="taishin", direction="outgoing", debit=Decimal(5985), credit=None, memo=memo)
+    maps = {"known_case_suffixes": frozenset({"115001"}), "client_name_identities": {"合成客戶": (7,)}}
+    cursor = FakeCursor(client_cases={7: ("115000001",)})
+    result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "taishin"}, maps, business_only=True)
+    assert result["staged_rows"] == []
+    assert staging.bank_case_candidates(cursor, row, maps) == ()
+
+
 def test_business_only_staging_preserves_batch_name_when_all_rows_are_filtered():
     row = _normalized_row(source_file="only-loan.xlsx")
     cursor = FakeCursor()
@@ -718,7 +753,7 @@ def test_business_only_staging_preserves_batch_name_when_all_rows_are_filtered()
 def test_business_only_repeat_checks_identity_before_classification(bank, monkeypatch):
     row = _normalized_row(format_id=bank)
     fingerprint = staging.build_dedup_fingerprint(row)
-    cursor = FakeCursor(existing_rows={fingerprint: {"id": 77}})
+    cursor = FakeCursor(existing_rows={fingerprint: {"id": 77, "reconciliation_status": "excluded"}})
     monkeypatch.setattr(staging, "classify_row_with_identity_maps",
                         lambda *_args: pytest.fail("an existing row must bypass admission"))
 
@@ -735,8 +770,8 @@ def test_business_only_repeat_checks_identity_before_classification(bank, monkey
 @pytest.mark.parametrize("kind", ["staff_salary", "client_refund"])
 @pytest.mark.parametrize(
     "proof,staff_admitted,refund_admitted",
-    [("account", False, True), ("case", True, True), ("both", True, True), ("none", False, False),
-     ("conflict", True, False), ("other_person", False, False), ("ambiguous_account", False, False),
+    [("account", False, False), ("case", True, True), ("both", True, True), ("none", False, False),
+     ("conflict", True, True), ("other_person", False, False), ("ambiguous_account", False, False),
      ("cross_type", False, False)],
 )
 def test_sinopac_shared_names_use_only_consistent_original_evidence_before_admission(
@@ -857,8 +892,11 @@ def test_sinopac_paid_namesake_remains_identifiable_before_open_payment_matching
     cases_by_owner = {case_owner: ("115000001",)}
     cursor = FakeCursor(staff_cases=cases_by_owner, client_cases=cases_by_owner)
     result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": "sinopac"}, maps, business_only=True)
-    admitted = proof in ({"case", "both", "conflict"} if staff else {"account", "case", "both"})
-    assert len(result["staged_rows"]) == int(admitted)
+    admitted = proof in {"case", "both", "conflict"}
+    manual = proof in {"account", "none"} and not admitted
+    assert len(result["staged_rows"]) == int(admitted or manual)
+    if manual:
+        assert result["staged_rows"][0]["classification_type"] == "non_business_review"
     if admitted:
         assert result["staged_rows"][0]["classification_type"] == kind
         assert result["staged_rows"][0]["matched_identity_ids"] == [case_owner]
@@ -868,7 +906,7 @@ def test_sinopac_paid_namesake_remains_identifiable_before_open_payment_matching
 def test_taishin_memo_staff_with_explicit_subsidy_purpose_keeps_source_for_matching(case_count):
     class CaseCursor(FakeCursor):
         def fetchall(self):
-            return tuple({"case_no": f"11500000{index + 1}"} for index in range(case_count))
+            return tuple({"case_no": f"11500000{index + 1}", "person_id": 7} for index in range(case_count))
 
     name = "合成台新月嫂"
     row = _normalized_row(direction="outgoing", debit=Decimal("11970"), credit=None,
@@ -879,6 +917,6 @@ def test_taishin_memo_staff_with_explicit_subsidy_purpose_keeps_source_for_match
     }, business_only=True)
 
     assert len(result["staged_rows"]) == 1
-    assert result["staged_rows"][0]["classification_type"] == "staff_legacy_subsidy"
-    assert result["staged_rows"][0]["matched_identity_ids"] == [7]
+    assert result["staged_rows"][0]["classification_type"] == ("non_business_review" if case_count > 1 else "staff_legacy_subsidy")
+    assert result["staged_rows"][0]["matched_identity_ids"] == ([] if case_count > 1 else [7])
     assert result["staged_rows"][0]["reconciliation_status"] == "pending"

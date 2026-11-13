@@ -23,11 +23,12 @@ from domains.client_finance.client_refund_reversal import (
     ClientRefundReturnBankFact,
     ClientReversalTarget,
 )
-from domains.finance_import.cancellation_code import extract_sinopac_account_reference
+from domains.finance_import.cancellation_code import extract_sinopac_account_reference, sinopac_memo_case_suffixes
 from domains.finance_import.transaction_classifier import (
-    TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON, _is_same_month, extract_name_from_row_text,
+    ORDINARY_REFUND_MEMO_MARKERS, TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON, _is_same_month, extract_name_from_row_text,
 )
-from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_taishin_client_memo_case
+from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
+from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_client_memo_case
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
@@ -241,17 +242,23 @@ class MySqlClientRefundReversalRepository:
             if not _case_exists(cursor, case_no):
                 raise ValueError("client_finance_case_not_found")
             version = _read_account_version(cursor, case_no, lock=False)
+            outgoing_rows = _query_candidate_outgoing_bank_rows(cursor)
+            outgoing_rows = _verify_taishin_subsidy_cases(cursor, outgoing_rows, connection=self._connection)
+            outgoing_rows = _verify_sinopac_refund_cases(cursor, outgoing_rows)
             refunds = _query_payable_obligations(
                 cursor,
                 case_no,
                 ClientRefundPurpose.CUSTOMER_REFUND,
+                read_account=any(row.get("format_id") == "legacy" and row.get("effective_classification_type") == "client_refund"
+                                 for row in outgoing_rows),
             )
             subsidy_returns = _query_payable_obligations(
                 cursor,
                 case_no,
                 ClientRefundPurpose.SUBSIDY_RETURN,
+                read_account=any(row.get("format_id") == "legacy" and row.get("effective_classification_type") == "client_subsidy_return"
+                                 for row in outgoing_rows),
             )
-            outgoing_rows = _verify_taishin_subsidy_cases(cursor, _query_candidate_outgoing_bank_rows(cursor), connection=self._connection)
             targets = _query_reversal_targets(cursor, case_no, "receipt")
             refund_return_targets = _query_reversal_targets(cursor, case_no, "refund")
         return {
@@ -284,7 +291,10 @@ class MySqlClientRefundReversalRepository:
         if self._preview_refund_classification is not None:
             # Simulate only the explicit correction's classification; bank facts stay immutable.
             bank_rows = tuple({**row, "effective_classification_type": self._preview_refund_classification} for row in bank_rows)
-        obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
+        is_sinopac_refund = (selection.refund_purpose is ClientRefundPurpose.CUSTOMER_REFUND
+                             and bool(bank_rows) and all(row.get("format_id") == "sinopac" for row in bank_rows))
+        read_account = any(row.get("format_id") == "legacy" for row in bank_rows)
+        obligation_rows = _load_refund_obligation_rows(cursor, selection, lock, read_account)
         proposed_rows = None
         if self._proposed_subsidy_return is not None:
             proposed = self._proposed_subsidy_return
@@ -303,8 +313,6 @@ class MySqlClientRefundReversalRepository:
             if manual_source_matches(cursor, row, case_no=selection.case_no, direction="client_refund",
                                      obligations=selection.obligation_identities) else row for row in bank_rows)
         manual_verified = bool(bank_rows) and all(row.get("manual_confirmed_case_no") == selection.case_no for row in bank_rows)
-        is_sinopac_refund = (selection.refund_purpose is ClientRefundPurpose.CUSTOMER_REFUND
-                             and bool(bank_rows) and all(row.get("format_id") == "sinopac" for row in bank_rows))
         is_taishin_subsidy = (selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}
                               and bool(bank_rows) and all(row.get("format_id") == "taishin" for row in bank_rows))
         if is_sinopac_refund or is_taishin_subsidy:
@@ -315,16 +323,21 @@ class MySqlClientRefundReversalRepository:
                     raise ValueError("bank_currency_not_twd")
             if not obligation_rows:
                 raise ValueError("outgoing_client_refund_no_open_obligation")
-            if is_sinopac_refund and not manual_verified and any(_refund_source_account(row) is None for row in bank_rows):
-                raise ValueError("client_refund_source_account_missing")
+        if not manual_verified and selection.refund_purpose is ClientRefundPurpose.CUSTOMER_REFUND:
+            bank_rows = _verify_sinopac_refund_cases(cursor, bank_rows, lock=lock)
+            if any(row.get("format_id") == "sinopac" and row.get("manual_confirmed_case_no") != selection.case_no
+                   and row.get("sinopac_refund_case_no") != selection.case_no for row in bank_rows):
+                raise ValueError("client_refund_memo_case_mismatch")
         if not manual_verified and selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
             bank_rows = _verify_taishin_subsidy_cases(cursor, bank_rows, lock=lock,
                 expected_case_no=selection.case_no, connection=self._connection)
             if any(row.get("format_id") == "taishin" and row.get("taishin_memo_case_no") != selection.case_no for row in bank_rows):
                 raise ValueError("client_subsidy_memo_recipient_unconfirmed")
-        memo_verified = manual_verified or (bool(bank_rows) and all(row.get("taishin_memo_case_no") == selection.case_no for row in bank_rows))
+        memo_verified = bool(bank_rows) and all(
+            selection.case_no in (row.get("manual_confirmed_case_no"), row.get("sinopac_refund_case_no"), row.get("taishin_memo_case_no"))
+            for row in bank_rows)
         recipient_account = None if memo_verified else _single_refund_recipient_account(obligation_rows)
-        if len(bank_rows) == 1:
+        if len(bank_rows) == 1 and not is_sinopac_refund:
             self.refund_account_matches = memo_verified or _refund_source_account(bank_rows[0]) == recipient_account
         self._refund_row_metadata = _refund_metadata(bank_rows)
         for row in bank_rows:
@@ -332,7 +345,7 @@ class MySqlClientRefundReversalRepository:
                 raise ValueError("bank_transaction_date_missing")
             if not _is_twd(row.get("currency")):
                 raise ValueError("bank_currency_not_twd")
-            if not memo_verified and _refund_source_account(row) != recipient_account:
+            if row.get("format_id") != "sinopac" and not memo_verified and _refund_source_account(row) != recipient_account:
                 raise ValueError("client_refund_recipient_account_mismatch")
         funding = {}
         if selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
@@ -441,8 +454,7 @@ def _read_account_version(cursor, case_no, *, lock):
 
 
 def _load_refund_bank_rows(cursor, identities, lock):
-    # Manual/historical classification does not rewrite the initial resolution
-    # cache. Verify original account or Taishin memo against current owner facts.
+    # Manual/historical classification does not rewrite the original bank facts.
     row_ids = tuple(_positive_row_id(item) for item in identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
@@ -450,7 +462,10 @@ def _load_refund_bank_rows(cursor, identities, lock):
         "fir.currency,fir.memo,fir.classification_reason,COALESCE(classification.classification_type,"
         "fir.classification_type) AS effective_classification_type,"
         "fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
-        "fir.bank_references,ledger.id AS ledger_entry_id "
+        "fir.bank_references,ledger.id AS ledger_entry_id,"
+        "EXISTS(SELECT 1 FROM staff_payout_events payout WHERE payout.finance_import_row_id=fir.id) AS staff_posted,"
+        "EXISTS(SELECT 1 FROM finance_import_classification_events pairing WHERE pairing.finance_import_row_id=fir.id "
+        "AND pairing.reason='manual_bank_case_pairing') AS manually_paired "
         "FROM finance_import_rows fir LEFT JOIN client_ledger_entries ledger "
         "ON ledger.finance_import_row_id=fir.id "
         "LEFT JOIN finance_import_classification_events classification "
@@ -526,15 +541,15 @@ def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock, *, proposed
     return tuple(facts)
 
 
-def _load_refund_obligation_rows(cursor, selection, lock):
+def _load_refund_obligation_rows(cursor, selection, lock, read_account=False):
     obligation_types = _obligation_types_for_purpose(selection.refund_purpose)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT obligation.obligation_identity,obligation.case_no,obligation.obligation_type,"
-        "obligation.amount_due_ntd,snapshot.bank_account "
+        "obligation.amount_due_ntd" + (",snapshot.bank_account " if read_account else " ") +
         "FROM client_obligations obligation "
-        "LEFT JOIN client_refund_recipient_snapshots snapshot "
-        "ON snapshot.refund_obligation_identity=obligation.obligation_identity "
+        + ("LEFT JOIN client_refund_recipient_snapshots snapshot "
+           "ON snapshot.refund_obligation_identity=obligation.obligation_identity " if read_account else "") +
         f"WHERE obligation.obligation_identity IN ({_placeholders(selection.obligation_identities)}) "
         "AND obligation.case_no=%s AND obligation.direction='payable_to_client' AND obligation.status='open' "
         "AND obligation.amount_due_ntd>0 "
@@ -585,6 +600,8 @@ def _refund_return_bank_facts(rows, case_no):
 def _refund_row_is_eligible(row, case_no, expected_classification, recipient_account):
     if row.get("manual_confirmed_case_no") == case_no:
         recipient_matches = True
+    elif row.get("format_id") == "sinopac" and expected_classification == "client_refund":
+        recipient_matches = row.get("sinopac_refund_case_no") == case_no
     elif row.get("format_id") == "taishin" and expected_classification == "client_subsidy_return":
         recipient_matches = row.get("taishin_memo_case_no") == case_no
     else:
@@ -597,14 +614,12 @@ def _refund_row_is_eligible(row, case_no, expected_classification, recipient_acc
         and row.get("transaction_date") is not None
         and recipient_matches
         and row.get("ledger_entry_id") is None
+        and not row.get("staff_posted")
         and _is_twd(row.get("currency"))
     )
 
 
 def _refund_source_account(row):
-    if row.get("format_id") == "sinopac":
-        references = _json_object(row.get("bank_references"))
-        return extract_sinopac_account_reference(references.get("交易參考編號"))
     if row.get("format_id") == "legacy":
         references = _json_object(row.get("bank_references"))
         reference = extract_sinopac_account_reference(references.get("transaction_reference"))
@@ -613,6 +628,41 @@ def _refund_source_account(row):
             return None
         return account or reference
     return row.get("resolved_counterparty_account")
+
+
+def _verify_sinopac_refund_cases(cursor, rows, *, lock=False):
+    from infrastructure.mysql.finance_import_repository import paired_bank_case
+
+    names = None
+    verified = []
+    for row in rows:
+        if row.get("format_id") != "sinopac" or row.get("effective_classification_type") != "client_refund":
+            verified.append(row)
+            continue
+        memo = row.get("memo")
+        if row.get("manually_paired"):
+            paired = paired_bank_case(cursor, row["id"])
+            case_no = None
+            if paired:
+                paired_case, paired_client = paired
+                suffixes = sinopac_memo_case_suffixes(memo)
+                resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)), include_candidates=True) if len(suffixes) == 1 else {}
+                cursor.execute("SELECT client_id FROM orders WHERE case_no=%s" + (" FOR UPDATE" if lock else ""), (paired_case,))
+                order = cursor.fetchone()
+                case_still_allowed = (
+                    not suffixes
+                    or resolution.get("case_no") == paired_case
+                    or resolution.get("reason") == "case_not_found"
+                    or paired_case in resolution.get("candidate_cases", ())
+                )
+                if order and paired_client == f"client:{order['client_id']}" and case_still_allowed:
+                    case_no = paired_case
+        else:
+            if names is None:
+                names = load_client_name_identities(cursor)
+            case_no = resolve_client_memo_case(cursor, memo, names, lock=lock)
+        verified.append({**row, "sinopac_refund_case_no": case_no})
+    return tuple(verified)
 
 
 def _verify_taishin_subsidy_cases(cursor, rows, *, lock=False, expected_case_no=None, require_resolved=False, connection=None):
@@ -629,16 +679,29 @@ def _verify_taishin_subsidy_cases(cursor, rows, *, lock=False, expected_case_no=
             continue
         memo = row.get("memo")
         staff_matched = extract_name_from_row_text({"memo": memo}, names) is not None
+        if any(marker in unicodedata.normalize("NFKC", str(memo or "")) for marker in ORDINARY_REFUND_MEMO_MARKERS):
+            verified.append({**row, "taishin_memo_case_no": None})
+            continue
         case_no = None
         if not staff_matched:
+            from infrastructure.mysql.finance_import_repository import paired_bank_case
             from infrastructure.mysql.subsidy_confirmation_repository import match_client_subsidy_month
 
             def match_month(active_cursor, client_ids):
                 return match_client_subsidy_month(connection, active_cursor, row.get('transaction_date'), client_ids, lock=lock)
 
             try:
-                case_no = resolve_taishin_client_memo_case(cursor, memo, client_names, lock=lock,
-                    match_month=match_month if connection is not None else None)
+                paired = paired_bank_case(cursor, row["id"]) if row.get("manually_paired") else None
+                if paired and paired[1].startswith("client:"):
+                    name = extract_name_from_row_text({"memo": memo}, tuple(client_names))
+                    if int(paired[1][7:]) in client_names.get(name, ()):
+                        cursor.execute("SELECT client_id FROM orders WHERE case_no=%s" + (" FOR UPDATE" if lock else ""), (paired[0],))
+                        owner = cursor.fetchone()
+                        if owner and int(owner["client_id"]) == int(paired[1][7:]):
+                            case_no = paired[0]
+                else:
+                    case_no = resolve_client_memo_case(cursor, memo, client_names, lock=lock,
+                        match_month=match_month if connection is not None else None)
             except ValueError:
                 if require_resolved or expected_case_no is not None:
                     raise
@@ -911,14 +974,14 @@ def _advance_account_version(cursor, request, resulting_version):
         raise RuntimeError("client_finance_candidate_stale")
 
 
-def _query_payable_obligations(cursor, case_no, refund_purpose):
+def _query_payable_obligations(cursor, case_no, refund_purpose, *, read_account=True):
     obligation_types = _obligation_types_for_purpose(refund_purpose)
     cursor.execute(
         "SELECT obligation.obligation_identity,obligation.obligation_type,"
-        "obligation.amount_due_ntd,obligation.due_date,snapshot.bank_account "
+        "obligation.amount_due_ntd,obligation.due_date" + (",snapshot.bank_account " if read_account else " ") +
         "FROM client_obligations obligation "
-        "LEFT JOIN client_refund_recipient_snapshots snapshot "
-        "ON snapshot.refund_obligation_identity=obligation.obligation_identity "
+        + ("LEFT JOIN client_refund_recipient_snapshots snapshot "
+           "ON snapshot.refund_obligation_identity=obligation.obligation_identity " if read_account else "") +
         "WHERE obligation.case_no=%s "
         "AND obligation.direction='payable_to_client' AND obligation.status='open' "
         f"AND obligation.obligation_type IN ({_placeholders(obligation_types)}) "
@@ -945,7 +1008,10 @@ def _query_candidate_outgoing_bank_rows(cursor):
         "SELECT fir.id,fir.format_id,fir.memo,fir.bank_references,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
         "fir.currency,fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
         "COALESCE(classification.classification_type,fir.classification_type) "
-        "AS effective_classification_type,ledger.id AS ledger_entry_id "
+        "AS effective_classification_type,ledger.id AS ledger_entry_id,"
+        "EXISTS(SELECT 1 FROM staff_payout_events payout WHERE payout.finance_import_row_id=fir.id) AS staff_posted,"
+        "EXISTS(SELECT 1 FROM finance_import_classification_events pairing WHERE pairing.finance_import_row_id=fir.id "
+        "AND pairing.reason='manual_bank_case_pairing') AS manually_paired "
         "FROM finance_import_rows fir "
         "LEFT JOIN finance_import_classification_events classification "
         "ON classification.id=(SELECT MAX(latest.id) "
@@ -974,10 +1040,14 @@ def _query_outgoing_bank_facts(rows, obligations, purpose, case_no):
             )
     facts = []
     for row in rows:
-        account = _refund_source_account(row)
-        targets = accounts_to_obligations.get(str(account).strip(), ())
-        if row.get("format_id") == "taishin" and expected_classification == "client_subsidy_return":
+        account = None
+        if row.get("format_id") == "sinopac" and expected_classification == "client_refund":
+            targets = tuple(str(item["obligation_identity"]) for item in obligations) if row.get("sinopac_refund_case_no") == case_no else ()
+        elif row.get("format_id") == "taishin" and expected_classification == "client_subsidy_return":
             targets = tuple(str(item["obligation_identity"]) for item in obligations) if row.get("taishin_memo_case_no") == case_no else ()
+        else:
+            account = _refund_source_account(row)
+            targets = accounts_to_obligations.get(str(account).strip(), ())
         if (
             row.get("effective_classification_type") != expected_classification
             or not targets
@@ -985,7 +1055,7 @@ def _query_outgoing_bank_facts(rows, obligations, purpose, case_no):
                 row,
                 case_no,
                 expected_classification,
-                str(account).strip(),
+                account,
             )
         ):
             continue

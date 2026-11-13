@@ -121,6 +121,10 @@ function resolveFinanceImportReview(
   const casePayment = ['client_receipt','staff_payout','staff_salary','client_refund','client_subsidy_return'].includes(row.classification_type);
   const sinopacStaffPayout = row.bank === 'sinopac' && ['staff_payout', 'staff_salary'].includes(row.classification_type);
   const reasonLabel = (code: string) => {
+    if (code === 'bank_case_suffix_not_found') return '備註六碼查無案件，請核對姓名及候選案件。';
+    if (code === 'bank_case_requires_manual_pairing') return '請確認本筆流水所屬案件及對象。';
+    if (code === 'manual_bank_case_pairing') return '案件已人工確認，請核對本筆款項。';
+    if (code === 'subsidy_requires_manual_confirmation') return '請在核對交易確認補助處理方式。';
     if (casePayment && LEGACY_REVIEW_DIAGNOSTICS.has(code)) return MISSING_REVIEW_REASON;
     if ((row.bank === 'taishin' || row.bank === undefined) && row.classification_type === 'client_subsidy_return') {
       if (code === 'bank_fact_not_eligible') return MISSING_REVIEW_REASON;

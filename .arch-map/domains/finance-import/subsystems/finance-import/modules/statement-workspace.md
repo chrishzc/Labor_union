@@ -26,6 +26,7 @@
 - `api/routes/finance_statement_workspace.py`
 - `api/routes/finance_import.py` — composed router and existing bank commands
 - `subsystems/finance_import/import_workflow.py`、`infrastructure/mysql/finance_import_repository.py` — 待核對跨批次重配借用既有 owner resolve／post；保留跨批次競用與須人工確認的明細。
+- 舊版永豐待核對薪資可由原始退款備註與同案唯一正式退款單更正。新分類事件與 Client Finance 核銷共用重配交易，原分類與原流水仍可追溯。
 - `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx` — 單一正式明細匯出入口及待核對批次重配。
 - `api/dependencies/finance_import.py`
 - `api/schemas/finance_import.py`
@@ -37,6 +38,8 @@
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
 - `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；客戶款齊且人工或銀行明細已正式確認方案才移出。發出提醒共用LINE同案期款來源及原成功紀錄。
 - `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。已確認的案件款項帶原流水直開共用案件抽屜核對，政府款開原整期核對。匯入紀錄從獨立入口查看。
+- 永豐待核對的同案月嫂薪資／一般退款流水可在案件抽屜開啟既有 Orders 取消結算，確認實際服務日、預覽並提交；正式回讀後重查同一筆流水與案件款項。
+- 「核對交易」以原流水及名冊候選完成單案人工配對。未核銷的誤匯入來源可排除，保留原列、指紋與排除事件，重新匯入沿原指紋判重。
 - 補助確認預檢在原上傳面板顯示金額、受款方向與建款／核銷計畫。同月唯一且可核銷的月嫂補助，沿原批次 Apply 自動核銷；同月多案保留選案及確認套用。六碼已定位且有同案應付款的跨月列可開單筆人工核對，沿原 Staff Payables 確認流程。全部受阻時不提供批次核銷動作。
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`

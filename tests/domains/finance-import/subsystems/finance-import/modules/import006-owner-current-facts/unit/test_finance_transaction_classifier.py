@@ -669,6 +669,45 @@ def test_sinopac_outgoing_fullwidth_memo():
     assert result["matched_identity_ids"] == [7]
 
 
+@pytest.mark.parametrize("format_id", ["sinopac", "legacy"])
+@pytest.mark.parametrize("refund_exists", [True, False])
+def test_sinopac_early_cancellation_payouts_use_separate_recipients(format_id, refund_exists):
+    payout = _row(format_id=format_id, direction="outgoing", credit=None, bank_references={})
+    identities = {
+        "staff_case_suffixes": {"115001": [7]},
+        "client_refund_case_suffixes": {"115001": [4]} if refund_exists else {},
+        "client_case_suffixes": {"115001": [4]},
+    }
+    refund = classify_finance_transaction(
+        {**payout, "debit": Decimal("2385"), "memo": "HC115001雇主退款"}, {}, {}, **identities,
+    )
+    salary = classify_finance_transaction(
+        {**payout, "debit": Decimal("3615"), "memo": "HC115001服務人員薪資"}, {}, {}, **identities,
+    )
+    assert (refund["classification_type"], refund["matched_identity_ids"]) == ("client_refund", [4])
+    assert (salary["classification_type"], salary["matched_identity_ids"]) == ("staff_salary", [7])
+
+
+@pytest.mark.parametrize("memo,reference,staff_accounts,refund_accounts,client_cases,kind,reason", [
+    ("HC115001雇主退款", "1234567890", {"1234567890": [7]}, {}, {"115001": [4]},
+     "client_refund", "sinopac_unique_client_refund_case_suffix_in_memo"),
+    ("HC115001雇主退款", "1234567890", {}, {"1234567890": [8]}, {"115001": [4]},
+     "client_refund", "sinopac_unique_client_refund_case_suffix_in_memo"),
+    ("HC115001雇主退款", None, {}, {}, {}, "non_business_review", "sinopac_employer_refund_case_not_resolved"),
+    ("HC115001／HC115002雇主退款", None, {}, {}, {"115001": [4]},
+     "non_business_review", "sinopac_employer_refund_case_not_resolved"),
+])
+def test_sinopac_employer_refund_does_not_fall_back_to_staff(memo, reference, staff_accounts,
+                                                           refund_accounts, client_cases, kind, reason):
+    row = _row(direction="outgoing", debit=Decimal("2385"), credit=None, memo=memo,
+               bank_references={"交易參考編號": reference})
+    result = classify_finance_transaction(
+        row, refund_accounts, staff_accounts, client_subsidy_return_accounts={},
+        staff_case_suffixes={"115001": [7]}, client_case_suffixes=client_cases,
+    )
+    assert (result["classification_type"], result["reason"]) == (kind, reason)
+
+
 def test_sinopac_outgoing_staff_payout_four_stage_fee_zero():
     # 永豐支出：月嫂姓名 + 同月份 + 差額 0 元（同行免手續費）
     row = _row(

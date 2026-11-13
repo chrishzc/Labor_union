@@ -321,6 +321,8 @@ class CaseAccountingView(_StrictModel):
 class FinanceImportBatchPreviewBody(_StrictModel):
     batch_identity: str = Field(min_length=1, max_length=191)
     staff_subsidy_selections: dict[str, str] = Field(default_factory=dict)
+    automatic: bool = False
+    review_row_identity: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class FinanceImportBatchSummaryView(_StrictModel):
@@ -409,9 +411,17 @@ class FinanceBankClientReceiptReviewView(_StrictModel):
     candidates: list[FinanceBankClientReceiptReviewCandidateView]
 
 
+class FinanceBankPairingCandidateView(_StrictModel):
+    case_no: str
+    purpose: Literal["staff_salary", "client_refund", "client_subsidy_return"]
+    person_id: int
+
+
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
     staff_subsidy_batch_identity: str | None = None
+    pairing_candidates: list[FinanceBankPairingCandidateView] = Field(default_factory=list)
+    pairing_memo: str | None = None
     row_identity: str
     transaction_date: str | None
     bank: Literal["sinopac", "taishin"]

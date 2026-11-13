@@ -36,6 +36,8 @@ TAISHIN_CLIENT_SUBSIDY_MEMO_REASON = "taishin_client_subsidy_case_suffix_in_memo
 TAISHIN_CLIENT_SUBSIDY_NAME_MEMO_REASON = "taishin_client_subsidy_name_in_memo"
 TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON = "taishin_client_subsidy_shared_name_in_memo"
 TAISHIN_CASE_MEMO_REASON = "taishin_memo_case_requires_manual_scheme"
+TAISHIN_ORDINARY_REFUND_REASON = "taishin_ordinary_refund_not_supported"
+ORDINARY_REFUND_MEMO_MARKERS = ("雇主退款", "退訂金")
 
 
 def _ids_for_account(accounts: Mapping[str, Any], account: str | None) -> list[Any]:
@@ -80,7 +82,6 @@ def _valid_client_virtual_account(row: Mapping[str, Any]) -> bool:
 def _classify_sinopac_outgoing(
     row: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
-    client_refund_accounts: Mapping[str, Any],
     staff_case_suffixes: Mapping[str, Any] | None = None,
     client_refund_case_suffixes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -110,17 +111,10 @@ def _classify_sinopac_outgoing(
                 "sinopac_unique_staff_case_suffix_in_memo",
             )
         if memo_refund_ids:
-            reference_key = 'transaction_reference' if row['format_id'] == 'legacy' else '交易參考編號'
-            account = extract_sinopac_account_reference(row['bank_references'].get(reference_key))
-            account_clients = _ids_for_account(client_refund_accounts, account)
-            if (_ids_for_account(staff_accounts, account)
-                    or (account_clients and set(account_clients) != set(memo_refund_ids))):
-                return _review('counterparty_identity_type_conflict')
             return _result(
                 "client_refund",
                 memo_refund_ids,
                 "sinopac_unique_client_refund_case_suffix_in_memo",
-                suffix,
             )
 
     reference_key = (
@@ -128,18 +122,6 @@ def _classify_sinopac_outgoing(
     )
     account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
     staff_ids = _ids_for_account(staff_accounts, account)
-    if row["format_id"] == "sinopac":
-        client_ids = _ids_for_account(client_refund_accounts, account)
-        if client_ids and staff_ids:
-            return _review("counterparty_identity_type_conflict")
-        if len(client_ids) > 1:
-            return _review("counterparty_account_multiple_matches")
-        if client_ids:
-            return _result(
-                "client_refund", client_ids,
-                "sinopac_unique_client_refund_account_in_transaction_reference",
-                account,
-            )
     if not staff_ids:
         return _review("sinopac_staff_account_no_match")
     if len(staff_ids) != 1:
@@ -250,7 +232,8 @@ def _classify_outgoing_by_name_month_fee(
         return None
 
     matched_staff = extract_name_from_row_text(row, staff_pool) if staff_pool else None
-    matched_client = extract_name_from_row_text(row, client_pool) if client_pool else None
+    client_source = {"memo": row.get("memo")} if row["format_id"] == "sinopac" else row
+    matched_client = extract_name_from_row_text(client_source, client_pool) if client_pool else None
 
     if matched_staff and matched_client:
         memo_text = unicodedata.normalize("NFKC", str(row.get("memo") or ""))
@@ -430,7 +413,6 @@ def classify_finance_transaction(
     known_case_suffixes: set[str] | frozenset[str] | None = None,
     staff_name_identities: Mapping[str, Sequence[int]] | None = None,
     client_name_identities: Mapping[str, Sequence[int]] | None = None,
-    client_refund_identity_accounts: Mapping[str, Any] | None = None,
     client_case_suffixes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
@@ -438,8 +420,6 @@ def classify_finance_transaction(
     validate_normalized_row(row)
     format_id = row["format_id"]
     direction = row["direction"]
-    if format_id == "sinopac" and client_refund_identity_accounts is not None:
-        client_refund_accounts = client_refund_identity_accounts
 
     if direction == "unknown":
         return _review("direction_unknown")
@@ -451,6 +431,20 @@ def classify_finance_transaction(
     fallback_review: dict[str, Any] | None = None
     if direction == "outgoing" and format_id != "taishin":
         memo = row.get("memo")
+        if (format_id in {"sinopac", "legacy"} and isinstance(memo, str)
+                and any(marker in unicodedata.normalize("NFKC", memo) for marker in ORDINARY_REFUND_MEMO_MARKERS)):
+            suffix = extract_sinopac_memo_case_suffix(memo)
+            case_clients = client_case_suffixes if client_case_suffixes is not None else client_refund_case_suffixes
+            client_ids = _ids_for_account(case_clients or {}, suffix)
+            if len(client_ids) != 1:
+                return _review("sinopac_employer_refund_case_not_resolved")
+
+            names = client_name_identities or {}
+            named_ids = names.get(extract_name_from_row_text({"memo": memo}, tuple(names)), ())
+            if named_ids and client_ids[0] not in named_ids:
+                return _review("counterparty_identity_type_conflict")
+            return _result("client_refund", client_ids, "sinopac_unique_client_refund_case_suffix_in_memo")
+
         government_memo = isinstance(memo, str) and any(marker in memo for marker in ("新竹市政府", "新竹市府"))
         if not government_memo:
             fee_result = _classify_outgoing_by_name_month_fee(
@@ -480,7 +474,8 @@ def classify_finance_transaction(
                     )
                     names = all_staff_names if is_staff else all_client_names
                     pool = sorted(set(names) | {item["name"] for item in candidates if item.get("name")}, key=len, reverse=True)
-                    name = extract_name_from_row_text(row, pool)
+                    name_source = row if is_staff else {"memo": memo}
+                    name = extract_name_from_row_text(name_source, pool)
                     directory = staff_name_identities if is_staff else client_name_identities
                     name_ids = set(directory.get(name, ())) if directory is not None else {
                         item[identity_key] for item in candidates if item.get("name") == name
@@ -500,28 +495,13 @@ def classify_finance_transaction(
                         if case_ids and ids != matched:
                             reason = "sinopac_unique_staff_case_suffix_in_memo"
                         return _result("staff_salary", matched, reason)
-                    account = extract_sinopac_account_reference(row["bank_references"].get("交易參考編號"))
-                    owners = _ids_for_account(client_refund_accounts, account)
-                    other_ids = (
-                        _ids_for_account(staff_accounts, account) + _ids_for_account(client_subsidy_return_accounts, account)
-                    )
-                    prefix = "client_refund"
-                    if len(owners) == 1 and owners[0] in name_ids:
-                        if other_ids or (case_ids and owners[0] not in case_ids):
+                    if case_ids:
+                        if not name_ids.intersection(case_ids):
                             return _review("counterparty_identity_type_conflict")
-                        if ids != owners:
-                            return _result(kind, owners, f"sinopac_unique_{prefix}_account_in_transaction_reference", account)
-                    elif len(case_ids) == 1 and case_ids[0] in name_ids:
-                        if other_ids or (owners and set(owners) != set(case_ids)):
-                            return _review("counterparty_identity_type_conflict")
-                        if ids != case_ids:
-                            return _result(kind, case_ids, f"sinopac_unique_{prefix}_case_suffix_in_memo", account)
-                    elif len(name_ids) > 1:
-                        return _review(f"outgoing_{'staff_payout' if is_staff else 'client_refund'}_name_ambiguous")
-                    elif len(name_ids) == 1 and fee_result["reason"].endswith("_no_open_obligation"):
-                        if other_ids or (owners and set(owners) != name_ids) or (case_ids and not name_ids <= set(case_ids)):
-                            return _review("counterparty_identity_type_conflict")
-                        return _result(kind, sorted(name_ids), fee_result["reason"], account)
+                        name_ids.intersection_update(case_ids)
+                    if len(name_ids) != 1:
+                        return _review("outgoing_client_refund_name_ambiguous")
+                    return _result(kind, sorted(name_ids), fee_result["reason"])
                 if ids:
                     is_staff = fee_result["classification_type"] == "staff_salary"
                     suffix = extract_sinopac_memo_case_suffix(memo)
@@ -534,12 +514,10 @@ def classify_finance_transaction(
                         account = extract_sinopac_account_reference(row["bank_references"].get(key))
                     account_ids = (
                         _ids_for_account(staff_accounts, account) if is_staff
-                        else _ids_for_account(client_refund_accounts, account)
-                        + _ids_for_account(client_subsidy_return_accounts, account)
+                        else _ids_for_account(client_subsidy_return_accounts, account)
                     )
                     other_ids = (
-                        _ids_for_account(client_refund_accounts, account)
-                        + _ids_for_account(client_subsidy_return_accounts, account)
+                        _ids_for_account(client_subsidy_return_accounts, account)
                         if is_staff else _ids_for_account(staff_accounts, account)
                     )
                     if other_ids or any(candidates and set(candidates) != set(ids) for candidates in (account_ids, case_ids)):
@@ -574,7 +552,6 @@ def classify_finance_transaction(
         sinopac_result = _classify_sinopac_outgoing(
             row,
             staff_accounts,
-            client_refund_accounts,
             staff_case_suffixes,
             client_refund_case_suffixes,
         )
@@ -585,6 +562,8 @@ def classify_finance_transaction(
     if format_id == "taishin":
         memo = row.get("memo")
         memo_text = unicodedata.normalize("NFKC", memo) if isinstance(memo, str) else ""
+        if direction == "outgoing" and any(marker in memo_text for marker in ORDINARY_REFUND_MEMO_MARKERS):
+            return _review(TAISHIN_ORDINARY_REFUND_REASON)
         government_memo = bool(memo_text and ("新竹市政府" in memo_text or "新竹市府" in memo_text))
         if direction == "incoming":
             if government_memo:

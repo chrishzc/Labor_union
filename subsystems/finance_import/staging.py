@@ -8,19 +8,131 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from decimal import Decimal
 import json
+import unicodedata
 from typing import Any, Mapping
 
 from domains.finance_import.cancellation_code import (
+    extract_sinopac_account_reference,
     extract_sinopac_memo_case_suffix,
     resolve_finance_cancellation_code,
     sinopac_memo_case_suffixes,
 )
-from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON, _is_same_month, classify_finance_transaction
+from domains.finance_import.transaction_classifier import (
+    ORDINARY_REFUND_MEMO_MARKERS,
+    TAISHIN_CASE_MEMO_REASON,
+    TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON,
+    TAISHIN_ORDINARY_REFUND_REASON,
+    _is_same_month,
+    classify_finance_transaction,
+    extract_name_from_row_text,
+)
 from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
 )
+
+MANUAL_BANK_CASE_REASON = "bank_case_requires_manual_pairing"
+UNKNOWN_BANK_SUFFIX_REASON = "bank_case_suffix_not_found"
+MANUAL_BANK_CASE_REASONS = (MANUAL_BANK_CASE_REASON, UNKNOWN_BANK_SUFFIX_REASON)
+
+
+def bank_case_name_evidence(row, identity_maps, *, filter_recipient=True):
+    """Derive the supported purpose and recipient IDs from the original bank name evidence."""
+    source = {"memo": row.get("memo"), "format_id": row["format_id"]}
+    staff_names = identity_maps.get("staff_name_identities") or {}
+    client_names = identity_maps.get("client_name_identities") or {}
+    staff = staff_names.get(extract_name_from_row_text(source, tuple(staff_names)), ())
+    clients = client_names.get(extract_name_from_row_text(source, tuple(client_names)), ())
+    memo = unicodedata.normalize("NFKC", row.get("memo") or "")
+    if row["format_id"] == "taishin":
+        if any(marker in memo for marker in ORDINARY_REFUND_MEMO_MARKERS):
+            return ()
+        if staff:
+            return (("staff_salary", staff),)
+        return (("client_subsidy_return", clients),) if clients else ()
+    if filter_recipient and any(marker in memo for marker in ORDINARY_REFUND_MEMO_MARKERS):
+        staff = ()
+    refs = row.get("bank_references") or {}
+    if isinstance(refs, str):
+        refs = json.loads(refs)
+    reference = extract_sinopac_account_reference(refs.get("交易參考編號") or refs.get("transaction_reference"))
+    staff_accounts = (identity_maps.get("staff_accounts") or {}).get(reference, ())
+    if filter_recipient and staff_accounts:
+        staff = tuple(item for item in staff if item in staff_accounts)
+    evidence = []
+    if staff:
+        evidence.append(("staff_salary", staff))
+    if clients:
+        evidence.append(("client_refund", clients))
+    return tuple(evidence)
+
+
+def _review_unresolved_outgoing(cursor, row, identity_maps):
+    suffixes = sinopac_memo_case_suffixes(row.get("memo"))
+    known = identity_maps.get("known_case_suffixes")
+    if len(suffixes) == 1 and known is not None and not suffixes <= known:
+        resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+        if resolution.get("reason") == "case_not_found":
+            names = bank_case_name_evidence(row, identity_maps, filter_recipient=False)
+            return UNKNOWN_BANK_SUFFIX_REASON if names else "skip"
+        if resolution.get("reason") == "case_not_unique" and bank_case_candidates(cursor, row, identity_maps):
+            return MANUAL_BANK_CASE_REASON
+    if suffixes:
+        return None
+    if bank_case_candidates(cursor, row, identity_maps):
+        return MANUAL_BANK_CASE_REASON
+    return None
+
+
+def _taishin_pairing_required(cursor, row, classification, identity_maps):
+    if row["format_id"] != "taishin" or sinopac_memo_case_suffixes(row.get("memo")):
+        return False
+    if classification["reason"] == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON:
+        return True
+    if classification["classification_type"] not in {"staff_salary", "staff_legacy_subsidy", "client_subsidy_return"}:
+        return False
+    return len(bank_case_candidates(cursor, row, identity_maps)) > 1
+
+
+def bank_case_candidates(cursor, row, identity_maps):
+    if row["direction"] != "outgoing":
+        return ()
+    suffixes = sinopac_memo_case_suffixes(row.get("memo"))
+    if len(suffixes) > 1:
+        return ()
+    resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes))) if suffixes else None
+    scoped_cases = ()
+    if resolution:
+        if resolution["result"] == "resolved":
+            scoped_cases = (resolution["case_no"],)
+        elif resolution.get("reason") == "case_not_unique":
+            scoped_cases = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)), include_candidates=True).get("candidate_cases", ())
+            if not scoped_cases:
+                return ()
+        elif resolution.get("reason") != "case_not_found":
+            return ()
+    candidates = []
+    for kind, ids in bank_case_name_evidence(row, identity_maps):
+        placeholders = ",".join("%s" for _ in ids)
+        if kind == "staff_salary":
+            sql = (
+                "SELECT case_no,staff_id AS person_id FROM orders WHERE staff_id IN (" + placeholders + ") "
+                "UNION SELECT case_no,staff_id FROM case_staff_assignments WHERE staff_id IN (" + placeholders + ") "
+                "AND status IN ('planned','active','completed') "
+                "UNION SELECT case_no,staff_id FROM staff_obligations WHERE staff_id IN (" + placeholders + ") "
+                "AND direction='payable_to_staff' AND status<>'cancelled'"
+            )
+            cursor.execute(sql, (*ids, *ids, *ids))
+        else:
+            cursor.execute(
+                "SELECT case_no,client_id AS person_id FROM orders WHERE client_id IN (" + placeholders + ")", ids,
+            )
+        for candidate in cursor.fetchall():
+            case_no = candidate["case_no"]
+            if not scoped_cases or case_no in scoped_cases:
+                candidates.append({"case_no": str(case_no), "purpose": kind, "person_id": int(candidate["person_id"])})
+    return tuple(sorted(candidates, key=lambda item: (item["case_no"], item["purpose"], item["person_id"])))
 
 
 def _json_default(value: Any) -> str:
@@ -173,7 +285,6 @@ def classify_row_with_identity_maps(
             known_case_suffixes,
             staff_name_identities=identity_maps.get("staff_name_identities"),
             client_name_identities=identity_maps.get("client_name_identities"),
-            client_refund_identity_accounts=identity_maps.get("client_refund_identity_accounts"),
             client_case_suffixes=identity_maps.get("client_case_suffixes"),
         )
     except TypeError:
@@ -359,8 +470,20 @@ def stage_finance_rows(
 
         if business_only:
             classification = classify_row_with_identity_maps(row, identity_maps)
-            if not _has_unique_import_case(cursor, row, classification, identity_maps):
+            if classification["reason"] == TAISHIN_ORDINARY_REFUND_REASON:
                 continue
+            admitted = _has_unique_import_case(cursor, row, classification, identity_maps)
+            reason = _review_unresolved_outgoing(cursor, row, identity_maps) if (
+                row["direction"] == "outgoing"
+                and classification["classification_type"] != "government_subsidy"
+                and (not admitted or sinopac_memo_case_suffixes(row.get("memo")))
+            ) else None
+            if reason is None and row["direction"] == "outgoing" and _taishin_pairing_required(cursor, row, classification, identity_maps):
+                reason = MANUAL_BANK_CASE_REASON
+            if reason == "skip" or (not admitted and reason is None):
+                continue
+            if reason:
+                classification = {"classification_type": "non_business_review", "matched_identity_ids": [], "reason": reason}
 
         cursor.execute(
             """INSERT INTO finance_import_rows (

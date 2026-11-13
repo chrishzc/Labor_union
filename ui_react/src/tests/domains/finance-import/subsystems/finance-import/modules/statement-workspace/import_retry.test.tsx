@@ -45,7 +45,7 @@ describe('finance import operation identity after an observed result',()=>{
     const split = kind === 'split';
     const checked: FinanceImportBatchPreview = { ...preview, rows: [{
       row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 11970,
-      classification_type: split ? 'staff_payout' : 'client_subsidy_return', disposition: 'create', target_identities: ['payment:1'],
+      classification_type: split ? 'staff_payout' : 'client_subsidy_return', disposition: kind === 'advance' ? 'business_pending' : 'create', target_identities: ['payment:1'],
       evidence: kind === 'sharedName' ? ['taishin_client_subsidy_shared_name_in_memo'] : [],
       available_actions: ['reconcile'], integrity_violations: [],
       fingerprint_collision: false, formal_reference_conflict: false,
@@ -54,6 +54,7 @@ describe('finance import operation identity after an observed result',()=>{
         payable_due_date: '2026-11-15', bank_cash_ntd: 11970, transfer_fee_ntd: 30,
         settlement_ntd: 12000, remaining_ntd: 0, blocker: null },
     }] };
+    if (kind === 'advance') checked.counts = {...checked.counts, ready_dispatch:0, business_pending:1};
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue(checked);
     chooseWorkbook();
     if (kind !== 'advance') {
@@ -61,13 +62,13 @@ describe('finance import operation identity after an observed result',()=>{
       expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(checked);
       return;
     }
-    const confirm = await screen.findByRole('button', { name: '確認套用本次明細' });
+    await waitFor(() => expect(financeImportMutationClient.preview).toHaveBeenCalledWith(checked.batch_identity, expect.any(AbortSignal), undefined, true));
+    expect(screen.queryByRole('region', { name: '補助處理預檢' })).not.toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
-    fireEvent.click(confirm);
-    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
+    expect(financeImportMutationClient.queryBatchOutcome).not.toHaveBeenCalled();
   });
 
-  it('does not submit a subsidy row whose creation preflight is blocked', async () => {
+  it('records the blocked subsidy reason without presenting a batch confirmation', async () => {
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...preview,
       counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 }, rows: [{
         row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 11970,
@@ -80,8 +81,10 @@ describe('finance import operation identity after an observed result',()=>{
           settlement_ntd: null, remaining_ntd: null, blocker: '客戶實際墊款依據不足' },
       }] });
     chooseWorkbook();
-    expect(await screen.findByText('本次沒有通過預檢的可套用動作，請先核對上述原因。')).toBeVisible();
-    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+    await waitFor(() => expect(financeImportMutationClient.preview).toHaveBeenCalled());
+    expect(screen.queryByRole('region', { name: '補助處理預檢' })).not.toBeInTheDocument();
+    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
+    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0].counts.ready_dispatch).toBe(0);
     expect(screen.queryByRole('button', { name: '確認套用本次明細' })).not.toBeInTheDocument();
   });
 

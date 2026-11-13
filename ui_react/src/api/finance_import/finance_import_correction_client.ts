@@ -81,6 +81,7 @@ export const SINOPAC_REFUND_BLOCKERS: Readonly<Record<string, string>> = {
   client_refund_source_account_missing: '原銀行流水未能辨識收款帳號，無法與退款單收款帳戶比對；請查核原流水。',
   client_refund_recipient_account_ambiguous: '所選退款單的收款帳戶缺少或不一致，無法確認唯一收款帳戶；請查核退款單帳戶資料。',
   client_refund_recipient_account_mismatch: '原銀行流水的收款帳號與所選退款單收款帳戶不同，無法核銷；請核對原流水與退款單帳戶。',
+  client_refund_memo_case_mismatch: '所選退款單與原流水備註或人工確認的案件不符，請核對案件。',
   refund_requires_exact_settlement: '實付少於待退金額超過100元；若為實際少退，請明確選擇部分退款，保留原退款單未退餘額。',
   allocation_exceeds_obligation: '銀行實付超過所選待退金額；請核對款項，確認超退時沿超退追償方式處理。',
 };

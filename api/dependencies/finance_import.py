@@ -88,8 +88,8 @@ class FinanceImportApplication:
     correction_workflow: FinanceImportCorrectionWorkflow
     posting_port: FinanceImportOwningDomainCompositePort
 
-    def preview_batch(self, batch_identity, correlation_id, staff_subsidy_selections=()):
-        return self.workflow.preview(batch_identity, correlation_id, staff_subsidy_selections)
+    def preview_batch(self, batch_identity, correlation_id, staff_subsidy_selections=(), automatic=False, review_row_identity=None):
+        return self.workflow.preview(batch_identity, correlation_id, staff_subsidy_selections, automatic, review_row_identity)
 
     def apply_batch(self, request: FinanceImportApplyRequest):
         self.posting_port.bind_request(request)

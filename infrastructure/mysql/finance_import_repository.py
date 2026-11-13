@@ -8,6 +8,7 @@ from decimal import Decimal
 import hashlib
 import json
 from typing import Iterator
+import unicodedata
 
 from pymysql.err import OperationalError
 
@@ -17,6 +18,8 @@ from domains.finance_import.correction import (
     FinanceImportCorrectionSelection,
     FinanceOwningDomain,
 )
+from domains.finance_import.cancellation_code import extract_sinopac_memo_case_suffix
+from domains.finance_import.transaction_classifier import ORDINARY_REFUND_MEMO_MARKERS
 from domains.finance_import.planning import (
     ClientReceiptReviewCandidate,
     ClientReceiptReviewDiagnostic,
@@ -51,6 +54,7 @@ from subsystems.finance_import.refund_return_review_workflow import (
 )
 
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
+SINOPAC_REFUND_REMATCH_EVIDENCE = "sinopac_refund_reclassified_from_staff_payout"
 
 
 class FinanceImportMySqlUnitOfWork(MySqlUnitOfWork):
@@ -69,9 +73,150 @@ class FinanceImportMySqlUnitOfWork(MySqlUnitOfWork):
             raise
 
 
+def _lock_bank_batch(cursor, row_id):
+    cursor.execute(
+        "SELECT contract.batch_id FROM finance_import_batch_contracts contract "
+        "WHERE contract.batch_id IN (SELECT batch_id FROM finance_import_occurrences "
+        "WHERE finance_import_row_id=%s) ORDER BY contract.batch_id FOR UPDATE",
+        (row_id,),
+    )
+    return tuple(row["batch_id"] for row in cursor.fetchall())
+
+
+def _advance_bank_batches(cursor, batch_ids):
+    if not batch_ids:
+        return
+    placeholders = ",".join("%s" for _ in batch_ids)
+    cursor.execute(
+        f"UPDATE finance_import_batch_contracts SET batch_version=batch_version+1 WHERE batch_id IN ({placeholders})",
+        batch_ids,
+    )
+
+
+def paired_bank_case(cursor, row_id):
+    cursor.execute(
+        "SELECT target_identities,evidence FROM finance_import_classification_events "
+        "WHERE finance_import_row_id=%s AND reason='manual_bank_case_pairing' ORDER BY id DESC LIMIT 1",
+        (row_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    target, = _json_text_tuple(row["target_identities"])
+    evidence, = _json_text_tuple(row["evidence"])
+    return evidence.removeprefix("bank-paired-case:"), target
+
+
 class MySqlFinanceImportRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
+
+    def exclude_unreconciled_bank_row(self, row_id, reason, actor):
+        with _mysql_cursor(self._connection) as cursor:
+            batch_ids = _lock_bank_batch(cursor, row_id)
+            cursor.execute(
+                "SELECT bank.batch_id,bank.reconciliation_status,"
+                "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(bank.bank_references,'$.source'))='manual_supplement',0) manual_source,"
+                "JSON_UNQUOTE(JSON_EXTRACT(exclusion.evidence_snapshot,'$.reason')) previous_reason,"
+                "JSON_UNQUOTE(JSON_EXTRACT(exclusion.evidence_snapshot,'$.actor')) previous_actor,"
+                "EXISTS(SELECT 1 FROM client_ledger_entries WHERE finance_import_row_id=bank.id) OR "
+                "EXISTS(SELECT 1 FROM staff_payout_events WHERE finance_import_row_id=bank.id) OR "
+                "EXISTS(SELECT 1 FROM government_subsidy_period_entries WHERE finance_import_row_id=bank.id) OR "
+                "EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts WHERE finance_import_row_id=bank.id) OR "
+                "EXISTS(SELECT 1 FROM finance_import_dispatch_events WHERE finance_import_row_id=bank.id "
+                "AND outcome='reconciled') AS posted "
+                "FROM finance_import_rows bank LEFT JOIN finance_import_integrity_events exclusion "
+                "ON exclusion.source_event_identity=%s WHERE bank.id=%s FOR UPDATE",
+                (f"bank-exclusion:{row_id}", row_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return "missing"
+            if row["reconciliation_status"] == "excluded":
+                return "excluded" if (row["previous_reason"], row["previous_actor"]) == (reason, actor) else "conflict"
+            if row["reconciliation_status"] != "pending" or row["posted"] or row.get("manual_source"):
+                return "conflict"
+            cursor.execute(
+                "UPDATE finance_import_rows SET reconciliation_status='excluded' WHERE id=%s",
+                (row_id,),
+            )
+            cursor.execute(
+                "INSERT INTO finance_import_integrity_events(batch_id,finance_import_row_id,issue_code,"
+                "active,evidence_snapshot,source_event_identity) VALUES (%s,%s,'bank_import_excluded',0,%s,%s)",
+                (row["batch_id"], row_id, _canonical_json({"actor": actor, "reason": reason}), f"bank-exclusion:{row_id}"),
+            )
+            _advance_bank_batches(cursor, batch_ids)
+            return "excluded"
+
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor):
+        from infrastructure.mysql.historical_reprocess_repository import _normalized_row
+        from subsystems.finance_import.identity_maps import load_finance_identity_maps
+        from subsystems.finance_import.staging import bank_case_candidates, MANUAL_BANK_CASE_REASONS
+
+        with _mysql_cursor(self._connection) as cursor:
+            batch_ids = _lock_bank_batch(cursor, row_id)
+            cursor.execute("SELECT * FROM finance_import_rows WHERE id=%s FOR UPDATE", (row_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return "missing"
+            if row["reconciliation_status"] != "pending":
+                return "conflict"
+            cursor.execute(
+                "SELECT 1 FROM client_ledger_entries WHERE finance_import_row_id=%s "
+                "UNION ALL SELECT 1 FROM staff_payout_events WHERE finance_import_row_id=%s "
+                "UNION ALL SELECT 1 FROM government_subsidy_period_entries WHERE finance_import_row_id=%s "
+                "UNION ALL SELECT 1 FROM finance_import_reconciliation_receipts WHERE finance_import_row_id=%s LIMIT 1",
+                (row_id, row_id, row_id, row_id),
+            )
+            if cursor.fetchone():
+                return "conflict"
+            cursor.execute(
+                "SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=%s "
+                "AND issue.active=1 AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest "
+                "WHERE latest.finance_import_row_id=issue.finance_import_row_id "
+                "AND latest.batch_id=issue.batch_id AND latest.issue_code=issue.issue_code) LIMIT 1",
+                (row_id,),
+            )
+            if cursor.fetchone():
+                return "conflict"
+            cursor.execute(
+                "SELECT classification_version,canonical_fact_version,classification_type,reason,target_identities,evidence "
+                "FROM finance_import_classification_events WHERE finance_import_row_id=%s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                (row_id,),
+            )
+            event = cursor.fetchone()
+            if event is None:
+                return "conflict"
+            target = f"{'staff' if purpose == 'staff_salary' else 'client'}:{person_id}"
+            evidence = (f"bank-paired-case:{case_no}",)
+            kind = "staff_payout" if purpose == "staff_salary" else purpose
+            if event["reason"] == "manual_bank_case_pairing":
+                same_pair = (_json_text_tuple(event["target_identities"]), _json_text_tuple(event["evidence"])) == ((target,), evidence)
+                return "paired" if same_pair and event["classification_type"] == kind else "conflict"
+            if event["classification_version"] != 0:
+                return "conflict"
+            if row.get("classification_reason") not in MANUAL_BANK_CASE_REASONS and (
+                row["format_id"] != "taishin" or event["classification_type"] != kind
+            ):
+                return "conflict"
+            choice = {"case_no": case_no, "purpose": purpose, "person_id": person_id}
+            if choice not in bank_case_candidates(cursor, _normalized_row(row), load_finance_identity_maps(cursor)):
+                return "conflict"
+            cursor.execute("SELECT client_id FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
+            order = cursor.fetchone()
+            if order is None or (purpose != "staff_salary" and order["client_id"] != person_id):
+                return "conflict"
+            cursor.execute(
+                "INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,"
+                "canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,"
+                "evidence,available_actions,actor,reason) "
+                "VALUES (%s,%s,1,1,%s,'business_pending',%s,%s,%s,JSON_ARRAY(),%s,'manual_bank_case_pairing')",
+                (row["batch_id"], row_id, kind, hashlib.sha256(_canonical_json(choice).encode()).hexdigest(),
+                 _canonical_json((target,)), _canonical_json(evidence), actor),
+            )
+            _advance_bank_batches(cursor, batch_ids)
+            return "paired"
+
 
     def load(self, identity_or_selection, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
@@ -398,7 +543,7 @@ class MySqlFinanceImportRepository:
             )
 
 
-def append_rematched_subsidy_classification(connection, candidate, actor):
+def append_rematched_refund_classification(connection, candidate, actor, reason):
     """Record the bank decision in the same transaction as the refund posting."""
     row_id = _row_database_id(candidate.row_identity)
     with _mysql_cursor(connection) as cursor:
@@ -413,7 +558,7 @@ def append_rematched_subsidy_classification(connection, candidate, actor):
             candidate.canonical_fact_version, candidate.classification_type.value,
             candidate.decision_facts_fingerprint.value,
             _canonical_json(candidate.target_identities), _canonical_json(candidate.evidence),
-            actor.actor_id, "已依正式方案二與既有退款義務重新配對",
+            actor.actor_id, reason,
         ))
 
 
@@ -438,15 +583,30 @@ def _refresh_pending_classification(row, source, identity_maps):
     decision = build_initial_classification(InitialClassificationFacts(
         int(source["id"]), current["classification_type"], tuple(current["matched_identity_ids"]), current["reason"],
     ))
-    if awaiting_scheme:
-        if decision.classification_type is not FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
-            return row
+    memo = unicodedata.normalize("NFKC", source.get("memo") or "")
+    possible_sinopac_refund = (
+        source.get("format_id") == "sinopac" and source.get("direction") == "outgoing"
+        and row.classification_type is FinanceClassificationType.STAFF_PAYOUT
+        and any(marker in memo for marker in (*ORDINARY_REFUND_MEMO_MARKERS, "退款", "退費"))
+    )
+    rematch_evidence = None
+    if awaiting_scheme and decision.classification_type is FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
+        rematch_evidence = TAISHIN_CASE_MEMO_REASON
+    if possible_sinopac_refund and (
+        decision.classification_type is FinanceClassificationType.CLIENT_REFUND
+        and extract_sinopac_memo_case_suffix(memo) is not None
+        and not any(marker in memo for marker in ("服務人員", "月嫂", "薪資"))
+    ):
+        rematch_evidence = SINOPAC_REFUND_REMATCH_EVIDENCE
+    if rematch_evidence:
         return replace(
             row, classification_type=decision.classification_type, disposition=decision.disposition,
-            target_identities=decision.target_identities, evidence=(*decision.evidence, TAISHIN_CASE_MEMO_REASON),
+            target_identities=decision.target_identities, evidence=tuple(sorted((*decision.evidence, rematch_evidence))),
             available_actions=decision.available_actions, decision_facts_fingerprint=decision.decision_facts_fingerprint,
         )
-    if (decision.classification_type is not row.classification_type
+    if awaiting_scheme:
+        return row
+    if (possible_sinopac_refund or decision.classification_type is not row.classification_type
             or (row.target_identities and decision.target_identities != row.target_identities)):
         return replace(row, classification_type=FinanceClassificationType.NON_BUSINESS_REVIEW,
                        disposition=FinanceImportDisposition.MANUAL_REVIEW, target_identities=())
@@ -585,7 +745,8 @@ def _load_correction_facts(cursor, selection, for_update):
         int(header["canonical_fact_version"]),
         int(header["classification_version"]),
         MoneyNTD(_integer_bank_amount(header["credit"], header["debit"])),
-        str(header["disposition"]) in {"manual_review", "business_pending"} and not header.get('period_bank_used'),
+        str(header["disposition"]) in {"manual_review", "business_pending"} and not header.get('period_bank_used')
+        and header.get("reconciliation_status") != "excluded",
         obligations,
         tuple(
             code
@@ -955,11 +1116,12 @@ _BATCH_ROWS_SQL = (
     "bank_fact.credit,bank_fact.debit,"
     "classification.canonical_fact_version,"
     "classification.classification_type,"
-    "classification.disposition,"
+    "CASE WHEN bank_fact.reconciliation_status='excluded' THEN 'existing' ELSE classification.disposition END AS disposition,"
     "classification.decision_facts_fingerprint,"
     "classification.target_identities,classification.evidence,"
     "classification.available_actions,dispatch.outcome AS latest_dispatch_outcome,"
-    "(EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts AS receipt "
+    "(EXISTS(SELECT 1 FROM client_ledger_entries ledger WHERE ledger.finance_import_row_id=bank_fact.id) "
+    "OR EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts AS receipt "
     "WHERE receipt.finance_import_row_id=bank_fact.id) OR EXISTS(SELECT 1 FROM government_subsidy_period_entries period_entry "
     "WHERE period_entry.finance_import_row_id=bank_fact.id) OR EXISTS(SELECT 1 FROM staff_payout_events payout "
     "WHERE payout.finance_import_row_id=bank_fact.id)) AS has_reconciliation_receipt "
@@ -975,7 +1137,7 @@ _BATCH_ROWS_SQL = (
     "FROM finance_import_dispatch_events AS latest_dispatch "
     "WHERE latest_dispatch.finance_import_row_id=bank_fact.id) "
     "WHERE occurrence.batch_id=%s "
-    "GROUP BY bank_fact.id,bank_fact.credit,bank_fact.debit,classification.id,"
+    "GROUP BY bank_fact.id,bank_fact.credit,bank_fact.debit,bank_fact.reconciliation_status,classification.id,"
     "dispatch.id,dispatch.outcome "
     "ORDER BY bank_fact.id"
 )
@@ -994,7 +1156,7 @@ _ACTIVE_INTEGRITY_SQL = (
 _CORRECTION_HEADER_SQL = (
     "SELECT contract.batch_id,contract.batch_identity,contract.batch_version,"
     "classification.canonical_fact_version,classification.classification_version,"
-    "classification.disposition,bank_fact.credit,bank_fact.debit,"
+    "classification.disposition,bank_fact.credit,bank_fact.debit,bank_fact.reconciliation_status,"
     "EXISTS(SELECT 1 FROM government_subsidy_period_entries period_entry WHERE period_entry.finance_import_row_id=bank_fact.id) period_bank_used "
     "FROM finance_import_rows AS bank_fact "
     "JOIN finance_import_occurrences AS occurrence "

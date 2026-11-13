@@ -8,7 +8,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore, type CancellationCommand } from '../adapters/orders/order_mutation_flow_store';
 import { sessionClient } from '../api/auth/session_client';
 
-interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void; allowHistoricalRepair?: boolean }
+interface Props { caseNo: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void; allowHistoricalRepair?: boolean; inBankReconciliation?: boolean }
 type DayDraft = { service_date: string; staff_id: string; reason: string };
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const drafts = (days: ServiceDay[]): DayDraft[] => days.map((day) => ({ service_date: day.service_date, staff_id: String(day.staff_id), reason: day.reason ?? '' }));
@@ -18,7 +18,7 @@ export function isCancellationTerminalStatus(status: string | null | undefined) 
   return ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(status ?? '');
 }
 
-export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, allowHistoricalRepair = true }) => {
+export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, allowHistoricalRepair = true, inBankReconciliation = false }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
@@ -42,6 +42,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     || flowPhase === 'applying' || flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed' || flowPhase === 'observing';
   const busy = unresolved || phase === 'loading' || phase === 'previewing';
   const historicalRepair = allowHistoricalRepair && query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
+  const saveHistoricalWithoutConfirmation = historicalRepair && !inBankReconciliation;
   const supportsServiceDays = query?.service_started === true || historicalRepair;
   const alreadyCancelled = query?.lifecycle_status === '訂單取消' && !historicalRepair;
   const cancellationUnavailable = isCancellationTerminalStatus(query?.lifecycle_status) && !historicalRepair;
@@ -153,7 +154,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
         || (data.client_finance_impact !== null && data.client_finance_impact.case_no !== caseNo) || (data.payroll_impact !== null && data.payroll_impact.case_no !== caseNo)) throw new Error('取消預覽案件識別不一致。');
       if (isActive(request, caseNo)) {
         setPreview(data); setPhase('idle');
-        if (historicalRepair) await apply(false, data);
+        if (saveHistoricalWithoutConfirmation) await apply(false, data);
       }
     } catch (caught) {
       if (isActive(request, caseNo)) {
@@ -293,14 +294,18 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
 
   return (
     <section aria-label={`案件 ${caseNo} 訂單取消`}>
-      <h4>{historicalRepair ? '補登取消前的實際服務' : '取消訂單'}</h4>
+      <h4>{historicalRepair ? '補登取消前的實際服務' : inBankReconciliation ? '取消結算' : '取消訂單'}</h4>
       {!query && phase !== 'loading' && !unresolved && <button type="button" onClick={() => void load()}>重新讀取取消狀態</button>}
       {phase === 'loading' && <p role="status">讀取取消狀態中…</p>}
       {query && (
         <>
           <p>目前狀態：{query.lifecycle_status}</p>
-          {alreadyCancelled && <p role="status">案件已取消；重新開始請使用受控重開。</p>}
-          {cancellationUnavailable && !alreadyCancelled && <p role="status">案件已完成，無法辦理取消。</p>}
+          {alreadyCancelled && <p role="status">{inBankReconciliation
+            ? '案件已取消。請查看本案帳務，確認取消結算與待核銷款項。'
+            : '案件已取消；重新開始請使用受控重開。'}</p>}
+          {cancellationUnavailable && !alreadyCancelled && <p role="status">{inBankReconciliation
+            ? '系統已將此案標記為完工，現有取消結算無法處理。請先核對案件的完工紀錄。'
+            : '案件已完成，無法辦理取消。'}</p>}
           {historicalRepair && <p role="status">後端允許補登歷史取消的實際服務事實；不是重新取消或重開。</p>}
           {!supportsServiceDays && !cancellationUnavailable && <p>服務尚未開始，取消實際服務日維持 0 天。</p>}
           {supportsServiceDays && !cancellationUnavailable && <p>已自動排除取消日之後的排班。請核對已服務日期與月嫂；取消當日尚未服務可移除此日，確認完全未服務可保留 0 日。</p>}
@@ -336,7 +341,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
               <label>收取原因<input value={feeNote} maxLength={500} onChange={event => { setFeeNote(event.target.value); invalidate(); }} /></label>
             </>}
           </fieldset>}
-          {!cancellationUnavailable && !preview && <button type="button" disabled={busy} onClick={() => void check()}>{historicalRepair ? '儲存實際服務事實' : '預覽取消帳務'}</button>}
+          {!cancellationUnavailable && !preview && <button type="button" disabled={busy} onClick={() => void check()}>{saveHistoricalWithoutConfirmation ? '儲存實際服務事實' : '預覽取消帳務'}</button>}
         </>
       )}
       {preview && (
@@ -360,9 +365,9 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
             {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{({ payable_to_staff: '應付薪資', receivable_from_staff: '應收回款項' } as Record<string, string>)[action.direction] ?? '薪資調整'} NT$ {action.amount.amount}</p>)}
             {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker === 'cancellation_amount_out_of_storage_range' ? '服務應付加違約金超出帳務可精確記錄的範圍。' : blocker}</p>)}
           </section>
-          {!historicalRepair && !cancellationUnavailable && !flow?.receipt && <>
+          {!saveHistoricalWithoutConfirmation && !cancellationUnavailable && !flow?.receipt && <>
             <button type="button" disabled={busy} onClick={invalidate}>返回調整</button>
-            <button type="button" className="order-v2-danger" disabled={busy || blocked} onClick={() => void apply()}>確認取消</button>
+            <button type="button" className="order-v2-danger" disabled={busy || blocked} onClick={() => void apply()}>{historicalRepair ? '確認補登與結算' : '確認取消'}</button>
           </>}
 
 

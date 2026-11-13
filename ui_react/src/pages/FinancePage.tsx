@@ -159,6 +159,8 @@ export const FinancePage: React.FC = () => {
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
+  const [automaticBatch, setAutomaticBatch] = useState(false);
+  const [reviewRowIdentity, setReviewRowIdentity] = useState<string | null>(null);
   const [unconfirmedIngestion, setUnconfirmedIngestion] = useState<IngestionCommand | null>(null);
   const [ingestionRecordMissing, setIngestionRecordMissing] = useState(false);
   const [applyReason, setApplyReason] = useState('');
@@ -264,18 +266,21 @@ export const FinancePage: React.FC = () => {
     } finally { setImportBusy(false); }
   };
 
-  const previewBankBatch = async (batchIdentity: string, selections?: Record<string, string>, applyReady = false) => {
+  const previewBankBatch = async (batchIdentity: string, selections?: Record<string, string>, applyReady = false, rowIdentity?: string) => {
     const request = start('batch-preview');
+    setAutomaticBatch(applyReady);
+    setReviewRowIdentity(rowIdentity ?? null);
     setBatchPreview({ kind: 'loading' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const preview = await financeImportMutationClient.preview(batchIdentity, request.controller.signal, selections);
+      const preview = applyReady
+        ? await financeImportMutationClient.preview(batchIdentity, request.controller.signal, undefined, true)
+        : rowIdentity
+          ? await financeImportMutationClient.preview(batchIdentity, request.controller.signal, selections, false, rowIdentity)
+          : await financeImportMutationClient.preview(batchIdentity, request.controller.signal, selections);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      const requiresSubsidyConfirmation = preview.rows.some(row => row.subsidy_preflight != null
-        && (row.subsidy_preflight.confirmation_only || (row.subsidy_preflight.scheme !== 'split'
-          && !row.evidence.includes('taishin_client_subsidy_shared_name_in_memo'))));
-      if (applyReady && canApplyImportedBatch(preview) && !requiresSubsidyConfirmation) {
-        await applyImportedBatch(preview);
+      if (applyReady && canApplyImportedBatch(preview)) {
+        await applyImportedBatch(preview, true);
       } else {
         setReload(value => value + 1);
       }
@@ -291,7 +296,7 @@ export const FinancePage: React.FC = () => {
   const previewImportedBatch = (ingested: FinanceWorkbookIngestionReceipt) =>
     previewBankBatch(ingested.batch_identity, undefined, true);
 
-  const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
+  const applyImportedBatch = async (checked: FinanceImportBatchPreview, automatic = automaticBatch) => {
     if (!canApplyImportedBatch(checked)) return;
     if (applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
@@ -300,7 +305,10 @@ export const FinancePage: React.FC = () => {
       const command = financeApplyCommandByPreview.current.get(previewFingerprint)
         ?? { idempotencyKey: `ui-finance-apply-${crypto.randomUUID()}`, correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
       financeApplyCommandByPreview.current.set(previewFingerprint, command);
-      const accepted = await financeImportMutationClient.apply(checked, command.reason, { idempotencyKey: command.idempotencyKey, correlationId: command.correlationId });
+      const accepted = await financeImportMutationClient.apply(checked, command.reason, {
+        idempotencyKey: command.idempotencyKey, correlationId: command.correlationId, ...(automatic && {automatic}),
+        ...(!automatic && reviewRowIdentity && {reviewRowIdentity}),
+      });
       setApplyJob({ kind: 'ready', data: accepted });
       await observeApplyOutcome(accepted.job_id, {
         batchIdentity: checked.batch_identity,
@@ -443,13 +451,15 @@ export const FinancePage: React.FC = () => {
           importBusy={importBusy}
           ingestion={ingestion}
           batchPreview={batchPreview}
+          automaticBatch={automaticBatch}
+          reviewRowIdentity={reviewRowIdentity}
           applyJob={applyJob}
           batchOutcome={batchOutcome}
           onIngest={() => void ingestWorkbook()}
           onApply={(preview) => void applyImportedBatch(preview)}
           onObserveApplyOutcome={(jobId, expected) => void observeApplyOutcome(jobId, expected)}
           onReconcile={openBankReview}
-          onPreviewBankBatch={(batchIdentity, selections) => void previewBankBatch(batchIdentity, selections)}
+          onPreviewBankBatch={(batchIdentity, selections, rowIdentity) => void previewBankBatch(batchIdentity, selections, false, rowIdentity)}
           confirmedImportReceipt={confirmedImportReceipt}
           submittedFinanceCommand={submittedFinanceCommand}
         />

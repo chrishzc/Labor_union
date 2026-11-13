@@ -43,6 +43,10 @@ from infrastructure.mysql.client_receipt_reconciliation_repository import (
 from infrastructure.mysql.client_refund_reversal_repository import (
     MySqlClientRefundReversalRepository,
 )
+from infrastructure.mysql.finance_import_repository import (
+    SINOPAC_REFUND_REMATCH_EVIDENCE,
+    append_rematched_refund_classification,
+)
 from infrastructure.mysql.government_subsidy_repository import (
     MySqlGovernmentSubsidyRepository,
 )
@@ -324,9 +328,9 @@ class MySqlFinanceImportOwningDomainComposite:
         from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON
 
         if isinstance(candidate, CanonicalFinanceImportRow) and TAISHIN_CASE_MEMO_REASON in candidate.evidence:
-            from infrastructure.mysql.finance_import_repository import append_rematched_subsidy_classification
-
-            append_rematched_subsidy_classification(self._connection, candidate, context.actor)
+            append_rematched_refund_classification(
+                self._connection, candidate, context.actor, "已依正式方案二與既有退款義務重新配對",
+            )
         selection = _client_subsidy_return_selection(
             self._connection,
             candidate,
@@ -361,6 +365,10 @@ class MySqlFinanceImportOwningDomainComposite:
 
     def _post_client_refund(self, candidate, context):
         selection = _client_refund_selection(self._connection, candidate)
+        if isinstance(candidate, CanonicalFinanceImportRow) and SINOPAC_REFUND_REMATCH_EVIDENCE in candidate.evidence:
+            append_rematched_refund_classification(
+                self._connection, candidate, context.actor, "已依永豐原始備註與同案正式退款單更正月嫂薪資分類",
+            )
         repository = MySqlClientRefundReversalRepository(self._connection)
         workflow = ClientRefundReversalWorkflow(
             repository,
@@ -753,7 +761,7 @@ def _resolve_client_refund(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
     if client_id is None:
         return candidate
-    memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
+    memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity, evidence=candidate.evidence)
     with connection.cursor() as cursor:
         cursor.execute("SELECT format_id,currency FROM finance_import_rows WHERE id=%s", (_row_id(candidate.row_identity),))
         source = cursor.fetchone() or {}
@@ -764,9 +772,18 @@ def _resolve_client_refund(connection, candidate):
         return candidate
     if memo_scoped and case_no is None:
         return candidate
-    rows = _load_client_refund_targets(
-        connection, client_id, case_no
-    )
+    reclassifying = SINOPAC_REFUND_REMATCH_EVIDENCE in candidate.evidence
+    if reclassifying:
+        if not is_sinopac or case_no is None:
+            return candidate
+        # Hold the owning account while choosing among its current obligations.
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT case_no FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+            if cursor.fetchone() is None:
+                return replace(candidate, pending_reason="outgoing_client_refund_no_open_obligation")
+        rows = _load_client_refund_targets(connection, client_id, case_no, for_update=True)
+    else:
+        rows = _load_client_refund_targets(connection, client_id, case_no)
     if is_sinopac:
         pending = replace(candidate, disposition=FinanceImportDisposition.BUSINESS_PENDING,
                           available_actions=("resolve_owning_domain_target",), pending_reason=None)
@@ -776,15 +793,31 @@ def _resolve_client_refund(connection, candidate):
             return replace(pending, pending_reason="bank_currency_not_twd")
         if not rows:
             return replace(pending, pending_reason="outgoing_client_refund_no_open_obligation")
+        cancellation_refunds = [
+            row for row in rows
+            if row["obligation_identity"].startswith("client-cancellation:create_refund:")
+        ]
         if any(row.get("due_date") is None for row in rows):
             return replace(pending, pending_reason="due_date_missing")
-        if not any(_is_same_month(trans_date, row["due_date"]) for row in rows):
+        if not cancellation_refunds and not any(_is_same_month(trans_date, row["due_date"]) for row in rows):
             return replace(pending, pending_reason="outgoing_client_refund_month_no_match")
         matches = _monthly_payout_target_candidates(rows, trans_date, candidate.amount.amount, by_case=True)
+        matches += tuple(
+            (row["obligation_identity"],)
+            for row in cancellation_refunds
+            if not _is_same_month(trans_date, row["due_date"])
+            and 0 <= int(row["amount_due_ntd"]) - candidate.amount.amount <= 100
+        )
         if len(matches) != 1:
             reason = "outgoing_client_refund_multiple_fee_matches" if matches else "outgoing_client_refund_amount_mismatch"
             return replace(pending, pending_reason=reason)
         targets = matches[0]
+        if reclassifying:
+            if len(targets) != 1 or not any(
+                row["obligation_identity"] == targets[0] and row.get("obligation_type") == "refund"
+                for row in rows
+            ):
+                return replace(pending, pending_reason="outgoing_client_refund_target_ambiguous")
     else:
         targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount, by_case=True)
     if targets is None:
@@ -803,7 +836,9 @@ def _resolve_client_refund(connection, candidate):
     )
     ready = _ready_candidate(candidate, targets, evidence)
     if is_sinopac:
-        workflow = ClientRefundReversalWorkflow(MySqlClientRefundReversalRepository(connection), BorrowedTransactionUnitOfWork)
+        repository = (MySqlClientRefundReversalRepository(connection, preview_refund_classification="client_refund")
+                      if reclassifying else MySqlClientRefundReversalRepository(connection))
+        workflow = ClientRefundReversalWorkflow(repository, BorrowedTransactionUnitOfWork)
         try:
             workflow.preview(_client_refund_selection(connection, ready),
                              CorrelationId(f"finance-import-refund-preview:{candidate.row_identity}"))
@@ -819,7 +854,7 @@ def _json_object(value):
     return decoded if isinstance(decoded, dict) else {}
 
 
-def _sinopac_outgoing_case_info(connection, row_identity, *, taishin_staff=False):
+def _sinopac_outgoing_case_info(connection, row_identity, *, taishin_staff=False, evidence=()):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT format_id,direction,memo,transaction_date FROM finance_import_rows WHERE id=%s",
@@ -835,6 +870,10 @@ def _sinopac_outgoing_case_info(connection, row_identity, *, taishin_staff=False
             return False, None, trans_date
         if row["direction"] != "outgoing":
             return True, None, trans_date
+        paired_case = next((item.removeprefix("bank-paired-case:") for item in evidence
+                            if item.startswith("bank-paired-case:")), None)
+        if paired_case:
+            return True, paired_case, trans_date
         if taishin_staff and row["format_id"] == "taishin":
             return False, None, trans_date
         suffixes = sinopac_memo_case_suffixes(row["memo"])
@@ -849,7 +888,7 @@ def _sinopac_outgoing_case_info(connection, row_identity, *, taishin_staff=False
 
 
 def _load_client_refund_targets(
-    connection, client_id, case_no=None, *, subsidy_return=False
+    connection, client_id, case_no=None, *, subsidy_return=False, for_update=False
 ):
     scope_predicates = []
     parameters = []
@@ -869,13 +908,14 @@ def _load_client_refund_targets(
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT obligation.case_no,obligation.obligation_identity,"
-            "obligation.due_date,obligation.amount_due_ntd FROM client_obligations obligation "
+            "obligation.due_date,obligation.amount_due_ntd,obligation.obligation_type FROM client_obligations obligation "
             "JOIN orders order_row ON order_row.case_no=obligation.case_no "
             "WHERE obligation.direction='payable_to_client' "
             "AND obligation.status='open' AND obligation.amount_due_ntd>0 "
             + type_predicate
             + "".join(scope_predicates)
-            + "ORDER BY obligation.case_no,obligation.due_date,obligation.obligation_identity",
+            + "ORDER BY obligation.case_no,obligation.due_date,obligation.obligation_identity"
+            + (" FOR UPDATE" if for_update else ""),
             tuple(parameters),
         )
         return tuple(cursor.fetchall())
@@ -913,7 +953,7 @@ def _resolve_staff_payout(connection, candidate):
     if staff_id is None:
         return candidate
     memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(
-        connection, candidate.row_identity, taishin_staff=True
+        connection, candidate.row_identity, taishin_staff=True, evidence=candidate.evidence
     )
     if candidate.subsidy_preflight is not None:
         case_no = candidate.subsidy_preflight.case_no
@@ -1140,6 +1180,12 @@ def _client_refund_selection(connection, candidate):
         )
         rows = tuple(cursor.fetchall())
     case_no = _single_client_refund_scope(rows, targets)
+    if isinstance(candidate, FinanceImportCorrectionSelection):
+        from infrastructure.mysql.finance_import_repository import paired_bank_case
+        with connection.cursor() as cursor:
+            paired = paired_bank_case(cursor, _row_id(candidate.row_identity))
+        if paired and paired[0] != case_no:
+            raise ValueError("bank_case_pairing_unavailable")
     return ClientRefundReversalSelection(
         case_no,
         (

@@ -112,16 +112,16 @@ export const financeImportMutationClient = {
       return receipt;
     } catch (error) { throw mapFinanceImportQueryError(error); }
   },
-  async preview(batchIdentity: string, signal?: AbortSignal, staffSubsidySelections?: Record<string, string>): Promise<FinanceImportBatchPreview> {
+  async preview(batchIdentity: string, signal?: AbortSignal, staffSubsidySelections?: Record<string, string>, automatic = false, reviewRowIdentity?: string): Promise<FinanceImportBatchPreview> {
     const batch = batchIdentity.trim(); if (!batch) throw new FinanceImportQueryError('FINANCE_IMPORT_BATCH_IDENTITY_INVALID', 'batch identity 不得為空白。');
-    try { return decode(previewSchema, await transport.post('/api/v1/finance-import/batches/preview', { batch_identity: batch, ...(staffSubsidySelections && { staff_subsidy_selections: staffSubsidySelections }) }, requestOptions(signal, { 'X-Correlation-ID': `finance-import-preview-${crypto.randomUUID()}` })), 'Finance Import Preview'); } catch (error) { throw mapFinanceImportQueryError(error); }
+    try { return decode(previewSchema, await transport.post('/api/v1/finance-import/batches/preview', { batch_identity: batch, ...(automatic && {automatic}), ...(reviewRowIdentity && {review_row_identity:reviewRowIdentity}), ...(staffSubsidySelections && { staff_subsidy_selections: staffSubsidySelections }) }, requestOptions(signal, { 'X-Correlation-ID': `finance-import-preview-${crypto.randomUUID()}` })), 'Finance Import Preview'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
-  async apply(preview: FinanceImportBatchPreview, reason: string, command: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }): Promise<FinanceImportJobAccepted> {
+  async apply(preview: FinanceImportBatchPreview, reason: string, command: { idempotencyKey: string; correlationId: string; signal?: AbortSignal; automatic?: boolean; reviewRowIdentity?: string }): Promise<FinanceImportJobAccepted> {
     const normalizedReason = reason.trim(); if (normalizedReason.length > 500) throw new FinanceImportQueryError('FINANCE_IMPORT_REASON_INVALID', '正式入帳原因不得超過500字。');
     const selections = Object.fromEntries(preview.rows.flatMap(row =>
       row.selected_staff_subsidy_case ? [[row.row_identity, row.selected_staff_subsidy_case]] : []));
     try { return decode(jobAcceptedSchema, await transport.post('/api/v1/finance-import/batches/apply', {
-      ...(Object.keys(selections).length && { staff_subsidy_selections: selections }), batch_identity: preview.batch_identity, expected_batch_version: preview.batch_version, preview_fingerprint: preview.preview_fingerprint, reason: normalizedReason }, requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), 'Finance Import Apply'); } catch (error) { throw mapFinanceImportQueryError(error); }
+      ...(command.automatic && {automatic: true}), ...(command.reviewRowIdentity && {review_row_identity:command.reviewRowIdentity}), ...(Object.keys(selections).length && { staff_subsidy_selections: selections }), batch_identity: preview.batch_identity, expected_batch_version: preview.batch_version, preview_fingerprint: preview.preview_fingerprint, reason: normalizedReason }, requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), 'Finance Import Apply'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
   async queryBatchOutcome(jobId: string, signal?: AbortSignal): Promise<FinanceImportBatchOutcome> {
     const normalized = jobId.trim(); if (!normalized) throw new FinanceImportQueryError('FINANCE_IMPORT_JOB_ID_INVALID', 'job id 不得為空白。');

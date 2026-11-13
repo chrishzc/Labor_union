@@ -196,8 +196,60 @@ def test_unmatched_and_blocked_rows_remain_visible_until_formal_posting() -> Non
         database.execute('INSERT INTO client_ledger_entries VALUES (2)')
         assert service.get_manifest('batch-1').review_count == 4
         assert [row.row_id for row in service.list_review_rows('batch-1', limit=100)] == [1, 3, 9, 10]
+        database.execute("UPDATE finance_import_rows SET reconciliation_status='excluded' WHERE id=1")
+        assert service.get_manifest('batch-1').review_count == 3
+        assert [row.row_id for row in service.list_review_rows('batch-1', limit=100)] == [3, 9, 10]
     finally:
         database.close()
+
+
+@pytest.mark.parametrize("posted", [False, True])
+def test_mistaken_import_exclusion_records_reason_without_removing_source(posted):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [{"batch_id": 4}]
+    cursor.fetchone.return_value = {"batch_id": 4, "reconciliation_status": "pending", "posted": posted}
+    result = MySqlFinanceImportRepository(connection).exclude_unreconciled_bank_row(7, "synthetic reason", "admin")
+    assert result == ("conflict" if posted else "excluded")
+    writes = [call.args for call in cursor.execute.call_args_list if call.args[0].startswith(("UPDATE", "INSERT", "DELETE"))]
+    if posted:
+        assert writes == []
+    else:
+        assert len(writes) == 3
+        assert "reconciliation_status='excluded'" in writes[0][0]
+        assert "bank_import_excluded" in writes[1][0]
+        assert '"reason":"synthetic reason"' in writes[1][1][2]
+        assert '"actor":"admin"' in writes[1][1][2]
+
+
+def test_bank_case_pairing_appends_only_the_selected_candidate(monkeypatch):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository
+    from subsystems.finance_import import identity_maps, staging
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [{"batch_id": 4}]
+    cursor.fetchone.side_effect = [
+        {"batch_id": 4, "format_id": "sinopac", "reconciliation_status": "pending",
+         "classification_reason": staging.UNKNOWN_BANK_SUFFIX_REASON, "bank_references": {}, "warnings": [], "raw_payload": {}},
+        None,
+        None,
+        {"classification_version": 0, "canonical_fact_version": 0, "reason": "initial_bank_classification"},
+        {"client_id": 5},
+    ]
+    monkeypatch.setattr(identity_maps, "load_finance_identity_maps", lambda _: {})
+    monkeypatch.setattr(staging, "bank_case_candidates", lambda *_: (
+        {"case_no": "case-2", "purpose": "client_refund", "person_id": 5},
+    ))
+    assert MySqlFinanceImportRepository(connection).pair_unreconciled_bank_row(7, "case-2", "client_refund", 5, "admin") == "paired"
+    event = next(call.args for call in cursor.execute.call_args_list
+                 if call.args[0].startswith("INSERT INTO finance_import_classification_events"))
+    assert event[1][0:3] == (4, 7, "client_refund")
+    assert event[1][4:7] == ('["client:5"]', '["bank-paired-case:case-2"]', "admin")
 
 
 def test_query_rejects_missing_formal_batch() -> None:
@@ -623,6 +675,30 @@ def test_refund_matching_reason_survives_apply_receipt_and_query_mapping(monkeyp
     assert query._bank_transaction(source, ['C-1'])['recorded_pending_reason'] == reason
     assert query._bank_transaction({**source, 'transaction_status':'posted'}, ['C-1'])['recorded_pending_reason'] is None
     assert query._bank_transaction({**source, 'recorded_pending_reason':None}, ['C-1'])['recorded_pending_reason'] is None
+
+
+def test_manual_review_plan_never_dispatches_other_rows_from_same_batch():
+    from unittest.mock import Mock
+    from subsystems.finance_import.import_workflow import FinanceImportWorkflow
+
+    selected = CanonicalFinanceImportRow(
+        "finance-import-row:1", 0, MoneyNTD(12000), FinanceClassificationType.STAFF_PAYOUT,
+        FinanceImportDisposition.CREATE, PreviewFingerprint("a" * 64), target_identities=("salary:1",),
+    )
+    other = CanonicalFinanceImportRow(
+        "finance-import-row:2", 0, MoneyNTD(6000), FinanceClassificationType.CLIENT_REFUND,
+        FinanceImportDisposition.CREATE, PreviewFingerprint("b" * 64), target_identities=("refund:2",),
+    )
+    facts = FinanceImportBatchFacts("finance-import-batch:1", 0, 2, 2, 0, "b" * 64, "v1", "v1", (selected, other))
+    repo = Mock()
+    repo.load.return_value = facts
+    posting = Mock()
+    posting.resolve.side_effect = lambda row: row
+    plan = FinanceImportWorkflow(repo, posting, Mock()).preview(
+        facts.batch_identity, CorrelationId("single-bank-row"), review_row_identity=selected.row_identity,
+    )
+    assert plan.dispatchable_rows == (selected,)
+    posting.resolve.assert_called_once_with(selected)
 
 
 def test_pending_rematch_resolves_across_batches_and_keeps_contested_targets_pending():

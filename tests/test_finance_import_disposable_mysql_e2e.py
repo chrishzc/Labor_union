@@ -68,29 +68,40 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
                 cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
                 assert cursor.fetchone()["count"] == 0, "requires fresh empty fixture database"
         _seed_sinopac_memo_cases(connection)
+        with connection.cursor() as cursor:
+            for index in range(1, 7):
+                case_no = f"11500070{index}"
+                cursor.execute(
+                    "INSERT INTO client_legacy_virtual_accounts "
+                    "(case_no,virtual_account,source_content_digest,source_row,created_by) "
+                    "VALUES (%s,%s,%s,%s,'memo-test')",
+                    (case_no, build_client_virtual_account(case_no), "a" * 64, index + 1),
+                )
+        connection.commit()
         before = _sinopac_memo_readback(connection)
     finally:
         connection.close()
 
     client_account, staff_account = "9" * 16, "8" * 16
     scenarios = (
-        ("refund", "HC115701退款", client_account, 1200, 0),
+        ("refund", "HC115701退款", "", 1200, 0),
         ("staff-hc", "HC115702服務人員", staff_account, 12000, 0),
         ("staff-a", "A115703服務人員", staff_account, 14000, 0),
         ("passbook-only", "", staff_account, 12000, 0),
         ("multiple-codes", "HC115702 HC115704", staff_account, 12000, 0),
         ("unknown-case", "HC115799退款", client_account, 1200, 0),
-        ("wrong-client", "HC115706退款", client_account, 1200, 0),
+        ("wrong-month", "HC115706退款", client_account, 1200, 0),
         ("seven-digits", "HC1157020", staff_account, 12000, 0),
         ("receipt-source", "", "", 0, 2000),
         ("wrong-case-amount", "HC115701服務人員", staff_account, 12000, 0),
     )
     rows = []
     for index, (label, memo, account, debit, credit) in enumerate(scenarios, 1):
+        day = "2026-11-02" if label == "wrong-month" else "2026-10-29"
         row = dict.fromkeys(SINOPAC_HEADERS)
         row.update({
-            "帳號": "10000001", "交易日": f"2026-10-29 09:00:{index:02d}",
-            "計息日": "2026-10-29", "入帳日": "2026-10-29", "摘要": "轉帳",
+            "帳號": "10000001", "交易日": f"{day} 09:00:{index:02d}",
+            "計息日": day, "入帳日": day, "摘要": "轉帳",
             "幣別": "TWD", "支出": debit, "存入": credit, "餘額": 100000 - index,
             "交易參考編號": account, "備註": memo, "票據號碼": label,
             "存摺備註": "HC115704服務人員",
@@ -104,7 +115,7 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     pd.DataFrame(rows, columns=SINOPAC_HEADERS).to_excel(workbook, index=False)
     expected_skipped = {"passbook-only", "multiple-codes", "unknown-case", "seven-digits"}
     expected_posted = {"refund", "staff-hc", "staff-a", "receipt-source"}
-    expected_pending = {"wrong-client", "wrong-case-amount"}
+    expected_pending = {"wrong-month", "wrong-case-amount"}
     expected_admitted = expected_posted | expected_pending
     normalized = normalize_workbook(workbook)
     assert normalized["source_row_count"] == 10
@@ -124,7 +135,7 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
                     "classification_reason": classification["reason"],
                 }
         # Spec 22 §15.3 / §15.6.1: unresolved new sources are skipped before
-        # persistence, while known cases with payment/account issues stay visible.
+        # persistence, while known cases with unmatched obligations stay visible.
         assert {label for label, result in admission.items() if result["admitted"]} == expected_admitted
         assert {label for label, result in admission.items() if not result["admitted"]} == expected_skipped
     finally:
@@ -236,7 +247,7 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
         )
         assert {row["row_id"] for row in pending["items"]} == {row_ids[label] for label in expected_pending}
         assert {row["row_id"]: row["recorded_pending_reason"] for row in pending["items"]} == {
-            row_ids["wrong-client"]: "client_refund_recipient_account_mismatch",
+            row_ids["wrong-month"]: "outgoing_client_refund_month_no_match",
             row_ids["wrong-case-amount"]: "staff_payout_amount_mismatch",
         }
         after = _sinopac_memo_readback(connection)
@@ -330,7 +341,7 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
         "checks": {name: "PASS" for name in (
             "refund_memo_case", "staff_hc_memo_case", "staff_a_memo_case",
             "missing_memo_no_passbook_fallback", "multiple_codes_skipped",
-            "unknown_case_skipped", "wrong_counterparty_pending", "seven_digits_skipped",
+            "unknown_case_skipped", "non_cancellation_wrong_month_pending", "seven_digits_skipped",
             "wrong_case_amount_pending", "receipt_reads_cancellation_column",
             "decoy_obligations_unchanged", "immutable_bank_source", "idempotent_replay",
             "durable_worker_posting", "terminal_receipt", "cross_file_duplicate_exclusion",
@@ -342,6 +353,106 @@ def test_sinopac_memo_case_isolation_on_fresh_mysql(tmp_path):
     (tmp_path / "memo-case-receipt.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
     )
+
+
+def test_rematch_corrects_only_unambiguous_existing_sinopac_refund(tmp_path, monkeypatch):
+    from api.dependencies.finance_import import build_finance_import_application
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
+    from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import import staging
+    from subsystems.finance_import.import_workflow import PendingReconciliationRequest
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+
+    bootstrap(_arguments())
+    connection = get_connection()
+    actor = ActorContext("sinopac-rematch-test")
+    try:
+        _seed_sinopac_memo_cases(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM staff WHERE name='Memo Test Staff'")
+            staff_id = cursor.fetchone()["id"]
+            for index in (1, 2, 3, 4, 6):
+                case_no = f"11500070{index}"
+                cursor.execute(
+                    "INSERT INTO client_legacy_virtual_accounts "
+                    "(case_no,virtual_account,source_content_digest,source_row,created_by) "
+                    "VALUES (%s,%s,%s,%s,'rematch-test')",
+                    (case_no, build_client_virtual_account(case_no), "a" * 64, index + 1),
+                )
+                cursor.execute("INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES (%s,0)", (case_no,))
+            cursor.execute(
+                "INSERT INTO client_obligation_events "
+                "(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,"
+                "after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
+                "VALUES ('refund:second:115000704','115000704','refund','payable_to_client','established',"
+                "0,1200,'2026-10-29','rematch-ambiguous-refund',0,'rematch-ambiguous-refund','rematch-test','fixture')"
+            )
+            cursor.execute(
+                "INSERT INTO client_obligations "
+                "(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) "
+                "VALUES ('refund:second:115000704','115000704','refund','payable_to_client',1200,'2026-10-29','open',%s,0)",
+                (cursor.lastrowid,),
+            )
+        connection.commit()
+
+        rows = []
+        scenarios = (
+            ("HC115701雇主退款", 1185),
+            ("HC115702退訂金", 900),
+            ("HC115703雇主退款", 1185),
+            ("HC115704 HC115706雇主退款", 1185),
+            ("HC115704雇主退款 月嫂薪資", 1185),
+            ("HC115704雇主退款 Memo Test Other Client", 1185),
+            ("HC115704退訂金", 1185),
+            ("HC115706雇主退款", 1185),
+            ("HC115706退訂金", 1185),
+        )
+        for index, (memo, amount) in enumerate(scenarios, 1):
+            rows.append({"帳號": "10000001", "交易日": f"2026-10-29 09:00:{index:02d}",
+                         "計息日": "2026-10-29", "入帳日": "2026-10-29", "摘要": "轉帳",
+                         "幣別": "TWD", "支出": amount, "存入": 0, "餘額": 100000 - index, "備註": memo})
+        path = tmp_path / "previously-misclassified.xlsx"
+        pd.DataFrame(rows, columns=SINOPAC_HEADERS).to_excel(path, index=False)
+
+        def legacy_decision(row, maps):
+            return {"classification_type": "staff_salary", "matched_identity_ids": [staff_id],
+                    "reason": "sinopac_unique_staff_case_suffix_in_memo", "resolved_counterparty_account": None}
+
+        with monkeypatch.context() as previous:
+            previous.setattr(staging, "classify_row_with_identity_maps", legacy_decision)
+            previous.setattr(staging, "_has_unique_import_case", lambda *args: True)
+            ingest = ingest_finance_workbook(str(path), IdempotencyKey("old-sinopac-import"), actor,
+                                            connection_factory=get_connection, normalizer=normalize_workbook)
+        assert ingest.canonical_created_count == len(scenarios)
+
+        app = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+        for key, posted in (("rematch-old", 1), ("rematch-again", 0)):
+            result = app.reconcile_pending(PendingReconciliationRequest(IdempotencyKey(key), actor, CorrelationId(key)))
+            assert (result.reconciled_count, result.pending_count) == (posted, len(scenarios) - 1)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank.memo,event.classification_type FROM finance_import_rows bank "
+                "JOIN finance_import_classification_events event ON event.finance_import_row_id=bank.id "
+                "ORDER BY bank.id,event.classification_version"
+            )
+            expected = [(memo, "staff_payout") for memo, _ in scenarios]
+            expected.insert(1, (scenarios[0][0], "client_refund"))
+            assert [(item["memo"], item["classification_type"]) for item in cursor.fetchall()] == expected
+            cursor.execute(
+                "SELECT ledger.case_no,ledger.amount_ntd,bank.memo FROM client_ledger_entries ledger "
+                "JOIN finance_import_rows bank ON bank.id=ledger.finance_import_row_id"
+            )
+            assert list(cursor.fetchall()) == [{"case_no": "115000701", "amount_ntd": 1185, "memo": scenarios[0][0]}]
+            for table, count in (("finance_import_batches", 1), ("finance_import_occurrences", len(scenarios)),
+                                 ("staff_payout_events", 0)):
+                cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
+                assert cursor.fetchone()["total"] == count
+    finally:
+        connection.close()
 
 
 @pytest.mark.parametrize("payment_type", ["staff_payout", "client_refund"])

@@ -334,6 +334,13 @@ class MySqlStaffPayoutRepository:
                     raise ValueError("bank_currency_not_twd")
             from infrastructure.mysql.manual_supplement_evidence import manual_source_matches
             cases = {row.get("case_no") for row in obligation_rows}
+            if any(row.get("manually_paired") and row.get("format_id") in _SINOPAC_PAYOUT_FORMATS for row in bank_rows):
+                from infrastructure.mysql.finance_import_repository import paired_bank_case
+                for row in bank_rows:
+                    if row.get("manually_paired") and row.get("format_id") in _SINOPAC_PAYOUT_FORMATS:
+                        paired = paired_bank_case(cursor, row["id"])
+                        if paired is None or cases != {paired[0]} or paired[1] != f"staff:{staff_id}":
+                            raise ValueError("bank_case_pairing_unavailable")
             bank_rows = tuple({**row, "manual_confirmed_staff_id": staff_id}
                 if len(cases) == 1 and None not in cases and manual_source_matches(cursor, row, case_no=next(iter(cases)),
                     direction="staff_salary", obligations=selection.obligation_identities) else row
@@ -617,7 +624,9 @@ def _load_selected_bank_rows(cursor, selection, lock):
         "fir.debit,fir.credit,fir.direction,fir.currency,"
         "fir.resolved_counterparty_account,fir.classification_type,"
         "classification.classification_type AS authoritative_classification_type,"
-        "fir.reconciliation_status,fir.warnings,spe.id AS payout_event_id "
+        "fir.reconciliation_status,fir.warnings,spe.id AS payout_event_id,"
+        "EXISTS(SELECT 1 FROM finance_import_classification_events pairing WHERE pairing.finance_import_row_id=fir.id "
+        "AND pairing.reason='manual_bank_case_pairing') AS manually_paired "
         "FROM finance_import_rows fir "
         "LEFT JOIN finance_import_classification_events classification "
         "ON classification.id=("
@@ -649,6 +658,15 @@ def _verify_taishin_memo_recipients(cursor, bank_rows, lock, *, expected_cases=N
             continue
         name = extract_name_from_row_text({"memo": row.get("memo")}, name_order)
         matches = names.get(name, ())
+        from infrastructure.mysql.finance_import_repository import paired_bank_case
+        paired = paired_bank_case(cursor, row["id"]) if row.get("manually_paired") else None
+        if paired:
+            case_no, recipient = paired
+            if (not recipient.startswith("staff:") or int(recipient[6:]) not in matches
+                    or (expected_cases is not None and expected_cases != {case_no})):
+                raise ValueError("staff_memo_case_mismatch")
+            verified.append({**row, "taishin_memo_staff_id": int(recipient[6:])})
+            continue
         if len(matches) != 1:
             raise ValueError("staff_memo_recipient_unconfirmed")
         from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes

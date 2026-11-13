@@ -114,8 +114,13 @@ def _bank_case(connection, row, candidate, *, for_update=False):
     from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
     from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
     from infrastructure.mysql.finance_import_owning_domain_composite import _single_prefixed_identity
-    suffixes = sinopac_memo_case_suffixes(row.get('memo'))
+    from infrastructure.mysql.finance_import_repository import paired_bank_case
     with connection.cursor() as cursor:
+        if any(item.startswith("bank-paired-case:") for item in candidate.evidence):
+            paired = paired_bank_case(cursor, row["id"])
+            if paired is None or paired[1] not in candidate.target_identities:
+                raise ValueError("bank_case_pairing_unavailable")
+            return paired[0]
         if candidate.classification_type is FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
             from infrastructure.mysql.client_refund_reversal_repository import _verify_taishin_subsidy_cases
             verified, = _verify_taishin_subsidy_cases(

@@ -37,6 +37,8 @@ class FinanceImportApplyRequest:
     batch_identity: str; expected_batch_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; correlation_id: CorrelationId
     staff_subsidy_selections: tuple[tuple[str, str], ...] = ()
+    automatic: bool = False
+    review_row_identity: str | None = None
 
     def __post_init__(self):
         require_canonical_text(self.batch_identity, "finance import batch identity", _IDENTITY_MAXIMUM_LENGTH)
@@ -79,6 +81,8 @@ class StoredFinanceImportReceipt:
 
 
 class FinanceImportRepository(Protocol):
+    def exclude_unreconciled_bank_row(self, row_id, reason, actor): ...
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor): ...
     def load(self, batch_identity: str, *, for_update: bool) -> FinanceImportBatchFacts: ...
     def load_pending_batches(self): ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool = False) -> StoredFinanceImportReceipt | None: ...
@@ -105,8 +109,22 @@ class FinanceImportWorkflowError(Exception):
 class FinanceImportWorkflow:
     def __init__(self, repository: FinanceImportRepository, posting_port: FinanceImportFormalPostingPort, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository; self._posting_port = posting_port; self._unit_of_work_factory = unit_of_work_factory
-    def preview(self, batch_identity: str, correlation_id: CorrelationId, staff_subsidy_selections=()) -> FinanceImportPlan:
-        try: return self._build_resolved_plan(self._repository.load(batch_identity, for_update=False), staff_subsidy_selections)
+
+    def exclude_unreconciled_bank_row(self, row_id, reason, actor):
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self._repository.exclude_unreconciled_bank_row(row_id, reason, actor.actor_id)
+            if result == "excluded":
+                unit_of_work.commit()
+            return result
+
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor):
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self._repository.pair_unreconciled_bank_row(row_id, case_no, purpose, person_id, actor.actor_id)
+            if result == "paired":
+                unit_of_work.commit()
+            return result
+    def preview(self, batch_identity: str, correlation_id: CorrelationId, staff_subsidy_selections=(), automatic=False, review_row_identity=None) -> FinanceImportPlan:
+        try: return self._build_resolved_plan(self._repository.load(batch_identity, for_update=False), staff_subsidy_selections, automatic, review_row_identity)
         except FinanceImportWorkflowError: raise
         except FinanceImportRepositoryUnavailable as error: raise _preview_transaction_error(correlation_id, error) from error
         except ValueError as error: raise _validation_error(correlation_id, str(error)) from error
@@ -200,16 +218,27 @@ class FinanceImportWorkflow:
     def _fresh_plan(self, request, facts):
         _validate_batch_version(request, facts)
         try:
-            plan = self._build_resolved_plan(facts, request.staff_subsidy_selections)
+            plan = self._build_resolved_plan(facts, request.staff_subsidy_selections, request.automatic, request.review_row_identity)
         except ValueError as error:
-            if str(error) != "staff_subsidy_case_selection_invalid":
+            if str(error) not in {"staff_subsidy_case_selection_invalid", "finance_import_review_row_invalid"}:
                 raise
             raise _stale_error(request, facts.batch_version) from error
         _validate_plan_is_applicable(request, plan)
         if plan.fingerprint != request.preview_fingerprint: raise _stale_error(request, facts.batch_version)
         return plan
-    def _build_resolved_plan(self, facts, staff_subsidy_selections=()):
+    def _build_resolved_plan(self, facts, staff_subsidy_selections=(), automatic=False, review_row_identity=None):
         selections = dict(staff_subsidy_selections)
+        if review_row_identity is not None:
+            if review_row_identity not in {row.row_identity for row in facts.rows} or selections.keys() - {review_row_identity}:
+                raise ValueError("finance_import_review_row_invalid")
+            facts = replace(facts, rows=tuple(
+                row if row.row_identity == review_row_identity or row.disposition is FinanceImportDisposition.EXISTING
+                else replace(row, disposition=(FinanceImportDisposition.MANUAL_REVIEW
+                             if row.classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW
+                             else FinanceImportDisposition.BUSINESS_PENDING),
+                             integrity_violations=(), fingerprint_collision=False, formal_reference_conflict=False)
+                for row in facts.rows
+            ))
         eligible_selection_rows = {
             row.row_identity for row in facts.rows
             if row.classification_type is FinanceClassificationType.STAFF_PAYOUT
@@ -217,11 +246,27 @@ class FinanceImportWorkflow:
         }
         if not selections.keys() <= eligible_selection_rows:
             raise ValueError("staff_subsidy_case_selection_invalid")
-        resolved_rows = tuple(
-            self._posting_port.resolve(replace(row, selected_staff_subsidy_case=selections[row.row_identity]))
-            if row.row_identity in selections else self._posting_port.resolve(row)
-            for row in facts.rows
-        )
+        resolved_rows = []
+        for row in facts.rows:
+            if review_row_identity is not None and row.row_identity != review_row_identity:
+                resolved_rows.append(row)
+                continue
+            if row.row_identity in selections:
+                row = replace(row, selected_staff_subsidy_case=selections[row.row_identity])
+            resolved_rows.append(self._posting_port.resolve(row))
+        resolved_rows = tuple(resolved_rows)
+        if automatic:
+            resolved_rows = tuple(
+                replace(row, disposition=FinanceImportDisposition.BUSINESS_PENDING,
+                        pending_reason=row.pending_reason or "subsidy_requires_manual_confirmation")
+                if row.subsidy_preflight is not None and (
+                    row.subsidy_preflight.confirmation_only
+                    or (row.subsidy_preflight.scheme != "split"
+                        and TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON not in row.evidence
+                        and not row.subsidy_preflight.existing_confirmed_payable)
+                ) else row
+                for row in resolved_rows
+            )
         return build_finance_import_plan(
             replace(
                 facts,
@@ -280,6 +325,10 @@ def _command_fingerprint(request):
         "actor_id": request.actor.actor_id,
         "reason": request.reason,
     }
+    if request.automatic:
+        payload["automatic"] = True
+    if request.review_row_identity:
+        payload["review_row_identity"] = request.review_row_identity
     if request.staff_subsidy_selections:
         payload["staff_subsidy_selections"] = dict(request.staff_subsidy_selections)
     return fingerprint_payload(payload)

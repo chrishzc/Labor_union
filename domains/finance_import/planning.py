@@ -485,6 +485,7 @@ def _validate_manual_review_state(row) -> None:
         not in {
             FinanceImportDisposition.MANUAL_REVIEW,
             FinanceImportDisposition.BLOCKED,
+            FinanceImportDisposition.EXISTING,
         }
     ):
         raise ValueError("non-business classification must remain in review")

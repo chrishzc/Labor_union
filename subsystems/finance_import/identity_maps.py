@@ -69,33 +69,6 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         subsidy_return_candidates.setdefault(account, set()).add(client_id)
 
     cursor.execute(
-        """SELECT order_row.client_id, snapshot.bank_account AS refund_account_no,
-                  obligation.status, obligation.amount_due_ntd
-           FROM client_obligations obligation
-           JOIN orders order_row ON order_row.case_no=obligation.case_no
-           JOIN client_refund_recipient_snapshots snapshot
-             ON snapshot.refund_obligation_identity=obligation.obligation_identity
-            AND snapshot.case_no=obligation.case_no
-           WHERE obligation.direction='payable_to_client'
-             AND obligation.status<>'cancelled'
-             AND obligation.obligation_type IN ('refund','adjustment')
-           ORDER BY order_row.client_id, obligation.obligation_identity"""
-    )
-    refund_rows = cursor.fetchall()
-    refund_candidates: dict[str, set[int]] = {}
-    refund_identity_candidates: dict[str, set[int]] = {}
-    for row in refund_rows:
-        if not isinstance(row, Mapping):
-            raise TypeError("cursor must return mapping rows")
-        account = _account(row.get("refund_account_no"))
-        if account is None:
-            continue
-        client_id = _positive_id(row.get("client_id"), "client_id")
-        refund_identity_candidates.setdefault(account, set()).add(client_id)
-        if row["status"] == "open" and int(row["amount_due_ntd"]) > 0:
-            refund_candidates.setdefault(account, set()).add(client_id)
-
-    cursor.execute(
         """SELECT sba.staff_id, sba.account_no
            FROM staff_bank_accounts sba
            WHERE sba.account_no IS NOT NULL
@@ -175,8 +148,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
     staff_name_identities = _staff_name_identities(cursor)
     client_name_identities = load_client_name_identities(cursor)
     return {
-        "client_refund_accounts": _stable_map(refund_candidates),
-        "client_refund_identity_accounts": _stable_map(refund_identity_candidates),
+        "client_refund_accounts": {},
         "client_subsidy_return_accounts": _stable_map(
             subsidy_return_candidates
         ),
@@ -313,7 +285,7 @@ def load_client_name_identities(cursor: Any, *, lock=False) -> dict[str, tuple[i
     return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
 
 
-def resolve_taishin_client_memo_case(cursor: Any, memo: str | None, names, *, lock=False, match_month=None) -> str | None:
+def resolve_client_memo_case(cursor: Any, memo: str | None, names, *, lock=False, match_month=None) -> str | None:
     suffixes = sinopac_memo_case_suffixes(memo)
     if len(suffixes) > 1:
         return None
@@ -377,13 +349,11 @@ def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
 
 def _client_receipt_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
     cursor.execute(
-        """SELECT order_row.client_id,client.name,beclass.refund_account_no,
+        """SELECT order_row.client_id,client.name,
                   obligation.amount_due_ntd
            FROM client_obligations obligation
            JOIN orders order_row ON order_row.case_no=obligation.case_no
            JOIN clients client ON client.id=order_row.client_id
-           LEFT JOIN beclass_records beclass ON beclass.bound_case_no=order_row.case_no
-               OR (beclass.bound_case_no IS NULL AND beclass.query_no=order_row.case_no)
            WHERE obligation.direction='receivable_from_client'
              AND obligation.status='open' AND obligation.amount_due_ntd>0
            ORDER BY order_row.client_id,obligation.obligation_identity"""
@@ -398,7 +368,6 @@ def _client_receipt_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
             {
                 "client_id": client_id,
                 "name": _account(row.get("name")) or "",
-                "account": _account(row.get("refund_account_no")) or "",
                 "open_amounts": set(),
             },
         )

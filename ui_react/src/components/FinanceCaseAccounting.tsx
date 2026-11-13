@@ -3,6 +3,7 @@
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
  */
 import { CancellationSettlementAccounting } from './CancellationSettlementAccounting';
+import { OrderCancellationPanel } from './OrderCancellationPanel';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
@@ -343,12 +344,13 @@ function CaseRefundReconciliation({
   );
 }
 
-function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase, pricing, multiBirthCount, onOpenParamsEdit, refundAccountNo, refundName }: {
+function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase, onCancellationObserved, pricing, multiBirthCount, onOpenParamsEdit, refundAccountNo, refundName }: {
   row: FinanceBankTransaction;
   data: CaseAccounting;
   onPosted: () => void;
   onBusyChange: (busy: boolean) => void;
   onViewCase?: () => void;
+  onCancellationObserved: () => void;
   pricing?: CasePricing | null;
   multiBirthCount?: string | null;
   onOpenParamsEdit?: () => void;
@@ -358,6 +360,9 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   const target = row.reconciliation_target;
   const [chosenIds, setChosenIds] = useState<string[]>([]);
   const [selectionBusy, setSelectionBusy] = useState(false);
+  const [showRefundCorrection, setShowRefundCorrection] = useState(false);
+  const [showCancellation, setShowCancellation] = useState(false);
+  const { requestLeave } = useUnsavedNavigation();
   const requiresSelection = target?.requires_selection ?? false;
   const selectedIds = requiresSelection ? chosenIds : target?.obligation_identities ?? [];
   const staffTarget = useMemo(() => target?.staff_id && selectedIds.length ? {
@@ -372,6 +377,13 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   const isReceipt = row.classification_type === 'client_receipt';
   const isRefundReturn = row.classification_type === 'client_refund_return';
   const isStaff = target.staff_id !== null;
+  const canOpenCancellation = row.bank === 'sinopac' && row.direction === 'outgoing'
+    && row.status === 'pending' && row.disposition !== 'blocked'
+    && (isStaff || row.classification_type === 'client_refund');
+  const canCorrectToRefund = isStaff && row.bank === 'sinopac' && row.direction === 'outgoing'
+    && row.status === 'pending' && data.client_items.some(item => item.direction === 'payable'
+      && (item.obligation_type === 'refund' || item.obligation_type === 'adjustment')
+      && (item.remaining_ntd ?? 0) > 0);
   const items = isStaff ? data.staff_items : data.client_items;
   const direction = isReceipt ? 'receivable' : 'payable';
   const obligations = items.filter(item => item.direction === direction && target.obligation_identities.includes(item.identity));
@@ -385,8 +397,16 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
     <header>
       <h3>{isRefundReturn ? '客戶退匯' : isReceipt ? '客戶繳款' : isStaff ? (row.bank === 'taishin' ? '補助轉交月嫂' : '月嫂薪資') : '客戶退款'} · 核對交易</h3>
       <p>{row.bank === 'sinopac' ? '永豐' : '台新'} · {row.transaction_date ?? '日期未提供'} · {row.reference} · {money(row.amount_ntd)}</p>
-      {!isReceipt && !isStaff && <p>名冊退款戶名：{refundName || '待確認'} · 名冊退款帳號：{refundAccountNo || '待補齊'}</p>}
+      {isRefundReturn && <p>名冊退款戶名：{refundName || '待確認'} · 名冊退款帳號：{refundAccountNo || '待補齊'}</p>}
     </header>
+    {showCancellation ? <>
+      <button type="button" className="finance-btn-secondary" disabled={selectionBusy}
+        onClick={() => requestLeave(() => setShowCancellation(false))}>返回核對交易</button>
+      <button type="button" className="finance-btn-secondary" disabled={selectionBusy}
+        onClick={() => requestLeave(() => { setShowCancellation(false); onViewCase?.(); })}>查看本案帳務</button>
+      <OrderCancellationPanel caseNo={data.case_no} inBankReconciliation
+        onBusyChange={reportBusy} onObserved={onCancellationObserved} />
+    </> : <>
     {onOpenParamsEdit && (
       <AccountingParametersBar
         caseNo={data.case_no}
@@ -396,15 +416,34 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         onOpenEdit={onOpenParamsEdit}
       />
     )}
-    {isStaff && requiresSelection && <fieldset disabled={selectionBusy}>
+    {canCorrectToRefund && <button type="button" className="finance-btn-secondary" disabled={selectionBusy}
+      onClick={() => setShowRefundCorrection(open => !open)}>
+      {showRefundCorrection ? '返回月嫂薪資核對' : '改核對客戶退款'}
+    </button>}
+    {canOpenCancellation && !showRefundCorrection && <button type="button" className="finance-btn-secondary"
+      disabled={selectionBusy} onClick={() => requestLeave(() => setShowCancellation(true))}>取消結算</button>}
+    {isStaff && requiresSelection && !showRefundCorrection && <fieldset disabled={selectionBusy}>
       <legend>本次核銷款項</legend>
       {obligations.length ? obligations.map(item=><label key={item.identity}>
         <input type="checkbox" aria-label={`核銷款項 ${item.identity}`} checked={selectedIds.includes(item.identity)}
           onChange={()=>setChosenIds(ids=>ids.includes(item.identity)?ids.filter(id=>id!==item.identity):[...ids,item.identity])}/>
         {item.label || '月嫂應付款'} · 待付 {money(item.remaining_ntd)} · {item.due_date ?? '未定日期'}
-      </label>) : <p>本案目前沒有可選款項，請回案件帳務確認正式款項資料。</p>}
+      </label>) : <p>本案目前沒有可選款項。{canOpenCancellation
+        ? '若案件提前結束服務，可開啟取消結算確認實際服務日。'
+        : '請回案件帳務確認正式款項資料。'}</p>}
     </fieldset>}
-    {isRefundReturn ? (
+    {canCorrectToRefund && showRefundCorrection ? (
+      <FinanceImportCorrectionForm
+        rowIdentity={row.row_identity}
+        sourceLabel={row.reference}
+        bankAmount={row.amount_ntd}
+        initialKind="client_refund"
+        initialCaseNo={data.case_no}
+        staff={[]}
+        onPosted={onPosted}
+        onBusyChange={reportBusy}
+      />
+    ) : isRefundReturn ? (
       <ClientRefundReturnReconciliationPanel caseNo={data.case_no} bankRowId={row.row_id} onPosted={onPosted} onBusyChange={onBusyChange} />
     ) : isReceipt ? (
       <ClientReceiptReconciliationPanel caseNo={data.case_no} requiredBankRowId={row.row_id}
@@ -428,6 +467,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         onViewCase={onViewCase}
       />
     )}
+    </>}
   </section>;
 }
 
@@ -445,6 +485,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const accountingDraft=termsEditState.dirty||pricingEditState.dirty;
  const[pendingAccountingRefresh,setPendingAccountingRefresh]=useState(false);
  const[freshBankRow,setFreshBankRow]=useState<FinanceBankTransaction|null>(null);
+  const[cancellationObservedRowId,setCancellationObservedRowId]=useState<number|null>(null);
  const[bankRefreshError,setBankRefreshError]=useState('');
  const reportReconciliationBusy=useCallback((busy:boolean)=>setReconciliationBusy(busy),[]);
  useEffect(()=>{bankReconciliation?.onBusyChange(accountingBusy);return()=>bankReconciliation?.onBusyChange(false);},[accountingBusy,bankReconciliation?.onBusyChange]);
@@ -531,7 +572,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
    </div>}
  </details>}
  {data&&bankReconciliation&&!showFullCase&&<fieldset style={{border:0,padding:0,margin:0,minWidth:0}} disabled={termsEditState.busy||termsEditState.dirty||pricingEditState.busy||pricingEditState.dirty||(pendingAccountingRefresh&&!reconciliationBusy)}>
-   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)}/>}
+   {cancellationObservedRowId===bankReconciliation.row.row_id&&<p role="status">取消結算已完成，請核對原流水與最新款項。</p>}
+   {bankRefreshError?<p role="alert">{bankRefreshError}<button onClick={refresh}>重新查詢原流水</button></p>:!freshBankRow||freshBankRow.row_id!==bankReconciliation.row.row_id||state.loading?<p role="status">正在同步帳務與原流水的核銷款項…</p>:freshBankRow.status==='posted'?<p role="status">原流水已核銷，請查看最新案件帳務。</p>:<CaseBankReconciliation key={`${freshBankRow.row_identity}:${revision}`} data={data} {...bankReconciliation} row={freshBankRow} pricing={state.pricing} multiBirthCount={multiBirthCount} refundAccountNo={refundAccountNo} refundName={refundName} onOpenParamsEdit={()=>setParamsDrawerOpen(true)} onBusyChange={reportReconciliationBusy} onViewCase={()=>setShowFullCase(true)} onCancellationObserved={()=>{setCancellationObservedRowId(freshBankRow.row_id);setPendingAccountingRefresh(true);onChanged?.();}}/>}
  </fieldset>}
  {data&&(!bankReconciliation||showFullCase)&&<><div hidden={view!==null}>
  <OrderAttributionFundingReview key={initialCase} caseNo={initialCase} revision={revision} onSaved={refresh} />

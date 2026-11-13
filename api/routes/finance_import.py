@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from pymysql.err import OperationalError
 from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from api.dependencies.admin_auth import require_admin, require_system_admin
 from api.dependencies.finance_import import (
@@ -320,6 +321,69 @@ def list_bank_transactions(
     )
 
 
+class ExcludeBankTransactionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class PairBankTransactionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str = Field(min_length=1, max_length=50)
+    purpose: Literal["staff_salary", "client_refund", "client_subsidy_return"]
+    person_id: StrictInt = Field(gt=0)
+
+
+@router.post("/bank-transactions/{row_id}/pair", response_model=BaseResponse[dict[str, int]])
+def pair_bank_transaction(
+    row_id: int,
+    body: PairBankTransactionBody,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: FinanceImportApplication = Depends(get_finance_import_application),
+):
+    correlation = CorrelationId(_request_correlation(request))
+    try:
+        result = application.workflow.pair_unreconciled_bank_row(
+            row_id, body.case_no, body.purpose, body.person_id,
+            ActorContext(immutable_admin_job_actor(principal, correlation.value)),
+        )
+    except OperationalError as error:
+        _raise_mysql_error(error, correlation)
+    if result != "paired":
+        raise _http_error(404 if result == "missing" else 409, TypedError(
+            ErrorCategory.NOT_FOUND if result == "missing" else ErrorCategory.CONFLICT,
+            "bank_case_pairing_unavailable", "候選案件或銀行流水已變更，請重新查詢。", correlation,
+        ))
+    return BaseResponse(data={"row_id": row_id}, message="已確認流水所屬案件")
+
+
+@router.post("/bank-transactions/{row_id}/exclude", response_model=BaseResponse[dict[str, int]])
+def exclude_bank_transaction(
+    row_id: int,
+    body: ExcludeBankTransactionBody,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: FinanceImportApplication = Depends(get_finance_import_application),
+):
+    correlation = CorrelationId(_request_correlation(request))
+    reason = body.reason.strip()
+    if row_id < 1 or not reason:
+        _raise_validation_error(ValueError("bank_exclusion_invalid"), correlation)
+    try:
+        result = application.workflow.exclude_unreconciled_bank_row(
+            row_id, reason, ActorContext(immutable_admin_job_actor(principal, correlation.value)),
+        )
+    except OperationalError as error:
+        _raise_mysql_error(error, correlation)
+    if result != "excluded":
+        code = "bank_transaction_not_found" if result == "missing" else "bank_transaction_exclusion_conflict"
+        category = ErrorCategory.NOT_FOUND if result == "missing" else ErrorCategory.CONFLICT
+        raise _http_error(404 if result == "missing" else 409, TypedError(
+            category, code, "銀行流水已變更或已核銷，請重新查詢。", correlation,
+        ))
+    return BaseResponse(data={"row_id": row_id}, message="已移除誤匯入明細")
+
+
 @router.get("/import-history", response_model=BaseResponse[FinanceImportHistoryPageView])
 def list_finance_import_history(
     request: Request,
@@ -509,7 +573,8 @@ def preview_finance_import_batch(
     correlation = CorrelationId(correlation_id)
     return _call_endpoint(
         lambda: _plan_payload(
-            application.preview_batch(body.batch_identity.strip(), correlation, tuple(sorted(body.staff_subsidy_selections.items())))
+            application.preview_batch(body.batch_identity.strip(), correlation, tuple(sorted(body.staff_subsidy_selections.items())), body.automatic, body.review_row_identity)
+            if body.automatic or body.review_row_identity else application.preview_batch(body.batch_identity.strip(), correlation, tuple(sorted(body.staff_subsidy_selections.items())))
             if body.staff_subsidy_selections else application.preview_batch(body.batch_identity.strip(), correlation)
         ),
         "成功產生 Finance Import Preview",
@@ -657,6 +722,8 @@ def apply_finance_import_batch(
         body.reason.strip(),
         correlation,
         tuple(sorted(body.staff_subsidy_selections.items())),
+        body.automatic,
+        body.review_row_identity,
     )
     
     return _durable_acceptance(
@@ -675,6 +742,8 @@ def _batch_apply_job_command(job_id, request) -> DurableJobCommand:
         command_version=1,
         payload={
             **({"staff_subsidy_selections": dict(request.staff_subsidy_selections)} if request.staff_subsidy_selections else {}),
+            **({"automatic": True} if request.automatic else {}),
+            **({"review_row_identity": request.review_row_identity} if request.review_row_identity else {}),
             "batch_identity": request.batch_identity,
             "expected_batch_version": request.expected_batch_version.value,
             "preview_fingerprint": request.preview_fingerprint.value,

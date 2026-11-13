@@ -126,7 +126,6 @@ def test_settled_refund_keeps_identity_evidence_without_becoming_an_unpaid_candi
     database.execute("UPDATE client_obligations SET status='settled',amount_due_ntd=0 WHERE obligation_identity=?", (identity,))
     with database.cursor() as cursor:
         maps = load_finance_identity_maps(cursor)
-    assert maps["client_refund_identity_accounts"] == {SNAPSHOT_ACCOUNT: [7]}
     assert maps["client_refund_accounts"] == {}
     assert maps["taishin_client_refund_candidates"] == ()
     assert maps["client_name_identities"]["Synthetic Paid Client"] == (7,)

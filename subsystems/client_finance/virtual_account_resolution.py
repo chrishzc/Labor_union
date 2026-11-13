@@ -75,14 +75,17 @@ def _pending(reason: str) -> dict[str, str | None]:
     return {"result": "pending", "case_no": None, "reason": reason}
 
 
-def resolve_client_virtual_account_suffix(cursor: Any, suffix: object) -> dict[str, str | None]:
+def resolve_client_virtual_account_suffix(cursor: Any, suffix: object, *, include_candidates=False) -> dict[str, Any]:
     """Use the canonical account resolver for a six-digit bank memo reference."""
     if not isinstance(suffix, str) or re.fullmatch(r"[0-9]{6}", suffix) is None:
         return _pending("invalid_virtual_account_format")
-    return resolve_client_virtual_account(cursor, _VIRTUAL_ACCOUNT_PREFIX + suffix)
+    account = _VIRTUAL_ACCOUNT_PREFIX + suffix
+    if include_candidates:
+        return resolve_client_virtual_account(cursor, account, include_candidates=True)
+    return resolve_client_virtual_account(cursor, account)
 
 
-def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[str, str | None]:
+def resolve_client_virtual_account(cursor: Any, cancellation_code: Any, *, include_candidates=False) -> dict[str, Any]:
     """Resolve imported mappings first; use the formula only when none exist."""
     if not isinstance(cancellation_code, str):
         return _pending("invalid_virtual_account_format")
@@ -108,7 +111,10 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[
     }
     if imported_candidates:
         if None in imported_candidates or len(imported_candidates) != 1:
-            return _pending("case_not_unique")
+            pending = _pending("case_not_unique")
+            if include_candidates:
+                pending["candidate_cases"] = tuple(sorted(str(case) for case in imported_candidates if case is not None))
+            return pending
         return {
             "result": "resolved",
             "case_no": str(next(iter(imported_candidates))),
@@ -136,7 +142,10 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[
     if not candidates:
         return _pending("case_not_found")
     if len(candidates) != 1:
-        return _pending("case_not_unique")
+        pending = _pending("case_not_unique")
+        if include_candidates:
+            pending["candidate_cases"] = tuple(sorted(candidates))
+        return pending
     return {"result": "resolved", "case_no": next(iter(candidates)), "reason": None}
 
 

@@ -160,7 +160,7 @@ def test_refund_owner_preserves_specific_source_failure_in_preview_and_apply(mon
             adapter.MySqlClientRefundReversalRepository(object())._load_refund(object(), selection, locked)
 
 
-@pytest.mark.parametrize('amounts,fee,due', [((12000,),0,'2026-10-15'),((12000,),30,'2026-10-15'),((12000,),100,'2026-10-15'),((6000,6000),0,'2026-10-15'),((6000,6000),30,'2026-10-15'),((6000,6000),100,'2026-10-15'),((12000,),0,None)])
+@pytest.mark.parametrize('amounts,fee,due', [((6000,),15,'2026-10-15'),((6000,),15,'2026-09-01'),((12000,),0,'2026-10-15'),((12000,),30,'2026-10-15'),((12000,),100,'2026-10-15'),((6000,6000),0,'2026-10-15'),((6000,6000),30,'2026-10-15'),((6000,6000),100,'2026-10-15'),((12000,),0,None)])
 def test_sinopac_refund_real_owner_and_import_correction_agree_and_replay_once(monkeypatch,amounts,fee,due):
     """CF-03: real workflows/rules/read adapter; persistence is a stateful synthetic double, not MySQL."""
     from copy import deepcopy
@@ -172,9 +172,9 @@ def test_sinopac_refund_real_owner_and_import_correction_agree_and_replay_once(m
     from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalSelection
 
     total=sum(amounts); cash=total-fee
-    ids=tuple(f'refund:{i}' for i in range(len(amounts)))
+    ids=tuple(f'client-cancellation:create_refund:deposit-{i}' for i in range(len(amounts)))
     bank={'id':97,'format_id':'sinopac','direction':'outgoing','debit':cash,'credit':0,'currency':'TWD',
-          'transaction_date':date(2026,10,20),'bank_references':{'交易參考編號':'0000007004'},
+          'transaction_date':date(2026,10,20),'memo':'HC115001退訂金','bank_references':{},
           'effective_classification_type':'client_refund','reconciliation_status':'pending','ledger_entry_id':None}
     before=deepcopy(bank)
     state={'version':4,'remaining':dict(zip(ids,amounts)),'receipts':{},'ledger':[],'allocations':[],'outbox':[]}
@@ -190,21 +190,33 @@ def test_sinopac_refund_real_owner_and_import_correction_agree_and_replay_once(m
     monkeypatch.setattr(storage,'_case_exists',lambda *args:True)
     monkeypatch.setattr(storage,'_load_account_version',lambda *args,**kwargs:state['version'])
     monkeypatch.setattr(storage,'_load_refund_bank_rows',lambda *args:(bank,))
+    monkeypatch.setattr(storage,'load_client_name_identities',lambda cursor:{})
+    monkeypatch.setattr(storage,'resolve_client_memo_case',
+                        lambda cursor,memo,names,**kwargs:'SYNTHETIC' if memo=='HC115001退訂金' else None)
     monkeypatch.setattr(storage,'_load_refund_obligation_rows',lambda *args:tuple(
-        dict(obligation_identity=i,case_no='SYNTHETIC',obligation_type='refund',amount_due_ntd=a,bank_account='0000007004')
+        dict(obligation_identity=i,case_no='SYNTHETIC',obligation_type='refund',amount_due_ntd=a)
         for i,a in state['remaining'].items() if a>0))
     monkeypatch.setattr(posting,'MySqlClientRefundReversalRepository',OwnerRepository)
     owner_selection=ClientRefundReversalSelection('SYNTHETIC',ClientFinanceCorrectionType.REFUND,bank_fact_identities=('97',),obligation_identities=ids)
     monkeypatch.setattr(posting,'_client_refund_selection',lambda *args:owner_selection)
     connection=MagicMock()
     connection.cursor.return_value.__enter__.return_value.fetchone.return_value={'format_id':'sinopac','currency':'TWD'}
-    monkeypatch.setattr(posting,'_sinopac_outgoing_case_info',lambda *args:(True,'SYNTHETIC','2026-10-20'))
+    monkeypatch.setattr(posting,'_sinopac_outgoing_case_info',lambda *args,**kwargs:(True,'SYNTHETIC','2026-10-20'))
     monkeypatch.setattr(posting,'_load_client_refund_targets',lambda *args:tuple(
         dict(case_no='SYNTHETIC',obligation_identity=i,due_date=due,amount_due_ntd=a) for i,a in zip(ids,amounts)))
     from domains.finance_import.planning import CanonicalFinanceImportRow,FinanceImportDisposition
+    from domains.finance_import.transaction_classifier import classify_finance_transaction
+    from decimal import Decimal
+    from infrastructure.mysql.historical_reprocess_repository import _normalized_row
+    source = _normalized_row({**bank, "debit": Decimal(cash), "credit": None, "memo": "HC115001退訂金",
+                              "source_file": "statement.xlsx", "source_bank_account": "001", "sheet_name": "Sheet1",
+                              "source_row": 4, "warnings": [], "raw_payload": {}})
+    decision = classify_finance_transaction(source, {}, {}, client_case_suffixes={"115001": [7]})
+    assert decision["classification_type"] == "client_refund"
+    assert decision["matched_identity_ids"] == [7]
     automatic=CanonicalFinanceImportRow('finance-import-row:97',0,MoneyNTD(cash),FinanceClassificationType.CLIENT_REFUND,
         FinanceImportDisposition.BUSINESS_PENDING,PreviewFingerprint('c'*64),target_identities=('client:7',),
-        evidence=('sinopac_unique_client_refund_account_in_transaction_reference',))
+        evidence=(decision["reason"],))
     ready=posting._resolve_client_refund(connection,automatic)
     if due is None:
         assert ready.disposition is FinanceImportDisposition.BUSINESS_PENDING and ready.pending_reason=='due_date_missing'

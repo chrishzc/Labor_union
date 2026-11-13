@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 import json
+import re
 import unicodedata
 from typing import Any
 from domains.finance_import.cancellation_code import (
@@ -27,7 +28,8 @@ from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
 )
-from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_taishin_client_memo_case
+from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_client_memo_case
+from subsystems.finance_import.staging import MANUAL_BANK_CASE_REASONS, bank_case_candidates
 
 
 _MAXIMUM_PAGE_SIZE = 100
@@ -49,7 +51,8 @@ JOIN finance_import_classification_events event
 # Every unresolved canonical bank fact is visible, including unmatched and
 # blocked rows. Formal owner postings take precedence over stale classifications.
 _REVIEW_ROW_PREDICATE = """
-NOT EXISTS (
+finance_row.reconciliation_status<>'excluded'
+AND NOT EXISTS (
     SELECT 1 FROM client_ledger_entries posted_client
     WHERE posted_client.finance_import_row_id=finance_row.id
 )
@@ -217,7 +220,7 @@ class FinanceImportQueryService:
         if start and end and start > end:
             raise ValueError("bank_transaction_invalid_date_range")
         search = search.strip()
-        conditions, params = [], []
+        conditions, params = ["finance_row.reconciliation_status<>'excluded'"], []
         if row_id is not None:
             _validate_page(1, row_id, "row_id")
             conditions.append("finance_row.id=%s")
@@ -254,8 +257,10 @@ class FinanceImportQueryService:
                     )), 'null')) END AS raw_reference,
                     COALESCE(event.classification_type,finance_row.classification_type) classification_type,
                     event.reason AS event_reason,
-                    COALESCE(finance_row.classification_reason,event.reason) AS review_reason,
+                    CASE WHEN event.reason='manual_bank_case_pairing' THEN event.reason
+                         ELSE COALESCE(finance_row.classification_reason,event.reason) END AS review_reason,
                     COALESCE(event.target_identities,JSON_ARRAY()) AS target_identities,
+                    COALESCE(event.evidence,JSON_ARRAY()) AS classification_evidence,
                     COALESCE(event.available_actions,JSON_ARRAY()) AS available_actions,
                     CASE WHEN EXISTS (
                         SELECT 1 FROM finance_import_integrity_events issue
@@ -284,6 +289,7 @@ class FinanceImportQueryService:
                    OR is_manual_supplement=1
                    OR (format_id='taishin' AND direction='outgoing'
                        AND review_reason='{TAISHIN_CASE_MEMO_REASON}')
+                   OR review_reason IN ('{MANUAL_BANK_CASE_REASONS[0]}','{MANUAL_BANK_CASE_REASONS[1]}')
                    OR (
                        COALESCE(classification_type,'')<>'non_business_review'
                        AND NOT (
@@ -402,6 +408,26 @@ class FinanceImportQueryService:
                     cases_by_id.setdefault(case["row_id"], []).append(case["case_no"])
             items = _enrich_bank_transactions(cursor, page, cases_by_id,
                 match_client_month=self._match_client_month)
+            maps = None
+            for row, item in zip(page, items, strict=True):
+                legacy_shared_name = (
+                    row["format_id"] == "taishin" and row["direction"] == "outgoing"
+                    and row["review_reason"] == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON
+                    and not sinopac_memo_case_suffixes(row.get("memo"))
+                )
+                if (item["status"] != "pending" or item["disposition"] == "blocked"
+                        or (item["reconciliation_target"] is not None and not legacy_shared_name)
+                        or row.get("event_reason") == "manual_bank_case_pairing"):
+                    continue
+                if row["review_reason"] not in MANUAL_BANK_CASE_REASONS and not legacy_shared_name:
+                    continue
+                if maps is None:
+                    from subsystems.finance_import.identity_maps import load_finance_identity_maps
+                    maps = load_finance_identity_maps(cursor)
+                candidates = bank_case_candidates(cursor, row, maps)
+                if candidates:
+                    item["pairing_candidates"] = candidates
+                    item["pairing_memo"] = re.sub(r"\d[\d\s\-－]{6,}\d", "****", row.get("memo") or "")[:500]
         return {
             "items": items,
             "pending_count": pending_count,
@@ -942,6 +968,8 @@ def _enrich_bank_transactions(
         target_rows = ()
         target_staff_id = None
         cases = list(dict.fromkeys(posted_cases_by_id.get(row_id, [])))
+        paired_case = next((item.removeprefix("bank-paired-case:") for item in _text_tuple(row.get("classification_evidence") or [])
+                            if item.startswith("bank-paired-case:")), None)
         cp_name = str(row["counterparty_name"]).strip() if row.get("counterparty_name") else None
         if cp_name in {"0", "none", "null", ""}:
             cp_name = None
@@ -1039,7 +1067,9 @@ def _enrich_bank_transactions(
             staff_id = _single_entity_id(row, "staff:")
             if status == "pending" and not cases:
                 suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
-                if suffix:
+                if paired_case:
+                    cases = [paired_case]
+                elif suffix:
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
@@ -1096,7 +1126,10 @@ def _enrich_bank_transactions(
         elif c_type in {"client_refund", "client_subsidy_return", "client_refund_return"}:
             client_id = _single_entity_id(row, "client:")
             if status == "pending" and not cases:
-                if taishin_subsidy and row.get("direction") == "outgoing":
+                if paired_case:
+                    cases = [paired_case]
+                    taishin_subsidy_memo_confirmed = taishin_subsidy
+                elif taishin_subsidy and row.get("direction") == "outgoing":
                     if memo_staff_names is None:
                         cursor.execute("SELECT name FROM staff WHERE name IS NOT NULL AND name<>''")
                         memo_staff_names = sorted({unicodedata.normalize("NFKC", str(person["name"])).strip() for person in cursor.fetchall()}, key=len, reverse=True)
@@ -1107,7 +1140,7 @@ def _enrich_bank_transactions(
                             return match_client_month(active_cursor, row.get('transaction_date'), client_ids)
 
                         try:
-                            resolved_case = resolve_taishin_client_memo_case(cursor, row.get("memo"), memo_client_names,
+                            resolved_case = resolve_client_memo_case(cursor, row.get("memo"), memo_client_names,
                                 match_month=match_month if match_client_month is not None else None)
                         except ValueError as error:
                             review_reason = str(error)
@@ -1176,7 +1209,7 @@ def _enrich_bank_transactions(
 
         # This target opens the existing workflow. The owner revalidates it at Preview/Apply.
         unavailable = None
-        memo_suffixes = sinopac_memo_case_suffixes(row.get("memo")) if row["direction"] == "outgoing" else ()
+        memo_suffixes = sinopac_memo_case_suffixes(row.get("memo")) if row["direction"] == "outgoing" and not paired_case else ()
         taishin_staff_case_scoped = taishin_staff and bool(memo_suffixes)
         if status != "pending":
             pass
@@ -1288,7 +1321,7 @@ def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_una
             row.get("batch_identity") if row["transaction_status"] == "pending"
             and row["disposition"] != "blocked"
             and bank == "taishin" and row["direction"] == "outgoing"
-            and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary"} else None
+            and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary", "client_subsidy_return"} else None
         ),
         "row_identity": f'finance-import-row:{row["row_id"]}',
         "transaction_date": row["transaction_date"],
