@@ -271,7 +271,10 @@ export const FinancePage: React.FC = () => {
       const preview = await financeImportMutationClient.preview(batchIdentity, request.controller.signal, selections);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      if (applyReady && canApplyImportedBatch(preview) && !preview.rows.some(row => row.subsidy_preflight != null)) {
+      const requiresSubsidyConfirmation = preview.rows.some(row => row.subsidy_preflight != null
+        && (row.subsidy_preflight.confirmation_only || (row.subsidy_preflight.scheme !== 'split'
+          && !row.evidence.includes('taishin_client_subsidy_shared_name_in_memo'))));
+      if (applyReady && canApplyImportedBatch(preview) && !requiresSubsidyConfirmation) {
         await applyImportedBatch(preview);
       } else {
         setReload(value => value + 1);

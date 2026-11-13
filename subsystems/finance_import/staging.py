@@ -187,7 +187,11 @@ def classify_row_with_identity_maps(
 
 
 def _has_unique_import_case(cursor, row, classification, identity_maps):
+    from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON
+
     kind = classification["classification_type"]
+    if kind == 'client_subsidy_return' and classification['reason'] == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON:
+        return True  # Preserve the bank row until the refund month resolves the case.
     if kind == "non_business_review":
         if (row["format_id"] in {"sinopac", "legacy"} and row["direction"] == "incoming"
                 and classification["reason"] == "sinopac_staff_return_requires_matching"):

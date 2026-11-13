@@ -95,6 +95,7 @@ def test_owner_load_binds_same_month_installment_to_source_bank_not_combined_due
     import infrastructure.mysql.staff_payout_repository as module
     cursor = _Cursor()
     repository = MySqlStaffPayoutRepository(object())
+    monkeypatch.setattr(cursor, 'fetchone', lambda: None, raising=False)
     selection = SimpleNamespace(event_type=StaffPayoutEventType.PAYOUT, difference_mode=None, obligation_identities=('obligation:1',))
     import infrastructure.mysql.manual_supplement_evidence as evidence
     monkeypatch.setattr(evidence, 'manual_source_matches', lambda *_args, **_kwargs: False)

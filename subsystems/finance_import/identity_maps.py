@@ -9,8 +9,11 @@ from collections.abc import Mapping
 import unicodedata
 from typing import Any
 
+from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
+from domains.finance_import.transaction_classifier import extract_name_from_row_text
 from subsystems.client_finance.virtual_account_resolution import (
     build_effective_formula_account,
+    resolve_client_virtual_account_suffix,
     uses_imported_case_virtual_account,
 )
 
@@ -170,7 +173,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
             refund_case_candidates.setdefault(suffix, set()).add(c_id)
 
     staff_name_identities = _staff_name_identities(cursor)
-    client_name_identities = _client_name_identities(cursor)
+    client_name_identities = load_client_name_identities(cursor)
     return {
         "client_refund_accounts": _stable_map(refund_candidates),
         "client_refund_identity_accounts": _stable_map(refund_identity_candidates),
@@ -299,8 +302,8 @@ def _staff_payout_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
     return tuple(results)
 
 
-def _client_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:
-    cursor.execute("SELECT id,name FROM clients WHERE name IS NOT NULL AND name <> ''")
+def load_client_name_identities(cursor: Any, *, lock=False) -> dict[str, tuple[int, ...]]:
+    cursor.execute("SELECT id,name FROM clients WHERE name IS NOT NULL AND name <> ''" + (" FOR UPDATE" if lock else ""))
     names: dict[str, set[int]] = {}
     for row in cursor.fetchall():
         if isinstance(row, Mapping) and row.get("name"):
@@ -308,6 +311,30 @@ def _client_name_identities(cursor: Any) -> dict[str, tuple[int, ...]]:
             if normalized:
                 names.setdefault(normalized, set()).add(_positive_id(row["id"], "client_id"))
     return {name: tuple(sorted(names[name])) for name in sorted(names, key=len, reverse=True)}
+
+
+def resolve_taishin_client_memo_case(cursor: Any, memo: str | None, names, *, lock=False, match_month=None) -> str | None:
+    suffixes = sinopac_memo_case_suffixes(memo)
+    if len(suffixes) > 1:
+        return None
+    name = extract_name_from_row_text({'memo': memo}, tuple(names))
+    client_ids = names.get(name, ())
+    if suffixes:
+        resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+        if resolution['result'] != 'resolved':
+            return None
+        case_no = resolution['case_no']
+        if not client_ids:
+            return case_no
+        cursor.execute('SELECT client_id FROM orders WHERE case_no=%s' + (' FOR UPDATE' if lock else ''), (case_no,))
+        return case_no if any(int(row['client_id']) in client_ids for row in cursor.fetchall()) else None
+    if len(client_ids) > 1 and match_month is not None:
+        return match_month(cursor, client_ids)
+    if len(client_ids) != 1:
+        return None
+    cursor.execute('SELECT case_no FROM orders WHERE client_id=%s LIMIT 2' + (' FOR UPDATE' if lock else ''), client_ids)
+    cases = cursor.fetchall()
+    return str(cases[0]['case_no']) if len(cases) == 1 else None
 
 
 def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:

@@ -258,6 +258,28 @@ def defer_overlapping_outgoing_payments(
     )
 
 
+def defer_conflicting_subsidy_schemes(
+    rows: tuple[CanonicalFinanceImportRow, ...],
+) -> tuple[CanonicalFinanceImportRow, ...]:
+    schemes_by_case: dict[str, set[str]] = {}
+    for row in rows:
+        preflight = row.subsidy_preflight
+        if row.disposition is FinanceImportDisposition.CREATE and preflight is not None:
+            schemes_by_case.setdefault(preflight.case_no, set()).add(preflight.scheme)
+    reason = "subsidy_confirmation_plan_conflict"
+    return tuple(
+        replace(
+            row, disposition=FinanceImportDisposition.BUSINESS_PENDING, target_identities=(),
+            available_actions=("resolve_owning_domain_target",), pending_reason=reason,
+            subsidy_preflight=replace(row.subsidy_preflight, blocker=reason, confirmation_only=False),
+        )
+        if row.disposition is FinanceImportDisposition.CREATE and row.subsidy_preflight is not None
+        and len(schemes_by_case[row.subsidy_preflight.case_no]) > 1
+        else row
+        for row in rows
+    )
+
+
 def _finance_import_plan(
     facts,
     planned_rows,

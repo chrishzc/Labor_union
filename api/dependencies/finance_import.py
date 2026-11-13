@@ -215,9 +215,12 @@ def get_finance_import_ingestion_service():
 
 
 def get_finance_import_query_service():
+    from functools import partial
+    from infrastructure.mysql.subsidy_confirmation_repository import match_client_subsidy_month
+
     connection = get_connection()
     try:
-        yield FinanceImportQueryService(connection)
+        yield FinanceImportQueryService(connection, match_client_month=partial(match_client_subsidy_month, connection))
     finally:
         connection.close()
 

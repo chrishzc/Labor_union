@@ -15,6 +15,7 @@ from domains.finance_import.cancellation_code import (
     extract_sinopac_account_reference,
     extract_sinopac_memo_case_suffix,
     resolve_finance_cancellation_code,
+    sinopac_memo_case_suffixes,
 )
 
 
@@ -32,6 +33,8 @@ CLASSIFICATION_TYPES = frozenset(
 
 
 TAISHIN_CLIENT_SUBSIDY_MEMO_REASON = "taishin_client_subsidy_case_suffix_in_memo"
+TAISHIN_CLIENT_SUBSIDY_NAME_MEMO_REASON = "taishin_client_subsidy_name_in_memo"
+TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON = "taishin_client_subsidy_shared_name_in_memo"
 TAISHIN_CASE_MEMO_REASON = "taishin_memo_case_requires_manual_scheme"
 
 
@@ -622,23 +625,26 @@ def classify_finance_transaction(
             if staff_result["classification_type"] == "staff_salary":
                 return {**staff_result, "resolved_counterparty_account": row.get("counterparty_account")}
             return staff_result
+        client_name = extract_name_from_row_text(
+            {'memo': memo}, sorted(client_name_identities or {}, key=len, reverse=True),
+        )
+        named_clients = _ids_for_account(client_name_identities or {}, client_name)
+        if len(named_clients) > 1:
+            return _result('client_subsidy_return', named_clients, TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON)
         if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
             client_ids = _ids_for_account(client_case_suffixes or {}, suffix)
-            client_name = extract_name_from_row_text({'memo': memo},
-                sorted(client_name_identities or {}, key=len, reverse=True))
-            named_clients = _ids_for_account(client_name_identities or {}, client_name)
             if named_clients and set(named_clients) != set(client_ids):
                 return _review('counterparty_identity_type_conflict')
-            # Combine purpose with a positively named role or the formal case
-            # customer's identity; do not whitelist complete memo phrases.
-            customer_subsidy = '補助' in memo_text and (
-                any(word in memo_text for word in ('雇主', '客戶')) or len(named_clients) == 1)
+            customer_subsidy = len(named_clients) == 1 or (
+                '補助' in memo_text and any(word in memo_text for word in ('雇主', '客戶')))
             existing_subsidy = len(client_ids) == 1 and any(
                 item.get('client_id') == client_ids[0] and item.get('obligation_type') == 'subsidy_return'
                 for item in taishin_client_refund_candidates)
             if (customer_subsidy or existing_subsidy) and len(client_ids) == 1:
                 return _result('client_subsidy_return', client_ids, TAISHIN_CLIENT_SUBSIDY_MEMO_REASON)
             return _review(TAISHIN_CASE_MEMO_REASON)
+        if len(named_clients) == 1 and not sinopac_memo_case_suffixes(memo):
+            return _result('client_subsidy_return', named_clients, TAISHIN_CLIENT_SUBSIDY_NAME_MEMO_REASON)
         return _review("taishin_outgoing_unrecognized")
 
     return _review("unsupported_bank_direction")

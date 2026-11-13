@@ -281,6 +281,8 @@ def test_taishin_subsidy_real_readers_correction_posting_and_recovery_replay(mon
         def execute(self,sql,params=()):
             if 'FROM finance_import_rows WHERE' in sql:self.rows=(bank,)
             elif 'FROM staff WHERE' in sql:self.rows=({'name':'合成月嫂甲'},)
+            elif 'SELECT id,name FROM clients' in sql:self.rows=()
+            elif sql=='SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE':self.rows=({'case_no':case},)
             elif 'FROM client_legacy_virtual_accounts' in sql:self.rows=({'case_no':'115000004' if params[0].endswith('115004') else case},)
             elif 'FROM government_subsidy_period_members' in sql:self.rows=({'id':7},) if covered else ()
             elif 'FROM client_obligations' in sql:self.rows=obligations()

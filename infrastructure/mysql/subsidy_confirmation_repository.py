@@ -10,6 +10,7 @@ from dataclasses import replace
 from domains.finance_import.planning import (
     FinanceClassificationType, FinanceImportDisposition, StaffSubsidyCaseCandidate, SubsidyConfirmationPreflight,
 )
+from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -69,26 +70,68 @@ def _staff_subsidy_month_cases(connection, transaction_date, staff_id, cases):
     return tuple(candidates), missing_due_date
 
 
+def match_client_subsidy_month(connection, cursor, transaction_date, client_ids, *, lock=False):
+    from domains.finance_import.transaction_classifier import _is_same_month
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState, query_subsidy_payable_handoff
+
+    if transaction_date is None:
+        raise ValueError('bank_transaction_date_missing')
+    placeholders = ','.join(['%s'] * len(client_ids))
+    cursor.execute(f'SELECT case_no FROM orders WHERE client_id IN ({placeholders}) ORDER BY case_no'
+                   + (' FOR UPDATE' if lock else ''), client_ids)
+    cases = tuple(row['case_no'] for row in cursor.fetchall())
+    state = MySqlAccountingWorkspaceState(connection)
+    matches = []
+    missing_due_date = False
+    for case_no in cases:
+        plan = state.subsidy_plan(case_no)
+        if plan.selected_scheme not in (None, 'advance'):
+            continue
+        cursor.execute("SELECT status,amount_due_ntd,due_date FROM client_obligations "
+                       "WHERE case_no=%s AND direction='payable_to_client' AND obligation_type='subsidy_return'"
+                       + (' FOR UPDATE' if lock else ''), (case_no,))
+        refunds = tuple(cursor.fetchall())
+        if refunds:
+            handoff = query_subsidy_payable_handoff(connection, case_no, proposed_scheme='advance')
+            if not handoff.service_completed or handoff.client_subsidy_reason:
+                continue
+            dates = [row['due_date'] for row in refunds if row['status'] == 'open' and row['amount_due_ntd'] > 0]
+        else:
+            preview = preview_manual_subsidy_plan(connection, case_no, 'advance', plan.version, for_update=lock)
+            missing_due_date |= preview.blocker == 'subsidy_service_end_missing'
+            dates = [preview.refund_plan.due_date] if not preview.blocker and preview.refund_plan else []
+        missing_due_date |= None in dates
+        if any(_is_same_month(transaction_date, due_date) for due_date in dates):
+            matches.append(case_no)
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise ValueError('client_subsidy_multiple_same_month_cases')
+    raise ValueError('due_date_missing' if missing_due_date else 'outgoing_client_refund_month_no_match')
+
+
 def _bank_case(connection, row, candidate, *, for_update=False):
     from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
     from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
     from infrastructure.mysql.finance_import_owning_domain_composite import _single_prefixed_identity
     suffixes = sinopac_memo_case_suffixes(row.get('memo'))
     with connection.cursor() as cursor:
+        if candidate.classification_type is FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
+            from infrastructure.mysql.client_refund_reversal_repository import _verify_taishin_subsidy_cases
+            verified, = _verify_taishin_subsidy_cases(
+                cursor, ({**row, 'effective_classification_type': 'client_subsidy_return'},), lock=for_update,
+                require_resolved=True, connection=connection,
+            )
+            case_no = verified['taishin_memo_case_no']
+            cursor.execute('SELECT client_id FROM orders WHERE case_no=%s', (case_no,))
+            owner = cursor.fetchone()
+            if owner is None or f"client:{owner['client_id']}" not in candidate.target_identities:
+                raise ValueError('client_subsidy_memo_case_mismatch')
+            return case_no
+        suffixes = sinopac_memo_case_suffixes(row.get('memo'))
         resolved = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes))) if len(suffixes) == 1 else None
         if suffixes and (resolved is None or resolved['result'] != 'resolved'):
             raise ValueError('subsidy_case_not_unique')
-        if candidate.classification_type is FinanceClassificationType.CLIENT_SUBSIDY_RETURN:
-            if resolved is None:
-                raise ValueError('client_subsidy_memo_recipient_unconfirmed')
-            case_no = resolved['case_no']
-            cursor.execute('SELECT client_id FROM orders WHERE case_no=%s', (case_no,))
-            owner = cursor.fetchone()
-            if owner is None or _single_prefixed_identity(candidate, 'client:') != int(owner['client_id']):
-                raise ValueError('client_subsidy_memo_case_mismatch')
-            from infrastructure.mysql.client_refund_reversal_repository import _verify_taishin_subsidy_cases
-            _verify_taishin_subsidy_cases(cursor, ({**row, 'effective_classification_type':'client_subsidy_return'},), expected_case_no=case_no)
-            return case_no
         staff_id = _single_prefixed_identity(candidate, 'staff:')
         from infrastructure.mysql.staff_payout_repository import _verify_taishin_memo_recipients
         verified = _verify_taishin_memo_recipients(cursor, (row,), False)
@@ -168,6 +211,8 @@ def resolve_subsidy_confirmation(connection, candidate, *, for_update=False):
         if case.subsidy_ntd == 0:
             raise ValueError('subsidy_amount_not_positive')
         if not handoff.service_completed:
+            if TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON in candidate.evidence:
+                raise ValueError('subsidy_service_not_completed')
             return _annotate(replace(pending, disposition=FinanceImportDisposition.CREATE,
                 target_identities=(), available_actions=('confirm_subsidy_scheme',),
                 pending_reason='subsidy_service_not_completed', subsidy_preflight=replace(preflight, confirmation_only=True)), case)

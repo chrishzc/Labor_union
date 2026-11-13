@@ -19,11 +19,15 @@ from domains.finance_import.cancellation_code import (
 )
 from domains.finance_import.statement_archive import bank_import_type
 from domains.finance_import.ingestion import FinanceWorkbookIngestionReceipt
-from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, _is_same_month, extract_name_from_row_text
+from domains.finance_import.transaction_classifier import (
+    TAISHIN_CASE_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON,
+    _is_same_month, extract_name_from_row_text,
+)
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
 )
+from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_taishin_client_memo_case
 
 
 _MAXIMUM_PAGE_SIZE = 100
@@ -202,8 +206,9 @@ class FinanceImportQueryNotFound(ValueError):
 
 
 class FinanceImportQueryService:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, match_client_month=None) -> None:
         self._connection = connection
+        self._match_client_month = match_client_month
 
     def bank_transactions(
         self, *, bank, direction, status, start, end, search, limit, before_row_id, row_id=None,
@@ -359,7 +364,16 @@ class FinanceImportQueryService:
                     contract.batch_identity
                 FROM page
                 LEFT JOIN finance_import_batch_contracts contract
-                    ON page.transaction_status='pending' AND contract.batch_id=page.batch_id
+                    ON page.transaction_status='pending' AND contract.batch_id=CASE
+                    WHEN page.format_id='taishin' AND page.direction='outgoing'
+                        AND page.classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy')
+                    THEN (
+                        SELECT occurrence.batch_id FROM finance_import_occurrences occurrence
+                        JOIN finance_import_batch_contracts member ON member.batch_id=occurrence.batch_id
+                        JOIN finance_import_batches batch ON batch.id=member.batch_id AND batch.status='completed'
+                        WHERE occurrence.finance_import_row_id=page.row_id
+                        ORDER BY occurrence.batch_id DESC LIMIT 1
+                    ) ELSE page.batch_id END
                 LEFT JOIN background_jobs job ON job.job_id=(
                     SELECT latest.job_id FROM background_jobs latest
                     WHERE contract.batch_identity IS NOT NULL
@@ -386,7 +400,8 @@ class FinanceImportQueryService:
                 )
                 for case in cursor.fetchall():
                     cases_by_id.setdefault(case["row_id"], []).append(case["case_no"])
-            items = _enrich_bank_transactions(cursor, page, cases_by_id)
+            items = _enrich_bank_transactions(cursor, page, cases_by_id,
+                match_client_month=self._match_client_month)
         return {
             "items": items,
             "pending_count": pending_count,
@@ -842,6 +857,7 @@ def _enrich_bank_transactions(
     cursor: Any,
     page: Sequence[Mapping[str, Any]],
     posted_cases_by_id: Mapping[int, list[str]],
+    *, match_client_month=None,
 ) -> list[dict[str, Any]]:
     if not page:
         return []
@@ -853,6 +869,7 @@ def _enrich_bank_transactions(
     suffix_cache: dict[str, str | None] = {}
     receipt_obligations: dict[str, Sequence[Mapping[str, Any]]] = {}
     memo_staff_names: list[str] | None = None
+    memo_client_names: dict[str, tuple[int, ...]] | None = None
 
     def client_name_by_id(client_id: int) -> str | None:
         if client_id not in client_name_cache:
@@ -1021,12 +1038,12 @@ def _enrich_bank_transactions(
         elif c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"}:
             staff_id = _single_entity_id(row, "staff:")
             if status == "pending" and not cases:
-                suffix = None if taishin_staff else extract_sinopac_memo_case_suffix(row.get("memo"))
+                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
                 if suffix:
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
-                if staff_id is None and len(cases) == 1:
+                if not taishin_staff and staff_id is None and len(cases) == 1:
                     staff_id = _sinopac_legacy_staff_id(cursor, row, cases[0])
                 if staff_id is not None:
                     cursor.execute(
@@ -1079,17 +1096,31 @@ def _enrich_bank_transactions(
         elif c_type in {"client_refund", "client_subsidy_return", "client_refund_return"}:
             client_id = _single_entity_id(row, "client:")
             if status == "pending" and not cases:
-                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
-                if suffix:
-                    resolved_case = resolve_suffix(suffix)
-                    if resolved_case:
-                        cases = [resolved_case]
-                if taishin_subsidy and row.get("direction") == "outgoing" and suffix and len(cases) == 1:
+                if taishin_subsidy and row.get("direction") == "outgoing":
                     if memo_staff_names is None:
                         cursor.execute("SELECT name FROM staff WHERE name IS NOT NULL AND name<>''")
                         memo_staff_names = sorted({unicodedata.normalize("NFKC", str(person["name"])).strip() for person in cursor.fetchall()}, key=len, reverse=True)
-                    taishin_subsidy_memo_confirmed = extract_name_from_row_text({"memo": row.get("memo")}, memo_staff_names) is None
-                if c_type == "client_subsidy_return" and cases and (review_reason == TAISHIN_CLIENT_SUBSIDY_MEMO_REASON or taishin_subsidy_memo_confirmed):
+                    if extract_name_from_row_text({"memo": row.get("memo")}, memo_staff_names) is None:
+                        if memo_client_names is None:
+                            memo_client_names = load_client_name_identities(cursor)
+                        def match_month(active_cursor, client_ids):
+                            return match_client_month(active_cursor, row.get('transaction_date'), client_ids)
+
+                        try:
+                            resolved_case = resolve_taishin_client_memo_case(cursor, row.get("memo"), memo_client_names,
+                                match_month=match_month if match_client_month is not None else None)
+                        except ValueError as error:
+                            review_reason = str(error)
+                            resolved_case = None
+                        taishin_subsidy_memo_confirmed = resolved_case is not None
+                        cases = [resolved_case] if resolved_case else []
+                elif not taishin_subsidy:
+                    resolved_case = resolve_suffix(extract_sinopac_memo_case_suffix(row.get("memo")))
+                    if resolved_case:
+                        cases = [resolved_case]
+                if c_type == "client_subsidy_return" and cases and (taishin_subsidy_memo_confirmed or (
+                    not taishin_subsidy and review_reason == TAISHIN_CLIENT_SUBSIDY_MEMO_REASON
+                )):
                     cursor.execute(
                         "SELECT case_no,due_date,obligation_identity,amount_due_ntd FROM client_obligations "
                         "WHERE case_no=%s AND direction='payable_to_client' AND obligation_type='subsidy_return' "
@@ -1097,7 +1128,7 @@ def _enrich_bank_transactions(
                         (cases[0],),
                     )
                     target_rows = cursor.fetchall()
-                elif client_id is not None:
+                elif client_id is not None and not taishin_subsidy:
                     type_sql = (
                         "AND o.obligation_type='subsidy_return'"
                         if c_type == "client_subsidy_return"
@@ -1145,7 +1176,8 @@ def _enrich_bank_transactions(
 
         # This target opens the existing workflow. The owner revalidates it at Preview/Apply.
         unavailable = None
-        memo_suffixes = sinopac_memo_case_suffixes(row.get("memo")) if row["direction"] == "outgoing" and not taishin_staff else ()
+        memo_suffixes = sinopac_memo_case_suffixes(row.get("memo")) if row["direction"] == "outgoing" else ()
+        taishin_staff_case_scoped = taishin_staff and bool(memo_suffixes)
         if status != "pending":
             pass
         elif row["disposition"] == "blocked":
@@ -1172,6 +1204,10 @@ def _enrich_bank_transactions(
             len(cases) != 1 or resolve_suffix(extract_sinopac_memo_case_suffix(row.get("memo"))) != cases[0]
         ):
             unavailable = "case_reference_unconfirmed"
+        elif taishin_staff and row.get('batch_identity') and not taishin_staff_case_scoped:
+            unavailable = "case_unconfirmed"
+        elif taishin_staff_case_scoped and not any(item.get('case_no') == cases[0] for item in target_rows):
+            unavailable = "no_open_items"
         elif len(cases) != 1:
             unavailable = "case_unconfirmed"
         else:
@@ -1223,7 +1259,8 @@ def _enrich_bank_transactions(
                 unavailable = "due_date_missing" if not any(item.get("due_date") for item in scoped_rows) else "no_same_month_items"
             else:
                 unavailable = "items_not_unique" if selected or len(month_rows) > 1 else "no_eligible_item"
-            if target is None and unavailable not in {"staff_unconfirmed", "client_unconfirmed"}:
+            shared_name_date_blocked = taishin_subsidy and row['review_reason'] == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON and not month_rows
+            if target is None and not shared_name_date_blocked and unavailable not in {"staff_unconfirmed", "client_unconfirmed"}:
                 # An unresolved installment is a reason for manual selection,
                 # not a reason to hide the same-case bank reconciliation entry.
                 target = {
@@ -1249,6 +1286,7 @@ def _bank_transaction(row, cases, reconciliation_target=None, reconciliation_una
         "row_id": int(row["row_id"]),
         "staff_subsidy_batch_identity": (
             row.get("batch_identity") if row["transaction_status"] == "pending"
+            and row["disposition"] != "blocked"
             and bank == "taishin" and row["direction"] == "outgoing"
             and row["classification_type"] in {"staff_payout", "staff_legacy_subsidy", "staff_salary"} else None
         ),

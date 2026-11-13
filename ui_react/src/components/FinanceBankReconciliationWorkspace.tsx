@@ -205,6 +205,21 @@ export function FinanceBankReconciliationWorkspace({
       : undefined;
   const viewedTransaction = viewedRow && (page?.items.find(row => row.row_id === viewedRow.row_id) ?? viewedRow);
   const detailTitle = viewedTransaction?.status === 'posted' ? '已核銷交易明細' : '待核對交易明細';
+  const subsidyReviewBusy = importBusy || batchPreview.kind === 'loading' || applyJob.kind === 'loading'
+    || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready');
+  const importPanelRef = useRef<HTMLDivElement>(null);
+
+  const openStaffSubsidyReview = (row: FinanceBankTransaction) => {
+    if (!row.staff_subsidy_batch_identity) return;
+    setViewedRow(null);
+    setShowImportPanel(true);
+    onPreviewBankBatch?.(row.staff_subsidy_batch_identity);
+    requestAnimationFrame(() => importPanelRef.current?.scrollIntoView?.({ block: 'nearest' }));
+  };
+  const openManualStaffSubsidy = (row: FinanceBankTransaction) => {
+    setViewedRow(null);
+    onReconcile(row);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -256,6 +271,7 @@ export function FinanceBankReconciliationWorkspace({
 
       {/* 2. 受控檔案上傳列 (點擊匯入或常駐支援) */}
       <div
+        ref={importPanelRef}
         className="bank-reconcile-import-panel"
         style={{ display: showImportPanel || financeWorkbook || ingestionNeedsLookup ? 'flex' : 'none' }}
         data-surface-id="finance.finance-import.upload-panel"
@@ -594,15 +610,16 @@ export function FinanceBankReconciliationWorkspace({
                         {row.disposition === 'blocked' ? (
                           <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>銷帳受阻</span>
                         ) : row.staff_subsidy_batch_identity && onPreviewBankBatch ? (
-                          <button type="button" className="bank-btn-action"
-                            disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
-                            onClick={() => {
-                              if (!row.staff_subsidy_batch_identity) return;
-                              setShowImportPanel(true);
-                              onPreviewBankBatch(row.staff_subsidy_batch_identity);
-                            }}>
-                            核對月嫂補助
-                          </button>
+                          <>
+                            <button type="button" className="bank-btn-action" disabled={subsidyReviewBusy}
+                              onClick={() => openStaffSubsidyReview(row)}>
+                              核對月嫂補助
+                            </button>
+                            {row.reconciliation_target && <button type="button" className="bank-btn-action"
+                              disabled={subsidyReviewBusy} onClick={() => openManualStaffSubsidy(row)}>
+                              單筆人工核對
+                            </button>}
+                          </>
                         ) : (row.reconciliation_target || (row.classification_type === 'government_subsidy' && row.direction !== 'unknown')) ? (
                           <button
                             type="button"
@@ -716,9 +733,25 @@ export function FinanceBankReconciliationWorkspace({
           ariaLabel={detailTitle}
           title={detailTitle}
           footer={
-            <button type="button" className="finance-btn-secondary" onClick={() => setViewedRow(null)}>
-              返回
-            </button>
+            <>
+              {viewedTransaction.status === 'pending' && viewedTransaction.disposition !== 'blocked'
+                && viewedTransaction.staff_subsidy_batch_identity && onPreviewBankBatch && (
+                  <button type="button" className="finance-btn-primary" disabled={subsidyReviewBusy}
+                    onClick={() => openStaffSubsidyReview(viewedTransaction)}>
+                    核對月嫂補助
+                  </button>
+                )}
+              {viewedTransaction.status === 'pending' && viewedTransaction.disposition !== 'blocked'
+                && viewedTransaction.staff_subsidy_batch_identity && viewedTransaction.reconciliation_target && (
+                  <button type="button" className="finance-btn-secondary" disabled={subsidyReviewBusy}
+                    onClick={() => openManualStaffSubsidy(viewedTransaction)}>
+                    單筆人工核對
+                  </button>
+                )}
+              <button type="button" className="finance-btn-secondary" onClick={() => setViewedRow(null)}>
+                返回
+              </button>
+            </>
           }
         >
           <div className="bank-fact-card">

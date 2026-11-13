@@ -37,7 +37,7 @@
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
 - `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→方案確認；客戶款齊且人工或銀行明細已正式確認方案才移出。發出提醒共用LINE同案期款來源及原成功紀錄。
 - `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。已確認的案件款項帶原流水直開共用案件抽屜核對，政府款開原整期核對。匯入紀錄從獨立入口查看。
-- 補助確認預檢的批次由 FinancePage 停留於原上傳面板，顯示金額、受款方向與建款／核銷計畫；使用者按「確認套用本次明細」才提交原 Apply，全部受阻時不提供可套用動作。其他來源原自動核銷及原鍵結果未明查回保持。
+- 補助確認預檢在原上傳面板顯示金額、受款方向與建款／核銷計畫。同月唯一且可核銷的月嫂補助，沿原批次 Apply 自動核銷；同月多案保留選案及確認套用。六碼已定位且有同案應付款的跨月列可開單筆人工核對，沿原 Staff Payables 確認流程。全部受阻時不提供批次核銷動作。
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
@@ -65,11 +65,12 @@
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints beneath `/api/v1/finance-import`: `GET statements/export` 只納入正式owner核銷證據；`GET statements/manual/export` 獨立唯讀匯出既有人工備查；`POST statements/manual` 經認證後回typed 410、無DB writer。React僅提供兩種匯出，不再提供無案件新增表單；案件正式補登仍沿規格22 §19。`POST statements/duplicates` 保留原判重契約。
-- `bank-transactions` — 以已定位唯一案件或已辨識政府補助的原始銀行流水為清單身分。U13 台新僅六碼定位的來源保留待人工確認方案及案件入口，不建立核銷 target；同案抽屜顯示原備註。其他來源沿原規則自動配對，案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘target以requires_selection及同案同對象候選IDs要求選款。正式owner重驗核銷，不由Query／UI寫帳。
+- `bank-transactions` — 顯示正式核銷的銀行流水及符合保留條件的待核對列，包含尚未確認唯一案件的台新月嫂補助及同名客戶補助退款。台新僅六碼定位但用途待確認的來源提供案件入口。案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘 target 以 `requires_selection` 及同案同對象候選 IDs 要求選款。正式 owner 重驗核銷，不由 Query／UI 寫帳。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
 - 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
 - 永豐月嫂舊流水的對象辨識紀錄為空時，清單只讀原交易參考編號，沿既有完整帳號解析確認唯一主要帳戶及同案正式月嫂義務後提供核對入口，不回填舊辨識紀錄。缺帳號、帳號不唯一或無同案義務仍待確認；台新及客戶款不採此補充查核，正式 Preview／Apply 仍由原 owner 重驗。
-- 台新客戶補助的入口依原始備註唯一六碼與正式虛擬帳號對照確認案件，並沿既有姓名擷取排除命中月嫂姓名的來源；不以舊對象辨識欄位或原因碼決定能否開啟。候選限同案補助待退款，可人工選款或顯示缺款；Query 不回填舊欄位，正式 Preview／Apply 仍驗原備註、資金資格、日期及核銷規則。
+- 台新客戶補助的入口依原始備註六碼或客戶姓名確認案件，並排除命中月嫂姓名的來源。同名客戶依六碼或唯一合格退款月份定位，跨月或無唯一案件留待核對。候選限同案補助待退款；正式 Preview／Apply 重驗原備註、資金資格、日期及核銷規則。
+- 台新待核對月嫂補助依流水 occurrence 找最近完成的正式批次，清單及交易明細共用原批次預檢與選案入口。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan` 與 POST `cases/{case_no}/accounting/subsidy-plan/preview`；沿原 actor、version CAS、Orders identity lock 與同鍵重播。Preview 零寫入，原保存重驗預檢並借用既有 owner 承接已合資格款項；未具金融資格可保存已預檢的方案但不得建款或核銷。無外部付款及日期重算。
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`

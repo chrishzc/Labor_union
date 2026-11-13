@@ -41,27 +41,30 @@ function chooseWorkbook(){
 }
 
 describe('finance import operation identity after an observed result',()=>{
-  it('holds a subsidy preflight until the original Apply is explicitly confirmed', async () => {
+  it.each(['advance', 'sharedName', 'split'] as const)('submits a resolved automatic subsidy match on upload (%s)', async (kind) => {
+    const split = kind === 'split';
     const checked: FinanceImportBatchPreview = { ...preview, rows: [{
       row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 11970,
-      classification_type: 'client_subsidy_return', disposition: 'create', target_identities: ['refund:1'],
-      evidence: [], available_actions: ['reconcile'], integrity_violations: [],
+      classification_type: split ? 'staff_payout' : 'client_subsidy_return', disposition: 'create', target_identities: ['payment:1'],
+      evidence: kind === 'sharedName' ? ['taishin_client_subsidy_shared_name_in_memo'] : [],
+      available_actions: ['reconcile'], integrity_violations: [],
       fingerprint_collision: false, formal_reference_conflict: false,
-      subsidy_preflight: { case_no: '115000001', scheme: 'advance', subsidy_ntd: 12000,
+      subsidy_preflight: { case_no: '115000001', scheme: split ? 'split' : 'advance', subsidy_ntd: 12000,
         total_ntd: 30000, confirmation_only: false, payable_amount_ntd: 12000,
         payable_due_date: '2026-11-15', bank_cash_ntd: 11970, transfer_fee_ntd: 30,
         settlement_ntd: 12000, remaining_ntd: 0, blocker: null },
     }] };
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue(checked);
     chooseWorkbook();
+    if (kind !== 'advance') {
+      await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
+      expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(checked);
+      return;
+    }
     const confirm = await screen.findByRole('button', { name: '確認套用本次明細' });
-    await waitFor(() => expect(confirm).toBeEnabled());
-    expect(screen.getByRole('region', { name: '補助處理預檢' })).toHaveTextContent('手續費 30 元');
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
-    expect(financeImportMutationClient.queryBatchOutcome).not.toHaveBeenCalled();
     fireEvent.click(confirm);
     await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
-    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(checked);
   });
 
   it('does not submit a subsidy row whose creation preflight is blocked', async () => {

@@ -10,8 +10,10 @@ from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
     CanonicalFinanceImportRow, ClientReceiptReviewDiagnostic, FinanceClassificationType, FinanceImportBatchFacts, FinanceImportDisposition, FinanceImportPlan,
-    build_finance_import_plan, defer_overlapping_client_receipts, defer_overlapping_outgoing_payments,
+    build_finance_import_plan, defer_conflicting_subsidy_schemes, defer_overlapping_client_receipts,
+    defer_overlapping_outgoing_payments,
 )
+from domains.finance_import.transaction_classifier import TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -125,6 +127,11 @@ class FinanceImportWorkflow:
                 for row in plan.dispatchable_rows
                 for target in row.target_identities
             )
+            conflicting_subsidy_rows = {
+                row.row_identity for row in defer_conflicting_subsidy_schemes(tuple(
+                    row for plan in plans if plan.apply_allowed for row in plan.dispatchable_rows
+                )) if row.disposition is FinanceImportDisposition.BUSINESS_PENDING
+            }
             reconciled = 0
             existing = 0
             for plan, (_, pending_ids) in zip(plans, batches, strict=True):
@@ -132,11 +139,15 @@ class FinanceImportWorkflow:
                                 and row.row_identity in pending_ids for row in plan.rows)
                 if not plan.apply_allowed:
                     continue
-                # No owner confirmation or contested balance is implicitly authorized.
+                # Unique staff payouts and eligible shared-name refunds can confirm on rematch.
                 rows = tuple(
                     row for row in plan.dispatchable_rows
-                    if (row.subsidy_preflight is None or row.subsidy_preflight.existing_confirmed_payable)
+                    if (row.subsidy_preflight is None or row.subsidy_preflight.existing_confirmed_payable
+                        or (not row.subsidy_preflight.confirmation_only
+                            and (row.subsidy_preflight.scheme == 'split'
+                                 or TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON in row.evidence)))
                     and row.target_identities
+                    and row.row_identity not in conflicting_subsidy_rows
                     and all(targets[target] == 1 for target in row.target_identities)
                 )
                 if not rows:
@@ -167,7 +178,7 @@ class FinanceImportWorkflow:
                 else:
                     row = self._posting_port.resolve(row)
             rows.append(row)
-        return build_finance_import_plan(replace(facts, rows=tuple(rows)))
+        return build_finance_import_plan(replace(facts, rows=defer_conflicting_subsidy_schemes(tuple(rows))))
     def _apply_in_unit_of_work(self, request):
         command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
@@ -214,7 +225,9 @@ class FinanceImportWorkflow:
         return build_finance_import_plan(
             replace(
                 facts,
-                rows=defer_overlapping_outgoing_payments(defer_overlapping_client_receipts(resolved_rows)),
+                rows=defer_overlapping_outgoing_payments(defer_overlapping_client_receipts(
+                    defer_conflicting_subsidy_schemes(resolved_rows),
+                )),
             )
         )
     def _dispatch(self, plan, request):

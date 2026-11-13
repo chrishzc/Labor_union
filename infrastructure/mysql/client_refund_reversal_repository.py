@@ -23,9 +23,11 @@ from domains.client_finance.client_refund_reversal import (
     ClientRefundReturnBankFact,
     ClientReversalTarget,
 )
-from domains.finance_import.cancellation_code import extract_sinopac_account_reference, extract_sinopac_memo_case_suffix
-from domains.finance_import.transaction_classifier import extract_name_from_row_text
-from subsystems.client_finance.virtual_account_resolution import resolve_client_virtual_account_suffix
+from domains.finance_import.cancellation_code import extract_sinopac_account_reference
+from domains.finance_import.transaction_classifier import (
+    TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON, _is_same_month, extract_name_from_row_text,
+)
+from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_taishin_client_memo_case
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
@@ -249,7 +251,7 @@ class MySqlClientRefundReversalRepository:
                 case_no,
                 ClientRefundPurpose.SUBSIDY_RETURN,
             )
-            outgoing_rows = _verify_taishin_subsidy_cases(cursor, _query_candidate_outgoing_bank_rows(cursor))
+            outgoing_rows = _verify_taishin_subsidy_cases(cursor, _query_candidate_outgoing_bank_rows(cursor), connection=self._connection)
             targets = _query_reversal_targets(cursor, case_no, "receipt")
             refund_return_targets = _query_reversal_targets(cursor, case_no, "refund")
         return {
@@ -316,7 +318,8 @@ class MySqlClientRefundReversalRepository:
             if is_sinopac_refund and not manual_verified and any(_refund_source_account(row) is None for row in bank_rows):
                 raise ValueError("client_refund_source_account_missing")
         if not manual_verified and selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
-            bank_rows = _verify_taishin_subsidy_cases(cursor, bank_rows, lock=lock, expected_case_no=selection.case_no)
+            bank_rows = _verify_taishin_subsidy_cases(cursor, bank_rows, lock=lock,
+                expected_case_no=selection.case_no, connection=self._connection)
             if any(row.get("format_id") == "taishin" and row.get("taishin_memo_case_no") != selection.case_no for row in bank_rows):
                 raise ValueError("client_subsidy_memo_recipient_unconfirmed")
         memo_verified = manual_verified or (bool(bank_rows) and all(row.get("taishin_memo_case_no") == selection.case_no for row in bank_rows))
@@ -444,7 +447,7 @@ def _load_refund_bank_rows(cursor, identities, lock):
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT fir.id,fir.format_id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
-        "fir.currency,fir.memo,COALESCE(classification.classification_type,"
+        "fir.currency,fir.memo,fir.classification_reason,COALESCE(classification.classification_type,"
         "fir.classification_type) AS effective_classification_type,"
         "fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
         "fir.bank_references,ledger.id AS ledger_entry_id "
@@ -497,6 +500,12 @@ def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock, *, proposed
         obligations = proposed_rows
     if tuple(row['obligation_identity'] for row in obligations) != selection.obligation_identities or not bank_rows:
         raise ValueError('subsidy_advance_settlement_ambiguous')
+    for row in bank_rows:
+        if row.get('format_id') == 'taishin' and row.get('classification_reason') == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON:
+            if any(obligation['due_date'] is None for obligation in obligations):
+                raise ValueError('due_date_missing')
+            if not all(_is_same_month(row['transaction_date'], obligation['due_date']) for obligation in obligations):
+                raise ValueError('outgoing_client_refund_month_no_match')
     amount = sum(_integer_money(row['amount_due_ntd']).amount for row in obligations)
     facts = []
     for paid_on in sorted({row['transaction_date'] for row in bank_rows}):
@@ -606,31 +615,39 @@ def _refund_source_account(row):
     return row.get("resolved_counterparty_account")
 
 
-def _verify_taishin_subsidy_cases(cursor, rows, *, lock=False, expected_case_no=None):
-    """Re-read memo identity; a staff name takes priority over a case suffix."""
+def _verify_taishin_subsidy_cases(cursor, rows, *, lock=False, expected_case_no=None, require_resolved=False, connection=None):
+    """Re-read memo identity, giving staff names priority."""
     if not any(row.get("format_id") == "taishin" and row.get("effective_classification_type") == "client_subsidy_return" for row in rows):
         return rows
     cursor.execute("SELECT name FROM staff WHERE name IS NOT NULL AND name<>''" + (" FOR UPDATE" if lock else ""))
     names = sorted({unicodedata.normalize("NFKC", str(row["name"])).strip() for row in cursor.fetchall()}, key=len, reverse=True)
+    client_names = load_client_name_identities(cursor, lock=lock)
     verified = []
     for row in rows:
         if row.get("format_id") != "taishin" or row.get("effective_classification_type") != "client_subsidy_return":
             verified.append(row)
             continue
-        case_no = None
         memo = row.get("memo")
-        suffix = extract_sinopac_memo_case_suffix(memo)
         staff_matched = extract_name_from_row_text({"memo": memo}, names) is not None
-        if suffix is not None and not staff_matched:
-            resolution = resolve_client_virtual_account_suffix(cursor, suffix)
-            if resolution["result"] == "resolved":
-                case_no = resolution["case_no"]
-        if expected_case_no is not None:
+        case_no = None
+        if not staff_matched:
+            from infrastructure.mysql.subsidy_confirmation_repository import match_client_subsidy_month
+
+            def match_month(active_cursor, client_ids):
+                return match_client_subsidy_month(connection, active_cursor, row.get('transaction_date'), client_ids, lock=lock)
+
+            try:
+                case_no = resolve_taishin_client_memo_case(cursor, memo, client_names, lock=lock,
+                    match_month=match_month if connection is not None else None)
+            except ValueError:
+                if require_resolved or expected_case_no is not None:
+                    raise
+        if require_resolved or expected_case_no is not None:
             if staff_matched:
                 raise ValueError("client_subsidy_memo_staff_matched")
             if case_no is None:
                 raise ValueError("client_subsidy_memo_recipient_unconfirmed")
-            if case_no != expected_case_no:
+            if expected_case_no is not None and case_no != expected_case_no:
                 raise ValueError("client_subsidy_memo_case_mismatch")
         verified.append({**row, "taishin_memo_case_no": case_no})
     return tuple(verified)

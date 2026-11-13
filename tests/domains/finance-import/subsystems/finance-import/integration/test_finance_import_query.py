@@ -534,6 +534,8 @@ def test_known_case_refund_return_has_original_refund_selection_entry(direction,
     ('subsidy_advance_not_due','HC115001 HC115002',[],'outgoing','taishin',1,False),
     ('subsidy_advance_not_due','HC115999',[],'outgoing','taishin',1,False),
     ('subsidy_advance_not_due','沒有案件六碼',[],'outgoing','taishin',1,False),
+    ('taishin_client_subsidy_name_in_memo','合成客戶甲 GB,轉入0000000000000003',[],'outgoing','taishin',1,True),
+    ('taishin_client_subsidy_name_in_memo','合成客戶乙 HC115001',[],'outgoing','taishin',1,False),
     ('taishin_client_subsidy_case_suffix_in_memo','HC115001',[],'incoming','taishin',1,False),
     ('subsidy_advance_not_due','HC115001',[],'outgoing','sinopac',1,False),
 ])
@@ -545,6 +547,12 @@ def test_taishin_subsidy_entry_uses_unique_original_memo_instead_of_the_legacy_r
             self.calls.append((statement,params))
             if statement.startswith('SELECT name FROM staff WHERE name IS NOT NULL'):
                 self._rows=[{'name':name} for name in staff_names]
+            elif statement.startswith('SELECT id,name FROM clients'):
+                self._rows = [{'id': 7, 'name': '合成客戶甲'}, {'id': 8, 'name': '合成客戶乙'}]
+            elif statement.startswith('SELECT case_no FROM orders WHERE client_id'):
+                self._rows = [{'case_no': '115000001'}] if params == (7,) else []
+            elif statement.startswith('SELECT client_id FROM orders WHERE case_no'):
+                self._rows = [{'client_id': 7}]
             elif statement.startswith('SELECT case_no,due_date,obligation_identity,amount_due_ntd FROM client_obligations'):
                 assert params==('115000001',)
                 self._rows=[{'case_no':'115000001','obligation_identity':f'subsidy:{i}','amount_due_ntd':12000,'due_date':'2026-10-15'} for i in range(count)]

@@ -44,11 +44,11 @@ def connection():
     c.close()
 
 
-def seed(c, *, installments=False, scheme=None, subsidy=12000):
+def seed(c, *, installments=False, scheme=None, subsidy=12000, customer_terms=False):
     tag = uuid4().hex
     case = f'87{int(tag[:8], 16) % 10000000:07d}'
     identity = 'split-command-test:' + tag
-    name = '合成方案月嫂' + tag[:8]
+    name = '合成方案月嫂' + tag[:8].translate(str.maketrans('0123456789', 'qrstuvwxyz'))
     account = str(int(tag[:12], 16) % 10**12).zfill(12)
     with c.cursor() as q:
         q.execute("INSERT INTO clients(case_no,name,identity_status) VALUES(%s,'Synthetic Split Client','一般市民')", (case,))
@@ -62,6 +62,15 @@ def seed(c, *, installments=False, scheme=None, subsidy=12000):
         q.execute("INSERT INTO staff_obligations(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,amount_due_ntd,due_date,status,current_event_id,payroll_version) VALUES(%s,%s,%s,%s,'service_pay','payable_to_staff',30000,'2026-10-15','open',%s,1)", (identity, assignment, case, staff, event))
         if subsidy is not None:
             q.execute("INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) VALUES(%s,2026,'manual',%s,%s)", (case, subsidy, subsidy))
+        if customer_terms:
+            deposit = (30000 - subsidy) // 3
+            for stage, amount in zip(('deposit', 'first', 'second'), (deposit, deposit, 30000 - subsidy - 2 * deposit)):
+                term = f'{case}:{stage}'
+                q.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) "
+                    "VALUES(%s,%s,%s,'receivable_from_client','established',0,%s,'2026-10-15',%s,0,%s,'synthetic','split customer term')",
+                    (term, case, stage, amount, term, term))
+                q.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) "
+                    "VALUES(%s,%s,%s,'receivable_from_client',%s,'2026-10-15','open',%s,0)", (term, case, stage, amount, q.lastrowid))
         if installments:
             q.executemany('INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) VALUES(%s,%s,%s,%s)',
                 ((identity, 'client', 30000-subsidy, date(2026,10,15)), (identity, 'subsidy', subsidy, date(2026,11,15))))
@@ -109,7 +118,7 @@ def counts(c, data):
 @pytest.mark.parametrize('existing,prior', [(False,0), (True,0), (False,5000)])
 def test_confirm_missing_plan_and_schedule_atomically_then_subsidy_settles_original(connection, existing, prior):
     c = connection
-    data = seed(c, installments=existing)
+    data = seed(c, installments=existing, customer_terms=True)
     application = build_staff_payout_application(c)
     if prior:
         old = selected(data, source(c, data, prior), split=False, mode=StaffPayoutDifferenceMode.UNDERPAYMENT)
@@ -167,7 +176,7 @@ def test_failure_after_plan_and_schedule_rolls_back_everything(connection, monke
 @pytest.mark.parametrize('subsidy_amount',[12000,22000])
 def test_payable_export_uses_bank_funding_balance_when_subsidy_was_paid_first(connection,subsidy_amount):
     from infrastructure.mysql.accounts_payable_export_sources import MySqlStaffPayableExportSource
-    c=connection;data=seed(c,installments=True,scheme='split',subsidy=subsidy_amount)
+    c=connection;data=seed(c,installments=True,scheme='split',subsidy=subsidy_amount,customer_terms=True)
     application=build_staff_payout_application(c)
     subsidy=selected(data,source(c,data,subsidy_amount-30,'taishin'),split=False)
     checked=application.preview(subsidy,CorrelationId('subsidy-first-export'))

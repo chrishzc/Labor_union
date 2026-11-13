@@ -321,13 +321,28 @@ def test_taishin_duplicate_staff_names_cannot_be_disambiguated_by_unpaid_amount(
 
 
 @pytest.mark.parametrize('named_ids,kind', [((17,), 'client_subsidy_return'),
-    ((18,), 'non_business_review'), ((17,18), 'non_business_review')])
-def test_taishin_named_customer_subsidy_uses_the_same_unique_case_identity(named_ids,kind):
+    ((18,), 'non_business_review'), ((17,18), 'client_subsidy_return')])
+@pytest.mark.parametrize('memo', ['HC115001合成家長補助返還', '合成家長 ＨＣ１１５００１ GB,轉入0000000000000003'])
+def test_taishin_named_customer_subsidy_uses_the_same_unique_case_identity(named_ids,kind,memo):
     result=classify_finance_transaction(_row(format_id='taishin',direction='outgoing',
-        debit=Decimal(11970),credit=None,memo='HC115001合成家長補助返還'), {},{},
+        debit=Decimal(11970),credit=None,memo=memo), {},{},
         client_case_suffixes={'115001':[17]},known_case_suffixes=frozenset({'115001'}),
         client_name_identities={'合成家長':named_ids})
     assert result['classification_type']==kind
+
+
+@pytest.mark.parametrize('memo, ids, kind', [
+    ('合成家長 GB,轉入0000000000000003', (17,), 'client_subsidy_return'),
+    ('合成家長 GB,轉入0000000000000003', (17, 18), 'client_subsidy_return'),
+    ('合成家長 HC115001 HC115002', (17,), 'non_business_review'),
+    ('合成家長 HC115099', (17,), 'non_business_review'),
+])
+def test_taishin_customer_name_without_a_case_reference(memo, ids, kind):
+    row = _row(format_id='taishin', direction='outgoing', debit=Decimal(11970), credit=None, memo=memo)
+    result = classify_finance_transaction(row, {}, {}, client_name_identities={'合成家長': ids},
+        known_case_suffixes=frozenset({'115001'}))
+    assert result['classification_type'] == kind
+    assert result['matched_identity_ids'] == (list(ids) if kind == 'client_subsidy_return' else [])
 
 
 @pytest.mark.parametrize('format_id,reference_key',[('sinopac','交易參考編號'),('legacy','transaction_reference')])

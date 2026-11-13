@@ -34,7 +34,7 @@
   - 適用範圍：已確認同一案件、同一月嫂及單筆原應付的永豐出款（即使尚未保存方案或尚無正式分期）。以 Payroll 有效應付 `T` 與 Government Subsidy `S` 為權威來源（不接受前端傳入或差額反推；`S` 不明、`S >= T`、已有衝突方案或客戶補助退款時拒絕）。
   - Preview 零寫入顯示 `T`、`S`、自備待付、實付、手續費與補助待付；缺分期時由 [Payroll Domain](03_Payroll_Domain.md#21-核心計價與費率政策) 承接 `T - S`（原應付日）與 `S`（服務結束月 `+ 2` 月 15 日）。
   - Apply 在單一 outer UoW 內鎖訂單身分、補助來源與付款事實，原子提交方案事件 split、缺席分期與自備款核銷（同鍵重播回原結果、來源變動 409）。單獨於案件頁設定方案不執行本入口之自備款核銷。
-- **方案一分來源核銷**：已建立自備／補助分期時，永豐 `P永` 僅核銷自備款分期、台新 `P台` 僅核銷補助款分期，各自依原分期到期月份比對該來源餘額（不拿全案 `T` 比較、亦不因同月合併）；含各自內扣手續費後兩者均清償始結清整筆應付。
+- **方案一分來源核銷**：永豐 `P永` 核銷自備款分期，台新 `P台` 核銷補助款分期，金額依各自來源餘額。兩筆分期均清償後才結清整筆應付。`P台` 自動配對使用原補助分期月份或原預檢擬建的補助分期月份；六碼已確認歸屬的跨月交易由人員依[單筆人工核對規則](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-staff-case-match)確認，正式預檢與套用重驗原始備註、月嫂、案件及款項資格。
 - **少付超過 100 元部分付款（`ApplyStaffPayoutDifference(mode=underpayment)`）**：
   - 銀行對帳「核對交易」可選「足額核銷本次款項（含 100 元內手續費）」、「付款不足，先核銷實付」、「付款超額，另列追收」及上述永豐方案一選項。
   - 在單一 UoW 內依義務 ID 順序寫入 payout event 與 allocation，計算 `remaining = obligation_amount - net_valid_payout`（> 0 轉 `partially_paid`），下期清冊僅列 `remaining`，不改變 Payroll 原始應付或重複建單；後續新補款繼續對同一義務結清。退匯／沖正僅重開指定來源付款額。
@@ -68,9 +68,9 @@
 
 - **Queries／Commands**：`QueryClientRefundReversal`、`Preview/ApplyClientRefund`、`Preview/ApplyClientSubsidyReturn`、`Preview/ApplyClientReceiptReversal`、`Preview/ApplyClientRefundReturn`、`Preview/ApplyClientRefundReversal`。
 - **Apply 八步與差額規則**：檢查 idempotency → 加鎖 account、bank facts、obligations／reversal targets → 重建驗證 expected version 與 fingerprint → append ledger 與 allocations → 重算 remaining → 更新 projection／outbox／receipt → 單次提交。
-  - **0～100 元手續費直接結清**：`R永`／`R台` 依各自對象規則（`R永` 驗帳號快照；`R台` 未命中月嫂姓名時以原始備註唯一六碼定位案件，不要求帳號快照）＋交易日月份唯一匹配且 `0 <= 應退餘額 - 銀行實付 <= 100` 時，動態計算 `transfer_fee_ntd` 結清為 `refunded`。
+  - **0～100 元手續費直接結清**：`R永` 驗帳號快照，`R台` 依[台新備註辨識](22_銀行流水匯入與帳務異常處理正式規格.md#taishin-subsidy-memo)以原始六碼或客戶姓名定位案件。`R台` 的同名客戶依交易月份與補助退款月份配對，人工核銷仍重驗月份，免驗帳號快照。符合對象及日期條件且 `0 <= 應退餘額 - 銀行實付 <= 100` 時，動態計算 `transfer_fee_ntd` 結清為 `refunded`。
   - **少退超過 100 元**：須人員明確選取部分退款模式，核銷實付並轉 `partially_refunded` 保留餘額；同案同對象同銀行同月多筆明確合併補助退款應逐筆檢驗原資格與日期。
-  - **超退（`銀行實付 > 應退餘額`）**：由 `ApplyClientRefundWithOverage` 在原義務額內結清，並將超額建立獨立 `client_over_refund_recovery`（`R台` 沿同一六碼與整期資金驗證，多筆合併僅立一筆追償）。
+  - **超退（`銀行實付 > 應退餘額`）**：由 `ApplyClientRefundWithOverage` 在原義務額內結清，並將超額建立獨立 `client_over_refund_recovery`。`R台` 沿同一備註案件辨識與整期資金驗證，多筆合併僅立一筆追償。
 
 ### 3.4 `client_over_refund_recovery` 與退匯／沖正契約
 

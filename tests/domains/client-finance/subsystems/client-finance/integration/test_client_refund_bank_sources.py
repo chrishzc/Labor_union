@@ -61,6 +61,11 @@ def test_subsidy_return_fee_preserves_bank_amount_and_settles_only_within_thresh
     ('HC115003', '115000004', False),
     ('HC115003 HC115004', '115000003', False),
     ('合成月嫂甲 HC115003', '115000003', False),
+    ('合成客戶甲 GB,轉入0000000000000003', '115000003', True),
+    ('ＨＣ１１５００３合成客戶甲', '115000003', True),
+    ('HC115003合成客戶乙', '115000003', False),
+    ('合成客戶乙 GB,轉入0000000000000003', '115000003', False),
+    ('合成同名客戶 GB,轉入0000000000000003', '115000003', False),
     ('無識別資料', '115000003', False),
 ])
 def test_taishin_subsidy_revalidates_memo_case_and_name_priority_without_account(memo, case_no, eligible):
@@ -68,6 +73,16 @@ def test_taishin_subsidy_revalidates_memo_case_and_name_priority_without_account
         def execute(self, statement, params=()):
             if 'FROM staff WHERE' in statement:
                 self.rows = [{'name': '合成月嫂甲'}]
+            elif 'FROM clients WHERE' in statement:
+                self.rows = [{'id': client_id, 'name': name} for client_id, name in (
+                    (7, '合成客戶甲'), (8, '合成客戶乙'), (9, '合成同名客戶'), (10, '合成同名客戶'),
+                )]
+            elif 'FROM orders WHERE client_id' in statement:
+                self.rows = [{'case_no': '115000003'}] if params == (7,) else [
+                    {'case_no': '115000004'}, {'case_no': '115000005'},
+                ]
+            elif 'SELECT client_id FROM orders' in statement:
+                self.rows = [{'client_id': 7}]
             elif 'FROM client_legacy_virtual_accounts' in statement:
                 self.rows = [{'case_no': '115000003'}]
             else:

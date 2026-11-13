@@ -242,10 +242,11 @@ def test_taishin_raw_memo_owner_preview_apply_and_replay_without_accounts(monkey
         def _prepare_subsidy_split(self,cursor,bank_rows,obligation_rows,obligations,lock):
             # This owner identity/fee test supplies an already qualified scheme;
             # the real scheme/money preflight is exercised by the MySQL tests.
+            from domains.payroll.installments import PayrollInstallment
             from subsystems.staff_payables.payout_reconciliation import StaffSubsidySplit
             amount = sum(row['amount_due_ntd'] for row in obligation_rows)
             return StaffSubsidySplit('115000003',obligation_rows[0]['obligation_identity'],1,True,
-                amount,amount,0,amount,False,())
+                amount,amount,0,amount,False,(PayrollInstallment('subsidy', amount, date(2026, 10, 15)),))
         def save_subsidy_split(self,split):
             assert split.plan_already_split and not split.establish_installments
         def find_receipt(self,key):return self.receipts.get(key.value)

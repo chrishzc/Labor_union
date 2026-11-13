@@ -655,10 +655,14 @@ def _client_receipt_target_query(client_id, case_no, amount_ntd):
 
 
 def _resolve_client_subsidy_return(connection, candidate):
-    from domains.finance_import.transaction_classifier import TAISHIN_CASE_MEMO_REASON
+    from domains.finance_import.transaction_classifier import (
+        TAISHIN_CASE_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_NAME_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON,
+    )
 
     client_id = _single_prefixed_identity(candidate, "client:")
-    memo_identified = TAISHIN_CLIENT_SUBSIDY_MEMO_REASON in candidate.evidence
+    memo_identified = any(reason in candidate.evidence for reason in (
+        TAISHIN_CLIENT_SUBSIDY_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_NAME_MEMO_REASON, TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON,
+    ))
     if not memo_identified and (client_id is None or _VERIFIED_OUTGOING_NAME_EVIDENCE.isdisjoint(candidate.evidence)):
         return candidate
     memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(
@@ -676,7 +680,7 @@ def _resolve_client_subsidy_return(connection, candidate):
             return replace(pending, pending_reason='bank_transaction_date_missing')
         if source.get('currency') is not None and str(source['currency']).upper() not in {'TWD','NTD'}:
             return replace(pending, pending_reason='bank_currency_not_twd')
-    if (memo_identified or memo_scoped) and case_no is None:
+    if memo_scoped and case_no is None:
         return replace(pending, pending_reason='client_subsidy_memo_recipient_unconfirmed')
     if is_taishin:
         from infrastructure.mysql.client_refund_reversal_repository import _verify_taishin_subsidy_cases
@@ -686,9 +690,15 @@ def _resolve_client_subsidy_return(connection, candidate):
             try:
                 if memo_source is None:
                     raise ValueError('bank_fact_not_eligible')
-                _verify_taishin_subsidy_cases(cursor, ({**memo_source, 'effective_classification_type':'client_subsidy_return'},), expected_case_no=case_no)
+                verified, = _verify_taishin_subsidy_cases(
+                    cursor, ({**memo_source, 'transaction_date': trans_date, 'effective_classification_type':'client_subsidy_return'},),
+                    expected_case_no=case_no, require_resolved=True, connection=connection,
+                )
+                case_no = case_no or verified['taishin_memo_case_no']
             except ValueError as error:
                 return replace(pending, pending_reason=str(error))
+    elif memo_identified and case_no is None:
+        return replace(pending, pending_reason='client_subsidy_memo_recipient_unconfirmed')
     rows = _load_client_refund_targets(
         connection, client_id, case_no, subsidy_return=True
     )

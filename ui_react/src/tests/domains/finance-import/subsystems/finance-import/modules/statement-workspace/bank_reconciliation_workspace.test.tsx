@@ -98,6 +98,21 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     confirmedImportReceipt: null,
   };
 
+  it('opens the existing single-transaction flow for a case-scoped staff subsidy', async () => {
+    const onPreviewBankBatch = vi.fn();
+    const row = { ...taishin, direction: 'outgoing' as const, classification_type: 'staff_payout',
+      staff_subsidy_batch_identity: 'finance-import-batch:9',
+      recorded_pending_reason: 'outgoing_staff_payout_month_no_match',
+      reconciliation_target: { case_no: '115000001', obligation_identities: ['staff:payment'], staff_id: 19 } };
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row], pending_count: 1, next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} onPreviewBankBatch={onPreviewBankBatch} />);
+    fireEvent.click(await screen.findByRole('button', { name: '單筆人工核對' }));
+    expect(onReconcile).toHaveBeenCalledWith(row);
+    expect(onPreviewBankBatch).not.toHaveBeenCalled();
+  });
+
   it('reopens a pending subsidy batch and sends the explicitly selected case for preview', async () => {
     const onPreviewBankBatch = vi.fn();
     const rowIdentity = 'finance-import-row:102';
@@ -110,6 +125,11 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       onPreviewBankBatch={onPreviewBankBatch} />);
     fireEvent.click(await screen.findByRole('button', { name: '核對月嫂補助' }));
     expect(onPreviewBankBatch).toHaveBeenCalledWith(batchIdentity);
+    fireEvent.click(screen.getByRole('button', { name: `查看交易 ${rowIdentity}` }));
+    const detail = screen.getByRole('dialog', { name: '待核對交易明細' });
+    fireEvent.click(within(detail).getByRole('button', { name: '核對月嫂補助' }));
+    expect(onPreviewBankBatch).toHaveBeenCalledTimes(2);
+    expect(onPreviewBankBatch).toHaveBeenLastCalledWith(batchIdentity);
     rerender(<FinanceBankReconciliationWorkspace {...defaultProps} onPreviewBankBatch={onPreviewBankBatch}
       batchPreview={{ kind: 'ready', data: {
         batch_identity: batchIdentity, batch_version: 0, source_content_digest: 'a'.repeat(64),

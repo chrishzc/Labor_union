@@ -30,7 +30,8 @@ def connection(monkeypatch):
     c.close()
 
 
-def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10), staff=None):
+def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, actual_end=date(2026, 9, 10), staff=None,
+         client_name='Synthetic Subsidy Client'):
     name = '合成月嫂' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
     with c.cursor() as q:
         while True:
@@ -39,7 +40,7 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
             if q.fetchone() is None:
                 break
         status = ('歷史訂單－服務完成' if historical else '訂單完成') if completed else ('歷史訂單－服務中' if historical else '服務中')
-        q.execute("INSERT INTO clients(case_no,name,identity_status) VALUES(%s,'Synthetic Subsidy Client','一般市民')",(case,))
+        q.execute("INSERT INTO clients(case_no,name,identity_status) VALUES(%s,%s,'一般市民')",(case,client_name))
         q.execute("INSERT INTO orders(case_no,client_id,status,start_date,end_date,actual_start_date,actual_end_date,service_days,service_hours_per_day,floor_fee) "
                   "VALUES(%s,%s,%s,'2026-09-01','2026-09-10','2026-09-01',%s,10,10,0)",(case,q.lastrowid,status,actual_end))
         q.execute('INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES(%s,0)',(case,))
@@ -73,21 +74,30 @@ def seed(c, historical, scheme, *, paid=True, subsidy=12000, completed=True, act
 
 
 def bank_source(c, tmp_path, case, name, scheme, *, cash=11970, bare_case=False, transaction_date=date(2026,11,15), memo_override=None):
-    from api.dependencies.finance_import import get_finance_import_ingestion_service
     from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     memo = name+'補助款' if scheme=='split' else 'HC'+build_client_virtual_account(case)[-6:]+'雇主補助款'
     if bare_case:
         memo = 'HC'+build_client_virtual_account(case)[-6:]
     if memo_override is not None:
         memo = memo_override
+    result = bank_workbook(c, tmp_path, [(transaction_date, cash, memo)])
+    assert result.canonical_created_count == 1
+    return result.batch_identity
+
+
+def bank_workbook(c, tmp_path, transactions):
+    from api.dependencies.finance_import import get_finance_import_ingestion_service
+
     path=tmp_path/(uuid4().hex+'.xlsx')
-    pd.DataFrame([['說明'],['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註'],
-        ['0001',transaction_date.strftime('%Y/%m/%d'),'09:00:00',transaction_date.strftime('%Y/%m/%d'),'轉出',cash,'',90000,memo]]).to_excel(path,index=False,header=False)
+    rows = [['說明'], ['序號','交易日期','交易時間','帳務日期','摘要','支出金額','存入金額','帳戶餘額','備註']]
+    for index, (transaction_date, cash, memo) in enumerate(transactions, start=1):
+        date_text = transaction_date.strftime('%Y/%m/%d') if transaction_date else ''
+        rows.append([f'{index:04d}', date_text, '09:00:00', date_text, '轉出', cash, '', 90000, memo])
+    pd.DataFrame(rows).to_excel(path, index=False, header=False)
     ingest = get_finance_import_ingestion_service()
     result = ingest(str(path), IdempotencyKey('ingest:' + uuid4().hex), ActorContext('synthetic'))
-    assert result.canonical_created_count==1
     c.rollback()  # Refresh the read-only pre-ingest REPEATABLE READ snapshot.
-    return result.batch_identity
+    return result
 
 
 def snapshot(c, case):
@@ -99,10 +109,243 @@ def snapshot(c, case):
     return result
 
 
-@pytest.mark.parametrize('same_month', [False, True])
-def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path, same_month):
-    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+@pytest.mark.parametrize('scenario', ['unique_month', 'same_month', 'no_month', 'suffix', 'wrong_suffix', 'missing_date', 'rematch'])
+def test_shared_client_name_refund_uses_the_unique_eligible_case(connection, tmp_path, scenario):
+    from contextlib import closing
+    from api.dependencies.finance_import import get_finance_import_query_service
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest, PendingReconciliationRequest
+
+    name = '合成同名客戶' + uuid4().hex[:8].translate(str.maketrans('0123456789', 'qrstuvwxyz'))
+    first, _, _ = seed(connection, False, 'advance', client_name=name)
+    second, _, _ = seed(connection, True, 'advance', client_name=name, subsidy=8000,
+                       actual_end=date(2026, 9 if scenario in {'same_month', 'suffix'} else 10, 20))
+    date_on = date(2026, 10 if scenario == 'no_month' else 11, 15)
+    memo = name + ' GB,轉入0000000000000003'
+    if scenario in {'suffix', 'wrong_suffix'}:
+        suffix_case = first
+        if scenario == 'wrong_suffix':
+            suffix_case, _, _ = seed(connection, False, 'advance')
+        memo = name + ' HC' + build_client_virtual_account(suffix_case)[-6:]
+    receipt = bank_workbook(connection, tmp_path, [(None if scenario == 'missing_date' else date_on, 11970, memo)])
+    if scenario == 'missing_date':
+        assert receipt.canonical_created_count == 0 and receipt.source_warning_count == 1
+        return
+    assert receipt.canonical_created_count == 1
+    before = {case: snapshot(connection, case) for case in (first, second)}
+    app = application(connection)
+    correlation = CorrelationId('synthetic-shared-client-name')
+    plan = app.preview_batch(receipt.batch_identity, correlation)
+    row, = plan.rows
+    reason = {
+        'same_month': 'client_subsidy_multiple_same_month_cases',
+        'no_month': 'outgoing_client_refund_month_no_match',
+        'wrong_suffix': 'client_subsidy_memo_recipient_unconfirmed',
+    }.get(scenario)
+    with closing(get_finance_import_query_service()) as query:
+        listed, = next(query).bank_transactions(bank='taishin', direction='outgoing', status='pending',
+            start=None, end=None, search='', limit=1, before_row_id=None,
+            row_id=int(row.row_identity.rsplit(':', 1)[-1]))['items']
+    if reason:
+        assert not plan.dispatchable_rows and row.pending_reason == reason
+        assert listed['cases'] == [] and listed['reconciliation_target'] is None
+    else:
+        assert plan.dispatchable_rows == (row,) and row.subsidy_preflight.case_no == first
+        assert listed['cases'] == [first]
+    assert {case: snapshot(connection, case) for case in (first, second)} == before
+
+    request = FinanceImportApplyRequest(receipt.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+        IdempotencyKey('shared-client:' + uuid4().hex), ActorContext('synthetic'), '', correlation)
+    if scenario == 'rematch':
+        applied = app.reconcile_pending(PendingReconciliationRequest(request.idempotency_key, request.actor, correlation))
+        assert applied.reconciled_count >= 1
+        assert snapshot(connection, second) == before[second]
+        assert snapshot(connection, first)['client_ledger_entries'] == before[first]['client_ledger_entries'] + 1
+        return
+    applied = app.apply_batch(request)
+    assert applied.reconciled_count == (0 if reason else 1)
+    assert snapshot(connection, second) == before[second]
+    if reason:
+        assert snapshot(connection, first) == before[first]
+    else:
+        assert snapshot(connection, first)['client_ledger_entries'] == before[first]['client_ledger_entries'] + 1
+        assert app.apply_batch(request) == applied
+
+
+def test_mixed_statement_continues_with_eligible_rows_and_corrected_workbook(connection, tmp_path):
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    good, _, _ = seed(connection, True, 'advance')
+    conflict, staff_name, _ = seed(connection, False, 'split', completed=False)
+    wrong_month, _, _ = seed(connection, True, 'advance')
+    short_paid, _, _ = seed(connection, False, 'advance')
+    no_advance, _, _ = seed(connection, False, 'advance', paid=False)
+
+    def memo(case, suffix='雇主補助款'):
+        return 'HC' + build_client_virtual_account(case)[-6:] + suffix
+
+    november = date(2026, 11, 15)
+    good_row = (november, 11900, memo(good))
+    imported = bank_workbook(connection, tmp_path, [
+        good_row,
+        (november, 12000, memo(conflict)),
+        (november, 12000, memo(conflict, staff_name + '補助款')),
+        (date(2026, 12, 15), 12000, memo(wrong_month)),
+        (november, 11899, memo(short_paid)),
+        (november, 12000, memo(no_advance)),
+        (november, 12000, '無法辨識的合成備註'),
+    ])
+    assert imported.canonical_created_count == 6
+    cases = (good, conflict, wrong_month, short_paid, no_advance)
+    before = {case: snapshot(connection, case) for case in cases}
+    app = application(connection)
+    correlation = CorrelationId('synthetic-mixed-statement')
+    plan = app.preview_batch(imported.batch_identity, correlation)
+    assert {case: snapshot(connection, case) for case in cases} == before
+    pending = {}
+    for row in plan.rows:
+        if row.pending_reason:
+            pending.setdefault(row.subsidy_preflight.case_no, []).append(row.pending_reason)
+    assert pending[conflict] == ['subsidy_confirmation_plan_conflict'] * 2
+    assert pending[wrong_month] == ['outgoing_client_refund_month_no_match']
+    assert pending[short_paid] == ['outgoing_client_refund_amount_mismatch']
+    assert pending[no_advance] == ['客戶實際墊款依據不足，保留既有款項並待確認。']
+    assert [row.subsidy_preflight.case_no for row in plan.dispatchable_rows] == [good]
+
+    request = FinanceImportApplyRequest(imported.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+        IdempotencyKey('mixed:' + uuid4().hex), ActorContext('synthetic'), '', correlation)
+    receipt = app.apply_batch(request)
+    assert receipt.reconciled_count == 1
+    bank_query = FinanceImportQueryService(connection)
+    for row in plan.rows:
+        if row.pending_reason:
+            saved, = bank_query.bank_transactions(bank='taishin', direction='outgoing', status='pending',
+                start=None, end=None, search='', limit=1, before_row_id=None,
+                row_id=int(row.row_identity.rsplit(':', 1)[-1]))['items']
+            assert saved['recorded_pending_reason'] == row.pending_reason
+    assert all(snapshot(connection, case) == before[case] for case in cases if case != good)
+    assert app.apply_batch(request) == receipt
+
+    corrected = bank_workbook(connection, tmp_path, [
+        good_row, (november, 12000, memo(wrong_month)), (november, 11900, memo(short_paid)),
+    ])
+    assert (corrected.canonical_created_count, corrected.duplicate_occurrence_count) == (2, 1)
+    plan = app.preview_batch(corrected.batch_identity, correlation)
+    assert {row.subsidy_preflight.case_no for row in plan.dispatchable_rows} == {wrong_month, short_paid}
+    receipt = app.apply_batch(FinanceImportApplyRequest(corrected.batch_identity, ExpectedVersion(plan.batch_version),
+        plan.fingerprint, IdempotencyKey('corrected:' + uuid4().hex), ActorContext('synthetic'), '', correlation))
+    assert receipt.reconciled_count == 2
+
+
+def test_mixed_shared_name_statement_respects_order_and_refund_state(connection, tmp_path):
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+
+    base = '合成退款' + uuid4().hex[:8].translate(str.maketrans('0123456789', 'qrstuvwxyz'))
+    workspace = build_accounting_workspace(connection)
+    app = application(connection)
+    correlation = CorrelationId('synthetic-shared-name-status-matrix')
+    november = date(2026, 11, 15)
+    cases = []
+    targets = set()
+    transactions = []
+    for suffix in ('進行', '未墊', '已退', '皆未墊'):
+        name = base + suffix
+        eligible, _, _ = seed(connection, False, 'advance', client_name=name, paid=suffix != '皆未墊')
+        other, _, _ = seed(connection, True, 'advance', client_name=name, completed=suffix != '進行',
+                           paid=suffix not in {'未墊', '皆未墊'})
+        cases.extend((eligible, other))
+        if suffix != '皆未墊':
+            targets.add(eligible)
+        if suffix == '已退':
+            preview = workspace.preview_subsidy_plan(other, 'advance', 0)
+            workspace.save_subsidy_plan(other, 'advance', 0, 'settled-fixture:' + uuid4().hex, 'synthetic', preview.fingerprint.value)
+            connection.commit()
+            original = bank_source(connection, tmp_path, other, name, 'advance')
+            plan = app.preview_batch(original, correlation)
+            assert app.apply_batch(FinanceImportApplyRequest(original, ExpectedVersion(plan.batch_version), plan.fingerprint,
+                IdempotencyKey('settled-fixture:' + uuid4().hex), ActorContext('synthetic'), '', correlation)).reconciled_count == 1
+        transactions.append((november, 11970, name + ' GB,轉入0000000000000003'))
+
+    before = {case: snapshot(connection, case) for case in cases}
+    imported = bank_workbook(connection, tmp_path, transactions)
+    assert imported.canonical_created_count == 4
+    plan = app.preview_batch(imported.batch_identity, correlation)
+    assert {row.subsidy_preflight.case_no for row in plan.dispatchable_rows} == targets
+    assert [row.pending_reason for row in plan.rows if row.pending_reason] == ['outgoing_client_refund_month_no_match']
+    assert {case: snapshot(connection, case) for case in cases} == before
+    request = FinanceImportApplyRequest(imported.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+        IdempotencyKey('status-matrix:' + uuid4().hex), ActorContext('synthetic'), '', correlation)
+    receipt = app.apply_batch(request)
+    assert receipt.reconciled_count == 3
+    for case in cases:
+        after = snapshot(connection, case)
+        if case in targets:
+            assert after['client_ledger_entries'] == before[case]['client_ledger_entries'] + 1
+        else:
+            assert after == before[case]
+    assert app.apply_batch(request) == receipt
+
+
+def test_shared_name_with_suffix_cannot_manually_reconcile_another_month(connection, tmp_path):
+    from contextlib import closing
+    from api.dependencies.finance_import import get_finance_import_query_service
+    from domains.client_finance.client_refund_reversal import ClientFinanceCorrectionType, ClientRefundPurpose
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from infrastructure.mysql.client_refund_reversal_repository import MySqlClientRefundReversalRepository
+    from infrastructure.mysql.finance_import_owning_domain_composite import BorrowedTransactionUnitOfWork
+    from subsystems.client_finance.client_refund_reversal_workflow import (
+        ClientRefundReversalError, ClientRefundReversalSelection, ClientRefundReversalWorkflow,
+    )
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    name = '合成跨月' + uuid4().hex[:8].translate(str.maketrans('0123456789', 'qrstuvwxyz'))
+    first, _, _ = seed(connection, False, 'advance', client_name=name)
+    second, _, _ = seed(connection, True, 'advance', client_name=name, actual_end=date(2026, 10, 20))
+    workspace = build_accounting_workspace(connection)
+    payable = workspace.preview_subsidy_plan(first, 'advance', 0)
+    workspace.save_subsidy_plan(first, 'advance', 0, 'wrong-month-fixture:' + uuid4().hex, 'synthetic', payable.fingerprint.value)
+    connection.commit()
+    memo = name + ' HC' + build_client_virtual_account(first)[-6:]
+    original = bank_workbook(connection, tmp_path, [(date(2026, 12, 15), 11970, memo)])
+    assert original.canonical_created_count == 1
+    before = {case: snapshot(connection, case) for case in (first, second)}
+    correlation = CorrelationId('shared-name-wrong-month')
+    plan = application(connection).preview_batch(original.batch_identity, correlation)
+    row, = plan.rows
+    assert not plan.dispatchable_rows and row.pending_reason == 'outgoing_client_refund_month_no_match'
+    row_id = row.row_identity.rsplit(':', 1)[-1]
+    selection = ClientRefundReversalSelection(first, ClientFinanceCorrectionType.REFUND, ClientRefundPurpose.SUBSIDY_RETURN,
+        bank_fact_identities=(row_id,), obligation_identities=(payable.refund_plan.obligation_identity,))
+    refund_workflow = ClientRefundReversalWorkflow(MySqlClientRefundReversalRepository(connection), BorrowedTransactionUnitOfWork)
+    with pytest.raises(ClientRefundReversalError) as error:
+        refund_workflow.preview(selection, correlation)
+    assert error.value.error.code == 'outgoing_client_refund_month_no_match'
+    with closing(get_finance_import_query_service()) as query:
+        listed, = next(query).bank_transactions(bank='taishin', direction='outgoing', status='pending',
+            start=None, end=None, search='', limit=1, before_row_id=None, row_id=int(row_id))['items']
+    assert listed['cases'] == [first] and listed['reconciliation_target'] is None
+    assert {case: snapshot(connection, case) for case in (first, second)} == before
+
+    corrected = bank_workbook(connection, tmp_path, [(date(2026, 11, 15), 11970, memo)])
+    app = application(connection)
+    fixed_plan = app.preview_batch(corrected.batch_identity, correlation)
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    receipt = app.apply_batch(FinanceImportApplyRequest(corrected.batch_identity, ExpectedVersion(fixed_plan.batch_version),
+        fixed_plan.fingerprint, IdempotencyKey('corrected-month:' + uuid4().hex), ActorContext('synthetic'), '', correlation))
+    assert receipt.reconciled_count == 1
+    assert snapshot(connection, first)['client_ledger_entries'] == before[first]['client_ledger_entries'] + 1
+    assert snapshot(connection, second) == before[second]
+
+
+@pytest.mark.parametrize('other_status', ['different_month', 'same_month', 'in_service', 'paid', 'rematch'])
+def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path, other_status):
+    from dataclasses import replace
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest, PendingReconciliationRequest
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
 
@@ -110,37 +353,125 @@ def test_staff_subsidy_case_match_with_multiple_assignments(connection, tmp_path
     with connection.cursor() as cursor:
         cursor.execute('SELECT staff_id FROM orders WHERE case_no=%s', (case,))
         staff = cursor.fetchone()['staff_id']
-    other, _, _ = seed(connection, False, 'split', staff=staff,
-                       actual_end=date(2026, 9 if same_month else 10, 20), subsidy=8000, paid=False)
+    same_month = other_status == 'same_month'
+    other, _, _ = seed(connection, True, 'split', staff=staff, completed=other_status != 'in_service',
+                       actual_end=date(2026, 10 if other_status in {'different_month', 'rematch'} else 9, 20), subsidy=8000, paid=False)
+    app = application(connection)
+    correlation = CorrelationId('staff-subsidy-candidates')
+    if other_status == 'paid':
+        paid_batch = bank_source(connection, tmp_path, other, name, 'split', cash=8000,
+            memo_override=name + ' HC' + build_client_virtual_account(other)[-6:])
+        paid_plan = app.preview_batch(paid_batch, correlation)
+        assert app.apply_batch(FinanceImportApplyRequest(paid_batch, ExpectedVersion(paid_plan.batch_version),
+            paid_plan.fingerprint, IdempotencyKey('paid-staff:' + uuid4().hex), ActorContext('synthetic'), '', correlation)).reconciled_count == 1
     before = build_accounting_workspace(connection).query(case)
+    other_before = build_accounting_workspace(connection).query(other)
     assert before.scheme == 'waiting'
     assert before.subsidy_ntd == 12000 and not before.subsidy_payments
     batch = bank_source(connection, tmp_path, case, name, 'split',
                         memo_override=name + ' 　GB,轉入' + '0' * 15 + '3')
-    app = application(connection)
-    correlation = CorrelationId('staff-subsidy-candidates')
     plan = app.preview_batch(batch, correlation)
     row = plan.rows[0]
+    from subsystems.finance_import.query import FinanceImportQueryService
+    bank_row, = FinanceImportQueryService(connection).bank_transactions(
+        bank='taishin', direction='outgoing', status='pending', start=None, end=None,
+        search='', limit=1, before_row_id=None, row_id=int(row.row_identity.rsplit(':', 1)[-1]),
+    )['items']
+    assert bank_row['staff_subsidy_batch_identity'] == batch
     assert {item.case_no for item in row.staff_subsidy_cases} == ({case, other} if same_month else {case})
     selections = ()
     if same_month:
         assert row.pending_reason == 'staff_subsidy_multiple_same_month_cases'
         assert not plan.dispatchable_rows
         assert {item.payable_amount_ntd for item in row.staff_subsidy_cases} == {8000, 12000}
+        app.reconcile_pending(PendingReconciliationRequest(IdempotencyKey('rematch-staff:' + uuid4().hex),
+            ActorContext('synthetic'), correlation))
+        assert app.preview_batch(batch, correlation).rows[0].pending_reason == 'staff_subsidy_multiple_same_month_cases'
         invalid = app.preview_batch(batch, correlation, ((row.row_identity, 'invalid-case'),))
         assert invalid.rows[0].pending_reason == 'staff_subsidy_case_selection_invalid'
         selections = ((row.row_identity, case),)
         plan = app.preview_batch(batch, correlation, selections)
     assert len(plan.dispatchable_rows) == 1, [item.pending_reason for item in plan.rows]
     assert plan.dispatchable_rows[0].subsidy_preflight.case_no == case
-    receipt = app.apply_batch(FinanceImportApplyRequest(
-        batch, ExpectedVersion(plan.batch_version), plan.fingerprint,
-        IdempotencyKey('apply:' + uuid4().hex), ActorContext('synthetic'), '', correlation, selections,
-    ))
-    assert receipt.reconciled_count == 1
+    if other_status == 'rematch':
+        receipt = app.reconcile_pending(PendingReconciliationRequest(IdempotencyKey('unique-staff-rematch:' + uuid4().hex),
+            ActorContext('synthetic'), correlation))
+        assert receipt.reconciled_count >= 1
+        assert app.preview_batch(batch, correlation).rows[0].disposition.value == 'existing'
+    else:
+        receipt = app.apply_batch(FinanceImportApplyRequest(
+            batch, ExpectedVersion(plan.batch_version), plan.fingerprint,
+            IdempotencyKey('apply:' + uuid4().hex), ActorContext('synthetic'), '', correlation, selections,
+        ))
+        assert receipt.reconciled_count == 1
     state = MySqlAccountingWorkspaceState(connection)
     assert state.subsidy_plan(case).selected_scheme == 'split'
-    assert state.subsidy_plan(other).selected_scheme is None
+    other_after = build_accounting_workspace(connection).query(other)
+    assert other_after.subsidy_plan == other_before.subsidy_plan
+    assert tuple(replace(item, version='') for item in other_after.staff_items) == tuple(
+        replace(item, version='') for item in other_before.staff_items)
+
+
+@pytest.mark.parametrize('existing_installment', [False, True])
+def test_staff_subsidy_suffix_with_wrong_month_requires_manual_reconciliation(connection, tmp_path, existing_installment):
+    from dataclasses import replace
+    from api.dependencies.staff_payout import build_staff_payout_application
+    from domains.staff_payables.reconciliation import StaffPayoutEventType
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+    from subsystems.finance_import.import_workflow import PendingReconciliationRequest
+    from subsystems.finance_import.query import FinanceImportQueryService
+    from subsystems.staff_payables.payout_reconciliation import (
+        StaffPayoutApplyRequest, StaffPayoutReconciliationError, StaffPayoutSelection,
+    )
+
+    case, name, identity = seed(connection, False, 'split')
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT staff_id FROM orders WHERE case_no=%s', (case,))
+        staff = cursor.fetchone()['staff_id']
+    other, _, other_identity = seed(connection, True, 'split', staff=staff, actual_end=date(2026, 10, 20))
+    workspace = build_accounting_workspace(connection)
+    if existing_installment:
+        preview = workspace.preview_subsidy_plan(case, 'split', 0)
+        workspace.save_subsidy_plan(case, 'split', 0, 'split-fixture:' + uuid4().hex, 'synthetic', preview.fingerprint.value)
+        connection.commit()
+    memo = name + ' HC' + build_client_virtual_account(case)[-6:]
+    batch = bank_source(connection, tmp_path, case, name, 'split', transaction_date=date(2026, 12, 15), memo_override=memo)
+    before = {case_no: workspace.query(case_no) for case_no in (case, other)}
+    app = application(connection)
+    correlation = CorrelationId('staff-subsidy-wrong-month')
+    plan = app.preview_batch(batch, correlation)
+    row, = plan.rows
+    assert not plan.dispatchable_rows and row.pending_reason == 'outgoing_staff_payout_month_no_match'
+    app.reconcile_pending(PendingReconciliationRequest(IdempotencyKey('rematch-wrong-month:' + uuid4().hex),
+        ActorContext('synthetic'), correlation))
+    assert app.preview_batch(batch, correlation).rows[0].pending_reason == 'outgoing_staff_payout_month_no_match'
+    row_id = row.row_identity.rsplit(':', 1)[-1]
+    listed, = FinanceImportQueryService(connection).bank_transactions(
+        bank='taishin', direction='outgoing', status='pending', start=None, end=None,
+        search='', limit=1, before_row_id=None, row_id=int(row_id),
+    )['items']
+    assert listed['reconciliation_target']['case_no'] == case
+    assert listed['reconciliation_target']['obligation_identities'] == [identity]
+    selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (row_id,), (identity,))
+    workflow = build_staff_payout_application(connection)
+    with pytest.raises(StaffPayoutReconciliationError) as error:
+        workflow.preview(replace(selection, obligation_identities=(other_identity,)), correlation)
+    assert error.value.error.code == 'staff_memo_case_mismatch'
+    checked = workflow.preview(selection, correlation)
+    for case_no in (case, other):
+        assert workspace.query(case_no).staff_items == before[case_no].staff_items
+
+    request = StaffPayoutApplyRequest(selection, ExpectedVersion(checked.staff_payables_version),
+        ExpectedVersion(checked.bank_facts_version), checked.fingerprint,
+        IdempotencyKey('staff-manual-month:' + uuid4().hex), ActorContext('synthetic'), '人工確認跨月撥款', correlation)
+    receipt = workflow.apply(request)
+    assert workflow.apply(request) == receipt
+    payment, = [item for item in workspace.query(case).staff_items if item.identity == identity]
+    assert payment.actual_ntd == 12000
+    assert app.preview_batch(batch, correlation).rows[0].disposition.value == 'existing'
+    assert tuple(replace(item, version='') for item in workspace.query(other).staff_items) == tuple(
+        replace(item, version='') for item in before[other].staff_items)
 
 
 @pytest.mark.parametrize(('scheme', 'bare_case'), [('split', False), ('advance', False), ('advance', True)])
@@ -189,15 +520,17 @@ def test_existing_six_digit_subsidy_memos_still_ingest(connection, tmp_path, suf
 
 
 @pytest.mark.parametrize('historical',[False,True])
-@pytest.mark.parametrize('scheme',['split','advance'])
-def test_bank_preview_then_apply_confirms_builds_and_settles_once(connection,tmp_path,historical,scheme):
+@pytest.mark.parametrize(('scheme', 'customer_name_memo'), [('split', False), ('advance', False), ('advance', True)])
+def test_bank_preview_then_apply_confirms_builds_and_settles_once(connection,tmp_path,historical,scheme,customer_name_memo):
     from api.dependencies.finance_import import build_finance_import_application
     from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace, MySqlAccountingWorkspaceState
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
-    case,name,identity=seed(connection,historical,scheme)
+    client_name = '合成客戶' + uuid4().hex[:8].translate(str.maketrans('0123456789','qrstuvwxyz'))
+    case,name,identity=seed(connection,historical,scheme,client_name=client_name)
     case_before=build_accounting_workspace(connection).query(case)
     assert case_before.subsidy_ntd==12000 and case_before.subsidy_plan.selected_scheme is None
-    batch=bank_source(connection,tmp_path,case,name,scheme)
+    memo = client_name + ' 　GB,轉入0000000000000003' if customer_name_memo else None
+    batch=bank_source(connection,tmp_path,case,name,scheme,memo_override=memo)
     before=snapshot(connection,case)
     app=application(connection)
     plan=app.preview_batch(batch,CorrelationId('subsidy-test'))
@@ -399,12 +732,19 @@ def test_apply_failure_rolls_back_confirmation_new_payable_and_settlement(connec
     app=application(connection);before=snapshot(connection,case)
     plan=app.preview_batch(batch,CorrelationId('atomic-bank'))
     assert len(plan.dispatchable_rows)==1
-    monkeypatch.setattr(MySqlClientRefundReversalRepository,'append_allocations',lambda *_:(_ for _ in ()).throw(RuntimeError('synthetic failure after ledger')))
     request=FinanceImportApplyRequest(batch,ExpectedVersion(plan.batch_version),plan.fingerprint,
         IdempotencyKey('atomic:'+uuid4().hex),ActorContext('synthetic'),'',CorrelationId('atomic-bank'))
-    with pytest.raises(FinanceImportWorkflowError):
-        app.apply_batch(request)
+    with monkeypatch.context() as fault:
+        fault.setattr(MySqlClientRefundReversalRepository,'append_allocations',lambda *_:(_ for _ in ()).throw(RuntimeError('synthetic failure after ledger')))
+        with pytest.raises(FinanceImportWorkflowError):
+            app.apply_batch(request)
     assert snapshot(connection,case)==before
+    receipt = app.apply_batch(request)
+    assert receipt.reconciled_count == 1
+    after = snapshot(connection, case)
+    assert after['finance_case_subsidy_plan_events'] == before['finance_case_subsidy_plan_events'] + 1
+    assert after['client_ledger_entries'] == before['client_ledger_entries'] + 1
+    assert app.apply_batch(request) == receipt and snapshot(connection, case) == after
 
 
 @pytest.mark.parametrize('historical',[False,True])
