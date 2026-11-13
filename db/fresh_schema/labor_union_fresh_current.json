@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-historical-open-terms-receipts-v1",
+  "release_id": "labor-union-validation-schema-staff-availability-optional-reason-v1",
   "source_bindings": {
-    "assembly_sha256": "015fdf0db13d66fcbf3110fb28ebe397f86befd0a52a29a1183260ea86f2226f",
-    "validation_manifest_sha256": "73e302d52420df01ef7af62789c43665ad214c90468dc7e0e1ee5fcd1a7910d1",
+    "assembly_sha256": "e9c633df09d6a352f19db0c72acf58db959a50b783e492b38de398c9ed94f28c",
+    "validation_manifest_sha256": "5154e4e30c82c234d71d90db99ed4da106693468032fe3d8ba82833cbf06e37c",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "880b94a050bb28a93767b6e6db045d3aaa30ace1765002710844845a60f32f66",
+  "sql_sha256": "1b379aa21278d0f80c9024fe4a6f1042b45eba67a4c762cdff9a425130c0e07b",
   "objects": {
     "tables": 399,
     "views": 2,

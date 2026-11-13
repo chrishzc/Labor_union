@@ -1,0 +1,77 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-controlled-file-client-passbook-cover-2026-11-13-v1",
+  "descriptors": {
+    "1075_controlled_file_client_passbook_cover.sql": {
+      "tables": {},
+      "parent_columns": {
+        "controlled_file_staging_objects": {
+          "owner_type": {
+            "column_type": "enum('contract_signing','scheduling','orders','staff','clients','line_integration')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "purpose": {
+            "column_type": "enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        },
+        "controlled_file_objects": {
+          "owner_type": {
+            "column_type": "enum('contract_signing','scheduling','orders','staff','clients','line_integration')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "purpose": {
+            "column_type": "enum('unsigned_contract','final_signed_contract','service_date_confirmation','baby_log_photo','meal_photo','order_notice','staff_resume','staff_certificate','staff_health_exam','client_passbook_cover','rich_menu_background')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {
+        "controlled_file_objects.fk_controlled_file_object_supersedes": {
+          "columns": [
+            "supersedes_object_id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "supersedes_version_number"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "controlled_file_staging_objects.chk_controlled_file_staging_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='clients'),atom(purpose='client_passbook_cover')),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))",
+        "controlled_file_objects.chk_controlled_file_object_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='clients'),atom(purpose='client_passbook_cover')),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

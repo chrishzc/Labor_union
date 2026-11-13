@@ -84,6 +84,10 @@
 - **BeClass 多案配對升級**。`labor_union_2026_11_12_client_beclass_query_case_v1.json` 以一個 ALTER 替換 `beclass_records` 的唯一索引，保留既有列、主鍵與查詢索引，無種子或回填。部署與驗證須搭配支援多案配對的 API。一旦同一查詢序號已有多案紀錄，保留新索引及資料，使用相容版本向前修復。
 - **歷史未結案的條款收據升級**。`labor_union_2026_11_12_historical_open_terms_receipts_v1.json` 以 `1074_historical_open_order_terms_receipt_status.sql` 在既有狀態值尾端追加「歷史訂單－未服務」與「歷史訂單－服務中」，保留原狀態順序、收據與案件資料。新建與保留資料升級均採同一欄位契約。
 
+- **客戶存摺封面受控檔案**。 `1075_controlled_file_client_passbook_cover.sql` 將現有 `clients / client_passbook_cover` 配對納入兩張受控檔案表的發行契約。新建與保留資料升級採相同結構，保留既有檔案紀錄及版本鏈。完整符合新版欄位、檢查限制與版本外鍵的既有庫不重跑此變更，未知或不完整結構仍阻擋。
+
+- **月嫂暫停接案原因改為選填**。`labor_union_2026_11_13_staff_availability_optional_reason_v1.json`（`1076_staff_availability_optional_reason.sql`）將 `scheduling_staff_unavailability_blocks.chk_scheduling_staff_unavailability_reason` 放寬為僅檢查 `CHAR_LENGTH(TRIM(created_by)) > 0`，與既有 Domain／UI 選填備註契約一致，保留既有列與其餘約束；新建與保留資料升級採相同檢查條件。
+
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 
 - 僅限 `APP_ENV=development`（或等價 validation profile）與 `localhost` 之 `union_db` 或 `lu_test_*`；每次執行前必回讀 environment、host、database 與 credential class（目標不符 fail closed）。

@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-controlled-file-client-passbook-cover-2026-11-13-v1",
+  "release_metadata": {
+    "release_name": "Controlled file client passbook cover",
+    "application_version": "controlled-file-client-passbook-cover-v1",
+    "published_at": "2026-11-13",
+    "description": "Publish the controlled-file enum and check contracts for client passbook covers without modifying existing rows."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-historical-open-terms-receipts-2026-11-12-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1075_controlled_file_client_passbook_cover.sql",
+      "relative_path": "db/schema_parts/1075_controlled_file_client_passbook_cover.sql",
+      "sha256": "d687e59bc307d48b5fa636493d2094fce57eae2d112927f60e9b12fb33d91386",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; preserve-existing-passbook-records-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "controlled-file-client-passbook-cover-exact",
+      "phase": "post-schema",
+      "policy": "Verify both controlled-file tables, enforced owner/purpose checks, self-reference, and preservation of rows.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "controlled-file-client-passbook-cover-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "controlled-file-client-passbook-cover-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.descriptors.json",
+    "sha256": "2b05a41cdc1881009c91b84fdce970d6599a3f314f6ec8d22fb3042789bcf10b",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

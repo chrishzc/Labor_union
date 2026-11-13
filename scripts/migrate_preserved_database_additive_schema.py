@@ -384,6 +384,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_11_registry_bootstrap_reason_v1.json",
     "labor_union_2026_11_12_client_beclass_query_case_v1.json",
     "labor_union_2026_11_12_historical_open_terms_receipts_v1.json",
+    "labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.json",
+    "labor_union_2026_11_13_staff_availability_optional_reason_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2630,6 +2632,7 @@ def _metadata_state_for_artifact(
         "1062_order_reopen_reason_optional.sql": "123_order_reopen_workflow.sql",
         "1065_historical_order_reused_pairing_check.sql": "194_historical_order_adoption.sql",
         "1072_case_architecture_bootstrap_reason_optional.sql": "124_case_architecture_bootstrap.sql",
+        "1076_staff_availability_optional_reason.sql": "188_matching_preferences_and_staff_availability.sql",
     }
     if artifact in check_predecessors:
         parent = {**descriptor, "checks": {}}
@@ -2706,6 +2709,8 @@ def _metadata_state_for_artifact(
             descriptor,
             defer_missing_triggers=defer_missing_triggers,
         )
+    if artifact == "1075_controlled_file_client_passbook_cover.sql":
+        return _controlled_file_client_passbook_state(snapshot, descriptor)
     if artifact == "1008_historical_order_adoption_noop_constraint.sql":
         return _historical_order_adoption_noop_constraint_state(
             snapshot,
@@ -4026,10 +4031,25 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        if normalized.startswith(("alter table controlled_file_staging_objects ", "alter table controlled_file_objects ")):
+            for artifact in (
+                "1075_controlled_file_client_passbook_cover.sql",
+                "1005_contract_external_signing_successor.sql",
+            ):
+                path = ROOT / "db/schema_parts" / artifact
+                if normalized in {
+                    re.sub(r"\s+", " ", sql.strip()).casefold()
+                    for sql in split_sql(path.read_text(encoding="utf-8"))
+                }:
+                    return "controlled_file_schema_change"
+            raise LocalAdditiveBlocked(
+                "unpublished controlled-file ALTER", code="forbidden_sql_effect",
+            )
         if normalized.startswith((
             "alter table order_terms_apply_receipts modify column lifecycle_status ",
             "alter table case_architecture_bootstrap_events ",
             "alter table beclass_records drop index query_no,",
+            "alter table scheduling_staff_unavailability_blocks ",
         )):
             for artifact in (
                 "1070_historical_order_terms_receipt_status.sql",
@@ -4037,6 +4057,7 @@ def _local_classify_statement(statement: str) -> str:
                 "1072_case_architecture_bootstrap_reason_optional.sql",
                 "1073_client_beclass_query_case_uniqueness.sql",
                 "1074_historical_open_order_terms_receipt_status.sql",
+                "1076_staff_availability_optional_reason.sql",
             ):
                 canonical = ROOT / "db/schema_parts" / artifact
                 (sql,) = split_sql(canonical.read_text(encoding="utf-8"))
@@ -4125,27 +4146,6 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
-        controlled_parent_replacement = (
-            normalized.startswith("alter table controlled_file_staging_objects ")
-            and "modify column purpose enum(" in normalized
-            and "'unsigned_contract'" in normalized
-            and "drop check chk_controlled_file_staging_owner_purpose" in normalized
-            and "add constraint chk_controlled_file_staging_owner_purpose check" in normalized
-        ) or (
-            normalized.startswith("alter table controlled_file_objects ")
-            and "modify column purpose enum(" in normalized
-            and "'unsigned_contract'" in normalized
-            and "drop check chk_controlled_file_object_owner_purpose" in normalized
-            and "add constraint chk_controlled_file_object_owner_purpose check" in normalized
-        )
-        controlled_fk_rebuild = normalized in {
-            "alter table controlled_file_objects drop foreign key "
-            "fk_controlled_file_object_supersedes",
-        }
-        if controlled_parent_replacement:
-            return "controlled_file_purpose_widen"
-        if controlled_fk_rebuild:
-            return "controlled_file_fk_rebuild"
         if normalized in {canonical_1008, canonical_1013}:
             return "controlled_check_replacement"
         if normalized == canonical_1023:
@@ -5817,6 +5817,15 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         item.name == "1072_case_architecture_bootstrap_reason_optional.sql" for item in SCHEMA_PARTS
     ):
         path = ROOT / "db/schema_parts/124_case_architecture_bootstrap.sql"
+    if path is None and part_name == "188_matching_preferences_and_staff_availability.sql" and any(
+        item.name == "1076_staff_availability_optional_reason.sql" for item in SCHEMA_PARTS
+    ):
+        path = ROOT / "db/schema_parts/188_matching_preferences_and_staff_availability.sql"
+    if path is None and part_name in {
+        "1004_controlled_file_storage_foundation.sql",
+        "1005_contract_external_signing_successor.sql",
+    } and _passbook_release_selected():
+        path = ROOT / "db/schema_parts" / part_name
     if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
@@ -5941,6 +5950,16 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["matching_response_events"] = {
             "reason": _column_contract("varchar(500)", "YES"),
         }
+    if part_name == "1076_staff_availability_optional_reason.sql":
+        table = "scheduling_staff_unavailability_blocks"
+        check = "chk_scheduling_staff_unavailability_reason"
+        descriptor["parent_columns"][table] = {
+            "reason": _column_contract("varchar(500)", "NO"),
+            "created_by": _column_contract("varchar(100)", "NO"),
+        }
+        opening = re.search(r"ADD\s+CONSTRAINT\s+chk_scheduling_staff_unavailability_reason\s+CHECK\s*\(", sql, re.I).end() - 1
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][(table, check)] = _normalize_sql_contract(clause)
     if part_name == "1072_case_architecture_bootstrap_reason_optional.sql":
         table = "case_architecture_bootstrap_events"
         check = "chk_case_architecture_bootstrap_text"
@@ -6248,6 +6267,26 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "'訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中',"
                 "'歷史訂單－服務完成','歷史訂單－帳務完成')"
             )
+    if part_name == "1075_controlled_file_client_passbook_cover.sql":
+        for statement in split_sql(sql):
+            match = re.match(r"ALTER TABLE (\w+)\s+MODIFY COLUMN (.+)", statement, re.S)
+            if not match:
+                continue
+            table, clauses = match.groups()
+            columns = descriptor["parent_columns"][table] = {}
+            for clause in _split_top_level("MODIFY COLUMN " + clauses):
+                if clause.startswith("MODIFY COLUMN "):
+                    name, contract = _parse_column_definition(clause.removeprefix("MODIFY COLUMN "))
+                    columns[name] = {
+                        **contract, "character_set_name": "utf8mb4", "collation_name": "utf8mb4_unicode_ci",
+                    }
+                elif clause.startswith("ADD CONSTRAINT "):
+                    name, expression = clause.removeprefix("ADD CONSTRAINT ").split(" CHECK ", 1)
+                    descriptor["checks"][(table, name)] = _normalize_sql_contract(expression)
+        key = ("controlled_file_objects", "fk_controlled_file_object_supersedes")
+        descriptor["foreign_keys"][key] = _canonical_artifact_descriptor(
+            "1005_contract_external_signing_successor.sql"
+        )["foreign_keys"][key]
     if part_name == "1005_contract_external_signing_successor.sql":
         purpose_column = _column_contract(
             "enum('unsigned_contract','final_signed_contract',"
@@ -6874,6 +6913,8 @@ def _release_descriptor_metadata_state(
         "1071_pending_order_terms_receipt_status.sql",
         "1072_case_architecture_bootstrap_reason_optional.sql",
         "1074_historical_open_order_terms_receipt_status.sql",
+        "1075_controlled_file_client_passbook_cover.sql",
+        "1076_staff_availability_optional_reason.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6914,6 +6955,8 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
+    if part_name == "1075_controlled_file_client_passbook_cover.sql":
+        return _controlled_file_client_passbook_state(snapshot, canonical)
     if part_name == "1032_matching_holiday_work_agreements.sql":
         return _matching_holiday_work_agreement_owner_state(
             snapshot,
@@ -6957,6 +7000,7 @@ def _release_descriptor_metadata_state(
         "1065_historical_order_reused_pairing_check.sql",
         "1072_case_architecture_bootstrap_reason_optional.sql",
         "1073_client_beclass_query_case_uniqueness.sql",
+        "1076_staff_availability_optional_reason.sql",
     }:
         return _metadata_state_for_artifact(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
     predecessor_state = _modified_parent_predecessor_absent_state(
@@ -6998,7 +7042,7 @@ def _controlled_file_storage_foundation_state(
     defer_missing_triggers: bool,
     initial_state: str | None = None,
 ) -> str:
-    """Accept 1004 only in its exact predecessor or canonical 1005 shape."""
+    """Accept the exact foundation or a published successor shape."""
     canonical = deepcopy(descriptor)
     state = initial_state or _artifact_metadata_state(
         snapshot,
@@ -7024,12 +7068,55 @@ def _controlled_file_storage_foundation_state(
             "controlled_file_objects",
         }:
             canonical["checks"][key] = clause
-    return _artifact_metadata_state(
+    state = _artifact_metadata_state(
         snapshot,
         canonical,
         "1004_controlled_file_storage_foundation.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
+    if state != "drift" or not _passbook_release_selected():
+        return state
+    passbook = _canonical_artifact_descriptor("1075_controlled_file_client_passbook_cover.sql")
+    for table, columns in passbook["parent_columns"].items():
+        canonical["tables"][table].update(columns)
+    canonical["checks"].update(passbook["checks"])
+    return _artifact_metadata_state(
+        snapshot, canonical, "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+
+
+def _passbook_release_selected() -> bool:
+    return any(path.name == "1075_controlled_file_client_passbook_cover.sql" for path in SCHEMA_PARTS)
+
+
+def _controlled_file_client_passbook_state(
+    snapshot: Mapping[str, Any], descriptor: dict[str, Any],
+) -> str:
+    artifact = "1075_controlled_file_client_passbook_cover.sql"
+    state = _artifact_metadata_state(snapshot, descriptor, artifact)
+    if state in {"exact", "absent"}:
+        return state
+    foundation = _canonical_artifact_descriptor("1004_controlled_file_storage_foundation.sql")
+    signing = _canonical_artifact_descriptor("1005_contract_external_signing_successor.sql")
+    predecessor = deepcopy(descriptor)
+    for table, columns in predecessor["parent_columns"].items():
+        columns["owner_type"]["column_type"] = foundation["tables"][table]["owner_type"]["column_type"]
+        columns["purpose"]["column_type"] = signing["parent_columns"][table]["purpose"]["column_type"]
+    for key in predecessor["checks"]:
+        predecessor["checks"][key] = signing["checks"][key]
+    if _artifact_metadata_state(snapshot, predecessor, artifact) == "exact":
+        return "absent"
+    # An older source may still need 1005 before it can apply this release.
+    if not any(path.name == "1005_contract_external_signing_successor.sql" for path in SCHEMA_PARTS):
+        return state
+    for table, columns in predecessor["parent_columns"].items():
+        columns["purpose"]["column_type"] = foundation["tables"][table]["purpose"]["column_type"]
+    for key in predecessor["checks"]:
+        predecessor["checks"][key] = foundation["checks"][key]
+    if _artifact_metadata_state(snapshot, predecessor, artifact) == "exact":
+        return "absent"
+    return state
 
 
 def _scheduling_service_day_logs_successor_state(
@@ -7314,25 +7401,26 @@ def _contract_external_signing_successor_state(
         for column in columns
     }
     if successor_columns.intersection(present_columns):
-        state = _artifact_metadata_state(
-            snapshot,
-            descriptor,
-            "1005_contract_external_signing_successor.sql",
-            defer_missing_triggers=defer_missing_triggers,
-        )
-        if state != "drift":
-            return state
-        compatible = deepcopy(descriptor)
+        contracts = [deepcopy(descriptor)]
+        if _passbook_release_selected():
+            passbook = _canonical_artifact_descriptor("1075_controlled_file_client_passbook_cover.sql")
+            passbook_signing = deepcopy(descriptor)
+            passbook_signing["parent_columns"].update(passbook["parent_columns"])
+            passbook_signing["checks"].update(passbook["checks"])
+            contracts.append(passbook_signing)
         final_pdf = _canonical_artifact_descriptor(
             "1034_contract_external_signing_final_pdf_completion.sql"
         )
-        compatible["checks"].update(final_pdf["checks"])
-        return _artifact_metadata_state(
-            snapshot,
-            compatible,
-            "1005_contract_external_signing_successor.sql",
-            defer_missing_triggers=defer_missing_triggers,
-        )
+        for contract in contracts:
+            for checks in (contract["checks"], {**contract["checks"], **final_pdf["checks"]}):
+                state = _artifact_metadata_state(
+                    snapshot, {**contract, "checks": checks},
+                    "1005_contract_external_signing_successor.sql",
+                    defer_missing_triggers=defer_missing_triggers,
+                )
+                if state != "drift":
+                    return state
+        return "drift"
 
     predecessor_type = _normalize_column_type_contract(
         "enum('final_signed_contract','service_date_confirmation',"
@@ -8008,6 +8096,11 @@ def _allowed_later_artifact_checks(
         path.name == "1072_case_architecture_bootstrap_reason_optional.sql" for path in SCHEMA_PARTS
     ):
         successor = _canonical_artifact_descriptor("1072_case_architecture_bootstrap_reason_optional.sql")
+        return {key: (clause,) for key, clause in successor["checks"].items()}
+    if part_name == "188_matching_preferences_and_staff_availability.sql" and any(
+        path.name == "1076_staff_availability_optional_reason.sql" for path in SCHEMA_PARTS
+    ):
+        successor = _canonical_artifact_descriptor("1076_staff_availability_optional_reason.sql")
         return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "194_historical_order_adoption.sql" and any(path.name == "1065_historical_order_reused_pairing_check.sql" for path in SCHEMA_PARTS):
         successor = _canonical_artifact_descriptor("1065_historical_order_reused_pairing_check.sql")

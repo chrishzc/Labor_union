@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from scripts import migrate_preserved_database_additive_schema as migration
@@ -8,6 +10,7 @@ from scripts import migrate_preserved_database_additive_schema as migration
 ARTIFACT = "1005_contract_external_signing_successor.sql"
 ORDER_LIFECYCLE_ARTIFACT = "1013_order_lifecycle_pending_status_constraint.sql"
 HISTORICAL_ACCOUNTING_ARTIFACT = "1028_historical_service_accounting.sql"
+PASSBOOK_ARTIFACT = "1075_controlled_file_client_passbook_cover.sql"
 
 
 def _empty_snapshot() -> dict[str, list[object] | dict[str, object]]:
@@ -60,6 +63,73 @@ def test_contract_successor_accepts_exact_pre_1004_dependency_as_absent() -> Non
     assert migration.local_additive_descriptor_state(
         snapshot, descriptor, ARTIFACT
     ) == "drift"
+
+
+def test_client_passbook_descriptor_distinguishes_current_predecessor_and_mixed_schema() -> None:
+    descriptor = migration._canonical_artifact_descriptor(PASSBOOK_ARTIFACT)
+    released = migration.OWNED_OBJECTS[PASSBOOK_ARTIFACT]
+    snapshot = _empty_snapshot()
+    for table, columns in descriptor["parent_columns"].items():
+        for name, contract in columns.items():
+            snapshot["columns"].append({"table_name": table, "column_name": name, **contract})
+    for (table, name), check in descriptor["checks"].items():
+        snapshot["constraints"].append({
+            "table_name": table, "constraint_name": name,
+            "constraint_type": "CHECK", "check_clause": check, "enforced": "YES",
+        })
+    (key, foreign_key), = descriptor["foreign_keys"].items()
+    table, name = key
+    snapshot["constraints"].append({
+        "table_name": table, "constraint_name": name, "constraint_type": "FOREIGN KEY",
+    })
+    snapshot["foreign_keys"].append({
+        "table_name": table, "constraint_name": name, "update_rule": "RESTRICT", "delete_rule": "RESTRICT",
+    })
+    for column, referenced in zip(foreign_key["columns"], foreign_key["referenced_columns"], strict=True):
+        snapshot["key_columns"].append({
+            "table_name": table, "constraint_name": name, "column_name": column,
+            "referenced_table_name": table, "referenced_column_name": referenced,
+        })
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, PASSBOOK_ARTIFACT) == "exact"
+    assert migration._release_descriptor_metadata_state(snapshot, PASSBOOK_ARTIFACT, released) == "exact"
+
+    predecessor = deepcopy(snapshot)
+    foundation = migration._canonical_artifact_descriptor("1004_controlled_file_storage_foundation.sql")
+    signing = migration._canonical_artifact_descriptor(ARTIFACT)
+    for row in predecessor["columns"]:
+        column = row["column_name"]
+        table = row["table_name"]
+        source = foundation["tables"] if column == "owner_type" else signing["parent_columns"]
+        row["column_type"] = source[table][column]["column_type"]
+    for row in predecessor["constraints"]:
+        if row["constraint_type"] == "CHECK":
+            row["check_clause"] = signing["checks"][(row["table_name"], row["constraint_name"])]
+    assert migration.local_additive_descriptor_state(predecessor, descriptor, PASSBOOK_ARTIFACT) == "absent"
+
+    pre_signing = deepcopy(predecessor)
+    for row in pre_signing["columns"]:
+        if row["column_name"] == "purpose":
+            row["column_type"] = foundation["tables"][row["table_name"]]["purpose"]["column_type"]
+    for row in pre_signing["constraints"]:
+        if row["constraint_type"] == "CHECK":
+            row["check_clause"] = foundation["checks"][(row["table_name"], row["constraint_name"])]
+    assert migration.local_additive_descriptor_state(pre_signing, descriptor, PASSBOOK_ARTIFACT) == "absent"
+
+    snapshot["columns"][0] = predecessor["columns"][0]
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, PASSBOOK_ARTIFACT) == "drift"
+    predecessor["foreign_keys"][0]["delete_rule"] = "CASCADE"
+    assert migration.local_additive_descriptor_state(predecessor, descriptor, PASSBOOK_ARTIFACT) == "drift"
+
+
+def test_local_additive_runner_allows_published_passbook_alters() -> None:
+    path = migration.ROOT / "db/schema_parts" / PASSBOOK_ARTIFACT
+    statements = migration.split_sql(path.read_text(encoding="utf-8"))
+    assert len(statements) == 4
+    assert all(migration._local_classify_statement(statement) for statement in statements)
+    unrelated = statements[0].replace("MODIFY COLUMN owner_type", "MODIFY COLUMN subject_reference")
+    with pytest.raises(migration.LocalAdditiveBlocked) as caught:
+        migration._local_classify_statement(unrelated)
+    assert caught.value.code == "forbidden_sql_effect"
 
 
 def test_1013_accepts_exact_historical_accounting_check_successor() -> None:

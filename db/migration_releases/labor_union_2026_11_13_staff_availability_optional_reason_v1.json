@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-staff-availability-optional-reason-2026-11-13-v1",
+  "release_metadata": {
+    "release_name": "Staff availability optional reason",
+    "application_version": "staff-availability-optional-reason-v1",
+    "published_at": "2026-11-13",
+    "description": "Allow an empty optional reason on staff unavailability blocks while retaining required created_by."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-controlled-file-client-passbook-cover-2026-11-13-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1076_staff_availability_optional_reason.sql",
+      "relative_path": "db/schema_parts/1076_staff_availability_optional_reason.sql",
+      "sha256": "bcd741353092dda23076dce90ac926a43c5fe4cdd7c392d3332465621e51846f",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-compatible-constraint-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "staff-availability-optional-reason-exact",
+      "phase": "post-schema",
+      "policy": "Preserve every row and allow blank optional availability block reasons.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "staff-availability-optional-reason-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "staff-availability-optional-reason-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_13_staff_availability_optional_reason_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_13_staff_availability_optional_reason_v1.descriptors.json",
+    "sha256": "6dcf4924f76d525ed5afc242df067e8074a5a13cb8f2c32b3822a346525e5166",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-availability-optional-reason-2026-11-13-v1",
+  "descriptors": {
+    "1076_staff_availability_optional_reason.sql": {
+      "tables": {},
+      "parent_columns": {
+        "scheduling_staff_unavailability_blocks": {
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_by": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "scheduling_staff_unavailability_blocks.chk_scheduling_staff_unavailability_reason": "atom(char_length(trim(created_by))>0)"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}
