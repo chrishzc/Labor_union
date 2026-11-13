@@ -34,6 +34,32 @@ def _staff_guard() -> str:
 
 # name -> (SQL parameters, body, allowed execution profiles).
 PROCEDURES = {
+    "lu_nas_delete_revoked_line_binding_v1": (
+        "IN p_user VARCHAR(191), IN p_role VARCHAR(20), IN p_version BIGINT UNSIGNED, IN p_updated DATETIME(6)", """
+        DECLARE v_menu VARCHAR(32);
+        SET v_menu=CASE p_role WHEN 'customer' THEN 'customer_menu' WHEN 'staff' THEN 'staff_menu'
+          WHEN 'admin' THEN 'union_staff_menu' END;
+        IF v_menu IS NULL OR NOT EXISTS(
+          SELECT 1 FROM line_identity_role_bindings
+          WHERE line_user_id=p_user AND subject_type=p_role AND binding_status='revoked'
+            AND aggregate_version=p_version AND updated_at_utc=p_updated FOR UPDATE
+        ) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='line_identity_binding_version_conflict'; END IF;
+        DELETE job FROM line_domain_outbox job JOIN line_identity_revocation_requests r
+          ON job.aggregate_identity=CAST(r.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci
+          WHERE job.intent_type='line.identity.revocation.menu_reset' AND job.aggregate_type='line_identity_revocation'
+            AND r.line_user_id=p_user AND r.subject_type=p_role;
+        DELETE FROM line_domain_outbox
+          WHERE intent_type='line.rich_menu.bind' AND aggregate_type='line_identity' AND aggregate_identity=p_user
+            AND idempotency_identity NOT LIKE 'line-menu-command:%'
+            AND JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$.menu_definition_id'))=v_menu;
+        DELETE FROM line_identity_revocation_requests WHERE line_user_id=p_user AND subject_type=p_role;
+        DELETE FROM line_identity_role_binding_events WHERE line_user_id=p_user AND subject_type=p_role;
+        DELETE FROM line_identity_role_bindings WHERE line_user_id=p_user AND subject_type=p_role;
+        IF p_role IN ('customer','staff') THEN
+          UPDATE line_platform_users SET selected_identity_role=NULL,aggregate_version=aggregate_version+1
+            WHERE line_user_id=p_user AND selected_identity_role=p_role;
+        END IF;
+        """, ("management",)),
     "lu_nas_delete_pending_line_review_v1": (
         "IN p_id BIGINT, IN p_version BIGINT", """
         DELETE FROM line_review_requests

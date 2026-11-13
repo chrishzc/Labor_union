@@ -357,6 +357,17 @@ class MySqlLineIdentityManagementRepository:
     def delete_revoked_binding(self, line_user_id, subject_type, expected_version, expected_updated_at, menu_definition_id):
         params = (line_user_id.value, subject_type.value)
         with self._connection.cursor() as cursor:
+            if os.getenv("DEPLOYMENT_PROFILE") == "nas":
+                try:
+                    call_mutation(
+                        cursor, "lu_nas_delete_revoked_line_binding_v1",
+                        *params, expected_version.value, expected_updated_at,
+                    )
+                except MySQLError as error:
+                    if error.args[:2] == (1644, "line_identity_binding_version_conflict"):
+                        raise RuntimeError("line_identity_binding_version_conflict") from error
+                    raise
+                return
             cursor.execute(
                 "DELETE job FROM line_domain_outbox job JOIN line_identity_revocation_requests r "
                 "ON job.aggregate_identity=CAST(r.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "

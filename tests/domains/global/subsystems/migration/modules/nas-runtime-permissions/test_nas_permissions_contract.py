@@ -61,21 +61,27 @@ def test_unknown_procedure_never_reaches_database():
         call_mutation(NoSql(), "delete_arbitrary_table", "clients")
 
 
-def test_pending_line_request_deletes_are_management_only_and_version_guarded():
+def test_line_identity_deletes_are_management_only_and_version_guarded():
     from infrastructure.mysql.nas_permissions import DELETE_TABLES
 
-    tables = {"line_review_requests", "provisional_client_registrations", "provisional_registration_conflicts"}
+    tables = {
+        "line_review_requests", "provisional_client_registrations", "provisional_registration_conflicts",
+        "line_domain_outbox", "line_identity_role_bindings", "line_identity_role_binding_events",
+        "line_identity_revocation_requests",
+    }
     assert tables <= DELETE_TABLES
     for profile in ("management", "line", "access", "maintenance"):
         assert all("DELETE" not in privilege for _, privileges in _table_grants(profile, sorted(tables))
                    for privilege in privileges)
     for name, status, version in (
+        ("lu_nas_delete_revoked_line_binding_v1", "binding_status='revoked'", "aggregate_version=p_version"),
         ("lu_nas_delete_pending_line_review_v1", "review_status='pending'", "aggregate_version=p_version"),
         ("lu_nas_delete_pending_line_pairing_v1", "status='submitted'", "application_version=p_version"),
     ):
         _, body, profiles = PROCEDURES[name]
         assert profiles == ("management",)
         assert status in body and version in body
+    assert "updated_at_utc=p_updated FOR UPDATE" in PROCEDURES["lu_nas_delete_revoked_line_binding_v1"][1]
 
 
 def test_registry_delete_procedures_do_not_grant_runtime_direct_root_delete():
@@ -146,12 +152,12 @@ def test_future_tables_are_not_automatically_added_to_line_or_access_write_scope
 
 def test_permission_plan_is_read_only_and_refuses_foreign_existing_accounts():
     from unittest.mock import MagicMock
-    from infrastructure.mysql.nas_permissions import DELETE_TABLES, permission_plan
+    from infrastructure.mysql.nas_permissions import DEFINER_UPDATE_COLUMNS, DELETE_TABLES, permission_plan
     database = "lu_test_nas"
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.side_effect = [{"selected_database": database}, {"partial_revokes": 0}]
-    tables = DELETE_TABLES | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
+    tables = DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
         "staff_matching_preference_definitions", "admin_audit_log_archive"}
     results = [[{"name": table} for table in tables],
                [{"name": name} for name in ("application_payload", "application_version", "approved_by_actor", "approved_at_utc")],

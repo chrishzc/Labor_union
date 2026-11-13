@@ -24,7 +24,13 @@ DELETE_TABLES = frozenset({
     "admin_audit_logs", "knowledge_answer_requests", "knowledge_answer_receipts",
     "knowledge_answer_sources", "knowledge_jobs", "knowledge_indexes",
     "line_review_requests", "provisional_client_registrations", "provisional_registration_conflicts",
+    "line_domain_outbox", "line_identity_revocation_requests",
+    "line_identity_role_binding_events", "line_identity_role_bindings",
 })
+DEFINER_UPDATE_COLUMNS = {
+    **CASE_CYCLE_LINKS,
+    "line_platform_users": "selected_identity_role,aggregate_version",
+}
 ACCESS_TABLES = frozenset({
     "admin_users", "admin_root_account", "admin_sessions", "admin_totp_factors",
     "admin_totp_recovery_codes", "admin_login_attempts", "admin_mfa_enrollment_challenges",
@@ -175,7 +181,7 @@ def permission_plan(connection, database: str) -> dict:
         application_columns = {row["name"] for row in cursor.fetchall()}
         if not {"application_payload", "application_version", "approved_by_actor", "approved_at_utc"} <= application_columns:
             raise ValueError("NAS security requires the additive registration upgrade first")
-        missing = (DELETE_TABLES | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
+        missing = (DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
                                   "staff_matching_preference_definitions", "admin_audit_log_archive"}) - tables
         if missing:
             raise ValueError("NAS security requires the current complete business schema")
@@ -209,6 +215,7 @@ def permission_plan(connection, database: str) -> dict:
         ):
             raise ValueError("NAS security procedure drift; no changes applied")
     additive_line_procedures = {
+        "lu_nas_delete_revoked_line_binding_v1",
         "lu_nas_delete_pending_line_review_v1", "lu_nas_delete_pending_line_pairing_v1",
     }
     baseline_states = {state for name, state in states.items() if name not in additive_line_procedures}
@@ -289,12 +296,12 @@ def install_permissions(connection, database: str, passwords: dict[str, str]) ->
         # Required by MySQL SELECT ... FOR UPDATE even for read-only parent
         # facts. This grants locking, not UPDATE/DELETE on those parent tables.
         cursor.execute(f"GRANT LOCK TABLES ON {plan['locking_scope']}.* TO '{names['definer']}'@'%'")
-        for table in sorted(DELETE_TABLES | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive"}):
+        for table in sorted(DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive"}):
             privileges = ["SELECT"]
             if table in DELETE_TABLES:
                 privileges.append("DELETE")
-            if table in CASE_CYCLE_LINKS:
-                privileges.append("UPDATE (" + CASE_CYCLE_LINKS[table] + ")")
+            if table in DEFINER_UPDATE_COLUMNS:
+                privileges.append("UPDATE (" + DEFINER_UPDATE_COLUMNS[table] + ")")
             if table in {"client_legacy_virtual_accounts", "admin_audit_log_archive"}:
                 privileges.append("INSERT")
             cursor.execute(f"GRANT {','.join(privileges)} ON {schema}.{_identifier(table)} TO '{names['definer']}'@'%'")

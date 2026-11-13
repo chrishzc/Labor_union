@@ -125,7 +125,15 @@ def test_line_cannot_write_core_approve_or_read_account_secrets(engine):
         line.rollback()
 
 
-@pytest.mark.parametrize('name', sorted(PROCEDURES))
+# These operations have their own fixtures and transaction assertions below.
+LINE_IDENTITY_DELETE_PROCEDURES = {
+    'lu_nas_delete_revoked_line_binding_v1',
+    'lu_nas_delete_pending_line_review_v1',
+    'lu_nas_delete_pending_line_pairing_v1',
+}
+
+
+@pytest.mark.parametrize('name', sorted(set(PROCEDURES) - LINE_IDENTITY_DELETE_PROCEDURES))
 def test_each_procedure_executes_with_allowed_profile_and_outer_rollback(engine, name):
     """A valid mutation changes exactly its scoped rows; rollback restores them."""
     profile = PROCEDURES[name][2][0]
@@ -210,7 +218,7 @@ def seed_operation(admin, name):
     raise AssertionError(name)
 
 
-@pytest.mark.parametrize('name', sorted(set(PROCEDURES)-{'lu_nas_delete_holiday_v1'}))
+@pytest.mark.parametrize('name', sorted(set(PROCEDURES) - LINE_IDENTITY_DELETE_PROCEDURES - {'lu_nas_delete_holiday_v1'}))
 def test_stale_arguments_rejected_and_unrelated_work_stays_in_outer_transaction(engine, name):
     with connect(engine) as admin:
         args, probe, before, _ = seed_operation(admin,name)
@@ -249,6 +257,90 @@ def test_disallowed_procedures_are_rejected_before_body_execution(engine, profil
             if profile in allowed:
                 continue
             denied(runtime,f"CALL `{name}`({','.join(['NULL']*len(signature.split(',')))})",numbers=(1370,))
+
+
+def test_three_line_delete_operations_use_management_and_outer_transaction(engine, monkeypatch):
+    from domains.line.identities import LineReviewRequestId, LineUserId
+    from domains.line.identity_binding import LineBindingSubjectType
+    from infrastructure.mysql.line_identity_management_repository import MySqlLineIdentityManagementRepository
+    from infrastructure.mysql.line_identity_review_repository import MySqlLineIdentityReviewRepository
+    from shared_kernel.identities import ExpectedVersion
+
+    monkeypatch.setenv("DEPLOYMENT_PROFILE", "nas")
+    user = "U-test-" + uuid4().hex
+    stamp = datetime(2026, 1, 2, 3, 4, 5, 123456)
+    with connect(engine) as root:
+        execute(root, "INSERT INTO line_platform_users (line_user_id,selected_identity_role) VALUES (%s,'customer')", (user,))
+        execute(root, "INSERT INTO line_identity_role_bindings "
+                "(line_user_id,subject_type,binding_status,subject_reference,aggregate_version,updated_at_utc) "
+                "VALUES (%s,'customer','revoked','1',7,%s),(%s,'staff','bound',%s,7,%s)",
+                (user, stamp, user, str(int(uuid4().hex[:12], 16)), stamp))
+        execute(root, "INSERT INTO line_identity_role_binding_events "
+                "(line_user_id,subject_type,action,subject_reference,expected_version,resulting_version,actor_id,payload_fingerprint,idempotency_key,correlation_id) "
+                "VALUES (%s,'customer','revoked','1',6,7,'test',REPEAT('a',64),%s,%s)", (user, user, user))
+        publication = execute(root, "INSERT INTO line_rich_menu_publication_tasks "
+                "(menu_definition_id,configuration_revision,publication_status,definition_snapshot,idempotency_key,correlation_id,requested_by_actor_id) "
+                "VALUES ('default_menu',1,'published',JSON_OBJECT(),%s,%s,'test')", (user, user))
+        reset = execute(root, "INSERT INTO line_identity_revocation_requests "
+                "(line_user_id,subject_type,subject_reference,request_status,requested_binding_version,pending_binding_version,"
+                "completed_binding_version,canonical_default_menu_publication_id,provider_menu_id,requested_by_actor_id,"
+                "request_reason,idempotency_key,correlation_id) VALUES (%s,'customer','1','completed',5,6,7,%s,'test-menu','test','',%s,%s)",
+                (user, publication, user, user))
+        menu_jobs = (
+            ("line_identity_revocation", str(reset), "line.identity.revocation.menu_reset", "default_menu", "reset:" + user),
+            ("line_identity", user, "line.rich_menu.bind", "customer_menu", "customer:" + user),
+            ("line_identity", user, "line.rich_menu.bind", "staff_menu", "staff:" + user),
+            ("line_identity", user, "line.rich_menu.bind", "customer_menu", "line-menu-command:" + user),
+        )
+        for aggregate, identity, intent, menu, key in menu_jobs:
+            execute(root, "INSERT INTO line_domain_outbox (aggregate_type,aggregate_identity,intent_type,payload_snapshot,idempotency_identity) "
+                    "VALUES (%s,%s,%s,JSON_OBJECT('menu_definition_id',%s),%s)", (aggregate, identity, intent, menu, key))
+        review = execute(root, "INSERT INTO line_review_requests "
+                 "(review_type,line_user_id,subject_type,subject_reference,aggregate_version,request_fingerprint,evidence_snapshot) "
+                 "VALUES ('client_rebind',%s,'customer','1',2,REPEAT('b',64),JSON_OBJECT())", (user,))
+        pairing = execute(root, "INSERT INTO provisional_client_registrations "
+                  "(line_user_id,active_line_user_id,payload_fingerprint,application_version) "
+                  "VALUES (%s,%s,REPEAT('c',64),3)", (user, user))
+        execute(root, "INSERT INTO provisional_registration_conflicts "
+                "(registration_id,proposed_payload_fingerprint,proposed_payload) VALUES (%s,REPEAT('d',64),JSON_OBJECT())", (pairing,))
+        root.commit()
+
+    with connect(engine, "management") as manager:
+        identity = MySqlLineIdentityManagementRepository(manager)
+        reviews = MySqlLineIdentityReviewRepository(manager)
+
+        def remove_binding(version=7, updated=stamp, role=LineBindingSubjectType.CUSTOMER):
+            identity.delete_revoked_binding(LineUserId(user), role, ExpectedVersion(version), updated, "customer_menu")
+
+        for action in (lambda: remove_binding(6), lambda: remove_binding(updated=stamp.replace(microsecond=0)),
+                       lambda: remove_binding(role=LineBindingSubjectType.STAFF),
+                       lambda: reviews.delete_pending(LineReviewRequestId(review), ExpectedVersion(1)),
+                       lambda: identity.delete_pending_provisional_registration(pairing, ExpectedVersion(2))):
+            with pytest.raises(RuntimeError, match="conflict|stale"):
+                action()
+            manager.rollback()
+
+        def remove_all():
+            remove_binding()
+            reviews.delete_pending(LineReviewRequestId(review), ExpectedVersion(2))
+            identity.delete_pending_provisional_registration(pairing, ExpectedVersion(3))
+
+        remove_all()
+        manager.rollback()
+        assert scalar(manager, "SELECT COUNT(*) FROM line_identity_role_bindings WHERE line_user_id=%s", (user,)) == 2
+        assert scalar(manager, "SELECT COUNT(*) FROM line_review_requests WHERE id=%s", (review,)) == 1
+        assert scalar(manager, "SELECT COUNT(*) FROM provisional_registration_conflicts WHERE registration_id=%s", (pairing,)) == 1
+        remove_all()
+        manager.commit()
+        assert scalar(manager, "SELECT subject_type FROM line_identity_role_bindings WHERE line_user_id=%s", (user,)) == "staff"
+        assert scalar(manager, "SELECT selected_identity_role FROM line_platform_users WHERE line_user_id=%s", (user,)) is None
+        assert scalar(manager, "SELECT COUNT(*) FROM line_identity_role_binding_events WHERE line_user_id=%s", (user,)) == 0
+        assert scalar(manager, "SELECT COUNT(*) FROM line_identity_revocation_requests WHERE id=%s", (reset,)) == 0
+        for key, expected in zip((job[-1] for job in menu_jobs), (0, 0, 1, 1)):
+            assert scalar(manager, "SELECT COUNT(*) FROM line_domain_outbox WHERE idempotency_identity=%s", (key,)) == expected
+        assert scalar(manager, "SELECT COUNT(*) FROM line_review_requests WHERE id=%s", (review,)) == 0
+        assert scalar(manager, "SELECT COUNT(*) FROM provisional_client_registrations WHERE id=%s", (pairing,)) == 0
+        assert scalar(manager, "SELECT COUNT(*) FROM provisional_registration_conflicts WHERE registration_id=%s", (pairing,)) == 0
 
 
 def test_line_questionnaire_sql_is_denied_and_internal_approval_uses_real_profile(engine):

@@ -10,7 +10,7 @@
 ## Implementation
 - query transport: `api/routes/line_identity_management.py` — role-scoped detail／Preview／Apply 與 bounded replacement-candidates reader。
 - 個人選單修復入口為 `POST /api/v1/line/identity-bindings/{line_user_id}/menu/resync`，由身分管理 application 驗證目前有效角色並入列既有選單工作。
-- 停用綁定刪除入口為 `POST /api/v1/line/identity-bindings/{line_user_id}/delete-revoked`，由身分管理 application 驗證角色與版本，並在同一交易刪除對應綁定及其紀錄。
+- 停用綁定刪除入口為 `POST /api/v1/line/identity-bindings/{line_user_id}/delete-revoked`，由身分管理 application 驗證角色與版本，並在同一交易刪除對應綁定及其紀錄；NAS 由限域程序執行。
 - schema: `api/schemas/line_identity_management.py`
 - 待審核與待配對分別由原管理 API 驗證狀態、版本及權限後永久刪除申請或登記；NAS 透過限域刪除程序執行。
 - contract: `subsystems/line/identity_management_contracts.py`
