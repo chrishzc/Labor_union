@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
@@ -177,6 +177,33 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(names).toEqual(['A2 第二位月嫂', 'A10 正式合格月嫂', '未設定 未編號月嫂']);
     fireEvent.click(screen.getByRole('checkbox', { name: '選擇正式候選 第二位月嫂' }));
     expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
+  it('新增候選月嫂先列出區域與週間服務都符合的人選，同組依會員編號排序', async () => {
+    mocks.queryPool.mockResolvedValue({ ...candidatePool(), candidates: [] });
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [
+      { ...eligible, staff_id: 1, staff_name: '週間不符月嫂', staff_union_no: 'A1', matching_conditions: {
+        ...eligible.matching_conditions,
+        preferred_service_days: { status: 'not_matched', required_value: '週休一日', staff_values: ['週休二日'] },
+      } },
+      { ...eligible, staff_id: 2, staff_name: '區域待確認月嫂', staff_union_no: 'A2', matching_conditions: {
+        ...eligible.matching_conditions,
+        region: { status: 'pending', required_value: '新竹市', staff_values: [] },
+      } },
+      { ...eligible, staff_id: 10, staff_name: '兩項符合甲', staff_union_no: 'A10' },
+      { ...eligible, staff_id: 3, staff_name: '兩項符合乙', staff_union_no: 'A3' },
+    ] }));
+
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} presentation="workbench" />);
+    const list = await screen.findByLabelText('可詢問月嫂');
+    const buttons = within(list).getAllByRole('button', { name: /^加入候選池/ });
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
+      '加入候選池（兩項符合乙）',
+      '加入候選池（兩項符合甲）',
+      '加入候選池（週間不符月嫂）',
+      '加入候選池（區域待確認月嫂）',
+    ]);
+    for (const button of buttons) expect(button).toBeEnabled();
   });
 
   it('automatically refreshes availability warnings after pause and restore changes', async () => {

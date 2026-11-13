@@ -92,6 +92,11 @@ function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[]
   ));
 }
 
+function matchesServicePreferences({ matching_conditions }: MatchingCandidateOption): boolean {
+  return matching_conditions.region.status === 'matched'
+    && matching_conditions.preferred_service_days.status === 'matched';
+}
+
 function sameStaffIds(expected: readonly number[], actual: readonly number[]): boolean {
   if (expected.length !== actual.length) return false;
   const expectedSorted = [...expected].sort((left, right) => left - right);
@@ -164,6 +169,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   }, [availabilityRevision, queryCandidates, multiBusy, addState.status, flow]);
 
   const candidates = queryState.status === 'ready' ? formalCandidates(queryState.data) : [];
+  if (presentation === 'workbench') {
+    candidates.sort((left, right) => Number(matchesServicePreferences(right)) - Number(matchesServicePreferences(left)));
+  }
 
   const toggleCandidate = (staffId: number) => {
     setSelectedStaffIds((current) => {
