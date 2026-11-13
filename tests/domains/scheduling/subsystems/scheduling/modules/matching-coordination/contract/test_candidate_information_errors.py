@@ -7,8 +7,17 @@ from fastapi.testclient import TestClient
 from api.dependencies.admin_auth import require_line_matching_sender
 from api.exception_handlers.typed_errors import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import candidate_contact_pool as routes
+from api.schemas.candidate_contact_pool import SendCandidateInformationRequest
 from api.schemas.errors import GlobalTypedErrorResponseView
 from subsystems.access.authentication_session import AdminPrincipal
+from pydantic import ValidationError
+
+
+def test_only_resend_may_omit_the_preview_fingerprint():
+    fields = {"actor": "operator-1", "event_key": "direct-send"}
+    assert SendCandidateInformationRequest(**fields, resend=True).preview_fingerprint is None
+    with pytest.raises(ValidationError, match="required for the initial send"):
+        SendCandidateInformationRequest(**fields)
 
 
 @pytest.mark.parametrize("operation", ["preview", "send"])

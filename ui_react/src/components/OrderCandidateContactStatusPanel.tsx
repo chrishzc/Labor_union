@@ -49,13 +49,26 @@ function errorMessage(error: unknown): string {
     : '候選聯絡狀態查詢失敗';
 }
 
-function deliveryStatus(
-  delivery: CandidateContact['information']['1'] | CandidateContact['information']['2'] | undefined,
-  compact = false,
-): string {
+const deliveryTimeFormatter = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function deliveryStatus(delivery: CandidateContact['information']['package'] | undefined): string {
   if (delivery == null) return '尚無紀錄';
   const labels = { queued: '等待發送', pending: '處理中', sent: '已發送', manually_confirmed: '已人工確認', retryable_failed: '發送未完成', failed: '發送失敗', cancelled: '已取消發送' };
-  return `${labels[delivery.status]} · ${compact ? delivery.sent_at.replace('T', ' ').slice(0, 16) : delivery.sent_at}`;
+  // Delivery timestamps without an offset are stored in UTC.
+  const timestamp = /(?:Z|[+-]\d{2}:\d{2})$/.test(delivery.sent_at)
+    ? delivery.sent_at
+    : `${delivery.sent_at}Z`;
+  const date = new Date(timestamp);
+  const displayTime = Number.isNaN(date.getTime()) ? delivery.sent_at : deliveryTimeFormatter.format(date);
+  return `${labels[delivery.status]} · ${displayTime}`;
 }
 
 export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange, presentation = 'legacy', onOpenCustomerConfirmation, focusedCandidateId, visible = true }) => {
@@ -66,7 +79,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
   const [sharedInformation, setSharedInformation] = useState<{ kind?: CandidateInformationKind } | null>(null);
-  const [informationTarget, setInformationTarget] = useState<{ candidateId: number; resend: boolean } | null>(null);
+  const [informationTarget, setInformationTarget] = useState<number | null>(null);
   const [datesReady, setDatesReady] = useState<boolean | null>(null);
   const [weeklyStartDate, setWeeklyStartDate] = useState<string | null>(null);
   const [weekly, setWeekly] = useState<CaseWeeklyServicePreview | null>(null);
@@ -331,7 +344,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       if (rejected && !recoveringUnknown) {
         orderMutationFlowStore.clearCandidateInformation(command.caseNo, command.candidateId);
         if (mounted.current && activeCaseNo.current === command.caseNo) {
-          if (presentation === 'workbench') {
+          if (presentation === 'workbench' || command.resend) {
             const stale = error.code === 'candidate_information_preview_stale';
             if (stale) setPreviewMode('idle');
             setSendError({ candidateId: command.candidateId, message: stale
@@ -356,6 +369,18 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const retryInformation = (candidateId: number) => {
     const current = orderMutationFlowStore.getCandidateInformation(caseNo, candidateId);
     if (current?.status === 'outcome_unknown') void submitInformation(current.command);
+  };
+
+  const resendInformation = async (candidateId: number) => {
+    if (orderMutationFlowStore.getCandidateInformation(caseNo, candidateId)) return;
+    setSendError(null);
+    try {
+      await submitInformation(createCandidateInformationSendCommand(caseNo, candidateId, undefined, true));
+    } catch (error) {
+      if (mounted.current && activeCaseNo.current === caseNo) {
+        setSendError({ candidateId, message: errorMessage(error) });
+      }
+    }
   };
 
   const retryInformationReadback = (candidateId: number) => {
@@ -558,48 +583,57 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     return history.length > 0 && <details className="candidate-package-history">
       <summary>查看分開寄送紀錄</summary>
       <dl>{history.map(kind => <div key={kind}>
-        <dt>{CANDIDATE_INFORMATION_LABELS[kind]}</dt><dd>{deliveryStatus(candidate.information[kind], presentation === 'workbench')}</dd>
+        <dt>{CANDIDATE_INFORMATION_LABELS[kind]}</dt><dd>{deliveryStatus(candidate.information[kind])}</dd>
       </div>)}</dl>
     </details>;
   };
-  const openInformation = (candidate: CandidateContact, resend: boolean) => {
+  const openInformation = (candidate: CandidateContact) => {
     setMutationError(null);
     setSendError(null);
-    setInformationTarget({ candidateId: candidate.id, resend });
+    setInformationTarget(candidate.id);
   };
   const renderSendPreview = (candidate: CandidateContact) => {
-    const openerId = `candidate-package-${caseNo}-${candidate.id}${informationTarget?.resend ? '-resend' : ''}`;
-    const candidateSend = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id);
-    return informationTarget?.candidateId === candidate.id && <OrderCandidateInformationSendPanel
+    const openerId = `candidate-package-${caseNo}-${candidate.id}`;
+    return informationTarget === candidate.id && <OrderCandidateInformationSendPanel
       key={openerId} caseNo={caseNo} candidate={candidate} revision={informationRevision}
-      blocked={informationTarget.resend ? candidateSend !== undefined && pendingStatus(candidateSend.status) : protectedOperation}
-      datesReady={informationTarget.resend || presentation !== 'workbench' || canUseDates}
-      resend={informationTarget.resend} onSubmit={submitInformation}
+      blocked={protectedOperation} onSubmit={submitInformation}
       sendError={sendError?.candidateId === candidate.id ? sendError.message : mutationError}
-      onClose={() => { setMutationError(null); setInformationTarget(null); document.getElementById(openerId)?.focus(); }}
-      onViewDates={() => presentation === 'workbench' ? setWeeklyOpen(true) : setSharedInformation({ kind: 3 })} />;
+      onClose={() => {
+        const opener = document.getElementById(openerId);
+        if (opener?.getAttribute('aria-expanded') !== 'true') return;
+        setMutationError(null);
+        setInformationTarget(null);
+        opener.focus();
+      }}
+      onViewDates={() => setSharedInformation({ kind: 3 })} />;
+  };
+  const renderResendButton = (candidate: CandidateContact) => {
+    const pending = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id);
+    return <button type="button" className="btn-primary-action"
+      aria-label={`再次寄送（${candidate.staff_name}）`} disabled={pending !== undefined}
+      onClick={() => { void resendInformation(candidate.id); }}>
+      {pending?.status === 'applying' || pending?.status === 'observing' ? '寄送處理中…' : '再次寄送'}
+    </button>;
   };
   const renderInformation = (candidate: CandidateContact) => {
-    const expanded = informationTarget?.candidateId === candidate.id;
+    const expanded = informationTarget === candidate.id;
     const openerId = `candidate-package-${caseNo}-${candidate.id}`;
     return <>
       <div className="candidate-package-entry">
         <div>
           <strong>寄送案件資訊</strong>
           <p>訂單資訊一、訂單資訊二、每週服務說明、共用回覆卡</p>
-          {candidate.information.package && <p>{deliveryStatus(candidate.information.package, true)}</p>}
+          {candidate.information.package && <p>{deliveryStatus(candidate.information.package)}</p>}
         </div>
         {!candidate.information.package && <button id={openerId} type="button" className="btn-primary-action"
-          aria-expanded={expanded && !informationTarget?.resend}
+          aria-expanded={expanded}
           aria-label={`預覽並寄送（${candidate.staff_name}）`}
           disabled={candidate.status !== 'active' || protectedOperation}
-          onClick={() => openInformation(candidate, false)}>預覽並寄送</button>}
-        <button id={`${openerId}-resend`} type="button" className="btn-primary-action"
-          aria-expanded={expanded && informationTarget?.resend === true}
-          aria-label={`再次寄送（${candidate.staff_name}）`}
-          onClick={() => openInformation(candidate, true)}>再次寄送</button>
+          onClick={() => openInformation(candidate)}>預覽並寄送</button>}
+        {renderResendButton(candidate)}
       </div>
       {renderSendPreview(candidate)}
+      {!expanded && sendError?.candidateId === candidate.id && <p role="alert">{sendError.message}</p>}
       {renderInformationHistory(candidate)}
     </>;
   };
@@ -752,17 +786,14 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 <div className="candidate-card-operations">
                   <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} compact />
                   <div className="candidate-card-footer">
-                    {candidate.information.package && <p>{deliveryStatus(candidate.information.package, true)}</p>}
+                    {candidate.information.package && <p>{deliveryStatus(candidate.information.package)}</p>}
                     {candidate.status === 'active' && <>
                       {candidate.willingness === 'willing' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
                       {!candidate.information.package && <button type="button" className="btn-primary-action"
                         aria-label={`確認寄送（${candidate.staff_name}）`} disabled={!canUseDates || !previewRequested || !previewDocuments}
                         onClick={() => { void confirmCandidateSend(candidate); }}>{preparingSend === candidate.id ? '寄送處理中…' : '確認寄送'}</button>}
                     </>}
-                    <button id={`candidate-package-${caseNo}-${candidate.id}-resend`}
-                      type="button" className="btn-primary-action" aria-expanded={informationTarget?.candidateId === candidate.id}
-                      aria-label={`再次寄送（${candidate.staff_name}）`}
-                      onClick={() => openInformation(candidate, true)}>再次寄送</button>
+                    {renderResendButton(candidate)}
                   </div>
                 </div>
                 {candidate.information_changes && candidate.information_changes.length > 0 && <div className="order-v2-drawer-error" role="status">
@@ -773,7 +804,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   </li>)}</ul>
                 </div>}
                 {renderInformationHistory(candidate)}
-                {renderSendPreview(candidate)}
                 {candidate.reason && <p>詢問備註：{candidate.reason}</p>}
                 {responseTarget?.id === candidate.id && <form noValidate className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
                   aria-label={`手動記錄接案意願（${candidate.staff_name}）`} onSubmit={event => {

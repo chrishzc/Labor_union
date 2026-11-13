@@ -203,7 +203,7 @@ export interface CandidateAddCommand {
 export interface CandidateInformationSendCommand {
   caseNo: string;
   candidateId: number;
-  previewFingerprint: string;
+  previewFingerprint?: string;
   actor: string;
   eventKey: string;
   resend?: boolean;
@@ -287,7 +287,7 @@ export function createCandidateAddCommand(
 export function createCandidateInformationSendCommand(
   caseNo: string,
   candidateId: number,
-  previewFingerprint: string,
+  previewFingerprint: string | undefined,
   resend = false,
 ): CandidateInformationSendCommand {
   const canonical = canonicalCaseNo(caseNo);
@@ -298,7 +298,9 @@ export function createCandidateInformationSendCommand(
   return {
     caseNo: canonical,
     candidateId,
-    previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
+    ...(resend && previewFingerprint === undefined ? {} : {
+      previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
+    }),
     actor,
     eventKey: `candidate-information-${candidateId}-${crypto.randomUUID()}`,
     ...(resend ? { resend } : {}),
@@ -543,7 +545,9 @@ export const candidateContactPoolClient = {
         `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${command.candidateId}/information`,
         {
           actor: command.actor,
-          preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(command.previewFingerprint),
+          ...(command.resend && command.previewFingerprint === undefined ? {} : {
+            preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(command.previewFingerprint),
+          }),
           event_key: z.string().min(1).max(100).parse(command.eventKey),
           ...(command.resend ? { resend: true } : {}),
         },

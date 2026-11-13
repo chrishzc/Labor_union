@@ -310,16 +310,17 @@ def test_resend_accepts_new_commands_without_previous_delivery_or_saved_dates(pa
         package_send.send(package_send.preview().preview_fingerprint)
     package_send.facts["address"] = "測試市範例路 2 號"
     package_send.facts["dates_saved"] = False
-    preview = package_send.preview(resend=True)
-    second = package_send.send(preview.preview_fingerprint, "resend", resend=True)
+    second = package_send.send(None, "resend", resend=True)
     assert second["status"] == "queued"
-    assert package_send.send(preview.preview_fingerprint, "resend", resend=True) == {
+    package_send.facts["address"] = "測試市範例路 3 號"
+    assert package_send.send(None, "resend", resend=True) == {
         **second, "status": "idempotent_replay",
     }
-    third = package_send.send(preview.preview_fingerprint, "again", resend=True)
+    third = package_send.send(None, "again", resend=True)
     assert third["event_id"] > second["event_id"]
     assert len(package_send.queued) == 2 + previous
-    assert "測試市範例路 2 號" in package_send.queued[-1].payload_json
+    assert "測試市範例路 2 號" in package_send.queued[-2].payload_json
+    assert "測試市範例路 3 號" in package_send.queued[-1].payload_json
     assert "尚未保存" in package_send.queued[-1].payload_json
     if previous:
         assert "測試市範例路 1 號" in package_send.queued[0].payload_json

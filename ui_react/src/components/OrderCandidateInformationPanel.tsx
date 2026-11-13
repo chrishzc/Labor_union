@@ -115,10 +115,8 @@ export function CandidateInformationPages({ documents, reply }: { documents: Inf
   </div>;
 }
 
-export function OrderCandidateInformationSendPanel({ caseNo, candidate, revision, blocked, onSubmit, onClose, onViewDates, sendError, resend = false, datesReady = true }: {
+export function OrderCandidateInformationSendPanel({ caseNo, candidate, revision, blocked, onSubmit, onClose, onViewDates, sendError }: {
   caseNo: string; candidate: CandidateContactPool['candidates'][number]; revision: number; blocked: boolean;
-  resend?: boolean;
-  datesReady?: boolean;
   onSubmit: (command: CandidateInformationSendCommand) => Promise<boolean | undefined>;
   onClose: () => void; onViewDates: () => void; sendError?: string | null;
 }) {
@@ -132,18 +130,18 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, revision
     const controller = new AbortController();
     setPreview(null);
     setError(null);
-    void candidateContactPoolClient.previewInformationPackage(caseNo, candidate.id, { signal: controller.signal, resend })
+    void candidateContactPoolClient.previewInformationPackage(caseNo, candidate.id, { signal: controller.signal })
       .then(data => { if (!controller.signal.aborted) setPreview(data); })
       .catch(reason => { if (!controller.signal.aborted) setError(errorText(reason)); });
     return () => controller.abort();
-  }, [caseNo, candidate.id, revision, resend]);
+  }, [caseNo, candidate.id, revision]);
 
   const confirm = async () => {
-    if (!preview?.preview_fingerprint || !datesReady || blocked || inFlight.current) return;
+    if (!preview?.preview_fingerprint || blocked || inFlight.current) return;
     inFlight.current = true;
     setSending(true);
     try {
-      const command = createCandidateInformationSendCommand(caseNo, candidate.id, preview.preview_fingerprint, resend);
+      const command = createCandidateInformationSendCommand(caseNo, candidate.id, preview.preview_fingerprint);
       if (await onSubmit(command)) onClose();
     } catch (reason) {
       setError(errorText(reason));
@@ -165,9 +163,9 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, revision
     {preview && <>
       <CandidateInformationPages documents={preview.documents} reply={preview} />
       <div className="candidate-package-footer">
-          {(!preview.preview_fingerprint || !datesReady) && <button type="button" disabled={blocked || sending} onClick={onViewDates}>查看並保存服務日期</button>}
-          <button type="button" className="btn-primary-action" disabled={!preview.preview_fingerprint || !datesReady || blocked || sending}
-            onClick={() => { void confirm(); }}>{resend ? '確認再次寄送' : '確認寄送'}</button>
+        {!preview.preview_fingerprint && <button type="button" disabled={blocked || sending} onClick={onViewDates}>查看並保存服務日期</button>}
+        <button type="button" className="btn-primary-action" disabled={!preview.preview_fingerprint || blocked || sending}
+          onClick={() => { void confirm(); }}>確認寄送</button>
       </div>
     </>}
     {error && <p role="alert">{error}</p>}

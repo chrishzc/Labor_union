@@ -886,7 +886,7 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
         _close(connection)
 
 
-def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any, preview_fingerprint: str, *,
+def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any, preview_fingerprint: str | None, *,
                      resend: bool = False) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
@@ -915,7 +915,7 @@ def _send_information_in_transaction(
     candidate_id: int,
     actor: str,
     event_key: str,
-    preview_fingerprint: str,
+    preview_fingerprint: str | None,
     resend: bool = False,
 ) -> dict[str, Any]:
     # Use the existing willingness event identity for callbacks and follow-up.
@@ -982,7 +982,10 @@ def _send_information_in_transaction(
         preview, card = _information_package_preview(
             connection, case_no, candidate_id, service_period=service_period, reference=reference, resend=resend,
         )
-        if preview_fingerprint != preview.preview_fingerprint:
+        if preview.preview_fingerprint is None or (
+            (not resend or preview_fingerprint is not None)
+            and preview_fingerprint != preview.preview_fingerprint
+        ):
             raise ValueError("candidate_information_preview_stale")
         refreshed_coverage_fingerprint = (
             _coverage_fingerprint(case_no, coverage)

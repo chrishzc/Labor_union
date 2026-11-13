@@ -34,8 +34,14 @@ class AddCandidatesRequest(_EventIdentity):
 
 
 class SendCandidateInformationRequest(_EventIdentity):
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    preview_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     resend: bool = False
+
+    @model_validator(mode="after")
+    def require_initial_preview(self) -> "SendCandidateInformationRequest":
+        if not self.resend and self.preview_fingerprint is None:
+            raise ValueError("preview_fingerprint is required for the initial send")
+        return self
 
 
 class CandidateInformationSectionView(BaseModel):

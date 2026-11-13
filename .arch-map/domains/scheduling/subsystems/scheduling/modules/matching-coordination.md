@@ -32,7 +32,7 @@
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/matching_recommendation_application.py` — 以有效班次及需求時段協調候選檔期判定。
   - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；以需求班次對應的日期投影 actual conflict、待確認與 buffer，分時比較由 query 使用 Scheduling 的占用規則。
-  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史。再次寄送以最新資料建立新任務，沿用既有日期或呈現缺值，不依賴上一筆投遞狀態。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史。再次寄送從指定月嫂卡片直接以最新資料建立新任務，沿用既有日期或呈現缺值，不依賴上一筆投遞狀態。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。

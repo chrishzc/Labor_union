@@ -176,6 +176,18 @@ describe('candidateContactPoolClient', () => {
     );
   });
 
+  it('posts a direct resend without a preview fingerprint', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({
+      success: true, message: 'queued', data: { status: 'queued', event_id: 31, line_task_id: 52 }, error: null,
+    });
+    await candidateContactPoolClient.sendInformation({ ...informationCommand, previewFingerprint: undefined, resend: true });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/information',
+      { actor: 'operator-1', event_key: 'test-package-send', resend: true },
+      { token: 'volatile-token' },
+    );
+  });
+
   it('uses Preview then Apply for a distinct manual information confirmation fact', async () => {
     const post = vi.spyOn(transport, 'post')
       .mockResolvedValueOnce(successEnvelope({

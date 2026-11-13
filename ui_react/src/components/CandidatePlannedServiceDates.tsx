@@ -27,7 +27,6 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
   const [dates, setDates] = useState<string[]>([]);
   const [busy, setBusy] = useState<'load' | 'calculate' | 'save' | null>('load');
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [, refreshRecovery] = useState(0);
   const sequence = useRef(0);
   const saving = useRef(false);
@@ -52,7 +51,7 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
     currentIdentity.current = identity;
     const controller = new AbortController();
     sequence.current += 1;
-    setFacts(null); setWeekdays(null); setDates([]); setError(null); setSuccess(null); setBusy('load'); emitPreview(null);
+    setFacts(null); setWeekdays(null); setDates([]); setError(null); setBusy('load'); emitPreview(null);
     const unsubscribe = orderMutationFlowStore.subscribe(() => refreshRecovery(value => value + 1));
     void Promise.all([
       ordersQueryClient.getOrderTerms(caseNo, { signal: controller.signal }),
@@ -75,7 +74,7 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
     if (!facts || saving.current || unresolved || formal) return;
     const request = ++sequence.current;
     const active = () => currentIdentity.current === identity && sequence.current === request;
-    setWeekdays(next); setDates([]); setError(null); setSuccess(null); emitPreview(null);
+    setWeekdays(next); setDates([]); setError(null); emitPreview(null);
     if (next.length === 7) { setBusy(null); setError('請至少保留一天可服務的星期。'); return; }
     setBusy('calculate');
     try {
@@ -101,7 +100,7 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
 
   const save = async (recovery?: 'apply' | 'observe') => {
     if (!facts || saving.current || formal || (!recovery && (busy || unresolved || dates.length === 0))) return;
-    saving.current = true; setBusy('save'); setError(null); setSuccess(null);
+    saving.current = true; setBusy('save'); setError(null);
     const intended = recovery ? [...(draft?.receiptView?.service_dates ?? draft?.selectedDates ?? [])] : [...dates];
     try {
       if (recovery === 'apply') await retryServiceDatesApplyFlow(caseNo);
@@ -129,7 +128,6 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
       }
       if (currentIdentity.current !== identity) return;
       setFacts({ ...facts, dates: saved }); setDates(saved.current_dates);
-      setSuccess('預計日期已保存，後續寄送將使用這份日期。');
       onSaved?.();
       const preview = await loadWeekly();
       if (currentIdentity.current === identity) emitPreview(preview);
@@ -140,6 +138,7 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
 
 
   return <section aria-label="預計服務日期設定">
+    <p>如果是連續服務，請直接點擊「無固定週休」。</p>
     <p>原始匯入服務方式：<strong aria-label="原始匯入服務方式">{facts?.mode.original_service_type ?? facts?.mode.service_mode ?? '尚未提供'}</strong></p>
     <fieldset disabled={!facts || busy === 'save' || busy === 'load' || unresolved || formal} aria-label="人工選定休假星期">
       <legend>人工選定休假星期</legend>
@@ -147,12 +146,10 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
         onChange={event => void recalculate(event.target.checked ? [...(weekdays ?? []), value].sort() : (weekdays ?? []).filter(day => day !== value))} />{label}</label>)}
       <button type="button" onClick={() => void recalculate([])}>無固定週休</button>
     </fieldset>
-    <p>勾選後立即試算；保存預計日期後供後續寄送使用，星期選項不保存。</p>
     {busy === 'load' && <p role="status">正在讀取預計日期…</p>}
     {formal && <p role="status">目前已有正式安排，請到服務安排調整日期。</p>}
     {busy === 'calculate' && <p role="status">正在重算每週服務時間…</p>}
     {error && <p role="alert">{error}</p>}
-    {success && <p role="status">{success}</p>}
     {dates.length > 0 && <details><summary>預計服務日期：{dates.length} 天（{dates[0]}～{dates.at(-1)}）</summary><p>{dates.join('、')}</p></details>}
     {unresolved && <p role="status">保存結果尚未完成回讀，請先接續原操作。</p>}
     {draft?.status === 'outcome_unknown' && <button type="button" disabled={busy !== null} onClick={() => void save('apply')}>接續保存預計日期</button>}

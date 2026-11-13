@@ -105,8 +105,8 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-CONTACT', { signal: expect.any(AbortSignal) }));
     expect(await screen.findByText('未設定 月嫂甲')).toBeInTheDocument();
     expect(screen.getByText('願意承接')).toBeInTheDocument();
-    expect(screen.getByText('已發送 · 2026-09-03T00:05:00Z')).toBeInTheDocument();
-    expect(screen.getByText('發送未完成 · 2026-09-03T00:06:00Z')).toBeInTheDocument();
+    expect(screen.getByText('已發送 · 2026-09-03 08:05')).toBeInTheDocument();
+    expect(screen.getByText('發送未完成 · 2026-09-03 08:06')).toBeInTheDocument();
     expect(screen.getByText('未設定 月嫂乙')).toBeInTheDocument();
     expect(screen.getByText('已選定')).toBeInTheDocument();
     expect(screen.getByText('回覆說明：日期不合')).toBeInTheDocument();

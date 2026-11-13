@@ -63,13 +63,12 @@ it('即時試算零寫入，一次保存日期，無第二步確認；重開使�
   expect(mocks.weekly).toHaveBeenLastCalledWith(CASE, 7, { serviceDates: chosen });
   expect(mocks.apply).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
-  await screen.findByText('預計日期已保存，後續寄送將使用這份日期。');
+  await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(expect.objectContaining({ date_basis: 'confirmed' })));
   expect(mocks.apply).toHaveBeenCalledTimes(1);
   expect(onSaved).toHaveBeenCalledTimes(1);
   expect(mocks.apply.mock.calls[0][1].service_dates).toEqual(chosen);
   expect(mocks.apply.mock.calls[0][1]).not.toHaveProperty('custom_rest_weekdays');
   expect(screen.queryByRole('button', { name: /確認/ })).not.toBeInTheDocument();
-  expect(onPreview).toHaveBeenLastCalledWith(expect.objectContaining({ date_basis: 'confirmed' }));
   view.unmount(); const count = mocks.calculate.mock.calls.length;
   open(); await screen.findByText(/預計服務日期：3 天/);
   expect(screen.getByRole('checkbox', { name: '星期五' })).not.toBeChecked();
@@ -85,7 +84,7 @@ it('較晚回來的舊試算不覆蓋新日期與預覽', async () => {
   await act(async () => finish(result(['2026-11-05', '2026-11-06', '2026-11-07'])));
   expect(mocks.weekly).toHaveBeenLastCalledWith(CASE, 7, { serviceDates: chosen });
   fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
-  await screen.findByText('預計日期已保存，後續寄送將使用這份日期。');
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   expect(saved).toEqual(chosen);
 });
 
@@ -113,15 +112,15 @@ it('保存結果未明時沿用原冪等鍵，不能重新試算覆蓋原操作'
   expect(onSaved).not.toHaveBeenCalled();
   expect(screen.getByRole('checkbox', { name: '星期五' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '接續保存預計日期' }));
-  await screen.findByText('預計日期已保存，後續寄送將使用這份日期。');
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   expect(mocks.apply.mock.calls[0][2].idempotencyKey).toBe(mocks.apply.mock.calls[1][2].idempotencyKey);
-  expect(onSaved).toHaveBeenCalledTimes(1);
 });
 
 it('詢問面板先顯示每週服務說明，保存完成回讀後通知工作台刷新', async () => {
   const onObserved = vi.fn();
   render(<OrderCandidateContactStatusPanel caseNo={CASE} presentation="workbench" onObserved={onObserved} />);
   expect(screen.getByRole('heading', { name: '1. 設定每週服務說明' })).toBeInTheDocument();
+  expect(await screen.findByText('如果是連續服務，請直接點擊「無固定週休」。')).toBeVisible();
   await choose();
   fireEvent.click(screen.getByRole('button', { name: '收起每週服務說明設定' }));
   expect(screen.queryByRole('button', { name: '保存預計日期' })).not.toBeInTheDocument();

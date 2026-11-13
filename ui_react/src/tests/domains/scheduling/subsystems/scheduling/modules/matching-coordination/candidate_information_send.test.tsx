@@ -57,7 +57,7 @@ beforeEach(() => {
     latest_willingness_event_id: null,
     information: {
       '1': null, '2': null, '3': null,
-      package: sent ? { status: 'queued', sent_at: '2026-10-01T00:00:00Z', event_id: 4, line_task_id: 5 } : null,
+      package: sent ? { status: 'queued', sent_at: '2026-11-13T04:16:00.123456', event_id: 4, line_task_id: 5 } : null,
     }, service_start_date: '2026-10-01', service_end_date: '2026-10-02', created_at: '2026-09-01T00:00:00Z',
   }] } as never));
   createInformationCommand.mockImplementation((caseNo, candidateId, previewFingerprint, resend) => ({
@@ -170,20 +170,12 @@ it.each([null, 'sent', 'failed', 'queued', 'pending', 'retryable_failed', 'cance
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   const card = within(await screen.findByRole('article'));
   fireEvent.click(card.getByRole('button', { name: '再次寄送（測試月嫂）' }));
-  const preview = await card.findByRole('region', { name: '寄送預覽' });
-  const shared = within(screen.getByRole('region', { name: '預覽案件資訊' }));
-  fireEvent.click(shared.getByRole('button', { name: '展開案件資訊預覽' }));
-  expect(shared.queryByRole('button', { name: /再次寄送/ })).not.toBeInTheDocument();
-  const confirm = await within(preview).findByRole('button', { name: '確認再次寄送' });
-  expect(client.sendInformation).not.toHaveBeenCalled();
-  expect(client.previewInformationPackage).toHaveBeenCalledWith('CASE-1', 3, expect.objectContaining({ resend: true }));
-  await waitFor(() => expect(confirm).toBeEnabled());
-  fireEvent.click(confirm);
   await waitFor(() => expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    candidateId: 3, resend: true, previewFingerprint: 'a'.repeat(64),
+    candidateId: 3, resend: true, previewFingerprint: undefined,
   })));
-  await waitFor(() => expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: '再次寄送（測試月嫂）' })).toBeEnabled();
+  expect(client.previewInformationPackage).not.toHaveBeenCalled();
+  expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument();
+  await waitFor(() => expect(card.getByRole('button', { name: '再次寄送（測試月嫂）' })).toBeEnabled());
 });
 
 it('shows only changed information on the candidate card without opening another preview', async () => {
@@ -229,7 +221,7 @@ it('previews all four pages before the candidate cards and sends only from the n
   fireEvent.click(within(panel).getByRole('button', { name: '收起案件資訊預覽' }));
   expect(sendButton).toBeEnabled();
   fireEvent.click(sendButton);
-  expect(await screen.findByText(/等待發送/)).toBeInTheDocument();
+  expect(await screen.findByText('等待發送 · 2026-11-13 12:16')).toBeInTheDocument();
   expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ candidateId: 3, previewFingerprint: 'a'.repeat(64) }));
   expect(screen.queryByRole('button', { name: '確認寄送（測試月嫂）' })).not.toBeInTheDocument();
 });
@@ -286,6 +278,23 @@ it('sends only the clicked candidate using their own fingerprint', async () => {
   fireEvent.click(firstSend);
   await waitFor(() => expect(screen.getAllByText(/等待發送/)).toHaveLength(2));
   expect(client.sendInformation).toHaveBeenNthCalledWith(2, expect.objectContaining({ candidateId: 3, previewFingerprint: 'a'.repeat(64) }));
+});
+
+it('directly resends only to the caregiver whose card was clicked', async () => {
+  const initial = await client.query('CASE-1');
+  const first = initial.candidates[0]!;
+  const second = { ...first, id: 4, staff_id: 9, staff_name: '另一位月嫂' };
+  vi.mocked(client.query).mockResolvedValue({ ...initial, candidates: [first, second] });
+
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
+  const shared = await openSharedPreview();
+  const secondCard = screen.getByRole('heading', { name: /另一位月嫂/ }).closest('article')!;
+  expect(within(shared).queryByRole('button', { name: /再次寄送/ })).not.toBeInTheDocument();
+  fireEvent.click(within(secondCard).getByRole('button', { name: '再次寄送（另一位月嫂）' }));
+  await waitFor(() => expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    candidateId: second.id, resend: true, previewFingerprint: undefined,
+  })));
+  expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument();
 });
 
 it('requires reopening the case preview if the recipient documents have changed', async () => {
