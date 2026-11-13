@@ -334,14 +334,15 @@ def _validate_current_availability(
     # not reintroduce optional discovery filters that can reject the exact
     # combination the UI just offered.
     if require_willing_candidate:
-        # Creating a recommendation uses the candidate inquiry window. Saved
-        # date explanations must not become a formal scheduling prerequisite.
+        # A single recommendation does not reserve dates. Exclude other cases'
+        # waiting-deposit locks before deriving coverage for the inquiry window.
         availability = search_candidate_inquiry_availability(
             case_no=case_no_value,
             segment_drafts=availability_kwargs["segment_drafts"],
             as_of=as_of_value,
             facts_port=facts_port,
             filter_policy=availability_kwargs["filter_policy"],
+            include_waiting_deposit_locks=False,
         )
     else:
         availability = search_segmented_caregiver_availability(**availability_kwargs)

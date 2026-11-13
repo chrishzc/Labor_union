@@ -3,6 +3,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
 import { OrderInformationSheets } from '../../../../../../../components/OrderInformationSheets';
 import { candidateContactPoolClient as client } from '../../../../../../../api/scheduling/candidate_contact_pool_client';
+import { matchingCandidateWorkflowClient, type MatchingAvailability } from '../../../../../../../api/scheduling/matching_candidate_workflow_client';
+import { publishStaffAvailabilityChange } from '../../../../../../../api/staff_availability/staff_availability_changes';
 import { queryOrderInformation } from '../../../../../../../api/orders/order_information_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
@@ -13,6 +15,10 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
   createCandidateWillingnessCommand: createWillingnessCommand,
   candidateContactPoolClient: { query: vi.fn(), previewInformation: vi.fn(), previewInformationPackage: vi.fn(), previewWeeklyService: vi.fn(), previewCaseInformation: vi.fn(), previewCaseWeeklyService: vi.fn(), sendInformation: vi.fn(), recordWillingness: vi.fn() },
 }));
+vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', async importOriginal => {
+  const original = await importOriginal<typeof import('../../../../../../../api/scheduling/matching_candidate_workflow_client')>();
+  return { ...original, matchingCandidateWorkflowClient: { ...original.matchingCandidateWorkflowClient, searchInquiryCandidates: vi.fn() } };
+});
 vi.mock('../../../../../../../api/orders/order_information_client', () => ({
   queryOrderInformation: vi.fn(),
 }));
@@ -24,8 +30,26 @@ vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ orders
   getServiceDates: vi.fn(async () => ({ case_no: 'CASE-1', order_version: 1, scheduling_version: 0,
     current_version: null, current_dates: [], selectable_dates: ['2026-10-01', '2026-10-02'], contracted_service_days: 2 })),
 } }));
+const inquiryDates = ['2026-10-01', '2026-10-02'];
+const inquiryRange = { start_date: '2026-10-01', end_date: '2026-10-02' };
+const unknownPreference = { status: 'pending' as const, required_value: null, staff_values: [] };
+const inquiryAvailability: MatchingAvailability = {
+  case_no: 'CASE-1', planned_start_date: '2026-10-01', planned_end_date: '2026-10-02',
+  feasibility: 'complete', complete_combinations: [], segment_candidates: [], conflicts: [],
+  candidate_options: [{
+    segment_index: 0, staff_id: 2, staff_name: '測試月嫂', coverage_day_count: 2, available_ranges: [inquiryRange],
+    case_period_start: inquiryRange.start_date, case_period_end: inquiryRange.end_date,
+    required_service_dates: inquiryDates, supported_service_dates: inquiryDates,
+    supported_ranges: [{ ...inquiryRange, service_day_count: 2 }], supported_day_count: 2, required_day_count: 2,
+    full_case_coverage: true, selected_segment_start: inquiryRange.start_date, selected_segment_end: inquiryRange.end_date,
+    full_selected_segment_coverage: true, uncovered_segment_dates: [], source_scheduling_version: 0, filter_results: {},
+    matching_conditions: { region: { ...unknownPreference }, preferred_service_days: { ...unknownPreference } },
+  }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(matchingCandidateWorkflowClient.searchInquiryCandidates).mockReset().mockResolvedValue(inquiryAvailability);
   orderMutationFlowStore.clearAll();
   let sent = false;
   vi.mocked(client.query).mockImplementation(async () => ({ case_no: 'CASE-1', pool_id: 1, candidates: [{
@@ -36,8 +60,8 @@ beforeEach(() => {
       package: sent ? { status: 'queued', sent_at: '2026-10-01T00:00:00Z', event_id: 4, line_task_id: 5 } : null,
     }, service_start_date: '2026-10-01', service_end_date: '2026-10-02', created_at: '2026-09-01T00:00:00Z',
   }] } as never));
-  createInformationCommand.mockImplementation((caseNo, candidateId, previewFingerprint) => ({
-    caseNo, candidateId, previewFingerprint, actor: 'operator-1', eventKey: 'information-package-key',
+  createInformationCommand.mockImplementation((caseNo, candidateId, previewFingerprint, resend) => ({
+    caseNo, candidateId, previewFingerprint, actor: 'operator-1', eventKey: 'information-package-key', resend,
   }));
   createWillingnessCommand.mockImplementation((caseNo, candidateId, willingness, reason) => ({
     caseNo, candidateId, willingness, reason, actor: 'operator-1', eventKey: 'willingness-command-key',
@@ -89,6 +113,96 @@ async function openSharedPreview() {
   await within(panel).findByRole('button', { name: '訂單資訊一' });
   return panel;
 }
+
+it('shows current reservations before LINE inquiry or manual willingness and refreshes after a change', async () => {
+  const search = vi.mocked(matchingCandidateWorkflowClient.searchInquiryCandidates);
+  search.mockResolvedValueOnce({ ...inquiryAvailability, conflicts: [
+    { staff_id: 2, segment_index: 0, work_date: '2026-10-01', reason_code: 'active_lock' },
+    { staff_id: 8, segment_index: 0, work_date: '2026-10-02', reason_code: 'staff_unavailability' },
+  ] });
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
+
+  const card = within(await screen.findByRole('article'));
+  fireEvent.click(await card.findByText('查看衝突日期與原因'));
+  expect(card.getByText('其他案件等待訂金保留（黃色鎖）：2026-10-01')).toBeInTheDocument();
+  expect(card.queryByText(/月嫂不可服務/)).not.toBeInTheDocument();
+  fireEvent.click(card.getByRole('button', { name: '手動記錄接案意願（測試月嫂）' }));
+  expect(card.getByRole('radio', { name: '願意承接' })).toBeEnabled();
+  expect(card.queryByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).not.toBeInTheDocument();
+  await openSharedPreview();
+  expect(card.getByRole('button', { name: '確認寄送（測試月嫂）' })).toBeEnabled();
+  expect(client.sendInformation).not.toHaveBeenCalled();
+
+  search.mockResolvedValueOnce({ ...inquiryAvailability, planned_start_date: '2026-10-02', planned_end_date: '2026-10-03', conflicts: [
+    { staff_id: 2, segment_index: 0, work_date: '2026-10-02', reason_code: 'schedule' },
+    { staff_id: 2, segment_index: 0, work_date: '2026-10-03', reason_code: 'buffer' },
+  ] });
+  publishStaffAvailabilityChange(2);
+  expect(await card.findByText('預計服務期間：2026-10-02 ～ 2026-10-03')).toBeVisible();
+  expect(card.getByText('七天緩衝期重疊，僅提醒：2026-10-03')).toBeInTheDocument();
+  expect(card.queryByText('七天緩衝期重疊，僅提醒', { exact: true })).not.toBeInTheDocument();
+  expect(card.getByText('有檔期衝突，待公會協調')).toBeVisible();
+  expect(card.queryByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).not.toBeInTheDocument();
+});
+
+it('offers a retry when the current availability cannot be checked', async () => {
+  const search = vi.mocked(matchingCandidateWorkflowClient.searchInquiryCandidates);
+  search.mockRejectedValueOnce(new Error('查詢失敗'));
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
+  const retry = await screen.findByRole('button', { name: '重新查詢檔期' });
+  fireEvent.click(retry);
+  await waitFor(() => expect(screen.queryByText('正在查詢候選月嫂的檔期…')).not.toBeInTheDocument());
+  expect(search).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText('目前無法查詢候選月嫂的檔期。')).not.toBeInTheDocument();
+});
+
+it.each([null, 'sent', 'failed', 'queued', 'pending', 'retryable_failed', 'cancelled'] as const)('再次寄送不受前次寄送狀態 %s 或未儲存日期限制', async status => {
+  const initial = await client.query('CASE-1');
+  const candidate = initial.candidates[0];
+  vi.mocked(client.previewCaseWeeklyService).mockResolvedValue({
+    case_no: 'CASE-1', required_service_days: 2, projected_service_days: 0, date_basis: 'planned', warnings: [], rows: [],
+  });
+  vi.mocked(client.query).mockResolvedValueOnce({ ...initial, candidates: [{
+    ...candidate, information: { ...candidate.information, package: status === null ? null : {
+      status, sent_at: '2026-10-01T00:00:00Z', event_id: null, line_task_id: 4,
+    } },
+  }] });
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
+  const card = within(await screen.findByRole('article'));
+  fireEvent.click(card.getByRole('button', { name: '再次寄送（測試月嫂）' }));
+  const preview = await card.findByRole('region', { name: '寄送預覽' });
+  const shared = within(screen.getByRole('region', { name: '預覽案件資訊' }));
+  fireEvent.click(shared.getByRole('button', { name: '展開案件資訊預覽' }));
+  expect(shared.queryByRole('button', { name: /再次寄送/ })).not.toBeInTheDocument();
+  const confirm = await within(preview).findByRole('button', { name: '確認再次寄送' });
+  expect(client.sendInformation).not.toHaveBeenCalled();
+  expect(client.previewInformationPackage).toHaveBeenCalledWith('CASE-1', 3, expect.objectContaining({ resend: true }));
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(client.sendInformation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    candidateId: 3, resend: true, previewFingerprint: 'a'.repeat(64),
+  })));
+  await waitFor(() => expect(screen.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: '再次寄送（測試月嫂）' })).toBeEnabled();
+});
+
+it('shows only changed information on the candidate card without opening another preview', async () => {
+  const initial = await client.query('CASE-1');
+  vi.mocked(client.query).mockResolvedValueOnce({ ...initial, candidates: [{
+    ...initial.candidates[0], information_changes: [
+      { document: '訂單資訊－1｜月嫂薪資', section: '服務約定', field: '預計開始日', before: '2026-10-01', after: '2026-10-02' },
+      { document: '訂單資訊－2', section: '飲食需求', field: '過敏體質', before: null, after: '花生' },
+    ],
+  }] });
+  render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
+  const card = within(await screen.findByRole('article'));
+  expect(card.getByText('資料已改變，請重新寄送確認意願')).toBeVisible();
+  expect(card.getByText('2026-10-01 → 2026-10-02')).toBeVisible();
+  expect(card.getByText('未列出 → 花生')).toBeVisible();
+  expect(card.queryByRole('region', { name: '寄送預覽' })).not.toBeInTheDocument();
+  expect(client.sendInformation).not.toHaveBeenCalled();
+  expect(client.query).toHaveBeenCalledWith('CASE-1', expect.objectContaining({ compareSentInformation: true }));
+});
 
 it('previews all four pages before the candidate cards and sends only from the named card', async () => {
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);

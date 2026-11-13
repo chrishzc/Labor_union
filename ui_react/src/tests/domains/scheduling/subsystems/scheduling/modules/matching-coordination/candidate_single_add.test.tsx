@@ -35,6 +35,20 @@ async function search(onPoolReadback = vi.fn()) {
   return onPoolReadback;
 }
 
+it('identifies the reserved dates before joining a candidate and keeps coordination available', async () => {
+  mocks.query.mockResolvedValue(pool([]));
+  mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
+    candidate_options: [option(11, '月嫂甲')], conflicts: [
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock' },
+    ] });
+  await search();
+  expect(screen.getByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).toBeVisible();
+  expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('查看衝突日期與原因'));
+  expect(screen.getByText('其他案件等待訂金保留（黃色鎖）：2026-09-01')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
+});
+
 it('reads existing membership, allows withdrawn candidates and replaces selection with row buttons', async () => {
   mocks.query.mockResolvedValue(pool([entry(11, '月嫂甲', 17), entry(12, '月嫂乙', 18, 'withdrawn')]));
   await search();

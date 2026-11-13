@@ -8,7 +8,7 @@ from domains.line.canonical_payload import canonical_line_payload_json
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Mapping
 
@@ -25,8 +25,8 @@ from infrastructure.mysql.order_information_repository import MySqlOrderInformat
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
-from subsystems.line.table_image_contracts import candidate_information_document
-from subsystems.line.table_image_messages import candidate_action_bubble, with_table_images
+from subsystems.line.table_image_contracts import TableDocument, candidate_information_document
+from subsystems.line.table_image_messages import DOCUMENTS_KEY, candidate_action_bubble, with_table_images
 from subsystems.orders.order_information import CandidateInformationPreview
 from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.matching_line_cards import candidate_contact_information_card
@@ -152,6 +152,15 @@ class CandidateContactEventState:
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateInformationChange:
+    document: str
+    section: str
+    field: str
+    before: str | None
+    after: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateContactEntryState:
     id: int
     staff_id: int
@@ -165,6 +174,7 @@ class CandidateContactEntryState:
     information: CandidateInformationState
     latest_willingness_event_id: int | None = None
     staff_union_no: str | None = None
+    information_changes: tuple[CandidateInformationChange, ...] | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.id, "candidate_id")
@@ -404,6 +414,7 @@ def query_pool(
     *,
     connection: Any | None = None,
     for_update: bool = False,
+    compare_sent_information: bool = False,
 ) -> CandidateContactPoolState:
     """Read a typed pool; borrowed connections are never committed or closed."""
 
@@ -489,6 +500,11 @@ def query_pool(
                     latest_willingness_event_id=latest_willingness_event_id,
                 )
             )
+        if compare_sent_information:
+            repository = MySqlOrderInformationRepository(connection)
+            candidates = [replace(candidate, information_changes=_sent_information_changes(
+                cursor, repository, case_no, candidate.id, by_candidate.get(candidate.id, []),
+            )) for candidate in candidates]
         return CandidateContactPoolState(
             pool_id=pool_id,
             case_no=case_no,
@@ -757,12 +773,12 @@ def preview_information(case_no: str, candidate_id: int, info_type: int):
         _close(connection)
 
 
-def preview_information_package(case_no: str, candidate_id: int):
+def preview_information_package(case_no: str, candidate_id: int, *, resend: bool = False):
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
     connection = get_connection()
     try:
-        preview, _ = _information_package_preview(connection, case_no, candidate_id)
+        preview, _ = _information_package_preview(connection, case_no, candidate_id, resend=resend)
         return preview
     finally:
         _close(connection)
@@ -777,13 +793,15 @@ def _information_package_card(connection, case_no, document, reference):
 
 def _information_package_preview(
     connection, case_no, candidate_id, *, service_period=None,
-    reference="preview-only",
+    reference="preview-only", resend=False,
 ):
     repository = MySqlOrderInformationRepository(connection)
     options = {"for_update": service_period is not None, "service_period": service_period}
     documents = tuple(repository.preview_candidate_information(case_no, candidate_id, kind, **options) for kind in (1, 2))
     try:
-        documents += (repository.preview_candidate_information(case_no, candidate_id, 3, **options),)
+        documents += (repository.preview_candidate_information(
+            case_no, candidate_id, 3, require_saved_dates=not resend, **options,
+        ),)
     except ValueError as error:
         if str(error) != "candidate_weekly_service_dates_not_ready" or service_period is not None:
             raise
@@ -868,14 +886,15 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
         _close(connection)
 
 
-def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any, preview_fingerprint: str) -> dict[str, Any]:
+def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any, preview_fingerprint: str, *,
+                     resend: bool = False) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
     actor = _required_text(actor, "actor", 100)
     event_key = _required_text(event_key, "event_key", 100)
     return _run_in_application_uow(
         lambda connection, cursor: _send_information_in_transaction(
-            connection, cursor, case_no, candidate_id, actor, event_key, preview_fingerprint
+            connection, cursor, case_no, candidate_id, actor, event_key, preview_fingerprint, resend
         )
     )
 
@@ -897,6 +916,7 @@ def _send_information_in_transaction(
     actor: str,
     event_key: str,
     preview_fingerprint: str,
+    resend: bool = False,
 ) -> dict[str, Any]:
     # Use the existing willingness event identity for callbacks and follow-up.
     event_type = "info_1_sent"
@@ -928,6 +948,7 @@ def _send_information_in_transaction(
                 or existing.get("actor") != actor
                 or existing_payload.get("information_package") is not True
                 or existing_payload.get("preview_fingerprint") != preview_fingerprint
+                or (existing_payload.get("resend") is True or existing_payload.get("previous_package_event_id") is not None) != resend
             ):
                 raise ValueError("candidate_information_idempotency_conflict")
             task_id = existing_payload.get("line_task_id")
@@ -936,31 +957,30 @@ def _send_information_in_transaction(
                 "event_id": existing["id"],
                 "line_task_id": _positive_int(task_id, "line_task_id") if task_id is not None else None,
             }
-        if entry["active_marker"] != 1 or entry["candidate_status"] != "active":
+        if entry["active_marker"] != 1 or (not resend and entry["candidate_status"] != "active"):
             raise ValueError("candidate_contact_not_found")
         recipient = _candidate_line_recipient(cursor, case_no, entry)
-        cursor.execute(
-            "SELECT id FROM caregiver_candidate_contact_events "
-            "WHERE candidate_id=%s AND event_type='info_1_sent' "
-            "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.information_package'))='true' "
-            "LIMIT 1 FOR UPDATE",
-            (candidate_id,),
-        )
-        if cursor.fetchone() is not None:
-            raise ValueError("candidate_information_package_already_queued")
+        if not resend:
+            cursor.execute(
+                "SELECT id FROM caregiver_candidate_contact_events "
+                "WHERE candidate_id=%s AND event_type='info_1_sent' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.information_package'))='true' LIMIT 1 FOR UPDATE",
+                (candidate_id,),
+            )
+            if cursor.fetchone() is not None:
+                raise ValueError("candidate_information_package_already_queued")
         service_period = _current_service_period(entry)
         refresh_period_from_order = service_period != (
             entry["service_start_date"], entry["service_end_date"],
         )
-        coverage = _require_current_candidate(
-            case_no,
-            entry["staff_id"],
-            str(service_period[0]),
-            str(service_period[1]),
-        )
+        coverage = None
+        if not resend or refresh_period_from_order:
+            coverage = _require_current_candidate(
+                case_no, entry["staff_id"], str(service_period[0]), str(service_period[1]),
+            )
         reference = hashlib.sha256(event_key.encode("utf-8")).hexdigest()
         preview, card = _information_package_preview(
-            connection, case_no, candidate_id, service_period=service_period, reference=reference,
+            connection, case_no, candidate_id, service_period=service_period, reference=reference, resend=resend,
         )
         if preview_fingerprint != preview.preview_fingerprint:
             raise ValueError("candidate_information_preview_stale")
@@ -1035,6 +1055,8 @@ def _send_information_in_transaction(
             "line_task_id": task_id, "delivery_status": "queued",
             "preview_fingerprint": preview_fingerprint, "information_package": True,
         }
+        if resend:
+            event_payload["resend"] = True
         cursor.execute(
             "INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)",
             (entry["pool_id"], candidate_id, event_type, event_key, actor, json.dumps(event_payload, sort_keys=True)),
@@ -1108,6 +1130,58 @@ def _record_willingness_in_transaction(
         return {"status":"recorded", "event_id":event_id}
     finally:
         pass
+
+
+def _sent_information_changes(cursor, repository, case_no, candidate_id, events):
+    sent = [event for event in events if event.get('current_delivery_status') == 'sent'
+            and _event_payload(event['payload']).get('information_package') is True]
+    if not sent:
+        return None
+    latest = max(sent, key=lambda event: (event.get('current_sent_at_utc') or event['occurred_at'], event['id']))
+    cursor.execute(
+        "SELECT payload_snapshot FROM line_delivery_tasks WHERE id=%s AND source_aggregate_identity=%s "
+        "AND source_aggregate_type='candidate_matching_willingness_card' AND processing_status='sent'",
+        (_event_payload(latest['payload']).get('line_task_id'), latest['event_key']),
+    )
+    row = cursor.fetchone()
+    try:
+        pictures = _event_payload(row['payload_snapshot']).get(DOCUMENTS_KEY) if row else None
+        if not pictures or len(pictures) != 3:
+            return None
+        before = tuple(TableDocument.from_mapping(picture['document']) for picture in pictures)
+        after = tuple(
+            candidate_information_document(case_no, kind, tuple((section.title, section.rows) for section in
+                repository.preview_candidate_information(case_no, candidate_id, kind, require_saved_dates=False).line_sections))
+            for kind in (1, 2, 3)
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    return _compare_information_documents(before, after)
+
+
+def _compare_information_documents(before, after):
+    def fields(documents):
+        values = {}
+        for index, document in enumerate(documents):
+            occurrences = {}
+            for section in document.sections:
+                for row in section.rows:
+                    for label, value in zip(row[::2], row[1::2]):
+                        if label:
+                            key = (section.title, label)
+                            occurrences[key] = occurrences.get(key, 0) + 1
+                            values[(index, *key, occurrences[key])] = value
+        return values
+
+    previous = fields(before)
+    current = fields(after)
+    changes = []
+    for key in dict.fromkeys((*previous, *current)):
+        old, new = previous.get(key), current.get(key)
+        if old != new:
+            index, section, label, _ = key
+            changes.append(CandidateInformationChange(after[index].title, section, label, old, new))
+    return tuple(changes)
 
 
 def _candidate_projection(events: list[dict[str, Any]]):

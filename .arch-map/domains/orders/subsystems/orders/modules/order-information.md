@@ -13,6 +13,7 @@ Case Import 照護與服務約定的 named projection 疊加 current BeClass cor
 依 2026-10-30 最新人工裁決，初步候選月嫂收到的資訊一只顯示月嫂薪資單價、預估總薪資與預計付款日；使用 Payroll 政策及目前 Orders 約定服務量的唯讀預估，不虛構 assignment／服務日、不建立正式應付，來源缺失標示待確認。月嫂版不帶客戶訂金、分期、客戶應付或其繳款日。客戶正式推薦版繼續借用 current 客戶契約 typed projection，包含訂金、分期、樓層費及繳款日，不帶月嫂薪資；兩種財務內容不共用。
 客戶付款查詢使用 current Orders confirmed／預計日期與 Finance stage plan；沒有執行指派時不採舊 commitment 的服務量，也不因舊媒合方案失效而清空付款欄位。正式契約與正式 plan／assignment 的來源及過期驗證保持各自 owner 契約。
 服務方式「無休」及未選休假星期沿用客戶契約投影的「連續服務」，讓資訊一畫面、寄送前預覽與付款金額一致。
+候選資訊一的管理端預覽與逐人寄送表格共用客戶名冊服務地址；資訊二省略重複地址。
 
 ## Implementation
 - `subsystems/orders/order_information.py` — 共用 case-only 服務／照護內容與 saved-date 週說明 typed projection；逐人 Preview 保留 recipient-bound fingerprint，不建立假 assignment 或 candidate。

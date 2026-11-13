@@ -568,7 +568,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 </nav>
                 <div hidden={matchingView !== 'candidates'}>
                 <OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={() => { setSelectedGroup('matching'); refreshFacts(); }}
-                  presentation="workbench" focusedCandidateId={focusedCandidateId} onEditStateChange={setCandidateContactState} onAddCandidates={() => setAddingCandidates(true)}
+                  presentation="workbench" visible={activeGroup === 'matching' && matchingView === 'candidates'} focusedCandidateId={focusedCandidateId} onEditStateChange={setCandidateContactState} onAddCandidates={() => setAddingCandidates(true)}
                   onOpenCustomerConfirmation={id => { setRecommendedCandidateId(id); openGroup('recommendation'); }} />
                 {addingCandidates && <CandidateInquiryDialog title="新增候選月嫂" wide busy={candidateAddState.busy}
                   onClose={() => { requestLeave(() => setAddingCandidates(false)); }}>

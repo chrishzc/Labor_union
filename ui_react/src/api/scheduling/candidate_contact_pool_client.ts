@@ -40,6 +40,10 @@ const CandidateContactSchema = z.strictObject({
   willingness: z.enum(['pending', 'willing', 'unwilling']),
   reason: z.string().max(500).nullable(),
   latest_willingness_event_id: z.number().int().positive().nullable(),
+  information_changes: z.array(z.strictObject({
+    document: z.string(), section: z.string(), field: z.string(),
+    before: z.string().nullable(), after: z.string().nullable(),
+  })).nullable().optional(),
   information: z.strictObject({
     '1': CandidateInformationDeliverySchema.nullable(),
     '2': CandidateInformationDeliverySchema.nullable(),
@@ -202,6 +206,7 @@ export interface CandidateInformationSendCommand {
   previewFingerprint: string;
   actor: string;
   eventKey: string;
+  resend?: boolean;
 }
 
 /** Immutable manual willingness command used for unknown-outcome recovery. */
@@ -216,6 +221,7 @@ export interface CandidateWillingnessCommand {
 
 export interface CandidateContactPoolQueryOptions {
   signal?: AbortSignal;
+  compareSentInformation?: boolean;
 }
 
 function mutationIdentity(): { actor: string; token: string } {
@@ -282,6 +288,7 @@ export function createCandidateInformationSendCommand(
   caseNo: string,
   candidateId: number,
   previewFingerprint: string,
+  resend = false,
 ): CandidateInformationSendCommand {
   const canonical = canonicalCaseNo(caseNo);
   const { actor } = mutationIdentity();
@@ -294,6 +301,7 @@ export function createCandidateInformationSendCommand(
     previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(previewFingerprint),
     actor,
     eventKey: `candidate-information-${candidateId}-${crypto.randomUUID()}`,
+    ...(resend ? { resend } : {}),
   };
 }
 
@@ -361,7 +369,7 @@ export const candidateContactPoolClient = {
     const envelope = decodePayload(
       CandidateContactPoolEnvelopeSchema,
       await transport.get(
-        `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/candidate-contact-pool`,
+        `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/candidate-contact-pool${options?.compareSentInformation ? '?compare_sent_information=true' : ''}`,
         requestOptions,
       ),
     );
@@ -464,11 +472,11 @@ export const candidateContactPoolClient = {
     return data;
   },
 
-  async previewInformationPackage(caseNo: string, candidateId: number, options?: { signal?: AbortSignal }): Promise<CandidateInformationPackagePreview> {
+  async previewInformationPackage(caseNo: string, candidateId: number, options?: { signal?: AbortSignal; resend?: boolean }): Promise<CandidateInformationPackagePreview> {
     const canonical = canonicalCaseNo(caseNo);
     const { token } = mutationIdentity();
     const envelope = decodePayload(mutationEnvelope(InformationPackagePreviewSchema), await transport.get(
-      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/package/preview`,
+      `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/package/preview${options?.resend ? '?resend=true' : ''}`,
       { token, signal: options?.signal },
     ));
     const data = envelope.data;
@@ -537,6 +545,7 @@ export const candidateContactPoolClient = {
           actor: command.actor,
           preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(command.previewFingerprint),
           event_key: z.string().min(1).max(100).parse(command.eventKey),
+          ...(command.resend ? { resend: true } : {}),
         },
         { token },
       ),

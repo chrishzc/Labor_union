@@ -35,6 +35,7 @@ class AddCandidatesRequest(_EventIdentity):
 
 class SendCandidateInformationRequest(_EventIdentity):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    resend: bool = False
 
 
 class CandidateInformationSectionView(BaseModel):
@@ -183,6 +184,16 @@ class CandidateInformationMap(BaseModel):
     package: CandidateInformationDeliveryView | None = None
 
 
+class CandidateInformationChangeView(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+
+    document: str
+    section: str
+    field: str
+    before: str | None
+    after: str | None
+
+
 class CandidateContactView(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
@@ -198,6 +209,7 @@ class CandidateContactView(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
     latest_willingness_event_id: int | None = Field(default=None, gt=0)
     information: CandidateInformationMap
+    information_changes: list[CandidateInformationChangeView] | None = None
 
     @model_validator(mode="after")
     def validate_service_date_range(self) -> "CandidateContactView":

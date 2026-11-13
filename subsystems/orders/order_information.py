@@ -224,8 +224,8 @@ def build_weekly_information(case_no, start_date, weekly):
                                     weekly["date_basis"] == "confirmed" and not weekly["warnings"] and bool(rows))
 
 
-def bind_weekly_information(common, candidate_id, staff_name, recipient):
-    if not common.send_allowed:
+def bind_weekly_information(common, candidate_id, staff_name, recipient, *, require_saved_dates=True):
+    if require_saved_dates and not common.send_allowed:
         raise ValueError("candidate_weekly_service_dates_not_ready")
     fingerprint = projection_fingerprint({"case_no": common.case_no, "candidate_id": candidate_id,
         "info_type": 3, "content": common.content_fingerprint, "recipient": recipient})
@@ -271,10 +271,10 @@ def _candidate_line_sections(
     fields, blockers, _warnings = _project_fields(template, facts, field_issues)
     if blockers:
         raise ValueError(blockers[0])
-    # Candidate LINE cards are deliberately redacted. The admin preview retains
-    # the complete projection, while provider-bound content excludes direct PII.
+    # Candidate information one includes the service address. Keep customer
+    # names, phone numbers and the duplicate address in sheet two out of these rows.
     excluded = {
-        "f_101_c1", "f_102_c2", "f_103_c3", "f_108_c8",
+        "f_101_c1", "f_102_c2", "f_103_c3",
         "f_201_e1", "f_202_e2", "f_203_e3", "f_205_e5",
     }
     info_two_diet = {
@@ -344,7 +344,7 @@ def _candidate_field_value(item: OrderInformationFieldView) -> str:
 
 
 def build_formal_information_sections(info_type, facts, field_issues):
-    """Full customer sheet projection; candidate cards keep their redaction."""
+    """Full customer sheet projection for the formal recommendation."""
     if info_type not in (1, 2):
         raise ValueError("info_type_invalid")
     return _candidate_line_sections(info_type, facts, field_issues, include_contact_details=True, audience='customer')

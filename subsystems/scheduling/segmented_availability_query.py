@@ -101,6 +101,7 @@ def search_segmented_caregiver_availability(
         filter_policy,
         inquiry=False,
         include_candidate_options=include_candidate_options,
+        include_waiting_deposit_locks=True,
     )
 
 
@@ -110,6 +111,8 @@ def search_candidate_inquiry_availability(
     as_of: Any,
     facts_port: SegmentedAvailabilityFactsPort | None = None,
     filter_policy: dict[str, Any] | None = None,
+    *,
+    include_waiting_deposit_locks: bool = True,
 ) -> Dict[str, Any]:
     """Check the planned inquiry window, never project official service dates."""
     return _search_availability(
@@ -121,6 +124,7 @@ def search_candidate_inquiry_availability(
         filter_policy,
         inquiry=True,
         include_candidate_options=True,
+        include_waiting_deposit_locks=include_waiting_deposit_locks,
     )
 
 
@@ -134,6 +138,7 @@ def _search_availability(
     *,
     inquiry,
     include_candidate_options,
+    include_waiting_deposit_locks,
 ):
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
@@ -231,7 +236,7 @@ def _search_availability(
         )
 
     active_lock_days = []
-    for row in loaded_facts["active_lock_rows"]:
+    for row in loaded_facts["active_lock_rows"] if include_waiting_deposit_locks else ():
         if row.get("case_no") == case_no or not row["active_marker"]:
             continue
         for day in _matching_shift_dates(row, "lock_date", wanted_time, planned_start, planned_end):

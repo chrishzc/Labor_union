@@ -34,7 +34,8 @@ from api.schemas.candidate_contact_pool import (
     CaseInformationPreviewView,
     CaseWeeklyServicePreviewView,
 )
-from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.authentication_session import AdminPrincipal, has_required_capability
+from subsystems.line.capabilities import LineCapability
 from subsystems.scheduling import candidate_contact_pool_workflow as workflow
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.segmented_availability_repository import MySqlSegmentedAvailabilityFactsRepository
@@ -129,10 +130,13 @@ def preview_case_weekly_dates(case_no: str, req: CandidateWeeklyServiceDatesPrev
     "/orders/{case_no}/candidate-contact-pool",
     response_model=BaseResponse[CandidateContactPoolView],
 )
-def query_candidate_contact_pool(case_no: str, principal: AdminPrincipal = Depends(require_line_matching_reader)):
-    del principal
+def query_candidate_contact_pool(case_no: str, principal: AdminPrincipal = Depends(require_line_matching_reader),
+                                 compare_sent_information: bool = False):
+    can_compare = compare_sent_information and has_required_capability(principal, LineCapability.MATCHING_SEND.value)
     return BaseResponse(
-        data=CandidateContactPoolView.model_validate(workflow.query_pool(case_no)),
+        data=CandidateContactPoolView.model_validate(workflow.query_pool(
+            case_no, compare_sent_information=True,
+        ) if can_compare else workflow.query_pool(case_no)),
         message="成功讀取候選聯繫池",
     )
 
@@ -177,11 +181,12 @@ def preview_candidate_information(case_no: str, candidate_id: int, info_type: in
     response_model=BaseResponse[CandidateInformationPackagePreviewView],
 )
 def preview_candidate_information_package(case_no: str, candidate_id: int,
+                                  resend: bool = False,
                                   principal: AdminPrincipal = Depends(require_line_matching_sender)):
     del principal
     try:
         return BaseResponse(data=CandidateInformationPackagePreviewView.model_validate(
-            workflow.preview_information_package(case_no, candidate_id)), message="已讀取寄送內容")
+            workflow.preview_information_package(case_no, candidate_id, resend=resend)), message="已讀取寄送內容")
     except ValueError as error:
         raise _information_error(error) from error
 
@@ -236,7 +241,8 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
     _require_actor(principal, req.actor)
     try:
         result = workflow.send_information(
-            case_no, candidate_id, req.actor, req.event_key, req.preview_fingerprint
+            case_no, candidate_id, req.actor, req.event_key, req.preview_fingerprint,
+            resend=req.resend,
         )
         return BaseResponse(
             data=SendCandidateInformationResult.model_validate(result),

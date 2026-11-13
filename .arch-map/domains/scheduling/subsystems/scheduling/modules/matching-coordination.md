@@ -32,7 +32,7 @@
   - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/matching_recommendation_application.py` — 以有效班次及需求時段協調候選檔期判定。
   - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；以需求班次對應的日期投影 actual conflict、待確認與 buffer，分時比較由 query 使用 Scheduling 的占用規則。
-  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；初次整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史，不建立正式服務日期。衝突候選仍可協調。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
+  - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；整包寄送使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史。再次寄送以最新資料建立新任務，沿用既有日期或呈現缺值，不依賴上一筆投遞狀態。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。
   - `ui_react/src/components/OrderInformationSheets.tsx` — 前段每週說明嵌入 Orders-owned 預計日期保存介面；週休選項即時試算但不保存，寄送讀 current 事前服務日期。
@@ -59,6 +59,7 @@
   - `api/routes/line_candidate_contact.py` — 退役表單的舊連結回 410 並提示直接聯絡工會。
   - `api/routes/line_mobile_admin.py`、`line/static/mobile_admin.html` — 工會媒合人工跟進清單、通知狀態及正式排班工具入口；初次搜尋零候選不列為通知待辦。
   - `ui_react/src/api/scheduling/matching_candidate_workflow_client.ts`、`ui_react/src/components/OrderCandidateQueryPanel.tsx` — 待辦工作台初步候選查詢走預計期間入口；多月嫂正式查詢仍走原入口。
+  - `ui_react/src/components/CandidateAvailabilityNotice.tsx` — 新增候選與詢問意願卡共用預計期間的逐位檔期提醒。詢問卡透過既有候選查詢讀取原因及日期。
   - `ui_react/src/components/OrderCandidateContactStatusPanel.tsx`、`ui_react/src/components/OrderFormalRecommendationPanel.tsx` — 客戶名冊接任續辦重用既有操作；可回報草稿／pending command 給外層關閉保護。候選保存與意願異動後正式推薦刷新 current 候選，推薦不等於正式指派。
   - `ui_react/src/components/OrderRecommendationReplacementPanel.tsx` — 推薦頁統一換人入口；無正式指派借用原 Release／Cancel／Create writer，每步原鍵與回條保留；已有指派重用 RPRE，已服務轉介代班。單一換人原因，不捏造 evidence。
   - `api/routes/matching_coordination.py`

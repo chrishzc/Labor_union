@@ -13,11 +13,14 @@ import {
   type CaseWeeklyServicePreview,
 } from '../api/scheduling/candidate_contact_pool_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { defaultMatchingFilterPolicy, matchingCandidateWorkflowClient, type MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
+import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { CandidateInformationPages, CandidateWeeklyServiceTable, OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
 import { CandidatePlannedServiceDates } from './CandidatePlannedServiceDates';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { CaregiverCommuteQuery } from './CaregiverCommute';
+import { CandidateAvailabilityNotice } from './CandidateAvailabilityNotice';
 
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
@@ -29,6 +32,7 @@ interface OrderCandidateContactStatusPanelProps {
   presentation?: 'legacy' | 'workbench';
   onOpenCustomerConfirmation?: (candidateId: number) => void;
   focusedCandidateId?: number;
+  visible?: boolean;
 }
 
 type ContactStatusState =
@@ -54,13 +58,15 @@ function deliveryStatus(
   return `${labels[delivery.status]} · ${compact ? delivery.sent_at.replace('T', ' ').slice(0, 16) : delivery.sent_at}`;
 }
 
-export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange, presentation = 'legacy', onOpenCustomerConfirmation, focusedCandidateId }) => {
+export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved, onAddCandidates, focusWillingness = false, revision = 0, onEditStateChange, presentation = 'legacy', onOpenCustomerConfirmation, focusedCandidateId, visible = true }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
+  const [availability, setAvailability] = useState<MatchingAvailability | 'error' | null>(null);
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [willingnessNotices, setWillingnessNotices] = useState<Record<number, string>>({});
   const [sharedInformation, setSharedInformation] = useState<{ kind?: CandidateInformationKind } | null>(null);
-  const [informationTarget, setInformationTarget] = useState<number | null>(null);
+  const [informationTarget, setInformationTarget] = useState<{ candidateId: number; resend: boolean } | null>(null);
   const [datesReady, setDatesReady] = useState<boolean | null>(null);
   const [weeklyStartDate, setWeeklyStartDate] = useState<string | null>(null);
   const [weekly, setWeekly] = useState<CaseWeeklyServicePreview | null>(null);
@@ -168,7 +174,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     const presentationGeneration = ++poolPresentationGeneration.current;
     statusQueryController.current = controller;
     setState({ status: 'loading' });
-    void candidateContactPoolClient.query(requestedCaseNo, { signal: controller.signal })
+    void candidateContactPoolClient.query(requestedCaseNo, { signal: controller.signal, ...(workbench ? { compareSentInformation: true } : {}) })
       .then((data) => {
         if (
           !controller.signal.aborted
@@ -198,6 +204,23 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     const controller = startStatusQuery(caseNo);
     return () => controller.abort();
   }, [caseNo, revision]);
+
+  const hasActiveCandidates = state.status === 'ready' && state.data.case_no === caseNo
+    && state.data.candidates.some(candidate => candidate.status === 'active');
+  const currentAvailability = availability && availability !== 'error' && availability.case_no === caseNo ? availability : null;
+  useEffect(() => {
+    if (!workbench || !visible) return;
+    return subscribeStaffAvailabilityChanges(() => setAvailabilityRevision(value => value + 1));
+  }, [workbench, visible]);
+  useEffect(() => {
+    setAvailability(null);
+    if (!workbench || !visible || !hasActiveCandidates) return;
+    const controller = new AbortController();
+    void matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, defaultMatchingFilterPolicy, { signal: controller.signal })
+      .then(data => { if (!controller.signal.aborted) setAvailability(data); })
+      .catch(() => { if (!controller.signal.aborted) setAvailability('error'); });
+    return () => controller.abort();
+  }, [caseNo, workbench, visible, hasActiveCandidates, availabilityRevision, revision]);
 
   useEffect(() => {
     if (presentation !== 'workbench') return;
@@ -249,16 +272,17 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       ...current, status: 'observing', error: null,
     });
     try {
-      const readback = await candidateContactPoolClient.query(command.caseNo);
+      const readback = await candidateContactPoolClient.query(command.caseNo, workbench ? { compareSentInformation: true } : undefined);
       const candidates = readback.candidates.filter((candidate) => candidate.id === command.candidateId);
       const delivery = candidates[0]?.information.package;
       if (readback.case_no !== command.caseNo || candidates.length !== 1 || !delivery) {
         throw new Error('寄送任務回讀與本次操作不一致。');
       }
-      if (
+      const hasNewerPackage = command.resend && delivery.event_id != null && delivery.event_id > current.receipt.event_id;
+      if (!hasNewerPackage && (
         delivery.event_id !== current.receipt.event_id
         || delivery.line_task_id !== current.receipt.line_task_id
-      ) {
+      )) {
         throw new Error('寄送結果與剛才的寄送不一致；請重新讀取投遞狀態。');
       }
       orderMutationFlowStore.clearCandidateInformation(
@@ -355,7 +379,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       ...current, status: 'observing', error: null,
     });
     try {
-      const readback = await candidateContactPoolClient.query(command.caseNo, { signal: controller.signal });
+      const readback = await candidateContactPoolClient.query(command.caseNo, { signal: controller.signal, ...(workbench ? { compareSentInformation: true } : {}) });
       if (
         controller.signal.aborted
         || !mounted.current
@@ -538,9 +562,25 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       </div>)}</dl>
     </details>;
   };
+  const openInformation = (candidate: CandidateContact, resend: boolean) => {
+    setMutationError(null);
+    setSendError(null);
+    setInformationTarget({ candidateId: candidate.id, resend });
+  };
+  const renderSendPreview = (candidate: CandidateContact) => {
+    const openerId = `candidate-package-${caseNo}-${candidate.id}${informationTarget?.resend ? '-resend' : ''}`;
+    const candidateSend = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id);
+    return informationTarget?.candidateId === candidate.id && <OrderCandidateInformationSendPanel
+      key={openerId} caseNo={caseNo} candidate={candidate} revision={informationRevision}
+      blocked={informationTarget.resend ? candidateSend !== undefined && pendingStatus(candidateSend.status) : protectedOperation}
+      datesReady={informationTarget.resend || presentation !== 'workbench' || canUseDates}
+      resend={informationTarget.resend} onSubmit={submitInformation}
+      sendError={sendError?.candidateId === candidate.id ? sendError.message : mutationError}
+      onClose={() => { setMutationError(null); setInformationTarget(null); document.getElementById(openerId)?.focus(); }}
+      onViewDates={() => presentation === 'workbench' ? setWeeklyOpen(true) : setSharedInformation({ kind: 3 })} />;
+  };
   const renderInformation = (candidate: CandidateContact) => {
-    const expanded = informationTarget === candidate.id;
-    const previewLabel = candidate.information.package ? '預覽案件資訊' : '預覽並寄送';
+    const expanded = informationTarget?.candidateId === candidate.id;
     const openerId = `candidate-package-${caseNo}-${candidate.id}`;
     return <>
       <div className="candidate-package-entry">
@@ -549,18 +589,17 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           <p>訂單資訊一、訂單資訊二、每週服務說明、共用回覆卡</p>
           {candidate.information.package && <p>{deliveryStatus(candidate.information.package, true)}</p>}
         </div>
-        <button id={openerId} type="button" className="btn-primary-action" aria-expanded={expanded}
-          aria-label={`${previewLabel}（${candidate.staff_name}）`}
+        {!candidate.information.package && <button id={openerId} type="button" className="btn-primary-action"
+          aria-expanded={expanded && !informationTarget?.resend}
+          aria-label={`預覽並寄送（${candidate.staff_name}）`}
           disabled={candidate.status !== 'active' || protectedOperation}
-          onClick={() => { setMutationError(null); setInformationTarget(candidate.id); }}>
-          {previewLabel}
-        </button>
+          onClick={() => openInformation(candidate, false)}>預覽並寄送</button>}
+        <button id={`${openerId}-resend`} type="button" className="btn-primary-action"
+          aria-expanded={expanded && informationTarget?.resend === true}
+          aria-label={`再次寄送（${candidate.staff_name}）`}
+          onClick={() => openInformation(candidate, true)}>再次寄送</button>
       </div>
-      {expanded && <OrderCandidateInformationSendPanel
-        key={openerId} caseNo={caseNo} candidate={candidate} revision={informationRevision}
-        blocked={mutationPending} onSubmit={submitInformation} sendError={mutationError}
-        onClose={() => { setMutationError(null); setInformationTarget(null); document.getElementById(openerId)?.focus(); }}
-        onViewDates={() => setSharedInformation({ kind: 3 })} />}
+      {renderSendPreview(candidate)}
       {renderInformationHistory(candidate)}
     </>;
   };
@@ -671,6 +710,10 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       {presentation === 'workbench' && datesReady === false &&
         <p>請先保存每週服務說明的日期。</p>}
       {presentation === 'workbench' && state.status === 'loading' && <p role="status">正在讀取人選…</p>}
+      {workbench && visible && hasActiveCandidates && (availability === 'error'
+        ? <p className="order-case-review-note" role="alert">目前無法查詢候選月嫂的檔期。{' '}
+          <button type="button" onClick={() => setAvailabilityRevision(value => value + 1)}>重新查詢檔期</button></p>
+        : !currentAvailability && <p role="status">正在查詢候選月嫂的檔期…</p>)}
       {state.status === 'ready' && state.data.candidates.length > 0 && (
         <>
           <div className="order-candidate-cards" aria-label="候選聯絡正式狀態">
@@ -683,8 +726,16 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 || willingnessFlow?.status === 'outcome_unknown'
                 || willingnessFlow?.status === 'observation_failed'
                 || willingnessFlow?.status === 'observing';
+              const plannedPeriod = candidate.status === 'active' ? currentAvailability : null;
+              const inquiryPeriodChanged = plannedPeriod !== null && (
+                candidate.service_start_date !== plannedPeriod.planned_start_date
+                || candidate.service_end_date !== plannedPeriod.planned_end_date
+              );
               if (presentation === 'workbench') return <article className="order-candidate-card compact" key={candidate.id} id={`candidate-inquiry-${caseNo}-${candidate.id}`} tabIndex={-1}>
-                <div className="candidate-card-identity"><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
+                <div className="candidate-card-identity"><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><p>
+                  {plannedPeriod ? `預計服務期間：${plannedPeriod.planned_start_date} ～ ${plannedPeriod.planned_end_date}`
+                    : `詢問期間：${candidate.service_start_date} ～ ${candidate.service_end_date}`}
+                </p>
                   <div className="candidate-card-actions">
                   <button type="button" aria-label={`手動記錄接案意願（${candidate.staff_name}）`} aria-expanded={responseTarget?.id === candidate.id}
                     aria-controls={`candidate-willingness-${caseNo}-${candidate.id}`} disabled={candidate.status !== 'active' || protectedOperation} onClick={() => {
@@ -694,9 +745,10 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                     setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: drafts[candidate.id] ?? candidate.reason ?? '' }));
                     setMutationError(null);
                   }}>手動記錄接案意願</button>
-                  <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information.package && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
+                  <span className={`order-candidate-willingness ${candidate.willingness}`}>{inquiryPeriodChanged && candidate.willingness !== 'pending' && '原期間・'}{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information.package && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
                   </div>
                 </div>
+                {plannedPeriod && <CandidateAvailabilityNotice availability={plannedPeriod} staffId={candidate.staff_id} showAdvisories={false} />}
                 <div className="candidate-card-operations">
                   <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} compact />
                   <div className="candidate-card-footer">
@@ -707,9 +759,21 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                         aria-label={`確認寄送（${candidate.staff_name}）`} disabled={!canUseDates || !previewRequested || !previewDocuments}
                         onClick={() => { void confirmCandidateSend(candidate); }}>{preparingSend === candidate.id ? '寄送處理中…' : '確認寄送'}</button>}
                     </>}
+                    <button id={`candidate-package-${caseNo}-${candidate.id}-resend`}
+                      type="button" className="btn-primary-action" aria-expanded={informationTarget?.candidateId === candidate.id}
+                      aria-label={`再次寄送（${candidate.staff_name}）`}
+                      onClick={() => openInformation(candidate, true)}>再次寄送</button>
                   </div>
                 </div>
+                {candidate.information_changes && candidate.information_changes.length > 0 && <div className="order-v2-drawer-error" role="status">
+                  <strong>資料已改變，請重新寄送確認意願</strong>
+                  <ul>{candidate.information_changes.map((change, index) => <li key={index}>
+                    <strong>{change.document}／{change.section}／{change.field}</strong>{' '}
+                    <span>{change.before ?? '未列出'} → {change.after ?? '未列出'}</span>
+                  </li>)}</ul>
+                </div>}
                 {renderInformationHistory(candidate)}
+                {renderSendPreview(candidate)}
                 {candidate.reason && <p>詢問備註：{candidate.reason}</p>}
                 {responseTarget?.id === candidate.id && <form noValidate className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
                   aria-label={`手動記錄接案意願（${candidate.staff_name}）`} onSubmit={event => {

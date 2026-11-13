@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from subsystems.orders.order_information import CandidateInformationPreview, CandidateInformationSection, build_weekly_information, bind_weekly_information
+from subsystems.orders.order_information import bind_weekly_information, build_candidate_information, build_weekly_information
 from subsystems.scheduling import candidate_contact_pool_workflow as candidate_workflow
 from infrastructure.line.messaging_api_adapter import _request_body
 from subsystems.scheduling.proposed_weekly_service_projection import project_order_weekly_service
@@ -16,6 +16,48 @@ from infrastructure.mysql.matching_notification_repository import (
     MySqlMatchingNotificationRepository, _CONFIRMATION_SCHEDULE_FACTS_SQL,
     _CUSTOMER_PROFILE_FACTS_SQL, _CURRENT_RESUMES_SQL,
 )
+
+
+def test_candidate_changes_use_last_delivered_picture_snapshot():
+    from dataclasses import asdict
+    from subsystems.line.table_image_contracts import candidate_information_document
+
+    sections = {
+        1: ('服務約定', (('預計服務開始日', '2026-11-09'), ('每日服務時數', '9'))),
+        2: ('照護需求', (('特殊照護時應注意事項', '早班'),)),
+        3: ('每週服務說明', (('第一週', '五天'),)),
+    }
+    pictures = [{"document": asdict(candidate_information_document('CASE-1', kind, (section,)))}
+                for kind, section in sections.items()]
+    sections[1] = ('服務約定', (('預計服務開始日', '2026-11-30'), ('每日服務時數', '9')))
+    sections[2] = ('照護需求', (('過敏體質', '花生'),))
+    cursor = SimpleNamespace(execute=lambda _sql, args: assert_last_sent(args),
+                             fetchone=lambda: {'payload_snapshot': {'_table_documents': pictures}})
+
+    def assert_last_sent(args):
+        assert args == (12, 'delivered')
+
+    def preview(_case, _candidate, kind, **options):
+        assert options == {'require_saved_dates': False}
+        title, rows = sections[kind]
+        return SimpleNamespace(line_sections=[SimpleNamespace(title=title, rows=rows)])
+
+    events = [
+        {'id': 1, 'event_key': 'delivered', 'occurred_at': datetime(2026, 11, 1), 'current_delivery_status': 'sent',
+         'payload': {'information_package': True, 'line_task_id': 12}},
+        {'id': 2, 'event_key': 'failed-resend', 'occurred_at': datetime(2026, 11, 2), 'current_delivery_status': 'failed',
+         'payload': {'information_package': True, 'line_task_id': 13}},
+    ]
+    repository = SimpleNamespace(preview_candidate_information=preview)
+    changes = candidate_workflow._sent_information_changes(cursor, repository, 'CASE-1', 4, events)
+    assert [(item.field, item.before, item.after) for item in changes] == [
+        ('預計開始日', '2026-11-09', '2026-11-30'),
+        ('照護注意事項', '早班', None),
+        ('過敏體質', None, '花生'),
+    ]
+    cursor.fetchone = lambda: {'payload_snapshot': {'type': 'flex'}}
+    assert candidate_workflow._sent_information_changes(cursor, repository, 'CASE-1', 4, events) is None
+    assert candidate_workflow._sent_information_changes(cursor, repository, 'CASE-1', 4, events[1:]) is None
 
 
 def confirmation_repository(monkeypatch, saved, periods, required_days=None):
@@ -157,7 +199,7 @@ def test_current_delivery_uses_line_task_fact_and_retains_exact_receipt(kind, ac
 def package_send(monkeypatch):
     start, end = date(2026, 10, 4), date(2026, 10, 5)
     recipient = "U" + "a" * 32
-    facts = {"dates_saved": True, "recipient": recipient}
+    facts = {"dates_saved": True, "recipient": recipient, "address": "測試市範例路 1 號"}
     queued, events = [], []
 
     class Cursor:
@@ -174,6 +216,7 @@ def package_send(monkeypatch):
                 self.row = next((event for event in events if event["payload"].get("information_package")), None)
             elif sql.startswith("INSERT INTO caregiver_candidate_contact_events"):
                 pool_id, candidate_id, event_type, event_key, actor, payload = params
+                self.lastrowid = 31 + len(events)
                 events.append(dict(id=self.lastrowid, pool_id=pool_id, candidate_id=candidate_id, event_type=event_type,
                     event_key=event_key, actor=actor, payload=json.loads(payload), occurred_at=datetime(2026, 10, 1)))
             else:
@@ -185,15 +228,17 @@ def package_send(monkeypatch):
     class Repository:
         def preview_candidate_information(self, case_no, candidate_id, kind, **_options):
             if kind == 3:
-                common = build_weekly_information(case_no, start, weekly("confirmed" if facts["dates_saved"] else "planned"))
-                return bind_weekly_information(common, candidate_id, "月嫂甲", facts["recipient"])
-            return CandidateInformationPreview(case_no, candidate_id, kind, "月嫂甲", f"資訊{kind}",
-                (CandidateInformationSection(f"資訊{kind}", (("項目", "內容"),)),),
-                hashlib.sha256(f"{kind}:{candidate_id}:{facts['recipient']}".encode()).hexdigest())
+                data = weekly() if facts["dates_saved"] else {"date_basis": "planned", "warnings": (), "rows": ()}
+                common = build_weekly_information(case_no, start, data)
+                return bind_weekly_information(common, candidate_id, "月嫂甲", facts["recipient"],
+                                               require_saved_dates=_options["require_saved_dates"])
+            sheet_facts = {"case_no": case_no, "staff_name": "月嫂甲", "address": facts["address"]}
+            return build_candidate_information(case_no, candidate_id, kind, sheet_facts, {}, facts["recipient"])
 
     def enqueue(request):
         queued.append(request)
-        return SimpleNamespace(task_id=SimpleNamespace(value=42))
+        task_id = 41 + len(queued)
+        return SimpleNamespace(task_id=SimpleNamespace(value=task_id))
 
     connection, cursor = object(), Cursor()
     monkeypatch.setattr(candidate_workflow, "MySqlOrderInformationRepository", lambda _: Repository())
@@ -204,11 +249,12 @@ def package_send(monkeypatch):
     monkeypatch.setattr(candidate_workflow, "configured_message_payload", lambda _connection, _key, card, _values: card)
     monkeypatch.setattr("subsystems.line.table_image_messages.image_url", lambda _key, index, _now: f"https://example.test/image/{index}")
 
-    def preview():
-        return candidate_workflow._information_package_preview(connection, "CASE-1", 3)[0]
+    def preview(*, resend=False):
+        return candidate_workflow._information_package_preview(connection, "CASE-1", 3, resend=resend)[0]
 
-    def send(fingerprint, key="initial-package"):
-        return candidate_workflow.send_information("CASE-1", 3, "operator", key, fingerprint)
+    def send(fingerprint, key="initial-package", *, resend=False):
+        return candidate_workflow.send_information("CASE-1", 3, "operator", key, fingerprint,
+                                                   resend=resend)
 
     return SimpleNamespace(facts=facts, queued=queued, events=events, preview=preview, send=send)
 
@@ -216,6 +262,7 @@ def package_send(monkeypatch):
 def test_candidate_information_package_is_one_push_and_one_receipt(package_send):
     preview = package_send.preview()
     assert [document.info_type for document in preview.documents] == [1, 2, 3]
+    assert ("服務地址", package_send.facts["address"]) in preview.documents[0].line_sections[0].rows
     receipt = package_send.send(preview.preview_fingerprint)
     assert receipt == {"status": "queued", "event_id": 31, "line_task_id": 42}
     assert package_send.send(preview.preview_fingerprint) == {**receipt, "status": "idempotent_replay"}
@@ -227,6 +274,11 @@ def test_candidate_information_package_is_one_push_and_one_receipt(package_send)
         package_send.send(preview.preview_fingerprint, "another-key")
 
     (request,) = package_send.queued
+    first_image, second_image, _ = json.loads(request.payload_json)["_table_documents"]
+    assert any(row[index:index + 2] == ["服務地址", package_send.facts["address"]]
+               for section in first_image["document"]["sections"] for row in section["rows"] for index in (0, 2))
+    assert all(package_send.facts["address"] not in row
+               for section in second_image["document"]["sections"] for row in section["rows"])
     payload = json.loads(_request_body(request))
     assert payload["to"] == package_send.facts["recipient"]
     (message,) = payload["messages"]
@@ -252,13 +304,35 @@ def test_candidate_information_package_is_one_push_and_one_receipt(package_send)
     assert information.package.line_task_id == receipt["line_task_id"]
 
 
-@pytest.mark.parametrize("change,error", [
-    ("dates_saved", "candidate_weekly_service_dates_not_ready"),
-    ("recipient", "candidate_information_preview_stale"),
+@pytest.mark.parametrize("previous", [False, True])
+def test_resend_accepts_new_commands_without_previous_delivery_or_saved_dates(package_send, previous):
+    if previous:
+        package_send.send(package_send.preview().preview_fingerprint)
+    package_send.facts["address"] = "測試市範例路 2 號"
+    package_send.facts["dates_saved"] = False
+    preview = package_send.preview(resend=True)
+    second = package_send.send(preview.preview_fingerprint, "resend", resend=True)
+    assert second["status"] == "queued"
+    assert package_send.send(preview.preview_fingerprint, "resend", resend=True) == {
+        **second, "status": "idempotent_replay",
+    }
+    third = package_send.send(preview.preview_fingerprint, "again", resend=True)
+    assert third["event_id"] > second["event_id"]
+    assert len(package_send.queued) == 2 + previous
+    assert "測試市範例路 2 號" in package_send.queued[-1].payload_json
+    assert "尚未保存" in package_send.queued[-1].payload_json
+    if previous:
+        assert "測試市範例路 1 號" in package_send.queued[0].payload_json
+
+
+@pytest.mark.parametrize("change,value,error", [
+    ("dates_saved", False, "candidate_weekly_service_dates_not_ready"),
+    ("recipient", "U" + "b" * 32, "candidate_information_preview_stale"),
+    ("address", "測試市範例路 2 號", "candidate_information_preview_stale"),
 ])
-def test_candidate_package_rechecks_readiness_before_any_write(package_send, change, error):
+def test_candidate_package_rechecks_readiness_before_any_write(package_send, change, value, error):
     preview = package_send.preview()
-    package_send.facts[change] = False if change == "dates_saved" else "U" + "b" * 32
+    package_send.facts[change] = value
     if change == "dates_saved":
         blocked = package_send.preview()
         assert blocked.preview_fingerprint is None

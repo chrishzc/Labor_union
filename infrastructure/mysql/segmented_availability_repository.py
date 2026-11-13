@@ -193,11 +193,13 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_waiting_buffer_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT segment.id AS segment_id, segment.staff_id, segment.assigned_start_date, segment.assigned_end_date "
-            "FROM caregiver_matching_plan_segments segment "
-            "INNER JOIN caregiver_availability_locks header ON header.plan_id = segment.plan_id "
-            "WHERE header.status = 'active' AND header.is_active = 1 "
-            "AND segment.assigned_end_date < %s AND DATE_ADD(segment.assigned_end_date, INTERVAL 7 DAY) >= %s",
+            "SELECT days.segment_id, days.staff_id, "
+            "MIN(days.lock_date) AS assigned_start_date, MAX(days.lock_date) AS assigned_end_date "
+            "FROM caregiver_availability_locks header "
+            "JOIN caregiver_availability_lock_days days ON days.lock_id = header.id "
+            "WHERE header.status = 'active' AND header.is_active = 1 AND days.active_marker = 1 "
+            "GROUP BY header.id, days.segment_id, days.staff_id "
+            "HAVING MAX(days.lock_date) < %s AND DATE_ADD(MAX(days.lock_date), INTERVAL 7 DAY) >= %s",
             (window_end, window_start),
         )
         return cursor.fetchall() or []

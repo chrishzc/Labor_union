@@ -114,6 +114,7 @@ class MySqlOrderInformationRepository:
         *,
         for_update: bool = False,
         service_period: tuple[object, object] | None = None,
+        require_saved_dates: bool = True,
     ):
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_SQL + (" FOR UPDATE" if for_update else ""), (case_no,))
@@ -150,7 +151,8 @@ class MySqlOrderInformationRepository:
             from subsystems.orders.order_information import build_weekly_information
             weekly = MySqlMatchingNotificationRepository(self._connection).case_weekly_service_preview(case_no)
             common = build_weekly_information(case_no, start_date, weekly)
-            return bind_weekly_information(common, candidate_id, str(candidate["staff_name"]), candidate.get("line_user_id"))
+            return bind_weekly_information(common, candidate_id, str(candidate["staff_name"]),
+                                           candidate.get("line_user_id"), require_saved_dates=require_saved_dates)
         return build_candidate_information(case_no, candidate_id, info_type, facts, issues, candidate.get("line_user_id"))
 
     def preview_matching_plan_information(

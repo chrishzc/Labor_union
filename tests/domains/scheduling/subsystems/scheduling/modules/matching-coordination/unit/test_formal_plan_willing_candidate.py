@@ -241,7 +241,7 @@ def test_willing_candidate_recommendation_uses_inquiry_period_without_preview_da
     assert captured["segment_drafts"] == [{"staff_id": 1, "start_date": "2026-12-21", "end_date": "2027-01-09"}]
 
 
-@pytest.mark.parametrize("reason", ["assignment", "staff_unavailability", "active_lock"])
+@pytest.mark.parametrize("reason", ["assignment", "schedule", "staff_unavailability", "requires_review"])
 def test_recommendation_still_blocks_real_candidate_period_conflicts(monkeypatch, reason):
     monkeypatch.setattr(
         matching_plan_workflow, "search_candidate_inquiry_availability",
@@ -411,6 +411,38 @@ class _FormalPlanFacts:
                 else []
             ),
         }
+
+
+def test_waiting_deposit_reservation_is_visible_but_does_not_block_single_recommendation():
+    from datetime import time
+
+    from domains.orders.terms import ServiceTimeTerms
+    from subsystems.scheduling.segmented_availability_query import search_candidate_inquiry_availability
+
+    service_time = ServiceTimeTerms(time(8), time(16), 0)
+    facts = _FormalPlanFacts().load_case_facts('CASE-WAITING-DEPOSIT')
+    facts['order']['service_time'] = service_time
+    facts['active_lock_rows'] = [{
+        'case_no': 'OTHER-CASE', 'staff_id': 1, 'active_marker': 1,
+        'lock_date': '2026-12-10', 'service_time': service_time,
+    }]
+    port = SimpleNamespace(load_case_facts=lambda _case_no: facts)
+    segments = [{'staff_id': 1, 'assigned_start_date': '2026-12-01', 'assigned_end_date': '2026-12-20'}]
+
+    inquiry = search_candidate_inquiry_availability('CASE-WAITING-DEPOSIT', [], '2026-11-30', port)
+    assert any(item['reason_code'] == 'active_lock' and item['work_date'] == '2026-12-10'
+               for item in inquiry['conflicts'])
+    assert not inquiry['complete_combinations']
+    matching_plan_workflow._validate_current_availability('CASE-WAITING-DEPOSIT', segments, '2026-11-30', port, True)
+
+    facts['schedule_rows'] = [{
+        'case_no': 'THIRD-CASE', 'staff_id': 1, 'assignment_id': 2,
+        'work_date': '2026-12-10', 'service_time': service_time,
+    }]
+    with pytest.raises(matching_plan_workflow.MatchingPlanAvailabilityConflict) as caught:
+        matching_plan_workflow._validate_current_availability('CASE-WAITING-DEPOSIT', segments, '2026-11-30', port, True)
+    assert ('schedule', '2026-12-10') in caught.value.conflicts
+    assert all(reason != 'active_lock' for reason, _ in caught.value.conflicts)
 
 
 def test_current_willing_candidate_creates_plan_without_candidate_display_dates(monkeypatch):

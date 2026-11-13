@@ -8,6 +8,7 @@ import json
 import pytest
 
 from subsystems.orders.order_information import (
+    build_case_information,
     build_candidate_information,
     OrderInformationOwnerSnapshot,
     OrderInformationQueryService,
@@ -18,6 +19,7 @@ from subsystems.orders.order_information import (
 def test_candidate_information_works_without_assignment_or_beclass_and_binds_content():
     facts = {"case_no": "INQUIRY-1", "staff_name": "測試月嫂", "assigned_start_date": date(2026, 10, 1),
              "assigned_end_date": date(2026, 10, 5), "service_hours_per_day": 8,
+             "address": "測試市範例路 1 號", "client_name": "測試客戶", "phone": "0900000000",
              "requires_cooking": False, "service_time": "09:00–17:00", "total_salary": None,
              "deposit_amount": 12000, "deposit_due_date": date(2026, 9, 20),
              "first_payment_amount": 36000, "first_payment_due_date": date(2026, 10, 1),
@@ -35,17 +37,27 @@ def test_candidate_information_works_without_assignment_or_beclass_and_binds_con
     assert "食材準備參考" in second.text
     sections = {section.title: dict(section.rows) for section in first.line_sections}
     first_rows = sections["服務約定"]
-    assert [label for label, _ in first.line_sections[0].rows[:8]] == [
+    assert [label for label, _ in first.line_sections[0].rows[:9]] == [
         "預計服務開始日",
         "預計服務結束日",
         "每日服務時段",
         "每日服務時數",
         "服務方式",
         "希望服務天數",
+        "服務地址",
         "下廚需求",
         "胎數",
     ]
     assert first_rows["每日服務時數"] == "8"
+    assert first_rows["服務地址"] == facts["address"]
+    shared = build_case_information("INQUIRY-1", 1, facts, {})
+    assert shared.line_sections == first.line_sections
+    assert "服務地址：測試市範例路 1 號" in first.text
+    assert facts["client_name"] not in first.text and facts["phone"] not in first.text
+    assert facts["address"] not in {value for section in second.line_sections for _, value in section.rows}
+    changed = {**facts, "address": "測試市範例路 2 號"}
+    assert shared.content_fingerprint != build_case_information("INQUIRY-1", 1, changed, {}).content_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, changed, {}, "recipient-a").preview_fingerprint
     assert first_rows["下廚需求"] == "不需要下廚"
     assert '客戶付款約定' not in sections
     assert sections['月嫂薪資']['薪資單價'] == '待確認'
