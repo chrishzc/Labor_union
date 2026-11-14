@@ -124,7 +124,12 @@ class LineIdentityManagementApplication:
             "subject_type": role.value, "binding_version": command.expected_version.value,
             "updated_at": expected_updated_at.isoformat(),
         })
-        with self._unit_of_work_factory() as unit_of_work:
+        with (
+            self._unit_of_work_factory() as unit_of_work,
+            unit_of_work.outbox.menu_provider_lock(user_id) as acquired,
+        ):
+            if not acquired:
+                raise RuntimeError("line_identity_menu_operation_in_progress")
             unit_of_work.outbox.lock_menu_user(user_id)
             receipt = unit_of_work.receipts.get(key)
             if receipt is not None:
@@ -136,11 +141,15 @@ class LineIdentityManagementApplication:
                 raise LookupError("line_identity_binding_not_found")
             if current.version != command.expected_version:
                 raise RuntimeError("line_identity_binding_version_conflict")
-            if current.status is not LineIdentityBindingStatus.REVOKED:
+            if current.status not in {
+                LineIdentityBindingStatus.REVOCATION_PENDING, LineIdentityBindingStatus.REVOKED,
+            }:
                 raise RuntimeError("line_identity_binding_not_revoked")
             owner = unit_of_work.identity_management.subject_candidate(role, current.subject_reference)
             if _candidate_line_user_id(owner) == user_id:
-                raise RuntimeError("line_identity_owner_projection_conflict")
+                if current.status is LineIdentityBindingStatus.REVOKED:
+                    raise RuntimeError("line_identity_owner_projection_conflict")
+                _clear_binding_owner(unit_of_work, current)
             unit_of_work.identity_management.delete_revoked_binding(
                 user_id, role, command.expected_version, expected_updated_at, role_menu_definition_id(role),
             )

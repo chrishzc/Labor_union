@@ -360,7 +360,7 @@ class MySqlLineIdentityManagementRepository:
             if os.getenv("DEPLOYMENT_PROFILE") == "nas":
                 try:
                     call_mutation(
-                        cursor, "lu_nas_delete_revoked_line_binding_v1",
+                        cursor, "lu_nas_delete_revoked_line_binding_v2",
                         *params, expected_version.value, expected_updated_at,
                     )
                 except MySQLError as error:
@@ -385,7 +385,7 @@ class MySqlLineIdentityManagementRepository:
                 cursor.execute(f"DELETE FROM {table} WHERE line_user_id=%s AND subject_type=%s", params)
             cursor.execute(
                 "DELETE FROM line_identity_role_bindings WHERE line_user_id=%s AND subject_type=%s "
-                "AND binding_status='revoked' AND aggregate_version=%s AND updated_at_utc=%s",
+                "AND binding_status IN ('revoked','revocation_pending') AND aggregate_version=%s AND updated_at_utc=%s",
                 (*params, expected_version.value, expected_updated_at),
             )
             if cursor.rowcount != 1:

@@ -383,6 +383,7 @@ def test_manual_resync_queues_bound_customer_once_and_keeps_identity_unchanged()
 
 
 def test_delete_revoked_binding_is_role_scoped_and_idempotent():
+    from contextlib import nullcontext
     from subsystems.line.identity_management_contracts import LineIdentityBindingActionCommand
 
     user = LineUserId("U-delete-fixture")
@@ -390,6 +391,7 @@ def test_delete_revoked_binding_is_role_scoped_and_idempotent():
     customer, staff = identities.bindings
     identities.get = lambda _, role: next((item for item in identities.bindings if item.subject_type is role), None)
     unit = _UnitOfWork(identities)
+    unit.outbox.menu_provider_lock = lambda _: nullcontext(True)
     calls = []
     owner = {"line_user_id": user.value}
 
@@ -417,6 +419,23 @@ def test_delete_revoked_binding_is_role_scoped_and_idempotent():
     assert calls == [(user, LineBindingSubjectType.CUSTOMER, customer.version, datetime(2026, 11, 13), "customer_menu")]
     assert identities.bindings == (staff,)
     assert unit.commits == len(unit.audit.items) == 1
+
+    identities.bindings = (replace(customer, status=LineIdentityBindingStatus.REVOCATION_PENDING), staff)
+    owner["line_user_id"] = user.value
+    unit.customers = SimpleNamespace(
+        clear_customer=lambda reference, line_user: owner.update(line_user_id=None),
+    )
+    pending_command = replace(command, idempotency_key=IdempotencyKey("delete-pending"))
+    unit.outbox.menu_provider_lock = lambda _: nullcontext(False)
+    with pytest.raises(RuntimeError, match="line_identity_menu_operation_in_progress"):
+        app.delete_revoked_binding(pending_command)
+    assert owner["line_user_id"] == user.value
+    unit.outbox.menu_provider_lock = lambda _: nullcontext(True)
+    app.delete_revoked_binding(pending_command)
+    assert owner["line_user_id"] is None
+    assert identities.bindings == (staff,)
+    assert not unit.outbox.items
+    assert unit.commits == len(unit.audit.items) == 2
 
 
 def test_staff_revocation_queues_a_distinct_customer_successor_menu() -> None:

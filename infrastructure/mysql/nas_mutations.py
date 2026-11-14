@@ -32,10 +32,10 @@ def _staff_guard() -> str:
     END IF;"""
 
 
-# name -> (SQL parameters, body, allowed execution profiles).
-PROCEDURES = {
-    "lu_nas_delete_revoked_line_binding_v1": (
-        "IN p_user VARCHAR(191), IN p_role VARCHAR(20), IN p_version BIGINT UNSIGNED, IN p_updated DATETIME(6)", """
+_DELETE_LINE_BINDING_PARAMETERS = (
+    "IN p_user VARCHAR(191), IN p_role VARCHAR(20), IN p_version BIGINT UNSIGNED, IN p_updated DATETIME(6)"
+)
+_DELETE_REVOKED_LINE_BINDING = """
         DECLARE v_menu VARCHAR(32);
         SET v_menu=CASE p_role WHEN 'customer' THEN 'customer_menu' WHEN 'staff' THEN 'staff_menu'
           WHEN 'admin' THEN 'union_staff_menu' END;
@@ -59,7 +59,19 @@ PROCEDURES = {
           UPDATE line_platform_users SET selected_identity_role=NULL,aggregate_version=aggregate_version+1
             WHERE line_user_id=p_user AND selected_identity_role=p_role;
         END IF;
-        """, ("management",)),
+        """
+
+
+# name -> (SQL parameters, body, allowed execution profiles).
+PROCEDURES = {
+    "lu_nas_delete_revoked_line_binding_v1": (
+        _DELETE_LINE_BINDING_PARAMETERS, _DELETE_REVOKED_LINE_BINDING, ("management",)),
+    "lu_nas_delete_revoked_line_binding_v2": (
+        _DELETE_LINE_BINDING_PARAMETERS,
+        _DELETE_REVOKED_LINE_BINDING.replace(
+            "binding_status='revoked'", "binding_status IN ('revoked','revocation_pending')",
+        ),
+        ("management",)),
     "lu_nas_delete_pending_line_review_v1": (
         "IN p_id BIGINT, IN p_version BIGINT", """
         DELETE FROM line_review_requests

@@ -216,6 +216,7 @@ def permission_plan(connection, database: str) -> dict:
             raise ValueError("NAS security procedure drift; no changes applied")
     additive_line_procedures = {
         "lu_nas_delete_revoked_line_binding_v1",
+        "lu_nas_delete_revoked_line_binding_v2",
         "lu_nas_delete_pending_line_review_v1", "lu_nas_delete_pending_line_pairing_v1",
     }
     baseline_states = {state for name, state in states.items() if name not in additive_line_procedures}

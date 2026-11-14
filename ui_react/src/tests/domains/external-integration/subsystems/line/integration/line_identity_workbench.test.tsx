@@ -7,8 +7,6 @@ import { BOUND_IDENTITY_FIXTURE as binding, REVOCATION_PREVIEW_FIXTURE, REVOCATI
 import type { LineIdentityBindingView } from '../../../../../../api/line_identity/line_identity_schemas';
 import { lineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import { sessionClient } from '../../../../../../api/auth/session_client';
-import { StaffIdentityProvider } from '../../../../../../components/StaffIdentityProvider';
-import * as staffDirectory from '../../../../../../api/staff_directory/staff_directory_client';
 import { transport } from '../../../../../../api/shared/transport';
 
 const summary = { pending_total: 3, staff_pending: 0, rebind_pending: 2, processed_today: 1, stale_pending: 0, stale_hours: 24 };
@@ -30,20 +28,15 @@ function client(items = [binding]) {
     listUnboundCandidates: vi.fn().mockResolvedValue(paired), pairProvisionalRegistration: vi.fn().mockResolvedValue({ case_no: 'ORD-086', client_id: 86, client_name: '邱珮瑜', line_user_id: 'U-pair-private', status: 'bound' }),
   };
 }
-async function openReplacement(name = binding.subject_name) {
-  const row = await screen.findByRole('row', { name: new RegExp(name) });
-  fireEvent.click(within(row).getByRole('button', { name: '更正綁定對象' }));
-  return screen.findByRole('dialog', { name: '更正綁定對象' });
-}
 async function openRevocation() {
   fireEvent.click(await screen.findByRole('button', { name: '解除綁定' }));
   return screen.findByRole('dialog', { name: '是否確認解除綁定？' });
 }
-async function confirmReason(label: string, reason: string) { fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value: reason } }); fireEvent.click(screen.getByRole('button', { name: label === '審核原因（選填）' ? '提交審核決定' : '儲存更正' })); expect(screen.queryByRole('checkbox')).not.toBeInTheDocument(); }
+async function confirmReason(label: string, reason: string) { fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value: reason } }); fireEvent.click(screen.getByRole('button', { name: '提交審核決定' })); expect(screen.queryByRole('checkbox')).not.toBeInTheDocument(); }
 afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 describe('身分與授權精簡工作區', () => {
-  it('把同步操作放在狀態欄，只有已停用列可確認永久刪除', async () => {
+  it('把同步操作放在狀態欄，解除中與已停用列都可永久刪除', async () => {
     const revoked = { ...staff, status: 'revoked' as const };
     const pending = { ...staff, line_user_id: 'U-pending', subject_name: '解除中月嫂', status: 'revocation_pending' as const };
     const api = {
@@ -54,16 +47,17 @@ describe('身分與授權精簡工作區', () => {
     render(<LineIdentityWorkbench client={api} />);
     const sync = await screen.findByRole('button', { name: '重新同步選單' });
     expect(sync.closest('td')).toHaveAttribute('data-label', '狀態');
-    const button = screen.getByRole('button', { name: '刪除停用資料' });
-    expect(within(button.closest('tr')!).getByText(staff.subject_name, { exact: false })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '刪除停用資料' })).toHaveLength(2);
+    const row = screen.getByRole('row', { name: /解除中月嫂/ });
+    const button = within(row).getByRole('button', { name: '刪除停用資料' });
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: '永久刪除停用綁定資料？' });
     expect(api.deleteRevokedBinding).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: '永久刪除' }));
     await screen.findByText('已永久刪除停用綁定資料。');
     expect(api.deleteRevokedBinding).toHaveBeenCalledExactlyOnceWith(
-      staff.line_user_id,
-      { expected_version: staff.version, expected_updated_at: staff.updated_at, idempotency_key: expect.any(String) },
+      pending.line_user_id,
+      { expected_version: pending.version, expected_updated_at: pending.updated_at, idempotency_key: expect.any(String) },
       expect.objectContaining({ subjectType: 'staff' }),
     );
   });
@@ -132,33 +126,14 @@ describe('身分與授權精簡工作區', () => {
     await waitFor(() => expect(api.listBindings).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'ORD-071', page: 1 }), expect.any(Object)));
     await screen.findByText(binding.subject_name);
   });
-  it('同一 LINE 的月嫂列明確傳送 staff 角色，不以目前選定角色開啟客戶資料', async () => {
-    const api = client([binding, staff]); api.getBinding.mockResolvedValue(staff);
-    render(<LineIdentityWorkbench client={api} />); const dialog = await openReplacement(staff.subject_name);
-    await waitFor(() => expect(api.getBinding).toHaveBeenCalledWith(binding.line_user_id, expect.objectContaining({ subjectType: 'staff' })));
-    expect(await within(dialog).findByText(/同帳號月嫂/)).toBeInTheDocument(); expect(api.applyRevocation).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain(binding.line_user_id);
-  });
-  it('拒絕錯角色的 detail，不讓錯誤資料進入操作表單', async () => {
-    const api = client([staff]); render(<LineIdentityWorkbench client={api} />); await openReplacement(staff.subject_name);
-    await screen.findByRole('alert'); expect(within(screen.getByRole('dialog')).queryByRole('button', { name: '儲存更正' })).not.toBeInTheDocument(); expect(api.applyRevocation).not.toHaveBeenCalled();
-  });
-  it('更正對象來自唯讀候選查詢，一次儲存帶入選填原因、角色與版本', async () => {
-    const api = client(); api.getBinding.mockResolvedValueOnce(binding).mockResolvedValue({ ...binding, subject_reference: '9', subject_name: candidate.subject_name, version: 8 });
-    render(<LineIdentityWorkbench client={api} />); await openReplacement();
-    const select = await screen.findByRole('combobox', { name: '新的綁定對象' }); await within(select).findByText(/更正客戶乙/);
-    fireEvent.change(select, { target: { value: '9' } }); await confirmReason('更正原因（選填）', '已核對正確對象');
-    expect(screen.queryByRole('button', { name: '確認更正' })).not.toBeInTheDocument(); expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    await waitFor(() => expect(api.applyReplacement).toHaveBeenCalledTimes(1));
-    expect(api.previewReplacement).toHaveBeenCalledWith(binding.line_user_id, '9', expect.objectContaining({ subjectType: 'customer' }));
-    expect(api.applyReplacement).toHaveBeenCalledWith(binding.line_user_id, expect.objectContaining({ expected_version: 7, target_subject_reference: '9', reason: '已核對正確對象' }), expect.objectContaining({ subjectType: 'customer' }));
-    await waitFor(() => expect(api.getBinding).toHaveBeenCalledTimes(2));
-  });
-  it('拒絕與所選對象不一致的 Preview，不提交不同對象', async () => {
-    const api = client(); api.previewReplacement.mockResolvedValue({ binding, target_subject_reference: 'wrong', target_subject_name: '錯誤對象', blockers: [] });
-    render(<LineIdentityWorkbench client={api} />); await openReplacement();
-    const select = await screen.findByRole('combobox', { name: '新的綁定對象' }); await within(select).findByText(/更正客戶乙/); fireEvent.change(select, { target: { value: '9' } }); fireEvent.change(screen.getByRole('textbox', { name: '更正原因（選填）' }), { target: { value: '已核對' } }); fireEvent.click(screen.getByRole('button', { name: '儲存更正' }));
-    await screen.findByRole('alert'); expect(screen.queryByRole('button', { name: '確認更正' })).not.toBeInTheDocument(); expect(api.applyReplacement).not.toHaveBeenCalled();
+  it('清單不提供更正或綁定明細抽屜', async () => {
+    const api = client([binding, staff]);
+    render(<LineIdentityWorkbench client={api} />);
+    await screen.findByText(staff.subject_name, { exact: false });
+    expect(screen.queryByRole('button', { name: '更正綁定對象' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(api.getBinding).not.toHaveBeenCalled();
+    expect(api.listReplacementCandidates).not.toHaveBeenCalled();
   });
   it('解除綁定在置中確認前零寫入，確認後只操作該身分且不需原因', async () => {
     const api = client();
@@ -258,34 +233,4 @@ it('typed client 將角色參數送到實際明細與 mutation 路徑，候選�
   const post = vi.spyOn(transport, 'post').mockResolvedValue(envelope(REVOCATION_PREVIEW_FIXTURE)); await lineIdentityClient.previewRevocation(binding.line_user_id, { subjectType: 'customer' }); expect(post).toHaveBeenLastCalledWith(expect.any(String), undefined, expect.objectContaining({ params: { subject_type: 'customer' } }));
   post.mockResolvedValue(envelope(REVOCATION_REQUEST_FIXTURE)); await lineIdentityClient.applyRevocation(binding.line_user_id, { expected_version: 7, reason: '確認解除', idempotency_key: 'test-key', correlation_id: 'test-correlation' }, { subjectType: 'customer' }); expect(post).toHaveBeenLastCalledWith(expect.stringContaining('/revocation/apply'), expect.objectContaining({ expected_version: 7 }), expect.objectContaining({ params: { subject_type: 'customer' } }));
   get.mockResolvedValue(envelope({ items: [candidate], total: 1, page: 1, page_size: 25 })); await lineIdentityClient.listReplacementCandidates!({ subject_type: 'customer', search: '客戶' }); expect(get).toHaveBeenLastCalledWith('/api/v1/line/identity-bindings/replacement-candidates', expect.objectContaining({ params: { subject_type: 'customer', search: '客戶' } }));
-});
-
-
-it('reads all staff replacement pages, sorts by union number, and keeps the exact selected subject', async () => {
-  const directoryQuery = vi.fn().mockResolvedValue({ items: [
-    { id: 8, name: '原月嫂', union_no: '001', phone: null, education: null },
-    { id: 9, name: '同名月嫂', union_no: 'A10', phone: null, education: null },
-    { id: 10, name: '同名月嫂', union_no: 'A2', phone: null, education: null },
-  ], next_cursor: null });
-  vi.spyOn(staffDirectory, 'createStaffDirectoryClient').mockReturnValue({ queryPage: directoryQuery, resetPagination: vi.fn() });
-  const api = client([staff]);
-  const updated = { ...staff, subject_reference: '10', subject_name: '同名月嫂', version: staff.version + 1 };
-  api.getBinding.mockResolvedValueOnce(staff).mockResolvedValue(updated);
-  api.applyReplacement.mockResolvedValue(updated);
-  api.listReplacementCandidates.mockResolvedValueOnce({ items: [{ ...candidate, subject_type: 'staff', subject_reference: '9', subject_name: '同名月嫂' }], total: 2, page: 1, page_size: 1 })
-    .mockResolvedValueOnce({ items: [{ ...candidate, subject_type: 'staff', subject_reference: '10', subject_name: '同名月嫂' }], total: 2, page: 2, page_size: 1 });
-  api.previewReplacement.mockResolvedValue({ binding: staff, target_subject_reference: '10', target_subject_name: '同名月嫂', blockers: [] });
-  render(<StaffIdentityProvider><LineIdentityWorkbench client={api} /></StaffIdentityProvider>);
-  await openReplacement('原月嫂');
-  const select = await screen.findByRole('combobox', { name: '新的綁定對象' }) as HTMLSelectElement;
-  await within(select).findByRole('option', { name: /A2 同名月嫂/ });
-  expect(Array.from(select.options).filter(option => option.value).map(option => option.value)).toEqual(['10', '9']);
-  expect(api.listReplacementCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ subject_type: 'staff', page: 2 }), expect.any(Object));
-  fireEvent.change(select, { target: { value: '10' } });
-  await confirmReason('更正原因（選填）', '已核對公會編號');
-  expect(api.previewReplacement).toHaveBeenCalledWith(staff.line_user_id, '10', expect.objectContaining({ subjectType: 'staff' }));
-  await waitFor(() => expect(api.applyReplacement).toHaveBeenCalledWith(staff.line_user_id,
-    expect.objectContaining({ target_subject_reference: '10', expected_version: staff.version, reason: '已核對公會編號' }),
-    expect.objectContaining({ subjectType: 'staff' })));
-  await waitFor(() => expect(api.getBinding).toHaveBeenCalledTimes(2));
 });

@@ -82,6 +82,10 @@ def test_line_identity_deletes_are_management_only_and_version_guarded():
         assert profiles == ("management",)
         assert status in body and version in body
     assert "updated_at_utc=p_updated FOR UPDATE" in PROCEDURES["lu_nas_delete_revoked_line_binding_v1"][1]
+    _, body, profiles = PROCEDURES["lu_nas_delete_revoked_line_binding_v2"]
+    assert profiles == ("management",)
+    assert "binding_status IN ('revoked','revocation_pending')" in body
+    assert "aggregate_version=p_version AND updated_at_utc=p_updated FOR UPDATE" in body
 
 
 def test_registry_delete_procedures_do_not_grant_runtime_direct_root_delete():

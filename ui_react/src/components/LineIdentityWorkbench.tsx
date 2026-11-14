@@ -10,12 +10,12 @@ import type { LineIdentityClient } from '../api/line_identity/line_identity_clie
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 import type {
   LineBindingSubjectType, LineIdentityBindingView, LineIdentityBindingPageView,
-  LineIdentityCandidate, LineIdentityCandidatePage, LineIdentityReplacementPreviewView,
+  LineIdentityCandidate,
   LineIdentityReviewView, LineIdentityReviewPageView, LineIdentityReviewDecision,
   LineIdentityReviewPreviewView, LineIdentityReviewType, UnboundPairingCandidatesView,
   UnboundProvisionalCandidate, UnboundOrderCandidate,
 } from '../api/line_identity/line_identity_schemas';
-import { adaptLineIdentityReplacementPreview, adaptLineIdentityRevocationPreview, maskLineUserId } from '../adapters/line_identity/line_identity_adapter';
+import { adaptLineIdentityRevocationPreview, maskLineUserId } from '../adapters/line_identity/line_identity_adapter';
 import { Drawer } from './Drawer';
 import './LineIdentityWorkbench.css';
 
@@ -39,7 +39,8 @@ function errorText(error: unknown) {
     if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入。';
     if (error.code === 'FORBIDDEN') return '目前帳號沒有執行這項操作的權限。';
     if (error.domainCode === 'line_identity_menu_role_not_active') return '這個帳號目前未使用此身分，請先在 LINE 選擇要使用的身分。';
-    if (error.domainCode === 'line_identity_binding_not_revoked') return '只能永久刪除已完成停用的綁定。';
+    if (error.domainCode === 'line_identity_binding_not_revoked') return '請先解除綁定，再永久刪除。';
+    if (error.domainCode === 'line_identity_menu_operation_in_progress') return 'LINE 正在處理這筆選單工作，請稍後再刪除。';
     if (error.domainCode === 'line_identity_owner_projection_conflict') return '對象資料仍連結這個 LINE 帳號，請先確認解除已完成。';
     if (error.domainCode === 'line_identity_revocation_in_progress') return '這個帳號正在解除身分綁定，請等選單回復後再試。';
     if (error.domainCode === 'line_provisional_registration_has_history') return '這筆登記已有案件或匯入紀錄，無法刪除。';
@@ -133,17 +134,12 @@ function useLineSubjectLabels() {
 }
 
 function BindingPanel({ client, reload, onChanged }: { client: Client; reload: number; onChanged: () => void }) {
-  const staffIdentity = useStaffIdentityLabels();
-  const [allStaffCandidates, setAllStaffCandidates] = useState<LineIdentityCandidate[]>([]);
   const subjectLabel = useLineSubjectLabels();
   const initial = useRef(new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '')).current;
   const initialRole = initial.get('binding_role');
   const [role, setRole] = useState<LineBindingSubjectType | 'all'>(initialRole === 'customer' || initialRole === 'staff' || initialRole === 'admin' ? initialRole : 'all');
   const [search, setSearch] = useState(initial.get('binding_q') ?? ''); const [page, setPage] = useState(() => { const value=Number(initial.get('binding_page'));return Number.isSafeInteger(value)&&value>0?value:1; });
   const [result, setResult] = useState<LineIdentityBindingPageView | null>(null); const [loading, setLoading] = useState(true); const [listError, setListError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<LineIdentityBindingView | null>(null); const [detail, setDetail] = useState<LineIdentityBindingView | null>(null);
-  const [reason, setReason] = useState('');
-  const [preview, setPreview] = useState<LineIdentityReplacementPreviewView | null>(null);
   const [confirmation, setConfirmation] = useState<LineIdentityBindingView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowBusy, setRowBusy] = useState(false);
@@ -152,9 +148,6 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
   const [unverifiedRow, setUnverifiedRow] = useState<{ item: LineIdentityBindingView; version: number } | null>(null);
   const confirmationDialog = useRef<HTMLDialogElement>(null);
   const rowController = useRef<AbortController | null>(null);
-  const [candidatePage, setCandidatePage] = useState<LineIdentityCandidatePage | null>(null); const [candidateSearch, setCandidateSearch] = useState(''); const [candidateNumber, setCandidateNumber] = useState(1); const [target, setTarget] = useState<LineIdentityCandidate | null>(null); const [candidateError, setCandidateError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false); const [applying, setApplying] = useState(false); const [operationError, setOperationError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null); const [uncertain, setUncertain] = useState(false);
-  const controller = useRef<AbortController | null>(null); const locked = useRef(false); const minimumVersion = useRef<number | null>(null);
   useEffect(() => {
     const [route,query='']=window.location.hash.split('?',2);if(!['#line-management','#/line-management','#line','#/line'].includes(route))return;
     const params=new URLSearchParams(query);const set=(key:string,value:string,fallback:string)=>value===fallback||!value?params.delete(key):params.set(key,value);
@@ -166,7 +159,6 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     return () => { abort.abort();window.clearTimeout(timer); };
   }, [client, role, search, page, reload]);
   useEffect(() => () => {
-    controller.current?.abort();
     rowController.current?.abort();
   }, []);
   useEffect(() => {
@@ -180,97 +172,6 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
       if (trigger instanceof HTMLElement) trigger.focus();
     };
   }, [confirmation]);
-  useEffect(() => {
-    if (!selected) return;
-    const abort = new AbortController();setCandidatePage(null);setCandidateError(null);setAllStaffCandidates([]);
-    const timer = window.setTimeout(() => { void (async () => {
-      if (!client.listReplacementCandidates) throw unavailable();
-      const query = { subject_type: selected.subject_type, search: candidateSearch.trim() || undefined, page: selected.subject_type === 'staff' ? 1 : candidateNumber, page_size: pageSize };
-      const value = await client.listReplacementCandidates(query, { signal: abort.signal });
-      const all = [...value.items];
-      const seen = new Set(all.map(item => item.subject_reference));
-      if (selected.subject_type === 'staff') {
-        for (let next = value.page + 1; all.length < value.total; next += 1) {
-          abort.signal.throwIfAborted();
-          const page = await client.listReplacementCandidates({ ...query, page: next }, { signal: abort.signal });
-          if (page.page !== next || page.total !== value.total || page.items.length === 0 || page.items.some(item => seen.has(item.subject_reference))) throw unavailable();
-          page.items.forEach(item => seen.add(item.subject_reference));
-          all.push(...page.items);
-        }
-      }
-      if (!abort.signal.aborted) { setAllStaffCandidates(all); setCandidatePage(value); }
-    })().catch(error => { if (!abort.signal.aborted) setCandidateError(errorText(error)); }); }, 150);
-    return () => { abort.abort();window.clearTimeout(timer); };
-  }, [client, selected, candidateSearch, candidateNumber]);
-  const loadDetail = async (item: LineIdentityBindingView) => {
-    controller.current?.abort(); const abort = new AbortController();controller.current = abort;setBusy(true);setOperationError(null);
-    try {
-      const value = await (client.getBinding?.(item.line_user_id, { subjectType: item.subject_type, signal: abort.signal }) ?? Promise.reject(unavailable()));
-      if (!abort.signal.aborted) { if (value.line_user_id !== item.line_user_id || value.subject_type !== item.subject_type || (minimumVersion.current!==null&&value.version<minimumVersion.current)) throw unavailable(); setDetail(value);setUncertain(false);minimumVersion.current=null; }
-    } catch (error) { if (!abort.signal.aborted) setOperationError(errorText(error)); }
-    finally { if (!abort.signal.aborted) setBusy(false); }
-  };
-  const open = (item: LineIdentityBindingView) => {
-    minimumVersion.current = null;
-    setSelected(item);
-    setDetail(null);
-    setPreview(null);
-    setReason('');
-    setTarget(null);
-    setCandidateSearch('');
-    setCandidateNumber(1);
-    setNotice(null);
-    setUncertain(false);
-    void loadDetail(item);
-  };
-  const close = () => {
-    if (locked.current) return;
-    controller.current?.abort();
-    setSelected(null);
-    setDetail(null);
-  };
-
-  const saveReplacement = async () => {
-    if (!selected || !detail || !target || locked.current || uncertain) return;
-    locked.current = true;
-    setBusy(true);
-    setApplying(true);
-    setOperationError(null);
-    const abort = new AbortController();
-    controller.current = abort;
-    try {
-      const options = { subjectType: selected.subject_type, signal: abort.signal };
-      const value = await (client.previewReplacement?.(selected.line_user_id, target.subject_reference, options) ?? Promise.reject(unavailable()));
-      if (abort.signal.aborted) return;
-      if (value.binding.subject_type !== selected.subject_type || value.binding.line_user_id !== selected.line_user_id || value.target_subject_reference !== target.subject_reference) throw unavailable();
-      setPreview(value);
-      if (value.blockers.length) return;
-      const receipt = await (client.applyReplacement?.(selected.line_user_id, {
-        expected_version: value.binding.version,
-        reason: reason.trim(),
-        idempotency_key: identity(),
-        correlation_id: identity(),
-        target_subject_reference: target.subject_reference,
-      }, options) ?? Promise.reject(unavailable()));
-      minimumVersion.current = receipt.version;
-      setNotice('綁定對象更正已受理。');
-      setUncertain(true);
-      setPreview(null);
-      setTarget(null);
-      onChanged();
-      await loadDetail(selected);
-    } catch (error) {
-      if (!abort.signal.aborted) {
-        setOperationError(errorText(error));
-        if (error instanceof LineIdentityClientError && error.outcomeUnknown) setUncertain(true);
-      }
-    } finally {
-      locked.current = false;
-      setBusy(false);
-      setApplying(false);
-    }
-  };
-
   const readBinding = async (item: LineIdentityBindingView, signal: AbortSignal, version = item.version) => {
     const current = await (client.getBinding?.(item.line_user_id, { subjectType: item.subject_type, signal }) ?? Promise.reject(unavailable()));
     if (current.line_user_id !== item.line_user_id || current.subject_type !== item.subject_type || current.version < version) throw unavailable();
@@ -361,9 +262,6 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
     }
   };
 
-  const blockers = preview ? adaptLineIdentityReplacementPreview(preview).blockers : [];
-  useUnsavedDraft('LINE 綁定維護', { '原因': reason, '已選對象': target }, { enabled: !!selected, busy: applying || uncertain, resetKey: notice });
-
   return <>
     <div className="identity-filters"><SearchField value={search} onChange={value=>{setSearch(value);setPage(1);}} label="搜尋姓名或案件編號" /><select aria-label="篩選身分角色" value={role} onChange={event=>{setRole(event.target.value as typeof role);setPage(1);}}><option value="all">全部身分角色</option>{Object.entries(roles).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></div>
     {rowNotice && <p className="identity-message" role="status">{rowNotice}</p>}
@@ -378,10 +276,9 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
           <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.retryRevocation} onClick={() => void runRowAction(item, 'restore')}>修復訪客選單</button>}
       </div></td><td data-label="更新時間">{date(item.updated_at)}</td><td className="identity-binding-actions"><div>
       {item.status === 'bound' && <>
-        {client.previewReplacement && client.applyReplacement && <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow} onClick={() => open(item)}>更正綁定對象</button>}
         <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.previewRevocation || !client.applyRevocation} onClick={() => { setRowError(null); setConfirmDelete(false); setConfirmation(item); }}>解除綁定</button>
       </>}
-      {item.status === 'revoked' && client.deleteRevokedBinding && <button type="button" className="identity-button identity-delete-action"
+      {(item.status === 'revoked' || item.status === 'revocation_pending') && client.deleteRevokedBinding && <button type="button" className="identity-button identity-delete-action"
         disabled={rowBusy || !!unverifiedRow || !item.updated_at}
         onClick={() => { setRowError(null); setConfirmDelete(true); setConfirmation(item); }}>刪除停用資料</button>}
     </div></td></tr>)}</tbody></table></div><Pagination page={result.page} pageSize={result.page_size} total={result.total} onPage={setPage} /></> : <Empty filtered={!!search.trim()||role!=='all'} label="目前沒有身分綁定紀錄" onClear={()=>{setSearch('');setRole('all');setPage(1);}} />)}
@@ -392,7 +289,7 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
         <dt>姓名</dt><dd>{subjectLabel(confirmation)}</dd>
         <dt>綁定身分</dt><dd>{roles[confirmation.subject_type]}</dd>
       </dl>
-      {confirmDelete && <p>這會永久刪除這個身分的綁定、綁定事件與解除紀錄。</p>}
+      {confirmDelete && <p>這會永久刪除這個身分的綁定與解除紀錄。若訪客選單尚未回復，會取消後續回復工作。</p>}
       <div className="identity-confirmation-actions">
         <button type="button" className="identity-button" disabled={rowBusy} onClick={() => setConfirmation(null)}>取消</button>
         <button type="button" className="identity-row-action" disabled={rowBusy}
@@ -401,32 +298,6 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
         </button>
       </div>
     </dialog>}
-    <Drawer className="identity-drawer" isOpen={selected !== null} onClose={close} closeDisabled={busy} closeLabel="關閉更正綁定對象" title="更正綁定對象"
-      footer={detail && !uncertain && <button type="button" className="identity-button primary" disabled={busy || !target} onClick={() => void saveReplacement()}>{applying ? '正在提交…' : '儲存更正'}</button>}>
-      {busy && <p role="status">{applying ? '正在提交操作…' : '正在查詢最新資料…'}</p>}
-      {operationError && <p role="alert" className="identity-error">{operationError}</p>}
-      {notice && <p className="identity-note" role="status">{notice}</p>}
-      {selected && (operationError || uncertain) && !busy && <button type="button" className="identity-button" onClick={() => void loadDetail(selected)}>重新查詢綁定狀態</button>}
-      {detail && !uncertain && <fieldset className="identity-action-form" disabled={busy}>
-        <p>目前綁定對象為 {subjectLabel(detail)}（{roles[detail.subject_type]}）。</p>
-        <SearchField value={candidateSearch} onChange={value => { setCandidateSearch(value); setCandidateNumber(1); setTarget(null); }} label="搜尋新的綁定對象" />
-        {candidateError && <p role="alert" className="identity-error">{candidateError}</p>}
-        {!candidatePage && !candidateError && <p role="status">正在查詢可更正對象…</p>}
-        {candidatePage && <>
-          <label className="identity-field">新的{roles[detail.subject_type]}對象
-            <select aria-label="新的綁定對象" value={target?.subject_reference ?? ''} onChange={event => setTarget((detail.subject_type === 'staff' ? allStaffCandidates : candidatePage.items).find(item => item.subject_reference === event.target.value) ?? null)}>
-              <option value="">請選擇同角色對象</option>
-              {(detail.subject_type === 'staff' ? [...allStaffCandidates].sort((a, b) => staffIdentity.compare(Number(a.subject_reference), Number(b.subject_reference))) : candidatePage.items).map(item =>
-                <option key={item.subject_reference} value={item.subject_reference}>{subjectLabel(item)}{item.subject_type !== 'staff' && ` · ${reference(item)}`}</option>)}
-            </select>
-          </label>
-          {candidatePage.total === 0 && <p className="identity-secondary">目前沒有可更正對象。</p>}
-          {detail.subject_type !== 'staff' && <Pagination page={candidatePage.page} pageSize={candidatePage.page_size} total={candidatePage.total} onPage={value => { setCandidateNumber(value); setTarget(null); }} />}
-        </>}
-        <label className="identity-field">更正原因（選填）<textarea rows={3} maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
-        {blockers.length > 0 && <ul className="identity-error" role="alert">{blockers.map(item => <li key={item}>{item}</li>)}</ul>}
-      </fieldset>}
-    </Drawer>
   </>;
 }
 

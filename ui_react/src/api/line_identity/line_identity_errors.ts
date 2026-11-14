@@ -23,6 +23,7 @@ export type LineIdentityDomainErrorCode =
   | 'line_identity_manual_completion_forbidden'
   | 'line_identity_binding_not_bound'
   | 'line_identity_binding_not_revoked'
+  | 'line_identity_menu_operation_in_progress'
   | 'line_identity_menu_role_not_active'
   | 'line_identity_subject_unchanged'
   | 'line_identity_replacement_subject_not_found'
@@ -56,6 +57,7 @@ const DOMAIN_ERROR_CODES = new Set<LineIdentityDomainErrorCode>([
   'line_identity_manual_completion_forbidden',
   'line_identity_binding_not_bound',
   'line_identity_binding_not_revoked',
+  'line_identity_menu_operation_in_progress',
   'line_identity_menu_role_not_active',
   'line_identity_subject_unchanged',
   'line_identity_replacement_subject_not_found',

@@ -259,7 +259,8 @@ def test_disallowed_procedures_are_rejected_before_body_execution(engine, profil
             denied(runtime,f"CALL `{name}`({','.join(['NULL']*len(signature.split(',')))})",numbers=(1370,))
 
 
-def test_three_line_delete_operations_use_management_and_outer_transaction(engine, monkeypatch):
+@pytest.mark.parametrize("binding_status", ("revoked", "revocation_pending"))
+def test_three_line_delete_operations_use_management_and_outer_transaction(engine, monkeypatch, binding_status):
     from domains.line.identities import LineReviewRequestId, LineUserId
     from domains.line.identity_binding import LineBindingSubjectType
     from infrastructure.mysql.line_identity_management_repository import MySqlLineIdentityManagementRepository
@@ -273,8 +274,8 @@ def test_three_line_delete_operations_use_management_and_outer_transaction(engin
         execute(root, "INSERT INTO line_platform_users (line_user_id,selected_identity_role) VALUES (%s,'customer')", (user,))
         execute(root, "INSERT INTO line_identity_role_bindings "
                 "(line_user_id,subject_type,binding_status,subject_reference,aggregate_version,updated_at_utc) "
-                "VALUES (%s,'customer','revoked','1',7,%s),(%s,'staff','bound',%s,7,%s)",
-                (user, stamp, user, str(int(uuid4().hex[:12], 16)), stamp))
+                "VALUES (%s,'customer',%s,%s,7,%s),(%s,'staff','bound',%s,7,%s)",
+                (user, binding_status, str(int(uuid4().hex[:12], 16)), stamp, user, str(int(uuid4().hex[:12], 16)), stamp))
         execute(root, "INSERT INTO line_identity_role_binding_events "
                 "(line_user_id,subject_type,action,subject_reference,expected_version,resulting_version,actor_id,payload_fingerprint,idempotency_key,correlation_id) "
                 "VALUES (%s,'customer','revoked','1',6,7,'test',REPEAT('a',64),%s,%s)", (user, user, user))
