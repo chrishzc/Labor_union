@@ -415,7 +415,7 @@ def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         blockers = ()
     elif contract or deposits:
         status = "blocked" if open_deposits else "in_progress"
-        blockers = (_notice("deposit_not_settled", "客戶定金 obligation 尚未結清。"),) if open_deposits else ()
+        blockers = (_notice("deposit_not_settled", "等待訂金入帳。"),) if open_deposits else ()
     else:
         return _unavailable_stage(4, "contract_deposit", "雙邊簽約與定金", "Contract Signing / Client Finance", "contract_and_deposit_lineage_missing")
     warnings = (_notice("deposit_unpaid_override_active", "定金仍未付款，已由管理員人工放行。"),) if override_active and open_deposits else ()
@@ -621,7 +621,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
         _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
         _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),
-        _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _latest(row, "deposit_updated_at", "deposit_gate_override_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else (), warnings=deposit_warnings),
+        _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _latest(row, "deposit_updated_at", "deposit_gate_override_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "等待訂金入帳。"),) if deposit_status == "blocked" else (), warnings=deposit_warnings),
         _step_from_stage(9, "confirmed_service_dates", "協調服務日期與排班", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),

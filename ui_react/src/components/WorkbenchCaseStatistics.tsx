@@ -12,7 +12,7 @@ const QUALIFICATION_LABELS = [
   '補助市民符合', '補助市民不符合',
   '原住民符合', '原住民不符合',
 ];
-const STATUS_LABELS = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消'] as const;
+const STATUS_LABELS = ['待補件', '洽談中', '訂單成立', '服務中', '訂單取消'] as const;
 const APPLICATION_STATUS_FIELDS = [
   ['訂單成立', 'order_established_count'], ['洽談中', 'negotiating_count'],
   ['取消', 'cancelled_count'], ['審核不符合', 'review_rejected_count'],

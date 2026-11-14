@@ -89,7 +89,7 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
     render(<OrderWorkbenchV2Page />);
     expect(await screen.findByText('CASE-FUTURE')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '歷史訂單' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /9 日期確認 1/ }));
+    fireEvent.click(screen.getByRole('button', { name: /9 待服務 1/ }));
     await waitFor(() => expect(mocks.core).toHaveBeenLastCalledWith(
       expect.objectContaining({ workbench_scope: 'in_progress', stage: 'confirmed_service_dates' }), expect.any(Object),
     ));

@@ -378,8 +378,8 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(screen.queryByRole('checkbox', { name: '只看阻塞' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '只看提醒' })).not.toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /10 排班\/服務 7/ })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 7/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /10 服務中 7/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /10 服務中 7/ }));
 
     await screen.findByText('CASE-ACTIVE-1');
     expect(screen.queryByRole('button', { name: /待開工 3/ })).not.toBeInTheDocument();
@@ -524,7 +524,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue({ ...response, case_category: 'non_citizen' });
     render(<WorkbenchCaseStatistics caseCategory="non_citizen" />);
     await waitFor(() => expect(document.querySelector('.statuses dd')).toHaveTextContent('12'));
-    expect([...document.querySelectorAll('.statuses dt')].map((cell) => cell.textContent)).toEqual(['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消']);
+    expect([...document.querySelectorAll('.statuses dt')].map((cell) => cell.textContent)).toEqual(['待補件', '洽談中', '訂單成立', '服務中', '訂單取消']);
     expect(document.querySelector('.qualifications')).toBeNull();
   });
 
@@ -559,7 +559,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 0/ }));
+    fireEvent.click(screen.getByRole('button', { name: /10 服務中 0/ }));
 
     await waitFor(() => expect(screen.getByText('CASE-FRESH')).toBeInTheDocument());
     resolveInitial(corePage([

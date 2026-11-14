@@ -32,7 +32,7 @@
 .workbench-statistics-qualifications { display: flex; }
 .workbench-statistics-qualifications > div { flex: 1; }
 .workbench-statistics-grid.qualifications { grid-template-columns: repeat(2, minmax(68px, 1fr)); }
-.workbench-statistics-grid.statuses { grid-template-columns: repeat(6, minmax(60px, 1fr)); }
+.workbench-statistics-grid.statuses { grid-template-columns: repeat(5, minmax(60px, 1fr)); }
 .workbench-statistics-grid.application-statuses { grid-template-columns: repeat(4, minmax(68px, 1fr)); }
 .workbench-statistics-grid > div { display: grid; justify-items: center; align-content: center; gap: 5px; padding: 6px 4px; }
 .workbench-statistics-grid dt { display: flex; align-items: center; justify-content: center; min-height: 32px; max-width: 50px; font-size: .75rem; line-height: 1.35; text-align: center; color: var(--md-sys-color-on-surface-variant); }

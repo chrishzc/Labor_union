@@ -12,7 +12,7 @@
 - presentation: 推薦確認沿用前段接案同意，只有意願通知變更才人工記錄；客戶三份資訊共用唯讀 dialog，主頁確認寄送／手動客戶決策。換人選擇接任者及服務段落，只填原因，依 fresh 指派 Query 分流，保留原操作與 immutable create receipt；不以畫面切換推進階段。
 - projection: 現行推薦的最新正式意願事件為不承接時，推薦確認改為 blocked 並回到換人待辦，包含已有 current generation 正式指派的案件；既有客戶接受或 waiting lock 不掩蓋此通知。讀取最新事件、不改寫 Orders lifecycle 或既有指派；實際換人／代班沿既有分流。
 - presentation: 進件工作區統一顯示缺件清單與前往名冊補件的深連結，移除重複服務條件表單；上方入口改為編輯客戶與訂單資料。名冊返回 `#order-workbench-v2?case=…` 時，以 bounded typed lifecycle-all Query 唯一比對相同案件，重新開啟其正式目前待辦；關閉後清除案件深連結。既有取消／重開及服務安排功能保持原 owner 流程。
-- 進件條款缺漏提示直接列出 Orders current facts 缺少的開始日、天數、服務時間或樓層加給；待辦看板與案件處理不再以技術描述或階段標題取代欄位名稱。既有階段／完整性判定不變。
+- 進件條款缺漏提示直接列出 Orders current facts 缺少的開始日、天數、服務時間或樓層加給；待辦看板與案件處理不再以技術描述或階段標題取代欄位名稱。定金未結清時提示與子狀態以「等待訂金入帳」呈現，十三階段導覽標籤以真實業務命名（第 9 步「待服務」、第 10 步「服務中」），不在工會操作介面暴露 obligation 或阻塞等技術描述。既有階段／完整性判定不變。
 - presentation: 待辦看板以卡片進入單一案件工作畫面；五個工作群組各自依正式資料顯示狀態，進件區呈現唯讀缺件清單並導向名冊補件，共用案件摘要位於上方，十三階段只作紀錄與導覽，不構成線性操作前置。不再提供案件資料／案件異動分頁；取消位於右上角，沿用既有操作面板與正式回讀，在 dialog 中保留結果未明時的離開限制及完成收據。取消案件從客戶名冊詳情辦理受控重開。日期更正與既有換人入口位於服務安排，唯讀聯絡、帳務及 LINE 紀錄由上方摘要列入口展開，同列最右側提供本案客戶與訂單資料編輯入口；下方不重複顯示資料摘要與通用明細讀取失敗提示，必要補件與 Terms 缺漏提示仍保留。群組切換不推進後端階段，已開啟表單保留掛載。不在工會操作頁顯示技術來源。正式 Orders 明細缺件時不得持續顯示 loading；歷史分支可並列呈現 immutable adoption evidence 的來源期間，但不冒充正式約定或實際日期。元件沿用原 `OrderWorkbenchV2Drawer` symbol，但不再使用 Drawer overlay；導覽為現有 route 內的本機狀態。
 - presentation: 移除獨立收款結算工作群組及重複訂金放行，Finance current stage 導向服務安排；已服務完成案件第五項顯示完工摘要、實際期間、Orders 完工事件時間與兩端結算狀態。單一同案帳務入口帶 case_no/from=workbench，Finance 承接歷史帳務完成及返回同案；未更動十三階段與 lifecycle owner。
 - presentation: 待辦看板固定查詢 `in_progress`，案件受理統計預設收合；完整階段與件數按鈕常駐展開，作為唯一作業階段篩選入口，不再顯示重複下拉選單。統計提供年度／季度／月份與固定四項資格、六項狀態欄位，透過 Reporting typed GET 讀取正式統計；loading／failure 顯示缺值並可手動重試，取消舊請求以避免 stale 數字。統計期間不改變下方待辦 query；看板重新整理與案件處理後重新讀取統計。工作區預設隨正式回讀接續目前待辦，手動查阅其他事項時保留位置並提供返回目前待辦；已開啟面板保留掛載供回讀完成。進件基本資料齊備不代表服務條件齊備，進件缺件或補件資格讀取失敗必須在進件工作區顯示原因；完整 Terms 操作移至名冊。
@@ -46,7 +46,7 @@
 
 ## Dependencies
 - outbound: `government-subsidy/government-subsidy/module:reconciliation-register-query` — 政府補助清單的唯讀預估沿同 owner 時數／資格上限／凍結單價；服務確認讀既有 Orders service_completion 證據，未核准以 nullable 正式待收與預估分開傳送。
-- outbound: `global/reporting/weekly-operations-report` — 讀取四種資格與原模板四欄申請案件指標、年度總數及曆年期間；非市民獨立統計仍呈現六種生命週期；不在 Orders presentation 重算正式分類。
+- outbound: `global/reporting/weekly-operations-report` — 讀取四種資格與原模板四欄申請案件指標、年度總數及曆年期間；非市民獨立統計呈現五種生命週期（不含訂單完成）；不在 Orders presentation 重算正式分類。
 - outbound: `scheduling/scheduling` — 讀取有效等待訂金鎖、正式服務期間與 service-time terms；有效鎖是推薦確認已跨入契約準備的直接投影證據。
 - outbound: `client-finance/client-finance` — 讀取定金與客戶 obligation projection。
 - outbound: `payroll/payroll` — 讀取月嫂薪資 obligation projection。
