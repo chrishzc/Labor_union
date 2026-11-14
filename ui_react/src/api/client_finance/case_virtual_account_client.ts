@@ -8,8 +8,20 @@ import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
 
 const account = z.string().regex(/^99781699[0-9]{6}$/);
-const viewSchema = z.strictObject({ case_no: z.string(), imported_virtual_accounts: z.array(account), built_in_virtual_account: account.nullable(), mapping_ids: z.array(z.number().int().positive()) });
-const receiptSchema = z.strictObject({ case_no: z.string(), before: z.array(account), virtual_account: account });
+const viewSchema = z.strictObject({
+  case_no: z.string(),
+  imported_virtual_accounts: z.array(account),
+  built_in_virtual_account: account.nullable(),
+  mapping_ids: z.array(z.number().int().positive()),
+  editable: z.boolean().optional(),
+  effective_virtual_account: account.nullable().optional(),
+});
+const receiptSchema = z.strictObject({
+  case_no: z.string(),
+  before: z.array(account),
+  virtual_account: account,
+  transferred_from_case_nos: z.array(z.string()).optional(),
+});
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.null() });
 export type CaseVirtualAccountView = z.infer<typeof viewSchema>;
 export interface CaseVirtualAccountCommand { case_no: string; virtual_account: string; expected_mapping_ids: number[] }

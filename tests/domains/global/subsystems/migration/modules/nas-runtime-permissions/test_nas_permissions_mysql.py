@@ -176,6 +176,30 @@ def seed_operation(admin, name):
                 (staff,'000','0000',account))
         expected = json.dumps([dict(bank_code='000',branch_code='0000',account_no=account,is_primary=1)])
         return (staff,expected), ('SELECT COUNT(*) FROM staff_bank_accounts WHERE staff_id=%s',(staff,)),1,0
+    if name == 'lu_nas_replace_case_account_v2':
+        sequence = staff % 1000
+        case = f'A{staff // 1000 % 116:03d}{sequence:03d}'
+        source = 'nas-source-' + key
+        for case_no, status in ((case, '洽談中'), (source, '訂單取消')):
+            client = execute(admin, 'INSERT INTO clients(case_no,name) VALUES(%s,%s)', (case_no, key))
+            execute(admin, 'INSERT INTO orders(case_no,client_id,status) VALUES(%s,%s,%s)', (case_no, client, status))
+        event = execute(admin, """
+            INSERT INTO order_lifecycle_control_events
+                (case_no,control_type,control_key,scope,action,actor,reason,expected_version,idempotency_key,payload_hash,payload_snapshot)
+            VALUES(%s,'cancellation','order_cancelled','order','activate','test','test',0,%s,%s,'{}')
+        """, (source, key, 'a' * 64))
+        execute(admin, """
+            INSERT INTO order_lifecycle_control_state
+                (case_no,control_type,control_key,scope,state,current_event_id,reason,changed_by)
+            VALUES(%s,'cancellation','order_cancelled','order','active',%s,'test','test')
+        """, (source, event))
+        account = f'99781699{staff * 2 + 1:06d}'
+        mapping = execute(admin, """
+            INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by)
+            VALUES(%s,%s,%s,2,'test')
+        """, (source, account, 'b' * 64))
+        args = (case, '[]', account, 'c' * 64, 'test', 3, json.dumps([mapping]))
+        return args, ('SELECT case_no FROM client_legacy_virtual_accounts WHERE virtual_account=%s', (account,)), source, case
     if name == 'lu_nas_trim_preferences_v1':
         definition = execute(admin, "INSERT INTO staff_matching_preference_definitions(preference_key,display_name,value_kind,comparison_operator,created_by,updated_by) VALUES(%s,'test','integer_set','contains_integer','test','test')",(key,))
         execute(admin, "INSERT INTO staff_matching_preference_profiles(staff_id,version,created_by,updated_by) VALUES(%s,1,'test','test')",(staff,))
@@ -228,6 +252,7 @@ def test_stale_arguments_rejected_and_unrelated_work_stays_in_outer_transaction(
     elif '_replace_staff_' in name: bad[1] = '[]'
     elif name == 'lu_nas_trim_preferences_v1': bad[1] += 1
     elif name == 'lu_nas_replace_case_account_v1': bad[1] = '[]'
+    elif name == 'lu_nas_replace_case_account_v2': bad[6] = '[]'
     elif name == 'lu_nas_cancel_occupancy_v1': bad[0] = 'another-case'
     elif name == 'lu_nas_remove_current_issue_v1': bad[3] = 'stale'
     elif name == 'lu_nas_archive_audits_v1':

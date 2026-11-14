@@ -26,6 +26,35 @@ const edit = () => fireEvent.change(screen.getByLabelText('匯入虛擬帳號'),
 const save = () => fireEvent.click(screen.getByRole('button', { name: /^儲存虛擬帳號$/ }));
 
 describe('名冊虛擬帳號設定', () => {
+  it('shows the account source and the cancelled case after transferring its account', async () => {
+    const caseNo = 'A115001';
+    const builtIn = '99781699115501';
+    const current = { ...view, case_no: caseNo, imported_virtual_accounts: [], mapping_ids: [], built_in_virtual_account: builtIn, effective_virtual_account: builtIn, editable: true };
+    mocks.query.mockResolvedValueOnce(current).mockResolvedValueOnce({
+      ...current, imported_virtual_accounts: [next], mapping_ids: [2], effective_virtual_account: next,
+    });
+    mocks.apply.mockResolvedValueOnce({ case_no: caseNo, before: [], virtual_account: next, transferred_from_case_nos: ['115000003'] });
+    render(<ClientRegistryVirtualAccount caseNo={caseNo} disabled={false} onRefresh={vi.fn().mockResolvedValue(undefined)} onStateChange={vi.fn()} />);
+    expect(await screen.findByText('目前使用來源：內建虛擬帳號')).toBeInTheDocument();
+    edit();
+    save();
+    expect(await screen.findByText('虛擬帳號已儲存，已從取消案件 115000003 轉入。')).toBeInTheDocument();
+    expect(screen.getByText('目前使用來源：匯入虛擬帳號')).toBeInTheDocument();
+    expect(screen.getByText(builtIn)).toBeInTheDocument();
+  });
+
+  it('shows the formula account without write controls for a read-only case', async () => {
+    const caseNo = 'A116001';
+    const builtIn = '99781699116501';
+    mocks.query.mockResolvedValueOnce({ ...view, case_no: caseNo, imported_virtual_accounts: [], built_in_virtual_account: builtIn, effective_virtual_account: builtIn, editable: false });
+    render(<ClientRegistryVirtualAccount caseNo={caseNo} disabled={false} onRefresh={vi.fn()} onStateChange={vi.fn()} />);
+    expect(await screen.findByText(builtIn)).toBeInTheDocument();
+    expect(screen.getByText('目前使用來源：內建虛擬帳號')).toBeInTheDocument();
+    expect(screen.queryByLabelText('匯入虛擬帳號')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^儲存虛擬帳號$/ })).not.toBeInTheDocument();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
   it('saves directly without a reason or preview and waits for account and roster readback', async () => {
     const refresh = deferred();
     const state = await mount(vi.fn(() => refresh.promise));

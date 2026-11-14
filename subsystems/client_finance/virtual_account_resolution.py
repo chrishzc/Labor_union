@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 import re
 
+from domains.client_finance.virtual_account import allows_case_account_edit, allows_historical_non_citizen_account
+
 
 _VIRTUAL_ACCOUNT_PREFIX = "99781699"
 _VIRTUAL_ACCOUNT_PATTERN = re.compile(rf"^{_VIRTUAL_ACCOUNT_PREFIX}([0-9]{{3}})([0-9]{{3}})$")
@@ -34,32 +36,28 @@ def uses_imported_case_virtual_account(case_no: object) -> bool:
     return re.fullmatch(r"[0-9]{9}", normalized) is not None and normalized[:3] < _FIRST_FORMULA_YEAR
 
 
-def build_effective_formula_account(case_no: object) -> str | None:
-    if uses_imported_case_virtual_account(case_no):
+def build_effective_formula_account(case_no: object, *, has_imported_account: bool = False) -> str | None:
+    if uses_imported_case_virtual_account(case_no) or (has_imported_account and allows_historical_non_citizen_account(case_no)):
         return None
     return build_client_virtual_account(case_no)
+
+
+def _imported_accounts(cursor: Any, case_no: str) -> set[str]:
+    cursor.execute(
+        "SELECT DISTINCT virtual_account FROM client_legacy_virtual_accounts "
+        "WHERE case_no = %s ORDER BY virtual_account",
+        (case_no,),
+    )
+    return {
+        str(row.get("virtual_account") if isinstance(row, dict) else row[0])
+        for row in cursor.fetchall()
+    }
 
 
 def resolve_case_virtual_account(cursor: Any, case_no: object) -> dict[str, str | None]:
     """Project the account source selected by the canonical case number."""
     normalized = str(case_no) if case_no is not None else ""
-    if not uses_imported_case_virtual_account(normalized):
-        built = build_effective_formula_account(normalized)
-        if built is None:
-            return {"result": "pending", "virtual_account": None, "reason": "case_not_representable"}
-        resolved = resolve_client_virtual_account(cursor, built)
-        if resolved["case_no"] != normalized:
-            return {"result": "pending", "virtual_account": None, "reason": "case_not_unique"}
-        return {"result": "resolved", "virtual_account": built, "reason": None}
-    cursor.execute(
-        "SELECT DISTINCT virtual_account FROM client_legacy_virtual_accounts "
-        "WHERE case_no = %s ORDER BY virtual_account",
-        (normalized,),
-    )
-    imported = {
-        str(row.get("virtual_account") if isinstance(row, dict) else row[0])
-        for row in cursor.fetchall()
-    }
+    imported = _imported_accounts(cursor, normalized) if allows_case_account_edit(normalized) else set()
     if len(imported) > 1:
         return {"result": "pending", "virtual_account": None, "reason": "imported_account_not_unique"}
     if imported:
@@ -68,7 +66,23 @@ def resolve_case_virtual_account(cursor: Any, case_no: object) -> dict[str, str 
         if resolved["case_no"] != normalized:
             return {"result": "pending", "virtual_account": None, "reason": "case_not_unique"}
         return {"result": "resolved", "virtual_account": account, "reason": None}
-    return {"result": "pending", "virtual_account": None, "reason": "imported_account_missing"}
+    if uses_imported_case_virtual_account(normalized):
+        return {"result": "pending", "virtual_account": None, "reason": "imported_account_missing"}
+    built = build_effective_formula_account(normalized)
+    if built is None:
+        return {"result": "pending", "virtual_account": None, "reason": "case_not_representable"}
+    if resolve_client_virtual_account(cursor, built)["case_no"] != normalized:
+        return {"result": "pending", "virtual_account": None, "reason": "case_not_unique"}
+    return {"result": "resolved", "virtual_account": built, "reason": None}
+
+
+def resolve_formula_case_virtual_account(cursor: Any, case_no: str) -> str | None:
+    """Display the formula source independently from an imported account."""
+    built = build_effective_formula_account(case_no)
+    if built is None:
+        return None
+    resolved = _resolve_account(cursor, built, include_candidates=False, show_formula=True)
+    return built if resolved["case_no"] == case_no else None
 
 
 def _pending(reason: str) -> dict[str, str | None]:
@@ -87,23 +101,22 @@ def resolve_client_virtual_account_suffix(cursor: Any, suffix: object, *, includ
 
 def resolve_client_virtual_account(cursor: Any, cancellation_code: Any, *, include_candidates=False) -> dict[str, Any]:
     """Resolve imported mappings first; use the formula only when none exist."""
-    if not isinstance(cancellation_code, str):
-        return _pending("invalid_virtual_account_format")
+    return _resolve_account(cursor, cancellation_code, include_candidates=include_candidates, show_formula=False)
 
-    match = _VIRTUAL_ACCOUNT_PATTERN.fullmatch(cancellation_code)
-    if match is None:
-        return _pending("invalid_virtual_account_format")
 
-    roc_year, sequence = match.groups()
-    generated_case_no = f"{roc_year}{int(sequence):06d}"
-    assert len(generated_case_no) == 9 and generated_case_no.isascii() and generated_case_no.isdigit()
+def resolve_imported_virtual_account(
+    cursor: Any, account: str, *, include_candidates: bool = False,
+) -> dict[str, Any] | None:
+    """Resolve a canonical account from registered mappings alone."""
     cursor.execute(
         "SELECT CASE WHEN EXISTS (SELECT 1 FROM client_legacy_virtual_accounts other "
         "WHERE other.case_no=mapping.case_no AND other.virtual_account<>mapping.virtual_account) "
         "THEN NULL ELSE mapping.case_no END AS case_no "
         "FROM client_legacy_virtual_accounts mapping WHERE mapping.virtual_account = %s "
-        "AND LENGTH(mapping.case_no)=9 AND mapping.case_no < '" + _FIRST_FORMULA_YEAR + "' ORDER BY mapping.case_no",
-        (cancellation_code,),
+        "AND ((LENGTH(mapping.case_no)=9 AND mapping.case_no < '" + _FIRST_FORMULA_YEAR + "') "
+        "OR (LENGTH(mapping.case_no)=7 AND SUBSTR(mapping.case_no,1,1)='A' "
+        "AND SUBSTR(mapping.case_no,2,3) < '" + _FIRST_FORMULA_YEAR + "')) ORDER BY mapping.case_no",
+        (account,),
     )
     imported_candidates = {
         row.get("case_no") if isinstance(row, dict) else row[0]
@@ -120,6 +133,22 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any, *, inclu
             "case_no": str(next(iter(imported_candidates))),
             "reason": None,
         }
+    return None
+
+
+def _resolve_account(cursor: Any, cancellation_code: Any, *, include_candidates: bool, show_formula: bool) -> dict[str, Any]:
+    if not isinstance(cancellation_code, str):
+        return _pending("invalid_virtual_account_format")
+
+    match = _VIRTUAL_ACCOUNT_PATTERN.fullmatch(cancellation_code)
+    if match is None:
+        return _pending("invalid_virtual_account_format")
+
+    imported = resolve_imported_virtual_account(cursor, cancellation_code, include_candidates=include_candidates)
+    if imported is not None:
+        return imported
+    roc_year, sequence = match.groups()
+    generated_case_no = f"{roc_year}{int(sequence):06d}"
     formula_candidates = set()
     if not uses_imported_case_virtual_account(generated_case_no):
         formula_candidates.add(generated_case_no)
@@ -132,7 +161,14 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any, *, inclu
         cursor.execute("SELECT case_no FROM orders WHERE case_no IN (%s,%s)",
                        (generated_case_no, non_citizen_case_no))
     else:
-        cursor.execute("SELECT case_no FROM orders WHERE case_no = %s", (next(iter(formula_candidates)),))
+        formula_case = next(iter(formula_candidates))
+        query = "SELECT case_no FROM orders WHERE case_no = %s"
+        if allows_historical_non_citizen_account(formula_case) and not show_formula:
+            query += (
+                " AND NOT EXISTS (SELECT 1 FROM client_legacy_virtual_accounts mapping"
+                " WHERE mapping.case_no=orders.case_no)"
+            )
+        cursor.execute(query, (formula_case,))
     generated_matches = cursor.fetchall()
     candidates = {
         str(row.get("case_no") if isinstance(row, dict) else row[0])
@@ -155,5 +191,7 @@ __all__ = [
     "resolve_case_virtual_account",
     "resolve_client_virtual_account",
     "resolve_client_virtual_account_suffix",
+    "resolve_formula_case_virtual_account",
+    "resolve_imported_virtual_account",
     "uses_imported_case_virtual_account",
 ]

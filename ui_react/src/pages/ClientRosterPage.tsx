@@ -313,9 +313,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         }}
       >
         <td>{item.case_no}</td>
-        <td>{item.imported_virtual_accounts.length
-          ? item.imported_virtual_accounts.map((value) => <div key={value}>{value}</div>)
-          : item.built_in_virtual_account ?? '—'}</td>
+        <td>{item.case_no.startsWith('A') && item.effective_virtual_account !== undefined
+          && item.imported_virtual_accounts.length > 0
+          ? item.effective_virtual_account ?? '待確認'
+          : item.imported_virtual_accounts.length
+            ? item.imported_virtual_accounts.map((value) => <div key={value}>{value}</div>)
+            : item.built_in_virtual_account ?? '—'}</td>
         <td>{item.name ?? '—'}</td><td>{item.identity_status ?? '尚未登錄'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{item.service_type ?? '尚未登錄'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>

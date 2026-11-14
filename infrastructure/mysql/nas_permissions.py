@@ -181,7 +181,7 @@ def permission_plan(connection, database: str) -> dict:
         application_columns = {row["name"] for row in cursor.fetchall()}
         if not {"application_payload", "application_version", "approved_by_actor", "approved_at_utc"} <= application_columns:
             raise ValueError("NAS security requires the additive registration upgrade first")
-        missing = (DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
+        missing = (DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "order_lifecycle_control_state", "scheduling_generations", "staff_matching_preference_profiles",
                                   "staff_matching_preference_definitions", "admin_audit_log_archive"}) - tables
         if missing:
             raise ValueError("NAS security requires the current complete business schema")
@@ -214,12 +214,13 @@ def permission_plan(connection, database: str) -> dict:
             or parameters.get(name) != [part.strip().lower() for part in signature.split(",")]
         ):
             raise ValueError("NAS security procedure drift; no changes applied")
-    additive_line_procedures = {
+    additive_procedures = {
         "lu_nas_delete_revoked_line_binding_v1",
         "lu_nas_delete_revoked_line_binding_v2",
         "lu_nas_delete_pending_line_review_v1", "lu_nas_delete_pending_line_pairing_v1",
+        "lu_nas_replace_case_account_v2",
     }
-    baseline_states = {state for name, state in states.items() if name not in additive_line_procedures}
+    baseline_states = {state for name, state in states.items() if name not in additive_procedures}
     if len(baseline_states) > 1 or (
         baseline_states == {"absent"} and "exact" in states.values()
     ):
@@ -297,7 +298,7 @@ def install_permissions(connection, database: str, passwords: dict[str, str]) ->
         # Required by MySQL SELECT ... FOR UPDATE even for read-only parent
         # facts. This grants locking, not UPDATE/DELETE on those parent tables.
         cursor.execute(f"GRANT LOCK TABLES ON {plan['locking_scope']}.* TO '{names['definer']}'@'%'")
-        for table in sorted(DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive"}):
+        for table in sorted(DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "order_lifecycle_control_state", "scheduling_generations", "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive"}):
             privileges = ["SELECT"]
             if table in DELETE_TABLES:
                 privileges.append("DELETE")

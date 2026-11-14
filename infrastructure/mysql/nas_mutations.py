@@ -132,6 +132,45 @@ PROCEDURES = {
         INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by)
           VALUES(p_case,p_account,p_digest,2,p_actor);
         """, ("management",)),
+    "lu_nas_replace_case_account_v2": (
+        "IN p_case VARCHAR(191), IN p_expected JSON, IN p_account VARCHAR(50), IN p_digest CHAR(64), "
+        "IN p_actor VARCHAR(100), IN p_source_row INT, IN p_transfer_expected JSON",
+        """
+        DECLARE v_cancelled_occupants INT;
+        IF p_case IS NULL OR p_case NOT REGEXP '^A[0-9]{6}$'
+          OR BINARY LEFT(p_case,1)<>'A' OR SUBSTRING(p_case,2,3)>='116'
+          OR p_account IS NULL OR p_account NOT REGEXP '^99781699[0-9]{6}$'
+          OR p_source_row IS NULL OR p_source_row<2
+          OR p_expected IS NULL OR JSON_TYPE(p_expected)<>'ARRAY'
+          OR p_transfer_expected IS NULL OR JSON_TYPE(p_transfer_expected)<>'ARRAY' THEN
+          SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_invalid_case_account';
+        END IF;
+        IF NOT EXISTS(SELECT case_no FROM orders WHERE case_no=p_case FOR UPDATE) THEN
+          SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_case_not_found'; END IF;
+        IF JSON_LENGTH(p_expected)<>(SELECT COUNT(*) FROM client_legacy_virtual_accounts WHERE case_no=p_case FOR UPDATE)
+          OR EXISTS(SELECT 1 FROM client_legacy_virtual_accounts m WHERE m.case_no=p_case
+            AND NOT EXISTS(SELECT 1 FROM JSON_TABLE(p_expected,'$[*]' COLUMNS(id BIGINT PATH '$' ERROR ON ERROR)) e WHERE e.id=m.id)
+            FOR UPDATE)
+          THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_case_account_stale'; END IF;
+        IF JSON_LENGTH(p_transfer_expected)<>(SELECT COUNT(*) FROM client_legacy_virtual_accounts
+          WHERE virtual_account=p_account AND case_no<>p_case FOR UPDATE)
+          OR EXISTS(SELECT 1 FROM client_legacy_virtual_accounts m WHERE m.virtual_account=p_account AND m.case_no<>p_case
+            AND NOT EXISTS(SELECT 1 FROM JSON_TABLE(p_transfer_expected,'$[*]' COLUMNS(id BIGINT PATH '$' ERROR ON ERROR)) e WHERE e.id=m.id)
+            FOR UPDATE)
+          THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_case_account_stale'; END IF;
+        SELECT COUNT(*) INTO v_cancelled_occupants FROM client_legacy_virtual_accounts m
+          JOIN orders o ON o.case_no=m.case_no
+          JOIN order_lifecycle_control_state c ON c.case_no=m.case_no
+            AND c.control_type='cancellation' AND c.control_key='order_cancelled'
+          WHERE m.virtual_account=p_account AND m.case_no<>p_case
+            AND o.status='訂單取消' AND c.state='active' FOR UPDATE;
+        IF v_cancelled_occupants<>JSON_LENGTH(p_transfer_expected)
+          THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_case_account_collision'; END IF;
+        DELETE FROM client_legacy_virtual_accounts WHERE virtual_account=p_account AND case_no<>p_case;
+        DELETE FROM client_legacy_virtual_accounts WHERE case_no=p_case;
+        INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by)
+          VALUES(p_case,p_account,p_digest,p_source_row,p_actor);
+        """, ("management",)),
     "lu_nas_cancel_occupancy_v1": (
         "IN p_case VARCHAR(191), IN p_generation BIGINT", """
         IF NOT EXISTS(SELECT id FROM scheduling_generations WHERE id=p_generation

@@ -7,6 +7,7 @@ from subsystems.client_finance.virtual_account_resolution import (
     resolve_case_virtual_account,
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
+    resolve_formula_case_virtual_account,
 )
 
 
@@ -135,11 +136,15 @@ def test_cases_with_imported_accounts_cannot_be_resolved_by_their_formula():
         assert resolve_client_virtual_account(cursor, "99781699115003")["result"] == "pending"
         assert resolve_case_virtual_account(cursor, "115000002")["reason"] == "imported_account_missing"
         assert resolve_case_virtual_account(cursor, "116000001")["virtual_account"] == "99781699116001"
-        assert resolve_case_virtual_account(cursor, "A115001")["virtual_account"] == "99781699115501"
+        assert resolve_case_virtual_account(cursor, "A115001")["virtual_account"] == "99781699115006"
+        assert resolve_formula_case_virtual_account(cursor, "A115001") == "99781699115501"
+        assert resolve_client_virtual_account(cursor, "99781699115006")["case_no"] == "A115001"
+        assert resolve_client_virtual_account_suffix(cursor, "115501")["result"] == "pending"
         assert resolve_case_virtual_account(cursor, "116000009")["result"] == "pending"
         assert resolve_client_virtual_account(cursor, "99781699116009")["case_no"] == "115000004"
         known_accounts, _, _, case_suffixes = _known_case_virtual_accounts(cursor)
-        assert known_accounts == {"99781699115009", "99781699116001", "99781699115501", "99781699116009"}
+        assert known_accounts == {"99781699115009", "99781699116001", "99781699115006", "99781699116009"}
+        assert case_suffixes["A115001"] == "115006"
         assert "116000009" not in case_suffixes
 
 

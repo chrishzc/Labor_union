@@ -25,13 +25,16 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [message, setMessage] = useState('');
+  const transferredFrom = useRef<string[]>([]);
   const sequence = useRef(0);
   const busy = ['applying', 'unknown', 'readback', 'readback_failed'].includes(phase);
-  useUnsavedChanges('案件虛擬帳號', view && account !== initialAccount(view) ? [{ label: '虛擬帳號', before: '既有帳號（不顯示內容）', after: account ? '已輸入變更（不顯示內容）' : '清空' }] : [], { busy });
-  const dirty = !!view && account !== initialAccount(view);
+  const editable = view?.editable !== false;
+  const dirty = !!view && editable && account !== initialAccount(view);
+  useUnsavedChanges('案件虛擬帳號', dirty ? [{ label: '虛擬帳號', before: '既有帳號（不顯示內容）', after: account ? '已輸入變更（不顯示內容）' : '清空' }] : [], { busy });
   useEffect(() => { onStateChange({ dirty, busy }); }, [dirty, busy, onStateChange]);
   const load = async () => {
     const request = ++sequence.current;
+    transferredFrom.current = [];
     setPhase('loading'); setMessage('');
     try {
       const result = await caseVirtualAccountClient.query(caseNo);
@@ -48,13 +51,16 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
       const [result] = await Promise.all([caseVirtualAccountClient.query(caseNo), onRefresh()]);
       if (request !== sequence.current) return;
       setView(result); setAccount(initialAccount(result)); setSubmission(null); setPhase('idle');
-      setMessage('虛擬帳號已儲存，名冊資料已更新。');
+      const sources = transferredFrom.current;
+      setMessage(sources.length
+        ? `虛擬帳號已儲存，已從取消案件 ${sources.join('、')} 轉入。`
+        : '虛擬帳號已儲存，名冊資料已更新。');
     } catch (error) {
       if (request === sequence.current) { setPhase('readback_failed'); setMessage(`已儲存，但最新資料讀取失敗：${errorText(error)}`); }
     }
   };
   const apply = async () => {
-    if (!view) return;
+    if (!view || !editable) return;
     if (phase !== 'unknown' && !saveValidation.validate([{ value: account, label: '匯入虛擬帳號', ref: saveFieldRef }])) return;
     const submitted = phase === 'unknown' && submission ? submission : {
       command: { case_no: caseNo, virtual_account: account.trim(), expected_mapping_ids: view.mapping_ids },
@@ -64,8 +70,11 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
     const request = ++sequence.current;
     setPhase('applying'); setMessage('正在儲存虛擬帳號…');
     try {
-      await caseVirtualAccountClient.apply(submitted.command, submitted.key);
-      if (request === sequence.current) await readback(request);
+      const receipt = await caseVirtualAccountClient.apply(submitted.command, submitted.key);
+      if (request === sequence.current) {
+        transferredFrom.current = receipt.transferred_from_case_nos ?? [];
+        await readback(request);
+      }
     } catch (error) {
       if (request !== sequence.current) return;
       const unknown = !(error instanceof ApiHttpError) || error.status >= 500;
@@ -75,19 +84,29 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
     }
   };
   const locked = disabled || busy || phase === 'loading';
+  const effectiveAccount = view?.effective_virtual_account;
+  const importedIsEffective = !!effectiveAccount && !!view?.imported_virtual_accounts.includes(effectiveAccount) && editable;
   return <section className="registry-editor" aria-label="虛擬帳號設定">
     <h3>虛擬帳號設定</h3>
-    <p className="registry-section-note">儲存後將取代本案全部匯入虛擬帳號，供後續契約與收款辨識使用。</p>
+    <p className="registry-section-note">{editable
+      ? '儲存後將取代本案全部匯入虛擬帳號，供後續契約與收款辨識使用。'
+      : '民國 116 年起沿用內建虛擬帳號。'}</p>
     {phase === 'loading' && <p role="status">正在讀取虛擬帳號…</p>}
     {view && <>
       <dl className="registry-information-fields"><div><dt>目前匯入虛擬帳號</dt><dd>{view.imported_virtual_accounts.join('、') || '未登錄'}</dd></div><div><dt>內建虛擬帳號</dt><dd>{view.built_in_virtual_account ?? '不適用'}</dd></div></dl>
-      <div className="registry-fields">
-        <><label>匯入虛擬帳號<input ref={saveFieldRef} aria-required="true" inputMode="numeric" maxLength={14} value={account} disabled={locked} placeholder="99781699 開頭，共 14 碼" onChange={event => { setAccount(event.target.value); setSubmission(null); setMessage(''); }} /></label>{saveValidation.feedback}</>
-      </div>
-      <div className="registry-actions">
-        <button type="button" disabled={locked} onClick={() => { setAccount(initialAccount(view)); setSubmission(null); setMessage(''); }}>取消帳號變更</button>
-        <button type="button" disabled={locked || phase === 'stale' || (!dirty && !!account.trim())} onClick={() => void apply()}>儲存虛擬帳號</button>
-      </div>
+      {effectiveAccount !== undefined && <p className="registry-section-note">目前使用來源：{effectiveAccount
+        ? importedIsEffective ? '匯入虛擬帳號' : '內建虛擬帳號'
+        : '待確認'}</p>}
+      {editable && <>
+        <div className="registry-fields">
+          <label>匯入虛擬帳號<input ref={saveFieldRef} aria-required="true" inputMode="numeric" maxLength={14} value={account} disabled={locked} placeholder="99781699 開頭，共 14 碼" onChange={event => { setAccount(event.target.value); setSubmission(null); setMessage(''); }} /></label>
+          {saveValidation.feedback}
+        </div>
+        <div className="registry-actions">
+          <button type="button" disabled={locked} onClick={() => { setAccount(initialAccount(view)); setSubmission(null); setMessage(''); }}>取消帳號變更</button>
+          <button type="button" disabled={locked || phase === 'stale' || (!dirty && !!account.trim())} onClick={() => void apply()}>儲存虛擬帳號</button>
+        </div>
+      </>}
     </>}
     {message && <p role="status">{message}</p>}
     {(!view || phase === 'stale') && phase !== 'loading' && <button type="button" disabled={disabled} onClick={() => void load()}>重新讀取虛擬帳號</button>}

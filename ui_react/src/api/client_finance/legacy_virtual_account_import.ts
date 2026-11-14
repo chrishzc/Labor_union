@@ -6,6 +6,12 @@ import { transport } from '../shared/transport';
 
 
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const nonCitizenRow = z.strictObject({
+  source_row: z.number().int().min(2),
+  case_no: z.string().min(1),
+  status: z.enum(['create', 'existing', 'transfer', 'conflict', 'ineligible_year', 'missing_order', 'replace_required']),
+  related_case_nos: z.array(z.string()),
+});
 const previewSchema = z.strictObject({
   source_content_digest: sha256,
   sheet_identity: sha256,
@@ -15,6 +21,7 @@ const previewSchema = z.strictObject({
   existing_count: z.number().int().min(0),
   skipped_count: z.number().int().min(0),
   preview_fingerprint: sha256,
+  non_citizen_rows: z.array(nonCitizenRow).optional(),
 });
 const receiptSchema = z.strictObject({
   source_content_digest: sha256,
@@ -23,6 +30,7 @@ const receiptSchema = z.strictObject({
   existing_count: z.number().int().min(0),
   skipped_count: z.number().int().min(0),
   replayed_workbook: z.boolean(),
+  non_citizen_rows: z.array(nonCitizenRow).optional(),
 });
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.null() });
 

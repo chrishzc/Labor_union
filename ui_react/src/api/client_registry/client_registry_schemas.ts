@@ -65,7 +65,8 @@ const staffObligationDate = z.strictObject({
 export const ClientRegistrySummarySchema = z.strictObject({
   identity_status: nullableText.optional(),
   client_id: z.number().int().positive(), case_no: z.string().min(1),
-  imported_virtual_accounts: z.array(z.string().min(1)), built_in_virtual_account: z.string().nullable(), name: nullableText,
+  imported_virtual_accounts: z.array(z.string().min(1)), built_in_virtual_account: z.string().nullable(),
+  effective_virtual_account: z.string().nullable().optional(), name: nullableText,
   phone: nullableText, city: nullableText, district: z.string().nullable().optional(), multi_birth_count: optionalNullableText, service_days: optionalNullablePositiveInt,
   requires_cooking: optionalNullableBoolean, planned_start_date: nullableText, order_status: nullableText,
   service_type: nullableText.optional(),

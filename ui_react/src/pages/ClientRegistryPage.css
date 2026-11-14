@@ -93,6 +93,9 @@
 .legacy-va-metrics dl div { padding: 9px 11px; border-radius: 8px; background: white; }
 .legacy-va-metrics dt { color: #74593f; font-size: .82rem; }
 .legacy-va-metrics dd { margin-top: 4px; }
+.legacy-va-results { width: 100%; border-collapse: collapse; text-align: left; }
+.legacy-va-results caption { margin: 10px 0; font-weight: 700; text-align: left; }
+.legacy-va-results th, .legacy-va-results td { border-bottom: 1px solid var(--color-border, #edcbbb); padding: 7px 10px; overflow-wrap: anywhere; }
 .legacy-va-confirm { display: flex; align-items: center; gap: 7px; color: #65483b; }
 .legacy-va-confirm input { width: auto; }
 .registry-editor .order-v2-drawer-section label { min-width: 0; }

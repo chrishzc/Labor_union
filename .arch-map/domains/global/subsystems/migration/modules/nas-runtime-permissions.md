@@ -21,6 +21,7 @@
 - schema 先由 canonical fresh／preserve-data upgrade 處理；plan 零寫入；未知／partial／foreign grants／procedure drift 拒絕，不 reset 業務資料。
 - runtime 無直接 DELETE／DDL／GRANT；固定程序僅具名 EXECUTE，沒有動態 table 參數或內部 commit。逐功能 adapter 仍由其 owning Subsystem 控制 transaction 與業務驗證。
 - LINE 停用綁定、待審核及待配對的永久刪除各有一個 management 專用程序。新增程序可由同一權限安裝流程補齊，保留既有程序的完整性檢查。
+- 歷史非市民的虛擬帳號更正使用 management 專用 `lu_nas_replace_case_account_v2`。新增版本沿既有權限安裝流程補齊，locked definer 以唯讀權限鎖定取消狀態，既有一般案仍走 v1。Client Finance 持有外層交易及收據。
 - runtime startup 實查表、欄位及程序授權；LINE 無 core INSERT／UPDATE 或刪除程序，身分投影僅限 LINE 連結欄位。讀取的本人範圍仍由 LINE owner 驗證，不宣稱 DB row-level security。
 - NAS-LINE-04：公開 LINE 的受控檔案 facts 與日誌主檔／附件／完成事件收斂為唯讀；合法操作經私人照片 transport 由原管理 profile／Scheduling writer 執行，通知 outbox／checkpoint 與 LINE 專用媒體不受影響。
 - canonical inventory 同時檢查必要授權缺漏。既有 FOR UPDATE 只以本 database 的 LOCK TABLES 滿足 read-lock 前提，無額外 core DML；依 partial_revokes 處理 database wildcard，保留原有 outer UoW。

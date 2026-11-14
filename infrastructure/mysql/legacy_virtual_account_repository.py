@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from infrastructure.mysql.nas_mutations import call_mutation
-
 import json
 
-from subsystems.client_finance.case_virtual_account import AccountMapping
-from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account
+from domains.client_finance.virtual_account import allows_historical_non_citizen_account
+from domains.orders.lifecycle import OrderLifecycleStatus
+from infrastructure.mysql.nas_mutations import call_mutation
+from subsystems.client_finance.case_virtual_account import AccountMapping, AccountOccupant
+from subsystems.client_finance.virtual_account_resolution import (
+    resolve_case_virtual_account,
+    resolve_formula_case_virtual_account,
+    resolve_imported_virtual_account,
+)
 
 
 class MySqlLegacyVirtualAccountRepository:
@@ -47,6 +52,12 @@ class MySqlLegacyVirtualAccountRepository:
                 (case_no, virtual_account, source_digest, source_row, actor),
             )
             return cursor.rowcount == 1
+
+    def effective_non_citizen_account_owner(self, account: str) -> str | None:
+        with self.connection.cursor() as cursor:
+            imported = resolve_imported_virtual_account(cursor, account)
+        case_no = imported["case_no"] if imported is not None else None
+        return case_no if case_no and allows_historical_non_citizen_account(case_no) else None
 
     def load_receipt(self, key: str):
         with self.connection.cursor() as cursor:
@@ -93,16 +104,35 @@ class MySqlLegacyVirtualAccountRepository:
 
     def resolve_formula_account(self, case_no: str) -> str | None:
         with self.connection.cursor() as cursor:
+            return resolve_formula_case_virtual_account(cursor, case_no)
+
+    def resolve_effective_account(self, case_no: str) -> str | None:
+        with self.connection.cursor() as cursor:
             return resolve_case_virtual_account(cursor, case_no)["virtual_account"]
 
-    def account_used_by_other_case(self, case_no: str, account: str, *, lock: bool) -> bool:
+    def account_occupants(self, case_no: str, account: str, *, lock: bool) -> tuple[AccountOccupant, ...]:
         suffix = " FOR UPDATE" if lock else ""
         with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT case_no FROM client_legacy_virtual_accounts "
-                f"WHERE virtual_account=%s AND case_no<>%s ORDER BY case_no{suffix}", (account, case_no),
+            if allows_historical_non_citizen_account(case_no):
+                cursor.execute(
+                    "SELECT m.id,m.case_no,(o.status=%s AND c.state='active') AS cancelled,"
+                    "c.current_event_id AS cancellation_event_id "
+                    "FROM client_legacy_virtual_accounts m JOIN orders o ON o.case_no=m.case_no "
+                    "LEFT JOIN order_lifecycle_control_state c ON c.case_no=m.case_no "
+                    "AND c.control_type='cancellation' AND c.control_key='order_cancelled' "
+                    "WHERE m.virtual_account=%s AND m.case_no<>%s ORDER BY m.case_no,m.id" + suffix,
+                    (OrderLifecycleStatus.CANCELLED.value, account, case_no),
+                )
+            else:
+                cursor.execute(
+                    "SELECT id,case_no,0 AS cancelled FROM client_legacy_virtual_accounts "
+                    "WHERE virtual_account=%s AND case_no<>%s ORDER BY case_no,id" + suffix,
+                    (account, case_no),
+                )
+            return tuple(
+                AccountOccupant(int(row["id"]), str(row["case_no"]), bool(row["cancelled"]), row.get("cancellation_event_id"))
+                for row in cursor.fetchall()
             )
-            return cursor.fetchone() is not None
 
     def load_case_account_receipt(self, key: str):
         with self.connection.cursor() as cursor:
@@ -117,6 +147,16 @@ class MySqlLegacyVirtualAccountRepository:
             cursor.execute("SELECT id FROM client_legacy_virtual_accounts WHERE case_no=%s ORDER BY id FOR UPDATE", (case_no,))
             expected = json.dumps([int(row["id"]) for row in cursor.fetchall()])
             call_mutation(cursor, "lu_nas_replace_case_account_v1", case_no, expected, account, digest, actor)
+
+    def replace_historical_non_citizen_account(
+        self, case_no: str, account: str, digest: str, actor: str, source_row: int,
+        mapping_ids: tuple[int, ...], occupants: tuple[AccountOccupant, ...],
+    ) -> None:
+        with self.connection.cursor() as cursor:
+            call_mutation(
+                cursor, "lu_nas_replace_case_account_v2", case_no, json.dumps(mapping_ids),
+                account, digest, actor, source_row, json.dumps([item.id for item in occupants]),
+            )
 
     def save_case_account_receipt(self, key: str, command: str, actor: str, result: dict) -> None:
         with self.connection.cursor() as cursor:

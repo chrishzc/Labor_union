@@ -34,6 +34,7 @@ class ClientRegistrySummaryView(_StrictModel):
     case_no: str = Field(min_length=1, max_length=50)
     imported_virtual_accounts: tuple[str, ...] = ()
     built_in_virtual_account: str | None = None
+    effective_virtual_account: str | None = None
     name: str | None = None
     phone: str | None = None
     city: str | None = None

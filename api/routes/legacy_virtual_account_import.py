@@ -20,7 +20,7 @@ _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 
 
-@router.post("/preview", response_model=BaseResponse[LegacyVirtualAccountPreviewView])
+@router.post("/preview", response_model=BaseResponse[LegacyVirtualAccountPreviewView], response_model_exclude_unset=True)
 async def preview_legacy_virtual_accounts(
     workbook: UploadFile = File(...),
     principal: AdminPrincipal = Depends(require_registry_writer),
@@ -30,7 +30,7 @@ async def preview_legacy_virtual_accounts(
     return await _with_workbook(workbook, lambda path: service.preview(str(path)), "虛擬帳號匯入預覽已完成")
 
 
-@router.post("/apply", response_model=BaseResponse[LegacyVirtualAccountReceiptView])
+@router.post("/apply", response_model=BaseResponse[LegacyVirtualAccountReceiptView], response_model_exclude_unset=True)
 async def apply_legacy_virtual_accounts(
     workbook: UploadFile = File(...),
     preview_fingerprint: str = Form(..., min_length=64, max_length=64),
@@ -50,7 +50,7 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
     try:
         path = await _persist_workbook(workbook)
         result = await run_in_threadpool(operation, path)
-        return BaseResponse(data=result.as_dict(), message=message)
+        return BaseResponse(success=True, data=result.as_dict(), message=message, error=None)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": str(error)}) from error
     except LegacyVirtualAccountWorkbookConflict as error:

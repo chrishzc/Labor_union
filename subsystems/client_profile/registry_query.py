@@ -50,6 +50,7 @@ class ClientRegistrySummary:
     estimated_subsidy_payment_date: date | None = None
     service_type: str | None = None
     identity_status: str | None = None
+    effective_virtual_account: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,6 +328,7 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
         estimated_subsidy_payment_date=row.get("estimated_subsidy_payment_date"),
         service_type=_nullable_text(row.get("service_type")),
         identity_status=_nullable_text(row.get("identity_status")),
+        effective_virtual_account=_nullable_text(row.get("effective_virtual_account")),
     )
 
 

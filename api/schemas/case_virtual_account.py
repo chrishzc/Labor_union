@@ -17,6 +17,8 @@ class CaseVirtualAccountView(BaseModel):
     imported_virtual_accounts: tuple[str, ...]
     built_in_virtual_account: str | None
     mapping_ids: tuple[int, ...]
+    editable: bool
+    effective_virtual_account: str | None
 
 
 class CaseVirtualAccountReceiptView(BaseModel):
@@ -24,3 +26,4 @@ class CaseVirtualAccountReceiptView(BaseModel):
     case_no: str
     before: tuple[str, ...]
     virtual_account: str
+    transferred_from_case_nos: tuple[str, ...] = ()

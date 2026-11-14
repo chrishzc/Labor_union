@@ -18,10 +18,10 @@ from domains.case_import.order_information import project_order_information
 from domains.clients.profile import can_reclassify_client
 from infrastructure.mysql.effective_case_service_rate import BIRTH_COUNT_JOINS, BIRTH_COUNT_SQL
 from subsystems.case_import.beclass_correction_workflow import allows_manual_beclass_source
+from domains.client_finance.virtual_account import allows_case_account_edit, allows_historical_non_citizen_account
 from subsystems.client_finance.virtual_account_resolution import (
-    build_effective_formula_account,
     resolve_case_virtual_account,
-    uses_imported_case_virtual_account,
+    resolve_formula_case_virtual_account,
 )
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
 from domains.client_finance.order_amount_calculation import _claim_schedule
@@ -122,6 +122,11 @@ class MySqlClientRegistryQueryRepository:
                 cursor, visible_case_nos
             )
             formula_accounts = _load_registry_formula_accounts(cursor, visible_case_nos)
+            effective_accounts = {
+                case_no: resolve_case_virtual_account(cursor, case_no)["virtual_account"]
+                for case_no, accounts in imported_virtual_accounts.items()
+                if accounts and allows_historical_non_citizen_account(case_no)
+            }
             obligation_dates = _load_obligation_dates(
                 cursor, visible_case_nos
             )
@@ -129,6 +134,7 @@ class MySqlClientRegistryQueryRepository:
             **row,
             "imported_virtual_accounts": imported_virtual_accounts[str(row["case_no"])],
             "built_in_virtual_account": formula_accounts[str(row["case_no"])],
+            "effective_virtual_account": effective_accounts.get(str(row["case_no"])),
             "district": _client_district(row.get("address")),
             **obligation_dates[str(row["case_no"])],
             **_claim_application_month(row),
@@ -440,7 +446,7 @@ class MySqlClientRegistryQueryRepository:
 
 def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     result: dict[str, list[str]] = {case_no: [] for case_no in case_nos}
-    case_nos = tuple(case_no for case_no in case_nos if uses_imported_case_virtual_account(case_no))
+    case_nos = tuple(case_no for case_no in case_nos if allows_case_account_edit(case_no))
     if not case_nos:
         return {case_no: () for case_no in result}
     placeholders = ",".join(("%s",) * len(case_nos))
@@ -456,8 +462,7 @@ def _load_imported_virtual_accounts(cursor, case_nos: tuple[str, ...]) -> dict[s
 
 def _load_registry_formula_accounts(cursor, case_nos: tuple[str, ...]) -> dict[str, str | None]:
     return {
-        case_no: resolve_case_virtual_account(cursor, case_no)["virtual_account"]
-        if build_effective_formula_account(case_no) else None
+        case_no: resolve_formula_case_virtual_account(cursor, case_no)
         for case_no in case_nos
     }
 

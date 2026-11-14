@@ -20,7 +20,10 @@ _Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=1
 
 def _run(operation):
     try:
-        return BaseResponse(data=asdict(operation()), message="虛擬帳號資料")
+        data = asdict(operation())
+        if data.get("transferred_from_case_nos") == ():
+            del data["transferred_from_case_nos"]
+        return BaseResponse(success=True, data=data, message="虛擬帳號資料", error=None)
     except CaseVirtualAccountError as exc:
         category = {404: "not_found", 503: "unavailable"}.get(exc.status, "conflict")
         raise typed_http_error(exc.status, category, exc.code, str(exc), "case-virtual-account") from exc
@@ -33,6 +36,6 @@ def query_case_account(case_no: str, principal: AdminPrincipal = Depends(require
     return _run(lambda: application.query(case_no))
 
 
-@router.post("/apply", response_model=BaseResponse[CaseVirtualAccountReceiptView])
+@router.post("/apply", response_model=BaseResponse[CaseVirtualAccountReceiptView], response_model_exclude_unset=True)
 def apply_case_account(case_no: str, body: CaseVirtualAccountApplyBody, idempotency_key: _Key, principal: AdminPrincipal = Depends(require_registry_writer), application: CaseVirtualAccountApplication = Depends(get_case_virtual_account_application)):
     return _run(lambda: application.apply(case_no, body.virtual_account, body.expected_mapping_ids, idempotency_key, str(principal.username)))

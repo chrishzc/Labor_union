@@ -11,10 +11,10 @@ from typing import Any
 
 from domains.finance_import.cancellation_code import sinopac_memo_case_suffixes
 from domains.finance_import.transaction_classifier import extract_name_from_row_text
+from domains.client_finance.virtual_account import allows_case_account_edit
 from subsystems.client_finance.virtual_account_resolution import (
     build_effective_formula_account,
     resolve_client_virtual_account_suffix,
-    uses_imported_case_virtual_account,
 )
 
 
@@ -191,7 +191,7 @@ def _known_case_virtual_accounts(
         if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account"):
             case_no = str(row["case_no"])
             virtual_account = str(row["virtual_account"]).strip()
-            if virtual_account and uses_imported_case_virtual_account(case_no):
+            if virtual_account and allows_case_account_edit(case_no):
                 va_to_cases.setdefault(virtual_account, set()).add(case_no)
                 imported_by_case.setdefault(case_no, set()).add(virtual_account)
 
@@ -201,7 +201,7 @@ def _known_case_virtual_accounts(
     }
     formula_to_cases: dict[str, set[str]] = {}
     for case_no in existing_cases:
-        built = build_effective_formula_account(case_no)
+        built = build_effective_formula_account(case_no, has_imported_account=case_no in imported_by_case)
         if built and built not in va_to_cases:
             formula_to_cases.setdefault(built, set()).add(case_no)
     valid_virtual_accounts.update(

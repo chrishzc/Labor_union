@@ -171,7 +171,7 @@ def test_registry_list_route_preserves_optional_false_and_returns_roster_fields(
     }
     assert response.data.items[0].model_dump() == {
         "identity_status": None,
-        "client_id": 7, "case_no": "115000001", "imported_virtual_accounts": ("009978160011500001",), "built_in_virtual_account": "99781699115001", "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
+        "client_id": 7, "case_no": "115000001", "imported_virtual_accounts": ("009978160011500001",), "built_in_virtual_account": "99781699115001", "effective_virtual_account": None, "name": "王小明", "phone": "0912345678", "city": "新竹市", "district": "東區",
         "multi_birth_count": None, "service_days": 26, "requires_cooking": False,
         "planned_start_date": None, "order_status": "洽談中",
         "staff_payment_due_date": None,
