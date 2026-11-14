@@ -27,7 +27,7 @@ class MySqlMultiCaregiverScheduleQueryRepository(MultiCaregiverScheduleQueryRepo
 
     def get_assignment_schedule(self, assignment_id: int) -> AssignmentScheduleQuery:
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT CURRENT_DATE AS `current_date`")
+            cursor.execute("SELECT DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR) AS `current_date`")
             current_date_row = cursor.fetchone()
             database_current_date = _required_date(
                 _value(current_date_row, "current_date"), "current_date"

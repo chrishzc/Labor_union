@@ -71,7 +71,7 @@ def test_pooled_connection_reuses_socket_resets_transaction_and_blocks_use_after
     created: list[_FakeRawConnection] = []
 
     def fake_connect(**kwargs):
-        del kwargs
+        assert kwargs["init_command"] == "SET SESSION time_zone = '+00:00'"
         raw = _FakeRawConnection()
         created.append(raw)
         return raw

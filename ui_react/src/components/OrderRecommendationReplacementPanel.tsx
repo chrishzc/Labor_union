@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { compareStaffUnionNumbers } from '../adapters/staff/staff_directory_adapter';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -75,7 +76,7 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
       const command: RecommendationReplacementFlowState['command'] = { caseNo, planId: plan.planId, expectedVersion: freshContact.plan.communication_version, actor, reason: reason.trim(), lockId: freshPlan.activeLockId, originalPlan: freshPlan, originalContact: freshContact,
         releaseFingerprint: release?.preview_fingerprint ?? null,
         releaseKey: `recommendation-release-${crypto.randomUUID()}`, cancelKey: `recommendation-cancel-${crypto.randomUUID()}`, createKey: `recommendation-create-${crypto.randomUUID()}`,
-        asOf: new Date().toISOString().slice(0, 10), segments: freshSegments.map((segment, index) => ({ staff_id: index === segmentIndex ? staffId : segment.staffId, start_date: segment.assignedStartDate, end_date: segment.assignedEndDate })) };
+        asOf: taipeiDate(), segments: freshSegments.map((segment, index) => ({ staff_id: index === segmentIndex ? staffId : segment.staffId, start_date: segment.assignedStartDate, end_date: segment.assignedEndDate })) };
       running.current = false;
       await cancelOriginal({ command, stage: command.lockId === null ? 'cancel' : 'release', released: false, cancelled: false, cancellationEventId: null, receipt: null, error: null });
 

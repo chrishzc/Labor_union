@@ -18,7 +18,7 @@
 8. `actual_hours = 有效 assignment-owned 正式服務日數 × orders.service_hours_per_day`；不得 fallback 到 `planned_hours` 或 `orders.staff_id`。
 9. cancelled assignment 保留歷史，但不得參與 current 排班、日期、工時或薪資。
 10. 服務資料鎖、取消限制與完整履約薪資依 Orders／Scheduling／Payroll 規格；Global 只要求 caller 不得旁路 owner predicate。
-11. 所有服務日期、完成時刻與到期日政策以 `Asia/Taipei` 解讀；測試注入 clock。
+11. 所有服務日期、完成時刻與到期日政策以 `Asia/Taipei` 解讀；測試注入 clock。前端顯示的業務日期與時間固定使用台灣時間，純日期欄位保留原日曆日期。MySQL 執行期連線及 NAS 伺服器的預設 SQL 時區固定為 UTC，`_utc`、事件時刻、租約及重試紀錄維持 UTC；顯示時轉為台灣時間。若 SQL 需要業務當日，明確由 UTC 時刻計算台灣日期。
 12. Alert／Anomalies 不是 Domain mutation gate；它只投影 owner predicate。
 13. 無法從 current root facts 唯一判定原因或修復方式時，停止自動更正，不得猜測 adjustment／reversal／target status。
 14. `#anomalies` 概念僅限 current issue；一般 owner review／work item 留在 owning page，且皆只能呼叫 owning typed command，不直接寫 Domain root。

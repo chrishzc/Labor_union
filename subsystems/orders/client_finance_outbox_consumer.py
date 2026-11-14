@@ -74,7 +74,7 @@ def _project_deposit_override(connection, event, payload) -> None:
             "(case_no,trigger_event,before_status,after_status,actor,business_date,"
             "expected_version,idempotency_key,facts_snapshot) "
             "SELECT case_no,'deposit_gate_overridden','洽談中','訂單成立',"
-            "%s,CURRENT_DATE,lifecycle_version-1,%s,"
+            "%s,DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR),lifecycle_version-1,%s,"
             "JSON_OBJECT('deposit_settled',FALSE,'unpaid_progression_allowed',TRUE,'reason',%s) "
             "FROM orders WHERE case_no=%s",
             (str(payload.get("actor") or "client-finance-override"), event["intent_key"], str(payload.get("reason") or ""), event["case_no"]),
@@ -121,7 +121,7 @@ def _project_deposit_established(connection, event, payload) -> None:
             "(case_no,trigger_event,before_status,after_status,actor,business_date,"
             "expected_version,idempotency_key,facts_snapshot) "
             "SELECT case_no,'deposit_reconciled','洽談中','訂單成立',"
-            "'client-finance-outbox',CURRENT_DATE,lifecycle_version-1,%s,"
+            "'client-finance-outbox',DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR),lifecycle_version-1,%s,"
             "JSON_OBJECT('deposit_settlement_identity',%s) "
             "FROM orders WHERE case_no=%s",
             (event["intent_key"], settlement_identity, event["case_no"]),

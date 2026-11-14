@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -507,7 +508,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       caseNo,
       kind: 'single',
       actor: sessionClient.getUser()?.username.trim() ?? '',
-      asOf: new Date().toISOString().slice(0, 10),
+      asOf: taipeiDate(),
       key: `orders-single-plan-${crypto.randomUUID()}`,
       segments,
     };

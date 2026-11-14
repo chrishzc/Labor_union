@@ -23,6 +23,7 @@ from infrastructure.mysql.replacement_matching_query import candidate_contact_op
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
+from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.table_image_contracts import TableDocument, candidate_information_document
@@ -236,7 +237,7 @@ def _require_current_candidate(case_no: str, staff_id: int, start_date: str, end
     availability_kwargs = {
         "case_no": case_no,
         "segment_drafts": [{"staff_id": staff_id, "start_date": start_date, "end_date": end_date}],
-        "as_of": date.today().isoformat(),
+        "as_of": SystemBusinessClock().today().isoformat(),
         "filter_policy": {"region": False, "cooking": False, "preferred_service_days": False, "daily_service_hours": False},
     }
     if segmented_facts_port is not None:
@@ -842,7 +843,7 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
             availability = {"conflicts": ()}
         elif projection["date_basis"] == "planned":
             availability = search_candidate_inquiry_availability(
-                case_no, [{"staff_id": projection["staff_id"]}], date.today().isoformat(),
+                case_no, [{"staff_id": projection["staff_id"]}], SystemBusinessClock().today().isoformat(),
                 segmented_facts_port, filter_policy={key: False for key in (
                     "region", "cooking", "preferred_service_days", "daily_service_hours")},
             )
@@ -850,7 +851,7 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
             availability = search_segmented_caregiver_availability(
                 case_no=case_no, segment_count=1,
                 segment_drafts=[{"staff_id": projection["staff_id"]}],
-                as_of=date.today().isoformat(), facts_port=segmented_facts_port,
+                as_of=SystemBusinessClock().today().isoformat(), facts_port=segmented_facts_port,
                 include_candidate_options=False,
                 filter_policy={key: False for key in (
                     "region", "cooking", "preferred_service_days", "daily_service_hours")},

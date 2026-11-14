@@ -25,7 +25,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString('zh-TW') : '尚無';
+  return value ? new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '尚無';
 }
 
 function operationIdentity(prefix: string): string {

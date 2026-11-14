@@ -38,6 +38,7 @@ from domains.scheduling.matching_communication import (
     record_caregiver_willingness,
     record_customer_decision,
 )
+from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.capabilities import (
@@ -1035,7 +1036,7 @@ def _validate_availability(
             }
             for segment in state.segments
         ],
-        as_of=datetime.now().date().isoformat(),
+        as_of=SystemBusinessClock().today().isoformat(),
         facts_port=facts_port,
         include_candidate_options=False,
         include_occupancy_periods=True,

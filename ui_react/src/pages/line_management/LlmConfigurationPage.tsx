@@ -148,7 +148,7 @@ export const LlmConfigurationPage: React.FC<LlmConfigurationPageProps> = ({ embe
   };
 
   const updatedAt = status?.updated_at
-    ? new Date(status.updated_at).toLocaleString('zh-TW')
+    ? new Date(status.updated_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
     : null;
   const statusIndicator = (
     <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
@@ -252,7 +252,7 @@ export const LlmConfigurationPage: React.FC<LlmConfigurationPageProps> = ({ embe
           <p className="llm-config-meta">最後更新：{updatedAt}</p>
         )}
         {lastConnectionTestAt && (
-          <p className="llm-config-meta">最近測試：{lastConnectionTestAt.toLocaleString('zh-TW')}</p>
+          <p className="llm-config-meta">最近測試：{lastConnectionTestAt.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</p>
         )}
         {notice && <div className="llm-config-notice success" role="status">{notice}</div>}
         {error && <div className="llm-config-notice error" role="alert">{error}</div>}

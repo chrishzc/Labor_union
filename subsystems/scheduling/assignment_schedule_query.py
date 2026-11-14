@@ -346,7 +346,7 @@ def get_assignment_schedule(assignment_id: int) -> dict[str, Any]:
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT CURRENT_DATE as `current_date`")
+            cursor.execute("SELECT DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR) as `current_date`")
             current_date_row = cursor.fetchone()
             if current_date_row is None:
                 raise ValueError("unable to load database current date")
@@ -527,7 +527,7 @@ def _get_case_schedule_conflict_snapshot_with_cursor(
     lock_clause = " FOR UPDATE" if lock_rows else ""
     if True:
         if True:
-            cursor.execute("SELECT CURRENT_DATE AS `current_date`")
+            cursor.execute("SELECT DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR) AS `current_date`")
             current_date_row = cursor.fetchone()
             if not isinstance(current_date_row, dict):
                 raise ValueError("unable to load database current date")

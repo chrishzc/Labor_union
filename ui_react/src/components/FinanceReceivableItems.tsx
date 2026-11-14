@@ -1,8 +1,9 @@
+import { taipeiDate } from '../shared/taipeiTime';
 import { useEffect, useState } from 'react';
 import { monthlyAccountingClient, type AccountingRange, type ReceivableAccountingList } from '../api/finance_import/monthly_accounting_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 export type ReceivableFilters={month:string|null;category:AccountingRange['category'];status:'all'|'open'|'settled'|'received';search:string};
-const currentMonth=()=>{const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;};
+const currentMonth = () => taipeiDate().slice(0, 7);
 
 export function FinanceReceivableItems({revision=0,undatedOnly=false,initialFilters,onFiltersChange,onCase,onSubsidy}:{revision?:number;undatedOnly?:boolean;initialFilters?:ReceivableFilters;onFiltersChange?:(filters:ReceivableFilters)=>void;onCase:(caseNo:string)=>void;onSubsidy?:(caseNo:string)=>void}){
   const [filters,setFilters]=useState<ReceivableFilters>(()=>initialFilters??{month:undatedOnly?null:currentMonth(),category:'subsidy',status:'all',search:''});

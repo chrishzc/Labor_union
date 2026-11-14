@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { monthlyAccountingClient, type AccountingRange, type MonthlyAccountingReport } from '../api/finance_import/monthly_accounting_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
@@ -10,7 +11,7 @@ type MonthRow = MonthlyAccountingReport['rows'][number];
 type AmountKey = 'expected_in_ntd' | 'received_ntd' | 'remaining_in_ntd' | 'expected_out_ntd' | 'paid_ntd' | 'remaining_out_ntd' | 'cash_in_ntd' | 'cash_out_ntd' | 'other_in_ntd' | 'other_out_ntd';
 const cashColumns: [AmountKey, string][] = [['cash_in_ntd', '已核銷入款'], ['cash_out_ntd', '已核銷出款']];
 const categories = { subsidy: '補助案件', non_citizen: '非市民案件', all: '全部案件' };
-const monthNow = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; };
+const monthNow = () => taipeiDate().slice(0, 7);
 const dueColumns: [AmountKey, string][] = [['expected_in_ntd', '應收'], ['remaining_in_ntd', '待收'], ['expected_out_ntd', '應付'], ['remaining_out_ntd', '待付']];
 
 export function FinanceMonthlyAccounting({ onCase, onPayableReview, initialRange, onRangeChange, revision = 0 }: { onCase: (caseNo: string) => void; onPayableReview?: (item: HistoricalPayableAuditItem) => void; initialRange?:AccountingRange; onRangeChange?:(range:AccountingRange)=>void; revision?: number }) {
@@ -45,7 +46,7 @@ export function FinanceMonthlyAccounting({ onCase, onPayableReview, initialRange
   const cashUnavailable = basis === 'cash' && Boolean(data?.cash_unavailable_reason);
   const hasData = !cashUnavailable && (data?.rows.some(row => basis === 'due' ? row.items.length > 0 : row.bank_facts.length > 0) ?? false);
   function query(next = draft) { if (!next.start_month || !next.end_month || next.start_month > next.end_month) { setInvalid('起始月份不可晚於結束月份。'); return; } setInvalid(''); setDownload(''); setExpansions({due:'',cash:''}); setRange({ ...next }); onRangeChange?.({...next}); }
-  function quick(unit: 'month' | 'quarter' | 'year') { const now = new Date(), year = now.getFullYear(), first = unit === 'year' ? 1 : unit === 'quarter' ? Math.floor(now.getMonth() / 3) * 3 + 1 : now.getMonth() + 1; const last = unit === 'year' ? 12 : unit === 'quarter' ? first + 2 : first; const next = { ...draft, start_month: `${year}-${String(first).padStart(2, '0')}`, end_month: `${year}-${String(last).padStart(2, '0')}` }; setDraft(next); query(next); }
+  function quick(unit: 'month' | 'quarter' | 'year') { const [year, month] = taipeiDate().split('-').map(Number); const first = unit === 'year' ? 1 : unit === 'quarter' ? Math.floor((month - 1) / 3) * 3 + 1 : month; const last = unit === 'year' ? 12 : unit === 'quarter' ? first + 2 : first; const next = { ...draft, start_month: `${year}-${String(first).padStart(2, '0')}`, end_month: `${year}-${String(last).padStart(2, '0')}` }; setDraft(next); query(next); }
   async function exportPayablesXlsx(month = payablesTargetMonth) {
     const controller = new AbortController(); payablesDownloadRequest.current = controller; setPayablesDownloading(true); setPayablesDownloadNotice('');
     try { const artifact = await accountsPayableExportClient.download(month, controller.signal); if (controller.signal.aborted) return; const url = URL.createObjectURL(artifact.blob), link = document.createElement('a'); link.href = url; link.download = artifact.filename; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); setPayablesDownloadNotice(`已送出下載：${artifact.filename}`); setShowPayablesModal(false); }

@@ -4,6 +4,7 @@ import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { useUnsavedDraft } from '../../components/UnsavedChanges';
 import { lineRuntimeTargetClient } from '../../api/line_runtime_targets/line_runtime_target_client';
 import { LineRuntimeTargetError } from '../../api/line_runtime_targets/line_runtime_target_errors';
+import { formatTaipeiDateTime } from '../../shared/taipeiTime';
 import type { LineRuntimeTarget, LineRuntimeTargetReceipt, LineRuntimeAdminCandidate } from '../../api/line_runtime_targets/line_runtime_target_schemas';
 import '../LineManagementPage.css';
 
@@ -122,7 +123,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({ client, 
       {!loading && !error && targets.length === 0 && <p>目前沒有已設定的管理員通知對象。</p>}
       <div className="line-grid-cards">{targets.map(target => <article className="line-info-card" key={target.target_id}>
         <strong>{target.display_label}</strong><p>{target.state === 'active' ? '啟用' : '停用'}</p>
-        <p>更新時間：{target.updated_at}</p>
+        <p>更新時間：{formatTaipeiDateTime(target.updated_at)}</p>
         <button className="line-secondary-btn" disabled={busy} onClick={() => void toggle(target)}>
           {target.state === 'active' ? '停用通知' : '啟用通知'}</button>
       </article>)}</div>

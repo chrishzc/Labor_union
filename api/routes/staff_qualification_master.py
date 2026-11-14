@@ -21,6 +21,7 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_qualification_master_repository import (
     MySqlStaffQualificationMasterRepository,
 )
+from shared_kernel.clock import SystemBusinessClock
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff.qualification_master_query import (
     QualificationMasterQueryApplication,
@@ -77,7 +78,7 @@ def query_staff_qualification_master(
     correlation = correlation_id or uuid4().hex
     try:
         result = application.query(
-            StaffQualificationMasterQuery(staff_id, as_of or date.today())
+            StaffQualificationMasterQuery(staff_id, as_of or SystemBusinessClock().today())
         )
         return BaseResponse(
             data=_master_view(result),

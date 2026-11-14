@@ -26,6 +26,7 @@ services:
     command:
       - "--character-set-server=utf8mb4"
       - "--collation-server=utf8mb4_unicode_ci"
+      - "--default-time-zone=+00:00"
       - "--innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL:-256M}"
       - "--innodb-log-buffer-size=16M"
       - "--max-connections=${MYSQL_MAX_CONNECTIONS:-60}"

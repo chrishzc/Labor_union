@@ -69,7 +69,7 @@ class QueryAwareCursor:
     def execute(self, sql, params=None):
         self.executed.append((" ".join(sql.split()), tuple(params) if params is not None else None))
         sql_upper = sql.upper()
-        if "SELECT CURRENT_DATE" in sql_upper:
+        if "SELECT DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR)" in sql_upper:
             self.current = self.fixture.get("current_date")
         elif "FROM CASE_STAFF_ASSIGNMENTS A" in sql_upper and "WHERE A.ID = %S" in sql_upper:
             self.current = self.fixture["assignments"].get(params[0]) if params else None

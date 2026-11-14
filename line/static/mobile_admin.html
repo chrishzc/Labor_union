@@ -727,7 +727,7 @@ async function loadTicketDetail(ticketId, originalRoot = document.getElementById
       const item = document.createElement("div");
       item.className = "event";
       const metadata = document.createElement("small");
-      metadata.textContent = new Date(event.created_at).toLocaleString();
+      metadata.textContent = formatDateTime(event.created_at);
       const message = document.createElement("span");
       message.textContent = event.message_text || event.event_type;
       item.append(metadata, message);
@@ -1758,7 +1758,7 @@ function reviewCard(review) {
   status.textContent = businessLabel(reviewStatusLabels, review.status, "狀態待確認");
   row.append(title, status);
   const summary = document.createElement("p");
-  summary.textContent = `LINE：${review.line_user_id_masked}｜送出：${review.created_at ? new Date(review.created_at).toLocaleString() : "無"}`;
+  summary.textContent = `LINE：${review.line_user_id_masked}｜送出：${review.created_at ? formatDateTime(review.created_at) : "無"}`;
   if (review.status !== "pending") {
     const readonlyReason = document.createElement("p");
     readonlyReason.className = "muted";
@@ -1978,7 +1978,7 @@ function validDateTime(value) {
 }
 
 function formatDateTime(value) {
-  return new Date(value).toLocaleString("zh-TW", {hour12:false});
+  return new Date(value).toLocaleString("zh-TW", {timeZone:"Asia/Taipei",hour12:false});
 }
 
 function requireOrderTrackingPage(data) {

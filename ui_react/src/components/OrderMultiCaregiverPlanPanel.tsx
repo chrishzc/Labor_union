@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 import { useUnsavedDraft } from './UnsavedChanges';
 import { CaregiverCommuteQuery } from './CaregiverCommute';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
@@ -183,7 +184,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
         caseNo,
         kind: 'multi' as const,
         actor: sessionClient.getUser()?.username.trim() ?? '',
-        asOf: new Date().toISOString().slice(0, 10),
+        asOf: taipeiDate(),
         key: `orders-multi-plan-${crypto.randomUUID()}`,
         segments,
       };

@@ -68,7 +68,9 @@ def test_schema_connection_preserves_tls_and_is_read_only(database_environment, 
     assert kwargs["ssl"] == {
         "ca": "ca.pem", "cert": "client.pem", "key": "client.key", "check_hostname": True,
     }
-    assert kwargs["init_command"] == "SET SESSION TRANSACTION READ ONLY"
+    assert kwargs["init_command"] == (
+        "SET SESSION time_zone = '+00:00', SESSION transaction_read_only = ON"
+    )
     assert kwargs["connect_timeout"] == 5
     assert kwargs["read_timeout"] == kwargs["write_timeout"] == 30
 

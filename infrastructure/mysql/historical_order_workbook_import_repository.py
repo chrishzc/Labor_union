@@ -139,7 +139,7 @@ class HistoricalOrderWorkbookImportRepository:
                     "INSERT INTO order_lifecycle_state_events "
                     "(case_no,trigger_event,before_status,after_status,actor,business_date,"
                     "expected_version,idempotency_key,facts_snapshot) "
-                    "VALUES (%s,'historical_order_adoption',%s,%s,%s,CURRENT_DATE,%s,%s,%s)",
+                    "VALUES (%s,'historical_order_adoption',%s,%s,%s,DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR),%s,%s,%s)",
                     (
                         candidate.case_no,
                         candidate.before_status.value,

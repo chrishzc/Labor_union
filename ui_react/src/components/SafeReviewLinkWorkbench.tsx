@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { LockKeyhole } from 'lucide-react';
 import { safeReviewLinkClient, type SafeReviewLinkClient } from '../api/line_safe_review_link/line_safe_review_link_client';
 import { SafeReviewLinkClientError } from '../api/line_safe_review_link/line_safe_review_link_errors';
+import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import type { SafeReviewLink, SafeReviewLinkReceipt } from '../api/line_safe_review_link/line_safe_review_link_schemas';
 
 interface Props { client?: SafeReviewLinkClient; }
@@ -109,7 +110,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
         <div><dt>目前狀態</dt><dd>{statusLabel(view.status)}</dd></div>
         <div><dt>審核目標</dt><dd>{view.canonical_internal_target}</dd></div>
         <div><dt>來源警示</dt><dd>{view.source_alert_identity}</dd></div>
-        <div><dt>到期時間</dt><dd>{view.expires_at_utc}</dd></div>
+        <div><dt>到期時間</dt><dd>{formatTaipeiDateTime(view.expires_at_utc)}</dd></div>
         <div><dt>根版本</dt><dd>{view.root_version}</dd></div>
         {view.redeemed_at_utc && <div><dt>使用時間</dt><dd>{view.redeemed_at_utc}</dd></div>}
         {view.revoked_at_utc && <div><dt>撤銷時間</dt><dd>{view.revoked_at_utc}</dd></div>}

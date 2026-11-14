@@ -211,7 +211,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
             <div style={{ background: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px', marginTop: '12px' }}>
               <strong>服務完成內容已檢查</strong>
               <div>目前狀態：{preview.current_status}</div>
-              <div>完成時刻：{new Date(preview.completion_instant).toLocaleString('zh-TW')}</div>
+              <div>完成時刻：{new Date(preview.completion_instant).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</div>
               <div>服務日：{preview.official_service_dates.join('、')}</div>
               <div>確認後訂單會進入服務完成狀態。</div>
 

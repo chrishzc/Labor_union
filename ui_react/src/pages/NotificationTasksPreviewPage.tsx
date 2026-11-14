@@ -11,6 +11,7 @@ import { NotificationTaskActions, notificationHref } from '../components/Notific
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import type { LineDeliveryStatus, LineDeliverySourceType } from '../api/line_delivery/line_delivery_query_schemas';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
+import { formatTaipeiDateTime } from '../shared/taipeiTime';
 import './NotificationTasksPreviewPage.css';
 
 type Group = 'review' | 'reminder' | 'support';
@@ -38,7 +39,7 @@ const PRIMARY:Record<NotificationSource,string> = {
 type Row = NotificationItem & {caseLabel:string;personLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger';delivery?:string};
 function row(item:NotificationItem,record=false):Row {
   const ticket = item.source==='customer_service' || (item.source==='recommendation' && !!item.reference_id);
-  return {...item,caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
+  return {...item,time:formatTaipeiDateTime(item.time),caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
     personLabel:ticket?'客服對象':'相關對象',person:ticket?(item.person || '未具名使用者'):item.person,
     primary:ticket?'前往客服案件':item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
     secondary:item.case_no && ['overdue','deposit'].includes(item.source)?'前往核對款項':item.unavailable_reason?'前往身分與群組設定':undefined,

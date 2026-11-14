@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 /**
  * File: FinancePage.tsx
  * Description: 呈現帳務四大工作區（案件帳務、銀行對帳、政府補助清單、每月帳務）並協調銀行對帳單匯入與自動核銷生命週期。
@@ -36,8 +37,7 @@ function canApplyImportedBatch(preview: FinanceImportBatchPreview): boolean {
 }
 
 function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return taipeiDate().slice(0, 7);
 }
 
 function normalizeFinanceTab(tab: string | null, overdue: boolean, hasCaseNo: boolean): FinanceTab {

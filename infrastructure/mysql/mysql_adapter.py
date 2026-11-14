@@ -13,6 +13,7 @@ from datetime import datetime, date, timedelta
 from threading import Lock
 from time import monotonic
 from dotenv import load_dotenv
+from shared_kernel.clock import SystemBusinessClock
 from subsystems.client_finance.virtual_account_resolution import (
     build_client_virtual_account,
 )
@@ -45,6 +46,7 @@ def _database_config_from_environment() -> dict:
         "password": password,
         "database": os.getenv("DB_DATABASE", "union_db"),
         "charset": "utf8mb4",
+        "init_command": "SET SESSION time_zone = '+00:00'",
     }
     ssl_mode = os.getenv("DB_SSL_MODE", "disabled").strip().lower()
     if nas_profile and ssl_mode != "verify_identity":
@@ -900,7 +902,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
     導入 ADR-v3-01 預產期 7 天緩衝鎖定與服務中解鎖機制。
     回傳字典: { date_day(int): { 'status': 'white'/'yellow'/'red', 'client_name': '...', 'case_no': ..., 'is_work_day': bool } }
     """
-    from datetime import date, datetime, timedelta
+    from datetime import datetime, timedelta
     conn = get_connection()
     schedule_map = {}
     
@@ -985,7 +987,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
             """, (staff_id, year, month))
             rows = cursor.fetchall()
             
-            today_date = date.today()
+            today_date = SystemBusinessClock().today()
             for r in rows:
                 w_date = parse_dt(r['work_date'])
                 if not w_date:

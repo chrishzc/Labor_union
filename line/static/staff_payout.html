@@ -200,8 +200,8 @@ async function loadPayouts() {
 }
 
 async function init() {
-  const now = new Date();
-  document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const month = new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Taipei",year:"numeric",month:"2-digit"}).format(new Date());
+  document.getElementById("monthInput").value = month;
   flowId = new URLSearchParams(location.search).get("flow_id") || "";
   try {
     const result = await fetch("/api/v1/line/identity/runtime-config").then(response => response.json());

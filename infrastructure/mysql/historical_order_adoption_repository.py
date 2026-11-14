@@ -229,7 +229,7 @@ class MySqlHistoricalOrderAdoptionRepository:
                 "INSERT INTO order_lifecycle_state_events "
                 "(case_no,trigger_event,before_status,after_status,actor,business_date,"
                 "expected_version,idempotency_key,facts_snapshot) "
-                "SELECT case_no,'historical_order_adoption',%s,%s,%s,CURRENT_DATE,%s,%s,%s "
+                "SELECT case_no,'historical_order_adoption',%s,%s,%s,DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR),%s,%s,%s "
                 "FROM orders WHERE case_no=%s",
                 (
                     preview.before_status,

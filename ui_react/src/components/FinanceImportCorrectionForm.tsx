@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 /**
  * File: FinanceImportCorrectionForm.tsx
  * Description: WF-04 銀行流水逐筆人工核對與核銷表單，支援預填已辨識案件或月嫂。
@@ -95,10 +96,10 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     return () => { window.clearTimeout(timer); caseRequest.current?.abort(); };
   }, [caseSearch, kind]);
   // 政府整期入款狀態
-  const currentNow = new Date();
+  const [currentYear, currentMonth] = taipeiDate().split('-').map(Number);
   const [subsidyUnit, setSubsidyUnit] = useState<SubsidyPeriod['unit']>('quarter');
-  const [subsidyYear, setSubsidyYear] = useState<number>(currentNow.getFullYear());
-  const [subsidyIndex, setSubsidyIndex] = useState<number>(Math.floor(currentNow.getMonth() / 3) + 1);
+  const [subsidyYear, setSubsidyYear] = useState<number>(currentYear);
+  const [subsidyIndex, setSubsidyIndex] = useState<number>(Math.floor((currentMonth - 1) / 3) + 1);
   const [subsidyView, setSubsidyView] = useState<SubsidyPeriodView | null>(null);
   const [subsidyLoading, setSubsidyLoading] = useState(false);
   const [subsidyError, setSubsidyError] = useState('');

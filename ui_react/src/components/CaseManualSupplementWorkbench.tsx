@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 /**
  * File: CaseManualSupplementWorkbench.tsx
  * Description: 案件抽屜手動補登款項工作台，提供操作銀行（永豐、台新）、交易方向、沖銷對象選擇，自動標準化並完成銷帳。
@@ -85,7 +86,7 @@ export function CaseManualSupplementWorkbench({
   const [targetItem, setTargetItem] = useState<string>(initialTarget?.identity ?? '');
   const [amount, setAmount] = useState<string>(String(initialTarget?.remaining || ''));
   const [transactionDate, setTransactionDate] = useState<string>(
-    new Date().toISOString().slice(0, 10)
+    taipeiDate()
   );
   const [reason, setReason] = useState<string>('');
   const [busy, setBusy] = useState<boolean>(false);

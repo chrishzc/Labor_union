@@ -32,6 +32,7 @@ class ReadOnlyRuntimeConfig:
         settings.pop("database", None)
         if database is not None:
             settings["database"] = database
+        settings["init_command"] = "SET SESSION time_zone = '+00:00', SESSION transaction_read_only = ON"
         timeout = min(float(timeout_seconds or 30), 30)
         return pymysql.connect(
             **settings,
@@ -40,7 +41,6 @@ class ReadOnlyRuntimeConfig:
             connect_timeout=min(timeout, 5),
             read_timeout=timeout,
             write_timeout=timeout,
-            init_command="SET SESSION TRANSACTION READ ONLY",
         )
 
 

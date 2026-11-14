@@ -1,3 +1,8 @@
+/**
+ * File: ClientRosterColumnFilter.tsx
+ * Description: 提供客戶名冊表頭的 Excel 式欄位篩選、排序、隱藏與凍結選單。
+ */
+import { taipeiDate } from '../shared/taipeiTime';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Filter } from 'lucide-react';
@@ -9,11 +14,19 @@ interface Props {
   column: RosterFilterColumn;
   active?: ClientRegistryColumnFilter;
   disabled: boolean;
+  isFrozen?: boolean;
+  canHide?: boolean;
   onApply: (predicate: ClientRegistryColumnFilter | undefined) => void;
   onSort?: (order: ClientRegistrySortOrder) => void;
+  onToggleFreeze?: () => void;
+  onHideColumn?: () => void;
+  onAutoFitWidth?: () => void;
 }
 
-export function ClientRosterColumnFilter({ column, active, disabled, onApply, onSort }: Props) {
+export function ClientRosterColumnFilter({
+  column, active, disabled, isFrozen = false, canHide = true,
+  onApply, onSort, onToggleFreeze, onHideColumn, onAutoFitWidth,
+}: Props) {
   const trigger = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const [open, setOpen] = useState(false);
@@ -27,11 +40,14 @@ export function ClientRosterColumnFilter({ column, active, disabled, onApply, on
       {active ? <Filter size={15} aria-hidden="true" /> : <span aria-hidden="true">▾</span>}
     </button>
     {open && createPortal(<FilterPanel column={column} active={active} trigger={trigger} onClose={close}
+      isFrozen={isFrozen} canHide={canHide} onToggleFreeze={onToggleFreeze} onHideColumn={onHideColumn} onAutoFitWidth={onAutoFitWidth}
       onApply={(predicate) => { onApply(predicate); close(); }} onSort={onSort ? (order) => { onSort(order); close(); } : undefined} />, document.body)}
   </>;
 }
 
-function FilterPanel({ column, active, trigger, onClose, onApply, onSort }: Omit<Props, 'disabled'> & { trigger: React.RefObject<HTMLButtonElement | null>; onClose: () => void }) {
+function FilterPanel({
+  column, active, trigger, onClose, onApply, onSort, isFrozen, canHide, onToggleFreeze, onHideColumn, onAutoFitWidth,
+}: Omit<Props, 'disabled'> & { trigger: React.RefObject<HTMLButtonElement | null>; onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0, maxHeight: 500 });
   const [operator, setOperator] = useState<ClientRegistryFilterOperator>(active && !['in', 'not_in'].includes(active.operator) ? active.operator : 'in');
@@ -112,17 +128,38 @@ function FilterPanel({ column, active, trigger, onClose, onApply, onSort }: Omit
     else onApply({ field: column.field, operator, values: operator === 'blank' ? [] : operator === 'between' ? [value.trim(), upper.trim()] : [value.trim()] });
   };
   const monthRange = (offset: number) => {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-    const end = new Date(today.getFullYear(), today.getMonth() + offset + 1, 0);
-    const iso = (item: Date) => `${item.getFullYear()}-${String(item.getMonth() + 1).padStart(2, '0')}-${String(item.getDate()).padStart(2, '0')}`;
+    const [year, month] = taipeiDate().split('-').map(Number);
+    const start = new Date(Date.UTC(year, month - 1 + offset, 1));
+    const end = new Date(Date.UTC(year, month + offset, 0));
+    const iso = (item: Date) => item.toISOString().slice(0, 10);
     setOperator('between'); setValue(iso(start)); setUpper(iso(end));
   };
   return <div ref={panel} className="client-roster-column-panel" role="dialog" aria-label={`${column.label}篩選選項`} style={position}
     onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }}
     onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== trigger.current) onClose(); }}>
     <form onSubmit={apply}>
-      <strong>{column.label}</strong>
+      <div className="client-roster-column-panel-header">
+        <strong>{column.label}</strong>
+        {(onToggleFreeze || (canHide && onHideColumn) || onAutoFitWidth) && (
+          <div className="client-roster-column-quick-actions">
+            {onToggleFreeze && (
+              <button type="button" className={isFrozen ? 'is-active' : undefined} onClick={() => { onToggleFreeze(); onClose(); }}>
+                {isFrozen ? '📌 解除凍結' : '📌 凍結此欄'}
+              </button>
+            )}
+            {canHide && onHideColumn && (
+              <button type="button" onClick={() => { onHideColumn(); onClose(); }}>
+                👁️‍🗨️ 隱藏此欄
+              </button>
+            )}
+            {onAutoFitWidth && (
+              <button type="button" onClick={() => { onAutoFitWidth(); onClose(); }}>
+                自動貼齊欄寬
+              </button>
+            )}
+          </div>
+        )}
+      </div>
       {onSort && <div className="client-roster-column-sort"><button type="button" onClick={() => onSort('asc')}>↑ 升冪排序</button><button type="button" onClick={() => onSort('desc')}>↓ 降冪排序</button></div>}
       <button type="button" className="client-roster-column-clear" onClick={() => onApply(undefined)}>清除此欄篩選</button>
       <label>篩選方式<select aria-label={`${column.label}篩選方式`} value={operator} onChange={(event) => setOperator(event.target.value as ClientRegistryFilterOperator)}>

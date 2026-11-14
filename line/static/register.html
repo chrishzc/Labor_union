@@ -1160,8 +1160,8 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
     function validateRegistrationForm() {
         clearFieldErrors();
         const errors = [];
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const taipeiDate = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+        const today = new Date(`${taipeiDate}T00:00:00Z`);
 
         const name = document.getElementById('name');
         const idNumber = document.getElementById('id_number');
@@ -1192,7 +1192,7 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         }
 
         if (birthDate.value) {
-            const birth = new Date(`${birthDate.value}T00:00:00`);
+            const birth = new Date(`${birthDate.value}T00:00:00Z`);
             if (Number.isNaN(birth.getTime()) || birth > today) {
                 addError(errors, birthDate, '出生年月日不可晚於今天。');
             }
@@ -1233,11 +1233,11 @@ Description: 提供 LIFF 客戶服務登記 Preview/Apply 與同源預覽載入�
         if (!expectedDate.value) {
             addError(errors, expectedDate, '請選擇預產期或已生產日期。');
         } else {
-            const expected = new Date(`${expectedDate.value}T00:00:00`);
+            const expected = new Date(`${expectedDate.value}T00:00:00Z`);
             const lowerBound = new Date(today);
-            lowerBound.setFullYear(lowerBound.getFullYear() - 1);
+            lowerBound.setUTCFullYear(lowerBound.getUTCFullYear() - 1);
             const upperBound = new Date(today);
-            upperBound.setFullYear(upperBound.getFullYear() + 1);
+            upperBound.setUTCFullYear(upperBound.getUTCFullYear() + 1);
             if (Number.isNaN(expected.getTime()) || (!isNonCitizen && (expected < lowerBound || expected > upperBound))) {
                 addError(errors, expectedDate, '日期需在今天前後 1 年內，請確認是否填錯年份。');
             }

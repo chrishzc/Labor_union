@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from shared_kernel.clock import SystemBusinessClock
 
 
 _TAIWAN_ID_LETTER_CODES = {
@@ -198,7 +199,7 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
             parsed = date.fromisoformat(candidate)
         except ValueError as exc:
             raise ValueError("birth_date must be a valid YYYY-MM-DD date") from exc
-        if parsed > date.today():
+        if parsed > SystemBusinessClock().today():
             raise ValueError("birth_date cannot be later than today")
         return value
 

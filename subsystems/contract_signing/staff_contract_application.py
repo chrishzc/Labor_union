@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
+from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.contract_signing.template_catalog import (
     TEMPLATE_DIRECTORY,
@@ -403,7 +404,7 @@ def _staff_template_facts(connection, case_no: str, segment: dict[str, object]) 
                 segment["assigned_end_date"] - segment["assigned_start_date"]
             ).days
             + 1,
-            "__today__": date.today(),
+            "__today__": SystemBusinessClock().today(),
         }
     )
     return result

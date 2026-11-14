@@ -1,3 +1,4 @@
+import { taipeiDate } from '../../shared/taipeiTime';
 /**
  * File: matching_candidate_workflow_client.ts
  * Description: 查詢單月嫂或多月嫂候選，並以既有正式 route 建立一至四段媒合方案。
@@ -198,7 +199,7 @@ export const matchingCandidateWorkflowClient = {
       AvailabilitySchema,
       await transport.post(
         `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/availability/search`,
-        { segment_count: 1, segment_drafts: [], as_of: new Date().toISOString().slice(0, 10), filters: MatchingFilterPolicySchema.parse(filters) },
+        { segment_count: 1, segment_drafts: [], as_of: taipeiDate(), filters: MatchingFilterPolicySchema.parse(filters) },
         { ...authOptions(), signal: options?.signal },
       ),
       'CANDIDATE_INQUIRY_SEARCH_FAILED',
@@ -229,7 +230,7 @@ export const matchingCandidateWorkflowClient = {
         {
           segment_count: segmentCount,
           segment_drafts: drafts,
-          as_of: new Date().toISOString().slice(0, 10),
+          as_of: taipeiDate(),
           filters: parsedFilters,
         },
         { ...authOptions(), signal: options?.signal },

@@ -1,3 +1,4 @@
+import { taipeiDate } from '../../shared/taipeiTime';
 /**
  * File: OperationsReportsWorkspace.tsx
  * Description: 沿用既有週報及補助欄位與 XLSX，提供營運及帳務唯一補助入口兩種既定畫面。
@@ -30,8 +31,8 @@ type ReportState =
   | { kind: 'error'; message: string };
 
 function currentPeriod() {
-  const now = new Date();
-  return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 };
+  const [year, month] = taipeiDate().split('-').map(Number);
+  return { year, quarter: Math.floor((month - 1) / 3) + 1 };
 }
 
 function currentTaipeiReportPeriod(): { startDate: string; endDate: string } {

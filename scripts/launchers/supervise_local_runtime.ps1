@@ -37,6 +37,7 @@ $script:StopRequested = $false
 $script:CleanupSucceeded = $false
 $script:RunId = [guid]::NewGuid().ToString("N")
 $script:RunStartedAt = (Get-Date).ToUniversalTime()
+$script:BusinessTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById('Taipei Standard Time')
 $script:CleanupUnknown = $false
 $script:ReactContainerName = $null
 $script:UnknownRootPids = [System.Collections.Generic.List[int]]::new()
@@ -64,11 +65,13 @@ function Write-RuntimeEvent {
         [int[]]$UnknownPids,
         [hashtable]$ChildExitCodes
     )
+    $eventTime = [DateTimeOffset]::UtcNow
     $payload = [ordered]@{
         schema = "local-runtime-supervision.v1"
         event = $Event
         run_id = $script:RunId
-        timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+        timestamp_utc = $eventTime.UtcDateTime.ToString("o")
+        timestamp_taipei = [System.TimeZoneInfo]::ConvertTime($eventTime, $script:BusinessTimeZone).ToString("o")
         run_started_at_utc = $script:RunStartedAt.ToString("o")
         root_start_time = Get-RootStartTime
         label = $Label

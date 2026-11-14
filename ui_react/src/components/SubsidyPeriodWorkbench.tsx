@@ -1,3 +1,4 @@
+import { taipeiDate } from '../shared/taipeiTime';
 /** Whole-period source, balance and next action are independent. */
 import {useEffect,useRef,useState} from 'react';
 import {subsidyPeriodClient,type SubsidyPeriod,type SubsidyPeriodView,type SubsidyBankRow,type GovernmentDifferenceCommand} from '../api/government_subsidy/period_reconciliation_client';
@@ -9,7 +10,10 @@ export function SubsidyPeriodWorkbench({revision=0,onOpenCase,bankSource,onPoste
  bankSource?:{id:number;direction:'incoming'|'outgoing';amountNtd:number};onPosted?:()=>void;onBusyChange?:(busy:boolean)=>void;
 }){
  const scopedBank = bankSource !== undefined;
- const [period,setPeriod]=useState<SubsidyPeriod>({unit:'quarter',year:new Date().getFullYear(),index:Math.floor(new Date().getMonth()/3)+1});
+ const [period,setPeriod]=useState<SubsidyPeriod>(()=>{
+   const [year, month] = taipeiDate().split('-').map(Number);
+   return {unit:'quarter',year,index:Math.floor((month-1)/3)+1};
+ });
  const [yearText,setYearText]=useState(String(period.year));const [view,setView]=useState<SubsidyPeriodView|null>(null);const [banks,setBanks]=useState<SubsidyBankRow[]>([]);
  const [bank,setBank]=useState('');const [handling,setHandling]=useState('');const [balanceId,setBalanceId]=useState('');const [action,setAction]=useState('');
  const [amount,setAmount]=useState('');const [reason,setReason]=useState('');const [caseNo,setCaseNo]=useState('');const [correction,setCorrection]=useState('');
