@@ -26,6 +26,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
+      APP_ENV: production
       LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:?LINE channel required}
       REGISTRATION_REDIS_HOST: registration-redis
       REGISTRATION_REDIS_INTAKE_PASSWORD_FILE: /run/secrets/registration_intake_password

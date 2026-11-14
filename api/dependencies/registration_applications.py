@@ -1,16 +1,18 @@
 """
 File: registration_applications.py
-Description: 管理後台需求審核依賴組裝，自動確認共用 Redis 暫存命名空間初始化狀態。
+Description: 管理後台需求審核依賴組裝，自動確認 Redis 暫存命名空間初始化狀態。
 """
 from functools import lru_cache
+from uuid import uuid4
 
 from api.dependencies.controlled_files import get_controlled_file_workflow
 from api.dependencies.line_identity import get_line_identity_application
+from api.error_contracts import typed_http_error
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
 from infrastructure.file.storage_layout import CLIENT_PASSBOOK_DIRECTORY, configured_storage_root
 from infrastructure.mysql.controlled_file_finalize_worker import MySqlControlledFileFinalizeRunner
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.redis.registration_connection import registration_redis_client
+from infrastructure.redis.registration_connection import RegistrationRedisConfigurationError, registration_redis_client
 from infrastructure.redis.registration_staging_repository import RedisRegistrationStagingRepository
 from infrastructure.runtime.file_transfer_settings import file_read_capacity
 from shared_kernel.clock import SystemBusinessClock
@@ -135,7 +137,11 @@ def get_registration_staging_repository():
 
 @lru_cache(maxsize=1)
 def get_registration_review_application():
-    staging = get_registration_staging_repository()
+    try:
+        staging = get_registration_staging_repository()
+    except RegistrationRedisConfigurationError:
+        raise typed_http_error(503, "unavailable", "registration_storage_not_configured",
+                               "申請暫存服務尚未完成設定。", uuid4().hex) from None
     formal = get_line_identity_application()
     try:
         staging.ensure_initialized()
