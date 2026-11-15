@@ -18,7 +18,6 @@ from domains.line.webhook import (
     build_line_webhook_event,
 )
 from shared_kernel.identities import ExpectedVersion
-from subsystems.customer_service.escalation_application import HumanEscalationApplication
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
@@ -225,24 +224,16 @@ def _handoff_postback_event(now):
     )
 
 
-def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_uow():
+def test_claimed_complaint_is_processed_without_support_side_effects():
     now = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
     event = _complaint_event(now)
     state = _State(event)
     unit_of_work_factory = _UnitOfWorkFactory(state)
-    escalation = HumanEscalationApplication(unit_of_work_factory, lambda: now)
-    service_help = LineServiceHelpApplication(
-        lambda: now,
-        escalation_gateway=escalation,
-    )
-
-    def unexpected_knowledge_fallback(*_args):
-        raise AssertionError("complaint ingress must precede Knowledge fallback")
+    service_help = LineServiceHelpApplication(lambda: now)
 
     handlers = LineWebhookIdentityHandlers(
         lambda: now,
         lambda _purpose, _flow_id: "https://example.test/identity",
-        knowledge_question_scheduler=unexpected_knowledge_fallback,
         service_help_application=service_help,
     )
     consumer = LineWebhookEventConsumer(
@@ -261,52 +252,21 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
         is LineWebhookProcessingStatus.PROCESSED
     )
 
-    assert len(state.escalations.commands) == 1
-    command = state.escalations.commands[0]
-    assert command.trigger_code is TriggerCode.COMPLAINT
-    assert command.trigger_policy_version == "complaint.v1"
-    assert command.context.as_dict() == {
-        "summary_code": "complaint_explicit",
-        "policy_version": "complaint.v1",
-        "category": "other",
-        "redaction_version": "m4-mask.v1",
-    }
-
+    assert state.escalations.commands == []
     assert state.escalations.alerts == []
-    assert state.escalations.receipts[0][2].resulting_hold_state is AutomationHoldState.ACTIVE
-    assert "王小美" not in repr(command.context)
-    assert "0912345678" not in repr(command.context)
-
-    assert len(state.customer_service.messages) == 1
-    assert state.customer_service.messages[0].message == (
-        "客訴訊息已遮罩；請查看客服 escalation 的去敏摘要。"
-    )
-    assert "王小美" not in repr(state.customer_service.messages[0])
-    assert "0912345678" not in repr(state.customer_service.messages[0])
-
-    assert len(state.delivery_tasks.requests) == 1
-    delivery = state.delivery_tasks.requests[0]
-    assert delivery.source_aggregate_type == "line_webhook_event"
-    assert delivery.source_aggregate_identity == "event-complaint-direct-flow"
-    assert delivery.idempotency_key.value == (
-        "service-help:complaint-empathy:event-complaint-direct-flow"
-    )
-    empathy = json.loads(delivery.payload_json)["text"]
-    assert "很抱歉讓您有不好的感受" in empathy
-    assert "AI" not in empathy
+    assert state.escalations.receipts == []
+    assert state.customer_service.messages == []
+    assert state.delivery_tasks.requests == []
 
 
-def test_call_postback_background_consumer_records_ticket_hold_without_duplicate_reply():
+def test_replayed_old_call_postback_is_processed_without_ticket_hold_or_reply():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     state = _State(_handoff_postback_event(now))
     unit_of_work_factory = _UnitOfWorkFactory(state)
-    escalation = HumanEscalationApplication(unit_of_work_factory, lambda: now)
     handlers = LineWebhookIdentityHandlers(
         lambda: now,
         lambda _purpose, _flow_id: "https://example.test/identity",
-        service_help_application=LineServiceHelpApplication(
-            lambda: now, escalation_gateway=escalation
-        ),
+        service_help_application=LineServiceHelpApplication(lambda: now),
     )
     consumer = LineWebhookEventConsumer(
         unit_of_work_factory,
@@ -316,6 +276,6 @@ def test_call_postback_background_consumer_records_ticket_hold_without_duplicate
     )
 
     assert consumer.run_once() == 1
-    assert len(state.customer_service.messages) == 1
-    assert len(state.escalations.commands) == 1
+    assert state.customer_service.messages == []
+    assert state.escalations.commands == []
     assert state.delivery_tasks.requests == []

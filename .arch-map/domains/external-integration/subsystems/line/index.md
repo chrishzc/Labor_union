@@ -12,7 +12,7 @@
 - `payment-overdue-reminders` — 各期獨立的繳款逾期待辦、人工提醒及寄送前複核；path: `modules/payment-overdue-reminders.md`
 - `deposit-notifications` — 訂金繳費提醒、正式核銷成功通知及本人繳費 LIFF；path: `modules/deposit-notifications.md`
 - `runtime-alert-target` — 告警對象既有 Query／Preview／Apply、固定分類與管理介面；path: `modules/runtime-alert-target.md`
-- `customer-service-reminders` — React 客服案件唯讀提醒、來源投影與未結案分頁；path: `modules/customer-service-reminders.md`
+- `customer-service-reminders` — 歷史客服工單授權唯讀、版本化切換結案；path: `modules/customer-service-reminders.md`
 - `worker-runtime-monitoring` — canonical worker cycle orchestration、success／failure heartbeat 與 runtime health classification；path: `modules/worker-runtime-monitoring.md`
 - `delivery-provider-transport` — committed delivery task 共用的 provider outcome contract 與 LINE Messaging API transport adapter；path: `modules/delivery-provider-transport.md`
 - `delivery-task-presentation` — LINE delivery task查詢工作台的business-facing presentation；path: `modules/delivery-task-presentation.md`
@@ -58,7 +58,7 @@
 
 ### 第一批資訊回覆（2026-10-30 人工核准）
 
-綁定入口、服務導覽、選單說明、客服受理、群組指令及接案等互動確認使用 `line_webhook_reply`。Webhook 核對原事件及原聊天室，在提交必要的業務寫入後發送，失敗不重試或補 Push。背景 worker 只結清遺留 Reply 任務。聊天室 AI 入口已停用，遺留聊天室知識回答任務亦停止投遞。正式語意見規格 20 §3.2。
+綁定入口、服務導覽、選單說明、舊求助留言指引、群組指令及接案等互動確認使用 `line_webhook_reply`。Webhook 核對原事件及原聊天室，在提交必要的業務寫入後發送，失敗不重試或補 Push。背景 worker 只結清遺留 Reply 任務。聊天室 AI 入口已停用，遺留聊天室知識回答任務亦停止投遞。正式語意見規格 20 §3.2。
 
 `webhook_intake.py` 在驗簽並保存事件時保留新事件的處理租約。`webhook_event_consumer.py::consume_registered` 保留新建 Reply 任務的租約，提交後交 `delivery_worker.py::deliver_webhook_reply`。同一事件的背景業務在 Reply 嘗試後交回 Inbox，程序中斷時依租約逾期回收。HTTP 接線由 `api/dependencies/line_runtime.py` 組合。
 
@@ -70,7 +70,7 @@
 
 ### 告警對象
 
-告警只使用已設定管理員個人對象；群組登錄、重設與啟用已退役，不從歷史群組設定復活。正式行為依規格 17 與 20。
+管理員個人與群組告警 Push 已退役。工會由手機待辦工作台主動查詢系統狀態，客服由官方帳號處理。
 
 ### 投遞與好友事件的既有修正
 
@@ -81,7 +81,7 @@
 `infrastructure/mysql/line_platform_identity_repository.py`保存晚到的好友事件與版本紀錄，
 同一 adapter 內的 canonical 狀態與 legacy `line_users` 投影都不倒退；
 `webhook_identity_handlers.py`的follow不建立歡迎訊息／flow，舊unfollow不取消目前通知，
-一般message仍處理。文字「未解決」建單失敗須傳回consumer rollback／retry，不能排入
+一般留言維持於官方帳號，FAQ 未解決評價照常記錄且以留言指引回應。
 成功通報；這不改變Feedback owner的root／receipt契約。
 
 ## Verification routing
@@ -104,7 +104,7 @@ layout_status: `custom_current`
 - integration_test: `tests/domains/external-integration/subsystems/line/integration/test_line_m4_continuation_regressions.py` — 客服 SQL、LINE 投遞及群組告警退役後的跨 owner 邊界。
 - integration_root: `ui_react/src/tests/line_successor_clients.test.ts`
 
-上述修正的source基準為PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`；記錄中的
+過往修正的source基準為PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`；記錄中的
 53項回歸只涵蓋指定情境，非全M1～M4通過。main合併、部署、實際DB與手機／provider狀態
 須分別核對；本索引不把尚缺的請假客戶決策或告警到一次性review link證據標為superseded／passed。
 

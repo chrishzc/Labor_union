@@ -274,18 +274,14 @@ class MatchingCoordinationApplication:
                 facts,
                 preview_fingerprint=preview_fingerprint,
             )
-            # M3 only hands off typed, committed owner intents.  The owning
-            # Scheduling/Assignment/Customer Service workflows remain the
-            # writers of their roots; P5 is responsible for delivery tasks.
-            if isinstance(command, ApplyLeaveImpactOnMatching) and leave_result is not None:
-                handoff_suffix = (
-                    ":line-bilateral"
-                    if leave_result.result_state == "leave_deferred"
-                    else ":customer-service"
-                )
+            if (
+                isinstance(command, ApplyLeaveImpactOnMatching)
+                and leave_result is not None
+                and leave_result.result_state == "leave_deferred"
+            ):
                 receipt = replace(
                     receipt,
-                    outbox_intent_ids=(f"{command.idempotency_key.value}{handoff_suffix}",),
+                    outbox_intent_ids=(f"{command.idempotency_key.value}:line-bilateral",),
                 )
             elif isinstance(command, ApplyServiceDateChangeRematch):
                 receipt = replace(

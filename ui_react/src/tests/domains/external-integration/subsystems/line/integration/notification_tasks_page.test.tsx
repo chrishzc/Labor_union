@@ -4,7 +4,6 @@ import { NotificationTasksPage } from '../../../../../../pages/NotificationTasks
 import { notificationTasksClient as client, notificationFailure, type NotificationItem } from '../../../../../../api/line_notifications/notification_tasks_client';
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
-import { transport } from '../../../../../../api/shared/transport';
 
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'overdue:deposit',source:'overdue',group:'reminder',title:'訂金逾期未清',case_no:'116000001',reference_id:null,
   person:'',summary:'本期未繳 NT$ 3,000',reason:'各期獨立判斷',time:'2026-10-24',tag:'待處理',recipient:'客戶私人聊天室',message:'目前訂金餘額',unavailable_reason:'客戶尚未綁定 LINE',expected_version:null,
@@ -17,20 +16,14 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();window.history.replaceState(null,'','/');});
 describe('通知事項實際接線',()=>{
-  it.each([
-    ['customer_service','測試客戶'],['customer_service','未具名使用者'],['recommendation','測試客戶'],
-  ] as const)('客服來源 %s 顯示對象 %s 並跳轉原客服頁，不開舊面板',async(source,person)=>{
-    vi.mocked(client.catalog).mockResolvedValue([{source,label:'客服需求',group:'support'}]);
-    vi.mocked(client.list).mockResolvedValue({items:[item({id:'customer_service:7',source,reference_id:7,title:'客服需求',person,payment:null,unavailable_reason:null})],total:1,next_cursor:null});
-    const get=vi.spyOn(transport,'get');const post=vi.spyOn(transport,'post');
-    render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'客服需求'});
-    expect(screen.getByText('客服對象').nextElementSibling).toHaveTextContent(person);
-    expect(screen.queryByText('相關對象')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:'前往客服案件'}));
-    expect(window.location.hash).toBe('#line-management?tab=tickets&ticket_q=7');
-    expect(screen.queryByRole('region',{name:'客服案件處理'})).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('內部備註')).not.toBeInTheDocument();
-    expect(get).not.toHaveBeenCalled();expect(post).not.toHaveBeenCalled();
+  it('推薦待跟進開啟案件工作區，無客服通知入口',async()=>{
+    vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦確認',group:'review'}]);
+    vi.mocked(client.list).mockResolvedValue({items:[item({id:'recommendation:7:reply_reminder',source:'recommendation',title:'推薦確認待跟進',payment:null,unavailable_reason:null})],total:1,next_cursor:null});
+    render(<NotificationTasksPage/>);
+    await screen.findByRole('heading',{name:'推薦確認待跟進'});
+    fireEvent.click(screen.getByRole('button',{name:'開啟案件工作區'}));
+    expect(window.location.hash).toBe('#order-workbench-v2?case=116000001&work=recommendation');
+    expect(screen.queryByRole('button',{name:'前往客服案件'})).not.toBeInTheDocument();
   });
   it.each(['customer_binding','staff_binding'] as const)('未綁定來源 %s 提供人工聯絡與複製，不建立 LINE 寄送工作',async source=>{
     const reminder=item({id:source+':7',source,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',
@@ -50,13 +43,6 @@ describe('通知事項實際接線',()=>{
     fireEvent.click(screen.getByRole('button',{name:'重新整理'}));
     await screen.findByRole('heading',{name:'目前沒有待辦事項'});
     vi.unstubAllGlobals();
-  });
-  it('同一客服聯絡需求只列一次',async()=>{
-    vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦確認',group:'review'},{source:'customer_service',label:'客服',group:'support'}]);
-    vi.mocked(client.list).mockImplementation(async source=>({items:[item({id:'customer_service:7',source,title:source==='customer_service'?'客服需求':'推薦聯絡需求',group:source==='customer_service'?'support':'review',reference_id:7})],total:1,next_cursor:null}));
-    render(<NotificationTasksPage />);await screen.findByRole('heading',{name:'客服需求'});
-    expect(screen.getByLabelText('通知事項清單').querySelectorAll('[data-notification-id]')).toHaveLength(1);
-    expect(screen.queryByRole('button',{name:/推薦聯絡需求/})).not.toBeInTheDocument();
   });
   it('讀取真實來源；缺少綁定仍保留原因、提醒與補齊入口，不因查詢建立寄送工作',async()=>{
     const send=vi.spyOn(client,'send');render(<NotificationTasksPage />);

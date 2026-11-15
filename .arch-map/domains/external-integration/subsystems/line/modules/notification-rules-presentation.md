@@ -33,7 +33,7 @@
   - `subsystems/line/message_copy_catalog.py` — 明列目前內建訊息的虛擬 genesis、卡片欄位與共用純替換，保留動態區塊及舊工作快照。
   - `infrastructure/mysql/line_message_copy.py` — 借用原 connection 的設定 reader；不另開 writer／commit。
   - shared dependency: `subsystems/line/service_start_day.py` — 開工群組問候與第一期款提醒共用純文字組裝；代班／群組日期公版明列指定日期及月嫂欄位。
-- `subsystems/line/service_start_messages.py` — 開始服務階段代班徵詢與步驟 5 案件群組小幫手選單、確認開工日、雙方合意延期、專員協助及使用說明／常見疑問標準回答之純組裝與預設文案。
+- `subsystems/line/service_start_messages.py` — 開始服務階段代班徵詢與步驟 5 案件群組小幫手選單、確認開工日、雙方合意延期、專員協助及客戶常見疑問標準回答之純組裝與預設文案。
   - `infrastructure/mysql/line_message_preview_repository.py` — readonly transaction、參數化分頁、owner facts 與既有付款 source 轉接。
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`
@@ -48,9 +48,9 @@
   - `subsystems/line/message_configuration.py` — notification_description 消費同一版本化文字設定；genesis 沿用既有設定檔。
   - `subsystems/line/staff_leave_customer_coordination.py` — 新請假確認卡片只替換說明文字，不變更日期、對象或 postback。
 
-完工問卷以群組小幫手 Reply，流程圖連至「通知與發送」的可編輯文字範本。完工事件自動推播規則維持禁用。
+完工問卷以群組小幫手 Reply，流程圖連至「通知與發送」的可編輯文字範本。小幫手選單提供共用文案編輯與獨立的完工唯讀公版。完工事件自動推播規則維持禁用。
 
-流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」舊連結及 API 解析至唯一 `service-menu` 設定，目錄不再列獨立 `service-other`；訂單異動導覽只提供正式 LIFF URI，舊五按鈕文案作唯讀投影，服務流程及收費補助統一導向 AI 客服 LIFF；`service-flow`／`service-payment` 不再列入公版、文案編輯或預設模板，客服流程只保留維護位置說明。資料修改與訂單修改受理通知仍可編輯，歷史設定不刪除。
+流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽提示直接在官方帳號留言；「其他問題」舊連結及 API 解析至唯一 `service-menu` 設定，目錄不再列獨立 `service-other`；訂單異動導覽只提供正式 LIFF URI，舊五按鈕文案作唯讀投影，服務流程及收費補助統一導向 AI 客服 LIFF；`service-flow`／`service-payment` 不再列入公版、文案編輯或預設模板，客服流程只保留維護位置說明。資料與訂單異動改由既有表單入口處理，舊客服範本與歷史設定保留供稽核。
 
 補列 current 身分／登記模板、客服導覽及受理／結案、候選資訊一／二／每週說明、工會詢問／回覆及完整推薦確認包。卡片重用 `subsystems/scheduling/matching_line_cards.py` 純組裝；公版使用明列範例，訂單資訊欄位沿用 Orders owner `subsystems/orders/order_information.py` 的純格式化；既有 record API 透過 Orders／Matching owner 唯讀 projection。工會逐案詢問與回覆草稿僅預覽，共用卡片的標題、說明與按鈕名稱沿文案設定儲存。D+1～D+3 與未具正式用途的測試模板不列入。零候選固定協調通知已由現行人工協調取代，預覽、有效規則／模板與 bootstrap 均移除，writer 拒絕重新加入。補列訂金、服務群組成功／錯誤、配對回覆、請假回覆、進度與身分入口、完整去敏告警；公版共用原純組裝函式，欄位值明列，record API 對新增純公版項目明示不可用。告警收件者改稱已設定管理員個人對象，不寫死幹部群；群組告警已取消。
 

@@ -162,6 +162,18 @@ def test_opening_payment_command_keeps_payment_reply_and_handoff(monkeypatch):
     assert 'payment-reminder-replied:1' in unit.recorded
 
 
+def test_old_opening_payment_help_replies_in_group_and_stops_private_followup(monkeypatch):
+    unit = Unit()
+    unit.service_start_days.payment_reply_context = lambda *_: (CANDIDATE, 1)
+    calls = []
+    monkeypatch.setattr('subsystems.line.deposit_notifications.handle_payment_reminder_postback',
+                        lambda data, event, unit, *, reply_only: calls.append((data, reply_only)) or True)
+
+    assert ServiceStartDayPaymentReply().handle_message(inbox('有疑問需要解決', 'U_CUSTOMER'), unit)
+    assert calls == [('payment-assistance:first:CASE-001', True)]
+    assert 'payment-reminder-replied:1' in unit.recorded
+
+
 @pytest.mark.parametrize('key', ['ack:start-day-response:old', 'ack:opening-greeting-response:old'])
 def test_pending_service_status_replies_cancel_before_delivery(key):
     unit = Unit()

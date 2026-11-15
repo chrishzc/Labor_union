@@ -51,7 +51,7 @@ def copy_template_id(key):
     return "LINE-COPY-" + key
 
 
-def copy_fields(payload):
+def copy_fields(payload, *, fixed_text=()):
     """Only display text is editable. Provider actions and business data stay outside."""
     fields, bodies = [], []
     def walk(node, path):
@@ -67,6 +67,8 @@ def copy_fields(payload):
                 current = (*path, key)
                 editable = key == "altText" or (key == "text" and node.get("type") == "text") or (key == "label" and "type" in node)
                 if editable and isinstance(value, str):
+                    if value in fixed_text:
+                        continue
                     fields.append({"id": "/".join(current), "label": "訊息摘要" if key == "altText" else "按鈕名稱" if key == "label" else "通知文字" if path == () else "卡片標題" if node.get("weight") == "bold" else "卡片文字", "content": value,
                                    "max_length": 400 if key == "altText" else 20 if key == "label" else 5000})
                 elif key not in {"action", "quickReply"}:

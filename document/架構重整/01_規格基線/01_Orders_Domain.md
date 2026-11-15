@@ -70,6 +70,12 @@
 - **每日服務時間與下廚需求**：時段三欄必須「全空或全有」（新案於 waiting lock 或訂金核銷前必須完整；修改時段須一次完整傳遞）。每日服務時數可直接輸入，以 0.5 小時為單位且不得超過 24 小時。調整起訖時段只更新畫面的建議時數，承辦人可採用建議或保留輸入值，畫面同時顯示兩者。選取常用班次時明確填入時段與時數。HCM 與 BeClass 唯一配對後可經 typed command 補寫 `requires_cooking`（即使已有 `actual_start_date` 但無正式排班時亦同）；問卷模糊維持 `case_import_cooking_requirement_ambiguous` review 而不回滾 HCM 匯入。
 - **已簽 PDF 歸檔與完約**。依 [簽約正式規格 §3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#34-分開文件回收手工證明與本機測試跳過)，Orders 在歸檔交易登記 `contract_completed`，並依訂金核銷事實投影成立狀態。服務時段、承諾服務日與期款資格由各自 owner 判定。
 
+### 3.4.1 客戶訂單異動申請
+
+- 已驗證 LIFF 客戶僅能預覽及送出本人的有效訂單。Preview 回傳原值、異動值與確認識別。送出重新核對身分、案件及訂單版本，成功由 Orders 保存申請編號、案號、異動項目、原值、申請值及待處理狀態。同一送出識別重試讀回原申請。
+- 保留訂單異動 Query／Preview。新的 `POST /api/v1/line/order-change/requests` 回讀訂單申請編號。舊 `/apply` 回 `410 Gone` 並提示重新開啟表單。
+- 工會由訂單管理查看待處理申請與個案歷程。各項正式異動經既有業務入口操作，完成申請時保存辦理結果、經辦人及時間。送出及結案僅更新申請。客戶在官方帳號收人工回覆。
+
 ### 3.5 Actual Start Preview／Apply
 
 - 首次確認與更正皆須 Preview／Apply（正常案件開工與代班流程依 [Scheduling §3.3 SSTART-01～08](02_Assignments_Scheduling_Domain.md#service-start-and-substitution) 自動同步並保存群組結果日曆；禁止以 `planned_start` 或預設日 fallback）。

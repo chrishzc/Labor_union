@@ -60,13 +60,13 @@ def get_line_webhook_intake() -> LineWebhookIntake:
     from subsystems.line.delivery_worker import LineDeliveryWorker
     from subsystems.line.event_dispatcher import LineEventDispatcher
     from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
-    from subsystems.line.webhook_immediate_reply import enqueue_handoff_reply
+    from subsystems.line.webhook_immediate_reply import enqueue_retired_handoff_reply
 
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "").strip()
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     now = lambda: datetime.now(timezone.utc)
     consumer = LineWebhookEventConsumer(open_line_unit_of_work, LineEventDispatcher(), "webhook-reply", now)
-    dispatch = webhook_reply_dispatcher(now, enqueue_handoff_reply)
+    dispatch = webhook_reply_dispatcher(now, enqueue_retired_handoff_reply)
 
     def deliver_reply(task):
         delivery = LineDeliveryWorker(

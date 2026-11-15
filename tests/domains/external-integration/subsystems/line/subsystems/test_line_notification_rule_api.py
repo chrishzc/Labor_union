@@ -55,7 +55,7 @@ def _copy_client(monkeypatch):
 def test_retired_explanation_templates_cannot_be_read_or_edited_even_if_saved(monkeypatch):
     client, application = _copy_client(monkeypatch)
     templates = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
-    for key in ('service-flow', 'service-payment'):
+    for key in ('service-flow', 'service-payment', 'service-profile-update', 'service-order-update', 'service-contact', 'service-resolved'):
         saved_template = {'id': 'LINE-COPY-' + key, 'name': key, 'message_type': 'text',
             'enabled': True, 'content': '舊說明內容', 'variables': []}
         templates.append(saved_template)
@@ -66,8 +66,6 @@ def test_retired_explanation_templates_cannot_be_read_or_edited_even_if_saved(mo
     assert application.revision == 7
     assert client.get("/api/v1/line/notification-rules/welcome/message-template").status_code == 404
     assert client.put("/api/v1/line/notification-rules/welcome/message-template", json={"content": "不得覆寫", "expected_revision": 7}).status_code == 404
-    for key in ('service-profile-update', 'service-order-update'):
-        assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
 
 
 def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monkeypatch):
@@ -83,6 +81,7 @@ def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monk
             'staff-leave-completed',
             'complaint-handoff-received',
             'customer-service-ticket-reply',
+            'helper-menu-completed',
         }:
             assert response.status_code == 404  # Read-only flow preview, fixed reply, or image card has no editable copy.
             continue
@@ -96,17 +95,51 @@ def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monk
         assert saved.json()["data"]["content"] == view["content"]
 
 
+def test_retired_completion_push_with_custom_template_is_hidden_and_cannot_be_edited(monkeypatch):
+    from copy import deepcopy
+
+    import pytest
+    from fastapi import HTTPException, Request
+
+    from api.schemas.line_notification_rules import UpdateLineNotificationMessageTemplateRequest
+    from subsystems.line.message_preview import LineMessagePreviewApplication
+
+    _, application = _copy_client(monkeypatch)
+    template_id = "OLD-CUSTOM-COMPLETION"
+    rule_id = "old-completion-push"
+    templates = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]
+    rules = application.definitions[LineConfigurationKind.NOTIFICATION_RULES]
+    templates['templates'].append({'id': template_id, 'name': '歷史自訂完工通知', 'message_type': 'text',
+                                   'enabled': True, 'content': '結案問卷舊範本', 'variables': []})
+    rules['rules'].append({'id': rule_id, 'template_id': template_id, 'event_code': 'order.service_completed',
+                           'recipient_selector': 'case_group', 'enabled': False, 'schedule': {'kind': 'immediate'}})
+    before = deepcopy(application.definitions)
+
+    catalog = LineMessagePreviewApplication._catalog(templates, rules, include_unlisted=True)
+    assert rule_id not in {entry.id for entry in catalog}
+    with pytest.raises(HTTPException) as lookup:
+        line_notification_rules.get_notification_rule_message_template(rule_id, _principal())
+    assert lookup.value.status_code == 404
+    with pytest.raises(HTTPException) as update:
+        line_notification_rules.update_notification_rule_message_template(
+            rule_id, UpdateLineNotificationMessageTemplateRequest(content='不應修改', expected_revision=7),
+            Request({'type': 'http'}), _principal(),
+        )
+    assert update.value.status_code == 404
+    assert application.definitions == before and application.revision == 7
+
+
 def test_fixed_copy_and_card_labels_save_with_revision_and_reject_action_fields(monkeypatch):
     import json
     from subsystems.line.message_copy_catalog import render_copy_payload
     from subsystems.line.order_group_application import group_invitation_payload
     client, application = _copy_client(monkeypatch)
     base = "/api/v1/line/notification-rules/"
-    text = client.get(base + "service-contact/message-template").json()["data"]
-    saved = client.put(base + "service-contact/message-template", json={"content": "已收到，請留下問題內容。", "expected_revision": text["revision"]})
+    text = client.get(base + "identity-pending/message-template").json()["data"]
+    saved = client.put(base + "identity-pending/message-template", json={"content": "已收到，請留下問題內容。", "expected_revision": text["revision"]})
     assert saved.status_code == 200
-    assert client.get(base + "service-contact/message-template").json()["data"]["content"] == "已收到，請留下問題內容。"
-    stale = client.put(base + "service-contact/message-template", json={"content": "舊版修改", "expected_revision": text["revision"]})
+    assert client.get(base + "identity-pending/message-template").json()["data"]["content"] == "已收到，請留下問題內容。"
+    stale = client.put(base + "identity-pending/message-template", json={"content": "舊版修改", "expected_revision": text["revision"]})
     assert stale.status_code == 409
     assert "line_message_template_revision_conflict" in stale.text
     view = client.get(base + "group-invitation-customer/message-template").json()["data"]
@@ -626,7 +659,7 @@ def test_unused_standalone_template_editors_are_closed_but_saved_settings_and_ac
     })
     assert client.get('/api/v1/line/notification-rules/still-active-notification/message-template').status_code == 200
     for key in ('template-client_rebind_rejected','template-staff_verification_rejected','identity-pending',
-                'identity-bound-customer','identity-bound-staff','identity-bound-admin','service-profile-update','service-order-update'):
+                'identity-bound-customer','identity-bound-staff','identity-bound-admin'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
 
 
@@ -666,7 +699,7 @@ def test_fixed_feedback_and_liff_admin_alert_editors_are_closed_without_deleting
         assert client.get(endpoint).status_code == 404
         assert client.put(endpoint,json={'content':'不應儲存','expected_revision':7}).status_code == 404
     assert application.revision == 7 and application.definitions == before
-    for key in ('group-invitation-customer','group-invitation-staff','service-profile-update','service-order-update'):
+    for key in ('group-invitation-customer','group-invitation-staff'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
 
 
@@ -684,8 +717,6 @@ def test_step5_group_helper_cards_and_copy_can_be_read_and_updated(monkeypatch) 
         "helper-confirm-start-completed",
         "helper-schedule-unconfirmed",
         "helper-postponement-completed",
-        "helper-staff-assistance-ack",
-        "helper-staff-assistance-closed",
         "helper-faq-ingredients",
         "helper-faq-hours",
         "helper-faq-subsidy",

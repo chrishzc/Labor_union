@@ -1,10 +1,9 @@
 """
 File: test_deterministic_ai_router.py
-Description: 驗證 M2 deterministic 路由的真人確認優先序、typed closed outcome 與 fail-closed 邊界。
+Description: 驗證 M2 deterministic 路由的舊真人關鍵字無轉接、typed closed outcome 與 fail-closed 邊界。
 """
 
 import pytest
-from domains.customer_service.ticket import CustomerServiceCategory
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
 from subsystems.line.ai_router_contracts import (
     Clarification,
@@ -12,42 +11,23 @@ from subsystems.line.ai_router_contracts import (
     DeterministicRoute,
     RouterOutcomeKind,
     SafeMenu,
-    TicketReferral,
 )
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
+from subsystems.line.navigation_catalog import get_current_revision
 
 
-def test_human_marker_precedes_exact_identity_alias() -> None:
-    outcome = DeterministicLineRouter().route(
-        "我要找客服，綁定訂單",
-        source_event_id="event-1",
-    )
+@pytest.mark.parametrize(
+    "message",
+    [
+        "我要找客服，綁定訂單", "我要人工協助服務登記", "專人客服", "呼叫專員",
+        "聯絡專人服務", "聯絡專人", "聯絡工會人員",
+    ],
+)
+def test_retired_handoff_alias_is_a_regular_message(message):
+    outcome = DeterministicLineRouter().route(message, source_event_id="event-old-handoff")
 
-    assert isinstance(outcome, TicketReferral)
-    assert outcome.kind is RouterOutcomeKind.TICKET_REFERRAL
-    assert outcome.category is CustomerServiceCategory.OTHER
-
-
-def test_human_marker_precedes_service_registration() -> None:
-    outcome = DeterministicLineRouter().route(
-        "我要人工協助服務登記",
-        source_event_id="event-human-registration",
-    )
-
-    assert isinstance(outcome, TicketReferral)
-
-
-@pytest.mark.parametrize("command", ["專人客服", "呼叫專員", "聯絡專人服務", "聯絡專人", "聯絡工會人員"])
-def test_explicit_confirmation_alias_creates_ticket_referral(command) -> None:
-    from subsystems.line.ai_router_contracts import TicketReferral
-
-    outcome = DeterministicLineRouter().route(
-        command, source_event_id="event-confirmed-human"
-    )
-
-    assert isinstance(outcome, TicketReferral)
-    assert outcome.kind is RouterOutcomeKind.TICKET_REFERRAL
-    assert outcome.reason_code == "explicit_human_request"
+    assert isinstance(outcome, SafeMenu)
+    assert "聯絡工會人員" not in outcome.options
 
 
 def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:
@@ -61,6 +41,7 @@ def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:
         category=None,
         identity_flow_id="customer_binding",
         reason_code="protected_identity_alias",
+        source_revision=get_current_revision(),
     )
     assert isinstance(near_miss, SafeMenu)
 

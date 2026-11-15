@@ -11,7 +11,7 @@
 
 - **LINE Ownership 邊界**：擁有平台 `user_id / group_id`、friend state（`unknown → active ↔ blocked`）、inbound webhook evidence、outbound delivery task／attempt ledger、`line_identity_role_bindings`／role binding events／review、Rich Menu definition 與 controlled media 關聯；不擁有業務單據狀態或金額。
 - **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
-- **M2 路由優先序**：全面採用確定性規則與持久人工轉介（禁止無拘束 AI 自動決策）。明確人工／誤判標記優先於自動比對。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
+- **M2 路由優先序**：採用確定性規則處理明確自助指令。一般詢問、客服及客訴由工會在 LINE 官方帳號直接處理。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **同事件即時與背景處理**。同一事件兼有即時 Reply 與背景業務時，保留 Inbox 租約至 Reply 嘗試結束後交回背景。程序中斷時沿既有租約逾期回收，詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
@@ -21,7 +21,7 @@
     - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：停止投影群組通知，殘留群組工作於投遞前取消。繳款提醒及入帳通知見 [LINE-PAY-03 與 LINE-PAY-08](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)。
     - `order.service_completed`（完工事件自動投遞）：系統不消費 `line_service_completion_notification` 標記或 Push。規則儲存拒絕，殘留工作於投遞前取消。月嫂從群組小幫手取得問卷的流程依[滿意度調查問卷規格](20_LINE客服與月嫂自助服務正式規格.md#44-滿意度調查問卷)。
     - 服務開始與換人結果日期表：僅發送至本案群組（無「確認／拒絕日期表」按鈕），投遞失敗不回滾正式排班。
-    - 案件群組月嫂專屬小幫手選單（含【確認開工日】、【服務排程】、【雙方合意延期】、【專員協助】與【使用說明／常見疑問標準回答】）：月嫂輸入喚醒詞「工會」或「小幫手」及後續各步驟操作（確認單產出、雙方同意、排程查詢、專員立待辦與標準回答）固定走 `line_webhook_reply` 同步回覆，全程 0 Push 額度消耗。
+    - 案件群組月嫂專屬小幫手選單（含【確認開工日】、【服務排程】、【雙方合意延期】、案件群組留言指引與【客戶常見疑問標準回答】）：月嫂輸入喚醒詞「工會」或「小幫手」及後續各步驟操作（確認單產出、雙方同意、排程查詢、舊協助按鈕的留言指引與標準回答）固定走 `line_webhook_reply` 同步回覆，全程 0 Push 額度消耗。
 - **安全觀察端點（Zero Commit／Zero Wakeup）**：
   - `GET /api/v1/line/configurations/{kind}/safe`（僅回傳 `kind`、`revision` 與 `state=empty | configured`，禁洩漏定義、URI 或任何 secret）。
   - Delivery public masked query（限 allowlist 篩選與真實總數分頁，禁止以 `user_id`／payload／raw error 過濾或回傳）。

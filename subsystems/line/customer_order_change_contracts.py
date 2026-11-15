@@ -3,24 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Mapping, Protocol
 
+from domains.orders.order_change_request import CustomerOrderChangeError, CustomerOrderChangeKind, OrderChangeRequestStatus
 from shared_kernel.fingerprints import PreviewFingerprint
-
-
-class CustomerOrderChangeKind(StrEnum):
-    SERVICE_ADDRESS = "service_address"
-    COOKING_REQUIREMENT = "cooking_requirement"
-    SERVICE_DAYS = "service_days"
-    DAILY_SERVICE_WINDOW = "daily_service_window"
-    OTHER = "other"
-
-
-class CustomerOrderChangeError(RuntimeError):
-    def __init__(self, code: str) -> None:
-        self.code = code
-        super().__init__(code)
+from subsystems.orders.order_change_requests import OrderChangeRequestStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +19,7 @@ class CustomerOrderSnapshot:
     values: Mapping[str, str]
 
 
-class CustomerOrderChangeRepository(Protocol):
+class CustomerOrderChangeRepository(OrderChangeRequestStore, Protocol):
     def list_for_client(self, client_id: int) -> tuple[CustomerOrderSnapshot, ...]: ...
 
     def load_for_client(
@@ -54,8 +41,8 @@ class CustomerOrderChangePreview:
 
 @dataclass(frozen=True, slots=True)
 class CustomerOrderChangeReceipt:
-    ticket_id: int
-    ticket_status: str
+    request_id: int
+    request_status: OrderChangeRequestStatus
     case_no: str
     kind: CustomerOrderChangeKind
     idempotency_key: str

@@ -106,7 +106,7 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     request = unit_of_work.delivery_tasks.requests[0]
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
-    assert "customer-service:handoff:confirm" in request.payload_json
+    assert "customer-service:handoff:confirm" not in request.payload_json
     assert "其他問題" in request.payload_json
     assert "月嫂身分認證" not in request.payload_json
 
@@ -127,7 +127,7 @@ def test_service_help_never_uses_reply_token_before_durable_delivery():
     assert request.idempotency_key.value == "service-help:menu:event-1"
 
 
-def test_contact_union_creates_ticket_and_audit_without_push_delivery_in_one_uow_boundary():
+def test_old_handoff_postback_background_path_is_inert():
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(
         lambda: datetime(2026, 8, 11, tzinfo=timezone.utc)
@@ -140,10 +140,9 @@ def test_contact_union_creates_ticket_and_audit_without_push_delivery_in_one_uow
         "customer-service:handoff:confirm",
     )
 
-    assert handled is True
-    assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.OTHER
-    assert unit_of_work.customer_service.messages[0].event_key == "line-service-help:other:event-2"
-    assert len(unit_of_work.audit.intents) == 1
+    assert handled is False
+    assert unit_of_work.customer_service.messages == []
+    assert unit_of_work.audit.intents == []
     assert unit_of_work.delivery_tasks.requests == []
 
 

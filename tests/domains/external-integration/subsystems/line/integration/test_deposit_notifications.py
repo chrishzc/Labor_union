@@ -1,6 +1,6 @@
 """
 File: test_deposit_notifications.py
-Description: 驗證訂金繳費提醒、專人協助 Postback 與停用訂金入帳推播之整合測試。
+Description: 驗證訂金繳費提醒、舊求助按鈕的留言指引與停用訂金入帳推播。
 """
 from dataclasses import replace
 from datetime import date, datetime, timezone, timedelta
@@ -22,11 +22,11 @@ from infrastructure.mysql.overdue_payment_query_repository import MySqlOverduePa
 from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
 from infrastructure.mysql.payment_reminder_notification_repository import MySqlPaymentReminderNotificationRepository
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
-from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
 from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineAuditRepository
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.line.capabilities import LineCapability
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.deposit_notifications import (
     ASSISTANCE_ACK, DepositNotificationApplication, DepositNotificationConflict,
@@ -266,6 +266,10 @@ def rows(db, table):
 
 
 def test_reminder_creates_committed_job_with_exact_text_and_buttons_no_finance_write(db):
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+
+    db.execute("INSERT INTO client_legacy_virtual_accounts VALUES (?,?)", (CASE, build_client_virtual_account(CASE)))
+    db.commit()
     before = rows(db, 'client_obligations')
     task, status = application(db).send_reminder(CASE, 2, IdempotencyKey('one'), ACTOR)
     assert status == 'pending' and task == 1
@@ -273,9 +277,9 @@ def test_reminder_creates_committed_job_with_exact_text_and_buttons_no_finance_w
     payload = json.loads(job['payload_snapshot'])
     assert payload['altText'] == '案件〈115000157〉訂金繳費提醒：NT$12,000'
     actions = payload['contents']['footer']['contents']
-    assert len(actions) == 2
     assert actions[0]['action'] == {'type':'postback','label':'已經匯款','data':'payment-ack:deposit:115000157','displayText':'已經匯款'}
-    assert actions[1]['action'] == {'type':'postback','label':'有疑問需要解決','data':'payment-assistance:deposit:115000157','displayText':'有疑問需要解決'}
+    assert len(actions) == 1
+    assert '請直接在此官方帳號聊天室留言' in payload['contents']['body']['contents'][1]['text']
     assert '99781699' not in job['payload_snapshot']
     assert rows(db, 'client_obligations') == before and not rows(db, 'client_ledger_entries')
     assert application(db).send_reminder(CASE, 2, IdempotencyKey('one'), ACTOR) == (task, status)
@@ -396,30 +400,29 @@ def test_customer_query_checks_current_binding_and_cannot_mark_paid(db):
     assert not rows(db,'client_ledger_entries')
 
 
-def test_assistance_button_uses_same_ticket_and_chat_ack_no_group_or_payment_effect(db):
-    commands=[]
-    uow=Uow(db)
-    uow.customer_service=SimpleNamespace(create_or_append=lambda command: commands.append(command) or SimpleNamespace(ticket_id=55))
-    event=SimpleNamespace(event_id=SimpleNamespace(value='synthetic-click'),source=SimpleNamespace(user_id=LineUserId(USER)),occurred_at=NOW)
-    assert handle_deposit_assistance('deposit-assistance:'+CASE,event,uow)
+def test_legacy_assistance_button_replies_in_original_chat_without_opening_ticket(db):
+    uow = Uow(db)
+    event = SimpleNamespace(
+        event_id=SimpleNamespace(value='synthetic-click'),
+        source=SimpleNamespace(user_id=LineUserId(USER)),
+        occurred_at=NOW,
+    )
+    postback = 'deposit-assistance:' + CASE
+    assert handle_deposit_assistance(postback, event, uow)
+    assert not rows(db, 'line_delivery_tasks')
+    assert handle_deposit_assistance(postback, event, uow, reply_only=True)
     uow.commit()
-    assert commands[0].case_no == CASE
-    assert json.loads(rows(db,'line_delivery_tasks')[0]['payload_snapshot'])['text'] == ASSISTANCE_ACK
-    db.execute("INSERT INTO customer_service_tickets VALUES (55,?,'other','waiting',1,?)", (USER,CASE))
-    db.execute('INSERT INTO customer_service_ticket_events VALUES (55,?)',(commands[0].event_key,));db.commit()
-    ticket=MySqlCustomerServiceRepository(Connection(db)).active_matching_assistance(USER)
-    assert ticket.ticket_id == 55 and ticket.case_no == CASE
-    from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
-    from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
-    uow.matching_schedule_confirmations=SimpleNamespace(confirm_line_rejection_reason=lambda *args:False)
-    uow.customer_service.active_matching_assistance=lambda user:ticket
-    consumer=LineMatchingPostbackApplication(MatchingNotificationApplication(lambda:uow,lambda:NOW,availability_validator=lambda _:None))
-    assert consumer.handle_message(SimpleNamespace(event=event),uow,LineUserId(USER),'已付款')
-    assert commands[-1].case_no==CASE and commands[-1].message=='已付款'
-    assert not rows(db,'client_ledger_entries')
-    event.source.user_id=LineUserId('U-other')
-    assert handle_deposit_assistance('deposit-assistance:'+CASE,event,uow)
-    assert len(commands) == 2 and not rows(db,'client_ledger_entries')
+    (reply,) = rows(db, 'line_delivery_tasks')
+    assert json.loads(reply['payload_snapshot'])['text'] == ASSISTANCE_ACK
+    assert reply['source_aggregate_type'] == REPLY_ONLY_WEBHOOK_SOURCE
+    assert reply['source_aggregate_identity'] == event.event_id.value
+    assert not rows(db, 'customer_service_tickets')
+    assert not rows(db, 'customer_service_ticket_events')
+    assert not rows(db, 'client_ledger_entries')
+    event.source.user_id = LineUserId('U-other')
+    event.event_id.value = 'foreign-click'
+    assert handle_deposit_assistance(postback, event, uow, reply_only=True)
+    assert len(rows(db, 'line_delivery_tasks')) == 1
 
 
 def test_verified_customer_route_and_staff_capability_guards(db, monkeypatch):

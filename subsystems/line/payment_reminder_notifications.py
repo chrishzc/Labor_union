@@ -13,6 +13,7 @@ from shared_kernel.clock import TAIPEI_TIME_ZONE
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey, IdempotencyReceipt
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+from subsystems.line.deposit_notifications import ASSISTANCE_ACK
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.payment_overdue_reminders import ReminderRecipient, STAGE_LABELS, payment_reference
@@ -119,7 +120,6 @@ def payment_reminder_card_payload(
                 '若已完成匯款，請點選下方「已經匯款」，工會將於核對後通知。')
     actions = [
         {'type': 'button', 'style': 'primary', 'action': {'type': 'postback', 'label': '已經匯款', 'data': f'payment-ack:{stage}:{case_no}', 'displayText': '已經匯款'}},
-        {'type': 'button', 'style': 'secondary', 'action': {'type': 'postback', 'label': '有疑問需要解決', 'data': f'payment-assistance:{stage}:{case_no}', 'displayText': '有疑問需要解決'}},
     ]
     return {
         'type': 'flex',
@@ -127,7 +127,10 @@ def payment_reminder_card_payload(
         'contents': {
             'type': 'bubble',
             'header': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': title, 'weight': 'bold', 'size': 'lg'}]},
-            'body': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': desc, 'wrap': True}]},
+            'body': {'type': 'box', 'layout': 'vertical', 'spacing': 'sm', 'contents': [
+                {'type': 'text', 'text': desc, 'wrap': True},
+                {'type': 'text', 'text': ASSISTANCE_ACK, 'size': 'sm', 'wrap': True},
+            ]},
             'footer': {'type': 'box', 'layout': 'vertical', 'contents': actions},
         },
     }

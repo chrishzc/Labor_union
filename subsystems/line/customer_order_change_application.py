@@ -4,29 +4,28 @@ from __future__ import annotations
 
 from datetime import date, time
 import hashlib
-import json
 from typing import Callable, Mapping, Protocol
 
-from domains.customer_service.ticket import CustomerServiceCategory
+from domains.orders.order_change_request import NewOrderChangeRequest, OrderChangeRequest
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.validation import require_canonical_text
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.client_profile.contracts import ClientProfileBindingError
 from subsystems.line.customer_order_change_contracts import (
     CustomerOrderChangeError,
     CustomerOrderChangeKind,
     CustomerOrderChangePreview,
     CustomerOrderChangeReceipt,
+    CustomerOrderChangeRepository,
     CustomerOrderSnapshot,
 )
 from subsystems.line.ports import LineAuditIntent
+from subsystems.orders.order_change_requests import prior_submission, record_order_change_request
 
 
 class _CustomerOrderChangeUnitOfWork(Protocol):
-    customer_order_changes: object
+    customer_order_changes: CustomerOrderChangeRepository
     customer_order_change_bindings: object
-    customer_service: object
     audit: object
 
     def __enter__(self): ...
@@ -108,55 +107,53 @@ class CustomerOrderChangeApplication:
         preview_fingerprint: PreviewFingerprint,
         idempotency_key: IdempotencyKey,
     ) -> CustomerOrderChangeReceipt:
-        event_key = _event_key(idempotency_key)
+        selected_kind = _parse_kind(kind)
+        normalized = _normalize_requested(selected_kind, requested)
+        idempotency_digest = hashlib.sha256(idempotency_key.value.encode("utf-8")).hexdigest()
+        command_fingerprint = fingerprint_payload({
+            "applicant_identity": applicant_identity,
+            "case_no": case_no,
+            "expected_order_version": expected_order_version,
+            "kind": selected_kind.value,
+            "requested": normalized,
+            "preview_fingerprint": preview_fingerprint.value,
+        }).value
         with self._unit_of_work_factory() as unit_of_work:
             _read_binding(unit_of_work, applicant_identity, client_id, lock=True)
+            store = unit_of_work.customer_order_changes
+            existing = prior_submission(store, client_id, idempotency_digest, command_fingerprint)
+            if existing is not None:
+                return _receipt(existing, idempotency_key, replayed=True)
             snapshot = _require_snapshot(
-                unit_of_work.customer_order_changes.load_for_client(
-                    client_id, case_no, lock=True
-                )
+                store.load_for_client(client_id, case_no, lock=True)
             )
             preview = _build_preview(
                 applicant_identity,
                 client_id,
                 snapshot,
                 expected_order_version,
-                kind,
-                requested,
+                selected_kind,
+                normalized,
             )
             if preview.preview_fingerprint != preview_fingerprint:
                 raise CustomerOrderChangeError("order_change_preview_fingerprint_mismatch")
-            message = _ticket_message(preview)
-            existing_message = unit_of_work.customer_service.event_message(event_key)
-            if existing_message is not None:
-                if existing_message != message:
-                    raise CustomerOrderChangeError(
-                        "order_change_idempotency_key_reused_with_different_payload"
-                    )
-                ticket = unit_of_work.customer_service.get_by_event_key(event_key)
-                if ticket is None:
-                    raise CustomerOrderChangeError("order_change_replay_readback_missing")
-                return _receipt(ticket, preview, idempotency_key, replayed=True)
-            ticket = unit_of_work.customer_service.create_or_append(
-                CreateCustomerServiceMessage(
-                    applicant_identity,
-                    CustomerServiceCategory.OTHER,
-                    message,
-                    event_key,
-                    client_id=client_id,
-                    case_no=preview.case_no,
-                )
+            request = record_order_change_request(
+                store,
+                NewOrderChangeRequest(
+                    client_id, preview.case_no, preview.kind, preview.before,
+                    preview.requested, idempotency_digest, command_fingerprint,
+                ),
             )
             unit_of_work.audit.append(
                 LineAuditIntent(
-                    "customer_service.order_change.requested",
+                    "orders.order_change.requested",
                     f"line:{applicant_identity}",
-                    "order",
-                    preview.case_no,
+                    "order_change_request",
+                    str(request.request_id),
                 )
             )
             unit_of_work.commit()
-            return _receipt(ticket, preview, idempotency_key, replayed=False)
+            return _receipt(request, idempotency_key, replayed=False)
 
 
 def _read_binding(unit_of_work, applicant_identity: str, client_id: int, *, lock: bool = False) -> None:
@@ -188,12 +185,7 @@ def _build_preview(
     kind: CustomerOrderChangeKind | str,
     requested: Mapping[str, object],
 ) -> CustomerOrderChangePreview:
-    try:
-        selected_kind = CustomerOrderChangeKind(kind)
-    except (TypeError, ValueError) as error:
-        raise CustomerOrderChangeError("order_change_kind_not_allowed") from error
-    if selected_kind is CustomerOrderChangeKind.SERVICE_DAYS:
-        raise CustomerOrderChangeError("order_change_service_dates_retired")
+    selected_kind = _parse_kind(kind)
     if snapshot.order_version != expected_order_version:
         raise CustomerOrderChangeError("order_change_order_version_stale")
     normalized = _normalize_requested(selected_kind, requested)
@@ -203,7 +195,7 @@ def _build_preview(
     }
     fingerprint = fingerprint_payload(
         {
-            "family": "customer_order_change/v1",
+            "family": "customer_order_change/v2",
             "applicant_identity": applicant_identity,
             "client_id": client_id,
             "case_no": snapshot.case_no,
@@ -302,34 +294,22 @@ def _normalize_requested(
     return {key: result[key] for key in sorted(result)}
 
 
-def _ticket_message(preview: CustomerOrderChangePreview) -> str:
-    labels = {
-        CustomerOrderChangeKind.SERVICE_ADDRESS: "服務地址",
-        CustomerOrderChangeKind.COOKING_REQUIREMENT: "下廚需求",
-        CustomerOrderChangeKind.SERVICE_DAYS: "服務日期／天數",
-        CustomerOrderChangeKind.DAILY_SERVICE_WINDOW: "每日服務時段",
-        CustomerOrderChangeKind.OTHER: "其他訂單內容",
-    }
-    detail = json.dumps(dict(preview.requested), ensure_ascii=False, sort_keys=True)
-    before = json.dumps(dict(preview.before), ensure_ascii=False, sort_keys=True)
-    return (
-        f"[訂單異動申請]\n案件：{preview.case_no}\n項目：{labels[preview.kind]}\n"
-        f"目前內容：{before}\n申請內容：{detail}\n"
-        "狀態：待工會確認；尚未修改正式訂單。"
-    )
+def _parse_kind(kind: CustomerOrderChangeKind | str) -> CustomerOrderChangeKind:
+    try:
+        selected = CustomerOrderChangeKind(kind)
+    except (TypeError, ValueError) as error:
+        raise CustomerOrderChangeError("order_change_kind_not_allowed") from error
+    if selected is CustomerOrderChangeKind.SERVICE_DAYS:
+        raise CustomerOrderChangeError("order_change_service_dates_retired")
+    return selected
 
 
-def _event_key(idempotency_key: IdempotencyKey) -> str:
-    digest = hashlib.sha256(idempotency_key.value.encode("utf-8")).hexdigest()
-    return f"line-order-change:{digest}"
-
-
-def _receipt(ticket, preview, idempotency_key, *, replayed):
+def _receipt(request: OrderChangeRequest, idempotency_key: IdempotencyKey, *, replayed: bool):
     return CustomerOrderChangeReceipt(
-        int(ticket.ticket_id),
-        ticket.status.value,
-        preview.case_no,
-        preview.kind,
+        request.request_id,
+        request.status,
+        request.case_no,
+        request.kind,
         idempotency_key.value,
         replayed,
     )

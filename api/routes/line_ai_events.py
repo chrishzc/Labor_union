@@ -3,7 +3,6 @@
 import os
 from dataclasses import asdict
 from datetime import datetime, time, timezone
-from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -38,7 +37,6 @@ from api.schemas.line_feedback import (
 from domains.line.identities import LineUserId
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.customer_service.escalation_application import HumanEscalationApplication
 from subsystems.line.ai_router_contracts import Unavailable
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
@@ -50,7 +48,6 @@ from subsystems.line.navigation_catalog import (
     reset_route_aliases,
     update_route_aliases,
 )
-from subsystems.line.service_help_application import LineServiceHelpApplication
 
 
 router = APIRouter(prefix="/api/v1/line/ai-events", tags=["LINE AI Events"])
@@ -66,30 +63,10 @@ def preview_router(
     router_outcome = DeterministicLineRouter().route(
         request.text, source_event_id=request.source_event_id, score=request.score
     )
-    ticket_id = None
     if request.apply_manual_fallback:
-        if not isinstance(router_outcome, Unavailable):
-            raise HTTPException(status_code=409, detail="manual_fallback_not_required")
-        actor = request.development_line_user_id.strip()
-        if not actor:
-            raise HTTPException(status_code=401, detail="development_line_identity_required")
-        with open_line_unit_of_work() as unit_of_work:
-            fact = unit_of_work.identity_management.current_fact(
-                LineIdentityCurrentFactQuery(LineUserId(actor))
-            )
-            if fact.root_version is None or not fact.owner_projections:
-                raise HTTPException(status_code=403, detail="line_router_preview_binding_not_current")
-            application = LineServiceHelpApplication(
-                lambda: datetime.now(timezone.utc),
-                escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, lambda: datetime.now(timezone.utc)),
-            )
-            inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value=request.source_event_id)))
-            ticket_id = application.apply_manual_fallback(
-                inbox, unit_of_work, LineUserId(actor), request.text
-            )
-            unit_of_work.commit()
+        raise HTTPException(status_code=410, detail="manual_fallback_retired")
     return BaseResponse(data=_router_preview_view(
-        router_outcome, request.source_event_id, ticket_id, request.score
+        router_outcome, request.source_event_id, request.score
     ))
 
 
@@ -369,7 +346,7 @@ def _require_development_router_preview() -> None:
 
 
 def _router_preview_view(
-    outcome, source_event_id: str, ticket_id: int | None, requested_score: int | None = None
+    outcome, source_event_id: str, requested_score: int | None = None
 ):
     kind = outcome.kind.value
     source_identity = getattr(outcome, "source_identity", CATALOG_SOURCE_IDENTITY)
@@ -380,8 +357,6 @@ def _router_preview_view(
     if outcome_score_band is None and isinstance(outcome, Unavailable) and requested_score is not None:
         outcome_score_band = score_band(requested_score)
     route_key = getattr(outcome, "route_key", None)
-    if route_key is None and getattr(outcome, "reason_code", None) == "explicit_human_request":
-        route_key = "human_handoff"
     return LineRouterPreviewView(
         kind=kind,
         source_event_id=source_event_id,
@@ -394,8 +369,8 @@ def _router_preview_view(
         route_key=route_key,
         options=tuple(getattr(outcome, "options", ())),
         answer_text=getattr(outcome, "text", getattr(outcome, "human_action", None)),
-        ticket_id=ticket_id,
-        apply_ready=isinstance(outcome, Unavailable),
+        ticket_id=None,
+        apply_ready=False,
     )
 
 

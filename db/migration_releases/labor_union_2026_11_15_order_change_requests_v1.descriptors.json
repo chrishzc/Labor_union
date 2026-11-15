@@ -1,0 +1,126 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-change-requests-2026-11-15-v1",
+  "descriptors": {
+    "1077_order_change_requests.sql": {
+      "tables": {
+        "order_change_requests": {
+          "id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "client_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "kind": {
+            "column_type": "enum('service_address','cooking_requirement','daily_service_window','other')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_payload": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "requested_payload": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "idempotency_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_fingerprint": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "submitted_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "result": {
+            "column_type": "varchar(1000)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "completed_by": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "completed_by_name": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "completed_at": {
+            "column_type": "datetime(6)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "parent_columns": {},
+      "indexes": {
+        "order_change_requests.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "order_change_requests.uk_order_change_submission": {
+          "non_unique": 0,
+          "columns": [
+            "client_id",
+            "idempotency_digest"
+          ]
+        },
+        "order_change_requests.idx_order_change_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "order_change_requests.idx_order_change_pending": {
+          "non_unique": 1,
+          "columns": [
+            "completed_at",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {
+        "order_change_requests.chk_order_change_completion": "or(and(atom(completed_atisnull),atom(resultisnull),atom(completed_byisnull),atom(completed_by_nameisnull)),and(atom(completed_atisnotnull),atom(resultisnotnull),atom(completed_byisnotnull),atom(completed_by_nameisnotnull)))"
+      },
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

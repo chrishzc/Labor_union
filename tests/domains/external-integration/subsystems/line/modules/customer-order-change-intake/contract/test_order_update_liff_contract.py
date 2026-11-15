@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from api.routes.line_order_change import page_router, router
+from api.routes.line_order_change import admin_router, page_router, router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[8]
@@ -16,10 +16,11 @@ def test_liff_uses_verified_query_preview_apply_and_never_claims_direct_change()
     assert "userId" not in page
     assert "/api/v1/line/order-change/query" in page
     assert "/api/v1/line/order-change/preview" in page
-    assert "/api/v1/line/order-change/apply" in page
-    assert page.index("/api/v1/line/order-change/preview") < page.index("/api/v1/line/order-change/apply")
-    assert "送出申請不代表訂單已修改" in page
-    assert "正式訂單尚未修改" in page
+    assert "/api/v1/line/order-change/requests" in page
+    assert page.index("/api/v1/line/order-change/preview") < page.index("/api/v1/line/order-change/requests")
+    assert "送出後由工會確認並另行辦理" in page
+    assert "訂單異動申請編號" in page
+    assert "ticket_id" not in page
     assert "服務地址" in page
     assert "下廚需求" in page
     assert "服務日期／天數" not in page
@@ -46,7 +47,7 @@ def test_rich_menu_and_liff_shell_route_order_update_to_real_page() -> None:
     identity = (PROJECT_ROOT / "line/static/identity.html").read_text(encoding="utf-8")
     routes = {
         (route.path, method)
-        for route in (*page_router.routes, *router.routes)
+        for route in (*page_router.routes, *router.routes, *admin_router.routes)
         for method in getattr(route, "methods", ())
     }
     main = (PROJECT_ROOT / "api/main.py").read_text(encoding="utf-8")
@@ -64,5 +65,9 @@ def test_rich_menu_and_liff_shell_route_order_update_to_real_page() -> None:
     assert ("/api/v1/line/order-change/query", "POST") in routes
     assert ("/api/v1/line/order-change/preview", "POST") in routes
     assert ("/api/v1/line/order-change/apply", "POST") in routes
+    assert ("/api/v1/line/order-change/requests", "POST") in routes
+    assert ("/api/v1/orders/change-requests", "GET") in routes
+    assert ("/api/v1/orders/change-requests/{request_id}/complete", "POST") in routes
     assert "app.include_router(line_order_change.router)" in main
     assert "app.include_router(line_order_change.page_router)" in main
+    assert "app.include_router(line_order_change.admin_router)" in main

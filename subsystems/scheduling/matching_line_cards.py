@@ -7,6 +7,8 @@ from typing import Mapping, Sequence
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.scheduling.matching_communication import MatchingNotificationKind
 
+MATCHING_ASSISTANCE_DIRECTIONS = "如有配對疑問，請直接在此官方帳號聊天室留言。"
+
 
 def caregiver_information_card(
     kind: MatchingNotificationKind,
@@ -234,7 +236,7 @@ def _caregiver_actions(token):
 def _customer_actions(token):
     return [
         _postback_button("接受此配對", token, "accepted", "#06C755"),
-        _postback_button("專人協助／進一步了解", token, "contact_requested", "#1677FF"),
+        _notice(MATCHING_ASSISTANCE_DIRECTIONS),
     ]
 
 

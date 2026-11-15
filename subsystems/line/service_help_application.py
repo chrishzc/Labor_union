@@ -1,6 +1,6 @@
 """
 File: service_help_application.py
-Description: 將客服文字路由為 durable LINE 回覆，並以同一 UoW 建立去敏 typed escalation。
+Description: 將已核准的自助服務文字入口路由為 LINE 回覆。
 """
 
 from __future__ import annotations
@@ -14,26 +14,18 @@ import os
 from typing import Callable
 
 from domains.customer_service.ticket import CustomerServiceCategory
-from domains.customer_service.escalation import EscalationContext, TriggerCode, evidence_digest
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.identities import LineSourceType
-from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.customer_service.escalation_contracts import (
-    CreateHumanEscalation,
-    HumanEscalationError,
-)
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
-from subsystems.line.ports import LineAuditIntent
 from subsystems.line.ai_router_contracts import (
     Clarification,
     DeterministicAnswer,
     DeterministicRoute,
     SafeMenu,
-    TicketReferral,
     Unavailable,
 )
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter
@@ -42,14 +34,6 @@ from shared_kernel.identities import IdempotencyReceipt
 from subsystems.line.runtime_human_escalation_source import normalize_complaint_text
 
 
-_CATEGORY_ALIASES = {
-    CustomerServiceCategory.SERVICE_FLOW: {"服務流程", "流程", "怎麼申請", "如何登記", "怎麼媒合", "1"},
-    CustomerServiceCategory.PAYMENT_SUBSIDY: {"收費與補助", "收費", "費用", "價格", "補助", "政府補助", "要付多少", "2"},
-    CustomerServiceCategory.SERVICE_PROGRESS: {"查詢服務進度", "查詢進度", "服務進度", "案件進度", "訂單進度", "目前狀態", "3"},
-    CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "改個人資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
-    CustomerServiceCategory.OTHER: {"聯絡工會人員", "聯絡工會", "聯絡專人", "找人", "找專員", "人工客服", "我要問人"},
-}
-_HANDOFF_CONFIRM_POSTBACK = "customer-service:handoff:confirm"
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
 _HANDOFF_CONTINUE_POSTBACK = "customer-service:handoff:continue-ai"
 _HANDOFF_RESUME_POSTBACK = "customer-service:handoff:resume-ai"
@@ -61,10 +45,9 @@ _RESUME_AI_ALIASES = {
     "恢復機器人回答",
     "繼續讓機器人回答",
 }
-COMPLAINT_HANDOFF_TEXT = "很抱歉讓您有不好的感受，已轉接真人客服。"
 _REPLY_ONLY_SUFFIXES = frozenset({
     "menu", "order-update-menu", "registration", "clarification", "unavailable",
-    "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "other",
+    "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "profile-update-form", "other",
 })
 
 
@@ -77,11 +60,9 @@ class LineServiceHelpApplication:
         self,
         now: Callable[[], datetime],
         identity_url: Callable[[str, str], str] | None = None,
-        escalation_gateway=None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
-        self._escalation_gateway = escalation_gateway
         self._router = DeterministicLineRouter()
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
@@ -93,39 +74,12 @@ class LineServiceHelpApplication:
         if _normalized_resume_command(normalized) in resume_aliases:
             self._retired_ai_action(inbox, unit_of_work, line_user_id)
             return True
-        if self._escalation_gateway is not None:
-            try:
-                self._escalation_gateway.hold_guard(
-                    _conversation_scope(line_user_id), unit_of_work
-                )
-            except HumanEscalationError as error:
-                if error.code != "automation_hold_active":
-                    raise
-                if reply_only:
-                    return False
-                self._append_to_active_ticket(
-                    inbox, unit_of_work, line_user_id, normalized
-                )
-                return True
+        if normalize_complaint_text(normalized) is not None:
+            return False
         event_id = inbox.event.event_id.value
         outcome = self._router.route(normalized, source_event_id=event_id)
-        complaint_context = normalize_complaint_text(normalized)
-        if reply_only and (
-            complaint_context is not None or isinstance(outcome, (TicketReferral, DeterministicAnswer))
-            or (isinstance(outcome, DeterministicRoute) and outcome.route_key in {"order_update_request", "profile_update"})
-        ):
+        if reply_only and isinstance(outcome, DeterministicAnswer):
             return False
-        if complaint_context is not None:
-            self._create_complaint_escalation(
-                inbox,
-                unit_of_work,
-                line_user_id,
-                complaint_context,
-            )
-            return True
-        if isinstance(outcome, TicketReferral):
-            self._create_manual_ticket(inbox, unit_of_work, line_user_id, normalized, outcome)
-            return True
         if isinstance(outcome, DeterministicRoute):
             if outcome.route_key == "registration":
                 self._reply_or_enqueue(
@@ -140,15 +94,12 @@ class LineServiceHelpApplication:
             if outcome.route_key == "service_help_menu":
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu", reason_code=outcome.reason_code)
                 return True
-            if outcome.route_key == "order_update_menu":
+            if outcome.route_key in {"order_update_menu", "order_update_request"}:
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _order_update_menu_payload(), "order-update-menu", reason_code=outcome.reason_code)
-                return True
-            if outcome.route_key == "order_update_request":
-                self._create_order_update_ticket(inbox, unit_of_work, line_user_id, normalized)
                 return True
             if outcome.category is None:
                 return False
-            self._handle_category(inbox, unit_of_work, line_user_id, outcome.category, normalized)
+            self._handle_category(inbox, unit_of_work, line_user_id, outcome.category)
             return True
         if isinstance(outcome, SafeMenu):
             return False
@@ -188,193 +139,36 @@ class LineServiceHelpApplication:
         self, inbox, unit_of_work, line_user_id, postback_data: str
     ) -> bool:
         if postback_data not in {
-            _HANDOFF_CONFIRM_POSTBACK,
             _HANDOFF_WRONG_ANSWER_POSTBACK,
             _HANDOFF_CONTINUE_POSTBACK,
             _HANDOFF_RESUME_POSTBACK,
         }:
             return False
-        if line_user_id is None:
-            return True
-        if postback_data == _HANDOFF_CONFIRM_POSTBACK:
-            event_id = inbox.event.event_id.value
-            reason_code = "explicit_human_request"
-            referral = TicketReferral(
-                CustomerServiceCategory.OTHER,
-                reason_code,
-                event_id,
-                IdempotencyKey(f"line-service-help:other:{event_id}"),
-            )
-            self._create_manual_ticket(
-                inbox, unit_of_work, line_user_id, "使用者呼叫工會專員", referral
-            )
-            return True
-        if postback_data in {
-            _HANDOFF_WRONG_ANSWER_POSTBACK,
-            _HANDOFF_RESUME_POSTBACK,
-            _HANDOFF_CONTINUE_POSTBACK,
-        }:
+        if line_user_id is not None and inbox.event.source.source_type is LineSourceType.USER:
             self._retired_ai_action(inbox, unit_of_work, line_user_id)
-            return True
-        return False
-
-    def apply_manual_fallback(self, inbox, unit_of_work, line_user_id, text: str) -> int:
-        """Create the typed manual fallback selected by the development preview."""
-        event_id = inbox.event.event_id.value
-        event_key = f"line-service-help:other:{event_id}"
-        existing_lookup = getattr(unit_of_work.customer_service, "get_by_event_key", None)
-        if callable(existing_lookup):
-            existing = existing_lookup(event_key)
-            if existing is not None:
-                return int(existing.ticket_id)
-        referral = TicketReferral(
-            CustomerServiceCategory.OTHER,
-            "explicit_human_request",
-            event_id,
-            IdempotencyKey(f"line-service-help:other:{event_id}"),
-        )
-        return self._create_manual_ticket(inbox, unit_of_work, line_user_id, text, referral)
-
-    def _create_complaint_escalation(
-        self,
-        inbox,
-        unit_of_work,
-        line_user_id,
-        context,
-    ) -> None:
-        """Route complaint language through the M4 ingress in the caller UoW.
-
-        The source normalizer intentionally returns no complaint text.  The
-        Customer Service owner still receives its required routing identity,
-        while the ticket note, escalation command, and alert carry only the
-        closed canonical context; the source fingerprint proves that the original
-        ingress was observed without retaining the raw complaint message.
-        """
-        if self._escalation_gateway is None:
-            raise HumanEscalationError(
-                "unavailable",
-                "human_escalation_ingress_unavailable",
-                "客訴轉真人流程尚未配置，已安全停止。",
-                retryable=True,
-            )
-        event_id = inbox.event.event_id.value
-        event_key = f"line-complaint:{event_id}"
-        ticket = unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id.value,
-                CustomerServiceCategory.OTHER,
-                "客訴訊息已遮罩；請查看客服 escalation 的去敏摘要。",
-                event_key,
-            )
-        )
-        command = CreateHumanEscalation(
-            source_event_identity=event_key,
-            source_kind="line_inbox",
-            source_fingerprint=evidence_digest(
-                {
-                    "event_identity": event_id,
-                    "line_user_id": line_user_id.value,
-                    "context": context,
-                }
-            ),
-            trigger_code=TriggerCode.COMPLAINT,
-            trigger_policy_version=context["policy_version"],
-            ticket_category=CustomerServiceCategory.OTHER,
-            context=EscalationContext.from_mapping(context),
-            hold_scope=_conversation_scope(line_user_id),
-            idempotency_key=IdempotencyKey(
-                f"line-complaint-escalation:{event_id}"
-            ),
-            correlation_id=CorrelationId(f"line-event:{event_id}"),
-            actor=ActorContext("system:line-complaint-ingress"),
-        )
-        receipt = self._escalation_gateway.create_for_ticket(command, ticket, unit_of_work)
-        # A redelivered complaint is already represented by the canonical
-        # escalation receipt.  Do not append another audit event or enqueue a
-        # second empathy task; the delivery repository remains the final
-        # idempotency boundary for callers that cannot return a receipt.
-        if getattr(receipt, "replayed", False):
-            return
-        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        self._reply_or_enqueue(
-            inbox,
-            unit_of_work,
-            line_user_id,
-            _text_payload(COMPLAINT_HANDOFF_TEXT),
-            "complaint-empathy",
-        )
-
-    def _create_manual_ticket(self, inbox, unit_of_work, line_user_id, text, referral):
-        ticket = unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id.value,
-                referral.category,
-                text,
-                referral.idempotency_key.value,
-            )
-        )
-        if self._escalation_gateway is not None:
-            command = _escalation_command(inbox, line_user_id, referral)
-            self._escalation_gateway.create_for_ticket(command, ticket, unit_of_work)
-        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        # The webhook may acknowledge via Reply API. A missing or failed Reply
-        # never creates a Push task; ticket persistence remains independent.
-        return int(ticket.ticket_id)
+        return True
 
     def _retired_ai_action(self, inbox, unit_of_work, line_user_id) -> None:
         self._reply_or_enqueue(
             inbox,
             unit_of_work,
             line_user_id,
-            _text_payload("此功能已停用。如需協助，請輸入「呼叫專員」。"),
+            _text_payload("此功能已停用。如需協助，請直接在此聊天室留言。"),
             "retired-ai-action",
             reason_code="chat_ai_retired",
         )
 
-    def _append_to_active_ticket(self, inbox, unit_of_work, line_user_id, text):
-        ticket = unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id.value,
-                CustomerServiceCategory.OTHER,
-                text,
-                _event_key(inbox, "active-hold"),
-            )
-        )
-        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        return int(ticket.ticket_id)
-
-    def _handle_category(self, inbox, unit_of_work, line_user_id, category, text):
+    def _handle_category(self, inbox, unit_of_work, line_user_id, category):
         if category in {CustomerServiceCategory.SERVICE_FLOW, CustomerServiceCategory.PAYMENT_SUBSIDY}:
             payload = _ai_assistant_payload()
         elif category is CustomerServiceCategory.SERVICE_PROGRESS:
             payload = self._progress_payload(inbox, unit_of_work, line_user_id)
         elif category is CustomerServiceCategory.PROFILE_UPDATE:
-            ticket = unit_of_work.customer_service.create_or_append(
-                CreateCustomerServiceMessage(line_user_id.value, category, text, _event_key(inbox, category.value))
-            )
-            payload = _text_payload(_TICKET_ACKNOWLEDGEMENTS[category])
-            unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
+            payload = _profile_update_payload()
         else:
             payload = _service_menu_payload()
-        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
-
-    def _create_order_update_ticket(self, inbox, unit_of_work, line_user_id, text):
-        ticket = unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id.value,
-                CustomerServiceCategory.OTHER,
-                text,
-                _event_key(inbox, "order-update"),
-            )
-        )
-        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        self._reply_or_enqueue(
-            inbox,
-            unit_of_work,
-            line_user_id,
-            _text_payload(_ORDER_UPDATE_ACKNOWLEDGEMENT),
-            "order-update",
-        )
+        suffix = "profile-update-form" if category is CustomerServiceCategory.PROFILE_UPDATE else category.value
+        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
 
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
@@ -404,8 +198,7 @@ class LineServiceHelpApplication:
             getattr(source, "source_type", None) is LineSourceType.USER
             and getattr(source, "user_id", None) == line_user_id
         )
-        copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "ticket": "service-contact",
-                    "profile_update": "service-profile-update", "order-update": "service-order-update", "other": "service-menu"}.get(suffix)
+        copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "other": "service-menu"}.get(suffix)
         if copy_key:
             payload = configured_payload(unit_of_work, copy_key, payload)
         request = LineDeliveryRequest(
@@ -458,77 +251,8 @@ class LineServiceHelpApplication:
     def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix, reason_code=reason_code)
 
-def _event_key(inbox, suffix):
-    return f"line-service-help:{suffix}:{inbox.event.event_id.value}"
-
-
-def _ticket_audit(ticket_id, line_user_id):
-    return LineAuditIntent("customer_service.message.received", f"line:{line_user_id}", "customer_service_ticket", str(ticket_id))
-
-
-def _conversation_scope(line_user_id):
-    return evidence_digest({"conversation_kind": "line_user", "conversation_identity": line_user_id.value})
-
-
-def _escalation_command(inbox, line_user_id, referral):
-    triggers = {
-        "explicit_human_request": TriggerCode.EXPLICIT_HUMAN_REQUEST,
-        "answer_rejected": TriggerCode.EXPLICIT_WRONG_ANSWER,
-    }
-    trigger = triggers.get(referral.reason_code)
-    if trigger is None:
-        raise HumanEscalationError(
-            "domain_blocked",
-            "human_escalation_source_invalid",
-            "LINE referral reason 無法建立 escalation",
-        )
-    source_event_identity = referral.idempotency_key.value
-    policy_version = "m2-deterministic.v1"
-    source_kind = "ticket_referral"
-    source_fingerprint = evidence_digest(
-        {
-            "source_event_identity": source_event_identity,
-            "source_kind": source_kind,
-            "trigger_code": trigger.value,
-            "policy_version": policy_version,
-            "category": referral.category.value,
-        }
-    )
-    source_event_id = inbox.event.event_id.value
-    return CreateHumanEscalation(
-        source_event_identity=source_event_identity,
-        source_kind=source_kind,
-        source_fingerprint=source_fingerprint,
-        trigger_code=trigger,
-        trigger_policy_version=policy_version,
-        ticket_category=referral.category,
-        context=EscalationContext(
-            summary_code=trigger.value,
-            policy_version=policy_version,
-            category=referral.category.value,
-            redaction_version="m4-mask.v1",
-        ),
-        hold_scope=_conversation_scope(line_user_id),
-        idempotency_key=IdempotencyKey(f"line-escalation:{evidence_digest(source_event_identity)}"),
-        correlation_id=CorrelationId(f"line-event:{source_event_id}"),
-        actor=ActorContext("system:line-service-help"),
-    )
-
-
 def _text_payload(text):
     return {"type": "text", "text": text}
-
-
-def _postback_quick_reply(label: str, data: str, display_text: str):
-    return {
-        "type": "action",
-        "action": {
-            "type": "postback",
-            "label": label,
-            "data": data,
-            "displayText": display_text,
-        },
-    }
 
 
 def _progress_payload(context):
@@ -573,7 +297,6 @@ def _service_menu_payload():
         ("費用與補助怎麼算？", "ai_assistant", "secondary"),
         ("如何查詢目前進度？", "查詢服務進度", "secondary"),
         ("登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
-        ("呼叫專員", "聯絡工會人員", "primary"),
         ("詢問其他問題", "ai_assistant", "secondary"),
     )
     return _navigation_card_payload(
@@ -582,7 +305,7 @@ def _service_menu_payload():
         title="服務與問答",
         description="常見問題與服務入口集中在這裡。如果沒看到想問的問題，可以試試看 AI 智慧問答！",
         actions=actions,
-        hint="如果沒看到想問的問題，可點選「詢問其他問題」開啟 AI 智慧問答，或選擇「呼叫專員」後在聊天室留言。",
+        hint="如需人員協助，請直接在此聊天室留言。",
     )
 
 
@@ -593,15 +316,26 @@ def _ai_assistant_payload():
         title="AI 客服與常見問答",
         description="服務流程、收費與補助等說明，請至 AI 客服查看常見問答或提問。",
         actions=(("開啟 AI 客服", "ai_assistant", "primary"),),
-        hint="如需人員協助，請回到聊天室輸入「呼叫專員」。",
+        hint="如需人員協助，請直接在此聊天室留言。",
     )
 
 
-def _order_update_liff_url():
+def _form_liff_url(target: str) -> str | None:
     liff_id = os.getenv("LINE_LIFF_ID", "").strip()
     if not liff_id or liff_id == "your_liff_id_here":
         return None
-    return f"https://liff.line.me/{liff_id}?target=order_update"
+    return f"https://liff.line.me/{liff_id}?target={target}"
+
+
+def _profile_update_payload():
+    url = _form_liff_url("profile_update")
+    if url is None:
+        return _text_payload("個人資料異動入口尚未完成設定。請直接在此聊天室留言。")
+    return _text_payload(f"請開啟本人資料異動表單：\n{url}")
+
+
+def _order_update_liff_url():
+    return _form_liff_url("order_update")
 
 
 def _order_update_menu_payload():
@@ -610,7 +344,7 @@ def _order_update_menu_payload():
         alt_text="修改訂單資訊：開啟正式申請表單",
         eyebrow="新竹市月子工會",
         title="修改訂單資訊",
-        description="請開啟正式訂單異動表單，選擇您的有效訂單與要修改的內容。" if available else "訂單異動入口尚未完成設定，請輸入「呼叫專員」取得協助。",
+        description="請開啟正式訂單異動表單，選擇您的有效訂單與要修改的內容。" if available else "訂單異動入口尚未完成設定。請直接在此聊天室留言。",
         actions=(("開啟訂單異動表單", "order_update", "primary"),) if available else (),
         hint="送出需求不代表訂單已變更；正式結果以工會確認為準。",
     )
@@ -660,19 +394,6 @@ def _navigation_button(label, action_text, style):
     if action_text == "order_update":
         return {"type": "button", "style": style, "height": "sm",
                 "action": {"type": "uri", "label": label, "uri": _order_update_liff_url()}}
-    if action_text == "聯絡工會人員":
-        return {
-            "type": "button",
-            "style": style,
-            "height": "sm",
-            "color": "#E0683A",
-            "action": {
-                "type": "postback",
-                "label": label,
-                "data": _HANDOFF_CONFIRM_POSTBACK,
-                "displayText": "呼叫專員",
-            },
-        }
     if action_text in ("ai_assistant", "其他問題"):
         ai_url = _ai_assistant_liff_url()
         if ai_url:
@@ -701,28 +422,6 @@ def _navigation_button(label, action_text, style):
     if style == "primary":
         button["color"] = "#E0683A"
     return button
-
-
-_TICKET_ACKNOWLEDGEMENTS = {
-    CustomerServiceCategory.PROFILE_UPDATE: "已收到修改資料需求，工會人員確認後會聯絡您核對要修改的內容。",
-}
-_ORDER_UPDATE_ACKNOWLEDGEMENT = (
-    "已收到訂單資訊修改需求。此需求可能影響訂單內容或月嫂接案意願，"
-    "目前尚未直接變更正式訂單；工會人員確認後會透過 LINE 與您聯絡。"
-)
-
-
-def _safe_menu_payload(outcome):
-    return {
-        "type": "text",
-        "text": "請選擇服務說明項目；若問題未列出，請選擇「聯絡工會人員」。",
-        "quickReply": {
-            "items": [
-                {"type": "action", "action": {"type": "message", "label": option, "text": option}}
-                for option in outcome.options
-            ]
-        },
-    }
 
 
 def _answer_payload(outcome):

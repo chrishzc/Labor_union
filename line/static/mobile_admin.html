@@ -137,23 +137,6 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
   <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
   <div id="status" class="info">載入中...</div>
   <button id="reauthenticate" class="secondary hidden" type="button">重新登入 LINE</button>
-  <section id="customerPane" class="hidden">
-    <div class="section-heading">
-      <div>
-        <h2>客服案件</h2>
-        <p class="muted">選擇狀態後，逐件回覆與完成處理。</p>
-      </div>
-      <button class="quiet" type="button" id="refreshTickets">重新整理</button>
-    </div>
-    <div class="toolbar">
-      <select id="ticketStatus" class="compact-filter" aria-label="客服案件狀態">
-        <option value="waiting">等待客服</option>
-        <option value="handling">處理中</option>
-        <option value="resolved">已完成</option>
-      </select>
-    </div>
-    <div id="tickets" class="surface-list"></div>
-  </section>
   <section id="reviewPane" class="hidden">
     <details id="systemStatus" class="system-status" data-status="unknown">
       <summary>系統狀態 <span id="systemStatusLabel" role="status" aria-live="polite">待確認</span></summary>
@@ -286,11 +269,10 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 let idToken = "";
-let target = "customer_service";
+let target = "staff_review";
 const reviewPreviews = new Map();
 const profileReviewPreviews = new Map();
 
-const replyPreviews = new Map();
 let schedulingQuery = null;
 let schedulingPreview = null;
 let schedulingQuerySequence = 0;
@@ -299,9 +281,7 @@ let schedulingFormRevision = 0;
 let schedulingCaseIdentity = "";
 let schedulingOptions = null;
 let schedulingOptionsSequence = 0;
-const ticketPageState = {page: 1, pageSize: 0, total: 0};
 const reviewPageState = {page: 1, pageSize: 50, total: 0};
-let ticketQuerySequence = 0;
 let reviewQuerySequence = 0;
 let profileReviewQuerySequence = 0;
 let profileReviewPage = 1;
@@ -323,16 +303,14 @@ let orderTrackingItems = [];
 const studioPreview = new URLSearchParams(location.search).get("studio_preview") === "1";
 const statusBox = document.getElementById("status");
 const panes = {
-  customer_service: document.getElementById("customerPane"),
   scheduling_review: document.getElementById("schedulingPane"),
   staff_review: document.getElementById("reviewPane"),
   order_tracking: document.getElementById("orderTrackingPane"),
   dashboard: document.getElementById("operationsPane"),
 };
 const supportedTargets = Object.freeze(Object.keys(panes));
-const targetAliases = Object.freeze({anomalies_center: "order_tracking"});
+const targetAliases = Object.freeze({anomalies_center: "order_tracking", customer_service: "staff_review"});
 const surfaceCopy = Object.freeze({
-  customer_service: ["客服中心", "只顯示客服案件與回覆工作。"],
   staff_review: ["待辦工作台", "分組處理資料異動、身分重綁、請假代班與媒合排班。"],
   scheduling_review: ["正式排班重建工具", "只處理已確認服務日期、尚未開始服務的正式指派建立或重建。"],
   order_tracking: ["狀態追蹤", "唯讀查看未完成訂單的目前階段與下一步。"],
@@ -349,13 +327,13 @@ function liffStateParams() {
 function targetFromUrl() {
   const params = new URLSearchParams(location.search);
   const state = liffStateParams();
-  const requested = params.get("target") || state.get("target") || "customer_service";
+  const requested = params.get("target") || state.get("target") || "staff_review";
   return targetAliases[requested] || requested;
 }
 
 function targetForIdentityRedirect() {
   const requested = supportedTargets.includes(target) ? target : targetFromUrl();
-  return supportedTargets.includes(requested) ? requested : "customer_service";
+  return supportedTargets.includes(requested) ? requested : "staff_review";
 }
 
 function revealMobileAdmin() {
@@ -520,7 +498,7 @@ async function postJson(url, body) {
 
 async function init() {
   try {
-    target = supportedTargets.includes(targetFromUrl()) ? targetFromUrl() : "customer_service";
+    target = supportedTargets.includes(targetFromUrl()) ? targetFromUrl() : "staff_review";
     if (studioPreview) {
       renderStudioPreview(target);
       revealMobileAdmin();
@@ -561,11 +539,7 @@ function renderStudioPreview(next) {
   document.querySelectorAll("main button, main select, main input, main textarea")
     .forEach(control => { control.disabled = true; });
   statusBox.className = "hidden";
-  if (target === "customer_service") {
-    const root = document.getElementById("tickets");
-    root.replaceChildren();
-    showEmpty(root, "安全預覽不載入正式客服案件。");
-  } else if (target === "staff_review") {
+  if (target === "staff_review") {
     setWorkstreamCount("identityReviewCount", "identityReviewMeta", 1, "待審核");
     setWorkstreamCount("profileReviewCount", "profileReviewMeta", 3, "待審核");
     setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", 1, "待提醒");
@@ -615,8 +589,7 @@ function switchPane(next) {
   applySurfaceHeading(target);
   const copy = surfaceCopy[target];
   showStatus(`${copy[0]}載入中`);
-  if (target === "customer_service") loadTickets();
-  else if (target === "scheduling_review") {
+  if (target === "scheduling_review") {
     renderSchedulingReview();
     loadSchedulingCaseOptions();
   }
@@ -625,203 +598,8 @@ function switchPane(next) {
   else if (target === "dashboard") loadOperationsSummary();
 }
 
-async function loadTickets() {
-  const requestedPage = ticketPageState.page;
-  const requestedStatus = document.getElementById("ticketStatus").value;
-  const querySequence = ++ticketQuerySequence;
-  document.getElementById("tickets").replaceChildren();
-  try {
-    const data = await postJson("/api/v1/line/mobile-admin/customer-service/tickets", {
-      status: requestedStatus,
-      page: requestedPage,
-    });
-    if (querySequence !== ticketQuerySequence
-        || requestedStatus !== document.getElementById("ticketStatus").value
-        || requestedPage !== ticketPageState.page) return;
-    const pageData = requireCustomerPage(data, requestedPage);
-    ticketPageState.page = pageData.page;
-    ticketPageState.pageSize = pageData.page_size;
-    ticketPageState.total = pageData.total;
-    const root = document.getElementById("tickets");
-    root.replaceChildren();
-    renderPagination(root, pageData, page => {
-      ticketPageState.page = page;
-      loadTickets();
-    });
-    showStatus("客服案件已更新");
-    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的客服案件。"); return; }
-    pageData.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
-  } catch (error) {
-    if (querySequence === ticketQuerySequence) showStatus(error.message, true);
-  }
-}
-
-const ticketStatusLabels = {waiting: "待處理", handling: "處理中", resolved: "已完成"};
-const ticketCategoryLabels = {
-  service_flow: "服務流程",
-  payment_subsidy: "收費與補助",
-  service_progress: "服務進度",
-  profile_update: "修改登記資料",
-  contact_union: "聯絡工會",
-  other: "其他問題",
-};
-const reviewStatusLabels = {
-  pending: "待審核",
-  approved: "已核准",
-  rejected: "已退回",
-  cancelled: "已取消",
-  expired: "已逾期",
-};
-const reviewOutcomeLabels = {created: "本次審核已完成", existing: "先前已完成相同審核"};
-
 function businessLabel(labels, value, fallback) {
   return labels[value] || fallback;
-}
-
-function ticketCard(ticket) {
-  const card = document.createElement("div");
-  card.className = "card";
-  const row = document.createElement("div");
-  row.className = "row";
-  const title = document.createElement("strong");
-  title.textContent = `#${ticket.ticket_id} ${ticket.client_name || "未綁定客戶"}`;
-  const status = document.createElement("span");
-  status.className = "pill";
-  status.textContent = businessLabel(ticketStatusLabels, ticket.status, "狀態待確認");
-  row.append(title, status);
-  const summary = document.createElement("p");
-  summary.textContent = `類型：${businessLabel(ticketCategoryLabels, ticket.category, "其他問題")}｜案件：${ticket.case_no || "無"}｜電話：${ticket.client_phone || "無"}`;
-  const events = document.createElement("div");
-  events.className = "events";
-  events.id = `events-${ticket.ticket_id}`;
-  const reply = document.createElement("textarea");
-  reply.id = `reply-${ticket.ticket_id}`;
-  reply.placeholder = "輸入要回覆給用戶的內容";
-  const resolveLabel = document.createElement("label");
-  const resolve = document.createElement("input");
-  resolve.type = "checkbox";
-  resolve.id = `resolve-${ticket.ticket_id}`;
-  resolveLabel.append(resolve, document.createTextNode(" 回覆後標示完成"));
-  const actions = document.createElement("div");
-  actions.style.marginTop = "10px";
-  const replyButton = document.createElement("button");
-  replyButton.type = "button";
-  replyButton.textContent = "送出回覆";
-  replyButton.addEventListener("click", () => previewTicketReply(ticket));
-  actions.appendChild(replyButton);
-  const invalidate = () => invalidateTicketReplyPreview(ticket.ticket_id);
-  reply.addEventListener("input", invalidate);
-  resolve.addEventListener("change", invalidate);
-  card.append(row, summary, events, reply, resolveLabel, actions);
-  loadTicketDetail(ticket.ticket_id, events);
-  return card;
-}
-
-async function loadTicketDetail(ticketId, originalRoot = document.getElementById(`events-${ticketId}`)) {
-  try {
-    const data = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticketId}`, {});
-    const root = originalRoot;
-    if (!root || root.isConnected === false) return;
-    root.replaceChildren();
-    data.events.forEach(event => {
-      const item = document.createElement("div");
-      item.className = "event";
-      const metadata = document.createElement("small");
-      metadata.textContent = formatDateTime(event.created_at);
-      const message = document.createElement("span");
-      message.textContent = event.message_text || event.event_type;
-      item.append(metadata, message);
-      root.appendChild(item);
-    });
-  } catch (_) {
-    const root = originalRoot;
-    if (!root || root.isConnected === false) return;
-    root.replaceChildren();
-    const message = document.createElement("span");
-    message.textContent = "處理紀錄載入失敗，請重試。";
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "secondary";
-    retry.textContent = "重新載入處理紀錄";
-    retry.addEventListener("click", () => loadTicketDetail(ticketId, root));
-    root.append(message, retry);
-  }
-}
-
-function invalidateTicketReplyPreview(ticketId) {
-  replyPreviews.delete(ticketId);
-  const root = document.getElementById(`reply-preview-${ticketId}`);
-  if (root) {
-    root.replaceChildren();
-    root.classList.add("hidden");
-  }
-}
-
-function requireReplyPreview(data, ticket) {
-  if (!data || data.ticket_id !== ticket.ticket_id
-      || !Number.isInteger(data.current_version)
-      || !Number.isInteger(data.expected_version)
-      || !Number.isInteger(data.reply_character_count)
-      || data.will_enqueue_delivery !== true
-      || data.apply_ready !== true
-      || typeof data.preview_fingerprint !== "string"
-      || !/^[0-9a-f]{64}$/.test(data.preview_fingerprint)) {
-    throw new Error("客服回覆資料不完整，尚未提交。");
-  }
-  return data;
-}
-
-
-
-async function previewTicketReply(ticket) {
-  const input=document.getElementById(`reply-${ticket.ticket_id}`);
-  const current=notificationViewCurrent(input);
-  if(input.dataset.submitting==='true')return;
-  const text=input.value.trim();
-  if(!text){showStatus('請先輸入回覆內容。',true);return;}
-  const payload={reply_text:text,resolve:document.getElementById(`resolve-${ticket.ticket_id}`).checked,internal_note:null,expected_version:ticket.version};
-  input.dataset.submitting='true';input.disabled=true;
-  try {
-    let state=replyPreviews.get(ticket.ticket_id);
-    if(!state || JSON.stringify(state.payload)!==JSON.stringify(payload)) {
-      const data=await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply/preview`,payload);
-      if(!current())return;
-      state={payload,preview:requireReplyPreview(data,ticket),idempotencyKey:`mobile-reply:${ticket.ticket_id}:${crypto.randomUUID()}`};
-      replyPreviews.set(ticket.ticket_id,state);
-    }
-    await applyTicketReply(ticket);
-  } catch(error){if(current())showStatus(error.message,true);}
-  finally{input.dataset.submitting='false';input.disabled=false;}
-}
-
-async function applyTicketReply(ticket) {
-  const current=notificationViewCurrent(document.getElementById(`reply-${ticket.ticket_id}`));
-  const state = replyPreviews.get(ticket.ticket_id);
-  if (!state) { showStatus("客服回覆資料已失效，請重新整理後送出。", true); return; }
-  try {
-    const data = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply/apply`, {
-      ...state.payload,
-      preview_fingerprint: state.preview.preview_fingerprint,
-      idempotency_key: state.idempotencyKey,
-    });
-    if (!data || data.ticket_id !== ticket.ticket_id
-        || !Number.isInteger(data.resulting_version)
-        || data.delivery_enqueued !== true
-        || data.delivery_delivered !== false
-        || typeof data.preview_fingerprint !== "string"
-        || !data.readback || data.readback.ticket?.ticket_id !== ticket.ticket_id) {
-      throw new Error("客服回覆結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
-    }
-    if(replyPreviews.get(ticket.ticket_id)===state)replyPreviews.delete(ticket.ticket_id);
-    if(!current())return;
-    showStatus([
-      `客服回覆已保存：工單 #${data.ticket_id}`,
-      "LINE 訊息已排入可靠發送佇列，尚未送達。",
-    ].join("\n"));
-    ticketPageState.page = 1;
-    if (target === "staff_review") await loadReviewWorkbench();
-    else await loadTickets();
-  } catch (error) { if(current())showStatus(error.message, true); }
 }
 
 function requireSchedulingQuery(data, caseNo) {
@@ -1210,7 +988,7 @@ function focusNotificationItems(source,items) {
   notificationSelection.matched=found.length===1;
   return found;
 }
-const notificationGroups = {all:'全部事項',review:'審核與協調',reminder:'款項與日誌',support:'客服與異常'};
+const notificationGroups = {all:'全部事項',review:'審核與協調',reminder:'款項與日誌',support:'系統與寄送異常'};
 const notificationParents = new Map();
 function restoreNotificationPanels() {
   notificationSelection=null;
@@ -1226,13 +1004,8 @@ function updateNotificationCards(root) {
   for(const card of root.querySelectorAll('[data-notification-id]')) {
     if(card.dataset.notificationId.startsWith('delivery:') && covered.has(Number(card.dataset.notificationId.split(':')[1]))){const list=card.parentElement;const section=card.closest('[data-notification-source]');card.remove();if(!list.querySelector('[data-notification-id]')){list.appendChild(notificationText('p','此寄送工作已集中於通知異常事項。'));section.querySelector('summary small').textContent='已合併至通知異常';}continue;}
     const previous=seen.get(card.dataset.notificationId);
-    if(previous) {
-      if(card.closest('[data-notification-source]').dataset.notificationSource==='customer_service') {
-        const list=previous.parentElement;previous.remove();seen.set(card.dataset.notificationId,card);
-        if(!list.querySelector('[data-notification-id]'))list.appendChild(notificationText('p','此聯絡需求已集中於客服事項。'));
-      }
-      else card.remove();
-    }else seen.set(card.dataset.notificationId,card);
+    if(previous) card.remove();
+    else seen.set(card.dataset.notificationId,card);
   }
   document.getElementById('reviewTotal').textContent=seen.size+(root.querySelector('[data-has-more="true"]')?' +':'');
 }
@@ -1301,7 +1074,7 @@ async function openNotificationItem(item,cursor) {
   const current=()=>sequence===notificationSequence && root.isConnected && target==='staff_review';
   const changed=()=>root.appendChild(notificationText('p','此事項已更新或已處理，請返回並重新整理待辦。'));
   root.append(notificationButton('返回通知事項',loadReviewWorkbench),notificationText('h2',item.title),notificationText('p',item.reason));
-  if(!['identity','deposit','registration','customer_service','delivery','runtime','customer_binding','staff_binding','notification_failure'].includes(item.source)) {
+  if(!['identity','deposit','registration','delivery','runtime','customer_binding','staff_binding','notification_failure'].includes(item.source)) {
     const page=await postJson(`/api/v1/line/mobile-admin/notification-tasks/${item.source}`,{cursor});
     if(!current())return;
     const fresh=page.items.find(row=>row.id===item.id);
@@ -1343,10 +1116,6 @@ async function openNotificationItem(item,cursor) {
     }else root.appendChild(notificationText('p','尚無可用電話，請先核對聯絡資料。'));
     root.append(notificationButton('複製綁定提醒',async()=>{await navigator.clipboard.writeText(item.message || '');if(current())showStatus('已複製，請由您透過既有聯絡方式轉達。');}),
       notificationText('p',`聯絡後仍保留此事項；完成綁定${item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，返回通知事項即重新查詢。`));
-  }else if(item.source==='customer_service' || (item.source==='recommendation' && item.reference_id)) {
-    const detail=await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${item.reference_id}`,{});
-    if(!current())return;
-    root.appendChild(ticketCard(detail.ticket));
   }else if(item.source==='registration') {
     const base=`/api/v1/line/mobile-admin/notification-task-actions/registrations/${item.reference_id}`;
     const view=await postJson(base+'/query',{});
@@ -1648,7 +1417,6 @@ async function loadCustomerRecommendationFollowups() {
   if (notificationVersion!==notificationSequence || sequence !== customerRecommendationQuerySequence || target !== "staff_review") return;
   if (page > data.totalPages) { customerRecommendationPage = data.totalPages; return loadCustomerRecommendationFollowups(); }
   const labels = {
-    contact_requested: "客戶希望進一步了解，請查看留言並回覆。",
     awaiting_signing: "客戶已接受配對，請至案件頁面準備契約並發起簽署；簽約與訂金付款可先後發生，訂金核銷後即可建群。",
     reply_reminder: "確認資訊送達滿 7 天尚未接受；客戶仍可要求協助或接受配對。",
     response_failed: "已收到客戶回覆，請工會核對方案及檔期。",
@@ -1672,25 +1440,6 @@ async function loadCustomerRecommendationFollowups() {
     const summary = document.createElement("p");
     summary.textContent = item.failure_reason || labels[item.status];
     card.append(title, summary);
-    if (item.status === "contact_requested" && item.reminder_due_at && new Date(item.reminder_due_at) <= new Date()) {
-      const reminder = document.createElement("p");
-      reminder.className = "muted";
-      reminder.textContent = "確認資訊送達已滿 7 天，請跟進客戶需求；原卡片仍可接受配對。";
-      card.appendChild(reminder);
-    }
-    if (item.ticket_id) {
-      const view = document.createElement("button");
-      view.type = "button";
-      view.textContent = "查看留言與回覆";
-      view.addEventListener("click", async () => {
-        view.disabled = true;
-        try {
-          const detail = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${item.ticket_id}`, {});
-          card.appendChild(ticketCard(detail.ticket));
-        } catch (error) { view.disabled = false; showStatus(error.message, true); }
-      });
-      card.appendChild(view);
-    }
     root.appendChild(card);
   });
 }
@@ -2183,7 +1932,6 @@ async function loadOperationsSummary() {
   }
 }
 
-document.getElementById("refreshTickets").addEventListener("click", loadTickets);
 document.getElementById("refreshReviews").addEventListener("click", loadReviewWorkbench);
 document.getElementById("refreshOrderStatuses").addEventListener("click", () => loadOrderStatuses(true));
 document.getElementById("orderStatusSearchForm").addEventListener("submit", event => {
@@ -2201,10 +1949,6 @@ document.getElementById("scheduleCaseNo").addEventListener("change", () => {
   schedulingOptions = null;
   invalidateSchedulingPreview();
   renderSchedulingReview();
-});
-document.getElementById("ticketStatus").addEventListener("change", () => {
-  ticketPageState.page = 1;
-  loadTickets();
 });
 document.getElementById("reviewStatus").addEventListener("change", () => {
   reviewPageState.page = 1;

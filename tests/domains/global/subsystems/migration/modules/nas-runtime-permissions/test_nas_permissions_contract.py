@@ -32,6 +32,18 @@ def test_line_cannot_bypass_private_photo_owner_with_direct_file_metadata_writes
                _table_grants("management", sorted(LINE_PRIVATE_PHOTO_TABLES)))
 
 
+def test_order_change_request_privileges_separate_submission_from_completion():
+    table = "order_change_requests"
+    line = dict(_table_grants("line", [table]))[table]
+    management = dict(_table_grants("management", [table]))[table]
+    assert line == [
+        "SELECT", "INSERT (case_no,client_id,kind,before_payload,requested_payload,"
+        "idempotency_digest,command_fingerprint,submitted_at)",
+    ]
+    assert management == ["SELECT", "UPDATE (result,completed_by,completed_by_name,completed_at)"]
+    assert dict(_table_grants("access", [table])) == {}
+
+
 def test_management_retains_business_writes_but_not_direct_deletes_or_audit_edits():
     grants = dict(_table_grants("management", ["staff", "holidays", "admin_users", "admin_audit_logs",
                                                "admin_audit_log_archive", "staff_certifications"]))

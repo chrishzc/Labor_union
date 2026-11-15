@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-staff-availability-optional-reason-v1",
+  "release_id": "labor-union-validation-schema-order-change-requests-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 199,
-    "ordered_digest_sha256": "a1370fe7431796472e45ea61a79ba676bd304ede997e03e7cb9bdf593e122480",
-    "terminal_artifact": "1076_staff_availability_optional_reason.sql"
+    "expected_count": 200,
+    "ordered_digest_sha256": "2d51e93d895b592e8c9fd9ab3422f43bcd3cf7ca5fcb74adc1d56dd223c2de9c",
+    "terminal_artifact": "1077_order_change_requests.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "e9c633df09d6a352f19db0c72acf58db959a50b783e492b38de398c9ed94f28c"
+    "sha256": "060e37fb931063b89a895a86caada3e9d80f180784222234764299a167694868"
   },
   "full_release": {
     "path": "scratch/validation-schema/labor_union_validation_schema.sql",

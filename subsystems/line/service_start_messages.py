@@ -3,18 +3,17 @@ File: service_start_messages.py
 Description: 提供開始服務階段之代班徵詢、群組小幫手選單、開工確認、排班日曆、合意延期與常見疑問純訊息組裝。
 """
 import calendar
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any, Sequence
 
 SATISFACTION_SURVEY_ACTION = 'group-helper:satisfaction-survey'
 
 HELPER_TEXT_DEFAULTS = {
-    'helper-satisfaction-survey': '本案服務已完成，感謝您使用工會的服務。',
+    'helper-satisfaction-survey': '感謝您使用工會的服務，歡迎提供滿意度回饋。',
     'helper-confirm-start-completed': '案件 {case_no} 已由雙方確認於 {start_date} 正式開工（預計服務至 {end_date}），系統已自動完成排班！您可隨時點選小幫手選單的「服務排程」查看最新日程；若畫面尚未變更，請稍後再重新查詢。',
     'helper-schedule-unconfirmed': '目前尚未確認開工日，此為預期排程（案件 {case_no}，預計期間：{start_date} 至 {end_date}）。待雙方點選「確認開工日」同意後，將轉為正式排程。',
     'helper-postponement-completed': '案件 {case_no} 雙方已合意完成延期補班（原本請假日：{leave_start_date}，合意補班日：{leave_end_date}），總服務天數與政府補助時數維持不變。最新排程已生效，可由「服務排程」查詢。',
-    'helper-staff-assistance-ack': '案件 {case_no} 已為您同步建立工會專員待辦事項（手機端與電腦版客服工作台已收到通知），工會專員將盡快進群為您說明與處理。',
-    'helper-staff-assistance-closed': '案件 {case_no} 的專員協助事項已由工會專員於群組說明並標記「已處理結案」。後續如有需要，可隨時再次呼叫小幫手選單。',
     'helper-faq-ingredients': '【工會標準說明：食材採買與準備】\n月子餐食材原則上由客戶家庭依產婦口味與飲食禁忌準備；如需月嫂協助代購食材，請雙方事先確認採買清單與實報實銷方式，代購時間將計入當日約定服務時數內。',
     'helper-faq-hours': '【工會標準說明：每日服務時數與工作範圍】\n日間到府服務依合約約定時段執勤，工作範圍以產婦月子餐製作、新生兒照護、產婦基礎護理及母嬰直接相關之簡易環境清潔為主，不包含全戶大掃除或非母嬰家屬之餐飲家務。',
     'helper-faq-subsidy': '【工會標準說明：政府補助申請與撥款方式】\n配合政府到宅坐月子補助方案，服務總天數與補助時數須符合核定標準，期間不辦理提前解約；若因雙方請假調整日程，一律採「雙方合意延期補班」辦理，以確保總服務時數守恆並保障客戶完整補助權益。',
@@ -252,6 +251,9 @@ def _cta_footer(primary_label: str, primary_data: str, secondary_label: str, sec
     }
 
 
+GROUP_ASSISTANCE_DIRECTIONS = '如需工會協助，請直接在此案件群組留言。'
+
+
 def group_helper_menu_card(case_no, staff_name, *, is_started: bool = False):
     status_badge = ('正式服務中', '#10B981', '#FFFFFF') if is_started else ('待確認開工', '#FBBF24', '#451A03')
     schedule_desc = '查看已服務天數、排休日與完工日' if is_started else '查看預期排程（開工前）'
@@ -259,9 +261,17 @@ def group_helper_menu_card(case_no, staff_name, *, is_started: bool = False):
         ('📅', '#D1FAE5', '確認開工日', '日期滾輪發起，需客戶與月嫂雙方同意', '確認開工日', 'group-helper:confirm-start-date'),
         ('📋', '#DBEAFE', '服務排程', schedule_desc, '服務排程', 'group-helper:service-schedule'),
         ('🤝', '#FEF3C7', '雙方合意延期', '檢核班表無衝突，送出延期卡客戶確認', '雙方合意延期', 'group-helper:mutual-postponement'),
-        ('🙋', '#F3E8FF', '專員協助', '手機與後台同步立待辦，專員進群協助', '專員協助', 'group-helper:staff-assistance'),
-        ('📖', '#F1F5F9', '使用說明 / 客戶常見疑問', '補助不解約說明 · 一鍵發送標準回答', '使用說明', 'group-helper:group-guidelines'),
+        ('📖', '#F1F5F9', '客戶常見疑問', '常見問題說明 · 一鍵發送標準回答', '客戶常見疑問', 'group-helper:group-guidelines'),
     ]
+    rows = [
+        _menu_action_row(
+            icon=icon, chip_bg=chip_bg, title=title, description=description,
+            action={'type': 'postback', 'label': label, 'data': data},
+        )
+        for icon, chip_bg, title, description, label, data in menu_items
+    ]
+    # Keep the FAQ row at its saved copy-field position.
+    rows.insert(3, {'type': 'text', 'text': GROUP_ASSISTANCE_DIRECTIONS, 'size': 'xs', 'color': '#64748B', 'wrap': True})
     return {
         'type': 'flex',
         'altText': '服務案件小幫手選單',
@@ -283,16 +293,7 @@ def group_helper_menu_card(case_no, staff_name, *, is_started: bool = False):
                 'backgroundColor': '#FAF7F4',
                 'paddingAll': '12px',
                 'spacing': 'sm',
-                'contents': [
-                    _menu_action_row(
-                        icon=icon,
-                        chip_bg=chip_bg,
-                        title=title,
-                        description=description,
-                        action={'type': 'postback', 'label': label, 'data': data},
-                    )
-                    for icon, chip_bg, title, description, label, data in menu_items
-                ],
+                'contents': rows,
             },
             'footer': {
                 'type': 'box',
@@ -313,6 +314,81 @@ def satisfaction_survey_menu_row(case_no: str) -> dict:
         description='在案件群組回覆滿意度調查訊息',
         action={'type': 'postback', 'label': '滿意度調查問卷', 'data': f'{SATISFACTION_SURVEY_ACTION}:{case_no}'},
     )
+
+
+def render_group_helper_menu_state(
+    payload: dict[str, Any], *, case_no: str, planned_start_date: str,
+    service_commenced: bool, has_confirmed_start: bool, service_completed: bool,
+    show_satisfaction_survey: bool,
+) -> dict[str, Any]:
+    card = deepcopy(payload)
+    bubble = card.get("contents", {})
+    has_started = service_completed or service_commenced
+    for section_key in ("body", "footer"):
+        section = bubble.get(section_key)
+        if isinstance(section, dict) and isinstance(section.get("contents"), list):
+            section["contents"] = _prepare_helper_menu_nodes(
+                section["contents"], case_no, planned_start_date, has_started,
+            )
+    if service_completed and show_satisfaction_survey:
+        bubble["body"]["contents"].append(satisfaction_survey_menu_row(case_no))
+    header = bubble.get("header")
+    if isinstance(header, dict):
+        if has_started:
+            _mark_helper_header(header, "服務已完成" if service_completed else "正式服務中", "#10B981")
+        elif has_confirmed_start:
+            _mark_helper_header(header, "已約定開工", "#0284C7")
+    return card
+
+
+def _prepare_helper_menu_nodes(nodes: list[Any], case_no: str, planned_start_date: str, has_started: bool) -> list[Any]:
+    filtered: list[Any] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            filtered.append(node)
+            continue
+        action = node.get("action")
+        action_data = str(action.get("data", "")) if isinstance(action, dict) else ""
+        if action_data == "group-helper:staff-assistance":
+            continue
+        if action_data.startswith("group-helper:confirm-start-date"):
+            if has_started:
+                continue
+            node["action"] = {
+                "type": "datetimepicker",
+                "label": action.get("label") or "確認開工日",
+                "data": f"group-helper:confirm-start-date:{case_no}",
+                "mode": "date",
+                "initial": planned_start_date,
+            }
+        if has_started and action_data == "group-helper:service-schedule":
+            _replace_exact_text(node, "查看預期排程（開工前）", "查看已服務天數、排休日與完工日")
+        if isinstance(node.get("contents"), list):
+            node["contents"] = _prepare_helper_menu_nodes(node["contents"], case_no, planned_start_date, has_started)
+        filtered.append(node)
+    return filtered
+
+
+def _mark_helper_header(header: dict[str, Any], status: str, color: str) -> None:
+    for item in header.get("contents", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("backgroundColor") == "#FBBF24":
+            inner = item.get("contents")
+            if isinstance(inner, list) and inner and isinstance(inner[0], dict) and inner[0].get("type") == "text":
+                item["backgroundColor"] = color
+                inner[0]["text"] = status
+                inner[0]["color"] = "#FFFFFF"
+        elif isinstance(item.get("contents"), list):
+            _mark_helper_header(item, status, color)
+
+
+def _replace_exact_text(node: dict[str, Any], old_text: str, new_text: str) -> None:
+    if node.get("type") == "text" and node.get("text") == old_text:
+        node["text"] = new_text
+    for child in node.get("contents", []):
+        if isinstance(child, dict):
+            _replace_exact_text(child, old_text, new_text)
 
 
 def confirm_start_date_card(
@@ -427,19 +503,19 @@ def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_da
 
 def group_guidelines_card():
     faq_items = [
-        ('🥗 食材採買是由誰負責？', '食材採買是由誰負責', 'group-faq:ingredients'),
-        ('⏰ 服務時段可以臨時更改嗎？', '服務時段可以臨時更改嗎', 'group-faq:hours'),
-        ('💰 政府補助款何時會撥付？', '政府補助款何時會撥付', 'group-faq:subsidy'),
+        ('🥗 食材採買是由誰負責？', '食材採買', 'group-faq:ingredients'),
+        ('⏰ 服務時段可以臨時更改嗎？', '服務時段', 'group-faq:hours'),
+        ('💰 政府補助款何時會撥付？', '政府補助', 'group-faq:subsidy'),
     ]
     return {
         'type': 'flex',
-        'altText': '群組小幫手使用說明與常見疑問',
+        'altText': '群組小幫手－客戶常見疑問',
         'contents': {
             'type': 'bubble',
             'size': 'mega',
             'header': _card_header(
                 badge='月嫂輔助工具',
-                title='📖 使用說明 · 常見客戶疑問',
+                title='📖 客戶常見疑問',
                 subtitle='月嫂可一鍵叫出工會標準公版回覆',
                 bg_color='#334155',
                 subtitle_color='#CBD5E1',
@@ -462,7 +538,7 @@ def group_guidelines_card():
                         'paddingAll': '12px',
                         'spacing': 'xs',
                         'contents': [
-                            {'type': 'text', 'text': '🏛️ 補助政策重要提醒：', 'size': 'xs', 'weight': 'bold', 'color': '#7C2D12'},
+                            {'type': 'text', 'text': '🏛️ 服務規範與重要提醒：', 'size': 'xs', 'weight': 'bold', 'color': '#7C2D12'},
                             {'type': 'text', 'text': '• 服務天數須完整履行，不接受提前解約。', 'size': 'xs', 'color': '#7C2D12', 'wrap': True},
                             {'type': 'text', 'text': '• 雙方皆可請假，合意後一律採延期補班。', 'size': 'xs', 'color': '#7C2D12', 'wrap': True},
                             {'type': 'text', 'text': '• 修改排程須先經雙方合意，再由月嫂點選紀錄。', 'size': 'xs', 'color': '#7C2D12', 'wrap': True},
@@ -623,6 +699,7 @@ def _schedule_legend_chip(color: str, label: str, *, is_rest: bool = False) -> d
         "backgroundColor": color,
         "cornerRadius": "3px",
         "flex": 0,
+        "contents": [],
     }
     if is_rest:
         indicator["borderColor"] = _SCHEDULE_REST_BORDER
@@ -646,6 +723,7 @@ def service_schedule_calendar_card(
     *,
     default_staff_name: str = "指派月嫂",
     today: date | None = None,
+    is_started: bool = True,
 ) -> dict[str, Any]:
     """生成 LINE Flex 原生月曆排班卡片（支援單月嫂、多月嫂色塊與休息日標註）。"""
     normalized_today = today or date.today()
@@ -841,7 +919,7 @@ def service_schedule_calendar_card(
                             {
                                 "type": "box",
                                 "layout": "horizontal",
-                                "backgroundColor": "#38BDF8",
+                                "backgroundColor": "#38BDF8" if is_started else "#F59E0B",
                                 "cornerRadius": "10px",
                                 "paddingStart": "6px",
                                 "paddingEnd": "6px",
@@ -850,7 +928,7 @@ def service_schedule_calendar_card(
                                 "contents": [
                                     {
                                         "type": "text",
-                                        "text": "排程已確認",
+                                        "text": "排程已確認" if is_started else "預期排程",
                                         "size": "xxs",
                                         "color": "#FFFFFF",
                                         "weight": "bold",
@@ -863,7 +941,7 @@ def service_schedule_calendar_card(
                         "type": "box",
                         "layout": "horizontal",
                         "margin": "md",
-                        "alignItems": "baseline",
+                        "alignItems": "center",
                         "contents": [
                             {
                                 "type": "text",

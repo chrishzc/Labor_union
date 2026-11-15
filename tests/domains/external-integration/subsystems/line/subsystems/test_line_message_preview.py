@@ -119,7 +119,7 @@ def test_retired_explanations_are_not_listed_or_previewed(key):
     application = app()
     catalog = application.catalog(actor())
     assert key not in {item.id for item in catalog}
-    assert {'service-profile-update', 'service-order-update'} <= {item.id for item in catalog}
+    assert {'service-profile-update', 'service-order-update'}.isdisjoint(item.id for item in catalog)
     with pytest.raises(MessagePreviewNotFound):
         application.render(key, None, None, None, actor(), sample=True)
 
@@ -241,7 +241,7 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
     ids = {entry.id for entry in catalog}
     assert {"card-customer-confirmation", "card-candidate-information-package",
             "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3",
-            "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
+            "service-menu", "order-update-menu", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
             "template-client_rebind_rejected", "template-staff_verification_rejected"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
     assert {entry.id for entry in catalog if entry.format == 'flex' and entry.name.startswith('正式媒合－')} == {'card-customer-confirmation'}
@@ -272,6 +272,12 @@ def test_unused_identity_templates_are_hidden_without_removing_rule_backed_notif
     "LINE-SERVICE-COMPLETION-V1",
     "deposit-settled",
     "payment-first-settled",
+    "service-contact",
+    "service-resolved",
+    "service-profile-update",
+    "service-order-update",
+    "complaint-handoff-received",
+    "customer-service-ticket-reply",
 ])
 def test_retired_group_notifications_are_absent_from_default_previews(key):
     from pathlib import Path
@@ -290,7 +296,7 @@ def test_retired_group_notifications_are_absent_from_default_previews(key):
         application.render(key, None, None, None, actor(), sample=True)
 
 
-@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-profile-update", "service-order-update", "service-other"])
+@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-other"])
 def test_fixed_runtime_messages_need_no_database_and_expose_no_actions(key):
     def forbidden():
         pytest.fail("fixed runtime message must not read subjects or create an interaction")
@@ -481,6 +487,38 @@ def test_current_group_preview_names_use_case_group_terminology():
     assert set(names) == {'案件群組邀請卡－客戶', '案件群組邀請卡－月嫂'}
 
 
+def test_group_helper_only_completed_sample_shows_survey():
+    from subsystems.line.message_copy_catalog import default_copy_templates
+
+    def forbidden():
+        pytest.fail("sample preview must not open a database connection")
+
+    saved = default_copy_templates()["helper-menu-card"]
+    saved["content"] = saved["content"].replace("服務案件管理選單", "工會小幫手").replace("待確認開工", "自訂開工狀態")
+    draft = saved["content"].replace("工會小幫手", "未儲存的文案")
+
+    class Config(Configuration):
+        def get(self, kind, _actor):
+            definition = {"templates": [saved]} if kind is LineConfigurationKind.MESSAGE_TEMPLATES else {"rules": []}
+            return LineConfigurationSnapshot(kind, LineConfigurationRevision(3), canonical_line_payload_json(definition))
+
+    application = app(Config(), factory=forbidden)
+    completed = application.render("helper-menu-completed", draft, None, None, actor(), sample=True)
+    scheduled = application.render("helper-menu-card", None, None, None, actor(), sample=True)
+    completed_card = json.dumps(asdict(completed.bubbles[0]), ensure_ascii=False)
+    scheduled_card = json.dumps(asdict(scheduled.bubbles[0]), ensure_ascii=False)
+
+    assert completed.status == scheduled.status == "ready"
+    assert "服務已完成" in completed_card and "滿意度調查問卷" in completed_card
+    assert "確認開工日" not in completed_card and "在案件群組回覆滿意度調查訊息" in completed_card
+    assert "group-helper:satisfaction-survey" not in completed_card + scheduled_card
+    assert "已約定開工" in scheduled_card and "滿意度調查問卷" not in scheduled_card
+    assert "確認開工日" in scheduled_card
+    assert "工會小幫手" in completed_card and "工會小幫手" in scheduled_card
+    assert "自訂開工狀態" not in completed_card + scheduled_card
+    assert "未儲存的文案" not in completed_card
+
+
 def test_signing_reminder_preview_is_retired_and_other_messages_remain_available():
     application = app()
     ids = {item.id for item in application.catalog(actor())}
@@ -499,13 +537,11 @@ def test_signing_reminder_preview_is_retired_and_other_messages_remain_available
 
 _READ_ONLY_FLOW_MESSAGES = {
     "staff-leave-completed": "您的請假申請已完成正式排班處理。",
-    "complaint-handoff-received": "已轉接真人客服",
-    "customer-service-ticket-reply": "工會會再與您確認服務安排",
 }
 _EDITABLE_FLOW_MESSAGES = {
     "registration-approved-citizen": "服務登記與綁定成功",
     "registration-approved-non-citizen": "案件編號：A000000",
-    "helper-satisfaction-survey": "本案服務已完成，感謝您使用工會的服務。",
+    "helper-satisfaction-survey": "感謝您使用工會的服務，歡迎提供滿意度回饋。",
 }
 
 
@@ -527,7 +563,7 @@ def test_all_editable_builtin_messages_have_copy_and_genesis_is_not_mutated():
     original = {"templates": []}
     effective = effective_copy_definition(original)
     for entry in app().catalog(actor()):
-        if entry.id in {'card-candidate-information-3', 'candidate-willing-received'} or entry.id in _READ_ONLY_FLOW_MESSAGES:
+        if entry.id in {'card-candidate-information-3', 'candidate-willing-received', 'helper-menu-completed'} or entry.id in _READ_ONLY_FLOW_MESSAGES:
             assert entry.id not in defaults
             continue
         if entry.builtin and entry.template_id is None:
@@ -618,6 +654,27 @@ def test_configuration_owner_rejects_malformed_card_copy_from_any_writer():
         validate_message_templates(definition)
 
 
+def test_service_menu_legacy_copy_keeps_faq_label_and_drops_retired_handoff():
+    from subsystems.line.message_copy_catalog import default_copy_templates, render_copy_payload
+    from subsystems.line.service_help_application import _service_menu_payload
+
+    template = default_copy_templates()["service-menu"]
+    old_saved_copy = json.loads(template["content"])
+    old_saved_copy["contents/body/contents/4/action/label"] = "呼叫專員"
+    old_saved_copy["contents/body/contents/5/action/label"] = "更多常見問答"
+    old_saved_copy["contents/footer/contents/0/text"] = "請點選呼叫專員。"
+    definition = {"templates": [{**template, "content": json.dumps(old_saved_copy)}]}
+
+    payload = render_copy_payload(definition, "service-menu", _service_menu_payload())
+    body, footer = payload["contents"]["body"], payload["contents"]["footer"]
+    assert len(body["contents"]) == 5
+    action = body["contents"][-1]["action"]
+    assert action["type"] == "uri" and action["uri"].endswith("?target=ai_assistant")
+    assert action["label"] == "更多常見問答"
+    assert footer["contents"][0]["text"] == "如需人員協助，請直接在此聊天室留言。"
+    assert json.loads(definition["templates"][0]["content"]) == old_saved_copy
+
+
 def test_progress_without_owner_context_does_not_invent_case_facts_from_copy_defaults():
     from types import SimpleNamespace
     from subsystems.line.service_help_application import LineServiceHelpApplication, _progress_payload
@@ -706,7 +763,7 @@ def test_fixed_operator_feedback_and_admin_alerts_have_no_catalog_or_default_cop
     catalog = LineMessagePreviewApplication._catalog(read_raw_config('message_templates'),rules)
     ids = {item.id for item in catalog}
     assert not keys & ids and not keys & set(default_copy_templates())
-    assert {'group-invitation-customer','group-invitation-staff','service-order-update','service-profile-update'} <= ids
+    assert {'group-invitation-customer','group-invitation-staff'} <= ids
     assert not {'LU96-M4-SAFE-ALERT-RULE-V1','LU96-M4-COMPLAINT-HIGH-RULE-V1'} & ids
     for key in keys:
         with pytest.raises(MessagePreviewNotFound):

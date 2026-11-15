@@ -15,10 +15,11 @@ from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import render_message_template
 from subsystems.line.message_copy_catalog import (
     INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS,
-    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID,
+    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID, RETIRED_CUSTOMER_SERVICE_TEMPLATE_IDS,
     RETIRED_SIGNING_REMINDER_TEMPLATE_IDS, RETIRED_START_DAY_REPORT_TEMPLATE_IDS,
     default_copy_templates, effective_copy_definition, render_copy_payload,
 )
+from subsystems.line.service_completion_notifications import RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE
 
 
 @dataclass(frozen=True)
@@ -140,8 +141,6 @@ _CURRENT_FLOW_PREVIEWS = (
     ("registration-approved-citizen", "市民需求申請核准通知", "text"),
     ("registration-approved-non-citizen", "非市民需求申請核准通知", "text"),
     ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),
-    ("complaint-handoff-received", "客訴已轉接真人客服通知", "text"),
-    ("customer-service-ticket-reply", "工會人員回覆客服工單", "text"),
     ("payment-overdue-deposit", "訂金逾期提醒卡", "flex"),
     ("payment-overdue-first", "第一期款逾期提醒卡", "flex"),
     ("payment-overdue-second", "第二期款逾期提醒卡", "flex"),
@@ -152,30 +151,26 @@ _CURRENT_FLOW_PREVIEWS = (
     ("cancellation-notice-collection", "取消結算補收入帳通知", "text"),
     ("payment-second-reminder", "第二期款繳費提醒卡", "flex"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
-    ("deposit-assistance", "訂金專人協助－受理回覆", "text"),
     ("payment-reminder-ack", "繳費提醒回覆－已匯款確認", "text"),
-    ("payment-assistance", "繳費提醒回覆－專人協助確認", "text"),
     ("group-invitation-customer", "案件群組邀請卡－客戶", "flex"),
     ("helper-menu-card", "案件群組－月嫂小幫手選單卡", "flex"),
+    ("helper-menu-completed", "案件群組－服務已完成小幫手選單卡", "flex"),
     ("helper-satisfaction-survey", "滿意度調查問卷－案件群組回覆", "text"),
     ("helper-confirm-start-card", "確認開工日－客戶確認卡", "flex"),
     ("helper-confirm-start-completed", "確認開工日－自動排班完成回覆", "text"),
     ("helper-schedule-unconfirmed", "服務排程－尚未確認開工日提示", "text"),
     ("helper-postponement-card", "雙方合意延期－客戶確認卡", "flex"),
     ("helper-postponement-completed", "雙方合意延期－排程更新完成回覆", "text"),
-    ("helper-staff-assistance-ack", "專員協助－群組待辦受理回覆", "text"),
-    ("helper-staff-assistance-closed", "專員協助－已處理結案群組回覆", "text"),
-    ("helper-guidelines-card", "使用說明與常見疑問－導覽卡", "flex"),
-    ("helper-faq-ingredients", "常見客戶疑問－食材採買與準備標準回答", "text"),
-    ("helper-faq-hours", "常見客戶疑問－每日服務時數與範圍標準回答", "text"),
-    ("helper-faq-subsidy", "常見客戶疑問－政府補助申請與撥款標準回答", "text"),
+    ("helper-guidelines-card", "客戶常見疑問－導覽卡", "flex"),
+    ("helper-faq-ingredients", "客戶常見疑問－食材採買與準備標準回答", "text"),
+    ("helper-faq-hours", "客戶常見疑問－每日服務時數與範圍標準回答", "text"),
+    ("helper-faq-subsidy", "客戶常見疑問－政府補助申請與撥款標準回答", "text"),
     ("service-start-inquiry", "服務開始－代班接案意願詢問", "flex"),
     ("service-start-result", "服務開始－群組日期結果紀錄", "text"),
     ("group-invitation-staff", "案件群組邀請卡－月嫂", "flex"),
     ("candidate-willing-received", "初步候選聯絡－月嫂意願受理", "text"),
     ("matching-willing-received", "正式媒合－月嫂意願受理", "text"),
     ("matching-customer-accepted", "正式媒合－客戶接受配對回覆", "text"),
-    ("matching-customer-assistance", "正式媒合－客戶專人協助回覆", "text"),
     ("matching-customer-response", "正式媒合－客戶選擇受理回覆", "text"),
     ("service-progress", "服務進度查詢結果", "text"),
     ("service-progress-unbound", "服務進度－未綁定提示", "text"),
@@ -198,10 +193,6 @@ _BUILTINS = (
     ("card-candidate-information-3", "初步候選聯絡－每週服務說明", "flex", True, True, False),
     ("service-menu", "服務與問答導覽卡", "flex", False, False, False),
     ("order-update-menu", "修改訂單資訊導覽卡", "flex", False, False, False),
-    ("service-contact", "呼叫專員－需求受理", "text", False, False, False),
-    ("service-resolved", "客服案件處理完成", "text", False, False, False),
-    ("service-profile-update", "登記資料修改受理", "text", False, False, False),
-    ("service-order-update", "訂單資訊修改受理", "text", False, False, False),
     ("identity-pending", "身分申請受理通知", "text", False, False, False),
     ("identity-bound-customer", "客戶綁定成功", "text", False, False, False),
     ("identity-bound-staff", "月嫂綁定成功", "text", False, False, False),
@@ -236,10 +227,12 @@ class LineMessagePreviewApplication:
         references = [
             (r["id"], r["template_id"]) for r in rules.get("rules", [])
             if r["template_id"] not in _RETIRED and r["template_id"] not in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
+            and r["template_id"] not in RETIRED_CUSTOMER_SERVICE_TEMPLATE_IDS
             and r["template_id"] not in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS
             and r["template_id"] not in RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS
             and r["template_id"] not in RETIRED_START_DAY_REPORT_TEMPLATE_IDS
             and r["template_id"] != RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID
+            and r.get("event_code") != RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE
             and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)
         ]
         referenced = {template_id for _, template_id in references}
@@ -370,16 +363,12 @@ class LineMessagePreviewApplication:
         elif key in {"service-menu", "order-update-menu"}:
             from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
             payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
-        elif key in {"service-profile-update", "service-order-update"}:
-            from domains.customer_service.ticket import CustomerServiceCategory
-            from subsystems.line.service_help_application import _TICKET_ACKNOWLEDGEMENTS, _ORDER_UPDATE_ACKNOWLEDGEMENT
-            payload = {"type": "text", "text": {
-                "service-profile-update": _TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
-                "service-order-update": _ORDER_UPDATE_ACKNOWLEDGEMENT}[key]}
-        elif key in {"service-contact", "service-resolved", "identity-pending"} or key.startswith("identity-bound-"):
-            from subsystems.line.message_copy import CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS
-            payload = {"type": "text", "text": {"service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
-                "identity-pending": IDENTITY_PENDING}.get(key, IDENTITY_SUCCESS_DEFAULTS.get(key.removeprefix("identity-bound-"), ""))}
+        elif key == "identity-pending" or key.startswith("identity-bound-"):
+            from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS
+            payload = {"type": "text", "text": (
+                IDENTITY_PENDING if key == "identity-pending"
+                else IDENTITY_SUCCESS_DEFAULTS.get(key.removeprefix("identity-bound-"), "")
+            )}
         elif descriptor.template_id == _LEAVE:
             if not leave:
                 return PreviewResult("unavailable", "此案件沒有可用的月嫂請假紀錄，無法產生請假確認卡。", "flex", facts=tuple(facts))
@@ -401,7 +390,8 @@ class LineMessagePreviewApplication:
                                                             asdict(case), "preview-only"))
         else:
             payload = rendered_payload
-        if key in default_copy_templates():
+        copy_key = "helper-menu-card" if key == "helper-menu-completed" else key
+        if copy_key in default_copy_templates():
             if sample:
                 from subsystems.line.message_preview_samples import VALUES, CASE, STAFF
                 copy_values = {**VALUES, "staff_name": STAFF.name, "identity_url": VALUES["bind_url"], "registration_url": VALUES["url"],
@@ -419,7 +409,20 @@ class LineMessagePreviewApplication:
                 copy_values["status"] = "critical"
             if key == "registration-approved-non-citizen":
                 copy_values["case_no"] = "A000000"
-            payload = render_copy_payload(templates, key, payload, copy_values, copy_content)
+            payload = render_copy_payload(templates, copy_key, payload, copy_values, copy_content if copy_key == key else None)
+        if key in {"helper-menu-card", "helper-menu-completed"}:
+            from subsystems.line.message_preview_samples import CASE
+            from subsystems.line.service_start_messages import render_group_helper_menu_state
+            service_completed = key == "helper-menu-completed"
+            payload = render_group_helper_menu_state(
+                payload,
+                case_no=CASE.case_no,
+                planned_start_date=CASE.start_date,
+                service_commenced=service_completed,
+                has_confirmed_start=True,
+                service_completed=service_completed,
+                show_satisfaction_survey=service_completed,
+            )
         if cancellation_copy:
             from subsystems.line.message_preview_samples import cancellation_notice_sample
             payload["text"] += "\n\n" + cancellation_notice_sample(key)

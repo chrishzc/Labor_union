@@ -1,6 +1,7 @@
 """結案問卷群組邀請已退役；僅保留 provider 前守門，取消殘留的舊群組工作。"""
 
 SOURCE_TYPE = 'order_service_completion'
+RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE = 'order.service_completed'
 
 
 def service_completion_delivery_is_current(unit, task):

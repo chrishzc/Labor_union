@@ -10,12 +10,13 @@ import re
 from uuid import uuid4
 from subsystems.line.message_copy_catalog import (
     INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS,
-    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID,
+    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID, RETIRED_CUSTOMER_SERVICE_TEMPLATE_IDS,
     RETIRED_SIGNING_REMINDER_TEMPLATE_IDS, RETIRED_START_DAY_REPORT_TEMPLATE_IDS,
     default_copy_templates, effective_copy_definition,
 )
 from subsystems.line.message_copy import validate_copy_content, copy_fields, apply_copy_payload
 from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
+from subsystems.line.service_completion_notifications import RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Path as ApiPath
 from pymysql.err import InterfaceError, OperationalError
@@ -448,6 +449,8 @@ def _message_template_view(
     rule_id = "service-menu" if rule_id == "service-other" else rule_id
     rule = next((item for item in rules.rules if item.id == rule_id), None)
     if rule is not None:
+        if rule.event_code == RETIRED_SERVICE_COMPLETION_PUSH_EVENT_CODE:
+            raise HTTPException(status_code=404, detail="此訊息已停止編輯。")
         if rule.template_id == "customer_onboarding_welcome":
             raise HTTPException(status_code=404, detail="加入好友歡迎訊息已改由 LINE 官方帳號設定。")
         if rule.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS or rule.template_id in {
@@ -468,6 +471,7 @@ def _message_template_view(
         raise HTTPException(status_code=404, detail="找不到這筆訊息設定。")
     if (
         template_id in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
+        or template_id in RETIRED_CUSTOMER_SERVICE_TEMPLATE_IDS
         or template_id in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS
         or template_id in RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS
         or template_id in RETIRED_START_DAY_REPORT_TEMPLATE_IDS

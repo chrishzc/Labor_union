@@ -343,7 +343,6 @@
         </form>
         <div id="bindingFailureActions" style="display:none; gap:10px; margin-top:14px;">
             <button type="button" class="btn-close" style="flex:1;" onclick="dismissBindingFailure()">返回修改</button>
-            <button type="button" class="btn-submit" id="callStaffButton" style="flex:1; margin-top:0;" onclick="callStaff()">呼叫專員</button>
         </div>
     </div>
 
@@ -607,34 +606,15 @@
     }
 
     function showBindingFailure(message) {
-        showMessage(message || '資料無法核對，請確認姓名與電話。', 'error');
+        const problem = message || '資料無法核對，請確認姓名與電話。';
+        showMessage(problem + ' 如需協助，請回 LINE 官方帳號聊天室留言。', 'error');
         document.getElementById('bindingFailureActions').style.display = 'flex';
-        document.getElementById('callStaffButton').disabled = false;
     }
 
     function dismissBindingFailure() {
         document.getElementById('bindingFailureActions').style.display = 'none';
         showMessage('', 'info');
         document.getElementById('userName').focus();
-    }
-
-    async function callStaff() {
-        const button = document.getElementById('callStaffButton');
-        if (button.disabled) return;
-        button.disabled = true;
-        try {
-            if (!liff.isInClient() || liff.getContext()?.type !== 'utou'
-                || !liff.isApiAvailable('sendMessages')) {
-                throw new Error('call-unavailable');
-            }
-            // The explicit user command enters the existing canonical webhook.
-            await liff.sendMessages([{type: 'text', text: '呼叫專員'}]);
-            showMessage('呼叫已送出，請返回聊天室留言。', 'info');
-            liff.closeWindow();
-        } catch (_) {
-            showMessage('請返回官方 LINE 聊天室輸入「呼叫專員」。', 'error');
-            button.disabled = false;
-        }
     }
 
     function showBindingResult(title, description, caseNo) {

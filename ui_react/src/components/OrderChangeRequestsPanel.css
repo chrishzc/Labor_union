@@ -1,0 +1,52 @@
+.order-change-requests {
+  margin-block: 1rem;
+}
+
+.order-change-requests > section {
+  padding-block: 0.75rem;
+}
+
+.order-change-request-list {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.order-change-request-list > li {
+  padding-block: 0.65rem;
+  border-block-end: 1px solid var(--border-light, #dce4ed);
+}
+
+.order-change-request-summary {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.order-change-request-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 1rem;
+}
+
+.order-change-request-comparison h3 {
+  font-size: 1rem;
+}
+
+.order-change-request-comparison dd {
+  margin-inline-start: 0;
+}
+
+.order-change-request-comparison dd,
+.order-change-request-result {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.order-change-request-list textarea {
+  display: block;
+  width: min(100%, 36rem);
+  margin-block: 0.35rem;
+  font: inherit;
+}

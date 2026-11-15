@@ -36,7 +36,6 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
     #staff-binding-mismatch ul { margin: 0 0 16px; padding-inline-start: 1.5em; font-weight: 700; }
     #staff-binding-mismatch:not([hidden]) ~ #binding-help button { min-height: 52px; font-size: 18px; }
     #staff-binding-mismatch:not([hidden]) ~ #binding-help #edit-binding { background: #076b45; }
-    #staff-binding-mismatch:not([hidden]) ~ #binding-help #call-staff { background: #fff; color: #243b53; border: 1px solid #52677a; }
   </style>
 </head>
 <body>
@@ -58,12 +57,11 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
       <li>身分證字號</li>
       <li>出生日期</li>
     </ul>
-    <p>請點<span class="button-name">「返回修改」</span>檢查資料。如果資料都正確，還是無法綁定，請點<span class="button-name">「呼叫專員」</span>，工會會協助您確認。</p>
+    <p>請點<span class="button-name">「返回修改」</span>檢查資料。如果資料都正確，還是無法綁定，請回 LINE 官方帳號聊天室留言。</p>
   </div>
   <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   <div id="binding-help" hidden>
     <button id="edit-binding" class="secondary" type="button">返回修改</button>
-    <button id="call-staff" class="secondary" type="button">呼叫專員</button>
   </div>
 </section></main>
 <script>
@@ -118,7 +116,7 @@ function safeIdentityErrorMessage(result, fallback) {
   const message = candidates.find(
     candidate => typeof candidate === "string" && candidate.trim()
   );
-  if (message && /^[a-z][a-z0-9_]+$/.test(message.trim())) return '身分資料或操作連結已失效，請返回 LINE 重新開啟對應入口；如仍無法完成，請呼叫專員。';
+  if (message && /^[a-z][a-z0-9_]+$/.test(message.trim())) return '身分資料或操作連結已失效，請返回 LINE 重新開啟對應入口。如仍無法完成，請在官方帳號聊天室留言。';
   return message ? message.trim() : fallback;
 }
 
@@ -366,22 +364,6 @@ function requireIdentityApply(result, preview, endpoint) {
   return receipt;
 }
 
-async function callBindingStaff() {
-  const button = document.getElementById('call-staff');
-  if (button.disabled) return;
-  button.disabled = true;
-  try {
-    if (!liff.isInClient() || liff.getContext()?.type !== 'utou' || !liff.isApiAvailable('sendMessages')) throw new Error();
-    await liff.sendMessages([{type:'text', text:'呼叫專員'}]);
-  } catch (_) {
-    showMessage('請返回官方 LINE 聊天室輸入「呼叫專員」。', true);
-    button.disabled = false;
-    return;
-  }
-  showMessage('呼叫已送出，請返回聊天室留言。');
-  liff.closeWindow();
-}
-
 async function loadLiffId() {
   const response = await fetch("/api/v1/line/identity/runtime-config");
   const result = await response.json();
@@ -443,7 +425,7 @@ function requestedMobileAdminPage() {
   const {parameters, stateParameters} = combinedEntryParameters();
   const target = parameters.get("target") || stateParameters.get("target");
   return {
-    customer_service: "/line-mobile-admin?target=customer_service",
+    customer_service: "/line-mobile-admin?target=staff_review",
     scheduling_review: "/line-mobile-admin?target=scheduling_review",
     staff_review: "/line-mobile-admin?target=staff_review",
     order_tracking: "/line-mobile-admin?target=order_tracking",
@@ -562,7 +544,6 @@ async function initialize() {
 }
 
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
-document.getElementById('call-staff').addEventListener('click', callBindingStaff);
 document.getElementById('edit-binding').addEventListener('click', () => {
   document.getElementById('binding-help').hidden = true;
   document.getElementById('staff-binding-mismatch').hidden = true;

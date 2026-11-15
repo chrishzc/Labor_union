@@ -2,33 +2,17 @@
 
 ## 1. 範圍、主切邊界與基本不變量
 
-本文件定義 LINE 客服工單流程、Webhook 同步回覆（`line_webhook_reply`）、月嫂端 LIFF 自助服務、管理端 LINE 工作台／手機審核，以及 `LINE-PAY-01`～`08` 繳款提醒與收據通知的現行正式契約。
+本文件定義 LINE 官方帳號人工服務、Webhook 同步回覆（`line_webhook_reply`）、月嫂端 LIFF 自助服務、管理端 LINE 工作台／手機審核，以及 `LINE-PAY-01`～`08` 繳款提醒與收據通知的現行正式契約。
 
-- **Domain 邊界**：LINE Integration 與 Customer Service 只擁有平台身分關聯、Webhook 收件、投遞任務、客服工單與對話事件；訂單、排班、客戶帳務與月嫂應付等根事實仍由各自 owning Domain／Subsystem 唯一擁有並經既有 canonical writer 提交，UI 與 LIFF 不得旁路寫入業務根事實。
+- **Domain 邊界**：LINE Integration 擁有平台身分關聯、Webhook 收件與投遞任務，Customer Service 僅維護既有歷史紀錄與切換結案；訂單、排班、客戶帳務與月嫂應付等根事實仍由各自 owning Domain／Subsystem 唯一擁有並經既有 canonical writer 提交，UI 與 LIFF 不得旁路寫入業務根事實。
 - **授權與主切**：所有非公開 LIFF 頁與自助服務 API 皆以 `server-verified LINE token` 結合伺服器端 `line_identity_bindings` 作為唯一授權依據；query string 上的 `userId`、顯示參數或未驗證前端狀態僅作導航輔助，不得構成授權或身分依據。舊入口退場後維持唯一新線，僅保留明確設定 `LINE_LEGACY_ROLLBACK_MODE=true` 時之緊急回退開關；禁止隱性雙寫與靜默回退。
 - **PII 與憑證邊界**：送往群組訊息、公版預覽或通用審計的摘要一律套用去敏或明確欄位投影，禁止外洩未遮罩手機號、身分證字號、完整地址或原始 provider payload。
 
-## 2. 客服工單生命週期與 M4 重大升級（Customer Service）
+## 2. 官方帳號人工服務與歷史工單
 
-### 2.1 一般觸發與工單狀態機
-
-客服工單主鍵由 Customer Service canonical writer 維護，狀態固定為 `waiting` → `handling` → `resolved`。
-
-1. **觸發分離**：一般文字提問、`問題`、`其他問題`、`詢問`、`5`、`6` 與身分核對失敗等輸入一律導向自助服務導覽或提示修正，不得自動建立客服工單；停用中的 AI 回應錯誤／繼續／恢復等回頭按鈕只回覆停用提示，不開單亦不解除既有客服狀態。只有明確點擊「聯絡專人服務／專人協助／聯絡工會人員」或符合正式客訴入口時，才進入客服受理。
-2. **計畫 A 獨立建單與接續規則**：
-   - 當使用者目前最新一筆工單為 `waiting` 或 `handling` 時，新進留言直接追加至該進行中工單並維持其處理狀態。
-   - **已結案永不重開**：當使用者所有歷史工單皆為 `resolved` 時，再次觸發「聯絡專人服務」一律新建全新 `ticket_id` 與獨立 `created_at_utc`，進入 `waiting` 並回覆固定受理文案「已通知客服人員為您處理，請稍候。」；禁止將先前已結案工單改回 `waiting` 或 `handling`。
-3. **共用待辦池與結案通知**：
-   - 工單採工會共用待辦池，不依單人認領狀態過濾清單。
-   - **React 管理端結案**：管理員於 React `#line-management` 客服分頁按下「處理完成」將工單轉為 `resolved` 時，僅更新系統狀態，**不向客戶 LINE 發送結案推播**。
-   - **其他合法結案路徑**：非 React 管理端客服結案路徑完成時，發送固定結案訊息「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」；任何路徑於 `resolved` 後再收到「聯絡專人服務」皆依計畫 A 新建工單。
-4. **冪等與並行鎖定**：重複觸發同一進行中工單之受理請求須冪等回傳同工單識別；接手、回覆與結案皆以 versioned optimistic concurrency 與 inbox/outbox 交易隔離保護（常見 typed errors：`customer_service_ticket_not_found`、`customer_service_ticket_version_conflict`、`customer_service_transition_invalid`）。
-
-### 2.2 M4 重大客訴與高優先升級
-
-正式客訴或 Anomaly 產生之 `HIGH` 等級異常經 M4 escalation ingress 進入 Customer Service：
-- 同交易建立或升級 `HIGH` 優先級工單與 `waiting`／`hold` 狀態，並於 outer UoW 提交後透過 outbox 觸發已設定之管理員個人告警（不發群組告警，詳見 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)）。
-- 支援 `create`、`claim`、`handling`、`resolve` 與解除 `hold` 流程；每次轉態回傳具 version 與 receipt 的 typed result，並於解除時驗證無殘留阻塞狀態。
+- 工會人員日常查閱 LINE 官方帳號並在原對話回覆一般詢問及正式客訴。通用聯絡、正式客訴、問答負評與業務求助均停止新增客服工單、人工升級、對話暫停及客服提醒。
+- 舊求助 Postback 依原聊天室回一次留言指引。一般留言與舊通用求助文字交由工會在官方帳號查看。明確的綁定、自助導覽、FAQ、個資及訂單表單指令仍依既有入口處理。
+- 舊工單及事件留在原資料表，桌面 LINE 營運提供授權唯讀查閱。切換中既有工單留用原版本化結案 Preview／Apply 與證據檢核解除暫停，結案不建立客戶 LINE 通知。新建、認領、開始處理及系統回覆 API 退役。尚未處置且缺少必要證據的舊暫停由工會逐筆交接。
 
 ## 3. Webhook Reply-Only 與 Push 投遞分工（`line_webhook_reply`）
 
@@ -38,12 +22,12 @@ LINE 官方帳號回應依是否具備有效一次性 `replyToken` 嚴格區分�
 
 下列兩類互動固定走純 `line_webhook_reply` 同步回覆通路，**禁止 fallback 改走 Push API**：
 
-1. **第一批 — 一般文字、綁定引導與選單回覆（靜態回覆）**：操作引導、未綁定提示、客戶／月嫂／工會身分綁定入口回覆、群組設定指令格式錯誤與未註冊提示、人工客服受理／進行中追問回覆、已停用 AI 按鈕提醒、以及預設未知文字引導文案（加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統不針對 `follow` 事件發送）。
+1. **第一批 — 一般文字、綁定引導與選單回覆（靜態回覆）**：操作引導、未綁定提示、客戶／月嫂／工會身分綁定入口回覆、群組設定指令格式錯誤與未註冊提示、舊求助 Postback 留言指引及已停用 AI 按鈕提示（加入好友歡迎訊息已退役並改由 LINE 官方帳號設定，系統不針對 `follow` 事件發送）。
 2. **第二批 — Postback 按鈕與開工日付款文字回報即時確認（Batch 2）**：
    - 正式媒合月嫂意願按鈕與初步候選共用回覆卡的受理確認。初步候選按「可以接案」或「無法接案」時，Webhook 均先提交意願，再立即以 Reply 回覆「感謝回復!!已記錄」。寫入失敗不得送成功回覆。初步候選的意願記錄見 [媒合候選池規格 §3.1](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)；
-   - 媒合推薦客戶端 Postback。已保存 Webhook 原事件並核對按鈕與收件人後，以 Reply 回覆接受配對「已收到您接受配對的回覆，後續由工會安排簽約。」或專人協助「已收到您的聯絡需求，請留下您的疑問」。同一收件事件交由背景依 [媒合規格 §3.2](02A_媒合候選池與客戶決定及通勤規格.md#32-客戶推薦確認手動更正與服務前整案換人r-04) 處理。Reply 表示收到回覆，業務狀態以背景提交結果為準；
+   - 媒合推薦客戶端 Postback。接受配對仍發同事件 Reply，背景依媒合規格驗證並提交。舊求助按鈕只回官方帳號留言指引。
    - 請假或交接代班月嫂 Postback ack（願意代班／無法代班）；
-   - 訂金催繳與各期款項提醒的「已經匯款」（即時回覆已收到並由工會核對通知）及「有疑問需要解決」（即時回覆並轉入專人客服）。開工當天的第一期款提醒採群組文字回報，其餘繳款卡片採 Postback。
+   - 訂金及各期款項卡片保留「已經匯款」Postback。繳款疑問引導到同一私人聊天室留言。開工當天的第一期款提醒仍可在原案件群組回報。
 
 ### 3.2 `line_webhook_reply` 執行與驗證契約
 
@@ -54,9 +38,9 @@ LINE 官方帳號回應依是否具備有效一次性 `replyToken` 嚴格區分�
 
 ### 3.3 `line_push_worker` 保留範圍
 
-LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「只在聊天室回覆」。需求申請核准、客訴轉接及人工客服回覆使用實際訊息組裝及合成資料提供唯讀公版，人工回覆顯示一則範例內容。請假排班完成通知的唯讀公版可於「通知與發送」查看。「完工與結案」列出滿意度調查問卷及帳務結算與結案。人工升級客服結案通知有獨立節點，一般客服工單結案呈現為內部操作。
+LINE 流程圖按觸發方式標示自動推播、人工發送或聊天室回覆。需求申請核准、請假排班完成、滿意度問卷及結算依各自正式流程維護公版。
 
-主動通知、定時提醒、LIFF 送出後跨請求確認、卡片主體與多氣泡組合仍維持 durable outbox → `line_push_worker`：含 Flex 媒合／推薦／請假卡片、訂金／各期催繳提醒、人工客服回覆與取消／退款／追償通知；訂金、第一期、第二期確認入帳通知已移除系統 LINE Push 與後台範本編輯，改由工會人員於 LINE 官方帳號聊天後台使用預設訊息手動發送，系統內僅保留入帳待辦提醒與「已於官方帳號發送／標記已通知」確認結案。
+主動通知、定時提醒、LIFF 送出後跨請求確認、卡片主體與多氣泡組合仍維持 durable outbox → `line_push_worker`：含 Flex 媒合／推薦／請假卡片、訂金／各期催繳提醒及取消／退款／追償通知；訂金、第一期、第二期確認入帳通知已移除系統 LINE Push 與後台範本編輯，改由工會人員於 LINE 官方帳號聊天後台使用預設訊息手動發送，系統內僅保留入帳待辦提醒與「已於官方帳號發送／標記已通知」確認結案。
 
 ## 4. 月嫂端 LINE 自助服務
 
@@ -71,9 +55,9 @@ LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「
     1. **【確認開工日】**：月嫂或客戶任一方皆可由原生日期滾輪選定約定開工日發起提議（卡片依發起方動態標示「月嫂已發起，請客戶確認」或「客戶已發起，請月嫂確認」），系統以免費 ReplyToken 回覆「開工日期確認單」卡片；由對方點選同意後依 [`02_Assignments_Scheduling_Domain.md`](02_Assignments_Scheduling_Domain.md) `SSTART-01`～`08` 單一 UoW 自動完成排班並 Reply 文案（提示可查看【服務排程】）。自提自審防護：提案方若誤點同意按鍵，系統靜默不反應以維持聊天室整潔；點擊【日期有誤，重新選擇】時系統以 ReplyToken 發布「{角色}已取消本次提議，雙方可再次點選小幫手重新選擇日期」。**正式開工後，選單自動隱藏此選項**。
     2. **【服務排程】**：以 7 欄排班日曆卡片呈現（標註多月嫂區段與固定排休日顏色圖例，精簡直觀不輸出冗長日期列表）。開工前點選提示預期排程或請雙方先確認開工日；正式開工後保留此選項，供雙方查閱已服務天數、剩餘天數與固定排休日。
     3. **【雙方合意延期】**：請見 §4.2。
-    4. **【專員協助】**：點擊後同步於手機端 `line-mobile-admin` 與電腦版 Web 客服清單建立待辦並以 Reply 通知；專員進群直接說明處理後於後台點選「已處理結案」（結案指令支援後台調整）。
-    5. **【使用說明】**：說明排程修改須雙方先溝通合意再呼叫選單記錄、配合政府補助方案不提前解約、雙方皆可請假且合意後採延期方式處理；內建常見客戶疑問標準回答庫（如食材採買、服務時段、補助撥款），當客戶提問時月嫂可操作選單以 `replyToken` 叫出工會標準回答。
-    6. **【滿意度調查問卷】**：依 §4.4 提供正式完工後的群組問卷訊息。
+    4. **案件群組留言**。需要工會協助時在原案件群組留言，舊專員協助按鈕只回留言指引，舊客服結案指令停止受理。
+    5. **【客戶常見疑問】**：提供客戶常見疑問導覽卡與標準回答庫（如食材採買、服務時段、補助撥款），當客戶提問時月嫂可操作選單以免費 `replyToken` 叫出工會標準回答；包含導覽卡文案、重要提醒、問題選項按鈕與公版標準回答內容，皆支援於後台「通知與發送」直接維護與即時預覽。
+    6. **【滿意度調查問卷】**：正式完工後，本案月嫂在原群組重新開啟選單即可點選，依 §4.4 回覆問卷文案。
 
 ### 4.2 雙方合意延期（`leave-v1`）
 
@@ -102,14 +86,16 @@ LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「
 
 ### 4.4 滿意度調查問卷
 
-- `Orders` 正式狀態為 `訂單完成` 時，本案已綁定身分的正式服務月嫂可在原案件群組開啟小幫手並點選【滿意度調查問卷】。系統核對目前訂單狀態、群組及月嫂歸屬後，在原群組以即時 Reply 發送目前的純文字範本。預設範本只有文字。具文案維護權限的工會人員可在「通知與發送」的同名範本加入問卷網址，後續回覆即帶出該網址供客戶開啟。問卷回覆不改變完工與帳務狀態。
+- `Orders` 正式狀態為 `訂單完成` 時，本案已綁定身分的正式服務月嫂在原案件群組重新輸入「小幫手」，新選單才顯示【滿意度調查問卷】。點選時，系統重新核對正式完工狀態、群組及月嫂歸屬，隨即在原群組 Reply 目前的純文字範本。預設範本只有文字。具文案維護權限的工會人員可在「通知與發送」的同名範本加入問卷網址，後續回覆即帶出該網址供客戶開啟。問卷回覆不改變完工與帳務狀態。
+- LINE 流程圖的「群組小幫手選單」提供「已約定開工」與「服務已完成」兩種公版。工會可從既有小幫手文案頁切到正式完工的唯讀公版。
 - 完工事件的自動群組投遞依 [LINE Gateway](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。
 
 | S 情境 | T 任務 | A 操作 | R 可觀察結果 |
 |---|---|---|---|
 | 訂單已正式完工，本案月嫂在原案件群組 | 發送問卷訊息 | 開啟小幫手後點選【滿意度調查問卷】 | 原群組收到一則即時純文字 Reply，無 Push。預設文字無網址。 |
-| 訂單未完工或操作人與本案月嫂身分不符 | 阻擋非適用的問卷操作 | 嘗試開啟或點擊既有選單的問卷項目 | 操作無法取得問卷網址。 |
-| 工會人員已在「通知與發送」儲存含問卷網址的範本 | 提供客戶問卷入口 | 本案月嫂於正式完工後再次點選【滿意度調查問卷】 | 原群組的 Reply 使用新文字及所填網址。 |
+| 訂單尚未正式完工，或操作人與本案月嫂身分不符 | 阻擋非適用的問卷操作 | 開啟小幫手並嘗試點擊舊卡的問卷項目 | 選單不顯示問卷項目。舊卡操作無法發送問卷。 |
+| 工會人員已在「通知與發送」儲存含問卷網址的範本，訂單已正式完工 | 提供客戶問卷入口 | 本案月嫂在原案件群組點選【滿意度調查問卷】 | 原群組的 Reply 使用新文字及所填網址。 |
+| 工會正在查看小幫手選單公版 | 核對各階段選項 | 從流程圖或文案頁開啟兩種公版 | 「服務已完成」公版顯示【滿意度調查問卷】。「已約定開工」公版無此選項。 |
 
 ### 4.5 月嫂薪資明細查詢與訂單異動通知
 
@@ -123,19 +109,18 @@ LINE 流程圖按觸發方式標示「自動推播」、「人工發送」或「
 
 ## 5. 管理端 LINE 工作台、手機審核與 LIFF 設定
 
-### 5.1 管理端桌面分頁與客服六欄清單
+### 5.1 管理端桌面分頁與歷史工單
 
 LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Point_Governance.md) 拆分為四個獨立桌面入口，另整合 `#notifications` 全域通知中心：
-- **`#line-management`（客服與營運）**：整合即時客服清單（`tickets`）、身分綁定查詢／撤銷與審核（`binding`）以及服務群組作業（`order_groups`）。
-  - **React 客服六欄表規格**：呼叫 `GET /api/v1/customer-service/tickets/reminders`（單批個人資料補水上限 100 筆、最高 4 並行請求、總預算 2 秒），固定只渲染六欄摘要欄位；不設額外狀態分頁籤、右側明細抽屜、行內回覆框或刪除按鈕。
-- **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；M4 重大升級與繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
+- **`#line-management`（LINE 營運）**：整合身分綁定查詢／撤銷與審核（`binding`）及服務群組作業（`order_groups`）。歷史客服紀錄只供授權查閱。電腦與手機的通知事項移除客服工單來源。
+- **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
 - **`#line-interface`（LINE 介面設定）** 與 **`#line-ai-events`（AI 客服工作室）**：
-  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 16 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與四個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
+  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 15 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與三個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
   - [LINE 介面設定的引導動作分頁](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊)提供觸發指令編輯與唯讀預覽。AI 客服工作室的回答測試先以相同路由預覽檢查問句。命中引導動作時顯示導向結果及前往設定的連結，未命中時才執行模型回答測試。
 
 ### 5.2 手機審核中心、DB 版控 LIFF 設定與非市民入口契約
 
-- **`line-mobile-admin`**：統一行動審核入口，包含 `staff_review`、`customer_service`、`order_tracking` 與 `dashboard` 四個視圖。原獨立群組／主管異常推播已退役，管理員改從 `line-mobile-admin?target=staff_review` 頂端可收合系統狀態摘要卡（`retired_admin_alert` 狀態）查閱告警總覽。
+- **`line-mobile-admin`**：統一行動審核入口，包含 `staff_review`、`order_tracking` 與 `dashboard` 三個視圖。舊 `customer_service` 連結導向待辦工作台。原獨立群組／主管異常推播已退役，管理員改從 `line-mobile-admin?target=staff_review` 頂端可收合系統狀態摘要卡（`retired_admin_alert` 狀態）查閱告警總覽。
 - **LIFF 設定唯一來源與 DB 版本控管**：
   - 服務申請入口（`gateway.html`）、需求調查（`register.html`）、帳號綁定（`bind.html`）、非市民申請頁（`/line-non-citizen-registration`）及管理端設定統一讀寫 MySQL 之版本化 `LIFF` 設定（`LineConfigurationKind.LIFF`）。[`config/liff_settings.json`](../../../config/liff_settings.json) 僅於資料庫尚未建立 LIFF 設定（`revision = 0`）時供明確 fresh bootstrap，執行中禁止 fallback 讀檔；設定缺失、格式錯誤或資料庫不可用回 `503`，頁面不存在或停用回 `404`。
   - 公開與管理端沿用既有 `/api/config/liff`、`/api/config/liff/runtime`、`/api/config/liff/state`、主題／頁面／欄位設定（`/api/config/liff/theme`、`/api/config/liff/pages/{page_id}` 與欄位新增／修改／刪除）、版本歷史（`GET /api/config/liff/history`）與還原（`POST /api/config/liff/rollback/{revision}`），並共用 `LiffSettingsConfig` typed validation。`ETag`／`If-Match` 採資料庫 revision 執行樂觀併發檢查，讀取後遭並行更新回 `409`；還原於目前 revision 新增一版且不覆寫或刪除既有版本，所有設定異動僅留存版本與稽核，不建立訊息投遞或選單發布工作。
@@ -147,7 +132,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 ### 5.3 資料異動審核（`profile_update` / `order_update`）
 
 - **`profile_update`**：管理客戶基本聯絡資料與退費相關資訊之申請；服務縣市（`city`）、詳細地址（`address`）與居住類型（`residence_type`）統一移至 **`order_update`** 處理，且 `order_update` 採純 URI 導向、依訂單鎖定狀態限制欄位修改。
-- 送出異動後產生紅綠 Diff 待審工單，須經工會人員於桌面端或 `mobile_admin` 明確核准後才透過 Client／Orders canonical writer 更新主資料；尚未建立正式排班與帳務鎖定前之 `OrderTerms` 更新可先反映至 `OrderTerms`，已鎖定訂單依既有變更管制阻擋。
+- 本人資料申請由 Client Profile 原審核流程處理。訂單異動申請由 [Orders 規格](01_Orders_Domain.md) 定義。工會在訂單管理追蹤，按需要使用既有正式業務入口修改資料及在官方帳號回覆。
 
 #### 月嫂更新個人資料
 
@@ -163,7 +148,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 ### 6.1 滿意度回饋與停用通知入口
 
 - 候選池為空提示與客服閒置定時自動推播入口固定回傳 `410 Gone`。
-- **滿意度回饋（Feedback）**：對單筆回應記錄 `resolved | unresolved` 評價與 audit metadata；標為 `unresolved` 時同交易連動建立或提示 Customer Service 客服工單。
+- **滿意度回饋（Feedback）**：對單筆回應記錄 `resolved | unresolved` 與稽核資料。未解決顯示在官方帳號直接留言的指引，評價與統計照常更新。
 
 ### 6.2 繳款提醒與人工收據規範
 
@@ -171,9 +156,9 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 
 | 代碼 | 對象與觸發時點 | 通路與文案邊界 | 停止／安全機制 |
 |---|---|---|---|
-| `LINE-PAY-01` | 訂金逾期提醒（人工作業觸發） | Flex 卡片，內文顯示案號、訂金金額與到期日（取消查看資訊外連按鈕）；含【已經匯款】與【有疑問需要解決】按鈕（走 `line_webhook_reply`） | 不可主動寄群組；不從聊天室截圖自動核銷 |
+| `LINE-PAY-01` | 訂金逾期提醒（人工作業觸發） | Flex 卡片，內文顯示案號、訂金金額與到期日（取消查看資訊外連按鈕）；保留【已經匯款】按鈕（走 `line_webhook_reply`），繳款疑問請在官方帳號直接留言 | 不可主動寄群組；不從聊天室截圖自動核銷 |
 | `LINE-PAY-02` | 開工當天的第一期款提醒與後續逾期通知 | 開工日若有第一期款未結清，將案號、未結清金額、繳款期限，以及供客戶輸入「已經匯款」或「有疑問需要解決」的指引，併入[同一則純文字群組開工問候](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。第一期款逾期自動補寄及後續人工提醒一律發送到客戶私聊。 | 已驗證為本案客戶者在原群組輸入指定文字，或在私聊逾期卡點選付款按鈕，均以 Reply 確認並依 `LINE-PAY-04` 停止自動追蹤。群組首次通知轉至私聊補寄時，沿用同一期款的首次發送紀錄。無有效客戶私聊對象時保留人工待辦。 |
-| `LINE-PAY-03` | 第二期款逾期提醒（對比應收與到期日） | 一對一私人 LINE Flex 卡片（含第二期到期當天；不再有群組通知），內文完整標明金額與到期日；含【已經匯款】與【有疑問需要解決】按鈕 | 無第二期或已結清者嚴格排除 |
+| `LINE-PAY-03` | 第二期款逾期提醒（對比應收與到期日） | 一對一私人 LINE Flex 卡片（含第二期到期當天；不再有群組通知），內文完整標明金額與到期日；含【已經匯款】按鈕與直接留言指引 | 無第二期或已結清者嚴格排除 |
 | `LINE-PAY-04` | 自動二次追蹤機制 | 首次提醒發出滿 24 小時仍未入帳時，最多自動補發 **1 次** Flex 卡片 | 收到客戶的「已經匯款」（Reply「已收到您的回覆，感謝您。工會將於核對後通知，請耐心等候不需重複繳款。」）或「有疑問需要解決」付款回報、私訊回覆或已完成核銷時立即終止追蹤。 |
 | `LINE-PAY-05`～`07` | `#payment-reminder-settings` 繳款提醒排程與通知條件 | `GET /api/v1/line/payment-overdue-reminders/schedule` 與 `PUT /api/v1/line/payment-overdue-reminders/schedule` 維護 Asia/Taipei 排程。帳務範本與預覽依[通知文案工作台契約](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)維護。 | 排程異動以 CAS expected revision 防覆蓋。 |
 | `LINE-PAY-08` | **入帳待辦提醒與手動確認結案**（訂金／一期／二期） | `GET /api/v1/line/payment-overdue-reminders/receipts` 查詢系統內入帳待辦；人員於 LINE 官方帳號聊天後台使用預設訊息手動發送後，點擊「已於官方帳號發送／標記已通知」呼叫 `POST /api/v1/line/payment-overdue-reminders/receipts/send` 寫入完成憑證並消除待辦 | **不建立系統 LINE Push 推播工作**，銀行對帳單核銷後僅保留系統待辦提醒；待辦清單與 `#notifications` 均提供明確引導與標記已通知確認按鈕，重複確認具冪等性 |

@@ -189,14 +189,13 @@ def cancellation_notice_sample(key):
 
 HELPER_SAMPLE_KEYS = frozenset({
     "helper-menu-card",
+    "helper-menu-completed",
     "helper-satisfaction-survey",
     "helper-confirm-start-card",
     "helper-confirm-start-completed",
     "helper-schedule-unconfirmed",
     "helper-postponement-card",
     "helper-postponement-completed",
-    "helper-staff-assistance-ack",
-    "helper-staff-assistance-closed",
     "helper-guidelines-card",
     "helper-faq-ingredients",
     "helper-faq-hours",
@@ -213,7 +212,8 @@ def _helper_sample_payload(key, field, case):
         mutual_postponement_card,
     )
 
-    if key == "helper-menu-card":
+    if key in {"helper-menu-card", "helper-menu-completed"}:
+        field("案件狀態", "status", "服務已完成" if key == "helper-menu-completed" else "已約定開工")
         return group_helper_menu_card(case(), field("月嫂姓名", "staff_name", STAFF.name))
     if key == "helper-confirm-start-card":
         return confirm_start_date_card(
@@ -240,8 +240,6 @@ def _helper_sample_payload(key, field, case):
         case()
         field("原本請假日", "leave_start_date", LEAVE.start_date)
         field("合意補班日", "leave_end_date", LEAVE.end_date)
-    elif key in {"helper-staff-assistance-ack", "helper-staff-assistance-closed"}:
-        case()
     else:
         field("發送方式", "delivery", "案件服務群組 Reply 回覆（0 Push 額度）")
     return {"type": "text", "text": HELPER_TEXT_DEFAULTS[key]}
@@ -264,14 +262,6 @@ def current_message_sample(key):
         from subsystems.scheduling.leave_substitution_linked_request_resolution import LEAVE_COMPLETION_TEXT
         field("收件人", "recipient", STAFF.name)
         payload = text(LEAVE_COMPLETION_TEXT)
-    elif key == "complaint-handoff-received":
-        from subsystems.line.service_help_application import COMPLAINT_HANDOFF_TEXT
-        field("收件人", "recipient", CASE.client_name)
-        payload = text(COMPLAINT_HANDOFF_TEXT)
-    elif key == "customer-service-ticket-reply":
-        from subsystems.customer_service.application import customer_service_reply_payload
-        message = field("人員輸入的回覆（範例）", "reply_text", "您好，已收到您的需求，工會會再與您確認服務安排。")
-        payload = customer_service_reply_payload(message)
     elif key.startswith("cancellation-notice-"):
         from subsystems.line.cancellation_notifications import DEFAULT_COPY
         case()
@@ -316,9 +306,6 @@ def current_message_sample(key):
     elif key == "service-day-log-reminder":
         from subsystems.line.service_day_log_reminders import reminder_text
         payload = text(reminder_text(field("月嫂姓名", "staff_name", STAFF.name)))
-    elif key in {"deposit-assistance", "payment-assistance"}:
-        from subsystems.line.deposit_notifications import PAYMENT_ASSISTANCE_ACK
-        payload = text(PAYMENT_ASSISTANCE_ACK)
     elif key == "payment-reminder-ack":
         from subsystems.line.deposit_notifications import PAYMENT_ACK_REPLY
         payload = text(PAYMENT_ACK_REPLY)
@@ -379,8 +366,7 @@ def current_message_sample(key):
         from domains.scheduling.matching_communication import CustomerMatchingDecision
         from subsystems.scheduling.matching_notification_application import matching_response_text
         willing = "willing" if key == "matching-willing-received" else None
-        decision = {"matching-customer-accepted": CustomerMatchingDecision.ACCEPTED,
-                    "matching-customer-assistance": CustomerMatchingDecision.CONTACT_REQUESTED}.get(key)
+        decision = CustomerMatchingDecision.ACCEPTED if key == "matching-customer-accepted" else None
         if willing is not None: field("月嫂意願", "caregiver_willingness", willing)
         if decision is not None: field("客戶選擇", "customer_decision", decision.value)
         payload = text(matching_response_text(willing, decision))

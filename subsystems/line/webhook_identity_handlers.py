@@ -139,13 +139,6 @@ class LineWebhookIdentityHandlers:
         text = _message_text(inbox)
         if text is None:
             return
-        if self._matching_postback_application is not None and self._matching_postback_application.handle_message(
-            inbox,
-            unit_of_work,
-            line_user_id,
-            text,
-        ):
-            return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             normalized = text.strip()
@@ -189,12 +182,11 @@ class LineWebhookIdentityHandlers:
         stripped = text.strip()
         resolved_aliases = set(route_aliases("feedback_resolved")) or _FEEDBACK_RESOLVED_TEXTS
         unresolved_aliases = set(route_aliases("feedback_unresolved")) or _FEEDBACK_UNRESOLVED_TEXTS
-        if stripped in resolved_aliases or stripped in unresolved_aliases:
-            return False
-        if (
-            self._matching_postback_application is not None
-            and self._matching_postback_application.has_active_assistance(unit_of_work, line_user_id, inbox.event.occurred_at)
-        ):
+        if stripped in unresolved_aliases:
+            self._handle_feedback_unresolved(inbox, unit_of_work, line_user_id)
+            unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
+            return True
+        if stripped in resolved_aliases:
             return False
         purpose = _identity_purpose_for_text(text)
         if purpose is not None:
@@ -218,6 +210,8 @@ class LineWebhookIdentityHandlers:
             self._group_helper_application is not None
             and self._group_helper_application.handle_postback(inbox, unit_of_work)
         ):
+            return True
+        if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
             return True
         data = _postback_data(inbox)
         if data.startswith("customer-service:handoff:") and data != "customer-service:handoff:confirm":
@@ -286,7 +280,7 @@ class LineWebhookIdentityHandlers:
         if match is None:
             return False
         line_user_id = _optional_user_id(inbox)
-        if line_user_id is None:
+        if line_user_id is None or inbox.event.source.source_type is not LineSourceType.USER:
             return True
         context = unit_of_work.knowledge_questions.feedback_context(
             int(match.group(1)),
@@ -299,7 +293,7 @@ class LineWebhookIdentityHandlers:
         )
         event_identity = inbox.event.event_id.value
         outcome = FeedbackOutcome(match.group(2))
-        result = self._feedback_application.apply_in_unit_of_work(
+        self._feedback_application.apply_in_unit_of_work(
             RecordLineFeedback(
                 actor_id=line_user_id.value,
                 source_response_id=context.source_response_id,
@@ -317,12 +311,7 @@ class LineWebhookIdentityHandlers:
         )
         message = "感謝您的肯定與回饋！"
         if outcome is FeedbackOutcome.UNRESOLVED:
-            ticket = (
-                f"（工單編號 #{result.root.ticket_id}）"
-                if result.root.ticket_id is not None
-                else ""
-            )
-            message = f"已收到您的回饋{ticket}。AI 問答系統已暫時關閉，您可以直接在此對話中留下訊息等待真人客服回應。"
+            message = "已記錄未解決。如需協助，請直接在此聊天室留言。"
         unit_of_work.delivery_tasks.enqueue(
             _text_delivery(
                 line_user_id,
@@ -330,7 +319,8 @@ class LineWebhookIdentityHandlers:
                 event_identity,
                 CorrelationId(f"line-event:{event_identity}"),
                 self._now(),
-                f"knowledge-feedback-ack:{event_identity}",
+                f"knowledge-feedback-receipt:{event_identity}",
+                source_type=REPLY_ONLY_WEBHOOK_SOURCE,
             )
         )
         return True
@@ -349,30 +339,20 @@ class LineWebhookIdentityHandlers:
         unit_of_work.delivery_tasks.enqueue(delivery)
 
     def _handle_feedback_unresolved(self, inbox, unit_of_work, line_user_id) -> None:
-        from domains.customer_service.ticket import CustomerServiceCategory
-        from subsystems.customer_service.contracts import CreateCustomerServiceMessage
-
+        if inbox.event.source.source_type is not LineSourceType.USER:
+            return
         event_identity = inbox.event.event_id.value
-        correlation_id = CorrelationId(f"line-event:{event_identity}")
-        ticket = unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id=line_user_id.value,
-                category=CustomerServiceCategory.OTHER,
-                message="LINE 知識庫問答用戶回饋未解決，請真人客服接手協助。",
-                event_key=f"line-feedback-ticket:{event_identity}",
+        unit_of_work.delivery_tasks.enqueue(
+            _text_delivery(
+                line_user_id,
+                _text_message_payload("如需協助，請直接在此聊天室留言。"),
+                event_identity,
+                CorrelationId(f"line-event:{event_identity}"),
+                self._now(),
+                f"feedback-unresolved-guidance:{event_identity}",
+                source_type=REPLY_ONLY_WEBHOOK_SOURCE,
             )
         )
-        ticket_id_str = f"（工單編號 #{ticket.ticket_id}）"
-
-        delivery = _text_delivery(
-            line_user_id,
-            _text_message_payload(f"已收到您的回饋！我們已為您通報工會專人客服{ticket_id_str}，專員將盡快接手與您聯繫協助，請稍候！"),
-            event_identity,
-            correlation_id,
-            self._now(),
-            f"feedback-unresolved:{event_identity}",
-        )
-        unit_of_work.delivery_tasks.enqueue(delivery)
 
     # Kept cohesive so the flow and its delivery task use the same event identity.
     def _open_and_notify(self, inbox, unit_of_work, line_user_id, purpose):
@@ -519,6 +499,8 @@ def _text_delivery(
     correlation_id,
     scheduled_at,
     idempotency_key,
+    *,
+    source_type="line_webhook_event",
 ):
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id),
@@ -527,7 +509,7 @@ def _text_delivery(
         scheduled_at,
         IdempotencyKey(idempotency_key),
         correlation_id,
-        "line_webhook_event",
+        source_type,
         event_identity,
     )
 

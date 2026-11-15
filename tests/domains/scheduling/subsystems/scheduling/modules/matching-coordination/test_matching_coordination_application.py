@@ -367,6 +367,7 @@ def test_leave_apply_rechecks_owner_receipt_inside_outer_transaction() -> None:
 
     assert receipt.result_state == "rematch_required"
     assert receipt.source_versions == preview.source_versions
+    assert receipt.outbox_intent_ids == ()
     assert operations == [
         "begin",
         "claim",

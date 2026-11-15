@@ -1,11 +1,10 @@
 """
 File: group_helper_application.py
-Description: 處理案件群組月嫂小幫手選單、開工日、合意延期、排程與專員協助（零推播）。
+Description: 處理案件群組月嫂小幫手選單、開工日、合意延期與排程（零推播）。
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
@@ -14,7 +13,6 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -34,20 +32,19 @@ from domains.scheduling.service_start import (
 )
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
-from subsystems.customer_service.escalation_application import complete_ticket_holds
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.navigation_catalog import load_persisted_aliases
 from subsystems.line.service_start_messages import (
     HELPER_TEXT_DEFAULTS,
+    GROUP_ASSISTANCE_DIRECTIONS,
     SATISFACTION_SURVEY_ACTION,
     confirm_start_date_card,
     group_guidelines_card,
     group_helper_menu_card,
     mutual_postponement_card,
-    satisfaction_survey_menu_row,
+    render_group_helper_menu_state,
     service_date_record,
     service_schedule_calendar_card,
 )
@@ -59,7 +56,6 @@ _ACTIVE_BINDING_STATUSES = frozenset({
     LineOrderGroupBindingStatus.ATTENTION,
 })
 _DEFAULT_MENU_ALIASES = ("小幫手", "工會", "月嫂選單", "服務選單")
-_DEFAULT_CLOSE_ALIASES = ("已處理結案", "專員已處理結案", "協助結案")
 _DEFAULT_POSTPONE_PREFIXES = ("雙方合意延期",)
 _POSTPONEMENT_RANGE_RE = re.compile(
     r"[：:]\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*(?:順延至|延至|->|→)\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*$"
@@ -249,7 +245,6 @@ class LineGroupHelperApplication:
         return {
             "group_helper_menu": tuple(routes.get("group_helper_menu") or _DEFAULT_MENU_ALIASES),
             "group_postponement": tuple(routes.get("group_postponement") or _DEFAULT_POSTPONE_PREFIXES),
-            "staff_assistance_close": tuple(routes.get("staff_assistance_close") or _DEFAULT_CLOSE_ALIASES),
         }
 
     def handle_reply(self, inbox: Any, unit_of_work: Any) -> bool:
@@ -270,9 +265,8 @@ class LineGroupHelperApplication:
 
         aliases = self._aliases()
         is_menu_cmd = text in aliases["group_helper_menu"]
-        is_close_cmd = text in aliases["staff_assistance_close"]
         postpone_match = _match_postponement_text(text, aliases["group_postponement"])
-        if not (is_menu_cmd or is_close_cmd or postpone_match):
+        if not (is_menu_cmd or postpone_match):
             return False
 
         ctx = self._resolve_group_context(unit_of_work, group_id, user_id)
@@ -280,15 +274,9 @@ class LineGroupHelperApplication:
             return False
 
         if is_menu_cmd:
-            if not (ctx["is_staff"] or ctx["is_customer"] or ctx["is_admin"] or ctx.get("can_share_satisfaction_survey")):
+            if not (ctx["is_staff"] or ctx["is_customer"] or ctx["is_admin"] or ctx.get("can_open_satisfaction_survey")):
                 return False
             self._reply_helper_menu(inbox, unit_of_work, group_id, ctx)
-            return True
-
-        if is_close_cmd:
-            if not ctx["is_admin"]:
-                return False
-            self._handle_close_assistance(inbox, unit_of_work, group_id, user_id, ctx)
             return True
 
         if postpone_match:
@@ -337,7 +325,7 @@ class LineGroupHelperApplication:
             return True
 
         if data.startswith(f"{SATISFACTION_SURVEY_ACTION}:"):
-            if data == f"{SATISFACTION_SURVEY_ACTION}:{ctx['case_no']}" and ctx.get("can_share_satisfaction_survey"):
+            if data == f"{SATISFACTION_SURVEY_ACTION}:{ctx['case_no']}" and ctx.get("can_open_satisfaction_survey"):
                 key = "helper-satisfaction-survey"
                 payload = configured_payload(unit_of_work, key, {"type": "text", "text": HELPER_TEXT_DEFAULTS[key]})
                 self._reply_text(inbox, unit_of_work, group_id, payload["text"], "satisfaction-survey")
@@ -393,7 +381,7 @@ class LineGroupHelperApplication:
             )
             return True
         if data == "group-helper:staff-assistance":
-            self._handle_staff_assistance(inbox, unit_of_work, group_id, user_id, ctx)
+            self._reply_text(inbox, unit_of_work, group_id, GROUP_ASSISTANCE_DIRECTIONS, "staff-assistance-directions")
             return True
         if data == "group-helper:group-guidelines":
             payload = configured_payload(unit_of_work, "helper-guidelines-card", group_guidelines_card())
@@ -522,9 +510,9 @@ class LineGroupHelperApplication:
             sub = unit_of_work.customer_service.staff_subject(user_id)
             is_staff = bool(sub and (staff_id is None or int(sub["staff_id"]) == staff_id))
 
-        served_staff_ids = {str(row["staff_id"]) for row in schedule_rows if row.get("is_work_day")}
-        can_share_satisfaction_survey = order.get("status") == OrderLifecycleStatus.COMPLETED and any(
-            binding.get("subject_type") == "staff" and str(binding.get("subject_reference")) in served_staff_ids
+        scheduled_staff_ids = {str(row["staff_id"]) for row in schedule_rows if row.get("is_work_day")}
+        can_open_satisfaction_survey = order.get("status") == OrderLifecycleStatus.COMPLETED and any(
+            binding.get("subject_type") == "staff" and str(binding.get("subject_reference")) in scheduled_staff_ids
             for binding in bindings
         )
 
@@ -561,7 +549,7 @@ class LineGroupHelperApplication:
             "service_commenced": service_commenced,
             "schedule_rows": schedule_rows,
             "is_staff": is_staff,
-            "can_share_satisfaction_survey": can_share_satisfaction_survey,
+            "can_open_satisfaction_survey": can_open_satisfaction_survey,
             "is_customer": is_customer,
             "is_admin": is_admin,
             "admin_user_id": admin_user_id,
@@ -585,103 +573,16 @@ class LineGroupHelperApplication:
             group_helper_menu_card(case_no, staff_name),
             {"case_no": case_no, "staff_name": staff_name},
         )
-        card = deepcopy(payload)
-        bubble = card.get("contents", {}) if isinstance(card, dict) else {}
-        is_completed = ctx.get("order_status") == OrderLifecycleStatus.COMPLETED
-        is_commenced = is_completed or bool(ctx.get("service_commenced", ctx.get("is_started", False)))
-        for section_key in ("body", "footer"):
-            section = bubble.get(section_key)
-            if isinstance(section, dict) and isinstance(section.get("contents"), list):
-                section["contents"] = self._prepare_helper_menu_nodes(
-                    section["contents"],
-                    case_no=case_no,
-                    planned_start_date=str(ctx["planned_start_date"]),
-                    hide_confirm_start=is_commenced,
-                )
-        if ctx.get("can_share_satisfaction_survey"):
-            bubble["body"]["contents"].append(satisfaction_survey_menu_row(case_no))
-        if is_commenced and isinstance(bubble.get("header"), dict):
-            self._mark_started_header(bubble["header"], "服務已完成" if is_completed else "正式服務中")
-        elif ctx.get("has_confirmed_start") and isinstance(bubble.get("header"), dict):
-            self._mark_scheduled_header(bubble["header"])
+        card = render_group_helper_menu_state(
+            payload,
+            case_no=case_no,
+            planned_start_date=str(ctx["planned_start_date"]),
+            service_commenced=bool(ctx.get("service_commenced", ctx.get("is_started", False))),
+            has_confirmed_start=bool(ctx.get("has_confirmed_start")),
+            service_completed=ctx.get("order_status") == OrderLifecycleStatus.COMPLETED,
+            show_satisfaction_survey=bool(ctx.get("can_open_satisfaction_survey")),
+        )
         self._reply_flex(inbox, unit_of_work, group_id, card, "helper-menu")
-
-    @classmethod
-    def _prepare_helper_menu_nodes(
-        cls,
-        nodes: list[Any],
-        *,
-        case_no: str,
-        planned_start_date: str,
-        hide_confirm_start: bool = False,
-        is_started: bool | None = None,
-    ) -> list[Any]:
-        should_hide = hide_confirm_start if is_started is None else is_started
-        filtered: list[Any] = []
-        for node in nodes:
-            if not isinstance(node, dict):
-                filtered.append(node)
-                continue
-            action = node.get("action")
-            action_data = str(action.get("data", "")) if isinstance(action, dict) else ""
-            if action_data.startswith("group-helper:confirm-start-date"):
-                if should_hide:
-                    # 實際服務日開始後自動隱藏【確認開工日】，保留【服務排程】讓雙方看已服務天數與排休日。
-                    continue
-                node["action"] = {
-                    "type": "datetimepicker",
-                    "label": action.get("label") or "確認開工日",
-                    "data": f"group-helper:confirm-start-date:{case_no}",
-                    "mode": "date",
-                    "initial": planned_start_date,
-                }
-            if should_hide and action_data == "group-helper:service-schedule":
-                cls._replace_exact_text(node, "查看預期排程（開工前）", "查看已服務天數、排休日與完工日")
-            if isinstance(node.get("contents"), list):
-                node["contents"] = cls._prepare_helper_menu_nodes(
-                    node["contents"],
-                    case_no=case_no,
-                    planned_start_date=planned_start_date,
-                    hide_confirm_start=should_hide,
-                )
-            filtered.append(node)
-        return filtered
-
-    @classmethod
-    def _mark_started_header(cls, header: dict[str, Any], status: str) -> None:
-        for item in header.get("contents", []):
-            if not isinstance(item, dict):
-                continue
-            if item.get("backgroundColor") == "#FBBF24":
-                inner = item.get("contents")
-                if isinstance(inner, list) and inner and isinstance(inner[0], dict) and inner[0].get("text") == "待確認開工":
-                    item["backgroundColor"] = "#10B981"
-                    inner[0]["text"] = status
-                    inner[0]["color"] = "#FFFFFF"
-            elif isinstance(item.get("contents"), list):
-                cls._mark_started_header(item, status)
-
-    @classmethod
-    def _mark_scheduled_header(cls, header: dict[str, Any]) -> None:
-        for item in header.get("contents", []):
-            if not isinstance(item, dict):
-                continue
-            if item.get("backgroundColor") == "#FBBF24":
-                inner = item.get("contents")
-                if isinstance(inner, list) and inner and isinstance(inner[0], dict) and inner[0].get("text") == "待確認開工":
-                    item["backgroundColor"] = "#0284C7"
-                    inner[0]["text"] = "已約定開工"
-                    inner[0]["color"] = "#FFFFFF"
-            elif isinstance(item.get("contents"), list):
-                cls._mark_scheduled_header(item)
-
-    @classmethod
-    def _replace_exact_text(cls, node: dict[str, Any], old_text: str, new_text: str) -> None:
-        if node.get("type") == "text" and node.get("text") == old_text:
-            node["text"] = new_text
-        for child in node.get("contents", []):
-            if isinstance(child, dict):
-                cls._replace_exact_text(child, old_text, new_text)
 
     def _handle_confirm_start_pick(
         self,
@@ -1123,98 +1024,6 @@ class LineGroupHelperApplication:
             },
         )
         self._reply_text(inbox, unit_of_work, group_id, completed["text"], "postpone-completed")
-
-    def _handle_staff_assistance(
-        self,
-        inbox: Any,
-        unit_of_work: Any,
-        group_id: str,
-        user_id: str,
-        ctx: dict[str, Any],
-    ) -> None:
-        event_id = inbox.event.event_id.value
-        case_no = ctx["case_no"]
-        unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id=user_id,
-                category=CustomerServiceCategory.SERVICE_PROGRESS,
-                message=f"案件 {case_no} 群組點選「專員協助」，請工會專員進群說明與協助處理。",
-                event_key=f"group-helper-assistance:{event_id}",
-                case_no=case_no,
-                client_id=ctx.get("client_id"),
-            )
-        )
-        ack = configured_payload(
-            unit_of_work,
-            "helper-staff-assistance-ack",
-            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-staff-assistance-ack"]},
-            {"case_no": case_no},
-        )
-        self._reply_text(inbox, unit_of_work, group_id, ack["text"], "staff-assistance-ack")
-
-    def _handle_close_assistance(
-        self,
-        inbox: Any,
-        unit_of_work: Any,
-        group_id: str,
-        user_id: str,
-        ctx: dict[str, Any],
-    ) -> None:
-        event_id = inbox.event.event_id.value
-        case_no = ctx["case_no"]
-        conn = getattr(unit_of_work, "_connection", None)
-        if conn is not None:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT id FROM customer_service_tickets "
-                    "WHERE case_no=%s AND status IN ('waiting','handling') FOR UPDATE",
-                    (case_no,),
-                )
-                ticket_rows = list(cursor.fetchall() or ())
-            actor_ref = f"admin:{ctx['admin_user_id']}" if ctx.get("admin_user_id") else f"line:{user_id}"
-            for row in ticket_rows:
-                tid = int(row["id"])
-                ticket = unit_of_work.customer_service.get(tid, lock=True)
-                escalations = (
-                    unit_of_work.escalations.active_for_ticket(tid)
-                    if getattr(unit_of_work, "escalations", None) is not None
-                    else ()
-                )
-                unit_of_work.customer_service.append_management_event(
-                    tid,
-                    f"group-helper-close:{event_id}:{tid}",
-                    "status_changed",
-                    CustomerServiceStatus.RESOLVED.value,
-                    actor_ref,
-                )
-                updated = unit_of_work.customer_service.update(
-                    tid,
-                    ticket.version,
-                    CustomerServiceStatus.RESOLVED,
-                    "專員於案件群組輸入結案指令已處理完成",
-                    ctx.get("admin_user_id"),
-                )
-                if escalations:
-                    from types import SimpleNamespace
-
-                    cmd = SimpleNamespace(
-                        expected_version=SimpleNamespace(value=ticket.version),
-                        preview_fingerprint=fingerprint_payload({"case_no": case_no, "ticket_id": tid, "event_id": event_id}),
-                        idempotency_key=IdempotencyKey(f"group-close:{event_id}:{tid}"),
-                        correlation_id=CorrelationId(f"line-event:{event_id}"),
-                        actor_id=actor_ref,
-                    )
-                    complete_ticket_holds(unit_of_work, escalations, cmd, updated.version)
-        elif hasattr(unit_of_work.customer_service, "resolve_open_for_case"):
-            unit_of_work.customer_service.resolve_open_for_case(case_no, f"line:{user_id}", event_id)
-
-        closed = configured_payload(
-            unit_of_work,
-            "helper-staff-assistance-closed",
-            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-staff-assistance-closed"]},
-            {"case_no": case_no},
-        )
-        self._reply_text(inbox, unit_of_work, group_id, closed["text"], "staff-assistance-closed")
 
     def _reply_text(self, inbox: Any, unit_of_work: Any, group_id: str, text: str, tag: str) -> None:
         self._enqueue_reply(

@@ -15,12 +15,6 @@ class _MatchingApplicationSpy:
     def __init__(self) -> None:
         self.calls = []
 
-    def append_customer_assistance_message_in_unit_of_work(self, *_args):
-        return False
-
-    def has_pending_customer_assistance(self, *_args):
-        return False
-
     def record_line_response_in_unit_of_work(self, unit_of_work, **arguments):
         self.calls.append((unit_of_work, arguments))
 
@@ -94,22 +88,6 @@ def test_m3_rejected_alias_is_normalized_to_legacy_declined_root_value() -> None
     )
 
     assert spy.calls[0][1]["decision"] == "declined"
-
-
-def test_retired_schedule_reason_does_not_change_old_or_new_dates() -> None:
-    handler = LineMatchingPostbackApplication(_MatchingApplicationSpy())
-    schedule_spy = _ScheduleConfirmationSpy()
-    unit_of_work = SimpleNamespace(matching_schedule_confirmations=schedule_spy)
-
-    handled = handler.handle_message(
-        _inbox("other-action"),
-        unit_of_work,
-        LineUserId("U-caregiver"),
-        "家中已有安排",
-    )
-
-    assert handled is False
-    assert schedule_spy.reason_calls == []
 
 
 def test_schedule_rejection_postback_uses_the_bound_line_user_and_event_identity() -> None:

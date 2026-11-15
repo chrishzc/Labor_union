@@ -5,12 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable, Protocol
 
-from domains.customer_service.ticket import CustomerServiceCategory
 from shared_kernel.identities import IdempotencyReceipt
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.feedback_contracts import (
     FeedbackAggregate,
-    FeedbackOutcome,
     FeedbackPreview,
     FeedbackReceipt,
     FeedbackReadback,
@@ -27,7 +24,6 @@ class FeedbackConflictError(ValueError):
 class FeedbackUnitOfWork(Protocol):
     feedback: LineFeedbackRepository
     receipts: object
-    customer_service: object
 
     def __enter__(self): ...
     def __exit__(self, exception_type, exception, traceback): ...
@@ -90,17 +86,6 @@ class LineFeedbackApplication:
                 return _readback(existing, replayed=True), True
             return _readback(existing, replayed=True), False
 
-        ticket_id = None
-        if command.outcome is FeedbackOutcome.UNRESOLVED:
-            ticket = unit_of_work.customer_service.create_or_append(
-                CreateCustomerServiceMessage(
-                    line_user_id=command.actor_id,
-                    category=CustomerServiceCategory.OTHER,
-                    message="LINE 回覆未解決，請客服協助。",
-                    event_key=f"line-feedback-ticket:{command.source_response_id}",
-                )
-            )
-            ticket_id = int(ticket.ticket_id)
         root = FeedbackRoot(
             actor_id=command.actor_id,
             source_response_id=command.source_response_id,
@@ -110,7 +95,7 @@ class LineFeedbackApplication:
             catalog_revision=command.catalog_revision,
             rule_revision=command.rule_revision,
             command_fingerprint=fingerprint,
-            ticket_id=ticket_id,
+            ticket_id=None,
             idempotency_key=command.idempotency_key,
             correlation_id=command.correlation_id,
             occurred_at=self._now(),

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: order_update.html
-Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待工會確認的客服需求。
+Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待工會確認的訂單異動申請。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -139,7 +139,7 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
     <p class="eyebrow">新竹市月子工會</p>
     <h1>申請修改訂單</h1>
     <p class="lead">選擇訂單與要修改的項目，核對修改內容後送出。</p>
-    <p class="boundary">申請須經工會確認才會更新訂單。變更可能影響服務內容、費用、排班或月嫂接案意願。</p>
+    <p class="boundary">送出後由工會確認並另行辦理。變更可能影響服務內容、費用、排班或月嫂接案意願。</p>
   </header>
 
   <section class="panel" id="formPanel">
@@ -326,29 +326,43 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
     document.getElementById("previewButton").focus();
   });
 
-  document.getElementById("applyButton").addEventListener("click", async () => {
+  const applyButton = document.getElementById("applyButton");
+  applyButton.addEventListener("click", async () => {
     if (!preview || studioPreview) return;
+    const submitted = preview;
     setLoading(true);
-    const idempotencyKey = sessionStorage.getItem("line-order-change-idempotency") || crypto.randomUUID();
-    sessionStorage.setItem("line-order-change-idempotency", idempotencyKey);
+    applyButton.disabled = true;
+    const storageKey = `line-order-change-idempotency:${submitted.preview_fingerprint}`;
     try {
-      const result = await request("/api/v1/line/order-change/apply", {
+      const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+      sessionStorage.setItem(storageKey, idempotencyKey);
+      const result = await request("/api/v1/line/order-change/requests", {
         line_id_token: lineIdToken,
-        case_no: preview.case_no,
-        expected_order_version: preview.order_version,
-        kind: preview.kind,
-        requested: preview.requested,
-        preview_fingerprint: preview.preview_fingerprint,
+        case_no: submitted.case_no,
+        expected_order_version: submitted.order_version,
+        kind: submitted.kind,
+        requested: submitted.requested,
+        preview_fingerprint: submitted.preview_fingerprint,
         idempotency_key: idempotencyKey
       });
-      sessionStorage.removeItem("line-order-change-idempotency");
+      if (!Number.isInteger(result.data?.request_id) || result.data.request_id <= 0 ||
+          !["pending", "completed"].includes(result.data.request_status)) {
+        throw new Error("暫時無法確認申請編號，請再次送出以確認同一筆申請。");
+      }
+      sessionStorage.removeItem(storageKey);
+      preview = null;
       document.getElementById("previewCard").classList.remove("show");
       const success = document.getElementById("successCard");
-      success.innerHTML = `<strong>申請已送出</strong><br>客服需求編號：#${escapeHtml(result.data.ticket_id)}<br>案件：${escapeHtml(result.data.case_no)}<br><br>目前狀態：待工會確認。正式訂單尚未修改。`;
+      const status = result.data.request_status === "completed" ? "已結案" : "待工會確認";
+      success.innerHTML = `<strong>已取得申請紀錄</strong><br>訂單異動申請編號：#${escapeHtml(result.data.request_id)}<br>案件：${escapeHtml(result.data.case_no)}<br><br>目前狀態：${status}。工會將在官方帳號回覆辦理結果。`;
+      showStatus("");
       success.classList.add("show");
       success.focus();
     } catch (error) { showStatus(error.message || "申請未送出，請重新預覽。", "error"); }
-    finally { setLoading(false); }
+    finally {
+      setLoading(false);
+      applyButton.disabled = false;
+    }
   });
 
   function formRequested() {
@@ -392,10 +406,10 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
     document.getElementById("previewButton").disabled = !(selectedOrder() && selectedKind());
   }
   function shortTime(value) { return String(value || "").slice(0, 5); }
-  function showStatus(message, kind) {
+  function showStatus(message, kind = "") {
     const status = document.getElementById("status");
     status.textContent = message;
-    status.className = `status ${kind}`;
+    status.className = kind ? `status ${kind}` : "status";
   }
   function setLoading(active) { document.getElementById("loader").classList.toggle("show", active); }
   async function request(url, payload) {

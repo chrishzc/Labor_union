@@ -103,18 +103,17 @@ def test_navigation_catalog_api_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert "已將「profile_update」的觸發指令恢復預設" in reset_res.json()["message"]
 
 
-def test_group_helper_and_staff_assistance_close_aliases(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_group_helper_keeps_aliases_and_retires_staff_assistance_close(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     test_storage = tmp_path / "helper_aliases.json"
     import subsystems.line.navigation_catalog as nav_module
     monkeypatch.setattr(nav_module, "CATALOG_STORAGE_PATH", test_storage)
     nav_module._invalidate_cache()
 
-    rev, routes = load_persisted_aliases(test_storage)
+    _, routes = load_persisted_aliases(test_storage)
     assert "group_helper_menu" in routes
-    assert "staff_assistance_close" in routes
+    assert "staff_assistance_close" not in routes
     assert "小幫手" in routes["group_helper_menu"]
     assert "工會" in routes["group_helper_menu"]
-    assert "已處理結案" in routes["staff_assistance_close"]
 
     router = DeterministicLineRouter()
     helper_outcome = router.route("小幫手", source_event_id="helper-menu-wake")
@@ -122,16 +121,7 @@ def test_group_helper_and_staff_assistance_close_aliases(monkeypatch: pytest.Mon
     assert helper_outcome.route_key == "group_helper_menu"
 
     close_outcome = router.route("已處理結案", source_event_id="staff-close-cmd")
-    assert isinstance(close_outcome, DeterministicRoute)
-    assert close_outcome.route_key == "staff_assistance_close"
-
-    new_rev, _ = update_route_aliases("staff_assistance_close", ["已處理結案", "專員完成"], path=test_storage)
-    assert new_rev == rev + 1
-    assert entry_for_alias("專員完成", path=test_storage).route_key == "staff_assistance_close"
-
-    reset_rev, _ = reset_route_aliases("staff_assistance_close", path=test_storage)
-    assert reset_rev == new_rev + 1
-    assert entry_for_alias("專員完成", path=test_storage) is None
+    assert not isinstance(close_outcome, DeterministicRoute)
 
 
 def test_all_chatroom_commands_in_catalog_and_dynamic_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -151,7 +141,6 @@ def test_all_chatroom_commands_in_catalog_and_dynamic_dispatch(monkeypatch: pyte
         "group_helper_menu",
         "group_postponement",
         "staff_assistance_close",
-        "human_handoff",
         "resume_ai_assistant",
         "feedback_resolved",
         "feedback_unresolved",
@@ -161,6 +150,8 @@ def test_all_chatroom_commands_in_catalog_and_dynamic_dispatch(monkeypatch: pyte
         "menu_switch_staff",
     }
     assert expected_keys.issubset(set(routes))
+    assert "human_handoff" not in routes
+    assert entry_for_alias("呼叫專員", path=test_storage) is None
     # Dual-scope "綁定訂單" does not block editing order_group_bind and still routes 1:1 to customer_binding.
     new_rev, _ = update_route_aliases("order_group_bind", ["綁定群組", "綁定訂單", "群組開案"], path=test_storage)
     assert new_rev == rev + 1

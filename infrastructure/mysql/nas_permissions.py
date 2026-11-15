@@ -231,6 +231,17 @@ def permission_plan(connection, database: str) -> dict:
 
 def _table_grants(profile: str, tables: list[str]):
     for table in tables:
+        if table == "order_change_requests":
+            if profile == "line":
+                yield table, [
+                    "SELECT", "INSERT (case_no,client_id,kind,before_payload,requested_payload,"
+                    "idempotency_digest,command_fingerprint,submitted_at)",
+                ]
+            elif profile == "management":
+                yield table, ["SELECT", "UPDATE (result,completed_by,completed_by_name,completed_at)"]
+            elif profile == "maintenance":
+                yield table, ["SELECT"]
+            continue
         read = write = False
         if profile == "management":
             read = table not in ACCESS_TABLES

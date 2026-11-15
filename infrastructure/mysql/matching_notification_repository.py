@@ -251,21 +251,6 @@ class MySqlMatchingNotificationRepository:
         interaction = self.interaction(intent["reference"], lock=False)
         return interaction is not None and interaction["interaction_status"] == "active"
 
-    def pending_customer_assistance(self, line_user_id: LineUserId, before: datetime) -> bool:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT 1 FROM line_inbox_events inbox JOIN matching_line_interactions interaction "
-                "ON interaction.recipient_line_user_id=inbox.source_user_id "
-                "AND interaction.token_hash=SHA2(SUBSTRING_INDEX(SUBSTRING_INDEX("
-                "JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')),':',2),':',-1),256) "
-                "WHERE inbox.source_user_id=%s AND inbox.event_type='postback' "
-                "AND inbox.occurred_at_utc<=%s AND inbox.processing_status IN ('pending','processing','retryable_failed') "
-                "AND interaction.action_scope='customer_decision' AND interaction.interaction_status<>'revoked' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')) LIKE 'matching:%%:contact_requested' LIMIT 1",
-                (line_user_id.value, database_utc(before)),
-            )
-            return cursor.fetchone() is not None
-
     def interaction(self, token_hash: str, *, lock: bool = True) -> Mapping[str, Any] | None:
         with self._connection.cursor() as cursor:
             cursor.execute(_INTERACTION_BY_TOKEN_SQL + (" FOR UPDATE" if lock else ""), (token_hash,))
@@ -568,9 +553,9 @@ class MySqlMatchingNotificationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(CustomerRecommendationFollowup(
             case_no=str(row["case_no"]), plan_id=int(row["plan_id"]),
-            status="response_failed" if row["response_failure"] else "contact_requested" if row["decision"] == "contact_requested" and row["ticket_status"] != "resolved" else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
+            status="response_failed" if row["response_failure"] else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
             reminder_due_at=(aware_utc(row["sent_at_utc"]) + timedelta(days=7)) if row.get("sent_at_utc") else None,
-            ticket_id=int(row["ticket_id"]) if row.get("ticket_id") is not None else None,
+            ticket_id=None,
             failure_reason=row["response_failure"],
         ) for row in rows)
 
@@ -1103,7 +1088,7 @@ SELECT p.id AS plan_id,p.case_no,
 FROM matching_line_interactions interaction
 JOIN line_inbox_events inbox ON inbox.source_user_id=interaction.recipient_line_user_id
 AND inbox.event_type='postback'
-AND JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')) REGEXP '^matching:[A-Za-z0-9_-]+:(accepted|contact_requested)$'
+AND JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')) REGEXP '^matching:[A-Za-z0-9_-]+:accepted$'
 AND SHA2(SUBSTRING_INDEX(SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(inbox.payload_snapshot,'$.postback.data')),':',2),':',-1),256)=interaction.token_hash
 WHERE interaction.plan_id=p.id AND interaction.action_scope='customer_decision'
 AND interaction.interaction_status<>'revoked'
@@ -1115,13 +1100,6 @@ ORDER BY r.occurred_at_utc DESC,r.id DESC LIMIT 1),'pending') AS decision,
 JOIN line_delivery_tasks task ON task.id=i.delivery_task_id
 WHERE i.plan_id=p.id AND i.notification_kind='customer_profiles'
 AND task.processing_status='sent') AS sent_at_utc,
-(SELECT MAX(t.id) FROM customer_service_tickets t
-JOIN customer_service_ticket_events e ON e.ticket_id=t.id
-WHERE e.event_key LIKE CONCAT('matching-assistance:',p.id,':%%')) AS ticket_id,
-(SELECT t.status FROM customer_service_tickets t
-JOIN customer_service_ticket_events e ON e.ticket_id=t.id
-WHERE e.event_key LIKE CONCAT('matching-assistance:',p.id,':%%')
-ORDER BY t.id DESC LIMIT 1) AS ticket_status,
 (EXISTS(SELECT 1 FROM contract_signing_events e
 JOIN contract_document_versions d ON d.id=e.document_version_id
 WHERE e.matching_plan_id=p.id AND e.event_type='signed_received'
@@ -1135,8 +1113,7 @@ FROM caregiver_matching_plans p JOIN orders ON orders.case_no=p.case_no
 WHERE p.is_active=1 AND p.status IN ('proposed','accepted')
 AND orders.status IN ('洽談中','訂單成立')
 ) followup WHERE (response_failure IS NOT NULL AND decision IN ('pending','contact_requested'))
-OR (decision='contact_requested' AND (ticket_status IS NULL OR ticket_status<>'resolved'))
 OR (decision='accepted' AND signing_complete=0)
-OR ((decision='pending' OR (decision='contact_requested' AND ticket_status='resolved')) AND sent_at_utc<=%s)"""
+OR (decision IN ('pending','contact_requested') AND sent_at_utc<=%s)"""
 
 _CUSTOMER_FOLLOWUPS_SQL = "SELECT * " + _CUSTOMER_FOLLOWUPS_SOURCE_SQL + " ORDER BY plan_id LIMIT %s OFFSET %s"

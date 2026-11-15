@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,15 +61,62 @@ class LineOrderChangePreviewView(BaseModel):
 
 class LineOrderChangeReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    ticket_id: int = Field(gt=0)
-    ticket_status: Literal["waiting", "handling", "resolved"]
+    request_id: int = Field(gt=0)
+    request_status: Literal["pending", "completed"]
     case_no: str
     kind: OrderChangeKind
     idempotency_key: str
     replayed: bool
 
 
+class OrderChangeRequestCompletionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    expected_version: int = Field(ge=0, le=1)
+    result: str = Field(min_length=1, max_length=1000)
+
+
+class OrderChangeCompletionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    result: str
+    actor_name: str
+    completed_at: datetime
+
+
+class OrderChangeRequestView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: int
+    case_no: str
+    kind: OrderChangeKind
+    status: Literal["pending", "completed"]
+    version: int
+    before: dict[str, str]
+    requested: dict[str, str]
+    submitted_at: datetime
+    completion: OrderChangeCompletionView | None
+
+
+class OrderChangeRequestPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    items: list[OrderChangeRequestView]
+    next_before_id: int | None
+
+
+class LegacyOrderChangeReferenceView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    event_id: int
+    ticket_id: int
+    ticket_status: Literal["waiting", "handling", "resolved"]
+    submitted_at: datetime
+
+
+class LegacyOrderChangeReferencePageView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    items: list[LegacyOrderChangeReferenceView]
+    next_before_id: int | None
+
+
 __all__ = [
+    "LegacyOrderChangeReferencePageView",
     "LineOrderChangeApplyRequest",
     "LineOrderChangeIdentityRequest",
     "LineOrderChangeOrderListView",
@@ -76,4 +124,7 @@ __all__ = [
     "LineOrderChangePreviewRequest",
     "LineOrderChangePreviewView",
     "LineOrderChangeReceiptView",
+    "OrderChangeRequestCompletionBody",
+    "OrderChangeRequestPageView",
+    "OrderChangeRequestView",
 ]

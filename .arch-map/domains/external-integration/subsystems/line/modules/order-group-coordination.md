@@ -16,7 +16,7 @@
 ## Implementation
 - domain: `domains/line/order_group.py`
 - application: `subsystems/line/order_group_application.py`
-- group_helper: `subsystems/line/group_helper_application.py` — 案件群組月嫂小幫手選單、確認開工日、雙方合意延期、服務排程、專員協助、常見問答及正式完工後由本案月嫂呼叫滿意度調查問卷（全程 Reply-only 零推播）
+- group_helper: `subsystems/line/group_helper_application.py` — 案件群組月嫂小幫手選單、確認開工日、雙方合意延期、服務排程、專員協助與常見問答。正式完工後，本案月嫂可點選滿意度調查問卷，群組互動走 Reply。
 - contracts: `subsystems/line/order_group_contracts.py`
 - audience adapter: `infrastructure/mysql/line_order_group_adapters.py`
 - persistence adapter: `infrastructure/mysql/line_media_order_group_repository.py`
@@ -38,7 +38,7 @@
 - `paid_uncreated_todos` 只讀 canonical settled projection 且訂金金額大於零、正常未結案 Orders 及尚無 group_id；不將銀行待核銷或客戶自述視為已付。
 - `opening_greeting_skips` 只讀 `service_start_greeting_no_group` 稽核事件，投影案號和紀錄時間，不讀其他稽核種類或投遞記錄。
 - 成員為 Orders 目前客戶與指派月嫂；canonical role binding 與 owner projection 不一致時標未知。加入狀況只使用目前群組綁定版本之後的 membership 事件，不沿用舊群組的 joined 投影。
-- 問卷按鈕與 Postback 都驗證目前案件群組、正式完工狀態、有效服務排班與月嫂身分綁定。問卷回覆沿用通知與發送的可編文字範本，預設文案不含網址。
+- 問卷按鈕與 Postback 都驗證目前案件群組、正式完工、有效服務排班與月嫂身分綁定。點選後發送「通知與發送」的可編文字範本，預設文案不含網址。
 
 ## Dependencies
 - outbound: `orders` — 提供訂單狀態與指派對象。

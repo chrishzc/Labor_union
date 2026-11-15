@@ -68,7 +68,7 @@
           "bounds": {
             "x": 0,
             "y": 843,
-            "width": 1250,
+            "width": 2500,
             "height": 843
           },
           "action": {
@@ -77,26 +77,6 @@
             "uri": "?target=ai_assistant",
             "uri_source": "liff",
             "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "human_contact",
-          "label": "聯絡專人",
-          "text_color": "#FFFFFF",
-          "background_color": "#10B981",
-          "bounds": {
-            "x": 1250,
-            "y": 843,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "postback",
-            "text": null,
-            "uri": null,
-            "displayText": "聯絡專人",
-            "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
         }
@@ -169,7 +149,7 @@
           "bounds": {
             "x": 0,
             "y": 843,
-            "width": 1250,
+            "width": 2500,
             "height": 843
           },
           "action": {
@@ -178,26 +158,6 @@
             "uri": "?target=ai_assistant",
             "uri_source": "liff",
             "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "customer_human_contact",
-          "label": "聯絡專人",
-          "text_color": "#FFFFFF",
-          "background_color": "#10B981",
-          "bounds": {
-            "x": 1250,
-            "y": 843,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "postback",
-            "text": null,
-            "uri": null,
-            "displayText": "聯絡專人",
-            "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
         }
@@ -329,33 +289,13 @@
           "bounds": {
             "x": 0,
             "y": 0,
-            "width": 1250,
+            "width": 2500,
             "height": 843
           },
           "action": {
             "type": "uri",
             "text": null,
             "uri": "?target=staff_review",
-            "uri_source": "liff",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "customer_service",
-          "label": "客服中心",
-          "text_color": "#FFFFFF",
-          "background_color": "#059669",
-          "bounds": {
-            "x": 1250,
-            "y": 0,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=customer_service",
             "uri_source": "liff",
             "data": null
           },

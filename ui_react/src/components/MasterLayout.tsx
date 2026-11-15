@@ -91,7 +91,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'reports', icon: FileBarChart, label: '營運報表', section: 'operations' },
 
   // LINE Section
-  { id: 'line-management', icon: ClipboardList, label: '客服與營運', section: 'line' },
+  { id: 'line-management', icon: ClipboardList, label: 'LINE 營運', section: 'line' },
   { id: 'line-notifications', icon: Send, label: '通知與寄送', section: 'line' },
   { id: 'line-interface', icon: PanelTop, label: 'LINE 介面設定', section: 'line' },
   { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },

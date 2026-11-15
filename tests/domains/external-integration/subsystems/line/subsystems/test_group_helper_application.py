@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 from api.dependencies.service_start import get_service_start_application
 from api.routes import staff_leave_intake
-from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.delivery import LineMessageKind
 from domains.line.identities import (
     LineSourceIdentity,
@@ -31,7 +30,7 @@ from domains.scheduling.service_start import ServiceStartConflict, ServiceStartD
 from infrastructure.mysql.customer_service_repository import _REMINDER_SOURCE_CASE
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.group_helper_application import LineGroupHelperApplication
-from subsystems.line.service_start_messages import HELPER_TEXT_DEFAULTS
+from subsystems.line.service_start_messages import GROUP_ASSISTANCE_DIRECTIONS, HELPER_TEXT_DEFAULTS
 
 
 def _make_inbox(
@@ -204,7 +203,7 @@ class _FakeGroupHelperUoW:
             "service_commenced": self.service_commenced,
             "schedule_rows": self.schedule_rows,
             "is_staff": user_id == "U-staff-1",
-            "can_share_satisfaction_survey": self.service_completed and user_id in {"U-staff-1", "U-staff-2"},
+            "can_open_satisfaction_survey": self.service_completed and user_id in {"U-staff-1", "U-staff-2"},
             "is_customer": user_id == "U-customer-1",
             "is_admin": user_id == "U-admin-1",
             "admin_user_id": 5 if user_id == "U-admin-1" else None,
@@ -228,21 +227,52 @@ def _make_app(*, now: datetime | None = None, custom_aliases: dict[str, list[str
     )
 
 
-@pytest.mark.parametrize(("completed", "user_id", "visible"), [
-    (True, "U-staff-1", True),
-    (True, "U-staff-2", True),
-    (True, "U-customer-1", False),
-    (False, "U-staff-1", False),
+@pytest.mark.parametrize(("confirmed_start", "completed", "user_id", "visible"), [
+    (False, False, "U-staff-1", False),
+    (True, False, "U-staff-1", False),
+    (True, False, "U-customer-1", False),
+    (False, True, "U-staff-1", True),
+    (False, True, "U-staff-2", True),
+    (False, True, "U-customer-1", False),
 ])
-def test_satisfaction_survey_only_shows_for_staff_after_completion(completed, user_id, visible) -> None:
-    uow = _FakeGroupHelperUoW(service_completed=completed)
+def test_satisfaction_survey_shows_for_staff_only_after_completion(confirmed_start, completed, user_id, visible) -> None:
+    uow = _FakeGroupHelperUoW(is_started=confirmed_start, service_commenced=False, service_completed=completed)
     assert _make_app().handle_message(_make_inbox(
         "evt-survey-menu", {"message": {"type": "text", "text": "小幫手"}}, user_id=user_id,
     ), uow)
     card = json.loads(uow.delivery_tasks.requests[0].payload_json)
-    actions = [row["action"]["data"] for row in card["contents"]["body"]["contents"]]
+    actions = [row["action"]["data"] for row in card["contents"]["body"]["contents"] if "action" in row]
     assert ("group-helper:satisfaction-survey:C-2026-01" in actions) is visible
+    if confirmed_start and not completed:
+        assert "已約定開工" in json.dumps(card, ensure_ascii=False)
+    if visible:
+        assert "在案件群組回覆滿意度調查訊息" in json.dumps(card, ensure_ascii=False)
     _assert_all_reply_only(uow)
+
+
+@pytest.mark.parametrize(("status", "has_agreed_date", "staff_reference", "visible"), [
+    ("訂單成立", True, "7", False),
+    ("訂單成立", False, "7", False),
+    ("訂單成立", True, "8", False),
+    ("訂單取消", True, "7", False),
+    ("服務中", True, "7", False),
+    ("訂單完成", True, "7", True),
+])
+def test_satisfaction_survey_runtime_context_uses_order_state_and_effective_staff(status, has_agreed_date, staff_reference, visible) -> None:
+    single_rows = iter((
+        {"status": status, "actual_start_date": date(2026, 6, 10) if has_agreed_date else None, "client_id": 88},
+        {"staff_id": 7}, None, {"1": 1} if has_agreed_date else None,
+    ))
+    row_sets = iter((
+        [{"staff_id": 7, "is_work_day": True}],
+        [{"subject_type": "staff", "subject_reference": staff_reference}],
+    ))
+    cursor = SimpleNamespace(execute=lambda *_: None, fetchone=lambda: next(single_rows), fetchall=lambda: next(row_sets))
+    connection = SimpleNamespace(cursor=lambda: nullcontext(cursor))
+
+    ctx = _make_app()._load_mysql_context(connection, object(), "C-2026-01", "U-staff-1")
+
+    assert ctx["can_open_satisfaction_survey"] is visible
 
 
 def test_satisfaction_survey_replies_to_same_group_with_saved_copy() -> None:
@@ -265,15 +295,16 @@ def test_satisfaction_survey_replies_to_same_group_with_saved_copy() -> None:
     _assert_all_reply_only(uow)
 
 
-@pytest.mark.parametrize(("completed", "case_no", "group_id", "user_id"), [
-    (False, "C-2026-01", "G-case-1", "U-staff-1"),
-    (True, "C-2026-01", "G-case-1", "U-customer-1"),
-    (True, "C-2026-01", "G-case-1", "U-unassigned"),
-    (True, "C-2026-02", "G-case-1", "U-staff-1"),
-    (True, "C-2026-01", "G-unbound", "U-staff-1"),
+@pytest.mark.parametrize(("confirmed_start", "completed", "case_no", "group_id", "user_id"), [
+    (False, False, "C-2026-01", "G-case-1", "U-staff-1"),
+    (True, False, "C-2026-01", "G-case-1", "U-staff-1"),
+    (True, True, "C-2026-01", "G-case-1", "U-customer-1"),
+    (True, True, "C-2026-01", "G-case-1", "U-unassigned"),
+    (True, True, "C-2026-02", "G-case-1", "U-staff-1"),
+    (True, True, "C-2026-01", "G-unbound", "U-staff-1"),
 ])
-def test_satisfaction_survey_rejects_unfinished_case_wrong_actor_or_forwarded_click(completed, case_no, group_id, user_id) -> None:
-    uow = _FakeGroupHelperUoW(service_completed=completed)
+def test_satisfaction_survey_rejects_unfinished_case_wrong_actor_or_forwarded_click(confirmed_start, completed, case_no, group_id, user_id) -> None:
+    uow = _FakeGroupHelperUoW(is_started=confirmed_start, service_commenced=False, service_completed=completed)
     assert _make_app().handle_postback(_make_inbox(
         "evt-survey-rejected", {"postback": {"data": f"group-helper:satisfaction-survey:{case_no}"}},
         group_id=group_id, user_id=user_id,
@@ -287,7 +318,7 @@ def test_satisfaction_survey_default_replies_plain_text_without_link() -> None:
         "evt-survey-unconfigured", {"postback": {"data": "group-helper:satisfaction-survey:C-2026-01"}},
     ), uow)
     reply, = uow.delivery_tasks.requests
-    assert json.loads(reply.payload_json) == {"type": "text", "text": "本案服務已完成，感謝您使用工會的服務。"}
+    assert json.loads(reply.payload_json) == {"type": "text", "text": "感謝您使用工會的服務，歡迎提供滿意度回饋。"}
     _assert_all_reply_only(uow)
 
 
@@ -305,14 +336,15 @@ def test_menu_aliases_pre_start_shows_datetimepicker_and_post_start_hides_confir
         assert req.message_kind is LineMessageKind.FLEX
         payload = json.loads(req.payload_json)
         items = payload["contents"]["body"]["contents"]
-        assert len(items) == 5
         assert items[0]["action"]["type"] == "datetimepicker"
         assert items[0]["action"]["mode"] == "date"
         assert items[0]["action"]["data"] == "group-helper:confirm-start-date:C-2026-01"
+        guidance, = (item for item in items if item.get("text") == GROUP_ASSISTANCE_DIRECTIONS)
+        assert "action" not in guidance
         assert payload["contents"]["header"]["contents"][0]["contents"][1]["contents"][0]["text"] == "待確認開工"
         _assert_all_reply_only(uow)
 
-    # Option A: 已確認開工後，自動隱藏【確認開工日】，保留【服務排程】等其餘四項
+    # 正式開工後保留服務排程與留言指引，問卷等到完工才出現。
     started_uow = _FakeGroupHelperUoW(is_started=True)
     handled_started = app.handle_reply(
         _make_inbox("evt-menu-started", {"type": "message", "message": {"type": "text", "text": "小幫手"}}),
@@ -321,10 +353,12 @@ def test_menu_aliases_pre_start_shows_datetimepicker_and_post_start_hides_confir
     assert handled_started is True
     started_payload = json.loads(started_uow.delivery_tasks.requests[0].payload_json)
     started_items = started_payload["contents"]["body"]["contents"]
-    assert len(started_items) == 4
-    action_data = [item["action"].get("data", "") for item in started_items]
+    guidance, = (item for item in started_items if item.get("text") == GROUP_ASSISTANCE_DIRECTIONS)
+    assert "action" not in guidance
+    action_data = [item["action"].get("data", "") for item in started_items if "action" in item]
     assert not any(d.startswith("group-helper:confirm-start-date") for d in action_data)
     assert "group-helper:service-schedule" in action_data
+    assert "group-helper:satisfaction-survey:C-2026-01" not in action_data
     assert started_payload["contents"]["header"]["contents"][0]["contents"][1]["contents"][0]["text"] == "正式服務中"
     _assert_all_reply_only(started_uow)
 
@@ -543,7 +577,7 @@ def test_customer_proposes_start_date_and_caregiver_agrees() -> None:
     _assert_all_reply_only(uow)
 
 
-def test_pre_commenced_confirmed_schedule_keeps_confirm_start_button() -> None:
+def test_pre_commenced_confirmed_schedule_keeps_confirm_start_and_hides_survey() -> None:
     app = _make_app()
     # is_started=True but service_commenced=False: schedule confirmed before actual start date
     uow = _FakeGroupHelperUoW(is_started=True, service_commenced=False)
@@ -555,9 +589,9 @@ def test_pre_commenced_confirmed_schedule_keeps_confirm_start_button() -> None:
     assert handled is True
     payload = json.loads(uow.delivery_tasks.requests[0].payload_json)
     items = payload["contents"]["body"]["contents"]
-    # All 5 items remain visible, allowing re-confirming start date before actual work starts
-    assert len(items) == 5
-    assert items[0]["action"]["data"].startswith("group-helper:confirm-start-date")
+    actions = [item["action"]["data"] for item in items if "action" in item]
+    assert "group-helper:confirm-start-date:C-2026-01" in actions
+    assert "group-helper:satisfaction-survey:C-2026-01" not in actions
     assert payload["contents"]["header"]["contents"][0]["contents"][1]["contents"][0]["text"] == "已約定開工"
     _assert_all_reply_only(uow)
 
@@ -887,17 +921,29 @@ def test_workflow3_service_schedule_multi_caregivers_calendar_card() -> None:
     assert "#10B981" in card_str  # 林月嫂
     assert "#3B82F6" in card_str  # 張月嫂
     assert "#FEF3C7" in card_str  # 休息日
+
+    def _verify_flex_boxes(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "box":
+                assert "contents" in node, f"Box missing contents: {node}"
+                assert node.get("alignItems") != "baseline", f"Invalid alignItems in box: {node}"
+            for v in node.values():
+                _verify_flex_boxes(v)
+        elif isinstance(node, list):
+            for item in node:
+                _verify_flex_boxes(item)
+
+    _verify_flex_boxes(payload)
     _assert_all_reply_only(post_uow)
 
 
-def test_workflow4_staff_assistance_admin_close_and_source_mapping() -> None:
+def test_workflow4_old_staff_assistance_replies_in_group_without_mutating_tickets() -> None:
     assert "group-helper-assistance:" in _REMINDER_SOURCE_CASE
     assert "'service'" in _REMINDER_SOURCE_CASE
 
     app = _make_app(custom_aliases={"staff_assistance_close": ["本案已結案"]})
     uow = _FakeGroupHelperUoW(is_started=True)
 
-    # Caregiver/customer requests staff assistance
     assert (
         app.handle_postback(
             _make_inbox("evt-assist-1", {"type": "postback", "postback": {"data": "group-helper:staff-assistance"}}),
@@ -905,17 +951,10 @@ def test_workflow4_staff_assistance_admin_close_and_source_mapping() -> None:
         )
         is True
     )
-    assert len(uow.customer_service.created) == 1
-    ticket_cmd = uow.customer_service.created[0]
-    assert ticket_cmd.category is CustomerServiceCategory.SERVICE_PROGRESS
-    assert ticket_cmd.event_key == "group-helper-assistance:evt-assist-1"
-    assert ticket_cmd.case_no == "C-2026-01"
-    assert ticket_cmd.client_id == 88
-    assert HELPER_TEXT_DEFAULTS["helper-staff-assistance-ack"].format(case_no="C-2026-01") in json.loads(
-        uow.delivery_tasks.requests[-1].payload_json
-    )["text"]
+    assert uow.customer_service.created == []
+    [reply] = uow.delivery_tasks.requests
+    assert json.loads(reply.payload_json)["text"] == GROUP_ASSISTANCE_DIRECTIONS
 
-    # Admin sends configured close alias -> closes ticket & replies confirmation
     assert (
         app.handle_message(
             _make_inbox(
@@ -925,12 +964,10 @@ def test_workflow4_staff_assistance_admin_close_and_source_mapping() -> None:
             ),
             uow,
         )
-        is True
+        is False
     )
-    assert uow.customer_service.resolved_cases == [("C-2026-01", "line:U-admin-1", "evt-close-1")]
-    assert HELPER_TEXT_DEFAULTS["helper-staff-assistance-closed"].format(case_no="C-2026-01") in json.loads(
-        uow.delivery_tasks.requests[-1].payload_json
-    )["text"]
+    assert uow.customer_service.resolved_cases == []
+    assert uow.delivery_tasks.requests == [reply]
     _assert_all_reply_only(uow)
 
 

@@ -8,7 +8,6 @@ import type { CustomerServiceClient } from '../api/customer_service/customer_ser
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
 import { lineRuntimeTargetClient } from '../api/line_runtime_targets/line_runtime_target_client';
 import { sessionClient } from '../api/auth/session_client';
-import { customerServiceEscalationClient } from '../api/customer_service_escalations/customer_service_escalation_client';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import { lineOrderGroupQueryClient } from '../api/line_order_groups/line_order_group_query_client';
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
@@ -107,37 +106,12 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(document.body.textContent).not.toContain(staffLineUserId);
   });
 
-  it('人工升級預設只顯示業務欄位，技術校驗資料收在進階區', async () => {
+  it('安全工作區不再提供人工升級建單入口', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
-    const escalation = { ...customerServiceEscalationClient, previewCreate: vi.fn(), create: vi.fn() };
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} escalation={escalation} runtimeOnly />);
-
-    const checksumLabel = screen.getByText('來源資料校驗碼');
-    expect(checksumLabel).not.toBeVisible();
-    expect(screen.getByLabelText('來源案件／事件參考')).toBeVisible();
-    expect(document.body).not.toHaveTextContent(/Preview 指紋|SHA-256/);
-
-    fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
-      target: { value: 'ticket-referral-31' },
-    });
-    expect(screen.getByText('請先核對來源並補齊資料。')).toBeVisible();
-    const createButton = screen.getByRole('button', { name: '建立人工客服升級' });
-    expect(createButton).toBeDisabled();
-    fireEvent.click(createButton);
-    expect(escalation.previewCreate).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByText('進階來源資料'));
-    expect(checksumLabel).toBeVisible();
-    expect(screen.getByLabelText('自動化暫停範圍')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('來源資料校驗碼'), { target: { value: 'b'.repeat(64) } });
-    expect(createButton).toBeEnabled();
-    fireEvent.change(screen.getByLabelText('自動化暫停範圍'), { target: { value: '   ' } });
-    expect(createButton).toBeDisabled();
-    expect(screen.getByText('請先核對來源並補齊資料。')).toBeVisible();
-    fireEvent.click(createButton);
-    expect(escalation.previewCreate).not.toHaveBeenCalled();
-    expect(escalation.create).not.toHaveBeenCalled();
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} runtimeOnly />);
+    expect(screen.queryByRole('heading', { name: '人工客服升級' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '建立人工客服升級' })).not.toBeInTheDocument();
   });
 
   it('沒有已連結 LINE 的管理員候選時顯示明確原因，不留下無說明的停用控制', async () => {
@@ -276,64 +250,6 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(runtimeTarget.setEnabled).not.toHaveBeenCalled();
     expect(runtimeTarget.previewResetGroup).not.toHaveBeenCalled();
     expect(runtimeTarget.resetGroup).not.toHaveBeenCalled();
-  });
-
-  it('人工升級 Preview 離頁後的晚到結果不會形成可套用狀態', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
-    const { customer, identity } = clients();
-    let resolvePreview!: (value: {
-      operation: 'create'; escalation_id: null; before_workflow_status: 'absent';
-      resulting_workflow_status: 'open'; before_hold_state: 'absent';
-      resulting_hold_state: 'active'; current_escalation_version: null;
-      current_ticket_version: null; preview_fingerprint: string; apply_ready: true;
-    }) => void;
-    const previewPromise = new Promise<Parameters<typeof resolvePreview>[0]>((resolve) => {
-      resolvePreview = resolve;
-    });
-    const escalation = {
-      ...customerServiceEscalationClient,
-      previewCreate: vi.fn(() => previewPromise),
-      create: vi.fn(),
-    } as typeof customerServiceEscalationClient;
-
-    const { unmount } = render(
-      <LineManagementPage
-        customerService={customer}
-        lineIdentity={identity}
-        escalation={escalation}
-        runtimeOnly
-      />
-    );
-    fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
-      target: { value: 'ticket-referral-31' },
-    });
-    fireEvent.click(screen.getByText('進階來源資料'));
-    fireEvent.change(screen.getByLabelText('來源資料校驗碼'), {
-      target: { value: 'b'.repeat(64) },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '建立人工客服升級' }));
-
-    const requestOptions = vi.mocked(escalation.previewCreate).mock.calls[0][1];
-    expect(requestOptions?.signal?.aborted).toBe(false);
-    unmount();
-    expect(requestOptions?.signal?.aborted).toBe(true);
-
-    resolvePreview({
-      operation: 'create',
-      escalation_id: null,
-      before_workflow_status: 'absent',
-      resulting_workflow_status: 'open',
-      before_hold_state: 'absent',
-      resulting_hold_state: 'active',
-      current_escalation_version: null,
-      current_ticket_version: null,
-      preview_fingerprint: 'c'.repeat(64),
-      apply_ready: true,
-    });
-    await Promise.resolve();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} escalation={escalation} runtimeOnly />);
-    expect(screen.queryByRole('checkbox', { name: /我已確認人工升級影響/ })).not.toBeInTheDocument();
-    expect(escalation.create).not.toHaveBeenCalled();
   });
 
   it('通知頁不再查詢或顯示歡迎詞，舊發送連結不再查詢獨立發送紀錄', async () => {

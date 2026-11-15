@@ -20,6 +20,7 @@ from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
     RETIRED_CONTRACT_DELIVERY_SOURCES,
     RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES,
+    customer_service_delivery_retired,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
@@ -100,6 +101,8 @@ class LineDeliveryTaskAdminApplication:
                 raise LineDeliveryTaskStateConflictError("契約 LINE 投遞已停用，無法發送或重試。")
             if action != "cancel" and current.request.source_aggregate_type in RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES:
                 raise LineDeliveryTaskStateConflictError("入帳確認推播已停用，請改由官方帳號發送。")
+            if action != "cancel" and customer_service_delivery_retired(current.request):
+                raise LineDeliveryTaskStateConflictError("客服工單通知已停用，請於官方帳號處理對話。")
             if existing is not None:
                 return current
             try:

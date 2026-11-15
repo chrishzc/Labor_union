@@ -25,6 +25,7 @@ from domains.line.rich_menu import (
     LineRichMenuPublicationSnapshot,
     LineRichMenuPublicationStatus,
 )
+from domains.line.rich_menu_draft import project_saved_staff_menu, rich_menu_has_retired_support_action
 from infrastructure.mysql.line_repository_support import (
     aware_utc,
     canonical_json_value,
@@ -687,6 +688,16 @@ class MySqlLineRichMenuPublicationRepository:
         if row is None:
             raise LookupError("line_rich_menu_configuration_revision_not_found")
         configuration = json.loads(canonical_json_value(row["definition_snapshot"]))
+        previous_menu = next(
+            (item for item in configuration.get("menus", [])
+             if isinstance(item, dict) and item.get("id") == command.menu_definition_id),
+            None,
+        )
+        if previous_menu and rich_menu_has_retired_support_action(previous_menu):
+            appearance = previous_menu.get("appearance") or {}
+            if appearance.get("image_mode") == "uploaded":
+                raise ValueError("請先更新自訂圖文選單圖片與按鈕，再儲存新版發布。")
+        configuration = project_saved_staff_menu(configuration)
         menu = next(
             (
                 item

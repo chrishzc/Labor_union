@@ -26,9 +26,6 @@ from subsystems.line.matching_coordination_delivery import (
 from subsystems.line.matching_coordination_delivery_worker import (
     MatchingCoordinationDeliveryWorker,
 )
-from subsystems.customer_service.matching_coordination_worker import (
-    MatchingCoordinationCustomerServiceWorker,
-)
 from subsystems.line.notification_failure_current_fact import (
     LineNotificationFailureCurrentFactQuery,
     LineNotificationFailureReason,
@@ -92,30 +89,6 @@ class _MatchingNotifications:
 
     def open_interaction(self, **values):
         self.rows[values["token_hash"]] = values
-
-
-class _CustomerService:
-    def __init__(self):
-        self.commands = []
-
-    def create_or_append(self, command):
-        self.commands.append(command)
-
-
-class _CustomerServiceUow:
-    def __init__(self, source=None, customer_service=None):
-        self.matching_coordination_customer_service = source
-        self.customer_service = customer_service or _CustomerService()
-        self.committed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
-    def commit(self):
-        self.committed = True
 
 
 def _item(**payload_overrides):
@@ -201,41 +174,6 @@ def test_zero_pool_delivery_opens_recipient_bound_interaction_once():
     assert row["action_scope"] == "customer_decision"
     MatchingCoordinationDeliveryApplication(lambda: uow, lambda: NOW).consume(item)
     assert len(interactions.rows) == 1
-
-
-def test_customer_service_owner_worker_consumes_typed_m3_handoff():
-    item = type(
-        "Item",
-        (),
-        {
-            "reference_id": "matching:case-96:customer-service",
-            "case_no": "CASE-96",
-            "line_user_id": "U-client-96",
-            "category": "service_flow",
-            "message": "請客服協助",
-        },
-    )()
-    source = type(
-        "Source",
-        (),
-        {"list_customer_service_intents": lambda self, *, limit: (item,)},
-    )()
-    customer_service = _CustomerService()
-    calls = 0
-
-    def factory():
-        nonlocal calls
-        calls += 1
-        return _CustomerServiceUow(
-            source if calls == 1 else None,
-            customer_service,
-        )
-
-    worker = MatchingCoordinationCustomerServiceWorker(factory, "line-worker-96")
-    assert worker.run_once() == 1
-    assert worker.failures == ()
-    assert customer_service.commands[0].line_user_id == "U-client-96"
-    assert customer_service.commands[0].event_key == item.reference_id
 
 
 @pytest.mark.parametrize(

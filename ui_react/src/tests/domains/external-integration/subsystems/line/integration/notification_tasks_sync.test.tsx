@@ -5,7 +5,7 @@ import {NotificationTasksPage} from '../../../../../../pages/NotificationTasksPr
 import {notificationTasksClient as client, type NotificationItem} from '../../../../../../api/line_notifications/notification_tasks_client';
 import {lineDeliveryQueryClient as delivery} from '../../../../../../api/line_delivery/line_delivery_query_client';
 import type {LineDeliveryItem} from '../../../../../../api/line_delivery/line_delivery_query_schemas';
-const item=(source:NotificationItem['source']):NotificationItem=>({id:'customer_service:7',source,group:'support',title:'同一聯絡需求',case_no:'115000001',
+const item=(source:NotificationItem['source']):NotificationItem=>({id:'recommendation:7:reply_reminder',source,group:'support',title:'推薦確認待跟進',case_no:'115000001',
  reference_id:7,person:'合成人物',summary:'待處理',reason:'原 owner 待辦',time:'',tag:'待處理',recipient:null,message:null,
  unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null});
 const task:LineDeliveryItem={task_id:1,id:1,task_type:'finance',source_type:'finance',status:'failed',updated_at:'2026-10-26T00:00:00Z',
@@ -16,14 +16,14 @@ beforeEach(()=>{
  vi.spyOn(delivery,'list').mockResolvedValue({items:[task],total:1,page:1,page_size:6,total_pages:1});
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
-it('正式頁完成後返回通知，重新查詢共享推薦與客服來源',async()=>{
- vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦',group:'review'},{source:'customer_service',label:'客服',group:'support'}]);
+it('正式頁完成後返回通知，重新查詢推薦來源',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦',group:'review'}]);
  vi.mocked(client.list).mockImplementation(async source=>({items:[item(source)],total:1,next_cursor:null}));
- const view=render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'同一聯絡需求'});view.unmount();
+ const view=render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'推薦確認待跟進'});view.unmount();
  vi.mocked(client.list).mockResolvedValue({items:[],total:0,next_cursor:null});render(<NotificationTasksPage/>);
  await screen.findByRole('heading',{name:'目前沒有待辦事項'});
  expect(vi.mocked(client.list).mock.calls.filter(x=>x[0]==='recommendation')).toHaveLength(2);
- expect(vi.mocked(client.list).mock.calls.filter(x=>x[0]==='customer_service')).toHaveLength(2);
+ expect(client.list).toHaveBeenCalledTimes(2);
 });
 it('款項分類交給原寄送 API 全部資料分頁篩選，不只篩目前六筆',async()=>{
  render(<NotificationTasksPage/>);fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));

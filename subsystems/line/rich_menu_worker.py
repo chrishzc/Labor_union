@@ -22,6 +22,7 @@ from subsystems.line.ports import (
 )
 from subsystems.line.rich_menu_backup import write_rich_menu_id_backup
 from subsystems.line.rich_menu_binding import schedule_published_menu_rebindings
+from domains.line.rich_menu_draft import rich_menu_has_retired_support_action
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
     LineRichMenuProviderOutcome,
@@ -81,6 +82,22 @@ class LineRichMenuWorker:
         receipts = {}
         attempts = {}
         receipts, attempts, previous_provider_menu_id = self._load_state(item)
+        try:
+            definition = json.loads(item.definition_json)
+        except (TypeError, ValueError):
+            definition = None
+        if isinstance(definition, dict) and rich_menu_has_retired_support_action(definition):
+            self._record(
+                item,
+                reference,
+                LineRichMenuProviderOutcome(
+                    LineRichMenuProviderOutcomeType.REJECTED,
+                    error_code="line_rich_menu_customer_service_retired",
+                    error_message="請儲存移除客服按鈕的圖文選單新版後發布。",
+                ),
+                previous_provider_menu_id,
+            )
+            return
         if LineRichMenuPublicationStep.UPLOAD not in receipts:
             try:
                 reference = self._image_materializer(

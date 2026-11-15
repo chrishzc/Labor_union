@@ -46,7 +46,7 @@ def greeting_payload(unit, case_no, amount=0, due_date=None):
 
 
 def greeting_directions(key):
-    return '\n客戶可輸入「已經匯款」或「有疑問需要解決」。' if key == 'payment-first-reminder' else ''
+    return '\n若已匯款，請輸入「已經匯款」。如有繳款疑問，請直接在此案件群組留言。' if key == 'payment-first-reminder' else ''
 
 
 def render_greeting_text(key, text, variables):
@@ -193,6 +193,8 @@ class ServiceStartDayPaymentReply:
         from subsystems.line.payment_reminder_notifications import record_manual_handoff
 
         record_manual_handoff(unit, greeting_task_id)
+        if payment_action == 'assistance':
+            return handle_payment_reminder_postback(f'payment-assistance:first:{context.case_no}', event, unit, reply_only=True)
         return handle_payment_reminder_postback(f'payment-{payment_action}:first:{context.case_no}', event, unit)
 
 def start_day_delivery_is_current(unit, task, now):

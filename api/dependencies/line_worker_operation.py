@@ -38,10 +38,6 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.segmented_availability_repository import (
     MySqlSegmentedAvailabilityFactsRepository,
 )
-from subsystems.customer_service.escalation_application import HumanEscalationApplication
-from subsystems.customer_service.matching_coordination_worker import (
-    MatchingCoordinationCustomerServiceWorker,
-)
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.service_start_day import (
     ServiceStartDayGreetingWorker, ServiceStartDayPaymentReply, is_retired_start_day_postback,
@@ -182,7 +178,6 @@ def _event_handlers(now):
         service_help_application=LineServiceHelpApplication(
             now,
             _identity_flow_url,
-            escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, now),
         ),
         menu_command_application=LineMenuCommandApplication(),
         feedback_application=LineFeedbackApplication(open_line_unit_of_work, now),
@@ -227,7 +222,7 @@ def webhook_reply_dispatcher(now, handoff):
 
     def dispatch(event, unit):
         if handoff(event, unit):
-            return False
+            return True
         if event.event.event_type == "message":
             return start_day_payment.handle_message(event, unit) or handlers.handle_reply_message(event, unit)
         return is_retired_start_day_postback(event) or handlers.handle_reply_postback(event, unit)
@@ -254,10 +249,6 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
             open_line_unit_of_work,
             worker_identity,
             now,
-        ),
-        "matching_coordination_customer_service": MatchingCoordinationCustomerServiceWorker(
-            open_line_unit_of_work,
-            worker_identity,
         ),
         "candidate_contact_coordination": CandidateContactCoordinationWorker(
             get_connection,

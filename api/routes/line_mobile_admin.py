@@ -46,7 +46,7 @@ from api.routes.assignment_plan import (
     _preview_assignment,
     _query_payload,
 )
-from api.routes.customer_service import _call_update_endpoint
+from api.routes.customer_service import _retired_customer_service
 from api.routes import client_profile as client_profile_routes
 from api.routes import staff_leave_management as staff_leave_management_routes
 from api.schemas.assignment_plan import (
@@ -60,13 +60,6 @@ from api.routes import line_payment_overdue_reminders as overdue_reminder_routes
 from api.routes import line_order_groups as order_group_routes
 from api.schemas.line_order_groups import OpeningGreetingSkipPageView, PaidOrderGroupTodoPageView
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
-from api.schemas.customer_service import (
-    CustomerServiceDetailView,
-    CustomerServicePageView,
-    CustomerServiceReplyApplyView,
-    CustomerServiceReplyPreviewView,
-    CustomerServiceSummaryView,
-)
 from api.schemas.client_profile import (
     ClientProfileApprovalApplyRequest,
     ClientProfileApprovalPreviewRequest,
@@ -88,7 +81,6 @@ from api.schemas.staff_leave_management import (
     StaffLeaveReviewReceiptView,
     StaffLeaveStatus,
 )
-from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
 from domains.line.identities import LineReviewRequestId, LineUserId
 from domains.line.review import LineReviewDecision, LineReviewStatus, LineReviewType
 from domains.orders.lifecycle import OrderLifecycleScope
@@ -107,15 +99,6 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.anomalies.current_issue_query import (
     CurrentIssueListRequest,
     CurrentIssueQueryApplication,
-)
-from subsystems.customer_service.application import (
-    CustomerServiceApplication,
-    CustomerServiceTicketNotFoundError,
-)
-from subsystems.customer_service.contracts import (
-    ApplyCustomerServiceTicketReply,
-    CustomerServiceListQuery,
-    PreviewCustomerServiceTicketReply,
 )
 from subsystems.client_profile.application import ClientProfileApplication
 from subsystems.line.capabilities import LineCapability
@@ -215,27 +198,6 @@ class _MobileStaffLeaveReviewRequest(_LiffAuthRequest):
     action: Literal["accept", "reject", "cancel"]
     reason: str = Field(default="", max_length=1000)
     idempotency_key: str = Field(min_length=1, max_length=191)
-
-
-class _CustomerServiceListRequest(_LiffAuthRequest):
-    status: CustomerServiceStatus | None = CustomerServiceStatus.WAITING
-    category: CustomerServiceCategory | None = None
-    search: str | None = Field(default=None, max_length=191)
-    page: int = Field(default=1, ge=1, le=100)
-
-
-class _CustomerServiceReplyPreviewRequest(_LiffAuthRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    reply_text: str = Field(min_length=1, max_length=2000)
-    resolve: bool
-    internal_note: str | None = Field(max_length=4000)
-    expected_version: int = Field(ge=0)
-
-
-class _CustomerServiceReplyApplyRequest(_CustomerServiceReplyPreviewRequest):
-    idempotency_key: str = Field(min_length=1, max_length=191)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class _ReviewListRequest(_LiffAuthRequest):
@@ -1005,142 +967,15 @@ def operations_summary(
     )
 
 
-@router.post("/customer-service/summary", response_model=BaseResponse[CustomerServiceSummaryView])
-def customer_service_summary(
-    payload: _LiffAuthRequest,
-):
-    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
-    return BaseResponse(data=CustomerServiceApplication(open_line_unit_of_work).summary())
-
-
-@router.post("/customer-service/tickets", response_model=BaseResponse[CustomerServicePageView])
-def customer_service_tickets(
-    payload: _CustomerServiceListRequest,
-):
-    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
-    page = CustomerServiceApplication(open_line_unit_of_work).list(
-        CustomerServiceListQuery(
-            status=payload.status,
-            category=payload.category,
-            search=payload.search,
-            page=payload.page,
-            page_size=50,
-        )
-    )
-    return BaseResponse(data=page)
-
-
-@router.post("/customer-service/tickets/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])
-def customer_service_detail(
-    ticket_id: int,
-    payload: _LiffAuthRequest,
-):
-    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
-    try:
-        detail = CustomerServiceApplication(open_line_unit_of_work).detail(ticket_id)
-    except CustomerServiceTicketNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    return BaseResponse(data=detail)
-
-
-@router.post(
-    "/customer-service/tickets/{ticket_id}/reply/preview",
-    response_model=BaseResponse[CustomerServiceReplyPreviewView],
-)
-def customer_service_reply_preview(
-    ticket_id: int,
-    payload: _CustomerServiceReplyPreviewRequest,
-):
-    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
-    identity = CorrelationId(f"mobile-customer-service-reply-preview:{uuid4()}")
-    command = PreviewCustomerServiceTicketReply(
-        ticket_id,
-        payload.reply_text,
-        payload.resolve,
-        payload.internal_note,
-        ExpectedVersion(payload.expected_version),
-        identity,
-    )
-    preview = _call_update_endpoint(
-        CustomerServiceApplication(open_line_unit_of_work).preview_reply,
-        command,
-        correlation_id=identity,
-        error_scope="reply",
-    )
-    return BaseResponse(
-        data=CustomerServiceReplyPreviewView(
-            ticket_id=preview.ticket_id,
-            before_status=preview.before_status,
-            after_status=preview.after_status,
-            current_version=preview.current_version,
-            expected_version=preview.expected_version,
-            reply_character_count=preview.reply_character_count,
-            will_enqueue_delivery=preview.will_enqueue_delivery,
-            preview_fingerprint=preview.preview_fingerprint.value,
-            apply_ready=preview.apply_ready,
-        ),
-        message="客服回覆 Preview 已建立；尚未寫入或排入傳送",
-    )
-
-
-@router.post(
-    "/customer-service/tickets/{ticket_id}/reply/apply",
-    response_model=BaseResponse[CustomerServiceReplyApplyView],
-)
-def customer_service_reply_apply(
-    ticket_id: int,
-    payload: _CustomerServiceReplyApplyRequest,
-):
-    principal, actor = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    )
-    identity = CorrelationId(f"mobile-customer-service-reply-apply:{uuid4()}")
-    command = ApplyCustomerServiceTicketReply(
-        ticket_id,
-        payload.reply_text,
-        payload.resolve,
-        payload.internal_note,
-        ExpectedVersion(payload.expected_version),
-        PreviewFingerprint(payload.preview_fingerprint),
-        actor.actor_id,
-        principal.id,
-        IdempotencyKey(payload.idempotency_key),
-        identity,
-    )
-    result = _call_update_endpoint(
-        CustomerServiceApplication(open_line_unit_of_work).apply_reply,
-        command,
-        correlation_id=identity,
-        error_scope="reply",
-    )
-    publish_line_wakeup_best_effort()
-    return BaseResponse(
-        data=CustomerServiceReplyApplyView(
-            ticket_id=result.ticket_id,
-            resulting_status=result.resulting_status,
-            resulting_version=result.resulting_version,
-            preview_fingerprint=result.preview_fingerprint.value,
-            delivery_enqueued=result.delivery_enqueued,
-            delivery_delivered=result.delivery_delivered,
-            replayed=result.replayed,
-            readback=result.readback,
-        ),
-        message="客服回覆已保存；LINE delivery 已排入佇列，尚未送達",
-    )
-
-
+@router.post("/customer-service/summary", include_in_schema=False)
+@router.post("/customer-service/tickets", include_in_schema=False)
+@router.post("/customer-service/tickets/{ticket_id}", include_in_schema=False)
+@router.post("/customer-service/tickets/{ticket_id}/reply/preview", include_in_schema=False)
+@router.post("/customer-service/tickets/{ticket_id}/reply/apply", include_in_schema=False)
 @router.post("/customer-service/tickets/{ticket_id}/reply", include_in_schema=False)
-def retired_customer_service_reply(ticket_id: int):
-    del ticket_id
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "code": "customer_service_reply_preview_required",
-            "message": "此回覆入口已退役，請先預覽再套用。",
-            "retryable": False,
-        },
-    )
+def retired_mobile_customer_service(payload: _LiffAuthRequest):
+    _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
+    raise _retired_customer_service()
 
 
 @router.post("/identity-reviews", response_model=BaseResponse[CanonicalLineReviewNumberedPageResponse])

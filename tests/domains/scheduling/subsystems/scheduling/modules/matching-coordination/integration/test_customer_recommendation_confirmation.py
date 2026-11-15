@@ -136,25 +136,21 @@ def _postback(decision, event_id="customer-event"):
     ))
 
 
-@pytest.mark.parametrize(("decision", "text"), [
-    ("accepted", "已收到您接受配對的回覆，後續由工會安排簽約。"),
-    ("contact_requested", "已收到您的聯絡需求，請留下您的疑問"),
-])
-def test_customer_receipt_defers_business_and_background_never_adds_reply(decision, text):
+def test_customer_receipt_defers_acceptance_and_background_never_adds_reply():
     uow = _Uow()
     handler = LineMatchingPostbackApplication(_app(uow))
-    event = _postback(decision)
+    event = _postback("accepted")
     assert handler.handle(event, uow, reply_only=True) is False
     assert handler.handle(event, uow, reply_only=True) is False
     assert uow.matching_notifications.events == {}
     assert uow.customer_service.messages == {}
     [reply] = uow.deliveries.values()
     assert reply.source_aggregate_type == "line_webhook_reply"
-    assert json.loads(reply.payload_json)["text"] == text
+    assert json.loads(reply.payload_json)["text"] == "已收到您接受配對的回覆，後續由工會安排簽約。"
     assert handler.handle(event, uow) is True
-    assert uow.matching_notifications.state.customer_decision.value == decision
+    assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.ACCEPTED
     assert len(uow.deliveries) == 1
-    assert len(uow.customer_service.messages) == (1 if decision == "contact_requested" else 0)
+    assert not uow.customer_service.messages
 
 
 @pytest.mark.parametrize("error_type,message", [
@@ -330,15 +326,20 @@ def test_resend_uses_current_snapshot_and_replay_does_not_revoke_again(monkeypat
         app.request_customer_confirmation(command("after-acceptance"))
 
 
-def test_assistance_then_acceptance_after_7_days_keeps_original_card_and_unique_staff_request():
+def test_old_assistance_replies_once_without_writing_and_same_card_can_accept():
     uow = _Uow()
-    _reply(uow, "contact_requested")
-    _reply(uow, "contact_requested")
-    assert len(uow.customer_service.messages) == 1
-    assert len(uow.deliveries) == 1
-    assert uow.matching_notifications.action["interaction_status"] == "active"
-    assert json.loads(next(iter(uow.deliveries.values())).payload_json)["text"] == "已收到您的聯絡需求，請留下您的疑問"
-    _reply(uow, "accepted", "two")
+    handler = LineMatchingPostbackApplication(_app(uow))
+    help_event = _postback("contact_requested")
+    assert handler.handle(help_event, uow, reply_only=True) is True
+    assert handler.handle(help_event, uow, reply_only=True) is True
+    assert handler.handle(help_event, uow) is True
+    [reply] = uow.deliveries.values()
+    assert reply.source_aggregate_type == "line_webhook_reply"
+    assert json.loads(reply.payload_json)["text"] == "如有配對疑問，請直接在此官方帳號聊天室留言。"
+    assert not uow.customer_service.messages and not uow.matching_notifications.events
+    accept_event = _postback("accepted", "same-card-accepted")
+    assert handler.handle(accept_event, uow, reply_only=True) is False
+    assert handler.handle(accept_event, uow) is True
     assert uow.matching_notifications.state.customer_decision is CustomerMatchingDecision.ACCEPTED
     assert uow.matching_notifications.action["interaction_status"] == "consumed"
     assert len(uow.deliveries) == 2
@@ -390,26 +391,13 @@ def test_time_does_not_block_but_current_identity_and_plan_still_do(boundary, er
     assert not uow.matching_notifications.events and not uow.deliveries and uow.commits == 0
 
 
-def test_leaving_question_reuses_customer_service_ticket_without_auto_reply_or_group():
-    uow = _Uow()
-    _reply(uow, "contact_requested")
-    uow.matching_schedule_confirmations = SimpleNamespace(confirm_line_rejection_reason=lambda *_: False)
-    adapter = LineMatchingPostbackApplication(_app(uow))
-    inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value="question-1"), occurred_at=NOW))
-    assert adapter.handle_message(inbox, uow, CUSTOMER, "請問月嫂是否有照顧雙胞胎的經驗？")
-    message = uow.customer_service.messages["matching-assistance-message:question-1"]
-    assert message.message == "請問月嫂是否有照顧雙胞胎的經驗？"
-    assert message.case_no == "CASE-SYNTHETIC"
-    assert len(uow.deliveries) == 1
-
-
-def test_help_ticket_and_response_roll_back_when_acknowledgement_queue_fails(monkeypatch):
+def test_acceptance_response_rolls_back_when_acknowledgement_queue_fails(monkeypatch):
     uow = _Uow()
     def fail(_):
         raise RuntimeError("synthetic queue failure")
     monkeypatch.setattr(uow.delivery_tasks, "enqueue", fail)
     with pytest.raises(RuntimeError):
-        _reply(uow, "contact_requested")
+        _reply(uow, "accepted")
     assert not uow.matching_notifications.events
     assert not uow.customer_service.messages and uow.commits == 0
 
@@ -472,7 +460,7 @@ def followups():
     connection.close()
 
 
-def test_reminder_uses_actual_delivery_and_replaces_help_with_signing_until_both_sides_signed(followups):
+def test_reminder_uses_actual_delivery_and_changes_to_signing_until_both_sides_signed(followups):
     connection, query = followups
     assert query()[0].status == "reply_reminder"
     connection.execute("UPDATE line_delivery_tasks SET sent_at_utc=?", ((NOW - timedelta(days=6)).replace(tzinfo=None).isoformat(" "),))
@@ -480,7 +468,7 @@ def test_reminder_uses_actual_delivery_and_replaces_help_with_signing_until_both
     connection.execute("INSERT INTO matching_response_events VALUES(1,10,'customer_decision','contact_requested',?)", (NOW.replace(tzinfo=None).isoformat(" "),))
     connection.execute("INSERT INTO customer_service_tickets(id) VALUES(55)")
     connection.execute("INSERT INTO customer_service_ticket_events VALUES(55,'matching-assistance:10:1')")
-    assert query()[0].status == "contact_requested" and query()[0].ticket_id == 55
+    assert query() == ()
     connection.execute("INSERT INTO matching_response_events VALUES(2,10,'customer_decision','accepted',?)", (NOW.replace(tzinfo=None).isoformat(" "),))
     assert len(query()) == 1 and query()[0].status == "awaiting_signing"
     connection.executescript("INSERT INTO contract_document_versions VALUES(1,'client_contract'); INSERT INTO contract_signing_events VALUES(1,10,NULL,'signed_received');")
@@ -525,16 +513,17 @@ def test_unsent_cancelled_replaced_or_declined_recommendations_do_not_create_rem
     assert query() == ()
 
 
-def test_resolved_assistance_leaves_contact_todo_and_only_returns_when_reminder_is_due(followups):
+def test_legacy_assistance_uses_delivery_deadline_independent_of_ticket(followups):
     connection, query = followups
     connection.execute("UPDATE line_delivery_tasks SET sent_at_utc=?", ((NOW - timedelta(days=1)).replace(tzinfo=None).isoformat(' '),))
     connection.execute("INSERT INTO matching_response_events VALUES(1,10,'customer_decision','contact_requested',?)", (NOW.replace(tzinfo=None).isoformat(' '),))
     connection.execute("INSERT INTO customer_service_tickets VALUES(55,'waiting')")
     connection.execute("INSERT INTO customer_service_ticket_events VALUES(55,'matching-assistance:10:1')")
-    assert query()[0].status == 'contact_requested'
-    connection.execute("UPDATE customer_service_tickets SET status='resolved'")
     assert query() == ()
     connection.execute("UPDATE line_delivery_tasks SET sent_at_utc=?", ((NOW - timedelta(days=7)).replace(tzinfo=None).isoformat(' '),))
+    assert len(query()) == 1 and query()[0].status == 'reply_reminder'
+    assert query()[0].ticket_id is None
+    connection.execute("UPDATE customer_service_tickets SET status='resolved'")
     assert len(query()) == 1 and query()[0].status == 'reply_reminder'
 
 
@@ -575,16 +564,6 @@ def test_question_routing_only_uses_the_requesters_open_assistance_ticket():
         assert repository.active_matching_assistance(CUSTOMER.value) is None
     finally:
         connection.close()
-
-
-def test_ticket_failure_rolls_back_response_and_queued_acknowledgement(monkeypatch):
-    uow = _Uow()
-    def fail(_):
-        raise RuntimeError("synthetic ticket failure")
-    monkeypatch.setattr(uow.customer_service, "create_or_append", fail)
-    with pytest.raises(RuntimeError):
-        _reply(uow, "contact_requested")
-    assert not uow.matching_notifications.events and not uow.deliveries and uow.commits == 0
 
 
 @pytest.mark.parametrize("scope,status,allowed", [

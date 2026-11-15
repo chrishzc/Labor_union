@@ -131,7 +131,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
           <span><CheckSquare aria-hidden="true" /> 每日時段</span>
         </div>
         <button type="button" className="mock-primary-btn" disabled>預覽修改內容</button>
-        <small>送出後建立客服需求；正式訂單維持不變並等待工會確認。</small>
+        <small>送出後取得訂單異動申請編號，等待工會在訂單管理辦理。</small>
       </div>
     );
   }
@@ -215,17 +215,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <div className="mock-placeholder-box">身分待審 ｜ 案件群組與連續缺漏天數 ｜ 各期逾期款項</div>
         <button type="button" className="mock-primary-btn" disabled>開啟月嫂驗證</button>
         <small>只顯示目前需要人員處理的項目。</small>
-      </div>
-    );
-  }
-
-  if (item.id === 'mobile_admin_customer_service') {
-    return (
-      <div className="mock-admin-view">
-        <div className="mock-step-indicator">客服中心</div>
-        <p>集中查看待處理客服案件與最近訊息。</p>
-        <div className="mock-placeholder-box">等待處理 ｜ 處理中 ｜ 已解決</div>
-        <button type="button" className="mock-primary-btn" disabled>查看客服案件</button>
       </div>
     );
   }

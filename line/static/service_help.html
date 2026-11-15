@@ -864,7 +864,7 @@
     const unresolvedButton = document.createElement('button');
     unresolvedButton.type = 'button';
     unresolvedButton.className = 'feedback-btn';
-    unresolvedButton.textContent = '需要專人協助';
+    unresolvedButton.textContent = '未解決';
 
     resolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'resolved');
     unresolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'unresolved');
@@ -917,10 +917,8 @@
       status.className = 'feedback-status';
       if (outcome === 'resolved') {
         status.textContent = '感謝您的回饋。';
-      } else if (Number.isInteger(result.data.ticket_id) && result.data.ticket_id > 0) {
-        status.textContent = '已記錄未解決，客服需求已建立。';
       } else {
-        status.textContent = '已記錄未解決；客服需求狀態請稍後確認。';
+        status.textContent = '已記錄未解決。如需協助，請回 LINE 官方帳號聊天室留言。';
       }
       actions.replaceWith(status);
     } catch (error) {
@@ -992,7 +990,7 @@
         }
       } else if (result.data.outcome === 'unsupported') {
         aiMsg.innerHTML = `
-          <div class="ai-badge unsupported">💡 轉專人客服引導</div>
+          <div class="ai-badge unsupported">查無適用解答</div>
           <div>${escapeHtml(result.data.suggestion || '抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。')}</div>
           <div style="margin-top: 8px; font-size: 13px; color: var(--primary); font-weight: 600;">
             👉 歡迎直接在目前這個 LINE 官方帳號聊天室中留言，工會真人專員將會親自為您詳細解說！

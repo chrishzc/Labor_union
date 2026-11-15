@@ -1,6 +1,6 @@
 """
 File: test_webhook_immediate_reply.py
-Description: 驗證專員申請僅用即時 Reply、失敗仍保存工單、零受理 Push，以及既有排隊受理工作保留原發送方式。
+Description: 驗證舊專員按鈕只回留言指引，殘留客服受理工作不呼叫 LINE。
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.delivery_contracts import LineProviderOutcome, LineProviderOutcomeType
 from subsystems.line.delivery_worker import LineDeliveryWorker
-from subsystems.line.message_copy import CONTACT_RECEIVED
 from subsystems.line.service_help_application import LineServiceHelpApplication
-from subsystems.line.webhook_immediate_reply import enqueue_handoff_reply
+from subsystems.line.webhook_immediate_reply import enqueue_retired_handoff_reply
 
 
 class _MockDeliveryTasks:
@@ -104,36 +103,33 @@ def _make_inbox(raw_event: dict, event_id: str = "evt-123") -> LineWebhookInboxS
     )
 
 
-@pytest.mark.parametrize("text", [None, "聯絡專人服務", "呼叫專員", "專人客服", "轉接真人客服"])
-def test_handoff_reply_keeps_existing_copy_and_leaves_ticket_for_background(text):
+def test_handoff_postback_only_guides_direct_chat():
     uow = _MockUnitOfWork()
-    raw = ({"type": "message", "message": {"type": "text", "text": text}} if text else
-           {"type": "postback", "postback": {"data": "customer-service:handoff:confirm"}})
-    inbox = _make_inbox(raw)
-    assert enqueue_handoff_reply(inbox, uow)
+    postback = {"type": "postback", "postback": {"data": "customer-service:handoff:confirm"}}
+    inbox = _make_inbox(postback)
+    assert enqueue_retired_handoff_reply(inbox, uow)
     [reply] = uow.delivery_tasks.requests
     assert reply.source_aggregate_type == "line_webhook_reply"
-    assert json.loads(reply.payload_json) == {"type": "text", "text": CONTACT_RECEIVED}
+    assert json.loads(reply.payload_json) == {
+        "type": "text", "text": "如需協助，請直接在此官方帳號聊天室留言。",
+    }
     assert not uow.customer_service.messages
 
     app = LineServiceHelpApplication(lambda: datetime(2026, 10, 29, tzinfo=timezone.utc))
-    if text:
-        assert app.handle(inbox, uow, LineUserId("U123456789"), text)
-    else:
-        assert app.handle_postback(inbox, uow, LineUserId("U123456789"), "customer-service:handoff:confirm")
-    assert len(uow.customer_service.messages) == 1
-    assert len(uow.audit.intents) == 1
+    assert not app.handle_postback(inbox, uow, LineUserId("U123456789"), "customer-service:handoff:confirm")
+    assert not uow.customer_service.messages
+    assert not uow.audit.intents
     assert uow.delivery_tasks.requests == [reply]
 
 
-@pytest.mark.parametrize("text", ["服務說明", "你好", "我要客訴：請聯絡專人"])
+@pytest.mark.parametrize("text", ["服務說明", "你好", "我要客訴：請聯絡專人", "呼叫專員", "專人客服"])
 def test_handoff_reply_does_not_take_general_or_complaint_messages(text):
     uow = _MockUnitOfWork()
-    assert not enqueue_handoff_reply(_make_inbox({"type": "message", "message": {"type": "text", "text": text}}), uow)
+    assert not enqueue_retired_handoff_reply(_make_inbox({"type": "message", "message": {"type": "text", "text": text}}), uow)
     assert not uow.delivery_tasks.requests
 
 
-def test_already_queued_legacy_ack_and_other_webhook_deliveries_keep_push():
+def test_already_queued_handoff_ack_cancels_but_menu_keeps_push():
     now = datetime(2026, 10, 30, tzinfo=timezone.utc)
     def task(index, suffix):
         request = LineDeliveryRequest(
@@ -171,8 +167,8 @@ def test_already_queued_legacy_ack_and_other_webhook_deliveries_keep_push():
     provider.send.return_value = LineProviderOutcome(LineProviderOutcomeType.SUCCESS, provider_message_id=LineProviderMessageId("synthetic-message-id"))
     worker = LineDeliveryWorker(lambda: uow, provider, "worker:reply-only", lambda: now)
     assert worker.run_once() == 2
-    assert deliveries.tasks[1].status is LineDeliveryStatus.SENT
-    assert deliveries.cancelled == [] and uow.committed
+    assert deliveries.tasks[1].status is LineDeliveryStatus.CANCELLED
+    assert len(deliveries.cancelled) == 1 and uow.committed
     assert deliveries.tasks[2].status is LineDeliveryStatus.SENT
-    assert [call.args[0] for call in provider.send.call_args_list] == [deliveries.tasks[1].request, deliveries.tasks[2].request]
+    provider.send.assert_called_once_with(deliveries.tasks[2].request)
     provider.reply.assert_not_called()

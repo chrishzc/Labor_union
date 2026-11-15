@@ -786,7 +786,8 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     fireEvent.click(within(preview).getByRole('button', { name: '每週服務說明' }));
     expect(within(preview).getByRole('table')).toHaveTextContent('40 小時');
     expect(within(preview).getByText('接受此配對')).toBeInTheDocument();
-    expect(within(preview).getByText('專人協助／進一步了解')).toBeInTheDocument();
+    expect(within(preview).getByText('如有配對疑問，請直接在此官方帳號聊天室留言。')).toBeInTheDocument();
+    expect(within(preview).queryByText('專人協助／進一步了解')).not.toBeInTheDocument();
     expect(within(preview).getByRole('button', { name: '下一頁' })).toBeDisabled();
     expect(within(preview).queryByRole('button', { name: '共用回覆卡' })).not.toBeInTheDocument();
     fireEvent.click(within(info).getByRole('button', { name: '收起客戶確認資訊預覽' }));

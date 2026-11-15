@@ -77,3 +77,16 @@ def test_apply_read_uses_client_and_case_scope_with_row_lock():
     assert params == (42, "CASE-2026-018")
     assert result is not None
     assert result.values["service_end_day_offset"] == "0"
+
+
+def test_legacy_order_change_references_match_original_event_case_even_if_ticket_merges_cases():
+    connection = _Connection([])
+    MySqlCustomerOrderChangeRepository(connection).list_legacy_requests(
+        "CASE-001", before_event_id=123, limit=26,
+    )
+    sql, params = connection.cursor_instance.calls[0]
+    assert "customer_service_ticket_events" in sql
+    assert "e.event_key LIKE 'line-order-change:%%'" in sql
+    assert "t.case_no" not in sql
+    assert "AND e.id<%s" in sql
+    assert params == ("[訂單異動申請]\n案件：CASE-001\n項目：",) * 2 + (123, 26)

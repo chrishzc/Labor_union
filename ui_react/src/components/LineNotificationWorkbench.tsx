@@ -45,11 +45,11 @@ const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }
   'helper-postponement-completed': { recipient: '案件服務群組', trigger: '客戶點選同意延期補班後，保持總服務天數與補助時數守恆並以免費 Reply 回覆群組' },
   'helper-staff-assistance-ack': { recipient: '案件服務群組', trigger: '月嫂點選「專員協助」後，同步於手機／Web 建立待辦並以免費 Reply 通知群組' },
   'helper-staff-assistance-closed': { recipient: '案件服務群組', trigger: '專員於後台點選「已處理結案」或輸入結案指令後，回覆群組結案訊息（可調整結案指令）' },
-  'helper-guidelines-card': { recipient: '案件服務群組', trigger: '月嫂點選小幫手選單的「使用說明」時，以免費 Reply 展開規範說明與客戶常見疑問按鈕' },
-  'helper-faq-ingredients': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：食材採買與準備」後以免費 Reply 送出標準回答' },
-  'helper-faq-hours': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：每日服務時數與範圍」後以免費 Reply 送出標準回答' },
-  'helper-faq-subsidy': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：政府補助申請與撥款」後以免費 Reply 送出標準回答' },
-  'helper-satisfaction-survey': { recipient: '案件服務群組', trigger: '案件正式完工後，本案月嫂從群組小幫手點選「滿意度調查問卷」，系統以 Reply 發送此範本文字' },
+  'helper-guidelines-card': { recipient: '案件服務群組', trigger: '月嫂點選小幫手選單的「客戶常見疑問」時，以免費 Reply 展開規範提醒與常見問題選單' },
+  'helper-faq-ingredients': { recipient: '案件服務群組', trigger: '月嫂於客戶常見疑問卡片點選「常見問題：食材採買與準備」後以免費 Reply 送出標準回答' },
+  'helper-faq-hours': { recipient: '案件服務群組', trigger: '月嫂於客戶常見疑問卡片點選「常見問題：每日服務時數與範圍」後以免費 Reply 送出標準回答' },
+  'helper-faq-subsidy': { recipient: '案件服務群組', trigger: '月嫂於客戶常見疑問卡片點選「常見問題：政府補助申請與撥款」後以免費 Reply 送出標準回答' },
+  'helper-satisfaction-survey': { recipient: '案件服務群組', trigger: '正式完工後，本案月嫂從群組小幫手點選「滿意度調查問卷」，系統以 Reply 發送此範本文字' },
 };
 
 interface NotificationContent {
@@ -99,7 +99,7 @@ const CARD_RECIPIENTS: Record<string, string> = {
   'card-candidate-information-3': '候選月嫂私人聊天室', 'card-caregiver-information': '正式媒合月嫂私人聊天室',
   'card-caregiver-information-2': '正式媒合月嫂私人聊天室',
   'group-invitation-customer': '客戶私人聊天室', 'group-invitation-staff': '月嫂私人聊天室',
-  'helper-menu-card': '案件服務群組', 'helper-confirm-start-card': '案件服務群組',
+  'helper-menu-card': '案件服務群組', 'helper-menu-completed': '案件服務群組', 'helper-confirm-start-card': '案件服務群組',
   'helper-postponement-card': '案件服務群組', 'helper-guidelines-card': '案件服務群組',
 };
 
@@ -215,7 +215,9 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setCatalog(null);
     void configuration.getNotificationRules({ signal: controller.signal }).then(async (snapshot) => {
       if (controller.signal.aborted || generation.current !== request) return;
-      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !RETIRED_TEMPLATE_IDS.has(rule.templateId));
+      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule =>
+        rule.eventCode !== 'order.service_completed' && !RETIRED_TEMPLATE_IDS.has(rule.templateId),
+      );
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);
@@ -394,6 +396,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const descriptor = descriptors.find(item => item.id === selected?.id);
   const automaticImage = selected?.id === 'card-candidate-information-3';
   const previewOnly = selected ? FLOW_PREVIEW_ONLY_IDS.has(selected.id) : false;
+  const helperMenuAlternative = selected?.id === 'helper-menu-card' ? allEntries.find(entry => entry.id === 'helper-menu-completed') :
+    selected?.id === 'helper-menu-completed' ? allEntries.find(entry => entry.id === 'helper-menu-card') : undefined;
   const contentLoading = selected?.kind === 'card' && !automaticImage && !previewOnly && !builtinContents[selected.id];
   const confirmationFlows = ['card-customer-confirmation', 'card-candidate-information-package', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected?.id ?? '') ? [
     { id: 'card-customer-confirmation', label: '正式媒合 · 客戶確認' },
@@ -439,6 +443,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
           editor={<>
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
+            {helperMenuAlternative && <button type="button" className="notification-text-button" disabled={updating} onClick={event => open(helperMenuAlternative, event.currentTarget)}>{previewOnly ? '返回小幫手選單文案' : '查看完工後選單公版'}</button>}
             {!previewOnly && !PAYMENT_REMINDER_MESSAGE_IDS.has(selected.id) && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
             {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); onSelectedEntryChange?.(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
               <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>

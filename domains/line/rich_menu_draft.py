@@ -26,7 +26,6 @@ _LIFF_TARGETS = frozenset(
         "?entry=registration",
         "?target=ai_assistant",
         "?target=anomalies_center",
-        "?target=customer_service",
         "?target=dashboard",
         "?target=faq",
         "?target=gateway",
@@ -73,7 +72,6 @@ _LIFF_TARGETS_BY_AUDIENCE = {
     "union_staff": frozenset(
         {
             "?target=anomalies_center",
-            "?target=customer_service",
             "?target=dashboard",
             "?target=order_tracking",
             "?target=staff_review",
@@ -82,7 +80,6 @@ _LIFF_TARGETS_BY_AUDIENCE = {
     "union_staff_page": frozenset(
         {
             "?target=anomalies_center",
-            "?target=customer_service",
             "?target=dashboard",
             "?target=order_tracking",
             "?target=staff_review",
@@ -106,7 +103,7 @@ _STAFF_MENU_LABELS = {
 
 
 def project_saved_staff_menu(definition: dict[str, object]) -> dict[str, object]:
-    """Update the standard entries in saved generated staff menus."""
+    """Project current buttons from saved menu definitions without rewriting them."""
     if not isinstance(definition, dict):
         return definition
     menus = definition.get("menus")
@@ -144,8 +141,57 @@ def project_saved_staff_menu(definition: dict[str, object]) -> dict[str, object]
                         "text_color": "#FFFFFF", "background_color": "#10B981", "border_radius": 54,
                     }))
                 menu = {**menu, "buttons": current_buttons}
-        current_menus.append(menu)
+        current_menus.append(_project_retired_support_buttons(menu))
     return {**definition, "menus": current_menus}
+
+
+def _project_retired_support_buttons(menu: object) -> object:
+    if not isinstance(menu, dict) or not isinstance(menu.get("buttons"), list):
+        return menu
+    buttons = menu["buttons"]
+    current = [
+        button for button in buttons
+        if not (isinstance(button, dict) and _retired_support_action(button.get("action")))
+    ]
+    if len(current) == len(buttons):
+        return menu
+    appearance = menu.get("appearance")
+    if isinstance(appearance, dict) and appearance.get("image_mode") == "generated":
+        standard_slots = {
+            "default_menu": ("ai_assistant", 843),
+            "customer_menu": ("customer_ai_assistant", 843),
+            "union_staff_menu": ("staff_review", 0),
+        }
+        slot = standard_slots.get(menu.get("id"))
+        if slot:
+            button_id, y = slot
+            left = {"x": 0, "y": y, "width": 1250, "height": 843}
+            right = {**left, "x": 1250}
+            if any(isinstance(button, dict) and button.get("bounds") == right and
+                   _retired_support_action(button.get("action")) for button in buttons):
+                current = [
+                    {**button, "bounds": {**left, "width": 2500}}
+                    if isinstance(button, dict) and button.get("id") == button_id
+                    and button.get("bounds") == left else button
+                    for button in current
+                ]
+    return {**menu, "buttons": current}
+
+
+def _retired_support_action(action: object) -> bool:
+    if not isinstance(action, Mapping):
+        return False
+    if action.get("type") == "postback":
+        return str(action.get("data", "")).startswith("customer-service:handoff:")
+    return action.get("type") == "uri" and action.get("uri") == "?target=customer_service"
+
+
+def rich_menu_has_retired_support_action(menu: Mapping[str, object]) -> bool:
+    buttons = menu.get("buttons")
+    return isinstance(buttons, list) and any(
+        isinstance(button, Mapping) and _retired_support_action(button.get("action"))
+        for button in buttons
+    )
 
 
 def _staff_profile_slot() -> dict[str, int]:
@@ -247,6 +293,8 @@ def _validate_menu_switch_audiences(menus: Sequence[Mapping[str, object]]) -> No
 
 def normalize_rich_menu_action(action: Mapping[str, object]) -> dict[str, object]:
     value = _mapping(action, "Rich Menu action")
+    if _retired_support_action(value):
+        raise RichMenuDraftValidationError("Rich Menu customer service action is retired")
     _only_keys(
         value,
         {"type", "text", "displayText", "uri", "uri_source", "data", "rich_menu_alias_id"},

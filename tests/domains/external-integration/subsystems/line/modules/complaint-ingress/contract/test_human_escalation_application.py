@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
-import json
 
 import pytest
 
@@ -275,7 +274,7 @@ def test_complaint_resolve_uses_customer_service_handling_evidence_not_runtime_g
     assert [event.value for _, event, _ in repo.events] == ["created", "claimed", "handling_started", "resolved", "hold_released"]
 
 
-def test_admin_resolve_enqueues_ai_restored_notice_in_the_same_uow():
+def test_admin_resolve_releases_historical_hold_in_the_same_uow_without_notice():
     repo, tickets, source = _EscalationRepo(), _TicketPort(), _Source(True)
     opened_uows = []
 
@@ -305,7 +304,7 @@ def test_admin_resolve_enqueues_ai_restored_notice_in_the_same_uow():
             CorrelationId("corr-handling-admin-notice"),
         )
     )
-    app.resolve(
+    receipt = app.resolve(
         ResolveHumanEscalation(
             created.escalation_id,
             2,
@@ -320,9 +319,10 @@ def test_admin_resolve_enqueues_ai_restored_notice_in_the_same_uow():
 
     resolve_uow = opened_uows[-1]
     assert resolve_uow.committed is True
-    assert len(resolve_uow.delivery_tasks.requests) == 1
-    payload = json.loads(resolve_uow.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "您的客服案件已處理完成。如仍有問題，請再次呼叫專員。"
+    assert receipt.resulting_workflow_status is EscalationWorkflowStatus.RESOLVED
+    assert receipt.resulting_hold_state is AutomationHoldState.RELEASED
+    assert tickets.rows[21]["status"] is CustomerServiceStatus.RESOLVED
+    assert resolve_uow.delivery_tasks.requests == []
 
 
 @pytest.mark.parametrize(

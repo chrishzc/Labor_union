@@ -195,9 +195,11 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert 'id="tabScheduling"' not in source
     assert 'id="tabReview"' not in source
     assert 'order_tracking: document.getElementById("orderTrackingPane")' in source
-    assert 'targetAliases = Object.freeze({anomalies_center: "order_tracking"})' in source
+    assert 'targetAliases = Object.freeze({anomalies_center: "order_tracking", customer_service: "staff_review"})' in source
     assert 'dashboard: document.getElementById("operationsPane")' in source
     assert "/api/v1/line/mobile-admin/current-anomalies" not in source
+    assert "/api/v1/line/mobile-admin/customer-service/" not in source
+    assert 'id="customerPane"' not in source
     assert "/api/v1/line/mobile-admin/order-statuses" in source
     assert "/api/v1/line/mobile-admin/operations-summary" in source
     assert "/api/v1/line/mobile-admin/client-profile/requests" in source
@@ -230,14 +232,32 @@ def test_union_staff_menu_uses_honest_work_surface_labels() -> None:
 
     menu = next(item for item in definition["menus"] if item["id"] == "union_staff_menu")
     assert [button["label"] for button in menu["buttons"]] == [
-        "待辦工作台", "客服中心", "狀態追蹤", "營運摘要",
+        "待辦工作台", "狀態追蹤", "營運摘要",
     ]
+    assert menu["buttons"][0]["bounds"] == {"x": 0, "y": 0, "width": 2500, "height": 843}
     for stale_label in ("待確認審核", "重大異常通報", "異常中心", "即時營運看板"):
         assert stale_label not in source
     assert menu["appearance"]["image_path"] == "line/union_staff_menu_v3.jpg"
     with Image.open(ROOT / menu["appearance"]["image_path"]) as image:
         assert image.format == "JPEG"
         assert image.size == (2500, 1686)
+
+
+def test_mobile_legacy_customer_service_checks_binding_then_returns_gone(monkeypatch):
+    from subsystems.line.capabilities import LineCapability
+
+    calls = []
+    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_context", lambda token, cap: calls.append((token, cap)))
+    monkeypatch.setattr(line_mobile_admin, "open_line_unit_of_work", lambda: pytest.fail("retired API opened a unit of work"))
+
+    with pytest.raises(HTTPException) as caught:
+        line_mobile_admin.retired_mobile_customer_service(
+            line_mobile_admin._LiffAuthRequest(line_id_token="synthetic-token")
+        )
+
+    assert calls == [("synthetic-token", LineCapability.CUSTOMER_SERVICE_READ)]
+    assert caught.value.status_code == 410
+    assert caught.value.detail["code"] == "customer_service_retired"
 
 
 def test_mobile_order_tracking_is_read_only_and_prompts_formal_plan_after_willingness(

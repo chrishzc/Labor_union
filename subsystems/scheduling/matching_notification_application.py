@@ -22,8 +22,6 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineUserId
-from domains.customer_service.ticket import CustomerServiceCategory
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
@@ -47,6 +45,7 @@ from subsystems.line.capabilities import (
 )
 from subsystems.orders.order_information import CandidateInformationSection
 from subsystems.scheduling.matching_line_cards import (
+    MATCHING_ASSISTANCE_DIRECTIONS,
     caregiver_information_card,
     customer_confirmation_card,
     customer_profiles_card,
@@ -362,58 +361,31 @@ class MatchingNotificationApplication:
             unit_of_work.delivery_tasks.enqueue(
                 _response_confirmation(result, line_user_id, correlation_id, occurred_at, unit_of_work)
             )
-        if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
-            unit_of_work.customer_service.create_or_append(
-                CreateCustomerServiceMessage(
-                    line_user_id.value, CustomerServiceCategory.OTHER,
-                    f"客戶希望進一步了解推薦方案；案件 {result.plan.case_no}，請查看後續留言。",
-                    f"matching-assistance:{result.plan.plan_id}:{result.event_id}",
-                    case_no=result.plan.case_no,
-                )
-            )
         return result
 
     def acknowledge_customer_postback(self, unit_of_work, token, decision, line_user_id, event):
-        interaction = unit_of_work.matching_notifications.interaction(_token_hash(token), lock=False)
-        if interaction is None or interaction.get("action_scope") != "customer_decision":
-            raise LookupError("customer matching interaction not found")
-        state = _required_state(unit_of_work, str(interaction["case_no"]), int(interaction["plan_id"]), False)
-        _require_active_interaction(interaction, line_user_id, event.occurred_at, state)
-        _require_customer_response_pending(state)
-        if state.customer_line_user_id != line_user_id:
-            raise MatchingRecipientMismatchError("LINE responder is no longer bound to the case")
+        if decision != "contact_requested":
+            interaction = unit_of_work.matching_notifications.interaction(_token_hash(token), lock=False)
+            if interaction is None or interaction.get("action_scope") != "customer_decision":
+                raise LookupError("customer matching interaction not found")
+            state = _required_state(unit_of_work, str(interaction["case_no"]), int(interaction["plan_id"]), False)
+            _require_active_interaction(interaction, line_user_id, event.occurred_at, state)
+            _require_customer_response_pending(state)
+            if state.customer_line_user_id != line_user_id:
+                raise MatchingRecipientMismatchError("LINE responder is no longer bound to the case")
         event_id = event.event_id.value
         text = matching_response_text(None, CustomerMatchingDecision(decision))
+        reply_key = "matching-assistance-directions" if decision == "contact_requested" else "matching-customer-receipt"
         unit_of_work.delivery_tasks.enqueue(LineDeliveryRequest(
             LineRecipient(LineRecipientType.USER, line_user_id),
             LineMessageKind.TEXT,
             canonical_line_payload_json({"type": "text", "text": text}),
             event.occurred_at,
-            IdempotencyKey(f"matching-customer-receipt:{event_id}"),
+            IdempotencyKey(f"{reply_key}:{event_id}"),
             CorrelationId(f"line-event:{event_id}"),
             REPLY_ONLY_WEBHOOK_SOURCE,
             event_id,
         ))
-
-    def has_active_customer_assistance(self, unit_of_work, line_user_id) -> bool:
-        return unit_of_work.customer_service.active_matching_assistance(line_user_id.value) is not None
-
-    def has_pending_customer_assistance(self, unit_of_work, line_user_id, occurred_at) -> bool:
-        return unit_of_work.matching_notifications.pending_customer_assistance(line_user_id, occurred_at)
-
-    def append_customer_assistance_message_in_unit_of_work(
-        self, unit_of_work, line_user_id, text, event_key,
-    ) -> bool:
-        ticket = unit_of_work.customer_service.active_matching_assistance(line_user_id.value)
-        if ticket is None:
-            return False
-        unit_of_work.customer_service.create_or_append(
-            CreateCustomerServiceMessage(
-                line_user_id.value, ticket.category, text, event_key,
-                case_no=ticket.case_no,
-            )
-        )
-        return True
 
     def record_manual_response(
         self,
@@ -780,7 +752,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
         )
         response_type = scope
     else:
-        if decision not in {"accepted", "declined", "contact_requested"}:
+        if decision not in {"accepted", "declined"}:
             raise MatchingCommunicationConflictError("invalid customer response action")
         value = CustomerMatchingDecision(decision)
         record_customer_decision(
@@ -813,7 +785,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             actor_id=f"line:{line_user_id.value}",
         ),
         occurred_at=occurred_at,
-        token_hash=None if scope == "caregiver_willingness" or decision == "contact_requested" or interaction.get("interaction_status") == "consumed" else token_hash,
+        token_hash=None if scope == "caregiver_willingness" or interaction.get("interaction_status") == "consumed" else token_hash,
     )
 
 
@@ -969,7 +941,7 @@ def _response_confirmation(result, recipient, correlation_id, scheduled_at, unit
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
-        canonical_line_payload_json(configured_payload(unit, "matching-willing-received" if result.caregiver_willingness is not None else "matching-customer-assistance" if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED else "matching-customer-accepted" if result.customer_decision is CustomerMatchingDecision.ACCEPTED else "matching-customer-response", {"type": "text", "text": text})),
+        canonical_line_payload_json(configured_payload(unit, "matching-willing-received" if result.caregiver_willingness is not None else "matching-customer-accepted" if result.customer_decision is CustomerMatchingDecision.ACCEPTED else "matching-customer-response", {"type": "text", "text": text})),
         scheduled_at,
         IdempotencyKey(f"matching-response-confirmation:{result.event_id}"),
         correlation_id,
@@ -1098,7 +1070,7 @@ def matching_response_text(caregiver_willingness, customer_decision):
     if caregiver_willingness is not None:
         text = "已收到您的承接意願，工會人員會依流程與您聯繫。"
     elif customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
-        text = "已收到您的聯絡需求，請留下您的疑問"
+        text = MATCHING_ASSISTANCE_DIRECTIONS
     elif customer_decision is CustomerMatchingDecision.ACCEPTED:
         text = "已收到您接受配對的回覆，後續由工會安排簽約。"
     else:

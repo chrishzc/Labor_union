@@ -14,6 +14,7 @@ from api.dependencies.line_deposit import get_deposit_notifications
 from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
+from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.notification_tasks import NotificationSource as Source, NotificationItem as Item, NotificationPage, NotificationSourceView, MobileNotificationQuery, NotificationCursor
 from subsystems.anomalies.current_issue_query import CurrentIssueCursorCodec, CurrentIssueListRequest
 from subsystems.line.notification_failure_current_fact import LineNotificationFailureCurrentFactQuery, LineNotificationFailureReason
@@ -33,10 +34,11 @@ from subsystems.line.payment_overdue_reminders import reminder_text as payment_t
 from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER
 from api.routes.line_deposit_payment import deposit_reminder_blocker
 from api.routes.line_payment_receipt_notifications import application as get_payment_receipt_notifications
-from subsystems.customer_service.application import CustomerServiceApplication
-from subsystems.customer_service.contracts import CustomerServiceReminderQuery
 
 router = APIRouter(tags=['Notification Workbench'])
+_ADMIN_QUERY_ERRORS = {
+    401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證。"},
+}
 SIZE = 25
 # Capabilities match the original owner entry points, including mobile auth.
 SOURCES = {
@@ -53,7 +55,6 @@ SOURCES = {
     Source.RECEIPT: ('帳款已入帳，待人員確認通知', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
     Source.GROUP: ('訂金已付尚未建群', 'reminder', Cap.ORDER_GROUP_READ),
     Source.OVERDUE: ('各期款項逾期', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
-    Source.CUSTOMER_SERVICE: ('客服與服務協助', 'support', Cap.CUSTOMER_SERVICE_READ),
     Source.DELIVERY: ('LINE 寄送異常', 'support', Cap.TASK_READ),
     Source.NOTIFICATION_FAILURE: ('LINE 通知建立異常', 'support', Cap.MONITOR_READ),
     Source.RUNTIME: ('系統狀態', 'support', Cap.MONITOR_READ),
@@ -77,6 +78,9 @@ def _item(source, identity, title, summary, reason, **kwargs):
 
 
 def query_source(source, cursor, principal):
+    if source == Source.CUSTOMER_SERVICE:
+        raise typed_http_error(410, 'conflict', 'customer_service_retired',
+                               '客服工單提醒已停用。請於 LINE 官方帳號處理留言。', 'notification-workbench')
     if source == Source.LEAVE:
         raise typed_http_error(410, 'conflict', 'legacy_leave_todo_retired',
                                '舊請假申請僅供歷史查閱；現行例外請使用開工、順延與代班待辦。', 'notification-workbench')
@@ -158,13 +162,11 @@ def _read_source(source, cursor, principal):
         with open_line_unit_of_work() as unit:
             total = unit.matching_notifications.customer_recommendation_followup_count(now)
             rows = unit.matching_notifications.customer_recommendation_followups(now, limit=SIZE, offset=cursor*SIZE)
-        titles = {'contact_requested':'客戶要求專人協助', 'awaiting_signing':'客戶已接受配對，待辦簽約', 'reply_reminder':'推薦確認待跟進', 'response_failed':'客戶回覆待工會處理'}
+        titles = {'awaiting_signing':'客戶已接受配對，待辦簽約', 'reply_reminder':'推薦確認待跟進', 'response_failed':'客戶回覆待工會處理'}
         items = [_item(source, f'{r.plan_id}:{r.status}', titles[r.status], r.failure_reason or '請接續本案原有工作流程。',
                        '7 天只作內部提醒，仍可接受配對；簽約與訂金付款可先後發生。', case_no=r.case_no,
-                       reference_id=r.ticket_id if r.status=='contact_requested' else None, tag='待簽約' if r.status=='awaiting_signing' else '待跟進',
+                       tag='待簽約' if r.status=='awaiting_signing' else '待跟進',
                        time=str(r.reminder_due_at or '')) for r in rows]
-        # One contact request is one ticket, also surfaced by the service owner.
-        items = [item.model_copy(update={'id':f'customer_service:{item.reference_id}'}) if item.reference_id else item for item in items]
     elif source == Source.SERVICE_START:
         dependency = get_service_start_application()
         application = next(dependency)
@@ -222,11 +224,6 @@ def _read_source(source, cursor, principal):
                        recipient=r.recipient_label, message=payment_text(r.payment), payment=asdict(r.payment),
                        unavailable_reason=r.unavailable_reason, delivery_status=r.last_reminder.status if r.last_reminder else None,
                        time=str(r.payment.due_date)) for r in rows]
-    elif source == Source.CUSTOMER_SERVICE:
-        result = CustomerServiceApplication(open_line_unit_of_work).reminders(CustomerServiceReminderQuery(page=page, page_size=SIZE))
-        total = result.total
-        items = [_item(source, r.ticket_id, '客服／服務協助待處理', r.reason, '前往客服案件頁查看留言，處理後標記完成。',
-                       reference_id=r.ticket_id, case_no=r.case_no, person=r.client_name or '未具名使用者', time=str(r.updated_at or '')) for r in result.items]
     elif source == Source.DELIVERY:
         result = get_line_delivery_task_admin_application().list(LineDeliveryAdminQuery(
             statuses=(LineDeliveryStatus.FAILED, LineDeliveryStatus.RETRYABLE_FAILED), page=page, page_size=SIZE), actor)
@@ -255,12 +252,20 @@ def _read_source(source, cursor, principal):
     return NotificationPage(items=items, total=total, next_cursor=page if total is not None and page*SIZE < total else None)
 
 
-@router.get('/api/v1/line/notification-tasks', response_model=BaseResponse[list[NotificationSourceView]])
+@router.get(
+    '/api/v1/line/notification-tasks',
+    response_model=BaseResponse[list[NotificationSourceView]],
+    responses=_ADMIN_QUERY_ERRORS,
+)
 def source_catalog(principal=Depends(require_admin)):
     return BaseResponse(data=_catalog(principal))
 
 
-@router.get('/api/v1/line/notification-tasks/{source}', response_model=BaseResponse[NotificationPage])
+@router.get(
+    '/api/v1/line/notification-tasks/{source}',
+    response_model=BaseResponse[NotificationPage],
+    responses=_ADMIN_QUERY_ERRORS,
+)
 def source_page(source: Source, cursor: NotificationCursor=0, principal=Depends(require_admin)):
     return BaseResponse(data=query_source(source, cursor, principal))
 
@@ -271,7 +276,12 @@ def mobile_source_page(source: Source, body: MobileNotificationQuery):
     if source == Source.STAFF_PROFILE:
         raise typed_http_error(404, 'not_found', 'notification_source_not_found',
                                '請由後台通知事項處理。', 'notification-workbench')
-    cap = Cap.REVIEW_READ if source == Source.LEAVE else (Cap.ORDER_GROUP_READ if source == Source.LOG else SOURCES[source][2])
+    retired_capabilities = {
+        Source.LEAVE: Cap.REVIEW_READ,
+        Source.LOG: Cap.ORDER_GROUP_READ,
+        Source.CUSTOMER_SERVICE: Cap.CUSTOMER_SERVICE_READ,
+    }
+    cap = retired_capabilities[source] if source in retired_capabilities else SOURCES[source][2]
     principal, _ = _mobile_admin_context(body.line_id_token, cap)
     return BaseResponse(data=query_source(source, body.cursor, principal))
 

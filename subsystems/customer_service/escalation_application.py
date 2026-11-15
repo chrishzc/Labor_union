@@ -4,7 +4,6 @@ Description: M4 escalation create、claim、handling、resolve、hold 與 caller
 
 from __future__ import annotations
 
-from subsystems.line.message_copy import CONTACT_RESOLVED
 
 from datetime import datetime, timezone
 from dataclasses import fields, replace
@@ -28,14 +27,6 @@ from domains.customer_service.ticket import (
     CustomerServiceTransitionError,
     transition_ticket,
 )
-from domains.line.canonical_payload import canonical_line_payload_json
-from domains.line.delivery import (
-    LineDeliveryRequest,
-    LineMessageKind,
-    LineRecipient,
-    LineRecipientType,
-)
-from domains.line.identities import LineUserId
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from subsystems.customer_service.escalation_contracts import (
@@ -211,23 +202,6 @@ class HumanEscalationApplication:
                 receipt = self._receipt(updated, "resolve", command.correlation_id.value, replayed=False)
                 for event_type in (EscalationEventType.RESOLVED, EscalationEventType.HOLD_RELEASED):
                     repo.append_event(int(_field(escalation, "id")), event_type, expected_escalation_version=command.expected_escalation_version, resulting_escalation_version=command.expected_escalation_version + 1, expected_ticket_version=command.expected_ticket_version, resulting_ticket_version=int(_field(resolved_ticket, "version")), expected_hold_version=int(_field(escalation, "hold_version", 0)), resulting_hold_version=int(_field(escalation, "hold_version", 0)) + 1, actor_ref=command.actor.actor_id, reason_code=command.resolution_code, reason_evidence_digest=command.resolution_evidence_digest, receipt_id=_receipt_id(event_type.value, command.idempotency_key.value), idempotency_key=f"{command.idempotency_key.value}:{event_type.value}", correlation_id=command.correlation_id.value)
-                delivery_tasks = getattr(uow, "delivery_tasks", None)
-                enqueue = getattr(delivery_tasks, "enqueue", None)
-                if not callable(enqueue):
-                    raise _error(
-                        "unavailable",
-                        "human_escalation_resolution_delivery_unavailable",
-                        retryable=True,
-                    )
-                enqueue(
-                    _admin_resolution_delivery(
-                        resolved_ticket,
-                        command,
-                        int(_field(escalation, "id")),
-                        self._now(),
-                        uow,
-                    )
-                )
                 repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
                 uow.commit()
                 return receipt
@@ -537,30 +511,6 @@ def _verify_preview(uow, command) -> None:
 
 def _optional_int(value) -> int | None:
     return None if value is None else int(value)
-
-
-def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime, unit=None):
-    from subsystems.line.message_copy_catalog import configured_payload
-    line_user_id = LineUserId(str(_field(ticket, "line_user_id")))
-    return LineDeliveryRequest(
-        LineRecipient(LineRecipientType.USER, line_user_id),
-        LineMessageKind.TEXT,
-        canonical_line_payload_json(
-            configured_payload(unit, "service-resolved", {
-                "type": "text",
-                "text": CONTACT_RESOLVED,
-            })
-        ),
-        now,
-        IdempotencyKey(
-            f"human-escalation-resolution:{escalation_id}:"
-            f"{command.expected_escalation_version + 1}"
-        ),
-        command.correlation_id,
-        # This is a customer-facing ticket notice, not the group's alert task.
-        "customer_service_ticket",
-        str(_field(ticket, "ticket_id")),
-    )
 
 
 def complete_ticket_holds(uow, escalations, command, resulting_ticket_version: int) -> None:

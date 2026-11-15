@@ -796,7 +796,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                       </table>
                       <p>{resumeNote}</p>
                       <span className="candidate-package-reply">接受此配對</span>
-                      <span className="candidate-package-reply">專人協助／進一步了解</span>
+                      <span>如有配對疑問，請直接在此官方帳號聊天室留言。</span>
                     </div> : (informationSection === 0 ? confirmationPreview.data.order_information_1 : confirmationPreview.data.order_information_2).map(item => <article key={item.segment_id} className="formal-confirmation-preview-segment">
                       <h4>{staffIdentity.label(item.staff_id, item.staff_name)}</h4>
                       <OrderPreviewSections sections={item.line_sections} />

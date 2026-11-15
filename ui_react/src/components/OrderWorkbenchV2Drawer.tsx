@@ -26,6 +26,7 @@ import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_pro
 import type { OrderSummaryCardViewModel } from '../adapters/orders/order_summary_adapter';
 import { ContractExternalSigningActions } from './ContractExternalSigningActions';
 import { OrderAssignmentPlanPanel } from './OrderAssignmentPlanPanel';
+import { OrderChangeRequestsPanel } from './OrderChangeRequestsPanel';
 import { OrderServiceAttributionPanel } from './OrderServiceAttributionPanel';
 import { OrderAttributionFundingReview } from './OrderAttributionFundingReview';
 import { HistoricalServiceAttributionPanel } from './HistoricalServiceAttributionPanel';
@@ -516,6 +517,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       />
       {factsRefreshing && <p role="status" className="order-case-read-status">正在更新案件資料…</p>}
       {timeline.status === 'error' && <div role="alert" className="order-v2-drawer-error">案件進度暫時無法取得，請稍後重新整理。</div>}
+      <OrderChangeRequestsPanel key={caseNo} caseNo={caseNo} />
       <div className="order-case-workspace">
         <aside className="order-case-stepper" aria-label="案件辦理事項">
           <h2>辦理事項</h2><p>依目前進度開啟工作，也可切換其他事項。</p>

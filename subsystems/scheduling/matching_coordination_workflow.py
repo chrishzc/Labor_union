@@ -739,12 +739,7 @@ class MatchingCoordinationWorkflow:
                 f"{zero_candidate_decision.event_id}:orders",
             )
         elif zero_candidate_decision is not None and zero_candidate_decision.decision is ZeroCandidateDecision.DISAGREE:
-            # Rejection is a typed Customer Service handoff; LINE never edits
-            # an Orders or Assignment root directly.
-            outbox = (
-                f"{zero_candidate_decision.event_id}:client-decision",
-                f"{zero_candidate_decision.event_id}:customer-service",
-            )
+            outbox = (f"{zero_candidate_decision.event_id}:client-decision",)
         notifications: tuple[MatchingNotificationIntentProjection, ...] = ()
         if (
             isinstance(request, ApplyCustomerMatchingDecision)

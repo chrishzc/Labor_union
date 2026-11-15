@@ -14,8 +14,7 @@ Success bilateral envelopes are informational-only; a bounded worker records typ
 - projection adapter: `infrastructure/mysql/line_matching_coordination_delivery_projection.py`
 - 2026-10-22 現行人工協調取代零候選固定通知；projection 與 consumer 對 matching.request.participants 回 typed retired error，零 token／task／commit，歷史 envelope 不改寫。delivery worker 在 provider 前拒絕既存零候選工作。
 - worker: `subsystems/line/matching_coordination_delivery_worker.py`
-- customer-service handoff source: `infrastructure/mysql/matching_coordination_customer_service_source.py`
-- customer-service handoff worker: `subsystems/customer_service/matching_coordination_worker.py`
+- 既有客服轉介意圖保留供人工移交，唯讀來源為 `infrastructure/mysql/matching_coordination_customer_service_source.py`。生產者與建單 worker 退役。
 
 ## Contracts
 - `document/架構重整/02_決策與退役執行記錄/PROV-20260828-line-modules-1-4-closure-spec-gap.md` §5 P5 (`R5-DELIVERY`, `R5-LINE006`)

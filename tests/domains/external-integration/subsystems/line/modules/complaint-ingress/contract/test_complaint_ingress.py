@@ -10,7 +10,6 @@ from domains.customer_service.escalation import EscalationEventType, TriggerCode
 from infrastructure.mysql.customer_service_escalation_repository import (
     MySqlCustomerServiceEscalationRepository,
 )
-from subsystems.customer_service.escalation_contracts import CreateHumanEscalation
 from subsystems.line.service_help_application import LineServiceHelpApplication
 
 
@@ -37,18 +36,6 @@ class _Audit:
 
     def append(self, intent):
         self.intents.append(intent)
-
-
-class _EscalationGateway:
-    def __init__(self):
-        self.create_calls = []
-
-    def hold_guard(self, hold_scope, unit_of_work):
-        del hold_scope, unit_of_work
-
-    def create_for_ticket(self, command, ticket, unit_of_work):
-        self.create_calls.append((command, ticket, unit_of_work))
-        return SimpleNamespace(escalation_id=41)
 
 
 class _Cursor:
@@ -82,48 +69,26 @@ def _inbox(event_id="event-complaint"):
     )
 
 
-def test_complaint_ingress_creates_masked_high_escalation_and_empathy_reply() -> None:
+def test_complaint_ingress_leaves_only_the_original_chat_message() -> None:
     unit_of_work = SimpleNamespace(
         delivery_tasks=_DeliveryTasks(),
         customer_service=_CustomerService(),
         audit=_Audit(),
     )
-    gateway = _EscalationGateway()
     application = LineServiceHelpApplication(
         lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
-    )
+        )
 
     assert application.handle(
         _inbox(),
         unit_of_work,
         LineUserId("U123456789"),
         "我要客訴：姓名 王小美，電話 0912345678",
-    ) is True
+    ) is False
 
-    command, ticket, gateway_uow = gateway.create_calls[0]
-    assert isinstance(command, CreateHumanEscalation)
-    assert command.trigger_code is TriggerCode.COMPLAINT
-    assert command.source_kind == "line_inbox"
-    assert command.trigger_policy_version == "complaint.v1"
-    assert command.context.as_dict() == {
-        "summary_code": "complaint_explicit",
-        "policy_version": "complaint.v1",
-        "category": "other",
-        "redaction_version": "m4-mask.v1",
-    }
-    assert command.ticket_category is CustomerServiceCategory.OTHER
-    assert gateway_uow is unit_of_work
-    assert ticket.ticket_id == 31
-    assert unit_of_work.customer_service.messages[0].message == (
-        "客訴訊息已遮罩；請查看客服 escalation 的去敏摘要。"
-    )
-    assert "王小美" not in repr(command)
-    assert "0912345678" not in repr(command)
-    assert len(unit_of_work.delivery_tasks.requests) == 1
-    assert "很抱歉讓您有不好的感受" in json.loads(
-        unit_of_work.delivery_tasks.requests[0].payload_json
-    )["text"]
+    assert unit_of_work.customer_service.messages == []
+    assert unit_of_work.delivery_tasks.requests == []
+    assert unit_of_work.audit.intents == []
 
 
 def test_complaint_event_persists_hold_versions_with_nullable_ticket_versions() -> None:

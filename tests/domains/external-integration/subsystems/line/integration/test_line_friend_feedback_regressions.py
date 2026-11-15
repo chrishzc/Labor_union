@@ -1,6 +1,6 @@
 """
 File: test_line_friend_feedback_regressions.py
-Description: 驗證 LINE 好友狀態事件保序、follow 零歡迎發送與客服回饋交易回滾重試。
+Description: 驗證 LINE 好友狀態事件保序、follow 零歡迎發送與舊未解決文字的留言指引。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from domains.line.identities import LineIdentityFlowId, LineUserId, LineWebhookEventId
+from domains.line.identities import LineIdentityFlowId, LineSourceType, LineUserId, LineWebhookEventId
 from domains.line.platform_user import LineFriendStatus, LinePlatformUserSnapshot
 from domains.line.webhook import LineWebhookProcessingStatus
 from infrastructure.mysql.line_platform_identity_repository import _friend_event_result
@@ -32,7 +32,7 @@ def _inbox(kind="message", *, occurred_at=NOW, text="未解決"):
             event_type=kind,
             event_id=event_id,
             occurred_at=occurred_at,
-            source=SimpleNamespace(user_id=USER),
+            source=SimpleNamespace(user_id=USER, source_type=LineSourceType.USER),
             payload_json=json.dumps({"message": {"type": "text", "text": text}}),
         ),
         lease=SimpleNamespace(event_id=event_id),
@@ -127,38 +127,21 @@ class FriendHandlerRegressionTests(unittest.TestCase):
         unit.customer_service = SimpleNamespace(create_or_append=Mock(return_value=SimpleNamespace(ticket_id=42)))
         _handler().handle_message(_inbox(occurred_at=NOW - timedelta(seconds=5)), unit)
         self.assertIs(state[0].friend_status, LineFriendStatus.BLOCKED)
-        unit.customer_service.create_or_append.assert_called_once()
+        unit.customer_service.create_or_append.assert_not_called()
         unit.delivery_tasks.enqueue.assert_called_once()
 
 
 class FeedbackHandlerRegressionTests(unittest.TestCase):
-    def test_ticket_failure_propagates_without_success_acknowledgement(self):
-        unit = _feedback_unit(SimpleNamespace(create_or_append=Mock(side_effect=RuntimeError("ticket unavailable"))))
-        with self.assertRaisesRegex(RuntimeError, "ticket unavailable"):
-            _handler().handle_message(_inbox(), unit)
-        unit.delivery_tasks.enqueue.assert_not_called()
-
-    def test_missing_repository_cannot_claim_success(self):
-        for missing in (True, False):
-            with self.subTest(missing=missing):
-                unit = _feedback_unit(None)
-                if missing:
-                    del unit.customer_service
-                with self.assertRaises(AttributeError):
-                    _handler().handle_message(_inbox(), unit)
-                unit.delivery_tasks.enqueue.assert_not_called()
-
-    def test_success_acknowledgement_contains_created_ticket(self):
-        service = SimpleNamespace(create_or_append=Mock(return_value=SimpleNamespace(ticket_id=42)))
+    def test_old_unresolved_command_replies_with_guidance_without_ticket(self):
+        service = SimpleNamespace(create_or_append=Mock(side_effect=RuntimeError("unexpected ticket write")))
         unit = _feedback_unit(service)
         _handler().handle_message(_inbox(), unit)
-        command = service.create_or_append.call_args.args[0]
-        self.assertEqual(command.event_key, "line-feedback-ticket:friend-feedback-event")
-        self.assertEqual(command.line_user_id, USER.value)
+        service.create_or_append.assert_not_called()
         unit.delivery_tasks.enqueue.assert_called_once()
         delivery = unit.delivery_tasks.enqueue.call_args.args[0]
-        self.assertIn("#42", delivery.payload_json)
-        self.assertEqual(delivery.idempotency_key.value, "feedback-unresolved:friend-feedback-event")
+        self.assertIn("直接在此聊天室留言", json.loads(delivery.payload_json)["text"])
+        self.assertEqual(delivery.source_aggregate_type, "line_webhook_reply")
+        self.assertEqual(delivery.idempotency_key.value, "feedback-unresolved-guidance:friend-feedback-event")
 
     def test_resolved_feedback_does_not_require_a_ticket(self):
         unit = _feedback_unit(None)
@@ -166,35 +149,14 @@ class FeedbackHandlerRegressionTests(unittest.TestCase):
         unit.delivery_tasks.enqueue.assert_called_once()
         self.assertNotIn("已為您通報", unit.delivery_tasks.enqueue.call_args.args[0].payload_json)
 
-    def test_ticket_failure_rolls_back_then_retries_without_false_acknowledgement(self):
+    def test_replaying_old_unresolved_event_never_writes_ticket(self):
         inbox = _inbox()
-        state = {"fail_ticket": True, "persisted": [], "transactions": []}
-        consumer = _consumer(inbox, state)
-        self.assertEqual(consumer.run_once(), 1)
-        self.assertEqual(state["transactions"], ["commit", "rollback", "commit"])
-        self.assertEqual([kind for kind, _ in state["persisted"]], ["completion"])
-        failure = state["persisted"][0][1]
-        self.assertIs(failure.target_status, LineWebhookProcessingStatus.RETRYABLE_FAILED)
-        self.assertEqual(failure.error_code, "RuntimeError")
-        self.assertEqual(failure.retry_after_seconds, 15)
-
-        state["fail_ticket"] = False
-        inbox.attempt_count = 2
-        self.assertEqual(consumer.run_once(), 1)
-        self.assertEqual([kind for kind, _ in state["persisted"]], ["completion", "ticket", "delivery", "completion"])
-        self.assertEqual(state["persisted"][1][1], "line-feedback-ticket:friend-feedback-event")
-        self.assertIn("#42", state["persisted"][2][1].payload_json)
-        self.assertIs(state["persisted"][3][1].target_status, LineWebhookProcessingStatus.PROCESSED)
-
-    def test_exhausted_ticket_failure_is_terminal_without_success_acknowledgement(self):
-        inbox = _inbox()
-        inbox.attempt_count = inbox.max_attempts
         state = {"fail_ticket": True, "persisted": [], "transactions": []}
         self.assertEqual(_consumer(inbox, state).run_once(), 1)
-        self.assertEqual([kind for kind, _ in state["persisted"]], ["completion"])
-        completion = state["persisted"][0][1]
-        self.assertIs(completion.target_status, LineWebhookProcessingStatus.TERMINAL_FAILED)
-        self.assertIsNone(completion.retry_after_seconds)
+        self.assertEqual(state["transactions"], ["commit", "commit"])
+        self.assertEqual([kind for kind, _ in state["persisted"]], ["delivery", "completion"])
+        self.assertEqual(state["persisted"][0][1].source_aggregate_type, "line_webhook_reply")
+        self.assertIs(state["persisted"][1][1].target_status, LineWebhookProcessingStatus.PROCESSED)
 
 
 def _consumer(inbox, state):
@@ -252,7 +214,7 @@ def _canonical_follow_handler(now=NOW):
     def capture_handler(*args, **kwargs):
         captured.append(LineWebhookIdentityHandlers(*args, **kwargs))
         # Follow handling is exercised below, not the unrelated dispatch registry.
-        return SimpleNamespace(registry=lambda: {"postback": Mock()})
+        return SimpleNamespace(registry=lambda: {"postback": Mock(), "message": Mock()})
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(runtime, "LineWebhookIdentityHandlers", side_effect=capture_handler))
@@ -261,7 +223,7 @@ def _canonical_follow_handler(now=NOW):
             "LineOrderGroupApplication", "LineCandidateContactPostbackApplication",
             "LineMatchingPostbackApplication", "MatchingNotificationApplication",
             "MySqlSegmentedAvailabilityFactsRepository", "LineServiceHelpApplication",
-            "HumanEscalationApplication", "LineMenuCommandApplication",
+            "LineMenuCommandApplication",
             "LineFeedbackApplication", "LineWebhookEventConsumer", "LineEventDispatcher",
         ):
             stack.enter_context(patch.object(runtime, name))

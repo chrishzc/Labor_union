@@ -82,21 +82,6 @@ import type {
   LineRuntimeTargetEnabledRequest,
   LineRuntimeTargetPreview,
 } from '../api/line_runtime_targets/line_runtime_target_schemas';
-import {
-  adaptCustomerServiceEscalation,
-  adaptCustomerServiceEscalationReceipt,
-  type CustomerServiceEscalationModel,
-  type CustomerServiceEscalationReceiptModel,
-} from '../adapters/customer_service_escalations/customer_service_escalation_adapter';
-import { customerServiceEscalationClient } from '../api/customer_service_escalations/customer_service_escalation_client';
-import { CustomerServiceEscalationError } from '../api/customer_service_escalations/customer_service_escalation_errors';
-import type {
-  CustomerServiceEscalationClaimRequest,
-  CustomerServiceEscalationCreateRequest,
-  CustomerServiceEscalationHandlingRequest,
-  CustomerServiceEscalationPreview,
-  CustomerServiceEscalationResolveRequest,
-} from '../api/customer_service_escalations/customer_service_escalation_schemas';
 import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
@@ -152,11 +137,10 @@ interface LineManagementPageProps {
   richMenuPublication?: LineRichMenuPublicationClient;
   richMenuPublicationPollIntervalMs?: number;
   runtimeTarget?: typeof lineRuntimeTargetClient;
-  escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
   safeReviewLink?: SafeReviewLinkClient;
   notificationTemplateClient?: LineNotificationTemplateClient;
-  /** Render only the safety and human-escalation workspace inside the canonical Group & Security page. */
+  /** Render only the safety workspace inside the canonical Group & Security page. */
   runtimeOnly?: boolean;
   /** 此頁面承載的責任範圍；預設為客服受理。 */
   scope?: LineScope;
@@ -173,12 +157,6 @@ interface QueryState<T> {
 type RuntimePendingOperation =
   | { kind: 'add'; request: LineRuntimeAdminTargetRequest; preview: LineRuntimeTargetPreview }
   | { kind: 'toggle'; targetId: number; request: LineRuntimeTargetEnabledRequest; preview: LineRuntimeTargetPreview };
-
-type EscalationPendingOperation =
-  | { kind: 'create'; request: CustomerServiceEscalationCreateRequest; preview: CustomerServiceEscalationPreview }
-  | { kind: 'claim'; escalationId: number; request: CustomerServiceEscalationClaimRequest; preview: CustomerServiceEscalationPreview }
-  | { kind: 'handling'; escalationId: number; request: CustomerServiceEscalationHandlingRequest; preview: CustomerServiceEscalationPreview }
-  | { kind: 'resolve'; escalationId: number; request: CustomerServiceEscalationResolveRequest; preview: CustomerServiceEscalationPreview };
 
 function idleState<T>(): QueryState<T> {
   return { status: 'idle', value: null, error: null };
@@ -208,15 +186,10 @@ function displayQueryError(error: unknown, fallback: string): string {
   if (error instanceof LineDeliveryQueryError) return `${error.code}：${error.message}`;
   if (error instanceof LineSafeConfigError) return `${error.code}：${error.message}`;
   if (error instanceof LineRuntimeTargetError) return `${error.code}：${error.message}`;
-  if (error instanceof CustomerServiceEscalationError) {
-    if (error.code.includes('NOT_FOUND')) return '找不到可升級的正式來源事件；請先由客服工單、LINE inbox、綁定失敗或 runtime 異常建立來源。';
-    return `${error.code}：${error.message}`;
-  }
   return fallback;
 }
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
-  ['tickets', '客服案件', 'line.tab.tickets'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['order_groups', '案件群組', 'line.tab.order-groups'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
@@ -228,7 +201,7 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
 ];
 
 const SCOPE_VIEWS: Record<LineScope, { title: string; subtitle: string; tabs: readonly LineTab[]; fallback: LineTab }> = {
-  service: { title: '客服與營運', subtitle: '處理客服案件、身分授權與案件群組。', tabs: ['tickets', 'binding', 'order_groups'], fallback: 'tickets' },
+  service: { title: 'LINE 營運', subtitle: '管理身分授權與案件群組。', tabs: ['binding', 'order_groups', 'tickets'], fallback: 'binding' },
   notifications: { title: '通知與寄送', subtitle: '設定通知規則，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
   interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單、LINE 訊息流程與引導動作。', tabs: ['richmenu', 'liff', 'message_flow', 'guidance'], fallback: 'richmenu' },
 };
@@ -314,7 +287,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   richMenuPublication = lineRichMenuPublicationClient,
   richMenuPublicationPollIntervalMs = 1500,
   runtimeTarget = lineRuntimeTargetClient,
-  escalation = customerServiceEscalationClient,
   safeReviewLink = safeReviewLinkClient,
   runtimeOnly = false,
   scope = 'service',
@@ -349,22 +321,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const runtimePreviewGeneration = useRef(0);
   const runtimeIdentity = useRef<{ signature: string; correlationId: string; idempotencyKey: string } | null>(null);
 
-  const [escalationIdInput, setEscalationIdInput] = useState('');
-  const [escalationTicketVersion, setEscalationTicketVersion] = useState('0');
-  const [escalationDetail, setEscalationDetail] = useState<QueryState<CustomerServiceEscalationModel>>(idleState);
-  const [escalationReceipt, setEscalationReceipt] = useState<CustomerServiceEscalationReceiptModel | null>(null);
-  const [escalationMutation, setEscalationMutation] = useState<MutationStatus>('idle');
-  const [escalationError, setEscalationError] = useState<string | null>(null);
-  const [escalationResolutionDigest, setEscalationResolutionDigest] = useState('');
-  const [escalationSourceIdentity, setEscalationSourceIdentity] = useState('');
-  const [escalationSourceFingerprint, setEscalationSourceFingerprint] = useState('');
-  const [escalationHoldScope, setEscalationHoldScope] = useState('customer_service_automation');
-  const [escalationSourceKind, setEscalationSourceKind] = useState<CustomerServiceEscalationCreateRequest['source_kind']>('ticket_referral');
-  const [escalationTrigger, setEscalationTrigger] = useState<CustomerServiceEscalationCreateRequest['trigger_code']>('explicit_human_request');
-  const [escalationCategory, setEscalationCategory] = useState<CustomerServiceEscalationCreateRequest['ticket_category']>('contact_union');
-  const escalationPreviewController = useRef<AbortController | null>(null);
-  const escalationPreviewGeneration = useRef(0);
-  const escalationIdentity = useRef<{ signature: string; correlation_id: string; idempotency_key: string } | null>(null);
 
   const [richMenuConfiguration, setRichMenuConfiguration] = useState<QueryState<LineRichMenuConfigurationModel>>(idleState);
   const [richMenuDraftSnapshot, setRichMenuDraftSnapshot] = useState<RichMenuDraft | null>(null);
@@ -410,7 +366,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       if (value === fallback || value === '') params.delete(key);
       else params.set(key, String(value));
     };
-    setParam('tab', activeTab, scope === 'service' ? 'tickets' : '');
+    setParam('tab', activeTab, scope === 'service' ? 'binding' : '');
     params.delete('rich');
     params.delete('rich_page');
     setParam('rule_q', notificationRuleSearch, '');
@@ -540,19 +496,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
     if (activeTab !== 'runtime') {
       runtimePreviewController.current?.abort();
-      escalationPreviewController.current?.abort();
       runtimePreviewController.current = null;
-      escalationPreviewController.current = null;
       runtimePreviewGeneration.current += 1;
-      escalationPreviewGeneration.current += 1;
       }
   }, [activeTab]);
 
   useEffect(() => () => {
     runtimePreviewController.current?.abort();
-    escalationPreviewController.current?.abort();
     runtimePreviewGeneration.current += 1;
-    escalationPreviewGeneration.current += 1;
   }, []);
 
   const refreshRuntime = () => setRuntimeReload((value) => value + 1);
@@ -621,137 +572,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   };
 
-  const loadEscalation = async (escalationId = Number(escalationIdInput)) => {
-    if (!Number.isInteger(escalationId) || escalationId < 1) return;
-    setEscalationDetail(loadingState());
-    setEscalationError(null);
-    try {
-      const detail = await escalation.getDetail(escalationId, { correlationId: operationIdentity('line-escalation-detail') });
-      setEscalationDetail(loadedState(adaptCustomerServiceEscalation(detail)));
-      setEscalationIdInput(String(escalationId));
-    } catch (error: unknown) {
-      setEscalationDetail(errorState(displayQueryError(error, '人工升級明細載入失敗')));
-    }
-  };
-
-  const previewCreateEscalation = async () => {
-    if (!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim()) return;
-    const signature = JSON.stringify(['create', escalationSourceIdentity.trim(), escalationSourceFingerprint, escalationSourceKind, escalationTrigger, escalationCategory, escalationHoldScope.trim()]);
-    if (escalationIdentity.current?.signature !== signature) escalationIdentity.current = {
-      signature, correlation_id: operationIdentity('line-escalation-create'), idempotency_key: operationIdentity('line-escalation-create-apply'),
-    };
-    const identity = escalationIdentity.current;
-    escalationPreviewController.current?.abort();
-    const controller = new AbortController();
-    escalationPreviewController.current = controller;
-    const generation = escalationPreviewGeneration.current + 1;
-    escalationPreviewGeneration.current = generation;
-    setEscalationMutation('loading');
-    setEscalationError(null);
-    try {
-      const request: CustomerServiceEscalationCreateRequest = {
-        source_event_identity: escalationSourceIdentity.trim(),
-        source_kind: escalationSourceKind,
-        source_fingerprint: escalationSourceFingerprint,
-        trigger_code: escalationTrigger,
-        trigger_policy_version: 'ui-react-v1',
-        ticket_category: escalationCategory,
-        context: { summary_code: escalationTrigger, policy_version: 'ui-react-v1', category: escalationCategory, redaction_version: 'v1' },
-        hold_scope: escalationHoldScope.trim(),
-        correlation_id: identity.correlation_id,
-        idempotency_key: identity.idempotency_key,
-      };
-      const preview = await escalation.previewCreate(request, { signal: controller.signal });
-      if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationReceipt(null);
-      await applyEscalation({ kind: 'create', request, preview });
-    } catch (error: unknown) {
-      if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationMutation('error');
-      setEscalationError(displayQueryError(error, '人工升級建立 Preview 失敗'));
-    }
-  };
-
-  const previewAdvanceEscalation = async (operation: 'claim' | 'handling' | 'resolve') => {
-    const detail = escalationDetail.value;
-    const ticketVersion = Number(escalationTicketVersion);
-    if (!detail || !Number.isInteger(ticketVersion) || ticketVersion < 0) return;
-    if (operation === 'resolve' && !/^[0-9a-f]{64}$/.test(escalationResolutionDigest)) return;
-    escalationPreviewController.current?.abort();
-    const controller = new AbortController();
-    escalationPreviewController.current = controller;
-    const generation = escalationPreviewGeneration.current + 1;
-    escalationPreviewGeneration.current = generation;
-    const signature = JSON.stringify([operation, detail.escalationId, detail.workflowVersion, ticketVersion, escalationResolutionDigest]);
-    if (escalationIdentity.current?.signature !== signature) escalationIdentity.current = {
-      signature, correlation_id: operationIdentity(`line-escalation-${operation}`), idempotency_key: operationIdentity(`line-escalation-${operation}-apply`),
-    };
-    const identity = { correlation_id: escalationIdentity.current.correlation_id, idempotency_key: escalationIdentity.current.idempotency_key };
-    setEscalationMutation('loading');
-    setEscalationError(null);
-    try {
-      let pending: EscalationPendingOperation;
-      if (operation === 'claim') {
-        const request = { expected_escalation_version: detail.workflowVersion, ...identity };
-        const preview = await escalation.previewClaim(detail.escalationId, request, { signal: controller.signal });
-        pending = { kind: 'claim', escalationId: detail.escalationId, request, preview };
-      } else if (operation === 'handling') {
-        const request = { expected_escalation_version: detail.workflowVersion, expected_ticket_version: ticketVersion, ...identity };
-        const preview = await escalation.previewStartHandling(detail.escalationId, request, { signal: controller.signal });
-        pending = { kind: 'handling', escalationId: detail.escalationId, request, preview };
-      }
-      else {
-        const request = { expected_escalation_version: detail.workflowVersion, expected_ticket_version: ticketVersion, resolution_code: 'handled_by_union_staff', resolution_evidence_digest: escalationResolutionDigest, ...identity };
-        const preview = await escalation.previewResolve(detail.escalationId, request, { signal: controller.signal });
-        pending = { kind: 'resolve', escalationId: detail.escalationId, request, preview };
-      }
-      if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationReceipt(null);
-      await applyEscalation(pending);
-    } catch (error: unknown) {
-      if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationMutation('error');
-      setEscalationError(displayQueryError(error, '人工升級狀態 Preview 失敗'));
-    }
-  };
-
-  const applyEscalation = async (escalationPending: EscalationPendingOperation) => {
-    setEscalationMutation('loading');
-    setEscalationError(null);
-    try {
-      let receipt;
-      if (escalationPending.kind === 'create') {
-        receipt = await escalation.create({
-          ...escalationPending.request,
-          preview_fingerprint: escalationPending.preview.preview_fingerprint,
-        });
-      } else if (escalationPending.kind === 'claim') {
-        receipt = await escalation.claim(escalationPending.escalationId, {
-          ...escalationPending.request,
-          preview_fingerprint: escalationPending.preview.preview_fingerprint,
-        });
-      } else if (escalationPending.kind === 'handling') {
-        receipt = await escalation.startHandling(escalationPending.escalationId, {
-          ...escalationPending.request,
-          preview_fingerprint: escalationPending.preview.preview_fingerprint,
-        });
-      } else {
-        receipt = await escalation.resolve(escalationPending.escalationId, {
-          ...escalationPending.request,
-          preview_fingerprint: escalationPending.preview.preview_fingerprint,
-        });
-      }
-      escalationIdentity.current = null;
-      const model = adaptCustomerServiceEscalationReceipt(receipt);
-      setEscalationReceipt(model);
-      setEscalationMutation('success');
-      await loadEscalation(model.escalationId);
-    } catch (error: unknown) {
-      setEscalationMutation('error');
-      setEscalationError(displayQueryError(error, '人工升級 Apply 失敗'));
-    }
-  };
-
   const { requestLeave } = useUnsavedNavigation();
   const localRichMenuConfiguration = richMenuDraftSnapshot && richMenuLocalDefinition
     ? adaptLineRichMenuDraft({ ...richMenuDraftSnapshot, definition: richMenuLocalDefinition })
@@ -777,6 +597,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>)}
       </nav>}
 
+      {!runtimeOnly && scope === 'service' && activeTab === 'binding' && (
+        <button type="button" className="line-secondary-btn" onClick={() => setActiveTab('tickets')}>查閱歷史客服紀錄</button>
+      )}
       {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
       {activeTab === 'delivery' && <LineDeliveryOperationsWorkbench/>}
       {activeTab === 'payment_overdue' && <a href="#finance?tab=receipts&view=overdue">前往帳務作業的逾期提醒</a>}
@@ -1419,197 +1242,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
           <SafeReviewLinkWorkbench client={safeReviewLink} />
 
-          {/* 3. 人工客服升級 */}
-          <section className="line-workspace-card">
-            <div className="line-section-heading">
-              <div>
-                <h2>人工客服升級</h2>
-                <p>可建立升級事件，或以已知 ID 查詢並依 available actions 接手、處理與結案。</p>
-              </div>
-            </div>
-
-            <div className="line-detail-grid line-section-bottom">
-              <label>
-                來源類型
-                <select
-                  className="line-filter-select line-full-width line-field-top-spacing"
-                  value={escalationSourceKind}
-                  onChange={(event) => { setEscalationSourceKind(event.target.value as CustomerServiceEscalationCreateRequest['source_kind']); }}
-                >
-                  <option value="ticket_referral">客服工單轉介</option>
-                  <option value="line_inbox">LINE inbox</option>
-                  <option value="binding_failure">綁定失敗</option>
-                  <option value="runtime_health">Runtime 異常</option>
-                </select>
-              </label>
-              <label>
-                觸發原因
-                <select
-                  className="line-filter-select line-full-width line-field-top-spacing"
-                  value={escalationTrigger}
-                  onChange={(event) => { setEscalationTrigger(event.target.value as CustomerServiceEscalationCreateRequest['trigger_code']); }}
-                >
-                  <option value="explicit_human_request">明確要求人工</option>
-                  <option value="explicit_wrong_answer">明確回覆錯誤</option>
-                  <option value="binding_failure_threshold_2">綁定失敗達門檻</option>
-                  <option value="complaint">客訴</option>
-                  <option value="runtime_critical">Runtime 嚴重異常</option>
-                </select>
-              </label>
-              <label>
-                工單分類
-                <select
-                  className="line-filter-select line-full-width line-field-top-spacing"
-                  value={escalationCategory}
-                  onChange={(event) => { setEscalationCategory(event.target.value as CustomerServiceEscalationCreateRequest['ticket_category']); }}
-                >
-                  <option value="service_flow">服務流程</option>
-                  <option value="payment_subsidy">收費與補助</option>
-                  <option value="service_progress">服務進度</option>
-                  <option value="profile_update">修改登記資料</option>
-                  <option value="contact_union">聯絡工會</option>
-                  <option value="other">其他問題</option>
-                </select>
-              </label>
-              <label>
-                來源案件／事件參考
-                <input className="line-search-input" value={escalationSourceIdentity} onChange={(event) => { setEscalationSourceIdentity(event.target.value); }} />
-              </label>
-              <details className="line-details-full">
-                <summary>進階來源資料</summary>
-                <p className="line-advanced-help">
-                  這些一致性欄位由來源流程提供；只有人工補登且已核對原始事件時才需填寫。
-                </p>
-                <div className="line-detail-grid">
-                  <label>
-                    來源資料校驗碼
-                    <input className="line-search-input" value={escalationSourceFingerprint} onChange={(event) => { setEscalationSourceFingerprint(event.target.value); }} />
-                  </label>
-                  <label>
-                    自動化暫停範圍
-                    <input className="line-search-input" value={escalationHoldScope} onChange={(event) => { setEscalationHoldScope(event.target.value); }} />
-                  </label>
-                </div>
-              </details>
-              <div className="line-grid-full">
-                {escalationSourceIdentity.trim() && (!/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim()) && (
-                  <div className="line-scope-note line-bottom-spacing" role="status">
-                    請先核對來源並補齊資料。
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="line-primary-btn line-full-action"
-                  disabled={!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim() || escalationMutation === 'loading'}
-                  onClick={() => void previewCreateEscalation()}
-                >
-                  建立人工客服升級
-                </button>
-              </div>
-            </div>
-
-            <div className="line-row-actions line-section-bottom">
-              <label htmlFor="escalation-id" className="line-field-label">升級 ID：</label>
-              <input
-                id="escalation-id"
-                inputMode="numeric"
-                className="line-search-input escalation-id-input"
-                value={escalationIdInput}
-                onChange={(event) => setEscalationIdInput(event.target.value)}
-              />
-              <button
-                type="button"
-                className="line-secondary-btn"
-                disabled={!/^\d+$/.test(escalationIdInput)}
-                onClick={() => void loadEscalation()}
-              >
-                查詢升級明細
-              </button>
-            </div>
-
-            <LoadingOrError state={escalationDetail} loadingText="正在載入人工升級明細…" />
-
-            {escalationDetail.value && (
-              <>
-                <div className="line-detail-grid">
-                  <div><span>工單</span><strong>{escalationDetail.value.ticketRef}</strong></div>
-                  <div><span>狀態</span><strong>{escalationDetail.value.workflowStatusLabel}</strong></div>
-                  <div><span>分類</span><strong>{escalationDetail.value.categoryLabel}</strong></div>
-                  <div><span>自動化</span><strong>{escalationDetail.value.automationHoldLabel}</strong></div>
-                  <div><span>警示</span><strong>{escalationDetail.value.alertStatus}</strong></div>
-                  <div><span>告警投遞任務</span><strong>{escalationDetail.value.deliveryTaskRef ?? '尚未建立'}</strong></div>
-                  <div><span>本機結果</span><strong>{escalationDetail.value.deliveryOutcomeRef ?? '尚未回讀'}</strong></div>
-                  {escalationDetail.value.triggerIdentity && <div><span>觸發身分（遮罩）</span><strong>{escalationDetail.value.triggerIdentity}</strong></div>}
-                  {escalationDetail.value.attemptWindow && <div><span>嘗試窗口</span><strong>{escalationDetail.value.attemptWindow.attemptCount} / {escalationDetail.value.attemptWindow.maximumAttempts}（第 {escalationDetail.value.attemptWindow.generation} 輪）</strong></div>}
-                  {escalationDetail.value.ownerSelector && <div><span>負責人選擇器</span><strong>{escalationDetail.value.ownerSelector}</strong></div>}
-                </div>
-
-                <details className="line-advanced-section">
-                  <summary>進階一致性與結案資料</summary>
-                  <p className="line-advanced-help">
-                    接手只需目前升級資料；開始處理或結案前，請依客服工單與結案紀錄補登下列校驗資料。
-                  </p>
-                  <div className="line-detail-grid">
-                    <label htmlFor="escalation-ticket-version">
-                      工單一致性版本
-                      <input
-                        id="escalation-ticket-version"
-                        inputMode="numeric"
-                        className="line-search-input"
-                        value={escalationTicketVersion}
-                        onChange={(event) => { setEscalationTicketVersion(event.target.value); }}
-                      />
-                    </label>
-                    <label htmlFor="escalation-resolution-digest">
-                      結案紀錄校驗碼
-                      <input
-                        id="escalation-resolution-digest"
-                        className="line-search-input"
-                        value={escalationResolutionDigest}
-                        onChange={(event) => { setEscalationResolutionDigest(event.target.value); }}
-                      />
-                    </label>
-                  </div>
-                </details>
-
-                <div className="line-row-actions line-block-spacing">
-                  {escalationDetail.value.availableActions.includes('claim') && (
-                    <button
-                      type="button"
-                      className="line-primary-btn"
-                      disabled={escalationMutation === 'loading'}
-                      onClick={() => void previewAdvanceEscalation('claim')}
-                    >
-                      接手
-                    </button>
-                  )}
-                  {escalationDetail.value.availableActions.includes('handling') && (
-                    <button
-                      type="button"
-                      className="line-primary-btn"
-                      disabled={escalationMutation === 'loading'}
-                      onClick={() => void previewAdvanceEscalation('handling')}
-                    >
-                      開始處理
-                    </button>
-                  )}
-                  {escalationDetail.value.availableActions.includes('resolve') && (
-                    <button
-                      type="button"
-                      className="line-primary-btn"
-                      disabled={escalationMutation === 'loading' || !/^[0-9a-f]{64}$/.test(escalationResolutionDigest)}
-                      onClick={() => void previewAdvanceEscalation('resolve')}
-                    >
-                      解決並解除暫停
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-
-            {escalationReceipt && <div className="line-success line-block-spacing-12" role="status">人工客服升級操作已完成；目前狀態：{escalationReceipt.workflowStatus}。</div>}
-            {escalationError && <div className="line-error line-block-spacing-12" role="alert">{escalationError}</div>}
-          </section>
         </div>
       )}
 

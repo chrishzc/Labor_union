@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer
-from shared_kernel.identities import IdempotencyKey
 from shared_kernel.validation import require_canonical_text
 from subsystems.line.ai_router_contracts import (
     Clarification,
@@ -15,30 +14,15 @@ from subsystems.line.ai_router_contracts import (
     DeterministicRoute,
     RouterOutcome,
     SafeMenu,
-    TicketReferral,
     Unavailable,
 )
 from subsystems.line.navigation_catalog import (
     CATALOG_REVISION,
     CATALOG_SOURCE_IDENTITY,
     entry_for_alias,
-    route_aliases,
 )
 
 
-_HUMAN_MARKERS = (
-    "人工協助",
-    "人工客服",
-    "找真人",
-    "轉真人",
-    "轉接真人",
-    "找客服",
-    "聯絡客服",
-    "聯絡工會",
-    "找人",
-    "找專員",
-    "問人",
-)
 _IDENTITY_ALIASES = {"綁定訂單", "訂單查詢", "綁定後台帳號"}
 _GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
 _SERVICE_ALIASES = {
@@ -94,22 +78,12 @@ _SERVICE_ALIASES = {
     "5": (None, "service_help_menu"),
     "6": (None, "service_help_menu"),
 }
-_SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
-_CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
+_SAFE_MENU_OPTIONS = ("服務與問答", "服務登記")
+_CLARIFICATION_OPTIONS = ("服務與問答", "服務登記")
 _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
     "一般市民（最高40小時）",
     "補助市民（最高120小時）",
 )
-_CONFIRMED_HUMAN_ALIASES = {
-    "聯絡專人",
-    "聯絡專人服務",
-    "聯絡工會人員",
-    "呼叫專員",
-    "聯絡工會專員",
-    "專人客服",
-    "轉接真人客服",
-    "轉真人客服",
-}
 
 _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
     "registration": None,
@@ -123,15 +97,6 @@ _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
     "other": None,
     "group_helper_menu": None,
 }
-
-
-def _confirmed_human_aliases() -> set[str]:
-    return set(route_aliases("human_handoff")) or _CONFIRMED_HUMAN_ALIASES
-
-
-def is_confirmed_human_request(text: str) -> bool:
-    normalized = text.strip() if isinstance(text, str) else ""
-    return normalized in _confirmed_human_aliases() or _human_reason(normalized) is not None
 
 
 class DeterministicLineRouter:
@@ -148,19 +113,6 @@ class DeterministicLineRouter:
     ) -> RouterOutcome:
         normalized = text.strip() if isinstance(text, str) else ""
         require_canonical_text(source_event_id, "source event id", 191)
-
-        human_reason = (
-            "explicit_human_request"
-            if normalized in _confirmed_human_aliases()
-            else _human_reason(normalized)
-        )
-        if human_reason is not None:
-            return TicketReferral(
-                CustomerServiceCategory.OTHER,
-                human_reason,
-                source_event_id,
-                IdempotencyKey(f"line-service-help:other:{source_event_id}"),
-            )
 
         if _is_ambiguous_subsidy_scope(normalized):
             return Clarification(
@@ -240,7 +192,7 @@ class DeterministicLineRouter:
             )
         if band == "gte_80":
             return Unavailable(
-                "deterministic_answer_unavailable", False, "請轉交客服人員確認。",
+                "deterministic_answer_unavailable", False, "如需協助，請直接在 LINE 官方帳號聊天室留言。",
                 CATALOG_SOURCE_IDENTITY, CATALOG_REVISION, "manual_fallback",
             )
         return _safe_menu("unknown_intent")
@@ -256,14 +208,6 @@ def score_band(score: int | None) -> str:
     if score >= 50:
         return "50_79"
     return "lt_50"
-
-
-def _human_reason(text: str) -> str | None:
-    if not text:
-        return None
-    if any(marker in text for marker in _HUMAN_MARKERS):
-        return "explicit_human_request"
-    return None
 
 
 def _is_ambiguous_subsidy_scope(text: str) -> bool:
@@ -293,4 +237,4 @@ def _safe_menu(reason_code: str) -> SafeMenu:
     return SafeMenu("service_help_safe_menu", _SAFE_MENU_OPTIONS, reason_code)
 
 
-__all__ = ["DeterministicLineRouter", "is_confirmed_human_request", "score_band"]
+__all__ = ["DeterministicLineRouter", "score_band"]

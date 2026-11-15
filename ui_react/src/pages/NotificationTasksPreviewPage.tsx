@@ -27,7 +27,7 @@ const GROUPS = [
   { id: 'all', label: '全部事項', icon: Inbox },
   { id: 'review', label: '審核與協調', icon: ClipboardCheck },
   { id: 'reminder', label: '款項與日誌', icon: Wallet },
-  { id: 'support', label: '客服與異常', icon: ShieldCheck },
+  { id: 'support', label: '系統與寄送異常', icon: ShieldCheck },
 ] as const;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
@@ -36,15 +36,14 @@ const PRIMARY:Record<NotificationSource,string> = {
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
   deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',
-  customer_service:'前往客服案件',delivery:'查看寄送工作',runtime:'前往通知對象設定',
+  delivery:'查看寄送工作',runtime:'前往通知對象設定',
   notification_failure:'處理通知建立異常',
 };
 type Row = NotificationItem & {caseLabel:string;personLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger';delivery?:string};
 function row(item:NotificationItem,record=false):Row {
-  const ticket = item.source==='customer_service' || (item.source==='recommendation' && !!item.reference_id);
   return {...item,time:formatTaipeiDateTime(item.time),caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
-    personLabel:ticket?'客服對象':'相關對象',person:ticket?(item.person || '未具名使用者'):item.person,
-    primary:ticket?'前往客服案件':item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
+    personLabel:'相關對象',
+    primary:item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
     secondary:item.source==='payment_receipt' && item.receipt?.amount_ntd != null && item.receipt.source_version != null && item.receipt.source_reference != null
       ? '已於官方帳號發送／標記已通知'
       : item.case_no && ['overdue','deposit'].includes(item.source)?'前往核對款項':item.unavailable_reason?'前往身分與群組設定':undefined,

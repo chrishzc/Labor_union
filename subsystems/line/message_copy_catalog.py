@@ -6,7 +6,7 @@ from copy import deepcopy
 import json
 
 from subsystems.line.message_copy import (
-    CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING,
+    IDENTITY_PENDING,
     IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, copy_fields, copy_template_id,
     message_definition, apply_copy_payload,
 )
@@ -31,12 +31,28 @@ RETIRED_START_DAY_REPORT_TEMPLATE_IDS = frozenset({
 RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID = "LINE-SERVICE-COMPLETION-TEXT-V1"
 
 
+_RETIRED_CUSTOMER_SERVICE_COPY_KEYS = frozenset({
+    "service-contact",
+    "service-resolved",
+    "service-profile-update",
+    "service-order-update",
+    "complaint-handoff-received",
+    "customer-service-ticket-reply",
+    "helper-staff-assistance-ack",
+    "helper-staff-assistance-closed",
+    "deposit-assistance",
+    "payment-assistance",
+    "matching-customer-assistance",
+})
+RETIRED_CUSTOMER_SERVICE_TEMPLATE_IDS = frozenset(
+    copy_template_id(key) for key in _RETIRED_CUSTOMER_SERVICE_COPY_KEYS
+)
+
+
 def _text_defaults():
-    from domains.customer_service.ticket import CustomerServiceCategory
     from domains.line.identity_flow import LineIdentityFlowPurpose
     from domains.scheduling.matching_communication import CustomerMatchingDecision
     from subsystems.line import service_help_application as help
-    from subsystems.line.deposit_notifications import ASSISTANCE_ACK
     from subsystems.line.service_day_log_reminders import reminder_text as log_reminder
     from subsystems.line.service_start_day import GREETING_COPY, PAYMENT_COPY
     from subsystems.line.webhook_identity_handlers import _identity_link_message
@@ -45,18 +61,13 @@ def _text_defaults():
     from subsystems.line.service_start_messages import HELPER_TEXT_DEFAULTS
     from subsystems.case_import.provisional_registration_application import registration_confirmation_text
     result = {
-        **HELPER_TEXT_DEFAULTS,
+        **{key: value for key, value in HELPER_TEXT_DEFAULTS.items() if key not in _RETIRED_CUSTOMER_SERVICE_COPY_KEYS},
         "registration-approved-citizen": registration_confirmation_text("{name}", approved=True),
         "registration-approved-non-citizen": registration_confirmation_text(
             "{name}", approved=True, case_no="{case_no}"
         ),
-        "service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
         "identity-pending": IDENTITY_PENDING,
-        "service-profile-update": help._TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
-        "service-order-update": help._ORDER_UPDATE_ACKNOWLEDGEMENT,
-        "deposit-assistance": ASSISTANCE_ACK,
         "payment-reminder-ack": "已收到您的回覆，感謝您。工會將於核對後通知，請耐心等候不需重複繳款。",
-        "payment-assistance": "已收到您的聯絡需求，請直接留下您的疑問，工會專人將盡快為您協助處理。",
         "payment-first-reminder": PAYMENT_COPY,
         "payment-first-greeting": GREETING_COPY,
         "payment-second-reminder": "案件 {case_no} 第二期款尚待確認入帳 {amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
@@ -76,7 +87,6 @@ def _text_defaults():
     for key, willing, decision in (
         ("matching-willing-received", "willing", None),
         ("matching-customer-accepted", None, CustomerMatchingDecision.ACCEPTED),
-        ("matching-customer-assistance", None, CustomerMatchingDecision.CONTACT_REQUESTED),
         ("matching-customer-response", None, None),
     ):
         result[key] = matching_response_text(willing, decision)
@@ -140,13 +150,25 @@ def _card_defaults():
 
 def default_copy_templates():
     """Virtual genesis entries; reads never persist or replace existing settings."""
+    from subsystems.line.deposit_notifications import ASSISTANCE_ACK
+    from subsystems.line.service_start_messages import GROUP_ASSISTANCE_DIRECTIONS
+    from subsystems.scheduling.matching_line_cards import MATCHING_ASSISTANCE_DIRECTIONS
+
+    fixed_guidance = {ASSISTANCE_ACK, GROUP_ASSISTANCE_DIRECTIONS, MATCHING_ASSISTANCE_DIRECTIONS}
     result = {}
     for key, content in _text_defaults().items():
         result[key] = _template(copy_template_id(key), key, content)
     for key, payload in _card_defaults().items():
         if key == 'card-candidate-information-3':
             continue  # The weekly picture contains owner data, not editable copy.
-        fields = copy_fields(payload)
+        fields = copy_fields(payload, fixed_text=fixed_guidance)
+        if key == "service-menu":
+            fields = [field for field in fields if field["id"] != "contents/footer/contents/0/text"]
+            for field in fields:
+                if field["id"] == "contents/body/contents/4/action/label":
+                    # Keep the saved FAQ label identity after removing the preceding button.
+                    field["path"] = field["id"]
+                    field["id"] = "contents/body/contents/5/action/label"
         if key.startswith("card-"):
             # Owner-projected rows, profile values and authored questions are
             # facts, not reusable announcement copy.
@@ -179,6 +201,32 @@ def default_copy_templates():
                         parts[3] = "*"
                         field["path"] = "/".join(parts)
                         field["match"] = field["content"]
+        elif key == "helper-guidelines-card":
+            field_labels = {
+                "altText": ("訊息摘要", "summary"),
+                "contents/header/contents/0/contents/0/contents/0/text": ("標籤徽章", "label"),
+                "contents/header/contents/1/text": ("卡片主標題", "title"),
+                "contents/header/contents/2/text": ("副標題說明", "body"),
+                "contents/body/contents/0/contents/0/text": ("重要提醒區塊標題", "label"),
+                "contents/body/contents/0/contents/1/text": ("提醒重點 1", "body"),
+                "contents/body/contents/0/contents/2/text": ("提醒重點 2", "body"),
+                "contents/body/contents/0/contents/3/text": ("提醒重點 3", "body"),
+                "contents/body/contents/1/text": ("常見問題區塊標題", "label"),
+                "contents/body/contents/2/contents/0/contents/0/text": ("問題 1 題目", "body"),
+                "contents/body/contents/2/contents/0/action/label": ("問題 1 按鈕名稱", "button"),
+                "contents/body/contents/2/contents/1/contents/0/text": ("問題 2 題目", "body"),
+                "contents/body/contents/2/contents/1/action/label": ("問題 2 按鈕名稱", "button"),
+                "contents/body/contents/2/contents/2/contents/0/text": ("問題 3 題目", "body"),
+                "contents/body/contents/2/contents/2/action/label": ("問題 3 按鈕名稱", "button"),
+            }
+            custom_fields = []
+            for f in fields:
+                if f["id"] in field_labels:
+                    lbl, knd = field_labels[f["id"]]
+                    f["label"] = lbl
+                    f["kind"] = knd
+                    custom_fields.append(f)
+            fields = custom_fields
         content = json.dumps({field["id"]: field["content"] for field in fields}, ensure_ascii=False)
         template = _template(copy_template_id(key), key, content)
         if key.startswith('card-') and 'case_no' not in {v['name'] for v in template['variables']}:
@@ -224,7 +272,19 @@ def effective_copy_definition(definition):
                 if isinstance(current, dict) and not set(current) <= set(defaults):
                     # Project the former five-button menu without rewriting its history.
                     template['content'] = specs[template['id']]['content']
-            if key in {'card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2', 'card-candidate-information-package'}:
+            if key in {
+                "service-menu", "helper-menu-card", "deposit-reminder", "payment-second-reminder",
+                "payment-overdue-deposit", "payment-overdue-first", "payment-overdue-second",
+                "card-customer-profiles", "card-customer-confirmation",
+            }:
+                current = json.loads(template["content"])
+                defaults = json.loads(specs[template["id"]]["content"])
+                if isinstance(current, dict):
+                    template["content"] = json.dumps(
+                        {**defaults, **{field: value for field, value in current.items() if field in defaults}},
+                        ensure_ascii=False,
+                    )
+            if key in {'card-candidate-information-1', 'card-candidate-information-2', 'card-candidate-information-package'}:
                 # Preserve only text fields still editable in the current card.
                 current = json.loads(template['content'])
                 legacy_ids = {field['id'] for field in copy_fields(_card_defaults()[key])}

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+import json
 
 from domains.line.delivery import (
     LineAttemptPlan,
@@ -56,6 +57,25 @@ def candidate_coordination_delivery_retired(request: LineDeliveryRequest) -> boo
             and request.source_aggregate_identity.startswith(CANDIDATE_RECONTACT_SOURCE_PREFIX)
         )
     )
+
+
+def customer_service_delivery_retired(request: LineDeliveryRequest) -> bool:
+    """Identify obsolete acknowledgements without cancelling other business actions."""
+    if request.source_aggregate_type == "customer_service_ticket":
+        return True
+    key = request.idempotency_key.value
+    if key.startswith((
+        "service-handoff-reply:", "service-help:complaint-empathy:", "service-help:ticket:",
+        "service-help:profile_update:", "service-help:order-update:",
+        "feedback-unresolved:", "knowledge-feedback-ack:",
+        "deposit-assistance:", "payment-assistance:",
+    )):
+        return True
+    if key.startswith("group-helper:") and key.endswith((":staff-assistance-ack", ":staff-assistance-closed")):
+        return True
+    if key.startswith("matching-customer-receipt:"):
+        return json.loads(request.payload_json).get("text") == "已收到您的聯絡需求，請留下您的疑問"
+    return False
 
 
 class LineDeliveryCommandOutcome(StrEnum):

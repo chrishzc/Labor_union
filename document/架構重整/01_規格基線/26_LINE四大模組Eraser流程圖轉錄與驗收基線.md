@@ -9,16 +9,16 @@
 | 模組 | Diagram ID | 對應能力範圍與現行 Owner |
 |---|---|---|
 | M1 | `9vI_ssJZUHa59Yw7LXc0d` | LINE LIFF 表單、身分綁定與角色選單切換（[`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md)、[`23_LINE身分管理與解除正式規格.md`](23_LINE身分管理與解除正式規格.md)、[`29_LINE服務說明、客服互動與選單角色正式規格.md`](29_LINE服務說明、客服互動與選單角色正式規格.md)） |
-| M2 | `xS5rOAuuQCUL139Tp4RA` | 自助導覽、專用 FAQ／AI LIFF 與明確客服升級（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)） |
+| M2 | `xS5rOAuuQCUL139Tp4RA` | 自助導覽、專用 FAQ／AI LIFF 與官方帳號人工回覆（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)） |
 | M3 | `IXLp95YCVlOmYlkS1gBkl` | 候選接案意願、推薦確認、簽約訂金交錯與排班／代班閉環（[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[媒合候選池與客戶決定及通勤](02A_媒合候選池與客戶決定及通勤規格.md)、[Contract Signing 正式規格](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)） |
-| M4 | `bYdfiEJlAm-XhTLuLoJ-` | 工會管理端（桌面／手機）、重大個人告警、客訴轉真人與代班帳務拆算（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)） |
+| M4 | `bYdfiEJlAm-XhTLuLoJ-` | 工會管理端（桌面／手機）、官方帳號人工服務與代班帳務拆算（[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)） |
 
 ### 1.2 現行可配置通知與人工提醒驗收邊界
 
 1. **Webhook Reply 與 Push 分工**：所有 Reply 在 Webhook 處理當次事件時發送（45 秒時窗、1 次嘗試、同事件／同聊天室檢核）。月嫂「可以接案」與「無法接案」皆先提交意願，再送原文案。逾時或失敗不補 Push；主動通知、卡片本體與定時排程由背景處理。詳見 [LINE 客服與月嫂自助服務規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 2. **現行可配置通知與退役項目**：
-   - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組）、[各期繳款提醒及人工入帳通知](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)、[開工當天群組問候](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。範本編輯與公版見[通知與發送](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)。
-   - 已全面退役項目：加入好友即時歡迎訊息（由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（由人工查閱群組相簿）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播、銀行核銷後自動代發收據及三期入帳確認系統 Push、完工事件自動推播問卷（`order.service_completed`）及第二期款群組通知（`client.second_payment_due`／`client.second_payment_settled`）。
+   - 保留可配置項目：[各期繳款提醒及人工入帳通知](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)、[開工當天群組問候](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。範本編輯與公版見[通知與發送](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)。
+   - 已全面退役項目：加入好友即時歡迎訊息（由 LINE 官方帳號設定）、管理員個人與群組告警、群組一次性審核連結及客服工單、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（由人工查閱群組相簿）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播、銀行核銷後自動代發收據及三期入帳確認系統 Push、完工事件自動推播問卷（`order.service_completed`）及第二期款群組通知（`client.second_payment_due`／`client.second_payment_settled`）。
 3. **群組設定與合成 Fixture 驗收原則**：服務群組綁定指令（`綁定訂單 案件編號 邀請網址` 與 `發送邀請`）依 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；`development` 環境得依 [`10_Global_保留資料Migration與Cutover_Subsystem.md`](10_Global_保留資料Migration與Cutover_Subsystem.md) 於本機受控資料庫使用 owner typed fixture producer 建立含 canonical IDs 之測試實例，嚴禁由 Notification 端偽造媒合、請假或薪資業務決策。
 
 ## 2. 逐節點驗收欄位與通過基準
@@ -63,10 +63,10 @@ flowchart TD
     Non_Citizen_Bind -->|同一帳號已綁定| Already_Bound
     Non_Citizen_Bind -->|需要改綁| Rebind_Request
     Non_Citizen_Bind -->|查無資料、不完整或核對失敗| Retry_Fail
-    Retry_Fail -->|明確呼叫專員| Human_Call["沿 Customer Service 建立／接續客服單"]
+    Retry_Fail -->|仍無法核對| Human_Call["在 LINE 官方帳號留言"]
 ```
 
-- 送出姓名與手機後依實際核對結果分流。API 錯誤不得偽裝為查無資料或直接開表。核對失敗僅提示修正，明確點選聯絡專員後方才建立客服單。使用者可從兩個第二步畫面返回第一步。
+- 送出姓名與手機後依實際核對結果分流。API 錯誤不得偽裝為查無資料或直接開表。核對失敗提示修正與回到官方帳號留言。使用者可從兩個第二步畫面返回第一步。
 
 #### 3.1.1 兩步導流修正後的驗收
 
@@ -88,19 +88,19 @@ flowchart TD
 | `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 綁定 `union_staff_menu` 開啟 `line-mobile-admin` 四頁籤；群組輸入拒絕發放。 |
 | 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
 
-## 4. 模組二（M2）：自助導覽、FAQ LIFF 與明確呼叫專員
+## 4. 模組二（M2）：自助導覽、FAQ LIFF 與人工回覆
 
 ```mermaid
 flowchart TD
-  Input["聊天室訊息 / 選單"] --> Active{"是否已有 waiting／handling 工單？"}
-  Active -->|有| Append["訊息追加至進行中工單"]
-  Active -->|無（無歷史單或最新單已 resolved）| Call{"明確呼叫專員／客訴？"}
-  Call -->|是| Ticket["計畫 A：建立全新 ticket_id 客服單並發一次受理回覆"]
-  Call -->|一般提問／查詢| Menu["同步回覆自助引導／FAQ LIFF，不開客服單"]
-  Old["已停用 AI 回覆／恢復按鈕"] --> Retired["回覆停用提示，不開單且不變更客服狀態"]
+  Msg["LINE 私聊"] --> Kind{"明確操作"}
+  Kind -->|自助指令| Guide["綁定、表單或 FAQ"]
+  Kind -->|一般留言或客訴| Read["工會查看官方帳號並回覆"]
+  Kind -->|舊求助按鈕| Hint["Reply：請直接留言"]
+  Hint --> Read
+  Guide -->|訂單異動表單| Request["訂單管理：取得申請編號並等待辦理"]
 ```
 
-- 專用 AI／常見問答統一由 `?target=ai_assistant` 提供（6 大分類、`document/line/AI客服QA題庫.jsonl` 54 題、`authoritative=false`，未命中回 `UNSUPPORTED` 並提供轉專人按鍵）。詳見 [`29_LINE服務說明、客服互動與選單角色正式規格.md`](29_LINE服務說明、客服互動與選單角色正式規格.md)。
+- FAQ 未命中或未解決提供直接留言指引，未解決評價照常記錄。
 
 ## 5. 模組三（M3）：候選接案意願與簽約排班閉環
 
@@ -113,7 +113,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   A["工會推薦意願人選給客戶"] --> B{"客戶回應"}
-  B -->|專人協助| C["line_webhook_reply 確認，建立待辦保留原卡可再接受"]
+  B -->|需要協助| C["在官方帳號聊天室直接留言，仍可接受原配對"]
   B -->|接受配對| D["保存接受決策；待辦轉簽約，簽約與訂金可交錯；滿 7 天未接僅內部提醒"]
   D --> S["外部平台簽署與簽回確認（依簽約規格）"]
   D --> E["訂金正式核銷後由工會建置案件服務群組"]
@@ -129,11 +129,11 @@ flowchart TD
 - 簽約節點依 [簽約正式規格 §3.2–3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#32-目前資料投影缺值提醒與瀏覽器-a4-列印) 驗收，並核對 LINE 流程圖的官方帳號手動範本指引。
 - LINE 流程圖「開始服務」顯示開工當天群組純文字問候的兩種公版。「持續服務與異動」在第二期款前顯示第一期款逾期與入帳節點，分別標示私訊提醒及官方帳號人工發送。依[群組開工問候投遞規格](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)和[第一期款通知規格](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)驗收。
 - LINE 流程圖「完工與結案」依[滿意度調查問卷規格](20_LINE客服與月嫂自助服務正式規格.md#44-滿意度調查問卷)呈現群組 Reply 並連至文案維護。「帳務結算與結案」呈現內部作業，取消結算通知依[既有人工發送入口](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)驗收。
-- 正式服務中排班調整採群組選單【雙方合意延期】（僅限月嫂由 Flex URI Action 免費開啟、LIFF 嚴格鎖定本案與客戶開啟阻擋、後台日曆多天成對調整且天數守恆，無衝突後由客戶確認生效，0 Push 額度），以及【專員協助】（雙管理端立待辦、後台可調結案指令）與【使用說明／常見疑問標準回答】（見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §4.1–4.2）；任何排班與協調決策不得跨過 Scheduling／Orders canonical writer 直接修改表單根欄位。
+- 正式服務中排班調整採群組選單【雙方合意延期】（僅限月嫂由 Flex URI Action 免費開啟、LIFF 嚴格鎖定本案與客戶開啟阻擋、後台日曆多天成對調整且天數守恆，無衝突後由客戶確認生效，0 Push 額度），以及在原案件群組留言與【客戶常見疑問標準回答】（見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §4.1–4.2）；任何排班與協調決策不得跨過 Scheduling／Orders canonical writer 直接修改表單根欄位。
 
 ## 6. 模組四（M4）：工會雙管理端、個人告警與代班拆帳
 
-- **雙管理端協同**：電腦版 Web 後台處理媒合排班、代班／換人、財務對帳（`WF-01`～`06`）、客戶客服清單、推播佇列追蹤與 `LINE-PAY-01`～`08` 繳款提醒／入帳待辦確認（三期入帳改於 LINE 官方帳號手動發送後點擊標記已通知）；手機端 `line-mobile-admin` 提供 `staff_review`、`customer_service`、`order_tracking` 與 `dashboard`（頂端含已退役系統告警之收合系統狀態摘要卡）。
+- **雙管理端協同**：電腦版負責訂單異動、媒合排班、代班、財務對帳與歷史客服紀錄查詢。手機端提供 `staff_review`、`order_tracking` 與 `dashboard`。日常客服與客訴由工會在官方帳號處理。
 - **個人化安全告警**：群組告警與群組一次性審核連結已全面取消。重大客訴或 `LINE-006` 異常只針對已設定管理員個人對象投遞去敏摘要及需驗證之管理入口；當下無有效個人設定對象時保留內部事件追蹤，嚴禁猜測發往任意群組。
 - **代班與換人帳務邊界**：代班確認加入並於 Scheduling 登錄實際服務日／交接日完成後，各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不建立系統入帳推播（`LINE-PAY-08` 僅保留入帳待辦提醒與標記已通知結案）。
 
@@ -146,7 +146,7 @@ flowchart TD
 | LINE 擁有未審新客暫存表 | 未核准前資料由 Case Import 專用持久化 Redis 14 天保管，核准始寫 MySQL | [Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md) |
 | `profile_update`／請假／改期直寫多表 | 一律透過 Client／Orders／Scheduling 各自 typed Query／Preview／Apply 提交，共用單一 UoW | [Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
 | M3／M4 直接跨模組改排班或拆薪 | 僅產生轉換請求或提交經辦協調事件，實際異動與薪資由 Scheduling／Payroll 依有效日重算 | [Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md) |
-| 群組重大告警＋一次性免登入連結 | 改採去敏管理員個人告警＋需登入驗證後台入口（個人物件具歷史保存停用機制） | [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
+| 群組重大告警＋一次性免登入連結 | 管理員主動查詢，既有告警資料保留 | [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
 | 月嫂填寫系統寶寶日誌與缺漏催繳 | 系統端表單與催繳完全退役（`410`），回歸 LINE 服務群組相簿與人工巡檢 | [LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md) |
 | **`R1-LIFECYCLE` 雙身分自動還原** | `Orders` 提交終結狀態 outbox（只帶 receipt ref）→ `LINE Identity` 驗證當事人無其他活躍產婦案且 staff `active` 時切回 `staff_menu`；退役／撤銷優先且禁止還原 | [Orders Domain](01_Orders_Domain.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md) |
 

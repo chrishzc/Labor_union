@@ -15,8 +15,7 @@ export function notificationHref(item:NotificationItem):string | null {
     case 'identity': return `#line-management?tab=binding&identity=reviews&review=${item.reference_id}`;
     case 'runtime': return '/line-mobile-admin?target=staff_review';
     case 'followup': return `#order-workbench-v2?case=${caseNo}&work=matching`;
-    case 'customer_service': return `#line-management?tab=tickets&ticket_q=${item.reference_id ?? ''}`;
-    case 'recommendation': return item.reference_id ? `#line-management?tab=tickets&ticket_q=${item.reference_id}` : `#order-workbench-v2?case=${caseNo}&work=${item.tag==='待簽約'?'contracts':'recommendation'}`;
+    case 'recommendation': return `#order-workbench-v2?case=${caseNo}&work=${item.tag==='待簽約'?'contracts':'recommendation'}`;
     default: return null;
   }
 }

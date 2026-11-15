@@ -185,20 +185,18 @@ def env():
     finally: db.db.close()
 
 
-def test_unresolved_links_one_ticket_and_exact_replay(env):
+def test_unresolved_persists_feedback_without_ticket_and_replays(env):
     o,db,app=env; seed(db,1,42)
     k=o["Knowledge"](db); ctx=k.feedback_context(42,"U-owner")
     assert (ctx.source_response_id,ctx.response_revision,ctx.rule_revision)==("knowledge-answer-receipt:42",1,None)
     assert k.feedback_context(42,"U-other") is None
     ku=o["KUow"](); ku._connection=db; assert ku.answer_receipt_catalog_revision(42)==9
-    first=app.apply(command(42,FeedbackOutcome.UNRESOLVED)); ticket=first.receipt.ticket_id
-    assert ticket and not first.receipt.replayed
-    event=db.db.execute("SELECT ticket_id,event_key FROM customer_service_ticket_events").fetchone()
-    assert tuple(event)==(ticket,"line-feedback-ticket:knowledge-answer-receipt:42")
+    first=app.apply(command(42,FeedbackOutcome.UNRESOLVED))
+    assert first.receipt.ticket_id is None and not first.receipt.replayed
     replay=app.apply(command(42,FeedbackOutcome.UNRESOLVED))
-    assert replay.receipt.replayed and replay.receipt.ticket_id==ticket
-    assert db.db.execute("SELECT COUNT(*) FROM customer_service_tickets").fetchone()[0]==1
-    assert db.db.execute("SELECT COUNT(*) FROM customer_service_ticket_events").fetchone()[0]==1
+    assert replay.receipt.replayed and replay.receipt.ticket_id is None
+    assert db.db.execute("SELECT COUNT(*) FROM customer_service_tickets").fetchone()[0]==0
+    assert db.db.execute("SELECT COUNT(*) FROM customer_service_ticket_events").fetchone()[0]==0
     assert db.db.execute("SELECT COUNT(*) FROM line_notification_source_events WHERE source_domain='line_feedback'").fetchone()[0]==1
 
 

@@ -1,4 +1,4 @@
-"""Canonical M2 feedback owner tests: terminal replay, conflict, ticket linkage and aggregate."""
+"""Canonical M2 feedback owner tests: terminal replay, conflict, and aggregate without new service tickets."""
 
 import json
 
@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from domains.customer_service.ticket import CustomerServiceCategory
-from domains.line.identities import LineUserId, LineWebhookEventId
+from domains.line.identities import LineSourceType, LineUserId, LineWebhookEventId
 from infrastructure.mysql.knowledge_retrieval_repository import MySqlKnowledgeRetrievalRepository
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
 from api.routes.line_ai_events import preview_router
@@ -106,17 +106,17 @@ def _command(outcome, key="feedback-key", source="reply-1"):
     )
 
 
-def test_unresolved_is_durable_and_links_exact_customer_service_ticket():
+def test_unresolved_is_durable_without_customer_service_ticket():
     uow = _Uow()
     app = LineFeedbackApplication(lambda: uow, lambda: datetime(2026, 9, 1, tzinfo=timezone.utc))
 
     result = app.apply(_command(FeedbackOutcome.UNRESOLVED))
 
-    assert result.root.ticket_id == 42
+    assert result.root.ticket_id is None
     assert result.receipt.outcome is FeedbackOutcome.UNRESOLVED
     assert result.receipt.replayed is False
     assert len(uow.feedback.items) == 1
-    assert len(uow.customer_service.calls) == 1
+    assert uow.customer_service.calls == []
     assert uow.commits == 1
 
 
@@ -129,7 +129,7 @@ def test_exact_replay_returns_original_receipt_without_second_ticket_or_root():
 
     assert replay.root == first.root
     assert replay.receipt.replayed is True
-    assert len(uow.customer_service.calls) == 1
+    assert uow.customer_service.calls == []
     assert len(uow.feedback.items) == 1
 
     readback = app.query("U-test", "reply-1")
@@ -229,6 +229,12 @@ def test_development_router_preview_exposes_fixed_buckets_and_requested_confiden
     assert (unavailable.semantic_bucket, unavailable.reason_code, unavailable.confidence, unavailable.score_band) == (
         "manual_fallback", "deterministic_answer_unavailable", 90, "gte_80",
     )
+    assert unavailable.ticket_id is None and not unavailable.apply_ready
+    with pytest.raises(HTTPException) as retired:
+        preview_router(LineRouterPreviewRequest(
+            text="高信心但沒有已發布答案", source_event_id="preview-unavailable", score=90, apply_manual_fallback=True,
+        ))
+    assert retired.value.status_code == 410 and retired.value.detail == "manual_fallback_retired"
 
 
 def test_router_preview_is_closed_outside_development_no_auth_profile(monkeypatch) -> None:
@@ -301,7 +307,11 @@ def test_answer_delivery_buttons_carry_the_exact_answer_receipt() -> None:
     ]
 
 
-def test_feedback_postback_records_root_and_ack_in_the_event_uow() -> None:
+@pytest.mark.parametrize("outcome, guidance", [
+    (FeedbackOutcome.RESOLVED, "感謝您的肯定與回饋！"),
+    (FeedbackOutcome.UNRESOLVED, "已記錄未解決。如需協助，請直接在此聊天室留言。"),
+])
+def test_feedback_postback_records_root_and_reply_in_the_event_uow(outcome, guidance) -> None:
     now = datetime(2026, 9, 9, 13, 20, tzinfo=timezone.utc)
     unit_of_work = _Uow()
     unit_of_work.delivery_tasks = _KnowledgeFeedbackDeliveries()
@@ -316,19 +326,21 @@ def test_feedback_postback_records_root_and_ack_in_the_event_uow() -> None:
     inbox = SimpleNamespace(
         event=SimpleNamespace(
             event_id=LineWebhookEventId("event-feedback-9"),
-            source=SimpleNamespace(user_id=LineUserId("U-test")),
+            source=SimpleNamespace(user_id=LineUserId("U-test"), source_type=LineSourceType.USER),
             payload_json=json.dumps(
-                {"postback": {"data": "feedback:knowledge:9:resolved"}}
+                {"postback": {"data": f"feedback:knowledge:9:{outcome.value}"}}
             ),
         )
     )
 
-    handler.handle_postback(inbox, unit_of_work)
+    assert handler.handle_reply_postback(inbox, unit_of_work)
 
     root = unit_of_work.feedback.items[("U-test", "knowledge-answer-receipt:9")]
-    assert root.outcome is FeedbackOutcome.RESOLVED
+    assert root.outcome is outcome
+    assert root.ticket_id is None
     assert root.binding_version == 0
     assert root.catalog_revision == 1
     assert len(unit_of_work.delivery_tasks.items) == 1
     acknowledgement = json.loads(unit_of_work.delivery_tasks.items[0].payload_json)
-    assert acknowledgement["text"] == "感謝您的肯定與回饋！"
+    assert acknowledgement["text"] == guidance
+    assert unit_of_work.delivery_tasks.items[0].source_aggregate_type == "line_webhook_reply"

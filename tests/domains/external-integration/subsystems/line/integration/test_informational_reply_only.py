@@ -179,7 +179,7 @@ def test_line_unit_of_work_opens_and_cancels_retired_log_reminder_before_deliver
     sender.reply.assert_not_called()
 
 
-@pytest.mark.parametrize("text", ["服務說明", "服務流程", "收費與補助", "查詢服務進度", "服務登記", "其他問題", "恢復AI"])
+@pytest.mark.parametrize("text", ["服務說明", "服務流程", "收費與補助", "查詢服務進度", "服務登記", "其他問題", "恢復AI", "修改登記資料", "修改服務地址"])
 def test_information_and_disabled_prompts_are_new_reply_only_work(text):
     unit = Unit()
     assert LineServiceHelpApplication(lambda: NOW).handle(inbox(text), unit, USER, text)
@@ -194,17 +194,12 @@ def test_information_and_disabled_prompts_are_new_reply_only_work(text):
     assert unit.delivery_tasks.reply_reads[0][1] == task.request.recipient
 
 
-@pytest.mark.parametrize("text", ["修改登記資料", "修改服務地址", "我要客訴：需要專員處理"])
-def test_business_intake_acknowledgements_still_use_push(text):
+@pytest.mark.parametrize("text", ["呼叫專員", "我要客訴：需要專員處理"])
+def test_retired_contact_and_complaint_leave_no_webhook_delivery_or_ticket(text):
     unit = Unit()
-    gateway = SimpleNamespace(hold_guard=lambda *args: None, create_for_ticket=lambda *args: None)
-    assert LineServiceHelpApplication(lambda: NOW, escalation_gateway=gateway).handle(inbox(text), unit, USER, text)
-    unit.customer_service.create_or_append.assert_called_once()
-    assert unit.delivery_tasks.tasks[1].request.source_aggregate_type == "line_webhook_event"
-    sender = provider()
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 1
-    sender.send.assert_called_once()
-    sender.reply.assert_not_called()
+    assert not LineServiceHelpApplication(lambda: NOW).handle(inbox(text), unit, USER, text)
+    unit.customer_service.create_or_append.assert_not_called()
+    assert unit.delivery_tasks.tasks == {}
 
 
 @pytest.mark.parametrize("text", ["綁定訂單", "我是月嫂", "綁定後台帳號"])
@@ -284,7 +279,7 @@ def test_reply_only_failures_never_push_or_automatically_retry(outcome):
 
 
 @pytest.mark.parametrize("source,key", [("line_webhook_event", "service-help:menu:synthetic-event"),
-    ("line_webhook_event", "service-help:ticket:synthetic-event"), ("matching_response_event", "matching-confirmation"),
+    ("matching_response_event", "matching-confirmation"),
     ("line_identity", "identity-result"), ("customer_service_assistance_ack", "deposit-assistance")])
 def test_old_queue_and_business_result_sources_keep_their_push_policy(source, key):
     unit, sender = Unit(), provider()
@@ -505,7 +500,7 @@ def test_background_worker_records_stranded_reply_without_provider_call():
     sender.reply.assert_not_called()
 
 
-def test_deposit_assistance_replies_in_webhook_and_leaves_ticket_for_worker():
+def test_old_deposit_assistance_replies_in_webhook_and_never_creates_a_ticket():
     from subsystems.line.deposit_notifications import handle_deposit_assistance
 
     unit = Unit()
@@ -517,7 +512,7 @@ def test_deposit_assistance_replies_in_webhook_and_leaves_ticket_for_worker():
     [reply] = unit.delivery_tasks.tasks.values()
     assert reply.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
     assert handle_deposit_assistance("deposit-assistance:CASE-1", event, unit)
-    unit.customer_service.create_or_append.assert_called_once()
+    unit.customer_service.create_or_append.assert_not_called()
     assert list(unit.delivery_tasks.tasks.values()) == [reply]
 
 
@@ -570,12 +565,13 @@ def test_payment_reminder_ack_and_assistance_postback_group_and_private_flow(sta
     reply_task_ast = unit_ast.delivery_tasks.tasks[1]
     assert reply_task_ast.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
     assert reply_task_ast.request.recipient == LineRecipient(expected_recipient_type, expected_identity)
-    assert json.loads(reply_task_ast.request.payload_json)["text"] == PAYMENT_ASSISTANCE_ACK
+    expected_guidance = "如有繳款疑問，請直接在此案件群組留言。" if group else PAYMENT_ASSISTANCE_ACK
+    assert json.loads(reply_task_ast.request.payload_json)["text"] == expected_guidance
     unit_ast.customer_service.create_or_append.assert_not_called()
 
     assert handle_payment_reminder_postback(data_ast, ev_ast, unit_ast, reply_only=False)
-    unit_ast.customer_service.create_or_append.assert_called_once()
-    assert any(a.action == "payment_assistance_requested" for a in unit_ast.audit)
+    unit_ast.customer_service.create_or_append.assert_not_called()
+    assert not unit_ast.audit and not unit_ast._receipts
 
 
 def test_deferred_inbox_event_remains_leased_until_reply_attempt_finishes():
@@ -681,7 +677,9 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     unit.matching_notifications = repo_cg
     LineMatchingPostbackApplication(matching_app).handle(postback_inbox("matching:safe-token-12345678901234567890:willing", event_id="ev-match-cg"), unit)
     # 3) Deposit assistance postback ack
-    assert handle_deposit_assistance("deposit-assistance:CASE-1", postback_inbox("deposit-assistance:CASE-1", event_id="ev-dep").event, unit)
+    assert handle_deposit_assistance(
+        "deposit-assistance:CASE-1", postback_inbox("deposit-assistance:CASE-1", event_id="ev-dep").event, unit, reply_only=True,
+    )
 
     expected_events = ["ev-cand", "ev-match", "ev-match-cg", "ev-dep"]
     assert [t.request.source_aggregate_type for t in unit.delivery_tasks.tasks.values()] == [REPLY_ONLY_WEBHOOK_SOURCE] * 4

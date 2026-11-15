@@ -78,7 +78,7 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "service_help_menu": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-service-help?tab=ai",
         "postback_identity": None,
     },
     "order_update_menu": {
@@ -88,38 +88,33 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "order_update_request": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-order-update",
         "postback_identity": None,
     },
     "service_flow": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-service-help?tab=ai",
         "postback_identity": None,
     },
     "payment_subsidy": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-service-help?tab=ai",
         "postback_identity": None,
     },
     "service_progress": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": None,
         "postback_identity": None,
     },
     "profile_update": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-profile-guard",
         "postback_identity": None,
     },
     "other": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": "/line-service-help?tab=ai",
         "postback_identity": None,
-    },
-    "human_handoff": {
-        "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
-        "postback_identity": "customer-service:handoff:confirm",
     },
     "resume_ai_assistant": {
         "tier": "navigation",
@@ -133,7 +128,7 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "feedback_unresolved": {
         "tier": "navigation",
-        "public_route": "/line-mobile-admin?target=customer_service",
+        "public_route": None,
         "postback_identity": None,
     },
     "menu_switch_help": {
@@ -165,11 +160,6 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "tier": "navigation",
         "public_route": None,
         "postback_identity": "line:group-postponement",
-    },
-    "staff_assistance_close": {
-        "tier": "admin",
-        "public_route": "/line-mobile-admin?target=customer_service",
-        "postback_identity": "line:staff-assistance-close",
     },
 }
 
@@ -223,16 +213,6 @@ _BASE_ALIASES: dict[str, list[str]] = {
     ],
     "profile_update": ["修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤"],
     "other": ["其他問題", "其他", "不是以上", "問題", "詢問"],
-    "human_handoff": [
-        "聯絡工會人員",
-        "聯絡專人",
-        "聯絡專人服務",
-        "呼叫專員",
-        "聯絡工會專員",
-        "專人客服",
-        "轉接真人客服",
-        "轉真人客服",
-    ],
     "resume_ai_assistant": [
         "恢復AI助理",
         "恢復AI",
@@ -249,7 +229,6 @@ _BASE_ALIASES: dict[str, list[str]] = {
     "menu_switch_staff": ["月嫂專區", "切換月嫂"],
     "group_helper_menu": ["小幫手", "工會", "月嫂選單", "服務選單"],
     "group_postponement": ["雙方合意延期"],
-    "staff_assistance_close": ["已處理結案", "專員已處理結案", "協助結案"],
 }
 
 

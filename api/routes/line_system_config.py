@@ -823,9 +823,9 @@ def delete_liff_field(
 # ---------------------------------------------------------------------------
 @router.get("/customer-service")
 def get_customer_service_config():
-    raise HTTPException(status_code=410, detail="閒置客服設定已停用；客服案件請使用客服中心。")
+    raise HTTPException(status_code=410, detail="客服工單設定已停用，請在 LINE 官方帳號處理對話。")
 
 
 @router.put("/customer-service", dependencies=[Depends(require_line_manager)])
 def update_customer_service_config():
-    raise HTTPException(status_code=410, detail="閒置客服設定已停用；客服案件請使用客服中心。")
+    raise HTTPException(status_code=410, detail="客服工單設定已停用，請在 LINE 官方帳號處理對話。")

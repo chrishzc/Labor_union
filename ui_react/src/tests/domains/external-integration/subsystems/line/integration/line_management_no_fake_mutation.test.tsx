@@ -4,7 +4,7 @@
  */
 import { CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE } from './fixtures/customer_service_reminder_fixtures';
 import { readFileSync } from 'node:fs';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient, CustomerServiceReminderClient } from '../../../../../../api/customer_service/customer_service_client';
 import { CustomerServiceClientError } from '../../../../../../api/customer_service/customer_service_errors';
@@ -20,7 +20,7 @@ import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_F
 type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'> & Partial<CustomerServiceReminderClient>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 describe('LINE 管理頁禁止假 mutation', () => {
   it('查詢失敗先顯示可讀訊息，技術錯誤碼預設收合', async () => {
@@ -32,11 +32,12 @@ describe('LINE 管理頁禁止假 mutation', () => {
       getTicketDetail: vi.fn().mockRejectedValue(new Error('not used')),
     };
 
+    window.history.replaceState(null, '', '#line-management?tab=tickets');
     render(<LineManagementPage customerService={customer} />);
 
     const alerts = await screen.findAllByRole('alert');
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toHaveTextContent('客服案件暫時無法載入');
+    expect(alerts[0]).toHaveTextContent('讀取歷史客服紀錄失敗');
     expect(alerts[0]).not.toHaveTextContent('HTTP_503');
     expect(alerts[0]).not.toHaveTextContent('Service Unavailable');
   });
@@ -97,7 +98,8 @@ describe('LINE 管理頁禁止假 mutation', () => {
       />
     );
     const view = render(page('service'));
-    await waitFor(() => expect(screen.getByText('ORD-TEST-0031')).toBeInTheDocument());
+    await screen.findByRole('button', { name: '查閱歷史客服紀錄' });
+    expect(screen.queryByRole('button', { name: '客服案件' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '檢查結案影響' })).not.toBeInTheDocument();
@@ -106,10 +108,10 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('測試客戶甲');
     expect(screen.queryByRole('button', { name: /產生綁定邀請/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看測試客戶甲的客戶身分' }));
-    await screen.findByRole('button', { name: '解除此身分' });
+    fireEvent.click(screen.getByRole('button', { name: '解除綁定' }));
+    const revocationDialog = await screen.findByRole('dialog', { name: '是否確認解除綁定？' });
     expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉身分明細' }));
+    fireEvent.click(within(revocationDialog).getByRole('button', { name: '取消' }));
 
     expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '案件群組' }));

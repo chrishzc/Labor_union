@@ -21,6 +21,7 @@ from subsystems.line.delivery_contracts import (
     RETIRED_CONTRACT_DELIVERY_SOURCES,
     RecordLineDeliveryAttemptCommand,
     candidate_coordination_delivery_retired,
+    customer_service_delivery_retired,
 )
 from shared_kernel.identities import ActorContext
 from subsystems.line.ports import LineMessagingProviderPort, LineUnitOfWorkPort
@@ -100,6 +101,7 @@ class LineDeliveryWorker:
             "candidate_coordination_retired": "retired-candidate-coordination",
             "contract_signing_reminder_retired": "retired-contract-signing-reminder",
             "contract_document_delivery_retired": "retired-contract-document-delivery",
+            "customer_service_delivery_retired": "retired-customer-service-delivery",
         }.get(validation_failure)
         if retired_key_prefix is not None:
             with self._unit_of_work_factory() as unit:
@@ -278,6 +280,8 @@ class LineDeliveryWorker:
             return "contract_signing_reminder_retired"
         if candidate_coordination_delivery_retired(task.request):
             return "candidate_coordination_retired"
+        if customer_service_delivery_retired(task.request):
+            return "customer_service_delivery_retired"
         if task.request.source_aggregate_type in {"runtime_health_event", "customer_service_escalation"}:
             return "line_admin_push_retired"
         if task.request.source_aggregate_type in {'staff_leave_customer_coordination', 'staff_leave_customer_decision'}:
