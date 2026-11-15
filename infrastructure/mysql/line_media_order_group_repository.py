@@ -5,6 +5,8 @@ Description: 以 MySQL 保存 LINE 媒體與群組綁定，並提供 COUNT/LIMIT
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 from pymysql.err import IntegrityError
@@ -15,9 +17,13 @@ from domains.line.order_group import (
     LineOrderGroupBindingSnapshot,
     LineOrderGroupBindingStatus,
     LineOrderGroupBindingConflict,
+    LineOrderGroupBindingNotFound,
     validate_invitation_url,
     build_order_group_binding_candidate,
+    require_order_group_history_delete,
 )
+from infrastructure.mysql.admin_command_repository import AdminCommandRepository
+from infrastructure.mysql.nas_mutations import call_mutation
 from infrastructure.mysql.line_repository_support import (
     aware_utc,
     database_utc,
@@ -25,6 +31,7 @@ from infrastructure.mysql.line_repository_support import (
     optional_row,
     source_identity,
 )
+from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ExpectedVersion
 from subsystems.line.media_contracts import (
     ArchiveLineMediaResult,
@@ -38,6 +45,8 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupInvitationSettings,
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
+    UnbindLineOrderGroupCommand,
+    DeleteLineOrderGroupHistoryCommand,
     LineOrderGroupCommandOutcome,
     LineOrderGroupEventPage,
     LineOrderGroupEventRecord,
@@ -164,7 +173,7 @@ class MySqlLineOrderGroupBindingRepository:
         return OpeningGreetingSkipPage(items, page, page_size, total, (total + page_size - 1) // page_size)
 
     def workspace_list(self, *, search, status, page, page_size) -> LineOrderGroupWorkspacePage:
-        conditions = []
+        conditions = [_WORKSPACE_VISIBLE_SQL]
         parameters = []
         if status:
             conditions.append("g.binding_status=%s")
@@ -173,7 +182,7 @@ class MySqlLineOrderGroupBindingRepository:
             conditions.append("g.case_no LIKE %s ESCAPE '='")
             literal = search.replace("=", "==").replace("%", "=%").replace("_", "=_")
             parameters.append(f"%{literal}%")
-        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        where = " WHERE " + " AND ".join(conditions)
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM line_order_group_bindings g" + where, parameters)
             total = int(cursor.fetchone()["total"])
@@ -190,7 +199,7 @@ class MySqlLineOrderGroupBindingRepository:
 
     def workspace_get(self, case_no) -> LineOrderGroupWorkspaceRecord | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_WORKSPACE_RECORD_SQL + " WHERE g.case_no=%s", (case_no,))
+            cursor.execute(_WORKSPACE_RECORD_SQL + " WHERE g.case_no=%s AND " + _WORKSPACE_VISIBLE_SQL, (case_no,))
             row = cursor.fetchone()
         return self._workspace_records((row,))[0] if row else None
 
@@ -271,6 +280,7 @@ class MySqlLineOrderGroupBindingRepository:
             result.append(LineOrderGroupWorkspaceRecord(
                 case, LineOrderGroupBindingStatus(row["binding_status"]), row["customer_name"],
                 bound_at, invited_at, tuple(members), latest.get(case),
+                int(row["aggregate_version"]), bool(row["group_bound"]),
             ))
         return tuple(result)
 
@@ -442,6 +452,31 @@ class MySqlLineOrderGroupBindingRepository:
             self._append_event(cursor, command, candidate)
         return BindLineOrderGroupResult(LineOrderGroupCommandOutcome.CREATED, candidate)
 
+    def unbind(self, command: UnbindLineOrderGroupCommand) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_SELECT_SQL + " FOR UPDATE", (command.case_no,))
+            row = optional_row(cursor.fetchone())
+            if row is None:
+                raise LineOrderGroupBindingNotFound(command.case_no)
+            candidate = build_order_group_binding_candidate(
+                _group_snapshot(row), group_id=None,
+                expected_version=command.expected_version, actor=command.actor,
+            )
+            cursor.execute(
+                "UPDATE line_order_group_bindings SET group_id=NULL,binding_status='unbound',"
+                "invitation_url=NULL,last_invitation_at_utc=NULL,activated_at_utc=NULL,aggregate_version=%s "
+                "WHERE case_no=%s AND aggregate_version=%s",
+                (candidate.resulting_version.value, command.case_no, candidate.expected_version.value),
+            )
+            if cursor.rowcount != 1:
+                raise LineOrderGroupBindingConflict("LINE order-group binding is stale")
+            cursor.execute(
+                "UPDATE line_order_group_participants SET invitation_status='pending',"
+                "joined_at_utc=NULL,left_at_utc=NULL WHERE case_no=%s",
+                (command.case_no,),
+            )
+            self._append_event(cursor, command, candidate)
+
     def _locked_snapshot(self, cursor, case_no):
         cursor.execute(
             "INSERT IGNORE INTO line_order_group_bindings (case_no) "
@@ -453,6 +488,59 @@ class MySqlLineOrderGroupBindingRepository:
         if row is None:
             raise LookupError("line_order_group_not_found")
         return _group_snapshot(row)
+
+    def delete_history(self, command: DeleteLineOrderGroupHistoryCommand) -> int:
+        family = "line_order_group_history_delete/v1"
+        case_no = command.case_no
+        expected = command.expected_version.value
+        actor = command.actor.actor_id
+        digest = fingerprint_payload({"case_no": case_no, "version": expected, "actor": actor}).value
+        key = f"{family}:{digest}"
+        receipts = AdminCommandRepository(self._connection)
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_SELECT_SQL + " FOR UPDATE", (case_no,))
+            row = optional_row(cursor.fetchone())
+            if row is None:
+                raise LineOrderGroupBindingNotFound(case_no)
+            receipt = receipts.load_receipt(family, key)
+            if receipt is not None:
+                result = receipt["result_snapshot"]
+                if isinstance(result, str):
+                    result = json.loads(result)
+                return int(result["deleted_events"])
+
+            require_order_group_history_delete(_group_snapshot(row), command.expected_version)
+            cursor.execute(_GROUP_EVENTS_COUNT_SQL, (case_no, case_no))
+            deleted_events = int(cursor.fetchone()["total"])
+            if not deleted_events:
+                raise LineOrderGroupBindingConflict("LINE order-group history is already empty")
+            cursor.execute(
+                "INSERT INTO application_command_claims "
+                "(idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (key, family, f"case:{case_no}", digest, command.correlation_id.value),
+            )
+            if os.getenv("DEPLOYMENT_PROFILE") == "nas":
+                call_mutation(cursor, "lu_nas_delete_order_group_history_v1", case_no, expected, key)
+            else:
+                cursor.execute(
+                    "SET @line_group_history_delete_key=%s,@line_group_history_delete_case=%s", (key, case_no),
+                )
+                try:
+                    cursor.execute("DELETE FROM line_order_group_runtime_events WHERE case_no=%s", (case_no,))
+                    cursor.execute("DELETE FROM line_order_group_binding_events WHERE case_no=%s", (case_no,))
+                    cursor.execute("DELETE FROM line_order_group_participants WHERE case_no=%s", (case_no,))
+                finally:
+                    cursor.execute("SET @line_group_history_delete_key=NULL,@line_group_history_delete_case=NULL")
+            cursor.execute(
+                "UPDATE line_order_group_bindings SET aggregate_version=aggregate_version+1 "
+                "WHERE case_no=%s AND group_id IS NULL AND aggregate_version=%s",
+                (case_no, expected),
+            )
+            if cursor.rowcount != 1:
+                raise LineOrderGroupBindingConflict("LINE order-group binding is stale")
+            receipts.save_receipt(family, key, digest, digest, actor, "", {"deleted_events": deleted_events})
+        return deleted_events
 
     def _existing_event(self, cursor, key):
         cursor.execute(_GROUP_EVENT_SELECT_SQL, (key,))
@@ -481,14 +569,17 @@ class MySqlLineOrderGroupBindingRepository:
         return BindLineOrderGroupResult(LineOrderGroupCommandOutcome.EXISTING, candidate)
 
     def _append_event(self, cursor, command, candidate):
-        action = "bound" if candidate.before_group_id is None else "replaced"
+        if candidate.resulting_group_id is None:
+            action = "released"
+        else:
+            action = "bound" if candidate.before_group_id is None else "replaced"
         cursor.execute(
             _GROUP_EVENT_INSERT_SQL,
             (
                 command.case_no,
                 action,
                 candidate.before_group_id.value if candidate.before_group_id else None,
-                candidate.resulting_group_id.value,
+                candidate.resulting_group_id.value if candidate.resulting_group_id else None,
                 candidate.expected_version.value,
                 candidate.resulting_version.value,
                 command.actor.actor_id,
@@ -675,9 +766,15 @@ _WORKSPACE_BIND_JOIN = (
     "AND b.resulting_version=g.aggregate_version AND b.resulting_group_id=g.group_id "
     "ORDER BY b.id DESC LIMIT 1) "
 )
+_WORKSPACE_VISIBLE_SQL = (
+    "(g.group_id IS NOT NULL OR EXISTS (SELECT 1 FROM line_order_group_binding_events history "
+    "WHERE history.case_no=g.case_no) OR EXISTS (SELECT 1 FROM line_order_group_runtime_events history "
+    "WHERE history.case_no=g.case_no))"
+)
 _WORKSPACE_RECORD_SQL = (
     "SELECT g.case_no,g.binding_status,c.name AS customer_name,"
-    "latest_binding.occurred_at_utc AS bound_at_utc,g.last_invitation_at_utc "
+    "latest_binding.occurred_at_utc AS bound_at_utc,g.last_invitation_at_utc,"
+    "g.aggregate_version,g.group_id IS NOT NULL AS group_bound "
     "FROM line_order_group_bindings g LEFT JOIN orders o ON o.case_no=g.case_no "
     "LEFT JOIN clients c ON c.id=o.client_id " + _WORKSPACE_BIND_JOIN
 )

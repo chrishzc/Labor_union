@@ -7,24 +7,26 @@
   <title>月嫂訂單查詢</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #fff7f8; color: #27272a; }
-    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    p { color: #71717a; line-height: 1.6; }
-    .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 16px; }
-    label { display: block; font-weight: 700; margin-bottom: 8px; }
-    input { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 12px; font-size: 16px; }
-    button { width: 100%; border: 0; border-radius: 6px; padding: 13px 16px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; margin-top: 12px; }
-    button.secondary { background: #52525b; }
-    .message { margin-top: 16px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #f8f5f0; color: #241c18; }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 44px; }
+    h1 { margin: 0 0 8px; font-size: 32px; font-weight: 800; color: #241c18; }
+    p { color: #54443b; font-size: 17px; line-height: 1.6; }
+    .panel { background: #fff; border: 2px solid #ded2c9; border-radius: 16px; padding: 20px; margin-top: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    label { display: block; font-weight: 800; font-size: 18px; margin-bottom: 10px; color: #241c18; }
+    input { width: 100%; border: 2px solid #ded2c9; border-radius: 12px; padding: 12px 16px; font-size: 18px; color: #241c18; min-height: 52px; outline: none; }
+    input:focus { border-color: #973b17; box-shadow: 0 0 0 2px #fcebdd; }
+    button { width: 100%; border: 0; border-radius: 14px; padding: 14px 20px; font-size: 19px; font-weight: 800; color: #fff; background: #973b17; margin-top: 14px; min-height: 54px; cursor: pointer; transition: all 0.15s ease; }
+    button:active { background: #7c2d0e; }
+    button.secondary { background: #54443b; }
+    .message { margin-top: 16px; padding: 14px 18px; border-radius: 12px; background: #f2ede9; color: #241c18; font-size: 16px; line-height: 1.6; }
     .error { background: #fee2e2; color: #b91c1c; }
-    .order { background: #fff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 16px; margin-top: 14px; }
-    .order h2 { margin: 0 0 10px; font-size: 20px; }
+    .order { background: #fff; border: 2px solid #ded2c9; border-radius: 16px; padding: 20px; margin-top: 18px; box-shadow: 0 3px 10px rgba(0,0,0,0.05); }
+    .order h2 { margin: 0 0 14px; font-size: 24px; font-weight: 800; color: #973b17; border-bottom: 1.5px solid #f2e6dc; padding-bottom: 10px; }
     .grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
-    .item { border-bottom: 1px solid #f4f4f5; padding: 8px 0; }
-    .item b { display: block; color: #52525b; font-size: 13px; margin-bottom: 3px; }
-    details { margin-top: 12px; }
-    summary { cursor: pointer; font-weight: 700; color: #be123c; }
+    .item { border-bottom: 1px solid #f2ede9; padding: 10px 0; font-size: 17px; }
+    .item b { display: block; color: #54443b; font-size: 15px; margin-bottom: 4px; font-weight: 700; }
+    details { margin-top: 14px; }
+    summary { cursor: pointer; font-weight: 800; color: #973b17; font-size: 17px; }
     @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   </style>
 </head>

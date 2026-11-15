@@ -303,16 +303,13 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     ]
     assert "?entry=gateway" in action_uris or "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
-    assert "?target=order_update" in action_uris
     assert "?target=faq" not in action_uris  # FAQ is a tab of the merged LIFF entry.
     assert "?target=ai_assistant" in action_uris
     assert "服務說明" not in message_texts
     assert "常見問答" not in message_texts
+    assert customer_menu["size"] == {"width": 2500, "height": 843}
     assert customer_quadrants == [
-        ("改個人資料", "uri", None, "?target=profile_update"),
-        ("改訂單內容", "uri", None, "?target=order_update"),
         ("常見問答", "uri", None, "?target=ai_assistant"),
-        ("聯絡專人", "postback", None, "customer-service:handoff:confirm"),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris

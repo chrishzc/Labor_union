@@ -22,7 +22,7 @@
 - `clients`（`#data-browser`、`#databrowser`、`#client-roster` alias 均解析至此頁，使用 `ClientRegistryPage`）
 - `data-import`
 - `reports`
-- `line-management` — LINE 營運（身分與授權、案件群組、歷史客服紀錄唯讀查閱）
+- `line-management` — LINE 營運（身分與授權、案件群組）
 - `line-notifications` — 通知與寄送（[通知與發送及範本分類](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)、寄送與異常）
 - `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖、引導動作）。引導動作分頁可用 `#line-interface?tab=guidance` 直接開啟。
 - `line-ai-events` — AI 客服工作室（常見問答、回答測試、回饋分析、模型設定）
@@ -61,7 +61,8 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
 - **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
 - **LINE 加入好友歡迎訊息設定**：`GET /api/v1/line/onboarding`、`POST /api/v1/line/onboarding/preview` 與 `PUT /api/v1/line/onboarding` 回傳 typed `410 Gone`；加入好友歡迎訊息改由 LINE 官方帳號後台設定，通知工作台與公版目錄不再列管歡迎詞。
-- **LINE 客服工單與舊訂單異動送件**。舊客服提醒、客服回覆與行動客服 API 回 `410 Gone`。歷史查詢與切換結案保留原授權。舊訂單異動 `POST /api/v1/line/order-change/apply` 回 `410 Gone`，新版表單以 `POST /api/v1/line/order-change/requests` 送件。
+- **LINE 客服工單與舊訂單異動送件**。舊客服工單摘要、列表、明細、客服提醒、客服回覆與行動客服 API 回 `410 Gone`。切換結案保留原授權。舊訂單異動 `POST /api/v1/line/order-change/apply` 回 `410 Gone`，新版表單以 `POST /api/v1/line/order-change/requests` 送件。
+- **客戶端自填改單與改個資頁面退役**：`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 頁面端點及實體 HTML 直接自路由移除、不開放連線；客戶改單與改個資需求統一於 LINE 官方帳號對話留訊由工會專員於管理後台維護。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
 ### 3.3 Windows NAS 維護入口

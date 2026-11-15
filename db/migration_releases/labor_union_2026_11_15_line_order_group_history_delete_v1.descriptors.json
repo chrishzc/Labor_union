@@ -1,0 +1,45 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-line-order-group-history-delete-2026-11-15-v1",
+  "descriptors": {
+    "1078_line_order_group_history_delete_guards.sql": {
+      "tables": {},
+      "parent_columns": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [
+        "trg_line_order_group_binding_events_before_delete",
+        "trg_line_order_group_runtime_events_before_delete"
+      ]
+    }
+  },
+  "predecessor_triggers": {
+    "trg_line_order_group_binding_events_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "line_order_group_binding_events",
+      "action_statement": "atom(beginifnotcoalesce(((@registry_delete_keyisnotnulland@registry_delete_caseisnotnullandexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='registry_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@registry_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.command_family='registry_delete/v1'andreceipt.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin))andnotexists(select1fromcontract_signing_eventssigned_eventwheresigned_event.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andsigned_event.event_type='signed_received')andnotexists(select1fromorder_contract_flow_eventscompletedwherecompleted.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andcompleted.event_type='contract_completed'))and((old.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)))),false)thensignalsqlstate'45000'setmessage_text='line_order_group_binding_events records cannot be deleted';endif;end)"
+    },
+    "trg_line_order_group_runtime_events_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "line_order_group_runtime_events",
+      "action_statement": "atom(beginifnotcoalesce(((@registry_delete_keyisnotnulland@registry_delete_caseisnotnullandexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='registry_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@registry_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.command_family='registry_delete/v1'andreceipt.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin))andnotexists(select1fromcontract_signing_eventssigned_eventwheresigned_event.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andsigned_event.event_type='signed_received')andnotexists(select1fromorder_contract_flow_eventscompletedwherecompleted.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andcompleted.event_type='contract_completed'))and((old.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)))),false)thensignalsqlstate'45000'setmessage_text='line_order_group_runtime_events records cannot be deleted';endif;end)"
+    }
+  },
+  "successor_triggers": {
+    "trg_line_order_group_binding_events_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "line_order_group_binding_events",
+      "action_statement": "atom(beginifnotcoalesce(((@registry_delete_keyisnotnulland@registry_delete_caseisnotnullandexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='registry_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@registry_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.command_family='registry_delete/v1'andreceipt.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin))andnotexists(select1fromcontract_signing_eventssigned_eventwheresigned_event.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andsigned_event.event_type='signed_received')andnotexists(select1fromorder_contract_flow_eventscompletedwherecompleted.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andcompleted.event_type='contract_completed'))and((old.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci))))or(@line_group_history_delete_keyisnotnulland@line_group_history_delete_caseisnotnullandold.case_no=(convert(@line_group_history_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@line_group_history_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='line_order_group_history_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@line_group_history_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.idempotency_key=(convert(@line_group_history_delete_keyusingutf8mb4)collateutf8mb4_bin))andexists(select1fromline_order_group_bindingsbindingwherebinding.case_no=old.case_noandbinding.group_idisnullandbinding.binding_status='unbound')),false)thensignalsqlstate'45000'setmessage_text='line_order_group_binding_events records cannot be deleted';endif;end)"
+    },
+    "trg_line_order_group_runtime_events_before_delete": {
+      "action_timing": "BEFORE",
+      "event_manipulation": "DELETE",
+      "event_object_table": "line_order_group_runtime_events",
+      "action_statement": "atom(beginifnotcoalesce(((@registry_delete_keyisnotnulland@registry_delete_caseisnotnullandexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='registry_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@registry_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.command_family='registry_delete/v1'andreceipt.idempotency_key=(convert(@registry_delete_keyusingutf8mb4)collateutf8mb4_bin))andnotexists(select1fromcontract_signing_eventssigned_eventwheresigned_event.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andsigned_event.event_type='signed_received')andnotexists(select1fromorder_contract_flow_eventscompletedwherecompleted.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andcompleted.event_type='contract_completed'))and((old.case_no=(convert(@registry_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci))))or(@line_group_history_delete_keyisnotnulland@line_group_history_delete_caseisnotnullandold.case_no=(convert(@line_group_history_delete_caseusingutf8mb4)collateutf8mb4_unicode_ci)andexists(select1fromapplication_command_claimscmdwherecmd.idempotency_key=(convert(@line_group_history_delete_keyusingutf8mb4)collateutf8mb4_bin)andcmd.command_family='line_order_group_history_delete/v1'andcmd.aggregate_identity=(concat('case:',convert(@line_group_history_delete_caseusingutf8mb4))collateutf8mb4_bin))andnotexists(select1fromadmin_command_receiptsreceiptwherereceipt.idempotency_key=(convert(@line_group_history_delete_keyusingutf8mb4)collateutf8mb4_bin))andexists(select1fromline_order_group_bindingsbindingwherebinding.case_no=old.case_noandbinding.group_idisnullandbinding.binding_status='unbound')),false)thensignalsqlstate'45000'setmessage_text='line_order_group_runtime_events records cannot be deleted';endif;end)"
+    }
+  }
+}

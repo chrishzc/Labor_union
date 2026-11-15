@@ -56,6 +56,22 @@ def test_management_retains_business_writes_but_not_direct_deletes_or_audit_edit
     assert not any("DELETE" in item for values in grants.values() for item in values)
 
 
+def test_order_group_history_deletion_requires_scoped_management_procedure():
+    from infrastructure.mysql.nas_permissions import DELETE_TABLES
+
+    history_tables = {"line_order_group_binding_events", "line_order_group_runtime_events", "line_order_group_participants"}
+    assert history_tables <= DELETE_TABLES
+    tables = sorted(history_tables | {"line_order_group_bindings", "orders", "admin_command_receipts", "application_command_claims"})
+    for profile in ("management", "line", "access", "maintenance"):
+        assert all("DELETE" not in privileges for _, privileges in _table_grants(profile, tables))
+    _, sql, profiles = PROCEDURES["lu_nas_delete_order_group_history_v1"]
+    assert profiles == ("management",)
+    assert "aggregate_version=p_version AND group_id IS NULL AND binding_status='unbound' FOR UPDATE" in sql
+    assert "command_family='line_order_group_history_delete/v1'" in sql
+    for table in history_tables:
+        assert f"DELETE FROM {table} WHERE case_no=p_case" in sql
+
+
 def test_fixed_procedures_have_no_dynamic_sql_or_transaction_commit():
     for name, (_, body, _) in PROCEDURES.items():
         sql = procedure_sql(name, account_names("lu_test_nas_permissions")["definer"])
@@ -174,7 +190,7 @@ def test_permission_plan_is_read_only_and_refuses_foreign_existing_accounts():
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.side_effect = [{"selected_database": database}, {"partial_revokes": 0}]
     tables = DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "scheduling_generations", "staff_matching_preference_profiles",
-        "staff_matching_preference_definitions", "admin_audit_log_archive"}
+        "staff_matching_preference_definitions", "admin_audit_log_archive", "application_command_claims", "admin_command_receipts"}
     results = [[{"name": table} for table in tables],
                [{"name": name} for name in ("application_payload", "application_version", "approved_by_actor", "approved_at_utc")],
                [], [], [], [{"name": account_names(database)["management"]}],

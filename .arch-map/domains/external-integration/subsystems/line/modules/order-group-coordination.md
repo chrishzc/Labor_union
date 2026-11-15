@@ -6,7 +6,7 @@
 
 ## Responsibility
 以已驗證的 LINE 管理員身分綁定訂單群組、同步 Orders 提供的客戶與月嫂 audience，並以 durable LINE delivery intent 轉送群組邀請；不得以客戶／月嫂資料表中的投影取代 canonical LINE role binding。
-管理端「案件群組」的綁定工作區僅觀察既有綁定，以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現；原服務日誌缺漏提醒已於 2026-11-10 隨日誌回歸群組相簿而退役移除，綁定工作區本身不增加群組 mutation。
+管理端「案件群組」以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現。具群組綁定權限者可手動解除現有綁定，再永久刪除已解除案件的群組歷程。群組解散不觸發刪除。
 工會 LINE 工作台另以正式已核銷的未結案案件與現有群組綁定差集呈現「尚未建群」，server 分頁、
 零寫入，僅提供案號、已核銷金額及複製綁定指令；不要求客戶簽約或推進案件。
 工會 LINE 工作台「訂金已付尚未建群」另提供「開工問候未送出紀錄」，以唯讀分頁呈現無有效案件群組的略過紀錄，獨立於訂金待辦與件數。
@@ -35,6 +35,7 @@
 - 管理端成員與可唯一辨識的成員事件，沿同一 current Staff join 額外投影 nullable 公會編號；只格式化月嫂姓名，客戶、未辨識對象及群組／事件順序保持原契約。
 - additive `/api/v1/line/order-groups/workspace/numbered`, `/workspace/{case_no}`, `/workspace/{case_no}/events/numbered`；舊 Query 不改義。
 - Query 固定 0 commit／receipt／outbox／provider call，不輸出群組 ID、LINE user ID、actor ID、邀請網址或指紋。
+- `POST /workspace/{case_no}/unbind` 與 `/delete-history` 使用 `ORDER_GROUP_BIND`、目前綁定版本及單一交易。解除清除現行群組與邀請網址並記錄解除歷程。刪除僅清除未綁定案件的群組事件及舊成員投影，保留版本列和刪除收據。
 - `paid_uncreated_todos` 只讀 canonical settled projection 且訂金金額大於零、正常未結案 Orders 及尚無 group_id；不將銀行待核銷或客戶自述視為已付。
 - `opening_greeting_skips` 只讀 `service_start_greeting_no_group` 稽核事件，投影案號和紀錄時間，不讀其他稽核種類或投遞記錄。
 - 成員為 Orders 目前客戶與指派月嫂；canonical role binding 與 owner projection 不一致時標未知。加入狀況只使用目前群組綁定版本之後的 membership 事件，不沿用舊群組的 joined 投影。

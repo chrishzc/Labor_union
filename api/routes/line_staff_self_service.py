@@ -142,7 +142,10 @@ def _verified_staff_self_service_flow(flow_id: str) -> LineUserId:
     with open_line_unit_of_work() as unit_of_work:
         snapshot = unit_of_work.identity_flows.get(LineIdentityFlowId(flow_id))
     if snapshot is None:
-        raise HTTPException(status_code=401, detail={"code": "line_flow_not_found", "message": "LINE 操作連結無效，請重新從圖文選單開啟"})
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "line_flow_not_found", "message": "此操作連結已逾期失效或不存在，請返回案件群組重新點選小幫手選單【雙方合意延期】。"},
+        )
     try:
         validate_identity_flow(
             snapshot,
@@ -151,7 +154,10 @@ def _verified_staff_self_service_flow(flow_id: str) -> LineUserId:
             now=datetime.now(UTC),
         )
     except ValueError as error:
-        raise HTTPException(status_code=401, detail={"code": "line_flow_invalid", "message": str(error)}) from error
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "line_flow_invalid", "message": "此操作連結已逾期失效（安全有效時間為 15 分鐘），請返回案件群組重新點選小幫手選單【雙方合意延期】。"},
+        ) from error
     return snapshot.line_user_id
 
 

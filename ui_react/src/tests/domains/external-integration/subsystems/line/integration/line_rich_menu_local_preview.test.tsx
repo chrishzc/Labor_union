@@ -4,16 +4,10 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
-import {
-  CUSTOMER_SERVICE_DETAIL_FIXTURE,
-  CUSTOMER_SERVICE_PAGE_FIXTURE,
-  CUSTOMER_SERVICE_SUMMARY_FIXTURE,
-} from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import {
   BINDING_PAGE_FIXTURE,
   BOUND_IDENTITY_FIXTURE,
@@ -25,7 +19,6 @@ import {
   LINE_RICH_MENU_OLD_PUBLICATION_FIXTURE,
 } from '../../../../../fixtures/line_configuration_query_fixtures';
 
-type CustomerQuery = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
 type IdentityQuery = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,11 +27,6 @@ describe('Rich Menu 本機互動預覽', () => {
   it('即時投影外觀與 typed message，取消還原，且維持零 mutation', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
-    const customer: CustomerQuery = {
-      getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
-      listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE),
-      getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE),
-    };
     const identity: IdentityQuery = {
       listBindings: vi.fn().mockResolvedValue(BINDING_PAGE_FIXTURE),
       getBinding: vi.fn().mockResolvedValue(BOUND_IDENTITY_FIXTURE),
@@ -59,7 +47,6 @@ describe('Rich Menu 本機互動預覽', () => {
 
     const { container } = render(
       <LineManagementPage scope="interface"
-        customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}

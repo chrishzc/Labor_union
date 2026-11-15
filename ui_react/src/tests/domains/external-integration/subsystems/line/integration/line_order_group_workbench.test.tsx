@@ -1,4 +1,4 @@
-/** Group observation acceptance: real component, bounded typed reads and no mutations. */
+/** 案件群組的查詢、解除綁定與歷程管理驗收。 */
 import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,10 +10,20 @@ import { sessionClient } from '../../../../../../api/auth/session_client';
 import type { LineOrderGroupStatus, LineOrderGroupWorkspaceRecord, LineOrderGroupWorkspaceEvent } from '../../../../../../api/line_order_groups/line_order_group_query_schemas';
 
 const event: LineOrderGroupWorkspaceEvent = { event_key: 'runtime:1', case_no: 'CASE-1', event_type: 'member_left', occurred_at: '2026-10-15T02:00:00Z', participant_role: 'staff', participant_name: '測試月嫂' };
-const record: LineOrderGroupWorkspaceRecord = { case_no: 'CASE-1', status: 'attention', customer_name: '測試客戶', bound_at: '2026-10-14T02:00:00Z', last_invitation_at: '2026-10-14T03:00:00Z', members: [{ role: 'customer', name: '測試客戶', membership_status: 'joined' }, { role: 'staff', name: '測試月嫂', membership_status: 'left' }], latest_event: event };
+const record: LineOrderGroupWorkspaceRecord = { case_no: 'CASE-1', status: 'attention', binding_version: 6, can_unbind: false, can_delete_history: false, customer_name: '測試客戶', bound_at: '2026-10-14T02:00:00Z', last_invitation_at: '2026-10-14T03:00:00Z', members: [{ role: 'customer', name: '測試客戶', membership_status: 'joined' }, { role: 'staff', name: '測試月嫂', membership_status: 'left' }], latest_event: event };
+const released: LineOrderGroupWorkspaceRecord = {
+  ...record, status: 'unbound', binding_version: 7, can_delete_history: true,
+  bound_at: null, last_invitation_at: null, latest_event: { ...event, event_key: 'binding:10', event_type: 'released' },
+};
 const page = (items: LineOrderGroupWorkspaceRecord[] = [record], number = 1, total = items.length) => ({ items, page: number, page_size: 25, total, total_pages: Math.ceil(total / 25) });
 function client(): LineOrderGroupWorkspaceClient {
-  return { workspaceList: vi.fn().mockResolvedValue(page()), workspaceDetail: vi.fn().mockResolvedValue(record), workspaceEvents: vi.fn().mockResolvedValue({ items: [event], page: 1, page_size: 25, total: 1, total_pages: 1 }) };
+  return {
+    workspaceList: vi.fn().mockResolvedValue(page()),
+    workspaceDetail: vi.fn().mockResolvedValue(record),
+    workspaceEvents: vi.fn().mockResolvedValue({ items: [event], page: 1, page_size: 25, total: 1, total_pages: 1 }),
+    workspaceUnbind: vi.fn().mockResolvedValue(released),
+    workspaceDeleteHistory: vi.fn().mockResolvedValue({ deleted_events: 3 }),
+  };
 }
 function mount(api = client(), startPage = 1) {
   function Workspace() {
@@ -49,6 +59,8 @@ describe('案件群組精簡工作區', () => {
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText('未設定 測試月嫂');
     expect(within(dialog).getByText('已離開')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '解除群組綁定' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
     expect(api.workspaceEvents).not.toHaveBeenCalled();
     expandHistory(); await waitFor(() => expect(api.workspaceEvents).toHaveBeenCalledTimes(1));
     expect(within(dialog).queryByText('member_left')).not.toBeInTheDocument();
@@ -124,6 +136,57 @@ describe('案件群組精簡工作區', () => {
     await screen.findByText('沒有符合條件的群組'); fireEvent.click(screen.getByRole('button', { name: '清除條件' })); await screen.findByText('CASE-1');
     expect(screen.getByRole('searchbox')).toHaveValue(''); expect(fetch).not.toHaveBeenCalled();
   });
+
+  it('解除綁定後仍可查閱歷程，手動永久刪除後關閉已清除的明細', async () => {
+    const api = client();
+    vi.mocked(api.workspaceDetail).mockResolvedValue({ ...record, can_unbind: true });
+    vi.mocked(api.workspaceList).mockResolvedValueOnce(page()).mockResolvedValueOnce(page([released])).mockResolvedValue(page([]));
+    mount(api);
+    fireEvent.click(await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' }));
+    expect(screen.queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '解除群組綁定' }));
+
+    await screen.findByText('已解除群組綁定，歷程已保留。');
+    expect(api.workspaceUnbind).toHaveBeenCalledExactlyOnceWith('CASE-1', 6);
+    expect(api.workspaceDeleteHistory).not.toHaveBeenCalled();
+    expandHistory();
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByText('未設定 測試月嫂已離開群組');
+    await waitFor(() => expect(api.workspaceList).toHaveBeenCalledTimes(2));
+
+    const deleteHistory = within(dialog).getByRole('button', { name: '永久刪除群組歷程' });
+    expect(deleteHistory).toHaveAccessibleDescription(/刪除後無法復原/);
+    fireEvent.click(deleteHistory);
+
+    await screen.findByText('已永久刪除案件 CASE-1 的群組歷程。');
+    expect(api.workspaceDeleteHistory).toHaveBeenCalledExactlyOnceWith('CASE-1', 7);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await screen.findByText('目前沒有案件群組綁定紀錄');
+    expect(screen.queryByRole('button', { name: '查看案件 CASE-1 群組明細' })).not.toBeInTheDocument();
+  });
+
+  it('刪除請求進行中阻擋再送，版本衝突時重新讀回目前群組', async () => {
+    const api = client();
+    vi.mocked(api.workspaceDetail).mockResolvedValueOnce(released).mockResolvedValue({ ...record, binding_version: 8, can_unbind: true });
+    let rejectDelete!: (error: Error) => void;
+    vi.mocked(api.workspaceDeleteHistory).mockReturnValue(new Promise((_resolve, reject) => { rejectDelete = reject; }));
+    mount(api);
+    fireEvent.click(await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' }));
+    fireEvent.click(await screen.findByRole('button', { name: '永久刪除群組歷程' }));
+
+    const pending = screen.getByRole('button', { name: '正在刪除群組歷程…' });
+    expect(pending).toBeDisabled();
+    expect(screen.getByRole('button', { name: '關閉群組明細' })).toBeDisabled();
+    fireEvent.click(pending);
+    expect(api.workspaceDeleteHistory).toHaveBeenCalledTimes(1);
+    await act(async () => rejectDelete(new LineOrderGroupQueryError('VERSION_CONFLICT', 'private detail', false, 409)));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('群組綁定或歷程已變更');
+    await screen.findByRole('button', { name: '解除群組綁定' });
+    expect(screen.queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
+    expect(api.workspaceDetail).toHaveBeenCalledTimes(2);
+    expect(api.workspaceDeleteHistory).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('群組工作區 typed query', () => {
@@ -154,5 +217,16 @@ describe('群組工作區 typed query', () => {
     await expect(lineOrderGroupQueryClient.workspaceDetail('CASE-1')).rejects.toMatchObject({ code: 'LINE_ORDER_GROUP_SCHEMA_MISMATCH' });
     fetch.mockResolvedValueOnce(response({ items: [{ ...event, case_no: 'OTHER' }], page: 1, page_size: 25, total: 1, total_pages: 1 }));
     await expect(lineOrderGroupQueryClient.workspaceEvents('CASE-1')).rejects.toMatchObject({ code: 'LINE_ORDER_GROUP_IDENTITY_MISMATCH' });
+  });
+
+  it('writes only the selected case and displayed binding version', async () => {
+    session();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(released)).mockResolvedValueOnce(response({ deleted_events: 3 }));
+    await expect(lineOrderGroupQueryClient.workspaceUnbind('CASE-1', 6)).resolves.toEqual(released);
+    await expect(lineOrderGroupQueryClient.workspaceDeleteHistory('CASE-1', 7)).resolves.toEqual({ deleted_events: 3 });
+    expect(fetch.mock.calls.map(([url, request]) => [url, request?.method, request?.body])).toEqual([
+      ['/api/v1/line/order-groups/workspace/CASE-1/unbind', 'POST', JSON.stringify({ expected_version: 6 })],
+      ['/api/v1/line/order-groups/workspace/CASE-1/delete-history', 'POST', JSON.stringify({ expected_version: 7 })],
+    ]);
   });
 });

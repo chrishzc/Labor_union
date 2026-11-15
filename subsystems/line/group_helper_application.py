@@ -854,7 +854,7 @@ class LineGroupHelperApplication:
         flow_cmd = OpenLineIdentityFlowCommand(
             LineIdentityFlowPurpose.STAFF_SELF_SERVICE,
             staff_line_id,
-            self._now() + timedelta(minutes=30),
+            self._now() + timedelta(minutes=15),
             IdempotencyKey(f"group-helper-postpone-flow:{event_id}"),
             CorrelationId(f"line-event:{event_id}"),
         )
@@ -863,7 +863,8 @@ class LineGroupHelperApplication:
         guide_text = (
             f"📅 案件 {ctx['case_no']} 雙方合意延期申請\n\n"
             f"請月嫂開啟個人班表選擇「原本請假日」與「合意補班日」，系統會即時檢查您後續案件是否檔期衝突，並確保政府補助總天數與時數守恆：\n"
-            f"{liff_url}"
+            f"{liff_url}\n\n"
+            f"⏳ 此專屬連結安全有效時間為 15 分鐘。若逾時失效，請隨時於群組輸入「小幫手」重新點選【雙方合意延期】發起。"
         )
         self._reply_text(inbox, unit_of_work, group_id, guide_text, "postpone-liff-link")
 

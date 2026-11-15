@@ -690,15 +690,25 @@ def test_draft_and_publication_notes_are_optional_but_length_bounded():
             model(**command, reason='x' * 501)
 
 
-@pytest.mark.parametrize("menu_id", ["default_menu", "customer_menu"])
-def test_bootstrap_menu_has_full_width_faq_at_bottom(menu_id):
+def test_default_menu_has_full_width_faq_at_bottom():
     definition = normalize_rich_menu_draft(json.loads(Path("config/line_menu.json").read_text(encoding="utf-8")))
-    menu = next(menu for menu in definition["menus"] if menu["id"] == menu_id)
+    menu = next(menu for menu in definition["menus"] if menu["id"] == "default_menu")
     lower = [button for button in menu["buttons"] if button["bounds"]["y"] > 0]
     assert len(menu["buttons"]) == 3
     assert [button["label"] for button in lower] == ["常見問答"]
     assert lower[0]["bounds"] == {"x": 0, "y": 843, "width": 2500, "height": 843}
     assert lower[0]["action"] == {"type": "uri", "uri": "?target=ai_assistant", "uri_source": "liff"}
+
+
+def test_customer_menu_has_half_height_single_faq_button():
+    definition = normalize_rich_menu_draft(json.loads(Path("config/line_menu.json").read_text(encoding="utf-8")))
+    menu = next(menu for menu in definition["menus"] if menu["id"] == "customer_menu")
+    assert menu["size"] == {"width": 2500, "height": 843}
+    assert len(menu["buttons"]) == 1
+    button = menu["buttons"][0]
+    assert button["label"] == "常見問答"
+    assert button["bounds"] == {"x": 0, "y": 0, "width": 2500, "height": 843}
+    assert button["action"] == {"type": "uri", "uri": "?target=ai_assistant", "uri_source": "liff"}
 
 
 def test_all_bootstrap_menus_use_concise_labels_and_large_accessible_image_rendering(monkeypatch):

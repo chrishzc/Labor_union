@@ -131,6 +131,8 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupInvitationSettings,
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
+    UnbindLineOrderGroupCommand,
+    DeleteLineOrderGroupHistoryCommand,
     LineOrderGroupEventPage,
     LineOrderGroupEventRecord,
     LineOrderGroupNumberedPage,
@@ -880,6 +882,10 @@ class LineOrderGroupBindingRepositoryPort(Protocol):
         self,
         command: BindLineOrderGroupCommand,
     ) -> BindLineOrderGroupResult: ...
+
+    def unbind(self, command: UnbindLineOrderGroupCommand) -> None: ...
+
+    def delete_history(self, command: DeleteLineOrderGroupHistoryCommand) -> int: ...
 
     def sync_participants(self, audience: OrderLineAudience) -> None: ...
 

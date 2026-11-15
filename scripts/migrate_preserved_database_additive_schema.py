@@ -387,6 +387,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_13_controlled_file_client_passbook_cover_v1.json",
     "labor_union_2026_11_13_staff_availability_optional_reason_v1.json",
     "labor_union_2026_11_15_order_change_requests_v1.json",
+    "labor_union_2026_11_15_line_order_group_history_delete_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2035,6 +2036,9 @@ def _owned_classification(
             result[part] = "partial"
     for artifact in RELEASE_MANIFEST.artifacts:
         name = str(artifact["name"])
+        if name == _LINE_GROUP_HISTORY_DELETE_ARTIFACT:
+            _, result[name] = _line_group_history_guard_snapshot(snapshot, name)
+            continue
         if name in result:
             continue
         if name == GOVERNMENT_OUTBOX_REPAIR_ARTIFACT:
@@ -2557,7 +2561,61 @@ def _registry_guard_metadata():
     return _REGISTRY_GUARD_METADATA
 
 
+_LINE_GROUP_HISTORY_DELETE_ARTIFACT = "1078_line_order_group_history_delete_guards.sql"
+
+
+@lru_cache(maxsize=1)
+def _line_group_history_guard_metadata():
+    path = ROOT / "db/migration_releases/labor_union_2026_11_15_line_order_group_history_delete_v1.descriptors.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _line_group_history_guard_snapshot(snapshot, artifact):
+    catalog = _line_group_history_guard_metadata()
+    before, after = catalog["predecessor_triggers"], catalog["successor_triggers"]
+    original = _registry_guard_metadata()["predecessor_triggers"]
+    rows = {row["trigger_name"]: row for row in snapshot.get("triggers", ())}
+    upgraded = set()
+    states = set()
+    keys = ("action_timing", "event_manipulation", "event_object_table", "action_statement")
+    for name, expected in after.items():
+        row = rows.get(name)
+        if row is None:
+            states.add("missing")
+            continue
+        if not set(keys) <= row.keys():
+            states.add("drift")
+            continue
+        actual = {key: row[key] for key in keys}
+        if actual["action_statement"] not in {expected["action_statement"], before[name]["action_statement"], original[name]["action_statement"]}:
+            actual["action_statement"] = _registry_guard_action(actual["action_statement"])
+        if actual == expected:
+            upgraded.add(name)
+            states.add("successor")
+        elif actual == before[name] or actual == original[name]:
+            states.add("predecessor")
+        else:
+            states.add("drift")
+    if artifact == _LINE_GROUP_HISTORY_DELETE_ARTIFACT:
+        if states == {"successor"}:
+            return snapshot, "exact"
+        if states == {"predecessor"}:
+            return snapshot, "absent"
+        return snapshot, "drift" if "drift" in states else "partial"
+    if not upgraded:
+        return snapshot, None
+    triggers = [
+        {**row, "action_statement": before[row["trigger_name"]]["action_statement"]}
+        if row["trigger_name"] in upgraded else row
+        for row in snapshot["triggers"]
+    ]
+    return {**snapshot, "triggers": triggers}, None
+
+
 def _registry_guard_snapshot(snapshot, artifact):
+    snapshot, group_history_state = _line_group_history_guard_snapshot(snapshot, artifact)
+    if group_history_state is not None:
+        return snapshot, group_history_state
     catalog = _registry_guard_metadata()
     old, new = catalog["predecessor_triggers"], catalog["successor_triggers"]
     rows = {row["trigger_name"]: row for row in snapshot.get("triggers", ())}
@@ -5998,7 +6056,7 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         r"`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+?)(?=;\s*(?:$|\n))",
         re.I | re.S,
     )
-    if part_name == "1060_registry_case_deletion_guards.sql":
+    if part_name in {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT}:
         complete_pattern = re.compile(r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+)", re.I | re.S)
         trigger_matches = [match for statement in split_sql(sql) if (match := complete_pattern.fullmatch(statement))]
     else:

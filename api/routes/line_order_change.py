@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from pathlib import Path as FilePath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import FileResponse
 
 from api.dependencies.admin_auth import require_persisted_admin, require_system_admin
 from api.dependencies.client_profile import get_verified_client_identity
@@ -52,16 +50,9 @@ admin_router = APIRouter(
     tags=["Orders 訂單異動申請"],
     dependencies=[Depends(require_system_admin)],
 )
-_PAGE = FilePath(__file__).resolve().parents[2] / "line" / "static" / "order_update.html"
-_NO_CACHE_HEADERS = {"Cache-Control": "no-store"}
 _ADMIN_QUERY_ERRORS = {
     401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證。"},
 }
-
-
-@page_router.get("/line-order-update")
-def order_update_page():
-    return FileResponse(_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @router.post("/query", response_model=BaseResponse[LineOrderChangeOrderListView])

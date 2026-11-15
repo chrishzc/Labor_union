@@ -23,6 +23,7 @@ $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST
 if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
 $ProjectRoot=$env:MANAGER_TEST_DIRECTORY
+$toolsMysqlDir=Join-Path $ProjectRoot 'tools\mysql'
 $runtimeDirectory=Join-Path $ProjectRoot 'scratch\windows-remote'
 $statePath=Join-Path $runtimeDirectory 'frontend-control\state.json'
 '''

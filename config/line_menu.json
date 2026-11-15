@@ -92,7 +92,7 @@
       "chat_bar_text": "客戶專區",
       "size": {
         "width": 2500,
-        "height": 1686
+        "height": 843
       },
       "appearance": {
         "background_color": "#F8FAFC",
@@ -102,53 +102,13 @@
       },
       "buttons": [
         {
-          "id": "profile_update",
-          "label": "改個人資料",
-          "text_color": "#FFFFFF",
-          "background_color": "#2563EB",
-          "bounds": {
-            "x": 0,
-            "y": 0,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=profile_update",
-            "uri_source": "liff",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "order_update",
-          "label": "改訂單內容",
-          "text_color": "#FFFFFF",
-          "background_color": "#0D9488",
-          "bounds": {
-            "x": 1250,
-            "y": 0,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=order_update",
-            "uri_source": "liff",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
           "id": "customer_ai_assistant",
           "label": "常見問答",
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
           "bounds": {
             "x": 0,
-            "y": 843,
+            "y": 0,
             "width": 2500,
             "height": 843
           },

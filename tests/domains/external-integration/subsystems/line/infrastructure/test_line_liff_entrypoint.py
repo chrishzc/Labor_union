@@ -233,9 +233,9 @@ def test_liff_targets_route_to_existing_pages() -> None:
     assert "non_citizen_registration: '/line-non-citizen-registration'" in gateway
     assert 'id="register-non-citizen"' in identity
     assert 'location.assign("/line-non-citizen-registration")' in identity
-    assert "profile_update: '/line-profile-guard'" in gateway
+    assert "profile_update: '/line-profile-guard'" not in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
-    assert 'profile_update: "/line-profile-guard"' in standalone_route
+    assert 'profile_update: "/line-profile-guard"' not in standalone_route
     assert 'staff_baby_log' not in staff_route
     assert 'staff_payout: "/line-staff-payout"' in staff_route
     assert 'staff_baby_log' not in gateway
@@ -389,7 +389,13 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     assert "liff.logout()" in mobile_admin
     assert 'new URL("/line-identity", location.origin)' in mobile_admin
     assert 'supportedTargets.includes(target) ? target : targetFromUrl()' in mobile_admin
-    assert 'supportedTargets.includes(requested) ? requested : "customer_service"' in mobile_admin
+    assert any(
+        fallback in mobile_admin
+        for fallback in (
+            'supportedTargets.includes(requested) ? requested : "staff_review"',
+            'supportedTargets.includes(requested) ? requested : "customer_service"',
+        )
+    )
     assert "liff.login({redirectUri: redirect.toString()})" in mobile_admin
     assert "liff.login({redirectUri: location.href})" not in mobile_admin
     assert 'params.get("userId")' not in mobile_admin
@@ -401,16 +407,15 @@ def test_line_bind_page_route_serves_bind_html() -> None:
     assert response.path.name == "bind.html"
 
 
-def test_line_profile_update_page_route_serves_profile_update_html() -> None:
-    response = line_identity.profile_update_page()
-    assert response.status_code == 200
-    assert response.path.name == "profile_update.html"
-
-
-def test_line_profile_guard_page_route_serves_profile_guard_html() -> None:
-    response = line_identity.profile_guard_page()
-    assert response.status_code == 200
-    assert response.path.name == "profile_guard.html"
+def test_line_profile_pages_are_retired_and_not_routed() -> None:
+    """Customer self-service profile update is fully retired with no routes or files."""
+    assert not (ROOT / "line/static/profile_update.html").exists()
+    assert not (ROOT / "line/static/profile_guard.html").exists()
+    assert not hasattr(line_identity, "profile_update_page")
+    assert not hasattr(line_identity, "profile_guard_page")
+    routes = {route.path for route in line_identity.page_router.routes}
+    assert "/line-profile-update" not in routes
+    assert "/line-profile-guard" not in routes
 
 
 def test_new_staff_page_routes_serve_split_assets() -> None:

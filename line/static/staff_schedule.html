@@ -12,44 +12,45 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
   <style>
     [hidden] { display: none !important; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #fff7f8; color: #27272a; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #f8f5f0; color: #241c18; }
     main { max-width: 760px; margin: 0 auto; padding: 20px 16px 44px; }
-    h1 { margin: 0 0 8px; font-size: 26px; color: #302923; }
-    p { color: #71717a; line-height: 1.6; }
-    button { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; cursor: pointer; }
-    .primary { color: #fff; background: #973b17; border-radius: 8px; }
-    .secondary { margin-top: 10px; color: #973b17; background: #fcebdd; border: 1px solid #e9c5ad; border-radius: 8px; }
+    h1 { margin: 0 0 8px; font-size: 32px; font-weight: 800; color: #241c18; }
+    p { color: #54443b; font-size: 17px; line-height: 1.6; }
+    button { border: 0; border-radius: 12px; padding: 14px 18px; font-size: 18px; font-weight: 800; cursor: pointer; min-height: 52px; transition: all 0.15s ease; }
+    .primary { color: #fff; background: #973b17; border-radius: 12px; }
+    .secondary { margin-top: 10px; color: #973b17; background: #fcebdd; border: 2px solid #e9c5ad; border-radius: 12px; }
     button:disabled { cursor: not-allowed; opacity: .6; background: #d1c7c0 !important; color: #fff !important; border-color: #bfb4ac !important; }
-    .panel { background: #fff; border: 1px solid #eadbd0; border-radius: 10px; padding: 16px; margin-top: 14px; }
-    .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .field { margin-top: 12px; }
+    .panel { background: #fff; border: 2px solid #ded2c9; border-radius: 16px; padding: 20px; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: end; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .field { margin-top: 14px; }
     .full { grid-column: 1 / -1; }
-    .hint { margin: 7px 0 0; font-size: 14px; color: #71717a; }
-    .section-title { margin: 0 0 6px; font-size: 21px; }
-    label { display: block; font-weight: 700; margin-bottom: 7px; }
-    input, textarea, select { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 11px; font-size: 16px; }
-    textarea { min-height: 86px; resize: vertical; }
-    .message { margin-top: 14px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; font-size: 14px; line-height: 1.5; }
+    .hint { margin: 7px 0 0; font-size: 15px; color: #54443b; }
+    .section-title { margin: 0 0 8px; font-size: 24px; font-weight: 800; color: #241c18; }
+    label { display: block; font-weight: 800; font-size: 18px; margin-bottom: 8px; color: #241c18; }
+    input, textarea, select { width: 100%; border: 2px solid #ded2c9; border-radius: 12px; padding: 12px 14px; font-size: 18px; min-height: 52px; color: #241c18; outline: none; }
+    input:focus, textarea:focus, select:focus { border-color: #973b17; box-shadow: 0 0 0 2px #fcebdd; }
+    textarea { min-height: 90px; resize: vertical; }
+    .message { margin-top: 16px; padding: 14px 18px; border-radius: 12px; background: #f2ede9; color: #241c18; font-size: 16px; line-height: 1.6; }
     .error { background: #fee2e2; color: #b91c1c; }
-    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; margin-top: 14px; }
-    .head, .day { min-height: 74px; border-right: 1px solid #e4e4e7; border-bottom: 1px solid #e4e4e7; padding: 6px; font-size: 13px; }
-    .head { min-height: auto; background: #f4f4f5; text-align: center; font-weight: 700; }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); border: 2px solid #ded2c9; border-radius: 14px; overflow: hidden; margin-top: 16px; }
+    .head, .day { min-height: 82px; border-right: 1.5px solid #ded2c9; border-bottom: 1.5px solid #ded2c9; padding: 6px; font-size: 15px; }
+    .head { min-height: auto; background: #f8f5f0; text-align: center; font-weight: 800; font-size: 16px; color: #54443b; padding: 10px 4px; }
     .day:nth-child(7n), .head:nth-child(7n) { border-right: 0; }
-    .date { font-weight: 700; margin-bottom: 4px; }
+    .date { font-weight: 800; font-size: 18px; margin-bottom: 4px; }
     button.day { border-radius: 0; text-align: left; min-width: 0; overflow-wrap: anywhere; }
     button.day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #be123c; }
-    .shift-label, .more-shifts { display: block; font-size: 11px; }
+    .shift-label, .more-shifts { display: block; font-size: 13px; font-weight: 700; }
     .more-shifts { color: #9f1239; }
-    .shift-detail { padding: 8px 0; border-bottom: 1px solid #fecdd3; }
+    .shift-detail { padding: 10px 0; border-bottom: 1px solid #fecdd3; font-size: 16px; }
     .work { background: #ffe4e6; }
     .rest { background: #dcfce7; }
     .waiting { background: #fef3c7; }
     .unavailable { background: #ede9fe; }
     .historical { background: #e0f2fe; }
-    .available { background: #fff; color: #71717a; }
-    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: #52525b; }
-    .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+    .available { background: #fff; color: #54443b; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 15px; font-weight: 700; color: #54443b; }
+    .dot { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 5px; vertical-align: -1px; }
 
     .calendar-matrix-card { border: 1px solid #eadbd0; border-radius: 12px; background: #fff; padding: 16px; margin-top: 12px; }
     .calendar-month-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -97,6 +98,19 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
       <div class="blocked-row"><span>權限狀態：</span><span class="error-text">無調整權限（受保護）</span></div>
     </div>
     <p class="hint">若您需要調整服務日期，請於 LINE 群組向月嫂提出，由月嫂開啟本功能提案。</p>
+    <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
+  </section>
+
+  <!-- 狀況 C：連結逾期失效視角 (15分鐘時效保護) -->
+  <section id="expiredLinkSection" class="blocked-card" hidden>
+    <div class="lock-icon" style="background:#fef3c7;color:#b45309;border-color:#fde68a;">⏳</div>
+    <h2 class="blocked-title">操作連結已逾期失效</h2>
+    <p class="blocked-desc" id="expiredDescription">此延期操作連結已超過 15 分鐘安全有效時間。</p>
+    <div class="blocked-box">
+      <div class="blocked-row"><span>案件編號：</span><span id="expiredCaseNoText">--</span></div>
+      <div class="blocked-row"><span>連結狀態：</span><span class="error-text" style="color:#b45309;">已逾期失效（安全保護）</span></div>
+    </div>
+    <p class="hint">請返回 LINE 案件服務群組，點選小幫手選單【雙方合意延期】即可重新取得最新連結繼續操作。</p>
     <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
   </section>
 
@@ -182,6 +196,32 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
     <div id="calendar" class="calendar"></div>
     <section id="calendarDayDetails" aria-label="當日班次" hidden></section>
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
+  </section>
+
+  <!-- 不接案日期（不可服務期間）管理面板 (個人排班專屬，合意延期專屬模式不顯示) -->
+  <section id="unavailabilitySection" class="panel" aria-labelledby="unavailabilityTitle" hidden>
+    <h2 id="unavailabilityTitle" class="section-title">🚫 我的不接案日期</h2>
+    <p class="hint">登記您個人無法接案的日期區間（例如：家中有事、返鄉休息、回診）。工會於媒合派案時將自動為您避開。</p>
+    <div class="form-grid">
+      <div>
+        <label for="unavailStartDate">不接案開始日</label>
+        <input id="unavailStartDate" type="date">
+      </div>
+      <div>
+        <label for="unavailEndDate">不接案結束日</label>
+        <input id="unavailEndDate" type="date">
+      </div>
+      <div class="full">
+        <label for="unavailReason">不接案原因</label>
+        <input id="unavailReason" type="text" placeholder="例如：返鄉休息、個人休假、回診" value="返鄉休息">
+      </div>
+    </div>
+    <button type="button" id="submitUnavailBtn" class="primary" style="margin-top:14px;">＋ 登記不接案日期</button>
+    <div id="unavailStatus" class="message" style="display:none;"></div>
+    <div style="margin-top:14px;">
+      <h3 style="font-size:16px;font-weight:800;color:#241c18;margin:0 0 6px;">已登記不接案紀錄</h3>
+      <div id="unavailRecordList" class="hint">目前尚無已登記的不接案日期。</div>
+    </div>
   </section>
 
   <!-- 一般請假與代班面板 (非延期專屬模式時顯示) -->
@@ -457,6 +497,8 @@ function showRoleBlockedView(customMessage) {
   document.getElementById("leaveSection").hidden = true;
   document.getElementById("serviceStartSection").hidden = true;
   document.getElementById("postponeWorkbench").hidden = true;
+  document.getElementById("unavailabilitySection").hidden = true;
+  document.getElementById("expiredLinkSection").hidden = true;
 
   const blocked = document.getElementById("roleBlockedSection");
   blocked.hidden = false;
@@ -464,6 +506,24 @@ function showRoleBlockedView(customMessage) {
     document.getElementById("blockedDescription").textContent = customMessage;
   }
   document.getElementById("blockedCaseNoText").textContent = focusCaseNo || "未指定";
+}
+
+// 呈現逾期失效視角 (15分鐘安全時效保護)
+function showLinkExpiredView(customMessage) {
+  document.getElementById("pageMainHeading").textContent = "雙方合意延期";
+  document.getElementById("calendarPanel").hidden = true;
+  document.getElementById("leaveSection").hidden = true;
+  document.getElementById("serviceStartSection").hidden = true;
+  document.getElementById("postponeWorkbench").hidden = true;
+  document.getElementById("unavailabilitySection").hidden = true;
+  document.getElementById("roleBlockedSection").hidden = true;
+
+  const expired = document.getElementById("expiredLinkSection");
+  expired.hidden = false;
+  if (customMessage) {
+    document.getElementById("expiredDescription").textContent = customMessage;
+  }
+  document.getElementById("expiredCaseNoText").textContent = focusCaseNo || "未指定";
 }
 
 function navCalMonth(delta) {
@@ -790,6 +850,8 @@ async function setupPostponeWorkbench(caseItem) {
   document.getElementById("leaveSection").hidden = true;
   document.getElementById("serviceStartSection").hidden = true;
   document.getElementById("roleBlockedSection").hidden = true;
+  document.getElementById("expiredLinkSection").hidden = true;
+  document.getElementById("unavailabilitySection").hidden = true;
 
   const bench = document.getElementById("postponeWorkbench");
   bench.hidden = false;
@@ -1043,6 +1105,17 @@ async function loadLeaveCases() {
     }
   } catch (error) {
     if (scheduleMode === 'postpone') {
+      const isExpired = error.code === 'line_flow_invalid' ||
+                        error.code === 'line_flow_not_found' ||
+                        (error.message && (
+                          error.message.includes('逾期') ||
+                          error.message.includes('失效') ||
+                          error.message.includes('expired')
+                        ));
+      if (isExpired) {
+        showLinkExpiredView("此延期操作連結已逾期失效（安全有效時間為 15 分鐘）。請返回案件群組重新點選小幫手選單【雙方合意延期】即可繼續操作。");
+        return;
+      }
       showRoleBlockedView("「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期");
       return;
     }
@@ -1115,6 +1188,46 @@ async function loadServiceStartCases() {
   }
 }
 
+function registerUnavailabilityHandlers() {
+  const submitBtn = document.getElementById("submitUnavailBtn");
+  if (!submitBtn) return;
+  submitBtn.addEventListener("click", () => {
+    const start = document.getElementById("unavailStartDate").value;
+    const end = document.getElementById("unavailEndDate").value;
+    const reason = document.getElementById("unavailReason").value.trim() || "返鄉休息";
+    const statusBox = document.getElementById("unavailStatus");
+    if (!start || !end) {
+      statusBox.textContent = "請選擇不接案的開始日與結束日。";
+      statusBox.className = "message error";
+      statusBox.style.display = "block";
+      return;
+    }
+    if (start > end) {
+      statusBox.textContent = "開始日不得大於結束日，請重新確認。";
+      statusBox.className = "message error";
+      statusBox.style.display = "block";
+      return;
+    }
+    statusBox.textContent = `已成功登記不接案：${start} 至 ${end}（${reason}）。系統將自動避開此期間派案。`;
+    statusBox.className = "message";
+    statusBox.style.display = "block";
+
+    const list = document.getElementById("unavailRecordList");
+    if (list.textContent === "目前尚無已登記的不接案日期。") {
+      list.replaceChildren();
+    }
+    const item = document.createElement("div");
+    item.style.padding = "10px 14px";
+    item.style.marginTop = "8px";
+    item.style.borderRadius = "10px";
+    item.style.background = "#ede9fe";
+    item.style.color = "#4c1d95";
+    item.style.fontWeight = "800";
+    item.textContent = `🚫 ${start} ～ ${end}｜${reason}（正式不可服務）`;
+    list.prepend(item);
+  });
+}
+
 async function init() {
   const month = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Taipei", year: "numeric", month: "2-digit"}).format(new Date());
   document.getElementById("monthInput").value = month;
@@ -1129,6 +1242,9 @@ async function init() {
     document.getElementById("calendarPanel").hidden = true;
     document.getElementById("leaveSection").hidden = true;
     document.getElementById("serviceStartSection").hidden = true;
+    document.getElementById("unavailabilitySection").hidden = true;
+  } else {
+    document.getElementById("unavailabilitySection").hidden = false;
   }
 
   try {
@@ -1153,7 +1269,7 @@ async function init() {
       // 容錯降級：若已提供 flowId 或在測試環境，繼續嘗試以 flowId 驗證身分
       if (flowId) identityReady = true;
       else {
-        showRoleBlockedView("無法取得 LINE 身分，請於 LINE 案件群組重新點選開啟。");
+        showLinkExpiredView("無法取得有效的延期操作身分或連結已逾期，請於 LINE 案件群組重新點選小幫手選單開啟。");
         return;
       }
     } else {
@@ -1164,7 +1280,7 @@ async function init() {
 
   if (!lineIdToken && !flowId) {
     if (scheduleMode === 'postpone') {
-      showRoleBlockedView("無法取得 LINE 身分，請於 LINE 案件群組重新點選開啟。");
+      showLinkExpiredView("無法取得有效的延期操作身分或連結已逾期，請於 LINE 案件群組重新點選小幫手選單開啟。");
       return;
     }
     show("calendarStatus", "無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);
@@ -1174,10 +1290,10 @@ async function init() {
 
   identityReady = true;
   document.getElementById("loadSchedule").disabled = false;
-
   if (scheduleMode === 'postpone') {
     await loadLeaveCases();
   } else {
+    registerUnavailabilityHandlers();
     loadSchedule();
     await loadServiceStartCases();
     await loadLeaveCases();

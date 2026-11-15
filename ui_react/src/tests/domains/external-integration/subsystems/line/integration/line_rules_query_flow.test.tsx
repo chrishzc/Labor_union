@@ -4,23 +4,19 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineNotificationRulesCatalog } from '../../../../../../api/line_configuration/line_configuration_query_schemas';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
 import { sessionClient } from '../../../../../../api/auth/session_client';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
 
 function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RULES_CATALOG_FIXTURE): {
-  customer: CustomerServiceClient;
   identity: Pick<LineIdentityClient, 'listBindings' | 'getBinding' | 'previewRevocation' | 'applyRevocation'>;
   configuration: LineConfigurationQueryClient;
 } {
   return {
-    customer: { getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE), listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE), getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE), previewResolve: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE), applyResolve: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE) },
     identity: { listBindings: vi.fn().mockResolvedValue(BINDING_PAGE_FIXTURE), getBinding: vi.fn().mockResolvedValue(BOUND_IDENTITY_FIXTURE), previewRevocation: vi.fn().mockResolvedValue(REVOCATION_PREVIEW_FIXTURE), applyRevocation: vi.fn().mockResolvedValue(REVOCATION_REQUEST_FIXTURE) },
     configuration: { getNotificationRules: vi.fn().mockResolvedValue(rules), getRichMenuConfiguration: vi.fn().mockResolvedValue(LINE_RICH_MENU_CONFIGURATION_FIXTURE), listRichMenuPublications: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE), getRichMenuPublication: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_FIXTURE) },
   };
@@ -41,8 +37,8 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
       } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     vi.stubGlobal('fetch', fetchSpy);
-    const { customer, identity, configuration } = dependencies();
-    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
+    const { identity, configuration } = dependencies();
+    render(<LineManagementPage scope="notifications" lineIdentity={identity} lineConfiguration={configuration} />);
     await screen.findByRole('button', { name: '編輯訂金確認內容' });
     expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
@@ -74,8 +70,8 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
 
   it('revision 0 的空 definition 顯示真實空狀態而不是 mock 規則或歡迎詞', async () => {
     const empty = { revision: 0, definition: {} } as const;
-    const { customer, identity, configuration } = dependencies(empty);
-    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
+    const { identity, configuration } = dependencies(empty);
+    render(<LineManagementPage scope="notifications" lineIdentity={identity} lineConfiguration={configuration} />);
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     expect(await screen.findByText('沒有符合條件的通知')).toBeInTheDocument();
     expect(document.querySelectorAll('[data-notification-id]')).toHaveLength(0);

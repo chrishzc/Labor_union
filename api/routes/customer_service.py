@@ -1,6 +1,6 @@
 """
 File: customer_service.py
-Description: 暴露客服唯讀、結案與回覆 Preview／Apply，以及退役 direct mutation 的認證 HTTP 入口。
+Description: 暴露客服切換結案 Preview／Apply，以及已退役工單操作的認證 HTTP 入口。
 """
 
 from __future__ import annotations
@@ -8,15 +8,12 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import admin_actor_context, require_customer_service_handler, require_customer_service_reader
 from api.schemas.base import BaseResponse
 from api.schemas.customer_service import (
-    CustomerServiceDetailView,
-    CustomerServicePageView,
-    CustomerServiceSummaryView,
     CustomerServiceUpdateApplyRequest,
     CustomerServiceUpdateApplyView,
     CustomerServiceUpdatePreviewRequest,
@@ -27,7 +24,7 @@ from api.schemas.customer_service import (
     HumanEscalationResolveApplyRequest,
     HumanEscalationViewResponse,
 )
-from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus, CustomerServiceTransitionError
+from domains.customer_service.ticket import CustomerServiceStatus, CustomerServiceTransitionError
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -47,7 +44,6 @@ from subsystems.customer_service.escalation_contracts import (
 )
 from subsystems.customer_service.contracts import (
     ApplyCustomerServiceTicketUpdate,
-    CustomerServiceListQuery,
     PreviewCustomerServiceTicketUpdate,
 )
 
@@ -137,29 +133,12 @@ def preview_resolve_escalation(
     return BaseResponse(data=_escalation_preview_response(preview), message="人工客服解除暫停 Preview 已建立；尚未寫入")
 
 
-@router.get("/summary", response_model=BaseResponse[CustomerServiceSummaryView])
-def summary(_: AdminPrincipal = Depends(require_customer_service_reader)):
-    return BaseResponse(data=_application().summary())
-
-
-@router.get("", response_model=BaseResponse[CustomerServicePageView])
-def list_tickets(
-    status: CustomerServiceStatus | None = CustomerServiceStatus.WAITING,
-    category: CustomerServiceCategory | None = None, search: str | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
-    _: AdminPrincipal = Depends(require_customer_service_reader),
-):
-    return BaseResponse(data=_application().list(CustomerServiceListQuery(status, category, search, page, page_size)))
-
-
+@router.get("/{ticket_id}", include_in_schema=False)
+@router.get("/summary", include_in_schema=False)
 @router.get("/reminders", include_in_schema=False)
-def retired_reminders(_: AdminPrincipal = Depends(require_customer_service_reader)):
+@router.get("", include_in_schema=False)
+def retired_customer_service_query(_: AdminPrincipal = Depends(require_customer_service_reader)):
     raise _retired_customer_service()
-
-
-@router.get("/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])
-def detail(ticket_id: int, _: AdminPrincipal = Depends(require_customer_service_reader)):
-    return BaseResponse(data=_call(_application().detail, ticket_id))
 
 
 @router.post(
@@ -261,15 +240,6 @@ def apply_update(
 @router.post("/{ticket_id}/reply/apply", include_in_schema=False)
 def retired_customer_service_write(_: AdminPrincipal = Depends(require_customer_service_handler)):
     raise _retired_customer_service()
-
-
-def _call(operation, *arguments):
-    try:
-        return operation(*arguments)
-    except CustomerServiceTicketNotFoundError as error:
-        raise HTTPException(status_code=404, detail={"code": "customer_service_ticket_not_found", "message": str(error)}) from error
-    except (CustomerServiceVersionConflictError, CustomerServiceTransitionError) as error:
-        raise HTTPException(status_code=409, detail={"code": "customer_service_ticket_version_conflict", "message": str(error)}) from error
 
 
 def _call_update_endpoint(

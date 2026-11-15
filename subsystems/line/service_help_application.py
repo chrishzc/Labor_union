@@ -328,26 +328,15 @@ def _form_liff_url(target: str) -> str | None:
 
 
 def _profile_update_payload():
-    url = _form_liff_url("profile_update")
-    if url is None:
-        return _text_payload("個人資料異動入口尚未完成設定。請直接在此聊天室留言。")
-    return _text_payload(f"請開啟本人資料異動表單：\n{url}")
+    return _text_payload("如需修改聯絡電話、服務地址或個人登記資料，請直接在此聊天室留言，工會專員將由後台為您即時調整與確認。")
 
 
 def _order_update_liff_url():
-    return _form_liff_url("order_update")
+    return None
 
 
 def _order_update_menu_payload():
-    available = _order_update_liff_url() is not None
-    return _navigation_card_payload(
-        alt_text="修改訂單資訊：開啟正式申請表單",
-        eyebrow="新竹市月子工會",
-        title="修改訂單資訊",
-        description="請開啟正式訂單異動表單，選擇您的有效訂單與要修改的內容。" if available else "訂單異動入口尚未完成設定。請直接在此聊天室留言。",
-        actions=(("開啟訂單異動表單", "order_update", "primary"),) if available else (),
-        hint="送出需求不代表訂單已變更；正式結果以工會確認為準。",
-    )
+    return _text_payload("如需變更服務時段、服務天數或訂單內容，請直接在此聊天室留言，工會專員將由後台為您即時確認與調整。")
 
 
 def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, hint):

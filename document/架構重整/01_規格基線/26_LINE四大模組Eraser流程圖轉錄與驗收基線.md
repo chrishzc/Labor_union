@@ -83,7 +83,7 @@ flowchart TD
 | 模組節點群組 | 現行規格契約與邊界 |
 |---|---|
 | `Register_Form` / 待審儲存 | 依 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md) `REG-BOUNDARY`／`REG-REDIS`／`REG-EXPIRY`：表單送出後存於無 MySQL 憑證之專用持久化 Redis（14 天自動到期清理）；待工會核准時才經 Case Import writer 寫入 MySQL 正式客戶／訂單並依回執刪除待審資料，拒絕亦立即刪除。 |
-| `Profile_Update_Page` / `order_update` | 聯絡資訊與退費欄位由 `profile_update` 負責；服務地址、縣市、居住型態由 `order_update`（純 URI 入口，無五按鈕與服務天數）申請並產生 Diff 工單，依訂單鎖定狀態檢核，經工會核准後方更新對應 owner（不適用 14 天 Redis 清理）。 |
+| `Profile_Update_Page` / `order_update` | **客戶端自填表單已退役**：依 [20 號規格](20_LINE客服與月嫂自助服務正式規格.md#53-資料異動審核與客戶自填表單退役) 與 [29 號規格](29_LINE服務說明、客服互動與選單角色正式規格.md#客戶端自助表單退役與後台維護原則)，`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 不提供連線，選單與聊天導流全面移除。客戶意向於對話留訊由工會於後台維護；月嫂本人資料更新維持由 `staff_profile_update.html` 進行。 |
 | `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、只讀 `staff_schedule` 與 `staff_payout`（`staff_payout.html`），開工日與請假延期改由案件群組小幫手選單操作（0 Push 額度）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
 | `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 綁定 `union_staff_menu` 開啟 `line-mobile-admin` 四頁籤；群組輸入拒絕發放。 |
 | 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
@@ -133,7 +133,7 @@ flowchart TD
 
 ## 6. 模組四（M4）：工會雙管理端、個人告警與代班拆帳
 
-- **雙管理端協同**：電腦版負責訂單異動、媒合排班、代班、財務對帳與歷史客服紀錄查詢。手機端提供 `staff_review`、`order_tracking` 與 `dashboard`。日常客服與客訴由工會在官方帳號處理。
+- **雙管理端協同**：電腦版負責訂單異動、媒合排班、代班與財務對帳。手機端提供 `staff_review`、`order_tracking` 與 `dashboard`。日常客服與客訴由工會在官方帳號處理。
 - **個人化安全告警**：群組告警與群組一次性審核連結已全面取消。重大客訴或 `LINE-006` 異常只針對已設定管理員個人對象投遞去敏摘要及需驗證之管理入口；當下無有效個人設定對象時保留內部事件追蹤，嚴禁猜測發往任意群組。
 - **代班與換人帳務邊界**：代班確認加入並於 Scheduling 登錄實際服務日／交接日完成後，各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不建立系統入帳推播（`LINE-PAY-08` 僅保留入帳待辦提醒與標記已通知結案）。
 

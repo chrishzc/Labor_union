@@ -37,3 +37,31 @@ def test_guard_release_and_trigger_effect_classification():
     assert m._local_classify_statement(safe) == "create_trigger"
     for verb in ("INSERT INTO ledger VALUES (1)", "DELETE FROM ledger", "UPDATE ledger SET v=1"):
         with pytest.raises(m.LocalAdditiveBlocked): m._local_classify_statement("CREATE TRIGGER t BEFORE DELETE ON example FOR EACH ROW BEGIN " + verb + "; END")
+
+
+def test_group_history_delete_guards_compose_with_registry_guards_without_hiding_drift():
+    artifact = "1078_line_order_group_history_delete_guards.sql"
+    before = snapshot("successor_triggers")
+    contracts = m._line_group_history_guard_metadata()["successor_triggers"]
+    after = {"triggers": [
+        {"trigger_name": row["trigger_name"], **contracts[row["trigger_name"]]}
+        if row["trigger_name"] in contracts else row
+        for row in before["triggers"]
+    ]}
+    metadata = {"columns": [], "indexes": [], "constraints": [], "key_columns": [],
+                "foreign_keys": [], "show_create_tables": {}, "views": []}
+    assert m._owned_classification({**metadata, **before})[artifact] == "absent"
+    assert m._owned_classification({**metadata, **after})[artifact] == "exact"
+    assert m._registry_guard_snapshot(after, artifact)[1] == "exact"
+    assert m._registry_guard_snapshot(after, ARTIFACT)[1] == "exact"
+
+    mixed = deepcopy(after)
+    target = next(index for index, row in enumerate(before["triggers"]) if row["trigger_name"] in contracts)
+    mixed["triggers"][target] = before["triggers"][target]
+    assert m._registry_guard_snapshot(mixed, artifact)[1] == "partial"
+    mixed["triggers"][target] = {**mixed["triggers"][target], "action_statement": "unrecognized definition"}
+    assert m._registry_guard_snapshot(mixed, artifact)[1] == "drift"
+
+    statements = m.split_sql((m.ROOT / "db/schema_parts" / artifact).read_text(encoding="utf-8"))
+    assert len(statements) == 4
+    assert {m._local_classify_statement(statement) for statement in statements} == {"drop_trigger_if_exists", "create_trigger"}

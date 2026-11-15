@@ -20,64 +20,76 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background: linear-gradient(135deg, #fff5f2 0%, #faece8 100%);
+      background: #f8f5f0;
       color: var(--text);
-      font: 17px/1.6 "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", sans-serif;
+      font: 18px/1.6 "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", sans-serif;
     }
-    main { width: min(100%, 664px); margin: 0 auto; padding: 20px 16px max(28px, env(safe-area-inset-bottom)); }
+    main { width: min(100%, 664px); margin: 0 auto; padding: 20px 16px max(32px, env(safe-area-inset-bottom)); }
     .page-header, .section, .submit-panel {
       background: var(--paper);
-      border: 1px solid var(--border);
+      border: 2px solid var(--border);
       border-radius: var(--radius);
-      padding: 20px;
+      padding: 22px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .04);
     }
-    .page-header { border-top: 4px solid var(--accent); box-shadow: 0 6px 20px rgba(120, 52, 28, .08); }
-    .brand { color: var(--accent); font-size: 15px; font-weight: 700; margin: 0 0 8px; }
-    h1 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; }
+    .page-header { border-top: 5px solid var(--accent); box-shadow: 0 6px 20px rgba(120, 52, 28, .08); }
+    .brand { color: var(--accent); font-size: 16px; font-weight: 800; margin: 0 0 8px; }
+    h1 { font-size: 34px; font-weight: 800; line-height: 1.2; margin: 0 0 12px; }
     p { margin: 0; }
-    .help { color: var(--muted); font-size: 15px; }
-    form { display: grid; gap: 16px; margin-top: 16px; }
+    .help { color: var(--muted); font-size: 16px; }
+    form { display: grid; gap: 18px; margin-top: 18px; }
     fieldset { border: 0; min-inline-size: 0; margin: 0; padding: 0; }
-    legend { color: var(--text); font-size: 21px; font-weight: 700; padding: 0; margin-bottom: 12px; }
-    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .field, .preference { display: block; min-width: 0; font-weight: 700; }
+    legend { color: var(--text); font-size: 24px; font-weight: 800; padding: 0; margin-bottom: 14px; border-bottom: 1.5px solid #f2e6dc; padding-bottom: 8px; width: 100%; }
+    .field-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .field, .preference { display: block; min-width: 0; font-weight: 800; font-size: 18px; }
     .field-wide, .preference { grid-column: 1 / -1; }
-    .preference .help { display: block; margin: 3px 0 0; font-weight: 400; }
+    .preference .help { display: block; margin: 5px 0 0; font-weight: 400; font-size: 15px; }
     input:not([type=checkbox]), textarea {
       display: block;
       width: 100%;
-      min-height: 48px;
-      margin-top: 5px;
-      padding: 9px 12px;
-      border: 1px solid #b89484;
-      border-radius: 10px;
+      min-height: 52px;
+      margin-top: 6px;
+      padding: 12px 14px;
+      border: 1.5px solid #b89484;
+      border-radius: 12px;
       color: var(--text);
       background: #fff;
       font: inherit;
-      font-weight: 400;
+      font-size: 18px;
+      font-weight: 500;
     }
-    textarea { min-height: 78px; resize: vertical; }
+    textarea { min-height: 84px; resize: vertical; }
     input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
     .bank-choice {
       display: flex;
       align-items: center;
-      gap: 12px;
-      min-height: 48px;
-      margin-top: 10px;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
+      gap: 14px;
+      min-height: 54px;
+      margin-top: 12px;
+      padding: 12px 16px;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
       background: var(--soft);
-      font-weight: 700;
+      font-weight: 800;
+      font-size: 18px;
+      cursor: pointer;
     }
-    .bank-choice input { accent-color: var(--accent); width: 22px; height: 22px; flex: none; margin: 0; }
-    #bank-fields { margin-top: 14px; }
+    .bank-choice input { accent-color: var(--accent); width: 26px; height: 26px; flex: none; margin: 0; cursor: pointer; }
+    #bank-fields { margin-top: 16px; }
     .submit-panel button {
       width: 100%;
-      min-height: 52px;
-      padding: 12px 16px;
+      min-height: 56px;
+      padding: 14px 20px;
       border: 0;
-      border-radius: 12px;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-size: 20px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(171, 66, 31, .2);
+    }
       background: var(--accent);
       color: #fff;
       font: inherit;
@@ -199,15 +211,44 @@ function render(data) {
   document.getElementById("current-bank").textContent = data.bank
     ? "目前帳號末四碼 " + data.bank.account_last4 : "尚未設定收款帳戶，請聯絡工會。";
   replacement.disabled = !data.bank;
-  for (const [key, label, maximum] of [["bank_code", "銀行代碼", 3], ["branch_code", "分行代碼", 4], ["account_no", "新收款帳號", 20]]) {
-    input(bankFields, key, label, "", { numeric: true, maximum, wide: key === "account_no" });
-  }
+  input(bankFields, "bank_branch_code", "金融機構與分行代碼（共 7 碼）", "", {
+    numeric: true, maximum: 7, hint: "請填寫 7 碼數字（前 3 碼為銀行代碼，後 4 碼為分行代碼）"
+  });
+  input(bankFields, "account_no", "新收款帳號", "", {
+    numeric: true, maximum: 20, wide: true
+  });
   const preferences = document.getElementById("preferences");
   for (const [key, label] of Object.entries(relationLabels)) {
     const hint = key === "service_periods"
-      ? "一行一項，例如 4小時(09:00-13:00)"
-      : "一行一項。可選值：" + data.relation_options[key].join("、");
-    input(preferences, key, label, relationText(data.relations[key]), { multiline: true, hint });
+      ? "一行一項，標準格式：8小時(08:30-17:00)、8小時(09:30-18:00)、4小時(08:30-12:30)、4小時(09:30-13:30)、24小時(09:00-次日09:00)"
+      : "一行一項。可選值：" + (data.relation_options?.[key] ? data.relation_options[key].join("、") : "");
+    const element = input(preferences, key, label, relationText(data.relations[key]), { multiline: true, hint });
+    if (key === "service_periods") {
+      const quickBox = document.createElement("div");
+      quickBox.style.display = "flex";
+      quickBox.style.flexWrap = "wrap";
+      quickBox.style.gap = "6px";
+      quickBox.style.marginTop = "6px";
+      const standardSlots = [
+        "8小時(08:30-17:00)", "8小時(09:30-18:00)",
+        "4小時(08:30-12:30)", "4小時(09:30-13:30)",
+        "24小時(09:00-次日09:00)"
+      ];
+      standardSlots.forEach(slot => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "+ " + slot;
+        btn.style.cssText = "font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #ded2c9;background:#f8f5f0;color:#54443b;cursor:pointer;";
+        btn.onclick = () => {
+          const current = element.value.trim();
+          if (!current.includes(slot)) {
+            element.value = current ? current + "\n" + slot : slot;
+          }
+        };
+        quickBox.appendChild(btn);
+      });
+      element.parentElement.appendChild(quickBox);
+    }
   }
   input(preferences, "transportation", "交通方式", data.transportation.join("\n"), { multiline: true, hint: "一行一項。" });
   const days = data.matching.preferred_service_days ?? {};
@@ -240,10 +281,19 @@ function changes() {
       kind: "integer_set", values: [...new Set(value("hours").split(/[,，]/).map(Number))].sort((a, b) => a - b)
     };
   }
+  let bankUpdate = null;
+  if (replacement.checked) {
+    const rawBankBranch = value("bank_branch_code").replace(/\D/g, "");
+    bankUpdate = {
+      bank_code: rawBankBranch.slice(0, 3),
+      branch_code: rawBankBranch.slice(3, 7),
+      account_no: value("account_no")
+    };
+  }
   return {
     profile, relations, matching,
     ...(value("transportation") === snapshot.transportation.join("\n") ? {} : { transportation: lines(value("transportation")) }),
-    ...(replacement.checked ? { bank: { bank_code: value("bank_code"), branch_code: value("branch_code"), account_no: value("account_no") } } : {})
+    ...(bankUpdate ? { bank: bankUpdate } : {})
   };
 }
 

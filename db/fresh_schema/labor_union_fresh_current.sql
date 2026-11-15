@@ -5935,28 +5935,25 @@ CREATE TABLE `order_cancellation_events` (
   CONSTRAINT `chk_order_cancellation_event_version` CHECK ((`resulting_order_version` = (`expected_order_version` + 1)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE order_change_requests (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    case_no VARCHAR(50) NOT NULL,
-    client_id INT NOT NULL,
-    kind ENUM('service_address','cooking_requirement','daily_service_window','other') NOT NULL,
-    before_payload JSON NOT NULL,
-    requested_payload JSON NOT NULL,
-    idempotency_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    submitted_at DATETIME(6) NOT NULL,
-    result VARCHAR(1000) NULL,
-    completed_by BIGINT UNSIGNED NULL,
-    completed_by_name VARCHAR(100) NULL,
-    completed_at DATETIME(6) NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_order_change_submission (client_id, idempotency_digest),
-    KEY idx_order_change_case (case_no, id),
-    KEY idx_order_change_pending (completed_at, id),
-    CONSTRAINT chk_order_change_completion CHECK (
-        (completed_at IS NULL AND result IS NULL AND completed_by IS NULL AND completed_by_name IS NULL)
-        OR (completed_at IS NOT NULL AND result IS NOT NULL AND completed_by IS NOT NULL AND completed_by_name IS NOT NULL)
-    )
+CREATE TABLE `order_change_requests` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `client_id` int NOT NULL,
+  `kind` enum('service_address','cooking_requirement','daily_service_window','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_payload` json NOT NULL,
+  `requested_payload` json NOT NULL,
+  `idempotency_digest` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `command_fingerprint` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `submitted_at` datetime(6) NOT NULL,
+  `result` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `completed_by` bigint unsigned DEFAULT NULL,
+  `completed_by_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_order_change_submission` (`client_id`,`idempotency_digest`),
+  KEY `idx_order_change_case` (`case_no`,`id`),
+  KEY `idx_order_change_pending` (`completed_at`,`id`),
+  CONSTRAINT `chk_order_change_completion` CHECK ((((`completed_at` is null) and (`result` is null) and (`completed_by` is null) and (`completed_by_name` is null)) or ((`completed_at` is not null) and (`result` is not null) and (`completed_by` is not null) and (`completed_by_name` is not null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `order_contract_completion_apply_receipts` (
@@ -9437,7 +9434,18 @@ SET MESSAGE_TEXT = 'line_notification_source_events records cannot be updated'$$
 DELIMITER ;
 
 DELIMITER $$
-CREATE TRIGGER `trg_line_order_group_binding_events_before_delete` BEFORE DELETE ON `line_order_group_binding_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be deleted'; END IF; END$$
+CREATE TRIGGER `trg_line_order_group_binding_events_before_delete` BEFORE DELETE ON `line_order_group_binding_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))))
+ OR (@line_group_history_delete_key IS NOT NULL
+    AND @line_group_history_delete_case IS NOT NULL
+    AND OLD.case_no=(CONVERT(@line_group_history_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)
+    AND EXISTS(SELECT 1 FROM application_command_claims cmd
+        WHERE cmd.idempotency_key=(CONVERT(@line_group_history_delete_key USING utf8mb4) COLLATE utf8mb4_bin)
+        AND cmd.command_family='line_order_group_history_delete/v1'
+        AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@line_group_history_delete_case USING utf8mb4)) COLLATE utf8mb4_bin))
+    AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt
+        WHERE receipt.idempotency_key=(CONVERT(@line_group_history_delete_key USING utf8mb4) COLLATE utf8mb4_bin))
+    AND EXISTS(SELECT 1 FROM line_order_group_bindings binding
+        WHERE binding.case_no=OLD.case_no AND binding.group_id IS NULL AND binding.binding_status='unbound')),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be deleted'; END IF; END$$
 DELIMITER ;
 
 DELIMITER $$
@@ -9446,7 +9454,18 @@ SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be updated'$$
 DELIMITER ;
 
 DELIMITER $$
-CREATE TRIGGER `trg_line_order_group_runtime_events_before_delete` BEFORE DELETE ON `line_order_group_runtime_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be deleted'; END IF; END$$
+CREATE TRIGGER `trg_line_order_group_runtime_events_before_delete` BEFORE DELETE ON `line_order_group_runtime_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))))
+ OR (@line_group_history_delete_key IS NOT NULL
+    AND @line_group_history_delete_case IS NOT NULL
+    AND OLD.case_no=(CONVERT(@line_group_history_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)
+    AND EXISTS(SELECT 1 FROM application_command_claims cmd
+        WHERE cmd.idempotency_key=(CONVERT(@line_group_history_delete_key USING utf8mb4) COLLATE utf8mb4_bin)
+        AND cmd.command_family='line_order_group_history_delete/v1'
+        AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@line_group_history_delete_case USING utf8mb4)) COLLATE utf8mb4_bin))
+    AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt
+        WHERE receipt.idempotency_key=(CONVERT(@line_group_history_delete_key USING utf8mb4) COLLATE utf8mb4_bin))
+    AND EXISTS(SELECT 1 FROM line_order_group_bindings binding
+        WHERE binding.case_no=OLD.case_no AND binding.group_id IS NULL AND binding.binding_status='unbound')),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be deleted'; END IF; END$$
 DELIMITER ;
 
 DELIMITER $$

@@ -9,10 +9,7 @@ import {
   CustomerServiceUnauthenticatedError,
   ApiDecodeError,
 } from '../api/customer_service/customer_service_errors';
-import {
-  customerServiceClient,
-  getCustomerServiceSummary,
-} from '../api/customer_service/customer_service_client';
+import { customerServiceClient } from '../api/customer_service/customer_service_client';
 import {
   CustomerServiceDetailSchema,
   CustomerServiceEventSchema,
@@ -24,15 +21,12 @@ import {
 } from '../api/customer_service/customer_service_schemas';
 import {
   CUSTOMER_SERVICE_DETAIL_FIXTURE,
-  CUSTOMER_SERVICE_DETAIL_RESPONSE_FIXTURE,
   CUSTOMER_SERVICE_PAGE_FIXTURE,
-  CUSTOMER_SERVICE_PAGE_RESPONSE_FIXTURE,
   CUSTOMER_SERVICE_RESOLVE_APPLY_REQUEST_FIXTURE,
   CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE,
   CUSTOMER_SERVICE_RESOLVE_PREVIEW_REQUEST_FIXTURE,
   CUSTOMER_SERVICE_RESOLVE_PREVIEW_RESPONSE_FIXTURE,
   CUSTOMER_SERVICE_SUMMARY_FIXTURE,
-  CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE,
   CUSTOMER_SERVICE_TICKET_FIXTURE,
   CUSTOMER_SERVICE_UPDATE_APPLY_RESPONSE_FIXTURE,
 } from './fixtures/customer_service/customer_service_contract_fixtures';
@@ -66,41 +60,6 @@ describe('customer service client', () => {
   afterEach(() => {
     sessionClient.clearSession();
     vi.restoreAllMocks();
-  });
-
-  it('只以 GET 呼叫 summary、list、detail 白名單並保留查詢參數', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(response(CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE))
-      .mockResolvedValueOnce(response(CUSTOMER_SERVICE_PAGE_RESPONSE_FIXTURE))
-      .mockResolvedValueOnce(response(CUSTOMER_SERVICE_DETAIL_RESPONSE_FIXTURE));
-    globalThis.fetch = fetchMock;
-
-    await customerServiceClient.getSummary();
-    await customerServiceClient.listTickets({
-      status: 'handling',
-      category: 'profile_update',
-      search: 'ORD-TEST',
-      page: 1,
-      page_size: 25,
-    });
-    await customerServiceClient.getTicketDetail(31);
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      '/api/v1/customer-service/tickets/summary'
-    );
-    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
-    expect(String(fetchMock.mock.calls[1][0])).toContain(
-      '/api/v1/customer-service/tickets?'
-    );
-    expect(String(fetchMock.mock.calls[1][0])).toContain('status=handling');
-    expect(String(fetchMock.mock.calls[1][0])).toContain(
-      'category=profile_update'
-    );
-    expect(fetchMock.mock.calls[2][0]).toBe(
-      '/api/v1/customer-service/tickets/31'
-    );
   });
 
   it('結案流程只呼叫 purpose-specific Preview 與 Apply，不呼叫 legacy PATCH/reply', async () => {
@@ -153,15 +112,18 @@ describe('customer service client', () => {
 
   it('每個請求即時取得記憶體 Session 並拒絕呼叫者覆寫 Authorization', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(response(CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE))
+      Promise.resolve(response(CUSTOMER_SERVICE_RESOLVE_PREVIEW_RESPONSE_FIXTURE))
     );
     globalThis.fetch = fetchMock;
 
-    await getCustomerServiceSummary({
+    await customerServiceClient.previewResolve(31, CUSTOMER_SERVICE_RESOLVE_PREVIEW_REQUEST_FIXTURE, {
+      correlationId: 'customer-service-preview-31',
       headers: { Authorization: 'Bearer caller-controlled' },
     });
     setTestSession('customer-service-token-b');
-    await getCustomerServiceSummary();
+    await customerServiceClient.previewResolve(31, CUSTOMER_SERVICE_RESOLVE_PREVIEW_REQUEST_FIXTURE, {
+      correlationId: 'customer-service-preview-31',
+    });
 
     const firstHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers);
     const secondHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
@@ -178,7 +140,9 @@ describe('customer service client', () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
 
-    await expect(customerServiceClient.getSummary()).rejects.toBeInstanceOf(
+    await expect(customerServiceClient.previewResolve(31, CUSTOMER_SERVICE_RESOLVE_PREVIEW_REQUEST_FIXTURE, {
+      correlationId: 'customer-service-preview-31',
+    })).rejects.toBeInstanceOf(
       CustomerServiceUnauthenticatedError
     );
     expect(fetchMock).not.toHaveBeenCalled();
@@ -245,34 +209,20 @@ describe('customer service client', () => {
   });
 
   it('回應缺 required、型別錯誤、多餘欄位、null 與 enum drift 均拋 ApiDecodeError', async () => {
-    const invalidPayloads = [
-      {
-        ...CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE,
-        data: { handling: 1, resolved_today: 3 },
-      },
-      {
-        ...CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE,
-        data: { ...CUSTOMER_SERVICE_SUMMARY_FIXTURE, waiting: '2' },
-      },
-      {
-        ...CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE,
-        data: { ...CUSTOMER_SERVICE_SUMMARY_FIXTURE, unexpected: true },
-      },
-      { ...CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE, data: null },
-      {
-        ...CUSTOMER_SERVICE_PAGE_RESPONSE_FIXTURE,
-        data: {
-          ...CUSTOMER_SERVICE_PAGE_FIXTURE,
-          items: [
-            { ...CUSTOMER_SERVICE_TICKET_FIXTURE, status: 'closed' },
-          ],
-        },
-      },
+    const valid = CUSTOMER_SERVICE_RESOLVE_PREVIEW_RESPONSE_FIXTURE;
+    const invalidData = [
+      { ...valid.data, current_version: undefined },
+      { ...valid.data, current_version: '2' },
+      { ...valid.data, unexpected: true },
+      null,
+      { ...valid.data, after_status: 'closed' },
     ];
 
-    for (const payload of invalidPayloads) {
-      globalThis.fetch = vi.fn().mockResolvedValue(response(payload));
-      await expect(customerServiceClient.getSummary()).rejects.toBeInstanceOf(
+    for (const data of invalidData) {
+      globalThis.fetch = vi.fn().mockResolvedValue(response({ ...valid, data }));
+      await expect(customerServiceClient.previewResolve(31, CUSTOMER_SERVICE_RESOLVE_PREVIEW_REQUEST_FIXTURE, {
+        correlationId: 'customer-service-preview-31',
+      })).rejects.toBeInstanceOf(
         ApiDecodeError
       );
     }

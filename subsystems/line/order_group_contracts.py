@@ -57,6 +57,32 @@ class BindLineOrderGroupResult:
 
 
 @dataclass(frozen=True, slots=True)
+class UnbindLineOrderGroupCommand:
+    case_no: str
+    expected_version: ExpectedVersion
+    actor: ActorContext
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
+
+    @property
+    def idempotency_key(self) -> IdempotencyKey:
+        return IdempotencyKey(f"group-unbind:{self.case_no}:{self.expected_version.value}")
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteLineOrderGroupHistoryCommand:
+    case_no: str
+    expected_version: ExpectedVersion
+    actor: ActorContext
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
+
+
+@dataclass(frozen=True, slots=True)
 class RelayLineGroupInvitationCommand:
     relay: LineGroupInvitationRelay
     idempotency_key: IdempotencyKey
@@ -209,6 +235,8 @@ class LineOrderGroupWorkspaceRecord:
     last_invitation_at: datetime | None
     members: tuple[LineOrderGroupParticipant, ...]
     latest_event: LineOrderGroupWorkspaceEvent | None
+    binding_version: int
+    group_bound: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +264,8 @@ __all__ = [
     "OpeningGreetingSkipPage",
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
+    "DeleteLineOrderGroupHistoryCommand",
+    "UnbindLineOrderGroupCommand",
     "GetLineOrderGroupQuery",
     "LineOrderGroupCommandOutcome",
     "LineOrderGroupEventRecord",

@@ -1,6 +1,6 @@
 /**
  * File: customer_service_client.ts
- * Description: 以即時 Session 呼叫客服查詢、狀態更新、LINE durable 回覆 Preview／Apply 與結案端點。
+ * Description: 以即時 Session 呼叫客服 Preview／Apply 及切換結案端點。
  */
 import { z } from 'zod';
 import {
@@ -19,9 +19,6 @@ import {
   mapCustomerServiceError,
 } from './customer_service_errors';
 import {
-  CustomerServiceDetailResponseSchema,
-  CustomerServiceListParamsSchema,
-  CustomerServicePageResponseSchema,
   CustomerServiceReplyApplyRequestSchema,
   CustomerServiceReplyApplyResponseSchema,
   CustomerServiceReplyPreviewRequestSchema,
@@ -29,11 +26,8 @@ import {
   CustomerServiceResolveApplyRequestSchema,
   CustomerServiceResolvePreviewRequestSchema,
   CustomerServiceResolvePreviewResponseSchema,
-  CustomerServiceSummaryResponseSchema,
   CustomerServiceUpdateApplyResponseSchema,
   type CustomerServiceDetail,
-  type CustomerServiceListParams,
-  type CustomerServicePage,
   type CustomerServiceReplyApply,
   type CustomerServiceReplyApplyRequest,
   type CustomerServiceReplyPreview,
@@ -41,7 +35,6 @@ import {
   type CustomerServiceResolveApplyRequest,
   type CustomerServiceResolvePreview,
   type CustomerServiceResolvePreviewRequest,
-  type CustomerServiceSummary,
   type CustomerServiceUpdateApply,
 } from './customer_service_schemas';
 
@@ -63,17 +56,6 @@ export interface CustomerServiceApplyOptions
 }
 
 export interface CustomerServiceClient {
-  getSummary(
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceSummary>;
-  listTickets(
-    params?: CustomerServiceListParams,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServicePage>;
-  getTicketDetail(
-    ticketId: number,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail>;
   previewResolve(
     ticketId: number,
     payload: CustomerServiceResolvePreviewRequest,
@@ -211,51 +193,6 @@ async function callCustomerService<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function getCustomerServiceSummary(
-  options?: CustomerServiceRequestOptions
-): Promise<CustomerServiceSummary> {
-  return callCustomerService(async () => {
-    const raw = await transport.get(
-      '/api/v1/customer-service/tickets/summary',
-      currentRequestOptions(options)
-    );
-    return decodeSuccessfulEnvelope(CustomerServiceSummaryResponseSchema, raw);
-  });
-}
-
-export async function listCustomerServiceTickets(
-  params?: CustomerServiceListParams,
-  options?: CustomerServiceRequestOptions
-): Promise<CustomerServicePage> {
-  return callCustomerService(async () => {
-    const parsed = CustomerServiceListParamsSchema.safeParse(params ?? {});
-    if (!parsed.success) {
-      throw new CustomerServiceRequestError(
-        parsed.error.issues.map((issue) => issue.message).join('; ')
-      );
-    }
-    const raw = await transport.get('/api/v1/customer-service/tickets', {
-      ...currentRequestOptions(options),
-      params: parsed.data,
-    });
-    return decodeSuccessfulEnvelope(CustomerServicePageResponseSchema, raw);
-  });
-}
-
-export async function getCustomerServiceTicketDetail(
-  ticketId: number,
-  options?: CustomerServiceRequestOptions
-): Promise<CustomerServiceDetail> {
-  return callCustomerService(async () => {
-    const validTicketId = validateTicketId(ticketId);
-    const raw = await transport.get(
-      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}`,
-      currentRequestOptions(options)
-    );
-    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
-  });
-}
-
 export async function previewCustomerServiceReply(
   ticketId: number,
   payload: CustomerServiceReplyPreviewRequest,
@@ -369,26 +306,6 @@ class DefaultCustomerServiceClient
   public listReminders(params?: CustomerServiceReminderParams, options?: CustomerServiceRequestOptions): Promise<CustomerServiceReminderPage> {
     return listCustomerServiceReminders(params, options);
   }
-  public getSummary(
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceSummary> {
-    return getCustomerServiceSummary(options);
-  }
-
-  public listTickets(
-    params?: CustomerServiceListParams,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServicePage> {
-    return listCustomerServiceTickets(params, options);
-  }
-
-  public getTicketDetail(
-    ticketId: number,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail> {
-    return getCustomerServiceTicketDetail(ticketId, options);
-  }
-
   public previewUpdate(
     ticketId: number,
     payload: CustomerServiceResolvePreviewRequest,

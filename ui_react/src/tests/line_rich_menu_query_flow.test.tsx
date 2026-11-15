@@ -4,7 +4,6 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
 import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
@@ -12,21 +11,17 @@ import type { LineRichMenuPublicationClient } from '../api/line_rich_menu_public
 import { sessionClient } from '../api/auth/session_client';
 import { RichMenuDraftSchema } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineManagementPage, resolveRichMenuUri } from '../pages/LineManagementPage';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_EDITABLE_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from './fixtures/line_configuration_query_fixtures';
 
-type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
 function dependencies(): {
-  customer: CustomerServiceQueryClient;
   identity: LineIdentityQueryClient;
   configuration: LineConfigurationQueryClient;
   richMenuDraft: LineRichMenuDraftClient;
 } {
   return {
-    customer: { getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE), listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE), getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE) },
     identity: { listBindings: vi.fn().mockResolvedValue(BINDING_PAGE_FIXTURE), getBinding: vi.fn().mockResolvedValue(BOUND_IDENTITY_FIXTURE) },
     configuration: { getNotificationRules: vi.fn().mockResolvedValue(LINE_NOTIFICATION_RULES_CATALOG_FIXTURE), getRichMenuConfiguration: vi.fn().mockResolvedValue(LINE_RICH_MENU_CONFIGURATION_FIXTURE), listRichMenuPublications: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE), getRichMenuPublication: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_FIXTURE) },
     richMenuDraft: { query: vi.fn().mockResolvedValue(LINE_RICH_MENU_DRAFT_FIXTURE), preview: vi.fn(), apply: vi.fn() },
@@ -44,7 +39,6 @@ describe('LINE Rich Menu query 接線', () => {
     expect(resolveRichMenuUri('?target=staff_schedule')).toBe('/line-staff-schedule');
     expect(resolveRichMenuUri('?target=staff_payout')).toBe('/line-staff-payout');
     expect(resolveRichMenuUri('?target=staff_verification')).toBe('/line-identity?target=staff_verification');
-    expect(resolveRichMenuUri('?target=order_update')).toBe('/line-order-update');
     expect(resolveRichMenuUri('?target=order_tracking')).toBe('/line-mobile-admin?target=order_tracking');
     expect(resolveRichMenuUri('?target=dashboard')).toBe('/line-mobile-admin?target=dashboard');
     expect(resolveRichMenuUri('?target=faq')).toBe('/line-service-help?tab=faq');
@@ -55,8 +49,8 @@ describe('LINE Rich Menu query 接線', () => {
   it('發布緊鄰儲存且一次提交，移除歷程入口；published 內容可建立下一版草稿', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
-    const { customer, identity, configuration, richMenuDraft } = dependencies();
-    render(<LineManagementPage scope="interface" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} richMenuDraft={richMenuDraft} />);
+    const { identity, configuration, richMenuDraft } = dependencies();
+    render(<LineManagementPage scope="interface" lineIdentity={identity} lineConfiguration={configuration} richMenuDraft={richMenuDraft} />);
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
 
     await waitFor(() => expect(screen.getAllByText('案件進度').length).toBeGreaterThan(0));
@@ -101,7 +95,7 @@ describe('LINE Rich Menu query 接線', () => {
       }],
     }));
 
-    render(<LineManagementPage scope="interface" customerService={dependenciesValue.customer} lineIdentity={dependenciesValue.identity} lineConfiguration={dependenciesValue.configuration} richMenuDraft={dependenciesValue.richMenuDraft} />);
+    render(<LineManagementPage scope="interface" lineIdentity={dependenciesValue.identity} lineConfiguration={dependenciesValue.configuration} richMenuDraft={dependenciesValue.richMenuDraft} />);
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
 
     fireEvent.click(await screen.findByRole('button', { name: '外觀與名稱' }));
@@ -156,7 +150,6 @@ describe('LINE Rich Menu query 接線', () => {
 
     render(
       <LineManagementPage scope="interface"
-        customerService={dependenciesValue.customer}
         lineIdentity={dependenciesValue.identity}
         lineConfiguration={dependenciesValue.configuration}
         richMenuDraft={dependenciesValue.richMenuDraft}
@@ -204,7 +197,7 @@ describe('Rich Menu shared draft persistence', () => {
       persisted = { ...persisted, revision: persisted.revision + 1, definition: request.definition, publication_locks: persisted.publication_locks.map(lock => ({ ...lock, configuration_revision: persisted.revision + 1, state: 'editable', readonly_reason: null })) };
       return { receipt: { outcome: 'created', committed_revision: persisted.revision, receipt_reference: 'shared-draft-save' }, readback: structuredClone(persisted) };
     });
-    const page = () => <LineManagementPage scope="interface" customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} richMenuPublication={publication} />;
+    const page = () => <LineManagementPage scope="interface" lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} richMenuPublication={publication} />;
     const mounted = render(page());
     const color = await screen.findByLabelText('自訂選單底色');
     expect(screen.queryByLabelText('按鈕顯示名稱')).not.toBeInTheDocument();
@@ -242,7 +235,7 @@ describe('Rich Menu shared draft persistence', () => {
     vi.mocked(deps.richMenuDraft.query).mockResolvedValue(initial);
     vi.mocked(deps.richMenuDraft.preview).mockImplementation(async request => ({ before_revision: 8, resulting_revision: 9, normalized_definition: request.definition, preview_fingerprint: 'a'.repeat(64) }));
     vi.mocked(deps.richMenuDraft.apply).mockResolvedValue({ receipt: { outcome: 'created', committed_revision: 9, receipt_reference: 'readback-mismatch' }, readback: { ...initial, revision: 9 } });
-    render(<LineManagementPage scope="interface" customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
+    render(<LineManagementPage scope="interface" lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
     fireEvent.change(await screen.findByLabelText('自訂選單底色'), { target: { value: '#123456' } });
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '驗證讀回衝突' } });
     expect(screen.queryByRole('checkbox', { name: /我確認儲存此草稿/ })).not.toBeInTheDocument();

@@ -95,7 +95,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 導流服務綁定',
     description: '修改登記資料前置門禁。先向伺服器驗證 LINE 登入憑證與客戶綁定資格：已綁定者可修改資料；未綁定者需先連結客戶資料或填寫需求。',
     apiMapping: '門禁查驗：/api/v1/line/client-profile/query ＋ 資格放行 / 阻擋導流',
-    audienceRoles: ['customer'],
+    audienceRoles: [],
   },
   {
     id: 'profile_update',
@@ -111,7 +111,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '必須驗證 LINE 登入憑證與正式客戶綁定',
     description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
     apiMapping: '客戶資料異動之查詢、預覽與申請流程示意',
-    audienceRoles: ['customer'],
+    audienceRoles: [],
   },
   {
     id: 'order_update',
@@ -128,7 +128,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '後端驗證 LINE 登入憑證、正式客戶綁定、本人有效訂單與最新版本',
     description: '客戶選擇本人的有效訂單，核對異動前後內容後送出，取得訂單異動申請編號。',
     apiMapping: '訂單異動送出及工會在訂單管理辦理的流程示意',
-    audienceRoles: ['customer'],
+    audienceRoles: [],
   },
   {
     id: 'staff_order_search',

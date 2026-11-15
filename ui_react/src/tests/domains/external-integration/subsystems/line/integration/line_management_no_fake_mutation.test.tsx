@@ -2,68 +2,26 @@
  * File: line_management_no_fake_mutation.test.tsx
  * Description: 驗證 LINE successor 不暴露未授權控制項，且未觸發 Preview／Apply 或 provider 請求。
  */
-import { CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE } from './fixtures/customer_service_reminder_fixtures';
 import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient, CustomerServiceReminderClient } from '../../../../../../api/customer_service/customer_service_client';
-import { CustomerServiceClientError } from '../../../../../../api/customer_service/customer_service_errors';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import { lineMessagePreviewClient } from '../../../../../../api/line_notification_rules/line_message_preview_client';
 import { LineManagementPage, type LineScope } from '../../../../../../pages/LineManagementPage';
-import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
 
-type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'> & Partial<CustomerServiceReminderClient>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
 afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 describe('LINE 管理頁禁止假 mutation', () => {
-  it('查詢失敗先顯示可讀訊息，技術錯誤碼預設收合', async () => {
-    const unavailable = new CustomerServiceClientError('unavailable', 'HTTP_503', 'Service Unavailable', 503, true);
-    const customer: CustomerServiceQueryClient = {
-      listReminders: vi.fn().mockRejectedValue(unavailable),
-      getSummary: vi.fn().mockRejectedValue(unavailable),
-      listTickets: vi.fn().mockRejectedValue(unavailable),
-      getTicketDetail: vi.fn().mockRejectedValue(new Error('not used')),
-    };
-
-    window.history.replaceState(null, '', '#line-management?tab=tickets');
-    render(<LineManagementPage customerService={customer} />);
-
-    const alerts = await screen.findAllByRole('alert');
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toHaveTextContent('讀取歷史客服紀錄失敗');
-    expect(alerts[0]).not.toHaveTextContent('HTTP_503');
-    expect(alerts[0]).not.toHaveTextContent('Service Unavailable');
-  });
-
   it('未授權控制項不進入畫面，合法流程在未操作前維持零 mutation', async () => {
     const catalogQuery = vi.spyOn(lineMessagePreviewClient, 'catalog').mockResolvedValue([]);
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
-
-    const previewResolve = vi.fn();
-    const applyResolve = vi.fn();
-    const customerCandidate = {
-      listReminders: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE),
-      getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
-      listTickets: vi.fn().mockResolvedValue({
-        ...CUSTOMER_SERVICE_PAGE_FIXTURE,
-        items: CUSTOMER_SERVICE_PAGE_FIXTURE.items.map((item) => ({
-          ...item,
-          status: 'waiting' as const,
-        })),
-      }),
-      getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE),
-      previewResolve,
-      applyResolve,
-    };
-    const customer: CustomerServiceQueryClient = customerCandidate;
 
     const previewRevocation = vi.fn();
     const applyRevocation = vi.fn();
@@ -90,7 +48,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
     const page = (scope: LineScope) => (
       <LineManagementPage
         scope={scope}
-        customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}
@@ -98,7 +55,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
       />
     );
     const view = render(page('service'));
-    await screen.findByRole('button', { name: '查閱歷史客服紀錄' });
+    expect(screen.queryByRole('button', { name: '查閱歷史客服紀錄' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '客服案件' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
@@ -135,8 +92,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
-    expect(previewResolve).not.toHaveBeenCalled();
-    expect(applyResolve).not.toHaveBeenCalled();
     expect(previewRevocation).not.toHaveBeenCalled();
     expect(applyRevocation).not.toHaveBeenCalled();
     expect(catalogQuery).toHaveBeenCalledTimes(1);
@@ -162,12 +117,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
 
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
-    const customer: CustomerServiceQueryClient = {
-      listReminders: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE),
-      getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
-      listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE),
-      getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE),
-    };
     const identity: LineIdentityQueryClient = {
       listBindings: vi.fn().mockResolvedValue(BINDING_PAGE_FIXTURE),
       getBinding: vi.fn().mockResolvedValue(BOUND_IDENTITY_FIXTURE),
@@ -187,7 +136,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
     render(
       <LineManagementPage
         scope="interface"
-        customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}

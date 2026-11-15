@@ -88,6 +88,8 @@
 
 - **月嫂暫停接案原因改為選填**。`labor_union_2026_11_13_staff_availability_optional_reason_v1.json`（`1076_staff_availability_optional_reason.sql`）將 `scheduling_staff_unavailability_blocks.chk_scheduling_staff_unavailability_reason` 放寬為僅檢查 `CHAR_LENGTH(TRIM(created_by)) > 0`，與既有 Domain／UI 選填備註契約一致，保留既有列與其餘約束；新建與保留資料升級採相同檢查條件。
 
+- **LINE 案件群組歷程刪除保護**。`labor_union_2026_11_15_line_order_group_history_delete_v1.json`（`1078_line_order_group_history_delete_guards.sql`）精確更新兩個群組事件刪除 trigger，保留既有案件刪除條件，並允許有同案、尚未完成的群組歷程刪除命令且目前無群組綁定時逐案刪除。升級本身不刪除任何既有資料。新建與保留資料升級採相同 trigger 契約。
+
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 
 - 僅限 `APP_ENV=development`（或等價 validation profile）與 `localhost` 之 `union_db` 或 `lu_test_*`；每次執行前必回讀 environment、host、database 與 credential class（目標不符 fail closed）。

@@ -31,6 +31,10 @@ class LineOrderGroupBindingConflict(ValueError):
     """Raised when an order-group binding candidate is stale or unchanged."""
 
 
+class LineOrderGroupBindingNotFound(LookupError):
+    """Raised when an operation needs an existing order-group record."""
+
+
 @dataclass(frozen=True, slots=True)
 class LineOrderGroupBindingSnapshot:
     case_no: str
@@ -48,11 +52,20 @@ class LineOrderGroupBindingSnapshot:
 class LineOrderGroupBindingCandidate:
     case_no: str
     before_group_id: LineGroupId | None
-    resulting_group_id: LineGroupId
+    resulting_group_id: LineGroupId | None
     expected_version: ExpectedVersion
     resulting_version: ExpectedVersion
     actor: ActorContext
     fingerprint: PreviewFingerprint
+
+
+def require_order_group_history_delete(
+    snapshot: LineOrderGroupBindingSnapshot, expected_version: ExpectedVersion,
+) -> None:
+    if snapshot.version != expected_version:
+        raise LineOrderGroupBindingConflict("LINE order-group binding is stale")
+    if snapshot.group_id is not None or snapshot.status is not LineOrderGroupBindingStatus.UNBOUND:
+        raise LineOrderGroupBindingConflict("LINE order-group history requires an unbound case")
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +107,7 @@ class LineGroupInvitationRelay:
 def build_order_group_binding_candidate(
     snapshot: LineOrderGroupBindingSnapshot,
     *,
-    group_id: LineGroupId,
+    group_id: LineGroupId | None,
     expected_version: ExpectedVersion,
     actor: ActorContext,
 ) -> LineOrderGroupBindingCandidate:
@@ -112,7 +125,7 @@ def build_order_group_binding_candidate(
 
 def _binding_fingerprint(
     snapshot: LineOrderGroupBindingSnapshot,
-    group_id: LineGroupId,
+    group_id: LineGroupId | None,
     expected_version: ExpectedVersion,
     actor: ActorContext,
 ) -> PreviewFingerprint:
@@ -120,7 +133,7 @@ def _binding_fingerprint(
         {
             "case_no": snapshot.case_no,
             "before_group_id": _optional_group_value(snapshot.group_id),
-            "resulting_group_id": group_id.value,
+            "resulting_group_id": _optional_group_value(group_id),
             "expected_version": expected_version.value,
             "actor_id": actor.actor_id,
         }
@@ -129,13 +142,14 @@ def _binding_fingerprint(
 
 def _validate_binding_candidate(
     snapshot: LineOrderGroupBindingSnapshot,
-    group_id: LineGroupId,
+    group_id: LineGroupId | None,
     expected_version: ExpectedVersion,
 ) -> None:
     if snapshot.version != expected_version:
         raise LineOrderGroupBindingConflict("LINE order-group binding is stale")
     if snapshot.group_id == group_id:
-        raise LineOrderGroupBindingConflict("LINE group is already bound to this order")
+        message = "LINE group is not bound to this order" if group_id is None else "LINE group is already bound to this order"
+        raise LineOrderGroupBindingConflict(message)
 
 
 def validate_invitation_url(invitation_url: str) -> None:
@@ -173,8 +187,10 @@ __all__ = [
     "LineGroupInvitationRelay",
     "LineOrderGroupBindingCandidate",
     "LineOrderGroupBindingConflict",
+    "LineOrderGroupBindingNotFound",
     "LineOrderGroupBindingSnapshot",
     "LineOrderGroupBindingStatus",
     "build_order_group_binding_candidate",
+    "require_order_group_history_delete",
     "validate_invitation_url",
 ]

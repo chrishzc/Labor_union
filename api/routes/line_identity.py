@@ -107,8 +107,6 @@ _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "iden
 _GATEWAY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "gateway.html"
 _BIND_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "bind.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
-_PROFILE_UPDATE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_update.html"
-_PROFILE_GUARD_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_guard.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 _STAFF_PAYOUT_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_payout.html"
@@ -158,16 +156,6 @@ def studio_preview_gateway_page():
 def studio_preview_non_citizen_registration_page():
     """Serve read-only non-citizen HTML under /api/ for same-origin studio iframe preview."""
     return non_citizen_registration_page()
-
-
-@page_router.get("/line-profile-guard")
-def profile_guard_page():
-    return FileResponse(_PROFILE_GUARD_PAGE, headers=_NO_CACHE_HEADERS)
-
-
-@page_router.get("/line-profile-update")
-def profile_update_page():
-    return FileResponse(_PROFILE_UPDATE_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-staff-orders")

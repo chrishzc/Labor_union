@@ -1,6 +1,6 @@
 /**
  * File: line_order_group_query_client.ts
- * Description: 以 fresh Session 查詢 LINE 訂單群組 numbered 清單、明細與事件，驗證 identity 與分頁界線。
+ * Description: 以 fresh Session 查詢及管理 LINE 訂單群組。
  */
 import type { ZodType } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -14,6 +14,7 @@ import {
   LineOrderGroupWorkspacePageSchema, LineOrderGroupWorkspaceRecordSchema,
   LineOrderGroupWorkspaceEventPageSchema, type LineOrderGroupWorkspacePage,
   type LineOrderGroupWorkspaceRecord, type LineOrderGroupWorkspaceEventPage,
+  LineOrderGroupHistoryDeletionSchema, type LineOrderGroupHistoryDeletion,
 } from './line_order_group_query_schemas';
 
 export interface LineOrderGroupQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
@@ -55,6 +56,20 @@ function assertCaseIdentity(caseNo: string, actual: string): void {
   if (caseNo !== actual) throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_IDENTITY_MISMATCH', '訂單群組與 request identity 不一致。');
 }
 
+async function workspaceMutation<T>(
+  caseNo: string, action: 'unbind' | 'delete-history', expectedVersion: number, schema: ZodType<T>,
+): Promise<T> {
+  const canonical = assertCaseNo(caseNo);
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+    throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_VALIDATION', '群組綁定版本無效。');
+  }
+  const raw = await transport.post(
+    `/api/v1/line/order-groups/workspace/${encodeURIComponent(canonical)}/${action}`,
+    { expected_version: expectedVersion }, options(),
+  );
+  return decode(schema, raw);
+}
+
 export const lineOrderGroupQueryClient = {
   async workspaceList(query: LineOrderGroupWorkspaceQuery = {}, input?: LineOrderGroupQueryOptions): Promise<LineOrderGroupWorkspacePage> {
     try {
@@ -79,6 +94,20 @@ export const lineOrderGroupQueryClient = {
       const data = decode(LineOrderGroupWorkspaceRecordSchema, await transport.get(`/api/v1/line/order-groups/workspace/${encodeURIComponent(canonical)}`, options(input)));
       assertCaseIdentity(canonical, data.case_no);
       return data;
+    } catch (error) { throw mapLineOrderGroupQueryError(error); }
+  },
+
+  async workspaceUnbind(caseNo: string, expectedVersion: number): Promise<LineOrderGroupWorkspaceRecord> {
+    try {
+      const data = await workspaceMutation(caseNo, 'unbind', expectedVersion, LineOrderGroupWorkspaceRecordSchema);
+      assertCaseIdentity(caseNo, data.case_no);
+      return data;
+    } catch (error) { throw mapLineOrderGroupQueryError(error); }
+  },
+
+  async workspaceDeleteHistory(caseNo: string, expectedVersion: number): Promise<LineOrderGroupHistoryDeletion> {
+    try {
+      return await workspaceMutation(caseNo, 'delete-history', expectedVersion, LineOrderGroupHistoryDeletionSchema);
     } catch (error) { throw mapLineOrderGroupQueryError(error); }
   },
 
@@ -153,4 +182,5 @@ function assertWorkspacePage(data: { items: unknown[]; page: number; page_size: 
   }
 }
 
-export type LineOrderGroupWorkspaceClient = Pick<typeof lineOrderGroupQueryClient, 'workspaceList' | 'workspaceDetail' | 'workspaceEvents'>;
+export type LineOrderGroupWorkspaceClient = Pick<typeof lineOrderGroupQueryClient,
+  'workspaceList' | 'workspaceDetail' | 'workspaceEvents' | 'workspaceUnbind' | 'workspaceDeleteHistory'>;

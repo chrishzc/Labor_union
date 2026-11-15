@@ -45,25 +45,10 @@ const TIER_LABELS: Record<string, string> = {
   admin: '工會管理',
 };
 
-const ROUTE_DESCRIPTIONS: Record<string, string> = {
-  customer_binding: '【1 對 1 聊天室】傳送客戶身分認證／綁定訂單 LIFF 連結（此為個人聊天室入口，非群組綁定指令）。',
-  admin_binding: '【1 對 1 聊天室】傳送工會後台管理員帳號綁定 LIFF 連結（連結 15 分鐘內有效）。',
-  staff_binding: '【1 對 1 聊天室】傳送月嫂身分認證資料填寫 LIFF 連結。',
-  union_menu: '【1 對 1 聊天室｜工會人員】切換工會圖文選單或開啟行動工作台各功能分頁。',
-  order_group_bind: '【LINE 群組｜工會人員】將目前群組綁定指定案件並儲存邀請連結。使用格式：「指令 案件編號 邀請網址」（例如：綁定群組 115000104 https://line.me/R/ti/g/xxxx）。',
-  order_group_invite: '【LINE 群組｜工會人員】依群組已儲存的邀請網址，將入群邀請卡推播給本案已完成 LINE 綁定的客戶與月嫂。',
-  group_helper_menu: '【LINE 群組｜月嫂／專員】在已綁定案件的服務群組輸入後，以免費 replyToken 喚醒月嫂專屬小幫手選單（0 Push 額度）。',
-  group_postponement: '【LINE 群組｜月嫂專屬】僅限本案月嫂由小幫手選單開啟專屬 LIFF（或由月嫂輸入文字「雙方合意延期 YYYY-MM-DD 順延至 YYYY-MM-DD」發起提議，支援多天成對調整，客戶操作即時阻擋）。',
-  registration: '【1 對 1 聊天室】導向客戶服務登記／身分確認 LIFF 頁面。',
-  service_help_menu: '【1 對 1 聊天室】回覆服務與常見問答主選單或引導提示。',
-  order_update_menu: '【1 對 1 聊天室】導向客戶修改訂單資訊 LIFF 頁面。',
-  resume_ai_assistant: '【1 對 1 聊天室】使用者請求恢復自動助理／機器人回覆（系統維持固定安全導覽回應）。',
-  feedback_resolved: '【1 對 1 聊天室】問答回饋文字指令（正面肯定結案）。',
-  feedback_unresolved: '【1 對 1 聊天室】舊版文字回饋指令顯示直接留言指引。',
-  menu_switch_help: '【1 對 1 聊天室｜管理者／雙身分】查看目前可切換的個人圖文選單視角說明。',
-  menu_switch_customer: '【1 對 1 聊天室】將個人底部圖文選單切換為客戶專區選單。',
-  menu_switch_visitor: '【1 對 1 聊天室】將個人底部圖文選單切換回訪客預設選單。',
-  menu_switch_staff: '【1 對 1 聊天室】將個人底部圖文選單切換為月嫂專區選單。',
+const EDITABLE_ROUTE_DESCRIPTIONS: Record<string, string> = {
+  admin_binding: '【一對一聊天室】取得工會後台帳號綁定連結，有效時間為 15 分鐘。',
+  order_group_bind: '【案件群組｜工會人員】輸入「指令 案件編號 邀請網址」，將群組綁定到該案件並儲存邀請網址。',
+  group_helper_menu: '【案件群組｜本案月嫂】輸入指令開啟小幫手選單。',
 };
 
 export const AiEventStudio: React.FC = () => {
@@ -72,7 +57,7 @@ export const AiEventStudio: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTier, setSelectedTier] = useState<TierCategory>('all');
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
-  const [routerInput, setRouterInput] = useState('我想修改登記資料');
+  const [routerInput, setRouterInput] = useState('');
   const [routerPreview, setRouterPreview] = useState<RouterPreview | null>(null);
   const [routerNotice, setRouterNotice] = useState<string | null>(null);
   const [routerNoticeKind, setRouterNoticeKind] = useState<'success' | 'info' | 'error' | null>(null);
@@ -101,8 +86,6 @@ export const AiEventStudio: React.FC = () => {
         if (!active) return;
         setCatalog(nextCatalog);
         setCatalogNotice(null);
-        const firstRouteKey = nextCatalog.entries[0]?.route_key;
-        if (firstRouteKey) setSelectedRouteKey((prev) => prev ?? firstRouteKey);
       })
       .catch(() => {
         if (active) setCatalogNotice('引導動作讀取失敗，請稍後重新整理。');
@@ -115,6 +98,7 @@ export const AiEventStudio: React.FC = () => {
     if (!catalog) return [];
     const groups = new Map<string, CatalogGroup>();
     for (const entry of catalog.entries) {
+      if (!Object.hasOwn(EDITABLE_ROUTE_DESCRIPTIONS, entry.route_key)) continue;
       const key = `${entry.route_key}:${entry.tier}:${entry.source_identity}:${entry.revision}`;
       const existing = groups.get(key);
       if (existing) {
@@ -183,6 +167,7 @@ export const AiEventStudio: React.FC = () => {
 
   const startEditing = () => {
     if (!selectedRule) return;
+    setSelectedRouteKey(selectedRule.routeKey);
     setEditingAliases([...selectedRule.aliases]);
     setNewAliasInput('');
     setAliasEditError(null);
@@ -295,13 +280,16 @@ export const AiEventStudio: React.FC = () => {
 
       const matchedRoute = preview.route_key;
       if (matchedRoute) {
-        setSelectedRouteKey(matchedRoute);
-        const cardElement = document.getElementById(`rule-card-${matchedRoute}`);
-        if (cardElement) {
-          cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const matchedRule = groupedRules.find((rule) => rule.routeKey === matchedRoute);
+        if (matchedRule) {
+          if (!isEditingAliases) selectRule(matchedRoute);
+          document.getElementById(`rule-card-${matchedRoute}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+          setRouterNotice('已找到符合的引導動作。');
+          setRouterNoticeKind('success');
+        } else {
+          setRouterNotice('預覽命中系統路由。此動作沒有可在這裡維護的指令。');
+          setRouterNoticeKind('info');
         }
-        setRouterNotice('已找到符合的引導動作。');
-        setRouterNoticeKind('success');
       } else {
         setRouterNotice('未命中固定引導動作，請查看詳細結果。');
         setRouterNoticeKind('info');
@@ -322,7 +310,7 @@ export const AiEventStudio: React.FC = () => {
     <div className="ai-studio-container studio-guidance-layout">
       <aside className="ai-studio-sidebar">
         <div className="ai-sidebar-top">
-          <h3><Bot aria-hidden="true" />引導動作</h3>
+          <h3><Bot aria-hidden="true" />聊天室觸發指令</h3>
         </div>
 
         <div className="liff-filter-pills studio-tier-pills" role="tablist" aria-label="引導動作分類">
@@ -369,7 +357,7 @@ export const AiEventStudio: React.FC = () => {
           <input
             id="server-ai-rule-search"
             type="search"
-            placeholder="搜尋動作、分類或常見問法"
+            placeholder="搜尋動作、分類或指令"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
           />
@@ -413,7 +401,7 @@ export const AiEventStudio: React.FC = () => {
             <div className="ai-editor-header">
               <div>
                 <h2>{selectedRule.aliases[0] || selectedRule.routeKey}</h2>
-                <p className="studio-description">{ROUTE_DESCRIPTIONS[selectedRule.routeKey] ?? '查看觸發問法、服務入口與引導結果。'}</p>
+                <p className="studio-description">{EDITABLE_ROUTE_DESCRIPTIONS[selectedRule.routeKey]}</p>
               </div>
               <span className="studio-editable-badge">可自訂觸發指令</span>
             </div>
@@ -604,6 +592,7 @@ export const AiEventStudio: React.FC = () => {
               <input
                 id="server-router-input"
                 aria-label="客服測試問句"
+                placeholder="例如「綁定後台帳號」"
                 value={routerInput}
                 disabled={routerBusy}
                 onChange={(event) => setRouterInput(event.target.value)}
@@ -623,7 +612,7 @@ export const AiEventStudio: React.FC = () => {
               <div aria-label="問句處理預覽結果">
                 {routerPreview.route_key && (
                   <p className="studio-description">
-                    引導動作：{groupedRules.find((rule) => rule.routeKey === routerPreview.route_key)?.aliases[0] || '已命中系統引導動作'}
+                    {catalog?.entries.find((entry) => entry.route_key === routerPreview.route_key)?.alias || '已命中系統引導動作'}
                   </p>
                 )}
                 <details className="studio-technical">
@@ -639,6 +628,25 @@ export const AiEventStudio: React.FC = () => {
             )}
           </section>
         </div>
+        <section className="ai-editor-card" aria-labelledby="guidance-menu-switch">
+          <h3 id="guidance-menu-switch">圖文選單切換指令</h3>
+          <p className="studio-description">請在 LINE 官方帳號的一對一聊天室輸入指令。</p>
+          <ul>
+            <li>「切換選單」可查看雙身分或工會帳號的切換指引。</li>
+            <li>「切換客戶」或「切換月嫂」可開啟對應的圖文選單。有雙重身分時也會記錄目前選用的身分。</li>
+            <li>工會人員可用「切換訪客」查看訪客選單，用「切換工會」返回工會選單。</li>
+          </ul>
+        </section>
+        <section className="ai-editor-card" aria-labelledby="guidance-menu-entries">
+          <h3 id="guidance-menu-entries">LINE 操作入口</h3>
+          <ul>
+            <li>訪客圖文選單的「月嫂認證」可辦理月嫂綁定。已有案件的客戶可從「預約與登記」選擇對應身分，再辦理綁定。</li>
+            <li>訪客與客戶可從「常見問答」查閱服務流程、費用與補助。</li>
+            <li>工會圖文選單有「待辦工作台」、「狀態追蹤」和「營運摘要」。</li>
+            <li>案件群組的小幫手選單有「雙方合意延期」。群組邀請的操作說明可在「LINE 營運」的「案件群組」查看。</li>
+          </ul>
+          <p className="studio-description">客戶如需修改個人資料或訂單內容，請直接在官方帳號或原案件群組留言。</p>
+        </section>
       </div>
     </div>
   );

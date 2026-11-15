@@ -9,9 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from api.dependencies.admin_auth import (
     admin_actor_context,
+    require_line_order_group_binder,
     require_line_order_group_reader,
 )
-from api.dependencies.line_runtime import get_line_order_group_query_application
+from api.dependencies.line_runtime import (
+    get_line_order_group_admin_application,
+    get_line_order_group_query_application,
+)
 from api.schemas.line_order_groups import (
     LineOrderGroupEventPageResponse,
     LineOrderGroupEventResponse,
@@ -21,11 +25,22 @@ from api.schemas.line_order_groups import (
     LineOrderGroupWorkspacePageResponse,
     LineOrderGroupWorkspaceRecordResponse,
     LineOrderGroupWorkspaceEventPageResponse,
+    LineOrderGroupVersionRequest,
+    LineOrderGroupHistoryDeleteResponse,
 )
-from domains.line.order_group import LineOrderGroupBindingStatus
+from domains.line.order_group import (
+    LineOrderGroupBindingConflict,
+    LineOrderGroupBindingNotFound,
+    LineOrderGroupBindingStatus,
+)
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.line.capabilities import LineCapability
+from subsystems.line.order_group_contracts import (
+    DeleteLineOrderGroupHistoryCommand, LineOrderGroupWorkspaceRecord, UnbindLineOrderGroupCommand,
+)
 from datetime import date
-from dataclasses import asdict
+from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 from api.dependencies.admin_auth import require_customer_service_handler
 from api.error_contracts import typed_http_error
@@ -134,11 +149,15 @@ def list_order_group_workspace(
     page_size: int = Query(default=25, ge=1, le=200),
     principal: AdminPrincipal = Depends(require_line_order_group_reader),
 ):
+    actor = admin_actor_context(principal)
     result = get_line_order_group_query_application().workspace_list(
-        admin_actor_context(principal), search=search.strip() or None if search else None,
+        actor, search=search.strip() or None if search else None,
         status=status.value if status else None, page=page, page_size=page_size,
     )
-    return LineOrderGroupWorkspacePageResponse.model_validate(result)
+    return LineOrderGroupWorkspacePageResponse(
+        items=[_workspace_record(item, actor) for item in result.items],
+        page=result.page, page_size=result.page_size, total=result.total, total_pages=result.total_pages,
+    )
 
 
 @router.get("/workspace/{case_no}", response_model=LineOrderGroupWorkspaceRecordResponse)
@@ -146,10 +165,62 @@ def get_order_group_workspace(
     case_no: str = Path(min_length=1, max_length=50, pattern=r"^\S(?:.*\S)?$"),
     principal: AdminPrincipal = Depends(require_line_order_group_reader),
 ):
-    result = get_line_order_group_query_application().workspace_get(admin_actor_context(principal), case_no)
+    actor = admin_actor_context(principal)
+    result = get_line_order_group_query_application().workspace_get(actor, case_no)
     if result is None:
         raise HTTPException(status_code=404, detail="找不到案件的服務群組")
-    return LineOrderGroupWorkspaceRecordResponse.model_validate(result)
+    return _workspace_record(result, actor)
+
+
+@router.post("/workspace/{case_no}/unbind", response_model=LineOrderGroupWorkspaceRecordResponse)
+def unbind_order_group_workspace(
+    body: LineOrderGroupVersionRequest,
+    case_no: str = Path(min_length=1, max_length=50, pattern=r"^\S(?:.*\S)?$"),
+    principal: AdminPrincipal = Depends(require_line_order_group_binder),
+):
+    actor = admin_actor_context(principal)
+    correlation_id = CorrelationId(f"line-group-unbind:{uuid4()}")
+    try:
+        result = get_line_order_group_admin_application().unbind(UnbindLineOrderGroupCommand(
+            case_no, ExpectedVersion(body.expected_version), actor, correlation_id,
+        ))
+    except LineOrderGroupBindingNotFound as error:
+        raise HTTPException(status_code=404, detail="找不到案件的服務群組") from error
+    except LineOrderGroupBindingConflict as error:
+        raise typed_http_error(
+            409, "conflict", "line_order_group_binding_conflict",
+            "群組綁定已變動，請重新整理後再操作。", correlation_id.value,
+        ) from error
+    return _workspace_record(result, actor)
+
+
+@router.post("/workspace/{case_no}/delete-history", response_model=LineOrderGroupHistoryDeleteResponse)
+def delete_order_group_workspace_history(
+    body: LineOrderGroupVersionRequest,
+    case_no: str = Path(min_length=1, max_length=50, pattern=r"^\S(?:.*\S)?$"),
+    principal: AdminPrincipal = Depends(require_line_order_group_binder),
+):
+    correlation_id = CorrelationId(f"line-group-delete-history:{uuid4()}")
+    try:
+        deleted_events = get_line_order_group_admin_application().delete_history(DeleteLineOrderGroupHistoryCommand(
+            case_no, ExpectedVersion(body.expected_version), admin_actor_context(principal), correlation_id,
+        ))
+    except LineOrderGroupBindingNotFound as error:
+        raise HTTPException(status_code=404, detail="找不到案件的群組歷程") from error
+    except LineOrderGroupBindingConflict as error:
+        raise typed_http_error(
+            409, "conflict", "line_order_group_history_conflict",
+            "群組或歷程已變動。請確認案件已解除綁定，再重新操作。", correlation_id.value,
+        ) from error
+    return LineOrderGroupHistoryDeleteResponse(deleted_events=deleted_events)
+
+
+def _workspace_record(result: LineOrderGroupWorkspaceRecord, actor: ActorContext) -> LineOrderGroupWorkspaceRecordResponse:
+    can_manage = LineCapability.ORDER_GROUP_BIND.value in actor.permission_scope
+    return LineOrderGroupWorkspaceRecordResponse.model_validate(result).model_copy(update={
+        "can_unbind": can_manage and result.group_bound,
+        "can_delete_history": can_manage and not result.group_bound and result.latest_event is not None,
+    })
 
 
 @router.get("/workspace/{case_no}/events/numbered", response_model=LineOrderGroupWorkspaceEventPageResponse)

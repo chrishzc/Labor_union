@@ -42,7 +42,7 @@ from subsystems.line.delivery_admin_application import (
     LineDeliveryTaskAdminApplication,
 )
 from subsystems.line.rich_menu_application import LineRichMenuApplication
-from subsystems.line.order_group_application import LineOrderGroupQueryApplication
+from subsystems.line.order_group_application import LineOrderGroupAdminApplication, LineOrderGroupQueryApplication
 from subsystems.line.webhook_intake import LineWebhookIntake
 from subsystems.line.runtime_alert_application import LineRuntimeApplication
 from subsystems.line.runtime_health import classify_line_worker_health
@@ -120,6 +120,11 @@ def get_line_rich_menu_application() -> LineRichMenuApplication:
 @lru_cache(maxsize=1)
 def get_line_order_group_query_application() -> LineOrderGroupQueryApplication:
     return LineOrderGroupQueryApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_order_group_admin_application() -> LineOrderGroupAdminApplication:
+    return LineOrderGroupAdminApplication(open_line_unit_of_work)
 
 
 @lru_cache(maxsize=1)
@@ -223,6 +228,7 @@ __all__ = [
     "get_line_delivery_task_admin_application",
     "get_line_rich_menu_application",
     "get_line_order_group_query_application",
+    "get_line_order_group_admin_application",
     "get_line_runtime_application",
     "get_line_database_health",
     "get_line_webhook_intake",

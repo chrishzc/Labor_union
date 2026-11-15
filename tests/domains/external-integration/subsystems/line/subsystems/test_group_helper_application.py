@@ -617,6 +617,7 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
     assert "flow_id=flow-999" in liff_text
     assert "case_no=C-2026-01" in liff_text
     assert "mode=postpone" in liff_text
+    assert "15 分鐘" in liff_text
 
     # 2. Occupancy conflict blocks card creation
     uow.service_start_workflow.arrangement.conflict = True

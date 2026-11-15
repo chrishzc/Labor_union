@@ -156,6 +156,19 @@ def test_each_procedure_executes_with_allowed_profile_and_outer_rollback(engine,
 
 def seed_operation(admin, name):
     key = uuid4().hex
+    if name == 'lu_nas_delete_order_group_history_v1':
+        case = 'nas-group-' + key
+        family = 'line_order_group_history_delete/v1'
+        client = execute(admin, 'INSERT INTO clients(name,case_no) VALUES (%s,%s)', ('test', case))
+        execute(admin, 'INSERT INTO orders(case_no,client_id) VALUES (%s,%s)', (case, client))
+        execute(admin, 'INSERT INTO line_order_group_bindings(case_no,aggregate_version) VALUES (%s,1)', (case,))
+        execute(admin, """INSERT INTO line_order_group_binding_events
+            (case_no,action,before_group_id,expected_version,resulting_version,actor_id,binding_fingerprint,idempotency_key,correlation_id)
+            VALUES (%s,'released','C-test',0,1,'test',%s,%s,%s)""", (case, 'a' * 64, key, key))
+        execute(admin, """INSERT INTO application_command_claims
+            (idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id)
+            VALUES (%s,%s,%s,%s,%s)""", (key, family, 'case:' + case, 'b' * 64, key))
+        return (case, 1, key), ('SELECT COUNT(*) FROM line_order_group_binding_events WHERE case_no=%s', (case,)), 1, 0
     staff = execute(admin, "INSERT INTO staff(name) VALUES(%s)", ('nas-test-'+key,))
     if name == 'lu_nas_delete_holiday_v1':
         # One operation per run; far-future scenario dates are not canonical seeds.

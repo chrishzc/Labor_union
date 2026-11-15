@@ -109,6 +109,18 @@ class LineOrderGroupWorkspaceRecordResponse(BaseModel):
     last_invitation_at: datetime | None
     members: list[LineOrderGroupParticipantResponse]
     latest_event: LineOrderGroupWorkspaceEventResponse | None
+    binding_version: int
+    can_unbind: bool = False
+    can_delete_history: bool = False
+
+
+class LineOrderGroupVersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, strict=True)
+
+
+class LineOrderGroupHistoryDeleteResponse(BaseModel):
+    deleted_events: int
 
 
 class LineOrderGroupWorkspacePageResponse(BaseModel):

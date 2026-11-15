@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-order-group-history-delete-2026-11-15-v1",
+  "release_metadata": {
+    "release_name": "LINE order group history deletion",
+    "application_version": "line-order-group-history-delete-v1",
+    "published_at": "2026-11-15",
+    "description": "Keep unbound case group history append-only except for a pending authorized per-case deletion command."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-change-requests-2026-11-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1078_line_order_group_history_delete_guards.sql",
+      "relative_path": "db/schema_parts/1078_line_order_group_history_delete_guards.sql",
+      "sha256": "ea0b08eb7f18ec7784a68cb1a81b98d743c1405fbb8bd3f78b278310b12bc349",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-isolated-candidate-before-switch; restore-protected-predecessor-only-through-approved-recovery",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "line-order-group-history-delete-guards-exact",
+      "phase": "post-schema",
+      "policy": "Verify both exact scoped group history guards while preserving every existing row.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "line-order-group-history-delete-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "line-order-group-history-delete-guards-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_15_line_order_group_history_delete_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_15_line_order_group_history_delete_v1.descriptors.json",
+    "sha256": "670193ed0e1504a6118b3585816d1d172ea3c5d7c490e5975f3b2717b3080db5",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

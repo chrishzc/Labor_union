@@ -91,6 +91,26 @@ PROCEDURES = {
     "lu_nas_delete_unsigned_case_v2": (
         "IN p_case VARCHAR(50), IN p_version BIGINT, IN p_client BIGINT, IN p_client_version BIGINT, IN p_command_key VARCHAR(191)",
         nas_case_deletion_body(), ("management",)),
+    "lu_nas_delete_order_group_history_v1": (
+        "IN p_case VARCHAR(50), IN p_version BIGINT UNSIGNED, IN p_command_key VARCHAR(191)", """
+        DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN
+          SET @line_group_history_delete_key=NULL,@line_group_history_delete_case=NULL;
+          RESIGNAL;
+        END;
+        IF NOT EXISTS(SELECT 1 FROM line_order_group_bindings WHERE case_no=p_case
+          AND aggregate_version=p_version AND group_id IS NULL AND binding_status='unbound' FOR UPDATE)
+          OR NOT EXISTS(SELECT 1 FROM application_command_claims WHERE idempotency_key=p_command_key
+            AND command_family='line_order_group_history_delete/v1' AND aggregate_identity=CONCAT('case:',p_case))
+          OR EXISTS(SELECT 1 FROM admin_command_receipts WHERE idempotency_key=p_command_key
+            AND command_family='line_order_group_history_delete/v1') THEN
+          SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='line_order_group_history_conflict';
+        END IF;
+        SET @line_group_history_delete_key=p_command_key,@line_group_history_delete_case=p_case;
+        DELETE FROM line_order_group_runtime_events WHERE case_no=p_case;
+        DELETE FROM line_order_group_binding_events WHERE case_no=p_case;
+        DELETE FROM line_order_group_participants WHERE case_no=p_case;
+        SET @line_group_history_delete_key=NULL,@line_group_history_delete_case=NULL;
+        """, ("management",)),
     "lu_nas_delete_holiday_v1": (
         "IN p_date DATE", """
         IF p_date IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_invalid_date'; END IF;

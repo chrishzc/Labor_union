@@ -827,11 +827,16 @@ def switch_runtime(settings, candidate, original_env_digest, directory):
 
 def upgrade(settings):
     print("正在核對資料庫版本，原資料庫不會被清空。", flush=True)
+    from scripts import update_local_database as updater
+
     has_tools = bool(resolve_client_tool("mysql") and resolve_client_tool("mysqldump"))
     is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
-    if not is_strict_nas or not has_tools:
+    is_local_nas_test = (
+        settings["host"].casefold().rstrip(".") in {"localhost", "127.0.0.1", "::1"}
+        and settings["database"].startswith("lu_nas_")
+    )
+    if not (is_strict_nas or is_local_nas_test):
         print("執行直連結構升級（Additive Migration）...", flush=True)
-        from scripts import update_local_database as updater
         result = updater.update_local_database(
             environment_file=settings["environment_file"],
             apply=True,
@@ -847,9 +852,23 @@ def upgrade(settings):
         save(directory / "result.json", {"status": "completed", "database": settings["database"]})
         return directory
 
+    require(has_tools, "安全升級需要 mysql 與 mysqldump。")
+    source = settings["database"]
+    read = reader(settings)
+    if is_local_nas_test:
+        source_preview = updater.build_additive_preview(read, source, updater.DEFAULT_RECEIPT_ROOT)
+        if source_preview.get("status") == "current":
+            updater.require_current_database(source_preview)
+            print("資料庫結構已是最新版本，無需升級。", flush=True)
+            return None
+        require(source_preview.get("status") == "ready" and source_preview.get("pending_releases"),
+                f"來源版本檢查未通過：{source_preview.get('blocked_reason') or source_preview.get('code')}。")
+        for pending in source_preview["pending_releases"]:
+            print(f"待升級：{pending['release_id']} ({pending['artifact']})", flush=True)
+
     root = destination_ready(settings, writable=True)
-    source, candidate = settings["database"], new_candidate("upgrade")
-    read, write = reader(settings), writer(settings, candidate)
+    candidate = new_candidate("upgrade")
+    write = writer(settings, candidate)
     for executable in ("mysql", "mysqldump"):
         write.client_prefix(executable)
     # Unknown backfills stop before source backup or candidate writes.
@@ -877,6 +896,8 @@ def upgrade(settings):
     print("正在進行最後的完整資料驗證。", flush=True)
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")
+    if is_local_nas_test:
+        updater.require_current_database(updater.build_additive_preview(write, candidate, directory))
     prepare_runtime_access(settings, candidate)
     try:
         from infrastructure.mysql.nas_mutations import ensure_nas_procedures
@@ -1262,7 +1283,7 @@ def main(argv=None):
         if args.mode == "backup":
             record_backup_result(settings, "passed", created_at=read_backup_receipt(path)["created_at"])
             print(f"備份成功，儲存位置：{path}")
-        else:
+        elif path is not None:
             print(f"副本驗證與設定切換完成。請重新啟動工會系統，再確認登入與資料。紀錄：{path}")
         return 0
     except (EOFError, KeyboardInterrupt):

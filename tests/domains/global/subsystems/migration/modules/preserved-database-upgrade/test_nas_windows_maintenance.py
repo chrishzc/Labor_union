@@ -576,8 +576,16 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
-def test_upgrade_preserves_order_and_never_switches_when_verification_fails(settings, monkeypatch, tmp_path):
+@pytest.mark.parametrize("local_test", [False, True])
+def test_upgrade_preserves_order_and_never_switches_when_verification_fails(settings, monkeypatch, tmp_path, local_test):
     steps = []
+    if local_test:
+        from scripts import update_local_database as updater
+
+        settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
+        monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {
+            "status": "ready", "pending_releases": [{"release_id": "fixture", "artifact": "fixture.sql"}],
+        })
     monkeypatch.setattr(nas.shutil, "which", lambda name: name)
     monkeypatch.setattr(nas.migration, "build_plan", lambda *_: {"status": "ready", "candidate_exists": False})
     monkeypatch.setattr(nas, "backup", lambda *_: steps.append("backup") or tmp_path)
@@ -593,6 +601,20 @@ def test_upgrade_preserves_order_and_never_switches_when_verification_fails(sett
         nas.upgrade(settings)
     assert steps == ["backup", "restore", "apply", "verify"]
     assert settings["environment_file"].read_bytes() == before
+
+
+def test_current_local_test_database_does_not_create_candidate(settings, monkeypatch, tmp_path):
+    from scripts import update_local_database as updater
+
+    settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    preview = {"status": "current"}
+    monkeypatch.setattr(updater, "build_additive_preview", lambda *_: preview)
+    checked = []
+    monkeypatch.setattr(updater, "require_current_database", checked.append)
+    monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("current schema needs no upgrade"))
+    assert nas.upgrade(settings) is None
+    assert checked == [preview]
 
 
 def test_schedule_stale_is_typed_and_does_not_register(settings, tmp_path, monkeypatch):

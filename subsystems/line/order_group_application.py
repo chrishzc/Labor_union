@@ -21,7 +21,8 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineSourceType, LineUserId
 from domains.line.order_group import (
-    LineGroupInvitationRelay, LineOrderGroupBindingConflict, validate_invitation_url,
+    LineGroupInvitationRelay, LineOrderGroupBindingConflict, LineOrderGroupBindingNotFound,
+    validate_invitation_url,
 )
 from shared_kernel.identities import (
     ActorContext,
@@ -42,6 +43,8 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupWorkspacePage,
     LineOrderGroupWorkspaceRecord,
     LineOrderGroupWorkspaceEventPage,
+    UnbindLineOrderGroupCommand,
+    DeleteLineOrderGroupHistoryCommand,
 )
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
@@ -277,6 +280,28 @@ class LineOrderGroupApplication:
         )
 
 
+class LineOrderGroupAdminApplication:
+    def __init__(self, unit_of_work_factory) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+
+    def unbind(self, command: UnbindLineOrderGroupCommand) -> LineOrderGroupWorkspaceRecord:
+        require_line_capability(command.actor, LineCapability.ORDER_GROUP_BIND)
+        with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.order_groups.unbind(command)
+            result = unit_of_work.order_groups.workspace_get(command.case_no)
+            if result is None:
+                raise LineOrderGroupBindingNotFound(command.case_no)
+            unit_of_work.commit()
+        return result
+
+    def delete_history(self, command: DeleteLineOrderGroupHistoryCommand) -> int:
+        require_line_capability(command.actor, LineCapability.ORDER_GROUP_BIND)
+        with self._unit_of_work_factory() as unit_of_work:
+            deleted_events = unit_of_work.order_groups.delete_history(command)
+            unit_of_work.commit()
+        return deleted_events
+
+
 class LineOrderGroupQueryApplication:
     def __init__(self, unit_of_work_factory) -> None:
         self._unit_of_work_factory = unit_of_work_factory
@@ -313,7 +338,7 @@ class LineOrderGroupQueryApplication:
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
         GetLineOrderGroupQuery(case_no)
         with self._unit_of_work_factory() as unit_of_work:
-            if unit_of_work.order_groups.get(case_no) is None:
+            if unit_of_work.order_groups.workspace_get(case_no) is None:
                 return None
             return unit_of_work.order_groups.workspace_events(case_no, page=page, page_size=page_size)
 
@@ -485,6 +510,7 @@ def group_invitation_delivery_is_current(unit_of_work, task) -> bool:
 
 
 __all__ = [
+    "LineOrderGroupAdminApplication",
     "LineOrderGroupApplication",
     "LineOrderGroupCommandRejected",
     "LineOrderGroupQueryApplication",

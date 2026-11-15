@@ -1,4 +1,4 @@
-"""Check legacy source projections and authorized ticket-history routes."""
+"""Check legacy source projections and retired ticket queries."""
 from contextlib import contextmanager
 import sqlite3
 from types import SimpleNamespace
@@ -10,7 +10,6 @@ import pytest
 from api.dependencies.admin_auth import require_admin, require_customer_service_reader
 from api.routes import customer_service as routes
 from api.schemas.customer_service import CustomerServiceReminderPageView
-from domains.customer_service.ticket import CustomerServiceStatus
 from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
 from subsystems.customer_service.application import CustomerServiceApplication
 from subsystems.customer_service.contracts import CustomerServiceReminderQuery, CustomerServiceReminderSource
@@ -153,38 +152,30 @@ def test_application_query_does_not_commit_or_enqueue(facts):
     assert len(result.items) == 8
 
 
-def test_reminder_route_is_retired_and_history_remains_read_only(facts, monkeypatch):
-    db, connection, repository = facts
-    db.execute("UPDATE customer_service_tickets SET line_user_id='U-HISTORY' WHERE id=9")
-    @contextmanager
-    def factory():
-        yield SimpleNamespace(customer_service=repository)
-    monkeypatch.setattr(routes, "_application", lambda: CustomerServiceApplication(factory))
+@pytest.mark.parametrize("suffix", ("", "/summary", "/reminders", "/{ticket_id}"))
+def test_retired_ticket_queries_hide_schema_and_never_access_records(suffix, monkeypatch):
+    def unexpected_data_access():
+        pytest.fail("A retired query must not open the customer service application")
+
+    monkeypatch.setattr(routes, "_application", unexpected_data_access)
+    monkeypatch.setattr(routes, "open_line_unit_of_work", unexpected_data_access)
     app = FastAPI()
     app.include_router(routes.router)
     prefix = "/api/v1/customer-service/tickets"
-    paths = {route.path: route.endpoint for route in routes.router.routes
-             if isinstance(route, APIRoute) and "GET" in route.methods}
-    reader = SimpleNamespace()
+    route, = (route for route in routes.router.routes
+              if isinstance(route, APIRoute) and "GET" in route.methods and route.path == f"{prefix}{suffix}")
     with pytest.raises(HTTPException) as retired:
-        paths[f"{prefix}/reminders"](reader)
+        route.endpoint(SimpleNamespace())
     assert retired.value.status_code == 410
     assert retired.value.detail["code"] == "customer_service_retired"
-    assert not connection.statements
-    history = paths[prefix](status=CustomerServiceStatus.RESOLVED, page=1, page_size=1, _=reader).data
-    assert history["total"] == 1
-    assert [ticket["ticket_id"] for ticket in history["items"]] == [9]
-    detail = paths[f"{prefix}/{{ticket_id}}"](9, reader).data
-    assert detail["ticket"]["ticket_id"] == 9
-    assert [event["id"] for event in detail["events"]] == [11]
-    assert f"{prefix}/{{ticket_id}}/reply/apply" not in app.openapi()["paths"]
+    assert route.path not in app.openapi()["paths"]
 
 
-def test_history_and_retired_reminder_routes_require_reader_authorization():
+def test_retired_ticket_queries_require_reader_authorization():
     prefix = "/api/v1/customer-service/tickets"
     paths = {route.path: route for route in routes.router.routes
              if isinstance(route, APIRoute) and "GET" in route.methods}
-    for path in (prefix, f"{prefix}/{{ticket_id}}", f"{prefix}/reminders"):
+    for path in (prefix, f"{prefix}/summary", f"{prefix}/reminders", f"{prefix}/{{ticket_id}}"):
         reader, = paths[path].dependant.dependencies
         assert reader.call is require_customer_service_reader
         admin, = reader.dependencies

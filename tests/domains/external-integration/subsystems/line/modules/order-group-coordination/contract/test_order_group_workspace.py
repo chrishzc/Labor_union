@@ -10,13 +10,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies.admin_auth import require_line_order_group_reader
+from api.dependencies.admin_auth import require_line_order_group_binder, require_line_order_group_reader
 from api.routes import line_order_groups
+from domains.line.order_group import LineOrderGroupBindingConflict, LineOrderGroupBindingNotFound
 from infrastructure.mysql.line_media_order_group_repository import MySqlLineOrderGroupBindingRepository
-from shared_kernel.identities import ActorContext
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.capabilities import LineCapabilityDeniedError
-from subsystems.line.order_group_application import LineOrderGroupQueryApplication
+from subsystems.line.order_group_application import LineOrderGroupAdminApplication, LineOrderGroupQueryApplication
+from subsystems.line.order_group_contracts import DeleteLineOrderGroupHistoryCommand, UnbindLineOrderGroupCommand
 
 
 def prepare_paid_group_todos(connection):
@@ -140,8 +142,9 @@ def test_mobile_paid_group_todo_is_verified_paginated_and_read_only(monkeypatch,
 
 
 class Connection:
-    """SQLite executes real SELECTs; translate only MySQL's text cast and CONCAT."""
-    def __init__(self):
+    """SQLite executes the workspace SQL with MySQL-specific syntax translated."""
+    def __init__(self, *, writes=False):
+        self.writes = writes
         self.db = sqlite3.connect(':memory:', check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.create_function('CONCAT', -1, lambda *values: ''.join(str(value) for value in values))
@@ -153,7 +156,7 @@ class Connection:
           CREATE TABLE case_staff_assignments (case_no TEXT, staff_id INT, status TEXT);
           CREATE TABLE line_identity_role_bindings (subject_type TEXT, subject_reference TEXT, binding_status TEXT, line_user_id TEXT);
           CREATE TABLE line_order_group_bindings (case_no TEXT PRIMARY KEY, group_id TEXT, binding_status TEXT, aggregate_version INT, updated_at_utc TEXT, last_invitation_at_utc TEXT);
-          CREATE TABLE line_order_group_binding_events (id INT PRIMARY KEY, case_no TEXT, action TEXT, resulting_group_id TEXT, resulting_version INT, occurred_at_utc TEXT);
+          CREATE TABLE line_order_group_binding_events (id INTEGER PRIMARY KEY, case_no TEXT, action TEXT, resulting_group_id TEXT, resulting_version INT, occurred_at_utc TEXT DEFAULT CURRENT_TIMESTAMP);
           CREATE TABLE line_order_group_runtime_events (id INT PRIMARY KEY, case_no TEXT, event_type TEXT, line_user_id TEXT, occurred_at_utc TEXT);
         ''')
 
@@ -163,11 +166,18 @@ class Connection:
         connection = self
         class Cursor:
             def execute(self, sql, args=()):
-                assert sql.lstrip().startswith('SELECT'), 'workspace attempted a mutation'
+                assert connection.writes or sql.lstrip().startswith('SELECT'), 'workspace attempted a mutation'
                 connection.executed.append((sql, tuple(args)))
+                if connection.writes and sql.startswith('SET @line_group_history_delete_'):
+                    return  # MySQL session state and immutable triggers are exercised by the schema tests.
                 sql = sql.replace('%s', '?')
                 sql = re.sub(r'CAST\((\w+\.id) AS CHAR CHARACTER SET utf8mb4\)\s*COLLATE utf8mb4_unicode_ci', r'CAST(\1 AS TEXT)', sql)
+                if connection.writes:
+                    sql = sql.removesuffix(' FOR UPDATE').replace('INSERT IGNORE', 'INSERT OR IGNORE')
                 cursor.execute(sql, args)
+
+            @property
+            def rowcount(self): return cursor.rowcount
 
             def row(self, raw):
                 if raw is None: return None
@@ -324,3 +334,169 @@ def test_unprivileged_reader_cannot_open_workspace(store):
     with pytest.raises(LineCapabilityDeniedError): application.workspace_get(actor,'CASE-001')
     with pytest.raises(LineCapabilityDeniedError): application.workspace_events(actor,'CASE-001',page=1,page_size=25)
     assert not connection.executed
+
+
+@pytest.fixture
+def writable_group_workspace(monkeypatch):
+    monkeypatch.delenv('DEPLOYMENT_PROFILE', raising=False)
+    connection = Connection(writes=True)
+    case = seed(connection, status='active')
+    event(connection, 1, case, 'member_joined', 'U-c1')
+    connection.db.executescript('''
+        ALTER TABLE line_order_group_bindings ADD COLUMN invitation_url TEXT;
+        ALTER TABLE line_order_group_bindings ADD COLUMN activated_at_utc TEXT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN before_group_id TEXT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN expected_version INT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN actor_id TEXT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN binding_fingerprint TEXT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN idempotency_key TEXT;
+        ALTER TABLE line_order_group_binding_events ADD COLUMN correlation_id TEXT;
+        CREATE TABLE line_order_group_participants (
+            case_no TEXT, line_user_id TEXT, invitation_status TEXT, joined_at_utc TEXT, left_at_utc TEXT
+        );
+        CREATE TABLE application_command_claims (
+            idempotency_key TEXT PRIMARY KEY, command_family TEXT, aggregate_identity TEXT,
+            command_fingerprint TEXT, correlation_id TEXT
+        );
+        CREATE TABLE admin_command_receipts (
+            command_family TEXT, idempotency_key TEXT PRIMARY KEY, request_fingerprint TEXT,
+            preview_fingerprint TEXT, actor TEXT, reason TEXT, result_snapshot TEXT
+        );
+        INSERT INTO line_order_group_participants VALUES ('CASE-001', 'U-c1', 'joined', '2026-10-15 02:00:00', NULL);
+        UPDATE line_order_group_bindings SET invitation_url='https://line.me/ti/g/private',
+            activated_at_utc='2026-10-15 02:00:00', last_invitation_at_utc='2026-10-15 01:30:00';
+    ''')
+    connection.db.commit()
+    repository = MySqlLineOrderGroupBindingRepository(connection)
+    commits = []
+
+    class UnitOfWork:
+        order_groups = repository
+
+        def __enter__(self): return self
+
+        def __exit__(self, *_): connection.db.rollback()
+
+        def commit(self):
+            connection.db.commit()
+            commits.append(True)
+
+    try:
+        yield connection, repository, LineOrderGroupAdminApplication(UnitOfWork), case, commits
+    finally:
+        connection.db.close()
+
+
+def test_unbind_clears_current_group_and_retains_history(writable_group_workspace):
+    connection, repository, application, case, commits = writable_group_workspace
+    actor = ActorContext('admin:7', ('line.order_group.bind',))
+    assert repository.workspace_get(case).group_bound
+    result = application.unbind(UnbindLineOrderGroupCommand(case, ExpectedVersion(1), actor, CorrelationId('unbind-1')))
+    assert (result.status.value, result.binding_version, result.group_bound) == ('unbound', 2, False)
+    assert result.bound_at is None and result.last_invitation_at is None
+    assert {member.membership_status for member in result.members} == {'unknown'}
+    assert result.latest_event.event_type == 'released'
+    assert repository.get_by_group('C-group-1') is None
+    assert repository.get_invitation(case).invitation_url is None
+    assert {item.event_type for item in repository.workspace_events(case, page=1, page_size=25).items} == {
+        'bound', 'member_joined', 'released',
+    }
+    participant = connection.db.execute('SELECT invitation_status,joined_at_utc FROM line_order_group_participants').fetchone()
+    assert tuple(participant) == ('pending', None)
+    assert commits == [True]
+
+    with pytest.raises(LineOrderGroupBindingConflict):
+        application.unbind(UnbindLineOrderGroupCommand(case, ExpectedVersion(1), actor, CorrelationId('stale')))
+    with pytest.raises(LineOrderGroupBindingConflict):
+        application.unbind(UnbindLineOrderGroupCommand(case, ExpectedVersion(2), actor, CorrelationId('unbound')))
+    assert commits == [True]
+
+
+def test_unbind_rejects_missing_case_and_reader_without_mutation(writable_group_workspace):
+    connection, _, application, case, commits = writable_group_workspace
+    reader = ActorContext('admin:7', ('line.order_group.read',))
+    with pytest.raises(LineCapabilityDeniedError):
+        application.unbind(UnbindLineOrderGroupCommand(case, ExpectedVersion(1), reader, CorrelationId('denied')))
+    assert connection.executed == []
+    binder = ActorContext('admin:7', ('line.order_group.bind',))
+    with pytest.raises(LineOrderGroupBindingNotFound):
+        application.unbind(UnbindLineOrderGroupCommand('missing', ExpectedVersion(0), binder, CorrelationId('missing')))
+    assert all(sql.startswith('SELECT') for sql, _ in connection.executed)
+    assert commits == []
+
+
+def test_http_unbind_uses_binder_capability_and_returns_safe_readback(monkeypatch, writable_group_workspace):
+    from fastapi import HTTPException
+
+    _, _, application, case, commits = writable_group_workspace
+    monkeypatch.setattr(line_order_groups, 'get_line_order_group_admin_application', lambda: application)
+    route = next(route for route in line_order_groups.router.routes if route.path.endswith('/unbind'))
+    assert route.dependant.dependencies[0].call is require_line_order_group_binder
+    principal = AdminPrincipal(7, 'binder', '工會人員', 'system_admin')
+    body = line_order_groups.LineOrderGroupVersionRequest(expected_version=1)
+    result = route.endpoint(body, case, principal)
+    assert result.binding_version == 2 and not result.can_unbind and result.can_delete_history
+    assert 'group_id' not in result.model_dump()
+    with pytest.raises(HTTPException) as failure:
+        route.endpoint(body, case, principal)
+    assert failure.value.status_code == 409
+    assert failure.value.detail['error']['code'] == 'line_order_group_binding_conflict'
+    assert commits == [True]
+
+
+def test_delete_history_physically_removes_only_unbound_case_history(writable_group_workspace):
+    connection, repository, application, case, commits = writable_group_workspace
+    neighbour = 'CASE-002'
+    connection.db.execute('INSERT INTO orders(case_no) VALUES (?)', (neighbour,))
+    connection.db.execute("INSERT INTO line_order_group_bindings(case_no,group_id,binding_status,aggregate_version) VALUES (?,'C-neighbour','bound',1)", (neighbour,))
+    event(connection, 2, neighbour, 'member_joined', 'U-neighbour')
+    connection.db.commit()
+    actor = ActorContext('admin:7', ('line.order_group.bind',))
+    application.unbind(UnbindLineOrderGroupCommand(case, ExpectedVersion(1), actor, CorrelationId('unbind')))
+    command = DeleteLineOrderGroupHistoryCommand(case, ExpectedVersion(2), actor, CorrelationId('delete-history'))
+
+    assert application.delete_history(command) == 3
+    assert application.delete_history(command) == 3  # Retry returns the durable receipt.
+    assert repository.get(case).version.value == 3
+    assert repository.workspace_get(case) is None
+    workspace = repository.workspace_list(search=None, status=None, page=1, page_size=25)
+    assert [item.case_no for item in workspace.items] == [neighbour]
+    for table in ('line_order_group_runtime_events', 'line_order_group_binding_events', 'line_order_group_participants'):
+        assert connection.db.execute(f'SELECT COUNT(*) FROM {table} WHERE case_no=?', (case,)).fetchone()[0] == 0
+    assert connection.db.execute('SELECT case_no FROM orders WHERE case_no=?', (case,)).fetchone()[0] == case
+    assert repository.workspace_events(neighbour, page=1, page_size=25).total == 1
+    assert connection.db.execute('SELECT COUNT(*) FROM admin_command_receipts').fetchone()[0] == 1
+
+
+def test_delete_history_blocks_active_rebound_and_read_only(writable_group_workspace):
+    _, repository, application, case, commits = writable_group_workspace
+    binder = ActorContext('admin:7', ('line.order_group.bind',))
+    reader = ActorContext('admin:8', ('line.order_group.read',))
+
+    with pytest.raises(LineCapabilityDeniedError):
+        application.delete_history(DeleteLineOrderGroupHistoryCommand(case, ExpectedVersion(1), reader, CorrelationId('denied')))
+    with pytest.raises(LineOrderGroupBindingConflict):
+        application.delete_history(DeleteLineOrderGroupHistoryCommand(case, ExpectedVersion(1), binder, CorrelationId('active')))
+    with pytest.raises(LineOrderGroupBindingConflict):
+        application.delete_history(DeleteLineOrderGroupHistoryCommand(case, ExpectedVersion(0), binder, CorrelationId('stale')))
+    assert repository.workspace_events(case, page=1, page_size=25).total == 2
+    assert not commits
+
+
+def test_delete_history_route_requires_binder_and_returns_deleted_count(monkeypatch, writable_group_workspace):
+    from fastapi import HTTPException
+
+    _, repository, application, case, _ = writable_group_workspace
+    monkeypatch.setattr(line_order_groups, 'get_line_order_group_admin_application', lambda: application)
+    route = next(route for route in line_order_groups.router.routes if route.path.endswith('/delete-history'))
+    assert route.dependant.dependencies[0].call is require_line_order_group_binder
+    principal = AdminPrincipal(7, 'binder', '工會人員', 'system_admin')
+    with pytest.raises(HTTPException) as active:
+        route.endpoint(line_order_groups.LineOrderGroupVersionRequest(expected_version=1), case, principal)
+    assert active.value.status_code == 409
+    assert active.value.detail['error']['code'] == 'line_order_group_history_conflict'
+
+    line_order_groups.unbind_order_group_workspace(line_order_groups.LineOrderGroupVersionRequest(expected_version=1), case, principal)
+    receipt = route.endpoint(line_order_groups.LineOrderGroupVersionRequest(expected_version=2), case, principal)
+    assert receipt.model_dump() == {'deleted_events': 3}
+    assert repository.workspace_get(case) is None

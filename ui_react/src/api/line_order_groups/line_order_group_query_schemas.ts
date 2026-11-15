@@ -70,6 +70,9 @@ export const LineOrderGroupWorkspaceEventSchema = z.strictObject({
 export const LineOrderGroupWorkspaceRecordSchema = z.strictObject({
   case_no: z.string().min(1),
   status: LineOrderGroupStatusSchema,
+  binding_version: z.number().int().nonnegative(),
+  can_unbind: z.boolean(),
+  can_delete_history: z.boolean(),
   customer_name: z.string().nullable(),
   bound_at: z.string().datetime({ offset: true }).nullable(),
   last_invitation_at: z.string().datetime({ offset: true }).nullable(),
@@ -92,8 +95,12 @@ export const LineOrderGroupWorkspaceEventPageSchema = z.strictObject({
   total: z.number().int().nonnegative(),
   total_pages: z.number().int().nonnegative(),
 });
+export const LineOrderGroupHistoryDeletionSchema = z.strictObject({
+  deleted_events: z.number().int().nonnegative(),
+});
 export type LineOrderGroupParticipant = z.infer<typeof LineOrderGroupParticipantSchema>;
 export type LineOrderGroupWorkspaceEvent = z.infer<typeof LineOrderGroupWorkspaceEventSchema>;
 export type LineOrderGroupWorkspaceRecord = z.infer<typeof LineOrderGroupWorkspaceRecordSchema>;
 export type LineOrderGroupWorkspacePage = z.infer<typeof LineOrderGroupWorkspacePageSchema>;
 export type LineOrderGroupWorkspaceEventPage = z.infer<typeof LineOrderGroupWorkspaceEventPageSchema>;
+export type LineOrderGroupHistoryDeletion = z.infer<typeof LineOrderGroupHistoryDeletionSchema>;

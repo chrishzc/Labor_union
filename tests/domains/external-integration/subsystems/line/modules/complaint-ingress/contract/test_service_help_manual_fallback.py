@@ -167,7 +167,8 @@ def test_profile_update_opens_verified_liff_without_ticket(monkeypatch):
     assert not unit.customer_service.messages
     [request] = unit.delivery_tasks.requests
     assert request.source_aggregate_type == "line_webhook_reply"
-    assert "https://liff.line.me/synthetic-liff?target=profile_update" in request.payload_json
+    assert "請直接在此聊天室留言，工會專員將由後台為您即時調整與確認" in request.payload_json
+    assert "?target=profile_update" not in request.payload_json
 
 
 def test_service_help_menu_opens_liff_for_explanations_and_preserves_service_actions(monkeypatch) -> None:
@@ -240,10 +241,8 @@ def test_order_update_menu_and_legacy_text_open_same_form(monkeypatch) -> None:
 
     menu_request = menu_uow.delivery_tasks.requests[0]
     payload = json.loads(menu_request.payload_json)
-    assert payload["contents"]["header"]["contents"][1]["text"] == "修改訂單資訊"
-    actions = [button['action'] for button in payload['contents']['body']['contents']]
-    assert actions == [{'type': 'uri', 'label': '開啟訂單異動表單',
-                        'uri': 'https://liff.line.me/1234567890-order?target=order_update'}]
+    assert "請直接在此聊天室留言，工會專員將由後台為您即時確認與調整" in payload["text"]
+    assert "?target=order_update" not in json.dumps(payload, ensure_ascii=False)
     assert not menu_uow.customer_service.messages
 
     assert application.handle(
@@ -312,6 +311,6 @@ def test_order_update_menu_without_configured_liff_has_no_invented_link(liff_id,
     from subsystems.line.service_help_application import _order_update_menu_payload
     monkeypatch.setenv('LINE_LIFF_ID', liff_id)
     payload = _order_update_menu_payload()
-    assert payload['contents']['body']['contents'] == []
-    assert '入口尚未完成設定' in payload['contents']['header']['contents'][2]['text']
-    assert '修改服務天數' not in json.dumps(payload, ensure_ascii=False)
+    assert payload['type'] == 'text'
+    assert '請直接在此聊天室留言' in payload['text']
+    assert 'http' not in payload['text']

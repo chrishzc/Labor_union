@@ -109,3 +109,28 @@ def test_staff_liff_invalid_token_returns_staff_specific_typed_error(monkeypatch
     assert captured.value.detail["error"]["code"] == "liff_token_invalid"
     assert "管理員" not in captured.value.detail["error"]["message"]
     assert "provider detail" not in captured.value.detail["error"]["message"]
+
+
+def test_caregiver_liff_pages_senior_friendly_contract() -> None:
+    schedule = (ROOT / "line" / "static" / "staff_schedule.html").read_text(encoding="utf-8")
+    assert '<section id="unavailabilitySection" class="panel" aria-labelledby="unavailabilityTitle" hidden>' in schedule
+    assert 'scheduleMode === \'postpone\'' in schedule
+    assert 'document.getElementById("unavailabilitySection").hidden = true;' in schedule
+    assert 'id="expiredLinkSection"' in schedule
+    assert 'showLinkExpiredView' in schedule
+    assert '15 分鐘' in schedule or '15分鐘' in schedule
+    assert ".innerHTML" not in schedule
+
+    order_search = (ROOT / "line" / "static" / "staff_order_search.html").read_text(encoding="utf-8")
+    assert "tel:" not in order_search
+    assert '["客戶電話", item.client_phone]' in order_search
+
+    payout = (ROOT / "line" / "static" / "staff_payout.html").read_text(encoding="utf-8")
+    assert "金額守恆與銷帳防錯保證" not in payout
+    assert "手續費" in payout
+    assert "方案一" in payout
+
+    profile = (ROOT / "line" / "static" / "staff_profile_update.html").read_text(encoding="utf-8")
+    assert "bank_branch_code" in profile
+    assert "8小時(08:30-17:00)" in profile
+    assert "4小時(08:30-12:30)" in profile

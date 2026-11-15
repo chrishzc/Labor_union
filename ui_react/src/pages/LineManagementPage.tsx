@@ -35,13 +35,6 @@ import {
   type RichMenuButtonModel,
 } from '../adapters/line_configuration/line_configuration_query_adapter';
 import {
-  customerServiceClient,
-  type CustomerServiceClient,
-  type CustomerServiceActionsClient,
-  type CustomerServiceReminderClient,
-} from '../api/customer_service/customer_service_client';
-import { CustomerServiceClientError } from '../api/customer_service/customer_service_errors';
-import {
   lineIdentityClient,
   type LineIdentityClient,
 } from '../api/line_identity/line_identity_client';
@@ -82,7 +75,6 @@ import type {
   LineRuntimeTargetEnabledRequest,
   LineRuntimeTargetPreview,
 } from '../api/line_runtime_targets/line_runtime_target_schemas';
-import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
 import { LineMessageFlow } from '../components/LineMessageFlow';
@@ -107,7 +99,7 @@ import { AiEventStudio } from './line_management/AiEventStudio';
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
-type LineTab = 'tickets' | 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'guidance' | 'order_groups' | 'payment_overdue' | 'runtime';
+type LineTab = 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'guidance' | 'order_groups' | 'payment_overdue' | 'runtime';
 /** 依責任邊界切分的頁面範圍：客服受理、通知寄送、LINE 介面設定。 */
 export type LineScope = 'service' | 'notifications' | 'interface';
 const LiffCardStudio = lazy(() => import('./line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio })));
@@ -126,11 +118,9 @@ function hashPage(params: URLSearchParams, key: string): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 1;
 }
 
-type CustomerServicePageClient = Partial<CustomerServiceClient & CustomerServiceReminderClient & CustomerServiceActionsClient>;
 type LineIdentityPageClient = Partial<LineIdentityClient>;
 
 interface LineManagementPageProps {
-  customerService?: CustomerServicePageClient;
   lineIdentity?: LineIdentityPageClient;
   lineConfiguration?: LineConfigurationQueryClient;
   richMenuDraft?: LineRichMenuDraftClient;
@@ -180,7 +170,6 @@ function operationIdentity(prefix: string): string {
 }
 
 function displayQueryError(error: unknown, fallback: string): string {
-  if (error instanceof CustomerServiceClientError) return `${error.code}：${error.message}`;
   if (error instanceof LineIdentityClientError) return `${error.code}：${error.message}`;
   if (error instanceof LineConfigurationQueryError) return `${error.code}：${error.message}`;
   if (error instanceof LineDeliveryQueryError) return `${error.code}：${error.message}`;
@@ -201,7 +190,7 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
 ];
 
 const SCOPE_VIEWS: Record<LineScope, { title: string; subtitle: string; tabs: readonly LineTab[]; fallback: LineTab }> = {
-  service: { title: 'LINE 營運', subtitle: '管理身分授權與案件群組。', tabs: ['binding', 'order_groups', 'tickets'], fallback: 'binding' },
+  service: { title: 'LINE 營運', subtitle: '管理身分授權與案件群組。', tabs: ['binding', 'order_groups'], fallback: 'binding' },
   notifications: { title: '通知與寄送', subtitle: '設定通知規則，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
   interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單、LINE 訊息流程與引導動作。', tabs: ['richmenu', 'liff', 'message_flow', 'guidance'], fallback: 'richmenu' },
 };
@@ -247,13 +236,11 @@ const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
   'entry:gateway': '/line-gateway',
   'entry:registration': '/line-bind',
   'target:gateway': '/line-gateway',
-  'target:profile_update': '/line-profile-guard',
   'target:staff_order_search': '/line-staff-orders',
   'target:staff_schedule': '/line-staff-schedule',
   'target:staff_leave_apply': '/line-staff-schedule',
   'target:staff_verification': '/line-identity?target=staff_verification',
   'target:staff_payout': '/line-staff-payout',
-  'target:order_update': '/line-order-update',
   'target:customer_service': '/line-mobile-admin?target=customer_service',
   'target:scheduling_review': '/line-mobile-admin?target=scheduling_review',
   'target:staff_review': '/line-mobile-admin?target=staff_review',
@@ -279,7 +266,6 @@ export function resolveRichMenuUri(uri: string | null): string | null {
 }
 
 export const LineManagementPage: React.FC<LineManagementPageProps> = ({
-  customerService = customerServiceClient,
   lineIdentity = lineIdentityClient,
   lineConfiguration = lineConfigurationQueryClient,
   notificationTemplateClient,
@@ -597,10 +583,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>)}
       </nav>}
 
-      {!runtimeOnly && scope === 'service' && activeTab === 'binding' && (
-        <button type="button" className="line-secondary-btn" onClick={() => setActiveTab('tickets')}>查閱歷史客服紀錄</button>
-      )}
-      {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
       {activeTab === 'delivery' && <LineDeliveryOperationsWorkbench/>}
       {activeTab === 'payment_overdue' && <a href="#finance?tab=receipts&view=overdue">前往帳務作業的逾期提醒</a>}
 

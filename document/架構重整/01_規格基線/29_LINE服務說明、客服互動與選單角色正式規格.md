@@ -4,7 +4,7 @@
 
 本文件為 LINE 官方帳號對話入口、四大 Rich Menu 角色選單（`default_menu`／`customer_menu`／`staff_menu`／`union_staff_menu`）、預約檢核閘道（Gateway）與 AI／常見問答 LIFF 知識庫之現行唯一正式規格。
 
-- **上下游分工**：平台 Webhook 收件、投遞、歷史客服紀錄與 `line_webhook_reply` 見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) 與 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；新案登記與非市民 14 天 Redis 待審儲存見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md)；身分解除見 [`23_LINE身分管理與解除正式規格.md`](23_LINE身分管理與解除正式規格.md)。
+- **上下游分工**：平台 Webhook 收件、投遞、舊客服工單交接與 `line_webhook_reply` 見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) 與 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；新案登記與非市民 14 天 Redis 待審儲存見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md)；身分解除見 [`23_LINE身分管理與解除正式規格.md`](23_LINE身分管理與解除正式規格.md)。
 
 ## 2. 服務閘道（Gateway）與登記入口規則
 
@@ -22,7 +22,7 @@
 
 - **唯一常見問答入口**：Rich Menu「常見問答」與相關導流統一開啟專用 AI／FAQ LIFF（`?target=ai_assistant` / `/line-service-help?tab=ai`），呈現六大主題分類，共用 `service-menu` 回主選單 CTA。
 - **分類導向**：原「服務流程介紹」（`service_flow`）與「費用與補助說明」（`fee_and_subsidy`）亦統一收斂導向 AI FAQ LIFF 主題頁；費用與補助固定使用現行政策分類說明「一般市民最高 40 小時／補助市民最高 120 小時（實際補助金額依本案服務資料計算）」，烹飪備料固定明示「由客戶購買並準備食材」。
-- **訂單異動表單簡化**：`order_update` 改為純 URI 開啟頁，移除過去內嵌五顆快速動作按鈕及 `service_days` 直接調整欄位（改期統一走服務群組協議與月嫂提交流程）。
+- **客戶端自助表單退役與後台維護原則**：經工會實務反饋，客戶端無線上自填改單與改個資需求，易造成版本混亂。客戶圖文選單全面移除「改個人資料」與「改訂單內容」入口，聊天室亦不再提供線上自填表單連結。客戶若有聯絡方式、服務地址或訂單需求變更，一律由客戶於官方帳號或案件群組直接留言，由工會專員於管理後台手動確認並調整。既有 `profile_update` 與 `order_update` 表單僅作後端歷史與管理預覽相容，不主動對客發布。
 - **已退役訊息範本入口（11 個獨立範本與 `service-flow`／`service-payment` 皆回 `404`）**：`service-flow` 與 `service-payment` 之獨立查詢／預覽／編輯回傳 typed `404`（不刪除既有資料庫設定）；另以下 11 個無現行引用之 standalone 訊息範本編輯及公版預覽入口已自目錄移除並回傳 `404`：`staff_switch_fail`、`staff_menu_not_set`、`esc_success`、`esc_fail`、`bind_link_msg`、`register_success`、`bind_success_existing`、`bind_confirm_rebind`、`bind_fail_no_data`、`client_rebind_approved`、`staff_verification_requested`（bootstrap 與資料庫設定歷史不刪除，其他規則明確引用者仍沿該 rule ID 維護）。
 
 ## 4. 可發布知識庫目錄（Knowledge Catalog）
@@ -35,12 +35,12 @@
 
 ## 5. 四大角色圖文選單（Rich Menu Audiences）
 
-為符合高齡友善操作與直觀辨識，全部 Rich Menu 統一採用 **`2500 x 1686` 高對比大字體規範**（主標字級 `138px`／副標或輔助說明 `48px`），**按鈕標籤一律壓縮至 6 個中文字以內**。四套選單與切換條件如下：
+為符合高齡友善操作與直觀辨識，訪客、月嫂與工會選單統一採用 **`2500 x 1686` 高對比大字體規範**（主標字級 `138px`／副標或輔助說明 `48px`）；**客戶選單（`customer_menu`）依方案 B 採用半高 `2500 x 843` 單列設計**，僅保留單一按鈕「常見問答」，簡潔且不遮擋聊天對話。**按鈕標籤一律壓縮至 6 個中文字以內**。四套選單與切換條件如下：
 
 | 選單 ID | 適用身分（Role Context） | 按鈕固定標籤（≤ 6 字） | 動作／導向契約 |
 |---|---|---|---|
 | `default_menu` | `visitor`（未綁定訪客／待審新客） | `預約與登記`、`月嫂認證`、`常見問答` | 預約與登記 → Gateway LIFF；月嫂認證 → `staff_binding` LIFF；常見問答 → `?target=ai_assistant` |
-| `customer_menu` | `customer`（已綁定正式產婦／客戶） | `改個人資料`、`改訂單內容`、`常見問答` | 改個人資料 → `profile_update` LIFF；改訂單內容 → `order_update` LIFF；常見問答 → `?target=ai_assistant` |
+| `customer_menu` | `customer`（已綁定正式產婦／客戶） | `常見問答`（半高 `2500 x 843` 單格滿版） | 常見問答 → `?target=ai_assistant`；客戶端不提供線上自填改個資或改訂單表單，若需異動請直接在聊天室留言由工會人員於後台編輯 |
 | `staff_menu` | `staff`（已綁定在職月嫂） | `我的訂單`、`我的排班`、`我的資料`、`我的薪資` | 我的訂單 → `staff_order_search` LIFF；我的排班 → `staff_schedule` LIFF；我的資料 → [月嫂更新個人資料](20_LINE客服與月嫂自助服務正式規格.md#月嫂更新個人資料)；我的薪資 → `staff_payout` LIFF |
 | `union_staff_menu` | `union_staff`（已綁定工會後台人員） | `待辦工作台`、`狀態追蹤`、`營運摘要` | 分別開啟 `line-mobile-admin` 對應視圖：`staff_review`、`order_tracking`、`dashboard` |
 
@@ -50,4 +50,4 @@
 ## 6. 官方聊天室客服互動與狀態一致規則
 
 1. 官方一對一聊天室的一般詢問與正式客訴由工會直接查看與回覆。系統只對明確的自助指令提供對應服務。
-2. 訪客、客戶與工會選單採三個按鈕。舊「聯絡專人」回原聊天室的直接留言指引，舊手機客服中心連結開啟待辦工作台。
+2. 訪客與工會選單採三個按鈕，月嫂選單採四個按鈕，客戶選單採單一「常見問答」按鈕。舊「聯絡專人」回原聊天室的直接留言指引，舊手機客服中心連結開啟待辦工作台。
