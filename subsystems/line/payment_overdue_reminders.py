@@ -1,4 +1,7 @@
-"""Union decides each overdue reminder; reads never enqueue or change Finance facts."""
+"""
+File: payment_overdue_reminders.py
+Description: 人工催繳清單與案件催繳 Flex 卡片發送，零寫入財務主檔。
+"""
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
@@ -110,16 +113,23 @@ class PaymentOverdueReminderApplication:
                     "本案雙方簽約尚未完成" if not fact.contract_completed else
                     "尚未綁定客戶 LINE" if recipient is None else
                     "本期已有寄送工作，請先確認原工作結果" if pending else None)
-                message = self._payload(unit,payment).get('text') if payment is not None else None
+                p_load = self._payload(unit,payment) if payment is not None else None
+                message = (p_load.get('altText') or p_load.get('text')) if isinstance(p_load, dict) else None
                 result.append(CasePaymentReminder(case_no,stage,payment,'客戶私人聊天室',reason is None,
                     reason,message,repo.history(case_no,stage)))
             return tuple(result)
 
     @staticmethod
     def _payload(unit, payment):
-        return configured_payload(unit, 'payment-overdue-' + payment.payment_stage,
-            {'type':'text','text':reminder_text(payment)},
-            {'payment_stage': STAGE_LABELS[payment.payment_stage], 'remaining_amount': f'{payment.remaining_amount_ntd:,}'})
+        from subsystems.line.payment_reminder_notifications import payment_reminder_card_payload
+        card = payment_reminder_card_payload(payment.payment_stage, payment.case_no, payment.remaining_amount_ntd, payment.due_date, 'overdue')
+        return configured_payload(unit, 'payment-overdue-' + payment.payment_stage, card, {
+            'case_no': payment.case_no,
+            'due_date': str(payment.due_date or ''),
+            'payment_stage': STAGE_LABELS[payment.payment_stage],
+            'remaining_amount': f'{payment.remaining_amount_ntd:,}',
+            'amount_ntd': f'{payment.remaining_amount_ntd:,}',
+        })
 
     def send_case(self, expected: OverdueClientPayment, key: str, actor: ActorContext):
         return self._send(expected,key,actor,case_scope=True)
@@ -155,7 +165,7 @@ class PaymentOverdueReminderApplication:
             recipient = repository.recipient(current,lock=True)
             if recipient is None:
                 raise PaymentOverdueReminderConflict('payment_overdue_recipient_unavailable')
-            result = unit.delivery_tasks.enqueue(LineDeliveryRequest(recipient.recipient,LineMessageKind.TEXT,
+            result = unit.delivery_tasks.enqueue(LineDeliveryRequest(recipient.recipient,LineMessageKind.FLEX,
                 canonical_line_payload_json(self._payload(unit,current)),now,key,
                 CorrelationId(payment_reference(current)+f':{recipient.binding_version}'),source,current.obligation_identity))
             unit.audit.append(LineAuditIntent('payment_overdue_reminder_queued',actor.actor_id,source,str(result.task_id.value)))

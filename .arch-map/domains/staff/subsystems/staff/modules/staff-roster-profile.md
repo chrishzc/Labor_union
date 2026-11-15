@@ -37,7 +37,8 @@
   - `api/schemas/staff_registry_mutation.py`
   - `ui_react/src/api/staff_profile/`
   - `ui_react/src/adapters/staff/staff_profile_adapter.ts`
-  - `ui_react/src/pages/StaffPage.tsx`
+  - `ui_react/src/pages/StaffPage.tsx`（含共用 `RosterTableLayout` 欄距、顯示與凍結排版，`lu.roster.layout.staff.v1`）
+  - `ui_react/src/components/RosterTableLayout.tsx`、`ui_react/src/components/RosterTableLayout.css`
   - `ui_react/src/api/staff_registry/`
   - `ui_react/src/components/StaffRegistryEditor.tsx`
 - entrypoint: `GET /api/v1/staff/{staff_id}/profile`

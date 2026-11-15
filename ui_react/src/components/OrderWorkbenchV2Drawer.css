@@ -1226,8 +1226,6 @@
 .service-arrangement-inline-form textarea { width: 100%; box-sizing: border-box; min-height: 90px; margin-bottom: 14px; padding: 12px; border: 1px solid #dbc5b6; border-radius: 8px; font: inherit; }
 .service-arrangement-automatic-status, .service-arrangement-deposit { border-top: 1px solid #e9ded6; margin-top: 20px; padding-top: 20px; }
 .service-arrangement-completion { margin: 24px 0 16px; }
-.service-arrangement-correction-segments { padding-left: 22px; line-height: 1.8; }
-.service-arrangement-correction-segments li { padding: 10px 0; border-bottom: 1px solid #e9ded6; }
 .registry-start-correction { margin: 16px 0; padding: 16px 0; border-block: 1px solid #efd5c7; }
 .registry-start-correction > a { display: block; margin-top: 12px; }
 @media (max-width: 760px) {

@@ -14,7 +14,9 @@ from shared_kernel.identities import ActorContext
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import render_message_template
 from subsystems.line.message_copy_catalog import (
-    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_SIGNING_REMINDER_TEMPLATE_IDS,
+    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS,
+    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID,
+    RETIRED_SIGNING_REMINDER_TEMPLATE_IDS, RETIRED_START_DAY_REPORT_TEMPLATE_IDS,
     default_copy_templates, effective_copy_definition, render_copy_payload,
 )
 
@@ -140,24 +142,35 @@ _CURRENT_FLOW_PREVIEWS = (
     ("staff-leave-completed", "月嫂請假完成正式排班通知", "text"),
     ("complaint-handoff-received", "客訴已轉接真人客服通知", "text"),
     ("customer-service-ticket-reply", "工會人員回覆客服工單", "text"),
-    ("payment-overdue-deposit", "訂金逾期－人工提醒客戶", "text"),
-    ("payment-overdue-first", "第一期款逾期－客戶私訊補寄與人工提醒", "text"),
-    ("payment-overdue-second", "第二期款逾期－客戶私訊補寄與人工提醒", "text"),
-    ("payment-first-reminder", "第一期款－服務開始日客戶私訊", "text"),
-    ("payment-first-greeting", "第一期已結清－服務開始問候", "text"),
-    ("payment-first-settled", "第一期款已確認入帳通知", "text"),
+    ("payment-overdue-deposit", "訂金逾期提醒卡", "flex"),
+    ("payment-overdue-first", "第一期款逾期提醒卡", "flex"),
+    ("payment-overdue-second", "第二期款逾期提醒卡", "flex"),
+    ("payment-first-reminder", "開工當天問候－含第一期款提醒", "text"),
+    ("payment-first-greeting", "開工當天問候－無第一期款餘額", "text"),
     ("cancellation-notice-settlement", "取消結算明細通知", "text"),
     ("cancellation-notice-refund", "取消結算退款完成通知", "text"),
     ("cancellation-notice-collection", "取消結算補收入帳通知", "text"),
-    ("payment-second-reminder", "第二期款－到期日客戶私訊", "text"),
+    ("payment-second-reminder", "第二期款繳費提醒卡", "flex"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
-    ("deposit-settled", "訂金已確認入帳卡", "flex"),
     ("deposit-assistance", "訂金專人協助－受理回覆", "text"),
+    ("payment-reminder-ack", "繳費提醒回覆－已匯款確認", "text"),
+    ("payment-assistance", "繳費提醒回覆－專人協助確認", "text"),
     ("group-invitation-customer", "案件群組邀請卡－客戶", "flex"),
+    ("helper-menu-card", "案件群組－月嫂小幫手選單卡", "flex"),
+    ("helper-satisfaction-survey", "滿意度調查問卷－案件群組回覆", "text"),
+    ("helper-confirm-start-card", "確認開工日－客戶確認卡", "flex"),
+    ("helper-confirm-start-completed", "確認開工日－自動排班完成回覆", "text"),
+    ("helper-schedule-unconfirmed", "服務排程－尚未確認開工日提示", "text"),
+    ("helper-postponement-card", "雙方合意延期－客戶確認卡", "flex"),
+    ("helper-postponement-completed", "雙方合意延期－排程更新完成回覆", "text"),
+    ("helper-staff-assistance-ack", "專員協助－群組待辦受理回覆", "text"),
+    ("helper-staff-assistance-closed", "專員協助－已處理結案群組回覆", "text"),
+    ("helper-guidelines-card", "使用說明與常見疑問－導覽卡", "flex"),
+    ("helper-faq-ingredients", "常見客戶疑問－食材採買與準備標準回答", "text"),
+    ("helper-faq-hours", "常見客戶疑問－每日服務時數與範圍標準回答", "text"),
+    ("helper-faq-subsidy", "常見客戶疑問－政府補助申請與撥款標準回答", "text"),
     ("service-start-inquiry", "服務開始－代班接案意願詢問", "flex"),
     ("service-start-result", "服務開始－群組日期結果紀錄", "text"),
-    ("service-start-normal-received", "服務當天－服務正常受理回覆", "text"),
-    ("service-start-help-received", "服務當天－協助需求受理回覆", "text"),
     ("group-invitation-staff", "案件群組邀請卡－月嫂", "flex"),
     ("candidate-willing-received", "初步候選聯絡－月嫂意願受理", "text"),
     ("matching-willing-received", "正式媒合－月嫂意願受理", "text"),
@@ -224,6 +237,9 @@ class LineMessagePreviewApplication:
             (r["id"], r["template_id"]) for r in rules.get("rules", [])
             if r["template_id"] not in _RETIRED and r["template_id"] not in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
             and r["template_id"] not in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS
+            and r["template_id"] not in RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS
+            and r["template_id"] not in RETIRED_START_DAY_REPORT_TEMPLATE_IDS
+            and r["template_id"] != RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID
             and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)
         ]
         referenced = {template_id for _, template_id in references}
@@ -265,9 +281,7 @@ class LineMessagePreviewApplication:
         descriptor = next((d for d in self._catalog(templates, rules, include_unlisted=True) if d.id == key), None)
         if descriptor is None:
             raise MessagePreviewNotFound("message")
-        if descriptor.template_id in {'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
-                'LINE-SECOND-PAYMENT-DUE-TEXT-V1', 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1',
-                'LINE-SERVICE-COMPLETION-TEXT-V1'} and not sample:
+        if descriptor.template_id == 'LINE-SECOND-PAYMENT-DUE-TEXT-V1' and not sample:
             return PreviewResult('unavailable', '此群組通知請使用公版預覽；正式內容由本案流程結果帶入。', descriptor.format)
         reader_factory = self._reader_factory
         if sample:
@@ -403,6 +417,8 @@ class LineMessagePreviewApplication:
                 copy_content = cancellation_draft
             if key == "runtime-system-health":
                 copy_values["status"] = "critical"
+            if key == "registration-approved-non-citizen":
+                copy_values["case_no"] = "A000000"
             payload = render_copy_payload(templates, key, payload, copy_values, copy_content)
         if cancellation_copy:
             from subsystems.line.message_preview_samples import cancellation_notice_sample

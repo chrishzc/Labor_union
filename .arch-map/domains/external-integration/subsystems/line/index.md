@@ -23,13 +23,13 @@
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`
-- `order-pre-start-notification-source` — [RETIRED SOURCE] 開工當天詢問、結案問卷、第二期款群組通知已停止 Push；僅保留舊按鈕 Reply-only 確認與殘留工作取消守門；path: `modules/order-pre-start-notification-source.md`
+- `order-pre-start-notification-source` — 開工當天純文字群組問候與客戶付款 Reply；完工問卷及第二期款群組來源的殘留投遞守門；path: `modules/order-pre-start-notification-source.md`
 - `test-fixture-bootstrap` — development-only LINE 身分、訂單情境與 Rich Menu 測試前置資料；path: `modules/test-fixture-bootstrap.md`
 - `feedback` — M2 immutable LINE feedback root／receipt／aggregate與Customer Service ticket linkage；path: `modules/feedback.md`
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation、masked empathy、告警與客戶結案通知的分離投遞；path: `modules/complaint-ingress.md`
 - `customer-order-change-intake` — verified LIFF 客戶訂單異動 Query／Preview／Apply，Apply 只建立 Customer Service 人工確認需求；path: `modules/customer-order-change-intake.md`
 - `matching-coordination-delivery` — M3 committed owner-intent至既有 LINE delivery task 的 typed projection與LINE-006 readback；path: `modules/matching-coordination-delivery.md`
-- `order-group-coordination` — 已驗證管理員的 LINE 訂單群組綁定、參與者同步與邀請投遞；path: `modules/order-group-coordination.md`
+- `order-group-coordination` — 已驗證管理員的 LINE 訂單群組綁定、參與者同步、邀請投遞與群組月嫂小幫手互動流程（開工日／合意延期／排程／專員協助，全程 Reply-only 零推播）；path: `modules/order-group-coordination.md`
 - `mobile-assignment-review` — persisted-human、target-isolated mobile transport，轉接既有 Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
 - `safe-review-link` — 短效一次性review-link transport、runtime owner 版本重驗、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
 - `staff-order-view` — 已驗證月嫂查看自己有效指派的訂單摘要與可選篩選；path: `modules/staff-order-view.md`

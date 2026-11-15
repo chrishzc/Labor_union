@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-================================================================================
-檔案名稱: line/line_bot.py
-功能說明: LINE Bot 子路由，負責 Webhook、LIFF、使用者事件、身分切換與 LINE 訊息任務建立
-================================================================================
+File: line_bot.py
+Description: LINE Bot 子路由，負責 Webhook、LIFF 入口與靜態頁分流。
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -247,6 +245,11 @@ async def health_check(request: Request):
             "target",
             "entry",
             "state",
+            "purpose",
+            "flow_id",
+            "case_no",
+            "ref",
+            "mode",
         )
     )
     accept = request.headers.get("accept", "")

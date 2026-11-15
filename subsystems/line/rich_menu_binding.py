@@ -24,6 +24,7 @@ from subsystems.line.outbox_contracts import (
 )
 _MANUAL_RESYNC_PREFIX = "rich-menu-manual-resync:"
 from subsystems.line.ports import LineAuditIntent, LineRichMenuProviderPort, LineUnitOfWorkPort
+from subsystems.line.rich_menu_backup import read_rich_menu_id_backup
 from subsystems.line.rich_menu_contracts import (
     LineRichMenuProviderOutcome,
     LineRichMenuProviderOutcomeType,
@@ -310,9 +311,13 @@ class LineRichMenuBindingWorker:
             raise ValueError("Rich Menu binding target is invalid")
         if not _is_current_target(unit_of_work, item, line_user_id, payload):
             return _failure("rich_menu_binding_superseded", "身分或選單意圖已變更")
-        provider_menu_id = unit_of_work.rich_menu_publications.published_provider_menu_id(
-            menu_definition_id
-        ) or payload.get("provider_menu_id")
+        provider_menu_id = (
+            unit_of_work.rich_menu_publications.published_provider_menu_id(
+                menu_definition_id
+            )
+            or payload.get("provider_menu_id")
+            or read_rich_menu_id_backup(menu_definition_id)
+        )
         if not provider_menu_id:
             return _failure("rich_menu_binding_not_published", "圖文選單尚未發布")
         if (

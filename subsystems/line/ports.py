@@ -126,6 +126,7 @@ from subsystems.line.outbox_contracts import (
 )
 from subsystems.line.feedback_contracts import LineFeedbackRepository
 from subsystems.line.order_group_contracts import (
+    OpeningGreetingSkipPage,
     PaidOrderGroupTodoPage,
     LineOrderGroupInvitationSettings,
     BindLineOrderGroupCommand,
@@ -846,6 +847,8 @@ class LineOrderGroupBindingRepositoryPort(Protocol):
     def save_invitation_url(self, binding: LineOrderGroupBindingSnapshot, invitation_url: str) -> None: ...
 
     def paid_uncreated_todos(self, *, page: int, page_size: int) -> PaidOrderGroupTodoPage: ...
+
+    def opening_greeting_skips(self, *, page: int, page_size: int) -> OpeningGreetingSkipPage: ...
 
     def workspace_list(
         self, *, search: str | None, status: str | None, page: int, page_size: int

@@ -1,4 +1,7 @@
-/** Edit a complete card's display copy without exposing its business actions. */
+/**
+ * File: LineCardCopyEditor.tsx
+ * Description: 編輯 LINE Flex 互動卡片顯示文案與可插入變數，保持原有業務按鈕動作不變。
+ */
 import { useRef, type RefObject } from 'react';
 import type { LineNotificationTemplateData } from '../api/line_notification_rules/line_notification_template_client';
 
@@ -9,6 +12,7 @@ const VARIABLE_NAMES: Record<string, string> = {
   case_no: '案件編號', staff_name: '月嫂姓名', caregiver_names: '月嫂姓名', client_name: '客戶姓名',
   service_dates: '服務日期', service_period: '服務期間', first_payment_notice: '第一期款提醒',
   amount_ntd: '金額', due_date: '繳款日期', start_date: '服務開始日', end_date: '服務結束日',
+  leave_start_date: '請假日期', leave_end_date: '補班日期',
 };
 
 export function LineCardCopyEditor({ fields, content, variables, disabled, onChange, bodyRef }: {

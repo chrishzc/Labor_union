@@ -1,4 +1,7 @@
-"""Typed application contracts for durable LINE delivery tasks."""
+"""
+File: delivery_contracts.py
+Description: 定義 LINE 永續投遞任務的應用層契約與停用來源常數。
+"""
 
 from __future__ import annotations
 
@@ -31,6 +34,9 @@ _MAXIMUM_CLAIM_BATCH_SIZE = 100
 REPLY_ONLY_WEBHOOK_SOURCE = "line_webhook_reply"
 RETIRED_CONTRACT_DELIVERY_SOURCES = frozenset({
     "contract_external_signing_session", "contract_signing_case", "contract_document_version",
+})
+RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES = frozenset({
+    "manual_client_payment_receipt", "client_deposit_settled", "client_second_payment_settled",
 })
 RETIRED_CANDIDATE_COORDINATION_SOURCES = (
     "candidate_contact_adjustment",

@@ -1,3 +1,7 @@
+/**
+ * File: ClientRosterPage.css
+ * Description: 定義客戶名冊頁面的搜尋篩選區、分頁與可調欄寬表格樣式。
+ */
 .client-roster-page { padding: 24px; color: #432c23; }
 .client-roster-page--embedded { padding: 0; }
 .client-roster-page h1 { margin: 0; color: #7c2d12; }
@@ -14,7 +18,8 @@
 .client-roster-pagination span { color: #65483b; }
 .client-roster-table-frame { display: flex; flex-direction: column; max-height: min(65vh, 720px); margin-top: 10px; max-width: 100%; border: 1px solid #ead3c8; border-radius: 12px; background: white; }
 .client-roster-table-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; color: #74593f; }
-.client-roster-table-title button { margin-inline-start: auto; }
+.client-roster-table-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto; }
+.client-roster-page .roster-picker-reset { background: white; color: #65483b; border-color: #d8b9a7; }
 .client-roster-table-wrap { min-height: 0; flex: 1 1 auto; max-width: 100%; overflow: auto; }
 .client-roster-table-wrap::-webkit-scrollbar { width: 14px; height: 0; }
 .client-roster-table-wrap::-webkit-scrollbar-track, .client-roster-table-wrap::-webkit-scrollbar-corner { background: #f8eee8; }
@@ -26,12 +31,13 @@
 .client-roster-scroll-rail input::-moz-range-track { height: 10px; border-radius: 6px; background: #e8dbd2; }
 .client-roster-scroll-rail input::-moz-range-thumb { width: var(--roster-thumb-width); height: 10px; border: 0; border-radius: 6px; background: #8d8177; }
 .client-roster-scroll-rail input:focus-visible { outline: 2px solid #b45309; outline-offset: 2px; }
-.client-roster-table-wrap table { width: 100%; min-width: 1250px; border-collapse: collapse; text-align: left; }
+.client-roster-table-wrap table { width: 100%; text-align: left; }
 .client-roster-table-wrap th, .client-roster-table-wrap td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: top; }
 .client-roster-table-wrap th { position: sticky; top: 0; background: #fff7ed; color: #7c2d12; white-space: nowrap; }
 .client-roster-table-wrap th button { padding: 0; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--md-sys-color-primary); }
-.client-roster-column-heading { display: flex; align-items: center; gap: 8px; }
-.client-roster-table-wrap th .client-roster-filter-trigger { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid #d8b9a7; border-radius: 5px; }
+.client-roster-column-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.client-roster-column-heading > button:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.client-roster-table-wrap th .client-roster-filter-trigger { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid #d8b9a7; border-radius: 5px; }
 .client-roster-table-wrap th .client-roster-filter-trigger:hover, .client-roster-table-wrap th .client-roster-filter-trigger.is-active { color: white; background: #9a3412; border-color: #9a3412; }
 .client-roster-active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: .86rem; }
 .client-roster-filter-help { flex-basis: 100%; color: #74593f; }
@@ -45,6 +51,10 @@
 .client-roster-column-panel button:disabled { opacity: .55; cursor: default; }
 .client-roster-column-panel :focus-visible, .client-roster-page button:focus-visible { outline: 2px solid #9a3412; outline-offset: 2px; }
 .client-roster-column-sort, .client-roster-column-select-actions, .client-roster-column-footer { display: flex; gap: 8px; }
+.client-roster-column-panel-header { display: grid; gap: 8px; }
+.client-roster-column-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.client-roster-column-quick-actions button { padding: 4px 8px; font-size: .78rem; background: #ffffff; color: #65483b; border-color: #d8b9a7; }
+.client-roster-column-quick-actions button.is-active { background: #ffedd5; color: #9a3412; border-color: #b45309; }
 .client-roster-column-clear { text-align: left; }
 .client-roster-column-hint { margin: 0; font-size: .76rem; color: #74593f; }
 .client-roster-column-values { display: grid; gap: 3px; max-height: 190px; overflow: auto; border: 1px solid #ead3c8; border-radius: 6px; padding: 6px; background: white; }

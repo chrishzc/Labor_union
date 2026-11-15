@@ -1,5 +1,5 @@
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderActualStartPanel } from '../components/OrderActualStartPanel';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -68,7 +68,11 @@ describe('Beta 實際開始日正式操作', () => {
     expect(screen.getByRole('button', { name: '預覽日期與逐段排班' })).toBeDisabled();
     expect(onObserved).not.toHaveBeenCalled();
     await act(async () => { finishPreview(preview()); });
-    expect(screen.getByText(/服務日 2026-09-02、2026-09-03/)).toBeInTheDocument();
+    const calendar = within(screen.getByRole('group', { name: '服務日期月曆' }));
+    expect(calendar.getByRole('button', { name: '服務日期 2026-09-02', pressed: true })).toBeDisabled();
+    expect(calendar.getByRole('button', { name: '服務日期 2026-09-03', pressed: true })).toBeDisabled();
+    expect(calendar.getByRole('button', { name: '服務日期 2026-09-04', pressed: false })).toBeDisabled();
+    expect(screen.queryByText(/2026-09-02、2026-09-03/)).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認調整開始日與排班' }));
     await screen.findByText('實際開始日已完成正式回讀：2026-09-02');

@@ -1,4 +1,7 @@
-"""Join typed Finance overdue facts with LINE-owned recipients and delivery history."""
+"""
+File: payment_overdue_reminder_repository.py
+Description: 聚合財務逾期事實、LINE 收件對象與催繳投遞歷程記錄。
+"""
 from domains.line.delivery import LineRecipient, LineRecipientType
 from domains.line.identities import LineDeliveryTaskId, LineUserId
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
@@ -9,6 +12,7 @@ from subsystems.client_finance.overdue_payment_query import OverduePaymentQueryP
 from subsystems.line.payment_overdue_reminders import (
     SOURCE_TYPE, CASE_SOURCE_TYPE, CaseReminderRecord, LastPaymentReminder, PaymentOverdueTodo, ReminderRecipient, payment_reference,
 )
+from subsystems.line.service_start_day import GREETING_SOURCE
 
 
 class MySqlPaymentOverdueReminderRepository:
@@ -26,16 +30,19 @@ class MySqlPaymentOverdueReminderRepository:
             cursor.execute("SELECT t.id,t.processing_status,t.scheduled_at_utc,t.sent_at_utc,t.payload_snapshot, (SELECT a.actor_id FROM line_domain_audit_events a WHERE a.action='payment_overdue_reminder_queued' AND BINARY a.aggregate_type=BINARY t.source_aggregate_type AND BINARY a.aggregate_identity=BINARY CAST(t.id AS CHAR) ORDER BY a.id LIMIT 1) actor FROM line_delivery_tasks t "
                 "WHERE (source_aggregate_type IN (%s,%s,%s,%s) AND BINARY source_aggregate_identity IN "
                 "(SELECT BINARY obligation_identity FROM client_obligations WHERE case_no=%s AND obligation_type=%s) "
+                "OR source_aggregate_type=%s AND %s='first' AND source_aggregate_identity=%s "
+                "AND EXISTS (SELECT 1 FROM client_obligations o WHERE o.case_no=%s AND o.obligation_type='first' "
+                "AND t.correlation_id LIKE CONCAT('opening-greeting:%%:',SHA2(o.obligation_identity,256),':%%')) "
                 "OR source_aggregate_type='client_deposit_reminder' AND %s='deposit' AND SUBSTRING_INDEX(source_aggregate_identity,':',1)=%s "
                 "OR source_aggregate_type='client_second_payment_reminder' AND %s='second' AND source_aggregate_identity=%s) "
                 "ORDER BY t.scheduled_at_utc DESC,t.id DESC", (SOURCE_TYPE,CASE_SOURCE_TYPE,'client_payment_initial_reminder',
-                    'client_payment_automatic_followup',case_no,stage,stage,case_no,stage,case_no))
+                    'client_payment_automatic_followup',case_no,stage,GREETING_SOURCE,stage,case_no,case_no,stage,case_no,stage,case_no))
             rows = cursor.fetchall()
         result=[]
         for row in rows:
             payload=row['payload_snapshot']
             if isinstance(payload,str): payload=json.loads(payload)
-            content=payload.get('text') if isinstance(payload,dict) and payload.get('type')=='text' else None
+            content=(payload.get('text') or payload.get('altText')) if isinstance(payload,dict) else None
             result.append(CaseReminderRecord(int(row['id']),aware_utc(row['scheduled_at_utc']),
                 aware_utc(row['sent_at_utc']) if row['sent_at_utc'] and row['processing_status']=='sent' else None,
                 str(row['processing_status']),content,row['actor']))

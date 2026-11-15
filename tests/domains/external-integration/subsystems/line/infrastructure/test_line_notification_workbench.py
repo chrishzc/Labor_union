@@ -24,7 +24,7 @@ def test_first_receipt_notification_is_a_stable_internal_todo_and_never_sends(mo
     assert first.items[0].id==again.items[0].id
     assert first.items[0].title=='第一期款已入帳，待確認通知'
     assert first.items[0].receipt.payment_stage=='first'
-    assert '前往帳務' in first.items[0].reason and first.items[0].case_no=='CASE-FIRST'
+    assert '官方帳號' in first.items[0].reason and '已於官方帳號發送／標記已通知' in first.items[0].reason and first.items[0].case_no=='CASE-FIRST'
     sent[0]=True
     assert query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL).items==[]
 
@@ -465,6 +465,59 @@ window.happyDOM.abort();
 '''
     result=subprocess.run(['node','--input-type=module','-e',script],check=False,capture_output=True,text=True,timeout=25)
     assert result.returncode==0,result.stderr
+
+
+def test_mobile_opening_greeting_history_is_visible_even_without_paid_group_todos():
+    import subprocess
+
+    script = r'''
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+import {Window} from './ui_react/node_modules/happy-dom/lib/index.js';
+const source=fs.readFileSync('line/static/mobile_admin.html','utf8').replace(/\r\n/g,'\n');
+const extract=h=>{const i=source.indexOf(h);assert(i>=0,h);return source.slice(i,source.indexOf('\n}',i)+2)};
+const window=new Window();const document=window.document;
+document.body.innerHTML='<div id="reviewPane"><div class="workstream-list"></div></div><div id="notificationSources"></div>';
+const calls=[];
+const ctx=vm.createContext({document,notificationSequence:0,notificationSelection:null,target:'staff_review',
+  notificationGroups:{all:'全部',reminder:'提醒'},restoreNotificationPanels(){},updateNotificationCards(){},showStatus(){},
+  postJson:async(url,body)=>{
+    calls.push([url,body]);
+    if(url.endsWith('/notification-tasks'))return [{group:'reminder',source:'group',label:'訂金已付尚未建群'}];
+    if(url.endsWith('/notification-tasks/group'))return {items:[],total:0,next_cursor:null};
+    assert.equal(url,'/api/v1/line/mobile-admin/order-group-todos');
+    assert.equal(body.view,'opening_greeting_skips');
+    return {items:[{case_no:body.page===1?'CASE-A':'CASE-B',occurred_at:'2026-11-15T01:00:00Z'}],
+      page:body.page,page_size:25,total:26};
+  },
+});
+for(const header of ['function notificationText(', 'function notificationButton(', 'function showEmpty(',
+  'function renderPagination(', 'function requireTodoPage(', 'function openingGreetingSkipRecords(',
+  'async function loadReviewWorkbench(']){
+  // Helpers with a one-line body end before the next newline.
+  const index=source.indexOf(header);
+  const line=source.slice(index,source.indexOf('\n',index));
+  vm.runInContext(line.endsWith(' }')?line:extract(header),ctx);
+}
+await vm.runInContext('loadReviewWorkbench()',ctx);
+const group=document.querySelector('[data-notification-source="group"]');
+assert(group.textContent.includes('目前沒有此類待辦。'));
+const history=group.querySelector('details');
+assert.equal(history.querySelector('summary').textContent,'開工問候未送出紀錄');
+assert.equal(calls.length,2);
+history.open=true;
+history.dispatchEvent(new window.Event('toggle'));
+await new Promise(resolve=>setTimeout(resolve,0));
+assert(history.textContent.includes('案件 CASE-A'));
+assert(history.textContent.includes('未綁定有效的案件服務群組'));
+[...history.querySelectorAll('button')].find(button=>button.textContent==='下一頁').click();
+await new Promise(resolve=>setTimeout(resolve,0));
+assert(history.textContent.includes('案件 CASE-B'));
+assert(!history.textContent.includes('案件 CASE-A'));
+assert(!calls.some(([url])=>url.includes('/send')||url.includes('/apply')));
+window.happyDOM.abort();
+'''
+    result = subprocess.run(['node', '--input-type=module', '-e', script], check=False, capture_output=True, text=True, timeout=25)
+    assert result.returncode == 0, result.stderr
 
 
 def test_mobile_one_click_commands_keep_original_intent_refresh_todos_and_ignore_late_operations():

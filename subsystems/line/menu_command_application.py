@@ -24,6 +24,7 @@ from shared_kernel.ports import OutboxIntent
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.rich_menu_binding import RICH_MENU_BINDING_INTENT
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+from subsystems.line.navigation_catalog import route_aliases
 
 
 _CUSTOMER_MENU_COMMANDS = {"客戶選單", "客戶專區", "切換客戶"}
@@ -33,19 +34,33 @@ _UNION_MENU_COMMANDS = {"工會選單", "工會客服", "切換工會"}
 _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}
 
 
+def _resolved_menu_commands() -> dict[str, set[str]]:
+    union_aliases = set(route_aliases("union_menu"))
+    return {
+        "help": set(route_aliases("menu_switch_help")) or set(_MENU_HELP_COMMANDS),
+        "customer": set(route_aliases("menu_switch_customer")) or set(_CUSTOMER_MENU_COMMANDS),
+        "visitor": (set(route_aliases("menu_switch_visitor")) | {"服務選單"}) or set(_VISITOR_MENU_COMMANDS),
+        "staff": (set(route_aliases("menu_switch_staff")) | {"月嫂選單"}) or set(_STAFF_MENU_COMMANDS),
+        "union": (
+            (union_aliases & {"工會選單", "切換工會", "工會客服"}) | {"工會選單"}
+        ) if union_aliases else set(_UNION_MENU_COMMANDS),
+    }
+
+
 class LineMenuCommandApplication:
     def handle_reply(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         command = text.strip()
-        return command in _MENU_HELP_COMMANDS and self._queue_switch_help(inbox, unit_of_work, line_user_id)
+        return command in _resolved_menu_commands()["help"] and self._queue_switch_help(inbox, unit_of_work, line_user_id)
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         source_type = getattr(getattr(inbox.event, 'source', None), 'source_type', None)
         if source_type is not None and source_type.value != 'user':
             return False
         command = text.strip()
-        if command in _MENU_HELP_COMMANDS:
+        commands = _resolved_menu_commands()
+        if command in commands["help"]:
             return self._queue_switch_help(inbox, unit_of_work, line_user_id)
-        if command in _CUSTOMER_MENU_COMMANDS:
+        if command in commands["customer"]:
             return self._queue_scoped_menu(
                 inbox,
                 unit_of_work,
@@ -54,10 +69,10 @@ class LineMenuCommandApplication:
                 "customer-menu",
                 allow_subject=LineBindingSubjectType.CUSTOMER,
             )
-        if command in _VISITOR_MENU_COMMANDS:
-            self._queue_menu(inbox, unit_of_work, line_user_id, "default_menu", "visitor-menu")
+        if command in commands["visitor"] or command.lower() in {item.lower() for item in commands["visitor"] if item.isascii()}:
+            self._queue_menu(inbox, unit_of_work, line_user_id, "default_menu", "esc" if command.lower() == "esc" else "visitor-menu")
             return True
-        if command in _STAFF_MENU_COMMANDS:
+        if command in commands["staff"]:
             return self._queue_scoped_menu(
                 inbox,
                 unit_of_work,
@@ -66,7 +81,7 @@ class LineMenuCommandApplication:
                 "staff-menu",
                 allow_subject=LineBindingSubjectType.STAFF,
             )
-        if command in _UNION_MENU_COMMANDS:
+        if command in commands["union"]:
             return self._queue_scoped_menu(
                 inbox,
                 unit_of_work,
@@ -75,9 +90,6 @@ class LineMenuCommandApplication:
                 "union-menu",
                 allow_subject=LineBindingSubjectType.ADMIN,
             )
-        if command.lower() == "esc":
-            self._queue_menu(inbox, unit_of_work, line_user_id, "default_menu", "esc")
-            return True
         return False
 
     def _queue_scoped_menu(

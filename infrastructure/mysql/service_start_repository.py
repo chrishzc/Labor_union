@@ -387,17 +387,17 @@ class MySqlServiceStartRepository:
                     if handover_context(request) else '提出的日期有排程衝突，原排班尚未變更；請依雙方重新談妥的日期記錄，或安排代班。')
                 c.execute('UPDATE scheduling_service_start_requests SET execution_dates=%s WHERE id=%s', (_json(context), request_id))
 
-    def complete(self,request_id,result,actor,key):
+    def complete(self,request_id,result,actor,key,*,enqueue_group_schedule: bool = True):
         request=self.request(request_id,lock=True)
         group=self.group(request['case_no'])
-        result={**result,'group_record_queued':bool(group and group['group_id']),
+        result={**result,'group_record_queued':bool(enqueue_group_schedule and group and group['group_id']),
                 'group_version':int(group['aggregate_version']) if group else None}
         with self.connection.cursor() as c:
             if request['confirmed_version_id']:
                 c.execute("UPDATE scheduling_service_start_requests SET status='applied',result_snapshot=%s,aggregate_version=aggregate_version+1 WHERE case_no=%s AND confirmed_version_id=%s AND status='awaiting_peers'",(_json(result),request['case_no'],request['confirmed_version_id']))
             else:
                 c.execute("UPDATE scheduling_service_start_requests SET status='applied',result_snapshot=%s,aggregate_version=aggregate_version+1 WHERE id=%s",(_json(result),request_id))
-        if group and group['group_id']:
+        if enqueue_group_schedule and group and group['group_id']:
             self._enqueue(LineRecipientType.GROUP,group['group_id'],configured_message_payload(self.connection, 'service-start-result', service_date_record(request['case_no'],result['assignments']), {'case_no': request['case_no'], 'assignments': '\n'.join(item['staff_name']+'：'+'、'.join(item['service_dates']) for item in result['assignments'])}),
                 'service_start_schedule',str(request_id),'schedule:'+key)
 

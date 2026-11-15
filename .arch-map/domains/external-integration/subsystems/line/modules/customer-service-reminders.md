@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-React 六欄未結案客服清單及 Customer Service owner-backed bounded query projection；完成按鈕沿既有 update Preview／Apply，由原 owner 在單一 UoW 完成 ticket／escalation 並解除 hold，不建立 Push。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。服務開始日群組按鈕建立的 `start-day-response:` 客服事件歸服務需求來源，供工會待辦查閱。
+React 六欄未結案客服清單及 Customer Service owner-backed bounded query projection；完成按鈕沿既有 update Preview／Apply，由原 owner 在單一 UoW 完成 ticket／escalation 並解除 hold，不建立 Push。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。既有 `start-day-response:` 客服事件仍歸服務需求來源，供工會查閱。
 
 ## Implementation
 - primary: `ui_react/src/components/LineCustomerServiceReminderWorkbench.tsx`

@@ -1,4 +1,7 @@
-"""Canonical query and control service for durable LINE delivery tasks."""
+"""
+File: delivery_admin_application.py
+Description: 提供 LINE 投遞任務查詢與停用來源保護之重試／取消控制。
+"""
 
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from subsystems.line.delivery_admin_contracts import (
 from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
     RETIRED_CONTRACT_DELIVERY_SOURCES,
+    RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
@@ -94,6 +98,8 @@ class LineDeliveryTaskAdminApplication:
                 )
             if action != "cancel" and current.request.source_aggregate_type in RETIRED_CONTRACT_DELIVERY_SOURCES:
                 raise LineDeliveryTaskStateConflictError("契約 LINE 投遞已停用，無法發送或重試。")
+            if action != "cancel" and current.request.source_aggregate_type in RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES:
+                raise LineDeliveryTaskStateConflictError("入帳確認推播已停用，請改由官方帳號發送。")
             if existing is not None:
                 return current
             try:

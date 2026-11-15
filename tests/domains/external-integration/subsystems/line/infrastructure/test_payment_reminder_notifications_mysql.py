@@ -33,6 +33,7 @@ from domains.line.configuration import LineConfigurationKind,LineConfigurationRe
 from subsystems.line.configuration_application import LineConfigurationApplication
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.payment_reminder_schedule import PaymentReminderSchedule
+from subsystems.line.service_start_day import GREETING_SOURCE, ServiceStartDayGreetingWorker
 from dataclasses import asdict
 import json
 
@@ -42,7 +43,9 @@ TABLES=('clients','orders','order_contract_flow_events','client_finance_accounts
     'client_payment_terms','line_platform_users','line_identity_role_bindings','line_delivery_tasks','line_delivery_attempt_events',
     'line_domain_audit_events','line_inbox_events','line_command_receipts','line_configuration_current','line_configuration_revisions',
     'client_deposit_settlement_projection','client_ledger_entries','client_legacy_virtual_accounts',
-    'client_finance_outbox','client_ledger_obligation_allocations','line_notification_source_events')
+    'client_finance_outbox','client_ledger_obligation_allocations','line_notification_source_events',
+    'staff','scheduling_aggregates','scheduling_generations','case_staff_assignments','staff_schedule',
+    'line_order_group_bindings')
 
 
 @pytest.fixture(scope='module')
@@ -92,11 +95,13 @@ def runtime(isolated_database):
             with connection.cursor() as cursor:cursor.execute(sql,params);return tuple(cursor.fetchall())
         finally:connection.close()
     deposit=DepositNotificationApplication(units,lambda:clock[0],liff_id='synthetic-liff',bank_code='807')
-    return SimpleNamespace(units=units,execute=execute,rows=rows,clock=clock,worker=PaymentReminderNotificationWorker(units,lambda:clock[0],deposit))
+    return SimpleNamespace(units=units,execute=execute,rows=rows,clock=clock,
+        worker=PaymentReminderNotificationWorker(units,lambda:clock[0],deposit),
+        opening=ServiceStartDayGreetingWorker(units,lambda:clock[0]))
 
 
 identities=count(1)
-def seed(rt,stage='first',amount=24000):
+def seed(rt,stage='second',amount=24000):
     case='116'+str(next(identities)).zfill(6);user='U'+uuid4().hex;obligation=case+':'+stage
     client=rt.execute("INSERT INTO clients(case_no,name,identity_status,service_type,created_at,line_user_id) VALUES (%s,'Synthetic reminder','一般市民','連續服務','2026-11-01',%s)",(case,user))
     first_due='2026-10-21' if stage=='second' else '2026-11-05'
@@ -110,6 +115,21 @@ def seed(rt,stage='first',amount=24000):
     rt.execute("INSERT INTO line_platform_users(line_user_id,friend_status) VALUES (%s,'active')",(user,))
     rt.execute("INSERT INTO line_identity_role_bindings(line_user_id,subject_type,subject_reference,binding_status) VALUES (%s,'customer',%s,'bound')",(user,str(client)))
     return case,obligation,user
+
+
+def seed_opening(rt, case):
+    day=NOW.date()
+    group='C'+uuid4().hex
+    staff=rt.execute("INSERT INTO staff(name,phone,status) VALUES ('Synthetic caregiver','0900000000','active')",())
+    generation=rt.execute("INSERT INTO scheduling_generations(case_no,generation_number,resulting_aggregate_version,status,effective_marker,created_by,change_reason) "
+                          "VALUES (%s,1,1,'effective',1,'synthetic','fixture')",(case,))
+    rt.execute("INSERT INTO scheduling_aggregates(case_no,aggregate_version,generation_counter,effective_generation_id) VALUES (%s,1,1,%s)",(case,generation))
+    assignment=rt.execute("INSERT INTO case_staff_assignments(case_no,generation_id,candidate_key,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,floor_fee_allocated,status) "
+                          "VALUES (%s,%s,%s,%s,1,%s,%s,0,'active')",(case,generation,f'{case}:opening',staff,day,day))
+    rt.execute("INSERT INTO staff_schedule(case_no,staff_id,assignment_id,generation_id,work_date,is_work_day,is_double_pay,effective_marker) "
+               "VALUES (%s,%s,%s,%s,%s,1,0,1)",(case,staff,assignment,generation,day))
+    rt.execute("INSERT INTO line_order_group_bindings(case_no,group_id,binding_status) VALUES (%s,%s,'bound')",(case,group))
+    return group
 
 
 def tasks(rt,identity):return rt.rows('SELECT id,processing_status,source_aggregate_type,recipient_type,recipient_identity FROM line_delivery_tasks WHERE source_aggregate_identity=%s ORDER BY id',(identity,))
@@ -138,7 +158,7 @@ def reply(rt,user,kind='message',source='user',at=None):
     with rt.units() as unit:unit.webhook_inbox.register(event);unit.commit()
 
 
-@pytest.mark.parametrize('stage',['deposit','first','second'])
+@pytest.mark.parametrize('stage',['deposit','second'])
 def test_real_queue_success_followup_and_unpaid_todo_remain_private(runtime,stage):
     rt=runtime;_,identity,user=seed(rt,stage)
     assert rt.worker._queue(identity)==1 and rt.worker._queue(identity)==0
@@ -189,11 +209,33 @@ def test_only_current_customer_private_replies_after_original_send_suppress_foll
     assert rt.worker._queue(identity)==1
 
 
-def test_native_zero_first_greets_but_zero_or_ambiguous_second_never_queues(runtime):
-    rt=runtime;_,first,_=seed(rt,'first',0)
-    assert rt.worker._queue(first)==1
-    payload=rt.rows('SELECT payload_snapshot FROM line_delivery_tasks WHERE source_aggregate_identity=%s',(first,))[0]['payload_snapshot']
-    assert '祝服務順利' in str(payload) and '未確認入帳' not in str(payload)
+@pytest.mark.parametrize('amount',[None,0,24000])
+def test_native_opening_greets_group_plain_text_with_optional_first_and_overdue_private(runtime,amount):
+    rt=runtime
+    case,first,user=seed(rt,'first',amount or 0)
+    group=seed_opening(rt,case)
+    if amount is None:
+        rt.execute('DELETE FROM client_obligations WHERE obligation_identity=%s',(first,))
+    assert rt.worker._queue(first)==0
+    assert rt.opening._queue(case,rt.clock[0],NOW.date())==1
+    assert rt.opening._queue(case,rt.clock[0],NOW.date())==0
+    task=tasks(rt,case)[0]
+    assert task['source_aggregate_type']==GREETING_SOURCE
+    assert task['recipient_type']=='group' and task['recipient_identity']==group
+    call,=deliver(rt,task['id'])
+    payload=json.loads(call.payload_json)
+    assert set(payload)=={'type','text'} and payload['type']=='text'
+    assert '祝服務順利' in payload['text'] and ('第一期款' in payload['text']) is bool(amount)
+    rt.clock[0]=NOW+timedelta(days=1,hours=1)
+    assert rt.worker._queue(first)==int(bool(amount))
+    if amount:
+        followup,=tasks(rt,first)
+        assert followup['recipient_type']=='user' and followup['recipient_identity']==user
+        assert len(deliver(rt,followup['id']))==1
+
+
+def test_native_zero_or_ambiguous_second_never_queues(runtime):
+    rt=runtime
     _,zero,_=seed(rt,'second',0)
     assert rt.worker._queue(zero)==0
     case,second,_=seed(rt,'second')

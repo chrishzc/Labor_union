@@ -1,0 +1,12 @@
+.calendar-date-cell .service-date-occupancy {
+  align-self: center;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 1px;
+  border-radius: 4px;
+  background: #f8e4e4;
+  color: #862d2d;
+  font-size: .6875rem;
+  line-height: 1.2;
+  text-align: center;
+}

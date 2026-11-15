@@ -460,9 +460,8 @@ describe('SchedulingPage query-only presentation', () => {
 
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
-    const now = new Date();
-    const expectedDays = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).getUTCDate();
-    expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(expectedDays);
+    expect(document.querySelectorAll('.gantt-month-group-col')).toHaveLength(12);
+    expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(36);
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       1,
       { pageSize: 20, lifecycleState: 'active' },
@@ -939,5 +938,39 @@ describe('SchedulingPage query-only presentation', () => {
     fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     await waitFor(() => expect(screen.getByText('此狀態沒有歷史請假紀錄。')).toBeInTheDocument());
     expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('resolved');
+  });
+
+  it('顯示全年度 12 個月 × 上／中／下旬三等份表頭，並以底部滑軌同步捲動表頭與內容', async () => {
+    render(<SchedulingPage />);
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+
+    expect(document.querySelectorAll('.gantt-month-group-col')).toHaveLength(12);
+    expect(document.querySelectorAll('.gantt-third-header-col')).toHaveLength(36);
+    expect(screen.getByText('1月上旬')).toBeInTheDocument();
+    expect(screen.getByText('12月下旬')).toBeInTheDocument();
+
+    const grid = document.querySelector('[data-surface-id="scheduling.calendar.grid"] .gantt-matrix-scroll-wrapper') as HTMLElement;
+    const header = document.querySelector('[data-surface-id="scheduling.calendar.date-header"]') as HTMLElement;
+    const slider = screen.getByRole('slider', { name: '左右捲動排班日曆' });
+
+    fireEvent.change(slider, { target: { value: '720' } });
+    expect(grid.scrollLeft).toBe(720);
+    expect(header.scrollLeft).toBe(720);
+  });
+
+  it('將同案服務與排休日合併為單一連續訂單條，並完整顯示客戶姓名、案件編號、起訖日期與每日時段', async () => {
+    render(<SchedulingPage />);
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('排班客戶甲').length).toBeGreaterThan(0));
+
+    const firstRowSpans = document.querySelectorAll('[data-staff-id="11"] .gantt-span-bar');
+    expect(firstRowSpans).toHaveLength(1);
+    const orderBar = firstRowSpans[0];
+    expect(orderBar).toHaveAttribute('data-start-day', '1');
+    expect(orderBar).toHaveAttribute('data-end-day', '2');
+    expect(orderBar).toHaveTextContent('排班客戶甲');
+    expect(orderBar).toHaveTextContent('CASE-SCH-001');
+    expect(orderBar).toHaveTextContent('2026-08-01 ～ 2026-08-10');
+    expect(orderBar).toHaveTextContent('09:00–18:00');
   });
 });

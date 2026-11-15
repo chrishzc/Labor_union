@@ -1,10 +1,10 @@
-import { ServiceStartSubstituteWorkbench } from '../components/ServiceStartSubstituteWorkbench';
-import { ManagementPageHeader } from '../components/ManagementPageHeader';
-import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: SchedulingPage.tsx
  * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
  */
+import { ServiceStartSubstituteWorkbench } from '../components/ServiceStartSubstituteWorkbench';
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
+import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import './SchedulingPage.css';
@@ -15,6 +15,7 @@ import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_tim
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import type { SchedulingCurrentAssignment } from '../api/scheduling/scheduling_current_schemas';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
@@ -201,19 +202,106 @@ function monthRange(selection: MonthSelection) {
   };
 }
 
-function monthAxis(selection: MonthSelection) {
-  const { totalDays } = monthRange(selection);
-  const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六'];
-  return Array.from({ length: totalDays }, (_, index) => {
-    const dayNumber = index + 1;
-    const date = new Date(Date.UTC(selection.year, selection.month - 1, dayNumber));
-    return {
-      dayNumber,
-      dateStr: isoDate(selection.year, selection.month, dayNumber),
-      weekday: weekdayLabels[date.getUTCDay()],
-      isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6,
-    };
-  });
+export interface YearThirdSegment {
+  key: string;
+  year: number;
+  month: number;
+  thirdIndex: 0 | 1 | 2;
+  columnIndex: number;
+  label: '上旬' | '中旬' | '下旬';
+  monthThirdLabel: string;
+  rangeLabel: string;
+  startDay: number;
+  endDay: number;
+  startDate: string;
+  endDate: string;
+  isActiveMonth: boolean;
+  containsToday: boolean;
+  todayDateStr: string;
+  holidayNames: readonly string[];
+}
+
+const GANTT_THIRD_COL_WIDTH = 136;
+const GANTT_TOTAL_THIRDS = 36;
+
+/** 建立指定年份 12 個月 × 上／中／下旬三等份（共 36 欄）時間軸。 */
+function buildYearThirdAxis(
+  selection: MonthSelection,
+  taipeiToday: string,
+  monthHolidays: readonly HolidayRow[],
+): YearThirdSegment[] {
+  const segments: YearThirdSegment[] = [];
+  for (let monthNum = 1; monthNum <= 12; monthNum += 1) {
+    const finalDay = new Date(Date.UTC(selection.year, monthNum, 0)).getUTCDate();
+    const defs: ReadonlyArray<{ label: '上旬' | '中旬' | '下旬'; startDay: number; endDay: number }> = [
+      { label: '上旬', startDay: 1, endDay: 10 },
+      { label: '中旬', startDay: 11, endDay: 20 },
+      { label: '下旬', startDay: 21, endDay: finalDay },
+    ];
+    defs.forEach((def, idx) => {
+      const thirdIndex = idx as 0 | 1 | 2;
+      const startDate = isoDate(selection.year, monthNum, def.startDay);
+      const endDate = isoDate(selection.year, monthNum, def.endDay);
+      const isActiveMonth = monthNum === selection.month;
+      const containsToday = isActiveMonth && taipeiToday >= startDate && taipeiToday <= endDate;
+      const holidayNames = monthHolidays
+        .filter((h) => h.holiday_date >= startDate && h.holiday_date <= endDate)
+        .map((h) => `${Number(h.holiday_date.slice(8, 10))}日 ${h.holiday_name}`);
+      segments.push({
+        key: `${selection.year}-${monthNum}-${thirdIndex}`,
+        year: selection.year,
+        month: monthNum,
+        thirdIndex,
+        columnIndex: (monthNum - 1) * 3 + thirdIndex,
+        label: def.label,
+        monthThirdLabel: `${monthNum}月${def.label}`,
+        rangeLabel: `${def.startDay}–${def.endDay}日`,
+        startDay: def.startDay,
+        endDay: def.endDay,
+        startDate,
+        endDate,
+        isActiveMonth,
+        containsToday,
+        todayDateStr: containsToday ? taipeiToday : startDate,
+        holidayNames,
+      });
+    });
+  }
+  return segments;
+}
+
+/** 將 YYYY-MM-DD 對應到該年度 36 欄座標軸的百分比位置。 */
+function dateToYearAxisPercent(isoDateStr: string, year: number, isEnd: boolean): number {
+  const yearStart = `${String(year).padStart(4, '0')}-01-01`;
+  const yearEnd = `${String(year).padStart(4, '0')}-12-31`;
+  if (isoDateStr < yearStart) return 0;
+  if (isoDateStr > yearEnd) return 100;
+
+  const monthNum = Number(isoDateStr.slice(5, 7));
+  const day = Number(isoDateStr.slice(8, 10));
+  const finalDay = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+
+  let thirdIndex = 0;
+  let segStartDay = 1;
+  let daysInSeg = 10;
+  if (day <= 10) {
+    thirdIndex = 0;
+    segStartDay = 1;
+    daysInSeg = 10;
+  } else if (day <= 20) {
+    thirdIndex = 1;
+    segStartDay = 11;
+    daysInSeg = 10;
+  } else {
+    thirdIndex = 2;
+    segStartDay = 21;
+    daysInSeg = Math.max(1, finalDay - 20);
+  }
+
+  const columnIndex = (monthNum - 1) * 3 + thirdIndex;
+  const offsetDays = day - segStartDay + (isEnd ? 1 : 0);
+  const clampedFraction = Math.max(0, Math.min(1, offsetDays / daysInSeg));
+  return ((columnIndex + clampedFraction) / GANTT_TOTAL_THIRDS) * 100;
 }
 
 function moveMonth(selection: MonthSelection, offset: number): MonthSelection {
@@ -1387,7 +1475,11 @@ function LeaveSubstitutionWorkspace({
 }
 
 export type CalendarRowState =
-  | { kind: 'loaded'; row: SchedulingCalendarRowViewModel }
+  | {
+      kind: 'loaded';
+      row: SchedulingCalendarRowViewModel;
+      assignments?: readonly SchedulingCurrentAssignment[];
+    }
   | { kind: 'empty' }
   | { kind: 'terms_incomplete' }
   | { kind: 'error'; message: string };
@@ -1647,47 +1739,233 @@ function visibleCaseInterval(
   };
 }
 
-// 動態將 Server 天數投影合併為連續甘特區間條塊（支援 Ghost Projection 幽靈透視）
+// 動態將 Server 天數投影合併為連續甘特區間條塊（支援跨月全期展示與 Ghost Projection 幽靈透視）
+interface OrderSummaryInfo {
+  clientName: string;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+interface SpanEnrichmentContext {
+  year: number;
+  month: number;
+  orderSummariesByCaseNo: Record<string, OrderSummaryInfo>;
+  staffAssignments: readonly StaffAssignmentOption[];
+  projectionAssignments: readonly SchedulingCurrentAssignment[];
+}
+
 interface GanttSpan {
   id: string;
   startDay: number;
   endDay: number;
+  visualStartDate: string;
+  visualEndDate: string;
   tone: 'active' | 'rest' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free' | 'historical';
   icon?: string;
+  clientName?: string;
   caseText: string;
+  dateRangeText?: string;
+  dailyTimeText?: string;
   statusLabel?: string;
   lane?: number;
+  assignmentId?: number | null;
   shift?: StaffMonthlySchedule['days'][number];
 }
 
-function monthlyShiftSpans(schedule: StaffMonthlySchedule): GanttSpan[] {
+function resolveOrderSpanEnrichment(
+  caseNo: string | null | undefined,
+  assignmentId: number | null | undefined,
+  spanStartDate: string,
+  spanEndDate: string,
+  context?: SpanEnrichmentContext,
+): {
+  clientName?: string;
+  fullStartDate: string;
+  fullEndDate: string;
+  dateRangeText: string;
+  dailyTimeText?: string;
+} {
+  if (!context || !caseNo) {
+    return {
+      fullStartDate: spanStartDate,
+      fullEndDate: spanEndDate,
+      dateRangeText: spanStartDate === spanEndDate ? spanStartDate : `${spanStartDate} ～ ${spanEndDate}`,
+    };
+  }
+  const optAssign = context.staffAssignments.find(
+    (item) => (assignmentId != null && item.id === assignmentId) || item.case_no === caseNo,
+  );
+  const projAssign = context.projectionAssignments.find(
+    (item) => (assignmentId != null && item.assignment_id === assignmentId) || item.case_no === caseNo,
+  );
+  const summary = context.orderSummariesByCaseNo[caseNo];
+
+  const fullStartDate =
+    optAssign?.actual_start_date
+    ?? optAssign?.assigned_start_date
+    ?? summary?.startDate
+    ?? projAssign?.assigned_start_date
+    ?? spanStartDate;
+  const fullEndDate =
+    optAssign?.actual_end_date
+    ?? optAssign?.assigned_end_date
+    ?? summary?.endDate
+    ?? projAssign?.assigned_end_date
+    ?? spanEndDate;
+  const dateRangeText = fullStartDate === fullEndDate
+    ? fullStartDate
+    : `${fullStartDate} ～ ${fullEndDate}`;
+
+  const firstTime = projAssign?.first_service_at?.slice(11, 16);
+  const endTime = projAssign?.completion_at?.slice(11, 16);
+  const dailyTimeText = firstTime && endTime
+    ? (projAssign?.actual_hours === 24 && firstTime === endTime
+      ? `${firstTime}–翌日${endTime} (24H)`
+      : `${firstTime}–${endTime}`)
+    : undefined;
+
+  return {
+    clientName: summary?.clientName,
+    fullStartDate,
+    fullEndDate,
+    dateRangeText,
+    dailyTimeText,
+  };
+}
+
+function assignNonOverlappingLanes(spans: GanttSpan[]): GanttSpan[] {
+  const occupiedByLane: Array<Array<{ start: string; end: string }>> = [];
+  return spans.map((span) => {
+    if (span.lane !== undefined) {
+      while (occupiedByLane.length <= span.lane) occupiedByLane.push([]);
+      occupiedByLane[span.lane].push({ start: span.visualStartDate, end: span.visualEndDate });
+      return span;
+    }
+    let assignedLane = 0;
+    while (assignedLane < occupiedByLane.length) {
+      const hasOverlap = occupiedByLane[assignedLane].some(
+        (slot) => span.visualStartDate <= slot.end && span.visualEndDate >= slot.start,
+      );
+      if (!hasOverlap) break;
+      assignedLane += 1;
+    }
+    if (!occupiedByLane[assignedLane]) occupiedByLane[assignedLane] = [];
+    occupiedByLane[assignedLane].push({ start: span.visualStartDate, end: span.visualEndDate });
+    return { ...span, lane: assignedLane };
+  });
+}
+
+function monthlyShiftSpans(
+  schedule: StaffMonthlySchedule,
+  context?: SpanEnrichmentContext,
+): GanttSpan[] {
+  const sortedDays = [...schedule.days].sort((a, b) => a.work_date.localeCompare(b.work_date));
   const spans: GanttSpan[] = [];
+  const activeOrderSpans = new Map<string, GanttSpan>();
   const previous = new Map<string, GanttSpan>();
   const lanes = new Map<number, number>();
-  for (const shift of schedule.days) {
+  const tones = {
+    working: 'active',
+    resting: 'active',
+    historical_assignment: 'historical',
+    historical_reservation: 'historical',
+    waiting_deposit_lock: 'waiting',
+    staff_unavailability: 'leave',
+    buffer: 'buffer',
+  } as const;
+  const labels = {
+    working: '排班',
+    resting: '排班',
+    historical_assignment: '歷史指派',
+    historical_reservation: '歷史預定',
+    waiting_deposit_lock: '等待訂金',
+    staff_unavailability: '不可服務',
+    buffer: '緩衝提醒',
+  } as const;
+
+  for (const shift of sortedDays) {
     if (shift.status === 'available') continue;
     const day = Number(shift.work_date.slice(8));
+    const continuation = !!shift.service_date && shift.service_date !== shift.work_date;
+    const orderKey = shift.case_no || shift.assignment_id
+      ? `${shift.case_no ?? ''}#${shift.assignment_id ?? ''}`
+      : null;
+
+    // 合併跨日續班與同案排休日為連續訂單區間，避免切成碎片
+    if (orderKey && (continuation || shift.status === 'resting')) {
+      const existing = activeOrderSpans.get(orderKey);
+      if (existing && (existing.endDay >= day - 1)) {
+        existing.endDay = Math.max(existing.endDay, day);
+        if (shift.work_date > existing.visualEndDate && !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate) {
+          existing.visualEndDate = shift.work_date;
+          existing.dateRangeText = existing.visualStartDate === existing.visualEndDate
+            ? existing.visualStartDate
+            : `${existing.visualStartDate} ～ ${existing.visualEndDate}`;
+        }
+        continue;
+      }
+    }
+
     const lane = lanes.get(day) ?? 0;
     lanes.set(day, lane + 1);
-    const continuation = !!shift.service_date && shift.service_date !== shift.work_date;
+
     const time = shift.starts_at && shift.ends_at
-      ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日 ' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
+      ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
       : ['working', 'historical_assignment', 'waiting_deposit_lock'].includes(shift.status) ? '時段未確認' : '';
-    const tones = { working: 'active', resting: 'rest', historical_assignment: 'historical', historical_reservation: 'historical', waiting_deposit_lock: 'waiting', staff_unavailability: 'leave', buffer: 'buffer' } as const;
-    const labels = { working: '排班', resting: '休息日', historical_assignment: '歷史指派', historical_reservation: '歷史預定', waiting_deposit_lock: '等待訂金', staff_unavailability: '不可服務', buffer: '緩衝提醒' } as const;
+
     const key = [shift.case_no, shift.assignment_id, shift.lock_id, shift.unavailability_block_id, shift.status, lane, time].join(':');
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
       prior.endDay = day;
+      if (shift.work_date > prior.visualEndDate && !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate) {
+        prior.visualEndDate = shift.work_date;
+        prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
+          ? prior.visualStartDate
+          : `${prior.visualStartDate} ～ ${prior.visualEndDate}`;
+      }
       continue;
     }
+
+    const enrichment = resolveOrderSpanEnrichment(
+      shift.case_no,
+      shift.assignment_id,
+      shift.work_date,
+      shift.work_date,
+      context,
+    );
+    const useFullRange = shift.case_no && (shift.status === 'working' || shift.status === 'resting' || shift.status === 'waiting_deposit_lock');
+    const icon = shift.status === 'working' || shift.status === 'resting'
+      ? '🟢'
+      : shift.status === 'waiting_deposit_lock'
+        ? '🔵'
+        : shift.status === 'staff_unavailability'
+          ? '🟣'
+          : shift.status === 'buffer'
+            ? '🔒'
+            : '🕘';
+
     const span: GanttSpan = {
-      id: `${key}:${day}`, startDay: day, endDay: day, lane,
-      tone: tones[shift.status], caseText: [shift.status === 'historical_reservation' ? labels[shift.status] : null, shift.case_no, time].filter(Boolean).join('　') || labels[shift.status],
-      statusLabel: labels[shift.status], shift,
+      id: `${key}:${day}`,
+      startDay: day,
+      endDay: day,
+      visualStartDate: useFullRange ? enrichment.fullStartDate : shift.work_date,
+      visualEndDate: useFullRange ? enrichment.fullEndDate : shift.work_date,
+      lane,
+      icon,
+      tone: tones[shift.status],
+      clientName: enrichment.clientName ?? shift.client_name ?? undefined,
+      caseText: shift.case_no || labels[shift.status],
+      dateRangeText: enrichment.dateRangeText,
+      dailyTimeText: time || enrichment.dailyTimeText,
+      statusLabel: labels[shift.status],
+      assignmentId: shift.assignment_id,
+      shift,
     };
     spans.push(span);
     previous.set(key, span);
+    if (orderKey && (shift.status === 'working' || shift.status === 'resting')) {
+      activeOrderSpans.set(orderKey, span);
+    }
   }
   return spans;
 }
@@ -1706,10 +1984,23 @@ function caseShiftSpans(config: GhostProjectionConfig, state: CaseEligibilityRow
       else if (state.data.availability === 'available' || state.data.coverage.missing_dates.length > 0) outcome = 'available';
       else if (state.data.availability === 'blocked') outcome = 'requires_review';
     }
+    const dayIso = `${month}-${String(day).padStart(2, '0')}`;
     const prior = result.at(-1);
-    const span = ghostCaseSpan({ ...config, outcome }, day, day);
-    if (prior?.tone === span.tone) prior.endDay = day;
-    else result.push({ ...span, lane, caseText: `${config.caseNo} · ${{ available: '可排', hard_conflict: '時段衝突', reservation_conflict: '時段衝突', requires_review: '時段待確認', checking: '確認中', unknown: '時段待確認' }[outcome]}`, statusLabel: undefined });
+    const span = ghostCaseSpan({ ...config, outcome }, day, day, month);
+    if (prior?.tone === span.tone) {
+      prior.endDay = day;
+      prior.visualEndDate = dayIso;
+    } else {
+      result.push({
+        ...span,
+        lane,
+        visualStartDate: dayIso,
+        visualEndDate: dayIso,
+        dateRangeText: `${config.fullStartDate} ～ ${config.fullEndDate}`,
+        caseText: `${config.caseNo} · ${{ available: '可排', hard_conflict: '時段衝突', reservation_conflict: '時段衝突', requires_review: '時段待確認', checking: '確認中', unknown: '時段待確認' }[outcome]}`,
+        statusLabel: undefined,
+      });
+    }
   }
   return result;
 }
@@ -1718,8 +2009,18 @@ function ghostCaseSpan(
   config: GhostProjectionConfig,
   startDay: number,
   endDay: number,
+  monthStr?: string,
 ): GanttSpan {
-  const common = { startDay, endDay };
+  const ym = monthStr ?? `${config.year}-${String(config.month).padStart(2, '0')}`;
+  const visualStartDate = `${ym}-${String(startDay).padStart(2, '0')}`;
+  const visualEndDate = `${ym}-${String(endDay).padStart(2, '0')}`;
+  const common = {
+    startDay,
+    endDay,
+    visualStartDate,
+    visualEndDate,
+    dateRangeText: `${config.fullStartDate} ～ ${config.fullEndDate}`,
+  };
   if (config.outcome === 'hard_conflict') {
     return {
       ...common,
@@ -1767,65 +2068,153 @@ function buildGanttSpans(
   totalDays: number,
   ghostConfig?: GhostProjectionConfig | null,
   historicalOverlays: readonly HistoricalAssignmentOverlay[] = [],
+  context?: SpanEnrichmentContext,
 ): GanttSpan[] {
+  const ymFallback = context
+    ? `${String(context.year).padStart(4, '0')}-${String(context.month).padStart(2, '0')}`
+    : `${taipeiCalendarDate(new Date()).year}-${String(taipeiCalendarDate(new Date()).month).padStart(2, '0')}`;
+  const mapHistoricalOverlay = (overlay: HistoricalAssignmentOverlay, startDay: number, endDay: number): GanttSpan => ({
+    id: `historical-${overlay.assignmentId}-${startDay}`,
+    startDay,
+    endDay,
+    visualStartDate: startDay === Number(overlay.startDate.slice(8, 10)) && endDay === Number(overlay.endDate.slice(8, 10))
+      ? overlay.startDate
+      : `${ymFallback}-${String(startDay).padStart(2, '0')}`,
+    visualEndDate: startDay === Number(overlay.startDate.slice(8, 10)) && endDay === Number(overlay.endDate.slice(8, 10))
+      ? overlay.endDate
+      : `${ymFallback}-${String(endDay).padStart(2, '0')}`,
+    tone: 'historical',
+    icon: '🕘',
+    clientName: overlay.clientName,
+    caseText: overlay.caseNo,
+    dateRangeText: overlay.startDate === overlay.endDate ? overlay.startDate : `${overlay.startDate} ～ ${overlay.endDate}`,
+    statusLabel: '歷史指派區間（不計入工時）',
+  });
+
   if (state?.kind === 'empty') {
     if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
       const start = Math.max(1, ghostConfig.startDay);
       const end = Math.min(totalDays, ghostConfig.endDay);
       return [ghostCaseSpan(ghostConfig, start, end)];
     }
-    return historicalOverlays.map((overlay) => {
-      const startDay = Number(overlay.startDate.slice(8, 10));
-      const endDay = Number(overlay.endDate.slice(8, 10));
-      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' };
-    });
+    return assignNonOverlappingLanes(historicalOverlays.map((overlay) =>
+      mapHistoricalOverlay(overlay, Number(overlay.startDate.slice(8, 10)), Number(overlay.endDate.slice(8, 10))),
+    ));
   }
 
   if (!state || state.kind === 'terms_incomplete' || state.kind === 'error') {
-    return historicalOverlays.map((overlay) => {
-      const startDay = Number(overlay.startDate.slice(8, 10));
-      const endDay = Number(overlay.endDate.slice(8, 10));
-      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' };
-    });
+    return assignNonOverlappingLanes(historicalOverlays.map((overlay) =>
+      mapHistoricalOverlay(overlay, Number(overlay.startDate.slice(8, 10)), Number(overlay.endDate.slice(8, 10))),
+    ));
   }
 
   const row = state.row;
   const spans: GanttSpan[] = [];
   let current: GanttSpan | null = null;
+  let currentCaseNo: string | null = null;
+
+  const finalizeCurrentSpan = (span: GanttSpan, caseNo: string | null) => {
+    const enrichment = resolveOrderSpanEnrichment(
+      caseNo,
+      null,
+      span.visualStartDate,
+      span.visualEndDate,
+      context,
+    );
+    const shouldExpandCrossMonth = caseNo !== null && (span.tone === 'active' || span.tone === 'waiting');
+    spans.push({
+      ...span,
+      clientName: enrichment.clientName,
+      dateRangeText: enrichment.dateRangeText,
+      dailyTimeText: enrichment.dailyTimeText,
+      visualStartDate: shouldExpandCrossMonth ? enrichment.fullStartDate : span.visualStartDate,
+      visualEndDate: shouldExpandCrossMonth ? enrichment.fullEndDate : span.visualEndDate,
+    });
+  };
 
   row.days.forEach((day, index) => {
     const dayNum = index + 1;
     const isOccupied = day.occupancyKinds.length > 0;
+    const primaryCaseNo = day.caseLabels.length === 1 ? day.caseLabels[0] : null;
+    const isRestMergedIntoOrder = day.tone === 'rest'
+      && day.caseLabels.length > 0
+      && !day.occupancyKinds.includes('staff_unavailability')
+      && !day.occupancyKinds.includes('assignment_buffer');
 
-    let tone: GanttSpan['tone'] = day.tone === 'rest'
-      ? (day.assignmentStatuses.includes('active') ? 'rest' : 'active')
-      : day.tone;
-    let caseText = day.caseLabels.join('、') || (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
-    let statusLabel = day.caseLabels.length > 0 ? day.statusLabel : undefined;
-    let icon: string | undefined = tone === 'active' ? '🟢' : tone === 'rest' ? '🔴' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
+    const tone: GanttSpan['tone'] = isRestMergedIntoOrder
+      ? 'active'
+      : day.tone === 'rest'
+        ? (day.assignmentStatuses.includes('active') ? 'rest' : 'active')
+        : day.tone;
+    const caseText = day.caseLabels.join('、') || (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
+    const mergedOrderLabel = day.assignmentStatuses.includes('completed')
+      ? '服務已結束'
+      : day.assignmentStatuses.includes('active')
+        ? '服務中'
+        : day.assignmentStatuses.includes('planned')
+          ? '已排定服務'
+          : day.statusLabel;
+    const statusLabel = day.caseLabels.length > 0
+      ? (isRestMergedIntoOrder ? mergedOrderLabel : day.statusLabel)
+      : undefined;
+    const icon: string | undefined = tone === 'active'
+      ? '🟢'
+      : tone === 'rest'
+        ? '🔴'
+        : tone === 'buffer'
+          ? '🔒'
+          : tone === 'leave'
+            ? '🚑'
+            : tone === 'waiting'
+              ? '🔵'
+              : undefined;
 
     if (!current) {
       if (isOccupied) {
-        current = { id: `span-${dayNum}`, startDay: dayNum, endDay: dayNum, tone, icon, caseText, statusLabel };
+        current = {
+          id: `span-${dayNum}`,
+          startDay: dayNum,
+          endDay: dayNum,
+          visualStartDate: day.date,
+          visualEndDate: day.date,
+          tone,
+          icon,
+          caseText,
+          statusLabel,
+        };
+        currentCaseNo = primaryCaseNo;
       }
     } else if (
-      current.tone === tone &&
-      current.caseText === caseText &&
-      current.statusLabel === statusLabel
+      current.tone === tone
+      && current.caseText === caseText
+      && current.statusLabel === statusLabel
     ) {
       current.endDay = dayNum;
+      current.visualEndDate = day.date;
     } else {
-      spans.push(current);
+      finalizeCurrentSpan(current, currentCaseNo);
       if (isOccupied) {
-        current = { id: `span-${dayNum}`, startDay: dayNum, endDay: dayNum, tone, icon, caseText, statusLabel };
+        current = {
+          id: `span-${dayNum}`,
+          startDay: dayNum,
+          endDay: dayNum,
+          visualStartDate: day.date,
+          visualEndDate: day.date,
+          tone,
+          icon,
+          caseText,
+          statusLabel,
+        };
+        currentCaseNo = primaryCaseNo;
       } else {
         current = null;
+        currentCaseNo = null;
       }
     }
   });
 
   if (current) {
-    spans.push(current);
+    finalizeCurrentSpan(current, currentCaseNo);
   }
 
   if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
@@ -1845,13 +2234,13 @@ function buildGanttSpans(
       if (canRender && segmentStart == null) segmentStart = day;
       if (!canRender && segmentStart != null) {
         const segmentEnd = day - 1;
-        spans.push({ id: `historical-${overlay.assignmentId}-${segmentStart}`, startDay: segmentStart, endDay: segmentEnd, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史指派區間（不計入工時）' });
+        spans.push(mapHistoricalOverlay(overlay, segmentStart, segmentEnd));
         segmentStart = null;
       }
     }
   });
 
-  return spans;
+  return assignNonOverlappingLanes(spans);
 }
 
 const SchedulingWorkbench: React.FC = () => {
@@ -1878,6 +2267,7 @@ const SchedulingWorkbench: React.FC = () => {
   const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
   const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
   const [monthlyRowsByStaff, setMonthlyRowsByStaff] = useState<Record<number, StaffMonthlySchedule | undefined>>({});
+  const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
   const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
   const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
@@ -1908,6 +2298,13 @@ const SchedulingWorkbench: React.FC = () => {
   const calendarHeaderScrollRef = useRef<HTMLDivElement | null>(null);
   const calendarBodyScrollRef = useRef<HTMLDivElement | null>(null);
   const [pendingTodayScroll, setPendingTodayScroll] = useState(false);
+  const [scrollLeftValue, setScrollLeftValue] = useState(0);
+  const [scrollMetrics, setScrollMetrics] = useState<{ max: number; thumbWidth: number; clientTimelineWidth: number; measuredZeroOverflow: boolean }>({
+    max: GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH,
+    thumbWidth: 160,
+    clientTimelineWidth: 1200,
+    measuredZeroOverflow: false,
+  });
   const calendarControllerRef = useRef<AbortController | null>(null);
   const caseOptionsControllerRef = useRef<AbortController | null>(null);
   const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
@@ -2078,6 +2475,15 @@ const SchedulingWorkbench: React.FC = () => {
           }),
         ]);
         if (!mountedRef.current || controller.signal.aborted) return;
+        const nextOrderSummaries: Record<string, OrderSummaryInfo> = {};
+        summaryPage.items.forEach((summary) => {
+          nextOrderSummaries[summary.case_no] = {
+            clientName: summary.client_name,
+            startDate: summary.actual_start_date ?? summary.start_date,
+            endDate: summary.actual_end_date ?? summary.end_date,
+          };
+        });
+        setOrderSummariesByCaseNo(nextOrderSummaries);
         const preDepositCaseNos = new Set(
           coreStagePage.items
             .filter((timeline) => (
@@ -2238,7 +2644,11 @@ const SchedulingWorkbench: React.FC = () => {
           const projection = canonical.value;
           const state: CalendarRowState = projection.days.length === 0
             ? { kind: 'empty' }
-            : { kind: 'loaded', row: adaptSchedulingProjection(staff, projection) };
+            : {
+                kind: 'loaded',
+                row: adaptSchedulingProjection(staff, projection),
+                assignments: projection.assignments,
+              };
           return { staffId: staff.id, state, overlays, historicalError, monthly: historical.status === 'fulfilled' ? historical.value : undefined, error: null };
         } catch (caught) {
           const error = caught instanceof Error ? caught : new Error('排班日曆查詢失敗');
@@ -2345,13 +2755,72 @@ const SchedulingWorkbench: React.FC = () => {
 
   const selectedStaffRow = selectedStaffId ? calendarRows[selectedStaffId] : null;
   const taipeiToday = todayIsoDate();
-  const [, taipeiMonth, taipeiDay] = taipeiToday.split('-');
+  const [taipeiYear, taipeiMonth, taipeiDay] = taipeiToday.split('-');
 
-  const daysList = useMemo(() => monthAxis(month).map((day) => ({
-    ...day,
-    isToday: day.dateStr === taipeiToday,
-    holidayName: monthHolidays.find(holiday => holiday.holiday_date === day.dateStr)?.holiday_name,
-  })), [month, taipeiToday, monthHolidays]);
+  const thirdSegments = useMemo(
+    () => buildYearThirdAxis(month, taipeiToday, monthHolidays),
+    [month, taipeiToday, monthHolidays],
+  );
+
+  const todayAxisPercent = useMemo(() => {
+    if (month.year !== Number(taipeiYear)) return null;
+    return dateToYearAxisPercent(taipeiToday, month.year, false);
+  }, [month.year, taipeiYear, taipeiToday]);
+
+  const syncScrollMetrics = useCallback(() => {
+    const body = calendarBodyScrollRef.current;
+    if (!body || body.scrollWidth <= 0 || body.clientWidth <= 0) return;
+    const max = Math.max(0, body.scrollWidth - body.clientWidth);
+    const ratio = Math.min(1, body.clientWidth / body.scrollWidth);
+    setScrollMetrics({
+      max,
+      thumbWidth: Math.max(64, Math.round(ratio * Math.max(300, body.clientWidth - 360))),
+      clientTimelineWidth: Math.max(300, body.clientWidth - 260),
+      measuredZeroOverflow: max === 0,
+    });
+  }, []);
+
+  useEffect(() => {
+    syncScrollMetrics();
+    window.addEventListener('resize', syncScrollMetrics);
+    return () => window.removeEventListener('resize', syncScrollMetrics);
+  }, [syncScrollMetrics, activeTab, filteredStaff.length]);
+
+  const applyHorizontalScroll = useCallback((nextLeft: number) => {
+    const body = calendarBodyScrollRef.current;
+    const header = calendarHeaderScrollRef.current;
+    const max = body && body.scrollWidth > body.clientWidth
+      ? Math.max(0, body.scrollWidth - body.clientWidth)
+      : scrollMetrics.max;
+    const clamped = Math.max(0, Math.min(max, nextLeft));
+    if (body) body.scrollLeft = clamped;
+    if (header) header.scrollLeft = clamped;
+    setScrollLeftValue(clamped);
+  }, [scrollMetrics.max]);
+
+  const scrollToMonthColumn = useCallback((targetMonth: number) => {
+    const body = calendarBodyScrollRef.current;
+    if (!body || body.scrollWidth <= body.clientWidth) return;
+    const monthOffset = Math.max(0, (targetMonth - 1) * 3 * GANTT_THIRD_COL_WIDTH - 20);
+    applyHorizontalScroll(monthOffset);
+  }, [applyHorizontalScroll]);
+
+  const stepScrollByThird = useCallback((deltaThirds: number) => {
+    const current = calendarBodyScrollRef.current?.scrollLeft ?? scrollLeftValue;
+    applyHorizontalScroll(current + deltaThirds * GANTT_THIRD_COL_WIDTH);
+  }, [applyHorizontalScroll, scrollLeftValue]);
+
+  const visibleMonthRange = useMemo(() => {
+    const timelineWidth = GANTT_TOTAL_THIRDS * GANTT_THIRD_COL_WIDTH;
+    const viewW = scrollMetrics.clientTimelineWidth;
+    const startMonth = Math.max(1, Math.min(12, Math.floor((scrollLeftValue / timelineWidth) * 12) + 1));
+    const endMonth = Math.max(startMonth, Math.min(12, Math.floor(((scrollLeftValue + viewW - 1) / timelineWidth) * 12) + 1));
+    return {
+      startMonth,
+      endMonth,
+      label: startMonth === endMonth ? `目前可視：${startMonth}月` : `目前可視：${startMonth}月 ～ ${endMonth}月`,
+    };
+  }, [scrollLeftValue, scrollMetrics.clientTimelineWidth]);
 
   useEffect(() => {
     if (!pendingTodayScroll) return;
@@ -2366,8 +2835,14 @@ const SchedulingWorkbench: React.FC = () => {
       + header.scrollLeft - staffWidth - (body.clientWidth - staffWidth - todayRect.width) / 2);
     body.scrollLeft = left;
     header.scrollLeft = body.scrollLeft;
+    setScrollLeftValue(body.scrollLeft);
     setPendingTodayScroll(false);
   }, [pendingTodayScroll, month, taipeiToday, filteredStaff.length, activeTab]);
+
+  useEffect(() => {
+    if (pendingTodayScroll || activeTab !== 'calendar') return;
+    scrollToMonthColumn(month.month);
+  }, [month.month, month.year, activeTab, pendingTodayScroll, scrollToMonthColumn]);
   const eligibilityResult = eligibilityState.kind === 'ready'
     ? eligibilityDisplay(eligibilityState.data)
     : null;
@@ -2477,8 +2952,30 @@ const SchedulingWorkbench: React.FC = () => {
         >
           {/* Top Control Bar: Month Switcher + Search + Filters */}
           <section className="gantt-matrix-header-bar" aria-label="月曆查詢控制">
-            {/* Left: Month Navigator & Today */}
+            {/* Left: Year & Month Navigator & Today */}
             <div className="gantt-month-navigator">
+              <div className="month-pill-group">
+                <button
+                  type="button"
+                  className="month-nav-arrow"
+                  aria-label="查看上一年"
+                  onClick={() => setMonth((value) => ({ year: value.year - 1, month: value.month }))}
+                >
+                  ◀ {month.year - 1}年
+                </button>
+                <span className="current-month-display">
+                  {month.year} 年 {month.month}月
+                </span>
+                <button
+                  type="button"
+                  className="month-nav-arrow"
+                  aria-label="查看下一年"
+                  onClick={() => setMonth((value) => ({ year: value.year + 1, month: value.month }))}
+                >
+                  {month.year + 1}年 ▶
+                </button>
+              </div>
+
               <div className="month-pill-group">
                 <button
                   type="button"
@@ -2489,9 +2986,6 @@ const SchedulingWorkbench: React.FC = () => {
                 >
                   ◀ {prevMonthName}
                 </button>
-                <span className="current-month-display">
-                  {month.year} 年 {month.month}月
-                </span>
                 <button
                   type="button"
                   data-control-id="scheduling.calendar.next-month"
@@ -2563,6 +3057,30 @@ const SchedulingWorkbench: React.FC = () => {
               </div>
             </div>
           </section>
+
+          {/* Quick Month Jump Row */}
+          <div className="gantt-month-jump-row" aria-label="月份快速定位">
+            <span className="gantt-month-jump-label">快速定位月份：</span>
+            {Array.from({ length: 12 }, (_, index) => {
+              const targetMonth = index + 1;
+              const isSelected = targetMonth === month.month;
+              const isInView = targetMonth >= visibleMonthRange.startMonth && targetMonth <= visibleMonthRange.endMonth;
+              const isCurrentRealMonth = month.year === Number(taipeiYear) && targetMonth === Number(taipeiMonth);
+              return (
+                <button
+                  key={targetMonth}
+                  type="button"
+                  className={`month-jump-pill ${isSelected ? 'active' : ''} ${isInView ? 'is-in-view' : ''} ${isCurrentRealMonth ? 'is-current-month' : ''}`}
+                  onClick={() => {
+                    setMonth((value) => ({ year: value.year, month: targetMonth }));
+                    scrollToMonthColumn(targetMonth);
+                  }}
+                >
+                  {targetMonth}月
+                </button>
+              );
+            })}
+          </div>
 
           <details className="gantt-case-checks" open={selectedCaseNo ? true : undefined}>
             <summary>案件排查<span>{selectedCaseNo ? `目前案件：${selectedCaseNo}` : '查詢可排人選與檔期衝突'}</span></summary>
@@ -2731,31 +3249,63 @@ const SchedulingWorkbench: React.FC = () => {
           {/* Multi-Caregiver Gantt Chart Matrix Table */}
           <>
             <p className="gantt-scroll-guidance" id="gantt-scroll-guidance">
-              左右滑動查看整月檔期；往下瀏覽時日期列會固定顯示，月嫂名冊會固定在左側。
+              全年度 12 個月 × 上／中／下旬三等份（共 36 欄）；利用下方凍結左右滑軌或上方月份按鈕即可連貫瀏覽跨月檔期。
             </p>
-            <div className="gantt-matrix-frame" data-surface-id="scheduling.calendar.grid" style={{ '--gantt-day-count': daysList.length } as React.CSSProperties}>
+            <div
+              className="gantt-matrix-frame"
+              data-surface-id="scheduling.calendar.grid"
+              style={{ '--gantt-day-count': thirdSegments.length } as React.CSSProperties}
+            >
               <div
                 ref={calendarHeaderScrollRef}
                 className="gantt-matrix-sticky-header"
                 data-surface-id="scheduling.calendar.date-header"
               >
-                <div className="gantt-matrix-header-row">
+                <div className="gantt-matrix-header-inner">
                   <div className="gantt-staff-header-cell">
                     <strong>月嫂名冊 ｜ 檔期診斷</strong>
+                    <small>每格約 9～11 天（上／中／下旬）</small>
                   </div>
-                  <div className="gantt-days-header-cells">
-                    {daysList.map((d) => (
-                      <div
-                        key={d.dateStr}
-                        className={`gantt-day-header-col ${d.isWeekend ? 'weekend' : ''} ${d.isToday ? 'today' : ''} ${d.holidayName ? 'holiday' : ''}`}
-                        data-date={d.dateStr}
-                        title={`${d.dateStr}${d.holidayName ? ` ${d.holidayName}` : ''}`}
-                      >
-                        <span className="day-number">{d.dayNumber}</span>
-                        <span className="weekday-text">{d.weekday}</span>
-                        {d.holidayName && <span className="gantt-holiday-name">{d.holidayName}</span>}
-                      </div>
-                    ))}
+                  <div className="gantt-timeline-header-stack">
+                    <div className="gantt-months-header-row">
+                      {Array.from({ length: 12 }, (_, idx) => {
+                        const monthNum = idx + 1;
+                        const isSelectedMonth = monthNum === month.month;
+                        const isRealCurrentMonth = month.year === Number(taipeiYear) && monthNum === Number(taipeiMonth);
+                        return (
+                          <div
+                            key={`${month.year}-m-${monthNum}`}
+                            className={`gantt-month-group-col ${isSelectedMonth ? 'active-month' : ''} ${isRealCurrentMonth ? 'is-current-month' : ''}`}
+                          >
+                            <span>{month.year}年 {monthNum}月</span>
+                            {isRealCurrentMonth ? (
+                              <span className="gantt-month-group-badge">本月</span>
+                            ) : isSelectedMonth ? (
+                              <span className="gantt-month-group-badge selected">查詢月</span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="gantt-thirds-header-row">
+                      {thirdSegments.map((seg) => (
+                        <div
+                          key={seg.key}
+                          className={`gantt-day-header-col gantt-third-header-col ${seg.thirdIndex === 2 ? 'is-month-end' : ''} ${seg.isActiveMonth ? 'is-active-month' : ''} ${seg.containsToday ? 'today' : ''} ${seg.holidayNames.length > 0 ? 'holiday' : ''}`}
+                          data-date={seg.todayDateStr}
+                          title={`${seg.startDate} ～ ${seg.endDate}${seg.holidayNames.length > 0 ? `｜${seg.holidayNames.join('、')}` : ''}`}
+                        >
+                          <div className="gantt-third-title">
+                            <span>{seg.monthThirdLabel}</span>
+                            {seg.containsToday && <span className="gantt-today-pill">今日</span>}
+                          </div>
+                          <span className="gantt-third-dates">{seg.rangeLabel}</span>
+                          {seg.holidayNames.length > 0 && (
+                            <span className="gantt-holiday-name">{seg.holidayNames.join('、')}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2766,9 +3316,12 @@ const SchedulingWorkbench: React.FC = () => {
                 tabIndex={0}
                 aria-describedby="gantt-scroll-guidance"
                 onScroll={(event) => {
+                  const nextLeft = event.currentTarget.scrollLeft;
                   if (calendarHeaderScrollRef.current) {
-                    calendarHeaderScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                    calendarHeaderScrollRef.current.scrollLeft = nextLeft;
                   }
+                  setScrollLeftValue(nextLeft);
+                  syncScrollMetrics();
                 }}
               >
                 <div className="gantt-matrix-table">
@@ -2790,12 +3343,26 @@ const SchedulingWorkbench: React.FC = () => {
                     : null;
                   const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
                   const monthly = monthlyRowsByStaff[staff.id];
+                  const enrichmentContext: SpanEnrichmentContext = {
+                    year: month.year,
+                    month: month.month,
+                    orderSummariesByCaseNo,
+                    staffAssignments: assignmentOptionsByStaffRef.current.get(staff.id) ?? [],
+                    projectionAssignments: row?.kind === 'loaded' ? (row.assignments ?? []) : [],
+                  };
                   const hasShiftRows = monthly?.days.some(day => day.starts_at || (day.status !== 'available' && day.status !== 'historical_assignment'));
                   const spans = hasShiftRows && monthly?.year === month.year && monthly.month === month.month
-                    ? monthlyShiftSpans(monthly)
-                    : buildGanttSpans(row ?? undefined, daysList.length, null, historicalOverlaysByStaff[staff.id]);
-                  if (ghostConfig) spans.push(...caseShiftSpans(ghostConfig, caseEligibilityRows[staff.id], Math.max(-1, ...spans.map(span => span.lane ?? 0)) + 1, `${month.year}-${String(month.month).padStart(2, '0')}`));
-                  const spanHeight = Math.max(52, ...spans.map(span => ((span.lane ?? 0) + 1) * 44 + 8));
+                    ? assignNonOverlappingLanes(monthlyShiftSpans(monthly, enrichmentContext))
+                    : buildGanttSpans(row ?? undefined, range.totalDays, null, historicalOverlaysByStaff[staff.id], enrichmentContext);
+                  if (ghostConfig) {
+                    spans.push(...caseShiftSpans(
+                      ghostConfig,
+                      caseEligibilityRows[staff.id],
+                      Math.max(-1, ...spans.map(span => span.lane ?? 0)) + 1,
+                      `${month.year}-${String(month.month).padStart(2, '0')}`,
+                    ));
+                  }
+                  const spanHeight = Math.max(60, ...spans.map(span => ((span.lane ?? 0) + 1) * 52 + 8));
                   const historicalOverlayError = historicalOverlayErrors[staff.id];
 
                   return (
@@ -2843,24 +3410,37 @@ const SchedulingWorkbench: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Right: Gantt Days Timeline Bar */}
+                      {/* Right: Gantt 36-Thirds Timeline Canvas */}
                       <div className="gantt-days-timeline-cell">
-                        {/* Render Days Grid */}
                         <div className="gantt-timeline-grid-bg">
-                          {daysList.map((d) => (
+                          {thirdSegments.map((seg) => (
                             <div
-                              key={d.dateStr}
-                              className={`gantt-grid-col ${d.isWeekend ? 'weekend-col' : ''} ${d.isToday ? 'today-col' : ''} ${d.holidayName ? 'holiday-col' : ''}`}
+                              key={seg.key}
+                              className={`gantt-grid-col ${seg.thirdIndex === 2 ? 'is-month-end' : ''} ${seg.isActiveMonth ? 'active-month-col' : ''} ${seg.containsToday ? 'today-col' : ''} ${seg.holidayNames.length > 0 ? 'holiday-col' : ''}`}
                             />
                           ))}
                         </div>
+                        {todayAxisPercent !== null && (
+                          <div
+                            className="gantt-today-vertical-line"
+                            style={{ left: `${todayAxisPercent}%` }}
+                            aria-hidden="true"
+                          />
+                        )}
 
                         {/* Continuous Visual Gantt Blocks */}
                         <div className="gantt-spans-layer" style={{ height: spanHeight }}>
                           {spans.map((sp) => {
-                            const leftPercent = ((sp.startDay - 1) / daysList.length) * 100;
-                            const widthPercent =
-                              (Math.max(1, sp.endDay - sp.startDay + 1) / daysList.length) * 100;
+                            const leftPercent = dateToYearAxisPercent(sp.visualStartDate, month.year, false);
+                            const endPercent = dateToYearAxisPercent(sp.visualEndDate, month.year, true);
+                            const widthPercent = Math.max(0.5, endPercent - leftPercent);
+                            const titleParts = [
+                              sp.clientName,
+                              sp.caseText,
+                              sp.dateRangeText,
+                              sp.dailyTimeText,
+                              sp.statusLabel ? `(${sp.statusLabel})` : null,
+                            ].filter(Boolean);
                             return (
                               <button
                                 type="button"
@@ -2871,22 +3451,38 @@ const SchedulingWorkbench: React.FC = () => {
                                 style={{
                                   left: `${leftPercent}%`,
                                   width: `${widthPercent}%`,
-                                  top: `${(sp.lane ?? 0) * 44 + 7}px`,
+                                  top: `${(sp.lane ?? 0) * 52 + 7}px`,
                                 }}
-                                title={`${sp.caseText}${sp.statusLabel ? ` (${sp.statusLabel})` : ''}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
+                                title={`${titleParts.join('｜')}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (sp.shift) {
                                     setSelectedShift(sp);
                                   } else if (selectedCaseNo && sp.tone !== 'historical') {
                                     handleOpenStaffGhostDrawer(staff);
+                                  } else if (sp.tone !== 'historical') {
+                                    setSelectedShift(sp);
                                   }
                                 }}
                               >
-                                {sp.icon && <span className="span-icon">{sp.icon} </span>}
-                                <span className="span-case-name">{sp.caseText}</span>
-                                {sp.statusLabel && (
-                                  <small className="span-status-sub"> ({sp.statusLabel})</small>
+                                <div className="span-line-primary">
+                                  {sp.icon && <span className="span-icon">{sp.icon} </span>}
+                                  {sp.clientName && (
+                                    <>
+                                      <span className="span-client-name">{sp.clientName}</span>
+                                      <span className="span-sep">｜</span>
+                                    </>
+                                  )}
+                                  <span className="span-case-name">{sp.caseText}</span>
+                                  {sp.statusLabel && (
+                                    <small className="span-status-sub"> ({sp.statusLabel})</small>
+                                  )}
+                                </div>
+                                {(sp.dateRangeText || sp.dailyTimeText) && (
+                                  <div className="span-line-secondary">
+                                    {sp.dateRangeText && <span className="span-date-range">📅 {sp.dateRangeText}</span>}
+                                    {sp.dailyTimeText && <span className="span-daily-time">　⏰ {sp.dailyTimeText}</span>}
+                                  </div>
                                 )}
                               </button>
                             );
@@ -2896,6 +3492,49 @@ const SchedulingWorkbench: React.FC = () => {
                     </div>
                   );
                 })}
+                </div>
+              </div>
+
+              {/* Sticky Bottom Horizontal Scroll Rail */}
+              <div className="gantt-scroll-rail" data-surface-id="scheduling.calendar.scroll-rail">
+                <div className="gantt-rail-meta">
+                  <button
+                    type="button"
+                    className="gantt-rail-step-btn"
+                    onClick={() => stepScrollByThird(-1)}
+                    aria-label="往左捲動一旬"
+                  >
+                    ◀ 上一旬
+                  </button>
+                  <span className="gantt-rail-visible-range">
+                    📍 {visibleMonthRange.label}
+                  </span>
+                  <button
+                    type="button"
+                    className="gantt-rail-step-btn"
+                    onClick={() => stepScrollByThird(1)}
+                    aria-label="往右捲動一旬"
+                  >
+                    下一旬 ▶
+                  </button>
+                </div>
+                <div className="gantt-rail-slider-wrap">
+                  <div className="gantt-rail-months-ticks" aria-hidden="true">
+                    {Array.from({ length: 12 }, (_, idx) => (
+                      <span key={idx + 1}>{idx + 1}月</span>
+                    ))}
+                  </div>
+                  <input
+                    type="range"
+                    className="gantt-scroll-rail-slider"
+                    aria-label="左右捲動排班日曆"
+                    min={0}
+                    max={scrollMetrics.max}
+                    value={Math.min(scrollLeftValue, scrollMetrics.max)}
+                    disabled={scrollMetrics.measuredZeroOverflow}
+                    onChange={(event) => applyHorizontalScroll(Number(event.target.value))}
+                    style={{ '--gantt-thumb-width': `${scrollMetrics.thumbWidth}px` } as React.CSSProperties}
+                  />
                 </div>
               </div>
             </div>
@@ -2925,13 +3564,23 @@ const SchedulingWorkbench: React.FC = () => {
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
-      <Drawer isOpen={selectedShift !== null} onClose={() => setSelectedShift(null)} title="班次明細">
-        {selectedShift?.shift && (
+      <Drawer isOpen={selectedShift !== null} onClose={() => setSelectedShift(null)} title="排班與訂單明細">
+        {selectedShift && (
           <div className="collision-drawer-content">
-            <strong>{selectedShift.caseText} · {selectedShift.statusLabel}</strong>
-            <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
-            {selectedShift.shift.service_date && <p>首個服務日 {selectedShift.shift.service_date}</p>}
-            {selectedShift.shift.assignment_id && <p>指派 {selectedShift.shift.assignment_id}</p>}
+            <strong>
+              {selectedShift.clientName ? `${selectedShift.clientName}｜` : ''}
+              {selectedShift.caseText}
+              {selectedShift.statusLabel ? ` · ${selectedShift.statusLabel}` : ''}
+            </strong>
+            <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
+            {selectedShift.dailyTimeText && <p>⏰ 每日時段：{selectedShift.dailyTimeText}</p>}
+            {selectedShift.shift && (
+              <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
+            )}
+            {selectedShift.shift?.service_date && <p>首個服務日 {selectedShift.shift.service_date}</p>}
+            {(selectedShift.shift?.assignment_id ?? selectedShift.assignmentId) && (
+              <p>指派 {selectedShift.shift?.assignment_id ?? selectedShift.assignmentId}</p>
+            )}
           </div>
         )}
       </Drawer>

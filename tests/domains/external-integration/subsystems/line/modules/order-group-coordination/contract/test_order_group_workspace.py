@@ -71,6 +71,44 @@ def test_paid_group_todo_query_requires_capability_and_never_commits(store):
     assert page.total==2
 
 
+def test_mobile_opening_greeting_skips_are_read_only_and_independent_of_paid_todos(monkeypatch, store):
+    from api.routes import line_mobile_admin
+    from fastapi import HTTPException
+
+    connection, repository = store
+    prepare_paid_group_todos(connection)
+    connection.db.execute('''CREATE TABLE line_domain_audit_events (
+        id INT PRIMARY KEY, action TEXT, aggregate_type TEXT, aggregate_identity TEXT, occurred_at_utc TEXT
+    )''')
+    connection.db.executemany('INSERT INTO line_domain_audit_events VALUES (?,?,?,?,?)', [
+        (1, 'service_start_greeting_no_group', 'order_service_start_greeting', 'PAID-1', '2026-11-15 01:00:00'),
+        (2, 'service_start_greeting_no_group', 'order_service_start_greeting', 'ZERO', '2026-11-15 01:00:00'),
+        (3, 'service_start_greeting_queued', 'order_service_start_greeting', 'HIDDEN-1', '2026-11-15 01:00:00'),
+        (4, 'service_start_greeting_no_group', 'unrelated', 'HIDDEN-2', '2026-11-15 01:00:00'),
+    ])
+    application = make_application(repository)
+    monkeypatch.setattr(line_mobile_admin, 'LineOrderGroupQueryApplication', lambda _: application)
+
+    def context(token, capability):
+        assert capability.value == 'line.order_group.read'
+        if token != 'staff':
+            raise HTTPException(403, 'staff binding required')
+        return None, ActorContext('admin:7', ('line.order_group.read',))
+
+    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', context)
+    request = line_mobile_admin._PaidOrderGroupTodoRequest
+    with pytest.raises(HTTPException, match='staff binding required'):
+        line_mobile_admin.paid_order_group_todos(request(line_id_token='customer', view='opening_greeting_skips'))
+    assert connection.executed == []
+    page_one = line_mobile_admin.paid_order_group_todos(request(line_id_token='staff', view='opening_greeting_skips', page_size=1)).data
+    page_two = line_mobile_admin.paid_order_group_todos(request(line_id_token='staff', view='opening_greeting_skips', page=2, page_size=1)).data
+    assert page_one.total == 2 and page_one.total_pages == 2
+    assert page_one.model_dump(mode='json')['items'] == [{'case_no': 'ZERO', 'occurred_at': '2026-11-15T01:00:00Z'}]
+    assert [item.case_no for item in page_two.items] == ['PAID-1']
+    paid = line_mobile_admin.paid_order_group_todos(request(line_id_token='staff')).data
+    assert [item.case_no for item in paid.items] == ['PAID-1', 'PAID-2']
+
+
 def test_mobile_paid_group_todo_is_verified_paginated_and_read_only(monkeypatch,store):
     from api.routes import line_mobile_admin
     from fastapi import HTTPException

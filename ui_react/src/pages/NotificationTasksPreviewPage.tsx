@@ -1,4 +1,7 @@
-/** Live notification workbench; pending facts and commands stay with their original owners. */
+/**
+ * File: NotificationTasksPreviewPage.tsx
+ * Description: 整合展示各待辦通知來源，支援入帳待辦於列表直接標記已通知消除。
+ */
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -42,7 +45,9 @@ function row(item:NotificationItem,record=false):Row {
   return {...item,time:formatTaipeiDateTime(item.time),caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
     personLabel:ticket?'客服對象':'相關對象',person:ticket?(item.person || '未具名使用者'):item.person,
     primary:ticket?'前往客服案件':item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
-    secondary:item.case_no && ['overdue','deposit'].includes(item.source)?'前往核對款項':item.unavailable_reason?'前往身分與群組設定':undefined,
+    secondary:item.source==='payment_receipt' && item.receipt?.amount_ntd != null && item.receipt.source_version != null && item.receipt.source_reference != null
+      ? '已於官方帳號發送／標記已通知'
+      : item.case_no && ['overdue','deposit'].includes(item.source)?'前往核對款項':item.unavailable_reason?'前往身分與群組設定':undefined,
     tone:item.unavailable_reason || item.source==='delivery' || item.source==='runtime'?'danger':item.source==='overdue'?'attention':undefined,
     delivery:record ? item.delivery_status ?? undefined : undefined};
 }
@@ -141,7 +146,14 @@ export function NotificationTasksPage() {
     }else if(item.source==='deposit')window.location.hash=`#finance?tab=client-receipts&case_no=${encodeURIComponent(item.case_no!)}`;
     else setExpanded(item.id);
   };
-  const secondary=(item:Row)=>{
+  const secondary=async(item:Row)=>{
+    if(item.source==='payment_receipt') {
+      if(locked.current)return;
+      locked.current=true;setBusy(true);setNotice('');
+      try {await client.send(item,'');setNotice('已標記入帳通知為已發送，並從待辦清單消除。');await refreshAfterCommit();}
+      catch(error){setNotice(notificationFailure(error));}finally{locked.current=false;setBusy(false);}
+      return;
+    }
     window.location.hash=item.secondary==='前往核對款項'?`#finance?tab=client-receipts&case_no=${encodeURIComponent(item.case_no!)}`
       : item.payment?.payment_stage!=='deposit' && item.source==='overdue'
         ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no ?? '')}`:'#line-management?tab=binding';
@@ -206,7 +218,7 @@ export function NotificationTasksPage() {
           </div>}
           {selected.delivery_status && !selected.delivery && <p>最近寄送狀態：{DELIVERY_LABELS[selected.delivery_status] ?? selected.delivery_status}</p>}
           <div className="notification-preview-actions"><button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>
-            {selected.secondary && <button type="button" className="np-button" disabled={busy} onClick={()=>secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
+            {selected.secondary && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>
           {expanded===selected.id && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} sourceReadError={failures[selected.source]} onCommitted={refreshAfterCommit} /></div>}
           <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />處理完成後，待辦會自動更新。</p>

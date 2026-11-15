@@ -1264,6 +1264,7 @@ async function loadReviewWorkbench(preserveOperation=false) {
     const list=document.createElement('div');const status=notificationText('small','讀取中…');status.style.marginLeft='10px';heading.appendChild(status);section.append(heading,list);root.appendChild(section);sections.push(section);
     let next=0;let initial=true;
     const more=notificationButton('載入更多',async()=>load(next));more.classList.add('hidden');section.appendChild(more);
+    if(source.source==='group') section.appendChild(openingGreetingSkipRecords(sequence));
     async function load(cursor) {
       try {
         const data=await postJson(`/api/v1/line/mobile-admin/notification-tasks/${source.source}`,{cursor});
@@ -1355,9 +1356,9 @@ async function openNotificationItem(item,cursor) {
     if(!view.approved)root.appendChild(notificationButton('核准並建立客戶',async()=>{await postJson(base+'/approve',{expected_version:view.version});if(current()){await loadReviewWorkbench();showStatus('需求申請已核准。');}}));
     else changed();
   }else if(item.source==='payment_receipt') {
-    root.appendChild(notificationText('h3','帳款已入帳，待帳務確認'));
-    root.appendChild(notificationText('p',`案件 ${item.case_no}：請由人員登入帳務頁面，核對金額與客戶後手動發送收款通知。此事項會保留至通知送達。`));
-    root.appendChild(notificationButton('複製案件編號',async()=>{await navigator.clipboard.writeText(item.case_no||'');if(current())showStatus('已複製案件編號，請至帳務頁面確認。');}));
+    root.appendChild(notificationText('h3','帳款已入帳，待於官方帳號通知'));
+    root.appendChild(notificationText('p',`案件 ${item.case_no}：請由人員於 LINE 官方帳號聊天室使用預設訊息手動通知客戶，再至桌面工作台標記已通知以消除待辦。`));
+    root.appendChild(notificationButton('複製案件編號',async()=>{await navigator.clipboard.writeText(item.case_no||'');if(current())showStatus('已複製案件編號，請於官方帳號通知後至桌面標記。');}));
   }else if(item.source==='delivery') {
     await renderNotificationDelivery(root,item.reference_id,current);
   }else if(item.source==='notification_failure') await renderNotificationFailure(root,item,current);
@@ -1480,6 +1481,39 @@ async function loadGroupTodos() {
     card.append(title,amount,help,command,copy);root.appendChild(card);
   });
 }
+
+function openingGreetingSkipRecords(notificationVersion) {
+  const panel=document.createElement('details');
+  const heading=notificationText('summary','開工問候未送出紀錄');
+  const body=document.createElement('div');
+  panel.append(heading,body);
+  let sequence=0;
+  const current=request=>request===sequence && notificationVersion===notificationSequence && target==='staff_review' && panel.isConnected;
+  async function load(page) {
+    const request=++sequence;
+    body.replaceChildren(notificationText('p','正在讀取開工問候紀錄…'));
+    try {
+      const response=await postJson('/api/v1/line/mobile-admin/order-group-todos',{view:'opening_greeting_skips',page,page_size:25});
+      if(!current(request))return;
+      const data=requireTodoPage(response,page);
+      if(data.items.some(item=>typeof item.case_no!=='string'||!Number.isFinite(Date.parse(item.occurred_at))))throw new Error('invalid opening greeting record');
+      body.replaceChildren();
+      if(!data.items.length)showEmpty(body,'目前沒有因服務群組未綁定而略過的開工問候。');
+      for(const item of data.items) {
+        const record=document.createElement('article');record.className='card';
+        const time=new Date(item.occurred_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'});
+        record.append(notificationText('strong',`案件 ${item.case_no}`),notificationText('p','當時未綁定有效的案件服務群組，開工問候未送出。'),notificationText('p',time));
+        body.appendChild(record);
+      }
+      if(data.totalPages>1)renderPagination(body,data,load);
+    }catch {
+      if(current(request))body.replaceChildren(notificationText('p','暫時無法讀取開工問候紀錄。'),notificationButton('重新讀取',()=>load(page)));
+    }
+  }
+  panel.addEventListener('toggle',()=>{if(panel.open)void load(1);});
+  return panel;
+}
+
 document.getElementById("groupTodoPrevious").addEventListener("click",async()=>{if(groupTodoPage>1){groupTodoPage--;try{await loadGroupTodos();}catch(error){showStatus(error.message,true);}}});
 document.getElementById("groupTodoNext").addEventListener("click",async()=>{groupTodoPage++;try{await loadGroupTodos();}catch(error){showStatus(error.message,true);}});
 
@@ -1514,7 +1548,7 @@ async function loadDepositPayments() {
     const deliveryLabels={pending:"已排入寄送",processing:"寄送處理中",retryable_failed:"等待重試",sent:"已送出",failed:"寄送失敗，請至寄送工作處理",cancelled:"寄送已取消，請確認案件及綁定"};
     if (!item.line_bound) status.textContent=item.settled ? "客戶未綁定 LINE，請人工通知已入帳。" : "客戶未綁定 LINE，請人工通知繳費。";
     else if (item.delivery_status) status.textContent=deliveryLabels[item.delivery_status] || "請確認寄送工作狀態。";
-    else if (item.settled) status.textContent="已入帳，待人員到帳務頁面確認並發送通知。";
+    else if (item.settled) status.textContent="已入帳，請於 LINE 官方帳號手動發送入帳通知並標記已通知。";
     else if (!item.ready) status.textContent="繳費資料待確認，尚不能發送提醒。";
     else {
       const button=document.createElement("button");button.type="button";button.textContent="發送訂金繳費提醒";

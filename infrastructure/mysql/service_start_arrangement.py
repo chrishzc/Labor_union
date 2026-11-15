@@ -1,4 +1,7 @@
-"""Adapt the approved coordination result to existing Orders/Scheduling writers."""
+"""
+File: service_start_arrangement.py
+Description: 轉接服務開始、請假順延與換人協調結果至 Orders 與 Scheduling 正式寫入器。
+"""
 
 from datetime import date, timedelta
 from functools import partial
@@ -168,6 +171,113 @@ class MySqlServiceStartArrangement:
             ExpectedVersion(preview.order_version),ExpectedVersion(preview.scheduling_version),
             ExpectedVersion(preview.client_finance_version),ExpectedVersion(preview.payroll_version),
             preview.fingerprint,IdempotencyKey('leave-result:'+key),actor,'記錄雙方已協調的請假結果',cid))
+
+    def preview_leave_defer(self, case_no: str, staff_id: int, assignment_id: int, dates: tuple) -> dict:
+        """零寫入預檢請假順延日期的月嫂檔期衝突與服務總天數守恆。"""
+        if not dates:
+            raise ServiceStartConflict('leave_result_dates_required', '請至少選擇一個要請假的服務日。')
+        originals = tuple(
+            item.original_date if isinstance(item.original_date, date) else date.fromisoformat(str(item.original_date))
+            for item in dates
+        )
+        replacements = tuple(
+            (item.new_date if isinstance(item.new_date, date) else date.fromisoformat(str(item.new_date)))
+            if item.new_date else None
+            for item in dates
+        )
+        if any(day is None for day in replacements) or len(set(replacements)) != len(replacements):
+            raise ServiceStartConflict('leave_result_new_dates_invalid', '合意補班日期不可空白或重複，且須確保總天數守恆。')
+        if any(new <= old for old, new in zip(originals, replacements)):
+            raise ServiceStartConflict('leave_result_must_defer', '合意補班日必須晚於原本請假日。')
+        today = SystemBusinessClock().today()
+        if any(day < today for day in originals) or any(day < today for day in replacements):
+            raise ServiceStartConflict('leave_result_past_service', '已完成的服務日不可由請假流程變更，請重新核對日期。')
+        conserved = len(originals) == len(replacements)
+        with self.connection.cursor() as c:
+            c.execute(
+                'SELECT day.id,day.assignment_id,day.work_date FROM staff_schedule day '
+                'JOIN scheduling_aggregates g ON g.effective_generation_id=day.generation_id '
+                'WHERE g.case_no=%s AND day.staff_id=%s AND day.effective_marker=1 AND day.is_work_day=1 '
+                'AND day.work_date BETWEEN %s AND %s ORDER BY day.work_date',
+                (case_no, staff_id, min(originals), max(originals)),
+            )
+            rows = {row['work_date']: row for row in c.fetchall()}
+        if any(day not in rows for day in originals) or (assignment_id and any(int(rows[day]['assignment_id']) != int(assignment_id) for day in originals)):
+            raise ServiceStartConflict('leave_result_dates_changed', '原服務日或服務月嫂已變更，請重新查詢排班。')
+        actual_assignment_id = int(assignment_id or rows[originals[0]]['assignment_id'])
+        try:
+            self._require_available_days(
+                case_no,
+                staff_id,
+                replacements,
+                '此補班日已有不可排班紀錄（檔期衝突），請重新與客戶協調其他日期！',
+            )
+            intent = LeaveSubstitutionBatchIntent(
+                actual_assignment_id,
+                tuple(
+                    LeaveSubstitutionItem(
+                        rows[old]['id'],
+                        old,
+                        LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
+                        None,
+                        False,
+                        new if new != old else None,
+                    )
+                    for old, new in zip(originals, replacements)
+                ),
+            )
+            preview = self.leave.preview(
+                LeaveSubstitutionPreviewRequest(case_no, intent, CorrelationId('leave-preview:' + case_no))
+            )
+        except Exception as error:
+            if isinstance(error, ServiceStartConflict) or self.is_occupancy_conflict(error):
+                code = getattr(getattr(error, 'error', None), 'code', None) or getattr(error, 'code', None) or 'staff_occupancy_conflict'
+                return {
+                    'conflict': True,
+                    'code': code,
+                    'message': '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！',
+                    'total_service_days_conserved': conserved,
+                    'original_dates': [str(d) for d in originals],
+                    'new_dates': [str(d) for d in replacements],
+                }
+            raise
+        if preview.apply_readiness.status == 'blocked':
+            blockers = tuple(preview.apply_readiness.blockers)
+            is_conflict = bool(set(blockers) & {
+                'staff_occupancy_conflict',
+                'actual_start_staff_schedule_conflict',
+                'service_ownership_conflict',
+                'scheduling.staff_effective_date_conflict',
+                'availability_lock_staff_occupancy_conflict',
+                'staff_unavailable',
+                'actual_start_unavailability_conflict',
+                'automatic_waiting_deposit_occupancy_conflict',
+            })
+            return {
+                'conflict': True,
+                'code': blockers[0] if blockers else 'leave_preview_blocked',
+                'message': (
+                    '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！'
+                    if is_conflict
+                    else '目前排班或帳務狀態暫時無法完成順延（請聯絡工會確認）。'
+                ),
+                'total_service_days_conserved': conserved and preview.calendar_candidate.conservation_status == 'conserved',
+                'original_dates': [str(d) for d in originals],
+                'new_dates': [str(d) for d in replacements],
+            }
+        conserved = conserved and preview.calendar_candidate.conservation_status == 'conserved'
+        return {
+            'conflict': not conserved,
+            'code': None if conserved else 'service_days_conservation_failed',
+            'message': (
+                '檔期無衝突，服務總天數與補助時數守恆，可送出延期確認。'
+                if conserved
+                else '順延後服務總天數未能守恆，請重新與客戶協調日期！'
+            ),
+            'total_service_days_conserved': conserved,
+            'original_dates': [str(d) for d in originals],
+            'new_dates': [str(d) for d in replacements],
+        }
 
     def _initial(self, request, start_date, actor, cid, key):
         with self.connection.cursor() as c:

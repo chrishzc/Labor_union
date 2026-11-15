@@ -31,6 +31,8 @@ from subsystems.line.media_contracts import (
     LineMediaArchiveOutcome,
 )
 from subsystems.line.order_group_contracts import (
+    OpeningGreetingSkip,
+    OpeningGreetingSkipPage,
     PaidOrderGroupTodo,
     PaidOrderGroupTodoPage,
     LineOrderGroupInvitationSettings,
@@ -48,6 +50,7 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupWorkspacePage,
     LineOrderGroupWorkspaceEventPage,
 )
+from subsystems.line.service_start_day import GREETING_NO_GROUP_AUDIT, GREETING_SOURCE
 
 
 class MySqlLineMediaMetadataRepository:
@@ -141,6 +144,24 @@ class MySqlLineOrderGroupBindingRepository:
             items = tuple(PaidOrderGroupTodo(str(row['case_no']), int(row['contracted_amount_ntd']))
                           for row in cursor.fetchall())
         return PaidOrderGroupTodoPage(items, page, page_size, total, (total + page_size - 1) // page_size)
+
+    def opening_greeting_skips(self, *, page: int, page_size: int) -> OpeningGreetingSkipPage:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise ValueError('line_group_todo_page_invalid')
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 50:
+            raise ValueError('line_group_todo_page_size_invalid')
+        source = ' FROM line_domain_audit_events WHERE aggregate_type=%s AND action=%s'
+        parameters = (GREETING_SOURCE, GREETING_NO_GROUP_AUDIT)
+        with self._connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) AS total' + source, parameters)
+            total = int(cursor.fetchone()['total'])
+            cursor.execute(
+                'SELECT aggregate_identity,occurred_at_utc' + source + ' ORDER BY occurred_at_utc DESC,id DESC LIMIT %s OFFSET %s',
+                (*parameters, page_size, (page - 1) * page_size),
+            )
+            items = tuple(OpeningGreetingSkip(str(row['aggregate_identity']), aware_utc(row['occurred_at_utc']))
+                          for row in cursor.fetchall())
+        return OpeningGreetingSkipPage(items, page, page_size, total, (total + page_size - 1) // page_size)
 
     def workspace_list(self, *, search, status, page, page_size) -> LineOrderGroupWorkspacePage:
         conditions = []

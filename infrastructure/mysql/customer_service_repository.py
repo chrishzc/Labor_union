@@ -55,7 +55,7 @@ class MySqlCustomerServiceRepository:
                 "SELECT t.* FROM customer_service_tickets t WHERE t.line_user_id=%s "
                 "AND t.status IN ('waiting','handling') AND EXISTS "
                 "(SELECT 1 FROM customer_service_ticket_events e WHERE e.ticket_id=t.id "
-                "AND (e.event_key LIKE 'matching-assistance:%%' OR e.event_key LIKE 'deposit-assistance:%%')) "
+                "AND (e.event_key LIKE 'matching-assistance:%%' OR e.event_key LIKE 'deposit-assistance:%%' OR e.event_key LIKE 'payment-assistance:%%')) "
                 "ORDER BY t.id DESC LIMIT 1 FOR UPDATE",
                 (line_user_id,),
             )
@@ -447,6 +447,7 @@ WHEN EXISTS (SELECT 1 FROM customer_service_escalations sx WHERE sx.ticket_id=e.
     AND sx.source_event_identity=e.event_key AND sx.trigger_code IN ('explicit_human_request','explicit_wrong_answer')) THEN 'handoff'
 WHEN SUBSTR(e.event_key,1,LENGTH('line-service-help:profile_update:'))='line-service-help:profile_update:'
     OR SUBSTR(e.event_key,1,LENGTH('start-day-response:'))='start-day-response:'
+    OR SUBSTR(e.event_key,1,LENGTH('group-helper-assistance:'))='group-helper-assistance:'
     OR SUBSTR(e.event_key,1,LENGTH('line-service-help:contact_union:'))='line-service-help:contact_union:'
     OR SUBSTR(e.event_key,1,LENGTH('line-service-help:other:'))='line-service-help:other:' THEN 'service'
 ELSE NULL END"""

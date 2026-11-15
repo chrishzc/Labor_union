@@ -1,12 +1,19 @@
-import { ManagementPageHeader } from '../components/ManagementPageHeader';
-import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: StaffPage.tsx
- * Description: 管理月嫂名冊、資格、接案偏好、不可服務期間與任職狀態。
+ * Description: 管理月嫂名冊、可調欄距與欄位顯示凍結、資格主檔、不可服務期間與任職狀態。
  */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
+import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
+import {
+  RosterColGroup,
+  RosterColumnPicker,
+  RosterColumnResizer,
+  useRosterTableLayout,
+  type RosterColumnDefinition,
+} from '../components/RosterTableLayout';
 import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
 import { StaffProfileChangeReview } from '../components/StaffProfileChangeReview';
 import { StaffQualificationEditor } from '../components/StaffQualificationEditor';
@@ -69,26 +76,124 @@ import {
 import type { StaffProfile } from '../api/staff_profile/staff_profile_schemas';
 import type { StaffRosterServiceProfile } from '../api/staff_directory/staff_directory_schemas';
 
-const rosterServiceColumns: Array<[keyof StaffRosterServiceProfile, string]> = [
-  ['care_babies', '最多照顧寶寶數'], ['service_regions', '可承接區域'],
-  ['service_time_slots', '可承接時段'], ['cooking_skills', '下廚能力'],
-  ['transportation', '交通方式'], ['weekly_rest', '週間服務／排休'],
-  ['holiday_availability', '特殊節日意願'], ['baby_types', '可承接胎數'],
-];
 const rosterServiceValue = (profile: StaffRosterServiceProfile | undefined, field: keyof StaffRosterServiceProfile) => {
   if (!profile) return '未載入';
   if (field === 'care_babies') return profile.care_babies === null ? '尚未登錄' : `${profile.care_babies} 位`;
   return profileItemsText(profile[field]);
 };
 
-const rosterProfileColumns: Array<[keyof StaffProfile, string]> = [
-  ['registered_at', '登錄日期'], ['identity_card', '身分證'], ['birthday', '生日'],
-  ['telephone', '市話'], ['telephone_extension', '分機'], ['email', 'Email'],
-  ['city', '縣市'], ['zip_code', '郵遞區號'], ['address', '地址'],
-  ['emergency_contact_name', '緊急聯絡人'], ['emergency_contact_phone', '緊急聯絡電話'],
-  ['admin_notes', '行政註記'],
+type StaffRosterColumnId =
+  | 'union_no'
+  | 'display_name'
+  | 'phone'
+  | 'education'
+  | keyof StaffRosterServiceProfile
+  | 'registered_at'
+  | 'identity_card'
+  | 'birthday'
+  | 'telephone'
+  | 'telephone_extension'
+  | 'email'
+  | 'city'
+  | 'zip_code'
+  | 'address'
+  | 'emergency_contact_name'
+  | 'emergency_contact_phone'
+  | 'admin_notes'
+  | 'bank_code'
+  | 'branch_code'
+  | 'account_no'
+  | 'is_primary'
+  | 'is_active'
+  | 'actions';
+
+const staffRosterColumns: readonly RosterColumnDefinition<StaffRosterColumnId>[] = [
+  { id: 'union_no', label: '公會編號', group: '基本識別', defaultWidth: 115, minWidth: 90, locked: true, defaultFrozen: true },
+  { id: 'display_name', label: '姓名', group: '基本識別', defaultWidth: 115, minWidth: 85 },
+  { id: 'phone', label: '電話', group: '基本識別', defaultWidth: 130, minWidth: 100 },
+  { id: 'education', label: '學歷', group: '基本識別', defaultWidth: 110, minWidth: 85 },
+  { id: 'care_babies', label: '最多照顧寶寶數', group: '接案條件', defaultWidth: 135, minWidth: 100 },
+  { id: 'service_regions', label: '可承接區域', group: '接案條件', defaultWidth: 180, minWidth: 110 },
+  { id: 'service_time_slots', label: '可承接時段', group: '接案條件', defaultWidth: 150, minWidth: 100 },
+  { id: 'cooking_skills', label: '下廚能力', group: '接案條件', defaultWidth: 150, minWidth: 100 },
+  { id: 'transportation', label: '交通方式', group: '接案條件', defaultWidth: 140, minWidth: 100 },
+  { id: 'weekly_rest', label: '週間服務／排休', group: '接案條件', defaultWidth: 150, minWidth: 100 },
+  { id: 'holiday_availability', label: '特殊節日意願', group: '接案條件', defaultWidth: 160, minWidth: 105 },
+  { id: 'baby_types', label: '可承接胎數', group: '接案條件', defaultWidth: 140, minWidth: 100 },
+  { id: 'registered_at', label: '登錄日期', group: '主檔個資', defaultWidth: 120, minWidth: 95 },
+  { id: 'identity_card', label: '身分證', group: '主檔個資', defaultWidth: 130, minWidth: 105 },
+  { id: 'birthday', label: '生日', group: '主檔個資', defaultWidth: 115, minWidth: 95 },
+  { id: 'telephone', label: '市話', group: '主檔個資', defaultWidth: 125, minWidth: 95 },
+  { id: 'telephone_extension', label: '分機', group: '主檔個資', defaultWidth: 90, minWidth: 70 },
+  { id: 'email', label: 'Email', group: '主檔個資', defaultWidth: 190, minWidth: 110 },
+  { id: 'city', label: '縣市', group: '主檔個資', defaultWidth: 100, minWidth: 75 },
+  { id: 'zip_code', label: '郵遞區號', group: '主檔個資', defaultWidth: 100, minWidth: 80 },
+  { id: 'address', label: '地址', group: '主檔個資', defaultWidth: 230, minWidth: 120 },
+  { id: 'emergency_contact_name', label: '緊急聯絡人', group: '主檔個資', defaultWidth: 125, minWidth: 95 },
+  { id: 'emergency_contact_phone', label: '緊急聯絡電話', group: '主檔個資', defaultWidth: 135, minWidth: 105 },
+  { id: 'admin_notes', label: '行政註記', group: '主檔個資', defaultWidth: 200, minWidth: 110 },
+  { id: 'bank_code', label: '銀行代碼', group: '銀行帳戶', defaultWidth: 105, minWidth: 85 },
+  { id: 'branch_code', label: '分行代碼', group: '銀行帳戶', defaultWidth: 105, minWidth: 85 },
+  { id: 'account_no', label: '銀行帳號', group: '銀行帳戶', defaultWidth: 165, minWidth: 110 },
+  { id: 'is_primary', label: '主要帳戶', group: '銀行帳戶', defaultWidth: 100, minWidth: 80 },
+  { id: 'is_active', label: '帳戶狀態', group: '銀行帳戶', defaultWidth: 100, minWidth: 80 },
+  { id: 'actions', label: '操作', group: '操作', defaultWidth: 135, minWidth: 115, locked: true },
 ];
-const rosterBankColumns = ['銀行代碼', '分行代碼', '銀行帳號', '主要帳戶', '帳戶狀態'];
+
+const renderStaffDataCell = (
+  staff: StaffDirectoryCardViewModel,
+  colId: Exclude<StaffRosterColumnId, 'actions'>,
+): { content: React.ReactNode; title?: string } => {
+  switch (colId) {
+    case 'union_no': { const text = staff.unionNo ?? '未設定'; return { content: text, title: text }; }
+    case 'display_name': return { content: staff.displayName, title: staff.displayName };
+    case 'phone': { const text = staff.phone ?? '未登錄'; return { content: text, title: text }; }
+    case 'education': return { content: staff.displayEducation, title: staff.displayEducation };
+    case 'care_babies':
+    case 'service_regions':
+    case 'service_time_slots':
+    case 'cooking_skills':
+    case 'transportation':
+    case 'weekly_rest':
+    case 'holiday_availability':
+    case 'baby_types': {
+      const text = rosterServiceValue(staff.serviceProfile, colId);
+      return { content: text, title: text };
+    }
+    case 'registered_at':
+    case 'identity_card':
+    case 'birthday':
+    case 'telephone':
+    case 'telephone_extension':
+    case 'email':
+    case 'city':
+    case 'zip_code':
+    case 'address':
+    case 'emergency_contact_name':
+    case 'emergency_contact_phone':
+    case 'admin_notes': {
+      const text = rosterProfileValue(staff.profile, colId);
+      return { content: text, title: text };
+    }
+    case 'bank_code':
+    case 'branch_code':
+    case 'account_no':
+    case 'is_primary':
+    case 'is_active': {
+      if (!staff.profile) return { content: '未載入', title: '未載入' };
+      if (staff.profile.bank_accounts.length === 0) return { content: '未登錄', title: '未登錄' };
+      const lines = staff.profile.bank_accounts.map((account) => {
+        const value = colId === 'bank_code' ? (account.bank_code ?? '未登錄')
+          : colId === 'branch_code' ? (account.branch_code ?? '未登錄')
+          : colId === 'account_no' ? (account.account_no ?? (account.account_last4 ? `末四碼 ${account.account_last4}` : '未登錄'))
+          : colId === 'is_primary' ? (account.is_primary ? '是' : '否')
+          : (account.is_active ? '有效' : '已停用');
+        return <div key={account.account_id} title={value}>{value}</div>;
+      });
+      return { content: lines };
+    }
+  }
+};
 const rosterProfileValue = (profile: StaffProfile | undefined, field: keyof StaffProfile) => {
   if (!profile) return '未載入';
   const value = profile[field];
@@ -432,6 +537,11 @@ const StaffRosterPage: React.FC = () => {
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [rosterLifecycle, setRosterLifecycle] = useState<'active' | 'retired'>('active');
   const rosterTabsId = useId();
+  const staffTableRef = useRef<HTMLTableElement>(null);
+  const staffTableLayout = useRosterTableLayout({
+    columns: staffRosterColumns,
+    storageKey: 'lu.roster.layout.staff.v1',
+  });
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
   const drawerStaffId = selectedStaff?.id ?? null;
@@ -1263,74 +1373,94 @@ const StaffRosterPage: React.FC = () => {
           )}
 
           {filteredStaffItems.length > 0 && (
-            <div className="staff-directory-table-wrap" role="region" aria-label="月嫂完整主檔清單，可橫向捲動" tabIndex={0} aria-busy={directory.status === 'loading-more'}>
-              <table className="staff-directory-table">
-                <caption>月嫂名冊清單</caption>
-                <thead><tr>
-                  <th scope="col">公會編號</th><th scope="col">姓名</th>
-                  <th scope="col">電話</th><th scope="col">學歷</th>
-                  {rosterServiceColumns.map(([field, label]) => <th scope="col" key={field}>{label}</th>)}
-                  {rosterProfileColumns.map(([field, label]) => <th scope="col" key={field}>{label}</th>)}
-                  {rosterBankColumns.map((label) => <th scope="col" key={label}>{label}</th>)}
-                  <th scope="col">操作</th>
-                </tr></thead>
-                <tbody>
-              {filteredStaffItems.map((staff) => (
-                <tr key={staff.id} data-control-id={`staff.row.${staff.id}`} tabIndex={interactionLocked ? -1 : 0}
-                  aria-label={`開啟 ${staff.displayName} 的詳情`} aria-haspopup="dialog"
-                  aria-expanded={selectedStaff?.id === staff.id} aria-disabled={interactionLocked}
-                  className={selectedStaff?.id === staff.id ? 'is-selected' : undefined}
-                  onClick={(event) => { if (!interactionLocked) { event.currentTarget.focus(); openStaffDetail(staff); } }}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStaffDetail(staff); }
-                  }}>
-                  <td>{staff.unionNo ?? '未設定'}</td><td>{staff.displayName}</td>
-                  <td>{staff.phone ?? '未登錄'}</td><td>{staff.displayEducation}</td>
-                  {rosterServiceColumns.map(([field]) => <td key={field}>{rosterServiceValue(staff.serviceProfile, field)}</td>)}
-                  {rosterProfileColumns.map(([field]) => <td key={field}>{rosterProfileValue(staff.profile, field)}</td>)}
-                  {rosterBankColumns.map((label, index) => <td key={label}>
-                    {!staff.profile ? '未載入' : staff.profile.bank_accounts.length === 0 ? '未登錄'
-                      : staff.profile.bank_accounts.map((account) => <div key={account.account_id}>
-                        {index === 0 ? account.bank_code ?? '未登錄'
-                          : index === 1 ? account.branch_code ?? '未登錄'
-                          : index === 2 ? account.account_no ?? (account.account_last4 ? `末四碼 ${account.account_last4}` : '未登錄')
-                          : index === 3 ? account.is_primary ? '是' : '否'
-                          : account.is_active ? '有效' : '已停用'}
-                      </div>)}
-                  </td>)}
-                  <td>
-                    <button
-                      type="button"
-                      data-control-id={`staff.drawer.open.${staff.id}`}
-                      className="staff-view-btn"
-                      aria-label={`查看 ${staff.displayName} 的詳情`}
-                      aria-haspopup="dialog"
-                      disabled={interactionLocked}
-                      onClick={(event) => { event.stopPropagation(); openStaffDetail(staff); }}
-                    >
-                      查看詳情 →
-                    </button>
-                    <button
-                      type="button"
-                      data-control-id={`staff.lifecycle.open.${staff.id}`}
-                      className="sr-only"
-                      disabled={interactionLocked}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        invalidateSlice();
-                        setSelectedStaffId(staff.id);
-                        setSelectedStaff(staff);
-                        setOpenAtStatus(true);
-                      }}
-                    >
-                      辦理退役／復職
-                    </button>
-                  </td>
-                </tr>
-              ))}
-                </tbody>
-              </table>
+            <div className="staff-directory-frame">
+              <div className="staff-directory-toolbar">
+                <span>月嫂名冊清單（顯示 {filteredStaffItems.length} 位）</span>
+                <RosterColumnPicker layout={staffTableLayout} disabled={interactionLocked} />
+              </div>
+              <div className="staff-directory-table-wrap" role="region" aria-label="月嫂完整主檔清單，可橫向捲動" tabIndex={0} aria-busy={directory.status === 'loading-more'}>
+                <table
+                  ref={staffTableRef}
+                  className="staff-directory-table roster-table-adjustable"
+                  style={{ width: `${staffTableLayout.totalWidth}px` }}
+                >
+                  <caption>月嫂名冊清單</caption>
+                  <RosterColGroup layout={staffTableLayout} />
+                  <thead>
+                    <tr>
+                      {staffTableLayout.orderedVisibleColumns.map((col) => {
+                        const thProps = staffTableLayout.getThProps(col.id);
+                        return (
+                          <th key={col.id} scope="col" {...thProps}>
+                            <span>{col.label}</span>
+                            <RosterColumnResizer
+                              columnId={col.id}
+                              label={col.label}
+                              layout={staffTableLayout}
+                              tableRef={staffTableRef}
+                            />
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredStaffItems.map((staff) => (
+                      <tr key={staff.id} data-control-id={`staff.row.${staff.id}`} tabIndex={interactionLocked ? -1 : 0}
+                        aria-label={`開啟 ${staff.displayName} 的詳情`} aria-haspopup="dialog"
+                        aria-expanded={selectedStaff?.id === staff.id} aria-disabled={interactionLocked}
+                        className={selectedStaff?.id === staff.id ? 'is-selected' : undefined}
+                        onClick={(event) => { if (!interactionLocked) { event.currentTarget.focus(); openStaffDetail(staff); } }}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStaffDetail(staff); }
+                        }}>
+                        {staffTableLayout.orderedVisibleColumns.map((col) => {
+                          const tdProps = staffTableLayout.getTdProps(col.id);
+                          if (col.id === 'actions') {
+                            return (
+                              <td key={col.id} {...tdProps}>
+                                <button
+                                  type="button"
+                                  data-control-id={`staff.drawer.open.${staff.id}`}
+                                  className="staff-view-btn"
+                                  aria-label={`查看 ${staff.displayName} 的詳情`}
+                                  aria-haspopup="dialog"
+                                  disabled={interactionLocked}
+                                  onClick={(event) => { event.stopPropagation(); openStaffDetail(staff); }}
+                                >
+                                  查看詳情 →
+                                </button>
+                                <button
+                                  type="button"
+                                  data-control-id={`staff.lifecycle.open.${staff.id}`}
+                                  className="sr-only"
+                                  disabled={interactionLocked}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    invalidateSlice();
+                                    setSelectedStaffId(staff.id);
+                                    setSelectedStaff(staff);
+                                    setOpenAtStatus(true);
+                                  }}
+                                >
+                                  辦理退役／復職
+                                </button>
+                              </td>
+                            );
+                          }
+                          const cell = renderStaffDataCell(staff, col.id);
+                          return (
+                            <td key={col.id} {...tdProps} title={cell.title}>
+                              {cell.content}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

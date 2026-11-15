@@ -7,7 +7,7 @@ import pytest
 
 from domains.line.configuration import LineConfigurationKind
 from domains.line.delivery import LineDeliveryStatus, LineRecipient, LineRecipientType
-from domains.line.identities import LineUserId
+from domains.line.identities import LineGroupId, LineUserId
 from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
 from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
 from subsystems.line.deposit_notifications import DepositNotificationApplication
@@ -25,7 +25,7 @@ USER='U'+'1'*32
 
 
 class Unit:
-    def __init__(self,stage='first',amount=24000):
+    def __init__(self,stage='second',amount=24000):
         self.now=NOW
         self.facts=ClientPaymentReminderFacts(OverdueClientPayment('CASE-1',stage,'CASE-1:'+stage,3,7,date(2026,11,5),amount),date(2026,11,5),True,'服務中')
         self.schedule=PaymentReminderSchedule()
@@ -55,7 +55,8 @@ class Unit:
         self.rows[command.task_id.value-1].status='cancelled'
     def original(self,*_,**__):
         initial=next((row for row in self.rows if row.request.source_aggregate_type==INITIAL),None)
-        return OriginalPaymentReminder(initial.task_id.value,initial.status,initial.sent_at,initial.request.recipient.identity.value) if initial else None
+        return OriginalPaymentReminder(initial.task_id.value,initial.status,initial.sent_at,initial.request.recipient.identity.value,
+                                       initial.request.recipient.recipient_type is LineRecipientType.GROUP) if initial else None
     def worker(self):
         deposit=DepositNotificationApplication(lambda:self,lambda:self.now,liff_id='synthetic-liff',bank_code='807')
         return PaymentReminderNotificationWorker(lambda:self,lambda:self.now,deposit)
@@ -63,7 +64,7 @@ class Unit:
         self.rows[0].status='sent';self.rows[0].sent_at=at
 
 
-@pytest.mark.parametrize('stage',['deposit','first','second'])
+@pytest.mark.parametrize('stage',['deposit','second'])
 def test_each_stage_auto_queues_only_one_private_reminder_without_provider(stage):
     unit=Unit(stage)
     assert unit.worker().run_once()==1
@@ -76,11 +77,11 @@ def test_each_stage_auto_queues_only_one_private_reminder_without_provider(stage
     assert payment_reminder_delivery_is_current(unit,unit.rows[0],unit.now)
 
 
-def test_paid_first_stage_keeps_only_start_day_greeting():
-    unit=Unit('first',0)
-    assert unit.worker().run_once()==1
-    text=json.loads(unit.rows[0].request.payload_json)['text']
-    assert '祝服務順利' in text and '繳款' not in text and '0 元' not in text
+@pytest.mark.parametrize('amount',[0, 24000])
+def test_payment_worker_never_sends_first_day_reminder(amount):
+    unit=Unit('first',amount)
+    assert unit.worker().run_once()==0
+    assert not unit.rows
 
 
 def test_zero_second_stage_does_not_notify():
@@ -89,9 +90,9 @@ def test_zero_second_stage_does_not_notify():
     assert not unit.rows
 
 
-@pytest.mark.parametrize('stage',['first','second'])
-def test_initial_waits_for_configured_time_and_does_not_backfill_past_days(stage):
-    unit=Unit(stage);unit.schedule=replace(unit.schedule,**{stage+'_time':'10:00'})
+def test_initial_waits_for_configured_time_and_does_not_backfill_past_days():
+    stage='second'
+    unit=Unit(stage);unit.schedule=replace(unit.schedule,second_time='10:00')
     assert unit.worker().run_once()==0
     unit.now+=timedelta(hours=1)
     assert unit.worker().run_once()==1
@@ -106,7 +107,7 @@ def test_fixed_time_deposit_is_queued_for_next_slot_without_repeated_projection(
     assert unit.worker().run_once()==0
 
 
-@pytest.mark.parametrize('stage',['deposit','first','second'])
+@pytest.mark.parametrize('stage',['deposit','second'])
 def test_overdue_followup_is_once_per_stage_after_original_success_and_24_hours(stage):
     unit=Unit(stage);worker=unit.worker();assert worker.run_once()==1
     unit.sent();unit.now=NOW+timedelta(days=1,minutes=59)
@@ -179,11 +180,38 @@ def test_rebinding_never_sends_to_old_customer():
 
 def test_schedule_edits_do_not_rewrite_or_cancel_already_committed_work():
     unit=Unit();worker=unit.worker();worker.run_once()
-    unit.schedule=replace(unit.schedule,first_time='23:00')
+    unit.schedule=replace(unit.schedule,second_time='23:00')
     assert payment_reminder_delivery_is_current(unit,unit.rows[0],unit.now)
     unit.sent();unit.now+=timedelta(days=1,hours=1);worker.run_once()
     unit.schedule=replace(unit.schedule,overdue_time='23:00')
     assert payment_reminder_delivery_is_current(unit,unit.rows[1],unit.now)
+
+
+def test_first_overdue_follows_group_opening_only_in_customer_private_chat():
+    unit=Unit('first')
+    group='C_ORIGINAL'
+    original=OriginalPaymentReminder(1,'sent',NOW,group,sent_to_group=True)
+    unit.payment_reminder_notifications.original=lambda *_,**__:original
+    unit.now=NOW+timedelta(days=1,hours=1)
+    assert unit.worker().run_once()==1
+    request=unit.rows[0].request
+    assert request.source_aggregate_type==FOLLOWUP
+    assert request.recipient.recipient_type is LineRecipientType.USER
+    assert request.recipient.identity.value==USER
+    unit.recipient_value=ReminderRecipient(LineRecipient(LineRecipientType.GROUP,LineGroupId(group)),0)
+    assert not payment_reminder_delivery_is_current(unit,unit.rows[0],unit.now)
+
+
+def test_first_overdue_respects_opening_payment_handoff_record():
+    from subsystems.line.payment_reminder_notifications import record_manual_handoff
+
+    unit=Unit('first')
+    original=OriginalPaymentReminder(1,'sent',NOW,'C_ORIGINAL',sent_to_group=True)
+    unit.payment_reminder_notifications.original=lambda *_,**__:original
+    unit.now=NOW+timedelta(days=1,hours=1)
+    record_manual_handoff(unit,original.task_id)
+    assert unit.worker().run_once()==0
+    assert not unit.rows
 
 
 def test_deposit_waits_for_signed_contract_and_missing_customer_stays_unqueued():

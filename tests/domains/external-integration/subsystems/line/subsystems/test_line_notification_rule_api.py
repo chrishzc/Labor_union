@@ -77,8 +77,14 @@ def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monk
     assert all(entry.id != "welcome" for entry in catalog)
     for entry in catalog:
         response = client.get(f"/api/v1/line/notification-rules/{entry.id}/message-template")
-        if entry.id == 'card-candidate-information-3':
-            assert response.status_code == 404  # System-generated picture has no editable copy.
+        if entry.id in {
+            'card-candidate-information-3',
+            'candidate-willing-received',
+            'staff-leave-completed',
+            'complaint-handoff-received',
+            'customer-service-ticket-reply',
+        }:
+            assert response.status_code == 404  # Read-only flow preview, fixed reply, or image card has no editable copy.
             continue
         assert response.status_code == 200, (entry.id, response.text)
         view = response.json()["data"]
@@ -125,9 +131,37 @@ def test_existing_flex_template_edits_text_without_replacing_dynamic_actions(mon
     from subsystems.line.message_copy import copy_fields
     client, application = _copy_client(monkeypatch)
     definition = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]
-    template = next(t for t in definition["templates"] if t["id"] == "LINE-ORDER-SERVICE-START-DAY-CARD-V1")
+    template = {
+        "id": "SYNTHETIC-MAINTAINED-CARD",
+        "name": "範例卡片",
+        "category": "order_lifecycle",
+        "message_type": "flex",
+        "enabled": True,
+        "content": {"type": "flex", "altText": "服務提醒", "contents": {
+            "type": "bubble",
+            "body": {"type": "box", "layout": "vertical", "contents": [
+                {"type": "text", "text": "服務提醒 {case_no}", "wrap": True},
+            ]},
+            "footer": {"type": "box", "layout": "vertical", "contents": [
+                {"type": "button", "action": {"type": "postback", "label": "確認", "data": "synthetic:{response_token}"}},
+            ]},
+        }},
+        "variables": [{"name": name, "required": True, "description": name} for name in ("case_no", "response_token")],
+        "usage": ["order_lifecycle", "notification"],
+    }
+    definition["templates"].append(template)
     before = deepcopy(template["content"])
-    rule = next(r for r in application.definitions[LineConfigurationKind.NOTIFICATION_RULES]["rules"] if r["template_id"] == template["id"])
+    rule = {
+        "id": "SYNTHETIC-MAINTAINED-RULE",
+        "event_code": "order.service_start_result",
+        "recipient_selector": "case_group",
+        "template_id": template["id"],
+        "enabled": False,
+        "schedule": {"kind": "immediate"},
+        "frequency": {"kind": "once"},
+        "predicates": [],
+    }
+    application.definitions[LineConfigurationKind.NOTIFICATION_RULES]["rules"].append(rule)
     path = f'/api/v1/line/notification-rules/{rule["id"]}/message-template'
     view = client.get(path).json()["data"]
     values = json.loads(view["content"])
@@ -580,8 +614,16 @@ def test_unused_standalone_template_editors_are_closed_but_saved_settings_and_ac
         assert client.put(endpoint, json={'content':'不得覆寫', 'expected_revision':7}).status_code == 404
     assert application.definitions == before and application.revision == 7
     rules = application.definitions[LineConfigurationKind.NOTIFICATION_RULES]['rules']
-    active = next(rule for rule in rules if rule['id'] == 'LINE-SECOND-PAYMENT-DUE-V1')
-    rules.append({**active, 'id':'still-active-notification', 'template_id':'register_success'})
+    base_rule = next(
+        (rule for rule in rules if rule['id'] == 'LINE-SECOND-PAYMENT-DUE-V1'),
+        rules[0],
+    )
+    rules.append({
+        **base_rule,
+        'id': 'still-active-notification',
+        'event_code': 'client.second_payment_due',
+        'template_id': 'register_success',
+    })
     assert client.get('/api/v1/line/notification-rules/still-active-notification/message-template').status_code == 200
     for key in ('template-client_rebind_rejected','template-staff_verification_rejected','identity-pending',
                 'identity-bound-customer','identity-bound-staff','identity-bound-admin','service-profile-update','service-order-update'):
@@ -626,3 +668,105 @@ def test_fixed_feedback_and_liff_admin_alert_editors_are_closed_without_deleting
     assert application.revision == 7 and application.definitions == before
     for key in ('group-invitation-customer','group-invitation-staff','service-profile-update','service-order-update'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
+
+
+def test_step5_group_helper_cards_and_copy_can_be_read_and_updated(monkeypatch) -> None:
+    import json
+
+    client, _application = _copy_client(monkeypatch)
+    card_ids = (
+        "helper-menu-card",
+        "helper-confirm-start-card",
+        "helper-postponement-card",
+        "helper-guidelines-card",
+    )
+    text_ids = (
+        "helper-confirm-start-completed",
+        "helper-schedule-unconfirmed",
+        "helper-postponement-completed",
+        "helper-staff-assistance-ack",
+        "helper-staff-assistance-closed",
+        "helper-faq-ingredients",
+        "helper-faq-hours",
+        "helper-faq-subsidy",
+    )
+
+    revision = 7
+    for card_id in card_ids:
+        res = client.get(f"/api/v1/line/notification-rules/{card_id}/message-template")
+        assert res.status_code == 200, res.text
+        data = res.json()["data"]
+        assert data["fields"]
+        payload = json.loads(data["content"])
+        first_key = next(iter(payload))
+        payload[first_key] = f"測試-{card_id}"[:15]
+        saved = client.put(
+            f"/api/v1/line/notification-rules/{card_id}/message-template",
+            json={"content": json.dumps(payload, ensure_ascii=False), "expected_revision": revision},
+        )
+        assert saved.status_code == 200, saved.text
+        revision = saved.json()["data"]["revision"]
+        refetched = client.get(f"/api/v1/line/notification-rules/{card_id}/message-template").json()["data"]
+        assert json.loads(refetched["content"])[first_key] == payload[first_key]
+
+    invalid_put = client.put(
+        "/api/v1/line/notification-rules/helper-menu-card/message-template",
+        json={"content": json.dumps({"unexpected_action": "不應允許修改"}, ensure_ascii=False), "expected_revision": revision},
+    )
+    assert invalid_put.status_code == 422
+
+    for text_id in text_ids:
+        res = client.get(f"/api/v1/line/notification-rules/{text_id}/message-template")
+        assert res.status_code == 200, res.text
+        updated = res.json()["data"]["content"] + "（已微調）"
+        saved = client.put(
+            f"/api/v1/line/notification-rules/{text_id}/message-template",
+            json={"content": updated, "expected_revision": revision},
+        )
+        assert saved.status_code == 200, saved.text
+        revision = saved.json()["data"]["revision"]
+        refetched = client.get(f"/api/v1/line/notification-rules/{text_id}/message-template").json()["data"]
+        assert refetched["content"] == updated
+
+
+def test_registration_approved_copy_can_be_edited_and_applied_to_delivery(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from infrastructure.mysql import provisional_registration_repository as repo_mod
+
+    client, application = _copy_client(monkeypatch)
+    revision = 7
+    custom = {}
+    for key, text in (
+        ("registration-approved-citizen", "自訂市民核准：{name}您好，請等候聯繫。"),
+        ("registration-approved-non-citizen", "自訂非市民核准：{name}（{case_no}）完成。"),
+    ):
+        get_res = client.get(f"/api/v1/line/notification-rules/{key}/message-template")
+        assert get_res.status_code == 200, get_res.text
+        put_res = client.put(
+            f"/api/v1/line/notification-rules/{key}/message-template",
+            json={"content": text, "expected_revision": revision},
+        )
+        assert put_res.status_code == 200, put_res.text
+        revision = put_res.json()["data"]["revision"]
+        custom[key] = put_res.json()["data"]["content"]
+
+    from subsystems.line.message_copy_catalog import render_copy_payload
+    templates_def = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]
+    monkeypatch.setattr(
+        repo_mod,
+        "configured_message_payload",
+        lambda _conn, key, payload, variables=None: render_copy_payload(templates_def, key, payload, variables),
+    )
+
+    queued = []
+    repo = repo_mod.MySqlProvisionalRegistrationRepository.__new__(repo_mod.MySqlProvisionalRegistrationRepository)
+    repo._connection = object()
+    repo._now = lambda: __import__("datetime").datetime(2026, 6, 1, tzinfo=__import__("datetime").timezone.utc)
+    repo._delivery_tasks = SimpleNamespace(enqueue=lambda req: queued.append(req))
+    candidate = SimpleNamespace(line_user_id="U-reg-1", client_payload={"name": "林媽媽"})
+
+    repo._enqueue_confirmation(candidate, 10, approved=True, case_no=None)
+    repo._enqueue_confirmation(candidate, 11, approved=True, case_no="A115001")
+    assert json.loads(queued[0].payload_json)["text"] == "自訂市民核准：林媽媽您好，請等候聯繫。"
+    assert json.loads(queued[1].payload_json)["text"] == "自訂非市民核准：林媽媽（A115001）完成。"

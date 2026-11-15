@@ -29,7 +29,7 @@ import { orderActualStartClient, type ActualStartPreview } from '../api/orders/o
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { assertStartDates, isServiceDateConflict, refreshServiceDatesAfterStart, sameServiceDates, saveServiceDatesStart, serviceDateRange } from '../adapters/orders/service_date_start_flow';
 import { historicalScheduleSegments, HistoricalRestartArrangementPanel } from './HistoricalRestartArrangementPanel';
-import { OrderServiceDateCalendar } from './OrderServiceDateCalendar';
+import { OrderReadOnlyServiceDateCalendar, OrderServiceDateCalendar } from './OrderServiceDateCalendar';
 import { OrderCaregiverScheduleCalendars } from './OrderCaregiverScheduleCalendars';
 import { OrderOfficialDateCorrectionPanel } from './OrderOfficialDateCorrectionPanel';
 
@@ -653,6 +653,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   };
 
   const selectedOfficeStaff = officeStaff ?? officeScheduleStaff;
+  const calendarStaff = officeSchedule ? selectedOfficeStaff : queryView?.bound_staff;
+  const calendarStaffId = calendarStaff?.length === 1 ? calendarStaff[0].staff_id : undefined;
   const multiCaregiverEditing = officeSchedule && officeEditing;
   const officeSegments = officeSchedule && selectedOfficeStaff.length > 1
     ? selectedOfficeStaff.map(person => ({
@@ -817,9 +819,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   if (coordinatedStart && queryView && queryView.bound_staff.length === 0
     && !schedulePending && historicalArrangementCase.current !== caseNo) return (
-    <section aria-label="服務日期協調結果">
+    <section className="order-service-dates-panel" aria-label="服務日期協調結果">
       <p>客戶與月嫂在原服務群組協調，由月嫂提交約定開始日；通過檢查即自動更新日期、排班及第一期款期限。</p>
-      {effectiveServiceDates ? <details><summary>查看正式服務日期</summary><p>{effectiveServiceDates.join('、')}</p></details>
+      {effectiveServiceDates ? <OrderReadOnlyServiceDateCalendar dates={effectiveServiceDates} />
         : queryView.current_dates.length > 0 ? <details><summary>查看已確認服務日期</summary><p>{queryView.current_dates.join('、')}</p></details>
           : <p>等待月嫂回報協調結果。</p>}
       {effectiveServiceDates === null && assignmentPlan && assignmentPlan.scheduling_version === queryView.scheduling_version
@@ -963,6 +965,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           {!multiCaregiverEditing && <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
+            staffSchedule={calendarStaffId ? { staffId: calendarStaffId, caseNo } : undefined}
             isDateDisabled={date => effectiveServiceDates !== null || !!scheduleRecovery || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
             onToggle={date => {
               const selected = displayedDates.includes(date);
@@ -985,6 +988,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
           {schedulePending && multiCaregiverEditing ? <fieldset disabled={working !== null || !!scheduleRecovery || isRecoveryActive}>
             <OrderCaregiverScheduleCalendars key={caseNo}
+              caseNo={caseNo}
               blocks={selectedOfficeStaff.map(person => ({ key: person.staff_id, staffId: person.staff_id, name: person.staff_name }))}
               dates={selectedDates}
               allocation={selectedOfficeStaff.length === 1

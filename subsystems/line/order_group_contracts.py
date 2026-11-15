@@ -120,6 +120,21 @@ class PaidOrderGroupTodoPage:
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningGreetingSkip:
+    case_no: str
+    occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningGreetingSkipPage:
+    items: tuple[OpeningGreetingSkip, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+@dataclass(frozen=True, slots=True)
 class LinkedLineAdmin:
     admin_user_id: int
     display_name: str
@@ -217,6 +232,8 @@ class LineOrderGroupWorkspaceEventPage:
 __all__ = [
     "PaidOrderGroupTodo",
     "PaidOrderGroupTodoPage",
+    "OpeningGreetingSkip",
+    "OpeningGreetingSkipPage",
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
     "GetLineOrderGroupQuery",

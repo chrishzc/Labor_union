@@ -7,7 +7,7 @@ import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { ArrowLeft, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, FLOW_PREVIEW_ONLY_IDS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
+import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, FLOW_PREVIEW_ONLY_IDS, LINE_MESSAGE_FLOWS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
 import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
 import { LineCardCopyEditor, cardCopyFieldId, type CardCopyField } from './LineCardCopyEditor';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
@@ -29,16 +29,27 @@ import './LineNotificationWorkbench.css';
 const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }> = {
   'payment-overdue-deposit': { recipient: '客戶私人聊天室', trigger: '訂金逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
   'deposit-reminder': { recipient: '客戶私人聊天室', trigger: '雙方簽約完成、繳費資料齊備後，依帳務提醒排程自動寄送' },
-  'deposit-settled': { recipient: '客戶私人聊天室', trigger: '正式核銷後，由人員在帳務入帳通知待辦確認並發送' },
   'payment-overdue-first': { recipient: '客戶私人聊天室', trigger: '第一期款逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
   'payment-overdue-second': { recipient: '客戶私人聊天室', trigger: '第二期款逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
-  'payment-first-reminder': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天，依帳務提醒排程自動寄送' },
-  'payment-first-greeting': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天已結清，僅寄送服務問候' },
-  'payment-first-settled': { recipient: '客戶私人聊天室', trigger: '第一期正式核銷後，留下內部通知，由人員到帳務確認並發送' },
-  'cancellation-notice-settlement': { recipient: '客戶私人聊天室', trigger: '正式取消後由人員預覽並發送，結算明細與繳款資訊由本案帳務帶入' },
-  'cancellation-notice-refund': { recipient: '客戶私人聊天室', trigger: '退款全額核銷後，由人員預覽並發送' },
-  'cancellation-notice-collection': { recipient: '客戶私人聊天室', trigger: '補收全額核銷後，由人員預覽並發送' },
+  'payment-first-reminder': { recipient: '案件服務群組', trigger: '開工當天有第一期款未結清時，將提醒加在同一則純文字問候內' },
+  'payment-first-greeting': { recipient: '案件服務群組', trigger: '開工當天無第一期款或已結清時，仍發送純文字問候' },
+  'cancellation-notice-settlement': { recipient: '客戶私人聊天室', trigger: '正式取消後由工會人員預覽並手動發送，結算明細與繳款資訊由本案帳務帶入（非系統自動推播）' },
+  'cancellation-notice-refund': { recipient: '客戶私人聊天室', trigger: '退款全額核銷後由工會人員預覽並手動發送（非系統自動推播）' },
+  'cancellation-notice-collection': { recipient: '客戶私人聊天室', trigger: '補收全額核銷後由工會人員預覽並手動發送（非系統自動推播）' },
   'payment-second-reminder': { recipient: '客戶私人聊天室', trigger: '正式第二期到期當天仍有餘額，依帳務提醒排程自動寄送' },
+  'helper-menu-card': { recipient: '案件服務群組', trigger: '月嫂於群組輸入喚醒指令（預設「工會」／「小幫手」）時，以免費 Reply 回覆（0 Push 額度）' },
+  'helper-confirm-start-card': { recipient: '案件服務群組', trigger: '月嫂選定約定開工日後，於群組以免費 Reply 產出確認卡供客戶點選「確認日期」' },
+  'helper-confirm-start-completed': { recipient: '案件服務群組', trigger: '客戶與月嫂雙方確認開工日後，單一 UoW 完成正式排班並以免費 Reply 回覆群組' },
+  'helper-schedule-unconfirmed': { recipient: '案件服務群組', trigger: '雙方尚未確認開工日前，點擊「服務排程」時以免費 Reply 提示為預期排程' },
+  'helper-postponement-card': { recipient: '案件服務群組', trigger: '月嫂確認無檔期衝突並送出請假／補班日後，於群組以免費 Reply 產出確認卡供客戶同意' },
+  'helper-postponement-completed': { recipient: '案件服務群組', trigger: '客戶點選同意延期補班後，保持總服務天數與補助時數守恆並以免費 Reply 回覆群組' },
+  'helper-staff-assistance-ack': { recipient: '案件服務群組', trigger: '月嫂點選「專員協助」後，同步於手機／Web 建立待辦並以免費 Reply 通知群組' },
+  'helper-staff-assistance-closed': { recipient: '案件服務群組', trigger: '專員於後台點選「已處理結案」或輸入結案指令後，回覆群組結案訊息（可調整結案指令）' },
+  'helper-guidelines-card': { recipient: '案件服務群組', trigger: '月嫂點選小幫手選單的「使用說明」時，以免費 Reply 展開規範說明與客戶常見疑問按鈕' },
+  'helper-faq-ingredients': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：食材採買與準備」後以免費 Reply 送出標準回答' },
+  'helper-faq-hours': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：每日服務時數與範圍」後以免費 Reply 送出標準回答' },
+  'helper-faq-subsidy': { recipient: '案件服務群組', trigger: '月嫂於使用說明卡片點選「常見問題：政府補助申請與撥款」後以免費 Reply 送出標準回答' },
+  'helper-satisfaction-survey': { recipient: '案件服務群組', trigger: '案件正式完工後，本案月嫂從群組小幫手點選「滿意度調查問卷」，系統以 Reply 發送此範本文字' },
 };
 
 interface NotificationContent {
@@ -49,13 +60,37 @@ interface NotificationContent {
 }
 
 const LIBRARY_PAGE_SIZE = 6;
-export const PAYMENT_REMINDER_MESSAGE_IDS: readonly string[] = [
+const PAYMENT_REMINDER_MESSAGE_IDS = new Set([
   'deposit-reminder', 'payment-first-reminder', 'payment-first-greeting', 'payment-second-reminder',
   'payment-overdue-deposit', 'payment-overdue-first', 'payment-overdue-second',
-  'deposit-settled', 'payment-first-settled',
   'cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection',
-];
-const RECEIPT_TEMPLATE = 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1';
+]);
+const CANCELLATION_NOTICE_MESSAGE_IDS = new Set([
+  'cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection',
+]);
+const RETIRED_MESSAGE_IDS = new Set(['deposit-settled', 'payment-first-settled']);
+const RETIRED_TEMPLATE_IDS = new Set([
+  'customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3',
+  'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1',
+  'LINE-SECOND-PAYMENT-DUE-TEXT-V1', 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1',
+  'LINE-SERVICE-COMPLETION-TEXT-V1', 'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
+]);
+
+const MESSAGE_CATEGORIES = [
+  ['all', '全部類別'],
+  ['accounting', '帳務'],
+  ['identity', '身分綁定'],
+] as const;
+type MessageCategory = typeof MESSAGE_CATEGORIES[number][0];
+const identityNodes = LINE_MESSAGE_FLOWS.find(flow => flow.id === 'identity')?.stages
+  .filter(stage => stage.title === '身分確認' || stage.title === '完成綁定')
+  .flatMap(stage => stage.nodes) ?? [];
+
+function categoryOf(entry: NotificationEntry): Exclude<MessageCategory, 'all'> | undefined {
+  if (PAYMENT_REMINDER_MESSAGE_IDS.has(entry.id)) return 'accounting';
+  if (identityNodes.some(node => node.ids?.includes(entry.id)
+    || node.templates?.includes(entry.rule?.templateId ?? ''))) return 'identity';
+}
 
 const CARD_RECIPIENTS: Record<string, string> = {
   'card-customer-confirmation': '客戶私人聊天室', 'card-customer-profiles': '客戶私人聊天室',
@@ -64,6 +99,8 @@ const CARD_RECIPIENTS: Record<string, string> = {
   'card-candidate-information-3': '候選月嫂私人聊天室', 'card-caregiver-information': '正式媒合月嫂私人聊天室',
   'card-caregiver-information-2': '正式媒合月嫂私人聊天室',
   'group-invitation-customer': '客戶私人聊天室', 'group-invitation-staff': '月嫂私人聊天室',
+  'helper-menu-card': '案件服務群組', 'helper-confirm-start-card': '案件服務群組',
+  'helper-postponement-card': '案件服務群組', 'helper-guidelines-card': '案件服務群組',
 };
 
 interface NotificationEntry {
@@ -78,7 +115,6 @@ interface NotificationEntry {
 }
 
 interface LineNotificationWorkbenchProps {
-  scope?: 'notifications' | 'payment-reminders';
   configuration?: LineConfigurationQueryClient;
   templates?: LineNotificationTemplateClient;
   previews?: LineMessagePreviewClient;
@@ -89,7 +125,7 @@ interface LineNotificationWorkbenchProps {
   selectedEntryId?: string | null;
   onSelectedEntryChange?(id: string | null): void;
   onReturnToFlow?(): void;
-  onOpenPaymentMessage?(id: string): void;
+  initialCategory?: MessageCategory;
 }
 
 function contentError(error: unknown, saving = false): string {
@@ -109,7 +145,6 @@ function readableRuleName(rule: LineNotificationRuleModel): string {
 }
 
 export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
-  scope = 'notifications',
   configuration = lineConfigurationQueryClient,
   templates = lineNotificationTemplateClient,
   previews = lineMessagePreviewClient,
@@ -120,17 +155,16 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   selectedEntryId,
   onSelectedEntryChange,
   onReturnToFlow,
-  onOpenPaymentMessage,
+  initialCategory = 'all',
 }) => {
-  const paymentOnly = scope === 'payment-reminders';
   const [entries, setEntries] = useState<NotificationEntry[]>([]);
   const [builtinContents, setBuiltinContents] = useState<Record<string, { data: NotificationContent | null; error: string | null }>>({});
   const [descriptors, setDescriptors] = useState<PreviewDescriptor[]>([]);
-  const [receiptRuleIds,setReceiptRuleIds] = useState<string[]>([]);
   const [previewCatalogError, setPreviewCatalogError] = useState(false);
   const [previewCatalogLoading, setPreviewCatalogLoading] = useState(true);
   const [targetUnavailable, setTargetUnavailable] = useState(false);
   const [formatFilter, setFormatFilter] = useState<'all' | 'text' | 'flex'>('all');
+  const [category, setCategory] = useState(initialCategory);
   const [libraryPage, setLibraryPage] = useState(1);
   const [deliveryTab, setDeliveryTab] = useState(false);
   const [catalog, setCatalog] = useState<LineNotificationRulesCatalog | null>(null);
@@ -162,16 +196,15 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setDescriptors([]); setPreviewCatalogError(false); setPreviewCatalogLoading(true);
     void previews.catalog({ signal: controller.signal }).then(value => {
       if (!controller.signal.aborted) {
-        setReceiptRuleIds(value.filter(item=>item.template_id===RECEIPT_TEMPLATE).map(item=>item.id));
-        const scoped = value.filter(item => (PAYMENT_REMINDER_MESSAGE_IDS.includes(item.id)||item.template_id===RECEIPT_TEMPLATE) === paymentOnly);
-        if (paymentOnly) scoped.sort((a,b) => PAYMENT_REMINDER_MESSAGE_IDS.indexOf(a.id)-PAYMENT_REMINDER_MESSAGE_IDS.indexOf(b.id));
+        const scoped = value.filter(item =>
+          !RETIRED_MESSAGE_IDS.has(item.id)
+          && !(item.template_id && RETIRED_TEMPLATE_IDS.has(item.template_id)),
+        );
         setDescriptors(scoped); setPreviewCatalogLoading(false);
       }
     }).catch(() => { if (!controller.signal.aborted) { setPreviewCatalogError(true); setPreviewCatalogLoading(false); } });
     return () => controller.abort();
-  }, [previews, reload, paymentOnly]);
-
-  useEffect(()=>{if(!paymentOnly&&selectedEntryId&&receiptRuleIds.includes(selectedEntryId))onOpenPaymentMessage?.(selectedEntryId);},[paymentOnly,selectedEntryId,receiptRuleIds,onOpenPaymentMessage]);
+  }, [previews, reload]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -182,7 +215,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setCatalog(null);
     void configuration.getNotificationRules({ signal: controller.signal }).then(async (snapshot) => {
       if (controller.signal.aborted || generation.current !== request) return;
-      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => (rule.templateId===RECEIPT_TEMPLATE)===paymentOnly && !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3', 'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1', 'LINE-SECOND-PAYMENT-DUE-TEXT-V1'].includes(rule.templateId));
+      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !RETIRED_TEMPLATE_IDS.has(rule.templateId));
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);
@@ -190,8 +223,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         const result = contents[index];
         return {
           id: rule.id,
-          name: rule.templateId===RECEIPT_TEMPLATE?'第二期款已確認入帳通知':result.status === 'fulfilled' && result.value.name && !/^Task96\b/.test(result.value.name) ? result.value.name : readableRuleName(rule),
-          recipient: rule.templateId===RECEIPT_TEMPLATE?'客戶私人聊天室':rule.recipientLabel,
+          name: result.status === 'fulfilled' && result.value.name && !/^Task96\b/.test(result.value.name) ? result.value.name : readableRuleName(rule),
+          recipient: rule.recipientLabel,
           kind: 'rule', rule,
           data: result.status === 'fulfilled' ? result.value : null,
           error: result.status === 'rejected' ? contentError(result.reason) : null,
@@ -207,7 +240,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
       setLoading(false);
     });
     return () => controller.abort();
-  }, [configuration, templates, reload, paymentOnly]);
+  }, [configuration, templates, reload]);
 
   useEffect(() => () => { saveController.current?.abort(); }, []);
 
@@ -342,17 +375,18 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const formatOf = (entry: NotificationEntry) => descriptors.find(item => item.id === entry.id)?.format ?? 'text';
   const statusOf = (entry: NotificationEntry) => messageFlowStatus({ id: entry.id, builtin: entry.kind === 'card' }, entry.rule);
   const visible = allEntries.filter(entry => (!query || `${entry.name} ${entry.data?.content ?? ''}`.toLowerCase().includes(query))
+    && (category === 'all' || categoryOf(entry) === category)
     && (formatFilter === 'all' || formatOf(entry) === formatFilter)
     && (enabled === 'all' || statusOf(entry) === enabled));
-  const pageSize = paymentOnly ? Math.max(1,visible.length) : LIBRARY_PAGE_SIZE;
+  const pageSize = LIBRARY_PAGE_SIZE;
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   const currentPage = Math.min(libraryPage, pageCount);
   const pageEntries = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const selectedIndex = visible.findIndex(entry => entry.id === selected?.id);
-  useEffect(() => { setLibraryPage(1); }, [search, enabled, formatFilter]);
+  useEffect(() => { setLibraryPage(1); }, [search, enabled, formatFilter, category]);
   useEffect(() => {
     if (selectedIndex >= 0) setLibraryPage(Math.floor(selectedIndex / pageSize) + 1);
-  }, [selected?.id, selectedIndex, search, enabled, formatFilter]);
+  }, [selected?.id, selectedIndex, search, enabled, formatFilter, category]);
   const fields = selected?.data?.fields ?? [];
   const managed = selected?.rule ? FLOW_MANAGED_EVENTS.has(selected.rule.eventCode) : false;
   const flowControlled = selected ? statusOf(selected) === 'flow' : false;
@@ -367,10 +401,10 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   ] : [];
 
   return (
-    <section className="notification-workspace" aria-label={paymentOnly ? '繳款提醒內容設定' : '通知內容設定'}>
+    <section className="notification-workspace" aria-label="通知內容設定">
       {onReturnToFlow && selectedEntryId && <button type="button" className="notification-text-button" disabled={updating} onClick={() => requestLeave(onReturnToFlow)}><ArrowLeft aria-hidden="true" />返回 LINE 流程圖</button>}
       <div className="notification-page-heading">
-        <div><h2>{paymentOnly ? '提醒內容' : '通知與發送'}</h2><p>{paymentOnly ? '維護繳款提醒、結清問候、入帳與取消結算範本。取消結算範本可調整開頭，金額與繳款資訊由案件帳務帶入。' : '選擇訊息，自由編寫內容並即時預覽。'}</p></div>
+        <div><h2>通知與發送</h2><p>選擇訊息，自由編寫內容並即時預覽。</p></div>
         <div className="notification-heading-actions"><span className="notification-safe-badge"><ShieldCheck />預覽不會實際發送</span><button type="button" className="notification-button" disabled={loading || updating} onClick={() => requestLeave(() => { setSelected(null); setNotice(null); setReload(value => value + 1); })}><RefreshCw aria-hidden="true" />重新整理</button></div>
       </div>
       {notice && <p className="notification-feedback" role="status">{notice}</p>}
@@ -379,14 +413,25 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
       {targetUnavailable && <p className="notification-feedback error" role="alert">找不到指定訊息，可能已停用該來源或不再提供，請重新整理或返回流程圖選擇。</p>}
       <div className="notification-unified-layout">
         <section className="notification-message-library" aria-label="訊息清單">
-          <div className="notification-library-title"><h3>{paymentOnly ? '各期款項通知' : '所有訊息'}</h3><span>{visible.length} 則</span></div>
+          <div className="notification-library-title"><h3>訊息清單</h3><span>{visible.length} 則</span></div>
           <label className="notification-search"><span className="sr-only">搜尋通知名稱或內容</span><Search aria-hidden="true" /><input type="search" value={search} maxLength={100} placeholder="搜尋訊息名稱或內容" onChange={event => onSearchChange(event.target.value)} /></label>
-          {!paymentOnly && <><div className="notification-format-filter" aria-label="訊息格式篩選">{([['all', '全部'], ['text', '純文字'], ['flex', '訊息卡片']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={formatFilter === key} onClick={() => setFormatFilter(key)}>{label}</button>)}</div>
-          <select aria-label="啟用狀態" value={enabled} onChange={event => onEnabledChange(event.target.value as typeof enabled)}><option value="all">全部狀態</option><option value="enabled">已啟用</option><option value="disabled">已停用</option></select></>}
+          <select aria-label="訊息類別" value={category} onChange={event => setCategory(event.target.value as MessageCategory)}>{MESSAGE_CATEGORIES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
+          <div className="notification-format-filter" aria-label="訊息格式篩選">{([['all', '全部'], ['text', '純文字'], ['flex', '訊息卡片']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={formatFilter === key} onClick={() => setFormatFilter(key)}>{label}</button>)}</div>
+          <select aria-label="啟用狀態" value={enabled} onChange={event => onEnabledChange(event.target.value as typeof enabled)}><option value="all">全部狀態</option><option value="enabled">已啟用</option><option value="disabled">已停用</option></select>
           <div className="notification-message-items">
-            {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); setFormatFilter('all'); }}>清除條件</button></div> : pageEntries.map(entry => <button type="button" key={entry.id} className="notification-message-item" aria-pressed={selected?.id === entry.id} data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} disabled={updating} onClick={event => open(entry, event.currentTarget)}>
-              <span className="notification-message-icon">{formatOf(entry) === 'flex' ? <LayoutPanelTop /> : <MessageSquare />}</span><span><strong>{entry.name}</strong><small>{entry.recipient}・{formatOf(entry) === 'flex' ? '訊息卡片' : '純文字'}{entry.rule?.enabled === false && !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode) ? '・已停用' : ''}</small></span>
-            </button>)}
+            {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); setFormatFilter('all'); setCategory('all'); }}>清除條件</button></div> : pageEntries.map(entry => (
+                <button type="button" key={entry.id} className="notification-message-item" aria-pressed={selected?.id === entry.id} data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} disabled={updating} onClick={event => open(entry, event.currentTarget)}>
+                  <span className="notification-message-icon">{formatOf(entry) === 'flex' ? <LayoutPanelTop /> : <MessageSquare />}</span>
+                  <span>
+                    <strong>{entry.name}</strong>
+                    <small>
+                      {entry.recipient}・{formatOf(entry) === 'flex' ? '訊息卡片' : '純文字'}
+                      {CANCELLATION_NOTICE_MESSAGE_IDS.has(entry.id) ? '・人工發送' : ''}
+                      {entry.rule?.enabled === false && !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode) ? '・已停用' : ''}
+                    </small>
+                  </span>
+                </button>
+            ))}
           </div>
           {!loading && pageCount > 1 && <nav className="notification-library-pagination" aria-label="訊息清單分頁"><button type="button" className="notification-button" aria-label="上一頁訊息" disabled={currentPage === 1 || updating} onClick={() => setLibraryPage(currentPage - 1)}>上一頁</button><span aria-live="polite">{currentPage} / {pageCount}</span><button type="button" className="notification-button" aria-label="下一頁訊息" disabled={currentPage === pageCount || updating} onClick={() => setLibraryPage(currentPage + 1)}>下一頁</button></nav>}
           <p className="notification-library-note">資料只用於查看訊息效果，不會建立投遞任務。</p>
@@ -394,7 +439,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
           editor={<>
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
-            {!paymentOnly && !previewOnly && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
+            {!previewOnly && !PAYMENT_REMINDER_MESSAGE_IDS.has(selected.id) && <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>}
             {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); onSelectedEntryChange?.(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
               <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
               {selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}
@@ -406,6 +451,18 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
               {selected.id === 'card-candidate-information-package' && <p className="notification-help">表格圖片由系統資料自動產生。這裡可編輯最後一張卡片的文案。</p>}
               {['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected.id) && <p className="notification-help">表格圖片由系統資料自動產生。這裡可編輯最後一張卡片的文案與按鈕名稱。</p>}
               {automaticImage && <p className="notification-help">每週服務安排圖片由系統資料自動產生，無需編輯文案。</p>}
+              {['helper-menu-card', 'helper-staff-assistance-closed'].includes(selected.id) && (
+                <div className="notification-help" role="note">
+                  {selected.id === 'helper-menu-card'
+                    ? '若要調整在群組輸入哪些關鍵字喚醒此選單（預設「小幫手」、「工會」），'
+                    : '若要調整專員結案時可使用的觸發指令（預設「已處理結案」），'}
+                  請前往{' '}
+                  <a href="#line-interface?tab=guidance">
+                    LINE 介面設定 → 引導動作
+                  </a>
+                  {' '}維護觸發指令。
+                </div>
+              )}
               {confirmationFlows.length > 0 && <nav className="notification-card-flow-tabs" aria-label="確認卡流程">{confirmationFlows.map(flow => {
                 const entry = allEntries.find(item => item.id === flow.id);
                 return entry && <button key={flow.id} type="button" aria-pressed={selected.id === flow.id} disabled={updating} onClick={event => open(entry, event.currentTarget)}>{flow.label}</button>;
@@ -413,6 +470,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
               {contentLoading && <p className="notification-feedback" role="status">正在載入訊息內容…</p>}{selected.data && !contentLoading ? <>{fields.length > 0 ? <LineCardCopyEditor fields={fields} content={content} variables={selected.data.variables} disabled={saving} bodyRef={saveFieldRef} onChange={value => { setContent(value); setSaveError(null); }} /> : <label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>}{saveValidation.feedback}
                 {managed && <p className="notification-help">說明文字用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
                 {fields.length === 0 && (selected.data.variables.length > 0 ? <p className="notification-help">預覽變數使用下方公版範例值；實際發送由正式流程帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p> : <p className="notification-help">此段文案沒有需要手動填寫的變數。</p>)}
+                {CANCELLATION_NOTICE_MESSAGE_IDS.has(selected.id) && <p className="notification-help">取消結算相關通知由工會人員於案件取消時在帳務頁手動預覽發送，系統於帳務結算時不會自動推播。</p>}
               </> : selected.kind === 'card' && !contentLoading && !selected.error && <p className="notification-help">使用正式訊息與卡片組裝方式，以下方公版範例資料展示內容。</p>}
               {saveError && <p className="notification-feedback error" role="alert">{saveError}</p>}
             </>}

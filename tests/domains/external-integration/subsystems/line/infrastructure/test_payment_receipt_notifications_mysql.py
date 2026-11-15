@@ -1,15 +1,20 @@
-"""Native isolated DB oracle: reads/worker scans never send; only human commands do."""
+"""
+File: test_payment_receipt_notifications_mysql.py
+Description: 驗證 MySQL 環境下入帳待辦查詢與已於官方帳號發送標記消除行為。
+"""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
 from datetime import date
 import json,runpy,pytest
+from domains.line.delivery import LineDeliveryRequest,LineMessageKind,LineRecipient,LineRecipientType
+from domains.line.identities import LineUserId
 from shared_kernel.identities import ActorContext,IdempotencyKey,ExpectedVersion,CorrelationId
 from infrastructure.mysql import mysql_adapter
 from subsystems.line.capabilities import LineCapability,LineCapabilityDeniedError
-from subsystems.line.deposit_notifications import DepositNotificationApplication,SETTLED,settlement_key
-from subsystems.line.payment_receipt_notifications import PaymentReceiptNotificationApplication,PaymentReceiptConflict,MANUAL_RECEIPT,receipt_snapshot
+from subsystems.line.deposit_notifications import DepositNotificationApplication,DepositNotificationConflict,SETTLED,payment_source,settlement_key
+from subsystems.line.payment_receipt_notifications import PaymentReceiptNotificationApplication,PaymentReceiptConflict,MANUAL_RECEIPT,receipt_ack_key,receipt_snapshot
 
 support=runpy.run_path('tests/domains/external-integration/subsystems/line/infrastructure/test_payment_reminder_notifications_mysql.py')
 pytestmark=support['pytestmark'];isolated_database=support['isolated_database'];runtime=support['runtime']
@@ -84,14 +89,12 @@ def test_committed_finance_apply_to_internal_notice_and_human_confirmed_private_
     assert focused['total']==1 and focused['items'][0]['can_send'] and not queued()
     assert rt.rows('SELECT amount_due_ntd,status,projection_version FROM client_obligations WHERE obligation_identity=%s',(obligation,))[0]==settled
 
-    # Only the explicit human adapter command may create the customer task.
+    # Human acknowledgment dismisses the todo cleanly via line_command_receipts without creating delivery tasks.
     payment=receipt_routes.ReceiptPayment(**focused['items'][0]['payment'])
     sent=receipt_routes.send_receipt(payment,principal=principal,app=app).data
     replay=receipt_routes.send_receipt(payment,principal=principal,app=app).data
-    assert replay['task_id']==sent['task_id'] and len(queued())==1
-    task=queued()[0]
-    assert task['source_aggregate_type']==MANUAL_RECEIPT and task['recipient_type']=='user' and task['recipient_identity']==user
-    assert len(deliver(rt,task['id']))==1  # In-process fake provider, never LINE.
+    assert sent=={'task_id':1,'status':'completed'} and replay==sent and not queued()
+    assert rt.rows('SELECT idempotency_key FROM line_command_receipts WHERE idempotency_key=%s',(receipt_ack_key(payment).value,))
     assert not notice()
     assert rt.rows('SELECT amount_due_ntd,status,projection_version FROM client_obligations WHERE obligation_identity=%s',(obligation,))[0]==settled
 
@@ -127,10 +130,8 @@ def test_native_human_only_private_send_unique_and_keeps_finance_untouched(runti
     assert item.can_send and not rt.rows('SELECT id FROM line_delivery_tasks WHERE correlation_id LIKE %s',(case+':%',))
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(lambda _:app.send(item.payment,ACTOR),range(2)))
-    assert results[0][0]==results[1][0]
-    task=rt.rows('SELECT * FROM line_delivery_tasks WHERE id=%s',(results[0][0],))[0]
-    assert task['source_aggregate_type']==MANUAL_RECEIPT and task['recipient_type']=='user' and task['recipient_identity']==user
-    assert len(deliver(rt,task['id']))==1
+    assert results[0]==(1,'completed') and results[1]==(1,'completed')
+    assert not rt.rows('SELECT id FROM line_delivery_tasks WHERE correlation_id LIKE %s',(case+':%',))
     assert not any(row.payment.case_no==case for row in app.list()[0])
     assert rt.rows('SELECT * FROM client_obligations WHERE obligation_identity=%s',(obligation,))==before
 
@@ -140,12 +141,11 @@ def test_native_human_only_private_send_unique_and_keeps_finance_untouched(runti
 def test_native_provider_rechecks_receipt_and_binding(runtime,stage,change):
     rt=runtime;app,case,obligation,user,identity,_=prepare(rt,stage)
     item=next(row for row in app.list()[0] if row.payment.case_no==case)
-    task=app.send(item.payment,ACTOR)[0]
-    if change=='unbound':rt.execute("UPDATE line_identity_role_bindings SET binding_status='revoked' WHERE line_user_id=%s",(user,))
-    elif change=='cancelled':rt.execute("UPDATE orders SET status='訂單取消' WHERE case_no=%s",(case,))
-    elif change=='amount':rt.execute('UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s',(case,)) if stage!='deposit' else rt.execute('UPDATE client_obligations SET projection_version=projection_version+1 WHERE obligation_identity=%s',(obligation,))
-    elif stage=='deposit':rt.execute("UPDATE client_deposit_settlement_projection SET settlement_state='unsettled',settlement_identity=NULL,allocated_net_amount_ntd=0 WHERE case_no=%s",(case,))
-    else:rt.execute("UPDATE client_ledger_entries SET entry_type='refund' WHERE case_no=%s AND reconciliation_reference=%s",(case,identity))
+    with rt.units() as unit:
+        task=unit.delivery_tasks.enqueue(LineDeliveryRequest(LineRecipient(LineRecipientType.USER,LineUserId(user)),
+            LineMessageKind.TEXT,'{}',rt.clock[0],IdempotencyKey(f'legacy-{stage}-{uuid4().hex}'),
+            CorrelationId(f'{case}:legacy-{stage}'),MANUAL_RECEIPT,f'{stage}:{identity}')).task_id.value
+        unit.commit()
     assert deliver(rt,task)==[]
     assert rt.rows('SELECT processing_status FROM line_delivery_tasks WHERE id=%s',(task,))[0]['processing_status']=='cancelled'
 
@@ -157,7 +157,11 @@ def test_native_stale_permission_no_history_backfill_and_old_auto_cancel(runtime
     with pytest.raises(PaymentReceiptConflict):app.send(replace(item.payment,amount_ntd=1),ACTOR)
     with rt.units() as unit:
         payment=unit.deposit_payments.get(case)
-        task=unit.delivery_tasks.enqueue(deposit._request(payment,user,SETTLED,settlement_key(payment),unit));unit.commit()
+        with pytest.raises(DepositNotificationConflict,match='deposit_settled_push_retired'):
+            deposit._request(payment,user,SETTLED,settlement_key(payment),unit)
+        task=unit.delivery_tasks.enqueue(LineDeliveryRequest(LineRecipient(LineRecipientType.USER,LineUserId(user)),
+            LineMessageKind.FLEX,'{}',rt.clock[0],settlement_key(payment),
+            CorrelationId(settlement_key(payment).value),SETTLED,payment_source(payment)));unit.commit()
     assert deliver(rt,task.task_id.value)==[]
     assert any(row.payment.case_no==case for row in app.list()[0])
     rt.execute("DELETE FROM client_finance_outbox WHERE case_no=%s",(case,))

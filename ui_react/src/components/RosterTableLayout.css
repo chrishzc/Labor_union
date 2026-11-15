@@ -1,0 +1,289 @@
+/**
+ * File: RosterTableLayout.css
+ * Description: 定義名冊表格共用樣式，涵蓋固定欄寬排版、單行緊湊省略、凍結定位與欄位選單。
+ */
+
+table.roster-table-adjustable {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+
+table.roster-table-adjustable th,
+table.roster-table-adjustable td {
+  border-right: 1px solid #f6e7df;
+  background-clip: padding-box;
+}
+
+table.roster-table-adjustable th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: #fff7ed;
+  color: #7c2d12;
+  border-bottom: 1px solid #e5bca3;
+  user-select: none;
+}
+
+table.roster-table-adjustable td {
+  background: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+table.roster-table-adjustable td > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sticky Left Columns */
+table.roster-table-adjustable th.is-sticky-col {
+  z-index: 6;
+  background: #ffedd5;
+}
+
+table.roster-table-adjustable td.is-sticky-col {
+  position: sticky;
+  z-index: 2;
+  background: #fffdfa;
+}
+
+table.roster-table-adjustable th.is-sticky-last,
+table.roster-table-adjustable td.is-sticky-last {
+  box-shadow: 3px 0 6px -2px rgba(67, 44, 35, 0.14);
+  border-right: 1px solid #d8b9a7;
+}
+
+table.roster-table-adjustable tbody tr:hover td {
+  background: #fff7ed;
+}
+
+table.roster-table-adjustable tbody tr:hover td.is-sticky-col {
+  background: #ffedd5;
+}
+
+table.roster-table-adjustable tbody tr.is-selected td {
+  background: #ffedd5;
+}
+
+table.roster-table-adjustable tbody tr.is-selected td.is-sticky-col {
+  background: #fed7aa;
+}
+
+table.roster-table-adjustable tbody tr.is-selected td:first-child {
+  box-shadow: inset 4px 0 0 #9a3412;
+}
+
+/* Header Heading & Pin Indicator */
+.roster-column-heading,
+.client-roster-column-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.roster-column-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+table.roster-table-adjustable th.is-sticky-col .roster-column-heading::before,
+table.roster-table-adjustable th.is-sticky-col .client-roster-column-heading::before {
+  content: "📌";
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+/* Resizer Handle */
+.roster-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roster-col-resizer::after {
+  content: "";
+  width: 2px;
+  height: 65%;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 0.12s ease, height 0.12s ease;
+}
+
+.roster-col-resizer:hover::after,
+.roster-col-resizer.is-resizing::after {
+  background: #9a3412;
+  height: 100%;
+}
+
+/* Toolbar Controls */
+.roster-column-picker-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.roster-picker-trigger,
+.roster-picker-reset {
+  border: 1px solid #d8b9a7;
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: #ffffff;
+  color: #65483b;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.roster-picker-trigger {
+  border-color: #9a3412;
+  background: #9a3412;
+  color: #ffffff;
+}
+
+.roster-picker-trigger:hover:not(:disabled) {
+  background: #7c2d12;
+  border-color: #7c2d12;
+}
+
+.roster-picker-reset:hover:not(:disabled) {
+  background: #fff7ed;
+  border-color: #b45309;
+  color: #7c2d12;
+}
+
+.roster-picker-trigger:disabled,
+.roster-picker-reset:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Column Picker Popover (Portaled to body) */
+.roster-column-picker-popover {
+  position: fixed;
+  z-index: 1200;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid #d8b9a7;
+  border-radius: 10px;
+  background: #fffdfa;
+  color: #432c23;
+  box-shadow: 0 10px 28px rgba(67, 44, 35, 0.22);
+  font-family: inherit;
+  font-size: 0.84rem;
+}
+
+.roster-column-picker-popover button {
+  border: 1px solid #d8b9a7;
+  border-radius: 6px;
+  padding: 4px 9px;
+  background: #ffffff;
+  color: #65483b;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.roster-column-picker-popover button:hover:not(:disabled) {
+  background: #fff7ed;
+  border-color: #b45309;
+  color: #7c2d12;
+}
+
+.roster-column-picker-popover :focus-visible {
+  outline: 2px solid #9a3412;
+  outline-offset: 2px;
+}
+
+.roster-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ead3c8;
+  color: #7c2d12;
+}
+
+.roster-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.roster-picker-clear-freeze {
+  margin-inline-start: auto;
+}
+
+.roster-picker-group-title {
+  margin: 8px 0 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #f1ddd5;
+  color: #7c2d12;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.roster-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.roster-picker-item:hover {
+  background: #fff7ed;
+}
+
+.roster-picker-item label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.roster-picker-item input[type="checkbox"] {
+  accent-color: #9a3412;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.roster-picker-required {
+  color: #9a3412;
+  font-size: 0.78rem;
+}
+
+.roster-pin-toggle-btn.is-pinned {
+  background: #ffedd5;
+  border-color: #b45309;
+  color: #9a3412;
+}

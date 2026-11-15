@@ -20,7 +20,7 @@ def _source(name: str) -> str:
 def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
     source = _source("identity.html")
     submit = source.split("async function submitForm", 1)[1].split(
-        "async function loadLiffId", 1
+        "function requireIdentityApply", 1
     )[0]
 
     assert "`/api/v1/line/identity/${definition.endpoint}/preview`" in submit
@@ -32,7 +32,7 @@ def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
     assert "expected_version" in source
     assert "確認送出身分驗證" in source
     assert "authentication_pending" in source
-    assert "帳密於套用時驗證" in source
+    assert "等待套用時驗證管理員帳號" in source
     assert "preview.password" not in submit
     assert "JSON.stringify(preview" not in submit
     assert "預覽指紋：" not in submit
@@ -43,13 +43,13 @@ def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
 def test_staff_identity_ui_reports_direct_binding_without_claiming_menu_delivery() -> None:
     source = _source("identity.html")
     submit = source.split("async function submitForm", 1)[1].split(
-        "async function applyIdentityPreview", 1
+        "function requireIdentityApply", 1
     )[0]
 
-    assert "資料匹配後會立即完成綁定" in source
+    assert "資料核對成功後會立即完成綁定" in source
     assert "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員" in submit
     assert "我們已為您切換專屬圖文選單" not in submit
-    assert "綁定成功，專屬選單將稍後更新。" in submit
+    assert "系統會稍後更新${menu}" in submit
 
 
 def test_mobile_review_ui_uses_preview_apply_and_safe_readback() -> None:

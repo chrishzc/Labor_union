@@ -379,6 +379,9 @@ def _router_preview_view(
     outcome_score_band = getattr(outcome, "score_band", None)
     if outcome_score_band is None and isinstance(outcome, Unavailable) and requested_score is not None:
         outcome_score_band = score_band(requested_score)
+    route_key = getattr(outcome, "route_key", None)
+    if route_key is None and getattr(outcome, "reason_code", None) == "explicit_human_request":
+        route_key = "human_handoff"
     return LineRouterPreviewView(
         kind=kind,
         source_event_id=source_event_id,
@@ -388,7 +391,7 @@ def _router_preview_view(
         confidence=confidence,
         score_band=outcome_score_band,
         reason_code=getattr(outcome, "reason_code", getattr(outcome, "code", None)),
-        route_key=getattr(outcome, "route_key", None),
+        route_key=route_key,
         options=tuple(getattr(outcome, "options", ())),
         answer_text=getattr(outcome, "text", getattr(outcome, "human_action", None)),
         ticket_id=ticket_id,

@@ -17,6 +17,7 @@ export interface CaregiverScheduleManagement {
 }
 
 interface Props {
+  caseNo?: string;
   blocks: CaregiverScheduleBlock[];
   dates: string[];
   allocation: Record<string, number>;
@@ -24,7 +25,7 @@ interface Props {
   management?: CaregiverScheduleManagement;
 }
 
-export function OrderCaregiverScheduleCalendars({ blocks, dates, allocation, onSelect, management }: Props) {
+export function OrderCaregiverScheduleCalendars({ caseNo, blocks, dates, allocation, onSelect, management }: Props) {
   const staff = useStaffIdentityLabels();
   const headingId = useId();
   const [adding, setAdding] = useState(false);
@@ -54,7 +55,7 @@ export function OrderCaregiverScheduleCalendars({ blocks, dates, allocation, onS
       {blocks.map(block => {
         const selected = sorted.filter(date => allocation[date] === block.key);
         const month = months[block.key] ?? firstMonth;
-        const visibleMonth = month && firstMonth && lastMonth ? [firstMonth, month, lastMonth].sort()[1] : null;
+        const visibleMonth = caseNo ? month : month && firstMonth && lastMonth ? [firstMonth, month, lastMonth].sort()[1] : null;
         const duplicates = blocks.filter(item => item.staffId === block.staffId);
         const name = label(block) + (duplicates.length > 1 ? ` · 區段 ${duplicates.indexOf(block) + 1}` : '');
         return <section key={block.key} className="caregiver-schedule-block" aria-label={name}>
@@ -64,7 +65,8 @@ export function OrderCaregiverScheduleCalendars({ blocks, dates, allocation, onS
           </header>
           {visibleMonth && firstMonth && lastMonth && <OrderServiceDateCalendar month={visibleMonth}
             onMonthChange={value => setMonths(current => ({ ...current, [block.key]: value }))}
-            selectedDates={selected} showHolidays={false} monthRange={[firstMonth, lastMonth]}
+            selectedDates={selected} showHolidays={false} monthRange={caseNo ? undefined : [firstMonth, lastMonth]}
+            staffSchedule={caseNo ? { caseNo, staffId: block.staffId } : undefined}
             isDateDisabled={date => !allowedDates.has(date)}
             dayLabel={date => {
               const owner = blocks.find(item => item.key === allocation[date]);

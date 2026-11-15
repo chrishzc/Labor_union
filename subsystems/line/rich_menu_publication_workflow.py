@@ -41,6 +41,7 @@ from subsystems.line.media_archive import (
     read_media_asset,
     store_generated_rich_menu_image,
 )
+from subsystems.line.rich_menu_backup import write_rich_menu_id_backup
 
 
 get_connection = unconfigured_connection_factory
@@ -824,31 +825,7 @@ def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
 
 
 def _write_legacy_id(audience_role: str, rich_menu_id: str) -> None:
-    key = {
-        "visitor": "default_rich_menu_id",
-        "customer": "customer_rich_menu_id",
-        "staff": "staff_rich_menu_id",
-        "union_staff": "union_staff_rich_menu_id",
-    }.get(audience_role)
-    if key is None:
-        return
-    try:
-        existing = json.loads(LEGACY_IDS_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        existing = {}
-    existing[key] = rich_menu_id
-    LEGACY_IDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(
-        prefix=".rich-menu-ids-", suffix=".tmp", dir=LEGACY_IDS_PATH.parent, text=True
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(existing, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
-        os.replace(temporary, LEGACY_IDS_PATH)
-    except Exception:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    write_rich_menu_id_backup(audience_role, rich_menu_id, path=LEGACY_IDS_PATH)
 
 
 def _complete_publication(item: dict[str, Any], rich_menu_id: str, asset_id: int) -> None:

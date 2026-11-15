@@ -95,6 +95,11 @@ class Unit:
     def __init__(self):
         self.delivery_tasks = Deliveries()
         self.audit = []
+        self._receipts = {}
+        self.receipts = SimpleNamespace(
+            get=lambda key, **kw: self._receipts.get(key.value if hasattr(key, 'value') else str(key)),
+            append=lambda r: self._receipts.setdefault(r.key.value if hasattr(r.key, 'value') else str(r.key), r),
+        )
         self.customer_service = SimpleNamespace(
             create_or_append=Mock(return_value=SimpleNamespace(ticket_id=42)),
             latest_client_case=Mock(return_value=None),
@@ -516,6 +521,63 @@ def test_deposit_assistance_replies_in_webhook_and_leaves_ticket_for_worker():
     assert list(unit.delivery_tasks.tasks.values()) == [reply]
 
 
+@pytest.mark.parametrize("stage", ["deposit", "first", "second"])
+@pytest.mark.parametrize("group", [False, True])
+def test_payment_reminder_ack_and_assistance_postback_group_and_private_flow(stage, group):
+    from subsystems.line.deposit_notifications import handle_payment_reminder_postback, PAYMENT_ACK_REPLY, PAYMENT_ASSISTANCE_ACK
+
+    # 1. 測試 payment-ack (已經匯款)
+    unit_ack = Unit()
+    unit_ack.deposit_notifications = SimpleNamespace(customer_line_user_id=lambda *args, **kwargs: USER.value)
+    unit_ack.deposit_payments = SimpleNamespace(get=lambda *args, **kwargs: object())
+    ev_ack = inbox(kind="postback", group=group).event
+    data_ack = f"payment-ack:{stage}:CASE-1"
+
+    # Webhook 即時階段：只送出 reply-only 訊息，不寫入收據或稽核
+    assert handle_payment_reminder_postback(data_ack, ev_ack, unit_ack, reply_only=True)
+    assert len(unit_ack.delivery_tasks.tasks) == 1
+    reply_task = unit_ack.delivery_tasks.tasks[1]
+    assert reply_task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+    expected_recipient_type = LineRecipientType.GROUP if group else LineRecipientType.USER
+    expected_identity = GROUP if group else USER
+    assert reply_task.request.recipient == LineRecipient(expected_recipient_type, expected_identity)
+    assert json.loads(reply_task.request.payload_json)["text"] == PAYMENT_ACK_REPLY
+    assert not unit_ack._receipts
+    assert not unit_ack.audit
+
+    # Worker 非同步階段：寫入冪等收據與稽核意圖，不重送重複的 delivery request
+    assert handle_payment_reminder_postback(data_ack, ev_ack, unit_ack, reply_only=False)
+    receipt_key = f"payment-ack:{stage}:CASE-1"
+    assert receipt_key in unit_ack._receipts
+    assert any(a.action == "payment_reminder_acknowledged" for a in unit_ack.audit)
+    assert len(unit_ack.delivery_tasks.tasks) == 1
+
+    # 驗證以 Reply API 送出，零 Push 降級
+    sender = provider()
+    deliver_reply(unit_ack, sender)
+    sender.reply.assert_called_once_with("synthetic-token", json.loads(reply_task.request.payload_json))
+    sender.send.assert_not_called()
+
+    # 2. 測試 payment-assistance (有疑問需要解決)
+    unit_ast = Unit()
+    unit_ast.deposit_notifications = SimpleNamespace(customer_line_user_id=lambda *args, **kwargs: USER.value)
+    unit_ast.deposit_payments = SimpleNamespace(get=lambda *args, **kwargs: object())
+    ev_ast = inbox(kind="postback", group=group).event
+    data_ast = f"payment-assistance:{stage}:CASE-1"
+
+    assert handle_payment_reminder_postback(data_ast, ev_ast, unit_ast, reply_only=True)
+    assert len(unit_ast.delivery_tasks.tasks) == 1
+    reply_task_ast = unit_ast.delivery_tasks.tasks[1]
+    assert reply_task_ast.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+    assert reply_task_ast.request.recipient == LineRecipient(expected_recipient_type, expected_identity)
+    assert json.loads(reply_task_ast.request.payload_json)["text"] == PAYMENT_ASSISTANCE_ACK
+    unit_ast.customer_service.create_or_append.assert_not_called()
+
+    assert handle_payment_reminder_postback(data_ast, ev_ast, unit_ast, reply_only=False)
+    unit_ast.customer_service.create_or_append.assert_called_once()
+    assert any(a.action == "payment_assistance_requested" for a in unit_ast.audit)
+
+
 def test_deferred_inbox_event_remains_leased_until_reply_attempt_finishes():
     from subsystems.line.event_dispatcher import LineEventDispatcher
     from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
@@ -553,9 +615,6 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     from subsystems.line.candidate_contact_postback_application import LineCandidateContactPostbackApplication
     from subsystems.line.deposit_notifications import handle_deposit_assistance
     from subsystems.line.matching_postback_application import LineMatchingPostbackApplication
-    from subsystems.line.service_start_day import (
-        ServiceStartDayCandidate, ServiceStartDayPostbackApplication, StartDayCaregiver, start_day_delivery_is_current,
-    )
     from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
     from subsystems.scheduling.matching_notification_contracts import (
         MatchingContactState, MatchingResponseResult, MatchingSegmentContact,
@@ -564,11 +623,6 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     unit = Unit()
     monkeypatch.setattr(unit, "receipts", SimpleNamespace(get=lambda *args, **kwargs: None, append=lambda *args, **kwargs: None), raising=False)
     monkeypatch.setattr(unit, "candidate_contact_pool_replies", SimpleNamespace(record_willingness=lambda *args, **kwargs: 91), raising=False)
-    candidate = ServiceStartDayCandidate("CASE-1", NOW.date(), GROUP.value, 7, 12000, (StartDayCaregiver(1, "測試月嫂"),))
-    monkeypatch.setattr(unit, "service_start_days", SimpleNamespace(
-        response_context=lambda token, group, user: candidate,
-        delivery_is_current=lambda task, now: False,
-    ), raising=False)
     monkeypatch.setattr(unit, "deposit_notifications", SimpleNamespace(customer_line_user_id=lambda case_no, lock=False: USER.value), raising=False)
     monkeypatch.setattr(unit, "deposit_payments", SimpleNamespace(get=lambda case_no, lock=False: SimpleNamespace(case_no=case_no)), raising=False)
 
@@ -626,31 +680,19 @@ def test_batch2_postback_acks_use_reply_only_without_push_fallback(monkeypatch):
     )
     unit.matching_notifications = repo_cg
     LineMatchingPostbackApplication(matching_app).handle(postback_inbox("matching:safe-token-12345678901234567890:willing", event_id="ev-match-cg"), unit)
-    # 3) Start-day group postback ack
-    assert ServiceStartDayPostbackApplication().handle(postback_inbox(f"start-day:{candidate.token}:help", group=True, event_id="ev-sday"), unit)
-    # 4) Deposit assistance postback ack
+    # 3) Deposit assistance postback ack
     assert handle_deposit_assistance("deposit-assistance:CASE-1", postback_inbox("deposit-assistance:CASE-1", event_id="ev-dep").event, unit)
 
-    expected_events = ["ev-cand", "ev-match", "ev-match-cg", "ev-sday", "ev-dep"]
-    assert [t.request.source_aggregate_type for t in unit.delivery_tasks.tasks.values()] == [REPLY_ONLY_WEBHOOK_SOURCE] * 5
+    expected_events = ["ev-cand", "ev-match", "ev-match-cg", "ev-dep"]
+    assert [t.request.source_aggregate_type for t in unit.delivery_tasks.tasks.values()] == [REPLY_ONLY_WEBHOOK_SOURCE] * 4
     assert [t.request.source_aggregate_identity for t in unit.delivery_tasks.tasks.values()] == expected_events
     assert [t.request.correlation_id.value for t in unit.delivery_tasks.tasks.values()] == [f"line-event:{eid}" for eid in expected_events]
-    assert len(unit.delivery_tasks.new_reply_task_ids()) == 5
-
-    # Preserved stale guard on start-day reply-only ack
-    cancelled = []
-    orig_cancel = unit.delivery_tasks.cancel
-    unit.delivery_tasks.cancel = cancelled.append
-    start_day_task = unit.delivery_tasks.tasks[4]
-    assert start_day_delivery_is_current(unit, start_day_task, NOW) is False
-    assert len(cancelled) == 1
-    unit.delivery_tasks.cancel = orig_cancel
-    unit.service_start_days.delivery_is_current = lambda task, now: True
+    assert len(unit.delivery_tasks.new_reply_task_ids()) == 4
 
     # Reply worker uses reply() only and never falls back to send() on expired token
     unit.delivery_tasks.opportunity = None
     sender = provider()
-    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 5
+    assert LineDeliveryWorker(lambda: unit, sender, "synthetic-worker", lambda: NOW).run_once() == 4
     sender.send.assert_not_called()
     assert all(t.status is LineDeliveryStatus.FAILED for t in unit.delivery_tasks.tasks.values())
 

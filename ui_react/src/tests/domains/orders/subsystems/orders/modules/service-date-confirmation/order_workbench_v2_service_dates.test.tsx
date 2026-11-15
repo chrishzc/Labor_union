@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   getServiceDates: vi.fn(), previewServiceDates: vi.fn(), applyServiceDates: vi.fn(),
   previewActualStart: vi.fn(), applyActualStart: vi.fn(),
   previewOfficeSchedule: vi.fn(), saveHistoricalSchedule: vi.fn(), getAssignmentPlan: vi.fn(),
+  queryStaffCalendar: vi.fn(),
+}));
+vi.mock('../../../../../../../api/scheduling/scheduling_current_client', () => ({
+  schedulingCurrentClient: { queryCurrentCalendar: mocks.queryStaffCalendar },
 }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getActualStart: mocks.getActualStart, getOrderCalendarDetail: mocks.getOrderCalendarDetail,
@@ -90,6 +94,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     }));
     mocks.getOrderCalendarDetail.mockResolvedValue({ case_no: CASE, service_mode: '休周六' });
     mocks.getServiceDates.mockImplementation(async () => structuredClone(currentQuery));
+    mocks.queryStaffCalendar.mockResolvedValue({ days: [] });
     mocks.calculate.mockImplementation(async ({ actual_start_date }: { actual_start_date: string }) => calculation(actual_start_date));
     mocks.previewServiceDates.mockImplementation(async (_case: string, { service_dates }: { service_dates: string[] }) => previewFor(service_dates));
     mocks.applyServiceDates.mockImplementation(async (_case: string, payload: Parameters<typeof ordersMutationClient.applyServiceDates>[1]) => {
@@ -289,11 +294,51 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await screen.findByText('班表已儲存並回讀正式排班。');
+    const calendar = within(screen.getByRole('group', { name: '服務日期月曆' }));
+    expect(calendar.getByRole('button', { name: '服務日期 2026-10-02', pressed: true })).toBeDisabled();
+    expect(calendar.getByRole('button', { name: '服務日期 2026-10-03', pressed: false })).toBeDisabled();
+    expect(screen.queryByText(initialDates.join('、'))).not.toBeInTheDocument();
     expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
       expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
     }), expect.anything(), true, undefined);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+  });
+
+  it('一般首排標示月嫂既有檔期，換月時不沿用舊標示或改變日期可選性', async () => {
+    currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
+    const entries = (calendar_date: string, occupancy_kind: string, case_no: string | null) => ({
+      calendar_date, entries: [{ occupancy_kind, case_no }],
+    });
+    mocks.queryStaffCalendar.mockResolvedValueOnce({ days: [
+      { calendar_date: '2026-10-02', entries: [
+        { occupancy_kind: 'official_workday', case_no: 'OTHER-CASE' },
+        { occupancy_kind: 'official_workday', case_no: 'ANOTHER-CASE' },
+      ] },
+      entries('2026-10-03', 'official_workday', CASE),
+      entries('2026-10-04', 'assignment_rest', 'OTHER-CASE'),
+      entries('2026-10-05', 'waiting_deposit_service', 'OTHER-CASE'),
+      entries('2026-10-06', 'staff_unavailability', null),
+    ] }).mockRejectedValueOnce(new Error('offline'));
+    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
+      officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
+
+    const scheduled = await screen.findByRole('button', { name: '服務日期 2026-10-02，已有排班' });
+    expect(scheduled).toBeEnabled();
+    expect(within(scheduled).getAllByText('已有排班')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-03' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-04' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-05，檔期保留' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-06，不可服務' })).toBeDisabled();
+    expect(mocks.queryStaffCalendar).toHaveBeenNthCalledWith(1,
+      { staffId: 12, rangeStart: '2026-10-01', rangeEnd: '2026-10-31' }, { signal: expect.any(AbortSignal) });
+
+    fireEvent.click(screen.getByRole('button', { name: '下一個月' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取月嫂檔期。');
+    expect(mocks.queryStaffCalendar).toHaveBeenNthCalledWith(2,
+      { staffId: 12, rangeStart: '2026-11-01', rangeEnd: '2026-11-30' }, { signal: expect.any(AbortSignal) });
+    expect(mocks.queryStaffCalendar.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(screen.queryByText('已有排班')).not.toBeInTheDocument();
   });
 
   it('多月嫂預覽失敗後可取消，重新讀取原日期，且未提交排班', async () => {
@@ -333,6 +378,9 @@ describe('服務日期自動讀取與單次儲存流程', () => {
         { assignment_id: 6, staff_id: 13, official_service_dates: [initialDates[1]] },
       ],
     });
+    mocks.queryStaffCalendar.mockImplementation(async ({ staffId }) => ({ days: staffId === 13
+      ? [{ calendar_date: '2026-10-02', entries: [{ occupancy_kind: 'official_workday', case_no: 'OTHER-CASE' }] }]
+      : [] }));
     render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart officeScheduleStaff={[
       { staff_id: 12, staff_name: '王月嫂' }, { staff_id: 13, staff_name: '林月嫂' },
     ]} />);
@@ -344,6 +392,8 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(saveButton).toBeDisabled();
     const first = within(screen.getByRole('region', { name: /王月嫂/ }));
     const second = within(screen.getByRole('region', { name: /林月嫂/ }));
+    expect(await second.findByRole('button', { name: /^服務日期 2026-10-02.*已有排班$/ })).toBeEnabled();
+    expect(first.queryByText('已有排班')).not.toBeInTheDocument();
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-01/ }));
     fireEvent.click(second.getByRole('button', { name: /^服務日期 2026-10-02/ }));
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-04/ }));

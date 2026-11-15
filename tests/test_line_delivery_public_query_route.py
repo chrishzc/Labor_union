@@ -184,8 +184,8 @@ def test_contract_delivery_detail_keeps_history_and_reports_retry_availability(m
     [(name, kind) for kind, names in {
         'matching': ('matching_schedule_recipient', 'matching_schedule_snapshot', 'candidate_contact_question',
                      'candidate_contact_answer', 'candidate_weekly_service_information', 'service_start_inquiry'),
-        'finance': ('client_deposit_reminder', 'client_deposit_settled', 'manual_payment_overdue_reminder',
-                    'client_second_payment_reminder','client_second_payment_settled'),
+        'finance': ('client_deposit_reminder', 'client_deposit_settled', 'manual_client_payment_receipt',
+                    'manual_payment_overdue_reminder', 'client_second_payment_reminder', 'client_second_payment_settled'),
         'order': ('order_service_start_day','order_service_start_day_response','order_service_completion'),
         'assignment': ('manual_service_day_log_reminder', 'service_start_schedule'),
         'group_invitation': ('service_start_invitation',),
@@ -217,7 +217,9 @@ def test_matching_schedule_sources_project_to_bounded_matching_label(
     assert "provider-secret" not in response.text
     detail=client.get('/api/v1/line/tasks/7')
     assert detail.status_code==200 and detail.json()['data']['task']['source_type']==expected_type
-    if source_aggregate_type == 'line_webhook_reply':
+    if source_aggregate_type in (
+        'line_webhook_reply', 'manual_client_payment_receipt', 'client_deposit_settled', 'client_second_payment_settled',
+    ):
         assert detail.json()['data']['retry_allowed'] is False
 
 

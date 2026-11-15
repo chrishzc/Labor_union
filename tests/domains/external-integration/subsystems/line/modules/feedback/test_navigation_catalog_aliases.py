@@ -101,3 +101,91 @@ def test_navigation_catalog_api_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_pa
     reset_res = client.post("/api/v1/line/ai-events/catalog/profile_update/reset")
     assert reset_res.status_code == 200
     assert "已將「profile_update」的觸發指令恢復預設" in reset_res.json()["message"]
+
+
+def test_group_helper_and_staff_assistance_close_aliases(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    test_storage = tmp_path / "helper_aliases.json"
+    import subsystems.line.navigation_catalog as nav_module
+    monkeypatch.setattr(nav_module, "CATALOG_STORAGE_PATH", test_storage)
+    nav_module._invalidate_cache()
+
+    rev, routes = load_persisted_aliases(test_storage)
+    assert "group_helper_menu" in routes
+    assert "staff_assistance_close" in routes
+    assert "小幫手" in routes["group_helper_menu"]
+    assert "工會" in routes["group_helper_menu"]
+    assert "已處理結案" in routes["staff_assistance_close"]
+
+    router = DeterministicLineRouter()
+    helper_outcome = router.route("小幫手", source_event_id="helper-menu-wake")
+    assert isinstance(helper_outcome, DeterministicRoute)
+    assert helper_outcome.route_key == "group_helper_menu"
+
+    close_outcome = router.route("已處理結案", source_event_id="staff-close-cmd")
+    assert isinstance(close_outcome, DeterministicRoute)
+    assert close_outcome.route_key == "staff_assistance_close"
+
+    new_rev, _ = update_route_aliases("staff_assistance_close", ["已處理結案", "專員完成"], path=test_storage)
+    assert new_rev == rev + 1
+    assert entry_for_alias("專員完成", path=test_storage).route_key == "staff_assistance_close"
+
+    reset_rev, _ = reset_route_aliases("staff_assistance_close", path=test_storage)
+    assert reset_rev == new_rev + 1
+    assert entry_for_alias("專員完成", path=test_storage) is None
+
+
+def test_all_chatroom_commands_in_catalog_and_dynamic_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    test_storage = tmp_path / "all_commands_aliases.json"
+    import subsystems.line.navigation_catalog as nav_module
+    monkeypatch.setattr(nav_module, "CATALOG_STORAGE_PATH", test_storage)
+    nav_module._invalidate_cache()
+
+    rev, routes = load_persisted_aliases(test_storage)
+    expected_keys = {
+        "customer_binding",
+        "admin_binding",
+        "staff_binding",
+        "union_menu",
+        "order_group_bind",
+        "order_group_invite",
+        "group_helper_menu",
+        "group_postponement",
+        "staff_assistance_close",
+        "human_handoff",
+        "resume_ai_assistant",
+        "feedback_resolved",
+        "feedback_unresolved",
+        "menu_switch_help",
+        "menu_switch_customer",
+        "menu_switch_visitor",
+        "menu_switch_staff",
+    }
+    assert expected_keys.issubset(set(routes))
+    # Dual-scope "綁定訂單" does not block editing order_group_bind and still routes 1:1 to customer_binding.
+    new_rev, _ = update_route_aliases("order_group_bind", ["綁定群組", "綁定訂單", "群組開案"], path=test_storage)
+    assert new_rev == rev + 1
+    assert entry_for_alias("綁定訂單", path=test_storage).route_key == "customer_binding"
+    assert entry_for_alias("群組開案", path=test_storage).route_key == "order_group_bind"
+
+    from subsystems.line.order_group_application import _group_command_aliases, _parse_binding
+    from subsystems.line.group_helper_application import _match_postponement_text
+    from subsystems.line.webhook_identity_handlers import _identity_purpose_for_text
+    from domains.line.identity_flow import LineIdentityFlowPurpose
+
+    bind_aliases, invite_aliases = _group_command_aliases()
+    assert "群組開案" in bind_aliases
+    assert "發送邀請" in invite_aliases
+    assert _parse_binding("群組開案 115000104 https://line.me/R/ti/g/abc", bind_aliases) == (
+        "115000104",
+        "https://line.me/R/ti/g/abc",
+    )
+
+    update_route_aliases("staff_binding", ["我是月嫂", "月嫂認證"], path=test_storage)
+    assert _identity_purpose_for_text("月嫂認證") is LineIdentityFlowPurpose.STAFF_VERIFICATION
+
+    update_route_aliases("group_postponement", ["雙方合意延期", "順延日期"], path=test_storage)
+    assert _match_postponement_text("順延日期：2026-12-01 順延至 2026-12-10", nav_module.route_aliases("group_postponement")) is not None
+
+    update_route_aliases("menu_switch_visitor", ["訪客選單", "回主選單"], path=test_storage)
+    from subsystems.line.menu_command_application import _resolved_menu_commands
+    assert "回主選單" in _resolved_menu_commands()["visitor"]

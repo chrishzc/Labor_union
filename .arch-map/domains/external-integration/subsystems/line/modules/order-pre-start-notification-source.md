@@ -4,25 +4,21 @@
 - subsystem: `external-integration/line`
 
 ## Responsibility
-[RETIRED SOURCE] 2026-11-12 起，開工當天群組服務狀況詢問、正常結案問卷群組邀請與第二期款群組通知不再投影來源事件，也不再 Push 到任何群組；原 scanner／projector／worker 與兩個來源 repository 已移除，`order_pre_start_notification_sources` worker 不再註冊。
-
-仍保留的最小責任：
-- 舊群組訊息上的 `start-day:` 按鈕仍可被驗證並以 `line_webhook_reply` Reply-only 確認；選「需要協助」時照舊建立 Customer Service 服務進度待辦。不補 Push。
-- provider 前守門：殘留的 `order_service_start_day`／`order_service_start_day_response`（非 Reply ack）、`order_service_completion`、`client_second_payment_reminder`／`client_second_payment_settled` 工作一律取消。
-- 第二期款改走私訊：到期當天由 `payment-overdue-reminders` 的繳款提醒 worker 發客戶私訊；核銷成功通知由人員於財務待辦確認後寄客戶私訊。
-- `notification_rules` 拒絕儲存 `order.service_start_day`、`order.service_completed` 及 `order.pre_start_reminder`／`order.second_payment_reminder`；第二期款兩個事件不封鎖；`config/notification_rules.json` 預設不含群組規則。
+- `service_start_day_greeting` worker 依正式開工日與帳務排程向本案群組發一則文字，第一期款有餘額才併入同一則。正式排班、群組綁定與餘額於投遞前重驗，舊開工卡片來源不得投遞。
+- 開工當天群組付款文字指令驗證本案客戶身分後使用 `line_webhook_reply`。舊服務回報按鈕與未送出的回覆不再處理業務或投遞。
+- 完工問卷與第二期款群組來源只保留投遞前取消守門。通用通知規則不得另發同一開工問候。
 
 ## Implementation
-- `subsystems/line/service_start_day.py` — 舊按鈕 postback 與開工 Push 守門。
-- `infrastructure/mysql/service_start_day_repository.py` — 舊按鈕回覆 context 與 Reply ack 現行性。
+- `subsystems/line/service_start_day.py` — 開工群組問候排程、付款文字指令與投遞守門。
+- `infrastructure/mysql/service_start_day_repository.py` — 正式開工候選、群組與身分 context、投遞現行性。
 - `subsystems/line/service_completion_notifications.py` — 殘留結案問卷工作守門（取消）。
 - `subsystems/line/second_payment_notifications.py` — 殘留第二期款群組工作守門（取消）。
 - `subsystems/line/notification_source_adapters.py` — 僅保留 Orders／Finance／Scheduling committed outbox adapter。
 - `domains/line/notification_rules.py` — 開工詢問與結案問卷事件儲存拒絕。
 
 ## Dependencies
-- inbound: `api/dependencies/line_worker_operation.py` 路由已驗證 `start-day:` group postback。
-- outbound: Customer Service `create_or_append`（協助待辦）、既有 delivery task cancel。
+- inbound: `api/dependencies/line_worker_operation.py` 組裝開工問候 worker 與群組 Reply 路由。
+- outbound: Scheduling 正式開工、Client Finance 第一期款、既有付款回報與 delivery task。
 
 ## Contracts
 - `document/架構重整/01_規格基線/17A_LINE_Gateway_Inbox與通知投遞正式規格.md`

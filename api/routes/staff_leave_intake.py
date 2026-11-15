@@ -1,9 +1,10 @@
 """File: staff_leave_intake.py
-Description: 提供已驗證月嫂提交請假協調結果，保留歷史請假查閱。"""
+Description: 提供月嫂查詢班表、預檢合意延期檔期衝突、建立群組提案與提交請假。"""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import ConfigDict, Field
 
 from api.dependencies.staff_leave_intake import get_staff_leave_intake_application
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
@@ -18,8 +19,11 @@ from api.schemas.line_staff_self_service import (
     StaffLeaveRequestReadbackResponse,
     StaffLiffRequest,
 )
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
+from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.line.group_helper_application import save_group_helper_proposal
 from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
 
 
@@ -28,14 +32,102 @@ router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling S
 from dataclasses import asdict
 from api.dependencies.service_start import get_service_start_application
 from api.routes.service_start import call as _result_call
-from api.schemas.service_start import StaffLeaveResultSubmission, ServiceStartView
+from api.schemas.service_start import LeaveDateChangeBody, StaffLeaveResultSubmission, ServiceStartView
 from domains.scheduling.leave_result import LeaveResultSubmission, LeaveDateChange
+
+
+class StaffLeaveDeferPreviewRequest(StaffLiffRequest):
+    model_config = ConfigDict(extra='forbid')
+    case_no: str = Field(min_length=1, max_length=50)
+    assignment_id: int = Field(gt=0)
+    dates: list[LeaveDateChangeBody] = Field(min_length=1, max_length=366)
+
+
+class StaffLeaveDeferProposeRequest(StaffLeaveDeferPreviewRequest):
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=140)
 
 
 @router.post('/leave-results/cases')
 def leave_result_cases(body: StaffLiffRequest, app=Depends(get_service_start_application)):
     _, staff = _verified_staff_context(body)
     return BaseResponse(data={'items': [asdict(item) for item in app.leave_cases(int(staff['staff_id']))]})
+
+
+@router.post('/leave-results/preview')
+def preview_leave_defer(body: StaffLeaveDeferPreviewRequest, app=Depends(get_service_start_application)):
+    """零寫入預檢月嫂合意順延補班日的排班衝突與總服務天數守恆。"""
+    _, staff = _verified_staff_context(body)
+    changes = tuple(LeaveDateChange(d.original_date, d.new_date) for d in body.dates)
+    result = _result_call(
+        lambda: app.arrangement.preview_leave_defer(
+            body.case_no, int(staff['staff_id']), body.assignment_id, changes
+        )
+    )
+    return BaseResponse(data=result, message=str(result.get('message') or '已完成檔期與補助天數檢核'))
+
+
+@router.post('/leave-results/propose')
+def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_service_start_application)):
+    """驗證無檔期衝突後建立群組延期提案（不消耗任何 Push 推播額度）。"""
+    _, staff = _verified_staff_context(body)
+    staff_id = int(staff['staff_id'])
+    changes = tuple(LeaveDateChange(d.original_date, d.new_date) for d in body.dates)
+    result = _result_call(
+        lambda: app.arrangement.preview_leave_defer(
+            body.case_no, staff_id, body.assignment_id, changes
+        )
+    )
+    if result.get('conflict'):
+        raise typed_http_error(
+            409,
+            'conflict',
+            str(result.get('code') or 'staff_occupancy_conflict'),
+            str(result.get('message') or '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！'),
+            'staff-leave-propose',
+        )
+    leave_start_label = '、'.join(str(item.original_date) for item in changes)
+    leave_end_label = '、'.join(str(item.new_date) for item in changes if item.new_date)
+    proposal_payload = {
+        'case_no': body.case_no,
+        'staff_id': staff_id,
+        'assignment_id': body.assignment_id,
+        'dates': [{'original_date': str(c.original_date), 'new_date': str(c.new_date)} for c in changes],
+        'leave_start_date': leave_start_label,
+        'leave_end_date': leave_end_label,
+    }
+    event_ref = (
+        body.idempotency_key
+        or f"liff:{fingerprint_payload(proposal_payload).value[:24]}"
+    )
+    with open_line_unit_of_work() as line_uow:
+        save_group_helper_proposal(
+            line_uow,
+            'group_helper_postpone_proposal',
+            body.case_no,
+            event_ref,
+            proposal_payload,
+        )
+        line_uow.commit()
+    group_message = (
+        f"雙方合意延期：{changes[0].original_date}→{changes[0].new_date}"
+        if len(changes) == 1 and changes[0].new_date is not None
+        else None
+    )
+    return BaseResponse(
+        data={
+            **result,
+            'case_no': body.case_no,
+            'assignment_id': body.assignment_id,
+            'leave_start_date': leave_start_label,
+            'leave_end_date': leave_end_label,
+            'group_message': group_message,
+            'group_record_queued': False,
+        },
+        message=(
+            '檔期無衝突，已建立群組延期提案（零推播額度）。'
+            + ('請返回案件群組點選「雙方合意延期」送出確認卡。' if group_message is None else '')
+        ),
+    )
 
 
 @router.post('/leave-results/submit', response_model=BaseResponse[ServiceStartView])

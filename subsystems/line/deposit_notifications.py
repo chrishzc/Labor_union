@@ -1,6 +1,6 @@
 """
 File: deposit_notifications.py
-Description: 協調訂金提醒通知與「專人協助」Postback 的 Reply-only 受理回覆。
+Description: 協調訂金提醒卡片、已經匯款與專人協助 Postback 的 Reply-only 受理回覆。
 """
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ from urllib.parse import urlencode
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.delivery import LineDeliveryRequest, LineDeliveryTaskSnapshot, LineMessageKind, LineRecipient, LineRecipientType
-from domains.line.identities import LineUserId
+from domains.line.identities import LineGroupId, LineSourceType, LineUserId
 from domains.line.canonical_payload import canonical_line_payload_json
-from shared_kernel.identities import CorrelationId, IdempotencyKey, ActorContext
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt, ActorContext
 from subsystems.client_finance.deposit_payment_query import DepositPayment
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
@@ -27,6 +28,8 @@ from subsystems.line.capabilities import LineCapability, require_line_capability
 REMINDER = 'client_deposit_reminder'
 SETTLED = 'client_deposit_settled'
 ASSISTANCE_ACK = '已收到您的聯絡需求，請留下您的疑問。'
+PAYMENT_ACK_REPLY = '已收到您的回覆，感謝您。工會將於核對後通知，請耐心等候不需重複繳款。'
+PAYMENT_ASSISTANCE_ACK = '已收到您的聯絡需求，請直接留下您的疑問，工會專人將盡快為您協助處理。'
 
 
 class DepositNotificationConflict(ValueError):
@@ -155,12 +158,14 @@ class DepositNotificationApplication:
             raise DepositPaymentForbidden('deposit_payment_forbidden')
 
     def _request(self, payment, recipient, kind, key, unit=None):
+        if kind == SETTLED:
+            raise DepositNotificationConflict('deposit_settled_push_retired')
         if not self._liff_id or self._liff_id == 'your_liff_id_here':
             raise DepositNotificationConflict('deposit_liff_not_configured')
         url = f'https://liff.line.me/{self._liff_id}/?' + urlencode({'target': 'deposit_payment', 'case_no': payment.case_no})
         payload = deposit_notification_payload(payment.case_no, payment.amount_ntd, payment.due_date, kind, url)
         if unit is not None:
-            payload = configured_payload(unit, 'deposit-settled' if kind == SETTLED else 'deposit-reminder', payload,
+            payload = configured_payload(unit, 'deposit-reminder', payload,
                 {'case_no': payment.case_no, 'amount_ntd': f'{payment.amount_ntd:,}', 'due_date': str(payment.due_date)})
         return LineDeliveryRequest(LineRecipient(LineRecipientType.USER, LineUserId(recipient)), LineMessageKind.FLEX,
                                    canonical_line_payload_json(payload), self._now(), key,
@@ -190,41 +195,89 @@ def deposit_delivery_is_current(uow, task, now) -> bool:
     return valid
 
 
-def handle_deposit_assistance(data, event, uow, *, reply_only=False) -> bool:
-    if not data.startswith('deposit-assistance:'):
+def handle_payment_reminder_postback(data: str, event, uow, *, reply_only: bool = False) -> bool:
+    match_ack = re.fullmatch(r"^payment-ack:(deposit|first|second):([A-Za-z0-9_-]{1,50})$", data)
+    match_ast = re.fullmatch(r"^(?:payment-assistance:(deposit|first|second)|deposit-assistance):([A-Za-z0-9_-]{1,50})$", data)
+    if match_ack is None and match_ast is None:
         return False
-    case_no = data.removeprefix('deposit-assistance:')
-    line_user_id = event.source.user_id
-    if (line_user_id is None or not re.fullmatch(r'[A-Za-z0-9_-]{1,50}', case_no)
-            or uow.deposit_notifications.customer_line_user_id(case_no, lock=True) != line_user_id.value
-            or uow.deposit_payments.get(case_no, lock=True) is None):
+    action = 'ack' if match_ack else 'assistance'
+    stage = match_ack.group(1) if match_ack else (match_ast.group(1) or 'deposit')
+    case_no = match_ack.group(2) if match_ack else match_ast.group(2)
+
+    source = event.source
+    line_user_id = source.user_id
+    if line_user_id is None:
         return True
-    key = IdempotencyKey('deposit-assistance:' + sha256(event.event_id.value.encode()).hexdigest())
+
+    source_type = getattr(source, 'source_type', LineSourceType.USER)
+    source_id = getattr(source, 'source_id', getattr(line_user_id, 'value', ''))
+    if source_type is LineSourceType.GROUP and source_id:
+        reply_recipient = LineRecipient(LineRecipientType.GROUP, LineGroupId(str(source_id)))
+    else:
+        customer_id = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
+        if customer_id and customer_id != line_user_id.value:
+            return True
+        reply_recipient = LineRecipient(LineRecipientType.USER, line_user_id)
+
+    if data.startswith('deposit-assistance:'):
+        key = IdempotencyKey('deposit-assistance:' + sha256(event.event_id.value.encode()).hexdigest())
+    else:
+        key = IdempotencyKey(f'payment-{action}:{stage}:{sha256(event.event_id.value.encode()).hexdigest()}')
+    if action == 'ack':
+        template_key = 'payment-reminder-ack'
+        reply_text = PAYMENT_ACK_REPLY
+    else:
+        template_key = 'deposit-assistance' if data.startswith('deposit-assistance:') else 'payment-assistance'
+        reply_text = ASSISTANCE_ACK if template_key == 'deposit-assistance' else PAYMENT_ASSISTANCE_ACK
+
     if not reply_only:
-        uow.customer_service.create_or_append(CreateCustomerServiceMessage(
-            line_user_id.value, CustomerServiceCategory.OTHER,
-            f'客戶詢問訂金繳費；案件 {case_no}，請查看後續留言。', key.value, case_no=case_no,
-        ))
+        from subsystems.line.ports import LineAuditIntent
+        if action == 'ack':
+            receipt_key = IdempotencyKey(f'payment-ack:{stage}:{case_no}')
+            receipt_expected = IdempotencyReceipt(
+                receipt_key,
+                fingerprint_payload({'case_no': case_no, 'stage': stage, 'user_id': line_user_id.value}),
+                json.dumps({'case_no': case_no, 'stage': stage, 'action': 'paid_reported'}, ensure_ascii=False),
+            )
+            if uow.receipts.get(receipt_key, for_update=True) is None:
+                uow.receipts.append(receipt_expected)
+            uow.audit.append(LineAuditIntent('payment_reminder_acknowledged', line_user_id.value, f'payment_{stage}', case_no))
+        else:
+            stage_names = {'deposit': '訂金', 'first': '第一期款', 'second': '第二期款'}
+            uow.customer_service.create_or_append(CreateCustomerServiceMessage(
+                line_user_id.value, CustomerServiceCategory.OTHER,
+                f'客戶詢問{stage_names.get(stage, stage)}繳費；案件 {case_no}，請查看後續留言。', key.value, case_no=case_no,
+            ))
+            uow.audit.append(LineAuditIntent('payment_assistance_requested', line_user_id.value, f'payment_{stage}', case_no))
         if uow.delivery_tasks.exists_for_key(key):
             return True
+
     uow.delivery_tasks.enqueue(LineDeliveryRequest(
-        LineRecipient(LineRecipientType.USER, line_user_id), LineMessageKind.TEXT,
-        canonical_line_payload_json(configured_payload(uow, 'deposit-assistance', {'type': 'text', 'text': ASSISTANCE_ACK})),
+        reply_recipient, LineMessageKind.TEXT,
+        canonical_line_payload_json(configured_payload(uow, template_key, {'type': 'text', 'text': reply_text})),
         event.occurred_at, key, CorrelationId(f'line-event:{event.event_id.value}'),
         REPLY_ONLY_WEBHOOK_SOURCE, event.event_id.value,
     ))
     return True
 
 
-def deposit_notification_payload(case_no, amount_ntd, due_date, kind, url):
-    paid = kind == SETTLED
-    text = (f'案件〈{case_no}〉訂金 NT${amount_ntd:,}已確認入帳，謝謝您。' if paid else
-            f'案件〈{case_no}〉訂金 NT${amount_ntd:,}，請於{due_date}前完成匯款。')
-    actions = [{'type': 'button', 'action': {'type': 'uri', 'label': '查看繳費狀態' if paid else '查看繳費資訊', 'uri': url}}]
-    if not paid:
-        actions.append({'type': 'button', 'action': {'type': 'postback', 'label': '專人協助',
-                                                  'data': f'deposit-assistance:{case_no}'}})
-    payload = {'type': 'flex', 'altText': text, 'contents': {'type': 'bubble',
+def handle_deposit_assistance(data, event, uow, *, reply_only=False) -> bool:
+    if data.startswith(('deposit-assistance:', 'payment-assistance:', 'payment-ack:')):
+        return handle_payment_reminder_postback(data, event, uow, reply_only=reply_only)
+    return False
+
+
+def deposit_notification_payload(case_no, amount_ntd, due_date, kind, url=None):
+    if kind == SETTLED:
+        raise DepositNotificationConflict('deposit_settled_push_retired')
+    amount_str = f'{amount_ntd:,}' if isinstance(amount_ntd, int) else str(amount_ntd)
+    text = f'案件〈{case_no}〉訂金 NT${amount_str}，請於{due_date}前完成匯款。若已完成匯款，請點選下方「已經匯款」，工會將於核對後通知。'
+    actions = [
+        {'type': 'button', 'style': 'primary', 'action': {'type': 'postback', 'label': '已經匯款', 'data': f'payment-ack:deposit:{case_no}', 'displayText': '已經匯款'}},
+        {'type': 'button', 'style': 'secondary', 'action': {'type': 'postback', 'label': '有疑問需要解決', 'data': f'payment-assistance:deposit:{case_no}', 'displayText': '有疑問需要解決'}},
+    ]
+    payload = {'type': 'flex', 'altText': f'案件〈{case_no}〉訂金繳費提醒：NT${amount_str}', 'contents': {'type': 'bubble',
+               'header': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': '訂金繳費提醒', 'weight': 'bold', 'size': 'lg'}]},
                'body': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': text, 'wrap': True}]},
                'footer': {'type': 'box', 'layout': 'vertical', 'contents': actions}}}
     return payload

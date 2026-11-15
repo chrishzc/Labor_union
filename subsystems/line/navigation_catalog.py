@@ -51,10 +51,25 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "public_route": "/line-identity",
         "postback_identity": None,
     },
+    "staff_binding": {
+        "tier": "identity",
+        "public_route": "/line-identity",
+        "postback_identity": None,
+    },
     "union_menu": {
         "tier": "admin",
         "public_route": "/line-mobile-admin",
         "postback_identity": "line:admin-menu",
+    },
+    "order_group_bind": {
+        "tier": "admin",
+        "public_route": None,
+        "postback_identity": "line:order-group-bind",
+    },
+    "order_group_invite": {
+        "tier": "admin",
+        "public_route": None,
+        "postback_identity": "line:order-group-invite",
     },
     "registration": {
         "tier": "navigation",
@@ -101,18 +116,83 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
         "public_route": "/line-mobile-admin?target=customer_service",
         "postback_identity": None,
     },
+    "human_handoff": {
+        "tier": "navigation",
+        "public_route": "/line-mobile-admin?target=customer_service",
+        "postback_identity": "customer-service:handoff:confirm",
+    },
+    "resume_ai_assistant": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "customer-service:handoff:resume-ai",
+    },
+    "feedback_resolved": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": None,
+    },
+    "feedback_unresolved": {
+        "tier": "navigation",
+        "public_route": "/line-mobile-admin?target=customer_service",
+        "postback_identity": None,
+    },
+    "menu_switch_help": {
+        "tier": "admin",
+        "public_route": None,
+        "postback_identity": "line:menu-switch-help",
+    },
+    "menu_switch_customer": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "line:menu-switch-customer",
+    },
+    "menu_switch_visitor": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "line:menu-switch-visitor",
+    },
+    "menu_switch_staff": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "line:menu-switch-staff",
+    },
+    "group_helper_menu": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "line:group-helper-menu",
+    },
+    "group_postponement": {
+        "tier": "navigation",
+        "public_route": None,
+        "postback_identity": "line:group-postponement",
+    },
+    "staff_assistance_close": {
+        "tier": "admin",
+        "public_route": "/line-mobile-admin?target=customer_service",
+        "postback_identity": "line:staff-assistance-close",
+    },
 }
 
+# 1對1精確比對「綁定訂單」與群組帶參數前綴「綁定訂單 <案號> <邀請網址>」跨聊天室不互斥
+_SHARED_SCOPE_ROUTE_PAIRS: frozenset[frozenset[str]] = frozenset({
+    frozenset({"customer_binding", "order_group_bind"}),
+})
+
 _BASE_ALIASES: dict[str, list[str]] = {
-    "customer_binding": ["綁定訂單", "訂單查詢"],
-    "admin_binding": ["綁定後台帳號"],
+    "customer_binding": ["綁定訂單", "訂單查詢", "綁定", "查詢訂單"],
+    "admin_binding": ["綁定後台帳號", "綁定工會帳號", "綁定system_admin"],
+    "staff_binding": ["我是月嫂", "我要綁定月嫂"],
     "union_menu": [
         "工會選單",
         "開啟客服系統",
         "開啟待辦工作台",
         "開啟異常中心",
         "開啟營運摘要",
+        "切換工會",
+        "工會客服",
     ],
+    "order_group_bind": ["綁定群組", "綁定案件群組", "綁定訂單"],
+    "order_group_invite": ["發送邀請"],
     "registration": ["服務登記"],
     "service_help_menu": ["服務說明", "服務與問答", "常見問答", "問答", "FAQ"],
     "order_update_menu": ["修改訂單資訊"],
@@ -143,6 +223,33 @@ _BASE_ALIASES: dict[str, list[str]] = {
     ],
     "profile_update": ["修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤"],
     "other": ["其他問題", "其他", "不是以上", "問題", "詢問"],
+    "human_handoff": [
+        "聯絡工會人員",
+        "聯絡專人",
+        "聯絡專人服務",
+        "呼叫專員",
+        "聯絡工會專員",
+        "專人客服",
+        "轉接真人客服",
+        "轉真人客服",
+    ],
+    "resume_ai_assistant": [
+        "恢復AI助理",
+        "恢復AI",
+        "繼續使用AI",
+        "恢復機器人",
+        "恢復機器人回答",
+        "繼續讓機器人回答",
+    ],
+    "feedback_resolved": ["有幫助", "👍 有幫助", "很有幫助", "有解決"],
+    "feedback_unresolved": ["未解決", "👎 未解決", "沒解決", "沒有幫助", "未解決（通報專人客服）"],
+    "menu_switch_help": ["切換選單", "選單切換", "管理者選單"],
+    "menu_switch_customer": ["客戶選單", "客戶專區", "切換客戶"],
+    "menu_switch_visitor": ["訪客選單", "切換訪客", "一般選單", "一般用戶選單", "切換一般", "esc"],
+    "menu_switch_staff": ["月嫂專區", "切換月嫂"],
+    "group_helper_menu": ["小幫手", "工會", "月嫂選單", "服務選單"],
+    "group_postponement": ["雙方合意延期"],
+    "staff_assistance_close": ["已處理結案", "專員已處理結案", "協助結案"],
 }
 
 
@@ -237,6 +344,12 @@ def entry_for_alias(
     )
 
 
+def route_aliases(route_key: str, path: Path | None = None) -> tuple[str, ...]:
+    """Return configured aliases for one route key, falling back to its defaults."""
+    _, routes = load_persisted_aliases(path)
+    return tuple(routes.get(route_key) or _BASE_ALIASES.get(route_key, ()))
+
+
 def update_route_aliases(
     route_key: str,
     aliases: list[str],
@@ -260,6 +373,8 @@ def update_route_aliases(
     revision, current_routes = load_persisted_aliases(path)
     for other_route, other_aliases in current_routes.items():
         if other_route == route_key:
+            continue
+        if frozenset({route_key, other_route}) in _SHARED_SCOPE_ROUTE_PAIRS:
             continue
         collision = set(cleaned).intersection(set(other_aliases))
         if collision:
@@ -301,6 +416,7 @@ __all__ = [
     "get_current_revision",
     "load_persisted_aliases",
     "reset_route_aliases",
+    "route_aliases",
     "save_persisted_aliases",
     "update_route_aliases",
 ]

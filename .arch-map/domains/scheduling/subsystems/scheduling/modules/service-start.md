@@ -9,7 +9,8 @@
 
 ## Implementation
 - `domains/scheduling/service_start.py`
-- `subsystems/scheduling/service_start_workflow.py`
+- `subsystems/scheduling/service_start_workflow.py` — ServiceStartWorkflow 協調開工確認與請假順延；新增同一 UoW 零推播寫入入口（`submit_in_current_unit_of_work`、`submit_leave_in_current_unit_of_work`）
+- `infrastructure/mysql/service_start_arrangement.py` — 提供零寫入合意延期檔期衝突與補助天數守恆預檢 `preview_leave_defer`
 - `infrastructure/mysql/service_start_repository.py` — 代班意願 LINE webhook 回覆（`service-start-reply:`）透過 `line_webhook_reply` Reply-only 建立確認回覆，禁止 fallback Push。
 - `infrastructure/mysql/service_start_arrangement.py` — 一般案件工會首次儲存班表，同一交易確認服務日期並委派 Assignment Plan 及相關帳務 writer。
 - `subsystems/line/service_start_messages.py` — 共用零副作用訊息格式。

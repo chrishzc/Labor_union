@@ -58,7 +58,7 @@ from api.schemas.base import BaseResponse
 from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
 from api.routes import line_payment_overdue_reminders as overdue_reminder_routes
 from api.routes import line_order_groups as order_group_routes
-from api.schemas.line_order_groups import PaidOrderGroupTodoPageView
+from api.schemas.line_order_groups import OpeningGreetingSkipPageView, PaidOrderGroupTodoPageView
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
 from api.schemas.customer_service import (
     CustomerServiceDetailView,
@@ -161,6 +161,7 @@ class _PaidOrderGroupTodoRequest(_LiffAuthRequest):
     model_config = ConfigDict(extra='forbid', strict=True)
     page: int = Field(default=1, ge=1, le=10000)
     page_size: int = Field(default=25, ge=1, le=50)
+    view: Literal['paid_uncreated', 'opening_greeting_skips'] = 'paid_uncreated'
 
 
 class _MobileClientProfileListRequest(_LiffAuthRequest):
@@ -527,11 +528,15 @@ def customer_recommendation_followups(payload: _MobileTodoPageRequest):
                               "page": payload.page, "page_size": payload.page_size}, message="成功取得客戶推薦確認待辦")
 
 
-@router.post('/order-group-todos', response_model=BaseResponse[PaidOrderGroupTodoPageView])
+@router.post('/order-group-todos', response_model=BaseResponse[PaidOrderGroupTodoPageView | OpeningGreetingSkipPageView])
 def paid_order_group_todos(payload: _PaidOrderGroupTodoRequest):
     _, actor = _mobile_admin_context(payload.line_id_token, LineCapability.ORDER_GROUP_READ)
     try:
-        page = LineOrderGroupQueryApplication(open_line_unit_of_work).paid_uncreated_todos(
+        application = LineOrderGroupQueryApplication(open_line_unit_of_work)
+        if payload.view == 'opening_greeting_skips':
+            skips = application.opening_greeting_skips(actor, page=payload.page, page_size=payload.page_size)
+            return BaseResponse(data=OpeningGreetingSkipPageView.model_validate(skips))
+        page = application.paid_uncreated_todos(
             actor, page=payload.page, page_size=payload.page_size,
         )
         return BaseResponse(data=PaidOrderGroupTodoPageView.model_validate(page))

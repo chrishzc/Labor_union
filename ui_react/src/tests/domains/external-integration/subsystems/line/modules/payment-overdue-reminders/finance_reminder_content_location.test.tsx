@@ -1,45 +1,54 @@
+/**
+ * File: finance_reminder_content_location.test.tsx
+ * Description: 驗證帳務範本回到 LINE 通知與發送，以及原帳務深連結相容。
+ */
 import { fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { describe,it,expect,vi } from 'vitest';
 import { FinanceWarningWorkspace } from '../../../../../../../components/FinanceWarningWorkspace';
 import { LineManagementPage } from '../../../../../../../pages/LineManagementPage';
 
-vi.mock('../../../../../../../components/LineNotificationWorkbench',()=>({PAYMENT_REMINDER_MESSAGE_IDS:['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled','payment-first-settled'],LineNotificationWorkbench:({scope,selectedEntryId,onSelectedEntryChange}:{scope?:string;selectedEntryId:string;onSelectedEntryChange:(id:string)=>void})=><section aria-label={scope==='payment-reminders'?'繳款提醒編輯':'原通知內容工作台'}><p>{selectedEntryId}</p><button onClick={()=>onSelectedEntryChange('payment-overdue-first')}>編輯第一期逾期內容</button></section>}));
+vi.mock('../../../../../../../components/LineNotificationWorkbench', () => ({
+  LineNotificationWorkbench: ({ selectedEntryId }: { selectedEntryId: string }) => (
+    <section aria-label="通知內容工作台"><p>{selectedEntryId}</p></section>
+  ),
+}));
 vi.mock('../../../../../../../components/FinanceCaseAccounting',()=>({FinanceAccountingWarnings:()=> <p>原有帳務警示</p>}));
 vi.mock('../../../../../../../components/PaymentReminderSchedulePanel',()=>({PaymentReminderSchedulePanel:()=> <p>正式提醒排程設定</p>}));
 vi.mock('../../../../../../../components/PaymentOverdueReminderWorkbench',()=>({PaymentOverdueReminderWorkbench:()=> <p>正式逾期款項清單</p>}));
 vi.mock('../../../../../../../components/LineMessageFlow',()=>({LineMessageFlow:()=>null}));
 
-describe('提醒內容搬移至帳務頁',()=>{
+describe('帳務範本集中於通知與發送',()=>{
   it('舊逾期深連結保留實際逾期清單，新入口也能查閱',()=>{
     window.history.replaceState(null,'','#finance?tab=receipts&view=overdue');
     render(<FinanceWarningWorkspace onCase={()=>{}}/>);
     expect(screen.getByRole('tab',{name:'逾期款項'})).toHaveAttribute('aria-selected','true');
     expect(screen.getByText('正式逾期款項清單')).toBeInTheDocument();
   });
-  it('原警示保留，同頁可切換排程與繳款提醒內容',()=>{
+  it('原警示保留，同頁可切換排程',()=>{
     window.history.replaceState(null,'','#finance?tab=accounting-warnings');
     render(<FinanceWarningWorkspace onCase={()=>{}}/>);
     expect(screen.getByText('原有帳務警示')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab',{name:'提醒排程'}));expect(screen.getByText('正式提醒排程設定')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab',{name:'提醒內容'}));expect(screen.getByRole('region',{name:'繳款提醒編輯'})).toBeInTheDocument();
-    expect(screen.queryByRole('region',{name:'原通知內容工作台'})).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:'編輯第一期逾期內容'}));
-    expect(window.location.hash).toContain('message=payment-overdue-first');
+    expect(screen.queryByRole('tab',{name:'提醒內容'})).not.toBeInTheDocument();
   });
   it('其他通知編輯入口仍在 LINE，不導向帳務',()=>{
     window.history.replaceState(null,'','#line-management?tab=push_queue&message=service-start-inquiry');
     render(<LineManagementPage scope="notifications"/>);
-    expect(screen.getByRole('region',{name:'原通知內容工作台'})).toBeInTheDocument();
+    expect(screen.getByRole('region',{name:'通知內容工作台'})).toBeInTheDocument();
     expect(window.location.hash).toContain('#line-management?');
     expect(window.location.hash).toContain('message=service-start-inquiry');
     expect(screen.getByRole('button',{name:'通知與發送'})).toBeInTheDocument();
   });
-  it.each(['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled','payment-first-settled'])('繳款提醒 %s 深連結移轉至同一則帳務內容',async(id)=>{
-    window.history.replaceState(null,'','#line-management?tab=push_queue&message='+id);
-    render(<LineManagementPage scope="notifications"/>);
-    await waitFor(()=>expect(window.location.hash).toContain('#finance?tab=accounting-warnings&view=reminder-content'));
-    expect(window.location.hash).toContain('message='+id);
-    expect(screen.queryByRole('region',{name:'原通知內容工作台'})).not.toBeInTheDocument();
+  it('原帳務網址開啟 LINE 內同一則範本', async () => {
+    window.history.replaceState(null, '', '#finance?tab=accounting-warnings&view=reminder-content&message=payment-overdue-first');
+    render(<FinanceWarningWorkspace onCase={() => {}} />);
+    await waitFor(() => expect(window.location.hash).toBe('#line-notifications?tab=push_queue&message=payment-overdue-first&category=accounting'));
+  });
+  it('LINE 帳務範本深連結在同一工作台開啟', () => {
+    window.history.replaceState(null, '', '#line-notifications?tab=push_queue&message=payment-first-greeting');
+    render(<LineManagementPage scope="notifications" />);
+    expect(screen.getByRole('region', { name: '通知內容工作台' })).toHaveTextContent('payment-first-greeting');
+    expect(window.location.hash).toContain('#line-notifications?');
   });
   it('方向鍵切換功能並將焦點保留在對應頁籤',()=>{
     window.history.replaceState(null,'','#finance?tab=accounting-warnings');

@@ -150,3 +150,73 @@ def test_cross_role_claim_waits_for_revocation_completion() -> None:
 
     assert result.status is LineIdentityBindingStatus.PENDING_REVIEW
     assert result.subject_type is LineBindingSubjectType.CUSTOMER
+
+
+def test_rebind_same_claim_after_revocation_uses_versioned_idempotency_key() -> None:
+    from types import SimpleNamespace
+    from domains.line.identity_binding import LineIdentityBindingSnapshot
+    from shared_kernel.identities import CorrelationId
+    from subsystems.line.identity_application import _bind_result
+    from subsystems.line.identity_contracts import LineIdentityCandidate
+
+    claim = _claim(LineBindingSubjectType.STAFF, "1")
+    recorded_keys: list[str] = []
+
+    class _FakeIdentities:
+        def __init__(self) -> None:
+            self.current = LineIdentityBindingSnapshot(
+                _LINE_USER_ID,
+                LineIdentityBindingStatus.REVOKED,
+                ExpectedVersion(3),
+                LineBindingSubjectType.STAFF,
+                "1",
+            )
+
+        def get(self, line_user_id, subject_type=None):
+            return self.current
+
+        def list_by_user(self, line_user_id, **kwargs):
+            return (self.current,)
+
+        def selected_role(self, line_user_id):
+            return None, ExpectedVersion(0)
+
+        def save_claim(self, incoming, expected_version):
+            assert expected_version == ExpectedVersion(3)
+            self.current = LineIdentityBindingSnapshot(
+                incoming.line_user_id,
+                LineIdentityBindingStatus.PENDING_REVIEW,
+                ExpectedVersion(4),
+                incoming.subject_type,
+                incoming.subject_reference,
+            )
+            return self.current
+
+        def bind(self, incoming, expected_version, actor_id, idempotency_key, correlation_id):
+            recorded_keys.append(idempotency_key.value)
+            assert expected_version == ExpectedVersion(4)
+            self.current = LineIdentityBindingSnapshot(
+                incoming.line_user_id,
+                LineIdentityBindingStatus.BOUND,
+                ExpectedVersion(5),
+                incoming.subject_type,
+                incoming.subject_reference,
+            )
+            return self.current
+
+    uow = SimpleNamespace(
+        identities=_FakeIdentities(),
+        audit=[],
+        outbox=[],
+        configurations=None,
+    )
+    result = _bind_result(
+        uow,
+        _LINE_USER_ID,
+        LineIdentityCandidate(LineBindingSubjectType.STAFF, "1"),
+        CorrelationId("corr-rebind-1"),
+    )
+
+    assert result.subject_reference == "1"
+    assert uow.identities.current.status is LineIdentityBindingStatus.BOUND
+    assert recorded_keys == [f"identity-bind:{claim.fingerprint.value}:v4"]

@@ -14,6 +14,7 @@
 - entry: `ui_react/src/main.tsx` — mounts the Access-owned `FirstRootSetupGate` before `App`, including cached-session and development-bypass composition; root status and bootstrap belong to Access authentication-session.
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
 - shared presentation: `ui_react/src/components/Drawer.tsx`、`ui_react/src/components/Drawer.css` — all sizes share customer-roster width (desktop min(1400px,94vw), mobile full width); preserve focus trap and unsaved-navigation protection, and return focus to the ongoing-case search when a saved case has left its original row.
+- shared presentation: `ui_react/src/components/RosterTableLayout.tsx`、`ui_react/src/components/RosterTableLayout.css` — Excel 式共用名冊表格排版抽象（欄寬拖曳與雙擊自動調寬、自訂顯示／隱藏與全選／取消全選、左側任意欄位凍結與累積 sticky offset、單行緊湊省略與本機 `localStorage` 持久化），供 `ClientRosterPage` 與 `StaffPage` 共用；不擁有業務規則或寫入操作。
 - shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。
 - shared presentation: `ui_react/src/components/UnsavedChanges.tsx`、`ui_react/src/components/UnsavedChanges.css` — 管理端表單提供草稿差異與原儲存狀態，shell 在切頁／Hash／登出前攔截，Drawer 與各 local navigation 在卸載前共用差異提示；儲存依 Global §2.4 單擊送出，內部使用既有 owner Preview／Apply，不要求人工預覽／核對。
 - primary: `ui_react/src/components/MasterLayout.tsx`

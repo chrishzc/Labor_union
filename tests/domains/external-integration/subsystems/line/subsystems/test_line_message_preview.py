@@ -268,7 +268,10 @@ def test_unused_identity_templates_are_hidden_without_removing_rule_backed_notif
     "LINE-ORDER-SERVICE-START-DAY-V1",
     "LINE-SECOND-PAYMENT-DUE-V1",
     "LINE-SECOND-PAYMENT-SETTLED-V1",
+    "LINE-SECOND-PAYMENT-SETTLED-TEXT-V1",
     "LINE-SERVICE-COMPLETION-V1",
+    "deposit-settled",
+    "payment-first-settled",
 ])
 def test_retired_group_notifications_are_absent_from_default_previews(key):
     from pathlib import Path
@@ -440,26 +443,21 @@ def test_deposit_and_service_progress_disclose_actual_public_substitutions():
     fields = {fact.id:fact.label for fact in reminder.facts}
     assert fields["訂金金額（新臺幣）（amount_ntd）"] == "6000"
     assert fields["繳費期限（due_date）"] == "2026-11-01"
-    settled = application.render("deposit-settled", None, None, None, actor(), sample=True)
-    assert "已確認入帳" in json.dumps(asdict(settled), ensure_ascii=False)
-    assert all("due_date" not in fact.id for fact in settled.facts)
+    with pytest.raises(MessagePreviewNotFound):
+        application.render("deposit-settled", None, None, None, actor(), sample=True)
     progress = application.render("service-progress", None, None, None, actor(), sample=True)
     assert "DEMO-CASE-001" in progress.text and "訂單成立" in progress.text
     assert len(progress.facts) == 4
 
 
-@pytest.mark.parametrize('key,decision', [
-    ('service-start-normal-received', 'normal'),
-    ('service-start-help-received', 'help'),
-])
-def test_start_day_acknowledgement_preview_reuses_committed_group_copy(key, decision, monkeypatch):
-    from subsystems.line import service_start_day
-    expected = service_start_day.start_day_response_text(decision)
-    application = app(factory=lambda: pytest.fail('fixed reply must not open a real reader'))
-    result = application.render(key, None, None, None, actor(), sample=True)
-    assert result.status == 'ready' and result.text == expected and result.facts == ()
-    monkeypatch.setattr(service_start_day, 'start_day_response_text', lambda actual: f'共用回覆：{actual}')
-    assert application.render(key, None, None, None, actor(), sample=True).text == f'共用回覆：{decision}'
+@pytest.mark.parametrize('key', ['service-start-normal-received', 'service-start-help-received'])
+def test_retired_start_day_acknowledgements_are_not_listed_or_rendered(key):
+    from subsystems.line.message_preview import MessagePreviewNotFound
+
+    application = app(factory=lambda: pytest.fail('retired reply must not open a real reader'))
+    assert key not in {item.id for item in application.catalog(actor())}
+    with pytest.raises(MessagePreviewNotFound):
+        application.render(key, None, None, None, actor(), sample=True)
 
 
 def test_substitute_and_date_record_preview_disclose_sparse_dates_and_caregiver():
@@ -494,20 +492,24 @@ def test_signing_reminder_preview_is_retired_and_other_messages_remain_available
 
     for stage,label,amount,recipient in [('deposit','訂金','6,000','客戶私人聊天室'),('first','第一期款','12,000','客戶私人聊天室'),('second','第二期款','8,000','客戶私人聊天室')]:
         result=application.render('payment-overdue-'+stage,None,None,None,actor(),sample=True)
-        assert label in result.text and amount in result.text
+        rendered = json.dumps(asdict(result), ensure_ascii=False)
+        assert label in rendered and amount in rendered
         assert any(fact.label==recipient for fact in result.facts)
 
 
 _READ_ONLY_FLOW_MESSAGES = {
-    "registration-approved-citizen": "服務登記與綁定成功",
-    "registration-approved-non-citizen": "案件編號：A000000",
     "staff-leave-completed": "您的請假申請已完成正式排班處理。",
     "complaint-handoff-received": "已轉接真人客服",
     "customer-service-ticket-reply": "工會會再與您確認服務安排",
 }
+_EDITABLE_FLOW_MESSAGES = {
+    "registration-approved-citizen": "服務登記與綁定成功",
+    "registration-approved-non-citizen": "案件編號：A000000",
+    "helper-satisfaction-survey": "本案服務已完成，感謝您使用工會的服務。",
+}
 
 
-@pytest.mark.parametrize("key, expected", _READ_ONLY_FLOW_MESSAGES.items())
+@pytest.mark.parametrize("key, expected", {**_READ_ONLY_FLOW_MESSAGES, **_EDITABLE_FLOW_MESSAGES}.items())
 def test_read_only_flow_previews_show_delivery_text_and_sample_facts(key, expected):
     result = app().render(key, None, None, None, actor(), sample=True)
     assert expected in result.text

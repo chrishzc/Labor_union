@@ -9,18 +9,20 @@
 管理端「案件群組」的綁定工作區僅觀察既有綁定，以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現；原服務日誌缺漏提醒已於 2026-11-10 隨日誌回歸群組相簿而退役移除，綁定工作區本身不增加群組 mutation。
 工會 LINE 工作台另以正式已核銷的未結案案件與現有群組綁定差集呈現「尚未建群」，server 分頁、
 零寫入，僅提供案號、已核銷金額及複製綁定指令；不要求客戶簽約或推進案件。
+工會 LINE 工作台「訂金已付尚未建群」另提供「開工問候未送出紀錄」，以唯讀分頁呈現無有效案件群組的略過紀錄，獨立於訂金待辦與件數。
 
 操作人員的 18 項群組設定完成、邀請排入、資格／設定與格式錯誤均使用既有純函式的固定中文；新提示只建立原群組、原事件的 Reply-only 工作，不讀通知文案設定，缺少或失敗 Reply 不補 Push。客戶／月嫂私人邀請卡仍沿原發送與可編輯文案契約，歷史設定不刪改。
 
 ## Implementation
 - domain: `domains/line/order_group.py`
 - application: `subsystems/line/order_group_application.py`
+- group_helper: `subsystems/line/group_helper_application.py` — 案件群組月嫂小幫手選單、確認開工日、雙方合意延期、服務排程、專員協助、常見問答及正式完工後由本案月嫂呼叫滿意度調查問卷（全程 Reply-only 零推播）
 - contracts: `subsystems/line/order_group_contracts.py`
 - audience adapter: `infrastructure/mysql/line_order_group_adapters.py`
 - persistence adapter: `infrastructure/mysql/line_media_order_group_repository.py`
 - transport: `api/routes/line_order_groups.py`, `api/schemas/line_order_groups.py`
-- staff todo transport: `api/routes/line_mobile_admin.py` — `/order-group-todos`，verified Admin／ORDER_GROUP_READ。
-- staff todo presentation: `line/static/mobile_admin.html` — 尚未建群分組，複製指令無外部效果。
+- staff todo transport: `api/routes/line_mobile_admin.py` — `/order-group-todos`，verified Admin／ORDER_GROUP_READ；`view=opening_greeting_skips` 查閱略過紀錄。
+- staff todo presentation: `line/static/mobile_admin.html` — 尚未建群分組、開工問候略過紀錄，複製指令無外部效果。
 - presentation: `ui_react/src/components/LineOrderGroupWorkbench.tsx`, `ui_react/src/components/LineOrderGroupWorkbench.css`
 - composition: `ui_react/src/pages/LineManagementPage.tsx` — order_groups branch only
 - typed client: `ui_react/src/api/line_order_groups/`
@@ -34,7 +36,9 @@
 - additive `/api/v1/line/order-groups/workspace/numbered`, `/workspace/{case_no}`, `/workspace/{case_no}/events/numbered`；舊 Query 不改義。
 - Query 固定 0 commit／receipt／outbox／provider call，不輸出群組 ID、LINE user ID、actor ID、邀請網址或指紋。
 - `paid_uncreated_todos` 只讀 canonical settled projection 且訂金金額大於零、正常未結案 Orders 及尚無 group_id；不將銀行待核銷或客戶自述視為已付。
+- `opening_greeting_skips` 只讀 `service_start_greeting_no_group` 稽核事件，投影案號和紀錄時間，不讀其他稽核種類或投遞記錄。
 - 成員為 Orders 目前客戶與指派月嫂；canonical role binding 與 owner projection 不一致時標未知。加入狀況只使用目前群組綁定版本之後的 membership 事件，不沿用舊群組的 joined 投影。
+- 問卷按鈕與 Postback 都驗證目前案件群組、正式完工狀態、有效服務排班與月嫂身分綁定。問卷回覆沿用通知與發送的可編文字範本，預設文案不含網址。
 
 ## Dependencies
 - outbound: `orders` — 提供訂單狀態與指派對象。
@@ -47,6 +51,7 @@
 - test_root: `tests/domains/external-integration/subsystems/line/modules/order-group-coordination/`
 - existing policy oracle: `tests/domains/external-integration/subsystems/line/domain/test_line_order_group_stage6.py`
 - ui integration: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_order_group_workbench.test.tsx`
+- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_group_helper_application.py`
 
 ## Provenance
 - responsibility and implementation paths: `source_observed`

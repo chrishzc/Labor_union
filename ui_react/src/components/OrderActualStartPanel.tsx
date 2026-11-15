@@ -4,6 +4,7 @@ import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
+import { OrderReadOnlyServiceDateCalendar } from './OrderServiceDateCalendar';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
@@ -319,14 +320,14 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
             ? <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
               <p>請核對各段服務日期；確認前不會儲存變更。</p>
-              <ol className="service-arrangement-correction-segments">
+              <div className="caregiver-schedule-blocks">
                 {preview.scheduling.assignments.map((assignment) => (
-                  <li key={assignment.candidate_key}>
-                    {staffNames[assignment.staff_id] ?? staffIdentity.label(assignment.staff_id)}：服務期間 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
-                    服務日 {assignment.service_dates.join('、')}
-                  </li>
+                  <section className="caregiver-schedule-block" key={assignment.candidate_key}>
+                    <header><h4>{staffNames[assignment.staff_id] ?? staffIdentity.label(assignment.staff_id)}</h4></header>
+                    <OrderReadOnlyServiceDateCalendar dates={assignment.service_dates} />
+                  </section>
                 ))}
-              </ol>
+              </div>
               <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
               <button type="button" disabled={busy || query?.service_data_locked}
                 onClick={() => void applyPreview()}>確認調整開始日與排班</button>

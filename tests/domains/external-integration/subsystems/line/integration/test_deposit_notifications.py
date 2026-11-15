@@ -1,4 +1,7 @@
-"""Deposit notifications preserve finance truth, customer ownership and durable delivery."""
+"""
+File: test_deposit_notifications.py
+Description: 驗證訂金繳費提醒、專人協助 Postback 與停用訂金入帳推播之整合測試。
+"""
 from dataclasses import replace
 from datetime import date, datetime, timezone, timedelta
 import json
@@ -9,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from domains.line.delivery import LineDeliveryStatus
+from domains.line.delivery import LineDeliveryRequest, LineDeliveryStatus, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineDeliveryTaskId, LineUserId, LineSourceType
 from domains.client_finance.reconciliation import PaymentStage
 from infrastructure.mysql.client_receipt_reconciliation_repository import MySqlClientReceiptReconciliationRepository
@@ -21,7 +24,7 @@ from infrastructure.mysql.payment_reminder_notification_repository import MySqlP
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
 from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineAuditRepository
-from shared_kernel.identities import ActorContext, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.delivery_worker import LineDeliveryWorker
@@ -137,6 +140,7 @@ def db():
     CREATE TABLE customer_service_tickets(id INTEGER PRIMARY KEY,line_user_id TEXT,category TEXT,status TEXT,version INTEGER,case_no TEXT);
     CREATE TABLE customer_service_ticket_events(ticket_id INTEGER,event_key TEXT);
     CREATE TABLE line_domain_audit_events(action TEXT,actor_id TEXT,aggregate_type TEXT,aggregate_identity TEXT);
+    CREATE TABLE line_command_receipts(idempotency_key TEXT PRIMARY KEY,command_family TEXT,payload_fingerprint TEXT,result_reference TEXT);
     ''')
     raw.execute("INSERT INTO orders(case_no,client_id,status) VALUES (?,1,'洽談中')", (CASE,))
     complete_contract(raw)
@@ -158,8 +162,23 @@ def queue_legacy_receipt(db):
     from subsystems.line.deposit_notifications import SETTLED,settlement_key
     with Uow(db) as unit:
         payment=unit.deposit_payments.get(CASE)
-        unit.delivery_tasks.enqueue(application(db)._request(payment,USER,SETTLED,settlement_key(payment),unit))
+        key=settlement_key(payment)
+        unit.delivery_tasks.enqueue(LineDeliveryRequest(
+            LineRecipient(LineRecipientType.USER,LineUserId(USER)),LineMessageKind.FLEX,'{}',
+            NOW,key,CorrelationId(key.value),SETTLED,payment_source(payment),
+        ))
         unit.commit()
+
+
+def test_deposit_settled_push_helpers_are_retired(db):
+    from subsystems.line.deposit_notifications import SETTLED, deposit_notification_payload, settlement_key
+    settle(db)
+    with Uow(db) as unit:
+        payment = unit.deposit_payments.get(CASE)
+        with pytest.raises(DepositNotificationConflict, match='deposit_settled_push_retired'):
+            application(db)._request(payment, USER, SETTLED, settlement_key(payment), unit)
+    with pytest.raises(DepositNotificationConflict, match='deposit_settled_push_retired'):
+        deposit_notification_payload(CASE, 12000, date(2026, 11, 1), SETTLED, 'https://example.invalid')
 
 
 def complete_contract(db, case_no=CASE):
@@ -252,11 +271,11 @@ def test_reminder_creates_committed_job_with_exact_text_and_buttons_no_finance_w
     assert status == 'pending' and task == 1
     job, = rows(db, 'line_delivery_tasks')
     payload = json.loads(job['payload_snapshot'])
-    assert payload['altText'] == '案件〈115000157〉訂金 NT$12,000，請於2026-11-01前完成匯款。'
+    assert payload['altText'] == '案件〈115000157〉訂金繳費提醒：NT$12,000'
     actions = payload['contents']['footer']['contents']
-    assert actions[0]['action']['label'] == '查看繳費資訊'
-    assert 'target=deposit_payment' in actions[0]['action']['uri'] and 'case_no=115000157' in actions[0]['action']['uri']
-    assert actions[1]['action'] == {'type':'postback','label':'專人協助','data':'deposit-assistance:115000157'}
+    assert len(actions) == 2
+    assert actions[0]['action'] == {'type':'postback','label':'已經匯款','data':'payment-ack:deposit:115000157','displayText':'已經匯款'}
+    assert actions[1]['action'] == {'type':'postback','label':'有疑問需要解決','data':'payment-assistance:deposit:115000157','displayText':'有疑問需要解決'}
     assert '99781699' not in job['payload_snapshot']
     assert rows(db, 'client_obligations') == before and not rows(db, 'client_ledger_entries')
     assert application(db).send_reminder(CASE, 2, IdempotencyKey('one'), ACTOR) == (task, status)
@@ -517,6 +536,19 @@ def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_lea
     completed = repository.followups(settled=True)
     assert completed.items == () and completed.page_total == completed.settled_total == 0
     assert completed.total == completed.unpaid_total == 1
+
+
+def test_deposit_receipt_ack_in_command_receipts_dismisses_settled_todo(db):
+    settle(db)
+    repository = Uow(db).deposit_notifications
+    assert len(repository.followups(settled=True).items) == 1
+    db.execute(
+        "INSERT INTO line_command_receipts(idempotency_key,command_family,payload_fingerprint,result_reference) VALUES (?,?,?,?)",
+        ('payment-receipt-ack:deposit:' + ('a' * 64), 'line_integration', 'b' * 64, 'deposit:' + ('a' * 64)),
+    )
+    db.commit()
+    assert repository.followups(settled=True).items == ()
+    assert not rows(db, 'line_delivery_tasks')
 
 
 def test_same_case_focus_filters_before_paging_and_exits_after_notice_sent(db):

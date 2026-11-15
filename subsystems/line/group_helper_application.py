@@ -1,0 +1,1275 @@
+"""
+File: group_helper_application.py
+Description: 處理案件群組月嫂小幫手選單、開工日、合意延期、排程與專員協助（零推播）。
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import date, datetime, timedelta, timezone
+import json
+import os
+import re
+from typing import Any, Callable
+from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
+
+from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineGroupId, LineSourceType, LineUserId
+from domains.line.identity_flow import LineIdentityFlowPurpose
+from domains.line.order_group import LineOrderGroupBindingStatus
+from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.scheduling.leave_result import LeaveDateChange, LeaveResultSubmission
+from domains.scheduling.service_start import (
+    ServiceStartConflict,
+    ServiceStartDecision,
+    ServiceStartSubmission,
+)
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
+from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+from subsystems.customer_service.escalation_application import complete_ticket_holds
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
+from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.navigation_catalog import load_persisted_aliases
+from subsystems.line.service_start_messages import (
+    HELPER_TEXT_DEFAULTS,
+    SATISFACTION_SURVEY_ACTION,
+    confirm_start_date_card,
+    group_guidelines_card,
+    group_helper_menu_card,
+    mutual_postponement_card,
+    satisfaction_survey_menu_row,
+    service_date_record,
+    service_schedule_calendar_card,
+)
+
+_ACTIVE_BINDING_STATUSES = frozenset({
+    LineOrderGroupBindingStatus.BOUND,
+    LineOrderGroupBindingStatus.INVITING,
+    LineOrderGroupBindingStatus.ACTIVE,
+    LineOrderGroupBindingStatus.ATTENTION,
+})
+_DEFAULT_MENU_ALIASES = ("小幫手", "工會", "月嫂選單", "服務選單")
+_DEFAULT_CLOSE_ALIASES = ("已處理結案", "專員已處理結案", "協助結案")
+_DEFAULT_POSTPONE_PREFIXES = ("雙方合意延期",)
+_POSTPONEMENT_RANGE_RE = re.compile(
+    r"[：:]\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*(?:順延至|延至|->|→)\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*$"
+)
+
+
+def _match_postponement_text(text: str, prefixes: tuple[str, ...]) -> re.Match[str] | None:
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        if text.startswith(prefix):
+            return _POSTPONEMENT_RANGE_RE.fullmatch(text[len(prefix):].lstrip())
+    return None
+_FAMILY_START_PROPOSAL = "group_helper_start_proposal"
+_FAMILY_POSTPONE_PROPOSAL = "group_helper_postpone_proposal"
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+
+def _extract_group_id(source: Any) -> str | None:
+    source_id = getattr(source, "source_id", None)
+    if isinstance(source_id, str) and source_id.strip():
+        return source_id.strip()
+    group_obj = getattr(source, "group_id", None)
+    group_val = getattr(group_obj, "value", None)
+    return group_val.strip() if isinstance(group_val, str) and group_val.strip() else None
+
+
+def _message_text(inbox: Any) -> str | None:
+    payload = json.loads(inbox.event.payload_json)
+    message = payload.get("message")
+    if not isinstance(message, dict) or message.get("type") != "text":
+        return None
+    text = message.get("text")
+    return text.strip() if isinstance(text, str) and text.strip() else None
+
+
+def _postback_info(inbox: Any) -> tuple[str, dict[str, Any]]:
+    payload = json.loads(inbox.event.payload_json)
+    postback = payload.get("postback")
+    if not isinstance(postback, dict):
+        return "", {}
+    data = postback.get("data")
+    params = postback.get("params")
+    return (
+        data.strip() if isinstance(data, str) else "",
+        params if isinstance(params, dict) else {},
+    )
+
+
+def _iso_date_or_none(raw: object) -> date | None:
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return date.fromisoformat(raw.strip()[:10])
+    except ValueError:
+        return None
+
+
+def _canonical_mode(service_type: str | None) -> str:
+    raw = (service_type or "").strip()
+    if "休假" in raw or "六日" in raw or "二日" in raw or "2日" in raw:
+        return "休六日"
+    return "休周日" if not raw else raw
+
+
+def _compute_expected_end_date(start_day: date, service_days: int, service_type: str | None) -> date:
+    from infrastructure.mysql.mysql_adapter import calculate_attendance_schedule
+
+    mode = _canonical_mode(service_type)
+    result = calculate_attendance_schedule(start_day, int(service_days or 20), mode)
+    end_val = _iso_date_or_none(result.get("actual_end_date"))
+    return end_val or (start_day + timedelta(days=max(0, int(service_days or 20) - 1)))
+
+
+def _default_staff_schedule_url(flow_id: str, case_no: str, mode: str) -> str:
+    query = urlencode({"flow_id": flow_id, "case_no": case_no, "mode": mode})
+    liff_id = os.getenv("LINE_STAFF_SCHEDULE_LIFF_ID", "").strip()
+    if liff_id and liff_id != "your_liff_id_here":
+        return f"https://liff.line.me/{liff_id}/?{query}"
+    base_url = (
+        os.getenv("LINE_PUBLIC_BASE_URL", "").strip()
+        or os.getenv("BASE_URL", "").strip()
+    ).rstrip("/")
+    placeholders = {"https://your-public-domain.example", "https://your-domain.example.com"}
+    if base_url and base_url not in placeholders:
+        return f"{base_url}/line-staff-schedule?{query}"
+    return f"http://127.0.0.1:8000/line-staff-schedule?{query}"
+
+
+def save_group_helper_proposal(
+    unit_of_work: Any,
+    family: str,
+    case_no: str,
+    event_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Append an immutable proposal snapshot for in-group start-date or postponement flows."""
+    conn = getattr(unit_of_work, "_connection", None)
+    fp = fingerprint_payload(payload).value
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    key_str = f"{family}:{case_no}:{event_id}"[:191]
+    corr_str = f"case:{case_no}"[:191]
+    ref_str = (
+        "cleared"
+        if payload.get("cleared")
+        else str(payload.get("start_date") or payload.get("leave_end_date") or "proposed")[:191]
+    )
+    if conn is not None:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM line_command_receipts WHERE idempotency_key=%s",
+                (key_str,),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "INSERT INTO line_command_receipts "
+                    "(idempotency_key,command_family,payload_fingerprint,result_reference,result_snapshot,correlation_id) "
+                    "VALUES (%s,%s,%s,%s,%s,%s)",
+                    (key_str, family, fp, ref_str, serialized, corr_str),
+                )
+        return
+    store = getattr(unit_of_work, "_helper_proposals", None)
+    if isinstance(store, dict):
+        store[(family, case_no)] = payload
+    receipts = getattr(unit_of_work, "receipts", None)
+    if receipts is not None:
+        from shared_kernel.fingerprints import PreviewFingerprint
+
+        key = IdempotencyKey(key_str)
+        if receipts.get(key) is None:
+            receipts.append(IdempotencyReceipt(key, PreviewFingerprint(fp), ref_str))
+
+
+def load_latest_group_helper_proposal(
+    unit_of_work: Any,
+    family: str,
+    case_no: str,
+) -> dict[str, Any] | None:
+    """Read the latest active (non-cleared) proposal snapshot for a case."""
+    conn = getattr(unit_of_work, "_connection", None)
+    if conn is not None:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT result_snapshot FROM line_command_receipts "
+                "WHERE command_family=%s AND correlation_id=%s ORDER BY id DESC LIMIT 1",
+                (family, f"case:{case_no}"[:191]),
+            )
+            row = cursor.fetchone()
+        if not row or not row.get("result_snapshot"):
+            return None
+        raw = row["result_snapshot"]
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(parsed, dict) or parsed.get("cleared"):
+            return None
+        return parsed
+    store = getattr(unit_of_work, "_helper_proposals", None)
+    if isinstance(store, dict):
+        parsed = store.get((family, case_no))
+        if isinstance(parsed, dict) and not parsed.get("cleared"):
+            return parsed
+    return None
+
+
+class LineGroupHelperApplication:
+    """Coordinate step-5 case-group helper menu & workflows using strict Reply-only delivery."""
+
+    def __init__(
+        self,
+        now: Callable[[], datetime] | None = None,
+        *,
+        service_start_factory: Callable[[Any], Any] | None = None,
+        staff_schedule_url: Callable[[str, str, str], str] | None = None,
+        aliases_provider: Callable[[], tuple[int, dict[str, list[str]]]] | None = None,
+    ) -> None:
+        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._service_start_factory = service_start_factory
+        self._staff_schedule_url = staff_schedule_url or _default_staff_schedule_url
+        self._aliases_provider = aliases_provider or load_persisted_aliases
+
+    def _business_today(self) -> date:
+        return self._now().astimezone(_TAIPEI_TZ).date()
+
+    def _aliases(self) -> dict[str, tuple[str, ...]]:
+        _, routes = self._aliases_provider()
+        return {
+            "group_helper_menu": tuple(routes.get("group_helper_menu") or _DEFAULT_MENU_ALIASES),
+            "group_postponement": tuple(routes.get("group_postponement") or _DEFAULT_POSTPONE_PREFIXES),
+            "staff_assistance_close": tuple(routes.get("staff_assistance_close") or _DEFAULT_CLOSE_ALIASES),
+        }
+
+    def handle_reply(self, inbox: Any, unit_of_work: Any) -> bool:
+        return self.handle_message(inbox, unit_of_work)
+
+    def handle_message(self, inbox: Any, unit_of_work: Any) -> bool:
+        event = inbox.event
+        if getattr(event.source, "source_type", None) is not LineSourceType.GROUP:
+            return False
+        group_id = _extract_group_id(event.source)
+        user_id_obj = getattr(event.source, "user_id", None)
+        user_id = getattr(user_id_obj, "value", None)
+        if not group_id or not user_id:
+            return False
+        text = _message_text(inbox)
+        if not text:
+            return False
+
+        aliases = self._aliases()
+        is_menu_cmd = text in aliases["group_helper_menu"]
+        is_close_cmd = text in aliases["staff_assistance_close"]
+        postpone_match = _match_postponement_text(text, aliases["group_postponement"])
+        if not (is_menu_cmd or is_close_cmd or postpone_match):
+            return False
+
+        ctx = self._resolve_group_context(unit_of_work, group_id, user_id)
+        if ctx is None:
+            return False
+
+        if is_menu_cmd:
+            if not (ctx["is_staff"] or ctx["is_customer"] or ctx["is_admin"] or ctx.get("can_share_satisfaction_survey")):
+                return False
+            self._reply_helper_menu(inbox, unit_of_work, group_id, ctx)
+            return True
+
+        if is_close_cmd:
+            if not ctx["is_admin"]:
+                return False
+            self._handle_close_assistance(inbox, unit_of_work, group_id, user_id, ctx)
+            return True
+
+        if postpone_match:
+            if not (ctx["is_staff"] or ctx["is_admin"]):
+                self._reply_text(
+                    inbox,
+                    unit_of_work,
+                    group_id,
+                    "「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期",
+                    "postpone-role-hint",
+                )
+                return True
+            raw_orig = [d.strip() for d in postpone_match.group(1).replace("、", ",").split(",") if d.strip()]
+            raw_new = [d.strip() for d in postpone_match.group(2).replace("、", ",").split(",") if d.strip()]
+            orig_days = [_iso_date_or_none(d) for d in raw_orig]
+            new_days = [_iso_date_or_none(d) for d in raw_new]
+            if not orig_days or not new_days or len(orig_days) != len(new_days) or any(d is None for d in orig_days + new_days):
+                return False
+            changes = [LeaveDateChange(o, n) for o, n in zip(orig_days, new_days)]  # type: ignore[arg-type]
+            self._propose_postponement(
+                inbox,
+                unit_of_work,
+                group_id,
+                ctx,
+                changes,
+            )
+            return True
+
+        return False
+
+    def handle_postback(self, inbox: Any, unit_of_work: Any) -> bool:
+        data, params = _postback_info(inbox)
+        if not data or not data.startswith(("group-helper:", "confirm-start:", "postponement:", "group-faq:")):
+            return False
+        event = inbox.event
+        if getattr(event.source, "source_type", None) is not LineSourceType.GROUP:
+            return True
+        group_id = _extract_group_id(event.source)
+        user_id_obj = getattr(event.source, "user_id", None)
+        user_id = getattr(user_id_obj, "value", None)
+        if not group_id or not user_id:
+            return True
+
+        ctx = self._resolve_group_context(unit_of_work, group_id, user_id)
+        if ctx is None:
+            return True
+
+        if data.startswith(f"{SATISFACTION_SURVEY_ACTION}:"):
+            if data == f"{SATISFACTION_SURVEY_ACTION}:{ctx['case_no']}" and ctx.get("can_share_satisfaction_survey"):
+                key = "helper-satisfaction-survey"
+                payload = configured_payload(unit_of_work, key, {"type": "text", "text": HELPER_TEXT_DEFAULTS[key]})
+                self._reply_text(inbox, unit_of_work, group_id, payload["text"], "satisfaction-survey")
+            return True
+
+        if data.startswith("group-helper:confirm-start-date"):
+            self._handle_confirm_start_pick(inbox, unit_of_work, group_id, ctx, data, params)
+            return True
+        if data == "confirm-start:agree":
+            self._handle_confirm_start_agree(inbox, unit_of_work, group_id, ctx)
+            return True
+        if data == "confirm-start:reselect":
+            save_group_helper_proposal(
+                unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"], event.event_id.value, {"cleared": True}
+            )
+            role_label = (
+                "工會專員"
+                if ctx["is_admin"]
+                else f"月嫂（{ctx['staff_name']}）"
+                if ctx["is_staff"]
+                else "客戶"
+                if ctx["is_customer"]
+                else "群組成員"
+            )
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                f"{role_label}已取消本次提議，雙方可再次點選小幫手重新選擇日期。",
+                "confirm-start-reselect",
+            )
+            return True
+        if data == "group-helper:service-schedule":
+            self._handle_service_schedule(inbox, unit_of_work, group_id, ctx)
+            return True
+        if data.startswith("group-helper:mutual-postponement"):
+            self._handle_mutual_postponement(inbox, unit_of_work, group_id, ctx, data)
+            return True
+        if data == "postponement:agree":
+            self._handle_postponement_agree(inbox, unit_of_work, group_id, ctx)
+            return True
+        if data == "postponement:reject":
+            save_group_helper_proposal(
+                unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"], event.event_id.value, {"cleared": True}
+            )
+            role_label = "客戶" if ctx.get("is_customer") else "月嫂" if ctx.get("is_staff") else "專員"
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                f"{role_label}已取消本次提議，原排程維持不變，雙方可再次點選小幫手重新選擇日期。",
+                "postponement-reject",
+            )
+            return True
+        if data == "group-helper:staff-assistance":
+            self._handle_staff_assistance(inbox, unit_of_work, group_id, user_id, ctx)
+            return True
+        if data == "group-helper:group-guidelines":
+            payload = configured_payload(unit_of_work, "helper-guidelines-card", group_guidelines_card())
+            self._reply_flex(inbox, unit_of_work, group_id, payload, "guidelines-card")
+            return True
+        if data.startswith("group-faq:"):
+            topic = data.split(":", 1)[1].strip()
+            key = f"helper-faq-{topic}"
+            default_text = HELPER_TEXT_DEFAULTS.get(key)
+            if default_text:
+                payload = configured_payload(unit_of_work, key, {"type": "text", "text": default_text})
+                self._reply_text(inbox, unit_of_work, group_id, payload["text"], f"faq-{topic}")
+            return True
+
+        return False
+
+    def _resolve_group_context(self, unit_of_work: Any, group_id: str, user_id: str) -> dict[str, Any] | None:
+        loader = getattr(unit_of_work, "group_helper_context", None)
+        binding_repo = getattr(unit_of_work, "order_groups", None)
+        binding = None
+        if binding_repo is not None:
+            if hasattr(binding_repo, "get_by_group"):
+                binding = binding_repo.get_by_group(group_id)
+            elif hasattr(binding_repo, "get_by_group_id"):
+                binding = binding_repo.get_by_group_id(group_id)
+        if binding is None:
+            return None
+        status = getattr(binding, "status", None) or getattr(binding, "binding_status", None)
+        if status not in _ACTIVE_BINDING_STATUSES and str(status) not in {s.value for s in _ACTIVE_BINDING_STATUSES}:
+            return None
+        case_no = str(binding.case_no)
+        if callable(loader):
+            return loader(case_no, user_id)
+
+        conn = getattr(unit_of_work, "_connection", None)
+        if conn is None:
+            return None
+        return self._load_mysql_context(conn, unit_of_work, case_no, user_id)
+
+    def _load_mysql_context(self, conn: Any, unit_of_work: Any, case_no: str, user_id: str) -> dict[str, Any] | None:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no,o.status,o.start_date,o.actual_start_date,o.actual_end_date,"
+                "o.service_days,o.lifecycle_version,o.client_id,c.service_type "
+                "FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s",
+                (case_no,),
+            )
+            order = cursor.fetchone()
+            if not order:
+                return None
+
+            cursor.execute(
+                "SELECT a.id AS assignment_id,a.staff_id,s.name AS staff_name,g.aggregate_version AS scheduling_version "
+                "FROM case_staff_assignments a "
+                "JOIN scheduling_aggregates g ON g.effective_generation_id=a.generation_id "
+                "JOIN staff s ON s.id=a.staff_id "
+                "WHERE a.case_no=%s ORDER BY a.assignment_sequence,a.id LIMIT 1",
+                (case_no,),
+            )
+            formal = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT ps.id AS segment_id,ps.staff_id,s.name AS staff_name,ps.assigned_start_date "
+                "FROM caregiver_matching_plans p "
+                "JOIN caregiver_matching_plan_segments ps ON ps.plan_id=p.id "
+                "JOIN staff s ON s.id=ps.staff_id "
+                "WHERE p.case_no=%s AND p.is_active=1 ORDER BY ps.segment_order,ps.id LIMIT 1",
+                (case_no,),
+            )
+            segment = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT 1 FROM scheduling_service_start_requests "
+                "WHERE case_no=%s AND status='applied' "
+                "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(execution_dates,'$.kind')),'')='' LIMIT 1",
+                (case_no,),
+            )
+            has_applied_start = cursor.fetchone() is not None
+
+            cursor.execute(
+                "SELECT day.work_date,day.is_work_day,a.staff_id,s.name AS staff_name FROM staff_schedule day "
+                "JOIN case_staff_assignments a ON a.id=day.assignment_id "
+                "LEFT JOIN staff s ON s.id=a.staff_id "
+                "JOIN scheduling_aggregates g ON g.effective_generation_id=a.generation_id "
+                "WHERE a.case_no=%s AND day.effective_marker=1 ORDER BY day.work_date",
+                (case_no,),
+            )
+            schedule_rows = list(cursor.fetchall() or ())
+
+            cursor.execute(
+                "SELECT subject_type,subject_reference FROM line_identity_role_bindings "
+                "WHERE line_user_id=%s AND binding_status='bound'",
+                (user_id,),
+            )
+            bindings = list(cursor.fetchall() or ())
+
+        staff_id = int((formal or segment or {}).get("staff_id") or 0) or None
+        staff_name = str((formal or segment or {}).get("staff_name") or "指派月嫂")
+        actual_start = _iso_date_or_none(order.get("actual_start_date"))
+        planned_start = (
+            actual_start
+            or _iso_date_or_none((segment or {}).get("assigned_start_date"))
+            or _iso_date_or_none(order.get("start_date"))
+            or self._business_today()
+        )
+        has_schedule_rows = any(r.get("is_work_day") for r in schedule_rows)
+        has_confirmed_start = bool(
+            has_applied_start
+            or (actual_start is not None and has_schedule_rows)
+        )
+        today = self._business_today()
+        # 消失條件：改成實際服務日開始後才隱藏（today >= actual_start 且已排定或服務中）
+        service_commenced = bool(
+            order.get("status") == "服務中"
+            or (has_confirmed_start and actual_start is not None and today >= actual_start)
+        )
+
+        is_admin = any(b.get("subject_type") == "admin" for b in bindings)
+        admin_ref = next((b.get("subject_reference") for b in bindings if b.get("subject_type") == "admin"), None)
+        admin_user_id = int(admin_ref) if isinstance(admin_ref, str) and admin_ref.isdigit() else None
+        is_staff = any(
+            b.get("subject_type") == "staff" and (staff_id is None or str(b.get("subject_reference")) == str(staff_id))
+            for b in bindings
+        )
+        if not is_staff and getattr(unit_of_work, "customer_service", None) is not None:
+            sub = unit_of_work.customer_service.staff_subject(user_id)
+            is_staff = bool(sub and (staff_id is None or int(sub["staff_id"]) == staff_id))
+
+        served_staff_ids = {str(row["staff_id"]) for row in schedule_rows if row.get("is_work_day")}
+        can_share_satisfaction_survey = order.get("status") == OrderLifecycleStatus.COMPLETED and any(
+            binding.get("subject_type") == "staff" and str(binding.get("subject_reference")) in served_staff_ids
+            for binding in bindings
+        )
+
+        client_id = order.get("client_id")
+        is_customer = any(
+            b.get("subject_type") == "customer"
+            and (client_id is None or str(b.get("subject_reference")) == str(client_id))
+            for b in bindings
+        )
+        if not is_customer and getattr(unit_of_work, "order_audiences", None) is not None:
+            try:
+                audience = unit_of_work.order_audiences.get(case_no)
+            except (LookupError, RuntimeError):
+                audience = None
+            if audience is not None and getattr(audience, "customer_line_user_id", None) == LineUserId(user_id):
+                is_customer = True
+
+        return {
+            "case_no": case_no,
+            "order_status": order.get("status"),
+            "order_version": int(order.get("lifecycle_version") or 0),
+            "client_id": int(client_id) if client_id is not None else None,
+            "service_days": int(order.get("service_days") or 20),
+            "service_type": order.get("service_type"),
+            "planned_start_date": planned_start,
+            "actual_end_date": _iso_date_or_none(order.get("actual_end_date")),
+            "staff_id": staff_id,
+            "staff_name": staff_name,
+            "segment_id": int(segment["segment_id"]) if segment and segment.get("segment_id") else None,
+            "assignment_id": int(formal["assignment_id"]) if formal and formal.get("assignment_id") else None,
+            "scheduling_version": int(formal["scheduling_version"]) if formal and formal.get("scheduling_version") is not None else 0,
+            "is_started": has_confirmed_start,
+            "has_confirmed_start": has_confirmed_start,
+            "service_commenced": service_commenced,
+            "schedule_rows": schedule_rows,
+            "is_staff": is_staff,
+            "can_share_satisfaction_survey": can_share_satisfaction_survey,
+            "is_customer": is_customer,
+            "is_admin": is_admin,
+            "admin_user_id": admin_user_id,
+        }
+
+    def _service_start_app(self, unit_of_work: Any) -> Any | None:
+        injected = getattr(unit_of_work, "service_start_workflow", None)
+        if injected is not None:
+            return injected
+        conn = getattr(unit_of_work, "_connection", None)
+        if self._service_start_factory is not None and conn is not None:
+            return self._service_start_factory(conn)
+        return None
+
+    def _reply_helper_menu(self, inbox: Any, unit_of_work: Any, group_id: str, ctx: dict[str, Any]) -> None:
+        case_no = ctx["case_no"]
+        staff_name = ctx["staff_name"]
+        payload = configured_payload(
+            unit_of_work,
+            "helper-menu-card",
+            group_helper_menu_card(case_no, staff_name),
+            {"case_no": case_no, "staff_name": staff_name},
+        )
+        card = deepcopy(payload)
+        bubble = card.get("contents", {}) if isinstance(card, dict) else {}
+        is_completed = ctx.get("order_status") == OrderLifecycleStatus.COMPLETED
+        is_commenced = is_completed or bool(ctx.get("service_commenced", ctx.get("is_started", False)))
+        for section_key in ("body", "footer"):
+            section = bubble.get(section_key)
+            if isinstance(section, dict) and isinstance(section.get("contents"), list):
+                section["contents"] = self._prepare_helper_menu_nodes(
+                    section["contents"],
+                    case_no=case_no,
+                    planned_start_date=str(ctx["planned_start_date"]),
+                    hide_confirm_start=is_commenced,
+                )
+        if ctx.get("can_share_satisfaction_survey"):
+            bubble["body"]["contents"].append(satisfaction_survey_menu_row(case_no))
+        if is_commenced and isinstance(bubble.get("header"), dict):
+            self._mark_started_header(bubble["header"], "服務已完成" if is_completed else "正式服務中")
+        elif ctx.get("has_confirmed_start") and isinstance(bubble.get("header"), dict):
+            self._mark_scheduled_header(bubble["header"])
+        self._reply_flex(inbox, unit_of_work, group_id, card, "helper-menu")
+
+    @classmethod
+    def _prepare_helper_menu_nodes(
+        cls,
+        nodes: list[Any],
+        *,
+        case_no: str,
+        planned_start_date: str,
+        hide_confirm_start: bool = False,
+        is_started: bool | None = None,
+    ) -> list[Any]:
+        should_hide = hide_confirm_start if is_started is None else is_started
+        filtered: list[Any] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                filtered.append(node)
+                continue
+            action = node.get("action")
+            action_data = str(action.get("data", "")) if isinstance(action, dict) else ""
+            if action_data.startswith("group-helper:confirm-start-date"):
+                if should_hide:
+                    # 實際服務日開始後自動隱藏【確認開工日】，保留【服務排程】讓雙方看已服務天數與排休日。
+                    continue
+                node["action"] = {
+                    "type": "datetimepicker",
+                    "label": action.get("label") or "確認開工日",
+                    "data": f"group-helper:confirm-start-date:{case_no}",
+                    "mode": "date",
+                    "initial": planned_start_date,
+                }
+            if should_hide and action_data == "group-helper:service-schedule":
+                cls._replace_exact_text(node, "查看預期排程（開工前）", "查看已服務天數、排休日與完工日")
+            if isinstance(node.get("contents"), list):
+                node["contents"] = cls._prepare_helper_menu_nodes(
+                    node["contents"],
+                    case_no=case_no,
+                    planned_start_date=planned_start_date,
+                    hide_confirm_start=should_hide,
+                )
+            filtered.append(node)
+        return filtered
+
+    @classmethod
+    def _mark_started_header(cls, header: dict[str, Any], status: str) -> None:
+        for item in header.get("contents", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("backgroundColor") == "#FBBF24":
+                inner = item.get("contents")
+                if isinstance(inner, list) and inner and isinstance(inner[0], dict) and inner[0].get("text") == "待確認開工":
+                    item["backgroundColor"] = "#10B981"
+                    inner[0]["text"] = status
+                    inner[0]["color"] = "#FFFFFF"
+            elif isinstance(item.get("contents"), list):
+                cls._mark_started_header(item, status)
+
+    @classmethod
+    def _mark_scheduled_header(cls, header: dict[str, Any]) -> None:
+        for item in header.get("contents", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("backgroundColor") == "#FBBF24":
+                inner = item.get("contents")
+                if isinstance(inner, list) and inner and isinstance(inner[0], dict) and inner[0].get("text") == "待確認開工":
+                    item["backgroundColor"] = "#0284C7"
+                    inner[0]["text"] = "已約定開工"
+                    inner[0]["color"] = "#FFFFFF"
+            elif isinstance(item.get("contents"), list):
+                cls._mark_scheduled_header(item)
+
+    @classmethod
+    def _replace_exact_text(cls, node: dict[str, Any], old_text: str, new_text: str) -> None:
+        if node.get("type") == "text" and node.get("text") == old_text:
+            node["text"] = new_text
+        for child in node.get("contents", []):
+            if isinstance(child, dict):
+                cls._replace_exact_text(child, old_text, new_text)
+
+    def _handle_confirm_start_pick(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        ctx: dict[str, Any],
+        data: str,
+        params: dict[str, Any],
+    ) -> None:
+        if not (ctx["is_staff"] or ctx["is_customer"] or ctx["is_admin"]):
+            return
+        if ctx.get("service_commenced", False):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "本案已於約定日期正式開工，如需調整排程請使用「雙方合意延期」。",
+                "confirm-start-already-started",
+            )
+            return
+        user_id_obj = getattr(inbox.event.source, "user_id", None)
+        user_id = getattr(user_id_obj, "value", str(user_id_obj or ""))
+        proposed_by = "admin" if ctx["is_admin"] else "staff" if ctx["is_staff"] else "customer"
+        parts = data.split(":")
+        picked = (
+            _iso_date_or_none(params.get("date"))
+            or (_iso_date_or_none(parts[2]) if len(parts) >= 3 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[-1]) else None)
+            or ctx["planned_start_date"]
+        )
+        end_day = _compute_expected_end_date(picked, ctx["service_days"], ctx.get("service_type"))
+        proposal = {
+            "case_no": ctx["case_no"],
+            "staff_id": ctx["staff_id"],
+            "staff_name": ctx["staff_name"],
+            "segment_id": ctx.get("segment_id"),
+            "assignment_id": ctx.get("assignment_id"),
+            "start_date": picked.isoformat(),
+            "end_date": end_day.isoformat(),
+            "proposed_by": proposed_by,
+            "proposer_user_id": user_id,
+        }
+        save_group_helper_proposal(
+            unit_of_work,
+            _FAMILY_START_PROPOSAL,
+            ctx["case_no"],
+            inbox.event.event_id.value,
+            proposal,
+        )
+        card = configured_payload(
+            unit_of_work,
+            "helper-confirm-start-card",
+            confirm_start_date_card(
+                ctx["case_no"],
+                ctx["staff_name"],
+                picked.isoformat(),
+                end_day.isoformat(),
+                proposed_by=proposed_by,
+            ),
+            {
+                "case_no": ctx["case_no"],
+                "staff_name": ctx["staff_name"],
+                "start_date": picked.isoformat(),
+                "end_date": end_day.isoformat(),
+            },
+        )
+        if proposed_by != "staff" and isinstance(card.get("contents"), dict):
+            bubble = card["contents"]
+            header = bubble.get("header")
+            if isinstance(header, dict) and isinstance(header.get("contents"), list):
+                top_row = header["contents"][0].get("contents", []) if isinstance(header["contents"][0], dict) else []
+                if top_row and isinstance(top_row[0], dict) and isinstance(top_row[0].get("contents"), list):
+                    top_row[0]["contents"][0]["text"] = "客戶已發起" if proposed_by == "customer" else "工會已協調"
+                if len(header["contents"]) > 2 and isinstance(header["contents"][2], dict):
+                    header["contents"][2]["text"] = "客戶已選定日期，請月嫂確認" if proposed_by == "customer" else "工會專員已選定日期，請雙方確認"
+            body = bubble.get("body")
+            if isinstance(body, dict) and isinstance(body.get("contents"), list) and len(body["contents"]) >= 2:
+                from subsystems.line.service_start_messages import _start_progress_card
+                body["contents"][1] = _start_progress_card("雙方合意確認進度：", staff_name=ctx["staff_name"], proposed_by=proposed_by)
+                if len(body["contents"]) >= 3 and isinstance(body["contents"][2], dict):
+                    body["contents"][2]["text"] = (
+                        "月嫂確認日期後系統將自動建立正式排程" if proposed_by == "customer" else "雙方同意後系統將自動建立正式排程"
+                    )
+        self._reply_flex(inbox, unit_of_work, group_id, card, "confirm-start-card")
+
+    def _handle_confirm_start_agree(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        ctx: dict[str, Any],
+    ) -> None:
+        user_id_obj = getattr(inbox.event.source, "user_id", None)
+        user_id = getattr(user_id_obj, "value", str(user_id_obj or ""))
+
+        if ctx.get("service_commenced", False):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "本案開工日已完成確認並建立正式排班，可點選「服務排程」查看。",
+                "confirm-start-already-done",
+            )
+            return
+
+        proposal = load_latest_group_helper_proposal(unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"])
+        if not proposal or proposal.get("cleared") or not proposal.get("start_date"):
+            return
+
+        proposed_by = str(proposal.get("proposed_by") or "staff")
+        proposer_user_id = str(proposal.get("proposer_user_id") or "")
+
+        # 防呆規則：工會管理員有代確認權限；一般成員若自己提申請又按同意，或同角色按同意，保持安靜不反應以維護聊天室整潔
+        if not ctx["is_admin"]:
+            if proposer_user_id and user_id == proposer_user_id:
+                return
+            if proposed_by == "staff":
+                if not ctx["is_customer"]:
+                    return
+            elif proposed_by == "customer":
+                if not ctx["is_staff"]:
+                    return
+            else:
+                if not (ctx["is_customer"] or ctx["is_staff"]):
+                    return
+
+        start_day = _iso_date_or_none(proposal["start_date"])
+        if not ctx["staff_id"] or start_day is None:
+            return
+
+        app = self._service_start_app(unit_of_work)
+        if app is None:
+            raise RuntimeError("group_helper_service_start_workflow_missing")
+        key = f"group-helper-start:{ctx['case_no']}:{inbox.event.event_id.value}"[:150]
+        try:
+            view = app.submit_in_current_unit_of_work(
+                ServiceStartSubmission(
+                    ctx["case_no"],
+                    int(ctx["staff_id"]),
+                    ctx.get("segment_id"),
+                    ServiceStartDecision.ACCEPTED,
+                    start_day,
+                    int(ctx["order_version"]),
+                    key,
+                    assignment_id=ctx.get("assignment_id"),
+                ),
+                enqueue_group_schedule=False,
+            )
+        except ServiceStartConflict as error:
+            self._reply_text(inbox, unit_of_work, group_id, f"開工確認未完成：{error.message}", "confirm-start-error")
+            return
+
+        if view.status == "substitute_required":
+            save_group_helper_proposal(
+                unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"], inbox.event.event_id.value, {"cleared": True}
+            )
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                f"⚠️ 案件 {ctx['case_no']} 偵測到月嫂排程檔期衝突，已為您轉交工會專員協助調整或安排代班。",
+                "confirm-start-conflict",
+            )
+            return
+
+        if view.status != "applied":
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                f"已收到案件 {ctx['case_no']} 開工確認，等候其他區段月嫂完成確認後將自動建立排班。",
+                "confirm-start-awaiting",
+            )
+            return
+
+        snapshot = view.result or {}
+        actual_start = str(snapshot.get("actual_start_date") or start_day.isoformat())
+        actual_end = str(
+            snapshot.get("actual_end_date")
+            or _compute_expected_end_date(start_day, ctx["service_days"], ctx.get("service_type")).isoformat()
+        )
+        save_group_helper_proposal(
+            unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"], inbox.event.event_id.value, {"cleared": True}
+        )
+        completed = configured_payload(
+            unit_of_work,
+            "helper-confirm-start-completed",
+            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-confirm-start-completed"]},
+            {"case_no": ctx["case_no"], "start_date": actual_start, "end_date": actual_end},
+        )
+        self._reply_text(inbox, unit_of_work, group_id, completed["text"], "confirm-start-completed")
+
+    def _handle_service_schedule(self, inbox: Any, unit_of_work: Any, group_id: str, ctx: dict[str, Any]) -> None:
+        if not ctx["is_started"]:
+            proposal = load_latest_group_helper_proposal(unit_of_work, _FAMILY_START_PROPOSAL, ctx["case_no"])
+            planned_start = (
+                _iso_date_or_none(proposal["start_date"])
+                if proposal and proposal.get("start_date")
+                else ctx["planned_start_date"]
+            )
+            planned_end = (
+                _iso_date_or_none(proposal["end_date"])
+                if proposal and proposal.get("end_date")
+                else _compute_expected_end_date(planned_start, ctx["service_days"], ctx.get("service_type"))
+            )
+            payload = configured_payload(
+                unit_of_work,
+                "helper-schedule-unconfirmed",
+                {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-schedule-unconfirmed"]},
+                {
+                    "case_no": ctx["case_no"],
+                    "start_date": planned_start.isoformat(),
+                    "end_date": planned_end.isoformat(),
+                },
+            )
+            self._reply_text(inbox, unit_of_work, group_id, payload["text"], "schedule-unconfirmed")
+            return
+
+        schedule_rows = ctx.get("schedule_rows") or ()
+        card = service_schedule_calendar_card(
+            ctx["case_no"],
+            schedule_rows,
+            default_staff_name=ctx.get("staff_name") or "指派月嫂",
+            today=self._business_today(),
+        )
+        self._reply_flex(inbox, unit_of_work, group_id, card, "service-schedule")
+
+    def _handle_mutual_postponement(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        ctx: dict[str, Any],
+        data: str,
+    ) -> None:
+        if not (ctx["is_staff"] or ctx["is_admin"]):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期",
+                "postpone-role-hint",
+            )
+            return
+
+        parts = data.split(":")
+        if len(parts) == 4:
+            orig_day = _iso_date_or_none(parts[2])
+            new_day = _iso_date_or_none(parts[3])
+            if orig_day and new_day:
+                self._propose_postponement(
+                    inbox, unit_of_work, group_id, ctx, [LeaveDateChange(orig_day, new_day)]
+                )
+                return
+
+        pending = load_latest_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"])
+        if pending and pending.get("dates"):
+            changes = [
+                LeaveDateChange(date.fromisoformat(d["original_date"]), date.fromisoformat(d["new_date"]))
+                for d in pending["dates"]
+                if d.get("original_date") and d.get("new_date")
+            ]
+            if changes:
+                self._propose_postponement(inbox, unit_of_work, group_id, ctx, changes)
+                return
+
+        staff_line_id = LineUserId(inbox.event.source.user_id.value)
+        event_id = inbox.event.event_id.value
+        flow_cmd = OpenLineIdentityFlowCommand(
+            LineIdentityFlowPurpose.STAFF_SELF_SERVICE,
+            staff_line_id,
+            self._now() + timedelta(minutes=30),
+            IdempotencyKey(f"group-helper-postpone-flow:{event_id}"),
+            CorrelationId(f"line-event:{event_id}"),
+        )
+        opened = unit_of_work.identity_flows.open(flow_cmd)
+        liff_url = self._staff_schedule_url(opened.flow_id.value, ctx["case_no"], "postpone")
+        guide_text = (
+            f"📅 案件 {ctx['case_no']} 雙方合意延期申請\n\n"
+            f"請月嫂開啟個人班表選擇「原本請假日」與「合意補班日」，系統會即時檢查您後續案件是否檔期衝突，並確保政府補助總天數與時數守恆：\n"
+            f"{liff_url}"
+        )
+        self._reply_text(inbox, unit_of_work, group_id, guide_text, "postpone-liff-link")
+
+    def _propose_postponement(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        ctx: dict[str, Any],
+        changes: list[LeaveDateChange],
+    ) -> None:
+        if not ctx["staff_id"] or not ctx.get("assignment_id"):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "本案尚未建立正式服務排班，尚無法辦理合意延期補班；如需調整開工日請直接於選單選擇「確認開工日」。",
+                "postpone-no-assignment",
+            )
+            return
+
+        app = self._service_start_app(unit_of_work)
+        arrangement = getattr(app, "arrangement", None)
+        if arrangement is not None and hasattr(arrangement, "preview_leave_defer"):
+            try:
+                preview = arrangement.preview_leave_defer(
+                    ctx["case_no"],
+                    int(ctx["staff_id"]),
+                    int(ctx["assignment_id"]),
+                    tuple(changes),
+                )
+            except ServiceStartConflict as error:
+                self._reply_text(
+                    inbox,
+                    unit_of_work,
+                    group_id,
+                    f"⚠️ 檔期檢核未通過：{error.message}",
+                    "postpone-preview-invalid",
+                )
+                return
+            if preview.get("conflict"):
+                self._reply_text(
+                    inbox,
+                    unit_of_work,
+                    group_id,
+                    f"⚠️ {preview.get('message', '此補班日已有檔期衝突，請重新與客戶協調其他日期！')}",
+                    "postpone-conflict",
+                )
+                return
+
+        leave_start_label = "、".join(str(item.original_date) for item in changes)
+        leave_end_label = "、".join(str(item.new_date) for item in changes)
+        proposal = {
+            "case_no": ctx["case_no"],
+            "staff_id": ctx["staff_id"],
+            "assignment_id": ctx["assignment_id"],
+            "dates": [{"original_date": str(c.original_date), "new_date": str(c.new_date)} for c in changes],
+            "leave_start_date": leave_start_label,
+            "leave_end_date": leave_end_label,
+        }
+        save_group_helper_proposal(
+            unit_of_work,
+            _FAMILY_POSTPONE_PROPOSAL,
+            ctx["case_no"],
+            inbox.event.event_id.value,
+            proposal,
+        )
+        card = configured_payload(
+            unit_of_work,
+            "helper-postponement-card",
+            mutual_postponement_card(ctx["case_no"], ctx["staff_name"], leave_start_label, leave_end_label),
+            {
+                "case_no": ctx["case_no"],
+                "staff_name": ctx["staff_name"],
+                "leave_start_date": leave_start_label,
+                "leave_end_date": leave_end_label,
+            },
+        )
+        self._reply_flex(inbox, unit_of_work, group_id, card, "postponement-card")
+
+    def _handle_postponement_agree(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        ctx: dict[str, Any],
+    ) -> None:
+        if ctx.get("is_staff") and not ctx.get("is_admin"):
+            # Caregiver proposed this postponement; caregiver clicking agree on their own proposal has no response (silent ignore to keep chat clean)
+            return
+        if not (ctx["is_customer"] or ctx["is_admin"]):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "請由客戶本人點選「同意延期補班」完成雙方確認。",
+                "postpone-need-customer",
+            )
+            return
+        proposal = load_latest_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"])
+        if not proposal or not proposal.get("dates"):
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "目前沒有待確認的延期提案，請月嫂先點選「雙方合意延期」選擇請假與補班日。",
+                "postpone-missing-proposal",
+            )
+            return
+
+        changes = tuple(
+            LeaveDateChange(date.fromisoformat(d["original_date"]), date.fromisoformat(d["new_date"]))
+            for d in proposal["dates"]
+        )
+        app = self._service_start_app(unit_of_work)
+        if app is None:
+            raise RuntimeError("group_helper_service_start_workflow_missing")
+        key = f"group-helper-postpone:{ctx['case_no']}:{inbox.event.event_id.value}"[:150]
+        try:
+            view = app.submit_leave_in_current_unit_of_work(
+                LeaveResultSubmission(
+                    ctx["case_no"],
+                    int(ctx["staff_id"]),
+                    int(proposal["assignment_id"]),
+                    "defer",
+                    changes,
+                    int(ctx["order_version"]),
+                    int(ctx["scheduling_version"]),
+                    key,
+                ),
+                enqueue_group_schedule=False,
+            )
+        except ServiceStartConflict as error:
+            self._reply_text(inbox, unit_of_work, group_id, f"延期補班未完成：{error.message}", "postpone-error")
+            return
+
+        save_group_helper_proposal(
+            unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"], inbox.event.event_id.value, {"cleared": True}
+        )
+        if view.status == "substitute_required":
+            self._reply_text(
+                inbox,
+                unit_of_work,
+                group_id,
+                "⚠️ 偵測到月嫂該日檔期衝突，原排班與補助天數尚未變更；請重新與月嫂協調其他補班日期，或由工會協助。",
+                "postpone-apply-conflict",
+            )
+            return
+
+        completed = configured_payload(
+            unit_of_work,
+            "helper-postponement-completed",
+            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-postponement-completed"]},
+            {
+                "case_no": ctx["case_no"],
+                "leave_start_date": proposal["leave_start_date"],
+                "leave_end_date": proposal["leave_end_date"],
+            },
+        )
+        self._reply_text(inbox, unit_of_work, group_id, completed["text"], "postpone-completed")
+
+    def _handle_staff_assistance(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        user_id: str,
+        ctx: dict[str, Any],
+    ) -> None:
+        event_id = inbox.event.event_id.value
+        case_no = ctx["case_no"]
+        unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id=user_id,
+                category=CustomerServiceCategory.SERVICE_PROGRESS,
+                message=f"案件 {case_no} 群組點選「專員協助」，請工會專員進群說明與協助處理。",
+                event_key=f"group-helper-assistance:{event_id}",
+                case_no=case_no,
+                client_id=ctx.get("client_id"),
+            )
+        )
+        ack = configured_payload(
+            unit_of_work,
+            "helper-staff-assistance-ack",
+            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-staff-assistance-ack"]},
+            {"case_no": case_no},
+        )
+        self._reply_text(inbox, unit_of_work, group_id, ack["text"], "staff-assistance-ack")
+
+    def _handle_close_assistance(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        user_id: str,
+        ctx: dict[str, Any],
+    ) -> None:
+        event_id = inbox.event.event_id.value
+        case_no = ctx["case_no"]
+        conn = getattr(unit_of_work, "_connection", None)
+        if conn is not None:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id FROM customer_service_tickets "
+                    "WHERE case_no=%s AND status IN ('waiting','handling') FOR UPDATE",
+                    (case_no,),
+                )
+                ticket_rows = list(cursor.fetchall() or ())
+            actor_ref = f"admin:{ctx['admin_user_id']}" if ctx.get("admin_user_id") else f"line:{user_id}"
+            for row in ticket_rows:
+                tid = int(row["id"])
+                ticket = unit_of_work.customer_service.get(tid, lock=True)
+                escalations = (
+                    unit_of_work.escalations.active_for_ticket(tid)
+                    if getattr(unit_of_work, "escalations", None) is not None
+                    else ()
+                )
+                unit_of_work.customer_service.append_management_event(
+                    tid,
+                    f"group-helper-close:{event_id}:{tid}",
+                    "status_changed",
+                    CustomerServiceStatus.RESOLVED.value,
+                    actor_ref,
+                )
+                updated = unit_of_work.customer_service.update(
+                    tid,
+                    ticket.version,
+                    CustomerServiceStatus.RESOLVED,
+                    "專員於案件群組輸入結案指令已處理完成",
+                    ctx.get("admin_user_id"),
+                )
+                if escalations:
+                    from types import SimpleNamespace
+
+                    cmd = SimpleNamespace(
+                        expected_version=SimpleNamespace(value=ticket.version),
+                        preview_fingerprint=fingerprint_payload({"case_no": case_no, "ticket_id": tid, "event_id": event_id}),
+                        idempotency_key=IdempotencyKey(f"group-close:{event_id}:{tid}"),
+                        correlation_id=CorrelationId(f"line-event:{event_id}"),
+                        actor_id=actor_ref,
+                    )
+                    complete_ticket_holds(unit_of_work, escalations, cmd, updated.version)
+        elif hasattr(unit_of_work.customer_service, "resolve_open_for_case"):
+            unit_of_work.customer_service.resolve_open_for_case(case_no, f"line:{user_id}", event_id)
+
+        closed = configured_payload(
+            unit_of_work,
+            "helper-staff-assistance-closed",
+            {"type": "text", "text": HELPER_TEXT_DEFAULTS["helper-staff-assistance-closed"]},
+            {"case_no": case_no},
+        )
+        self._reply_text(inbox, unit_of_work, group_id, closed["text"], "staff-assistance-closed")
+
+    def _reply_text(self, inbox: Any, unit_of_work: Any, group_id: str, text: str, tag: str) -> None:
+        self._enqueue_reply(
+            inbox,
+            unit_of_work,
+            group_id,
+            LineMessageKind.TEXT,
+            canonical_line_payload_json({"type": "text", "text": text}),
+            tag,
+        )
+
+    def _reply_flex(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        payload: dict[str, Any],
+        tag: str,
+    ) -> None:
+        self._enqueue_reply(
+            inbox,
+            unit_of_work,
+            group_id,
+            LineMessageKind.FLEX,
+            canonical_line_payload_json(payload),
+            tag,
+        )
+
+    def _enqueue_reply(
+        self,
+        inbox: Any,
+        unit_of_work: Any,
+        group_id: str,
+        kind: LineMessageKind,
+        payload_json: str,
+        tag: str,
+    ) -> None:
+        event_id = inbox.event.event_id.value
+        key = IdempotencyKey(f"group-helper:{event_id}:{tag}"[:191])
+        unit_of_work.delivery_tasks.enqueue(
+            LineDeliveryRequest(
+                LineRecipient(LineRecipientType.GROUP, LineGroupId(group_id)),
+                kind,
+                payload_json,
+                inbox.event.occurred_at,
+                key,
+                CorrelationId(f"line-event:{event_id}"),
+                REPLY_ONLY_WEBHOOK_SOURCE,
+                event_id,
+            )
+        )
+
+
+__all__ = [
+    "LineGroupHelperApplication",
+    "load_latest_group_helper_proposal",
+    "save_group_helper_proposal",
+]

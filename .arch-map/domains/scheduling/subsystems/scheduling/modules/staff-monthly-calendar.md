@@ -14,6 +14,7 @@
   - `api/schemas/staff_monthly_schedule.py`
   - `ui_react/src/api/scheduling/staff_monthly_schedule_client.ts`
   - `ui_react/src/adapters/scheduling/historical_assignment_overlay_adapter.ts`
+  - `line/static/service-date-calendar.js`、`line/static/service-date-calendar.d.ts`、`line/static/service-date-calendar.css` — 訂單工作台與合意延期 LIFF 共用的月份格線、檔期標示投影及樣式。
 - entrypoints:
   - `ui_react/src/pages/SchedulingPage.tsx`
   - `ui_react/src/pages/SchedulingPage.css`
@@ -24,6 +25,7 @@
 - outbound: `orders/operational-stage-projection` — 排查案件選項依十三核心階段的正式 current ordinal 限定在第 8「訂金」之前。
 - outbound: `orders/historical-precision-restart` — 重啟使舊歷史指派區段失效。歷史未服務案的唯讀預定沿目前有效的重啟世代保留，待正式班表接手。
 - inbound: Scheduling UI — 只透過 typed monthly endpoint 讀取投影，不直接讀 persistence facts。
+- inbound: `orders/service-date-confirmation`、`scheduling/leave-substitution` — 共用月曆呈現，各自透過既有查詢取得檔期資料。
 
 ## Contracts
 - 名冊先讀完 bounded Staff summary cursor 全部頁面，再依 Staff-owned `union_no` 自然升冪排列，未設定排最後；日曆、排查與代班選單使用「公會編號 姓名」，搜尋比對公會編號，不以內部 STF 代碼代替。

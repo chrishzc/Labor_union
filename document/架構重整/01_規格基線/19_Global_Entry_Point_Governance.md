@@ -23,12 +23,12 @@
 - `data-import`
 - `reports`
 - `line-management` — 客服與營運（客服案件、身分與授權、案件群組）
-- `line-notifications` — 通知與寄送（通知與發送、寄送與異常）
+- `line-notifications` — 通知與寄送（[通知與發送及範本分類](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)、寄送與異常）
 - `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖、引導動作）。引導動作分頁可用 `#line-interface?tab=guidance` 直接開啟。
 - `line-ai-events` — AI 客服工作室（常見問答、回答測試、回饋分析、模型設定）
 - `finance`
 - `accounting-parameters`
-- `payment-reminder-settings` — 帳務通知排程條件與 10 則帳務 LINE 範本設定
+- `payment-reminder-settings` — 帳務通知排程與通知條件
 - `database-backup` — 每日備份時間與狀態（owner 為 [NAS Fresh 初始化與維護復原](10A_NAS_Fresh初始化與維護復原規格.md)）
 - `account-management`
 - `contract-templates`

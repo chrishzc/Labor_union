@@ -1,4 +1,7 @@
-/** Verify the selected Staff drawer renders the bounded authenticated profile. */
+/**
+ * File: staff_profile_flow.test.tsx
+ * Description: 驗證月嫂名冊讀取、公會編號排序、抽屜未儲存防護與共用 Excel 式欄寬顯示凍結排版。
+ */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
 import { staffRegistryClient } from '../../../../../../../api/staff_registry/staff_registry_client';
@@ -19,6 +22,7 @@ import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/sta
 
 describe('Staff roster profile flow', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
@@ -231,5 +235,60 @@ describe('Staff roster profile flow', () => {
     expect(within(screen.getByRole('table', { name: '月嫂名冊清單' })).getByText(/T01 six region final/)).toBeInTheDocument();
     expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('資格證明：托育人員證照');
 
+  });
+
+  it('supports shared Excel-style column visibility, freeze, resizer drag, and reset layout', async () => {
+    render(<UnsavedChangesProvider><StaffPage /></UnsavedChangesProvider>);
+    const table = await screen.findByRole('table', { name: '月嫂名冊清單' });
+
+    const initialHeaders = within(table).getAllByRole('columnheader');
+    expect(initialHeaders).toHaveLength(30);
+    expect(initialHeaders[0]).toHaveTextContent('公會編號');
+    expect(initialHeaders[0]).toHaveClass('is-sticky-col');
+    expect(initialHeaders[0].style.left).toBe('0px');
+
+    fireEvent.click(screen.getByRole('button', { name: /自訂顯示與凍結欄位 \(30\/30\)/ }));
+    const picker = screen.getByRole('dialog', { name: '自訂顯示與凍結欄位' });
+
+    fireEvent.click(within(picker).getByRole('button', { name: '取消全選' }));
+    const lockedOnlyHeaders = within(table).getAllByRole('columnheader');
+    expect(lockedOnlyHeaders).toHaveLength(2);
+    expect(lockedOnlyHeaders[0]).toHaveTextContent('公會編號');
+    expect(lockedOnlyHeaders[1]).toHaveTextContent('操作');
+
+    fireEvent.click(within(picker).getByRole('button', { name: '全選' }));
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(30);
+
+    fireEvent.click(within(picker).getByRole('button', { name: '凍結姓名' }));
+    const frozenHeaders = within(table).getAllByRole('columnheader');
+    expect(frozenHeaders[0]).toHaveTextContent('公會編號');
+    expect(frozenHeaders[1]).toHaveTextContent('姓名');
+    expect(frozenHeaders[1]).toHaveClass('is-sticky-col');
+    expect(frozenHeaders[1].style.left).toBe('115px');
+
+    fireEvent.click(within(picker).getByRole('button', { name: '清除凍結' }));
+    expect(within(table).getAllByRole('columnheader')[0]).not.toHaveClass('is-sticky-col');
+    fireEvent.click(within(picker).getByRole('button', { name: '關閉' }));
+
+    const resizer = table.querySelector('.roster-col-resizer[data-resizer-col="display_name"]') as HTMLElement;
+    expect(resizer).not.toBeNull();
+    expect((table.querySelectorAll('colgroup col')[1] as HTMLTableColElement).style.width).toBe('115px');
+    fireEvent.mouseDown(resizer, { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 185 });
+    fireEvent.mouseUp(window);
+    expect((table.querySelectorAll('colgroup col')[1] as HTMLTableColElement).style.width).toBe('200px');
+
+    const persisted = JSON.parse(window.localStorage.getItem('lu.roster.layout.staff.v1') ?? '{}') as {
+      frozenIds?: string[];
+      widths?: Record<string, number>;
+    };
+    expect(persisted.frozenIds).toEqual([]);
+    expect(persisted.widths?.display_name).toBe(200);
+
+    fireEvent.click(screen.getByRole('button', { name: '重設預設排版' }));
+    const resetHeaders = within(table).getAllByRole('columnheader');
+    expect(resetHeaders).toHaveLength(30);
+    expect(resetHeaders[0]).toHaveClass('is-sticky-col');
+    expect((table.querySelectorAll('colgroup col')[1] as HTMLTableColElement).style.width).toBe('115px');
   });
 });

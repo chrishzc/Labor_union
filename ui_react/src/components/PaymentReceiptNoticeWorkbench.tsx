@@ -1,4 +1,7 @@
-/** Committed receipt todos require a human click; queries never send. */
+/**
+ * File: PaymentReceiptNoticeWorkbench.tsx
+ * Description: 提供各期帳款已入帳待辦檢視與「已於官方帳號發送／標記已通知」確認消除。
+ */
 import { useEffect,useRef,useState } from 'react';
 import { createPortal } from 'react-dom';
 import { paymentReceiptClient,type PaymentReceiptClient,type PaymentReceiptPage,type PaymentReceiptTodo,type ReceiptFocus } from '../api/line_order_groups/payment_receipt_notification_client';
@@ -21,16 +24,16 @@ export function PaymentReceiptNoticeWorkbench({revision,expanded=false,client=pa
   useEffect(()=>{const node=dialog.current;if(!node)return;if(opened&&!node.open)node.showModal();if(!opened&&node.open)node.close();},[opened]);
   async function send(item:PaymentReceiptTodo){
     if(sending.current)return;sending.current=true;setBusy(true);setError('');setNotice('');
-    try{await client.send(item);setNotice(`${item.payment.case_no} ${labels[item.payment.payment_stage]}入帳通知已建立人工寄送工作，尚未證明送達。`);setReload(value=>value+1);}
+    try{await client.send(item);setNotice(`${item.payment.case_no} ${labels[item.payment.payment_stage]}入帳通知已標記為已於官方帳號發送，待辦已消除。`);setReload(value=>value+1);}
     catch(caught){if(caught instanceof ApiHttpError&&caught.status===409){setData(null);setReload(value=>value+1);setError('帳款或寄送狀態已變更，請核對最新待辦。');}
-      else if(caught instanceof ApiHttpError&&caught.status===403)setError('目前帳號沒有發送入帳通知的權限。');
-      else setError('寄送結果尚未確認；再次點擊會確認同一筆操作，不重複建立。');}
+      else if(caught instanceof ApiHttpError&&caught.status===403)setError('目前帳號沒有標記入帳通知的權限。');
+      else setError('標記結果尚未確認；再次點擊會確認同一筆操作，不重複建立。');}
     finally{sending.current=false;setBusy(false);}
   }
-  const contents=<><p>帳款已正式核銷，請核對案件與金額後手動發送客戶私訊。稍後處理仍會保留待辦。</p>
+  const contents=<><p>帳款已正式核銷，請於 LINE 官方帳號聊天室使用預設訊息手動通知客戶後，點選下方按鈕消除待辦。稍後處理仍會保留待辦。</p>
     {Object.keys(focus).length>0&&<button type="button" disabled={busy} onClick={()=>{setFocus({});setPage(1);}}>查看全部入帳通知</button>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
-    {data&&<><p>共 {data.total} 筆待確認。</p><div className="receipt-notice-scroll"><table className="finance-table"><thead><tr><th>案件／期別</th><th className="finance-num">入帳金額</th><th>操作</th></tr></thead><tbody>{data.items.map(item=><tr key={identity(item)}><td>{item.payment.case_no}<br/>{labels[item.payment.payment_stage]}</td><td className="finance-num">NT$ {item.payment.amount_ntd.toLocaleString('zh-TW')}</td><td><button type="button" disabled={busy||!item.can_send} onClick={()=>void send(item)}>發送入帳通知</button>{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}</td></tr>)}</tbody></table></div>{!data.items.length&&<p>目前沒有待發送的入帳通知。</p>}
+    {data&&<><p>共 {data.total} 筆待確認。</p><div className="receipt-notice-scroll"><table className="finance-table"><thead><tr><th>案件／期別</th><th className="finance-num">入帳金額</th><th>操作</th></tr></thead><tbody>{data.items.map(item=><tr key={identity(item)}><td>{item.payment.case_no}<br/>{labels[item.payment.payment_stage]}</td><td className="finance-num">NT$ {item.payment.amount_ntd.toLocaleString('zh-TW')}</td><td><button type="button" disabled={busy||!item.can_send} onClick={()=>void send(item)}>已於官方帳號發送／標記已通知</button>{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}</td></tr>)}</tbody></table></div>{!data.items.length&&<p>目前沒有待標記的入帳通知。</p>}
       {data.total>data.page_size&&<nav aria-label="入帳通知分頁"><button type="button" disabled={busy||page===1} onClick={()=>setPage(value=>value-1)}>上一頁</button><span>第 {page} 頁</span><button type="button" disabled={busy||page*data.page_size>=data.total} onClick={()=>setPage(value=>value+1)}>下一頁</button></nav>}</>}
     <button type="button" disabled={busy} onClick={()=>setReload(value=>value+1)}>重新整理入帳待辦</button></>;
   return <section className="receipt-notice-workspace" aria-label="入帳通知待辦">

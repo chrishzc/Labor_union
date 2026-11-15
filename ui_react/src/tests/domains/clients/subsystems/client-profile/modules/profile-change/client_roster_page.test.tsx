@@ -1,3 +1,7 @@
+/**
+ * File: client_roster_page.test.tsx
+ * Description: 驗證客戶名冊分頁查詢、欄位篩選排序、共用 Excel 式欄寬／顯示／凍結排版及詳情抽屜互動。
+ */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { ClientRosterPage } from '../../../../../../../pages/ClientRosterPage';
@@ -42,6 +46,7 @@ describe('ClientRosterPage', () => {
   let termsQuery: MockInstance<typeof orderTermsMutationClient.query>;
 
   beforeEach(() => {
+    window.localStorage.clear();
     termsQuery = vi.spyOn(orderTermsMutationClient, 'query').mockResolvedValue(orderTerms);
     mocks.list.mockReset();
     mocks.query.mockReset();
@@ -558,6 +563,78 @@ describe('ClientRosterPage', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('選項查詢失敗');
     expect(within(dialog).getByRole('button', { name: '確定' })).toBeDisabled();
     expect(mocks.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports shared Excel-style column visibility, arbitrary freeze, resizer drag, and reset layout', async () => {
+    mocks.list.mockResolvedValue({
+      items: [item],
+      next_cursor: null,
+      next_offset: null,
+    });
+
+    render(<ClientRosterPage />);
+    const table = await screen.findByRole('table', { name: /^客戶名冊清單/ });
+
+    const initialHeaders = within(table).getAllByRole('columnheader');
+    expect(initialHeaders).toHaveLength(19);
+    expect(initialHeaders[0]).toHaveClass('is-sticky-col');
+    expect(initialHeaders[0].style.left).toBe('0px');
+
+    fireEvent.click(screen.getByRole('button', { name: /自訂顯示與凍結欄位 \(19\/19\)/ }));
+    const picker = screen.getByRole('dialog', { name: '自訂顯示與凍結欄位' });
+
+    fireEvent.click(within(picker).getByRole('button', { name: '取消全選' }));
+    const lockedOnlyHeaders = within(table).getAllByRole('columnheader');
+    expect(lockedOnlyHeaders).toHaveLength(1);
+    expect(lockedOnlyHeaders[0]).toHaveTextContent(/^案件編號/);
+
+    fireEvent.click(within(picker).getByRole('button', { name: '全選' }));
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(19);
+
+    fireEvent.click(within(picker).getByRole('button', { name: '凍結客戶姓名' }));
+    const frozenHeaders = within(table).getAllByRole('columnheader');
+    expect(frozenHeaders[0]).toHaveTextContent(/^案件編號/);
+    expect(frozenHeaders[1]).toHaveTextContent(/^客戶姓名/);
+    expect(frozenHeaders[1]).toHaveClass('is-sticky-col');
+    expect(frozenHeaders[1].style.left).toBe('120px');
+
+    fireEvent.click(within(picker).getByRole('button', { name: '清除凍結' }));
+    expect(within(table).getAllByRole('columnheader')[0]).not.toHaveClass('is-sticky-col');
+    fireEvent.click(within(picker).getByRole('button', { name: '關閉' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '客戶姓名篩選' }));
+    const nameFilterDialog = await screen.findByRole('dialog', { name: '客戶姓名篩選選項' });
+    fireEvent.click(within(nameFilterDialog).getByRole('button', { name: '📌 凍結此欄' }));
+    const reorderedHeaders = within(table).getAllByRole('columnheader');
+    expect(reorderedHeaders[0]).toHaveTextContent(/^客戶姓名/);
+    expect(reorderedHeaders[0]).toHaveClass('is-sticky-col');
+
+    fireEvent.click(screen.getByRole('button', { name: '服務天數篩選' }));
+    const daysFilterDialog = await screen.findByRole('dialog', { name: '服務天數篩選選項' });
+    fireEvent.click(within(daysFilterDialog).getByRole('button', { name: /隱藏此欄/ }));
+    expect(within(table).queryByRole('columnheader', { name: /^服務天數/ })).not.toBeInTheDocument();
+
+    const resizer = table.querySelector('.roster-col-resizer[data-resizer-col="name"]') as HTMLElement;
+    expect(resizer).not.toBeNull();
+    expect((table.querySelectorAll('colgroup col')[0] as HTMLTableColElement).style.width).toBe('110px');
+    fireEvent.mouseDown(resizer, { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 190 });
+    fireEvent.mouseUp(window);
+    expect((table.querySelectorAll('colgroup col')[0] as HTMLTableColElement).style.width).toBe('200px');
+
+    const persisted = JSON.parse(window.localStorage.getItem('lu.roster.layout.client.v1') ?? '{}') as {
+      frozenIds?: string[];
+      widths?: Record<string, number>;
+    };
+    expect(persisted.frozenIds).toEqual(['name']);
+    expect(persisted.widths?.name).toBe(200);
+
+    fireEvent.click(screen.getByRole('button', { name: '重設預設排版' }));
+    const resetHeaders = within(table).getAllByRole('columnheader');
+    expect(resetHeaders).toHaveLength(19);
+    expect(resetHeaders[0]).toHaveTextContent(/^案件編號/);
+    expect(resetHeaders[0]).toHaveClass('is-sticky-col');
+    expect(within(table).getByRole('columnheader', { name: /^服務天數/ })).toBeInTheDocument();
   });
 });
 

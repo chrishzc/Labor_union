@@ -17,8 +17,8 @@
 
 1. **Webhook Reply 與 Push 分工**：所有 Reply 在 Webhook 處理當次事件時發送（45 秒時窗、1 次嘗試、同事件／同聊天室檢核）。月嫂「可以接案」與「無法接案」皆先提交意願，再送原文案。逾時或失敗不補 Push；主動通知、卡片本體與定時排程由背景處理。詳見 [LINE 客服與月嫂自助服務規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 2. **現行可配置通知與退役項目**：
-   - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組），以及獨立管理契約下的訂金／一期／二期人工逾期提醒與人工收據（`LINE-PAY-01`～`08`）。
-   - 已全面退役項目：加入好友即時歡迎訊息（改由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（改回 LINE 群組相簿人工查閱）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播、銀行核銷後自動代發收據、開工當天群組詢問 Push（`order.service_start_day`；舊訊息按鈕仍只以 Reply 確認）、正常完工滿意度群組問卷通知（`order.service_completed`），以及第二期款群組通知（`client.second_payment_due`／`client.second_payment_settled` 群組來源停止投影，改走客戶私訊排程與 `LINE-PAY-08` 人工收據，流程與第一期一致；規則儲存不另行封鎖）。
+   - 保留可配置項目：管理員個人重大異常／客訴告警（不發群組）、[各期繳款提醒及人工入帳通知](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)、[開工當天群組問候](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。範本編輯與公版見[通知與發送](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#5-rich-menu通知文案編輯與表格圖片)。
+   - 已全面退役項目：加入好友即時歡迎訊息（由 LINE 官方帳號設定）、群組異常告警與群組一次性審核連結、三日延遲引導排程（`D+1`～`D+3`）、月嫂寶寶日誌表單與連續缺漏 3 天催繳提醒（由人工查閱群組相簿）、候選池為空固定推播、媒合成功／薪資異常／閒置客服自動推播、銀行核銷後自動代發收據及三期入帳確認系統 Push、完工事件自動推播問卷（`order.service_completed`）及第二期款群組通知（`client.second_payment_due`／`client.second_payment_settled`）。
 3. **群組設定與合成 Fixture 驗收原則**：服務群組綁定指令（`綁定訂單 案件編號 邀請網址` 與 `發送邀請`）依 [`17A_LINE_Gateway_Inbox與通知投遞正式規格.md`](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)；`development` 環境得依 [`10_Global_保留資料Migration與Cutover_Subsystem.md`](10_Global_保留資料Migration與Cutover_Subsystem.md) 於本機受控資料庫使用 owner typed fixture producer 建立含 canonical IDs 之測試實例，嚴禁由 Notification 端偽造媒合、請假或薪資業務決策。
 
 ## 2. 逐節點驗收欄位與通過基準
@@ -84,7 +84,7 @@ flowchart TD
 |---|---|
 | `Register_Form` / 待審儲存 | 依 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md) `REG-BOUNDARY`／`REG-REDIS`／`REG-EXPIRY`：表單送出後存於無 MySQL 憑證之專用持久化 Redis（14 天自動到期清理）；待工會核准時才經 Case Import writer 寫入 MySQL 正式客戶／訂單並依回執刪除待審資料，拒絕亦立即刪除。 |
 | `Profile_Update_Page` / `order_update` | 聯絡資訊與退費欄位由 `profile_update` 負責；服務地址、縣市、居住型態由 `order_update`（純 URI 入口，無五按鈕與服務天數）申請並產生 Diff 工單，依訂單鎖定狀態檢核，經工會核准後方更新對應 owner（不適用 14 天 Redis 清理）。 |
-| `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、`staff_schedule`（`leave-v1`／`SSTART-01`～`08`）與 `staff_payout`（`staff_payout.html`）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
+| `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、只讀 `staff_schedule` 與 `staff_payout`（`staff_payout.html`），開工日與請假延期改由案件群組小幫手選單操作（0 Push 額度）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
 | `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 綁定 `union_staff_menu` 開啟 `line-mobile-admin` 四頁籤；群組輸入拒絕發放。 |
 | 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
 
@@ -117,19 +117,25 @@ flowchart TD
   B -->|接受配對| D["保存接受決策；待辦轉簽約，簽約與訂金可交錯；滿 7 天未接僅內部提醒"]
   D --> S["外部平台簽署與簽回確認（依簽約規格）"]
   D --> E["訂金正式核銷後由工會建置案件服務群組"]
-  E --> F["開工前／當日雙方於群組協調日期 → 月嫂由 LIFF 提交（SSTART-01～08）"]
-  F -->|無衝突| G["同交易更新排班／帳務／一期款到期日並寄群組日期表"]
+  E --> F["月嫂於群組呼叫小幫手選單（0 Push）→【確認開工日】滾輪選定日期 → 對方點選同意（防自提自審）"]
+  F -->|無衝突| G["同交易更新排班／帳務／一期款到期日並 Reply 生效（開工後隱藏確認開工日，保留服務排程）"]
   F -->|衝突或需代班| H["工會待辦尋人 → 願意 → 寄群組邀請 → 入群後工會登錄日期與日期表"]
+  G --> I["開工當天：群組收到一則純文字問候，第一期款有餘額才併入提醒"]
+  I -->|第一期仍逾期| J["第一期款逾期提醒：客戶私訊"]
+  I -->|第一期核銷| K["第一期款入帳：官方帳號人工發送，系統標記已通知"]
+  J -->|第一期核銷| K
 ```
 
 - 簽約節點依 [簽約正式規格 §3.2–3.4](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#32-目前資料投影缺值提醒與瀏覽器-a4-列印) 驗收，並核對 LINE 流程圖的官方帳號手動範本指引。
-- 正式服務中請假同樣採 `leave-v1`（見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §4.2）；任何排班與協調決策不得跨過 Scheduling／Orders canonical writer 直接修改表單根欄位。
+- LINE 流程圖「開始服務」顯示開工當天群組純文字問候的兩種公版。「持續服務與異動」在第二期款前顯示第一期款逾期與入帳節點，分別標示私訊提醒及官方帳號人工發送。依[群組開工問候投遞規格](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)和[第一期款通知規格](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)驗收。
+- LINE 流程圖「完工與結案」依[滿意度調查問卷規格](20_LINE客服與月嫂自助服務正式規格.md#44-滿意度調查問卷)呈現群組 Reply 並連至文案維護。「帳務結算與結案」呈現內部作業，取消結算通知依[既有人工發送入口](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)驗收。
+- 正式服務中排班調整採群組選單【雙方合意延期】（僅限月嫂由 Flex URI Action 免費開啟、LIFF 嚴格鎖定本案與客戶開啟阻擋、後台日曆多天成對調整且天數守恆，無衝突後由客戶確認生效，0 Push 額度），以及【專員協助】（雙管理端立待辦、後台可調結案指令）與【使用說明／常見疑問標準回答】（見 [`20_LINE客服與月嫂自助服務正式規格.md`](20_LINE客服與月嫂自助服務正式規格.md) §4.1–4.2）；任何排班與協調決策不得跨過 Scheduling／Orders canonical writer 直接修改表單根欄位。
 
 ## 6. 模組四（M4）：工會雙管理端、個人告警與代班拆帳
 
-- **雙管理端協同**：電腦版 Web 後台處理媒合排班、代班／換人、財務對帳（`WF-01`～`06`）、客戶客服清單、推播佇列追蹤與 `LINE-PAY-01`～`08` 繳款提醒／人工收據；手機端 `line-mobile-admin` 提供 `staff_review`、`customer_service`、`order_tracking` 與 `dashboard`（頂端含已退役系統告警之收合系統狀態摘要卡）。
+- **雙管理端協同**：電腦版 Web 後台處理媒合排班、代班／換人、財務對帳（`WF-01`～`06`）、客戶客服清單、推播佇列追蹤與 `LINE-PAY-01`～`08` 繳款提醒／入帳待辦確認（三期入帳改於 LINE 官方帳號手動發送後點擊標記已通知）；手機端 `line-mobile-admin` 提供 `staff_review`、`customer_service`、`order_tracking` 與 `dashboard`（頂端含已退役系統告警之收合系統狀態摘要卡）。
 - **個人化安全告警**：群組告警與群組一次性審核連結已全面取消。重大客訴或 `LINE-006` 異常只針對已設定管理員個人對象投遞去敏摘要及需驗證之管理入口；當下無有效個人設定對象時保留內部事件追蹤，嚴禁猜測發往任意群組。
-- **代班與換人帳務邊界**：代班確認加入並於 Scheduling 登錄實際服務日／交接日完成後，各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不補發額外財務完成推播（收據僅按 `LINE-PAY-08` 人工發送）。
+- **代班與換人帳務邊界**：代班確認加入並於 Scheduling 登錄實際服務日／交接日完成後，各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不建立系統入帳推播（`LINE-PAY-08` 僅保留入帳待辦提醒與標記已通知結案）。
 
 ## 7. Current 正式契約對照與架構不變量
 

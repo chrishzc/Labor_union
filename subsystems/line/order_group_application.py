@@ -35,6 +35,7 @@ from subsystems.line.capabilities import (
     require_line_capability,
 )
 from subsystems.line.order_group_contracts import (
+    OpeningGreetingSkipPage,
     PaidOrderGroupTodoPage,
     BindLineOrderGroupCommand,
     GetLineOrderGroupQuery,
@@ -45,10 +46,24 @@ from subsystems.line.order_group_contracts import (
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
 from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.navigation_catalog import route_aliases
 
 _BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
 _INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
 _INVITATION_URL_REQUIRED = "請先設定本群組邀請網址。\n" + _BIND_FORMAT
+
+
+def _group_command_aliases() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    bind_aliases = tuple(route_aliases("order_group_bind") or ("綁定訂單",))
+    invite_aliases = tuple(route_aliases("order_group_invite") or ("發送邀請",))
+    return bind_aliases, invite_aliases
+
+
+def _matched_prefix(text: str, prefixes: tuple[str, ...]) -> str | None:
+    return next(
+        (prefix for prefix in sorted(prefixes, key=len, reverse=True) if text.startswith(prefix)),
+        None,
+    )
 _SAFE_RUNTIME_ERRORS = {
     "order_line_audience_not_ready", "cancelled_order_cannot_bind_line_group",
     "settled_deposit_required_for_line_group",
@@ -72,7 +87,10 @@ class LineOrderGroupApplication:
 
     def handle_reply(self, inbox, unit_of_work) -> bool:
         text = _message_text(inbox)
-        if text and text.startswith(("綁定訂單", "發送邀請")):
+        if not text:
+            return False
+        bind_aliases, invite_aliases = _group_command_aliases()
+        if _matched_prefix(text, bind_aliases) is not None or _matched_prefix(text, invite_aliases) is not None:
             return self.handle_message(inbox, unit_of_work)
         return False
 
@@ -83,19 +101,29 @@ class LineOrderGroupApplication:
         text = _message_text(inbox)
         if text is None:
             return False
-        is_bind_command = text.startswith("綁定訂單")
-        is_invite_command = text.startswith("發送邀請")
+        bind_aliases, invite_aliases = _group_command_aliases()
+        matched_bind = _matched_prefix(text, bind_aliases)
+        matched_invite = _matched_prefix(text, invite_aliases)
+        is_bind_command = matched_bind is not None
+        is_invite_command = not is_bind_command and matched_invite is not None
         if text == _ALERT_TARGET_COMMAND:
             return True  # Retired command: no registration, reply or delivery intent.
         if not (is_bind_command or is_invite_command):
             return False
         try:
             if is_bind_command:
-                case_no, invitation_url = _parse_binding(text)
+                case_no, invitation_url = _parse_binding(text, bind_aliases)
                 self._bind(inbox, unit_of_work, case_no, invitation_url)
             elif is_invite_command:
-                if text != "發送邀請":
-                    raise LineOrderGroupCommandRejected(_INVITE_COMMAND_FORMAT)
+                if text not in invite_aliases:
+                    primary_invite = invite_aliases[0]
+                    primary_bind = "綁定訂單" if "綁定訂單" in bind_aliases else bind_aliases[0]
+                    hint = (
+                        _INVITE_COMMAND_FORMAT
+                        if primary_invite == "發送邀請" and primary_bind == "綁定訂單"
+                        else f"邀請指令只需輸入「{primary_invite}」。\n首次設定或更新網址請使用：\n格式：{primary_bind} 案件編號 邀請網址"
+                    )
+                    raise LineOrderGroupCommandRejected(hint)
                 self._relay(inbox, unit_of_work)
         except (LookupError, PermissionError, RuntimeError, ValueError) as error:
             # Persistence failures must reach the outer consumer and roll back.
@@ -258,6 +286,11 @@ class LineOrderGroupQueryApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.order_groups.paid_uncreated_todos(page=page, page_size=page_size)
 
+    def opening_greeting_skips(self, actor: ActorContext, *, page: int, page_size: int) -> OpeningGreetingSkipPage:
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.order_groups.opening_greeting_skips(page=page, page_size=page_size)
+
     def workspace_list(
         self, actor: ActorContext, *, search: str | None, status: str | None,
         page: int, page_size: int,
@@ -387,29 +420,36 @@ def _safe_error_message(error: Exception) -> str:
     return messages.get(str(error), "操作無法完成，請至 LINE 管理中心查看。")
 
 
-def _parse_binding(text: str) -> tuple[str, str]:
-    parts = text.split()
+def _parse_binding(text: str, bind_prefixes: tuple[str, ...] = ("綁定訂單",)) -> tuple[str, str]:
+    matched = _matched_prefix(text, bind_prefixes)
+    remainder = text[len(matched):] if matched is not None else text
+    args = remainder.split() if (matched is not None and (remainder == "" or remainder[0].isspace())) else []
     reason = None
-    if parts[0] != "綁定訂單":
+    if matched is None or (remainder != "" and not remainder[0].isspace()):
         reason = "請在指令、案件編號與網址之間加空白或換行。"
-    elif len(parts) == 1:
+    elif len(args) == 0:
         reason = "請填寫案件編號與邀請網址。"
-    elif len(parts) == 2:
-        reason = ("請填寫案件編號。" if parts[1].startswith("http")
-                  else "請在案件編號與網址之間加空白或換行。" if "https://" in parts[1]
+    elif len(args) == 1:
+        reason = ("請填寫案件編號。" if args[0].startswith("http")
+                  else "請在案件編號與網址之間加空白或換行。" if "https://" in args[0]
                   else "請貼上本群組邀請網址。")
-    elif len(parts) > 3:
+    elif len(args) > 2:
         reason = "請只填寫案件編號與一個完整邀請網址；網址中間不要換行或加空白。"
-    elif not re.fullmatch(r"[A-Za-z0-9_-]{1,50}", parts[1]):
+    elif not re.fullmatch(r"[A-Za-z0-9_-]{1,50}", args[0]):
         reason = "案件編號格式不正確。"
     else:
         try:
-            validate_invitation_url(parts[2])
+            validate_invitation_url(args[1])
         except ValueError:
             reason = "邀請網址格式不正確，請從本群組複製完整的 LINE 群組邀請連結。"
     if reason is not None:
-        raise LineOrderGroupCommandRejected(reason + "\n" + _BIND_FORMAT)
-    return parts[1], parts[2]
+        hint = _BIND_FORMAT if (matched or "綁定訂單") == "綁定訂單" else (
+            f"格式：{matched} 案件編號 邀請網址\n"
+            f"例如：{matched} 115000157 https://line.me/R/ti/g/xxxxx\n"
+            "各項之間可用空白或換行，網址請完整貼上。"
+        )
+        raise LineOrderGroupCommandRejected(reason + "\n" + hint)
+    return args[0], args[1]
 
 
 def group_invitation_delivery_is_current(unit_of_work, task) -> bool:

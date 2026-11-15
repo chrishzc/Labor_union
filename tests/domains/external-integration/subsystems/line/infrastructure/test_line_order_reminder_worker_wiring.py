@@ -15,15 +15,14 @@ from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
 
 
-def test_canonical_group_postback_routes_to_start_day_application(monkeypatch):
-    calls=[]
-    monkeypatch.setattr(line_worker_operation,'ServiceStartDayPostbackApplication',
-        lambda:SimpleNamespace(handle=lambda event,unit:calls.append((event,unit)) or True))
-    consumer=line_worker_operation._event_consumer('synthetic-group-postback',lambda:NOW)
-    event=SimpleNamespace(event=SimpleNamespace(event_type='postback'))
-    unit=object()
-    assert consumer._dispatcher.dispatch(event,unit).status.value=='processed'
-    assert calls==[(event,unit)]
+def test_canonical_group_postback_consumes_retired_start_day_without_side_effects():
+    consumer = line_worker_operation._event_consumer('synthetic-group-postback', lambda: NOW)
+    event = SimpleNamespace(event=SimpleNamespace(
+        event_type='postback', payload_json='{"postback":{"data":"start-day:old:help"}}',
+    ))
+    assert consumer._dispatcher.dispatch(event, object()).status.value == 'processed'
+    immediate = line_worker_operation.webhook_reply_dispatcher(lambda: NOW, lambda *_: False)
+    assert immediate(event, object())
 
 
 def test_retired_order_group_source_worker_is_not_registered(

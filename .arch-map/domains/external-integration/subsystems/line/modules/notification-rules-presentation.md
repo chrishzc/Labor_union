@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-2026-10-30 最新人工補充：原「通知與發送」完整工作台維持 LINE push_queue；訂金首次提醒、第一期繳款提醒／結清問候、第二期到期提醒與三期逾期提醒以及訂金／第一期／第二期入帳通知共十則，獨立由帳務警示「提醒內容」組裝。共用編輯元件以封閉 scope 分離目錄，帳務不查其他通知規則或歡迎訊息；沿用原文案、公版預覽、revision／writer 與草稿。只有這些款項內容的 LINE 深連結與流程選取導向帳務，其餘仍在 LINE。帳務組裝入口由 payment-overdue-reminders module 擁有，本 module 繼續擁有既有通知內容編輯及預覽。
+「通知與發送」統一維護一般訊息及帳務提醒、開工純文字問候、取消結算範本，支援帳務與身分綁定類別、訊息格式及搜尋。流程圖與既有帳務範本深連結均定位原文案編輯及公版，沿用 revision、writer 與草稿。帳務保留排程入口。各期入帳確認以官方帳號人工發送呈現，系統不提供入帳範本；完工問卷公版沿群組 Reply 節點查閱，取消結算範本仍在通知與發送。
 統一 LINE-owned 通知與卡片內容維護，直接編輯各則文字並預覽；既有規則欄位收在發送設定，依 Global §2.4 一次點擊送出、原因選填，內部仍沿用zero-write Preview與同一候選的Save／Delete及closed結果，不設人工再次確認。加入好友歡迎訊息已退役（改由 LINE 官方帳號設定，`/api/v1/line/onboarding` 回傳 410），通知工作台與公版目錄不再查詢或列出歡迎詞，並於目錄補入 `identity-customer-link`。卡片說明文字由新通知組裝時讀取目前訊息設定，案件欄位／回覆操作仍由原流程決定。一般畫面不得顯示typed error code、raw backend／provider detail；不得改寫revision、fingerprint、idempotency、已提交通知或工作快照。
 
 「通知與發送」採清單、inline 編輯與手機預覽整合工作台。依 2026-10-22 最新人工裁決，工作台改用明確標示的公版範例，以無業務 DB 能力的 typed sample port 重用原純組裝函式；欄位表列出中文名稱、變數／路徑與帶入值。移除真實案件／月嫂選取與資格限制，不建立投遞任務、操作憑證、異動稽核或 provider effect。既有 record API 保留原 readonly 契約，工作台不再呼叫。
@@ -32,7 +32,8 @@
   - `subsystems/line/message_copy.py` — 文案預設、三身分成功設定、原交易內設定讀取，以及僅 display text 的欄位投影／替換；不處理 provider action。
   - `subsystems/line/message_copy_catalog.py` — 明列目前內建訊息的虛擬 genesis、卡片欄位與共用純替換，保留動態區塊及舊工作快照。
   - `infrastructure/mysql/line_message_copy.py` — 借用原 connection 的設定 reader；不另開 writer／commit。
-  - shared dependency: `subsystems/line/service_start_day.py::start_day_response_text` — 服務當天群組受理回覆由原 owner 提供純文案；代班／群組日期公版明列指定日期及月嫂欄位。
+  - shared dependency: `subsystems/line/service_start_day.py` — 開工群組問候與第一期款提醒共用純文字組裝；代班／群組日期公版明列指定日期及月嫂欄位。
+- `subsystems/line/service_start_messages.py` — 開始服務階段代班徵詢與步驟 5 案件群組小幫手選單、確認開工日、雙方合意延期、專員協助及使用說明／常見疑問標準回答之純組裝與預設文案。
   - `infrastructure/mysql/line_message_preview_repository.py` — readonly transaction、參數化分頁、owner facts 與既有付款 source 轉接。
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`
@@ -47,7 +48,7 @@
   - `subsystems/line/message_configuration.py` — notification_description 消費同一版本化文字設定；genesis 沿用既有設定檔。
   - `subsystems/line/staff_leave_customer_coordination.py` — 新請假確認卡片只替換說明文字，不變更日期、對象或 postback。
 
-服務完工滿意度問卷群組邀請已於 2026-11-12 退役，不再提供規則維護；歷史設定僅供讀取。
+完工問卷以群組小幫手 Reply，流程圖連至「通知與發送」的可編輯文字範本。完工事件自動推播規則維持禁用。
 
 流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」舊連結及 API 解析至唯一 `service-menu` 設定，目錄不再列獨立 `service-other`；訂單異動導覽只提供正式 LIFF URI，舊五按鈕文案作唯讀投影，服務流程及收費補助統一導向 AI 客服 LIFF；`service-flow`／`service-payment` 不再列入公版、文案編輯或預設模板，客服流程只保留維護位置說明。資料修改與訂單修改受理通知仍可編輯，歷史設定不刪除。
 
@@ -77,3 +78,5 @@ Reconcile when unified notification content presentation、configured card copy�
 2026-10-30：目錄與文案編輯清單排除重大客訴／系統異常管理員告警模板及 runtime-system-health。流程圖改為主動查看系統／客服狀態；保留歷史設定，不提供重新啟用 Push。
 
 2026-10-30 最新裁決：18 項給操作人員的 group-bound／group-invitations-queued／group-error-*／group-format-* 改固定 Reply-only，目錄、default copy 與舊編輯／公版入口均移除。管理員告警 rule 文案 Query／PUT 同樣關閉，保留原設定及歷史；客戶／月嫂邀請與有效業務通知不變。
+
+2026-11-14 擴充：步驟 5（開始服務）補齊案件群組小幫手選單卡（`helper-menu-card`）、開工日確認卡與自動排班回覆（`helper-confirm-start-*`）、未確認開工日排程提示（`helper-schedule-unconfirmed`）、雙方合意延期確認與回覆（`helper-postponement-*`）、專員協助受理與結案回覆（`helper-staff-assistance-*`）及使用說明與客戶常見疑問標準回答（`helper-guidelines-card`、`helper-faq-*`）之文案編輯、變數插入與公版預覽支援；流程圖步驟 5 直接導向編輯工作台，小幫手選單與專員結案回覆並提示前往 `#line-interface?tab=guidance` 調整觸發／結案指令。

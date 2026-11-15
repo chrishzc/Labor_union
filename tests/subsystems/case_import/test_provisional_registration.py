@@ -276,11 +276,13 @@ class _ApplicationConnection:
         class Cursor:
             rowcount = 0
             lastrowid = 0
+            _return_none = False
             def __enter__(self): return self
             def __exit__(self, *_): return False
             def execute(self, sql, args=()):
                 connection.statements.append((sql, args))
                 self.rowcount = 0
+                self._return_none = sql.lstrip().upper().startswith("SELECT ") and "provisional_client_registrations" not in sql
                 if sql.startswith("INSERT IGNORE INTO provisional_client_registrations"):
                     if connection.record is None:
                         self.rowcount = 1
@@ -302,7 +304,8 @@ class _ApplicationConnection:
                     self.rowcount = 1
                 elif not sql.startswith("SELECT "):
                     raise AssertionError(f"unexpected registration write: {sql}")
-            def fetchone(self): return connection.copy(connection.record)
+            def fetchone(self):
+                return None if self._return_none else connection.copy(connection.record)
         return Cursor()
 
     def begin(self):

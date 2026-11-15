@@ -46,7 +46,7 @@
   ```text
   completion_instant = actual_end_date + service_end_day_offset + service_end_time  # Asia/Taipei
   ```
-- **唯一正式持久化入口**：`AutoCompleteOrderService` 於單一 outer UoW 鎖定 lifecycle aggregate、effective Scheduling generation、assignment-owned 正式服務日、`actual_end_date`、完整時段 tuple 與 active controls，當 `evaluation_at >= completion_instant` 且無 `auto_complete` blocker（與 Scheduling 請假代班原子序列化 CAS Orders version），轉為 `訂單完成` 並立即建立 `order_service_data_locks` 凍結服務日期、時數、服務單價與樓層費（非財務聯絡個資仍可獨立更正）；同時寫出 `line_service_completion_notification=true` outbox 觸發原案件群組單次完工滿意度問卷通知（見 [LINE 客服與月嫂自助服務 §4.4](20_LINE客服與月嫂自助服務正式規格.md)）。
+- **唯一正式持久化入口**：`AutoCompleteOrderService` 於單一 outer UoW 鎖定 lifecycle aggregate、effective Scheduling generation、assignment-owned 正式服務日、`actual_end_date`、完整時段 tuple 與 active controls，當 `evaluation_at >= completion_instant` 且無 `auto_complete` blocker（與 Scheduling 請假代班原子序列化 CAS Orders version），轉為 `訂單完成` 並立即建立 `order_service_data_locks` 凍結服務日期、時數、服務單價與樓層費（非財務聯絡個資仍可獨立更正）。完工 outbox 保留 `line_service_completion_notification=true` 標記。LINE 投遞依 [Gateway 正式規格](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#2-line-webhook-inbox-與-delivery-task-骨架)。
 - **完工帳務交接**：同一交易先同步正式月嫂應付，再由原帳務規則檢查已確認的補助方案。轉付月嫂承接有效補助分期，先墊後退須有客戶實際墊款才建立正式退款，政府直付或方案未確認時不建立客戶補助退款。
 - **唯讀狀態查詢**：`GET /api/v1/orders/{case_no}/service-completion` 回報權威完成時刻與目前進度，不設一般工作台人工「辦理完工確認」步驟（由背景 durable discovery 委派 canonical handler 自動評估）。
 - **完工後服務日更正（`official-service-dates`）**：僅限已完成案件，在不涉及調整、補助退還等價格變動前提下，依守恆天數經 Scheduling replacement 更新各 assignment 服務日並推進 `actual_end_date`（保留原 completion event 與 `order_service_data_locks`，零新建金融義務）。
@@ -81,7 +81,7 @@
 - **Cancellation（未完整履約前適用）**：
   - Preview 鎖定 Taipei 業務日，對已開始服務者預填截至當日之實際排定日＋月嫂（供確認增減並允許 0 日完全未履約取消），並由具權限工會人員逐案輸入取消違約金（不收為 `0`，收取輸入正整數 NTD＋必填原因；一般取消原因選填）。
   - Preview 明確列示服務應付 `S`、違約金 `F`、淨實收 `R`、應退／應補收與 Client Finance 必填 `direction`（`refund_due | additional_charge_due | no_finance_change`）＋ `direction_amount_ntd`。
-  - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務，正式提交與全額結清後依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md) 提供 LINE 私訊通知客戶按鈕。
+  - Apply 在單一 outer transaction 保存取消事件、解除等待鎖、更新實際服務 assignments 與雙邊義務。取消結算通知依 [LINE 客服與月嫂自助服務 §4.5](20_LINE客服與月嫂自助服務正式規格.md#45-月嫂薪資明細查詢與訂單異動通知)。
 - **Controlled Reopen**：管理端入口位於客戶名冊的「訂單取消」案件詳情上方。僅受理尚未發生取消正式退款、沖正或結算之取消案；備註選填（空白則系統稽核補記「系統記錄受控重開訂單」）；追加 reopen event、不刪取消歷史、不恢復舊排班／等待鎖／分期（已有退款、沖正或結算須另建新案）。
 
 ### 3.7 Typed Endpoints、Errors、純函式 Modules 與 Writer Exit

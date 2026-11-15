@@ -107,15 +107,16 @@ def test_identity_page_safely_extracts_typed_errors_for_flow_commands() -> None:
 
 def test_identity_preview_maps_machine_statuses_to_business_labels() -> None:
     source = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
-    preview_text = source.split("function identityPreviewText(endpoint, preview)", 1)[1].split(
+    labels_block = source.split("const identityPreviewStatusLabels = {", 1)[1].split("};", 1)[0]
+    require_preview = source.split("function requireIdentityPreview(result)", 1)[1].split(
         "async function submitForm", 1
     )[0]
 
-    assert 'matched: "已找到可綁定資料"' in source
-    assert 'requires_review: "需要工會人員確認"' in source
-    assert "Object.hasOwn(identityPreviewStatusLabels, preview.status)" in source
-    assert "檢查結果：${identityPreviewStatusLabels[preview.status]}" in preview_text
-    assert "預覽狀態：${preview.status}" not in preview_text
+    assert 'authentication_pending: "等待套用時驗證管理員帳號"' in labels_block
+    assert 'matched: "已找到可綁定資料"' in labels_block
+    assert 'requires_review: "需要工會人員確認"' in labels_block
+    assert "Object.hasOwn(identityPreviewStatusLabels, preview.status)" in require_preview
+    assert "預覽狀態：" not in source
 
 
 def test_flow_validation_route_translates_expired_flow_to_http_410(monkeypatch) -> None:
@@ -274,12 +275,91 @@ def test_staff_schedule_page_uses_strict_leave_flow() -> None:
     assert 'liff.login({redirectUri: redirect.toString()})' in source
 
 
+def test_staff_schedule_postpone_only_submits_the_latest_checked_pair_once() -> None:
+    source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
+    script = source.split("<script>", 1)[1].split(
+        'document.getElementById("loadSchedule").addEventListener', 1
+    )[0]
+    runner = r"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const nodes = new Map();
+const node = () => ({ style: {}, append() {}, appendChild() {}, replaceChildren() {} });
+const context = vm.createContext({
+  document: {
+    createElement: node,
+    getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, node());
+      return nodes.get(id);
+    },
+  },
+  AbortController, crypto, alert() {},
+});
+const evaluate = (script) => vm.runInContext(script, context);
+evaluate(SOURCE);
+evaluate(`
+  postponeCase = {case_no: 'TEST', assignment_id: 12, service_dates: ['2027-01-05', '2027-01-08']};
+  postponeSelectedDates = new Set(postponeCase.service_dates);
+  postponeCalendar = {calendarWeekdays: ['日', '一', '二', '三', '四', '五', '六']};
+  renderPostponeCalendar = () => {};
+  closeLiffWindow = () => {};
+  const calls = [];
+  leaveResultPost = (path, payload, signal) =>
+    new Promise((resolve) => calls.push({path, payload, signal, resolve}));
+  handlePostponeDateClick('2027-01-06');
+`);
+const settle = () => new Promise(setImmediate);
+
+(async () => {
+  assert.equal(nodes.get('postponeConservationText').textContent, '3 / 2 天');
+  assert.equal(nodes.get('postponeBalanceBadge').textContent, '多選 1 天');
+  assert.equal(evaluate('calls.length'), 0);
+  evaluate("handlePostponeDateClick('2027-01-06')");
+  assert.equal(nodes.get('postponeBalanceBadge').textContent, '日期未變更');
+  assert.equal(evaluate('calls.length'), 0);
+  evaluate("handlePostponeDateClick('2027-01-05')");
+  assert.equal(nodes.get('postponeConservationText').textContent, '1 / 2 天');
+  assert.equal(nodes.get('postponeBalanceBadge').textContent, '尚缺 1 天');
+  assert.equal(evaluate('calls.length'), 0);
+  evaluate("handlePostponeDateClick('2027-01-05'); handlePostponeDateClick('2027-01-06'); handlePostponeDateClick('2027-01-05');");
+  assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview');
+  evaluate(`
+    handlePostponeDateClick('2027-01-06');
+    handlePostponeDateClick('2027-01-07');
+    calls[0].resolve({conflict: false});
+  `);
+  await settle();
+  assert.equal(evaluate('calls[0].signal.aborted'), true);
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  await evaluate('submitPostponeProposal()');
+  assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview');
+
+  evaluate('calls[1].resolve({conflict: false})');
+  await settle();
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
+  evaluate(`
+    void submitPostponeProposal();
+    handlePostponeDateClick('2027-01-07');
+    void submitPostponeProposal();
+  `);
+  assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview,propose');
+  assert.equal(evaluate('calls[2].payload.dates[0].new_date'), '2027-01-07');
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  evaluate("calls[2].resolve({conflict: false, case_no: 'TEST', assignment_id: 12})");
+  await settle();
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+""".replace("SOURCE", json.dumps(script))
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
 def test_staff_baby_log_page_is_retired() -> None:
     assert not (ROOT / "line" / "static" / "staff_baby_log.html").exists()
-    with pytest.raises(HTTPException) as captured:
-        line_identity.staff_baby_log_page()
-    assert captured.value.status_code == 410
-    assert captured.value.detail["code"] == "staff_baby_log_retired"
+    assert not hasattr(line_identity, "staff_baby_log_page")
+    assert not any(
+        getattr(route, "path", None) == "/line-staff-baby-log"
+        for route in line_identity.page_router.routes
+    )
 
 
 def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() -> None:
@@ -338,9 +418,7 @@ def test_new_staff_page_routes_serve_split_assets() -> None:
     assert payout.status_code == 200
     assert payout.path.name == "staff_payout.html"
 
-    with pytest.raises(HTTPException) as captured:
-        line_identity.staff_baby_log_page()
-    assert captured.value.status_code == 410
+    assert not hasattr(line_identity, "staff_baby_log_page")
 
 
 def test_studio_preview_routes_serve_gateway_and_non_citizen_registration() -> None:
@@ -402,3 +480,101 @@ vm.runInContext({json.dumps(source.split('<script>')[script_index].split('</scri
 }})().catch((error) => {{ console.error(error); process.exit(1); }});
 """
         subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
+def test_root_endpoint_serves_gateway_html_for_purpose_and_schedule_liff_params(monkeypatch) -> None:
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+    from line import line_bot
+
+    app = FastAPI()
+    app.include_router(line_bot.router)
+    monkeypatch.setattr(line_bot, "get_db_connection", lambda: type("C", (), {"close": lambda self: None})())
+
+    with TestClient(app) as client:
+        for query in (
+            "purpose=admin_binding&flow_id=flow-123",
+            "purpose=customer_binding&flow_id=flow-456",
+            "flow_id=flow-789&case_no=C-2026-01&mode=postpone",
+        ):
+            res = client.get(f"/?{query}", headers={"Accept": "*/*"})
+            assert res.status_code == 200
+            assert "text/html" in res.headers["content-type"]
+            assert "og:title" in res.text
+            assert '"status":"healthy"' not in res.text
+
+        health = client.get("/", headers={"Accept": "application/json"})
+        assert health.status_code == 200
+        assert health.json()["status"] == "healthy"
+
+
+def test_gateway_and_identity_route_all_guide_targets_without_dropping_context() -> None:
+    gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
+    identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
+
+    assert "targetPaths.deposit_payment" in gateway
+    assert "registration: '/line-identity?entry=registration'" in gateway
+    assert "if (flowPurpose && flowId)" in gateway
+    assert "/line-identity?${flowQuery.toString()}" in gateway
+    assert "/line-staff-schedule?${scheduleQuery.toString()}" in gateway
+
+    assert 'target === "deposit_payment"' in identity
+    assert "`/line-deposit-payment?case_no=${encodeURIComponent(caseNo)}`" in identity
+    assert "if (!purposeParam && flowIdParam && (modeParam || caseNoParam))" in identity
+    assert 'if (caseNo) target.searchParams.set("case_no", caseNo);' in identity
+    assert 'if (mode) target.searchParams.set("mode", mode);' in identity
+
+    gateway_script = gateway.split("<script>", 1)[1].split("</script>", 1)[0]
+    runner = """
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+async function check(search) {
+  let redirected = null;
+  const nodes = {
+    pageLogo: {textContent: ''},
+    pageTitle: {textContent: ''},
+    pageSubtitle: {textContent: ''},
+    loaderOverlay: {style: {display: 'flex'}},
+    loaderText: {textContent: ''},
+    actionsContainer: {replaceChildren: () => undefined, hasChildNodes: () => false},
+    previewDestination: {textContent: ''},
+  };
+  const ctx = vm.createContext({
+    URLSearchParams,
+    document: {
+      documentElement: {style: {setProperty: () => undefined}},
+      body: {style: {}, classList: {add: () => undefined}},
+      head: {append: () => undefined},
+      getElementById: id => nodes[id] || {style: {}, textContent: ''},
+    },
+    window: {
+      location: {search, href: 'https://example.test/' + search, pathname: '/'},
+      addEventListener: () => undefined,
+      liff: {init: async () => undefined, isLoggedIn: () => true, getIDToken: () => 'tok'},
+    },
+    fetch: async (url) => {
+      if (url.includes('/api/config/liff/runtime')) {
+        return {ok: true, json: async () => ({theme: {}, page: {title: 't', subtitle: 's', content: {}, actions: []}})};
+      }
+      return {ok: true, json: async () => ({data: {liff_id: '2010579869-5e4mcSmT'}})};
+    },
+    console: {error: () => undefined},
+  });
+  Object.defineProperty(ctx.window.location, 'href', {
+    get: () => redirected || ('https://example.test/' + search),
+    set: (v) => { redirected = v; },
+  });
+  vm.runInContext(SOURCE, ctx);
+  await ctx.initLiff();
+  return redirected;
+}
+(async () => {
+  assert.equal(await check('?purpose=admin_binding&flow_id=f1'), '/line-identity?purpose=admin_binding&flow_id=f1');
+  assert.equal(await check('?liff.state=' + encodeURIComponent('/?purpose=staff_verification&flow_id=f2')), '/line-identity?purpose=staff_verification&flow_id=f2');
+  assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone');
+  assert.equal(await check('?target=staff_schedule&case_no=C-1&mode=postpone'), '/line-identity?target=staff_schedule&case_no=C-1&mode=postpone');
+  assert.equal(await check('?target=deposit_payment&case_no=C-1'), '/line-deposit-payment?case_no=C-1');
+  assert.equal(await check('?entry=registration'), '/line-identity?entry=registration');
+})().catch((e) => { console.error(e); process.exit(1); });
+""".replace("SOURCE", json.dumps(gateway_script))
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)

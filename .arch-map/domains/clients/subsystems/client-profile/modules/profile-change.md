@@ -43,8 +43,9 @@
   - 歷史與正常案件均使用 Scheduling Assignment Plan Query 的 canonical assignment；歷史 binding 由 owner 選取，不在 UI 另讀歷史來源。無逐日排班仍顯示已保存的人員／期間，不提供正常換人／日期更正操作。
   - 「服務安排與月嫂」倒數第二區加入 Orders actual-start 更正；有指派時原子更新各段排班。草稿／結果未明受既有名冊關閉鎖保護，成功後以相同 case 深連結至 service work group 核對。
 - `ui_react/src/components/ClientRegistryReplacementCandidates.tsx` — 倒數第二區續辦接任人選；組合現有候選查詢／保存、意願紀錄與正式推薦／客戶確認。三步保持草稿、結果未明及回讀關閉鎖；推薦不冒充 effective assignment。
-- `ui_react/src/components/ClientRosterColumnFilter.tsx` — Excel 式表頭篩選；只讀 allowlisted 全名冊選項，不在單頁上過濾。
-- `ui_react/src/components/client_roster_filter_columns.ts` — 表頭與已套用摘要共用欄位標籤、型別及格式。
+- `ui_react/src/components/ClientRosterColumnFilter.tsx` — Excel 式表頭篩選與快捷排版動作（凍結／隱藏／自動欄寬）；只讀 allowlisted 全名冊選項，不在單頁上過濾。
+- `ui_react/src/components/client_roster_filter_columns.ts` — 表頭、已套用摘要與 `RosterTableLayout` 共用欄位定義（`clientRosterColumns`）、標籤、型別及格式。
+- `ui_react/src/components/RosterTableLayout.tsx`、`ui_react/src/components/RosterTableLayout.css` — 共用可調欄距、自訂顯示與凍結欄位抽象（`lu.roster.layout.client.v1`）。
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
 ## Dependencies

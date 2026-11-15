@@ -103,7 +103,7 @@ export function CancellationSettlementNotices({
       {' '}
       <button type="button" disabled={sending} onClick={() => setSelected(null)}>關閉預覽</button>
       {' '}
-      <a href={`#payment-reminder-settings?view=reminder-content&message=cancellation-notice-${preview.kind}`}>調整 LINE 通知範本</a>
+      <a href={`#line-notifications?tab=push_queue&category=accounting&message=cancellation-notice-${preview.kind}`}>調整 LINE 通知範本</a>
     </div>}
     {(notices.length > 0 || error) && <button type="button" disabled={sending || loading} onClick={() => {
       setSendFeedback('');

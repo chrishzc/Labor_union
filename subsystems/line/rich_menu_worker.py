@@ -6,6 +6,7 @@ Description: 執行 LINE Rich Menu 分步 saga 與 published cleanup-only crash 
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Callable
 
 from shared_kernel.fingerprints import fingerprint_payload
@@ -19,6 +20,7 @@ from subsystems.line.ports import (
     LineRichMenuStepReceipt,
     LineUnitOfWorkPort,
 )
+from subsystems.line.rich_menu_backup import write_rich_menu_id_backup
 from subsystems.line.rich_menu_binding import schedule_published_menu_rebindings
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
@@ -38,6 +40,7 @@ class LineRichMenuWorker:
         worker_identity: str,
         now: Callable[[], datetime],
         batch_size: int = 5,
+        ids_backup_writer: Callable[[str, str], None] | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._provider = provider
@@ -45,6 +48,11 @@ class LineRichMenuWorker:
         self._worker_identity = worker_identity
         self._now = now
         self._batch_size = batch_size
+        self._ids_backup_writer = (
+            ids_backup_writer
+            if ids_backup_writer is not None
+            else write_rich_menu_id_backup
+        )
 
     def run_once(self) -> int:
         work_items = self._claim()
@@ -629,6 +637,22 @@ class LineRichMenuWorker:
                     outcome.provider_menu_id,
                 )
             unit_of_work.commit()
+        if (
+            outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+            and outcome.provider_menu_id
+        ):
+            self._persist_id_backup(item.definition_json, outcome.provider_menu_id)
+
+    def _persist_id_backup(self, definition_json: str, provider_menu_id: str) -> None:
+        if not callable(self._ids_backup_writer):
+            return
+        try:
+            definition = json.loads(definition_json)
+            role = definition.get("audience_role") or definition.get("id")
+            if role:
+                self._ids_backup_writer(str(role), provider_menu_id)
+        except Exception:
+            pass
 
 
 __all__ = ["LineRichMenuWorker"]

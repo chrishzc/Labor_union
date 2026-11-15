@@ -11,7 +11,9 @@ function api():PaymentReminderScheduleClient{return {get:vi.fn().mockResolvedVal
 describe('帳務繳款提醒排程',()=>{
   it('讀取不儲存，調整時間後沿目前版本儲存',async()=>{
     const client=api();render(<PaymentReminderSchedulePanel client={client}/>);
-    const field=await screen.findByLabelText('第一期寄送時間');
+    const field=await screen.findByLabelText('開工問候寄送時間');
+    expect(screen.getByText('隨開工問候寄送至案件群組')).toBeInTheDocument();
+    expect(screen.getByText('在設定時段私訊客戶，最多一次')).toBeInTheDocument();
     expect(client.save).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'儲存提醒排程'})).toBeDisabled();
     fireEvent.change(field,{target:{value:'14:00'}});
     fireEvent.click(screen.getByRole('button',{name:'儲存提醒排程'}));
@@ -29,7 +31,7 @@ describe('帳務繳款提醒排程',()=>{
   it('排程衝突保留草稿，不顯示後端細節或自動覆寫',async()=>{
     const client=api();vi.mocked(client.save).mockRejectedValue(new ApiHttpError(409,'stale','private SQL detail',false));
     render(<PaymentReminderSchedulePanel client={client}/>);
-    const field=await screen.findByLabelText('第一期寄送時間');fireEvent.change(field,{target:{value:'11:30'}});
+    const field=await screen.findByLabelText('開工問候寄送時間');fireEvent.change(field,{target:{value:'11:30'}});
     fireEvent.click(screen.getByRole('button',{name:'儲存提醒排程'}));
     await screen.findByRole('alert');expect(field).toHaveValue('11:30');expect(document.body).not.toHaveTextContent('private SQL');
     expect(client.save).toHaveBeenCalledTimes(1);
@@ -45,7 +47,7 @@ describe('帳務繳款提醒排程',()=>{
   it('儲存結果不明重試沿用同一操作識別',async()=>{
     const client=api();vi.mocked(client.save).mockRejectedValueOnce(new Error('network'));
     render(<PaymentReminderSchedulePanel client={client}/>);
-    fireEvent.change(await screen.findByLabelText('第一期寄送時間'),{target:{value:'13:00'}});
+    fireEvent.change(await screen.findByLabelText('開工問候寄送時間'),{target:{value:'13:00'}});
     fireEvent.click(screen.getByRole('button',{name:'儲存提醒排程'}));await screen.findByRole('alert');
     fireEvent.click(screen.getByRole('button',{name:'儲存提醒排程'}));
     await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(2));

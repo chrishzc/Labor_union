@@ -1,4 +1,7 @@
-"""LINE binding and delivery views over committed Finance events; never consumes Orders status."""
+"""
+File: deposit_notification_repository.py
+Description: 查詢帳務訂金核銷與提醒投遞狀態，排除已於官方帳號確認通知之入帳待辦。
+"""
 from domains.line.identities import LineDeliveryTaskId
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
@@ -135,6 +138,12 @@ class MySqlDepositNotificationRepository:
                             (payment.case_no, payment.settlement_identity),
                         )
                         if cursor.fetchone() is None:
+                            continue
+                        cursor.execute(
+                            "SELECT 1 FROM line_command_receipts WHERE idempotency_key=%s LIMIT 1",
+                            ('payment-receipt-ack:deposit:' + payment.settlement_identity,),
+                        )
+                        if cursor.fetchone() is not None:
                             continue
                 if payment.settled and delivery and delivery['processing_status'] == 'sent':
                     continue

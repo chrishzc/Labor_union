@@ -187,6 +187,66 @@ def cancellation_notice_sample(key):
     return notice_details(CancellationNoticeSource(CASE.case_no, 1, accounting, item, "99781699000000"), kind)
 
 
+HELPER_SAMPLE_KEYS = frozenset({
+    "helper-menu-card",
+    "helper-satisfaction-survey",
+    "helper-confirm-start-card",
+    "helper-confirm-start-completed",
+    "helper-schedule-unconfirmed",
+    "helper-postponement-card",
+    "helper-postponement-completed",
+    "helper-staff-assistance-ack",
+    "helper-staff-assistance-closed",
+    "helper-guidelines-card",
+    "helper-faq-ingredients",
+    "helper-faq-hours",
+    "helper-faq-subsidy",
+})
+
+
+def _helper_sample_payload(key, field, case):
+    from subsystems.line.service_start_messages import (
+        HELPER_TEXT_DEFAULTS,
+        confirm_start_date_card,
+        group_guidelines_card,
+        group_helper_menu_card,
+        mutual_postponement_card,
+    )
+
+    if key == "helper-menu-card":
+        return group_helper_menu_card(case(), field("月嫂姓名", "staff_name", STAFF.name))
+    if key == "helper-confirm-start-card":
+        return confirm_start_date_card(
+            case(),
+            field("月嫂姓名", "staff_name", STAFF.name),
+            field("服務開始日", "start_date", CASE.start_date),
+            field("服務結束日", "end_date", CASE.end_date),
+        )
+    if key == "helper-postponement-card":
+        return mutual_postponement_card(
+            case(),
+            field("月嫂姓名", "staff_name", STAFF.name),
+            field("原本請假日", "leave_start_date", LEAVE.start_date),
+            field("合意補班日", "leave_end_date", LEAVE.end_date),
+        )
+    if key == "helper-guidelines-card":
+        field("發送方式", "delivery", "案件服務群組 Reply 回覆（0 Push 額度）")
+        return group_guidelines_card()
+    if key in {"helper-confirm-start-completed", "helper-schedule-unconfirmed"}:
+        case()
+        field("服務開始日", "start_date", CASE.start_date)
+        field("服務結束日", "end_date", CASE.end_date)
+    elif key == "helper-postponement-completed":
+        case()
+        field("原本請假日", "leave_start_date", LEAVE.start_date)
+        field("合意補班日", "leave_end_date", LEAVE.end_date)
+    elif key in {"helper-staff-assistance-ack", "helper-staff-assistance-closed"}:
+        case()
+    else:
+        field("發送方式", "delivery", "案件服務群組 Reply 回覆（0 Push 額度）")
+    return {"type": "text", "text": HELPER_TEXT_DEFAULTS[key]}
+
+
 def current_message_sample(key):
     """Explicit current flow examples, rendered by the same pure helpers as delivery."""
     fields = []
@@ -212,53 +272,61 @@ def current_message_sample(key):
         from subsystems.customer_service.application import customer_service_reply_payload
         message = field("人員輸入的回覆（範例）", "reply_text", "您好，已收到您的需求，工會會再與您確認服務安排。")
         payload = customer_service_reply_payload(message)
-    elif key=='payment-first-settled':
-        from subsystems.line.payment_receipt_notifications import first_receipt_message
-        amount=field('本次核銷入帳金額','amount_ntd',12000)
-        field('收件人','recipient','客戶私人聊天室')
-        payload=first_receipt_message(case(),amount)
     elif key.startswith("cancellation-notice-"):
         from subsystems.line.cancellation_notifications import DEFAULT_COPY
         case()
         field("收件人", "recipient", "客戶私人聊天室")
         payload = text(DEFAULT_COPY[key.removeprefix("cancellation-notice-")])
-    elif key in {'payment-first-reminder','payment-first-greeting','payment-second-reminder'}:
+    elif key in {'payment-first-reminder', 'payment-first-greeting'}:
+        from types import SimpleNamespace
+        from subsystems.line.service_start_day import greeting_payload
+        field('收件人', 'recipient', '案件服務群組')
+        amount, due = 0, None
+        if key == 'payment-first-reminder':
+            amount = field('未核銷餘額', 'amount_ntd', 6000)
+            due = field('正式到期日', 'due_date', '2026-11-01')
+        payload = greeting_payload(SimpleNamespace(), case(), amount, due)
+    elif key == 'payment-second-reminder':
         from datetime import date
         from types import SimpleNamespace
         from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
         from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
         from subsystems.line.payment_reminder_notifications import initial_payload
-        stage='second' if key=='payment-second-reminder' else 'first'
-        amount=field('未核銷餘額','amount_ntd',0 if key=='payment-first-greeting' else 6000)
+        amount=field('未核銷餘額','amount_ntd',6000)
         field('收件人','recipient','客戶私人聊天室')
         field('正式到期日','due_date','2026-11-01')
-        facts=ClientPaymentReminderFacts(OverdueClientPayment(case(),stage,'preview-only',1,1,date(2026,11,1),amount),date(2026,11,1),True,'服務中')
+        facts=ClientPaymentReminderFacts(OverdueClientPayment(case(),'second','preview-only',1,1,date(2026,11,1),amount),date(2026,11,1),True,'服務中')
         _,content=initial_payload(SimpleNamespace(),facts)
         payload=json.loads(content)
     elif key.startswith("payment-overdue-"):
         from datetime import date
-        from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
-        from subsystems.line.payment_overdue_reminders import reminder_text, STAGE_LABELS
+        from subsystems.line.payment_overdue_reminders import STAGE_LABELS
+        from subsystems.line.payment_reminder_notifications import payment_reminder_card_payload
         stage = key.removeprefix("payment-overdue-")
         field("期別", "payment_stage", STAGE_LABELS[stage])
         field("收件人", "recipient", "客戶私人聊天室")
         amount = field("剩餘待繳金額", "remaining_amount_ntd", {"deposit": 6000, "first": 12000, "second": 8000}[stage])
-        payload = text(reminder_text(OverdueClientPayment(case(), stage, "preview-only", 1, 1, date(2026,11,1), amount)))
-    elif key in {"deposit-reminder", "deposit-settled"}:
-        from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER, SETTLED
+        due = field("正式到期日", "due_date", "2026-11-01")
+        payload = payment_reminder_card_payload(stage, case(), amount, due, "overdue")
+    elif key == "deposit-reminder":
+        from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER
         amount = field("訂金金額（新臺幣）", "amount_ntd", 6000)
-        due = field("繳費期限", "due_date", "2026-11-01") if key == "deposit-reminder" else None
-        entry = field("繳費頁面", "payment_entry", "https://preview.invalid/deposit")
-        payload = deposit_notification_payload(case(), amount, due, SETTLED if key == "deposit-settled" else REMINDER, entry)
+        due = field("繳費期限", "due_date", "2026-11-01")
+        payload = deposit_notification_payload(case(), amount, due, REMINDER)
     elif key == "service-day-log-reminder":
         from subsystems.line.service_day_log_reminders import reminder_text
         payload = text(reminder_text(field("月嫂姓名", "staff_name", STAFF.name)))
-    elif key == "deposit-assistance":
-        from subsystems.line.deposit_notifications import ASSISTANCE_ACK
-        payload = text(ASSISTANCE_ACK)
+    elif key in {"deposit-assistance", "payment-assistance"}:
+        from subsystems.line.deposit_notifications import PAYMENT_ASSISTANCE_ACK
+        payload = text(PAYMENT_ASSISTANCE_ACK)
+    elif key == "payment-reminder-ack":
+        from subsystems.line.deposit_notifications import PAYMENT_ACK_REPLY
+        payload = text(PAYMENT_ACK_REPLY)
     elif key == "group-bound":
         from subsystems.line.order_group_application import group_binding_acknowledgement
         payload = text(group_binding_acknowledgement(case()))
+    elif key in HELPER_SAMPLE_KEYS:
+        payload = _helper_sample_payload(key, field, case)
     elif key == "service-start-inquiry":
         from subsystems.line.service_start_messages import substitute_inquiry
         dates = ['2026-11-02', '2026-11-04', '2026-11-06']
@@ -270,9 +338,6 @@ def current_message_sample(key):
         name = field("月嫂姓名", "assignments[0].staff_name", STAFF.name)
         field("服務日期", "assignments[0].service_dates", '、'.join(dates))
         payload=service_date_record(case(),[{'staff_name':name,'service_dates':dates}])
-    elif key in {"service-start-normal-received", "service-start-help-received"}:
-        from subsystems.line.service_start_day import start_day_response_text
-        payload = text(start_day_response_text('normal' if key == "service-start-normal-received" else 'help'))
     elif key == "group-invitations-queued":
         from subsystems.line.order_group_application import group_invitation_acknowledgement
         count = field("邀請對象人數", "recipient_count", 2)

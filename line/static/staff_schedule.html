@@ -1,25 +1,26 @@
 <!DOCTYPE html>
 <!--
 File: staff_schedule.html
-Description: 提供月嫂查班及提交已協調的請假、順延與代班結果。
+Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案及提交請假結果。
 -->
 <html lang="zh-Hant-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>月嫂排班資訊</title>
+  <link rel="stylesheet" href="/static/service-date-calendar.css">
   <style>
-  [hidden] { display: none !important; }
+    [hidden] { display: none !important; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #fff7f8; color: #27272a; }
-    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 44px; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
+    main { max-width: 760px; margin: 0 auto; padding: 20px 16px 44px; }
+    h1 { margin: 0 0 8px; font-size: 26px; color: #302923; }
     p { color: #71717a; line-height: 1.6; }
-    button { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; }
-    .primary { color: #fff; background: #be123c; }
-    .secondary { margin-top: 10px; color: #9f1239; background: #ffe4e6; }
-    button:disabled { cursor: not-allowed; opacity: .6; }
-    .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 14px; }
+    button { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .primary { color: #fff; background: #973b17; border-radius: 8px; }
+    .secondary { margin-top: 10px; color: #973b17; background: #fcebdd; border: 1px solid #e9c5ad; border-radius: 8px; }
+    button:disabled { cursor: not-allowed; opacity: .6; background: #d1c7c0 !important; color: #fff !important; border-color: #bfb4ac !important; }
+    .panel { background: #fff; border: 1px solid #eadbd0; border-radius: 10px; padding: 16px; margin-top: 14px; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .field { margin-top: 12px; }
@@ -29,7 +30,7 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
     label { display: block; font-weight: 700; margin-bottom: 7px; }
     input, textarea, select { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 11px; font-size: 16px; }
     textarea { min-height: 86px; resize: vertical; }
-    .message { margin-top: 14px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; }
+    .message { margin-top: 14px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; font-size: 14px; line-height: 1.5; }
     .error { background: #fee2e2; color: #b91c1c; }
     .calendar { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; margin-top: 14px; }
     .head, .day { min-height: 74px; border-right: 1px solid #e4e4e7; border-bottom: 1px solid #e4e4e7; padding: 6px; font-size: 13px; }
@@ -49,14 +50,119 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
     .available { background: #fff; color: #71717a; }
     .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: #52525b; }
     .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
-    .hide { display: none; }
+
+    .calendar-matrix-card { border: 1px solid #eadbd0; border-radius: 12px; background: #fff; padding: 16px; margin-top: 12px; }
+    .calendar-month-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .calendar-month-header h3 { font-size: 17px; font-weight: 600; color: #302923; margin: 0; }
+    .calendar-nav-btn { min-height: 32px; min-width: 32px; border: 1px solid #eadbd0; border-radius: 6px; background: #faf8f6; color: #65564b; font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .calendar-days-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+    .service-date-weekday { text-align: center; font-size: 14px; font-weight: 500; color: #857163; padding: 6px 0; }
+    .calendar-date-cell { min-height: 48px; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #302923; font-size: 16px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; padding: 4px 2px; }
+    .calendar-date-cell.is-service { background: #fcebdd; border-color: #e9c5ad; color: #973b17; font-weight: 600; }
+    .calendar-date-cell.is-leave { background: #fff5f5 !important; border: 2px dashed #e53e3e !important; color: #c53030 !important; font-weight: 700; }
+    .calendar-date-cell.is-makeup { background: #edf2e8 !important; border: 2px solid #d5dfcc !important; color: #466747 !important; font-weight: 700; }
+    .calendar-days-grid .calendar-date-cell:disabled:not(.is-service, .is-leave, .is-makeup) { background: #fff !important; color: #857163 !important; border-color: transparent !important; }
+    .calendar-days-grid .calendar-date-cell.is-service:disabled { background: #fcebdd !important; color: #973b17 !important; border-color: #e9c5ad !important; }
+    .cell-badge { font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px; margin-top: 2px; font-weight: bold; }
+    .guide-bar { padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; margin-top: 10px; border: 1px solid #eadbd0; }
+    .pair-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #faf8f6; border: 1px solid #eadbd0; border-radius: 8px; font-size: 13px; margin-bottom: 6px; }
+    .badge-conserved { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: #edf2e8; color: #466747; border: 1px solid #d5dfcc; }
+    .badge-missing { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: #fff5f5; color: #c53030; border: 1px solid #fed7d7; }
+
+    /* 權限阻擋專用卡片 */
+    .blocked-card { background: #fff; border: 1px solid #eadbd0; border-radius: 12px; padding: 32px 18px; text-align: center; margin-top: 20px; }
+    .lock-icon { font-size: 42px; margin-bottom: 12px; }
+    .blocked-title { font-size: 18px; font-weight: 700; color: #302923; margin: 0 0 6px; }
+    .blocked-desc { font-size: 14px; color: #65564b; margin: 0 0 16px; line-height: 1.6; }
+    .blocked-box { background: #faf8f6; border: 1px solid #eadbd0; border-radius: 8px; padding: 12px 16px; margin: 16px auto; max-width: 360px; text-align: left; font-size: 13px; line-height: 1.8; color: #65564b; }
+    .blocked-row { display: flex; justify-content: space-between; }
+    .error-text { color: #c53030; font-weight: 700; }
+    .close-btn { margin-top: 16px; padding: 11px 24px; border-radius: 8px; background: #fff; border: 1px solid #eadbd0; color: #302923; font-weight: 600; cursor: pointer; }
+
     @media (max-width: 560px) { .toolbar, .form-grid { grid-template-columns: 1fr; } .full { grid-column: auto; } }
   </style>
 </head>
 <body>
-<main>
-  <h1>排班資訊</h1>
+<main id="mainContainer">
+  <h1 id="pageMainHeading">排班資訊</h1>
 
+  <!-- 狀況 B：非月嫂／客戶身分阻擋畫面 (身分辨識保護) -->
+  <section id="roleBlockedSection" class="blocked-card" hidden>
+    <div class="lock-icon">🔒</div>
+    <h2 class="blocked-title">僅限本案月嫂操作</h2>
+    <p class="blocked-desc" id="blockedDescription">「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期</p>
+    <div class="blocked-box">
+      <div class="blocked-row"><span>目前登入身分：</span><strong id="blockedIdentityText">客戶 / 非本案人員</strong></div>
+      <div class="blocked-row"><span>案件編號：</span><span id="blockedCaseNoText">--</span></div>
+      <div class="blocked-row"><span>權限狀態：</span><span class="error-text">無調整權限（受保護）</span></div>
+    </div>
+    <p class="hint">若您需要調整服務日期，請於 LINE 群組向月嫂提出，由月嫂開啟本功能提案。</p>
+    <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
+  </section>
+
+  <!-- 狀況 A：雙方合意延期專屬工作台 (重用後台日曆與多天調整) -->
+  <section id="postponeWorkbench" class="panel" hidden>
+    <div style="border-bottom:1px solid #f2e6dc;padding-bottom:10px;margin-bottom:12px;">
+      <span style="font-size:11px;font-weight:700;background:#fcebdd;color:#973b17;padding:3px 8px;border-radius:4px;border:1px solid #e9c5ad;">🔒 案件專屬排班調整</span>
+      <h2 id="postponeHeading" style="font-size:16px;font-weight:700;color:#302923;margin:8px 0 2px;">案件：--</h2>
+      <p style="font-size:13px;color:#65564b;margin:0;">先在案件群組與客戶協調，確認請假與補班日；送出後將在群組由客戶確認（0 推播費）。</p>
+    </div>
+
+    <div class="guide-bar" style="background:#fffaf5;border-color:#f2d8c5;color:#7a3415;">
+      在同一張月曆點選日期即可加入或取消。調整後的服務天數須與原班表相同。
+    </div>
+
+    <div class="calendar-matrix-card">
+      <div class="calendar-month-header">
+        <h3 id="calViewMonthLabel">2026 年 12 月</h3>
+        <div style="display:flex;gap:4px;">
+          <button type="button" id="postponePreviousMonth" class="calendar-nav-btn" aria-label="上一個月" onclick="navCalMonth(-1)">‹</button>
+          <button type="button" id="postponeNextMonth" class="calendar-nav-btn" aria-label="下一個月" onclick="navCalMonth(1)">›</button>
+        </div>
+      </div>
+
+      <div class="calendar-days-grid" id="postponeCalWeekdays" style="margin-bottom:4px;" aria-hidden="true"></div>
+
+      <div class="calendar-days-grid" id="postponeCalGrid" role="group" aria-label="服務日期月曆"></div>
+      <p class="hint" id="postponeCalendarStatus" role="status" hidden></p>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid #f2e6dc;padding-top:10px;margin-top:10px;font-size:11px;color:#65564b;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fcebdd;border:1px solid #e9c5ad;"></span>現行服務日</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fff5f5;border:2px dashed #e53e3e;"></span>已取消原服務日</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#edf2e8;border:1px solid #d5dfcc;"></span>已新增補班日</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fff;border:1px solid #d4d4d8;"></span>空白休假</span>
+      </div>
+    </div>
+
+    <!-- 成對清單與守恆確認 -->
+    <div style="background:#fff;border:1px solid #eadbd0;border-radius:10px;padding:14px;margin-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h4 style="margin:0;font-size:14px;color:#302923;">調整排班明細核對</h4>
+        <span id="postponeBalanceBadge" class="badge-conserved" aria-live="polite">日期未變更</span>
+      </div>
+
+      <div id="postponePairsContainer" style="font-size:13px;"></div>
+
+      <div style="background:#faf8f6;padding:8px 10px;border-radius:6px;border:1px solid #f0e4dc;display:flex;justify-content:space-between;font-size:12px;color:#65564b;margin-top:8px;">
+        <span>已選服務天數</span>
+        <strong id="postponeConservationText" style="color:#302923;" aria-live="polite">—</strong>
+      </div>
+    </div>
+
+    <div id="postponeActionNotice" class="message" role="status" hidden></div>
+    <button type="button" id="postponeRetryPreview" class="secondary" hidden onclick="checkPostponePairs()">重新檢查檔期</button>
+
+    <div style="margin-top:14px;">
+      <button type="button" id="postponeSubmitBtn" class="primary" style="width:100%;padding:14px;font-size:15px;" disabled onclick="submitPostponeProposal()">
+        建立延期提案（零推播）
+      </button>
+      <p style="font-size:11px;color:#857163;text-align:center;margin:8px 0 0;">
+        建立提案後，請依畫面指示返回案件群組。客戶確認同意後才會更新排班。
+      </p>
+    </div>
+  </section>
+
+  <!-- 一般月曆查詢面板 (非延期專屬模式時顯示) -->
   <section id="calendarPanel" class="panel">
     <div class="toolbar">
       <div>
@@ -78,21 +184,48 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
 
-  <section class="panel" aria-labelledby="leaveTitle">
+  <!-- 一般請假與代班面板 (非延期專屬模式時顯示) -->
+  <section id="leaveSection" class="panel" aria-labelledby="leaveTitle">
     <h2 id="leaveTitle" class="section-title">請假、順延與代班</h2>
-    <p>先在案件群組與客戶協調，再送出。順延無衝突時會直接更新；需要代班或有排程衝突時，由工會處理。</p>
+    <p>先在案件群組與客戶協調，再送出。已協調順延無衝突時會直接更新；需要安排代班或有排程衝突時，由工會處理。</p>
     <div id="leaveCases"></div>
     <p id="leaveStatus" role="status"></p>
     <button type="button" id="reloadLeaveCases">更新請假與排班</button>
   </section>
-<section class="panel" aria-label="回報服務開始安排"><h2>回報服務開始安排</h2><p id="serviceStartStatus" role="status"></p><div id="serviceStartCases"></div><button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button></section>
+
+  <!-- 回報服務開始安排面板 (非延期專屬模式時顯示) -->
+  <section id="serviceStartSection" class="panel" aria-label="回報服務開始安排">
+    <h2>回報服務開始安排</h2>
+    <p id="serviceStartStatus" role="status"></p>
+    <div id="serviceStartCases"></div>
+    <button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button>
+  </section>
 </main>
+
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 let lineIdToken = "";
 let flowId = "";
+let focusCaseNo = "";
+let scheduleMode = "";
 let identityReady = false;
 
+// 專屬延期模式狀態
+let postponeCase = null;
+let postponeSelectedDates = new Set();
+let postponeCalendar;
+let postponeMonth;
+let postponeMonthRequest;
+let postponeStaffId;
+let postponeOccupancy = new Map();
+let postponeCheck = { status: 'idle' };
+
+function closeLiffWindow() {
+  if (typeof liff !== "undefined" && typeof liff.closeWindow === "function") {
+    try { liff.closeWindow(); return; } catch (_) {}
+  }
+  window.close();
+}
 
 async function captureLineIdentity() {
   try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
@@ -134,7 +267,8 @@ function responseErrorCode(data) {
 }
 
 function showReauthenticationFor(data) {
-  document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
+  const reauth = document.getElementById("reauthenticate");
+  if (reauth) reauth.hidden = !responseErrorCode(data).startsWith("liff_");
 }
 
 function reauthenticateLine() {
@@ -220,30 +354,6 @@ function showCalendarDay(items, date) {
     if (item.service_date && item.service_date !== item.work_date && item.starts_at) {
       appendCalendarCell(block, "hint", `原服務日 ${item.service_date} · ${item.starts_at.slice(11, 16)} 起`);
     }
-    if (item.status !== "working" || !item.assignment_id || !item.case_no) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary";
-    button.textContent = "處理這一班";
-    button.onclick = async () => {
-      const targetDate = item.service_date || item.work_date;
-      const findField = () => Array.from(document.querySelectorAll("#leaveCases article")).find(
-        card => card.dataset.caseNo === item.case_no && Number(card.dataset.assignmentId) === item.assignment_id
-      )?.querySelector(`input[data-service-date="${targetDate}"]`);
-      let field = findField();
-      if (!field) {
-        await loadLeaveCases();
-        field = findField();
-      }
-      if (!field || field.disabled) {
-        appendCalendarCell(block, "hint", "這一班目前無法提交請假協調結果。");
-        return;
-      }
-      field.checked = true;
-      field.dispatchEvent(new Event("change"));
-      field.focus();
-    };
-    block.append(button);
   }
 }
 
@@ -323,11 +433,704 @@ async function loadSchedule() {
   }
 }
 
+async function leaveResultPost(path, body, signal) {
+  const response = await fetch('/api/v1/line/staff-self-service/leave-results/' + path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({...identityPayload(), ...body}),
+    signal
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    const error = new Error(result.detail?.error?.message || result.detail?.message || result.message || '目前無法送出協調結果。');
+    error.httpStatus = response.status;
+    error.code = result.detail?.error?.code || result.detail?.code || '';
+    throw error;
+  }
+  return result.data;
+}
+
+// 呈現權限阻擋視角 (身分辨識保護)
+function showRoleBlockedView(customMessage) {
+  document.getElementById("pageMainHeading").textContent = "雙方合意延期";
+  document.getElementById("calendarPanel").hidden = true;
+  document.getElementById("leaveSection").hidden = true;
+  document.getElementById("serviceStartSection").hidden = true;
+  document.getElementById("postponeWorkbench").hidden = true;
+
+  const blocked = document.getElementById("roleBlockedSection");
+  blocked.hidden = false;
+  if (customMessage) {
+    document.getElementById("blockedDescription").textContent = customMessage;
+  }
+  document.getElementById("blockedCaseNoText").textContent = focusCaseNo || "未指定";
+}
+
+function navCalMonth(delta) {
+  if (!postponeMonth || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  const nextMonth = postponeCalendar.shiftCalendarMonth(postponeMonth, delta);
+  if (nextMonth < '1900-01' || nextMonth > '2100-12') return;
+  postponeMonth = nextMonth;
+  void loadPostponeCalendar();
+}
+
+const postponeScheduleKinds = new Map([
+  ['working', 'official_workday'],
+  ['waiting_deposit_lock', 'waiting_deposit_service'],
+  ['staff_unavailability', 'staff_unavailability'],
+]);
+
+async function loadPostponeCalendar() {
+  postponeMonthRequest?.abort();
+  const request = new AbortController();
+  postponeMonthRequest = request;
+  const { year, monthNumber, firstDate, lastDate } = postponeCalendar.buildCalendarMonth(postponeMonth);
+  const caseNo = postponeCase.case_no;
+  const status = document.getElementById('postponeCalendarStatus');
+  postponeOccupancy = new Map();
+  status.hidden = false;
+  status.textContent = '正在讀取月嫂檔期…';
+  renderPostponeCalendar();
+  try {
+    const response = await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${monthNumber}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(identityPayload()),
+      signal: request.signal,
+    });
+    const result = await responseData(response);
+    if (postponeMonthRequest !== request || request.signal.aborted) return;
+    if (!response.ok || !result.success) throw new Error('無法讀取月嫂檔期。');
+    const schedule = requireStaffSchedule(result.data);
+    if (schedule.year !== year || schedule.month !== monthNumber || schedule.staff_id <= 0 ||
+        (postponeStaffId !== undefined && postponeStaffId !== schedule.staff_id)) {
+      throw new Error('班表與查詢條件不符。');
+    }
+    postponeStaffId = schedule.staff_id;
+    const monthDays = schedule.days.filter(day => day.work_date >= firstDate && day.work_date <= lastDate);
+    postponeOccupancy = postponeCalendar.calendarOccupancyByDate(monthDays.map(day => ({
+      date: day.work_date,
+      caseNo: day.case_no,
+      kind: postponeScheduleKinds.get(day.status),
+    })), caseNo);
+    status.textContent = '檔期標示供選日參考，是否衝突依服務時段判定。';
+    status.hidden = postponeOccupancy.size === 0;
+    renderPostponeCalendar();
+  } catch (_) {
+    if (postponeMonthRequest !== request || request.signal.aborted) return;
+    status.textContent = '無法讀取月嫂檔期。選回原本的服務天數後，系統仍會檢查是否衝突。';
+  }
+}
+
+function renderPostponeCalendar() {
+  if (!postponeMonth) return;
+  const grid = document.getElementById("postponeCalGrid");
+  const activeDate = grid.contains(document.activeElement) ? document.activeElement.dataset.date : undefined;
+  grid.replaceChildren();
+  const { year, monthNumber, leadingDays, dates } = postponeCalendar.buildCalendarMonth(postponeMonth);
+  document.getElementById("calViewMonthLabel").textContent = `${year} 年 ${monthNumber} 月`;
+  const locked = postponeCheck.status === 'submitting' || postponeCheck.status === 'complete';
+  document.getElementById('postponePreviousMonth').disabled = locked || postponeMonth === '1900-01';
+  document.getElementById('postponeNextMonth').disabled = locked || postponeMonth === '2100-12';
+  const serviceDates = new Set(postponeCase.service_dates);
+
+  for (let i = 0; i < leadingDays; i++) {
+    const empty = document.createElement("div");
+    empty.setAttribute('aria-hidden', 'true');
+    grid.appendChild(empty);
+  }
+
+  for (const dateStr of dates) {
+    const isService = serviceDates.has(dateStr);
+    const selected = postponeSelectedDates.has(dateStr);
+    const isLeave = isService && !selected;
+    const isMakeup = !isService && selected;
+    const occupancy = postponeOccupancy.get(dateStr) ?? [];
+
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "calendar-date-cell";
+    cell.dataset.date = dateStr;
+    cell.disabled = locked;
+    cell.setAttribute('aria-pressed', String(selected));
+    const dayNames = [`服務日期 ${dateStr}`];
+    if (isService) dayNames.push('現行服務日');
+    if (isLeave) dayNames.push('已取消原服務日');
+    if (isMakeup) dayNames.push('已新增補班日');
+    const label = [...dayNames, ...occupancy].join('，');
+    cell.setAttribute('aria-label', label);
+    cell.title = label;
+
+    const time = document.createElement("time");
+    time.dateTime = dateStr;
+    time.textContent = String(Number(dateStr.slice(-2)));
+    cell.appendChild(time);
+
+    if (isLeave) {
+      cell.classList.add("is-leave");
+      const badge = document.createElement("span");
+      badge.className = "cell-badge";
+      badge.style.background = "#fed7d7";
+      badge.style.color = "#c53030";
+      badge.textContent = "取消";
+      cell.appendChild(badge);
+    } else if (isMakeup) {
+      cell.classList.add("is-makeup");
+      const badge = document.createElement("span");
+      badge.className = "cell-badge";
+      badge.style.background = "#d5dfcc";
+      badge.style.color = "#466747";
+      badge.textContent = "新增";
+      cell.appendChild(badge);
+    } else if (isService) {
+      cell.classList.add("is-service");
+    }
+
+    for (const text of occupancy) {
+      const badge = document.createElement('small');
+      badge.className = 'service-date-occupancy';
+      badge.textContent = text;
+      cell.appendChild(badge);
+    }
+    cell.onclick = () => handlePostponeDateClick(dateStr);
+    grid.appendChild(cell);
+    if (activeDate === dateStr && !cell.disabled) cell.focus({ preventScroll: true });
+  }
+}
+
+function handlePostponeDateClick(dateStr) {
+  if (!postponeCase || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  if (!postponeSelectedDates.delete(dateStr)) postponeSelectedDates.add(dateStr);
+  renderPostponeCalendar();
+  updatePostponePairs();
+  void checkPostponePairs();
+}
+
+function postponeDateChanges() {
+  const baseline = new Set(postponeCase.service_dates);
+  const original = [...baseline].filter(date => !postponeSelectedDates.has(date)).sort();
+  const replacement = [...postponeSelectedDates].filter(date => !baseline.has(date)).sort();
+  return {original, replacement};
+}
+
+function formatPostponeDisplayDate(dateStr) {
+  const parts = dateStr.split('-');
+  const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  return `${parts[1]}/${parts[2]} (${postponeCalendar.calendarWeekdays[d.getUTCDay()]})`;
+}
+
+function updatePostponePairs() {
+  const {original, replacement} = postponeDateChanges();
+  const difference = replacement.length - original.length;
+  const target = postponeSelectedDates.size - difference;
+  document.getElementById('postponeConservationText').textContent = `${postponeSelectedDates.size} / ${target} 天`;
+  const container = document.getElementById('postponePairsContainer');
+  container.replaceChildren();
+  const balanceBadge = document.getElementById('postponeBalanceBadge');
+  const submitBtn = document.getElementById('postponeSubmitBtn');
+
+  balanceBadge.className = difference === 0 ? "badge-conserved" : "badge-missing";
+  if (difference !== 0 || original.length === 0) {
+    balanceBadge.textContent = difference < 0 ? `尚缺 ${-difference} 天`
+      : difference > 0 ? `多選 ${difference} 天` : "日期未變更";
+    submitBtn.textContent = "建立延期提案（零推播）";
+    return;
+  }
+
+  balanceBadge.textContent = `已調整 ${original.length} 天（天數相同）`;
+  submitBtn.textContent = `建立 ${original.length} 天延期提案（零推播）`;
+  for (let i = 0; i < original.length; i++) {
+    const row = document.createElement("div");
+    row.className = "pair-row";
+
+    const left = document.createElement("div");
+    left.style.display = "flex";
+    left.style.alignItems = "center";
+    left.style.gap = "6px";
+
+    const seq = document.createElement("span");
+    seq.style.width = "18px";
+    seq.style.height = "18px";
+    seq.style.borderRadius = "50%";
+    seq.style.background = "#fcebdd";
+    seq.style.color = "#973b17";
+    seq.style.fontSize = "10px";
+    seq.style.fontWeight = "bold";
+    seq.style.display = "flex";
+    seq.style.alignItems = "center";
+    seq.style.justifyContent = "center";
+    seq.textContent = String(i + 1);
+
+    const leaveSpan = document.createElement("span");
+    leaveSpan.style.color = "#c53030";
+    leaveSpan.style.fontWeight = "600";
+    leaveSpan.textContent = `原 ${formatPostponeDisplayDate(original[i])}`;
+    left.append(seq, leaveSpan);
+
+    const arrow = document.createElement("span");
+    arrow.style.color = "#857163";
+    arrow.style.fontWeight = "bold";
+    arrow.textContent = "➔";
+
+    const right = document.createElement("div");
+    const makeupSpan = document.createElement("span");
+    makeupSpan.style.color = "#466747";
+    makeupSpan.style.fontWeight = "600";
+    makeupSpan.textContent = `改至 ${formatPostponeDisplayDate(replacement[i])} 補班`;
+    right.appendChild(makeupSpan);
+
+    row.append(left, arrow, right);
+    container.appendChild(row);
+  }
+}
+
+function renderPostponeCheck() {
+  const notice = document.getElementById('postponeActionNotice');
+  const {status, message} = postponeCheck;
+  notice.hidden = !message;
+  notice.className = status === 'conflict' || status === 'unavailable' || postponeCheck.submitFailed ? 'message error' : 'message';
+  notice.textContent = message ?? '';
+  document.getElementById('postponeRetryPreview').hidden = status !== 'unavailable';
+  document.getElementById('postponeSubmitBtn').disabled = status !== 'ready';
+}
+
+async function checkPostponePairs() {
+  if (!postponeCase || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  postponeCheck.controller?.abort();
+  const {original, replacement} = postponeDateChanges();
+  if (!original.length || original.length !== replacement.length) {
+    postponeCheck = {status: 'idle'};
+    renderPostponeCheck();
+    return;
+  }
+
+  const intent = {
+    case_no: postponeCase.case_no,
+    assignment_id: postponeCase.assignment_id,
+    dates: original.map((original_date, index) => ({
+      original_date,
+      new_date: replacement[index],
+    })),
+  };
+  const controller = new AbortController();
+  const checking = {status: 'checking', controller, message: '正在檢查補班檔期…'};
+  postponeCheck = checking;
+  renderPostponeCheck();
+  try {
+    const preview = await leaveResultPost('preview', intent, controller.signal);
+    if (postponeCheck !== checking) return;
+    if (typeof preview?.conflict !== 'boolean') throw new Error('檔期檢查回應不完整。');
+    if (preview.conflict) {
+      const reason = typeof preview.message === 'string' && preview.message.trim()
+        ? preview.message : '補班日有檔期衝突，請重新協調日期。';
+      postponeCheck = {
+        status: 'conflict',
+        message: reason.includes('檔期衝突') ? reason : `檔期衝突：${reason}`,
+      };
+    } else {
+      postponeCheck = {status: 'ready', intent, message: '檔期檢查通過，可送出延期提案。'};
+    }
+  } catch (error) {
+    if (postponeCheck !== checking) return;
+    postponeCheck = {
+      status: 'unavailable',
+      message: error.httpStatus === 409 && error.code.startsWith('leave_result_')
+        ? error.message : '無法完成檔期檢查，請重新檢查檔期。',
+    };
+  }
+  renderPostponeCheck();
+}
+
+async function submitPostponeProposal() {
+  if (postponeCheck.status !== 'ready') return;
+  const {intent, idempotencyKey = crypto.randomUUID()} = postponeCheck;
+  postponeCheck = {status: 'submitting', message: '正在確認檔期並建立延期提案…'};
+  renderPostponeCheck();
+  renderPostponeCalendar();
+  try {
+    const proposed = await leaveResultPost('propose', {...intent, idempotency_key: idempotencyKey});
+    if (proposed?.conflict !== false || proposed.case_no !== intent.case_no || proposed.assignment_id !== intent.assignment_id) {
+      throw new Error('延期提案回應不完整。');
+    }
+    postponeCheck = {status: 'complete', message: '已建立延期提案。'};
+    renderPostponeCheck();
+    let sentToGroup = false;
+    if (typeof proposed.group_message === 'string' && proposed.group_message &&
+        typeof liff !== 'undefined' && typeof liff.isInClient === 'function' && liff.isInClient()) {
+      try {
+        await liff.sendMessages([{type: 'text', text: proposed.group_message}]);
+        sentToGroup = true;
+      } catch (_) {
+        sentToGroup = false;
+      }
+    }
+
+    alert(sentToGroup
+      ? `【延期訊息已送出】\n請返回案件群組查看確認卡，並等待客戶點選確認。\n\n本視窗將自動關閉返回群組。`
+      : `【延期提案已成功建立】\n已檢核無檔期衝突！請返回案件群組點選小幫手選單「雙方合意延期」送出確認卡（零推播額度）。`);
+
+    closeLiffWindow();
+  } catch (error) {
+    postponeCheck = error.httpStatus === 409
+      ? {status: 'unavailable', message: '排班狀態有變動，請重新檢查檔期。'}
+      : {status: 'ready', intent, idempotencyKey, submitFailed: true, message: '無法確認提案結果，請重試原操作。'};
+    renderPostponeCheck();
+    renderPostponeCalendar();
+  }
+}
+
+// 啟動專屬合意延期工作台
+async function setupPostponeWorkbench(caseItem) {
+  postponeCase = caseItem;
+  postponeSelectedDates = new Set(caseItem.service_dates);
+  postponeCheck.controller?.abort();
+  postponeCheck = {status: 'idle'};
+  document.getElementById("pageMainHeading").textContent = "雙方合意延期";
+  document.getElementById("calendarPanel").hidden = true;
+  document.getElementById("leaveSection").hidden = true;
+  document.getElementById("serviceStartSection").hidden = true;
+  document.getElementById("roleBlockedSection").hidden = true;
+
+  const bench = document.getElementById("postponeWorkbench");
+  bench.hidden = false;
+
+  document.getElementById("postponeHeading").textContent = `案件編號：${caseItem.case_no}`;
+
+  try {
+    postponeCalendar = await import('/static/service-date-calendar.js');
+  } catch (_) {
+    show('postponeCalendarStatus', '無法載入月曆，請重新開啟此頁。', true);
+    return;
+  }
+  const weekdays = document.getElementById('postponeCalWeekdays');
+  weekdays.replaceChildren(...postponeCalendar.calendarWeekdays.map(text => {
+    const day = document.createElement('span');
+    day.className = 'service-date-weekday';
+    day.textContent = text;
+    return day;
+  }));
+
+  postponeMonth = caseItem.service_dates[0]?.slice(0, 7) ?? document.getElementById('monthInput').value;
+  updatePostponePairs();
+  renderPostponeCheck();
+  void loadPostponeCalendar();
+}
+
+async function loadLeaveCases() {
+  const root = document.getElementById('leaveCases');
+  root.replaceChildren();
+  const status = document.getElementById('leaveStatus');
+  status.textContent = '正在查詢本人正式排班…';
+
+  try {
+    const data = await leaveResultPost('cases', {});
+
+    // 如果是延期專屬模式，嚴格進行案件鎖定與身分校驗
+    if (scheduleMode === 'postpone') {
+      if (!focusCaseNo) {
+        showRoleBlockedView("未指定案件編號，請從 LINE 案件群組選單開啟專屬排班調整。");
+        return;
+      }
+      const matched = data.items.find(item => item.case_no === focusCaseNo);
+      if (!matched) {
+        showRoleBlockedView(`您非案件 ${focusCaseNo} 之指派月嫂，無法調整本案排班。`);
+        return;
+      }
+      await setupPostponeWorkbench(matched);
+      return;
+    }
+
+    // 一般排班請假面板渲染 (保留相容性)
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (!key?.startsWith('leave-result-submit:')) continue;
+      let pending;
+      try { pending = JSON.parse(sessionStorage.getItem(key)); } catch { continue; }
+      if (!data.items.some(item => item.case_no === pending.case_no && item.assignment_id === pending.assignment_id))
+        data.items.push({...pending, order_version: pending.expected_order_version, scheduling_version: pending.expected_scheduling_version, service_dates: pending.dates.map(d => d.original_date)});
+    }
+    status.textContent = data.items.length ? '請選擇受影響的服務日，再填寫協調結果。' : '目前沒有可提交請假的正式排班。';
+    for (const item of data.items) {
+      const card = document.createElement('article');
+      card.className = 'panel';
+      card.dataset.caseNo = item.case_no;
+      card.dataset.assignmentId = item.assignment_id;
+      const h = document.createElement('h3');
+      h.textContent = '案件 ' + item.case_no;
+      card.append(h);
+
+      const form = document.createElement('form');
+      const choice = document.createElement('select');
+      choice.setAttribute('aria-label', '請假協調結果');
+      for (const [value, text] of [['defer', '已協調順延'], ['substitute', '需要安排代班']]) {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = text;
+        choice.append(o);
+      }
+      form.append(choice);
+
+      const dayList = document.createElement('fieldset');
+      const legend = document.createElement('legend');
+      legend.textContent = '選擇受影響的服務日';
+      dayList.append(legend);
+      dayList.style.maxHeight = '360px';
+      dayList.style.overflowY = 'auto';
+      form.append(dayList);
+
+      const previewNotice = document.createElement('p');
+      previewNotice.className = 'message';
+      previewNotice.setAttribute('role', 'status');
+      previewNotice.hidden = true;
+      let previewTimer = null;
+      let hasConflict = false;
+
+      const collectDeferDates = fieldsList => fieldsList.filter(f => f.check.checked).map(f => ({original_date: f.day, new_date: choice.value === 'defer' ? f.input.value : null}));
+      let fields = [];
+      const runDeferPreview = async () => {
+        if (choice.value !== 'defer') { previewNotice.hidden = true; previewNotice.textContent = ''; hasConflict = false; return null; }
+        const dates = collectDeferDates(fields);
+        if (!dates.length || dates.some(d => !d.new_date || d.new_date <= d.original_date)) { previewNotice.hidden = true; previewNotice.textContent = ''; hasConflict = false; return null; }
+        try {
+          const preview = await leaveResultPost('preview', {case_no: item.case_no, assignment_id: item.assignment_id, dates});
+          hasConflict = Boolean(preview.conflict);
+          previewNotice.hidden = false;
+          previewNotice.className = hasConflict ? 'message error' : 'message';
+          previewNotice.textContent = hasConflict ? ('檔期衝突：' + (preview.message || '此補班日已有其他案件排班，請重新與客戶協調其他日期！')) : (preview.message || '檔期無衝突，服務總天數與補助時數守恆。');
+          return preview;
+        } catch (error) {
+          hasConflict = true;
+          previewNotice.hidden = false;
+          previewNotice.className = 'message error';
+          previewNotice.textContent = '檔期衝突：' + error.message;
+          return {conflict: true, message: error.message};
+        }
+      };
+      const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(() => { void runDeferPreview(); }, 120); };
+      fields = item.service_dates.map(day => {
+        const row = document.createElement('div');
+        row.className = 'field';
+        const label = document.createElement('label');
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.dataset.serviceDate = day;
+        check.setAttribute('aria-label', '原服務日 ' + day);
+        check.style.width = 'auto';
+        label.style.display = 'flex';
+        label.style.gap = '8px';
+        label.append(check, document.createTextNode('原服務日 ' + day));
+        const newLabel = document.createElement('label');
+        newLabel.textContent = '協議後日期';
+        newLabel.hidden = true;
+        const input = document.createElement('input');
+        input.type = 'date';
+        input.setAttribute('aria-label', day + ' 協議後日期');
+        input.disabled = true;
+        newLabel.append(input);
+        check.onchange = () => {
+          newLabel.hidden = !check.checked || choice.value !== 'defer';
+          input.disabled = !check.checked || choice.value !== 'defer';
+          input.required = check.checked && choice.value === 'defer';
+          schedulePreview();
+        };
+        input.onchange = () => schedulePreview();
+        row.append(label, newLabel);
+        dayList.append(row);
+        return {day, check, input, newLabel};
+      });
+
+      const send = document.createElement('button');
+      send.type = 'submit';
+      send.textContent = '送出請假協調結果';
+      const recover = document.createElement('button');
+      recover.type = 'button';
+      recover.textContent = '確認原操作結果';
+      const message = document.createElement('p');
+      message.setAttribute('role', 'status');
+
+      const storageKey = 'leave-result-submit:' + item.case_no + ':' + item.assignment_id;
+      let pending = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+      let busy = false;
+
+      const lock = () => {
+        send.disabled = busy || Boolean(pending);
+        choice.disabled = busy || Boolean(pending);
+        recover.hidden = !pending;
+        recover.disabled = busy;
+        for (const f of fields) {
+          f.check.disabled = busy || Boolean(pending);
+          f.input.disabled = busy || Boolean(pending) || !f.check.checked || choice.value !== 'defer';
+        }
+      };
+
+      choice.onchange = () => {
+        fields.forEach(f => {
+          f.newLabel.hidden = !f.check.checked || choice.value !== 'defer';
+          f.input.disabled = !f.check.checked || choice.value !== 'defer';
+          f.input.required = f.check.checked && choice.value === 'defer';
+        });
+        lock();
+        schedulePreview();
+      };
+
+      const submit = async () => {
+        if (!pending || busy) return;
+        busy = true;
+        lock();
+        try {
+          const result = await leaveResultPost('submit',pending);
+          pending = null;
+          sessionStorage.removeItem(storageKey);
+          message.className = 'message';
+          message.textContent = result.status === 'applied' ? (result.result.group_record_queued ? '正式日期、排班及帳務已更新，日期表已交付案件群組寄送。' : '正式日期、排班及帳務已更新；本案尚缺案件群組設定，請聯絡工會。') : (result.conflict_message ? '日期有排程衝突，原排班尚未變更，已交工會處理。' : '已收到代班需求，交由工會安排；原排班尚未變更。');
+          for (const element of form.elements) element.disabled = true;
+          recover.hidden = true;
+        } catch (error) {
+          message.className = 'message error';
+          message.textContent = error.message;
+          if (error.httpStatus >= 400 && error.httpStatus < 500) {
+            pending = null;
+            sessionStorage.removeItem(storageKey);
+          }
+          busy = false;
+          lock();
+        } finally {
+          busy = false;
+          recover.disabled = false;
+        }
+      };
+
+      recover.onclick = () => void submit();
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (pending || busy) return;
+        const selected = fields.filter(f => f.check.checked);
+        if (!selected.length) {
+          message.className = 'message error';
+          message.textContent = '請至少選擇一個原服務日。';
+          return;
+        }
+        if (choice.value === 'defer' && selected.some(f => !f.input.value || f.input.value <= f.day)) {
+          message.className = 'message error';
+          message.textContent = '請填寫晚於原服務日的協議後日期。';
+          return;
+        }
+        if (choice.value === 'defer') {
+          const preview = await runDeferPreview();
+          if (preview && preview.conflict || hasConflict) {
+            message.className = 'message error';
+            message.textContent = previewNotice.textContent || '檔期衝突：此補班日已有其他案件排班，請重新與客戶協調其他日期！';
+            return;
+          }
+        }
+        pending = {
+          case_no: item.case_no,
+          assignment_id: item.assignment_id,
+          decision: choice.value,
+          dates: selected.map(f => ({original_date: f.day, new_date: choice.value === 'defer' ? f.input.value : null})),
+          expected_order_version: item.order_version,
+          expected_scheduling_version: item.scheduling_version,
+          idempotency_key:crypto.randomUUID()
+        };
+        sessionStorage.setItem(storageKey,JSON.stringify(pending));
+        void submit();
+      };
+
+      form.append(previewNotice, send, recover, message);
+      card.append(form);
+      root.append(card);
+      lock();
+    }
+  } catch (error) {
+    if (scheduleMode === 'postpone') {
+      showRoleBlockedView("「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期");
+      return;
+    }
+    status.textContent = error.message;
+  }
+}
+
+async function serviceStartPost(path, body) {
+  const response = await fetch('/api/v1/line/staff-self-service/service-start/' + path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({...body, flow_id: flowId, line_id_token: lineIdToken})
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    const error = new Error(result.detail?.error?.message || result.detail?.message || result.message || '目前無法完成服務安排。');
+    error.httpStatus = response.status;
+    throw error;
+  }
+  return result.data;
+}
+
+async function loadServiceStartCases() {
+  const root = document.getElementById('serviceStartCases');
+  root.replaceChildren();
+  const status = document.getElementById('serviceStartStatus');
+  status.textContent = '正在查詢本人服務安排…';
+  try {
+    const data = await serviceStartPost('cases', {});
+    if (!data || !Array.isArray(data.items)) throw new Error('服務安排資料格式錯誤。');
+    status.textContent = data.items.length ? '請先與客戶在服務群組協調，再提交結果。' : '目前沒有可回報的服務安排。';
+    for (const item of data.items) {
+      const card = document.createElement('article');
+      card.className = 'panel';
+      const heading = document.createElement('h3');
+      heading.textContent = '案件 ' + item.case_no + '｜服務區段 ' + item.segment_start_date + '～' + item.segment_end_date;
+      card.append(heading);
+      const form = document.createElement('form');
+      const choice = document.createElement('select');
+      choice.setAttribute('aria-label', '協調結果');
+      for (const [value, text] of [['accepted', '接受，填寫開始日期'], ['declined', '無法配合，請工會安排代班']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        choice.append(option);
+      }
+      const label = document.createElement('label');
+      label.textContent = '雙方約定的服務開始日';
+      const start = document.createElement('input');
+      start.type = 'date';
+      start.required = true;
+      start.setAttribute('aria-label', '雙方約定的服務開始日');
+      label.append(start);
+      choice.onchange = () => {
+        label.hidden = choice.value !== 'accepted';
+        start.required = choice.value === 'accepted';
+      };
+      const submit = document.createElement('button');
+      submit.type = 'submit';
+      submit.textContent = '送出協調結果';
+      const state = document.createElement('p');
+      state.setAttribute('role', 'status');
+      form.append(choice, label, submit, state);
+      card.append(form);
+      root.append(card);
+    }
+  } catch (error) {
+    status.textContent = error.message;
+    status.setAttribute('role', 'alert');
+  }
+}
+
 async function init() {
-  const month = new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Taipei",year:"numeric",month:"2-digit"}).format(new Date());
+  const month = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Taipei", year: "numeric", month: "2-digit"}).format(new Date());
   document.getElementById("monthInput").value = month;
   const params = new URLSearchParams(location.search);
   flowId = params.get("flow_id") || "";
+  focusCaseNo = params.get("case_no") || "";
+  scheduleMode = params.get("mode") || "";
+
+  // 延期專屬模式：先隱藏其他面板以提升速度與直覺體驗
+  if (scheduleMode === 'postpone') {
+    document.getElementById("pageMainHeading").textContent = "雙方合意延期";
+    document.getElementById("calendarPanel").hidden = true;
+    document.getElementById("leaveSection").hidden = true;
+    document.getElementById("serviceStartSection").hidden = true;
+  }
+
   try {
     const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
     const config = result.data || {};
@@ -346,130 +1149,44 @@ async function init() {
       }
     }
   } catch (_) {
-    show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
-    document.getElementById("reauthenticate").hidden = false;
+    if (scheduleMode === 'postpone') {
+      // 容錯降級：若已提供 flowId 或在測試環境，繼續嘗試以 flowId 驗證身分
+      if (flowId) identityReady = true;
+      else {
+        showRoleBlockedView("無法取得 LINE 身分，請於 LINE 案件群組重新點選開啟。");
+        return;
+      }
+    } else {
+      show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
+      document.getElementById("reauthenticate").hidden = false;
+    }
   }
+
   if (!lineIdToken && !flowId) {
+    if (scheduleMode === 'postpone') {
+      showRoleBlockedView("無法取得 LINE 身分，請於 LINE 案件群組重新點選開啟。");
+      return;
+    }
     show("calendarStatus", "無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);
     document.getElementById("reauthenticate").hidden = false;
     return;
   }
+
   identityReady = true;
   document.getElementById("loadSchedule").disabled = false;
 
-  loadSchedule();
-  await loadServiceStartCases();
-  await loadLeaveCases();
+  if (scheduleMode === 'postpone') {
+    await loadLeaveCases();
+  } else {
+    loadSchedule();
+    await loadServiceStartCases();
+    await loadLeaveCases();
+  }
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
-document.getElementById('reloadLeaveCases').onclick=()=>void loadLeaveCases();
+document.getElementById('reloadLeaveCases').onclick = () => void loadLeaveCases();
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
-
-async function serviceStartPost(path, body) {
-  const response=await fetch('/api/v1/line/staff-self-service/service-start/'+path,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,flow_id:flowId,line_id_token:lineIdToken})});
-  const result=await response.json();
-  if(!response.ok || !result.success){const error=new Error(result.detail?.error?.message || result.detail?.message || result.message || '目前無法完成服務安排。');error.httpStatus=response.status;throw error;}
-  return result.data;
-}
-async function loadServiceStartCases() {
-  const root=document.getElementById('serviceStartCases');root.replaceChildren();
-  const status=document.getElementById('serviceStartStatus');status.textContent='正在查詢本人服務安排…';
-  try {
-    const data=await serviceStartPost('cases',{});
-    for(let i=0;i<sessionStorage.length;i++){const key=sessionStorage.key(i);if(!key?.startsWith('service-start-submit:'))continue;let saved;try{saved=JSON.parse(sessionStorage.getItem(key));}catch{continue;}if(saved && !data.items.some(item=>item.case_no===saved.case_no && item.segment_id===saved.segment_id && item.assignment_id===saved.assignment_id))data.items.push({...saved,order_version:saved.expected_order_version,segment_start_date:saved.start_date??'待確認',segment_end_date:'原操作結果待確認'});}
-    if(!data || !Array.isArray(data.items)) throw new Error('服務安排資料格式錯誤。');
-    status.textContent=data.items.length?'請先與客戶在服務群組協調，再提交結果。':'目前沒有可回報的服務安排。';
-    for(const item of data.items){
-      const card=document.createElement('article');card.className='panel';
-      const heading=document.createElement('h3');heading.textContent='案件 '+item.case_no+'｜服務區段 '+item.segment_start_date+'～'+item.segment_end_date;card.append(heading);
-      const form=document.createElement('form');
-      const choice=document.createElement('select');choice.setAttribute('aria-label','協調結果');
-      for(const [value,text] of [['accepted','接受，填寫開始日期'],['declined','無法配合，請工會安排代班']]){const option=document.createElement('option');option.value=value;option.textContent=text;choice.append(option);}
-      const label=document.createElement('label');label.textContent='雙方約定的服務開始日';
-      const start=document.createElement('input');start.type='date';start.required=true;start.setAttribute('aria-label','雙方約定的服務開始日');label.append(start);
-      choice.onchange=()=>{label.hidden=choice.value!=='accepted';start.required=choice.value==='accepted';};
-      const submit=document.createElement('button');submit.type='submit';submit.textContent='送出協調結果';
-      const state=document.createElement('p');state.setAttribute('role','status');
-      const recover=document.createElement('button');recover.type='button';recover.textContent='確認原操作結果';recover.hidden=true;
-      const storageKey='service-start-submit:'+item.case_no+':'+item.segment_id+':'+item.assignment_id;
-      const saved=sessionStorage.getItem(storageKey);let pending=saved?JSON.parse(saved):null;
-      const lock=()=>{submit.disabled=Boolean(pending);choice.disabled=Boolean(pending);start.disabled=Boolean(pending);recover.hidden=!pending;};lock();
-      const send=async()=>{
-        if(!pending)return;submit.disabled=true;recover.disabled=true;
-        try{const result=await serviceStartPost('submit',pending);sessionStorage.removeItem(storageKey);pending=null;
-          state.textContent=result.status==='applied'?'實際服務日期與排班已更新，結果將記錄於服務群組。':result.status==='substitute_required'?'已交由工會安排代班。':'已收到約定日期，等待其他服務區段的月嫂提交。';
-          choice.disabled=true;start.disabled=true;recover.hidden=true;
-        }catch(error){state.textContent=error.message;if(error.httpStatus>=400 && error.httpStatus<500){pending=null;sessionStorage.removeItem(storageKey);}lock();}
-        finally{recover.disabled=false;}
-      };
-      recover.onclick=()=>void send();
-      form.onsubmit=event=>{event.preventDefault();if(pending)return;
-        pending={case_no:item.case_no,segment_id:item.segment_id,assignment_id:item.assignment_id,expected_order_version:item.order_version,
-          decision:choice.value,start_date:choice.value==='accepted'?start.value:null,idempotency_key:crypto.randomUUID()};
-        sessionStorage.setItem(storageKey,JSON.stringify(pending));lock();void send();};
-      form.append(choice,label,submit,recover,state);card.append(form);root.append(card);
-    }
-  }catch(error){status.textContent=error.message;status.setAttribute('role','alert');}
-}
-
-async function leaveResultPost(path, body) {
-  const response=await fetch('/api/v1/line/staff-self-service/leave-results/'+path,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...identityPayload(),...body})});
-  const result=await response.json();
-  if(!response.ok || !result.success){const error=new Error(result.detail?.error?.message||result.detail?.message||result.message||'目前無法送出協調結果。');error.httpStatus=response.status;throw error;}
-  return result.data;
-}
-async function loadLeaveCases(){
-  const root=document.getElementById('leaveCases');root.replaceChildren();
-  const status=document.getElementById('leaveStatus');status.textContent='正在查詢本人正式排班…';
-  try{
-    const data=await leaveResultPost('cases',{});
-    for(let i=0;i<sessionStorage.length;i++){
-      const key=sessionStorage.key(i);if(!key?.startsWith('leave-result-submit:'))continue;
-      let pending;try{pending=JSON.parse(sessionStorage.getItem(key));}catch{continue;}
-      if(!data.items.some(item=>item.case_no===pending.case_no&&item.assignment_id===pending.assignment_id))
-        data.items.push({...pending,order_version:pending.expected_order_version,scheduling_version:pending.expected_scheduling_version,service_dates:pending.dates.map(d=>d.original_date)});
-    }
-    status.textContent=data.items.length?'請選擇受影響的服務日，再填寫協調結果。':'目前沒有可提交請假的正式排班。';
-    for(const item of data.items){
-      const card=document.createElement('article');card.className='panel';card.dataset.caseNo=item.case_no;card.dataset.assignmentId=item.assignment_id;const h=document.createElement('h3');h.textContent='案件 '+item.case_no;card.append(h);
-      const form=document.createElement('form');const choice=document.createElement('select');choice.setAttribute('aria-label','請假協調結果');
-      for(const [value,text] of [['defer','已協調順延'],['substitute','需要安排代班']]){const o=document.createElement('option');o.value=value;o.textContent=text;choice.append(o);}form.append(choice);
-      const dayList=document.createElement('fieldset');const legend=document.createElement('legend');legend.textContent='選擇受影響的服務日';dayList.append(legend);dayList.style.maxHeight='360px';dayList.style.overflowY='auto';form.append(dayList);
-      const fields=item.service_dates.map(day=>{
-        const row=document.createElement('div');row.className='field';
-        const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.dataset.serviceDate=day;check.setAttribute('aria-label','原服務日 '+day);check.style.width='auto';label.style.display='flex';label.style.gap='8px';label.append(check,document.createTextNode('原服務日 '+day));
-        const newLabel=document.createElement('label');newLabel.textContent='協議後日期';newLabel.hidden=true;const input=document.createElement('input');input.type='date';input.setAttribute('aria-label',day+' 協議後日期');input.disabled=true;newLabel.append(input);
-        check.onchange=()=>{newLabel.hidden=!check.checked||choice.value!=='defer';input.disabled=!check.checked||choice.value!=='defer';input.required=check.checked&&choice.value==='defer';};
-        row.append(label,newLabel);dayList.append(row);return {day,check,input,newLabel};
-      });
-      choice.onchange=()=>fields.forEach(f=>{f.newLabel.hidden=!f.check.checked||choice.value!=='defer';f.input.disabled=!f.check.checked||choice.value!=='defer';f.input.required=f.check.checked&&choice.value==='defer';});
-      const send=document.createElement('button');send.type='submit';send.textContent='送出請假協調結果';
-      const recover=document.createElement('button');recover.type='button';recover.textContent='確認原操作結果';
-      const message=document.createElement('p');message.setAttribute('role','status');
-      const storageKey='leave-result-submit:'+item.case_no+':'+item.assignment_id;
-      let pending=JSON.parse(sessionStorage.getItem(storageKey)||'null');let busy=false;
-      const lock=()=>{send.disabled=busy||Boolean(pending);choice.disabled=busy||Boolean(pending);recover.hidden=!pending;recover.disabled=busy;for(const f of fields){f.check.disabled=busy||Boolean(pending);f.input.disabled=busy||Boolean(pending)||!f.check.checked||choice.value!=='defer';}};
-      const submit=async()=>{if(!pending||busy)return;busy=true;lock();
-        try{const result=await leaveResultPost('submit',pending);pending=null;sessionStorage.removeItem(storageKey);
-          message.textContent=result.status==='applied'?(result.result.group_record_queued?'正式日期、排班及帳務已更新，日期表已交付案件群組寄送。':'正式日期、排班及帳務已更新；本案尚缺案件群組設定，請聯絡工會。'):(result.conflict_message?'日期有排程衝突，原排班尚未變更，已交工會處理。':'已收到代班需求，交由工會安排；原排班尚未變更。');
-          for(const element of form.elements)element.disabled=true;recover.hidden=true;
-        }catch(error){message.textContent=error.message;if(error.httpStatus>=400&&error.httpStatus<500){pending=null;sessionStorage.removeItem(storageKey);}busy=false;lock();}
-        finally{busy=false;recover.disabled=false;}
-      };
-      recover.onclick=()=>void submit();form.onsubmit=event=>{event.preventDefault();if(pending||busy)return;
-        const selected=fields.filter(f=>f.check.checked);if(!selected.length){message.textContent='請至少選擇一個原服務日。';return;}
-        if(choice.value==='defer'&&selected.some(f=>!f.input.value||f.input.value<=f.day)){message.textContent='請填寫晚於原服務日的協議後日期。';return;}
-        pending={case_no:item.case_no,assignment_id:item.assignment_id,decision:choice.value,
-          dates:selected.map(f=>({original_date:f.day,new_date:choice.value==='defer'?f.input.value:null})),
-          expected_order_version:item.order_version,expected_scheduling_version:item.scheduling_version,idempotency_key:crypto.randomUUID()};
-        sessionStorage.setItem(storageKey,JSON.stringify(pending));void submit();};
-      form.append(send,recover,message);card.append(form);root.append(card);lock();
-    }
-  }catch(error){status.textContent=error.message;}
-}
 
 init();
 </script>

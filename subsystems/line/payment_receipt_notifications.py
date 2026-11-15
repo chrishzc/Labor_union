@@ -1,15 +1,18 @@
-"""Human-approved receipt notices over committed Finance facts; no automatic send."""
+"""
+File: payment_receipt_notifications.py
+Description: 管理各期帳款入帳待辦查詢與「已於官方帳號發送／標記已通知」確認消除。
+"""
 from dataclasses import dataclass, asdict
 from hashlib import sha256
 from typing import Literal, Protocol, TYPE_CHECKING
 
 from domains.line.canonical_payload import canonical_line_payload_json
-from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
+from domains.line.delivery import LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
-from shared_kernel.identities import ActorContext, IdempotencyKey, CorrelationId
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import ActorContext, IdempotencyKey, IdempotencyReceipt
 from subsystems.line.capabilities import LineCapability, require_line_capability
-from subsystems.line.deposit_notifications import SETTLED, payment_source
-from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.deposit_notifications import payment_source
 
 if TYPE_CHECKING:
     from subsystems.line.cancellation_notifications import CancellationNoticeDelivery, CancellationNoticeSource
@@ -87,8 +90,12 @@ def first_receipt_message(case_no,amount_ntd):
     return {'type':'text','text':f'案件 {case_no} 第一期款 {amount_ntd:,} 元已確認入帳，謝謝。'}
 
 
+def receipt_ack_key(payment):
+    return IdempotencyKey(f'payment-receipt-ack:{payment.payment_stage}:{payment.settlement_identity}')
+
+
 class PaymentReceiptNotificationApplication:
-    def __init__(self, units, now, deposit):
+    def __init__(self, units, now, deposit=None):
         self._units,self._now,self._deposit=units,now,deposit
 
     def list(self,page=1,page_size=25,*,case_no=None,payment_stage=None,settlement_identity=None):
@@ -108,13 +115,9 @@ class PaymentReceiptNotificationApplication:
                     if identity in seen: continue
                     seen.add(identity)
                     history=repo.history(snapshot)
-                    if history and history.status=='sent': continue
-                    recipient=repo.recipient(snapshot.case_no)
-                    blocker=receipt_blocker(history,recipient)
-                    if snapshot.payment_stage=='deposit' and self._deposit._liff_id in ('','your_liff_id_here'):
-                        blocker='LINE 繳費頁面尚未設定，請先完成設定。'
+                    if history and history.status in ('sent','acknowledged'): continue
                     if (page-1)*page_size<=total<page*page_size:
-                        result.append(PaymentReceiptTodo(snapshot,blocker is None,blocker,history.status if history else None))
+                        result.append(PaymentReceiptTodo(snapshot,True,None,None))
                     total+=1
                 after=rows[-1].event_id
                 if len(rows)<100: break
@@ -128,36 +131,29 @@ class PaymentReceiptNotificationApplication:
             payment=repo.payment(expected.case_no,expected.payment_stage,expected.settlement_identity,lock=True)
             if payment is None or receipt_snapshot(payment,expected.payment_stage)!=expected:
                 raise PaymentReceiptConflict('payment_receipt_changed')
-            recipient=repo.recipient(expected.case_no,lock=True)
-            if not recipient: raise PaymentReceiptConflict('payment_receipt_recipient_unavailable')
-            reference=receipt_reference(expected,recipient)
-            key=IdempotencyKey('manual-receipt:'+sha256(reference.encode()).hexdigest())
-            existing=unit.deposit_notifications.existing_delivery(key)
-            if existing is not None:
-                if existing.status.value=='cancelled': raise PaymentReceiptConflict('payment_receipt_cancelled')
-                return existing.task_id.value,existing.status.value
-            if receipt_blocker(repo.history(expected,lock=True),recipient):
-                raise PaymentReceiptConflict('payment_receipt_already_attempted')
-            if expected.payment_stage=='deposit':
-                original=self._deposit._request(payment,recipient,SETTLED,key,unit)
-                kind,payload=original.message_kind,original.payload_json
-            elif expected.payment_stage=='first':
-                kind=LineMessageKind.TEXT
-                payload=canonical_line_payload_json(configured_payload(unit,'payment-first-settled',first_receipt_message(expected.case_no,expected.amount_ntd),
-                    {'case_no':expected.case_no,'amount_ntd':f'{expected.amount_ntd:,}'}))
-            else:
-                kind=LineMessageKind.TEXT
-                from subsystems.line.message_copy import message_definition
-                from subsystems.line.message_configuration import render_message_template
-                rendered=render_message_template(message_definition(unit),'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1',
-                    {'case_no':expected.case_no,'second_payment_amount':f'{expected.amount_ntd:,}'})
-                kind,payload=rendered.message_kind,rendered.payload_json
-            result=unit.delivery_tasks.enqueue(LineDeliveryRequest(LineRecipient(LineRecipientType.USER,LineUserId(recipient)),
-                kind,payload,self._now(),key,CorrelationId(reference),MANUAL_RECEIPT,
-                expected.payment_stage+':'+expected.settlement_identity))
-            unit.audit.append(LineAuditIntent('payment_receipt_manually_queued',actor.actor_id,MANUAL_RECEIPT,str(result.task_id.value)))
+            key=receipt_ack_key(expected)
+            if unit.receipts.get(key,for_update=True) is not None:
+                return 1,'completed'
+            history=repo.history(expected,lock=True)
+            if history and history.status in ('sent','acknowledged'):
+                return 1,'completed'
+            unit.receipts.append(IdempotencyReceipt(
+                key,
+                fingerprint_payload({
+                    'case_no':expected.case_no,
+                    'payment_stage':expected.payment_stage,
+                    'settlement_identity':expected.settlement_identity,
+                }),
+                f'{expected.payment_stage}:{expected.settlement_identity}',
+            ))
+            unit.audit.append(LineAuditIntent(
+                'payment_receipt_acknowledged',
+                actor.actor_id,
+                MANUAL_RECEIPT,
+                f'{expected.payment_stage}:{expected.settlement_identity}',
+            ))
             unit.commit()
-            return result.task_id.value,result.status.value
+            return 1,'completed'
 
 
 def payment_receipt_delivery_is_current(unit,task,now):
@@ -165,20 +161,10 @@ def payment_receipt_delivery_is_current(unit,task,now):
     automatic=(task.request.source_aggregate_type=='client_finance_account'
         and unit.payment_receipt_notifications.automatic_receipt(task))
     if task.request.source_aggregate_type!=MANUAL_RECEIPT and not automatic: return True
-    if automatic:
-        unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(task.task_id,ActorContext('line-receipt-worker'),
-            IdempotencyKey(f'payment-receipt-auto-stop:{task.task_id.value}'),task.request.correlation_id))
-        unit.commit()
-        return False
-    stage,_,identity=task.request.source_aggregate_identity.partition(':')
-    case=task.request.correlation_id.value.partition(':')[0]
-    repo=unit.payment_receipt_notifications
-    payment=repo.payment(case,stage,identity,lock=True)
-    recipient=repo.recipient(case,lock=True)
-    valid=bool(payment and recipient and task.request.recipient==LineRecipient(LineRecipientType.USER,LineUserId(recipient))
-        and task.request.correlation_id.value==receipt_reference(receipt_snapshot(payment,stage),recipient))
-    if not valid:
-        unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(task.task_id,ActorContext('line-receipt-worker'),
-            IdempotencyKey(f'payment-receipt-stale:{task.task_id.value}'),task.request.correlation_id))
-        unit.commit()
-    return valid
+    key=IdempotencyKey(
+        f'payment-receipt-auto-stop:{task.task_id.value}' if automatic else f'payment-receipt-retired:{task.task_id.value}'
+    )
+    unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(task.task_id,ActorContext('line-receipt-worker'),
+        key,task.request.correlation_id))
+    unit.commit()
+    return False

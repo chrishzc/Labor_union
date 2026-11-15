@@ -8,6 +8,8 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>LINE 身分確認</title>
+  <meta property="og:title" content="新竹市月子工會｜LINE 身分確認與帳號綁定">
+  <meta property="og:description" content="請開啟此官方安全頁面完成客戶、月嫂或工會帳號驗證綁定。">
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
     body { margin: 0; min-height: 100vh; background: linear-gradient(135deg,#eef2f7,#d9e2ec); color: #334e68; font-family: 'Noto Sans TC',sans-serif; }
@@ -188,9 +190,19 @@ async function ensureLineIdToken() {
 }
 
 async function openStaffPage(path) {
-  await openIdentityFlow("staff_self_service");
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const existingFlowId = parameters.get("flow_id") || stateParameters.get("flow_id") || "";
+  const caseNo = parameters.get("case_no") || stateParameters.get("case_no") || "";
+  const mode = parameters.get("mode") || stateParameters.get("mode") || "";
+  if (existingFlowId) {
+    flowId = existingFlowId;
+  } else {
+    await openIdentityFlow("staff_self_service");
+  }
   const target = new URL(path, location.origin);
   target.searchParams.set("flow_id", flowId);
+  if (caseNo) target.searchParams.set("case_no", caseNo);
+  if (mode) target.searchParams.set("mode", mode);
   location.replace(target.toString());
 }
 
@@ -454,6 +466,10 @@ function requestedStandalonePage() {
   if (target === "candidate_contact_customer" && /^[0-9a-f]{64}$/.test(reference)) {
     return `/line-candidate-contact-customer?ref=${encodeURIComponent(reference)}`;
   }
+  const caseNo = parameters.get("case_no") || stateParameters.get("case_no") || "";
+  if (target === "deposit_payment" && /^[A-Za-z0-9_-]{1,50}$/.test(caseNo)) {
+    return `/line-deposit-payment?case_no=${encodeURIComponent(caseNo)}`;
+  }
   return {
     faq: "/line-service-help?tab=faq",
     ai_assistant: "/line-service-help?tab=ai",
@@ -511,6 +527,17 @@ async function initialize() {
   const {parameters, stateParameters} = combinedEntryParameters();
   const target = parameters.get("target") || stateParameters.get("target");
   const purposeParam = parameters.get("purpose") || stateParameters.get("purpose");
+  const flowIdParam = parameters.get("flow_id") || stateParameters.get("flow_id") || "";
+  const modeParam = parameters.get("mode") || stateParameters.get("mode") || "";
+  const caseNoParam = parameters.get("case_no") || stateParameters.get("case_no") || "";
+  if (!purposeParam && flowIdParam && (modeParam || caseNoParam)) {
+    const scheduleTarget = new URL("/line-staff-schedule", location.origin);
+    scheduleTarget.searchParams.set("flow_id", flowIdParam);
+    if (caseNoParam) scheduleTarget.searchParams.set("case_no", caseNoParam);
+    if (modeParam) scheduleTarget.searchParams.set("mode", modeParam);
+    location.replace(scheduleTarget.toString());
+    return;
+  }
   if (target === "staff_verification" || purposeParam === "staff_verification") {
     await ensureLineIdToken();
     await openIdentityFlow("staff_verification");

@@ -1,4 +1,7 @@
-/** The desktop and LIFF read the same owner-backed source pages. */
+/**
+ * File: notification_tasks_client.ts
+ * Description: 提供桌面與 LIFF 共用的待辦通知查詢及入帳待辦已通知標記客戶端。
+ */
 import { z } from 'zod';
 import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
@@ -16,7 +19,13 @@ const itemSchema = z.object({id:z.string(),source:sourceSchema,group:groupSchema
   recipient:z.string().nullable(),message:z.string().nullable(),unavailable_reason:z.string().nullable(),expected_version:z.number().int().nullable(),
   delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),
   failure:z.object({issue_key:z.string().regex(/^ci_[0-9a-f]{64}$/),notification_reason:z.enum(['recipient_unavailable','template_or_schedule_invalid']),related_task_ids:z.array(z.number().int().positive())}).strict().nullable().optional(),
-  receipt:z.object({payment_stage:z.enum(['deposit','first','second']),settlement_identity:z.string().min(1).max(128)}).strict().nullable().optional()}).strict();
+  receipt:z.object({
+    payment_stage:z.enum(['deposit','first','second']),
+    settlement_identity:z.string().min(1).max(128),
+    amount_ntd:z.number().int().positive().optional(),
+    source_version:z.number().int().positive().optional(),
+    source_reference:z.string().min(1).max(128).optional(),
+  }).strict().nullable().optional()}).strict();
 const pageSchema = z.object({items:z.array(itemSchema),total:z.number().int().nonnegative().nullable(),next_cursor:z.union([z.number().int().nonnegative(),z.string().min(1).max(2048)]).nullable()}).strict();
 const catalogSchema = z.array(z.object({source:sourceSchema,label:z.string(),group:groupSchema}).strict());
 export type NotificationItem = z.infer<typeof itemSchema>;
@@ -39,7 +48,21 @@ export const notificationTasksClient = {
     return pageSchema.parse(raw.data);
   },
   async send(item:NotificationItem,key:string) {
-    if(item.source==='payment_receipt')throw new Error('請前往帳務頁面確認後發送入帳通知。');
+    if(item.source==='payment_receipt') {
+      if(!item.case_no || !item.receipt || item.receipt.amount_ntd == null || item.receipt.source_version == null || !item.receipt.source_reference) {
+        throw new Error('請前往帳務頁面確認並標記已通知。');
+      }
+      const raw = await transport.post<{data:unknown}>('/api/v1/line/payment-overdue-reminders/receipts/send',{
+        case_no:item.case_no,
+        payment_stage:item.receipt.payment_stage,
+        settlement_identity:item.receipt.settlement_identity,
+        amount_ntd:item.receipt.amount_ntd,
+        source_version:item.receipt.source_version,
+        source_reference:item.receipt.source_reference,
+      },notificationOptions());
+      const result = z.object({task_id:z.number().int().positive(),status:z.string()}).strict().parse(raw.data);
+      return result.task_id;
+    }
     const path = item.source === 'overdue' ? '/api/v1/line/payment-overdue-reminders/send'
       : '/api/v1/line/notification-task-actions/deposit-reminder';
     const body = item.source === 'overdue' ? {...item.payment,idempotency_key:key}

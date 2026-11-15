@@ -49,25 +49,31 @@
 ### 3.3 服務開始、排班與代班流程（`SSTART-01～08`）
 
 ```text
-客戶於原群組提議日期（雙方自行協調；客戶 LIFF 移除日期/天數修改入口）
-→ 月嫂於 Staff LIFF 點「接受，填開始日」或「無法配合，請工會代班」
-  ├─ 接受且無衝突＋契約／訂金／時段齊全 → 共同 coordinator 單一 UoW 更新 Orders/Scheduling/Finance/Payroll
-  │   → 發送無確認按鈕之群組結果日期表（不另經工會確認）
+客戶與月嫂於原案件群組協調（客戶 LIFF 移除日期/天數修改入口）
+→ 月嫂於群組呼叫「月嫂專屬小幫手選單」（輸入「工會」或「小幫手」，純 line_webhook_reply 0 Push 回覆）
+  ├─ 【確認開工日】：月嫂或客戶由原生日期滾輪選定約定開工日發起提議 → Reply 群組「開工日期確認單」
+  │   → 對方點【確認日期】且無衝突＋契約／訂金／時段齊全（提案方誤點同意靜默無反應；按重新選擇取消本次提議）
+  │   → 共同 coordinator 單一 UoW 更新 Orders/Scheduling/Finance/Payroll
+  │   → Reply 生效文案（提示查看【服務排程】）→ 正式開工後選單自動隱藏【確認開工日】
+  ├─ 【服務排程】：7 欄排班日曆卡片（圖例標註多月嫂區段與排休日）；開工前提示預期排程或先確認開工日，開工後查看已服務天數、排休日與完工日
   └─ 不接受／檔期衝突 → 建立工會代班待辦（僅洽談中／成立／服務中）
       → 工會確認替代區段並選定月嫂詢問意願 →（願意）→ 寄送單人本案群組邀請 →（取得真實入群證據）
       → 工會人員直接填寫實際服務日期 → 同一共同 Apply 正式生效並發送群組結果表
 ```
 
 - **核心條款（`SSTART-01～08`）**：
+  - **月嫂群組選單與零 Push 額度**：月嫂於案件服務群組操作「月嫂專屬小幫手選單」（含【確認開工日】、【服務排程】、【雙方合意延期】、【專員協助】與【使用說明／常見疑問標準回答】），互動全程皆使用 Webhook `replyToken` 同步回覆，嚴禁呼叫 Push API 消耗額度。
   - **工會首次儲存班表**：一般案件已選定月嫂、簽約完成、符合訂金條件且尚無正式班表時，授權工會人員核對實際開始日與服務日，並依 [多月嫂排班 §3.4.1](#multi-caregiver-service-correction) 完成逐日分配。工會提交明確記錄為工會確認，由共同 Apply 在同一交易保存日期、正式指派、逐日班次與相關業務結果。若已有同方案人員的有效指派但完全沒有正式逐日班次，須核對該指派並接續建立班次，避免產生重複的有效指派。檔期、版本或承諾不符時整筆阻擋。
   - **班表成立判定**：已確認日期以 Orders 日期版本表示。現行正式排班以有效指派及其有效逐日工作班次為準；存在有效指派且缺逐日工作班次時，顯示待處理並回傳可辨識的擋關原因。
-  - 停用客戶 LIFF 「服務日期／天數」申請及結構化日期 payload（保留其他異動與歷史查閱），並停用雙方「確認日期表／拒絕日期表」卡按鈕（舊確認路由固定回 `410`）。
+  - 停用客戶 LIFF 「服務日期／天數」申請及結構化日期 payload（保留其他異動與歷史查閱），並停用雙方「確認日期表／拒絕日期表」卡按鈕（確認日期表路由固定回 `410`）。
   - 服務中局部代班保持全案原 `actual_start_date` 與第一期款到期日；只有全案實際開工日改變時同交易同步第一、二期到期日。未來開工日之排班先保存正式結果，到期由背景 canonical lifecycle worker 轉為 `服務中`。
   - **共用入口**：`POST /api/v1/line/staff-self-service/service-start/*`、工會 `POST /api/v1/line/mobile-admin/service-start/*` 及 `GET/POST /api/v1/scheduling/service-start/*`；一般具備權限工會人員皆可操作（不限 `system_admin`）。
 
+<a id="leave-substitution"></a>
+
 ### 3.4 請假／順延／局部代班與服務中換人（`leave-v1`、`handover-v1`）
 
-- **Leave／Substitution**：桌面工作台依 server 進行中＋已有排班案納入選單（含已排班未開工）。月嫂本人提交雙方已協調結果（`execution_dates` 採 `leave-v1`；順延可指定明確補班日或依規則順延；無衝突直接單一 UoW 生效，衝突或代班立待辦）。休假同意不再經由已退役獨立 LINE 審核入口。
+- **雙方合意延期（Leave／Substitution）**。桌面工作台納入進行中且已有排班的案件，含已排班未開工。雙方可提出請假，合意後延期補足服務，總服務天數與政府補助時數守恆。此流程不接受提前解約。月嫂依 [LIFF 選日與群組確認流程](20_LINE客服與月嫂自助服務正式規格.md#42-雙方合意延期leave-v1) 提議。預檢唯讀。客戶同意後，於單一 UoW 重讀檔期並以 `leave-v1` 的 `execution_dates` 更新正式班表。正式確認時發現檔期衝突，保留原班表並立工會待辦。另行回報需要代班時也立待辦。
 - **批次重播與 AutoComplete 競爭**：`batch_key` 加鎖檢查 header／item_count／連續 ordinal／snapshot／fingerprint（同鍵異內容回 `batch_key_request_identity_conflict`）；Apply 與 [Orders AutoComplete](01_Orders_Domain.md#32-autocompleteorderservice-與完工後日期更正) **皆須先鎖定同一 Orders lifecycle aggregate 驗證 expected version**，先提交者勝出、後到者以 stale 失敗零寫入。
 - **服務中換人（`handover-v1`）**：針對已開工、仍有剩餘服務日且未鎖定之案件指定原 segment：選定接任月嫂詢問意願（附全部剩餘日）→ 願意後單人邀請並取得真實入群 membership → 工會填入交接日（`>= 今日` Taipei 時鐘，不得遺漏或改動已服務日與原薪資）→ 委派 `LeaveSubstitutionBatchIntent.handover_date` Preview／Apply 於單一 UoW 更新排班、原月嫂保留已付／匯出段與 Payroll handover 差額（見 [Payroll §3.5](03_Payroll_Domain.md#35-服務中換人付款承接staff-handover)）＋發送無按鈕群組結果表（維持最多 4 個有效 segments）。
 

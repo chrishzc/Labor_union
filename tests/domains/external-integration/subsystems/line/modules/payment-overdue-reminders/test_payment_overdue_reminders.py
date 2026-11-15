@@ -1,4 +1,7 @@
-"""Manual-only overdue acceptance: stage isolation, fresh facts and safe replay."""
+"""
+File: test_payment_overdue_reminders.py
+Description: 驗證期別隔離、客戶私人推播、自訂文案與過期事實自動撤銷等手動催繳流程。
+"""
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
@@ -109,12 +112,16 @@ def test_configured_copy_survives_delivery_guard_but_stale_facts_still_cancel(st
         unit.payment_overdue_reminders.recipient.return_value=ReminderRecipient(
             LineRecipient(LineRecipientType.GROUP,LineGroupId('C'+'1'*32)),1)
     template=dict(default_copy_templates()['payment-overdue-'+stage])
-    template['content']+=' 感謝您的協助。'
+    content_map = json.loads(template['content'])
+    for k in content_map:
+        if k.endswith('/text') or k == 'altText':
+            content_map[k] += ' 感謝您的協助。'
+    template['content'] = json.dumps(content_map, ensure_ascii=False)
     unit.configurations=SimpleNamespace(get=lambda _:SimpleNamespace(
         revision=SimpleNamespace(value=1),definition_json=json.dumps({'templates':[template]})))
     PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(payment,'custom-copy',ActorContext('union'))
     request=unit.delivery_tasks.enqueue.call_args.args[0]
-    assert '感謝您的協助。' in json.loads(request.payload_json)['text']
+    assert '感謝您的協助。' in request.payload_json
     assert f'{payment.remaining_amount_ntd:,}' in request.payload_json
     repository=MySqlPaymentOverdueReminderRepository(None)
     repository.payments=SimpleNamespace(get=Mock(return_value=payment))

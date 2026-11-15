@@ -56,7 +56,8 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
         <div className="line-flow-steps" style={{ '--line-flow-stage-count': journey.stages.length } as CSSProperties}>{journey.stages.map((item, index) => {
           const count = item.nodes.reduce((sum, node) => {
             const hasCatalogEntry = node.ids || node.templates;
-            return sum + (hasCatalogEntry ? resolveFlowMessages(node, descriptors, rules).length : node.delivery ? 1 : 0);
+            const count = hasCatalogEntry ? resolveFlowMessages(node, descriptors, rules).length : node.delivery ? 1 : 0;
+            return sum + (node.alternatives ? Math.min(count, 1) : count);
           }, 0);
           return <div className="line-flow-step-wrap" key={item.title}>
             {index > 0 && <div className="line-flow-line" aria-hidden="true"><ArrowRight size={18} /></div>}
@@ -81,7 +82,7 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
             const items = resolveFlowMessages(node, descriptors, rules);
             const single = items.length === 1 ? items[0] : null;
             return <div className="line-flow-message-group" key={node.id}><button type="button" className="line-flow-message-row" disabled={items.length === 0} aria-expanded={!single && items.length > 0 ? expandedNode === node.id : undefined} onClick={() => single ? openMessage(single) : setExpandedNode(expandedNode === node.id ? null : node.id)}>
-              <span className="line-flow-row-name">{node.title}</span>{single ? statusLabel(single) : <span className="line-flow-group-count">{items.length ? `${items.length} 則訊息` : '缺少訊息設定'}</span>}<span className="line-flow-row-action">{single ? (node.previewOnly ? '預覽訊息' : '調整訊息') : items.length ? '查看訊息' : '尚未設定'}{single ? <ArrowRight size={14} /> : <ChevronDown size={14} className={expandedNode === node.id ? 'expanded' : ''} />}</span>
+              <span className="line-flow-row-name">{node.title}</span>{single ? statusLabel(single) : <span className="line-flow-group-count">{items.length ? `${items.length} ${node.alternatives ? '種公版' : '則訊息'}` : '缺少訊息設定'}</span>}<span className="line-flow-row-action">{single ? (node.previewOnly ? '預覽訊息' : '調整訊息') : items.length ? '查看訊息' : '尚未設定'}{single ? <ArrowRight size={14} /> : <ChevronDown size={14} className={expandedNode === node.id ? 'expanded' : ''} />}</span>
             </button>{deliveryLabels}{items.length === 0 && <p className="line-flow-node-summary">此訊息的規則或模板尚未設定，請先同步通知設定。</p>}{node.summary && <p className="line-flow-node-summary">{node.summary}</p>}{!single && expandedNode === node.id && <div className="line-flow-nested">{items.map(item => <button type="button" key={item.descriptor.id} onClick={() => openMessage(item)}><span>{item.descriptor.name}</span>{statusLabel(item)}<ArrowRight size={14} aria-hidden="true" /></button>)}</div>}</div>;
           })}
         </section> : <div className="line-flow-instruction" id="line-flow-stage-messages"><MessageSquare size={18} aria-hidden="true" /><p>點選上方步驟，查看這個環節的 LINE 訊息。</p></div>}

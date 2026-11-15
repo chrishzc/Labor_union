@@ -43,7 +43,9 @@ from subsystems.customer_service.matching_coordination_worker import (
     MatchingCoordinationCustomerServiceWorker,
 )
 from subsystems.line.delivery_worker import LineDeliveryWorker
-from subsystems.line.service_start_day import ServiceStartDayPostbackApplication
+from subsystems.line.service_start_day import (
+    ServiceStartDayGreetingWorker, ServiceStartDayPaymentReply, is_retired_start_day_postback,
+)
 from subsystems.line.matching_coordination_delivery_worker import (
     MatchingCoordinationDeliveryWorker,
 )
@@ -65,6 +67,7 @@ from subsystems.line.matching_postback_application import LineMatchingPostbackAp
 from subsystems.line.media_application import LineMediaArchiveWorker, schedule_line_media_archive
 from subsystems.line.menu_command_application import LineMenuCommandApplication
 from subsystems.line.order_group_application import LineOrderGroupApplication
+from subsystems.line.group_helper_application import LineGroupHelperApplication
 from subsystems.line.rich_menu_binding import (
     RICH_MENU_BINDING_INTENT,
     LineRichMenuBindingWorker,
@@ -86,6 +89,7 @@ from subsystems.line.notification_reconciliation import (
 )
 from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
 from api.dependencies.line_runtime import get_line_runtime_application
+from api.dependencies.service_start import build_service_start_application
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -151,6 +155,10 @@ def _event_handlers(now):
         open_line_unit_of_work,
         now,
     )
+    group_helper = LineGroupHelperApplication(
+        now,
+        service_start_factory=build_service_start_application,
+    )
     identity_handlers = LineWebhookIdentityHandlers(
         now,
         _identity_flow_url,
@@ -158,6 +166,7 @@ def _event_handlers(now):
         follow_scheduler=None,
         media_scheduler=schedule_line_media_archive,
         group_application=LineOrderGroupApplication(now, alert_group_registrar=register_group_alert_target),
+        group_helper_application=group_helper,
         candidate_contact_postback_application=LineCandidateContactPostbackApplication(),
         matching_postback_application=LineMatchingPostbackApplication(
             MatchingNotificationApplication(
@@ -180,15 +189,25 @@ def _event_handlers(now):
     )
     handlers = identity_handlers.registry()
     default_postback = handlers["postback"]
+    default_message = handlers["message"]
+    start_day_payment = ServiceStartDayPaymentReply()
 
     def handle_postback(inbox, unit_of_work):
-        if ServiceStartDayPostbackApplication().handle(inbox, unit_of_work):
+        if is_retired_start_day_postback(inbox):
             return
         if leave_coordination.handle_postback(inbox, unit_of_work):
+            return
+        if group_helper.handle_postback(inbox, unit_of_work):
             return
         return default_postback(inbox, unit_of_work)
 
     handlers["postback"] = handle_postback
+
+    def handle_message(inbox, unit_of_work):
+        if not start_day_payment.handle_message(inbox, unit_of_work):
+            return default_message(inbox, unit_of_work)
+
+    handlers["message"] = handle_message
     return handlers, identity_handlers
 
 
@@ -204,14 +223,14 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
 
 def webhook_reply_dispatcher(now, handoff):
     _, handlers = _event_handlers(now)
-    start_day = ServiceStartDayPostbackApplication()
+    start_day_payment = ServiceStartDayPaymentReply()
 
     def dispatch(event, unit):
         if handoff(event, unit):
             return False
         if event.event.event_type == "message":
-            return handlers.handle_reply_message(event, unit)
-        return start_day.handle(event, unit) or handlers.handle_reply_postback(event, unit)
+            return start_day_payment.handle_message(event, unit) or handlers.handle_reply_message(event, unit)
+        return is_retired_start_day_postback(event) or handlers.handle_reply_postback(event, unit)
 
     return dispatch
 
@@ -220,6 +239,7 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
     from api.dependencies.line_deposit import get_deposit_notifications
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationWorker
     return {
+        "service_start_day_greeting": ServiceStartDayGreetingWorker(open_line_unit_of_work, now),
         "payment_reminder_notifications": PaymentReminderNotificationWorker(open_line_unit_of_work,now,get_deposit_notifications()),
         "deposit_settlement_notifications": get_deposit_notifications(),
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),

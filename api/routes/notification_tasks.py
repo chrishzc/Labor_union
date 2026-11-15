@@ -1,7 +1,6 @@
-"""Thin desktop/LIFF read adapters over the existing pending-query owners.
-
-Each request reads one bounded source from existing owners. No new inbox,
-completion flag, writer, or cross-owner transaction is introduced here.
+"""
+File: notification_tasks.py
+Description: 提供桌面與 LIFF 共用的唯讀通知待辦分頁與單筆操作投影。
 """
 from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,7 +30,7 @@ from subsystems.line.review_contracts import LineReviewListQuery
 from subsystems.line.candidate_contact_coordination_worker import query_manual_followups
 from subsystems.line.delivery_admin_contracts import LineDeliveryAdminQuery
 from subsystems.line.payment_overdue_reminders import reminder_text as payment_text
-from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER, SETTLED
+from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER
 from api.routes.line_deposit_payment import deposit_reminder_blocker
 from api.routes.line_payment_receipt_notifications import application as get_payment_receipt_notifications
 from subsystems.customer_service.application import CustomerServiceApplication
@@ -191,17 +190,23 @@ def _read_source(source, cursor, principal):
                                '核銷通知由原有工作自動處理；不重複核銷。' if p.settled else '寄送前由原流程重新核對繳費資訊及收件人。',
                                case_no=p.case_no, expected_version=p.obligation_version, tag='已核銷待通知' if p.settled else '待提醒',
                                recipient='客戶私人聊天室', unavailable_reason=unavailable, delivery_status=r.delivery_status,
-                               message=deposit_notification_payload(p.case_no,p.amount_ntd,p.due_date,SETTLED if p.settled else REMINDER,'')['altText'] if p.settled or p.due_date else None))
+                               message='請由人員於 LINE 官方帳號聊天室使用預設訊息手動通知訂金已入帳。' if p.settled else (deposit_notification_payload(p.case_no,p.amount_ntd,p.due_date,REMINDER,'')['altText'] if p.due_date else None)))
     elif source == Source.RECEIPT:
         rows,total=get_payment_receipt_notifications().list(page,SIZE)
         labels={'deposit':'訂金','first':'第一期款','second':'第二期款'}
         items=[_item(source,r.payment.payment_stage+':'+r.payment.settlement_identity,
             labels[r.payment.payment_stage]+'已入帳，待確認通知',
             f'本期 NT$ {r.payment.amount_ntd:,} 已正式核銷。',
-            '請前往帳務頁面核對案件、金額與收件對象，再手動發送收款通知；查看通知不會寄送客戶訊息。',
+            '請由人員於 LINE 官方帳號聊天室使用預設訊息手動通知客戶後，點選「已於官方帳號發送／標記已通知」消除待辦。',
             case_no=r.payment.case_no,tag='待帳務確認',recipient='客戶私人聊天室',
             unavailable_reason=r.unavailable_reason,delivery_status=r.delivery_status,
-            receipt={'payment_stage':r.payment.payment_stage,'settlement_identity':r.payment.settlement_identity}) for r in rows]
+            receipt={
+                'payment_stage':r.payment.payment_stage,
+                'settlement_identity':r.payment.settlement_identity,
+                'amount_ntd':r.payment.amount_ntd,
+                'source_version':r.payment.source_version,
+                'source_reference':r.payment.source_reference,
+            }) for r in rows]
     elif source == Source.GROUP:
         result = get_line_order_group_query_application().paid_uncreated_todos(actor, page=page, page_size=SIZE)
         total = result.total

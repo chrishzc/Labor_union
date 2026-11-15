@@ -10,6 +10,13 @@ export const FLOW_MANAGED_NOTIFICATION_EVENTS = new Set([
   'complaint.ingress.hold_high_ticket',
 ]);
 
+export function notificationMessageHref(message?: string | null, category?: 'accounting'): string {
+  const query = new URLSearchParams({ tab: 'push_queue' });
+  if (message) query.set('message', message);
+  if (category) query.set('category', category);
+  return `#line-notifications?${query}`;
+}
+
 export type MessageFlowStatus = 'enabled' | 'disabled' | 'flow' | 'unavailable';
 export function messageFlowStatus(descriptor: Pick<PreviewDescriptor, 'id' | 'builtin'>, rule?: LineNotificationRuleModel): MessageFlowStatus {
   if (rule) return FLOW_MANAGED_NOTIFICATION_EVENTS.has(rule.eventCode) ? 'flow' : rule.enabled ? 'enabled' : 'disabled';
@@ -33,6 +40,7 @@ interface FlowNodeDefinition {
   templates?: readonly string[];
   internal?: boolean;
   previewOnly?: boolean;
+  alternatives?: boolean;
   delivery?: readonly MessageDeliveryMode[];
   summary?: string;
 }
@@ -57,37 +65,36 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     { title: '收款與建群', nodes: [
       { id: 'deposit-reminder', title: '訂金繳費提醒', delivery: ['automatic', 'manual'], ids: ['deposit-reminder'], summary: '雙方簽約完成且資料齊備後，依排程自動私訊客戶；工會人員也可從待辦手動發送。' },
       { id: 'deposit-help', title: '訂金專人協助受理', delivery: ['reply'], ids: ['deposit-assistance'] },
-      { id: 'deposit-settled', title: '訂金確認入帳', delivery: ['manual'], ids: ['deposit-settled'] },
+      { id: 'deposit-settled', title: '訂金確認入帳', summary: '確認入帳後，由工會人員在 LINE 官方帳號聊天後台使用預設訊息手動發送，並於系統內標記已通知以消除待辦。' },
       { id: 'deposit-overdue', title: '訂金逾期－私訊補寄與人工提醒', delivery: ['automatic', 'manual'], ids: ['payment-overdue-deposit'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；任何私訊或按鈕回覆後改人工提醒，未核銷款項保留待辦。' },
       { id: 'group-invitation', title: '寄送案件群組邀請', delivery: ['manual'], ids: ['group-invitation-customer', 'group-invitation-staff'], summary: '訂金正式核銷後，人員在案件群組設定綁定與邀請網址，再輸入「發送邀請」；不以簽約完成作為建群門檻。' },
     ] },
     { title: '開始服務', nodes: [
-      { id: 'coordinated-dates', title: '月嫂提交已協調的開始日', internal: true, summary: '客戶與月嫂在案件群組自行協調；月嫂由訂單查詢或排班資訊與請假提交日期。無衝突即更新正式日期、排班與第一期款到期日；需要代班或衝突才交工會。' },
-      { id: 'start-date-record', title: '正式日期表記錄到案件群組', delivery: ['automatic'], ids: ['service-start-result'], summary: '正式保存成功後寄送群組日期表，僅記錄結果，沒有再次確認或拒絕按鈕。' },
-      { id: 'service-start', title: '服務開始當天通知卡', delivery: ['automatic'], templates: ['LINE-ORDER-SERVICE-START-DAY-CARD-V1'] },
-      { id: 'service-start-replies', title: '服務開始當天受理回覆', delivery: ['reply'], ids: ['service-start-normal-received', 'service-start-help-received'], summary: '點選「服務正常」或「需要協助」後，在原案件群組回覆。' },
-      { id: 'first-payment', title: '第一期款－自動客戶私訊', delivery: ['automatic'], ids: ['payment-first-reminder','payment-first-greeting'], summary: '正式服務開始當天依排程私訊；已結清只保留服務問候。' },
-      { id: 'first-payment-settled', title: '第一期款入帳收據', delivery: ['manual'], ids: ['payment-first-settled'], summary: '確認入帳後，由工會人員手動私訊客戶。' },
-      { id: 'first-overdue', title: '第一期款逾期－私訊補寄與人工提醒', delivery: ['automatic', 'manual'], ids: ['payment-overdue-first'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
+      { id: 'group-helper-menu', title: '群組小幫手選單（月嫂專屬控制台）', delivery: ['reply'], ids: ['helper-menu-card'], summary: '月嫂於案件服務群組輸入「工會」或「小幫手」，系統以免費 replyToken 回覆選單卡片（含確認開工日、服務排程、雙方合意延期、專員協助、使用說明）；全程 0 Push 額度消耗。' },
+      { id: 'confirm-start-date', title: '確認開工日', delivery: ['reply'], ids: ['helper-confirm-start-card', 'helper-confirm-start-completed'], summary: '月嫂或客戶由原生日期滾輪發起約定開工日提議，系統回覆開工確認單；防自提自審（提案方點同意靜默不反應），由對方確認後單一 UoW 自動完成排班並更新一期款期限；點擊重新選擇發送取消通知。正式開工後選單自動隱藏此項。' },
+      { id: 'opening-day-greeting', title: '開工當天群組問候', delivery: ['automatic'], ids: ['payment-first-greeting', 'payment-first-reminder'], alternatives: true, summary: '開工當天向案件群組發送一則純文字問候。第一期款尚未結清時，在同一則文字附上繳款提醒。' },
+      { id: 'service-schedule', title: '服務排程', delivery: ['reply'], ids: ['helper-schedule-unconfirmed', 'service-start-result'], summary: '以 7 欄排班日曆卡片呈現（圖例標註多月嫂區段與固定排休日，精簡直觀）；未開工時提示預期排程或先確認開工日，開工後供雙方查看已服務天數、剩餘天數與排休日（純 Reply 回覆，0 Push 額度）。' },
+      { id: 'mutual-postponement', title: '雙方合意延期', delivery: ['reply'], ids: ['helper-postponement-card', 'helper-postponement-completed'], summary: '僅限本案月嫂由 Flex URI Action 免費開啟（客戶操作回覆阻擋提示）；LIFF 嚴格鎖定本案、阻擋客戶開啟，重用後台日曆樣式支援多天成對調整且天數守恆；無衝突送出並經客戶同意後單一 UoW 更新排班（防自提自審，客戶重新協調回覆取消通知）。' },
+      { id: 'staff-assistance', title: '專員協助', delivery: ['reply'], ids: ['helper-staff-assistance-ack', 'helper-staff-assistance-closed'], summary: '點擊後於手機端 line-mobile-admin 與電腦版 Web 客服清單同步立待辦並以 Reply 通知；專員進群說明後於後台按「已處理結案」（結案指令支援後台調整）。' },
+      { id: 'group-guidelines', title: '使用說明與客戶常見疑問', delivery: ['reply'], ids: ['helper-guidelines-card', 'helper-faq-ingredients', 'helper-faq-hours', 'helper-faq-subsidy'], summary: '宣導排程修改須事前合意、配合政府補助不提前解約、請假採合意延期補班；內建常見客戶疑問（如食材採買、服務時段、補助撥款），月嫂可一鍵由系統 Reply 代發工會標準回答。' },
     ] },
     { title: '持續服務與異動', nodes: [
+      { id: 'first-overdue', title: '第一期款逾期－私訊補寄與人工提醒', delivery: ['automatic', 'manual'], ids: ['payment-overdue-first'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動私訊補寄一次；後續人工提醒也走客戶私訊。' },
+      { id: 'first-payment-settled', title: '第一期款確認入帳', summary: '工會在 LINE 官方帳號私聊手動發送入帳通知，並在系統標記已通知。' },
       { id: 'second-payment', title: '第二期款到期提醒', delivery: ['automatic'], ids: ['payment-second-reminder'], summary: '到期當天仍有餘額時，依排程自動私訊客戶；不需第二期或已結清不催繳。' },
-      { id: 'second-payment-settled', title: '第二期款入帳收據', delivery: ['manual'], templates: ['LINE-SECOND-PAYMENT-SETTLED-TEXT-V1'], summary: '確認入帳後，由工會人員手動私訊客戶。' },
+      { id: 'second-payment-settled', title: '第二期款入帳收據', summary: '確認入帳後，由工會人員在 LINE 官方帳號聊天後台使用預設訊息手動發送，並於系統內標記已通知以消除待辦。' },
       { id: 'second-overdue', title: '第二期款逾期－私訊補寄與人工提醒', delivery: ['automatic', 'manual'], ids: ['payment-overdue-second'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
-      { id: 'leave', title: '請假、順延、代班與換人（共用流程）', delivery: ['automatic', 'manual'], ids: ['service-start-inquiry', 'group-invitation-staff', 'service-start-result'], summary: '工會人員徵詢代班意願、邀請加入原群組。正式保存後，系統寄送群組日期表。' },
-      { id: 'leave-completed', title: '月嫂請假完成正式排班處理', delivery: ['automatic'], ids: ['staff-leave-completed'], previewOnly: true, summary: '代班處理完成並結束關聯請假申請後，私訊原申請月嫂。' },
     ] },
     { title: '完工與結案', nodes: [
-      { id: 'service-completion', title: '服務完工與滿意度問卷邀請', delivery: ['automatic'], templates: ['LINE-SERVICE-COMPLETION-TEXT-V1'], summary: '正常服務完工後，在原案件群組通知一次。問卷網址先留空，日後可於通知內容加入；不等待帳務結清。' },
-      { id: 'settlement', title: '帳務結算與結案', internal: true, summary: '一般退款、補助核銷與月嫂付款由帳務流程處理。取消結算相關通知由工會人員另外發送。' },
-      { id: 'cancellation-notices', title: '取消結算通知', delivery: ['manual'], ids: ['cancellation-notice-settlement', 'cancellation-notice-refund', 'cancellation-notice-collection'], summary: '工會人員可依案件狀態私訊客戶結算明細、退款完成或補收入帳。完成帳務操作不會自動寄送。' },
+      { id: 'service-completion', title: '滿意度調查問卷', delivery: ['reply'], ids: ['helper-satisfaction-survey'], summary: '正式完工後，本案月嫂可從群組小幫手呼叫問卷訊息。系統在原群組回覆目前範本文字，問卷網址可在「通知與發送」補上。' },
+      { id: 'settlement', title: '帳務結算與結案', internal: true, summary: '一般退款、補助核銷與月嫂付款由帳務流程處理。' },
     ] },
   ] },
   { id: 'identity', name: '登記與身分', stages: [
     { title: '加入好友', nodes: [{ id: 'welcome', title: '加入 LINE 好友（官方帳號設定）', internal: true, summary: '加入好友歡迎訊息改由 LINE 官方帳號後台設定，系統不額外發送歡迎訊息。' }] },
     { title: '登記需求', nodes: [
       { id: 'registration', title: '開啟服務登記', delivery: ['reply'], ids: ['service-registration', 'service-registration-unavailable'] },
-      { id: 'registration-approved', title: '需求申請核准通知', delivery: ['automatic'], ids: ['registration-approved-citizen', 'registration-approved-non-citizen'], previewOnly: true, summary: '工會核准後私訊申請人。非市民核准通知包含正式案件編號。' },
+      { id: 'registration-approved', title: '需求申請核准通知', delivery: ['automatic'], ids: ['registration-approved-citizen', 'registration-approved-non-citizen'], summary: '工會核准後私訊申請人。非市民核准通知包含正式案件編號，可於後台自訂核准文案。' },
     ] },
     { title: '身分確認', nodes: [
       { id: 'identity-links', title: '客戶、月嫂與工會身分入口', delivery: ['reply'], ids: ['identity-customer-link', 'identity-staff-link', 'identity-admin-link'] },
@@ -118,9 +125,12 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
   ] },
 ];
 
-export const FLOW_PREVIEW_ONLY_IDS = new Set(LINE_MESSAGE_FLOWS.flatMap(journey =>
-  journey.stages.flatMap(stage => stage.nodes.flatMap(node => node.previewOnly ? node.ids ?? [] : []))
-));
+export const FLOW_PREVIEW_ONLY_IDS = new Set([
+  'staff-leave-completed',
+  ...LINE_MESSAGE_FLOWS.flatMap(journey =>
+    journey.stages.flatMap(stage => stage.nodes.flatMap(node => node.previewOnly ? node.ids ?? [] : []))
+  ),
+]);
 
 export interface FlowMessage { descriptor: PreviewDescriptor; rule?: LineNotificationRuleModel; status: MessageFlowStatus }
 export function resolveFlowMessages(node: FlowNodeDefinition, descriptors: readonly PreviewDescriptor[], rules: readonly LineNotificationRuleModel[]): FlowMessage[] {

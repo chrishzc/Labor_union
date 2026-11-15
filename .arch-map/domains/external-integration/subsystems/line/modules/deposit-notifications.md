@@ -5,8 +5,8 @@
 - subsystem: `line`
 
 ## Responsibility
-工會人員待辦主動建立訂金繳費提醒；讀取已提交且帶 LINE 通知標記的 Client Finance 核銷事件，
-核銷事件僅保留待辦，成功通知改由 payment-overdue-reminders 的專用人員命令依 settlement identity 去重建立；worker 不自動寄送，舊自動工作在 provider 前取消。客戶 LIFF 只讀本人案件繳費資料；協助按鈕沿既有客服案件與聊天室留言流程，並以 `line_webhook_reply`（Reply-only）受理回覆。缺帳號／銀行代碼或客戶綁定時保留人員待辦。provider 前重驗來源與綁定。
+工會人員與排程僅針對未核銷訂金建立訂金繳費提醒（`client_deposit_reminder`）；讀取已提交且帶 LINE 通知標記的 Client Finance 核銷事件，
+訂金核銷事件僅於系統內保留入帳待辦（由 payment-overdue-reminders 管理待辦與標記已通知結案），系統不再針對訂金確認入帳建立 LINE Push 或範本（改由人員於 LINE 官方帳號聊天後台使用預設訊息手動發送），舊自動／已入帳推播工作在 provider 前取消。訂金提醒統一採用 Flex 卡片（內文載明案號、金額與到期日，取消外連按鈕，配置【已經匯款】與【有疑問需要解決】Postback 按鈕），客戶點擊【已經匯款】即時 Reply 確認並終止 24 小時自動補發，【有疑問需要解決】沿既有客服案件與聊天室留言流程，並以 `line_webhook_reply`（Reply-only）受理回覆。缺帳號／銀行代碼或客戶綁定時保留人員待辦。provider 前重驗來源與綁定。
 不擁有財務、入帳或案件狀態，不通知群組、不補發歷史核銷。
 未核銷訂金提醒的清單／總數、送出與 provider 前均須同案雙方簽約完成；以 Orders 目前契約識別及相符 `contract_completed` 事件唯讀判定，舊待寄提醒不符則取消。預先計價、合法核銷、已核銷成功通知與客戶繳費查詢不加此門檻。
 

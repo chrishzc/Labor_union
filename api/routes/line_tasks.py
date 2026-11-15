@@ -49,7 +49,11 @@ from subsystems.line.delivery_admin_contracts import (
     ControlLineDeliveryTaskCommand,
     LineDeliveryAdminQuery,
 )
-from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE, RETIRED_CONTRACT_DELIVERY_SOURCES
+from subsystems.line.delivery_contracts import (
+    REPLY_ONLY_WEBHOOK_SOURCE,
+    RETIRED_CONTRACT_DELIVERY_SOURCES,
+    RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES,
+)
 from subsystems.line.runtime_health import classify_line_worker_health
 
 LOGGER = logging.getLogger(__name__)
@@ -197,6 +201,7 @@ def task_detail(
             retry_allowed=(
                 task.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE
                 and task.source_aggregate_type not in RETIRED_CONTRACT_DELIVERY_SOURCES
+                and task.source_aggregate_type not in RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES
             ),
         )
     except Exception as error:
@@ -261,11 +266,12 @@ _SOURCE_TYPE_GROUPS = {
         "service_start_inquiry",
     ),
     LineDeliveryPublicSourceType.ORDER: (
-        "order", "order_service_start_day", "order_service_start_day_response",
+        "order", "order_service_start_day", "order_service_start_day_response", "order_service_start_greeting",
         "order_service_completion",
     ),
     LineDeliveryPublicSourceType.FINANCE: (
         "client_finance_account", "client_deposit_reminder", "client_deposit_settled",
+        "manual_client_payment_receipt",
         "manual_payment_overdue_reminder",
         "client_second_payment_reminder", "client_second_payment_settled",
     ),

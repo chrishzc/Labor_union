@@ -22,6 +22,7 @@ from subsystems.line.navigation_catalog import (
     CATALOG_REVISION,
     CATALOG_SOURCE_IDENTITY,
     entry_for_alias,
+    route_aliases,
 )
 
 
@@ -120,12 +121,17 @@ _ROUTE_CATEGORY_MAP: dict[str, CustomerServiceCategory | None] = {
     "service_progress": CustomerServiceCategory.SERVICE_PROGRESS,
     "profile_update": CustomerServiceCategory.PROFILE_UPDATE,
     "other": None,
+    "group_helper_menu": None,
 }
+
+
+def _confirmed_human_aliases() -> set[str]:
+    return set(route_aliases("human_handoff")) or _CONFIRMED_HUMAN_ALIASES
 
 
 def is_confirmed_human_request(text: str) -> bool:
     normalized = text.strip() if isinstance(text, str) else ""
-    return normalized in _CONFIRMED_HUMAN_ALIASES or _human_reason(normalized) is not None
+    return normalized in _confirmed_human_aliases() or _human_reason(normalized) is not None
 
 
 class DeterministicLineRouter:
@@ -145,7 +151,7 @@ class DeterministicLineRouter:
 
         human_reason = (
             "explicit_human_request"
-            if normalized in _CONFIRMED_HUMAN_ALIASES
+            if normalized in _confirmed_human_aliases()
             else _human_reason(normalized)
         )
         if human_reason is not None:

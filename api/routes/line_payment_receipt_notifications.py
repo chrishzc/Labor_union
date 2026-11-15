@@ -1,4 +1,7 @@
-"""Authenticated receipt todo Query and explicit human Send; no provider calls."""
+"""
+File: line_payment_receipt_notifications.py
+Description: 提供各期帳款入帳待辦查詢、已通知確認與契約取消結算通知端點。
+"""
 from dataclasses import asdict
 from datetime import datetime, UTC
 from typing import Literal
@@ -70,7 +73,7 @@ def list_receipts(page:int=Query(1,ge=1),page_size:int=Query(25,ge=1,le=100),
 def send_receipt(body:ReceiptPayment,principal:AdminPrincipal=Depends(require_customer_service_handler),app=Depends(application)):
     try:
         task,status=app.send(PaymentReceiptSnapshot(**body.model_dump()),admin_actor_context(principal))
-        return BaseResponse(data={'task_id':task,'status':status},message='已建立人工入帳通知寄送工作，尚未證明送達。')
+        return BaseResponse(data={'task_id':task,'status':status},message='已標記入帳通知為已發送，並從待辦清單消除。')
     except (PaymentReceiptConflict,DepositNotificationConflict) as error:
         raise typed_http_error(409,'conflict',str(error),'帳款或寄送狀態已變更，請重新整理待辦。','payment-receipt') from error
     except LineCapabilityDeniedError as error:

@@ -1,4 +1,7 @@
-"""Coordinate explicit service-start results and the exceptional substitute worklist."""
+"""
+File: service_start_workflow.py
+Description: 協調服務開始、請假順延與代班結果，支援單一外層交易與零推播群組確認。
+"""
 
 from dataclasses import dataclass
 from datetime import date
@@ -85,35 +88,65 @@ class ServiceStartWorkflow:
 
     def submit(self, submission: ServiceStartSubmission):
         with self.units() as unit:
-            replay = self.repository.replay_submission(submission)
-            if replay is not None:
-                return replay
-            self.repository.lock_submission(submission)
-            replay=self.repository.replay_submission(submission,lock=True)
-            if replay is not None:
-                return replay
-            subject = self.repository.lock_subject(submission)
-            request_id = self.repository.create_submission(submission, subject)
-            if submission.decision.value == 'accepted':
-                self._arrange(request_id, submission.start_date, f'staff:{submission.staff_id}', submission.key)
-            unit.commit()
-            return self.repository.view(request_id, staff_id=submission.staff_id)
+            view = self.submit_in_current_unit_of_work(submission)
+            if view is not None:
+                unit.commit()
+            return self.repository.view(view.request_id, staff_id=submission.staff_id)
+
+    def submit_in_current_unit_of_work(
+        self,
+        submission: ServiceStartSubmission,
+        *,
+        enqueue_group_schedule: bool = True,
+    ):
+        replay = self.repository.replay_submission(submission)
+        if replay is not None:
+            return replay
+        self.repository.lock_submission(submission)
+        replay = self.repository.replay_submission(submission, lock=True)
+        if replay is not None:
+            return replay
+        subject = self.repository.lock_subject(submission)
+        request_id = self.repository.create_submission(submission, subject)
+        if submission.decision.value == 'accepted':
+            self._arrange(
+                request_id,
+                submission.start_date,
+                f'staff:{submission.staff_id}',
+                submission.key,
+                enqueue_group_schedule=enqueue_group_schedule,
+            )
+        return self.repository.view(request_id, staff_id=submission.staff_id, lock=True)
 
     def leave_cases(self, staff_id):
         return self.repository.leave_cases(staff_id)
 
     def submit_leave(self, submission):
         with self.units() as unit:
-            self.repository.lock_case(submission.case_no, (submission.staff_id,))
-            replay = self.repository.replay_leave(submission)
-            if replay is not None:
-                return replay
-            request_id = self.repository.create_leave(submission)
-            if submission.decision == 'defer':
-                self._arrange(request_id, submission.dates[0].new_date,
-                              f'staff:{submission.staff_id}', submission.key)
+            view = self.submit_leave_in_current_unit_of_work(submission)
             unit.commit()
-            return self.repository.view(request_id, staff_id=submission.staff_id)
+            return self.repository.view(view.request_id, staff_id=submission.staff_id)
+
+    def submit_leave_in_current_unit_of_work(
+        self,
+        submission,
+        *,
+        enqueue_group_schedule: bool = True,
+    ):
+        self.repository.lock_case(submission.case_no, (submission.staff_id,))
+        replay = self.repository.replay_leave(submission)
+        if replay is not None:
+            return replay
+        request_id = self.repository.create_leave(submission)
+        if submission.decision == 'defer':
+            self._arrange(
+                request_id,
+                submission.dates[0].new_date,
+                f'staff:{submission.staff_id}',
+                submission.key,
+                enqueue_group_schedule=enqueue_group_schedule,
+            )
+        return self.repository.view(request_id, staff_id=submission.staff_id, lock=True)
 
     def todos(self, page=1, page_size=25, case_no=None):
         return self.repository.todos(page, page_size, case_no)
@@ -198,7 +231,7 @@ class ServiceStartWorkflow:
     def record_willingness_in_current_unit_of_work(self, token, line_user_id, willingness, event_key):
         return self.repository.record_willingness(token, line_user_id, willingness, event_key)
 
-    def _arrange(self, request_id, start_date, actor, key):
+    def _arrange(self, request_id, start_date, actor, key, *, enqueue_group_schedule: bool = True):
         # A canonical business occupancy conflict becomes an exception work item.
         # Infrastructure and stale errors still abort the complete transaction.
         self.repository.arrangement_savepoint()
@@ -211,4 +244,10 @@ class ServiceStartWorkflow:
             self.repository.mark_substitute_required(request_id, error)
             return
         if result is not None:
-            self.repository.complete(request_id, result, actor, key)
+            self.repository.complete(
+                request_id,
+                result,
+                actor,
+                key,
+                enqueue_group_schedule=enqueue_group_schedule,
+            )

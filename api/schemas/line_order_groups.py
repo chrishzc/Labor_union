@@ -35,6 +35,21 @@ class PaidOrderGroupTodoPageView(BaseModel):
     total_pages: int
 
 
+class OpeningGreetingSkipView(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    case_no: str
+    occurred_at: datetime
+
+
+class OpeningGreetingSkipPageView(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    items: list[OpeningGreetingSkipView]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class LineOrderGroupPageResponse(BaseModel):
     items: list[LineOrderGroupRecord]
     total: int

@@ -1,4 +1,7 @@
-"""MySQL owner for provisional LINE customer registration root facts."""
+"""
+File: provisional_registration_repository.py
+Description: 管理 LINE 臨時登記之寫入、審核核准與可編修核准通知入列。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineUserId
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+from infrastructure.mysql.line_message_copy import configured_message_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.case_import.provisional_registration_application import registration_confirmation_text
@@ -191,8 +195,16 @@ class MySqlProvisionalRegistrationRepository:
         return receipt.case_no
 
     def _enqueue_confirmation(self, candidate, registration_id, *, approved, case_no=None) -> None:
+        name = str(candidate.client_payload["name"])
+        text = registration_confirmation_text(name, approved=approved, case_no=case_no)
+        if approved:
+            copy_key = "registration-approved-non-citizen" if case_no else "registration-approved-citizen"
+            variables = {"name": name, **({"case_no": case_no} if case_no else {})}
+            text = configured_message_payload(
+                self._connection, copy_key, {"type": "text", "text": text}, variables
+            )["text"]
         self._delivery_tasks.enqueue(
-            _confirmation_request(candidate, registration_id, self._now(), approved=approved, case_no=case_no)
+            _confirmation_request(candidate, registration_id, self._now(), approved=approved, case_no=case_no, text=text)
         )
 
 
@@ -281,16 +293,15 @@ def _insert_beclass_record(cursor, candidate) -> int:
     return _last_insert_id(cursor, "provisional_registration_beclass_insert_failed")
 
 
-def _confirmation_request(candidate, registration_id, scheduled_at, *, approved, case_no=None):
+def _confirmation_request(candidate, registration_id, scheduled_at, *, approved, case_no=None, text=None):
     stage = "approved" if approved else "submitted"
+    rendered_text = text if text is not None else registration_confirmation_text(
+        str(candidate.client_payload["name"]), approved=approved, case_no=case_no
+    )
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId(candidate.line_user_id)),
         LineMessageKind.TEXT,
-        canonical_line_payload_json(
-            {"type": "text", "text": registration_confirmation_text(
-                str(candidate.client_payload["name"]), approved=approved, case_no=case_no
-            )}
-        ),
+        canonical_line_payload_json({"type": "text", "text": rendered_text}),
         scheduled_at,
         IdempotencyKey(f"line-registration:{registration_id}:{stage}"),
         CorrelationId(f"line-registration:{registration_id}"),

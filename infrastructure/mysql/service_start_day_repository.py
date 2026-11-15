@@ -1,18 +1,64 @@
 """
 File: service_start_day_repository.py
-Description: 唯讀驗證舊開工詢問按鈕的 Reply-only 回覆現行性；不再產生 Push 來源。
+Description: 讀取開工日群組、排班及第一期款資料，驗證問候與回覆的對象。
 """
 from datetime import date, datetime
-import json
+from hashlib import sha256
 
+from domains.line.delivery import LineMessageKind, LineRecipientType
+from infrastructure.mysql.client_payment_reminder_query_repository import MySqlClientPaymentReminderQueryRepository
+from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
+from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.line.service_start_day import (
-    EVENT_CODE, EVENT_PREFIX, ServiceStartDayCandidate, StartDayCaregiver, start_day_reply_token,
+    GREETING_SOURCE, ServiceStartDayCandidate, StartDayCaregiver, greeting_reference,
 )
 
 
 class MySqlServiceStartDayRepository:
     def __init__(self, connection):
         self.connection = connection
+
+    def due_cases(self, day, after='', limit=100):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no FROM orders WHERE actual_start_date=%s AND case_no>%s "
+                           "AND status IN ('訂單成立','服務中') ORDER BY case_no LIMIT %s", (day, after, limit))
+            return tuple(str(row['case_no']) for row in cursor.fetchall())
+
+    def has_missing_group(self, case_no, day):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM orders o WHERE o.case_no=%s AND o.actual_start_date=%s "
+                           "AND o.status IN ('訂單成立','服務中') "
+                           "AND NOT EXISTS (SELECT 1 FROM line_order_group_bindings b WHERE b.case_no=o.case_no "
+                           "AND b.binding_status IN ('bound','inviting','active','attention') AND b.group_id IS NOT NULL)",
+                           (case_no, day))
+            return cursor.fetchone() is not None
+
+    def first_payment(self, case_no):
+        payments = MySqlClientPaymentReminderQueryRepository(self.connection)
+        rows = [row for row in payments.for_case(case_no) if row.payment.payment_stage == 'first']
+        if len(rows) != 1:
+            return None
+        facts = payments.get(rows[0].payment.obligation_identity, lock=True)
+        if facts is None or facts.payment.remaining_amount_ntd <= 0:
+            return None
+        return facts.payment
+
+    def has_greeting(self, case_no, day):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM line_delivery_tasks WHERE source_aggregate_type=%s "
+                           "AND source_aggregate_identity=%s AND correlation_id LIKE %s "
+                           "AND (processing_status<>'cancelled' OR completed_attempts>0) LIMIT 1 FOR UPDATE",
+                           (GREETING_SOURCE, case_no, f'opening-greeting:{day.isoformat()}:%'))
+            if cursor.fetchone() is not None:
+                return True
+            # An opening notice sent or already attempted before the rollout is already accounted for.
+            cursor.execute("SELECT 1 FROM line_delivery_tasks t JOIN client_obligations o "
+                           "ON o.obligation_identity=t.source_aggregate_identity "
+                           "WHERE t.source_aggregate_type='client_payment_initial_reminder' "
+                           "AND o.case_no=%s AND o.obligation_type='first' AND t.recipient_type='group' "
+                           "AND t.correlation_id LIKE %s AND (t.completed_attempts>0 OR t.processing_status='sent') "
+                           "LIMIT 1 FOR UPDATE", (case_no, f'%:{day.isoformat()}'))
+            return cursor.fetchone() is not None
 
     def current(self, case_no: str, service_date: date, *, lock=False):
         with self.connection.cursor() as cursor:
@@ -40,45 +86,45 @@ class MySqlServiceStartDayRepository:
             caregivers = tuple(StartDayCaregiver(int(row['staff_id']), str(row['name'])) for row in cursor.fetchall())
             if not caregivers:
                 return None
-            # Payment reminders have their own private-customer workflow. This
-            # source now asks only the assigned caregivers about service status.
+            # Opening notices read Finance separately.
             amount = 0
         return ServiceStartDayCandidate(case_no, service_date, str(group['group_id']),
                                         int(group['effective_generation_id']), amount, caregivers)
 
-    def _source(self, token):
+    def payment_reply_context(self, group_id, day, line_user_id):
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT facts_snapshot FROM line_notification_source_events "
-                           "WHERE source_domain='orders' AND event_code=%s AND source_event_identity=%s",
-                           (EVENT_CODE, EVENT_PREFIX + token))
-            row = cursor.fetchone()
-        if not row:
-            return None
-        return json.loads(row['facts_snapshot']) if isinstance(row['facts_snapshot'], str) else row['facts_snapshot']
-
-    def response_context(self, token, group_id, line_user_id):
-        source = self._source(token)
-        if not source or source['group_id'] != group_id:
-            return None
-        current = self.current(source['case_no'], date.fromisoformat(source['service_date']), lock=True)
-        if (current is None or current.group_id != group_id
-                or current.generation_id != source['generation_id']):
-            return None
-        with self.connection.cursor() as cursor:
-            cursor.execute("SELECT subject_reference FROM line_identity_role_bindings "
-                           "WHERE line_user_id=%s AND subject_type='staff' AND binding_status='bound' FOR UPDATE",
-                           (line_user_id,))
+            cursor.execute("SELECT b.case_no,o.actual_start_date FROM line_order_group_bindings b "
+                           "JOIN orders o ON o.case_no=b.case_no WHERE b.group_id=%s", (group_id,))
             binding = cursor.fetchone()
-        if not binding or str(binding['subject_reference']) not in {str(item.staff_id) for item in current.caregivers}:
+        if not binding:
             return None
-        return current
+        service_date = binding['actual_start_date']
+        if service_date is None or service_date > day:
+            return None
+        current = self.current(binding['case_no'], service_date, lock=True)
+        if current is None or current.group_id != group_id:
+            return None
+        first = self.first_payment(current.case_no)
+        if first is None:
+            return None
+        payment_key = sha256(first.obligation_identity.encode()).hexdigest()
+        with self.connection.cursor() as cursor:
+            pattern = f'opening-greeting:{service_date.isoformat()}:{payment_key}:%'
+            cursor.execute("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type=%s "
+                           "AND source_aggregate_identity=%s AND recipient_identity=%s AND correlation_id LIKE %s "
+                           "AND processing_status='sent' ORDER BY id LIMIT 1 FOR UPDATE",
+                           (GREETING_SOURCE, current.case_no, group_id, pattern))
+            task = cursor.fetchone()
+        if not task:
+            return None
+        customer = MySqlDepositNotificationRepository(self.connection).customer_line_user_id(current.case_no, lock=True)
+        return (current, int(task['id'])) if customer == line_user_id else None
 
     def delivery_is_current(self, task, now: datetime):
-        # 只驗證舊按鈕 Reply ack；開工詢問 Push 已退役，由 provider 前守門取消。
-        token = start_day_reply_token(task)
-        source = self._source(token) if token is not None else None
-        if source is None or task.request.recipient.recipient_type.value != 'group':
+        request = task.request
+        if request.recipient.recipient_type is not LineRecipientType.GROUP or request.message_kind is not LineMessageKind.TEXT:
             return False
-        current = self.current(source['case_no'], date.fromisoformat(source['service_date']), lock=True)
-        return (current is not None and current.group_id == task.request.recipient.identity.value
-                and current.generation_id == source['generation_id'])
+        day = now.astimezone(TAIPEI_TIME_ZONE).date()
+        current = self.current(request.source_aggregate_identity, day, lock=True)
+        return bool(current and current.group_id == request.recipient.identity.value
+                    and greeting_reference(current, self.first_payment(current.case_no)) == request.correlation_id.value)

@@ -111,7 +111,7 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
         setScope(event.target.value === 'upcoming' ? 'upcoming' : 'served');
         setAddedStaff([]); setRemovedBlocks([]); setOverrides({}); setReplacements({}); setEditDates(false);
       }}><option value="served">更正已服務紀錄</option><option value="upcoming">調整後續排班</option></select></label>}
-      <OrderCaregiverScheduleCalendars key={scope} blocks={blocks} dates={availableDays} allocation={allocation}
+      <OrderCaregiverScheduleCalendars key={scope} caseNo={caseNo} blocks={blocks} dates={availableDays} allocation={allocation}
         onSelect={(day, key) => setOverrides(current => ({ ...current, [day]: allocation[day] === key ? null : key }))}
         management={{
           options: [...(directory?.people.values() ?? [])].map(person => ({ staffId: person.id, name: person.name ?? undefined })),

@@ -840,6 +840,8 @@ def _require_flow(unit_of_work, flow_id, purpose, line_user_id, now):
 def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
     claim = LineIdentityClaim(line_user_id, candidate.subject_type, candidate.subject_reference)
     snapshot = _bind_claim(unit_of_work, claim, correlation_id)
+    if snapshot.status is not LineIdentityBindingStatus.BOUND:
+        raise RuntimeError("line_identity_bind_incomplete")
     unit_of_work.audit.append(
         LineAuditIntent(
             "line.identity.bound",
@@ -882,7 +884,7 @@ def _bind_claim(unit_of_work, claim, correlation_id):
         claim,
         expected,
         f"line-user:{claim.line_user_id.value}"[:100],
-        IdempotencyKey(f"identity-bind:{claim.fingerprint.value}"),
+        IdempotencyKey(f"identity-bind:{claim.fingerprint.value}:v{expected.value}"),
         correlation_id.value,
     )
 

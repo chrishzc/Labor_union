@@ -18,13 +18,14 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
+from domains.line.identities import LineSourceType
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.platform_user import LineFriendEvent, LineFriendEventType
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
-from subsystems.line.navigation_catalog import CATALOG_REVISION
+from subsystems.line.navigation_catalog import CATALOG_REVISION, route_aliases
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
@@ -71,6 +72,7 @@ class LineWebhookIdentityHandlers:
         follow_scheduler: Callable[[object, object, object], int] | None = None,
         media_scheduler: Callable[[object, object], bool] | None = None,
         group_application: object | None = None,
+        group_helper_application: object | None = None,
         candidate_contact_postback_application: object | None = None,
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
@@ -84,6 +86,7 @@ class LineWebhookIdentityHandlers:
         self._follow_scheduler = follow_scheduler
         self._media_scheduler = media_scheduler
         self._group_application = group_application
+        self._group_helper_application = group_helper_application
         self._candidate_contact_postback_application = candidate_contact_postback_application
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
@@ -121,6 +124,10 @@ class LineWebhookIdentityHandlers:
             inbox, unit_of_work
         ):
             return
+        if self._group_helper_application is not None and self._group_helper_application.handle_message(
+            inbox, unit_of_work
+        ):
+            return
         line_user_id = _optional_user_id(inbox)
         if line_user_id is None:
             return
@@ -142,10 +149,12 @@ class LineWebhookIdentityHandlers:
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             normalized = text.strip()
-            if normalized in _FEEDBACK_RESOLVED_TEXTS:
+            resolved_aliases = set(route_aliases("feedback_resolved")) or _FEEDBACK_RESOLVED_TEXTS
+            unresolved_aliases = set(route_aliases("feedback_unresolved")) or _FEEDBACK_UNRESOLVED_TEXTS
+            if normalized in resolved_aliases:
                 self._handle_feedback_resolved(inbox, unit_of_work, line_user_id)
                 return
-            if normalized in _FEEDBACK_UNRESOLVED_TEXTS:
+            if normalized in unresolved_aliases:
                 self._handle_feedback_unresolved(inbox, unit_of_work, line_user_id)
                 return
             if self._menu_command_application is not None and self._menu_command_application.handle(
@@ -171,11 +180,16 @@ class LineWebhookIdentityHandlers:
         """Run the existing response owners without processing unrelated inbound work."""
         if self._group_application is not None and self._group_application.handle_reply(inbox, unit_of_work):
             return True
+        if self._group_helper_application is not None and self._group_helper_application.handle_reply(inbox, unit_of_work):
+            return True
         line_user_id = _optional_user_id(inbox)
         text = _message_text(inbox)
         if line_user_id is None or text is None or inbox.event.source.source_type is not LineSourceType.USER:
             return False
-        if text.strip() in _FEEDBACK_RESOLVED_TEXTS or text.strip() in _FEEDBACK_UNRESOLVED_TEXTS:
+        stripped = text.strip()
+        resolved_aliases = set(route_aliases("feedback_resolved")) or _FEEDBACK_RESOLVED_TEXTS
+        unresolved_aliases = set(route_aliases("feedback_unresolved")) or _FEEDBACK_UNRESOLVED_TEXTS
+        if stripped in resolved_aliases or stripped in unresolved_aliases:
             return False
         if (
             self._matching_postback_application is not None
@@ -200,6 +214,11 @@ class LineWebhookIdentityHandlers:
         return handled
 
     def handle_reply_postback(self, inbox, unit_of_work) -> bool:
+        if (
+            self._group_helper_application is not None
+            and self._group_helper_application.handle_postback(inbox, unit_of_work)
+        ):
+            return True
         data = _postback_data(inbox)
         if data.startswith("customer-service:handoff:") and data != "customer-service:handoff:confirm":
             return self._service_help_application is not None and self._service_help_application.handle_postback(
@@ -235,6 +254,11 @@ class LineWebhookIdentityHandlers:
             self._group_application.handle_membership(inbox, unit_of_work)
 
     def handle_postback(self, inbox, unit_of_work):
+        if (
+            self._group_helper_application is not None
+            and self._group_helper_application.handle_postback(inbox, unit_of_work)
+        ):
+            return
         if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
             return
         if (
@@ -535,11 +559,17 @@ def _identity_link_message(purpose, url, unit_of_work=None):
 
 def _identity_purpose_for_text(text):
     normalized = text.strip()
-    if _STAFF_COMMAND in normalized or normalized == "我要綁定月嫂":
+    staff_aliases = route_aliases("staff_binding") or (_STAFF_COMMAND, "我要綁定月嫂")
+    if normalized in staff_aliases or any(alias in normalized for alias in staff_aliases):
         return LineIdentityFlowPurpose.STAFF_VERIFICATION
-    if normalized in _ADMIN_COMMANDS:
+    admin_aliases = set(route_aliases("admin_binding")) or _ADMIN_COMMANDS
+    if normalized in admin_aliases:
         return LineIdentityFlowPurpose.ADMIN_BINDING
-    if normalized in _CUSTOMER_COMMANDS:
+    customer_aliases = (
+        set(route_aliases("customer_binding"))
+        | set(route_aliases("registration"))
+    ) or _CUSTOMER_COMMANDS
+    if normalized in customer_aliases:
         return LineIdentityFlowPurpose.CUSTOMER_BINDING
     return None
 

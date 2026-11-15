@@ -444,9 +444,8 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('每日服務時段尚未完整'));
 
-    const now = new Date();
-    const expectedDays = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).getUTCDate();
-    expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(expectedDays);
+    expect(document.querySelectorAll('.gantt-month-group-col')).toHaveLength(12);
+    expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(36);
     expect(calendarRequests(requests)).toHaveLength(2);
   });
 

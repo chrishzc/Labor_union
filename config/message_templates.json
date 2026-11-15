@@ -247,79 +247,6 @@
       ]
     },
     {
-      "id": "LINE-ORDER-SERVICE-START-DAY-CARD-V1",
-      "name": "服務當天群組繳款提醒與月嫂服務狀況詢問",
-      "category": "order_lifecycle",
-      "message_type": "flex",
-      "enabled": true,
-      "content": {
-        "type": "flex",
-        "altText": "服務開始提醒與服務狀況詢問",
-        "contents": {
-          "type": "bubble",
-          "body": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-              {
-                "type": "text",
-                "text": "【服務開始提醒】\n案件編號：{case_no}\n今天是本案的服務開始日，祝服務順利！\n\n{first_payment_notice}\n\n{caregiver_names}，請問今天的服務是否順利？",
-                "wrap": true
-              }
-            ]
-          },
-          "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-              {
-                "type": "button",
-                "action": {
-                  "type": "postback",
-                  "label": "服務正常",
-                  "data": "start-day:{response_token}:normal"
-                }
-              },
-              {
-                "type": "button",
-                "action": {
-                  "type": "postback",
-                  "label": "需要協助",
-                  "data": "start-day:{response_token}:help"
-                }
-              }
-            ]
-          }
-        }
-      },
-      "variables": [
-        {
-          "name": "case_no",
-          "required": true,
-          "description": "案件編號"
-        },
-        {
-          "name": "first_payment_notice",
-          "required": true,
-          "description": "未結清時的繳款段落；已結清為空字串"
-        },
-        {
-          "name": "caregiver_names",
-          "required": true,
-          "description": "當日排班月嫂姓名"
-        },
-        {
-          "name": "response_token",
-          "required": true,
-          "description": "系統建立的群組當日詢問識別"
-        }
-      ],
-      "usage": [
-        "order_lifecycle",
-        "notification"
-      ]
-    },
-    {
       "id": "LINE-SECOND-PAYMENT-DUE-TEXT-V1",
       "name": "第二期款到期當天原群組提醒",
       "category": "order_lifecycle",
@@ -362,19 +289,6 @@
           "description": "本次第二期款正式核銷金額"
         }
       ],
-      "usage": [
-        "order_lifecycle",
-        "notification"
-      ]
-    },
-    {
-      "id": "LINE-SERVICE-COMPLETION-TEXT-V1",
-      "name": "服務完工－滿意度問卷邀請",
-      "category": "order_lifecycle",
-      "message_type": "text",
-      "enabled": true,
-      "content": "本案服務已完成，感謝您的配合。請填寫服務滿意度問卷，讓我們了解您的服務體驗。",
-      "variables": [],
       "usage": [
         "order_lifecycle",
         "notification"

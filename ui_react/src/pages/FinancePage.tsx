@@ -23,6 +23,7 @@ import type { FinanceBankTransaction } from '../api/finance_import/finance_impor
 import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
 import { FinanceBankReconciliationWorkspace } from '../components/FinanceBankReconciliationWorkspace';
+import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 
 export type FinanceTab = 'case-accounting' | 'finance-import' | 'government-list' | 'monthly';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -102,6 +103,7 @@ export const FinancePage: React.FC = () => {
       caseNo: (params.get('case_no') ?? '').slice(0, 50),
       fromWorkbench: params.get('from') === 'workbench',
       subTab: params.get('subtab') === 'all' ? ('all' as const) : ('ongoing' as const),
+      receiptNotice: Boolean(params.get('receipt_stage') || params.get('settlement_identity') || params.get('tab') === 'receipt-notices'),
     };
   });
   const [activeTab, setActiveTab] = useState<FinanceTab>(() =>
@@ -417,6 +419,8 @@ export const FinancePage: React.FC = () => {
           </button>
         ))}
       </nav>
+
+      {entry.receiptNotice && <PaymentReceiptNoticeWorkbench revision={reload} />}
 
       {activeTab === 'case-accounting' && (
         <FinanceCaseList

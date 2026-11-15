@@ -101,7 +101,8 @@ import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomer
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
 import { LineMessageFlow } from '../components/LineMessageFlow';
-import { LineNotificationWorkbench, PAYMENT_REMINDER_MESSAGE_IDS } from '../components/LineNotificationWorkbench';
+import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
+import { notificationMessageHref } from '../adapters/line_configuration/line_message_flow_adapter';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import {
@@ -330,12 +331,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [notificationMessageId, setNotificationMessageId] = useState<string | null>(initialHashParams.get('message')?.slice(0, 191) || null);
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
-  useEffect(() => {
-    if (activeTab !== 'push_queue' || !notificationMessageId || !PAYMENT_REMINDER_MESSAGE_IDS.includes(notificationMessageId)) return;
-    const query = new URLSearchParams({tab:'accounting-warnings',view:'reminder-content'});
-    if(notificationMessageId)query.set('message',notificationMessageId);
-    window.location.hash='#finance?'+query.toString();
-  }, [activeTab,notificationMessageId]);
 
   const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(hashPage(initialHashParams, 'group_page'));
   const [orderGroupSearch, setOrderGroupSearch] = useState((initialHashParams.get('group_q') ?? '').slice(0, 50));
@@ -1247,15 +1242,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       )}
 
       {!runtimeOnly && scope === 'interface' && <LineMessageFlow active={activeTab === 'message_flow'} configuration={lineConfiguration} onOpenMessage={id => {
-        window.location.hash = '#line-management?' + new URLSearchParams({ tab: 'push_queue', message: id });
+        window.location.hash = notificationMessageHref(id);
       }} />}
 
-      {activeTab === 'push_queue' && (notificationMessageId && PAYMENT_REMINDER_MESSAGE_IDS.includes(notificationMessageId)
-        ? <p role="status">正在開啟帳務警示的提醒內容…</p>
-        : <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient}
+      {activeTab === 'push_queue' && <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient}
           search={notificationRuleSearch} enabled={notificationRuleEnabled} onSearchChange={setNotificationRuleSearch} onEnabledChange={setNotificationRuleEnabled}
+          initialCategory={initialHashParams.get('category') === 'accounting' ? 'accounting' : 'all'}
           selectedEntryId={notificationMessageId} onSelectedEntryChange={setNotificationMessageId} onReturnToFlow={() => { window.location.hash = '#line-management?tab=message_flow'; }}
-          onOpenPaymentMessage={id=>{window.location.hash='#finance?'+new URLSearchParams({tab:'accounting-warnings',view:'reminder-content',message:id});}} />)}
+        />}
 
       {activeTab === 'order_groups' && <LineOrderGroupWorkbench
         page={orderGroupPageNumber}

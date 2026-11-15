@@ -1,4 +1,7 @@
-"""Public notification workbench projections; no additional task state."""
+"""
+File: notification_tasks.py
+Description: 定義桌面與 LIFF 待辦工作台之唯讀投影與入帳待辦結構描述。
+"""
 from enum import StrEnum
 from datetime import date
 from typing import Annotated, Literal
@@ -68,6 +71,9 @@ class ReceiptNotificationContext(BaseModel):
     model_config = ConfigDict(extra='forbid')
     payment_stage: Literal['deposit','first','second']
     settlement_identity: str = Field(min_length=1,max_length=128)
+    amount_ntd: int | None = Field(default=None,ge=1)
+    source_version: int | None = Field(default=None,ge=1)
+    source_reference: str | None = Field(default=None,min_length=1,max_length=128)
 
 
 class NotificationItem(BaseModel):

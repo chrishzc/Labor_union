@@ -9,7 +9,9 @@ from pathlib import Path
 import re
 from uuid import uuid4
 from subsystems.line.message_copy_catalog import (
-    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_SIGNING_REMINDER_TEMPLATE_IDS,
+    INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS, RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS,
+    RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID,
+    RETIRED_SIGNING_REMINDER_TEMPLATE_IDS, RETIRED_START_DAY_REPORT_TEMPLATE_IDS,
     default_copy_templates, effective_copy_definition,
 )
 from subsystems.line.message_copy import validate_copy_content, copy_fields, apply_copy_payload
@@ -169,6 +171,11 @@ def update_notification_rule_message_template(
         elif len(payload.content) > 5000:
             raise LineMessageConfigurationError("通知文案不可超過 5000 字。")
         else:
+            from subsystems.line.service_start_day import GREETING_COPY_KEYS, PAYMENT_COPY_VARIABLES, greeting_directions
+            if rule_id == 'payment-first-reminder' and not all(variable in payload.content for variable in PAYMENT_COPY_VARIABLES):
+                raise LineMessageConfigurationError("開工問候含第一期款提醒時，文案須保留 {case_no}、{amount_ntd} 及 {due_date}。")
+            if rule_id in GREETING_COPY_KEYS and len((payload.content + greeting_directions(rule_id)).encode('utf-16-le')) > 10000:
+                raise LineMessageConfigurationError("開工問候文案加上固定回覆指引後不可超過 LINE 字數上限。")
             template["content"] = payload.content
         validate_message_templates(definition)
         result = application.apply(
@@ -459,7 +466,13 @@ def _message_template_view(
         template_id = {"bind_success_new_order": IDENTITY_SUCCESS_TEMPLATES["customer"], "staff_switch_success": IDENTITY_SUCCESS_TEMPLATES["staff"]}.get(template_id, template_id)
     else:
         raise HTTPException(status_code=404, detail="找不到這筆訊息設定。")
-    if template_id in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS or template_id in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS:
+    if (
+        template_id in INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS
+        or template_id in RETIRED_SIGNING_REMINDER_TEMPLATE_IDS
+        or template_id in RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS
+        or template_id in RETIRED_START_DAY_REPORT_TEMPLATE_IDS
+        or template_id == RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID
+    ):
         raise HTTPException(status_code=404, detail="此訊息已停止編輯。")
     templates = templates_definition.get("templates", [])
     template = next(

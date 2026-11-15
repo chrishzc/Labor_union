@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+from subsystems.line.navigation_catalog import route_aliases
 
 from datetime import datetime, timedelta
 import os
@@ -85,7 +86,11 @@ class LineServiceHelpApplication:
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
         normalized = text.strip()
-        if _normalized_resume_command(normalized) in _RESUME_AI_ALIASES:
+        resume_aliases = {
+            _normalized_resume_command(alias)
+            for alias in (route_aliases("resume_ai_assistant") or tuple(_RESUME_AI_ALIASES))
+        }
+        if _normalized_resume_command(normalized) in resume_aliases:
             self._retired_ai_action(inbox, unit_of_work, line_user_id)
             return True
         if self._escalation_gateway is not None:

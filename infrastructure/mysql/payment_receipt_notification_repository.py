@@ -1,4 +1,7 @@
-"""Read marked committed settlements using existing Finance queries and LINE history."""
+"""
+File: payment_receipt_notification_repository.py
+Description: 依帳務核銷事實與 LINE 確認／投遞紀錄查詢各期入帳待辦歷史。
+"""
 import json
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
@@ -130,7 +133,11 @@ class MySqlPaymentReceiptNotificationRepository:
             return cursor.fetchone() is not None
 
     def history(self,payment,*,lock=False):
+        ack_key=f'payment-receipt-ack:{payment.payment_stage}:{payment.settlement_identity}'
         with self.connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM line_command_receipts WHERE idempotency_key=%s LIMIT 1"+(' FOR UPDATE' if lock else ''),(ack_key,))
+            if cursor.fetchone() is not None:
+                return PaymentReceiptHistory('acknowledged',0)
             cursor.execute("SELECT processing_status status,completed_attempts attempts FROM line_delivery_tasks t WHERE "
                 '(source_aggregate_type=%s AND source_aggregate_identity=%s AND correlation_id LIKE %s '
                 "OR %s='deposit' AND idempotency_key=%s AND (processing_status='sent' OR completed_attempts>0) "

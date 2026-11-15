@@ -1,3 +1,7 @@
+/**
+ * File: payment_receipt_notices.test.tsx
+ * Description: 驗證帳務入帳待辦工作台僅於人工點選已通知後消除待辦之互動行為。
+ */
 import { fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { describe,it,expect,vi } from 'vitest';
 import { PaymentReceiptNoticeWorkbench } from '../../../../../../../components/PaymentReceiptNoticeWorkbench';
@@ -7,35 +11,35 @@ const todo:PaymentReceiptTodo={payment:{case_no:'DEMO-001',payment_stage:'deposi
 function client(item=todo):PaymentReceiptClient{return {list:vi.fn().mockResolvedValue({items:[item],total:1,page:1,page_size:25}),send:vi.fn().mockResolvedValue({task_id:1,status:'pending'})};}
 
 describe('入帳通知由人員發送',()=>{
-  it('從內部通知進入只查同案第一期，確認後才發送',async()=>{
+  it('從內部通知進入只查同案第一期，確認後才標記已通知',async()=>{
     const first={...todo,payment:{...todo.payment,payment_stage:'first' as const}};const api=client(first);
     window.history.replaceState(null,'','#finance?tab=accounting-warnings&case_no=DEMO-001&receipt_stage=first&settlement_identity='+todo.payment.settlement_identity);
     const view=render(<PaymentReceiptNoticeWorkbench revision={0} client={api}/>);
     const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('第一期款');
     expect(api.list).toHaveBeenCalledWith(1,expect.any(AbortSignal),{case_no:'DEMO-001',payment_stage:'first',settlement_identity:todo.payment.settlement_identity});
     expect(api.send).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button',{name:'發送入帳通知'}));
+    fireEvent.click(within(dialog).getByRole('button',{name:'已於官方帳號發送／標記已通知'}));
     await waitFor(()=>expect(api.send).toHaveBeenCalledExactlyOnceWith(first));
     view.unmount();window.history.replaceState(null,'','/');
   });
-  it('收到帳款只跳提示，關閉後待辦保留，查詢與重新整理不送出',async()=>{
+  it('收到帳款只跳提示，關閉後待辦保留，查詢與重新整理不標記消除',async()=>{
     const api=client();render(<PaymentReceiptNoticeWorkbench revision={0} expanded client={api}/>);
     const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('DEMO-001');expect(api.send).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button',{name:'稍後處理，保留待辦'}));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button',{name:'發送入帳通知'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'已於官方帳號發送／標記已通知'})).toBeEnabled();
     fireEvent.click(screen.getByRole('button',{name:'重新整理入帳待辦'}));
     await waitFor(()=>expect(api.list).toHaveBeenCalledTimes(2));
     expect(api.send).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
-  it('只有按下發送才建立工作，連點不重複送出，狀態不假稱送達',async()=>{
+  it('只有按下標記按鈕才消除待辦，連點不重複送出，顯示已於官方帳號發送',async()=>{
     const api=client();let finish!:(value:{task_id:number;status:string})=>void;
     vi.mocked(api.send).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
     render(<PaymentReceiptNoticeWorkbench revision={0} client={api}/>);
-    const button=within(await screen.findByRole('dialog')).getByRole('button',{name:'發送入帳通知'});
+    const button=within(await screen.findByRole('dialog')).getByRole('button',{name:'已於官方帳號發送／標記已通知'});
     fireEvent.click(button);fireEvent.click(button);expect(api.send).toHaveBeenCalledExactlyOnceWith(todo);
-    finish({task_id:1,status:'pending'});
-    expect(await screen.findByRole('status')).toHaveTextContent('尚未證明送達');
+    finish({task_id:1,status:'completed'});
+    expect(await screen.findByRole('status')).toHaveTextContent('已於官方帳號發送，待辦已消除');
   });
   it('核銷完成刷新後才跳出新入帳提示，沒有待辦不彈窗',async()=>{
     const api=client();vi.mocked(api.list).mockResolvedValueOnce({items:[],total:0,page:1,page_size:25});
@@ -48,13 +52,13 @@ describe('入帳通知由人員發送',()=>{
   it('未綁定仍保留待辦，不能點發送',async()=>{
     const api=client({...todo,can_send:false,unavailable_reason:'客戶尚未綁定 LINE'});
     render(<PaymentReceiptNoticeWorkbench revision={0} client={api}/>);
-    const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('button',{name:'發送入帳通知'})).toBeDisabled();
+    const dialog=await screen.findByRole('dialog');expect(within(dialog).getByRole('button',{name:'已於官方帳號發送／標記已通知'})).toBeDisabled();
     expect(dialog).toHaveTextContent('客戶尚未綁定 LINE');expect(api.send).not.toHaveBeenCalled();
   });
   it('帳款異動回傳衝突時重新查詢，不自動再送',async()=>{
     const api=client();vi.mocked(api.send).mockRejectedValue(new ApiHttpError(409,'stale','private detail'));
     render(<PaymentReceiptNoticeWorkbench revision={0} client={api}/>);
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'發送入帳通知'}));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'已於官方帳號發送／標記已通知'}));
     await waitFor(()=>expect(api.list).toHaveBeenCalledTimes(2));expect(api.send).toHaveBeenCalledTimes(1);expect(document.body).not.toHaveTextContent('private detail');
   });
 });

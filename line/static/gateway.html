@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>新竹市月子工會 - 服務確認入口</title>
+    <meta property="og:title" content="新竹市月子工會｜LINE 服務與身分綁定入口">
+    <meta property="og:description" content="請透過 LINE 開啟官方安全入口進行帳號綁定、服務登記或查詢。">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -202,6 +204,10 @@
     const liffStateParams = parseLiffStateParams();
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
     const entryParam = urlParams.get('entry') || liffStateParams.get('entry');
+    const flowPurpose = urlParams.get('purpose') || liffStateParams.get('purpose') || '';
+    const flowId = urlParams.get('flow_id') || liffStateParams.get('flow_id') || '';
+    const scheduleMode = urlParams.get('mode') || liffStateParams.get('mode') || '';
+    const scheduleCaseNo = urlParams.get('case_no') || liffStateParams.get('case_no') || '';
 
     // 解析直接跳轉的內部路徑（若 liff.state 本身即為 /line-... 路徑）
     let directPath = '';
@@ -219,7 +225,7 @@
     const interactionReference = urlParams.get('ref') || liffStateParams.get('ref') || '';
     const targetPaths = {
         gateway: '/line-gateway',
-        registration: '/line-bind',
+        registration: '/line-identity?entry=registration',
         non_citizen_registration: '/line-non-citizen-registration',
         staff_order_search: '/line-identity?target=staff_order_search',
         staff_schedule: '/line-identity?target=staff_schedule',
@@ -321,8 +327,28 @@
                 navigateTo(directPath, false);
                 return;
             }
+            if (flowPurpose && flowId) {
+                const flowQuery = new URLSearchParams({ purpose: flowPurpose, flow_id: flowId });
+                navigateTo(`/line-identity?${flowQuery.toString()}`, false);
+                return;
+            }
+            if (!targetPage && !entryParam && flowId && (scheduleMode || scheduleCaseNo)) {
+                const scheduleQuery = new URLSearchParams({ flow_id: flowId });
+                if (scheduleCaseNo) scheduleQuery.set('case_no', scheduleCaseNo);
+                if (scheduleMode) scheduleQuery.set('mode', scheduleMode);
+                navigateTo(`/line-staff-schedule?${scheduleQuery.toString()}`, false);
+                return;
+            }
             if (targetPaths[targetPage]) {
-                navigateTo(targetPaths[targetPage], false);
+                let destination = targetPaths[targetPage];
+                if ((targetPage === 'staff_schedule' || targetPage === 'staff_leave_apply') && (flowId || scheduleCaseNo || scheduleMode)) {
+                    const extra = new URLSearchParams();
+                    if (flowId) extra.set('flow_id', flowId);
+                    if (scheduleCaseNo) extra.set('case_no', scheduleCaseNo);
+                    if (scheduleMode) extra.set('mode', scheduleMode);
+                    destination += `&${extra.toString()}`;
+                }
+                navigateTo(destination, false);
                 return;
             }
             if (entryParam && targetPaths[entryParam]) {

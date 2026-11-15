@@ -1,3 +1,7 @@
+/**
+ * File: ClientRosterPage.tsx
+ * Description: 呈現客戶名冊清單，支援分頁、Excel 式篩選、可調欄距與自訂顯示凍結欄位。
+ */
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { RegistryDeletionPanel } from '../components/RegistryDeletionPanel';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
@@ -5,7 +9,19 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
 import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter';
-import { rosterFilterColumns, rosterFilterSummary } from '../components/client_roster_filter_columns';
+import {
+  clientRosterColumns,
+  rosterFilterColumns,
+  rosterFilterSummary,
+  type ClientRosterColumnConfig,
+  type ClientRosterColumnId,
+} from '../components/client_roster_filter_columns';
+import {
+  RosterColGroup,
+  RosterColumnPicker,
+  RosterColumnResizer,
+  useRosterTableLayout,
+} from '../components/RosterTableLayout';
 import { ClientRegistryDetailEditor, type RegistryEditState } from '../components/ClientRegistryDetailEditor';
 import { Drawer } from '../components/Drawer';
 import { isCancellationTerminalStatus, OrderCancellationPanel } from '../components/OrderCancellationPanel';
@@ -109,6 +125,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
   const tableViewport = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const tableLayout = useRosterTableLayout({
+    columns: clientRosterColumns,
+    storageKey: 'lu.roster.layout.client.v1',
+  });
   const [scrollRail, setScrollRail] = useState({ left: 0, max: 0, thumb: 100 });
   const syncScrollRail = useCallback(() => {
     const viewport = tableViewport.current;
@@ -125,7 +146,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
     syncScrollRail();
     return () => observer.disconnect();
-  }, [page, error, syncScrollRail]);
+  }, [page, error, tableLayout.totalWidth, tableLayout.orderedVisibleColumns.length, syncScrollRail]);
 
   const load = async (nextFilters: RosterFilters, nextOffset = 0) => {
     const requestId = ++listRequest.current;
@@ -169,13 +190,85 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     setFilters({ ...nextFilters, query: filters.query });
     void load(nextFilters);
   };
-  const columnHeading = (field: ClientRegistryFilterField, sortBy?: ClientRegistrySortBy) => {
-    const column = rosterFilterColumns.find((item) => item.field === field)!;
-    return <div className="client-roster-column-heading">
-      {sortBy ? <button type="button" disabled={loading} onClick={() => changeSort(sortBy)}>{column.label}{sortLabel(sortBy)}</button> : <span>{column.label}</span>}
-      <ClientRosterColumnFilter column={column} active={appliedFilters.columnFilters.find((item) => item.field === field)} disabled={loading}
-        onApply={(predicate) => applyColumn(field, predicate)} onSort={sortBy ? (order) => changeSort(sortBy, order) : undefined} />
-    </div>;
+  const renderHeaderCell = (col: ClientRosterColumnConfig) => {
+    const thProps = tableLayout.getThProps(col.id);
+    const sortBy = col.sortBy;
+    const filterCol = col.filterField ? rosterFilterColumns.find((item) => item.field === col.filterField) : undefined;
+    const isFrozen = tableLayout.frozenIds.has(col.id);
+    const ariaSort = sortBy && appliedFilters.sortBy === sortBy
+      ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending'
+      : undefined;
+    return (
+      <th
+        scope="col"
+        key={col.id}
+        title={col.headerTitle}
+        aria-sort={ariaSort}
+        className={thProps.className}
+        style={thProps.style}
+      >
+        <div className="client-roster-column-heading">
+          {sortBy ? (
+            <button type="button" disabled={loading} onClick={() => changeSort(sortBy)}>{col.label}{sortLabel(sortBy)}</button>
+          ) : (
+            <span className="roster-column-label" title={col.label}>{col.label}</span>
+          )}
+          {filterCol && (
+            <ClientRosterColumnFilter
+              column={filterCol}
+              active={appliedFilters.columnFilters.find((item) => item.field === filterCol.field)}
+              disabled={loading}
+              isFrozen={isFrozen}
+              canHide={!col.locked}
+              onApply={(predicate) => applyColumn(filterCol.field, predicate)}
+              onSort={sortBy ? (order) => changeSort(sortBy, order) : undefined}
+              onToggleFreeze={() => tableLayout.toggleColumnFreeze(col.id)}
+              onHideColumn={!col.locked ? () => tableLayout.hideColumn(col.id) : undefined}
+              onAutoFitWidth={() => tableLayout.autoFitColumn(col.id, tableRef.current)}
+            />
+          )}
+        </div>
+        <RosterColumnResizer columnId={col.id} label={col.label} layout={tableLayout} tableRef={tableRef} />
+      </th>
+    );
+  };
+  const renderCellContent = (item: RosterItem, colId: ClientRosterColumnId): React.ReactNode => {
+    switch (colId) {
+      case 'case_no': return item.case_no;
+      case 'virtual_account': {
+        if (item.case_no.startsWith('A') && item.effective_virtual_account !== undefined
+            && item.imported_virtual_accounts.length > 0) {
+          return item.effective_virtual_account ?? '待確認';
+        }
+        return item.imported_virtual_accounts.length
+          ? item.imported_virtual_accounts.map((value) => <div key={value} title={value}>{value}</div>)
+          : item.built_in_virtual_account ?? '—';
+      }
+      case 'name': return item.name ?? '—';
+      case 'identity_status': return item.identity_status ?? '尚未登錄';
+      case 'phone': return item.phone ?? '—';
+      case 'district': return item.district ?? '';
+      case 'multi_birth_count': return item.multi_birth_count ?? '—';
+      case 'service_days': return item.service_days ?? '—';
+      case 'service_type': return item.service_type ?? '尚未登錄';
+      case 'requires_cooking': return displayCooking(item.requires_cooking);
+      case 'planned_start_date': return item.planned_start_date ?? '—';
+      case 'order_status': return item.order_status ?? '—';
+      case 'deposit_due_date': return clientDueDates(item, 'deposit');
+      case 'first_due_date': return clientDueDates(item, 'first');
+      case 'second_due_date': return clientDueDates(item, 'second');
+      case 'staff_obligation_due_date': return item.staff_obligation_dates === undefined ? '未載入' : item.staff_obligation_dates.length ? item.staff_obligation_dates.map((entry) => (
+        <div key={`${entry.obligation_identity}:${entry.due_date ?? ''}`} title={entry.obligation_identity}>
+          {staffIdentity.label(entry.staff_id, entry.staff_name)}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
+        </div>
+      )) : '無值';
+      case 'subsidy_return_due_date': return clientDueDates(item, 'subsidy_return');
+      case 'estimated_self_funded_staff_due_date': return item.estimated_self_funded_staff_due_date ?? '—';
+      case 'claim_application_ym': return item.claim_application_year === undefined || item.claim_application_month === undefined ? '未載入'
+        : item.claim_application_year !== null && item.claim_application_month !== null
+        ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
+        : '無值';
+    }
   };
   const previousPage = () => void load(appliedFilters, Math.max(0, pageOffset - pageSize));
   const nextPage = () => {
@@ -263,7 +356,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       <div className="client-roster-filter-actions"><button type="submit" disabled={loading}>搜尋</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('order-accounting')}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('case-inspection')}>案件資料檢查匯出</button></div>
     </form>
     <div className="client-roster-active-filters" aria-label="已套用篩選">
-      <span className="client-roster-filter-help">點欄名旁的 ▾ 篩選；不同欄位的條件會同時套用。</span>
+      <span className="client-roster-filter-help">點欄名旁的 ▾ 可篩選、隱藏或凍結；拖曳欄位右緣調整寬度（雙擊自動貼齊）。不同欄位的條件會同時套用。</span>
       {appliedFilters.query.trim() && <span className="client-roster-filter-chip">搜尋：{appliedFilters.query}<button type="button" disabled={loading} aria-label="清除搜尋條件" onClick={() => { const next = { ...appliedFilters, query: '' }; setFilters(next); void load(next); }}>×</button></span>}
       {appliedFilters.columnFilters.map((predicate) => <span className="client-roster-filter-chip" key={predicate.field}>{rosterFilterSummary(predicate)}<button type="button" disabled={loading} aria-label={`清除${rosterFilterColumns.find((item) => item.field === predicate.field)!.label}篩選`} onClick={() => applyColumn(predicate.field)}>×</button></span>)}
       {filters.query !== appliedFilters.query && <span role="status">搜尋文字已變更，尚未套用。</span>}
@@ -276,27 +369,14 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     {(page || error) && <div className="client-roster-table-frame">
       <div className="client-roster-table-title">
         <span id={tableTitleId}>客戶名冊清單{page && `（第 ${Math.floor(pageOffset / pageSize) + 1} 頁）`}</span>
-        <button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button>
+        <div className="client-roster-table-actions">
+          <RosterColumnPicker layout={tableLayout} disabled={loading} />
+          <button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button>
+        </div>
       </div>
-      {!error && page && <div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table aria-labelledby={tableTitleId}>
-      <thead><tr>
-        <th scope="col" aria-sort={appliedFilters.sortBy === 'case_no' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('case_no', 'case_no')}</th>
-        <th scope="col">虛擬帳號</th>
-        <th scope="col" aria-sort={appliedFilters.sortBy === 'customer_name' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('name', 'customer_name')}</th>
-        <th scope="col">{columnHeading('identity_status')}</th><th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
-        <th scope="col" aria-sort={appliedFilters.sortBy === 'service_days' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('service_days', 'service_days')}</th>
-        <th scope="col">{columnHeading('service_type')}</th>
-        <th scope="col">{columnHeading('requires_cooking')}</th>
-        <th scope="col" aria-sort={appliedFilters.sortBy === 'expected_start_date' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('planned_start_date', 'expected_start_date')}</th>
-        <th scope="col">{columnHeading('order_status')}</th>
-        <th scope="col" title="client_obligations.due_date（deposit）">{columnHeading('deposit_due_date')}</th>
-        <th scope="col" title="client_obligations.due_date（first）">{columnHeading('first_due_date')}</th>
-        <th scope="col" title="client_obligations.due_date（second）">{columnHeading('second_due_date')}</th>
-        <th scope="col" title="staff_obligations.due_date">月嫂義務應付日</th>
-        <th scope="col" title="client_obligations.due_date（subsidy_return）">{columnHeading('subsidy_return_due_date')}</th>
-        <th scope="col" title="自費薪資以實際或預定服務結束日估算，為次月 15 日。">薪資預估日期</th>
-        <th scope="col" title="依實際服務結束日估算，尚無實際日期時使用預定結束日。">補助預計申請年月</th>
-      </tr></thead>
+      {!error && page && <div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table ref={tableRef} aria-labelledby={tableTitleId} className="roster-table-adjustable" style={{ width: `${tableLayout.totalWidth}px` }}>
+      <RosterColGroup layout={tableLayout} />
+      <thead><tr>{tableLayout.orderedVisibleColumns.map(renderHeaderCell)}</tr></thead>
       <tbody>{page.items.map((item) => <tr
         key={item.case_no}
         className={selectedCaseNo === item.case_no ? 'is-selected' : undefined}
@@ -312,30 +392,12 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           }
         }}
       >
-        <td>{item.case_no}</td>
-        <td>{item.case_no.startsWith('A') && item.effective_virtual_account !== undefined
-          && item.imported_virtual_accounts.length > 0
-          ? item.effective_virtual_account ?? '待確認'
-          : item.imported_virtual_accounts.length
-            ? item.imported_virtual_accounts.map((value) => <div key={value}>{value}</div>)
-            : item.built_in_virtual_account ?? '—'}</td>
-        <td>{item.name ?? '—'}</td><td>{item.identity_status ?? '尚未登錄'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
-        <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{item.service_type ?? '尚未登錄'}</td><td>{displayCooking(item.requires_cooking)}</td>
-        <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
-        <td>{clientDueDates(item, 'deposit')}</td>
-        <td>{clientDueDates(item, 'first')}</td>
-        <td>{clientDueDates(item, 'second')}</td>
-        <td>{item.staff_obligation_dates === undefined ? '未載入' : item.staff_obligation_dates.length ? item.staff_obligation_dates.map((entry) => (
-          <div key={`${entry.obligation_identity}:${entry.due_date ?? ''}`} title={entry.obligation_identity}>
-            {staffIdentity.label(entry.staff_id, entry.staff_name)}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
-          </div>
-        )) : '無值'}</td>
-        <td>{clientDueDates(item, 'subsidy_return')}</td>
-        <td>{item.estimated_self_funded_staff_due_date ?? '—'}</td>
-        <td>{item.claim_application_year === undefined || item.claim_application_month === undefined ? '未載入'
-          : item.claim_application_year !== null && item.claim_application_month !== null
-          ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
-          : '無值'}</td>
+        {tableLayout.orderedVisibleColumns.map((col) => {
+          const tdProps = tableLayout.getTdProps(col.id);
+          const content = renderCellContent(item, col.id);
+          const cellTitle = typeof content === 'string' && content ? content : typeof content === 'number' ? String(content) : undefined;
+          return <td key={col.id} className={tdProps.className} style={tdProps.style} title={cellTitle}>{content}</td>;
+        })}
       </tr>)}</tbody>
     </table></div>}
     {!error && page && scrollRail.max > 0 && <div className="client-roster-scroll-rail">

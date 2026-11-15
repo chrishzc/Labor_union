@@ -13,12 +13,12 @@
 - `subsystems/scheduling/substitution_payables_lineage.py`
 - `subsystems/scheduling/service_handover_accounting.py` — 服務中換人的 owner-derived 前後薪資、實付、追償與客戶帳款比較。
 - `api/routes/staff_leave_management.py`
-- `api/routes/staff_leave_intake.py` — 本人 leave-results Query／Submit；舊 pending intake 回 410，歷史 readback 保留。
+- `api/routes/staff_leave_intake.py` — 本人 leave-results Query／Preview（檔期衝突與天數守恆預檢）／Propose（群組零推播提案）／Submit；舊 pending intake 回 410，歷史 readback 保留。
+- `line/static/staff_schedule.html` — 月嫂個人班表。合意延期 LIFF 使用共用月曆、配對預檢及群組提案；直接提交協調結果的原操作可於結果未明時查核。
 - `domains/scheduling/leave_result.py` — 明確原日／新日與順延／代班 typed intent。
 - `infrastructure/mysql/leave_result_repository.py` — 現有 Scheduling result store 的 leave-v1 envelope、本人日期與版本驗證。
 - `subsystems/scheduling/service_start_workflow.py` — 共用代班意願、邀請、加入與單一外層交易；請假獨立於 service-start peer 決策。
 - `infrastructure/mysql/service_start_arrangement.py` — 請假委派 canonical Leave/Substitution writer。
-- `line/static/staff_schedule.html` — 月嫂直接提交協調結果，結果未明以同一命令查核。
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.tsx` — 工會記錄新協議日期、詢問意願、單人邀請及加入後保存日期。
 - `line/static/mobile_admin.html` — 相同工會例外操作。
 - `api/routes/leave_substitution.py`
@@ -41,6 +41,7 @@
 - `infrastructure/mysql/service_handover_repository.py` — 原區段換人 Query／初次意願命令，沿共用 result store 的 handover-v1 envelope，不新增表或狀態。
 
 ## Dependencies
+- outbound: `scheduling/staff-monthly-calendar` — 合意延期 LIFF 重用月份格線與檔期標示，以本人月班表查詢供選日參考。
 - outbound: `payroll` — Apply 由既有 outer Unit of Work 提交 payroll obligations；lineage 只讀其 immutable event/version。
 - outbound: `staff-payables` — lineage 只讀 projection/evidence；換人經 typed owner application 同交易銜接合法 Payroll correction 的 projection／獨立追償，不擁有付款、匯出或 payout state。
 - outbound: `external-integration/line` — 共用代班意願、單人原案件群組邀請、加入證據與無按鈕正式日期表，僅建立 committed delivery。

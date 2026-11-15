@@ -18,6 +18,17 @@ INACTIVE_CANDIDATE_COPY_TEMPLATE_IDS = frozenset(copy_template_id(key) for key i
 RETIRED_SIGNING_REMINDER_TEMPLATE_IDS = frozenset(
     copy_template_id(key) for key in ("contract-signing-client", "contract-signing-staff")
 )
+RETIRED_PAYMENT_RECEIPT_TEMPLATE_IDS = frozenset({
+    copy_template_id("deposit-settled"),
+    copy_template_id("payment-first-settled"),
+    "LINE-SECOND-PAYMENT-SETTLED-TEXT-V1",
+})
+RETIRED_START_DAY_REPORT_TEMPLATE_IDS = frozenset({
+    'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
+    copy_template_id('service-start-normal-received'),
+    copy_template_id('service-start-help-received'),
+})
+RETIRED_SERVICE_COMPLETION_PUSH_TEMPLATE_ID = "LINE-SERVICE-COMPLETION-TEXT-V1"
 
 
 def _text_defaults():
@@ -27,23 +38,29 @@ def _text_defaults():
     from subsystems.line import service_help_application as help
     from subsystems.line.deposit_notifications import ASSISTANCE_ACK
     from subsystems.line.service_day_log_reminders import reminder_text as log_reminder
-    from subsystems.line.service_start_day import start_day_response_text
+    from subsystems.line.service_start_day import GREETING_COPY, PAYMENT_COPY
     from subsystems.line.webhook_identity_handlers import _identity_link_message
     from subsystems.scheduling.matching_notification_application import matching_response_text
     from subsystems.line.cancellation_notifications import DEFAULT_COPY as CANCELLATION_NOTICE_COPY
+    from subsystems.line.service_start_messages import HELPER_TEXT_DEFAULTS
+    from subsystems.case_import.provisional_registration_application import registration_confirmation_text
     result = {
+        **HELPER_TEXT_DEFAULTS,
+        "registration-approved-citizen": registration_confirmation_text("{name}", approved=True),
+        "registration-approved-non-citizen": registration_confirmation_text(
+            "{name}", approved=True, case_no="{case_no}"
+        ),
         "service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
         "identity-pending": IDENTITY_PENDING,
         "service-profile-update": help._TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
         "service-order-update": help._ORDER_UPDATE_ACKNOWLEDGEMENT,
         "deposit-assistance": ASSISTANCE_ACK,
-        "payment-first-reminder": "案件 {case_no} 今天開始服務，祝服務順利！第一期款尚待確認入帳：{amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
-        "payment-first-greeting": "案件 {case_no} 今天開始服務，祝服務順利！",
-        "payment-first-settled": "案件 {case_no} 第一期款 {amount_ntd} 元已確認入帳，謝謝。",
+        "payment-reminder-ack": "已收到您的回覆，感謝您。工會將於核對後通知，請耐心等候不需重複繳款。",
+        "payment-assistance": "已收到您的聯絡需求，請直接留下您的疑問，工會專人將盡快為您協助處理。",
+        "payment-first-reminder": PAYMENT_COPY,
+        "payment-first-greeting": GREETING_COPY,
         "payment-second-reminder": "案件 {case_no} 第二期款尚待確認入帳 {amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
         "service-day-log-reminder": log_reminder("{staff_name}"),
-        "service-start-normal-received": start_day_response_text("normal"),
-        "service-start-help-received": start_day_response_text("help"),
         "service-start-result": "服務日期安排\n案件：{case_no}\n{assignments}",
         "service-progress": "最新案件：{case_no}\n目前狀態：{status}\n服務期間：{start_date} 至 {end_date}",
         "service-progress-unbound": help._unbound_progress_reply("{identity_url}"),
@@ -69,20 +86,37 @@ def _text_defaults():
 def _card_defaults():
     from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
     from subsystems.line.order_group_application import group_invitation_payload
-    from subsystems.line.service_start_messages import substitute_inquiry
+    from subsystems.line.service_start_messages import (
+        confirm_start_date_card,
+        group_guidelines_card,
+        group_helper_menu_card,
+        mutual_postponement_card,
+        substitute_inquiry,
+    )
     result = {"service-menu": _service_menu_payload(),
               "order-update-menu": _order_update_menu_payload(),
+              "helper-menu-card": group_helper_menu_card("{case_no}", "{staff_name}"),
+              "helper-confirm-start-card": confirm_start_date_card("{case_no}", "{staff_name}", "{start_date}", "{end_date}"),
+              "helper-postponement-card": mutual_postponement_card("{case_no}", "{staff_name}", "{leave_start_date}", "{leave_end_date}"),
+              "helper-guidelines-card": group_guidelines_card(),
               "service-start-inquiry": substitute_inquiry("{case_no}", "", "", "not-a-token", service_dates=["{service_dates}"])}
     result["service-start-inquiry"]["contents"]["body"]["contents"][1]["text"] = "案件：{case_no}\n{service_period}"
     for role, label in (("customer", "媽媽"), ("staff", "月嫂")):
         result["group-invitation-" + role] = group_invitation_payload("{case_no}", label, "https://invalid.local")
     # Amounts stay authoritative variables, never public sample values.
-    for key, paid in (("deposit-reminder", False), ("deposit-settled", True)):
-        from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER, SETTLED
-        class Amount:
-            def __format__(self, spec):
-                return "{amount_ntd}"
-        result[key] = deposit_notification_payload("{case_no}", Amount(), "{due_date}", SETTLED if paid else REMINDER, "https://invalid.local")
+    from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER
+    from subsystems.line.payment_reminder_notifications import payment_reminder_card_payload
+    class Amount:
+        def __init__(self, var="amount_ntd"):
+            self.var = var
+        def __str__(self):
+            return "{" + self.var + "}"
+        def __format__(self, spec):
+            return "{" + self.var + "}"
+    result["deposit-reminder"] = deposit_notification_payload("{case_no}", Amount("amount_ntd"), "{due_date}", REMINDER)
+    result["payment-second-reminder"] = payment_reminder_card_payload("second", "{case_no}", Amount("amount_ntd"), "{due_date}", "reminder")
+    for stage in ("deposit", "first", "second"):
+        result["payment-overdue-" + stage] = payment_reminder_card_payload(stage, "{case_no}", Amount("remaining_amount"), "{due_date}", "overdue")
     from domains.scheduling.matching_communication import MatchingNotificationKind
     from subsystems.scheduling.matching_line_cards import (
         caregiver_information_card, candidate_contact_information_card, customer_profiles_card,
@@ -164,9 +198,24 @@ def _template(identifier, name, content):
 
 
 def effective_copy_definition(definition):
+    from subsystems.line.service_start_day import PAYMENT_COPY_VARIABLES
+
     result = deepcopy(definition)
-    specs = {t["id"]: t for t in default_copy_templates().values() if t.get("copy_fields")}
+    defaults_by_key = default_copy_templates()
+    first_reminder = defaults_by_key['payment-first-reminder']
+    specs = {t["id"]: t for t in defaults_by_key.values() if t.get("copy_fields")}
     for template in result.get("templates", []):
+        if template['id'] == first_reminder['id']:
+            content = template['content']
+            try:
+                saved_fields = json.loads(content)
+            except json.JSONDecodeError:
+                saved_fields = None
+            if isinstance(saved_fields, dict) or not all(variable in content for variable in PAYMENT_COPY_VARIABLES):
+                # Card copy and text missing mandatory payment fields cannot be sent as an opening notice.
+                template['content'] = first_reminder['content']
+            template.pop('copy_fields', None)
+            template['variables'] = deepcopy(first_reminder['variables'])
         if template["id"] in specs:
             key = template['id'].removeprefix('LINE-COPY-')
             if key == 'order-update-menu':
@@ -190,7 +239,7 @@ def effective_copy_definition(definition):
             template["copy_fields"] = deepcopy(specs[template["id"]]["copy_fields"])
             template['variables'] = deepcopy(specs[template['id']]['variables'])
     existing = {t["id"] for t in result.get("templates", [])}
-    for template in default_copy_templates().values():
+    for template in defaults_by_key.values():
         if template["id"] not in existing:
             seeded = deepcopy(template)
             legacy_id = {"identity_bound_customer": "bind_success_new_order", "identity_bound_staff": "staff_switch_success"}.get(template["id"])
@@ -225,4 +274,7 @@ def render_copy_payload(definition, key, payload, variables=None, content=None):
     rendered = render_message_template({"templates": [candidate]}, candidate["id"], {k: v for k, v in (variables or {}).items() if k in used})
     result = deepcopy(payload)
     result["text"] = json.loads(rendered.payload_json)["text"]
+    if key in {'payment-first-greeting', 'payment-first-reminder'}:
+        from subsystems.line.service_start_day import render_greeting_text
+        result['text'] = render_greeting_text(key, result['text'], variables or {})
     return result

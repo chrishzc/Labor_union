@@ -45,6 +45,29 @@ const TIER_LABELS: Record<string, string> = {
   admin: '工會管理',
 };
 
+const ROUTE_DESCRIPTIONS: Record<string, string> = {
+  customer_binding: '【1 對 1 聊天室】傳送客戶身分認證／綁定訂單 LIFF 連結（此為個人聊天室入口，非群組綁定指令）。',
+  admin_binding: '【1 對 1 聊天室】傳送工會後台管理員帳號綁定 LIFF 連結（連結 15 分鐘內有效）。',
+  staff_binding: '【1 對 1 聊天室】傳送月嫂身分認證資料填寫 LIFF 連結。',
+  union_menu: '【1 對 1 聊天室｜工會人員】切換工會圖文選單或開啟行動工作台各功能分頁。',
+  order_group_bind: '【LINE 群組｜工會人員】將目前群組綁定指定案件並儲存邀請連結。使用格式：「指令 案件編號 邀請網址」（例如：綁定群組 115000104 https://line.me/R/ti/g/xxxx）。',
+  order_group_invite: '【LINE 群組｜工會人員】依群組已儲存的邀請網址，將入群邀請卡推播給本案已完成 LINE 綁定的客戶與月嫂。',
+  group_helper_menu: '【LINE 群組｜月嫂／專員】在已綁定案件的服務群組輸入後，以免費 replyToken 喚醒月嫂專屬小幫手選單（0 Push 額度）。',
+  group_postponement: '【LINE 群組｜月嫂專屬】僅限本案月嫂由小幫手選單開啟專屬 LIFF（或由月嫂輸入文字「雙方合意延期 YYYY-MM-DD 順延至 YYYY-MM-DD」發起提議，支援多天成對調整，客戶操作即時阻擋）。',
+  staff_assistance_close: '【LINE 群組｜專員】專員進群說明處理後，使用此結案指令將待辦標記已處理結案並回覆群組。',
+  registration: '【1 對 1 聊天室】導向客戶服務登記／身分確認 LIFF 頁面。',
+  service_help_menu: '【1 對 1 聊天室】回覆服務與常見問答主選單或引導提示。',
+  order_update_menu: '【1 對 1 聊天室】導向客戶修改訂單資訊 LIFF 頁面。',
+  human_handoff: '【1 對 1 聊天室】轉接工會專人客服並建立人工客服待辦。',
+  resume_ai_assistant: '【1 對 1 聊天室】使用者請求恢復自動助理／機器人回覆（系統維持固定安全導覽回應）。',
+  feedback_resolved: '【1 對 1 聊天室】問答回饋文字指令（正面肯定結案）。',
+  feedback_unresolved: '【1 對 1 聊天室】問答回饋未解決，轉通報工會專人客服建立工單。',
+  menu_switch_help: '【1 對 1 聊天室｜管理者／雙身分】查看目前可切換的個人圖文選單視角說明。',
+  menu_switch_customer: '【1 對 1 聊天室】將個人底部圖文選單切換為客戶專區選單。',
+  menu_switch_visitor: '【1 對 1 聊天室】將個人底部圖文選單切換回訪客預設選單。',
+  menu_switch_staff: '【1 對 1 聊天室】將個人底部圖文選單切換為月嫂專區選單。',
+};
+
 export const AiEventStudio: React.FC = () => {
   const [catalog, setCatalog] = useState<NavigationCatalog | null>(null);
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
@@ -392,7 +415,7 @@ export const AiEventStudio: React.FC = () => {
             <div className="ai-editor-header">
               <div>
                 <h2>{selectedRule.aliases[0] || selectedRule.routeKey}</h2>
-                <p className="studio-description">查看觸發問法、服務入口與引導結果。</p>
+                <p className="studio-description">{ROUTE_DESCRIPTIONS[selectedRule.routeKey] ?? '查看觸發問法、服務入口與引導結果。'}</p>
               </div>
               <span className="studio-editable-badge">可自訂觸發指令</span>
             </div>

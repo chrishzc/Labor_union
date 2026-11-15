@@ -4,7 +4,7 @@
 
 - 狀態：`current-spec`
 - Owner：LINE Integration Domain（`domains/line/`、`subsystems/line/`）
-- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、服務開始與換人結果日期表群組通知（開工當天詢問、完工問卷與第二期款群組通知已於 2026-11-12 退役，不再 Push 到群組）、Rich Menu 草稿編輯與發布 saga、通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`），以及私人日誌照片傳輸代理（`NAS-LINE-04`）。
+- 單一負責範圍：LINE Webhook Inbox、Durable Delivery Task（租約 worker 與 M4 Safe Review Link）、好友事件時間保序、`LINE-006` 失敗 readback／人工補送／逐筆略過、群組告警與管理員個人告警退役契約（`/runtime/query`）、服務群組綁定／全體與代班單人邀請（`order-group-todos`）、開工當天群組問候、服務開始與換人結果日期表群組通知、Rich Menu 草稿編輯與發布 saga、通知文案全面維護／公版預覽／表格圖片（`LINE-PREVIEW`、`LINE-COPY`、`LINE-TABLE-IMAGE`），以及私人日誌照片傳輸代理（`NAS-LINE-04`）。
 - 關聯引用：見 [Global 共同契約](00_Global_共同契約.md)、[Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Anomalies Domain](06_Anomalies_Domain.md)、[External Integration / Access Control](17_External_Integration_LINE_Access正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md)、[Controlled File Storage NAS](30_Controlled_File_Storage_NAS正式規格.md)。
 
 ## 2. LINE Webhook Inbox 與 Delivery Task 骨架
@@ -17,10 +17,11 @@
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
   - **業務通知投影規則**：
     - 契約簽署與 LINE 通知分工見 [簽約規格 §3.3](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#33-檔期衝突檢核送交記錄與官方帳號提醒)。
-    - `order.service_start_day`（開工當天原群組詢問）：**2026-11-12 退役**。不再投影來源事件或 Push；規則儲存拒絕（`order.service_start_day`／`order.service_completed`）；殘留工作於 provider 前取消。舊訊息按鈕（`start-day:` postback）仍只以 Reply 確認。`order.pre_start_reminder` 已完全停用取消。
-    - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：**2026-11-12 改為私訊**，流程與第一期一致。到期當天由客戶私訊繳款提醒排程（`payment_reminder_notifications`）發送；核銷成功通知由財務待辦人工確認後寄客戶私訊（`payment_receipt_notifications`）。群組來源不再投影、預設不含群組規則，殘留群組工作於 provider 前取消；規則儲存不另行封鎖。
-    - `order.service_completed`（服務完工群組問卷通知）：**2026-11-12 退役**。不再消費 `line_service_completion_notification` 標記或 Push；規則儲存拒絕（與 `order.service_start_day` 相同）；殘留工作於 provider 前取消。Orders 完工事實與標記寫入不受影響。
+    - **`order.service_start_day`（開工當天群組問候）**：依 Scheduling 確認的正式開工日，在台北時間開工當天依現有開工日通知時段，向本案已綁定的服務群組排入每案一則純文字 Push。依 [LINE-PAY-02](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)，第一期款有未結清餘額時，才將繳款提醒追加到同一則文字。無第一期款或已結清時仍發送問候。第一期款排程與通用通知規則不得另外排入開工問候或同日第一期首次提醒。重跑排程及重試沿用同一通知識別。送出前重驗正式開工日、群組綁定及第一期款狀態，避免已結清仍催繳。缺有效群組時留供工會查核，不改投私聊；過去開工日不因啟用此通知而補發。`order.pre_start_reminder` 維持停用。
+    - `client.second_payment_due`／`client.second_payment_settled`（二期群組通知）：停止投影群組通知，殘留群組工作於投遞前取消。繳款提醒及入帳通知見 [LINE-PAY-03 與 LINE-PAY-08](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)。
+    - `order.service_completed`（完工事件自動投遞）：系統不消費 `line_service_completion_notification` 標記或 Push。規則儲存拒絕，殘留工作於投遞前取消。月嫂從群組小幫手取得問卷的流程依[滿意度調查問卷規格](20_LINE客服與月嫂自助服務正式規格.md#44-滿意度調查問卷)。
     - 服務開始與換人結果日期表：僅發送至本案群組（無「確認／拒絕日期表」按鈕），投遞失敗不回滾正式排班。
+    - 案件群組月嫂專屬小幫手選單（含【確認開工日】、【服務排程】、【雙方合意延期】、【專員協助】與【使用說明／常見疑問標準回答】）：月嫂輸入喚醒詞「工會」或「小幫手」及後續各步驟操作（確認單產出、雙方同意、排程查詢、專員立待辦與標準回答）固定走 `line_webhook_reply` 同步回覆，全程 0 Push 額度消耗。
 - **安全觀察端點（Zero Commit／Zero Wakeup）**：
   - `GET /api/v1/line/configurations/{kind}/safe`（僅回傳 `kind`、`revision` 與 `state=empty | configured`，禁洩漏定義、URI 或任何 secret）。
   - Delivery public masked query（限 allowlist 篩選與真實總數分頁，禁止以 `user_id`／payload／raw error 過濾或回傳）。
@@ -28,7 +29,8 @@
 
 ## 3. 服務群組綁定、待辦與代班邀請
 
-- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態；「尚未建群」待辦端點 `POST /api/v1/line/mobile-admin/order-group-todos` 僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號；提供一鍵複製 `綁定訂單 {case_no} 〈本群組邀請網址〉` 格式而不暴露真實 `group_id` 或邀請網址於管理 Query。
+- **觀察與待辦（`GET /api/v1/line/order-groups/numbered`、`GET /api/v1/line/order-groups/{case_no}/events/numbered`、`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`、`GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`）**：依真實分頁顯示加入／離開事件與狀態；「尚未建群」待辦端點 `POST /api/v1/line/mobile-admin/order-group-todos` 預設僅列正常未結案、正式訂金 `settlement_state='settled'` 且金額 `> 0` 尚無服務群組之案號；提供一鍵複製 `綁定訂單 {case_no} 〈本群組邀請網址〉` 格式而不暴露真實 `group_id` 或邀請網址於管理 Query。
+- **開工問候未送出紀錄**。工會 LINE 工作台「通知事項 → 訂金已付尚未建群 → 開工問候未送出紀錄」沿用同一端點的 `view=opening_greeting_skips`，依時間由新至舊分頁顯示因未綁定有效案件服務群組而略過開工問候的案號、紀錄時間與原因。僅已驗證且具 `ORDER_GROUP_READ` 的工會人員可查看。紀錄取自既有稽核事件，獨立於訂金待辦及其件數，既有紀錄仍可在建群後查閱。查詢不建立投遞工作。
 - **群組指令**：
   - `綁定訂單 {case_no} {邀請網址}`：具 `ORDER_GROUP_BIND` 且已綁定 LINE 之工會人員輸入（接受單／多空白、全形空白或換行；僅接無額外參數 `https://line.me/ti/g/...` 或 `https://line.me/R/ti/g/...`；儲存至私有 `line_order_group_bindings.invitation_url`）。
   - `發送邀請`：於群組重新檢查資格後為媽媽與所有已綁定指派月嫂排入私人邀請卡片（按鈕開啟群組連結）；發送前群組／網址／訂金／人員變動即自動取消舊工作。
@@ -48,6 +50,7 @@
   - 由 `GET /api/v1/line/message-previews/catalog`、`GET /api/v1/line/message-previews/subjects` 與 `POST /api/v1/line/message-previews/preview` 提供公版索引、對象搜尋與即時渲染；目錄依 `MESSAGE_TEMPLATES` 維護全部通知文字與確認卡片（編輯框統一寬度 `504px`、每頁 `6` 則、正式媒合僅列「正式媒合－客戶完整推薦確認包」，保留各身分獨立成功文案 `identity_bound_customer | _staff | _admin` 與 `PUT` CAS 版本防衝突）。
   - 「通知與發送」工作台使用零寫入公版 `data_source=sample`（`Cache-Control: no-store`，固定範例不含真實個資或發送動作）。「寄送案件資訊」節點以整包呈現，頁面內容見 [媒合候選池規格](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)。
   - LINE 流程圖「簽約」以文字呈現外部簽署、回收文件及官方帳號聊天後台的手動範本操作。
+  - 「通知與發送」統一維護 LINE 範本，包含原帳務頁的各期繳款／逾期提醒、開工問候與取消結算。清單預設顯示全部，提供業務類別篩選，至少包含【帳務】及【身分綁定】；可與既有搜尋及訊息格式篩選並用。流程圖連結與既有帳務範本深連結均開啟工作台內同一則範本。帳務頁的排程與通知條件入口見 [LINE-PAY-05～07](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)。
 - **三張表格圖片渲染（`LINE-COPY-TABLE-01`、`LINE-TABLE-IMAGE-01～04`）**：
   - [候選月嫂的案件資訊](02A_媒合候選池與客戶決定及通勤規格.md#31-寄送案件資訊候選詢問與更新詢問期間)使用表格 PNG 呈現資料。正式推薦一次 Push 只含一則 Flex 輪播訊息，依序呈現各履歷 PNG 頁面、「訂單資訊一、資訊二、每週服務安排」三張表格 PNG。客戶版資訊一的財務欄位限於客戶費用與繳款約定。客戶回覆按鈕放在每週服務安排同一頁。已提交的任務重試時沿用提交時保存的投遞格式。
   - 圖片快照與投遞任務在同一交易提交。`GET /api/v1/line/table-images/{token}` 以七日有效的圖片連結讀取快照，表格按快照渲染，履歷回傳提交時保存的 PNG。履歷連結使用 `LINE_CHANNEL_SECRET`，回應含 `private, no-store, nosniff, no-referrer`。圖片服務異常回 `503`。
@@ -58,6 +61,14 @@
 - 本人附件下載 `POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 驗證該日誌附件歸屬後回傳私密 `JPEG/PNG` blob（`no-store/nosniff`，禁止 URL query 傳 token）。
 
 ## 7. 驗收標準
+
+| S 情境 | T 任務 | A 操作 | R 可觀察結果 |
+|---|---|---|---|
+| 已到正式開工日與排程時段，已綁定案件群組，第一期款尚有餘額 | 送開工問候與一期款提醒 | 執行當日通知排程兩次 | 群組只收到一則 `text` Push，含問候、第一期款金額與期限及客戶付款回報指引，無卡片或快選按鈕。客戶私聊無同日首次提醒。 |
+| 正式開工時無第一期款或已結清 | 送開工問候 | 執行當日通知排程；另驗證排入後、投遞前才完成核銷 | 群組只收到一則純文字問候，無催繳內容。 |
+| 開工日無有效案件群組 | 查詢未能送出的問候 | 執行當日通知排程後，由具群組讀取權限的工會人員開啟「開工問候未送出紀錄」 | 群組和私聊均無 Push。工會讀到案號、紀錄時間與未綁定原因，無對應訂金待辦的案號亦可查閱。 |
+| 案件群組已收到開工問候 | 核對開工問候的互動範圍 | 輸入開工服務回報相關文字，另驗證有餘額時本案客戶輸入付款回報文字 | 服務回報文字不觸發開工回覆或建單。客戶付款回報依 LINE-PAY-02 處理。 |
+| 有帳務及身分綁定範本 | 從同一工作台找範本 | 分別套用兩種類別與關鍵字，並開啟一條既有帳務範本深連結 | 清單僅顯示符合篩選的項目。深連結可定位原範本，帳務頁仍可設定通知排程。 |
 
 1. 驗證 Inbox 斷點回滾重試與 `follow/unfollow` 保序、Worker 租約防止重播、群組 `綁定訂單／發送邀請` 與單人代班邀請各階段狀態分離。
 2. 驗證 `NAS-LINE-03` 退役端點 410 與 `/runtime/query` 去敏摘要、`LINE-006` 逐來源重播及 skip 解除、Rich Menu 三態草稿與 3-table saga、文案 `504px` 公版預覽、`table-images` 受眾薪資／費用分離，及 `NAS-LINE-04` 跨憑證下載防護。
