@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pymysql.err import IntegrityError
-from domains.finance_import.statement_archive import ArrangementEvent, CaseArrangement, SubsidyPlanEvent, CaseSubsidyPlan
+from domains.finance_import.statement_archive import ArrangementEvent, CaseArrangement, SubsidyPlanEvent, CaseSubsidyPlan, case_accounting_scheme
 
 from subsystems.finance_import.accounting_workspace import CaseBankMemo, HistoricalAccountingMarker, HistoricalAccountingAmount, AccountingConflict
 from domains.finance_import.cancellation_code import extract_sinopac_memo_case_suffix
@@ -211,22 +211,36 @@ def query_subsidy_payable_handoff(connection, case_no, *, proposed_scheme=None, 
         raise LookupError('accounting_case_not_found')
     case = build_accounting_workspace(connection).query(case_no)
     funding = case.funding
+    status = str(row['status'])
     staff_total = case.staff_receivable_ntd
     if staff_total is None:
         staff_total = payroll_candidate_total
     total = staff_total if staff_total is not None else (funding.total_ntd if funding else None)
     cash = case.cash_by_flow
+    funding_conflict = funding is not None and staff_total is not None and funding.total_ntd != staff_total
+    historical_candidate = (status.startswith('歷史') and proposed_scheme is None
+                            and case.staff_receivable_ntd is None and payroll_candidate_total is not None)
+    historical_conflict = case.scheme_conflict or (historical_candidate and funding_conflict)
+    historical_scheme = case.scheme
+    if historical_candidate and not historical_conflict and historical_scheme in {'waiting', 'unknown'}:
+        historical_scheme = case_accounting_scheme(
+            total, case.customer_amount_ntd, case.subsidy_ntd, case.customer_fully_received,
+            cash['G'] if cash is not None else 0,
+            direct_confirmed=bool(case.arrangement and case.arrangement.direct_confirmed),
+            bank_sources_complete=cash is not None,
+            full_subsidy=bool(funding and funding.full_subsidy),
+        )
     customer_paid = case.customer_paid_ntd
     if customer_paid is not None and cash is not None:
         customer_paid -= cash['RS']
     staff = tuple(item for item in case.staff_items if item.direction == 'payable' and item.summary_included)
     return decide_subsidy_handoff(SubsidyHandoffFacts(
         proposed_scheme if proposed_scheme is not None else case.subsidy_plan.selected_scheme if case.subsidy_plan is not None else None,
-        case.scheme, case.scheme_conflict, str(row['status']), total,
+        historical_scheme, historical_conflict, status, total,
         case.subsidy_ntd, case.customer_amount_ntd, customer_paid,
         sum(item.actual_ntd for item in staff) if staff else None,
         None if cash is None else cash['PT'], None if cash is None else cash['RT'],
         None if cash is None else cash['G'], bool(row['has_customer_subsidy_payable']),
         funding.full_subsidy if funding is not None else False,
-        funding is not None and staff_total is not None and funding.total_ntd != staff_total,
+        funding_conflict,
         'bank' if proposed_scheme is not None else case.subsidy_plan.confirmation_source if case.subsidy_plan else None))

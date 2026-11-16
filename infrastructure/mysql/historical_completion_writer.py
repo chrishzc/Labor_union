@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any
 
 from pymysql.err import IntegrityError
@@ -29,6 +30,7 @@ from subsystems.orders.historical_completion_apply import (
     HistoricalCompletionCandidate,
     HistoricalCompletionClaimState,
     HistoricalCompletionReceipt,
+    HistoricalPayrollSyncResult,
     HistoricalServiceCompletionCandidate,
     HistoricalServiceCompletionFacts,
     HistoricalServiceCompletionReceipt,
@@ -284,7 +286,10 @@ class MySqlHistoricalServiceCompletionWriter:
         event_key = _child_identity(key, "lifecycle-event")
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT c.command_fingerprint,e.id,e.case_no,e.after_status,e.expected_version "
+                "SELECT c.command_fingerprint,e.id,e.case_no,e.after_status,e.expected_version,"
+                "e.facts_snapshot->>'$.historical_payroll_sync.action' AS payroll_action,"
+                "e.facts_snapshot->>'$.historical_payroll_sync.reason' AS payroll_reason,"
+                "e.facts_snapshot->>'$.historical_payroll_sync.detail' AS payroll_detail "
                 "FROM application_command_claims c "
                 "JOIN order_lifecycle_state_events e ON e.case_no=c.aggregate_identity "
                 "AND e.idempotency_key=%s "
@@ -303,6 +308,10 @@ class MySqlHistoricalServiceCompletionWriter:
                 int(row["id"]),
                 int(row["expected_version"]) + 1,
                 _service_completed_status(row["after_status"]),
+                payroll_sync=(
+                    HistoricalPayrollSyncResult(row["payroll_action"], row["payroll_reason"], row["payroll_detail"])
+                    if row.get("payroll_action") is not None else None
+                ),
             ),
         )
 
@@ -322,14 +331,19 @@ class MySqlHistoricalServiceCompletionWriter:
             request.correlation_id,
             "historical_service_period_elapsed",
         )
-        with self._connection.cursor() as cursor:
-            event_id = persist_order_lifecycle_impact(cursor, command)
-            persist_order_lifecycle_projection(cursor, command)
         from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
         from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 
-        synchronize_historical_payroll(self._connection, request.case_no, actor=request.actor)
+        # Payroll reads the completed projection in the same transaction.
         with self._connection.cursor() as cursor:
+            persist_order_lifecycle_projection(cursor, command)
+        result = synchronize_historical_payroll(self._connection, request.case_no, actor=request.actor)
+        payroll_sync = HistoricalPayrollSyncResult(result["action"], result.get("reason"), result.get("detail"))
+        payroll_snapshot = {key: value for key, value in asdict(payroll_sync).items() if value is not None}
+        with self._connection.cursor() as cursor:
+            event_id = persist_order_lifecycle_impact(
+                cursor, command, historical_payroll_sync=payroll_snapshot,
+            )
             synchronize_terminal_subsidy_return(
                 cursor, request.case_no, actor=request.actor, key=request.idempotency_key,
                 correlation_id=request.correlation_id, source_family="historical-service-completion",
@@ -340,6 +354,7 @@ class MySqlHistoricalServiceCompletionWriter:
             event_id,
             candidate.resulting_order_version,
             candidate.lifecycle.after_status,
+            payroll_sync=payroll_sync,
         )
 
 

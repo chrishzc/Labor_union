@@ -1,6 +1,9 @@
 """Contract tests for the MySQL historical completion lifecycle adapter."""
 
+import json
 from datetime import date
+
+import pytest
 
 from domains.orders.lifecycle import LifecycleImpactCandidate, OrderLifecycleStatus
 from infrastructure.mysql.historical_completion_writer import (
@@ -14,11 +17,15 @@ from subsystems.orders.historical_completion_apply import (
     ApplyHistoricalServiceCompletion,
     ApplyHistoricalCompletion,
     HistoricalCompletionCandidate,
+    HistoricalPayrollSyncResult,
     HistoricalServiceCompletionCandidate,
 )
 class _Cursor:
     def __init__(self):
         self.calls = []
+        self.lastrowid = 92
+        self.rowcount = 1
+        self.row = None
 
     def __enter__(self):
         return self
@@ -31,6 +38,9 @@ class _Cursor:
 
     def fetchall(self):
         return ()
+
+    def fetchone(self):
+        return self.row
 
 
 class _Connection:
@@ -123,29 +133,26 @@ def test_apply_locks_historical_staff_payout_roots() -> None:
     assert all(parameters == ("CASE-1",) for _, parameters in connection.cursor_value.calls)
 
 
-def test_service_completion_persist_reuses_canonical_event_outbox_and_projection_writers(
-    monkeypatch,
-) -> None:
-    calls = []
+@pytest.mark.parametrize("payroll_result", (
+    {"action": "created"},
+    {"action": "skipped", "reason": "payroll_rate_policy_not_found", "detail": "請查核月嫂時薪。"},
+))
+def test_service_completion_keeps_payroll_outcome_in_event_and_receipt(monkeypatch, payroll_result) -> None:
+    connection = _Connection()
+    cursor = connection.cursor_value
 
-    def persist_event(cursor, command):
-        calls.append(("event", command))
-        return 92
+    def synchronize_payroll(connection, case_no, **kwargs):
+        assert [sql.split(maxsplit=2)[:2] for sql, _ in cursor.calls] == [["UPDATE", "orders"]]
+        assert cursor.calls[0][1][0] == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
+        return payroll_result
 
-    def persist_projection(cursor, command):
-        calls.append(("projection", command))
+    def synchronize_subsidy(cursor, case_no, *, source_id, **kwargs):
+        assert source_id == 92
+        assert "orders_domain_outbox" in cursor.calls[-1][0]
 
-    monkeypatch.setattr(
-        "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_impact",
-        persist_event,
-    )
-    monkeypatch.setattr(
-        "infrastructure.mysql.historical_completion_writer.persist_order_lifecycle_projection",
-        persist_projection,
-    )
     monkeypatch.setattr(
         "infrastructure.mysql.automatic_client_accounting.synchronize_terminal_subsidy_return",
-        lambda cursor, case_no, **kwargs: calls.append(("subsidy", case_no)),
+        synchronize_subsidy,
     )
     lifecycle = LifecycleImpactCandidate(
         "CASE-1",
@@ -175,15 +182,27 @@ def test_service_completion_persist_reuses_canonical_event_outbox_and_projection
 
     monkeypatch.setattr(
         "subsystems.payroll.historical_baseline_obligation_sync.synchronize_historical_payroll",
-        lambda connection, case_no, **kwargs: calls.append(("payroll", case_no)),
+        synchronize_payroll,
     )
-    receipt = MySqlHistoricalServiceCompletionWriter(_Connection()).persist_service_completion(
-        request, candidate
-    )
+    writer = MySqlHistoricalServiceCompletionWriter(connection)
+    receipt = writer.persist_service_completion(request, candidate)
 
-    assert [name for name, _ in calls] == ["event", "projection", "payroll", "subsidy"]
-    command = calls[0][1]
-    assert command.trigger_event == "historical_service_period_elapsed"
-    assert command.candidate.service_data_lock_should_exist is False
+    _, event = cursor.calls[1]
+    assert event[1] == "historical_service_period_elapsed"
+    snapshot = json.loads(event[-1])
+    assert snapshot["service_data_lock_should_exist"] is False
+    assert snapshot["historical_payroll_sync"] == payroll_result
+    assert json.loads(cursor.calls[2][1][-1]) == snapshot
     assert receipt.lifecycle_event_id == 92
     assert receipt.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
+    assert receipt.payroll_sync == HistoricalPayrollSyncResult(**payroll_result)
+
+    cursor.row = {
+        "command_fingerprint": "c" * 64, "id": 92, "case_no": "CASE-1",
+        "after_status": receipt.after_status.value, "expected_version": 7,
+        "payroll_action": payroll_result["action"], "payroll_reason": payroll_result.get("reason"),
+        "payroll_detail": payroll_result.get("detail"),
+    }
+    assert writer.find_service_completion_receipt(request.idempotency_key).receipt == receipt
+    cursor.row["payroll_action"] = None
+    assert writer.find_service_completion_receipt(request.idempotency_key).receipt.payroll_sync is None

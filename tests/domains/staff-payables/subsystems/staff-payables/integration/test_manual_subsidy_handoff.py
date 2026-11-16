@@ -338,3 +338,47 @@ def test_full_subsidy_handoff_and_original_readers_feed_the_same_list_and_excel_
         ('台新銀行' if row.outgoing_bank == '633' else '永豐銀行', row.amount.amount) for row in listed)
     assert archived == [receipt.workbook_bytes]
     assert (case, staff_rows, refunds) == before
+
+
+@pytest.mark.parametrize("received,subsidy,funding_total,expected,conflict", [
+    (True, 5000, None, "split", False),
+    (False, 5000, None, "waiting", False),
+    (True, None, None, "unknown", False),
+    (True, 5000, 12000, "split", False),
+    (True, 5000, 13000, "unknown", True),
+    (True, 0, 13000, "unknown", True),
+])
+def test_historical_handoff_can_classify_verified_sources_before_first_payable(
+    monkeypatch, received, subsidy, funding_total, expected, conflict,
+):
+    from infrastructure.mysql import accounting_workspace_repository as workspace_repository
+
+    case = SimpleNamespace(
+        funding=SimpleNamespace(total_ntd=funding_total, full_subsidy=False) if funding_total is not None else None,
+        staff_receivable_ntd=None, subsidy_ntd=subsidy, customer_amount_ntd=7000,
+        customer_paid_ntd=7000 if received else 0, customer_fully_received=received,
+        subsidy_plan=None, scheme='unknown', scheme_conflict=False, arrangement=None,
+        cash_by_flow=None, staff_items=(),
+    )
+
+    class OrderCursor(Cursor):
+        def execute(self, sql, parameters):
+            assert sql.startswith("SELECT")
+
+        def fetchone(self):
+            return {'status': '歷史訂單－服務完成', 'has_customer_subsidy_payable': False}
+
+    connection = SimpleNamespace(cursor=lambda: OrderCursor(()))
+    monkeypatch.setattr(workspace_repository, 'build_accounting_workspace',
+        lambda _: SimpleNamespace(query=lambda case_no: case))
+
+    current = workspace_repository.query_subsidy_payable_handoff(connection, 'CASE')
+    candidate = workspace_repository.query_subsidy_payable_handoff(connection, 'CASE', payroll_candidate_total=12000)
+
+    assert current.scheme == 'unknown'
+    assert current.staff_subsidy_reason is None
+    assert candidate.scheme == expected
+    if conflict:
+        assert candidate.staff_subsidy_reason == '歷史補助方案或金額來源互相衝突，請由原帳務流程核對。'
+    else:
+        assert candidate.staff_subsidy_reason is None

@@ -13,11 +13,15 @@ from subsystems.orders.terms_workflow import (
 )
 
 
-def persist_order_lifecycle_impact(cursor, command) -> int:
-    lifecycle_event_id = _append_lifecycle_event(cursor, command)
+def persist_order_lifecycle_impact(cursor, command, *, historical_payroll_sync=None) -> int:
+    payload = _lifecycle_payload(command)
+    if historical_payroll_sync is not None:
+        payload["historical_payroll_sync"] = historical_payroll_sync
+    snapshot = _canonical_json(payload)
+    lifecycle_event_id = _append_lifecycle_event(cursor, command, snapshot)
     if _forms_service_data_lock(command):
         _insert_service_data_lock(cursor, command, lifecycle_event_id)
-    _append_orders_outbox(cursor, command, lifecycle_event_id)
+    _append_orders_outbox(cursor, command, lifecycle_event_id, snapshot)
     return lifecycle_event_id
 
 
@@ -40,7 +44,7 @@ def persist_order_lifecycle_projection(cursor, command) -> None:
         raise RuntimeError("order_version_conflict")
 
 
-def _append_lifecycle_event(cursor, command):
+def _append_lifecycle_event(cursor, command, snapshot):
     cursor.execute(
         _LIFECYCLE_EVENT_INSERT_SQL,
         (
@@ -52,7 +56,7 @@ def _append_lifecycle_event(cursor, command):
             command.candidate.business_date,
             command.expected_order_version,
             _child_identity(command, "lifecycle-event"),
-            _canonical_json(_lifecycle_payload(command)),
+            snapshot,
         ),
     )
     return int(cursor.lastrowid)
@@ -81,7 +85,7 @@ def _insert_service_data_lock(cursor, command, lifecycle_event_id):
     )
 
 
-def _append_orders_outbox(cursor, command, lifecycle_event_id):
+def _append_orders_outbox(cursor, command, lifecycle_event_id, snapshot):
     cursor.execute(
         "INSERT INTO orders_domain_outbox "
         "(case_no,lifecycle_event_id,intent_key,intent_type,payload_snapshot) "
@@ -90,7 +94,7 @@ def _append_orders_outbox(cursor, command, lifecycle_event_id):
             command.candidate.case_no,
             lifecycle_event_id,
             _child_identity(command, "orders-outbox"),
-            _canonical_json(_lifecycle_payload(command)),
+            snapshot,
         ),
     )
 

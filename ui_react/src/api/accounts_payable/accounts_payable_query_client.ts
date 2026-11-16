@@ -2,6 +2,7 @@
  * File: accounts_payable_query_client.ts
  * Description: 以fresh Session查詢單月Accounts Payable canonical preview並驗證aggregate。
  */
+import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
@@ -13,12 +14,24 @@ export interface AccountsPayableQueryClient {
   queryCase(caseNo: string, targetMonth: string, options?: AccountsPayableQueryOptions): Promise<CaseStaffPayableAudit>;
   lookupHistorical(keyword: string, targetMonth: string, signal?: AbortSignal): Promise<HistoricalPayableAuditItem[]>;
   recordHistoricalUnpaid(caseNo: string, command: HistoricalUnpaidPayableCommand): Promise<void>;
-  synchronizeHistorical(caseNo: string): Promise<string | undefined>;
+  synchronizeHistorical(caseNo: string): Promise<HistoricalPayrollSyncOutcome | undefined>;
 }
 export type HistoricalUnpaidPayableCommand = {
   staff_id: number; obligation_identity: string | null; expected_event_id: number | null;
   amount_ntd: number; due_date: string | null; evidence: string; confirmed_unpaid: true; key: string;
 };
+
+const HistoricalPayrollSyncOutcomeSchema = z.discriminatedUnion('action', [
+  z.object({ case_no: z.string(), action: z.enum(['created', 'updated']) }),
+  z.object({
+    case_no: z.string(), action: z.literal('skipped'), reason: z.string().min(1), detail: z.string().min(1).optional(),
+  }),
+]);
+const HistoricalPayrollSyncResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ details: z.array(HistoricalPayrollSyncOutcomeSchema).max(1) }),
+});
+type HistoricalPayrollSyncOutcome = z.infer<typeof HistoricalPayrollSyncOutcomeSchema>;
 
 let correlationSequence = 0;
 
@@ -42,13 +55,15 @@ class DefaultAccountsPayableQueryClient implements AccountsPayableQueryClient {
   }
 
   async synchronizeHistorical(caseNo: string) {
-    const result = await transport.post<{ success: boolean; data?: { details: { action: string; reason?: string }[] } }>(
+    const raw = await transport.post<unknown>(
       `/api/v1/orders/${encodeURIComponent(caseNo)}/payroll/sync-historical-baseline-obligations`,
       undefined, { token: sessionClient.getToken() },
     );
-    if (!result.success) throw new Error('historical_payroll_sync_failed');
-    const detail = result.data?.details[0];
-    return detail?.action === 'skipped' ? detail.reason : detail?.action;
+    const detail = HistoricalPayrollSyncResponseSchema.parse(raw).data.details[0];
+    if (detail && detail.case_no !== caseNo) {
+      throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_IDENTITY_MISMATCH', '案件編號與查詢不一致。');
+    }
+    return detail;
   }
 
   async query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview> {

@@ -34,7 +34,7 @@
 
 ## Dependencies
 - outbound: `payroll/payroll/module:payroll-adjustment` — 缺義務或正式未付款項更正轉介原 Payroll 流程。清冊查詢不代算或代寫。
-- outbound: `payroll/historical-service-accounting` — 只讀該 owner 已建立的正式義務，不在報表重跑單薪／樓層費公式。
+- outbound: `payroll/historical-service-accounting` — 報表只讀既有正式義務。歷史逐案查核可用該 owner 的唯讀同步預覽取得目前缺件或歸屬待核對原因，預覽不填入清冊金額或日期。
 - outbound: `scheduling` — 與 Assignment Plan Query 共用 `order_terms_read_model.select_current_assignments`，不以 `orders.staff_id` 或任意最大 assignment id 代替 current binding。
 - outbound: `client-finance/client-finance/module:client-subsidy-return-query` — 沿用 Domain `project_subsidy_return` 與補助到期日規則，只將目前排班結束日作為明示預估日期來源。
 

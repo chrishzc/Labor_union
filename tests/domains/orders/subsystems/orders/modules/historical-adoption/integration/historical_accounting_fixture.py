@@ -1,6 +1,6 @@
 """Shared real-accounting setup for historical-adoption native regressions."""
 
-def seed_accounting_basis(cursor, case_no, *, has_case_rate=True):
+def seed_accounting_basis(cursor, case_no, *, has_case_rate=True, verified_self_funded=True):
     identity = "一般市民" if has_case_rate else "非市民"
     client_rate = 300 if has_case_rate else 320
     cursor.execute("UPDATE clients SET identity_status=%s WHERE case_no=%s", (identity, case_no))
@@ -20,6 +20,12 @@ def seed_accounting_basis(cursor, case_no, *, has_case_rate=True):
         "VALUES (%s,'historical-fixture-v1',%s,0,'2025-01-01','2025-01-02',NULL,%s)",
         (case_no, client_rate, event_id),
     )
+    if verified_self_funded:
+        cursor.execute(
+            "INSERT INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) "
+            "VALUES (%s,2025,'manual',0,0)",
+            (case_no,),
+        )
     if not has_case_rate:
         return
     cursor.execute(

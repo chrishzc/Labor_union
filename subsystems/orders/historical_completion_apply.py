@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from typing import Callable, Protocol
@@ -229,12 +229,20 @@ class ApplyHistoricalServiceCompletion:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalPayrollSyncResult:
+    action: str
+    reason: str | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalServiceCompletionReceipt:
     case_no: str
     lifecycle_event_id: int
     resulting_order_version: int
     after_status: OrderLifecycleStatus
     replayed: bool = False
+    payroll_sync: HistoricalPayrollSyncResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -539,13 +547,7 @@ def _service_completion_command_fingerprint(
 def _replayed_service_completion(
     receipt: HistoricalServiceCompletionReceipt,
 ) -> HistoricalServiceCompletionReceipt:
-    return HistoricalServiceCompletionReceipt(
-        receipt.case_no,
-        receipt.lifecycle_event_id,
-        receipt.resulting_order_version,
-        receipt.after_status,
-        True,
-    )
+    return replace(receipt, replayed=True)
 
 
 def _service_error(

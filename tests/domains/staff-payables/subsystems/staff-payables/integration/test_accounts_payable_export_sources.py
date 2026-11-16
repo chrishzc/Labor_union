@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
 
@@ -136,8 +137,9 @@ def test_case_audit_reports_unknown_amount_and_unformed_date_instead_of_zero():
 
 
 class _CanonicalCursor:
-    def __init__(self, formal_rows=()):
+    def __init__(self, formal_rows=(), order_status="訂單完成"):
         self.formal_rows = formal_rows
+        self.order_status = order_status
         self.rows = ()
         self.statements = []
     def __enter__(self): return self
@@ -147,7 +149,7 @@ class _CanonicalCursor:
         if "historical_confirmation.confirmation_kind AS" in statement:
             self.rows = self.formal_rows
         elif "SELECT orders.case_no,orders.staff_payment_due_date" in statement:
-            self.rows = ({"case_no": "C-1", "staff_payment_due_date": date(2026, 3, 15)},)
+            self.rows = ({"case_no": "C-1", "staff_payment_due_date": date(2026, 3, 15), "status": self.order_status},)
         elif "FROM scheduling_aggregates" in statement:
             self.rows = ()
         elif "FROM case_staff_assignments assignment" in statement:
@@ -161,11 +163,12 @@ class _CanonicalCursor:
 
 
 class _CanonicalConnection:
-    def __init__(self, formal_rows=()): self.cursor_instance = _CanonicalCursor(formal_rows)
+    def __init__(self, formal_rows=(), order_status="訂單完成"):
+        self.cursor_instance = _CanonicalCursor(formal_rows, order_status)
     def cursor(self): return self.cursor_instance
 
 
-def test_missing_historical_obligation_is_not_recalculated_by_export_query():
+def test_missing_obligation_is_not_recalculated_by_export_query():
     connection = _CanonicalConnection()
     source = MySqlStaffPayableExportSource(connection)
     assert source.load(date(2026, 3, 15)) == ()
@@ -175,6 +178,57 @@ def test_missing_historical_obligation_is_not_recalculated_by_export_query():
     assert all(item.source == "order_facts" for item in items)
     assert all(item.amount_due is None and item.balance is None for item in items)
     assert all("尚未建立月嫂應付帳務" in item.reason for item in items)
+
+
+@pytest.mark.parametrize(("outcome", "reason"), [
+    ({"action": "skipped", "reason": "historical_payroll_attribution_pending", "detail": "待核對原付款證據。"},
+     "待核對原付款證據。"),
+    ({"action": "created", "due_date": "2026-03-15", "amount_ntd": 12000},
+     "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"),
+])
+def test_historical_case_audit_uses_current_payroll_preview_without_reporting_payment_as_created(
+    monkeypatch, outcome, reason
+):
+    paid = _partially_paid_staff_row(payout_status="completed", export_amount_ntd=0)
+    connection = _CanonicalConnection((paid,), order_status="歷史訂單－服務完成")
+
+    def preview(conn, case_no, *, dry_run):
+        assert (conn, case_no, dry_run) == (connection, "C-1", True)
+        return outcome
+
+    monkeypatch.setattr("subsystems.payroll.historical_baseline_obligation_sync.synchronize_historical_payroll", preview)
+    item_paid, item_missing = MySqlStaffPayableExportSource(connection).load_case("C-1", date(2026, 3, 15))
+
+    assert item_paid.disposition == "paid_or_settled"
+    assert item_missing.reason == reason
+    assert item_missing.source == "order_facts"
+    assert item_missing.amount_due is None and item_missing.effective_due_date is None
+
+
+@pytest.mark.parametrize(("order_status", "payroll_reason", "reason", "preview_count"), [
+    ("歷史訂單－服務完成", "historical_payroll_attribution_pending", "待核對原付款證據。", 1),
+    ("歷史訂單－服務完成", "historical_payroll_funding_conflict", "列入所選付款月份。", 1),
+    ("訂單完成", "historical_payroll_attribution_pending", "列入所選付款月份。", 0),
+])
+def test_case_audit_surfaces_pending_historical_attribution_without_changing_formal_payables(
+    monkeypatch, order_status, payroll_reason, reason, preview_count,
+):
+    due_date = date(2026, 3, 15)
+    unpaid = _partially_paid_staff_row()
+    settled = _partially_paid_staff_row(staff_id=2, obligation_identity="staff:2", historical_confirmation_kind="settled")
+    connection = _CanonicalConnection((unpaid, settled), order_status=order_status)
+    calls = []
+
+    def preview(conn, case_no, *, dry_run):
+        calls.append((conn, case_no, dry_run))
+        return {"action": "skipped", "reason": payroll_reason, "detail": "待核對原付款證據。"}
+
+    monkeypatch.setattr("subsystems.payroll.historical_baseline_obligation_sync.synchronize_historical_payroll", preview)
+    item_unpaid, item_settled = MySqlStaffPayableExportSource(connection).load_case("C-1", due_date)
+
+    assert calls == [(connection, "C-1", True)] * preview_count
+    assert item_unpaid == replace(_formal_case_audit_item(unpaid, due_date), reason=reason)
+    assert item_settled == _formal_case_audit_item(settled, due_date)
 
 
 def test_current_assignment_and_paid_obligation_are_composed_once_without_relisting_paid_staff():

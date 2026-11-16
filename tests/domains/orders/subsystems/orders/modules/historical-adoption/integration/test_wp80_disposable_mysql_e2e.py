@@ -5,7 +5,7 @@ Description: 在明確 disposable MySQL 驗證歷史狀態、assignment、event�
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
 import os
 from uuid import uuid4
@@ -14,9 +14,12 @@ import pytest
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+from infrastructure.mysql.historical_completion_writer import MySqlHistoricalServiceCompletionWriter
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from .historical_accounting_fixture import seed_accounting_basis
+from shared_kernel.clock import FixedBusinessClock
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
@@ -24,6 +27,10 @@ from subsystems.orders.historical_adoption_workflow import (
 from subsystems.orders.historical_order_workbook import (
     HistoricalCaregiverSource,
     HistoricalOrderWorkbookRow,
+)
+from subsystems.orders.historical_completion_apply import (
+    ApplyHistoricalServiceCompletion,
+    HistoricalServiceCompletionApplyWorkflow,
 )
 from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -69,6 +76,58 @@ def test_historical_order_apply_is_atomic_and_replays():
         _assert_persisted(connection, case_no, staff_id, request.idempotency_key)
         _assert_statement_reconciles(connection, case_no, staff_id)
         assert synchronize_historical_payroll(connection, case_no)["reason"] == "already_synced"
+    finally:
+        connection.close()
+
+
+def test_rollover_preserves_unknown_funding_reason_without_creating_payroll():
+    token = uuid4().hex
+    case_no = f"WP80-{token[:12]}"
+    staff_name = f"歷史待核對-{token[:8]}"
+    connection = get_connection()
+    try:
+        _seed_case(connection, case_no, staff_name, verified_self_funded=False)
+        row = _source_row(case_no, token, staff_name)
+        adoption = HistoricalOrderAdoptionWorkflow(
+            MySqlHistoricalOrderAdoptionRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
+            clock=FixedBusinessClock(datetime(2025, 1, 15, tzinfo=timezone.utc)),
+        )
+        adoption_preview = adoption.preview(row)
+        assert adoption_preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE
+        adopted = adoption.apply(HistoricalOrderAdoptionRequest(
+            row, adoption_preview.fingerprint, f"{token}:adopt", "synthetic", "Historical case", token,
+        ))
+        assert adopted.assignment_count == 1
+
+        request = ApplyHistoricalServiceCompletion(
+            case_no, adopted.resulting_version, date(2025, 2, 1), IdempotencyKey(f"{token}:rollover"),
+            ActorContext("synthetic"), "Historical source service period elapsed", CorrelationId(token),
+        )
+        rollover = HistoricalServiceCompletionApplyWorkflow(
+            MySqlHistoricalServiceCompletionWriter(connection), lambda: MySqlUnitOfWork(connection),
+        )
+        completed = rollover.apply(request)
+        replay = rollover.apply(request)
+        assert completed.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
+        assert completed.payroll_sync.action == "skipped"
+        assert completed.payroll_sync.reason == "historical_payroll_funding_conflict"
+        assert "付款來源" in completed.payroll_sync.detail
+        assert replay.replayed and replay.lifecycle_event_id == completed.lifecycle_event_id
+        assert replay.payroll_sync == completed.payroll_sync
+
+        for dry_run in (True, False):
+            result = synchronize_historical_payroll(connection, case_no, dry_run=dry_run)
+            assert result == {"action": "skipped", "reason": completed.payroll_sync.reason,
+                              "detail": completed.payroll_sync.detail}
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_obligations WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["count"] == 0
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_obligation_events WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["count"] == 0
+            cursor.execute("SELECT staff_payment_due_date FROM orders WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["staff_payment_due_date"] is None
     finally:
         connection.close()
 
@@ -389,7 +448,7 @@ def test_unpaid_historical_attribution_replaces_confirmed_manual_amount_and_spli
         connection.close()
 
 
-def _seed_case(connection, case_no, staff_name, *, has_case_rate=True):
+def _seed_case(connection, case_no, staff_name, *, has_case_rate=True, verified_self_funded=True):
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO clients (case_no,name) VALUES (%s,'歷史客戶')", (case_no,))
         client_id = int(cursor.lastrowid)
@@ -402,7 +461,9 @@ def _seed_case(connection, case_no, staff_name, *, has_case_rate=True):
             (staff_name, f"W{case_no[-9:]}"),
         )
         staff_id = int(cursor.lastrowid)
-        seed_accounting_basis(cursor, case_no, has_case_rate=has_case_rate)
+        seed_accounting_basis(
+            cursor, case_no, has_case_rate=has_case_rate, verified_self_funded=verified_self_funded,
+        )
     connection.commit()
     return staff_id
 

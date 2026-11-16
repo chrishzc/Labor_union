@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from calendar import monthrange
 from decimal import Decimal
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.staff_payables.reconciliation import StaffPayableStatus
 from domains.staff_payables.subsidy_handoff import subsidy_refund_amount_reason
 from shared_kernel.money import MoneyNTD
@@ -83,9 +85,30 @@ class MySqlStaffPayableExportSource:
                 cursor.execute("SELECT id,name FROM staff WHERE id IN (" + ",".join("%s" for _ in missing) + ")",
                                tuple(item["staff_id"] for item in missing))
                 names = {int(row["id"]): row["name"] for row in cursor.fetchall()}
-        return items + tuple(_missing_case_audit_item({**row, "staff_id": assignment["staff_id"] if assignment else None,
+        missing_items = tuple(_missing_case_audit_item({**row, "staff_id": assignment["staff_id"] if assignment else None,
             "recipient_name": names.get(int(assignment["staff_id"])) if assignment else None})
             for row in order_rows for assignment in (missing or (() if items else (None,))))
+        unpaid_statuses = {"pending", "partially_paid"}
+        if order_rows[0]["status"] in {
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        } and (missing_items or any(item.payment_status in unpaid_statuses for item in items)):
+            from subsystems.payroll.historical_baseline_obligation_sync import synchronize_historical_payroll
+
+            outcome = synchronize_historical_payroll(self._connection, case_no, dry_run=True)
+            reason = outcome.get("detail")
+            if outcome["action"] in {"created", "updated"}:
+                reason = "已查到同步所需資料，可同步月嫂應付。本次查核尚未入帳。"
+            if reason:
+                attribution_pending = outcome.get("reason") == "historical_payroll_attribution_pending"
+                items = tuple(
+                    replace(item, reason=reason)
+                    if item.payment_status in unpaid_statuses and (attribution_pending or item.disposition == "date_not_formed")
+                    else item
+                    for item in items
+                )
+                missing_items = tuple(replace(item, reason=reason) for item in missing_items)
+        return items + missing_items
 
     def find_historical_cases(self, keyword: str, target_payment_date: date):
         with self._connection.cursor() as cursor:
@@ -465,7 +488,7 @@ ORDER BY obligations.staff_id, obligations.obligation_identity
 
 
 _STAFF_PAYABLE_CASE_ORDER_FACTS_SQL = """
-SELECT orders.case_no,orders.staff_payment_due_date
+SELECT orders.case_no,orders.staff_payment_due_date,orders.status
 FROM orders
 WHERE orders.case_no = %s
 """

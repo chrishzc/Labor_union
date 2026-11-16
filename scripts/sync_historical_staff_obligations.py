@@ -70,7 +70,11 @@ def main() -> int:
         if result["details"]:
             print("\n詳細異動:")
             for item in result["details"]:
-                print(f"  - 案號 {item['case_no']}: {item['action']} ({item.get('amount_ntd', '')} NT$, 付款日: {item.get('due_date', '')})")
+                prefix = f"  - 案號 {item['case_no']}: {item['action']}"
+                if item["action"] == "skipped":
+                    print(f"{prefix} ({item.get('detail') or item['reason']})")
+                else:
+                    print(f"{prefix} (月嫂 ID: {item['staff_id']}, {item['amount_ntd']} NT$, 付款日: {item['due_date']})")
         return 0
     except Exception as exc:
         conn.rollback()

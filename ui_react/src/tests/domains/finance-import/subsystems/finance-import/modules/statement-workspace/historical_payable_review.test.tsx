@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import type { HistoricalPayableAuditItem } from '../../../../../../../api/accounts_payable/accounts_payable_query_schemas';
+import { transport } from '../../../../../../../api/shared/transport';
 import { HistoricalPayableEditor, HistoricalPayableLookup } from '../../../../../../../components/HistoricalPayableReview';
 
 const pending: HistoricalPayableAuditItem = {
@@ -22,7 +23,8 @@ it('帶入同案及月嫂，同步後重新查核清冊', async () => {
       amount_due_ntd: 12000, balance_ntd: 12000, effective_due_date: '2026-10-15',
       source: 'formal_obligation', disposition: 'selected_month', reason: '列入所選付款月份。',
     }]);
-  const sync = vi.spyOn(accountsPayableQueryClient, 'synchronizeHistorical').mockResolvedValue('created');
+  const sync = vi.spyOn(accountsPayableQueryClient, 'synchronizeHistorical')
+    .mockResolvedValue({ case_no: pending.case_no, action: 'created' });
 
   function Workspace() {
     const [selected, setSelected] = useState<HistoricalPayableAuditItem>();
@@ -53,4 +55,21 @@ it('已結清款項只顯示查核原因', () => {
   }} onSaved={vi.fn()} />);
   expect(screen.getByText('已有結清證據。')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '更正應付' })).not.toBeInTheDocument();
+});
+
+it('顯示歷史歸屬更正的待核對原因，無成功回報或清冊重讀', async () => {
+  vi.spyOn(transport, 'post').mockResolvedValue({
+    success: true,
+    data: { details: [{
+      case_no: pending.case_no, action: 'skipped', reason: 'historical_payroll_attribution_pending',
+      detail: '請核對原出款證據，並回到歷史服務歸屬更正。',
+    }] },
+  });
+  const onSaved = vi.fn();
+  render(<HistoricalPayableEditor item={pending} onSaved={onSaved} />);
+
+  fireEvent.click(screen.getByRole('button', { name: '同步月嫂應付' }));
+
+  expect(await screen.findByRole('status')).toHaveTextContent('請核對原出款證據，並回到歷史服務歸屬更正。');
+  expect(onSaved).not.toHaveBeenCalled();
 });

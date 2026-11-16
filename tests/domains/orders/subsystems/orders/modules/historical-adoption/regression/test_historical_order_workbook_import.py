@@ -275,11 +275,17 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
             self.apply_calls += 1
             outcome, replayed = {
                 2: (HistoricalOrderOutcome.ADOPTED, False),
-                3: (HistoricalOrderOutcome.ADOPTED, True),
+                3: (HistoricalOrderOutcome.ADOPTED, False),
                 4: (HistoricalOrderOutcome.REVIEW_REQUIRED, True),
                 5: (HistoricalOrderOutcome.REVIEW_REQUIRED, False),
             }[request.row.source_row]
-            return SimpleNamespace(outcome=outcome, replayed=replayed, assignment_count=0, review_identity="review" if outcome is HistoricalOrderOutcome.REVIEW_REQUIRED else None)
+            return SimpleNamespace(
+                outcome=outcome, replayed=replayed, assignment_count=0,
+                review_identity="review" if outcome is HistoricalOrderOutcome.REVIEW_REQUIRED else None,
+                unchanged=request.row.source_row == 3,
+                payroll_skip_reason={2: "already_synced", 3: "payroll_rate_policy_not_found"}.get(request.row.source_row),
+                payroll_skip_detail="請查核本案保存的月嫂費率。" if request.row.source_row == 3 else None,
+            )
 
     workflow = Workflow()
     service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow, _UnitOfWork)
@@ -287,13 +293,16 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
     receipt = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
     assert receipt.adopted_count == 2
     assert receipt.review_required_count == 2
-    assert receipt.replayed_rows == 2
+    assert receipt.replayed_rows == 1
     assert receipt.import_counts.as_dict() == {"imported_count": 1, "duplicate_skipped_count": 2, "not_imported_count": 1}
     assert sum(receipt.import_counts.as_dict().values()) == receipt.source_row_count
     assert [item.source_row for item in receipt.row_issues] == [5]
     assert receipt.row_issues[0].case_no == workbook.rows[3].case_no
     view = HistoricalOrderWorkbookReceiptView.model_validate(receipt.as_dict())
     assert view.import_counts.duplicate_skipped_count == 2
+    assert [issue.source_row for issue in view.payroll_issues] == [3]
+    assert view.payroll_issues[0].issue_codes == ["payroll_rate_policy_not_found"]
+    assert view.payroll_issues[0].detail == "請查核本案保存的月嫂費率。"
     with pytest.raises(ValueError, match="historical_order_import_counts_not_conserved"):
         HistoricalOrderWorkbookReceiptView.model_validate({
             **receipt.as_dict(),
@@ -302,6 +311,7 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
     replay = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
     assert replay.import_counts == receipt.import_counts
     assert replay.as_dict()["row_issues"] == receipt.as_dict()["row_issues"]
+    assert replay.payroll_issues == receipt.payroll_issues
     assert workflow.apply_calls == 8
 
 

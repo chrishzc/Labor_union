@@ -77,11 +77,12 @@ function HistoricalPayableSync({ item, onSaved }: { item: HistoricalPayableAudit
     setMessage('');
     try {
       const result = await accountsPayableQueryClient.synchronizeHistorical(item.case_no);
-      if (result === 'created' || result === 'updated' || result === 'already_synced') {
+      if (result && (result.action !== 'skipped' || result.reason === 'already_synced')) {
         setMessage('已查回月嫂應付，清冊將重新讀取。');
         onSaved();
       } else {
-        setMessage(historicalSyncMessages[result ?? ''] ?? '本案目前無法同步，請重新查核案件狀態。');
+        setMessage(result?.detail ?? historicalSyncMessages[result?.reason ?? '']
+          ?? '本案目前無法同步，請重新查核案件狀態。');
       }
     } catch {
       setMessage('無法確認同步結果，請重新查核本案。');
@@ -109,6 +110,7 @@ const historicalSyncMessages: Record<string, string> = {
   payroll_rate_policy_not_found: '請查核本案保存的月嫂時薪。',
   historical_payroll_nonpositive_amount: '計算出的月嫂應付金額須大於零，請查核計算依據。',
   historical_payroll_funding_conflict: '請查核本案自費與直接補助的付款來源。',
+  historical_payroll_attribution_pending: '請回到歷史服務歸屬更正，查核應付與原付款證據。',
 };
 
 function HistoricalPayableCorrection({ item, onSaved }: { item: HistoricalPayableAuditItem; onSaved: () => void }) {
