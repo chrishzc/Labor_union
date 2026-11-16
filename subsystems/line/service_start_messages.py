@@ -457,6 +457,39 @@ def confirm_start_date_card(
     }
 
 
+def mutual_postponement_entry_card(case_no: str, liff_url: str) -> dict:
+    return {
+        'type': 'flex',
+        'altText': '雙方合意延期申請',
+        'contents': {
+            'type': 'bubble',
+            'body': {
+                'type': 'box',
+                'layout': 'vertical',
+                'spacing': 'md',
+                'contents': [
+                    {'type': 'text', 'text': '雙方合意延期申請', 'weight': 'bold', 'size': 'lg', 'wrap': True},
+                    _key_value_row('案件編號：', case_no),
+                    {'type': 'text', 'text': '請月嫂選擇請假日與補班日。系統會檢查檔期，並確認補助天數與時數是否維持。', 'size': 'sm', 'wrap': True},
+                    {'type': 'text', 'text': '若要再調整日期，可從原群組按同一個按鈕重新開啟。', 'size': 'sm', 'wrap': True},
+                ],
+            },
+            'footer': {
+                'type': 'box',
+                'layout': 'vertical',
+                'contents': [
+                    {
+                        'type': 'button',
+                        'style': 'primary',
+                        'color': '#C45C30',
+                        'action': {'type': 'uri', 'label': '開啟延期申請', 'uri': liff_url},
+                    },
+                ],
+            },
+        },
+    }
+
+
 def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_date, *, proposal_ref=None):
     action_suffix = f":{proposal_ref}" if proposal_ref else ""
     return {

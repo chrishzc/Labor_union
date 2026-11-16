@@ -5,7 +5,7 @@ Description: 協調服務開始、請假順延與代班結果，支援單一外�
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Callable, Protocol
+from typing import Callable, Literal, Protocol
 
 from domains.scheduling.service_start import ServiceStartConflict, ServiceStartSubmission
 from shared_kernel.fingerprints import fingerprint_payload
@@ -71,6 +71,12 @@ class LeaveCase:
     service_dates: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class LeaveCaseAvailability:
+    code: Literal['eligible', 'not_assigned', 'order_status', 'service_data_locked', 'no_adjustable_days']
+    order_status: str | None = None
+
+
 class ServiceStartRepository(Protocol):
     def staff_cases(self, staff_id: int) -> tuple[ServiceStartCase, ...]: ...
     def replay_submission(self, submission: ServiceStartSubmission) -> ServiceStartView | None: ...
@@ -120,6 +126,9 @@ class ServiceStartWorkflow:
 
     def leave_cases(self, staff_id):
         return self.repository.leave_cases(staff_id)
+
+    def selected_leave_case(self, staff_id: int, case_no: str) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
+        return self.repository.selected_leave_case(staff_id, case_no)
 
     def submit_leave(self, submission):
         with self.units() as unit:

@@ -445,6 +445,18 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
     <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
   </section>
 
+  <section id="postponeAuthSection" class="blocked-card" hidden>
+    <h2 class="blocked-title">目前無法確認 LINE 身分</h2>
+    <p class="blocked-desc">請用本案月嫂的 LINE 帳號，在原群組重新開啟延期申請。</p>
+    <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
+  </section>
+
+  <section id="postponeUnavailableSection" class="blocked-card" hidden>
+    <h2 class="blocked-title">目前無法辦理延期</h2>
+    <p class="blocked-desc" id="postponeUnavailableDescription"></p>
+    <button type="button" class="close-btn" onclick="closeLiffWindow()">關閉並返回群組</button>
+  </section>
+
   <!-- 狀況 A：雙方合意延期專屬工作台 (重用後台日曆與多天調整) -->
   <section id="postponeWorkbench" class="panel" hidden>
     <div style="border-bottom:1px solid #f2e6dc;padding-bottom:10px;margin-bottom:12px;">
@@ -495,7 +507,7 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
     </div>
 
     <div id="postponeActionNotice" class="message" role="status" hidden></div>
-    <button type="button" id="postponeRetryPreview" class="secondary" hidden onclick="checkPostponePairs()">重新檢查檔期</button>
+    <button type="button" id="postponeRetryPreview" class="secondary" hidden onclick="retryPostponeCheck()">重新檢查檔期</button>
 
     <div style="margin-top:14px;">
       <button type="button" id="postponeSubmitBtn" class="primary" style="width:100%;padding:14px;font-size:15px;" disabled onclick="submitPostponeProposal()">
@@ -504,6 +516,7 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
       <p style="font-size:11px;color:#857163;text-align:center;margin:8px 0 0;">
         送出後由客戶在原群組確認。客戶同意後才會更新排班。
       </p>
+      <button type="button" id="postponeReturnToGroup" class="secondary" hidden onclick="closeLiffWindow()">返回群組看確認卡</button>
     </div>
   </section>
 
@@ -619,6 +632,7 @@ let postponeMonthRequest;
 let postponeStaffId;
 let postponeOccupancy = new Map();
 let postponeCheck = { status: 'idle' };
+let lastSentPostponeSelection;
 
 function closeLiffWindow() {
   if (typeof liff !== "undefined" && typeof liff.closeWindow === "function") {
@@ -1235,40 +1249,43 @@ async function leaveResultPost(path, body, signal) {
   return result.data;
 }
 
-// 呈現權限阻擋視角 (身分辨識保護)
-function showRoleBlockedView(customMessage) {
+function showPostponeSection(sectionId) {
   document.getElementById("pageMainHeading").textContent = "雙方合意延期";
   document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("postponeWorkbench").hidden = true;
   document.getElementById("unavailabilitySection").hidden = true;
-  document.getElementById("expiredLinkSection").hidden = true;
-
-  const blocked = document.getElementById("roleBlockedSection");
-  blocked.hidden = false;
-  if (customMessage) {
-    document.getElementById("blockedDescription").textContent = customMessage;
+  for (const id of ["postponeWorkbench", "roleBlockedSection", "expiredLinkSection",
+                    "postponeAuthSection", "postponeUnavailableSection"]) {
+    document.getElementById(id).hidden = id !== sectionId;
   }
+}
+
+function showRoleBlockedView(customMessage) {
+  showPostponeSection("roleBlockedSection");
+  document.getElementById("blockedDescription").textContent = customMessage;
   document.getElementById("blockedCaseNoText").textContent = focusCaseNo || "未指定";
 }
 
-// 呈現逾期失效視角 (15分鐘安全時效保護)
 function showLinkExpiredView(customMessage) {
-  document.getElementById("pageMainHeading").textContent = "雙方合意延期";
-  document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("postponeWorkbench").hidden = true;
-  document.getElementById("unavailabilitySection").hidden = true;
-  document.getElementById("roleBlockedSection").hidden = true;
-
-  const expired = document.getElementById("expiredLinkSection");
-  expired.hidden = false;
-  if (customMessage) {
-    document.getElementById("expiredDescription").textContent = customMessage;
-  }
+  showPostponeSection("expiredLinkSection");
+  document.getElementById("expiredDescription").textContent = customMessage;
   document.getElementById("expiredCaseNoText").textContent = focusCaseNo || "未指定";
 }
 
+function showPostponeAuthView() {
+  showPostponeSection("postponeAuthSection");
+}
+
+function showPostponeUnavailableView(message) {
+  showPostponeSection("postponeUnavailableSection");
+  document.getElementById("postponeUnavailableDescription").textContent = message;
+}
+
+function postponeEditingLocked() {
+  return ['submitting', 'complete', 'stale'].includes(postponeCheck.status);
+}
+
 function navCalMonth(delta) {
-  if (!postponeMonth || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  if (!postponeMonth || postponeEditingLocked()) return;
   const nextMonth = postponeCalendar.shiftCalendarMonth(postponeMonth, delta);
   if (nextMonth < '1900-01' || nextMonth > '2100-12') return;
   postponeMonth = nextMonth;
@@ -1330,7 +1347,7 @@ function renderPostponeCalendar() {
   grid.replaceChildren();
   const { year, monthNumber, leadingDays, dates } = postponeCalendar.buildCalendarMonth(postponeMonth);
   document.getElementById("calViewMonthLabel").textContent = `${year} 年 ${monthNumber} 月`;
-  const locked = postponeCheck.status === 'submitting' || postponeCheck.status === 'complete';
+  const locked = postponeEditingLocked();
   document.getElementById('postponePreviousMonth').disabled = locked || postponeMonth === '1900-01';
   document.getElementById('postponeNextMonth').disabled = locked || postponeMonth === '2100-12';
   const serviceDates = new Set(postponeCase.service_dates);
@@ -1400,7 +1417,7 @@ function renderPostponeCalendar() {
 }
 
 function handlePostponeDateClick(dateStr) {
-  if (!postponeCase || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  if (!postponeCase || postponeEditingLocked()) return;
   if (!postponeSelectedDates.delete(dateStr)) postponeSelectedDates.add(dateStr);
   renderPostponeCalendar();
   updatePostponePairs();
@@ -1489,18 +1506,52 @@ function renderPostponeCheck() {
   const notice = document.getElementById('postponeActionNotice');
   const {status, message, groupMessage} = postponeCheck;
   notice.hidden = !message;
-  notice.className = status === 'conflict' || status === 'unavailable' || postponeCheck.submitFailed ? 'message error' : 'message';
+  notice.className = status === 'conflict' || status === 'unavailable' || status === 'stale' || postponeCheck.submitFailed ? 'message error' : 'message';
   notice.textContent = message ?? '';
-  document.getElementById('postponeRetryPreview').hidden = status !== 'unavailable';
+  const retry = document.getElementById('postponeRetryPreview');
+  retry.hidden = status !== 'unavailable' && status !== 'stale';
+  retry.textContent = status === 'stale' ? '讀取最新排班' : '重新檢查檔期';
+  const returnButton = document.getElementById('postponeReturnToGroup');
+  returnButton.hidden = lastSentPostponeSelection === undefined;
+  returnButton.disabled = status === 'submitting' || Boolean(groupMessage);
   const submitBtn = document.getElementById('postponeSubmitBtn');
   const canRetrySend = status === 'complete' && Boolean(groupMessage);
   submitBtn.disabled = status !== 'ready' && !canRetrySend;
   if (canRetrySend) submitBtn.textContent = '重試送出延期訊息';
 }
 
+async function retryPostponeCheck() {
+  if (postponeCheck.status === 'stale') {
+    postponeCheck = {status: 'submitting', message: '正在讀取最新排班…'};
+    renderPostponeCheck();
+    await loadPostponeCase();
+    return;
+  }
+  await checkPostponePairs();
+}
+
+function postponeSelectionKey() {
+  return JSON.stringify([...postponeSelectedDates].sort());
+}
+
+function sentPostponeState() {
+  return {status: 'sent', message: '延期訊息已送出。你可以繼續改日期，或返回群組查看客戶確認卡。'};
+}
+
+function markPostponeScheduleStale() {
+  postponeCheck = {status: 'stale', message: '正式排班已變更，請先讀取最新排班再調整日期。'};
+  renderPostponeCheck();
+  renderPostponeCalendar();
+}
+
 async function checkPostponePairs() {
-  if (!postponeCase || postponeCheck.status === 'submitting' || postponeCheck.status === 'complete') return;
+  if (!postponeCase || postponeEditingLocked()) return;
   postponeCheck.controller?.abort();
+  if (lastSentPostponeSelection === postponeSelectionKey()) {
+    postponeCheck = sentPostponeState();
+    renderPostponeCheck();
+    return;
+  }
   const {original, replacement} = postponeDateChanges();
   if (!original.length || original.length !== replacement.length) {
     postponeCheck = {status: 'idle'};
@@ -1536,6 +1587,10 @@ async function checkPostponePairs() {
     }
   } catch (error) {
     if (postponeCheck !== checking) return;
+    if (error.code === 'leave_result_dates_changed') {
+      markPostponeScheduleStale();
+      return;
+    }
     postponeCheck = {
       status: 'unavailable',
       message: error.httpStatus === 409 && error.code.startsWith('leave_result_')
@@ -1566,6 +1621,14 @@ async function sendPostponeMessage(groupMessage) {
     renderPostponeCheck();
     return;
   }
+  if (requirePostponeGroupReply) {
+    lastSentPostponeSelection = postponeSelectionKey();
+    postponeCheck = sentPostponeState();
+    updatePostponePairs();
+    renderPostponeCheck();
+    renderPostponeCalendar();
+    return;
+  }
   postponeCheck = {status: 'complete', message: '延期訊息已送出。請在原 LINE 群組查看客戶確認卡。'};
   renderPostponeCheck();
   closeLiffWindow();
@@ -1594,6 +1657,10 @@ async function submitPostponeProposal() {
       throw new Error('延期提案回應不完整。');
     }
   } catch (error) {
+    if (error.code === 'leave_result_dates_changed') {
+      markPostponeScheduleStale();
+      return;
+    }
     postponeCheck = error.httpStatus === 409
       ? {status: 'unavailable', message: '排班狀態有變動，請重新檢查檔期。'}
       : {status: 'ready', intent, idempotencyKey, submitFailed: true, message: '無法確認提案結果，請重試原操作。'};
@@ -1612,18 +1679,11 @@ async function submitPostponeProposal() {
 // 啟動專屬合意延期工作台
 async function setupPostponeWorkbench(caseItem) {
   postponeCase = caseItem;
+  lastSentPostponeSelection = undefined;
   postponeSelectedDates = new Set(caseItem.service_dates);
   postponeCheck.controller?.abort();
   postponeCheck = {status: 'idle'};
-  document.getElementById("pageMainHeading").textContent = "雙方合意延期";
-  document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("roleBlockedSection").hidden = true;
-  document.getElementById("expiredLinkSection").hidden = true;
-  document.getElementById("unavailabilitySection").hidden = true;
-
-  const bench = document.getElementById("postponeWorkbench");
-  bench.hidden = false;
-
+  showPostponeSection("postponeWorkbench");
   document.getElementById("postponeHeading").textContent = `案件編號：${caseItem.case_no}`;
 
   try {
@@ -1678,31 +1738,41 @@ function initPostponeSwipe() {
 }
 
 async function loadPostponeCase() {
+  if (!focusCaseNo) {
+    showPostponeUnavailableView("未指定案件，請回原 LINE 群組開啟延期申請。");
+    return;
+  }
   try {
-    const data = await leaveResultPost('cases', {});
-    if (!focusCaseNo) {
-      showRoleBlockedView("未指定案件編號，請從 LINE 案件群組選單開啟專屬排班調整。");
-      return;
-    }
+    const data = await leaveResultPost('cases', {case_no: focusCaseNo});
     const matched = data.items.find(item => item.case_no === focusCaseNo);
-    if (!matched) {
-      showRoleBlockedView(`您非案件 ${focusCaseNo} 之指派月嫂，無法調整本案排班。`);
+    if (matched) {
+      await setupPostponeWorkbench(matched);
       return;
     }
-    await setupPostponeWorkbench(matched);
+    const availability = data.availability;
+    if (availability?.code === 'not_assigned') {
+      showRoleBlockedView(`您非案件 ${focusCaseNo} 之指派月嫂，無法調整本案排班。`);
+    } else if (availability?.code === 'order_status' && availability.order_status === '洽談中') {
+      showPostponeUnavailableView("本案目前為「洽談中」。訂單成立後可重新開啟延期申請。");
+    } else if (availability?.code === 'order_status' && availability.order_status) {
+      showPostponeUnavailableView(`本案目前為「${availability.order_status}」，無法辦理延期。`);
+    } else if (availability?.code === 'service_data_locked') {
+      showPostponeUnavailableView("本案服務資料已鎖定。如需協助，請聯絡工會。");
+    } else {
+      showPostponeUnavailableView("本案目前沒有可調整的服務日。");
+    }
   } catch (error) {
     const isExpired = error.code === 'line_flow_invalid' ||
-                      error.code === 'line_flow_not_found' ||
-                      (error.message && (
-                        error.message.includes('逾期') ||
-                        error.message.includes('失效') ||
-                        error.message.includes('expired')
-                      ));
+                      error.code === 'line_flow_not_found';
     if (isExpired) {
       showLinkExpiredView("此延期操作連結已逾期失效（安全有效時間為 15 分鐘）。請返回案件群組重新點選小幫手選單【雙方合意延期】即可繼續操作。");
-      return;
+    } else if (error.code === 'line_staff_binding_not_found') {
+      showRoleBlockedView("「雙方合意延期」僅供本案月嫂操作，請確認目前登入的 LINE 帳號。");
+    } else if (error.httpStatus === 401 || error.code?.startsWith('liff_')) {
+      showPostponeAuthView();
+    } else {
+      showPostponeUnavailableView("暫時無法讀取本案排班，請稍後再試。");
     }
-    showRoleBlockedView("「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期");
   }
 }
 
@@ -1774,7 +1844,14 @@ async function init() {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
         if (flowId) identityReady = true;
-        else {
+        else if (scheduleMode === 'postpone' && requirePostponeGroupReply) {
+          const redirect = new URL("/line-staff-schedule", location.origin);
+          redirect.searchParams.set("case_no", focusCaseNo);
+          redirect.searchParams.set("mode", "postpone");
+          redirect.searchParams.set("group_reply", "1");
+          liff.login({redirectUri: redirect.toString()});
+          return;
+        } else {
           const redirect = new URL("/line-identity", location.origin);
           redirect.searchParams.set("target", "staff_schedule");
           liff.login({redirectUri: redirect.toString()});
@@ -1789,7 +1866,7 @@ async function init() {
       // 容錯降級：若已提供 flowId 或在測試環境，繼續嘗試以 flowId 驗證身分
       if (flowId) identityReady = true;
       else {
-        showLinkExpiredView("無法取得有效的延期操作身分或連結已逾期，請於 LINE 案件群組重新點選小幫手選單開啟。");
+        showPostponeAuthView();
         return;
       }
     } else {
@@ -1800,7 +1877,7 @@ async function init() {
 
   if (!lineIdToken && !flowId) {
     if (scheduleMode === 'postpone') {
-      showLinkExpiredView("無法取得有效的延期操作身分或連結已逾期，請於 LINE 案件群組重新點選小幫手選單開啟。");
+      showPostponeAuthView();
       return;
     }
     show("calendarStatus", "無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);

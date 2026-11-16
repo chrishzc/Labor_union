@@ -24,7 +24,6 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineGroupId, LineSourceType, LineUserId
-from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.order_group import LineOrderGroupBindingStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.scheduling.leave_result import LeaveDateChange, LeaveResultSubmission
@@ -36,7 +35,6 @@ from domains.scheduling.service_start import (
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
-from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.message_copy_catalog import configured_payload
 from subsystems.line.navigation_catalog import load_persisted_aliases
 from subsystems.line.service_start_messages import (
@@ -48,6 +46,7 @@ from subsystems.line.service_start_messages import (
     group_guidelines_card,
     group_helper_menu_card,
     mutual_postponement_card,
+    mutual_postponement_entry_card,
     render_group_helper_menu_state,
     service_date_record,
     service_schedule_calendar_card,
@@ -139,8 +138,8 @@ def _compute_expected_end_date(start_day: date, service_days: int, service_type:
     return end_val or (start_day + timedelta(days=max(0, int(service_days or 20) - 1)))
 
 
-def _default_staff_schedule_url(flow_id: str, case_no: str, mode: str) -> str:
-    query = urlencode({"flow_id": flow_id, "case_no": case_no, "mode": mode, "group_reply": "1"})
+def _default_staff_schedule_url(case_no: str, mode: str) -> str:
+    query = urlencode({"case_no": case_no, "mode": mode, "group_reply": "1"})
     liff_id = os.getenv("LINE_STAFF_SCHEDULE_LIFF_ID", "").strip()
     if liff_id and liff_id != "your_liff_id_here":
         return f"https://liff.line.me/{liff_id}/?{query}"
@@ -291,7 +290,7 @@ class LineGroupHelperApplication:
         now: Callable[[], datetime] | None = None,
         *,
         service_start_factory: Callable[[Any], Any] | None = None,
-        staff_schedule_url: Callable[[str, str, str], str] | None = None,
+        staff_schedule_url: Callable[[str, str], str] | None = None,
         aliases_provider: Callable[[], tuple[int, dict[str, list[str]]]] | None = None,
     ) -> None:
         self._now = now or (lambda: datetime.now(timezone.utc))
@@ -1006,24 +1005,9 @@ class LineGroupHelperApplication:
                 )
                 return
 
-        staff_line_id = LineUserId(inbox.event.source.user_id.value)
-        event_id = inbox.event.event_id.value
-        flow_cmd = OpenLineIdentityFlowCommand(
-            LineIdentityFlowPurpose.STAFF_SELF_SERVICE,
-            staff_line_id,
-            self._now() + timedelta(minutes=15),
-            IdempotencyKey(f"group-helper-postpone-flow:{event_id}"),
-            CorrelationId(f"line-event:{event_id}"),
-        )
-        opened = unit_of_work.identity_flows.open(flow_cmd)
-        liff_url = self._staff_schedule_url(opened.flow_id.value, ctx["case_no"], "postpone")
-        guide_text = (
-            f"📅 案件 {ctx['case_no']} 雙方合意延期申請\n\n"
-            f"請月嫂開啟個人班表選擇「原本請假日」與「合意補班日」，系統會即時檢查您後續案件是否檔期衝突，並確保政府補助總天數與時數守恆：\n"
-            f"{liff_url}\n\n"
-            f"⏳ 此專屬連結安全有效時間為 15 分鐘。若逾時失效，請隨時於群組輸入「小幫手」重新點選【雙方合意延期】發起。"
-        )
-        self._reply_text(inbox, unit_of_work, group_id, guide_text, "postpone-liff-link")
+        liff_url = self._staff_schedule_url(ctx["case_no"], "postpone")
+        card = mutual_postponement_entry_card(ctx["case_no"], liff_url)
+        self._reply_flex(inbox, unit_of_work, group_id, card, "postpone-liff-link")
 
     def _propose_postponement(
         self,

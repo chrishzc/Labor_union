@@ -280,7 +280,7 @@ def test_staff_schedule_page_uses_mutual_postponement_without_legacy_leave_submi
 
 
 @pytest.mark.parametrize("fail_send", [False, True], ids=["one-tap", "retry-same-message"])
-def test_staff_schedule_postpone_only_submits_the_latest_checked_pair_once(fail_send: bool) -> None:
+def test_staff_schedule_postpone_can_send_revised_proposal_from_same_page(fail_send: bool) -> None:
     source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
     script = source.split("<script>", 1)[1].split(
         'document.getElementById("loadSchedule").addEventListener', 1
@@ -327,7 +327,7 @@ evaluate(`
   closeLiffWindow = () => { closeCount++; };
   const calls = [];
   leaveResultPost = (path, payload, signal) =>
-    new Promise((resolve) => calls.push({path, payload, signal, resolve}));
+    new Promise((resolve, reject) => calls.push({path, payload, signal, resolve, reject}));
   handlePostponeDateClick('2027-01-06');
 `);
 const settle = () => new Promise(setImmediate);
@@ -394,9 +394,40 @@ const settle = () => new Promise(setImmediate);
     assert.deepEqual(messages, ['延期提案通知', '延期提案通知']);
   }
   assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview,propose');
-  assert.equal(evaluate('closeCount'), 1);
+  assert.equal(evaluate('closeCount'), 0);
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
-  assert.match(nodes.get('postponeActionNotice').textContent, /延期訊息已送出/);
+  assert.equal(nodes.get('postponeReturnToGroup').hidden, false);
+  assert.match(nodes.get('postponeActionNotice').textContent, /延期訊息已送出.*繼續改日期/);
+  assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
+  await evaluate('submitPostponeProposal()');
+  evaluate("handlePostponeDateClick('2027-01-07'); handlePostponeDateClick('2027-01-07');");
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  assert.equal(evaluate('calls.length'), 3);
+
+  evaluate("handlePostponeDateClick('2027-01-07'); handlePostponeDateClick('2027-01-09');");
+  assert.equal(evaluate('calls[3].path'), 'preview');
+  evaluate('calls[3].resolve({conflict: false})');
+  await settle();
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
+  evaluate('void submitPostponeProposal()');
+  assert.equal(evaluate('calls[4].path'), 'propose');
+  assert.equal(evaluate('calls[4].payload.dates[0].new_date'), '2027-01-09');
+  assert.notEqual(evaluate('calls[2].payload.idempotency_key'), evaluate('calls[4].payload.idempotency_key'));
+  evaluate("calls[4].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: '新版延期提案通知'})");
+  await settle();
+  assert.equal(messages.at(-1), '新版延期提案通知');
+  assert.equal(evaluate('closeCount'), 0);
+
+  evaluate("handlePostponeDateClick('2027-01-09'); handlePostponeDateClick('2027-01-10');");
+  evaluate("calls[5].reject({httpStatus: 409, code: 'leave_result_dates_changed'})");
+  await settle();
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  assert.equal(nodes.get('postponeRetryPreview').hidden, false);
+  assert.equal(nodes.get('postponeRetryPreview').textContent, '讀取最新排班');
+  assert.match(nodes.get('postponeActionNotice').textContent, /正式排班已變更/);
+  evaluate("let refreshCount = 0; loadPostponeCase = async () => { refreshCount++; };");
+  await evaluate('retryPostponeCheck()');
+  assert.equal(evaluate('refreshCount'), 1);
 
   lineContext = 'external';
   evaluate(`
@@ -404,12 +435,69 @@ const settle = () => new Promise(setImmediate);
     postponeCheck = {status: 'ready', intent: calls[2].payload};
     void submitPostponeProposal();
   `);
-  evaluate("calls[3].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: null})");
+  evaluate("calls[6].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: null})");
   await settle();
-  assert.equal(evaluate('closeCount'), 1);
+  assert.equal(evaluate('closeCount'), 0);
   assert.match(nodes.get('postponeActionNotice').textContent, /已儲存.*手動回到原 LINE 群組/);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """.replace("FAIL_SEND", json.dumps(fail_send)).replace("SOURCE", json.dumps(script))
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
+def test_postponement_page_distinguishes_order_status_from_role_block() -> None:
+    source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
+    script = source.split("<script>", 1)[1].split(
+        'document.getElementById("loadSchedule").addEventListener', 1
+    )[0]
+    runner = r"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const nodes = new Map();
+const context = vm.createContext({
+  document: {
+    getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, {});
+      return nodes.get(id);
+    },
+  },
+});
+const evaluate = script => vm.runInContext(script, context);
+evaluate(SOURCE);
+evaluate(`
+  focusCaseNo = 'TEST-ORDER';
+  let response;
+  let workbench;
+  leaveResultPost = async (path, request) => {
+    if (path !== 'cases' || request.case_no !== focusCaseNo) throw new Error('case not requested');
+    return response;
+  };
+  setupPostponeWorkbench = async (item) => {
+    workbench = item;
+    showPostponeSection("postponeWorkbench");
+  };
+`);
+
+(async () => {
+  await evaluate("response = {items: [], availability: {code: 'order_status', order_status: '洽談中'}}; loadPostponeCase()");
+  assert.equal(nodes.get('roleBlockedSection').hidden, true);
+  assert.equal(nodes.get('postponeUnavailableSection').hidden, false);
+  assert.match(nodes.get('postponeUnavailableDescription').textContent, /洽談中.*訂單成立後/);
+
+  await evaluate("response = {items: [], availability: {code: 'not_assigned'}}; loadPostponeCase()");
+  assert.equal(nodes.get('roleBlockedSection').hidden, false);
+  assert.equal(nodes.get('postponeUnavailableSection').hidden, true);
+
+  await evaluate("response = {items: []}; loadPostponeCase()");
+  assert.equal(nodes.get('roleBlockedSection').hidden, true);
+  assert.equal(nodes.get('postponeUnavailableSection').hidden, false);
+  assert.match(nodes.get('postponeUnavailableDescription').textContent, /沒有可調整的服務日/);
+
+  await evaluate("response = {items: [{case_no: 'TEST-ORDER'}], availability: {code: 'eligible'}}; loadPostponeCase()");
+  assert.equal(evaluate('workbench.case_no'), 'TEST-ORDER');
+  assert.equal(nodes.get('postponeWorkbench').hidden, false);
+  assert.equal(nodes.get('postponeUnavailableSection').hidden, true);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+""".replace("SOURCE", json.dumps(script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
 
 
@@ -610,6 +698,7 @@ def test_root_endpoint_serves_gateway_html_for_purpose_and_schedule_liff_params(
             "purpose=admin_binding&flow_id=flow-123",
             "purpose=customer_binding&flow_id=flow-456",
             "flow_id=flow-789&case_no=C-2026-01&mode=postpone",
+            "case_no=C-2026-01&mode=postpone&group_reply=1",
         ):
             res = client.get(f"/?{query}", headers={"Accept": "*/*"})
             assert res.status_code == 200
@@ -696,6 +785,8 @@ async function check(search, retired = false) {
   assert.equal(await check('?liff.state=' + encodeURIComponent('/?purpose=staff_verification&flow_id=f2')), '/line-identity?purpose=staff_verification&flow_id=f2');
   assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone');
   assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone&group_reply=1'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone&group_reply=1');
+  assert.equal(await check('?case_no=C-1&mode=postpone&group_reply=1'), '/line-staff-schedule?case_no=C-1&mode=postpone&group_reply=1');
+  assert.equal(await check('?liff.state=' + encodeURIComponent('/?case_no=C-1&mode=postpone&group_reply=1')), '/line-staff-schedule?case_no=C-1&mode=postpone&group_reply=1');
   assert.equal(await check('?target=staff_schedule&case_no=C-1&mode=postpone'), '/line-identity?target=staff_schedule&case_no=C-1&mode=postpone');
   assert.equal(await check('?target=staff_leave_apply', true), null);
   assert.equal(await check('?liff.state=' + encodeURIComponent('/?target=staff_leave_apply'), true), null);

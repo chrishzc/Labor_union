@@ -53,10 +53,25 @@ class StaffLeaveDeferProposeRequest(StaffLeaveDeferPreviewRequest):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=140)
 
 
+class StaffLeaveCasesRequest(StaffLiffRequest):
+    case_no: str | None = Field(default=None, min_length=1, max_length=50)
+
+
 @router.post('/leave-results/cases')
-def leave_result_cases(body: StaffLiffRequest, app=Depends(get_service_start_application)):
+def leave_result_cases(body: StaffLeaveCasesRequest, app=Depends(get_service_start_application)):
     _, staff = _verified_staff_context(body)
-    return BaseResponse(data={'items': [asdict(item) for item in app.leave_cases(int(staff['staff_id']))]})
+    staff_id = int(staff['staff_id'])
+    if body.case_no is None:
+        return BaseResponse(data={'items': [asdict(item) for item in app.leave_cases(staff_id)]})
+
+    cases, availability = app.selected_leave_case(staff_id, body.case_no)
+    availability_payload = {'code': availability.code}
+    if availability.order_status is not None:
+        availability_payload['order_status'] = availability.order_status
+    return BaseResponse(data={
+        'items': [asdict(item) for item in cases],
+        'availability': availability_payload,
+    })
 
 
 @router.post('/leave-results/preview')

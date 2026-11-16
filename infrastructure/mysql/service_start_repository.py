@@ -24,7 +24,7 @@ from subsystems.scheduling.service_start_workflow import ServiceStartCase, Servi
 from subsystems.line.order_group_application import group_invitation_payload
 from subsystems.line.service_start_messages import substitute_inquiry, service_date_record
 from infrastructure.mysql.leave_result_repository import (
-    leave_context, leave_cases, replay_leave, create_leave, record_leave_dates,
+    leave_context, leave_cases, replay_leave, create_leave, record_leave_dates, selected_leave_case,
 )
 from infrastructure.mysql.service_handover_repository import handover_context, load_handover, create_handover
 
@@ -44,6 +44,9 @@ class MySqlServiceStartRepository:
 
     def leave_cases(self, staff_id):
         return leave_cases(self.connection, staff_id)
+
+    def selected_leave_case(self, staff_id: int, case_no: str):
+        return selected_leave_case(self.connection, staff_id, case_no)
 
     def handover_context(self, case_no, assignment_id=None):
         return load_handover(self, case_no, assignment_id)

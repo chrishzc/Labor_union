@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 import json
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -24,7 +25,6 @@ from domains.line.identities import (
     LineUserId,
     LineWebhookEventId,
 )
-from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.order_group import LineOrderGroupBindingStatus
 from domains.scheduling.service_start import ServiceStartConflict, ServiceStartDecision
 from infrastructure.mysql.customer_service_repository import _REMINDER_SOURCE_CASE
@@ -79,15 +79,6 @@ class _FakeOrderGroupsRepo:
         if group_id != "G-case-1":
             return None
         return SimpleNamespace(case_no="C-2026-01", status=self.status)
-
-
-class _FakeIdentityFlowRepo:
-    def __init__(self) -> None:
-        self.commands: list[Any] = []
-
-    def open(self, cmd: Any) -> Any:
-        self.commands.append(cmd)
-        return SimpleNamespace(flow_id=SimpleNamespace(value="flow-999"))
 
 
 class _FakeCustomerServiceRepo:
@@ -174,7 +165,6 @@ class _FakeGroupHelperUoW:
         self.receipts = _FakeReceiptRepo()
         self.delivery_tasks = _FakeDeliveryRepo()
         self.order_groups = _FakeOrderGroupsRepo()
-        self.identity_flows = _FakeIdentityFlowRepo()
         self.customer_service = _FakeCustomerServiceRepo()
         self.service_start_workflow = _FakeServiceStartWorkflow()
         self._helper_proposals: dict[tuple[str, str], dict[str, Any]] = {}
@@ -606,32 +596,49 @@ def test_pre_commenced_confirmed_schedule_keeps_confirm_start_and_hides_survey()
     _assert_all_reply_only(uow)
 
 
-def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(monkeypatch) -> None:
-    monkeypatch.delenv("LINE_STAFF_SCHEDULE_LIFF_ID", raising=False)
+@pytest.mark.parametrize("dedicated_liff", [False, True])
+def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(monkeypatch, dedicated_liff) -> None:
+    if dedicated_liff:
+        monkeypatch.setenv("LINE_STAFF_SCHEDULE_LIFF_ID", "synthetic-schedule-liff")
+    else:
+        monkeypatch.delenv("LINE_STAFF_SCHEDULE_LIFF_ID", raising=False)
     monkeypatch.setenv("LINE_LIFF_ID", "synthetic-shared-liff")
     app = _make_app()
     uow = _FakeGroupHelperUoW(is_started=True)
 
-    # 1. No proposal yet -> replies LIFF URL targeting case & postpone mode
-    assert (
-        app.handle_postback(
+    # 1. Each menu opening returns the same case-specific LIFF entry.
+    def open_entry(event_id):
+        return app.handle_postback(
             _make_inbox(
-                "evt-postpone-open",
+                event_id,
                 {"type": "postback", "postback": {"data": "group-helper:mutual-postponement"}},
                 user_id="U-staff-1",
             ),
             uow,
         )
-        is True
-    )
-    assert uow.identity_flows.commands[0].purpose is LineIdentityFlowPurpose.STAFF_SELF_SERVICE
-    liff_text = json.loads(uow.delivery_tasks.requests[-1].payload_json)["text"]
-    assert "https://liff.line.me/synthetic-shared-liff/line-staff-schedule?" in liff_text
-    assert "flow_id=flow-999" in liff_text
-    assert "case_no=C-2026-01" in liff_text
-    assert "mode=postpone" in liff_text
-    assert "group_reply=1" in liff_text
-    assert "15 分鐘" in liff_text
+
+    assert open_entry("evt-postpone-open") is True
+    entry_request = uow.delivery_tasks.requests[-1]
+    assert entry_request.message_kind is LineMessageKind.FLEX
+    card = json.loads(entry_request.payload_json)
+    button, = card["contents"]["footer"]["contents"]
+    assert button["style"] == "primary"
+    assert button["action"]["type"] == "uri"
+    assert button["action"]["label"] == "開啟延期申請"
+    url = urlsplit(button["action"]["uri"])
+    expected_path = "/synthetic-schedule-liff/" if dedicated_liff else "/synthetic-shared-liff/line-staff-schedule"
+    assert (url.scheme, url.netloc, url.path) == ("https", "liff.line.me", expected_path)
+    assert parse_qs(url.query) == {
+        "case_no": ["C-2026-01"],
+        "mode": ["postpone"], "group_reply": ["1"],
+    }
+    body = json.dumps(card["contents"]["body"], ensure_ascii=False)
+    assert "C-2026-01" in body
+    assert "同一個按鈕重新開啟" in body
+    assert "https://" not in body + card["altText"]
+    assert open_entry("evt-postpone-reopen") is True
+    assert json.loads(uow.delivery_tasks.requests[-1].payload_json) == card
+    assert not uow._helper_proposals
 
     # 2. Occupancy conflict blocks card creation
     uow.service_start_workflow.arrangement.conflict = True

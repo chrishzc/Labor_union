@@ -334,8 +334,10 @@
                 navigateTo(`/line-identity?${flowQuery.toString()}`, false);
                 return;
             }
-            if (!targetPage && !entryParam && flowId && (scheduleMode || scheduleCaseNo)) {
-                const scheduleQuery = new URLSearchParams({ flow_id: flowId });
+            const opensPostponement = scheduleMode === 'postpone' && scheduleCaseNo && scheduleGroupReply;
+            if (!targetPage && !entryParam && (opensPostponement || (flowId && (scheduleMode || scheduleCaseNo)))) {
+                const scheduleQuery = new URLSearchParams();
+                if (flowId) scheduleQuery.set('flow_id', flowId);
                 if (scheduleCaseNo) scheduleQuery.set('case_no', scheduleCaseNo);
                 if (scheduleMode) scheduleQuery.set('mode', scheduleMode);
                 if (scheduleGroupReply) scheduleQuery.set('group_reply', '1');

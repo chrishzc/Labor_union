@@ -71,6 +71,29 @@ def schedule(case):
         'WHERE a.case_no=%s AND d.effective_marker=1 AND d.is_work_day=1 ORDER BY d.work_date',(case,))
 
 
+def test_selected_leave_case_distinguishes_ineligible_order_from_unassigned_staff(http):
+    case, staff = setup(http)
+    path = '/api/v1/line/staff-self-service/leave-results/cases'
+
+    legacy = checked(http.post(path, json={'line_id_token': staff[0][1]}))
+    assert set(legacy) == {'items'}
+    target = checked(http.post(path, json={'line_id_token': staff[0][1], 'case_no': case}))
+    assert target['availability'] == {'code': 'eligible'}
+    assert target['items'] == [item for item in legacy['items'] if item['case_no'] == case]
+    assert target['items']
+
+    write("UPDATE orders SET status='洽談中' WHERE case_no=%s", (case,))
+    assert schedule(case)
+    target = checked(http.post(path, json={'line_id_token': staff[0][1], 'case_no': case}))
+    assert target == {
+        'items': [],
+        'availability': {'code': 'order_status', 'order_status': '洽談中'},
+    }
+
+    other_staff = checked(http.post(path, json={'line_id_token': staff[1][1], 'case_no': case}))
+    assert other_staff == {'items': [], 'availability': {'code': 'not_assigned'}}
+
+
 def test_confirmed_postponement_updates_schedule_and_finance_without_push(http):
     case, staff = setup(http)
     before = schedule(case)

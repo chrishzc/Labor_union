@@ -8,10 +8,14 @@ from dataclasses import asdict
 from datetime import date
 import json
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.scheduling.service_start import ServiceStartConflict
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.scheduling.service_start_workflow import LeaveCase
+from subsystems.scheduling.service_start_workflow import LeaveCase, LeaveCaseAvailability
+
+
+_ELIGIBLE_ORDER_STATUSES = (OrderLifecycleStatus.ESTABLISHED.value, OrderLifecycleStatus.IN_SERVICE.value)
 
 
 def leave_context(request):
@@ -20,17 +24,21 @@ def leave_context(request):
     return raw if isinstance(raw, dict) and raw.get('kind') == 'leave-v1' else None
 
 
-def leave_cases(connection, staff_id, *, lock=False):
+def leave_cases(connection, staff_id, *, lock=False, case_no=None):
+    case_filter = '' if case_no is None else ' AND o.case_no=%s'
+    parameters = (staff_id, *_ELIGIBLE_ORDER_STATUSES, SystemBusinessClock().today())
+    if case_no is not None:
+        parameters += (case_no,)
     with connection.cursor() as c:
         c.execute("SELECT o.case_no,o.lifecycle_version AS order_version,g.aggregate_version AS scheduling_version,"
             "a.id AS assignment_id,day.work_date FROM orders o "
             "JOIN scheduling_aggregates g ON g.case_no=o.case_no "
             "JOIN case_staff_assignments a ON a.generation_id=g.effective_generation_id "
             "JOIN staff_schedule day ON day.assignment_id=a.id AND day.effective_marker=1 AND day.is_work_day=1 "
-            "WHERE a.staff_id=%s AND o.status IN ('訂單成立','服務中') AND day.work_date>=%s "
-            "AND NOT EXISTS (SELECT 1 FROM order_service_data_locks l WHERE l.case_no=o.case_no) "
-            "ORDER BY o.case_no,a.id,day.work_date" + (' FOR UPDATE' if lock else ''),
-            (staff_id, SystemBusinessClock().today()))
+            "WHERE a.staff_id=%s AND o.status IN (%s,%s) AND day.work_date>=%s "
+            "AND NOT EXISTS (SELECT 1 FROM order_service_data_locks l WHERE l.case_no=o.case_no)"
+            + case_filter + " ORDER BY o.case_no,a.id,day.work_date" + (' FOR UPDATE' if lock else ''),
+            parameters)
         rows = c.fetchall()
     result = {}
     for row in rows:
@@ -39,6 +47,30 @@ def leave_cases(connection, staff_id, *, lock=False):
         item.pop('work_date', None)
         item['service_dates'].append(str(row['work_date']))
     return tuple(LeaveCase(**{**item,'service_dates':tuple(item['service_dates'])}) for item in result.values())
+
+
+def selected_leave_case(connection, staff_id: int, case_no: str) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
+    cases = leave_cases(connection, staff_id, case_no=case_no)
+    if cases:
+        return cases, LeaveCaseAvailability('eligible')
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT o.status, EXISTS(SELECT 1 FROM order_service_data_locks l "
+            "WHERE l.case_no=o.case_no) AS service_data_locked FROM orders o "
+            "JOIN scheduling_aggregates g ON g.case_no=o.case_no "
+            "WHERE o.case_no=%s AND EXISTS(SELECT 1 FROM case_staff_assignments a "
+            "WHERE a.generation_id=g.effective_generation_id AND a.staff_id=%s)",
+            (case_no, staff_id),
+        )
+        order = cursor.fetchone()
+    if order is None:
+        return (), LeaveCaseAvailability('not_assigned')
+    if order['status'] not in _ELIGIBLE_ORDER_STATUSES:
+        return (), LeaveCaseAvailability('order_status', str(order['status']))
+    if order['service_data_locked']:
+        return (), LeaveCaseAvailability('service_data_locked')
+    return (), LeaveCaseAvailability('no_adjustable_days')
 
 
 def submission_fingerprint(submission):
