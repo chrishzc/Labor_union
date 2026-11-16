@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   officialServiceDateCorrectionClient as client,
   type AttributionChange,
@@ -38,6 +38,7 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
   const [pending, setPending] = useState<{ change: AttributionChange; preview: AttributionPreview; key: string; reason: string } | null>(null);
   const [applying, setApplying] = useState(false);
   const [busy, setBusy] = useState(false);
+  const submissionInProgress = useRef(false);
   const [message, setMessage] = useState('');
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
   const original = new Map(segments.flatMap(segment => segment.official_service_dates.map(date => [date, segment] as const)));
@@ -75,11 +76,13 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
     && addedStaff.every(id => Object.values(allocation).includes(-id))
     && datesValid && substituteReady && !!evidence.trim() && !!reason.trim();
   async function submit() {
-    setBusy(true);
-    onBusyChange(true);
-    setMessage('');
+    if (submissionInProgress.current) return;
+    submissionInProgress.current = true;
     let applied = false;
     try {
+      setBusy(true);
+      onBusyChange(true);
+      setMessage('');
       if (pending) {
         setApplying(true);
         const receipt = await client.applyAttribution(caseNo, pending.change, pending.preview, pending.reason, pending.key, adoptCalculatedAmounts);
@@ -117,6 +120,7 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
       }
       setMessage(error instanceof Error ? error.message : '更正未完成，請重新核對。');
     } finally {
+      submissionInProgress.current = false;
       setBusy(false);
       onBusyChange(false);
     }

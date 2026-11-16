@@ -162,6 +162,30 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 
+  it('合意延期後未載入月嫂指派時，仍從查詢顯示目前正式班表', async () => {
+    currentQuery = {
+      ...currentQuery,
+      scheduling_version: 8,
+      current_version: 2,
+      current_dates: initialDates,
+      effective_service_dates: revisedDates,
+    };
+    render(<OrderServiceDatesPanel caseNo={CASE} />);
+
+    const calendar = await screen.findByRole('group', { name: '服務日期月曆' });
+    const removedDay = within(calendar).getByRole('button', { name: '服務日期 2026-10-02' });
+    const replacementDay = within(calendar).getByRole('button', { name: '服務日期 2026-10-03' });
+    expect(removedDay).toHaveAttribute('aria-pressed', 'false');
+    expect(replacementDay).toHaveAttribute('aria-pressed', 'true');
+    expect(replacementDay).toBeDisabled();
+    fireEvent.click(screen.getByText('查看已保存日期與版本'));
+    const history = screen.getByLabelText('先前確認的日期與目前排班');
+    expect(history).toHaveTextContent(`先前確認版本#2先前確認日期${initialDates.join('、')}`);
+    expect(history).toHaveTextContent(`目前排班服務日${revisedDates.join('、')}`);
+    expect(screen.queryByRole('button', { name: '儲存服務日期' })).not.toBeInTheDocument();
+    expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+  });
+
   it('任一 owner 回讀案件編號不一致時 fail closed，不執行精算或 Preview', async () => {
     mocks.getActualStart.mockResolvedValue({ case_no: 'OTHER-CASE' });
     render(<OrderServiceDatesPanel caseNo={CASE} />);

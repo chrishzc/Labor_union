@@ -87,6 +87,9 @@ def _classify_sinopac_outgoing(
 ) -> dict[str, Any]:
     memo = row.get("memo")
     suffix = extract_sinopac_memo_case_suffix(memo)
+    reference_key = "transaction_reference" if row["format_id"] == "legacy" else "交易參考編號"
+    account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
+    staff_ids = _ids_for_account(staff_accounts, account)
     if suffix is not None:
         staff_case_map = staff_case_suffixes or {}
         refund_case_map = client_refund_case_suffixes or {}
@@ -105,6 +108,8 @@ def _classify_sinopac_outgoing(
         if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
             return _review("counterparty_account_multiple_matches")
         if memo_staff_ids:
+            if row["format_id"] == "sinopac" and len(staff_ids) == 1 and staff_ids != memo_staff_ids:
+                return _review("counterparty_identity_type_conflict")
             return _result(
                 "staff_salary",
                 memo_staff_ids,
@@ -117,11 +122,6 @@ def _classify_sinopac_outgoing(
                 "sinopac_unique_client_refund_case_suffix_in_memo",
             )
 
-    reference_key = (
-        "transaction_reference" if row["format_id"] == "legacy" else "交易參考編號"
-    )
-    account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
-    staff_ids = _ids_for_account(staff_accounts, account)
     if not staff_ids:
         return _review("sinopac_staff_account_no_match")
     if len(staff_ids) != 1:

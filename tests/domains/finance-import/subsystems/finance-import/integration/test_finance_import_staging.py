@@ -710,7 +710,7 @@ def test_incoming_name_account_and_amount_without_a_virtual_account_is_not_persi
 
 @pytest.mark.parametrize("bank", ["sinopac", "taishin"])
 @pytest.mark.parametrize("has_name", [True, False])
-def test_unknown_memo_suffix_requires_a_known_name_to_keep_source(monkeypatch, bank, has_name):
+def test_unknown_memo_suffix_only_keeps_taishin_with_a_known_name(monkeypatch, bank, has_name):
     name = "合成客戶"
     purpose_text = "雇主退款" if bank == "sinopac" else "雇主補助款"
     row = _normalized_row(format_id=bank, direction="outgoing", debit=Decimal("5985"), credit=None,
@@ -720,14 +720,47 @@ def test_unknown_memo_suffix_requires_a_known_name_to_keep_source(monkeypatch, b
                         lambda *_: {"result": "pending", "case_no": None, "reason": "case_not_found"})
     cursor = FakeCursor(client_cases={7: ("115000001",), 8: ("115000002",)})
     result = staging.stage_finance_rows(cursor, {**_normalized([row]), "format_id": bank}, maps, business_only=True)
-    assert len(result["staged_rows"]) == int(has_name)
-    if has_name:
+    expected_retained = bank == "taishin" and has_name
+    assert len(result["staged_rows"]) == int(expected_retained)
+    if expected_retained:
         assert result["staged_rows"][0]["classification_type"] == "non_business_review"
         candidates = staging.bank_case_candidates(cursor, row, maps)
         assert [item["case_no"] for item in candidates] == ["115000001", "115000002"]
-        assert {item["purpose"] for item in candidates} == {
-            "client_refund" if bank == "sinopac" else "client_subsidy_return"
-        }
+        assert {item["purpose"] for item in candidates} == {"client_subsidy_return"}
+
+
+@pytest.mark.parametrize("memo,bank_references", [
+    ("HC115001 合成乙 薪資", {}),
+    ("HC115001", {"交易參考編號": "0000007002"}),
+])
+def test_sinopac_keeps_two_payout_rows_for_same_case_before_second_staff_is_assigned(monkeypatch, memo, bank_references):
+    case_no = "115000001"
+    known = _normalized_row(
+        format_id="sinopac", direction="outgoing", debit=Decimal(9000), credit=None,
+        memo="HC115001 合成甲 薪資", bank_references={},
+    )
+    unassigned = _normalized_row(
+        format_id="sinopac", direction="outgoing", source_row=3, debit=Decimal(7000), credit=None,
+        memo=memo, bank_references=bank_references,
+    )
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
+                        lambda *_: {"result": "resolved", "case_no": case_no})
+    maps = {
+        "known_case_suffixes": frozenset({"115001"}),
+        "staff_case_suffixes": {"115001": (7,)},
+        "all_staff_names": ("合成甲", "合成乙"),
+        "staff_name_identities": {"合成甲": (7,), "合成乙": (8,)},
+        "staff_accounts": {"0000007002": (8,)},
+        "staff_payout_candidates": ({"staff_id": 7, "case_no": case_no, "name": "合成甲",
+                                     "due_date": "2026-10-15", "amount_due_ntd": 9000},),
+    }
+    result = staging.stage_finance_rows(
+        FakeCursor(), {**_normalized([known, unassigned]), "format_id": "sinopac"}, maps, business_only=True,
+    )
+    saved = result["staged_rows"]
+    assert [item["classification_type"] for item in saved] == ["staff_salary", "non_business_review"]
+    assert [item["matched_identity_ids"] for item in saved] == [[7], []]
+    assert saved[0]["dedup_fingerprint"] != saved[1]["dedup_fingerprint"]
 
 
 @pytest.mark.parametrize("memo", ["HC115001退訂金", "HC115001雇主退款合成客戶"])

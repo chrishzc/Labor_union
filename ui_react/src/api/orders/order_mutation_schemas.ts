@@ -82,6 +82,7 @@ export const ServiceDateConfirmationQueryViewSchema = z
     selectable_dates: z.array(IsoDateSchema),
     current_version: z.number().int().min(1).nullable(),
     current_dates: z.array(IsoDateSchema),
+    effective_service_dates: z.array(IsoDateSchema).optional(),
     bound_staff: z.array(BoundServiceStaffSchema),
     arrangement_pending: z.boolean(),
     historical_schedule_pending: z.boolean().optional(),

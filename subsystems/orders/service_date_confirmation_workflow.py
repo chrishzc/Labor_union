@@ -36,6 +36,7 @@ class ServiceDateConfirmationFacts:
     restart_assignments: tuple[RestartSchedulingAssignmentFacts, ...] = ()
     service_hours_per_day: float = 0
     current_confirmed_order_version: int | None = None
+    effective_service_dates: tuple[date, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -74,6 +74,8 @@ def _review_unresolved_outgoing(cursor, row, identity_maps):
     if len(suffixes) == 1 and known is not None and not suffixes <= known:
         resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
         if resolution.get("reason") == "case_not_found":
+            if row["format_id"] == "sinopac":
+                return "skip"
             names = bank_case_name_evidence(row, identity_maps, filter_recipient=False)
             return UNKNOWN_BANK_SUFFIX_REASON if names else "skip"
         if resolution.get("reason") == "case_not_unique" and bank_case_candidates(cursor, row, identity_maps):
@@ -95,7 +97,7 @@ def _taishin_pairing_required(cursor, row, classification, identity_maps):
     return len(bank_case_candidates(cursor, row, identity_maps)) > 1
 
 
-def bank_case_candidates(cursor, row, identity_maps):
+def bank_case_candidates(cursor, row, identity_maps, *, recipient_evidence=None):
     if row["direction"] != "outgoing":
         return ()
     suffixes = sinopac_memo_case_suffixes(row.get("memo"))
@@ -113,7 +115,9 @@ def bank_case_candidates(cursor, row, identity_maps):
         elif resolution.get("reason") != "case_not_found":
             return ()
     candidates = []
-    for kind, ids in bank_case_name_evidence(row, identity_maps):
+    if recipient_evidence is None:
+        recipient_evidence = bank_case_name_evidence(row, identity_maps)
+    for kind, ids in recipient_evidence:
         placeholders = ",".join("%s" for _ in ids)
         if kind == "staff_salary":
             sql = (
@@ -133,6 +137,64 @@ def bank_case_candidates(cursor, row, identity_maps):
             if not scoped_cases or case_no in scoped_cases:
                 candidates.append({"case_no": str(case_no), "purpose": kind, "person_id": int(candidate["person_id"])})
     return tuple(sorted(candidates, key=lambda item: (item["case_no"], item["purpose"], item["person_id"])))
+
+
+def sinopac_purpose_candidates(cursor, row, classification_type, evidence, target_identities):
+    if row["format_id"] != "sinopac" or row["direction"] != "outgoing":
+        return ()
+    if classification_type not in {"staff_payout", "staff_salary", "client_refund", "non_business_review"}:
+        return ()
+    case_no = next((item.removeprefix("bank-paired-case:") for item in evidence
+                    if item.startswith("bank-paired-case:")), None)
+    if case_no is None:
+        suffixes = sinopac_memo_case_suffixes(row.get("memo"))
+        if suffixes:
+            if len(suffixes) != 1:
+                return ()
+            resolution = resolve_client_virtual_account_suffix(cursor, next(iter(suffixes)))
+            if resolution["result"] != "resolved":
+                return ()
+            case_no = resolution["case_no"]
+        else:
+            recipient_evidence = None
+            if len(target_identities) == 1:
+                target = target_identities[0]
+                if classification_type in {"staff_payout", "staff_salary"} and target.startswith("staff:"):
+                    recipient_evidence = (("staff_salary", (int(target[6:]),)),)
+                elif classification_type == "client_refund" and target.startswith("client:"):
+                    recipient_evidence = (("client_refund", (int(target[7:]),)),)
+            identity_maps = {}
+            if recipient_evidence is None:
+                from subsystems.finance_import.identity_maps import load_finance_identity_maps
+                identity_maps = load_finance_identity_maps(cursor)
+            cases = {candidate["case_no"] for candidate in bank_case_candidates(
+                cursor, row, identity_maps, recipient_evidence=recipient_evidence,
+            )}
+            if len(cases) != 1:
+                return ()
+            case_no = cases.pop()
+    cursor.execute("SELECT client_id FROM orders WHERE case_no=%s", (case_no,))
+    order = cursor.fetchone()
+    if order is None:
+        return ()
+    candidates = []
+    if classification_type != "client_refund":
+        candidates.append({"case_no": case_no, "purpose": "client_refund", "person_id": int(order["client_id"])})
+    if classification_type not in {"staff_payout", "staff_salary"}:
+        cursor.execute(
+            "SELECT staff.id AS staff_id,staff.name FROM staff JOIN ("
+            "SELECT staff_id FROM orders WHERE case_no=%s AND staff_id IS NOT NULL "
+            "UNION SELECT staff_id FROM case_staff_assignments WHERE case_no=%s "
+            "AND status IN ('planned','active','completed') "
+            "UNION SELECT staff_id FROM staff_obligations WHERE case_no=%s "
+            "AND direction='payable_to_staff' AND status<>'cancelled'"
+            ") recipients ON recipients.staff_id=staff.id ORDER BY staff.id",
+            (case_no, case_no, case_no),
+        )
+        candidates.extend({"case_no": case_no, "purpose": "staff_salary", "person_id": int(item["staff_id"]),
+                           "person_name": item["name"]}
+                          for item in cursor.fetchall())
+    return tuple(candidates)
 
 
 def _json_default(value: Any) -> str:
@@ -480,6 +542,11 @@ def stage_finance_rows(
             ) else None
             if reason is None and row["direction"] == "outgoing" and _taishin_pairing_required(cursor, row, classification, identity_maps):
                 reason = MANUAL_BANK_CASE_REASON
+            if (not admitted and reason is None and row["format_id"] == "sinopac"
+                    and row["direction"] == "outgoing"):
+                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+                if suffix and resolve_client_virtual_account_suffix(cursor, suffix)["result"] == "resolved":
+                    reason = MANUAL_BANK_CASE_REASON
             if reason == "skip" or (not admitted and reason is None):
                 continue
             if reason:

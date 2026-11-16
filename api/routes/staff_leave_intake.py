@@ -1,7 +1,7 @@
 """File: staff_leave_intake.py
 Description: 提供月嫂查詢班表、預檢合意延期檔期及建立群組提案。"""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import ConfigDict, Field
@@ -23,7 +23,7 @@ from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.line.group_helper_application import save_group_helper_proposal
+from subsystems.line.group_helper_application import load_group_helper_proposal, save_group_helper_proposal
 from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
 
 
@@ -72,19 +72,6 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_ser
     _, staff = _verified_staff_context(body)
     staff_id = int(staff['staff_id'])
     changes = tuple(LeaveDateChange(d.original_date, d.new_date) for d in body.dates)
-    result = _result_call(
-        lambda: app.arrangement.preview_leave_defer(
-            body.case_no, staff_id, body.assignment_id, changes
-        )
-    )
-    if result.get('conflict'):
-        raise typed_http_error(
-            409,
-            'conflict',
-            str(result.get('code') or 'staff_occupancy_conflict'),
-            str(result.get('message') or '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！'),
-            'staff-leave-propose',
-        )
     leave_start_label = '、'.join(str(item.original_date) for item in changes)
     leave_end_label = '、'.join(str(item.new_date) for item in changes if item.new_date)
     proposal_payload = {
@@ -99,27 +86,75 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_ser
         body.idempotency_key
         or f"liff:{fingerprint_payload(proposal_payload).value[:24]}"
     )
+    family = 'group_helper_postpone_proposal'
     with open_line_unit_of_work() as line_uow:
-        save_group_helper_proposal(
+        saved = load_group_helper_proposal(line_uow, family, body.case_no, event_ref)
+        if saved is not None:
+            return _proposal_response(saved, proposal_payload)
+        result = _result_call(
+            lambda: app.arrangement.preview_leave_defer(
+                body.case_no, staff_id, body.assignment_id, changes
+            )
+        )
+        if result.get('conflict'):
+            raise typed_http_error(
+                409,
+                'conflict',
+                str(result.get('code') or 'staff_occupancy_conflict'),
+                str(result.get('message') or '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！'),
+                'staff-leave-propose',
+            )
+        saved = save_group_helper_proposal(
             line_uow,
-            'group_helper_postpone_proposal',
+            family,
             body.case_no,
             event_ref,
-            proposal_payload,
+            {**proposal_payload, 'liff_result': result},
         )
+        response = _proposal_response(saved, proposal_payload)
         line_uow.commit()
+        return response
+
+
+def _proposal_response(saved: dict[str, Any], requested: dict[str, Any]) -> BaseResponse:
+    def date_pairs(payload: dict[str, Any]) -> list[tuple[str, str]]:
+        return sorted((item['original_date'], item['new_date']) for item in payload.get('dates', []))
+
+    if (
+        any(saved.get(field) != requested[field] for field in ('case_no', 'staff_id', 'assignment_id'))
+        or date_pairs(saved) != date_pairs(requested)
+    ):
+        raise typed_http_error(
+            409,
+            'idempotency_mismatch',
+            'staff_leave_proposal_idempotency_conflict',
+            '此操作識別已用於另一筆延期提案，請重新確認日期後再送出。',
+            'staff-leave-propose',
+        )
+    dates = saved['dates']
+    result = saved.get('liff_result')
+    if result is None:
+        # Receipts created before the LIFF response was recorded contain the accepted date pairs.
+        result = {
+            'conflict': False,
+            'code': None,
+            'message': '檔期無衝突，服務總天數與補助時數守恆，可送出延期確認。',
+            'total_service_days_conserved': True,
+            'original_dates': [item['original_date'] for item in dates],
+            'new_dates': [item['new_date'] for item in dates],
+        }
     group_message = (
-        f"雙方合意延期：{changes[0].original_date}→{changes[0].new_date}"
-        if len(changes) == 1 and changes[0].new_date is not None
+        f"雙方合意延期：{dates[0]['original_date']}→{dates[0]['new_date']}"
+        if len(dates) == 1
         else None
     )
     return BaseResponse(
         data={
             **result,
-            'case_no': body.case_no,
-            'assignment_id': body.assignment_id,
-            'leave_start_date': leave_start_label,
-            'leave_end_date': leave_end_label,
+            'case_no': saved['case_no'],
+            'assignment_id': saved['assignment_id'],
+            'leave_start_date': saved['leave_start_date'],
+            'leave_end_date': saved['leave_end_date'],
             'group_message': group_message,
             'group_record_queued': False,
         },

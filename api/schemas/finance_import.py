@@ -415,8 +415,14 @@ class FinanceBankPairingCandidateView(_StrictModel):
     case_no: str
     purpose: Literal["staff_salary", "client_refund", "client_subsidy_return"]
     person_id: int
+    person_name: str | None = None
     estimated_subsidy_payment_date: str | None = None
     estimated_self_funded_staff_due_date: str | None = None
+
+
+class FinanceBankPurposeReviewView(_StrictModel):
+    classification_version: int = Field(ge=0)
+    candidates: list[FinanceBankPairingCandidateView]
 
 
 class FinanceBankTransactionView(_StrictModel):
@@ -424,6 +430,7 @@ class FinanceBankTransactionView(_StrictModel):
     staff_subsidy_batch_identity: str | None = None
     pairing_candidates: list[FinanceBankPairingCandidateView] = Field(default_factory=list)
     pairing_memo: str | None = None
+    purpose_review: FinanceBankPurposeReviewView | None = None
     row_identity: str
     transaction_date: str | None
     bank: Literal["sinopac", "taishin"]

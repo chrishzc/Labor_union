@@ -37,6 +37,11 @@ def _repository_facts(monkeypatch, *, end_date="2026-09-03", service_days=3, ser
     ):
         monkeypatch.setattr(repository, name, load_window)
 
+    monkeypatch.setattr(
+        "infrastructure.mysql.segmented_availability_repository.load_historical_reservation_rows",
+        lambda _cursor, **_kwargs: [],
+    )
+
     order = {
         "case_no": "CASE-RECONTACT",
         "status": "洽談中",
@@ -64,7 +69,10 @@ def test_inquiry_projects_missing_end_from_orders_terms_without_confirming_dates
         "2026-09-01", "2026-09-02", "2026-09-03",
     ]
     assert facts["confirmed_service_dates"] == [{"service_date": "2026-08-01"}]
-    assert set(loaded_windows) == {("2026-08-01", "2026-09-03")}
+    assert set(loaded_windows) == {
+        ("2026-08-01", "2026-09-03"),
+        ("2026-07-31", "2026-09-04"),
+    }
 
 
 def test_missing_planned_end_uses_the_same_rest_rules_as_contract_dates(monkeypatch):
@@ -93,7 +101,10 @@ def test_candidate_inquiry_keeps_current_order_window_while_loading_old_conflict
 
     assert facts["order"]["start_date"] == "2026-09-01"
     assert facts["order"]["end_date"] == "2026-09-03"
-    assert set(loaded_windows) == {("2026-08-01", "2026-09-03")}
+    assert set(loaded_windows) == {
+        ("2026-08-01", "2026-09-03"),
+        ("2026-07-31", "2026-09-04"),
+    }
     assert result["candidate_options"][0]["required_service_dates"] == [
         "2026-09-01",
         "2026-09-02",
@@ -104,6 +115,11 @@ def test_candidate_inquiry_keeps_current_order_window_while_loading_old_conflict
 
 def test_official_search_still_projects_confirmed_dates_outside_order_window(monkeypatch):
     facts, _loaded_windows = _repository_facts(monkeypatch)
+    facts["confirmed_service_dates"] = [
+        {"service_date": "2026-08-01"},
+        {"service_date": "2026-08-02"},
+        {"service_date": "2026-09-03"},
+    ]
     captured = {}
 
     def derive(**kwargs):

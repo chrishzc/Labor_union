@@ -295,23 +295,31 @@ export function FinanceBankReconciliationWorkspace({
       : undefined;
   const viewedTransaction = viewedRow && (page?.items.find(row => row.row_id === viewedRow.row_id) ?? viewedRow);
   const [pairing, setPairing] = useState<FinanceBankTransaction | null>(null);
+  const [reviewingPurpose, setReviewingPurpose] = useState(false);
   const [selectedPair, setSelectedPair] = useState<NonNullable<FinanceBankTransaction['pairing_candidates']>[number] | null>(null);
   const [excludeReason, setExcludeReason] = useState<string | null>(null);
   const [rowActionBusy, setRowActionBusy] = useState(false);
   const [rowActionError, setRowActionError] = useState('');
-  const openPairing = (row: FinanceBankTransaction) => {
+  const openPairing = (row: FinanceBankTransaction, reviewPurpose = false) => {
     setViewedRow(null);
     setExcludeReason(null);
     setSelectedPair(null);
     setRowActionError('');
     setPairing(row);
+    setReviewingPurpose(reviewPurpose);
   };
   const confirmPairing = async () => {
     if (!pairing || !selectedPair || rowActionBusy) return;
     setRowActionBusy(true);
     setRowActionError('');
     try {
-      await financeImportQueryClient.pairBankTransaction(pairing.row_id, selectedPair);
+      if (reviewingPurpose && pairing.purpose_review) {
+        await financeImportQueryClient.pairBankTransaction(
+          pairing.row_id, selectedPair, pairing.purpose_review.classification_version,
+        );
+      } else {
+        await financeImportQueryClient.pairBankTransaction(pairing.row_id, selectedPair);
+      }
       const result = await financeImportQueryClient.listBankTransactions({transaction_status:'all', row_id:pairing.row_id});
       const fresh = result.items.find(row => row.row_id === pairing.row_id);
       setPairing(null);
@@ -452,7 +460,10 @@ export function FinanceBankReconciliationWorkspace({
                 batchOutcome.kind === 'loading' ||
                 submittedFinanceCommand !== undefined
               }
-              onClick={onIngest}
+              onClick={() => {
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                onIngest();
+              }}
               style={{ padding: '7px 14px' }}
             >
               {ingestion.kind === 'loading' ||
@@ -780,6 +791,11 @@ export function FinanceBankReconciliationWorkspace({
                               : bankReconciliationUnavailableReason(row)}</small>
                           </>
                         ) : <span className="bank-reconcile-sub">{bankReconciliationUnavailableReason(row)}</span>}
+                        {row.purpose_review && (
+                          <button type="button" className="bank-btn-action" onClick={() => openPairing(row, true)}>
+                            更正出款用途
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="bank-btn-action btn-view"
@@ -864,20 +880,21 @@ export function FinanceBankReconciliationWorkspace({
       {historyOpen && <FinanceImportHistory revision={revision} onClose={() => setHistoryOpen(false)} />}
       {excludedOpen && <FinanceExcludedTransactionsDrawer revision={revision} onClose={() => setExcludedOpen(false)} />}
 
-      {pairing && <Drawer isOpen title="核對交易 · 人工配對" ariaLabel="人工配對"
+      {pairing && <Drawer isOpen title={reviewingPurpose ? '更正出款用途' : '核對交易 · 人工配對'}
+        ariaLabel={reviewingPurpose ? '更正出款用途' : '人工配對'}
         closeDisabled={rowActionBusy} onClose={() => setPairing(null)}
         footer={<button type="button" className="finance-btn-primary" disabled={!selectedPair || rowActionBusy}
-          onClick={() => void confirmPairing()}>確認配對</button>}>
+          onClick={() => void confirmPairing()}>{reviewingPurpose ? '確認用途' : '確認配對'}</button>}>
         <div className="beclass-pairing-columns" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(14rem,1fr))',gap:'1rem'}}>
           <section className="bank-fact-card" aria-label="原銀行流水">
             <h4>原銀行流水</h4>
             <p>{pairing.reference} · {pairing.transaction_date} · {financeMoney(pairing.amount_ntd)}</p>
             {pairing.pairing_memo && <p>{pairing.pairing_memo}</p>}
-            <p>{pairing.review_reason === 'bank_case_suffix_not_found' ? '備註六碼查無案件，請核對姓名及候選案件。' : '請確認本筆流水所屬案件及對象。'}</p>
+            <p>{reviewingPurpose ? '請核對原始備註，選擇本筆出款的用途及對象。' : pairing.review_reason === 'bank_case_suffix_not_found' ? '備註六碼查無案件，請核對姓名及候選案件。' : '請確認本筆流水所屬案件及對象。'}</p>
           </section>
           <fieldset className="bank-fact-card" disabled={rowActionBusy}>
-            <legend>候選案件</legend>
-            {pairing.pairing_candidates?.map(candidate => {
+            <legend>{reviewingPurpose ? '出款用途' : '候選案件'}</legend>
+            {(reviewingPurpose ? pairing.purpose_review?.candidates : pairing.pairing_candidates)?.map(candidate => {
               const key = `${candidate.case_no}:${candidate.purpose}:${candidate.person_id}`;
               return (
                 <p key={key}>
@@ -885,9 +902,11 @@ export function FinanceBankReconciliationWorkspace({
                     <input type="radio" name="bank-case-candidate"
                       checked={selectedPair === candidate} onChange={() => setSelectedPair(candidate)} />
                     {candidate.case_no} · {purposeLabels[candidate.purpose]}
-                    {candidate.purpose === 'staff_salary' && ` · 月嫂編號 ${candidate.person_id}`}
-                    {' · 預估補助入帳 '}{candidate.estimated_subsidy_payment_date ?? '—'}
-                    {' · 預估薪資入帳 '}{candidate.estimated_self_funded_staff_due_date ?? '—'}
+                    {candidate.purpose === 'staff_salary' && ` · ${candidate.person_name ?? `月嫂編號 ${candidate.person_id}`}`}
+                    {!reviewingPurpose && <>
+                      {' · 預估補助入帳 '}{candidate.estimated_subsidy_payment_date ?? '—'}
+                      {' · 預估薪資入帳 '}{candidate.estimated_self_funded_staff_due_date ?? '—'}
+                    </>}
                   </label>
                 </p>
               );
@@ -908,6 +927,11 @@ export function FinanceBankReconciliationWorkspace({
           title={detailTitle}
           footer={
             <>
+              {viewedTransaction.purpose_review && (
+                <button type="button" className="bank-btn-action" onClick={() => openPairing(viewedTransaction, true)}>
+                  更正出款用途
+                </button>
+              )}
               {viewedTransaction.status === 'pending' && Boolean(viewedTransaction.pairing_candidates?.length) &&
                 <button type="button" className="finance-btn-primary" disabled={rowActionBusy}
                   onClick={() => openPairing(viewedTransaction)}>核對交易</button>}

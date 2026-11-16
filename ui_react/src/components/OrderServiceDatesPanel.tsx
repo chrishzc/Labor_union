@@ -175,13 +175,15 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const scheduleRecovery = scheduleRequests.current.get(caseNo);
   const assignmentPlan = currentAssignmentPlan?.scheduling_version === queryView?.scheduling_version
     ? currentAssignmentPlan : savedSchedule;
-  const effectiveServiceDates = queryView !== null
+  const assignmentPlanDates = queryView !== null
     && assignmentPlan?.case_no === caseNo
     && assignmentPlan.scheduling_version === queryView.scheduling_version
     && assignmentPlan.assignments.length > 0
     && assignmentPlan.assignments.every(segment => segment.official_service_dates.length > 0)
     ? [...new Set(assignmentPlan.assignments.flatMap((segment) => segment.official_service_dates))].sort()
     : null;
+  const queriedEffectiveDates = queryView?.case_no === caseNo ? queryView.effective_service_dates : undefined;
+  const effectiveServiceDates = queriedEffectiveDates?.length ? queriedEffectiveDates : assignmentPlanDates;
   const officeSchedule = scheduleRecovery?.office ?? (!arrangementPending && officeScheduleStaff.length > 0 && effectiveServiceDates === null);
   const schedulePending = arrangementPending || officeSchedule;
   const confirmationSupersededBySchedule = effectiveServiceDates !== null

@@ -332,6 +332,7 @@ class PairBankTransactionBody(BaseModel):
     case_no: str = Field(min_length=1, max_length=50)
     purpose: Literal["staff_salary", "client_refund", "client_subsidy_return"]
     person_id: StrictInt = Field(gt=0)
+    expected_classification_version: StrictInt | None = Field(default=None, ge=0)
 
 
 @router.post("/bank-transactions/{row_id}/pair", response_model=BaseResponse[dict[str, int]])
@@ -347,6 +348,7 @@ def pair_bank_transaction(
         result = application.workflow.pair_unreconciled_bank_row(
             row_id, body.case_no, body.purpose, body.person_id,
             ActorContext(immutable_admin_job_actor(principal, correlation.value)),
+            expected_classification_version=body.expected_classification_version,
         )
     except OperationalError as error:
         _raise_mysql_error(error, correlation)

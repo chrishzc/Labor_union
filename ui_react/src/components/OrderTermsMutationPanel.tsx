@@ -641,6 +641,9 @@ const OrderTermsEditor: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onO
       {closedService && (
         <div><p role="status">目前鎖定原因：本案服務已完成。漏填或誤填樓層費可正式更正，差額由帳務承接。</p>
           {!floorCorrection && <button type="button" disabled={savingLocked} onClick={()=>{setDraft(draftFromQuery(currentQuery));setFloorCorrection(true);}}>更正結案樓層費</button>}
+          <p className="order-v2-drawer-note" style={{ marginTop: '6px' }}>
+            💡 若本案實際服務天數縮短或提前結束需要產生退款，請使用【取消結算／確認服務天數】結算實際服務日，系統將重算總額並產生客戶退款。
+          </p>
         </div>
       )}
       {!closedService && lockReason && (

@@ -196,3 +196,11 @@ def test_export_preserves_the_same_typed_selection():
     predicates = (RegistryColumnFilter("order_status", "in", ("訂單成立", "服務中")), RegistryColumnFilter("requires_cooking", "blank"))
     ClientRegistryOrderAccountingExportApplication(repository).export(OrderAccountingExportQuery(column_filters=predicates))
     assert repository.selection.column_filters == predicates
+
+
+def test_registry_filters_matches_case_no_with_or_without_hc_prefix(roster):
+    connection, _ = roster
+    where, params = adapter._registry_filters(query="HCTEST-105", multi_birth_count=None, order_status=None, requires_cooking=None, after=None)
+    statement = "SELECT o.case_no FROM orders o JOIN clients c ON c.id=o.client_id WHERE " + " AND ".join(where)
+    matched = [row[0] for row in connection.execute(statement.replace("%s", "?"), params)]
+    assert matched == ["TEST-105"]

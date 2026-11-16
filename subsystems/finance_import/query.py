@@ -29,7 +29,7 @@ from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account_suffix,
 )
 from subsystems.finance_import.identity_maps import load_client_name_identities, resolve_client_memo_case
-from subsystems.finance_import.staging import MANUAL_BANK_CASE_REASONS, bank_case_candidates
+from subsystems.finance_import.staging import MANUAL_BANK_CASE_REASONS, bank_case_candidates, sinopac_purpose_candidates
 
 
 _MAXIMUM_PAGE_SIZE = 100
@@ -261,6 +261,7 @@ class FinanceImportQueryService:
                     )), 'null')) END AS raw_reference,
                     COALESCE(event.classification_type,finance_row.classification_type) classification_type,
                     event.reason AS event_reason,
+                    event.classification_version,
                     CASE WHEN event.reason='manual_bank_case_pairing' THEN event.reason
                          ELSE COALESCE(finance_row.classification_reason,event.reason) END AS review_reason,
                     COALESCE(event.target_identities,JSON_ARRAY()) AS target_identities,
@@ -315,15 +316,56 @@ class FinanceImportQueryService:
             )
         """
         if search:
-            scoped += """,
+            clean_search = re.sub(r"^(?:HC|hc)\s*", "", search).strip()
+            patterns = [search]
+            if clean_search and clean_search != search:
+                patterns.append(clean_search)
+            if re.fullmatch(r"[0-9]{9}", clean_search):
+                patterns.append(f"{clean_search[:3]}{int(clean_search[3:]):03d}")
+            elif re.fullmatch(r"[0-9]{6}", clean_search):
+                patterns.append(f"{clean_search[:3]}{int(clean_search[3:]):06d}")
+
+            case_predicates = []
+            case_params: list[Any] = []
+            for p in patterns:
+                case_predicates.append("EXISTS (SELECT 1 FROM proofs WHERE proofs.row_id=bank_rows.row_id AND LOCATE(%s,proofs.case_no)>0)")
+                case_params.append(p)
+                case_predicates.append("LOCATE(%s,bank_rows.classification_evidence)>0")
+                case_params.append(p)
+                case_predicates.append("LOCATE(%s,bank_rows.target_identities)>0")
+                case_params.append(p)
+                case_predicates.append("LOCATE(%s,bank_rows.memo)>0")
+                case_params.append(p)
+                case_predicates.append("EXISTS (SELECT 1 FROM client_legacy_virtual_accounts va WHERE va.virtual_account=bank_rows.cancellation_code AND LOCATE(%s,va.case_no)>0)")
+                case_params.append(p)
+                case_predicates.append(
+                    "EXISTS (SELECT 1 FROM orders ord WHERE "
+                    "((bank_rows.cancellation_code=CONCAT('95696',ord.case_no) "
+                    "OR (SUBSTR(ord.case_no,1,1)='A' AND bank_rows.cancellation_code=CONCAT('95696',SUBSTR(ord.case_no,2,3),LPAD(CAST(SUBSTR(ord.case_no,5) AS UNSIGNED)+500,6,'0')))) "
+                    "OR (bank_rows.classification_type IN ('client_receipt','client_refund','client_subsidy_return','client_refund_return') "
+                    "AND JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(ord.client_id AS JSON))) "
+                    "OR (bank_rows.classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy') "
+                    "AND JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(ord.staff_id AS JSON)))) "
+                    "AND LOCATE(%s,ord.case_no)>0)"
+                )
+                case_params.append(p)
+                case_predicates.append(
+                    "EXISTS (SELECT 1 FROM staff_obligations sob WHERE "
+                    "bank_rows.classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy') "
+                    "AND JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(sob.staff_id AS JSON)) "
+                    "AND LOCATE(%s,sob.case_no)>0)"
+                )
+                case_params.append(p)
+
+            case_sql = " OR ".join(case_predicates)
+            scoped += f""",
                 matched AS (
                     SELECT bank_rows.* FROM bank_rows
                     WHERE LOCATE(%s,CONCAT_WS(' ',CONCAT('bank:',row_id),
                         CONCAT(sheet_name,'#',source_row), safe_reference, counterparty_name,
                         cancellation_code, memo,
                         CASE WHEN classification_type='government_subsidy' THEN '新竹市政府' ELSE '' END))>0
-                      OR EXISTS (SELECT 1 FROM proofs
-                           WHERE proofs.row_id=bank_rows.row_id AND LOCATE(%s,proofs.case_no)>0)
+                      OR ({case_sql})
                       OR (bank_rows.classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy')
                           AND EXISTS (SELECT 1 FROM staff s
                                WHERE JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(s.id AS JSON))
@@ -334,7 +376,9 @@ class FinanceImportQueryService:
                                  AND LOCATE(%s,c.name)>0))
                 )
             """
-            params.extend((search, search, search, search))
+            params.append(search)
+            params.extend(case_params)
+            params.extend((search, search))
         scope = "matched" if search else "bank_rows"
         with self._connection.cursor() as cursor:
             pending_count = None
@@ -414,13 +458,27 @@ class FinanceImportQueryService:
                 match_client_month=self._match_client_month)
             maps = None
             for row, item in zip(page, items, strict=True):
+                if item["status"] != "pending" or item["disposition"] == "blocked":
+                    continue
+                if (row["format_id"] == "sinopac" and row["direction"] == "outgoing"
+                        and not row.get("is_manual_supplement") and row.get("classification_version") is not None
+                        and (row["classification_type"] in {"staff_payout", "staff_salary", "client_refund"}
+                             or row["review_reason"] == MANUAL_BANK_CASE_REASONS[0])):
+                    candidates = sinopac_purpose_candidates(
+                        cursor, row, row["classification_type"], _text_tuple(row.get("classification_evidence") or []),
+                        _text_tuple(row.get("target_identities") or []),
+                    )
+                    if candidates:
+                        item["purpose_review"] = {"classification_version": row["classification_version"], "candidates": candidates}
+                        item["pairing_memo"] = re.sub(r"\d[\d\s\-－]{6,}\d", "****", row.get("memo") or "")[:500]
+                        if not item["cases"]:
+                            item["cases"] = (candidates[0]["case_no"],)
                 legacy_shared_name = (
                     row["format_id"] == "taishin" and row["direction"] == "outgoing"
                     and row["review_reason"] == TAISHIN_CLIENT_SUBSIDY_SHARED_NAME_REASON
                     and not sinopac_memo_case_suffixes(row.get("memo"))
                 )
-                if (item["status"] != "pending" or item["disposition"] == "blocked"
-                        or (item["reconciliation_target"] is not None and not legacy_shared_name)
+                if ((item["reconciliation_target"] is not None and not legacy_shared_name)
                         or row.get("event_reason") == "manual_bank_case_pairing"):
                     continue
                 if row["review_reason"] not in MANUAL_BANK_CASE_REASONS and not legacy_shared_name:

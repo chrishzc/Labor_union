@@ -6,6 +6,7 @@ Description: 提供案件中心客戶名冊查詢、訂單條件與歷史帳務�
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
@@ -494,8 +495,16 @@ def _registry_filters(
         where.append("o.case_no > %s")
         parameters.append(after)
     if query is not None:
-        where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
-        parameters.append(f"%{query}%")
+        clean_query = re.sub(r"^(?:HC|hc)\s*", "", query).strip()
+        if clean_query and clean_query != query:
+            where.append(
+                "(CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s "
+                "OR o.case_no LIKE %s)"
+            )
+            parameters.extend((f"%{query}%", f"%{clean_query}%"))
+        else:
+            where.append("CONCAT_WS(' ',o.case_no,COALESCE(c.name,''),COALESCE(c.phone,'')) LIKE %s")
+            parameters.append(f"%{query}%")
     if multi_birth_count is not None:
         where.append(f"{BIRTH_COUNT_SQL} = %s")
         parameters.append(multi_birth_count)

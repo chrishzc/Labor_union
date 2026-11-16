@@ -23,9 +23,14 @@ export const financeImportQueryClient = {
     { case_no, purpose, person_id }: Pick<
       NonNullable<FinanceBankTransaction['pairing_candidates']>[number], 'case_no' | 'purpose' | 'person_id'
     >,
+    expectedClassificationVersion?: number,
   ) {
     const result = await decode<{row_id:number}>(transport.post(
-      `/api/v1/finance-import/bank-transactions/${rowId}/pair`, { case_no, purpose, person_id },
+      `/api/v1/finance-import/bank-transactions/${rowId}/pair`,
+      {
+        case_no, purpose, person_id,
+        ...(expectedClassificationVersion === undefined ? {} : { expected_classification_version: expectedClassificationVersion }),
+      },
       options(undefined, 'finance-bank-pair'),
     ), financeEnvelope(z.strictObject({row_id: z.literal(rowId)})), '人工配對');
     return result.row_id;

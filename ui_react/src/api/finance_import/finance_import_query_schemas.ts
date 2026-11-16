@@ -21,6 +21,15 @@ export const FinanceClientReceiptReviewSchema = z.strictObject({
   reason: z.string(),
   candidates: z.array(z.strictObject({ obligation_identity: z.string(), obligation_type: z.string(), due_date: z.iso.date().nullable() })),
 });
+const financeBankPairingCandidateSchema = z.strictObject({
+  case_no: z.string().min(1),
+  purpose: z.enum(['staff_salary', 'client_refund', 'client_subsidy_return']),
+  person_id: z.number().int().positive(),
+  person_name: z.string().nullish(),
+  estimated_subsidy_payment_date: z.iso.date().nullish(),
+  estimated_self_funded_staff_due_date: z.iso.date().nullish(),
+});
+
 export const FinanceBankTransactionPageSchema = z.strictObject({
   items: z.array(z.strictObject({
     row_id: z.number().int().positive(), row_identity: z.string(), transaction_date: z.string().nullable(),
@@ -37,13 +46,11 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
     }).nullish(),
     reconciliation_unavailable_reason: z.string().nullish(),
     staff_subsidy_batch_identity: z.string().nullish(),
-    pairing_candidates: z.array(z.strictObject({
-      case_no: z.string().min(1),
-      purpose: z.enum(['staff_salary', 'client_refund', 'client_subsidy_return']),
-      person_id: z.number().int().positive(),
-      estimated_subsidy_payment_date: z.iso.date().nullish(),
-      estimated_self_funded_staff_due_date: z.iso.date().nullish(),
-    })).optional(),
+    pairing_candidates: z.array(financeBankPairingCandidateSchema).optional(),
+    purpose_review: z.strictObject({
+      classification_version: z.number().int().nonnegative(),
+      candidates: z.array(financeBankPairingCandidateSchema),
+    }).nullish(),
     pairing_memo: z.string().nullish(),
   })),
   pending_count: optionalCount,

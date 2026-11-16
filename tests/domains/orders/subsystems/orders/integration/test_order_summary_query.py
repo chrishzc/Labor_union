@@ -65,6 +65,35 @@ def test_query_passes_case_or_client_search_text_to_repository() -> None:
     assert captured["lifecycle_scope"] is OrderLifecycleScope.ALL
 
 
+def test_mysql_repository_strips_hc_prefix_for_case_number_matching() -> None:
+    from infrastructure.mysql.order_summary_query_repository import MySqlOrderSummaryQueryRepository
+    captured_params = []
+
+    class DummyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, _sql, params):
+            captured_params.append(params)
+
+        def fetchall(self):
+            return ()
+
+    class DummyConnection:
+        def cursor(self):
+            return DummyCursor()
+
+    repo = MySqlOrderSummaryQueryRepository(DummyConnection())
+    repo.fetch_page(after_case_no=None, page_size=10, query_text="HC115000003")
+    assert len(captured_params) == 1
+    params = captured_params[0]
+    assert "115000003" in params
+    assert "HC115000003" in params
+
+
 def test_query_passes_unfinished_lifecycle_scope_to_repository() -> None:
     captured = {}
     service = OrderSummaryQueryService(

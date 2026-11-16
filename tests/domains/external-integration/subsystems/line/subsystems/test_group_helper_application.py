@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.dependencies.service_start import get_service_start_application
@@ -801,8 +801,11 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     )
     monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(uow_stub))
 
-    def _spy_save(_uow: Any, family: str, case_no: str, event_ref: str, payload: dict[str, Any]) -> None:
+    save_group_helper_proposal = staff_leave_intake.save_group_helper_proposal
+
+    def _spy_save(_uow: Any, family: str, case_no: str, event_ref: str, payload: dict[str, Any]) -> dict[str, Any]:
         saved_calls.append((family, case_no, event_ref, payload))
+        return save_group_helper_proposal(_uow, family, case_no, event_ref, payload)
 
     monkeypatch.setattr(staff_leave_intake, "save_group_helper_proposal", _spy_save)
 
@@ -854,6 +857,61 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     assert multi_res.status_code == 200
     assert multi_res.json()["data"]["group_message"] is None
     assert len(saved_calls[-1][3]["dates"]) == 2
+
+
+@pytest.mark.parametrize("legacy_receipt", [False, True])
+def test_liff_postponement_replays_original_result_after_proposal_changes(
+    monkeypatch: Any, legacy_receipt: bool,
+) -> None:
+    arrangement = _FakeArrangement()
+    application = _FakeServiceStartWorkflow(arrangement=arrangement)
+    committed: list[bool] = []
+    uow = SimpleNamespace(
+        _helper_proposals={},
+        receipts=_FakeReceiptRepo(),
+        commit=lambda: committed.append(True),
+    )
+    monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(uow))
+    staff = {"staff_id": 7}
+    monkeypatch.setattr(staff_leave_intake, "_verified_staff_context", lambda _body: (None, staff))
+    dates = [
+        {"original_date": "2026-06-12", "new_date": "2026-06-15"},
+        {"original_date": "2026-06-13", "new_date": "2026-06-16"},
+    ]
+    body = {
+        "flow_id": "flow-999",
+        "case_no": "C-2026-01",
+        "assignment_id": 22,
+        "dates": dates,
+        "idempotency_key": "staff-proposal-1",
+    }
+    family = "group_helper_postpone_proposal"
+
+    def propose(payload: dict[str, Any]) -> dict[str, Any]:
+        request = staff_leave_intake.StaffLeaveDeferProposeRequest.model_validate(payload)
+        return staff_leave_intake.propose_leave_defer(request, application).model_dump()
+
+    original = propose(body)
+    if legacy_receipt:
+        uow._helper_proposals[family, body["case_no"], body["idempotency_key"]].pop("liff_result")
+    staff_leave_intake.save_group_helper_proposal(uow, family, body["case_no"], "group-confirmed", {"cleared": True})
+    arrangement.conflict = True
+
+    assert propose({**body, "dates": list(reversed(dates))}) == original
+    changed_dates = [dates[0], {**dates[1], "new_date": "2026-06-17"}]
+    with pytest.raises(HTTPException) as conflict:
+        propose({**body, "dates": changed_dates})
+    assert conflict.value.status_code == 409
+    assert conflict.value.detail["error"]["code"] == "staff_leave_proposal_idempotency_conflict"
+
+    staff["staff_id"] = 8
+    with pytest.raises(HTTPException) as other_staff:
+        propose(body)
+    assert other_staff.value.status_code == 409
+    assert len(arrangement.preview_calls) == 1
+    assert committed == [True]
+    assert len(uow.receipts.items) == 2
+    assert uow._helper_proposals[family, body["case_no"]] == {"cleared": True}
 
 
 def test_workflow3_service_schedule_pre_start_and_post_start_progress() -> None:

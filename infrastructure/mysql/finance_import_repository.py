@@ -148,10 +148,10 @@ class MySqlFinanceImportRepository:
             _advance_bank_batches(cursor, batch_ids)
             return "excluded"
 
-    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor):
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor, *, expected_classification_version=None):
         from infrastructure.mysql.historical_reprocess_repository import _normalized_row
         from subsystems.finance_import.identity_maps import load_finance_identity_maps
-        from subsystems.finance_import.staging import bank_case_candidates, MANUAL_BANK_CASE_REASONS
+        from subsystems.finance_import.staging import bank_case_candidates, MANUAL_BANK_CASE_REASONS, sinopac_purpose_candidates
 
         with _mysql_cursor(self._connection) as cursor:
             batch_ids = _lock_bank_batch(cursor, row_id)
@@ -159,14 +159,20 @@ class MySqlFinanceImportRepository:
             row = cursor.fetchone()
             if row is None:
                 return "missing"
-            if row["reconciliation_status"] != "pending":
+            if row["reconciliation_status"] != "pending" or _json_object(row.get("bank_references") or {}).get("source") == "manual_supplement":
                 return "conflict"
             cursor.execute(
                 "SELECT 1 FROM client_ledger_entries WHERE finance_import_row_id=%s "
                 "UNION ALL SELECT 1 FROM staff_payout_events WHERE finance_import_row_id=%s "
                 "UNION ALL SELECT 1 FROM government_subsidy_period_entries WHERE finance_import_row_id=%s "
-                "UNION ALL SELECT 1 FROM finance_import_reconciliation_receipts WHERE finance_import_row_id=%s LIMIT 1",
-                (row_id, row_id, row_id, row_id),
+                "UNION ALL SELECT 1 FROM finance_import_reconciliation_receipts WHERE finance_import_row_id=%s "
+                "UNION ALL SELECT 1 FROM finance_import_dispatch_events WHERE finance_import_row_id=%s "
+                "AND outcome IN ('reconciled','existing') "
+                "UNION ALL SELECT 1 FROM government_subsidy_transactions WHERE finance_import_row_id=%s "
+                "AND transaction_status='succeeded' "
+                "UNION ALL SELECT 1 FROM staff_overpayment_recovery_events WHERE finance_import_row_id=%s "
+                "AND event_type='cash_recovered' LIMIT 1",
+                (row_id,) * 7,
             )
             if cursor.fetchone():
                 return "conflict"
@@ -180,27 +186,38 @@ class MySqlFinanceImportRepository:
             if cursor.fetchone():
                 return "conflict"
             cursor.execute(
-                "SELECT classification_version,canonical_fact_version,classification_type,reason,target_identities,evidence "
+                "SELECT classification_version,canonical_fact_version,classification_type,disposition,reason,target_identities,evidence "
                 "FROM finance_import_classification_events WHERE finance_import_row_id=%s ORDER BY id DESC LIMIT 1 FOR UPDATE",
                 (row_id,),
             )
             event = cursor.fetchone()
-            if event is None:
+            if event is None or event.get("disposition") == "blocked":
                 return "conflict"
             target = f"{'staff' if purpose == 'staff_salary' else 'client'}:{person_id}"
             evidence = (f"bank-paired-case:{case_no}",)
             kind = "staff_payout" if purpose == "staff_salary" else purpose
-            if event["reason"] == "manual_bank_case_pairing":
+            version = int(event["classification_version"])
+            if expected_classification_version is not None and version != expected_classification_version:
+                return "conflict"
+            if expected_classification_version is None and event["reason"] == "manual_bank_case_pairing":
                 same_pair = (_json_text_tuple(event["target_identities"]), _json_text_tuple(event["evidence"])) == ((target,), evidence)
                 return "paired" if same_pair and event["classification_type"] == kind else "conflict"
-            if event["classification_version"] != 0:
-                return "conflict"
-            if row.get("classification_reason") not in MANUAL_BANK_CASE_REASONS and (
-                row["format_id"] != "taishin" or event["classification_type"] != kind
-            ):
-                return "conflict"
+            if expected_classification_version is None:
+                if version != 0 or (row.get("classification_reason") not in MANUAL_BANK_CASE_REASONS and (
+                    row["format_id"] != "taishin" or event["classification_type"] != kind
+                )):
+                    return "conflict"
             choice = {"case_no": case_no, "purpose": purpose, "person_id": person_id}
-            if choice not in bank_case_candidates(cursor, _normalized_row(row), load_finance_identity_maps(cursor)):
+            source = _normalized_row(row)
+            candidates = (
+                bank_case_candidates(cursor, source, load_finance_identity_maps(cursor))
+                if expected_classification_version is None
+                else sinopac_purpose_candidates(
+                    cursor, source, event["classification_type"], _json_text_tuple(event["evidence"]),
+                    _json_text_tuple(event["target_identities"]),
+                )
+            )
+            if not any(all(candidate[key] == value for key, value in choice.items()) for candidate in candidates):
                 return "conflict"
             cursor.execute("SELECT client_id FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
             order = cursor.fetchone()
@@ -210,8 +227,9 @@ class MySqlFinanceImportRepository:
                 "INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,"
                 "canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,"
                 "evidence,available_actions,actor,reason) "
-                "VALUES (%s,%s,1,1,%s,'business_pending',%s,%s,%s,JSON_ARRAY(),%s,'manual_bank_case_pairing')",
-                (row["batch_id"], row_id, kind, hashlib.sha256(_canonical_json(choice).encode()).hexdigest(),
+                "VALUES (%s,%s,%s,%s,%s,'business_pending',%s,%s,%s,JSON_ARRAY(),%s,'manual_bank_case_pairing')",
+                (row["batch_id"], row_id, version + 1, max(1, int(event["canonical_fact_version"])), kind,
+                 hashlib.sha256(_canonical_json(choice).encode()).hexdigest(),
                  _canonical_json((target,)), _canonical_json(evidence), actor),
             )
             _advance_bank_batches(cursor, batch_ids)

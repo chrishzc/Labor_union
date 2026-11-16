@@ -94,6 +94,7 @@ function CaseRefundReconciliation({
   reportBusy,
   selectionBusy,
   onViewCase,
+  onOpenCancellation,
 }: {
   row: FinanceBankTransaction;
   data: CaseAccounting;
@@ -105,6 +106,7 @@ function CaseRefundReconciliation({
   reportBusy: (busy: boolean) => void;
   selectionBusy: boolean;
   onViewCase?: () => void;
+  onOpenCancellation?: () => void;
 }) {
   const [showReassign, setShowReassign] = useState(false);
   const bankTotal = row.amount_ntd;
@@ -183,26 +185,39 @@ function CaseRefundReconciliation({
                 <p className="finance-empty-desc">
                   原銀行流水已帶入（{row.bank === 'sinopac' ? '永豐銀行' : '台新銀行'} {money(row.amount_ntd)}），但本案帳務尚未建立待退款或補助退款義務。請先至案件帳務確認正式款項資料後，再進行核對。
                 </p>
-                {onViewCase && (
-                  <div className="finance-empty-action-group">
+                <div className="finance-empty-action-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {onOpenCancellation && (
                     <button
                       type="button"
                       className="finance-btn-action-primary"
-                      onClick={onViewCase}
+                      onClick={onOpenCancellation}
                       disabled={selectionBusy}
+                      style={{ background: 'var(--md-sys-color-primary, #6750a4)', color: '#fff' }}
                     >
-                      查看本案帳務（設定方案／補登款項）
+                      ⚡ 調整服務天數結算退款（取消結算）
                     </button>
-                    <button
-                      type="button"
-                      className="finance-btn-action-secondary"
-                      onClick={() => setShowReassign((prev) => !prev)}
-                      disabled={selectionBusy}
-                    >
-                      {showReassign ? '收合更正表單' : '更正款項用途／重新歸屬'}
-                    </button>
-                  </div>
-                )}
+                  )}
+                  {onViewCase && (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="finance-btn-action-primary"
+                        onClick={onViewCase}
+                        disabled={selectionBusy}
+                      >
+                        查看本案帳務（設定方案／補登款項）
+                      </button>
+                      <button
+                        type="button"
+                        className="finance-btn-action-secondary"
+                        onClick={() => setShowReassign((prev) => !prev)}
+                        disabled={selectionBusy}
+                      >
+                        {showReassign ? '收合更正表單' : '更正款項用途／重新歸屬'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="finance-recon-obligations-list">
@@ -377,10 +392,10 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   const isReceipt = row.classification_type === 'client_receipt';
   const isRefundReturn = row.classification_type === 'client_refund_return';
   const isStaff = target.staff_id !== null;
-  const canOpenCancellation = row.bank === 'sinopac' && row.direction === 'outgoing'
+  const canOpenCancellation = (row.bank === 'sinopac' || row.bank === 'taishin') && row.direction === 'outgoing'
     && row.status === 'pending' && row.disposition !== 'blocked'
     && (isStaff || row.classification_type === 'client_refund');
-  const canCorrectToRefund = isStaff && row.bank === 'sinopac' && row.direction === 'outgoing'
+  const canCorrectToRefund = isStaff && (row.bank === 'sinopac' || row.bank === 'taishin') && row.direction === 'outgoing'
     && row.status === 'pending' && data.client_items.some(item => item.direction === 'payable'
       && (item.obligation_type === 'refund' || item.obligation_type === 'adjustment')
       && (item.remaining_ntd ?? 0) > 0);
@@ -421,7 +436,9 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
       {showRefundCorrection ? '返回月嫂薪資核對' : '改核對客戶退款'}
     </button>}
     {canOpenCancellation && !showRefundCorrection && <button type="button" className="finance-btn-secondary"
-      disabled={selectionBusy} onClick={() => requestLeave(() => setShowCancellation(true))}>取消結算</button>}
+      disabled={selectionBusy} onClick={() => requestLeave(() => setShowCancellation(true))}>
+      {row.classification_type === 'client_refund' ? '取消結算（調整服務天數產生退款）' : '取消結算'}
+    </button>}
     {isStaff && requiresSelection && !showRefundCorrection && <fieldset disabled={selectionBusy}>
       <legend>本次核銷款項</legend>
       {obligations.length ? obligations.map(item=><label key={item.identity}>
@@ -429,7 +446,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
           onChange={()=>setChosenIds(ids=>ids.includes(item.identity)?ids.filter(id=>id!==item.identity):[...ids,item.identity])}/>
         {item.label || '月嫂應付款'} · 待付 {money(item.remaining_ntd)} · {item.due_date ?? '未定日期'}
       </label>) : <p>本案目前沒有可選款項。{canOpenCancellation
-        ? '若案件提前結束服務，可開啟取消結算確認實際服務日。'
+        ? '若案件提前結束服務或實際服務天數變更，請點擊上方【取消結算】確認實際服務日產生退款。'
         : '請回案件帳務確認正式款項資料。'}</p>}
     </fieldset>}
     {canCorrectToRefund && showRefundCorrection ? (
@@ -465,6 +482,7 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         reportBusy={reportBusy}
         selectionBusy={selectionBusy}
         onViewCase={onViewCase}
+        onOpenCancellation={canOpenCancellation ? () => requestLeave(() => setShowCancellation(true)) : undefined}
       />
     )}
     </>}
@@ -567,8 +585,14 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
          <OrderTermsMutationPanel caseNo={initialCase} query={state.registry.order_terms.data} fromRegistry onObserved={()=>setPendingAccountingRefresh(true)} onEditStateChange={setTermsEditState}/>:
          <p>目前無法讀取正式服務條件，請重新查詢案件後再更正。</p>}
      </fieldset>
-     <CasePricingAdjustmentPanel caseNo={initialCase} revision={revision} disabled={reconciliationBusy||termsEditState.busy}
-       onCommitted={async()=>{setPendingAccountingRefresh(true);}} onStateChange={setPricingEditState}/>
+     {bankReconciliation && !showFullCase ? (
+       <div style={{ marginTop: '10px', padding: '10px 14px', background: '#f5f0eb', borderRadius: '6px', fontSize: '0.84rem', color: '#52433d' }}>
+         💡 本案帳務計價參數（胎數、補助上限、時薪）已整合於下方的<strong>【✏️ 原地更正參數】</strong>抽屜；如需調整請點擊該按鈕進行即時試算並儲存。
+       </div>
+     ) : (
+       <CasePricingAdjustmentPanel caseNo={initialCase} revision={revision} disabled={reconciliationBusy||termsEditState.busy}
+         onCommitted={async()=>{setPendingAccountingRefresh(true);}} onStateChange={setPricingEditState}/>
+     )}
    </div>}
  </details>}
  {data&&bankReconciliation&&!showFullCase&&<fieldset style={{border:0,padding:0,margin:0,minWidth:0}} disabled={termsEditState.busy||termsEditState.dirty||pricingEditState.busy||pricingEditState.dirty||(pendingAccountingRefresh&&!reconciliationBusy)}>

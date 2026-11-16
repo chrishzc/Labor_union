@@ -345,14 +345,19 @@ def test_taishin_customer_name_without_a_case_reference(memo, ids, kind):
     assert result['matched_identity_ids'] == (list(ids) if kind == 'client_subsidy_return' else [])
 
 
-@pytest.mark.parametrize('format_id,reference_key',[('sinopac','交易參考編號'),('legacy','transaction_reference')])
-def test_sinopac_staff_case_is_resolved_without_checking_the_reference_account(format_id,reference_key):
+@pytest.mark.parametrize('format_id,reference_key,reference_staff,kind,staff_ids,reason', [
+    ('sinopac', '交易參考編號', [], 'staff_salary', [9], 'sinopac_unique_staff_case_suffix_in_memo'),
+    ('sinopac', '交易參考編號', [9], 'staff_salary', [9], 'sinopac_unique_staff_case_suffix_in_memo'),
+    ('sinopac', '交易參考編號', [10], 'non_business_review', [], 'counterparty_identity_type_conflict'),
+    ('legacy', 'transaction_reference', [10], 'staff_salary', [9], 'sinopac_unique_staff_case_suffix_in_memo'),
+])
+def test_staff_case_suffix_and_reference_evidence(format_id, reference_key, reference_staff, kind, staff_ids, reason):
     row=_row(format_id=format_id,direction='outgoing',debit=Decimal(12000),credit=None,memo='HC115001服務人員',
         bank_references={reference_key:'123456789012'})
-    result=classify_finance_transaction(row,{}, {'123456789012':[10]},staff_case_suffixes={'115001':[9]})
-    assert result['classification_type']=='staff_salary'
-    assert result['matched_identity_ids']==[9]
-    assert result['reason']=='sinopac_unique_staff_case_suffix_in_memo'
+    result = classify_finance_transaction(row, {}, {'123456789012': reference_staff}, staff_case_suffixes={'115001': [9]})
+    assert result['classification_type'] == kind
+    assert result['matched_identity_ids'] == staff_ids
+    assert result['reason'] == reason
 
 
 def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():

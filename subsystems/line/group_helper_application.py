@@ -13,6 +13,9 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+from pymysql.constants.ER import DUP_ENTRY
+from pymysql.err import IntegrityError
+
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
     LineDeliveryRequest,
@@ -148,13 +151,39 @@ def _default_staff_schedule_url(flow_id: str, case_no: str, mode: str) -> str:
     return f"http://127.0.0.1:8000/line-staff-schedule?{query}"
 
 
+def load_group_helper_proposal(
+    unit_of_work: Any,
+    family: str,
+    case_no: str,
+    event_id: str,
+    *,
+    current_read: bool = False,
+) -> dict[str, Any] | None:
+    """Read the immutable receipt for a specific proposal, including older proposals."""
+    conn = getattr(unit_of_work, "_connection", None)
+    if conn is None:
+        return getattr(unit_of_work, "_helper_proposals", {}).get((family, case_no, event_id))
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT result_snapshot FROM line_command_receipts "
+            "WHERE idempotency_key=%s AND command_family=%s AND correlation_id=%s"
+            + (" FOR SHARE" if current_read else ""),
+            (f"{family}:{case_no}:{event_id}"[:191], family, f"case:{case_no}"[:191]),
+        )
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    raw = row["result_snapshot"]
+    return json.loads(raw) if isinstance(raw, str) else raw
+
+
 def save_group_helper_proposal(
     unit_of_work: Any,
     family: str,
     case_no: str,
     event_id: str,
     payload: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
     """Append an immutable proposal snapshot for in-group start-date or postponement flows."""
     conn = getattr(unit_of_work, "_connection", None)
     fp = fingerprint_payload(payload).value
@@ -167,21 +196,29 @@ def save_group_helper_proposal(
         else str(payload.get("start_date") or payload.get("leave_end_date") or "proposed")[:191]
     )
     if conn is not None:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT 1 FROM line_command_receipts WHERE idempotency_key=%s",
-                (key_str,),
-            )
-            if cursor.fetchone() is None:
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO line_command_receipts "
                     "(idempotency_key,command_family,payload_fingerprint,result_reference,result_snapshot,correlation_id) "
                     "VALUES (%s,%s,%s,%s,%s,%s)",
                     (key_str, family, fp, ref_str, serialized, corr_str),
                 )
-        return
+        except IntegrityError as error:
+            if error.args[0] != DUP_ENTRY:
+                raise
+            # A concurrent insert may have committed after our transaction's read snapshot.
+            saved = load_group_helper_proposal(unit_of_work, family, case_no, event_id, current_read=True)
+            if saved is None:
+                raise
+            return saved
+        return payload
     store = getattr(unit_of_work, "_helper_proposals", None)
     if isinstance(store, dict):
+        receipt_key = (family, case_no, event_id)
+        if receipt_key in store:
+            return store[receipt_key]
+        store[receipt_key] = payload
         store[(family, case_no)] = payload
     receipts = getattr(unit_of_work, "receipts", None)
     if receipts is not None:
@@ -190,6 +227,7 @@ def save_group_helper_proposal(
         key = IdempotencyKey(key_str)
         if receipts.get(key) is None:
             receipts.append(IdempotencyReceipt(key, PreviewFingerprint(fp), ref_str))
+    return payload
 
 
 def load_latest_group_helper_proposal(

@@ -29,6 +29,9 @@ class ServiceDateConfirmationQueryView(BaseModel):
     selectable_dates: list[date]
     current_version: int | None = None
     current_dates: list[date]
+    effective_service_dates: list[date] = Field(
+        description="Dates from the complete effective Scheduling generation",
+    )
     bound_staff: list[BoundServiceStaffView]
     arrangement_pending: bool
     historical_schedule_pending: bool = False

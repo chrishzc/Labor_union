@@ -215,6 +215,42 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByLabelText('搜尋交易')).toBeInTheDocument();
   });
 
+  it('searches transactions by associated case and allows opening the matched case', async () => {
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async query => {
+      if (query.search === '115000001' || query.search === 'HC115000001') {
+        return {
+          items: [sinopac],
+          pending_count: 1,
+          next_before_row_id: null,
+        };
+      }
+      return {
+        items: [taishin, sinopac],
+        pending_count: 2,
+        next_before_row_id: null,
+      };
+    });
+
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    expect(await screen.findByRole('button', { name: '核對交易 Sheet1#2' })).toBeVisible();
+
+    const searchInput = screen.getByLabelText('搜尋交易');
+    fireEvent.change(searchInput, { target: { value: '115000001' } });
+
+    await waitFor(() => {
+      expect(financeImportQueryClient.listBankTransactions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: '115000001' }),
+        expect.anything(),
+      );
+    });
+
+    expect(await screen.findByRole('button', { name: '115000001' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '核對交易 交易明細#3' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '115000001' }));
+    expect(onCase).toHaveBeenCalledWith('115000001');
+  });
+
   it('runs one rematch and refreshes the bank list after showing the counts', async () => {
     const rematch = vi.spyOn(financeImportMutationClient, 'reconcilePending').mockResolvedValue({
       checked_count: 5, reconciled_count: 3, existing_count: 0, pending_count: 2,
@@ -225,7 +261,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新配對並核銷' }));
     expect(await screen.findByText('已查核 5 筆，核銷 3 筆，仍待核對 2 筆。')).toBeInTheDocument();
     expect(rematch).toHaveBeenCalledOnce();
-    expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledTimes(initialRequests + 1);
+    await waitFor(() => expect(financeImportQueryClient.listBankTransactions).toHaveBeenCalledTimes(initialRequests + 1));
     rematch.mockRestore();
   });
 
@@ -723,6 +759,34 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
       post.mockRestore();
       token.mockRestore();
     }
+  });
+
+  it('changes a pending Sinopac payout to a refund and opens the refreshed refund target', async () => {
+    const candidate = { case_no: '115000002', purpose: 'client_refund' as const, person_id: 5 };
+    const source = {
+      ...sinopac, direction: 'outgoing' as const, classification_type: 'staff_payout',
+      pairing_memo: 'HC115002 合成備註',
+      purpose_review: { classification_version: 2, candidates: [candidate] },
+    };
+    const fresh = {
+      ...source, classification_type: 'client_refund', purpose_review: null,
+      reconciliation_target: { case_no: candidate.case_no, staff_id: null, obligation_identities: ['refund:1'] },
+    };
+    vi.mocked(financeImportQueryClient.listBankTransactions)
+      .mockResolvedValueOnce({ items: [source], pending_count: 1, next_before_row_id: null })
+      .mockResolvedValue({ items: [fresh], pending_count: 1, next_before_row_id: null });
+    vi.mocked(financeImportQueryClient.pairBankTransaction).mockResolvedValueOnce(source.row_id);
+    const handleReconcile = vi.fn();
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} onReconcile={handleReconcile} />);
+    fireEvent.click(await screen.findByRole('button', { name: '更正出款用途' }));
+    const drawer = screen.getByRole('dialog', { name: '更正出款用途' });
+    expect(within(drawer).getByText(source.pairing_memo)).toBeVisible();
+    const confirm = within(drawer).getByRole('button', { name: '確認用途' });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(within(drawer).getByRole('radio', { name: /115000002.*退款/ }));
+    fireEvent.click(confirm);
+    expect(financeImportQueryClient.pairBankTransaction).toHaveBeenCalledWith(source.row_id, candidate, 2);
+    await waitFor(() => expect(handleReconcile).toHaveBeenCalledWith(fresh));
   });
 
   it('requires a reason to exclude a pending row and refreshes the list', async () => {

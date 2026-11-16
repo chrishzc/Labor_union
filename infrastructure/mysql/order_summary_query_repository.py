@@ -5,6 +5,7 @@ Description: 依 Orders canonical lifecycle scope 提供 bounded 摘要查詢。
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -182,6 +183,7 @@ SELECT o.case_no,
    AND (
        %s IS NULL
        OR o.case_no LIKE CONCAT('%%', %s, '%%')
+       OR o.case_no LIKE CONCAT('%%', %s, '%%')
        OR c.name LIKE CONCAT('%%', %s, '%%')
    )
  ORDER BY o.case_no
@@ -203,6 +205,7 @@ class MySqlOrderSummaryQueryRepository:
     ) -> tuple[Mapping[str, object], ...]:
         cursor_case_no = _cursor_case_no(after_case_no)
         result_limit = _result_limit(page_size)
+        clean_query = re.sub(r"^(?:HC|hc)\s*", "", query_text).strip() if query_text else None
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _ORDER_SUMMARY_PAGE_SQL,
@@ -213,6 +216,7 @@ class MySqlOrderSummaryQueryRepository:
                     OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value,
                     query_text,
                     query_text,
+                    clean_query or query_text,
                     query_text,
                     result_limit,
                 ),

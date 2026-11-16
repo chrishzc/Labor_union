@@ -1,3 +1,7 @@
+/**
+ * File: compact_case_drawer.test.tsx
+ * Description: 案件精簡抽屜之帳務呈現、方案確認、退款沖抵與核對整合測試。
+ */
 import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {FinanceCaseAccounting} from '../../../../../../../components/FinanceCaseAccounting';
@@ -492,4 +496,305 @@ describe('同案通知與方案保存防重',()=>{
   const calls=vi.mocked(financeAccountingClient.saveSubsidyPlan).mock.calls;
   expect(calls[1][1]).toEqual({scheme:'split',expected_version:1,preview_fingerprint:'b'.repeat(64)});expect(calls[2][2]).toBe(calls[1][2]);
  });
+});
+describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
+  it('E2E：台新銀行退款流水無待退款項時，透過調整服務天數結算產生退款，並完成退款沖抵核銷', async () => {
+    const refundObligationId = 'client-cancellation:refund:taishin';
+    const row: FinanceBankTransaction = {
+      row_id: 88,
+      row_identity: 'finance-import-row:88',
+      bank: 'taishin',
+      direction: 'outgoing',
+      transaction_date: '2026-11-15',
+      reference: '台新退款 88',
+      amount_ntd: 5000,
+      status: 'pending',
+      classification_type: 'client_refund',
+      disposition: 'business_pending',
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      reconciliation_target: {
+        case_no: caseNo,
+        staff_id: null,
+        obligation_identities: [],
+        requires_selection: true,
+      },
+    };
+
+    let settled = false;
+    const initialData = facts();
+    initialData.client_items = initialData.client_items.filter(item => item.direction !== 'payable');
+    const settledData = facts();
+    settledData.client_items.push({
+      identity: refundObligationId,
+      direction: 'payable',
+      obligation_type: 'refund',
+      label: '取消結算服務天數退款',
+      party: '合成客戶',
+      expected_ntd: 5000,
+      actual_ntd: 0,
+      remaining_ntd: 5000,
+      payment_stage: null,
+      has_payment: false,
+      version: '1',
+      due_date: '2026-11-15',
+    });
+
+    vi.mocked(financeAccountingClient.query).mockImplementation(async () => settled ? settledData : initialData);
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async () => ({
+      items: [settled ? {
+        ...row,
+        reconciliation_target: { ...row.reconciliation_target!, obligation_identities: [refundObligationId] },
+      } : row],
+      pending_count: 1,
+      next_before_row_id: null,
+    }));
+
+    const dates = [{ service_date: '2026-10-10', staff_id: 12, reason: null }];
+    const cancellationQuery: OrderCancellationQuery = {
+      case_no: caseNo,
+      lifecycle_status: '服務中',
+      actual_start_date: '2026-10-10',
+      contracted_service_days: 20,
+      service_hours_per_day: 8,
+      service_started: true,
+      historical_mid_service_confirmation_available: false,
+      service_data_locked: false,
+      order_version: 1,
+      scheduling_version: 1,
+      scheduling_generation: 1,
+      client_finance_version: 1,
+      payroll_version: 1,
+      confirmed_service_days: dates,
+      caregiver_options: [{ staff_id: 12, display_name: '合成月嫂' }],
+    };
+    const fingerprint = 'e'.repeat(64);
+
+    const querySpy = vi.spyOn(orderCancellationClient, 'query').mockImplementation(async () => settled ? {
+      ...cancellationQuery,
+      lifecycle_status: '訂單取消',
+      order_version: 2,
+      scheduling_version: 2,
+      scheduling_generation: 2,
+      client_finance_version: 2,
+      payroll_version: 2,
+    } : cancellationQuery);
+    const previewSpy = vi.spyOn(orderCancellationClient, 'preview').mockResolvedValue({
+      ...cancellationQuery,
+      cancellation_date: '2026-10-11',
+      actual_end_date: '2026-10-10',
+      official_service_day_count: 1,
+      official_service_hours: 8,
+      scheduling: null,
+      client_finance_impact: null,
+      payroll_impact: null,
+      lifecycle_impact: {
+        case_no: caseNo,
+        before_status: '服務中',
+        after_status: '訂單取消',
+        actual_end_date: '2026-10-10',
+        cancellation_effective: true,
+        fingerprint,
+      },
+      preview_fingerprint: fingerprint,
+    });
+    const applySpy = vi.spyOn(orderCancellationClient, 'apply').mockImplementation(async () => {
+      settled = true;
+      notifyCaseAccountingChanged(caseNo);
+      return {
+        case_no: caseNo,
+        lifecycle_status: '訂單取消',
+        order_version: 2,
+        scheduling_version: 2,
+        scheduling_generation: 2,
+        client_finance_version: 2,
+        payroll_version: 2,
+        actual_end_date: '2026-10-10',
+        official_service_day_count: 1,
+        official_service_hours: 8,
+        cancelled_assignment_ids: [],
+        created_assignment_keys: [],
+        preview_fingerprint: fingerprint,
+      };
+    });
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
+      expect(await screen.findByText('本案目前沒有可選待退款項')).toBeVisible();
+      const adjustBtn = await screen.findByRole('button', { name: /⚡ 調整服務天數結算退款/ });
+      expect(adjustBtn).toBeVisible();
+
+      fireEvent.click(adjustBtn);
+      expect(await screen.findByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
+
+      fireEvent.click(screen.getByRole('button', { name: '預覽取消帳務' }));
+      const confirmBtn = await screen.findByRole('button', { name: '確認取消' });
+      fireEvent.click(confirmBtn);
+
+      expect(await screen.findByText('取消結算已完成，請核對原流水與最新款項。')).toBeVisible();
+      expect(await screen.findByRole('checkbox', { name: /核銷款項/ })).toBeVisible();
+    } finally {
+      querySpy.mockRestore();
+      previewSpy.mockRestore();
+      applySpy.mockRestore();
+      orderMutationFlowStore.clearAll();
+    }
+  });
+
+  it('黑箱：核對交易中折疊區塊引導使用原地更正參數抽屜，收斂重複入口', async () => {
+    const row: FinanceBankTransaction = {
+      row_id: 11,
+      row_identity: 'finance-import-row:11',
+      bank: 'sinopac',
+      direction: 'incoming',
+      transaction_date: '2026-11-15',
+      reference: '永豐入帳 11',
+      amount_ntd: 6000,
+      status: 'pending',
+      classification_type: 'client_receipt',
+      disposition: 'business_pending',
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      reconciliation_target: { case_no: caseNo, staff_id: null, obligation_identities: ['deposit'], requires_selection: false },
+    };
+
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+
+    wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
+    const details = await screen.findByText('調整本案服務條件／計價');
+    fireEvent.click(details);
+
+    expect(await screen.findByText(/本案帳務計價參數（胎數、補助上限、時薪）已整合於下方/)).toBeVisible();
+  });
+
+  it('猴子測試：快速隨機連點切換取消結算與核對視圖，無例外崩潰且狀態穩定', async () => {
+    const row: FinanceBankTransaction = {
+      row_id: 12,
+      row_identity: 'finance-import-row:12',
+      bank: 'taishin',
+      direction: 'outgoing',
+      transaction_date: '2026-11-15',
+      reference: '台新出款 12',
+      amount_ntd: 1000,
+      status: 'pending',
+      classification_type: 'client_refund',
+      disposition: 'business_pending',
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      reconciliation_target: { case_no: caseNo, staff_id: null, obligation_identities: [], requires_selection: true },
+    };
+
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+
+    const dates = [{ service_date: '2026-10-10', staff_id: 12, reason: null }];
+    const cancellationQuery: OrderCancellationQuery = {
+      case_no: caseNo,
+      lifecycle_status: '服務中',
+      actual_start_date: '2026-10-10',
+      contracted_service_days: 20,
+      service_hours_per_day: 8,
+      service_started: true,
+      historical_mid_service_confirmation_available: false,
+      service_data_locked: false,
+      order_version: 1,
+      scheduling_version: 1,
+      scheduling_generation: 1,
+      client_finance_version: 1,
+      payroll_version: 1,
+      confirmed_service_days: dates,
+      caregiver_options: [{ staff_id: 12, display_name: '合成月嫂' }],
+    };
+
+    const querySpy = vi.spyOn(orderCancellationClient, 'query').mockResolvedValue(cancellationQuery);
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
+      for (let i = 0; i < 6; i++) {
+        const openBtn = await screen.findByRole('button', { name: /取消結算（調整服務天數產生退款）/ });
+        fireEvent.click(openBtn);
+        const backBtn = await screen.findByRole('button', { name: '返回核對交易' });
+        fireEvent.click(backBtn);
+      }
+      expect(await screen.findByRole('button', { name: /取消結算（調整服務天數產生退款）/ })).toBeEnabled();
+    } finally {
+      querySpy.mockRestore();
+    }
+  });
+
+  it('探索性測試：取消結算預覽遇到網路 500 時，保留草稿狀態並顯示錯誤提示，可安全重試', async () => {
+    const row: FinanceBankTransaction = {
+      row_id: 13,
+      row_identity: 'finance-import-row:13',
+      bank: 'taishin',
+      direction: 'outgoing',
+      transaction_date: '2026-11-15',
+      reference: '台新出款 13',
+      amount_ntd: 3000,
+      status: 'pending',
+      classification_type: 'client_refund',
+      disposition: 'business_pending',
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      reconciliation_target: { case_no: caseNo, staff_id: null, obligation_identities: [], requires_selection: true },
+    };
+
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+
+    const dates = [{ service_date: '2026-10-10', staff_id: 12, reason: null }];
+    const cancellationQuery: OrderCancellationQuery = {
+      case_no: caseNo,
+      lifecycle_status: '服務中',
+      actual_start_date: '2026-10-10',
+      contracted_service_days: 20,
+      service_hours_per_day: 8,
+      service_started: true,
+      historical_mid_service_confirmation_available: false,
+      service_data_locked: false,
+      order_version: 1,
+      scheduling_version: 1,
+      scheduling_generation: 1,
+      client_finance_version: 1,
+      payroll_version: 1,
+      confirmed_service_days: dates,
+      caregiver_options: [{ staff_id: 12, display_name: '合成月嫂' }],
+    };
+
+    const querySpy = vi.spyOn(orderCancellationClient, 'query').mockResolvedValue(cancellationQuery);
+    const previewSpy = vi.spyOn(orderCancellationClient, 'preview').mockRejectedValueOnce(new Error('網路連線逾時'));
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
+      fireEvent.click(await screen.findByRole('button', { name: /取消結算（調整服務天數產生退款）/ }));
+      expect(await screen.findByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
+      fireEvent.click(screen.getByRole('button', { name: '預覽取消帳務' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('網路連線逾時');
+      expect(screen.getByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
+      expect(screen.getByRole('button', { name: '預覽取消帳務' })).toBeEnabled();
+    } finally {
+      querySpy.mockRestore();
+      previewSpy.mockRestore();
+      orderMutationFlowStore.clearAll();
+    }
+  });
 });

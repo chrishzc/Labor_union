@@ -82,7 +82,7 @@ class StoredFinanceImportReceipt:
 
 class FinanceImportRepository(Protocol):
     def exclude_unreconciled_bank_row(self, row_id, reason, actor): ...
-    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor): ...
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor, *, expected_classification_version=None): ...
     def load(self, batch_identity: str, *, for_update: bool) -> FinanceImportBatchFacts: ...
     def load_pending_batches(self): ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool = False) -> StoredFinanceImportReceipt | None: ...
@@ -117,9 +117,12 @@ class FinanceImportWorkflow:
                 unit_of_work.commit()
             return result
 
-    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor):
+    def pair_unreconciled_bank_row(self, row_id, case_no, purpose, person_id, actor, *, expected_classification_version=None):
         with self._unit_of_work_factory() as unit_of_work:
-            result = self._repository.pair_unreconciled_bank_row(row_id, case_no, purpose, person_id, actor.actor_id)
+            result = self._repository.pair_unreconciled_bank_row(
+                row_id, case_no, purpose, person_id, actor.actor_id,
+                expected_classification_version=expected_classification_version,
+            )
             if result == "paired":
                 unit_of_work.commit()
             return result

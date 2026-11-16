@@ -304,6 +304,7 @@ def _query_payload(facts) -> dict[str, Any]:
         "selectable_dates": facts.selectable_dates,
         "current_version": facts.current_version,
         "current_dates": facts.current_dates,
+        "effective_service_dates": facts.effective_service_dates,
         "bound_staff": [
             {
                 "staff_id": assignment.staff_id,

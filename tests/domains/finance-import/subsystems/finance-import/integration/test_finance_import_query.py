@@ -268,6 +268,52 @@ def test_excluded_bank_transactions_loads_audit_evidence_and_rows():
     assert result["next_before_row_id"] is None
 
 
+def test_bank_transactions_search_matches_associated_case_and_variants() -> None:
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    class _MockCursor:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+        def __enter__(self) -> "_MockCursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: tuple[object, ...]) -> None:
+            self.queries.append((sql, params))
+
+        def fetchone(self) -> dict[str, object]:
+            return {"total": 1}
+
+        def fetchall(self) -> list[dict[str, object]]:
+            return []
+
+    cursor = _MockCursor()
+    service = FinanceImportQueryService(SimpleNamespace(cursor=lambda: cursor))
+    service.bank_transactions(
+        bank=None,
+        direction=None,
+        status="pending",
+        start=None,
+        end=None,
+        search="HC115000003",
+        limit=50,
+        before_row_id=None,
+    )
+
+    assert len(cursor.queries) >= 1
+    sql, params = cursor.queries[0]
+    assert "proofs.case_no" in sql
+    assert "classification_evidence" in sql
+    assert "target_identities" in sql
+    assert "client_legacy_virtual_accounts" in sql
+    assert "orders" in sql
+    assert "115000003" in params
+    assert "115003" in params
+
+
 def test_bank_case_pairing_appends_only_the_selected_candidate(monkeypatch):
     from unittest.mock import MagicMock
     from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository
@@ -291,8 +337,53 @@ def test_bank_case_pairing_appends_only_the_selected_candidate(monkeypatch):
     assert MySqlFinanceImportRepository(connection).pair_unreconciled_bank_row(7, "case-2", "client_refund", 5, "admin") == "paired"
     event = next(call.args for call in cursor.execute.call_args_list
                  if call.args[0].startswith("INSERT INTO finance_import_classification_events"))
-    assert event[1][0:3] == (4, 7, "client_refund")
-    assert event[1][4:7] == ('["client:5"]', '["bank-paired-case:case-2"]', "admin")
+    assert event[1][0:5] == (4, 7, 1, 1, "client_refund")
+    assert event[1][6:] == ('["client:5"]', '["bank-paired-case:case-2"]', "admin")
+
+
+@pytest.mark.parametrize(
+    "current_kind,purpose,person_id,expected_kind",
+    [("staff_payout", "client_refund", 5, "client_refund"), ("client_refund", "staff_salary", 7, "staff_payout")],
+)
+@pytest.mark.parametrize("state", ["pending", "stale", "posted", "blocked", "different_case"])
+def test_sinopac_purpose_review_rechecks_current_source_and_appends_classification(
+    monkeypatch, current_kind, purpose, person_id, expected_kind, state,
+):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository
+    from subsystems.finance_import import identity_maps, staging
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.side_effect = [[{"batch_id": 4}], [{"staff_id": 7, "name": "合成月嫂"}]]
+    cursor.fetchone.side_effect = [
+        {"batch_id": 4, "format_id": "sinopac", "direction": "outgoing", "reconciliation_status": "pending",
+         "memo": "HC115001 合成備註", "bank_references": {}, "warnings": [], "raw_payload": {}},
+        {"posted": 1} if state == "posted" else None,
+        None,
+        {"classification_version": 2, "canonical_fact_version": 1, "classification_type": current_kind,
+         "disposition": "blocked" if state == "blocked" else "business_pending",
+         "reason": "manual_bank_case_pairing", "evidence": ["bank-paired-case:case-2"], "target_identities": []},
+        {"client_id": 5},
+        {"client_id": 5},
+    ]
+    monkeypatch.setattr(identity_maps, "load_finance_identity_maps", lambda _: {})
+    monkeypatch.setattr(staging, "resolve_client_virtual_account_suffix",
+                        lambda *_: pytest.fail("the committed manual case takes precedence"))
+    result = MySqlFinanceImportRepository(connection).pair_unreconciled_bank_row(
+        7, "case-1" if state == "different_case" else "case-2", purpose, person_id, "admin",
+        expected_classification_version=1 if state == "stale" else 2,
+    )
+    events = [call.args[1] for call in cursor.execute.call_args_list
+              if call.args[0].startswith("INSERT INTO finance_import_classification_events")]
+    if state == "pending":
+        assert result == "paired"
+        (event,) = events
+        assert event[:5] == (4, 7, 3, 1, expected_kind)
+        assert event[7:] == ('["bank-paired-case:case-2"]', "admin")
+    else:
+        assert result == "conflict"
+        assert events == []
 
 
 def test_query_rejects_missing_formal_batch() -> None:

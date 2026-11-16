@@ -66,7 +66,7 @@ class MySqlServiceDateConfirmationRepository:
             )
             current = cursor.fetchone()
             current_dates = self._dates(cursor, current["id"], lock=lock) if current else ()
-            suggested = self._suggested_dates(cursor, case_no, order, lock=lock)
+            effective_dates = self._effective_service_dates(cursor, case_no, order, lock=lock)
             restart_generation, restart_assignments = self._restart_scheduling_source(
                 cursor, case_no, int(order["service_days"]), lock=lock
             )
@@ -75,7 +75,7 @@ class MySqlServiceDateConfirmationRepository:
             int(order["lifecycle_version"] or 0),
             int(order["scheduling_version"] or 0),
             int(order["service_days"]),
-            suggested,
+            effective_dates,
             self._selectable_dates(order),
             int(current["version"]) if current else None,
             current_dates,
@@ -83,6 +83,7 @@ class MySqlServiceDateConfirmationRepository:
             restart_assignments,
             float(order["service_hours_per_day"]),
             int(current["order_version"]) if current else None,
+            effective_service_dates=effective_dates,
         )
 
     def load_service_dates(
@@ -309,7 +310,7 @@ class MySqlServiceDateConfirmationRepository:
         return tuple(row["service_date"] for row in cursor.fetchall())
 
     @staticmethod
-    def _suggested_dates(cursor, case_no, order, *, lock=False):
+    def _effective_service_dates(cursor, case_no, order, *, lock=False):
         cursor.execute(
             "SELECT s.work_date FROM staff_schedule s JOIN scheduling_aggregates g "
             "ON g.effective_generation_id=s.generation_id WHERE g.case_no=%s "

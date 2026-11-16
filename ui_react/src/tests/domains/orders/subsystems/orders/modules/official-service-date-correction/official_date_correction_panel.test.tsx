@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { serviceStartClient } from '../../../../../../../api/scheduling/service_start_client';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import { OrderOfficialDateCorrectionPanel } from '../../../../../../../components/OrderOfficialDateCorrectionPanel';
 import { OrderServiceAttributionPanel } from '../../../../../../../components/OrderServiceAttributionPanel';
 vi.mock('../../../../../../../api/scheduling/holiday_client', () => ({ holidayClient: { query: vi.fn(async () => ({ holidays: [] })) } }));
@@ -58,7 +59,7 @@ it('makes date changes explicit and previews only the affected days before savin
   expect(mocks.applyAttribution).not.toHaveBeenCalled();
 });
 
-it('saves consent-backed substitutes only on the requested dates and observes the closed task', async () => {
+it('sends a consent-backed substitute save once per click burst and retries an unknown result with the original key', async () => {
   const date = '2099-11-25';
   const unaffectedDay = '2099-11-26';
   const source = { assignment_id: 13, staff_id: 7, candidate_key: null, sequence: 1,
@@ -68,21 +69,28 @@ it('saves consent-backed substitutes only on the requested dates and observes th
     { staff_id: 7, service_dates: [unaffectedDay] }, { staff_id: 8, service_dates: [date] },
   ], staff_entitlements: [], funding: [], paid_obligations: [], manual_amounts: [] };
   mocks.previewAttribution.mockClear().mockResolvedValue(preview);
-  mocks.applyAttribution.mockClear().mockResolvedValue({ scheduling_version: 2,
-    effective_assignments: [{ assignment_id: 13, service_dates: [unaffectedDay] }, { assignment_id: 14, service_dates: [date] }] });
+  mocks.applyAttribution.mockReset()
+    .mockRejectedValueOnce(new ApiHttpError(503, 'unavailable', '暫時無法確認'))
+    .mockResolvedValue({ scheduling_version: 2,
+      effective_assignments: [{ assignment_id: 13, service_dates: [unaffectedDay] }, { assignment_id: 14, service_dates: [date] }] });
   const assignmentReadback = vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockImplementation(async () => ({
     case_no: 'ISSUE-346', scheduling_version: 2, order_version: 1, scheduling_generation: 2,
     client_finance_version: null, payroll_version: null,
     service_started: true, contracted_service_days: 2, service_hours_per_day: 8,
     assignments: [{ ...source, official_service_dates: [unaffectedDay] }, { ...source, assignment_id: 14, staff_id: 8, official_service_dates: [date] }],
   }));
-  const taskReadback = vi.spyOn(serviceStartClient, 'detail').mockImplementation(async () => ({
-    request_id: 81, version: 4, workflow_kind: 'leave', status: 'applied',
-    case_no: 'ISSUE-346', staff_id: 7, staff_name: '月嫂 7', segment_id: 13, order_version: 1,
-    requested_start_date: null, selected_staff_id: null, selected_staff_name: null, willingness: null,
-    invitation_status: null, joined: false, result: null, proposed_start_date: null, proposed_end_date: null,
-    leave_dates: [{ original_date: date, new_date: null }], conflict_message: null, handover_dates: [],
-  }));
+  let finishTaskReadback: (() => void) | undefined;
+  const taskReadbackReady = new Promise<void>(resolve => { finishTaskReadback = resolve; });
+  const taskReadback = vi.spyOn(serviceStartClient, 'detail').mockImplementation(async () => {
+    await taskReadbackReady;
+    return {
+      request_id: 81, version: 4, workflow_kind: 'leave', status: 'applied',
+      case_no: 'ISSUE-346', staff_id: 7, staff_name: '月嫂 7', segment_id: 13, order_version: 1,
+      requested_start_date: null, selected_staff_id: null, selected_staff_name: null, willingness: null,
+      invitation_status: null, joined: false, result: null, proposed_start_date: null, proposed_end_date: null,
+      leave_dates: [{ original_date: date, new_date: null }], conflict_message: null, handover_dates: [],
+    };
+  });
   try {
     const onSaved = vi.fn();
     render(<OrderServiceAttributionPanel caseNo="ISSUE-346" segments={[source]}
@@ -97,14 +105,38 @@ it('saves consent-backed substitutes only on the requested dates and observes th
     const previewButton = screen.getByRole('button', { name: '預覽排班與帳務' });
     expect(previewButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('代班月嫂同意的協調依據（必填）'), { target: { value: '電話確認月嫂同意代班' } });
-    fireEvent.click(previewButton);
+    await act(async () => {
+      previewButton.click();
+      previewButton.click();
+    });
+    expect(mocks.previewAttribution).toHaveBeenCalledOnce();
     expect(mocks.previewAttribution).toHaveBeenCalledWith('ISSUE-346', {
       scope: 'upcoming', evidence: '電話確認月嫂同意代班', substitute_request_id: 81, expected_substitute_request_version: 3,
       moves: [{ source_assignment_id: 13, source_date: date, replacement_date: date, staff_id: 8, target_assignment_id: null }],
     });
-    fireEvent.click(await screen.findByRole('button', { name: '確認並儲存排班' }));
+    const saveButton = await screen.findByRole('button', { name: '確認並儲存排班' });
+    await act(async () => {
+      saveButton.click();
+      saveButton.click();
+      saveButton.click();
+    });
+    expect(mocks.applyAttribution).toHaveBeenCalledTimes(1);
+    await screen.findByRole('alert');
+    expect(onSaved).not.toHaveBeenCalled();
+
+    const retryButton = await screen.findByRole('button', { name: '以原操作重新確認' });
+    await act(async () => {
+      retryButton.click();
+      retryButton.click();
+    });
+    await waitFor(() => expect(taskReadback).toHaveBeenCalledWith(81));
+    expect(mocks.applyAttribution).toHaveBeenCalledTimes(2);
+    expect(mocks.applyAttribution.mock.calls[1]).toEqual(mocks.applyAttribution.mock.calls[0]);
+    expect(mocks.applyAttribution.mock.calls[0][4]).toEqual(expect.any(String));
+    expect(retryButton).toBeDisabled();
+    expect(onSaved).not.toHaveBeenCalled();
+    await act(async () => { finishTaskReadback?.(); });
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-    expect(taskReadback).toHaveBeenCalledWith(81);
   } finally {
     assignmentReadback.mockRestore();
     taskReadback.mockRestore();
