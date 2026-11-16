@@ -8,7 +8,7 @@ from subsystems.finance_import.identity_maps import load_finance_identity_maps
 
 @pytest.mark.parametrize("query", [
     "COALESCE(projection.balance_ntd", "SELECT id,name FROM staff", "SELECT id,name FROM clients",
-    "SELECT case_no FROM orders", "SELECT case_no, virtual_account FROM client_legacy_virtual_accounts",
+    "SELECT case_no, staff_id FROM orders", "SELECT case_no, virtual_account FROM client_legacy_virtual_accounts",
     "SELECT order_row.client_id, client.name, obligation.case_no",
 ])
 def test_identity_query_failure_is_not_a_successful_empty_candidate_set(query):

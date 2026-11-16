@@ -451,12 +451,14 @@ def test_actual_xlsx_preview_keeps_bad_rows_reviewable_without_aborting_good_row
             "case_no": "MATRIX-REVIEW",
             "fields": ["訂單狀態"],
             "issue_codes": ["historical_status_invalid"],
+            "detail": None,
         },
         {
             "source_row": 8,
             "case_no": "MATRIX-STAFF",
             "fields": ["月嫂姓名", "第 1 位月嫂姓名"],
             "issue_codes": ["historical_staff_ambiguous"],
+            "detail": None,
         },
     ]
     assert repository.receipts == {}

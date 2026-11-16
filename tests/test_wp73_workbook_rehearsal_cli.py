@@ -1,4 +1,4 @@
-"""
+﻿"""
 File: test_wp73_workbook_rehearsal_cli.py
 Description: 驗證 WP73 活頁簿演練唯讀去識別化，並正確處理替代欄位與選表歧義。
 """
@@ -190,7 +190,7 @@ def test_explicit_sheet_resolves_ambiguity_without_echoing_name(tmp_path, capsys
 
 
 def test_rehearsal_rejects_non_xlsx_before_parsing(tmp_path, capsys) -> None:
-    workbook = tmp_path / "history.xls"
+    workbook = tmp_path / "history.csv"
     workbook.write_bytes(b"not-an-excel-file")
 
     assert rehearsal.main(["--lane", "hcm", "--workbook", str(workbook)]) == 2

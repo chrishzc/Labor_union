@@ -779,7 +779,7 @@ def test_sinopac_refund_resolver_saves_actual_step_and_keeps_manual_action(monke
     connection=Mock()
     connection.cursor.return_value.__enter__=Mock(return_value=Mock(fetchone=Mock(return_value={'format_id':'sinopac','currency':currency})))
     connection.cursor.return_value.__exit__=Mock(return_value=False)
-    monkeypatch.setattr(module,'_sinopac_outgoing_case_info',lambda *args:(True,'SYNTHETIC',trans_date))
+    monkeypatch.setattr(module,'_sinopac_outgoing_case_info',lambda *args,**kwargs:(True,'SYNTHETIC',trans_date))
     monkeypatch.setattr(module,'_load_client_refund_targets',lambda *args:tuple(dict(case_no='SYNTHETIC',obligation_identity=f'refund:{i}',due_date=due,amount_due_ntd=a) for i,a in enumerate(amounts)))
     owner=Mock()
     monkeypatch.setattr(module.ClientRefundReversalWorkflow,'preview',owner)

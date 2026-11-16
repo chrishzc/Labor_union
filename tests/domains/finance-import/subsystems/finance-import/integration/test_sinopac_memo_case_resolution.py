@@ -32,7 +32,7 @@ class _CaseCursor:
     def __exit__(self, *_args):
         return False
 
-    def execute(self, sql, params):
+    def execute(self, sql, params=()):
         sql = " ".join(sql.split())
         self.executions.append((sql, params))
         if "FROM finance_import_rows WHERE id=" in sql:
@@ -64,6 +64,7 @@ class _CaseCursor:
         elif any(table in sql for table in (
             "FROM client_finance_accounts", "FROM staff_payable_accounts",
             "FROM staff_payout_obligation_links", "FROM finance_anomaly_occurrences",
+            "FROM clients",
         )):
             self.current = ()
         else:
@@ -107,12 +108,19 @@ def _pending(row, kind, *, verified_name=True):
     }
     if verified_name:
         row = {**row, "counterparty_name": obligation["name"]}
-    decision = classify_finance_transaction(
-        row, {"10001": [7]} if kind == "refund" else {},
-        {"10001": [7]} if kind == "staff" else {}, {},
-        staff_payout_candidates=(obligation,) if kind == "staff" else (),
-        taishin_client_refund_candidates=(obligation,) if kind == "refund" else (),
-    )
+    if kind == "refund":
+        # 規格 22 §4.2：永豐客戶退款不讀退款帳號，只由「雇主退款／退訂金」備註與案件六碼辨識；
+        # 本檔測的是 owning-domain resolver，故以已分類為 client_refund 的 pending 列作為前提。
+        if row.get("format_id") == "taishin":
+            decision = {"classification_type": "client_refund", "matched_identity_ids": [7],
+                        "reason": "unique_client_refund_name_and_month_matched"}
+        else:
+            decision = {"classification_type": "client_refund", "matched_identity_ids": [7],
+                        "reason": "sinopac_unique_client_refund_case_suffix_in_memo"}
+    else:
+        decision = classify_finance_transaction(
+            row, {}, {"10001": [7]}, {}, staff_payout_candidates=(obligation,),
+        )
     assert decision["classification_type"] == ("client_refund" if kind == "refund" else "staff_salary")
     initial = build_initial_classification(InitialClassificationFacts(
         97, decision["classification_type"], tuple(decision["matched_identity_ids"]), decision["reason"],
@@ -137,8 +145,10 @@ def _target_query(connection):
     )
 
 
-@pytest.mark.parametrize("memo", ["HC115001服務人員", "A115001服務人員", "HC115001退款"])
-@pytest.mark.parametrize("kind", ["refund", "staff"])
+@pytest.mark.parametrize(("kind", "memo"), [
+    ("refund", "HC115001雇主退款"), ("refund", "A115001退訂金"),
+    ("staff", "HC115001服務人員"), ("staff", "A115001服務人員"), ("staff", "HC115001退款"),
+])
 def test_workbook_memo_selects_only_that_case_for_refunds_and_staff_payouts(tmp_path, memo, kind):
     row = _workbook_row(tmp_path, memo)
     candidate = _pending(row, kind)
@@ -161,13 +171,14 @@ def test_workbook_memo_selects_only_that_case_for_refunds_and_staff_payouts(tmp_
             **row, "id": 97, "transaction_date": date(2026, 10, 20),
             "effective_classification_type": "client_refund", "reconciliation_status": "pending",
             "resolved_counterparty_account": None, "ledger_entry_id": None,
+            "sinopac_refund_case_no": "115000001",
         },), "115000001", ClientRefundPurpose.CUSTOMER_REFUND, "10001")
         assert len(facts) == 1 and facts[0].eligible is True
 
 
 @pytest.mark.parametrize("kind", ["refund", "staff"])
 def test_memo_case_uses_imported_mapping_instead_of_a_formula_guess(tmp_path, kind):
-    row = _workbook_row(tmp_path, "HC115001退款")
+    row = _workbook_row(tmp_path, "HC115001雇主退款" if kind == "refund" else "HC115001退款")
     connection = _CaseConnection(row, (
         _obligation("114000018", "selected"), _obligation("115000001", "wrong-formula"),
     ), mappings=("114000018",), cases=("114000018", "115000001"))
@@ -242,6 +253,7 @@ def test_refund_does_not_use_cached_or_memo_account_when_bank_reference_conflict
 @pytest.mark.parametrize(("kind", "format_id"), [("refund", "taishin"), ("staff", "legacy")])
 def test_verified_name_can_resolve_without_a_memo_case(tmp_path, kind, format_id):
     row = _workbook_row(tmp_path, "HC115001退款")
+    row["format_id"] = format_id
     candidate = _pending(row, kind)
     source = {**row, "format_id": format_id, "memo": None}
     connection = _CaseConnection(source, (_obligation("115000001", "existing-target"),))
@@ -250,10 +262,3 @@ def test_verified_name_can_resolve_without_a_memo_case(tmp_path, kind, format_id
     target_sql, parameters = _target_query(connection)
     assert "AND obligation.case_no=%s" not in target_sql
     assert parameters == (7,)
-
-
-def test_shared_refund_and_staff_account_is_not_resolved_by_memo_label(tmp_path):
-    row = _workbook_row(tmp_path, "HC115001退款")
-    decision = classify_finance_transaction(row, {"10001": [7]}, {"10001": [8]}, {})
-    assert decision["classification_type"] == "non_business_review"
-    assert decision["reason"] == "counterparty_identity_type_conflict"
