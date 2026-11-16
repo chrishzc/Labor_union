@@ -13,6 +13,7 @@ class StatementExportRow:
     source: str
     cases: tuple[str, ...]
     fields: tuple[tuple[str, object], ...]
+    purpose: str = ""
 
 
 @dataclass(frozen=True)

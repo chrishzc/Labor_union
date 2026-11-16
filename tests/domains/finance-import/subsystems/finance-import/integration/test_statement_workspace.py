@@ -214,8 +214,8 @@ def test_full_export_keeps_both_bank_columns_and_text_without_formulas():
     class Archive:
         def export_rows(self):
             return (
-                StatementExportRow("bank:1", "sinopac", "reconciled", ("115000001",), (("帳號", "000001"), ("備註", "=1+1"), ("更正註記", "Y"))),
-                StatementExportRow("bank:2", "taishin", "reconciled", ("115000002",), (("台新原欄", "000002"), ("備註", "+cmd"))),
+                StatementExportRow("bank:1", "sinopac", "reconciled", ("115000001",), (("帳號", "000001"), ("備註", "=1+1"), ("更正註記", "Y")), "訂金+第一期(組合銷帳)"),
+                StatementExportRow("bank:2", "taishin", "reconciled", ("115000002",), (("台新原欄", "000002"), ("備註", "+cmd")), "補助轉交月嫂"),
             )
     app = FastAPI(); app.include_router(router)
     app.dependency_overrides[require_admin] = lambda: object()
@@ -227,9 +227,55 @@ def test_full_export_keeps_both_bank_columns_and_text_without_formulas():
     workbook = load_workbook(BytesIO(response.content), data_only=False)
     assert workbook.sheetnames == ["永豐", "台新"]
     sheet = workbook["永豐"]
+    headers = [cell.value for cell in sheet[1]]
+    assert "明細識別" not in headers and "資料來源" not in headers
+    assert headers[-2:] == ["款項用途", "關聯案件"]
     assert sheet["A2"].value == "000001" and sheet["M2"].data_type == "s"
     assert sheet["M2"].value == "=1+1" and sheet.auto_filter.ref
-    assert workbook["台新"]["A2"].value == "000002"
+    assert sheet.cell(2, headers.index("款項用途") + 1).value == "訂金+第一期(組合銷帳)"
+    assert sheet.cell(2, headers.index("關聯案件") + 1).value == "115000001"
+    taishin_sheet = workbook["台新"]
+    taishin_headers = [cell.value for cell in taishin_sheet[1]]
+    assert "明細識別" not in taishin_headers and "資料來源" not in taishin_headers
+    assert taishin_sheet["A2"].value == "000002"
+    assert taishin_sheet.cell(2, taishin_headers.index("款項用途") + 1).value == "補助轉交月嫂"
+
+
+def test_format_export_purpose_covers_single_and_combined_reconciliation_items():
+    from infrastructure.mysql.finance_statement_archive_repository import format_export_purpose
+
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "deposit", "item_identity": "deposit:1"}]) == "訂金"
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "first", "item_identity": "first:1"}]) == "第一期"
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "second", "item_identity": "second:1"}]) == "第二期"
+    assert format_export_purpose("sinopac", [
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "first", "item_identity": "first:1"},
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "deposit", "item_identity": "deposit:1"},
+    ]) == "訂金+第一期(組合銷帳)"
+    assert format_export_purpose("sinopac", [
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "deposit", "item_identity": "deposit:1"},
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "first", "item_identity": "first:1"},
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": "second", "item_identity": "second:1"},
+    ]) == "訂金+第一期+第二期(組合銷帳)"
+    assert format_export_purpose("sinopac", [{"proof_source": "staff_payout", "entry_type": "payout", "obligation_type": None, "item_identity": "staff:1"}]) == "月嫂薪資"
+    assert format_export_purpose("sinopac", [
+        {"proof_source": "staff_payout", "entry_type": "payout", "obligation_type": None, "item_identity": "staff:1"},
+        {"proof_source": "staff_payout", "entry_type": "payout", "obligation_type": None, "item_identity": "staff:2"},
+    ]) == "月嫂薪資(組合銷帳)"
+    assert format_export_purpose("taishin", [{"proof_source": "staff_payout", "entry_type": "payout", "obligation_type": None, "item_identity": "staff:1"}]) == "補助轉交月嫂"
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "refund", "obligation_type": "refund", "item_identity": "refund:1"}]) == "客戶退款"
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "refund", "obligation_type": "refund", "item_identity": "client-cancellation:1"}]) == "取消結算退款"
+    assert format_export_purpose("taishin", [{"proof_source": "client_ledger", "entry_type": "subsidy_return", "obligation_type": "subsidy_return", "item_identity": "sub:1"}]) == "退客戶先墊補助"
+    assert format_export_purpose("sinopac", [{"proof_source": "client_ledger", "entry_type": "reversal", "obligation_type": "refund", "item_identity": "refund:1"}]) == "客戶退匯"
+    assert format_export_purpose("taishin", [
+        {"proof_source": "government_subsidy", "entry_type": "incoming", "obligation_type": None, "item_identity": "10"},
+        {"proof_source": "government_subsidy", "entry_type": "incoming", "obligation_type": None, "item_identity": "10"},
+    ]) == "政府補助"
+    assert format_export_purpose("taishin", [{"proof_source": "government_subsidy", "entry_type": "outgoing", "obligation_type": None, "item_identity": "11"}]) == "政府補助差額退回"
+    assert format_export_purpose("sinopac", [{"proof_source": "staff_overpayment_recovery", "entry_type": "cash_recovered", "obligation_type": None, "item_identity": "rec:1"}]) == "月嫂超付追償"
+    assert format_export_purpose("sinopac", [
+        {"proof_source": "client_ledger", "entry_type": "receipt", "obligation_type": None, "item_identity": None},
+        {"proof_source": "client_over_refund_recovery", "entry_type": "collected", "obligation_type": None, "item_identity": "crec:1"},
+    ]) == "客戶退款超付追償"
 
 
 def test_historical_reference_export_is_separate_readonly_and_preserves_text():

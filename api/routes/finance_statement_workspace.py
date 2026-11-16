@@ -305,7 +305,8 @@ def _statement_export_response(rows, *, reference=False):
                 if name not in columns:
                     columns.append(name)
         metadata = []
-        for name in ("明細識別", "資料來源", "關聯案件"):
+        extra_columns = ("明細識別", "資料來源", "關聯案件") if reference else ("款項用途", "關聯案件")
+        for name in extra_columns:
             while name in columns:
                 name = "_" + name
             metadata.append(name)
@@ -316,7 +317,12 @@ def _statement_export_response(rows, *, reference=False):
                 cell.data_type = "s"
         for row in selected:
             fields = dict(row.fields)
-            values = [fields.get(column) for column in columns] + [row.identity, "歷史人工備查（不代表已核銷）" if reference else row.source, ",".join(row.cases)]
+            extra_values = (
+                [row.identity, "歷史人工備查（不代表已核銷）", ",".join(row.cases)]
+                if reference
+                else [row.purpose or "已核銷款項", ",".join(row.cases)]
+            )
+            values = [fields.get(column) for column in columns] + extra_values
             sheet.append(values)
             # Bank text is untrusted spreadsheet content, never a formula.
             for cell in sheet[sheet.max_row]:

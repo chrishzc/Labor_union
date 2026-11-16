@@ -67,7 +67,7 @@
 
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
-- archive endpoints beneath `/api/v1/finance-import`: `GET statements/export` 只納入正式owner核銷證據；`GET statements/manual/export` 獨立唯讀匯出既有人工備查；`POST statements/manual` 經認證後回typed 410、無DB writer。React僅提供兩種匯出，不再提供無案件新增表單；案件正式補登仍沿規格22 §19。`POST statements/duplicates` 保留原判重契約。
+- archive endpoints beneath `/api/v1/finance-import`: `GET statements/export` 只納入正式owner核銷證據，匯出分銀行原欄位並附「款項用途」（含單一項目與訂金+第一期(組合銷帳)等組合銷帳標示）與「關聯案件」，不顯示內部明細識別與資料來源欄；`GET statements/manual/export` 獨立唯讀匯出既有人工備查；`POST statements/manual` 經認證後回typed 410、無DB writer。React僅提供兩種匯出，不再提供無案件新增表單；案件正式補登仍沿規格22 §19。`POST statements/duplicates` 保留原判重契約。
 - `bank-transactions` — 顯示正式核銷的銀行流水及符合保留條件的待核對列，包含尚未確認唯一案件的台新月嫂補助及同名客戶補助退款。台新僅六碼定位但用途待確認的來源提供案件入口。案件與對象已確認的待核對列可開核銷子畫面；唯一款項預選，其餘 target 以 `requires_selection` 及同案同對象候選 IDs 要求選款。正式 owner 重驗核銷，不由 Query／UI 寫帳。
 - 永豐客戶入款的待核對原因沿原 Apply 收據讀取；多候選合併同一原因並保留當次期別及可空的原到期日，缺日期明示未設定。缺少當次證據時，原因欄明示未留存，並區分依目前期款推得的提示；舊少收／超收及日期／多候選碼只讀對齊新分類，不改歷史收據。退款帳戶缺件只留在明示超收另列退款的操作內。
 - 台新客戶補助的當次自動配對失敗原因以 `pending_reason` 進入原 Apply 收據，清單以 `recorded_pending_reason` 讀回；不以備註六碼定位成功證據取代真正的日期、款項、金額、多候選或 owner 資格阻擋。
