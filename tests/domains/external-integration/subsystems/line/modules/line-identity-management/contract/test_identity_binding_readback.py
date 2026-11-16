@@ -65,13 +65,13 @@ def test_verified_binding_receipt_uses_role_and_distinguishes_new_and_existing(e
     assert not result['help']
 
 
-def test_customer_review_receipt_describes_retaining_previous_binding():
+def test_obsolete_customer_review_receipt_does_not_claim_success():
     result = _submit({
         'status': 'pending_review', 'review_request_id': 7,
         'receipt_identity': 'public', 'preview_fingerprint': 'a' * 64,
     }, 'customer', preview_status='requires_review')
-    assert result['message'] == '重新綁定申請已送出'
-    assert result['result'] == '審核編號：7。請等待工會確認。核准前會保留原綁定。'
+    assert '綁定結果讀回不完整' in result['message']
+    assert result['result'] == ''
 
 
 def test_staff_mismatch_offers_readable_help_without_automatic_contact():

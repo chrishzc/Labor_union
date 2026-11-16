@@ -314,12 +314,9 @@ async function submitForm(event, definition, button, previewBox) {
         "身分套用失敗，請稍後再試。"
       );
     }
-    const receipt = requireIdentityApply(applyResult, preview, definition.endpoint);
+    const receipt = requireIdentityApply(applyResult, preview);
     const {roleLabel, endpoint} = definition;
-    if (receipt.status === "pending_review") {
-      showMessage("重新綁定申請已送出");
-      previewBox.textContent = `審核編號：${receipt.review_request_id}。請等待工會確認。核准前會保留原綁定。`;
-    } else if (receipt.status === "existing") {
+    if (receipt.status === "existing") {
       showMessage(`${roleLabel}身分已完成綁定`);
       previewBox.textContent = "此 LINE 帳號已綁定此身分，可直接返回 LINE 使用。";
     } else {
@@ -352,13 +349,11 @@ async function submitForm(event, definition, button, previewBox) {
   }
 }
 
-function requireIdentityApply(result, preview, endpoint) {
+function requireIdentityApply(result, preview) {
   const receipt = result?.data;
-  const allowed = endpoint === 'customer' ? ['bound', 'existing', 'pending_review'] : ['bound', 'existing'];
-  if (!receipt || !allowed.includes(receipt.status)
+  if (!receipt || !['bound', 'existing'].includes(receipt.status)
       || typeof receipt.receipt_identity !== 'string' || !receipt.receipt_identity.trim()
-      || receipt.preview_fingerprint !== preview.preview_fingerprint
-      || (receipt.status === 'pending_review' && (!Number.isSafeInteger(receipt.review_request_id) || receipt.review_request_id <= 0))) {
+      || receipt.preview_fingerprint !== preview.preview_fingerprint) {
     throw new Error('綁定結果讀回不完整，請勿重複送出；請聯絡工會確認。');
   }
   return receipt;

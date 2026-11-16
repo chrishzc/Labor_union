@@ -19,6 +19,7 @@ React 身分綁定、待審核、待配對三任務工作區；只呈現 owner-b
 - 身分綁定列表獨立顯示 LINE 端個人選單同步結果，使用既有 binding query。
 - 已綁定列可送出單筆選單重新同步，沿既有身分管理 typed client 顯示受理及同步結果。
 - 身分綁定清單使用列內動作與確認視窗，沒有更正綁定入口或綁定明細抽屜。解除中與已解除的綁定都可永久刪除。
+- 桌面待審核類型篩選無「月嫂身分驗證」。歷史資料在「全部」保留原類型。
 - depends_on: `line-identity-management`, `line-identity-review-presentation` — canonical role/query/command contracts。
 - LINE 管理頁其他 tabs、舊 standalone review／maintenance／pairing 元件與其直接 consumer 不退役。
 

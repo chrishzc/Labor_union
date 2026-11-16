@@ -346,20 +346,6 @@
         </div>
     </div>
 
-    <!-- 重新綁定確認卡片 -->
-    <div class="success-card" id="rebindContent" style="display: none;">
-        <div class="success-icon" style="color: var(--primary); background: rgba(74, 144, 226, 0.1); border-color: rgba(74, 144, 226, 0.2);">?</div>
-        <div class="success-title" id="rebindTitle" style="color: var(--primary);">申請重新綁定</div>
-        <div class="success-text" id="rebindDesc">
-            此資料需要重新綁定。送出後由工會確認，核准前保留原綁定。
-        </div>
-        <div id="rebindStatusMessage" class="status-message" role="status" aria-live="polite"></div>
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <button class="btn-close" id="rebindCancelButton" style="flex: 1;" onclick="cancelRebind()">取消</button>
-            <button class="btn-submit" id="rebindConfirmButton" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">申請重新綁定</button>
-        </div>
-    </div>
-
     <!-- 成功卡片 -->
     <div class="success-card" id="successContent">
         <div class="success-icon">✓</div>
@@ -378,7 +364,6 @@
     let isTestMode = false;
     let currentIdToken = '';
     let runtimePage = null;
-    let pendingCustomerBinding = null;
     let bindingOperationPending = false;
     let bindingResultUnknown = false;
 
@@ -390,7 +375,6 @@
     const formContent = document.getElementById('formContent');
     const successContent = document.getElementById('successContent');
     const successDesc = document.getElementById('successDesc');
-    const rebindContent = document.getElementById('rebindContent');
 
     // 輔助函式：顯示提示訊息
     function showMessage(text, type = 'info') {
@@ -555,10 +539,6 @@
         document.getElementById('btnSubmit').textContent = page.submit_button;
         document.getElementById('successTitle').textContent = page.success_title;
         successDesc.textContent = page.success_description;
-        document.getElementById('rebindTitle').textContent = page.content.rebind_title || '申請重新綁定';
-        document.getElementById('rebindDesc').textContent = page.content.rebind_description || '';
-        document.getElementById('rebindCancelButton').textContent = page.content.rebind_cancel_button || '取消';
-        document.getElementById('rebindConfirmButton').textContent = page.content.rebind_confirm_button || '申請重新綁定';
         document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
         loaderText.textContent = page.loading_text;
         const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
@@ -611,6 +591,16 @@
         document.getElementById('bindingFailureActions').style.display = 'flex';
     }
 
+    function showRebindBlocked(response, result) {
+        const error = result.detail?.error;
+        if (response.status !== 409 || error?.code !== 'line_customer_rebind_blocked' || typeof error.message !== 'string' || !error.message.trim()) {
+            return false;
+        }
+        showMessage(error.message, 'error');
+        document.getElementById('bindingFailureActions').style.display = 'flex';
+        return true;
+    }
+
     function dismissBindingFailure() {
         document.getElementById('bindingFailureActions').style.display = 'none';
         showMessage('', 'info');
@@ -619,7 +609,6 @@
 
     function showBindingResult(title, description, caseNo) {
         formContent.style.display = 'none';
-        rebindContent.style.display = 'none';
         successContent.style.display = 'block';
         const isNewBinding = title === '綁定成功';
         document.getElementById('successTitle').textContent = (isNewBinding && runtimePage?.success_title) || title;
@@ -644,27 +633,22 @@
         });
         const result = await response.json();
         if (!response.ok) bindingResultUnknown = false;
+        if (showRebindBlocked(response, result)) return;
         if (response.status === 410) {
             sessionStorage.removeItem('line_flow_id_customer');
             document.getElementById('restartBinding').hidden = false;
         }
         if (!response.ok || !result.data
-            || !['bound', 'existing', 'pending_review'].includes(result.data.status)) {
+            || !['bound', 'existing'].includes(result.data.status)) {
             throw new Error('目前無法完成綁定，請重新核對資料。');
         }
         if (typeof result.data.receipt_identity !== 'string' || !result.data.receipt_identity.trim()
-            || result.data.preview_fingerprint !== candidate.preview.preview_fingerprint
-            || (result.data.status === 'pending_review' && (!Number.isSafeInteger(result.data.review_request_id) || result.data.review_request_id <= 0))) {
+            || result.data.preview_fingerprint !== candidate.preview.preview_fingerprint) {
             throw new Error('綁定結果讀回不完整，請勿重複送出；請聯絡工會確認。');
         }
         sessionStorage.removeItem('line_flow_id_customer');
         bindingResultUnknown = false;
-        pendingCustomerBinding = null;
-        if (result.data.status === 'pending_review') {
-            showBindingResult('申請已送出', '申請已送出，待工會確認。核准前保留原綁定。');
-        } else {
-            showBindingResult('綁定成功', '綁定成功，專屬選單將稍後更新。若同時具有客戶與月嫂身分，請返回聊天室輸入「切換客戶」或「切換月嫂」，明確選擇要使用的身分。', candidate.preview.candidate?.case_no);
-        }
+        showBindingResult('綁定成功', '綁定成功，專屬選單將稍後更新。若同時具有客戶與月嫂身分，請返回聊天室輸入「切換客戶」或「切換月嫂」，明確選擇要使用的身分。', candidate.preview.candidate?.case_no);
     }
 
     async function handleFormSubmit(event) {
@@ -677,7 +661,6 @@
             showBindingFailure(validation.message);
             return;
         }
-        pendingCustomerBinding = null;
         dismissBindingFailure();
         bindingOperationPending = true;
         showLoader(runtimePage?.content?.submit_loading_text || '正在核對資料...');
@@ -700,6 +683,7 @@
                 body: JSON.stringify({flow_id: flowId, line_id_token: currentIdToken, name, phone}),
             });
             const result = await response.json();
+            if (showRebindBlocked(response, result)) return;
             if (response.status === 410) {
                 sessionStorage.removeItem('line_flow_id_customer');
                 document.getElementById('restartBinding').hidden = false;
@@ -707,7 +691,7 @@
             }
             if (!response.ok || !result.data) throw new Error('目前無法核對資料，請稍後再試。');
             const preview = result.data;
-            if (!['already_bound', 'requires_review', 'matched', 'not_found'].includes(preview.status)
+            if (!['already_bound', 'matched', 'not_found'].includes(preview.status)
                 || !Number.isSafeInteger(preview.expected_version) || preview.expected_version < 0
                 || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint || '')
                 || (preview.status !== 'not_found' && (!preview.candidate || typeof preview.candidate.currently_bound !== 'boolean'))) {
@@ -718,14 +702,6 @@
             }
             if (preview.status === 'already_bound') {
                 showBindingResult('您已完成綁定', '您已完成綁定，可直接返回 LINE 使用。', preview.candidate?.case_no);
-                return;
-            }
-            if (preview.status === 'requires_review' && preview.candidate) {
-                pendingCustomerBinding = {flowId, name, phone, preview};
-                document.getElementById('rebindStatusMessage').textContent = '';
-                document.getElementById('rebindStatusMessage').className = 'status-message';
-                formContent.style.display = 'none';
-                rebindContent.style.display = 'block';
                 return;
             }
             if (preview.status === 'matched' && preview.candidate?.has_completed_survey) {
@@ -749,35 +725,6 @@
             bindingOperationPending = false;
             hideLoader();
         }
-    }
-
-    async function confirmRebind() {
-        if (bindingOperationPending || bindingResultUnknown) return;
-        if (!pendingCustomerBinding) {
-            cancelRebind();
-            showBindingFailure('請重新核對資料後再申請。');
-            return;
-        }
-        bindingOperationPending = true;
-        showLoader('正在送出重新綁定申請...');
-        try {
-            await applyCustomerBinding(pendingCustomerBinding);
-        } catch (error) {
-            const message = document.getElementById('rebindStatusMessage');
-            message.textContent = error.message || '目前無法送出申請，請稍後再試。';
-            message.className = 'status-message error';
-            document.getElementById('rebindConfirmButton').disabled = bindingResultUnknown;
-        } finally {
-            bindingOperationPending = false;
-            hideLoader();
-        }
-    }
-
-    function cancelRebind() {
-        pendingCustomerBinding = null;
-        rebindContent.style.display = 'none';
-        formContent.style.display = 'block';
-        showMessage('已取消申請，原綁定維持不變。', 'info');
     }
 
     // 關閉 LIFF 視窗

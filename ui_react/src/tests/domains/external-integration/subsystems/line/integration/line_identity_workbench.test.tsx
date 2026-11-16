@@ -176,7 +176,12 @@ describe('身分與授權精簡工作區', () => {
   });
   it('待審核不預選核准，通過正式 Preview／Apply 後自動查回審核結果', async () => {
     const api = client(); api.getReview.mockResolvedValueOnce(review).mockResolvedValue({ ...review, status: 'approved', version: 4 });
-    render(<LineIdentityWorkbench client={api} />); fireEvent.click(screen.getByRole('tab', { name: /待審核/ })); fireEvent.click(await screen.findByRole('button', { name: '審核審核對象甲的綁定申請' }));
+    render(<LineIdentityWorkbench client={api} />); fireEvent.click(screen.getByRole('tab', { name: /待審核/ }));
+    const filter = within(screen.getByRole('combobox', { name: '篩選審核類型' }));
+    expect(filter.queryByRole('option', { name: '月嫂身分驗證' })).not.toBeInTheDocument();
+    expect(filter.getByRole('option', { name: '客戶重新綁定' })).toBeInTheDocument();
+    expect(filter.getByRole('option', { name: '內部人員綁定' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '審核審核對象甲的綁定申請' }));
     await screen.findByRole('radio', { name: '核准' }); expect(screen.getByRole('radio', { name: '核准' })).not.toBeChecked(); expect(screen.getByRole('button', { name: '提交審核決定' })).toBeDisabled();
     fireEvent.click(screen.getByRole('radio', { name: '核准' })); await confirmReason('審核原因（選填）', '已核對原帳號與新申請'); expect(screen.queryByRole('checkbox')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '確認核准' })).not.toBeInTheDocument();
     await screen.findByText('已核准'); expect(api.getReview).toHaveBeenCalledTimes(2); expect(api.applyReviewDecision).toHaveBeenCalledWith(71, 'approve', expect.objectContaining({ expected_version: 3, preview_fingerprint: 'private-preview-fingerprint' }), expect.any(Object));

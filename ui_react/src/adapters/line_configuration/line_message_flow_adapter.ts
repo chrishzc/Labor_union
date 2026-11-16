@@ -97,9 +97,8 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     ] },
     { title: '身分確認', nodes: [
       { id: 'identity-links', title: '客戶、月嫂與工會身分入口', delivery: ['reply'], ids: ['identity-customer-link', 'identity-staff-link', 'identity-admin-link'] },
-      { id: 'identity-pending', title: '受理身分申請', delivery: ['automatic'], ids: ['identity-pending'], templates: ['staff_verification_rejected'] },
     ] },
-    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', delivery: ['automatic'], ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'], templates: ['client_rebind_rejected'] }] },
+    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', delivery: ['automatic'], ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'] }] },
   ] },
   { id: 'support', name: '自助服務與留言', summary: '一般詢問及客訴由工會人員在 LINE 官方帳號處理。服務導覽、FAQ 和異動表單仍可直接開啟。', stages: [
     { title: '開啟服務', nodes: [

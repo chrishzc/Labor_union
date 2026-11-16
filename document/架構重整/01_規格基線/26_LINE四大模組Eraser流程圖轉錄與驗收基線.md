@@ -52,8 +52,7 @@ flowchart TD
     Non_Citizen_Status -. 同頁固定提示 .-> Pending_Hint["已送出待審，無須重複填寫"]
     Branch_Gov_Yes -->|資料完整、尚未綁定| State_A["確認綁定成功；排入專屬選單更新"]
     Branch_Gov_Yes -->|同一帳號已綁定| Already_Bound["已完成綁定，返回 LINE 不重複 Apply"]
-    Branch_Gov_Yes -->|需要改綁| Rebind_Request["申請重新綁定／取消"]
-    Rebind_Request -->|明確申請| Rebind_Review["待工會審核，核准前保留原綁定"]
+    Branch_Gov_Yes -->|需要改綁| Rebind_Request["請工會確認身分並解除原綁定，再用新帳號綁定"]
     Branch_Gov_Yes -->|缺問卷| State_B["帶入已核對資料填問卷"]
     Branch_Gov_Yes -->|查無資料| State_C["帶入姓名與電話填問卷"]
     State_B --> Register_Form["產婦服務需求表單 → 送出後待工會核准"]
@@ -85,7 +84,7 @@ flowchart TD
 | `Register_Form` / 待審儲存 | 依 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md) `REG-BOUNDARY`／`REG-REDIS`／`REG-EXPIRY`：表單送出後存於無 MySQL 憑證之專用持久化 Redis（14 天自動到期清理）；待工會核准時才經 Case Import writer 寫入 MySQL 正式客戶／訂單並依回執刪除待審資料，拒絕亦立即刪除。 |
 | `Profile_Update_Page` / `order_update` | **客戶端自填表單已退役**：依 [20 號規格](20_LINE客服與月嫂自助服務正式規格.md#53-資料異動審核與客戶自填表單退役) 與 [29 號規格](29_LINE服務說明、客服互動與選單角色正式規格.md#客戶端自助表單退役與後台維護原則)，`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 不提供連線，選單與聊天導流全面移除。客戶意向於對話留訊由工會於後台維護；月嫂本人資料更新維持由 `staff_profile_update.html` 進行。 |
 | `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、只讀 `staff_schedule` 與 `staff_payout`（`staff_payout.html`），開工日與請假延期改由案件群組小幫手選單操作（0 Push 額度）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
-| `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 綁定 `union_staff_menu` 開啟 `line-mobile-admin` 四頁籤；群組輸入拒絕發放。 |
+| `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 完成綁定或更換原 LINE 綁定，套用 `union_staff_menu` 開啟 `line-mobile-admin`；群組輸入拒絕發放。 |
 | 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
 
 ## 4. 模組二（M2）：自助導覽、FAQ LIFF 與人工回覆

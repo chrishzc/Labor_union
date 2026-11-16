@@ -8,11 +8,12 @@ import pytest
 
 
 ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "pyproject.toml").is_file())
+REBIND_BLOCKED_MESSAGE = "拒絕重新綁定，請聯絡工會人員確認身分解除舊綁定。在用新帳號綁定"
 
 
-def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True, existing_case=False, case_no=None):
+def _run_page(status, actions="await handleFormSubmit(event);", *, apply_status="bound", preview_ok=True, in_client=True, survey_complete=True, existing_case=False, case_no=None, rebind_blocked_at=None):
     source = (ROOT / "line/static/bind.html").read_text(encoding="utf-8").split("<script>", 1)[1].split("</script>", 1)[0]
-    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete, "existing_case": existing_case, "case_no": case_no})
+    settings = json.dumps({"status": status, "apply_status": apply_status, "preview_ok": preview_ok, "in_client": in_client, "survey_complete": survey_complete, "existing_case": existing_case, "case_no": case_no, "rebind_blocked_at": rebind_blocked_at, "rebind_blocked_message": REBIND_BLOCKED_MESSAGE})
     harness = r"""
 const vm = require('node:vm');
 const settings = SETTINGS;
@@ -45,6 +46,9 @@ const context = vm.createContext({
     isApiAvailable: () => true, sendMessages: async values => messages.push(values), closeWindow: () => closes++},
   fetch: async (url, options) => {
     calls.push({url, body: JSON.parse(options.body)});
+    if (settings.rebind_blocked_at && url.endsWith('/' + settings.rebind_blocked_at)) return {ok: false, status: 409, json: async () => ({detail: {error: {
+      code: 'line_customer_rebind_blocked', message: settings.rebind_blocked_message,
+    }}})};
     if (url.endsWith('/preview')) return {ok: settings.preview_ok, json: async () => ({data: {
       status: settings.status, expected_version: 3, preview_fingerprint: 'a'.repeat(64),
       candidate: settings.status === 'not_found' ? null : {
@@ -80,28 +84,15 @@ def test_already_bound_returns_without_apply_or_an_invented_case_number():
     assert result["redirects"] == result["messages"] == []
 
 
-def test_rebind_cancel_does_not_apply_or_replace_any_binding():
-    result = _run_page("requires_review", "await handleFormSubmit(event); cancelRebind();")
-    assert len(result["calls"]) == 1
+@pytest.mark.parametrize("existing_case", [False, True])
+def test_rebind_blocked_at_preview_shows_exact_guidance_without_apply(existing_case):
+    result = _run_page("matched", rebind_blocked_at="preview", existing_case=existing_case, case_no="A115001")
+    assert [item["url"] for item in result["calls"]] == ["/api/v1/line/identity/customer/preview"]
     assert result["elements"]["formContent"]["display"] == "block"
-    assert result["elements"]["rebindContent"]["display"] == "none"
-    assert result["elements"]["statusMessage"]["text"] == "已取消申請，原綁定維持不變。"
-
-
-def test_rebind_only_applies_after_explicit_request_using_the_original_preview():
-    result = _run_page(
-        "requires_review", "await handleFormSubmit(event); await confirmRebind();",
-        apply_status="pending_review", existing_case=True, case_no="A115001",
-    )
-    assert [item["url"] for item in result["calls"]] == [
-        "/api/v1/line/identity/customer/preview", "/api/v1/line/identity/customer/apply",
-    ]
-    assert result["calls"][1]["body"]["preview_fingerprint"] == "a" * 64
-    assert result["calls"][1]["body"]["expected_version"] == 3
-    assert result["elements"]["successTitle"]["text"] == "申請已送出"
-    assert "核准前保留原綁定" in result["elements"]["successDesc"]["text"]
-    assert "綁定成功" not in result["elements"]["successDesc"]["text"]
-    assert result["messages"] == []
+    assert result["elements"]["successContent"]["display"] == "none"
+    assert "rebindConfirmButton" not in result["elements"]
+    assert result["elements"]["statusMessage"]["text"] == REBIND_BLOCKED_MESSAGE
+    assert result["redirects"] == result["messages"] == []
 
 
 def test_matched_binding_does_not_claim_menu_delivery_or_fabricate_case_number():
@@ -118,24 +109,21 @@ def test_failed_preview_does_not_redirect_or_automatically_call_human_service():
     assert "工單" not in result["elements"]["statusMessage"]["text"]
 
 
-def test_human_call_requires_the_explicit_button_action():
-    result = _run_page("matched", "await handleFormSubmit(event); await callStaff();", preview_ok=False)
-    assert result["messages"] == [[{"type": "text", "text": "呼叫專員"}]]
-    assert result["closes"] == 1
-
-
-def test_unavailable_human_call_does_not_claim_a_request_was_created():
-    result = _run_page("matched", "await handleFormSubmit(event); await callStaff();", preview_ok=False, in_client=False)
+@pytest.mark.parametrize("in_client", [False, True])
+def test_binding_failure_guides_manual_contact_without_sending_a_message(in_client):
+    result = _run_page("matched", preview_ok=False, in_client=in_client)
     assert result["messages"] == []
     assert result["closes"] == 0
-    assert result["elements"]["statusMessage"]["text"] == "請返回官方 LINE 聊天室輸入「呼叫專員」。"
+    assert result["elements"]["statusMessage"]["text"].endswith("如需協助，請回 LINE 官方帳號聊天室留言。")
 
 
 def test_stale_rebind_result_does_not_show_success():
-    result = _run_page("requires_review", "await handleFormSubmit(event); await confirmRebind();", apply_status="conflict")
+    result = _run_page("matched", rebind_blocked_at="apply")
+    assert [item["url"] for item in result["calls"]] == [
+        "/api/v1/line/identity/customer/preview", "/api/v1/line/identity/customer/apply",
+    ]
     assert result["elements"]["successContent"]["display"] == "none"
-    assert result["elements"]["rebindContent"]["display"] == "block"
-    assert result["elements"]["rebindStatusMessage"]["text"] == "目前無法完成綁定，請重新核對資料。"
+    assert result["elements"]["statusMessage"]["text"] == REBIND_BLOCKED_MESSAGE
 
 
 @pytest.mark.parametrize("status,survey_complete,redirect", [("not_found", True, True), ("matched", False, True), ("matched", True, False)])
@@ -171,41 +159,45 @@ def test_existing_case_keeps_incomplete_lookup_on_binding_page(status, survey_co
     assert result["elements"]["bindingFailureActions"]["display"] == "flex"
 
 
-@pytest.mark.parametrize("stale", [False, True])
-def test_rebind_owner_only_creates_review_and_preserves_original_binding(stale):
+@pytest.mark.parametrize("conflict", ["old_account", "different_customer"])
+def test_direct_rebind_is_blocked_before_apply_and_creates_no_review(conflict):
     from datetime import datetime, timedelta, timezone
     from types import SimpleNamespace
-    from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
+
+    from fastapi import HTTPException
+
+    from api.routes.line_identity import _translate_identity_errors
+    from domains.line.identities import LineIdentityFlowId, LineUserId
     from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
     from domains.line.identity_flow import LineIdentityFlowPurpose, LineIdentityFlowSnapshot, LineIdentityFlowStatus
+    from shared_kernel.fingerprints import PreviewFingerprint
     from shared_kernel.identities import CorrelationId, ExpectedVersion
-    from subsystems.line.identity_application import LineIdentityApplication, LineIdentityConflictError
+    from subsystems.line.identity_application import LineCustomerRebindBlockedError, LineIdentityApplication
     from subsystems.line.identity_contracts import CustomerIdentityProof, LineIdentityCandidate
 
     now = datetime(2026, 10, 22, tzinfo=timezone.utc)
     user = LineUserId("U-rebind-test")
     flow_id = LineIdentityFlowId("flow-rebind-test")
-    binding = SimpleNamespace(version=ExpectedVersion(2), status=LineIdentityBindingStatus.BOUND, subject_reference="original-client")
-    target = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, "requested-client", LineUserId("U-original-owner"))
+    owner = LineUserId("U-original-owner") if conflict == "old_account" else None
+    target = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, "requested-client", owner)
+    binding = None if conflict == "old_account" else SimpleNamespace(
+        version=ExpectedVersion(2), status=LineIdentityBindingStatus.BOUND, subject_reference="original-client",
+    )
     proof = CustomerIdentityProof("測試媽媽", "0900000000")
-    reviews, consumed, deliveries, commits = [], [], [], []
+
+    def unexpected_write(*_):
+        pytest.fail("blocked rebind must not write or create a review")
 
     class Uow:
-        identities = SimpleNamespace(get=lambda *_: binding)
-        customers = SimpleNamespace(resolve_customer=lambda *_: target)
+        identities = SimpleNamespace(get=lambda *_: binding, bind=unexpected_write)
+        customers = SimpleNamespace(resolve_customer=lambda *_: target, bind_customer=unexpected_write)
         identity_flows = SimpleNamespace(
             get=lambda *_: LineIdentityFlowSnapshot(flow_id, LineIdentityFlowPurpose.CUSTOMER_BINDING, user,
                 LineIdentityFlowStatus.ACTIVE, now + timedelta(minutes=15), "rebind-test"),
-            consume=lambda *args: consumed.append(args),
+            consume=unexpected_write,
         )
-        delivery_tasks = SimpleNamespace(enqueue=lambda task: deliveries.append(task))
-
-        def __init__(self):
-            self.reviews = SimpleNamespace(create=self.create_review)
-
-        def create_review(self, command):
-            reviews.append(command)
-            return SimpleNamespace(snapshot=SimpleNamespace(request_id=LineReviewRequestId(9)))
+        reviews = SimpleNamespace(create=unexpected_write)
+        delivery_tasks = SimpleNamespace(enqueue=unexpected_write)
 
         def __enter__(self):
             return self
@@ -213,23 +205,21 @@ def test_rebind_owner_only_creates_review_and_preserves_original_binding(stale):
         def __exit__(self, *_):
             return False
 
-        def commit(self):
-            commits.append(True)
+        commit = unexpected_write
 
     application = LineIdentityApplication(Uow, lambda: now)
-    preview = application.preview_customer(flow_id, user, proof)
-    assert preview.status.value == "requires_review"
-    if stale:
-        binding.version = ExpectedVersion(3)
-        with pytest.raises(LineIdentityConflictError):
-            application.apply_customer(flow_id, user, proof, preview.expected_version,
-                preview.preview_fingerprint, CorrelationId("rebind-stale-test"))
-        assert reviews == consumed == deliveries == commits == []
-    else:
-        result = application.apply_customer(flow_id, user, proof, preview.expected_version,
-            preview.preview_fingerprint, CorrelationId("rebind-review-test"))
-        assert result.status.value == "pending_review"
-        assert len(reviews) == len(consumed) == len(deliveries) == len(commits) == 1
-    assert binding.subject_reference == "original-client"
-    assert binding.status is LineIdentityBindingStatus.BOUND
-    assert target.currently_bound_line_user_id == LineUserId("U-original-owner")
+    with pytest.raises(HTTPException) as response:
+        _translate_identity_errors(application.preview_customer, flow_id, user, proof)
+    assert response.value.status_code == 409
+    assert response.value.detail["error"]["code"] == "line_customer_rebind_blocked"
+    assert response.value.detail["error"]["message"] == (
+        "拒絕重新綁定，請聯絡工會人員確認身分解除舊綁定。在用新帳號綁定"
+    )
+    with pytest.raises(LineCustomerRebindBlockedError):
+        application.apply_customer(flow_id, user, proof, ExpectedVersion(0),
+            PreviewFingerprint("a" * 64), CorrelationId("rebind-bypass-test"))
+
+    # Once the original binding has been released, this is an ordinary bind.
+    target = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, "requested-client", None)
+    binding = None
+    assert application.preview_customer(flow_id, user, proof).status.value == "matched"

@@ -2,7 +2,7 @@
  * File: line_identity_review_workbench.test.tsx
  * Description: 驗證 LINE 身分人工審核一次提交時的 list／detail／內部 Preview／Apply／receipt／readback 流程。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   LineIdentityReviewWorkbench,
@@ -76,6 +76,8 @@ describe('LINE 身分人工審核工作台', () => {
     render(<LineIdentityReviewWorkbench client={client} />);
 
     await screen.findByText('未設定 待審月嫂甲');
+    expect(within(screen.getByLabelText('審核類型')).queryByRole('option', { name: '月嫂身分驗證' })).not.toBeInTheDocument();
+    expect(screen.getByText('月嫂身分驗證')).toBeInTheDocument();
     expect(screen.getByText('只有具審核權限的真人管理員可核准或拒絕；等待時間不會自動做出決定。')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(PENDING_REVIEW.line_user_id);
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
@@ -158,10 +160,10 @@ describe('LINE 身分人工審核工作台', () => {
     expect(screen.getByRole('button', { name: '下一頁' })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText('審核類型'), {
-      target: { value: 'staff_verification' },
+      target: { value: 'client_rebind' },
     });
     await waitFor(() => expect(listReviews).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, review_type: 'staff_verification' }),
+      expect.objectContaining({ page: 1, review_type: 'client_rebind' }),
       expect.any(Object),
     ));
     await screen.findByText('顯示 1-25 / 26 件');

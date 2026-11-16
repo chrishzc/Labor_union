@@ -3,6 +3,8 @@ File: test_line_identity_api_routes.py
 Description: 驗證 canonical LINE identity API 的 typed payload、驗證身分與單一登記編排。
 """
 
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -19,8 +21,9 @@ from api.schemas.line_identity import (
     ProvisionalRegistrationPreviewRequest,
     StaffIdentityRequest,
 )
-from domains.line.identities import LineReviewRequestId, LineUserId
-from domains.line.identity_binding import LineBindingSubjectType
+from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
+from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingSnapshot, LineIdentityBindingStatus
+from domains.line.identity_flow import LineIdentityFlowPurpose, LineIdentityFlowSnapshot, LineIdentityFlowStatus
 from domains.line.review import (
     LineReviewDecision,
     LineReviewSnapshot,
@@ -28,6 +31,100 @@ from domains.line.review import (
     LineReviewType,
     build_review_decision_candidate,
 )
+from shared_kernel.identities import CorrelationId, ExpectedVersion
+from subsystems.line.identity_application import LineIdentityApplication, LineIdentityAuthenticationError, LineIdentityConflictError
+from subsystems.line.identity_contracts import AdminCredentialProof, LineIdentityApplyStatus, LineIdentityCandidate
+
+
+@pytest.mark.parametrize("blocked_by", [None, "password", "stale", "exclusive_role"])
+def test_admin_rebind_has_no_review_and_preserves_binding_on_conflict(blocked_by) -> None:
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+    old_user, new_user = LineUserId("U-old-admin"), LineUserId("U-new-admin")
+    role = LineBindingSubjectType.ADMIN
+    flow_id = LineIdentityFlowId("admin-rebind-flow")
+    credential = AdminCredentialProof("fixture-operator", "fixture-password")
+    durable = {
+        "owner": old_user,
+        "old_status": LineIdentityBindingStatus.BOUND,
+        "new_status": None,
+        "consumed": False,
+        "attempts": 0,
+    }
+
+    @contextmanager
+    def unit_of_work():
+        staged = durable.copy()
+
+        def get_flow(_):
+            status = LineIdentityFlowStatus.CONSUMED if staged["consumed"] else LineIdentityFlowStatus.ACTIVE
+            return LineIdentityFlowSnapshot(flow_id, LineIdentityFlowPurpose.ADMIN_BINDING, new_user, status, now + timedelta(minutes=15), "fixture")
+
+        def get_binding(user, subject_type):
+            status = staged["old_status"] if user == old_user else staged["new_status"]
+            return LineIdentityBindingSnapshot(user, status, ExpectedVersion(3 if user == old_user else 1), subject_type, "42") if status else None
+
+        def revoke(user, version, actor, key, correlation, subject_type):
+            assert (user, version, subject_type) == (old_user, ExpectedVersion(3), role)
+            staged["old_status"] = LineIdentityBindingStatus.REVOKED
+
+        def bind_admin(subject, user, expected_user):
+            assert (subject, user, expected_user) == ("42", new_user, staged["owner"])
+            assert staged["old_status"] is LineIdentityBindingStatus.REVOKED
+            staged["owner"] = user
+
+        def bind(claim, version, *_):
+            assert (claim.line_user_id, claim.subject_type, version) == (new_user, role, ExpectedVersion(0))
+            if blocked_by == "exclusive_role":
+                raise LineIdentityConflictError("line_identity_admin_role_exclusive")
+            staged["new_status"] = LineIdentityBindingStatus.BOUND
+            return get_binding(new_user, role)
+
+        yield SimpleNamespace(
+            identity_flows=SimpleNamespace(
+                get=get_flow,
+                consume=lambda *_: staged.update(consumed=True),
+                record_failed_attempt=lambda *_: staged.update(attempts=staged["attempts"] + 1),
+            ),
+            admins=SimpleNamespace(
+                authenticate_admin=lambda submitted: LineIdentityCandidate(role, "42", old_user)
+                if submitted == credential and blocked_by != "password" else None,
+                bind_admin=bind_admin,
+            ),
+            identities=SimpleNamespace(
+                get=get_binding,
+                get_by_subject=lambda *_: get_binding(new_user if blocked_by == "stale" else old_user, role),
+                revoke=revoke,
+                bind=bind,
+                list_by_user=lambda user: (get_binding(user, role),),
+            ),
+            audit=SimpleNamespace(append=lambda _intent: None),
+            outbox=SimpleNamespace(append=lambda _intent: None),
+            delivery_tasks=SimpleNamespace(enqueue=lambda _intent: None),
+            commit=lambda: durable.update(staged),
+        )
+
+    application = LineIdentityApplication(unit_of_work, lambda: now)
+    preview = application.preview_admin(flow_id, new_user, credential)
+    arguments = (flow_id, new_user, credential, preview.expected_version, preview.preview_fingerprint, CorrelationId("admin-rebind"))
+
+    if blocked_by is None:
+        result = application.apply_admin(*arguments)
+        assert result.status is LineIdentityApplyStatus.BOUND
+        assert result.review_request_id is None
+        assert durable["owner"] == new_user
+        assert durable["old_status"] is LineIdentityBindingStatus.REVOKED
+        assert durable["new_status"] is LineIdentityBindingStatus.BOUND
+        assert durable["consumed"]
+        return
+
+    error_type = LineIdentityAuthenticationError if blocked_by == "password" else LineIdentityConflictError
+    with pytest.raises(error_type):
+        application.apply_admin(*arguments)
+    assert durable["owner"] == old_user
+    assert durable["old_status"] is LineIdentityBindingStatus.BOUND
+    assert durable["new_status"] is None
+    assert not durable["consumed"]
+    assert durable["attempts"] == int(blocked_by == "password")
 
 
 def test_runtime_config_exposes_only_safe_public_origin(monkeypatch) -> None:
@@ -360,4 +457,5 @@ def _registration_preview_payload():
         expected_date="2026-10-01",
         service_days=26,
         address="台北市中山區",
+        passbook_image_id="test-passbook-image",
     )

@@ -5,8 +5,7 @@ Description: 編排 verified LINE platform root、身分流程、原子登記、
 
 from __future__ import annotations
 
-from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, configured_text
-from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.message_copy import IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, configured_text
 
 from datetime import datetime, timedelta
 from typing import Callable
@@ -33,7 +32,6 @@ from domains.line.identity_flow import (
     LineIdentityFlowPurpose,
     validate_identity_flow,
 )
-from domains.line.review import LineReviewType
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
@@ -43,7 +41,6 @@ from shared_kernel.identities import (
 )
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
-    CustomerIdentityProof,
     LineIdentityApplyResult,
     LineIdentityApplyStatus,
     LineIdentityCandidate,
@@ -53,7 +50,6 @@ from subsystems.line.identity_contracts import (
     StaffIdentityProof,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
-from subsystems.line.review_contracts import CreateLineReviewCommand
 from subsystems.line.rich_menu_binding import schedule_resolved_identity_menu
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
@@ -69,6 +65,11 @@ class LineIdentityNotFoundError(LookupError):
 
 class LineIdentityConflictError(RuntimeError):
     pass
+
+
+class LineCustomerRebindBlockedError(LineIdentityConflictError):
+    def __init__(self) -> None:
+        super().__init__("拒絕重新綁定，請聯絡工會人員確認身分解除舊綁定。在用新帳號綁定")
 
 
 class LineIdentityAuthenticationError(PermissionError):
@@ -143,7 +144,7 @@ class LineIdentityApplication:
                 preview,
             )
 
-    # Kept cohesive so flow consumption and customer binding/review stay one transaction.
+    # Kept cohesive so flow consumption and customer binding stay one transaction.
     def apply_customer(
         self,
         flow_id,
@@ -180,16 +181,10 @@ class LineIdentityApplication:
                 )
                 result = self._apply_customer_candidate(
                     unit_of_work,
-                    flow_id,
                     preview,
-                    proof,
                     correlation_id,
                 )
-                if result.status is not LineIdentityApplyStatus.PENDING_REVIEW:
-                    unit_of_work.identities.reset_failure_streak(
-                        line_user_id,
-                        flow_id,
-                    )
+                unit_of_work.identities.reset_failure_streak(line_user_id, flow_id)
                 unit_of_work.commit()
         except LineIdentityNotFoundError:
             self._record_binding_failure(
@@ -322,9 +317,7 @@ class LineIdentityApplication:
                 )
             result = self._apply_customer_candidate(
                 unit_of_work,
-                flow_id or LineIdentityFlowId(f"registration:{outcome.registration_id}"),
                 preview,
-                CustomerIdentityProof(intent.name.strip(), intent.phone.strip()),
                 correlation_id,
                 owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
             )
@@ -381,9 +374,7 @@ class LineIdentityApplication:
                                          line_user_id if binding and binding.status is LineIdentityBindingStatus.BOUND else None)
         preview = _customer_preview(unit_of_work, line_user_id, customer)
         result = self._apply_customer_candidate(
-            unit_of_work, LineIdentityFlowId(f"registration-approval:{registration_id}"), preview,
-            CustomerIdentityProof(str(application.candidate.client_payload["name"]),
-                                  str(application.candidate.client_payload["phone"])),
+            unit_of_work, preview,
             correlation_id, owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
         )
         if result.status not in {LineIdentityApplyStatus.BOUND, LineIdentityApplyStatus.EXISTING}:
@@ -569,28 +560,27 @@ class LineIdentityApplication:
                 line_user_id,
                 self._now(),
             )
-            if candidate.currently_bound_line_user_id not in {None, line_user_id}:
-                result = _create_review(
-                    unit_of_work,
-                    flow_id,
-                    line_user_id,
-                    candidate,
-                    LineReviewType.ADMIN_BINDING,
-                    fingerprint_payload({"admin_id": candidate.subject_reference}).value,
-                    correlation_id,
+            previous_line_user_id = candidate.currently_bound_line_user_id
+            if previous_line_user_id not in {None, line_user_id}:
+                previous = unit_of_work.identities.get_by_subject(
+                    LineBindingSubjectType.ADMIN, candidate.subject_reference,
                 )
-            else:
-                unit_of_work.admins.bind_admin(
-                    candidate.subject_reference,
-                    line_user_id,
-                    candidate.currently_bound_line_user_id,
+                if (
+                    previous is None
+                    or previous.status is not LineIdentityBindingStatus.BOUND
+                    or previous.line_user_id != previous_line_user_id
+                ):
+                    raise LineIdentityConflictError("工會帳號原有 LINE 綁定已變更，請重新開啟綁定流程。")
+                unit_of_work.identities.revoke(
+                    previous.line_user_id,
+                    previous.version,
+                    f"line-user:{line_user_id.value}"[:100],
+                    IdempotencyKey(f"admin-rebind:{flow_id.value}"),
+                    correlation_id.value,
+                    LineBindingSubjectType.ADMIN,
                 )
-                result = _bind_result(
-                    unit_of_work,
-                    line_user_id,
-                    candidate,
-                    correlation_id,
-                )
+            unit_of_work.admins.bind_admin(candidate.subject_reference, line_user_id, previous_line_user_id)
+            result = _bind_result(unit_of_work, line_user_id, candidate, correlation_id)
             _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
             unit_of_work.commit()
         return result
@@ -615,41 +605,22 @@ class LineIdentityApplication:
             raise LineIdentityAuthenticationError("工會人員帳號或密碼錯誤")
         return candidate
 
-    # Kept cohesive so direct bind and review creation share one explicit decision boundary.
     def _apply_customer_candidate(
         self,
         unit_of_work,
-        flow_id,
         preview,
-        proof,
         correlation_id,
         owner_projection_line_user_id=None,
     ):
         candidate = preview.candidate
         if candidate is None:
             raise LineIdentityNotFoundError("找不到相符的客戶資料")
-        if preview.status is LineIdentityPreviewStatus.REQUIRES_REVIEW:
-            result = _create_review(
-                unit_of_work,
-                flow_id,
-                preview.line_user_id,
-                candidate,
-                LineReviewType.CLIENT_REBIND,
-                _customer_proof_fingerprint(proof).value,
-                correlation_id,
-            )
-        else:
-            unit_of_work.customers.bind_customer(
-                candidate.subject_reference,
-                preview.line_user_id,
-                owner_projection_line_user_id or candidate.currently_bound_line_user_id,
-            )
-            result = _bind_result(
-                unit_of_work,
-                preview.line_user_id,
-                candidate,
-                correlation_id,
-            )
+        unit_of_work.customers.bind_customer(
+            candidate.subject_reference,
+            preview.line_user_id,
+            owner_projection_line_user_id or candidate.currently_bound_line_user_id,
+        )
+        result = _bind_result(unit_of_work, preview.line_user_id, candidate, correlation_id)
         _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
         return result
 
@@ -735,12 +706,14 @@ def _customer_preview(unit_of_work, line_user_id, candidate):
             version,
             PreviewFingerprint("0" * 64),
         )
+    if candidate.currently_bound_line_user_id not in {None, line_user_id}:
+        raise LineCustomerRebindBlockedError()
+    if binding and binding.status is LineIdentityBindingStatus.BOUND and (
+        candidate.currently_bound_line_user_id is None or binding.subject_reference != candidate.subject_reference
+    ):
+        raise LineCustomerRebindBlockedError()
     if candidate.currently_bound_line_user_id == line_user_id:
         status = LineIdentityPreviewStatus.ALREADY_BOUND
-    elif candidate.currently_bound_line_user_id is not None:
-        status = LineIdentityPreviewStatus.REQUIRES_REVIEW
-    elif binding and binding.status is LineIdentityBindingStatus.BOUND:
-        status = LineIdentityPreviewStatus.REQUIRES_REVIEW
     else:
         status = LineIdentityPreviewStatus.MATCHED
     return LineIdentityPreview(
@@ -889,78 +862,8 @@ def _bind_claim(unit_of_work, claim, correlation_id):
     )
 
 
-def _save_pending_claim_if_available(unit_of_work, line_user_id, candidate):
-    if unit_of_work.identities.get_by_subject(candidate.subject_type, candidate.subject_reference):
-        return
-    current = unit_of_work.identities.get(
-        line_user_id,
-        candidate.subject_type,
-    )
-    if current and current.status not in {
-        LineIdentityBindingStatus.UNBOUND,
-        LineIdentityBindingStatus.REVOKED,
-    }:
-        return
-    claim = LineIdentityClaim(line_user_id, candidate.subject_type, candidate.subject_reference)
-    unit_of_work.identities.save_claim(
-        claim,
-        current.version if current else ExpectedVersion(0),
-    )
-
-
-# Kept cohesive so review identity, evidence fingerprint, and idempotency remain aligned.
-def _create_review(
-    unit_of_work,
-    flow_id,
-    line_user_id,
-    candidate,
-    review_type,
-    proof_fingerprint,
-    correlation_id,
-):
-    request_fingerprint = fingerprint_payload(
-        {
-            "flow_id": flow_id.value,
-            "line_user_id": line_user_id.value,
-            "review_type": review_type.value,
-            "subject_type": candidate.subject_type.value,
-            "subject_reference": candidate.subject_reference,
-            "proof_fingerprint": proof_fingerprint,
-        }
-    )
-    evidence_json = canonical_line_payload_json(
-        {
-            "proof_fingerprint": proof_fingerprint,
-            "subject_reference": candidate.subject_reference,
-            "subject_type": candidate.subject_type.value,
-        }
-    )
-    created = unit_of_work.reviews.create(
-        CreateLineReviewCommand(
-            review_type,
-            line_user_id,
-            candidate.subject_type,
-            candidate.subject_reference,
-            request_fingerprint,
-            evidence_json,
-            flow_id,
-            IdempotencyKey(f"review-create:{flow_id.value}"),
-            correlation_id,
-        )
-    )
-    return LineIdentityApplyResult(
-        LineIdentityApplyStatus.PENDING_REVIEW,
-        line_user_id,
-        candidate.subject_type,
-        candidate.subject_reference,
-        created.snapshot.request_id,
-        f"line-review:{created.snapshot.request_id.value}:pending",
-    )
-
-
 # Kept cohesive so the stable delivery key covers every semantic result field.
 def _enqueue_result_message(unit_of_work, result, correlation_id, scheduled_at):
-    pending = result.status is LineIdentityApplyStatus.PENDING_REVIEW
     key_fingerprint = fingerprint_payload(
         {
             "line_user_id": result.line_user_id.value,
@@ -976,7 +879,7 @@ def _enqueue_result_message(unit_of_work, result, correlation_id, scheduled_at):
     exists = getattr(unit_of_work.delivery_tasks, "exists_for_key", None)
     if callable(exists) and exists(delivery_key):
         return  # Preserve the committed payload even when copy has since changed.
-    text = configured_payload(unit_of_work, "identity-pending", {"type": "text", "text": IDENTITY_PENDING})["text"] if pending else configured_text(
+    text = configured_text(
         unit_of_work, IDENTITY_SUCCESS_TEMPLATES[result.subject_type.value], IDENTITY_SUCCESS_DEFAULTS[result.subject_type.value])
     request = LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, result.line_user_id),

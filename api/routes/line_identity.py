@@ -73,6 +73,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.identity_application import (
     LineIdentityApplication,
     LineIdentityAuthenticationError,
+    LineCustomerRebindBlockedError,
     LineIdentityConflictError,
     LineIdentityNotFoundError,
 )
@@ -747,6 +748,11 @@ def _translate_identity_errors(call, *arguments):
         ) from error
     except LineIdentityAuthenticationError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
+    except LineCustomerRebindBlockedError as error:
+        raise typed_http_error(
+            409, "conflict", "line_customer_rebind_blocked", str(error),
+            _correlation_id("customer-rebind-blocked").value,
+        ) from error
     except LineIdentityConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:

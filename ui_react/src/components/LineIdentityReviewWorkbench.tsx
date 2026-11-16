@@ -190,7 +190,6 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
       <select className="line-filter-select" id="line-identity-review-type" value={reviewType} onChange={(event) => props.onReviewTypeChange(event.target.value as 'all' | LineIdentityReviewType)}>
         <option value="all">全部待審類型</option>
         <option value="client_rebind">客戶重新綁定</option>
-        <option value="staff_verification">月嫂身分驗證</option>
         <option value="admin_binding">管理員綁定</option>
       </select>
       {page.status === 'loading' && <div className="line-loading">正在載入待審清單…</div>}

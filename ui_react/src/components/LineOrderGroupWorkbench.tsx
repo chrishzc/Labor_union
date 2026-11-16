@@ -98,6 +98,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
   }, [client, selected, eventPage, eventReload]);
 
   const open = (caseNo: string) => {
+    if (actionInFlight.current) return;
     setEvents(pending());
     setEventPage(1);
     setSelected(caseNo);
@@ -177,7 +178,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
                   </td>
                   <td className="order-group-actions-cell">
                     <div className="order-group-row-actions">
-                      <button type="button" className="order-group-row-button" aria-label={`查看案件 ${item.case_no} 群組歷程`} onClick={() => open(item.case_no)}>群組歷程</button>
+                      <button type="button" className="order-group-row-button" aria-label={`查看案件 ${item.case_no} 群組歷程`} disabled={pendingAction !== null} onClick={() => open(item.case_no)}>群組歷程</button>
                       {item.can_unbind && <button type="button" className="order-group-row-button" disabled={pendingAction !== null} onClick={() => void applyGroupAction(item, 'unbind')}>
                         {currentAction === 'unbind' ? '正在解除綁定…' : '解除群組綁定'}
                       </button>}

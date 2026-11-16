@@ -32,38 +32,43 @@ function mount(api = client(), startPage = 1) {
   }
   return { api, ...render(<Workspace />) };
 }
-function expandHistory() {
-  const details = screen.getByText('群組歷程').closest('details')!;
-  act(() => { details.open = true; fireEvent(details, new Event('toggle')); });
-}
 afterEach(() => vi.restoreAllMocks());
 
 describe('案件群組精簡工作區', () => {
   it('does not display retired service-day log gap or send reminder button', async () => {
     mount(client(), 1);
-    await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' });
+    await screen.findByRole('button', { name: '查看案件 CASE-1 群組歷程' });
     expect(screen.queryByText(/日誌連續缺漏/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '發送提醒' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組歷程' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText(/服務日誌提醒/)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: '發送提醒' })).not.toBeInTheDocument();
   });
 
-  it('only shows three useful columns and reads events after expanding the drawer history', async () => {
+  it('shows the group summary in the list and loads events only when opening the history drawer', async () => {
     const { api } = mount();
-    await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' });
-    expect(screen.getAllByRole('columnheader').map(item => item.textContent)).toEqual(['案件', '群組狀態', '最近動態']);
-    expect(screen.queryByRole('button', { name: /發送|綁定|解除/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
-    const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText('未設定 測試月嫂');
-    expect(within(dialog).getByText('已離開')).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: '解除群組綁定' })).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: '查看案件 CASE-1 群組歷程' });
+    expect(screen.getAllByRole('columnheader').map(item => item.textContent)).toEqual(['案件', '客戶與月嫂', '群組狀態', '綁定與動態', '操作']);
+    const row = within(screen.getByRole('row', { name: /CASE-1/ }));
+    expect(row.getByText('測試客戶')).toBeInTheDocument();
+    expect(row.getByText('未設定 測試月嫂')).toBeInTheDocument();
+    expect(row.getByText('已加入', { exact: true })).toBeInTheDocument();
+    expect(row.getByText('已離開', { exact: true })).toBeInTheDocument();
+    expect(row.getByText('群組綁定')).toBeInTheDocument();
+    expect(row.getByText('2026/10/14 10:00')).toBeInTheDocument();
+    expect(row.getByText('最近邀請')).toBeInTheDocument();
+    expect(row.getByText('2026/10/14 11:00')).toBeInTheDocument();
+    expect(row.getByText('未設定 測試月嫂已離開群組')).toBeInTheDocument();
+    expect(row.queryByRole('button', { name: /發送|綁定|解除|刪除/ })).not.toBeInTheDocument();
     expect(api.workspaceEvents).not.toHaveBeenCalled();
-    expandHistory(); await waitFor(() => expect(api.workspaceEvents).toHaveBeenCalledTimes(1));
-    expect(within(dialog).queryByText('member_left')).not.toBeInTheDocument();
+    fireEvent.click(row.getByRole('button', { name: '查看案件 CASE-1 群組歷程' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText('未設定 測試月嫂已離開群組');
+    expect(within(dialog).queryByText('未設定 測試月嫂', { exact: true })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /解除|永久刪除/ })).not.toBeInTheDocument();
+    expect(api.workspaceDetail).not.toHaveBeenCalled();
+    expect(api.workspaceEvents).toHaveBeenCalledExactlyOnceWith('CASE-1', { page: 1, pageSize: 25 }, expect.any(Object));
     const help = within(dialog).getByText('綁定與邀請方式').closest('details')!;
     expect(help.open).toBe(false);
     expect(help.textContent).toContain('訂金須已確認核銷');
@@ -84,9 +89,9 @@ describe('案件群組精簡工作區', () => {
 
   it('keeps unknown information explicit and never invents successful membership', async () => {
     const api = client(); vi.mocked(api.workspaceList).mockResolvedValue(page([{ ...record, customer_name: null, latest_event: null, members: [{ role: 'customer', name: null, membership_status: 'unknown' }] }]));
-    mount(api); await screen.findByText('客戶資料待確認');
+    mount(api); await screen.findByText('資料待確認');
     expect(screen.getByText('加入狀況待確認')).toBeInTheDocument();
-    expect(screen.getByText('尚無群組動態紀錄')).toBeInTheDocument();
+    expect(screen.getByText('尚無紀錄')).toBeInTheDocument();
     expect(screen.queryByText('客戶與月嫂皆已加入')).not.toBeInTheDocument();
   });
 
@@ -99,7 +104,7 @@ describe('案件群組精簡工作區', () => {
     await screen.findByText('目前沒有案件群組綁定紀錄');
   });
 
-  it('aborts old list and detail requests and ignores their late responses', async () => {
+  it('aborts old list and history requests and ignores their late responses', async () => {
     const api = client(); let resolveOld!: (value: ReturnType<typeof page>) => void;
     vi.mocked(api.workspaceList).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; })).mockResolvedValue(page([{ ...record, case_no: 'CASE-2', latest_event: null }]));
     mount(api); await waitFor(() => expect(api.workspaceList).toHaveBeenCalledTimes(1));
@@ -107,25 +112,25 @@ describe('案件群組精簡工作區', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'CASE-2' } }); await screen.findByText('CASE-2');
     expect(oldSignal.aborted).toBe(true);
     await act(async () => resolveOld(page())); expect(screen.queryByText('CASE-1')).not.toBeInTheDocument();
-    let resolveDetail!: (value: LineOrderGroupWorkspaceRecord) => void;
-    vi.mocked(api.workspaceDetail).mockReturnValue(new Promise(resolve => { resolveDetail = resolve; }));
-    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-2 群組明細' }));
-    await waitFor(() => expect(api.workspaceDetail).toHaveBeenCalled());
-    const signal = vi.mocked(api.workspaceDetail).mock.calls[0][1]!.signal!;
+    const events = { items: [event], page: 1, page_size: 25, total: 1, total_pages: 1 };
+    let resolveHistory!: (value: typeof events) => void;
+    vi.mocked(api.workspaceEvents).mockReturnValue(new Promise(resolve => { resolveHistory = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-2 群組歷程' }));
+    await waitFor(() => expect(api.workspaceEvents).toHaveBeenCalled());
+    const signal = vi.mocked(api.workspaceEvents).mock.calls[0][2]!.signal!;
     fireEvent.click(screen.getByRole('button', { name: '關閉群組明細' })); expect(signal.aborted).toBe(true);
-    await act(async () => resolveDetail(record)); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await act(async () => resolveHistory(events)); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('preserves detail when the history fails and keeps separate history pagination', async () => {
+  it('preserves the list summary when history fails and keeps separate history pagination', async () => {
     const api = client(); vi.mocked(api.workspaceEvents).mockRejectedValueOnce(new Error('provider raw detail')).mockResolvedValue({ items: [event], page: 1, page_size: 25, total: 26, total_pages: 2 });
-    mount(api); await screen.findByText('CASE-1'); fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
-    await within(await screen.findByRole('dialog')).findByText('未設定 測試月嫂'); expandHistory();
+    mount(api); await screen.findByText('CASE-1'); fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組歷程' }));
     await screen.findByRole('button', { name: '重試歷程' });
     expect(screen.getByText('已離開')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試歷程' })); await screen.findByRole('button', { name: '下一頁群組事件' });
     vi.mocked(api.workspaceEvents).mockResolvedValue({ items: [{ ...event, event_key: 'binding:1', event_type: 'bound' }], page: 2, page_size: 25, total: 26, total_pages: 2 });
     fireEvent.click(screen.getByRole('button', { name: '下一頁群組事件' })); await screen.findByText('已綁定案件群組');
-    expect(api.workspaceDetail).toHaveBeenCalledTimes(1);
+    expect(api.workspaceDetail).not.toHaveBeenCalled();
     expect(api.workspaceEvents).toHaveBeenLastCalledWith('CASE-1', { page: 2, pageSize: 25 }, expect.any(Object));
   });
 
@@ -137,46 +142,48 @@ describe('案件群組精簡工作區', () => {
     expect(screen.getByRole('searchbox')).toHaveValue(''); expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('解除綁定後仍可查閱歷程，手動永久刪除後關閉已清除的明細', async () => {
+  it('操作欄使用同列案號與版本，解除後可查閱歷程，手動永久刪除後清單移除該案', async () => {
     const api = client();
-    vi.mocked(api.workspaceDetail).mockResolvedValue({ ...record, can_unbind: true });
-    vi.mocked(api.workspaceList).mockResolvedValueOnce(page()).mockResolvedValueOnce(page([released])).mockResolvedValue(page([]));
+    const other = { ...record, case_no: 'CASE-2', binding_version: 12, can_unbind: true };
+    const otherReleased = { ...released, case_no: 'CASE-2', binding_version: 13 };
+    vi.mocked(api.workspaceUnbind).mockResolvedValue(otherReleased);
+    vi.mocked(api.workspaceList).mockResolvedValueOnce(page([record, other])).mockResolvedValueOnce(page([record, otherReleased])).mockResolvedValue(page());
     mount(api);
-    fireEvent.click(await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' }));
-    expect(screen.queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '解除群組綁定' }));
+    const otherRow = within(await screen.findByRole('row', { name: /CASE-2/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(otherRow.queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
+    fireEvent.click(otherRow.getByRole('button', { name: '解除群組綁定' }));
 
-    await screen.findByText('已解除群組綁定，歷程已保留。');
-    expect(api.workspaceUnbind).toHaveBeenCalledExactlyOnceWith('CASE-1', 6);
+    await screen.findByText('案件 CASE-2 已解除群組綁定，歷程已保留。');
+    expect(api.workspaceUnbind).toHaveBeenCalledExactlyOnceWith('CASE-2', 12);
     expect(api.workspaceDeleteHistory).not.toHaveBeenCalled();
-    expandHistory();
+    fireEvent.click(await screen.findByRole('button', { name: '查看案件 CASE-2 群組歷程' }));
     const dialog = screen.getByRole('dialog');
     await within(dialog).findByText('未設定 測試月嫂已離開群組');
-    await waitFor(() => expect(api.workspaceList).toHaveBeenCalledTimes(2));
+    expect(api.workspaceEvents).toHaveBeenCalledExactlyOnceWith('CASE-2', { page: 1, pageSize: 25 }, expect.any(Object));
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉群組明細' }));
 
-    const deleteHistory = within(dialog).getByRole('button', { name: '永久刪除群組歷程' });
+    const releasedRow = within(screen.getByRole('row', { name: /CASE-2/ }));
+    const deleteHistory = releasedRow.getByRole('button', { name: '永久刪除群組歷程' });
     expect(deleteHistory).toHaveAccessibleDescription(/刪除後無法復原/);
     fireEvent.click(deleteHistory);
 
-    await screen.findByText('已永久刪除案件 CASE-1 的群組歷程。');
-    expect(api.workspaceDeleteHistory).toHaveBeenCalledExactlyOnceWith('CASE-1', 7);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    await screen.findByText('目前沒有案件群組綁定紀錄');
-    expect(screen.queryByRole('button', { name: '查看案件 CASE-1 群組明細' })).not.toBeInTheDocument();
+    await screen.findByText('已永久刪除案件 CASE-2 的群組歷程。');
+    expect(api.workspaceDeleteHistory).toHaveBeenCalledExactlyOnceWith('CASE-2', 13);
+    await screen.findByRole('row', { name: /CASE-1/ });
+    expect(screen.queryByRole('row', { name: /CASE-2/ })).not.toBeInTheDocument();
   });
 
-  it('刪除請求進行中阻擋再送，版本衝突時重新讀回目前群組', async () => {
+  it('刪除請求進行中阻擋再送，版本衝突時重新讀回清單', async () => {
     const api = client();
-    vi.mocked(api.workspaceDetail).mockResolvedValueOnce(released).mockResolvedValue({ ...record, binding_version: 8, can_unbind: true });
+    vi.mocked(api.workspaceList).mockResolvedValueOnce(page([released])).mockResolvedValue(page([{ ...record, binding_version: 8, can_unbind: true }]));
     let rejectDelete!: (error: Error) => void;
     vi.mocked(api.workspaceDeleteHistory).mockReturnValue(new Promise((_resolve, reject) => { rejectDelete = reject; }));
     mount(api);
-    fireEvent.click(await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' }));
     fireEvent.click(await screen.findByRole('button', { name: '永久刪除群組歷程' }));
 
     const pending = screen.getByRole('button', { name: '正在刪除群組歷程…' });
     expect(pending).toBeDisabled();
-    expect(screen.getByRole('button', { name: '關閉群組明細' })).toBeDisabled();
     fireEvent.click(pending);
     expect(api.workspaceDeleteHistory).toHaveBeenCalledTimes(1);
     await act(async () => rejectDelete(new LineOrderGroupQueryError('VERSION_CONFLICT', 'private detail', false, 409)));
@@ -184,7 +191,8 @@ describe('案件群組精簡工作區', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('群組綁定或歷程已變更');
     await screen.findByRole('button', { name: '解除群組綁定' });
     expect(screen.queryByRole('button', { name: '永久刪除群組歷程' })).not.toBeInTheDocument();
-    expect(api.workspaceDetail).toHaveBeenCalledTimes(2);
+    expect(api.workspaceList).toHaveBeenCalledTimes(2);
+    expect(api.workspaceDetail).not.toHaveBeenCalled();
     expect(api.workspaceDeleteHistory).toHaveBeenCalledTimes(1);
   });
 });

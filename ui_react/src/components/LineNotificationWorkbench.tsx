@@ -88,6 +88,7 @@ const identityNodes = LINE_MESSAGE_FLOWS.find(flow => flow.id === 'identity')?.s
 
 function categoryOf(entry: NotificationEntry): Exclude<MessageCategory, 'all'> | undefined {
   if (PAYMENT_REMINDER_MESSAGE_IDS.has(entry.id)) return 'accounting';
+  if (entry.id === 'identity-pending') return 'identity';
   if (identityNodes.some(node => node.ids?.includes(entry.id)
     || node.templates?.includes(entry.rule?.templateId ?? ''))) return 'identity';
 }
