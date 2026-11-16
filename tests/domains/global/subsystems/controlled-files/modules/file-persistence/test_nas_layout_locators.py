@@ -1,6 +1,5 @@
 """New production locators preserve opaque identities and existing transaction ownership."""
 from datetime import date, datetime, timezone
-import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -43,18 +42,29 @@ def test_staff_files_finalize_to_named_owner_directory_and_download_by_old_stagi
     assert download.content == content
 
 
-def test_client_passbook_cover_uses_passbook_directory(production):
-    digest = hashlib.sha256(b"fixture passbook").hexdigest()
+@pytest.mark.parametrize("app_env", ["production", "development"])
+def test_client_passbook_cover_finalizes_to_named_client_directory(production, monkeypatch, app_env):
+    monkeypatch.setenv("APP_ENV", app_env)
+    storage = FileSystemControlledFileStorage(production)
+    content = b"fixture passbook"
+    staged = storage.put_staged(idempotency_key="fixture:passbook", filename="upload.jpg", mime_type="image/jpeg", content=content)
     candidate = SimpleNamespace(
         owner=Owner.CLIENTS,
         purpose=Purpose.CLIENT_PASSBOOK_COVER,
         subject_reference="42",
         object_key="clients/42/passbook_cover",
         mime_type="image/jpeg",
-        sha256_digest=digest,
+        sha256_digest=staged.sha256_digest,
     )
-    locator = _storage_locator_for(candidate, {})
-    assert locator == f"{layout.CLIENT_PASSBOOK_DIRECTORY}/42/存摺封面_42_v1_{digest[:6]}.jpg"
+    locator = _storage_locator_for(candidate, {}, client_name="測試/客戶")
+    assert locator == f"{layout.CLIENT_PASSBOOK_DIRECTORY}/測試_客戶_42/存摺封面_測試_客戶_42_v1_{staged.sha256_digest[:6]}.jpg"
+    storage.finalize_staged(staged.staging_id, expected_sha256=staged.sha256_digest, object_reference=locator)
+    assert (production / locator).read_bytes() == content
+
+    candidate.subject_reference = "43"
+    candidate.object_key = "clients/43/passbook_cover"
+    same_name_locator = _storage_locator_for(candidate, {}, client_name="測試/客戶")
+    assert same_name_locator.startswith(f"{layout.CLIENT_PASSBOOK_DIRECTORY}/測試_客戶_43/")
 
 
 def test_contract_pdf_and_menu_have_their_business_directories(production):

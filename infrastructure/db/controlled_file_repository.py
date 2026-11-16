@@ -224,12 +224,24 @@ class MySqlControlledFileWorkflowRepository:
             file_id = f"cf_{uuid.uuid4().hex}"
             applied_at_utc = _mysql_utc(applied_at)
             staff_record = None
+            client_name = None
             if candidate.owner is ControlledFileOwner.STAFF and _uses_archive_layout(candidate):
                 cursor.execute("SELECT id,union_no,name FROM staff WHERE id=%s", (candidate.subject_reference,))
                 staff_record = cursor.fetchone()
                 if not isinstance(staff_record, Mapping):
                     raise RuntimeError("controlled_file_staff_storage_subject_missing")
-            storage_locator = _storage_locator_for(candidate, staging, version=version, staff_record=staff_record)
+            elif (
+                candidate.owner is ControlledFileOwner.CLIENTS
+                and candidate.purpose is ControlledFilePurpose.CLIENT_PASSBOOK_COVER
+                and _uses_archive_layout(candidate)
+            ):
+                cursor.execute("SELECT name FROM clients WHERE id=%s", (candidate.subject_reference,))
+                client = cursor.fetchone()
+                if isinstance(client, Mapping):
+                    client_name = client["name"]
+            storage_locator = _storage_locator_for(
+                candidate, staging, version=version, staff_record=staff_record, client_name=client_name,
+            )
             cursor.execute(
                 _OBJECT_INSERT_SQL,
                 (
@@ -692,7 +704,7 @@ def _uses_archive_layout(candidate: ControlledFileCandidate) -> bool:
     )
 
 
-def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) -> str:
+def _storage_locator_for(candidate, staging, *, version=1, staff_record=None, client_name=None) -> str:
     if _uses_archive_layout(candidate):
         subject = safe_filename_component(candidate.subject_reference)
         digest = candidate.sha256_digest[:6]
@@ -701,7 +713,12 @@ def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) ->
                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}.get(candidate.mime_type, ".bin")
         if candidate.owner is ControlledFileOwner.CLIENTS and candidate.purpose is ControlledFilePurpose.CLIENT_PASSBOOK_COVER:
-            return f"{CLIENT_PASSBOOK_DIRECTORY}/{subject}/存摺封面_{subject}_v{version}_{digest}{extension}"
+            if not isinstance(client_name, str) or not client_name.strip():
+                raise RuntimeError("controlled_file_client_storage_subject_missing")
+            # Leave room for the client ID, version, digest and extension within the NAS filename limit.
+            name = client_name.strip().encode("utf-8")[:180].decode("utf-8", errors="ignore")
+            label = safe_filename_component(f"{name}_{subject}")
+            return f"{CLIENT_PASSBOOK_DIRECTORY}/{label}/存摺封面_{label}_v{version}_{digest}{extension}"
         if candidate.owner is ControlledFileOwner.STAFF:
             if staff_record is None:
                 raise RuntimeError("controlled_file_staff_storage_subject_missing")

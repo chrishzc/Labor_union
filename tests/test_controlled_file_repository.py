@@ -5,6 +5,7 @@ Description: 驗證受控檔案 MySQL repository 的鎖、映射、CAS 與零 hi
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -14,6 +15,7 @@ import pytest
 from infrastructure.db.controlled_file_repository import (
     MySqlControlledFileWorkflowRepository,
 )
+from infrastructure.file.storage_layout import CLIENT_PASSBOOK_DIRECTORY
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.controlled_files.contracts import (
@@ -109,8 +111,8 @@ def _candidate() -> ControlledFileCandidate:
     )
 
 
-def _staging_row():
-    candidate = _candidate()
+def _staging_row(candidate=None):
+    candidate = candidate or _candidate()
     return {
         "id": 8,
         "staging_id": candidate.staging_id,
@@ -269,6 +271,39 @@ def test_register_file_locks_version_chain_and_never_projects_locator() -> None:
     insert_sql, insert_values = cursor.executions[2]
     assert "INSERT INTO controlled_file_objects" in insert_sql
     assert insert_values[8] == _staging_row()["storage_locator"]
+    assert connection.commits == 0
+
+
+def test_register_passbook_uses_formal_client_name_and_preserves_version_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CONTROLLED_FILE_STORAGE_ROOT", str(tmp_path))
+    candidate = replace(
+        _candidate(),
+        owner=ControlledFileOwner.CLIENTS,
+        purpose=ControlledFilePurpose.CLIENT_PASSBOOK_COVER,
+        subject_reference="42",
+        object_key="clients/42/passbook_cover",
+        logical_folder=CLIENT_PASSBOOK_DIRECTORY,
+        filename="upload.png",
+        mime_type="image/png",
+    )
+    cursor = ScriptedCursor(
+        [_staging_row(candidate), {"id": 7, "version_number": 1}, {"name": "測試客戶"}],
+        rowcounts=[0, 0, 0, 1, 1],
+    )
+    connection = FakeConnection(cursor)
+
+    result = MySqlControlledFileWorkflowRepository(connection).register_file(
+        candidate, actor=ActorContext("admin-001"), applied_at=NOW
+    )
+
+    assert cursor.executions[2] == ("SELECT name FROM clients WHERE id=%s", ("42",))
+    insert_sql, insert_values = cursor.executions[3]
+    assert "INSERT INTO controlled_file_objects" in insert_sql
+    assert insert_values[3:5] == ("42", "clients/42/passbook_cover")
+    assert insert_values[8] == f"{CLIENT_PASSBOOK_DIRECTORY}/測試客戶_42/存摺封面_測試客戶_42_v2_{DIGEST[:6]}.png"
+    assert insert_values[12:15] == (2, 7, 1)
+    assert result.filename == "upload.png"
     assert connection.commits == 0
 
 

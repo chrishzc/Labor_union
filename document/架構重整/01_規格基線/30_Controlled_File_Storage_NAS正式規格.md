@@ -109,8 +109,8 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 ├── 01_案件合約 (orders)/{案件編號}/
 │   ├── 客戶合約_{案件編號}_v1_已簽署_{短Hash}.pdf
 │   └── 月嫂承攬協議_{案件編號}_{月嫂編號}_已簽署_{短Hash}.pdf
-├── 02_客戶存摺封面 (passbooks)/{客戶或案件識別}/
-│   └── 存摺封面_{客戶或案件識別}_v{版本號}_{短Hash}.{副檔名}
+├── 02_客戶存摺封面 (passbooks)/{客戶姓名}_{客戶編號}/
+│   └── 存摺封面_{客戶姓名}_{客戶編號}_v{版本號}_{短Hash}.{副檔名}
 ├── 03_月嫂檔案與資格 (staff)/{月嫂編號}_{姓名}/
 │   ├── resume/月嫂履歷_{月嫂編號}_{月嫂姓名}_v{版本號}_{短Hash}.pdf
 │   ├── certificates/證照_{月嫂編號}_{證照名稱}_{短Hash}.pdf
@@ -129,7 +129,7 @@ Reconciliation 對照 DB metadata、storage truth、business reference 與 outbo
 - 新正式受控附件於原 outer transaction 保存 finalize intent，commit 後由 bounded finalize runner 歸檔至 `01`～`04` 新 locator；未綁定 LINE 原始媒體位於 `_staging/line_media`。
 - 明確設定本機絕對儲存路徑時，新上傳的客戶服務契約及月嫂委任契約歸檔至 `01`，客戶審核／建檔時確認的存摺封面歸檔至 `02`，月嫂履歷、證照及體檢文件歸檔至 `03`。登錄時建立 finalize intent，由背景工作歸檔並維持原檔案識別的下載能力。新上傳的 LINE 選單素材由既有媒體資產流程直接寫入 `04/rich_menus/`，以資產識別讀取。既有檔案位置照原紀錄讀取。
 - `05_資料庫冷備份 (db_backups)/YYYY-MM/` 衍生於同一共用根（無獨立 `NAS_BACKUP_DIR`），Global migration 使用 `_partial/` 與 `_maintenance/`，備份須經匯出 exit、gzip 解壓、schema 穩定、SHA-256 與讀回全過後封裝為單一 `.zip` 發布（並向下相容讀取既有 `_receipts/YYYY-MM/` 舊三檔備份）；一般受控檔案 adapter 須嚴格排除備份專區存取（含 Windows 大小寫與尾端空白／句點等價路徑）。
-- 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。
+- 實體檔案命名固定為 `[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`；透過 `FileSystemControlledFileStorage.readiness()` Fail-Closed 保護寫入一致性。新歸檔的存摺封面採用登錄當時的正式客戶姓名，附客戶編號以區分同名客戶。過長的姓名截短至可完整表示於前 180 個 UTF-8 bytes 的字元。既有存摺封面仍依原儲存位置讀取。
 
 ## 9. 驗收標準
 
