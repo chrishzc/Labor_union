@@ -27,7 +27,7 @@ import { financeImportCorrectionClient } from '../../../../../../../api/finance_
 import { financeImportMutationClient } from '../../../../../../../api/finance_import/finance_import_mutation_client';
 
 vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
-  financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn(), pairBankTransaction: vi.fn(), excludeBankTransaction: vi.fn() },
+  financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn(), listExcludedBankTransactions: vi.fn(), pairBankTransaction: vi.fn(), excludeBankTransaction: vi.fn() },
 }));
 vi.mock('../../../../../../../components/FinanceStatementArchive', () => ({
   FinanceStatementArchive: ({ compact: _compact }: { compact?: boolean }) => (
@@ -75,6 +75,10 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
         status: 'saved', new_count: 0, duplicate_count: 3, reconciled_count: 0, pending_count: 2,
         source_warning_count: 0, error_code: null }],
       next_before: null,
+    });
+    vi.mocked(financeImportQueryClient.listExcludedBankTransactions).mockResolvedValue({
+      items: [],
+      next_before_row_id: null,
     });
   });
 
@@ -817,6 +821,46 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getAllByRole('button', { name: '查看交易 finance-import-row:101' })).toHaveLength(1);
     expect(within(dialog).getByText('本次核銷')).toBeInTheDocument();
     expect(screen.getByLabelText('篩選銀行')).toHaveValue('sinopac');
+  });
+
+  it('opens excluded bank transactions drawer and displays removal reason and audit details', async () => {
+    vi.mocked(financeImportQueryClient.listExcludedBankTransactions).mockResolvedValue({
+      items: [
+        {
+          row_id: 88,
+          row_identity: 'bank:88',
+          batch_id: 12,
+          bank: 'sinopac',
+          transaction_date: '2026-11-10',
+          direction: 'incoming',
+          amount_ntd: 25000,
+          summary: '非本會款項',
+          memo: '退回款',
+          counterparty_name: '張大明',
+          source_file: 'sinopac_nov.xlsx',
+          sheet_name: 'Sheet1',
+          source_row: 10,
+          raw_reference: 'TX8888',
+          excluded_at: '2026-11-11T10:00:00.000Z',
+          excluded_by: 'admin',
+          exclusion_reason: '廠商誤匯入非本工會帳款',
+        },
+      ],
+      next_before_row_id: null,
+    });
+
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    const excludedBtn = screen.getByRole('button', { name: '已移除流水紀錄' });
+    expect(excludedBtn).toBeVisible();
+
+    fireEvent.click(excludedBtn);
+    const dialog = await screen.findByRole('dialog', { name: '已移除流水紀錄' });
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByText('廠商誤匯入非本工會帳款')).toBeVisible();
+    expect(within(dialog).getByText('admin')).toBeVisible();
+    expect(within(dialog).getByText('NT$ 25,000')).toBeVisible();
+    expect(within(dialog).getByText('永豐')).toBeVisible();
+    expect(within(dialog).getByText('sinopac_nov.xlsx', { exact: false })).toBeInTheDocument();
   });
 
   it('displays posted bank facts and opens readonly fact drawer', async () => {

@@ -79,6 +79,41 @@ def test_current_pages_and_retired_candidate_links_are_served_with_correct_statu
     asyncio.run(check())
 
 
+def test_split_line_postponement_mounts_only_verified_result_handlers():
+    from fastapi import HTTPException
+    from fastapi.routing import iter_route_contexts
+    from api.nas_apps import line_app
+    from api.routes import nas_line_operations as routes, staff_leave_intake
+
+    base = "/api/v1/line/staff-self-service/leave-results"
+    public = {route.path: route for route in iter_route_contexts(line_app().routes)}
+    private = {route.path: route for route in iter_route_contexts(routes.private_router.routes)}
+    expected = {
+        "cases": staff_leave_intake.leave_result_cases,
+        "preview": staff_leave_intake.preview_leave_defer,
+        "propose": staff_leave_intake.propose_leave_defer,
+    }
+    assert {path for path in public if path.startswith(base)} == {
+        f"{base}/{name}" for name in (*expected, "submit")
+    }
+    assert {path for path in private if path.startswith(routes.PREFIX + base)} == {
+        f"{routes.PREFIX}{base}/{name}" for name in expected
+    }
+    assert not any("/line/staff-self-service/leave-requests" in path for path in {*public, *private})
+    for name, handler in expected.items():
+        forwarded = public[f"{base}/{name}"]
+        original = private[f"{routes.PREFIX}{base}/{name}"]
+        assert forwarded.methods == original.methods == {"POST"}
+        assert forwarded.endpoint is routes.forward_line_operation
+        assert original.endpoint is handler
+    retired = public[f"{base}/submit"]
+    assert retired.endpoint is staff_leave_intake.submit_leave_result
+    with pytest.raises(HTTPException) as rejected:
+        retired.endpoint()
+    assert rejected.value.status_code == 410
+    assert rejected.value.detail["error"]["code"] == "staff_leave_direct_submit_retired"
+
+
 @pytest.fixture
 def mobile_owner(bridge, monkeypatch):
     from api.routes import line_mobile_admin as mobile

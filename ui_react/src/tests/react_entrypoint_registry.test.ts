@@ -27,7 +27,7 @@ const LIFF_ASSETS = [
   ['非市民服務申請', '非市民服務申請'],
   ['bind.html', '連結客戶資料'],
   ['staff_order_search.html', '我的案件'],
-  ['staff_schedule.html', '班表與請假'],
+  ['staff_schedule.html', '我的排班'],
   ['staff_profile_update.html', '更新個人資料'],
   ['staff_payout.html', '薪資與付款紀錄'],
   ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],

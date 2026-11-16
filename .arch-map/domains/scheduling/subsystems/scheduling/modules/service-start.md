@@ -18,7 +18,7 @@
 - `api/schemas/service_start.py`
 - `ui_react/src/api/scheduling/service_start_client.ts`
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.tsx`
-  - 排班頁「請假與代班」分頁先顯示全案待處理事項。案件工作區在服務日期和正式排班下方顯示同案的服務開始、請假與換人待辦。
+  - 排班頁「代班待辦」分頁先顯示全案待處理事項。延期衝突的局部代班待辦從同案多月嫂排班完成，原 `dates` 動作的局部代班分支拒絕新提交。
   - `requestId` 深連結獨立查詢該筆需求並核對案件，不依賴待辦分頁、不改選其他事項；`#scheduling?tab=coordination&case_no=<case>&request=<id>` 由既有 SchedulingPage 薄組合，開頁不 mutation。
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.css`
 - `line/static/staff_order_search.html`

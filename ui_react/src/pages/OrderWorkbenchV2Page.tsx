@@ -75,19 +75,35 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
+    substituteRequestId?: number;
+    openUpcomingStaffing?: boolean;
   } | null>(null);
   const requestSequence = useRef(0);
-  const [requestedCase, setRequestedCase] = useState(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('case') ?? '');
+  const [caseLink, setCaseLink] = useState(() => window.location.hash);
+  const caseLinkParams = new URLSearchParams(caseLink.split('?')[1]);
+  const requestedCase = caseLinkParams.get('case') ?? '';
+  const requestedSubstitute = caseLinkParams.get('substitute');
+  const openUpcomingStaffing = caseLinkParams.get('staffing') === 'upcoming';
   const [caseLinkError, setCaseLinkError] = useState<string | null>(null);
   const lastResolvedQuery = useRef<string | null>(null);
   const refreshProjection = useCallback(() => setProjectionRefreshKey((current) => current + 1), []);
   const closeDrawer = useCallback(() => {
     setSelectedDrawer(null);
-    setRequestedCase('');
+    setCaseLink('');
     setCaseLinkError(null);
     if (new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('case')) window.history.replaceState(null, '', '#order-workbench-v2');
     refreshProjection();
   }, [refreshProjection]);
+  useEffect(() => {
+    const readCaseLink = () => {
+      const hash = window.location.hash;
+      if (hash.startsWith('#order-workbench-v2?') && new URLSearchParams(hash.split('?')[1]).has('case')) {
+        setCaseLink(hash);
+      }
+    };
+    window.addEventListener('hashchange', readCaseLink);
+    return () => window.removeEventListener('hashchange', readCaseLink);
+  }, []);
   const previousHomeRequest = useRef(homeNavigationRequest);
   useEffect(() => {
     if (previousHomeRequest.current === homeNavigationRequest) return;
@@ -100,17 +116,26 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   useEffect(() => {
     if (!requestedCase) return;
     const controller = new AbortController();
+    let substituteRequestId: number | undefined;
+    if (requestedSubstitute !== null) {
+      const candidate = Number(requestedSubstitute);
+      if (!/^[1-9][0-9]*$/.test(requestedSubstitute) || !Number.isSafeInteger(candidate)) {
+        setCaseLinkError('代班待辦連結無效，請從待辦重新開啟。');
+        return;
+      }
+      substituteRequestId = candidate;
+    }
     setCaseLinkError(null);
     void orderCoreStageProjectionClient.getCoreStageTimelines({ lifecycle_scope: 'all', case_no_search: requestedCase, page_size: 20 }, { signal: controller.signal })
       .then((page) => {
         if (controller.signal.aborted) return;
         const exact = page.items.filter((item) => item.case_no === requestedCase);
         if (exact.length !== 1) throw new Error('無法確認要開啟的案件，請重新查詢。');
-        setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type });
+        setSelectedDrawer({ caseNo: exact[0]!.case_no, branchType: exact[0]!.branch_type, substituteRequestId, openUpcomingStaffing });
       })
       .catch((error) => { if (!controller.signal.aborted) setCaseLinkError(error instanceof Error ? error.message : '案件讀取失敗。'); });
     return () => controller.abort();
-  }, [requestedCase]);
+  }, [requestedCase, requestedSubstitute, openUpcomingStaffing]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -224,12 +249,15 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
   if (selectedDrawer !== null) return (
     <>
       {error !== null && <div role="alert"><p>案件清單更新失敗，請重新整理後繼續。</p><button type="button" onClick={refreshProjection}>重新整理</button></div>}
+      {caseLinkError && <p role="alert">{caseLinkError}</p>}
       <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, width: '100%' }}>
         <OrderWorkbenchV2Drawer
-          key={selectedDrawer.caseNo}
+          key={`${selectedDrawer.caseNo}:${selectedDrawer.substituteRequestId ?? ''}:${selectedDrawer.openUpcomingStaffing ?? false}`}
           homeNavigationRequest={homeNavigationRequest}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
+          substituteRequestId={selectedDrawer.substituteRequestId}
+          openUpcomingStaffing={selectedDrawer.openUpcomingStaffing}
           summary={summaryIndex.get(selectedDrawer.caseNo)}
           workbenchScope="in_progress"
           onClose={closeDrawer}

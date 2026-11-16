@@ -7,6 +7,7 @@ from api.error_contracts import typed_http_error
 from api.routes import (
     line_candidate_contact, line_deposit_payment, line_feedback, line_mobile_admin,
     line_mobile_staff_leave_coordination, line_service_help, matches, notification_task_actions,
+    staff_leave_intake,
 )
 from infrastructure.http.line_operations_client import LineOperationsClient, LineOperationsUnavailable, PREFIX
 from infrastructure.runtime.worker_credentials import LINE_OPERATIONS_SERVICE
@@ -44,15 +45,25 @@ async def forward_line_operation(request: Request, client=Depends(get_line_opera
 # This is an explicit selection of the existing LIFF contracts, not a catch-all
 # proxy to management URLs. Original handlers enforce LINE identity, current
 # binding, capabilities, scope, versions and idempotency inside management-api.
+_POSTPONEMENT_PREFIX = "/api/v1/line/staff-self-service/leave-results"
+_POSTPONEMENT_PATHS = {f"{_POSTPONEMENT_PREFIX}/{step}" for step in ("cases", "preview", "propose")}
+_postponement_operations = APIRouter()
+_postponement_operations.routes.extend(
+    route for route in staff_leave_intake.router.routes if route.path in _POSTPONEMENT_PATHS
+)
 _OPERATIONS = (
     line_deposit_payment.router, line_service_help.public_router,
     line_feedback.router, line_mobile_admin.router, line_mobile_staff_leave_coordination.router,
     notification_task_actions.mobile_router,
-    matches.resume_router,
+    matches.resume_router, _postponement_operations,
 )
 private_router = APIRouter(prefix=PREFIX, include_in_schema=False,
                           dependencies=[Depends(require_private_line_operations)])
 public_router = APIRouter()
+public_router.add_api_route(
+    f"{_POSTPONEMENT_PREFIX}/submit", staff_leave_intake.submit_leave_result,
+    methods=["POST"], include_in_schema=False,
+)
 for original in _OPERATIONS:
     private_router.include_router(original)
     for route in original.routes:

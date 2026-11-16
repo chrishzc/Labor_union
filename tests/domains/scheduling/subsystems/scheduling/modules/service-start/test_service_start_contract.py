@@ -8,6 +8,31 @@ from api.routes import service_start,matching_schedule_confirmation
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.message_preview_samples import current_message_sample
 
+
+def test_legacy_leave_dates_refuse_new_mutations_but_replay_saved_commands():
+    from datetime import date
+    from unittest.mock import MagicMock
+    from fastapi import HTTPException
+    from subsystems.scheduling.service_start_workflow import ServiceStartWorkflow
+
+    repository, arrangement, units = MagicMock(), MagicMock(), MagicMock()
+    application = ServiceStartWorkflow(repository, arrangement, units)
+    repository.command_replay.return_value = None
+    repository.is_leave_request.return_value = True
+    args = (41, date(2026, 11, 17), 3, "admin", "existing-key")
+    with pytest.raises(HTTPException) as blocked:
+        service_start.call(lambda: application.save_dates(*args))
+    assert blocked.value.status_code == 410
+    assert blocked.value.detail["error"]["code"] == "leave_substitute_dates_retired"
+    repository.require_joined_candidate.assert_not_called()
+    arrangement.apply.assert_not_called()
+    units.return_value.__enter__.return_value.commit.assert_not_called()
+    repository.command_replay.return_value = 41
+    assert application.save_dates(*args) is repository.view.return_value
+    repository.is_leave_request.assert_called_once_with(41, lock=True)
+    arrangement.apply.assert_not_called()
+
+
 @pytest.mark.parametrize('role,status',[('line_manager',200),('staff',403),('line_viewer',200)])
 def test_union_capability_allows_current_operations_and_rejects_other_audiences(role,status):
  app=FastAPI();app.include_router(service_start.router)

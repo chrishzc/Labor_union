@@ -99,7 +99,7 @@ export const ASSET_ITEMS: LiffAssetItem[] = [
   },
   {
     id: 'staff_schedule',
-    displayTitle: "班表與請假",
+    displayTitle: "我的排班",
     purpose: "查看個人排班月曆，登記不接案日期區間。",
     group: "月嫂服務",
     type: 'liff',
@@ -242,7 +242,6 @@ const ASSET_TO_TARGET_MAP: Record<string, { value: string; overrideLabel?: strin
  */
 const ADDITIONAL_TARGETS: LiffTargetOption[] = [
   { value: '?target=gateway', label: '服務申請入口（?target=gateway）', audienceRoles: ['visitor'] },
-  { value: '?target=staff_leave_apply', label: '月嫂請假登記，相容入口（?target=staff_leave_apply）', audienceRoles: ['staff'] },
   { value: '?target=faq', label: '常見問答（?target=faq）', audienceRoles: ['visitor', 'customer'] },
   { value: '?target=ai_assistant', label: 'AI 智慧問答（?target=ai_assistant）', audienceRoles: ['visitor', 'customer'] },
   { value: '?target=scheduling_review', label: '排班審核（?target=scheduling_review）', audienceRoles: ['union_staff'] },

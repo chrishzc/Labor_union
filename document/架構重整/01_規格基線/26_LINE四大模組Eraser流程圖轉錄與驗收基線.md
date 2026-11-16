@@ -118,7 +118,9 @@ flowchart TD
   D --> E["訂金正式核銷後由工會建置案件服務群組"]
   E --> F["月嫂於群組呼叫小幫手選單（0 Push）→【確認開工日】滾輪選定日期 → 對方點選同意（防自提自審）"]
   F -->|無衝突| G["同交易更新排班／帳務／一期款到期日並 Reply 生效（開工後隱藏確認開工日，保留服務排程）"]
-  F -->|衝突或需代班| H["工會待辦尋人 → 願意 → 寄群組邀請 → 入群後工會登錄日期與日期表"]
+  F -->|開工日期衝突| H["工會由開工待辦安排人員並確認班表"]
+  G --> M["服務期間由月嫂提議延期，客戶確認"]
+  M -->|確認時發生檔期衝突| L["工會由代班待辦開啟原案多月嫂排班"]
   G --> I["開工當天：群組收到一則純文字問候，第一期款有餘額才併入提醒"]
   I -->|第一期仍逾期| J["第一期款逾期提醒：客戶私訊"]
   I -->|第一期核銷| K["第一期款入帳：官方帳號人工發送，系統標記已通知"]
@@ -134,7 +136,7 @@ flowchart TD
 
 - **雙管理端協同**：電腦版負責訂單異動、媒合排班、代班與財務對帳。手機端提供 `staff_review`、`order_tracking` 與 `dashboard`。日常客服與客訴由工會在官方帳號處理。
 - **個人化安全告警**：群組告警與群組一次性審核連結已全面取消。重大客訴或 `LINE-006` 異常只針對已設定管理員個人對象投遞去敏摘要及需驗證之管理入口；當下無有效個人設定對象時保留內部事件追蹤，嚴禁猜測發往任意群組。
-- **代班與換人帳務邊界**：代班確認加入並於 Scheduling 登錄實際服務日／交接日完成後，各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不建立系統入帳推播（`LINE-PAY-08` 僅保留入帳待辦提醒與標記已通知結案）。
+- **代班與換人帳務邊界**：局部代班依 [多月嫂排班規格](31_MultiCaregiver_Admin_UI正式規格.md#4-局部代班工作面) 處理。代班與換人各自依正式服務區段由 [`03_Payroll_Domain.md`](03_Payroll_Domain.md) 獨立生成當事人整筆應付義務（不拆半、不以「補助薪資／自費薪資」分次發薪）；客戶補助扣抵、退款與政府整期核銷沿 [`04_Client_Finance_Domain.md`](04_Client_Finance_Domain.md)、[`14_Government_Subsidy_Domain.md`](14_Government_Subsidy_Domain.md) 與 [`16_Staff_Payables與Client_Refund正式規格.md`](16_Staff_Payables與Client_Refund正式規格.md) 處理，LINE 端不計算任何金額亦不建立系統入帳推播（`LINE-PAY-08` 僅保留入帳待辦提醒與標記已通知結案）。
 
 ## 7. Current 正式契約對照與架構不變量
 

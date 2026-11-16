@@ -229,12 +229,14 @@ def test_liff_targets_route_to_existing_pages() -> None:
         "function requestedStandalonePage()", 1
     )[0]
 
-    assert "staff_leave_apply: '/line-identity?target=staff_leave_apply'" in gateway
+    assert "staff_leave_apply: '/line-identity?target=staff_leave_apply'" not in gateway
     assert "non_citizen_registration: '/line-non-citizen-registration'" in gateway
     assert 'id="register-non-citizen"' in identity
     assert 'location.assign("/line-non-citizen-registration")' in identity
     assert "profile_update: '/line-profile-guard'" not in gateway
-    assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
+    assert 'staff_leave_apply: "/line-staff-schedule"' not in staff_route
+    assert 'if (target === "staff_leave_apply")' in identity
+    assert '請從案件群組的小幫手發起「雙方合意延期」' in identity
     assert 'profile_update: "/line-profile-guard"' not in standalone_route
     assert 'staff_baby_log' not in staff_route
     assert 'staff_payout: "/line-staff-payout"' in staff_route
@@ -261,14 +263,16 @@ def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
         assert 'get("userId")' not in source
 
 
-def test_staff_schedule_page_uses_strict_leave_flow() -> None:
+def test_staff_schedule_page_uses_mutual_postponement_without_legacy_leave_submission() -> None:
     source=(ROOT/'line/static/staff_schedule.html').read_text(encoding='utf-8')
     assert '/api/v1/line/staff-self-service/leave-results/' in source
-    assert "leaveResultPost('submit',pending)" in source
-    assert '需要安排代班' in source and '已協調順延' in source
+    assert "leaveResultPost('submit'" not in source
+    assert "leaveResultPost('cases'," in source
+    assert "leaveResultPost('preview'," in source
+    assert "leaveResultPost('propose'," in source
+    assert '需要安排代班' not in source and '已協調順延' not in source
     assert '/leave-requests/preview' not in source and 'confirmLeave' not in source
-    assert '確認原操作結果' in source
-    assert 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in source
+    assert '我的不接案日期' in source
     assert 'development_line_user_id: ""' in source
     assert 'params.get("userId")' not in source
     assert 'redirect.searchParams.set("target", "staff_schedule")' in source
@@ -582,7 +586,7 @@ def test_gateway_and_identity_route_all_guide_targets_without_dropping_context()
     runner = """
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-async function check(search) {
+async function check(search, retired = false) {
   let redirected = null;
   const nodes = {
     pageLogo: {textContent: ''},
@@ -620,6 +624,7 @@ async function check(search) {
   });
   vm.runInContext(SOURCE, ctx);
   await ctx.initLiff();
+  if (retired) assert.match(nodes.loaderText.textContent, /案件群組.*雙方合意延期/);
   return redirected;
 }
 (async () => {
@@ -627,6 +632,8 @@ async function check(search) {
   assert.equal(await check('?liff.state=' + encodeURIComponent('/?purpose=staff_verification&flow_id=f2')), '/line-identity?purpose=staff_verification&flow_id=f2');
   assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone');
   assert.equal(await check('?target=staff_schedule&case_no=C-1&mode=postpone'), '/line-identity?target=staff_schedule&case_no=C-1&mode=postpone');
+  assert.equal(await check('?target=staff_leave_apply', true), null);
+  assert.equal(await check('?liff.state=' + encodeURIComponent('/?target=staff_leave_apply'), true), null);
   assert.equal(await check('?target=deposit_payment&case_no=C-1'), '/line-deposit-payment?case_no=C-1');
   assert.equal(await check('?entry=registration'), '/line-identity?entry=registration');
 })().catch((e) => { console.error(e); process.exit(1); });

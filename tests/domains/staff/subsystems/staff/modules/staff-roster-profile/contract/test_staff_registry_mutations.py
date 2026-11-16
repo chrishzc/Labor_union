@@ -17,7 +17,9 @@ from subsystems.staff.profile_workflow import StaffProfileSnapshot
 from infrastructure.mysql.staff_bank_account_repository import MySqlStaffBankAccountRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.staff.bank_account_workflow import StaffBankAccountConflict, StaffBankAccountWorkflow
-from subsystems.staff.profile_change_approval import StaffProfileChange, StaffProfileChangeApproval, VersionedChange
+from subsystems.staff.profile_change_approval import (
+    StaffProfileChange, StaffProfileChangeApproval, VersionedChange, restore_staff_profile_change
+)
 from subsystems.staff.profile_workflow import StaffProfileMutationConflict, StaffProfileMutationWorkflow
 
 
@@ -169,6 +171,62 @@ def test_reviewed_profile_and_bank_changes_commit_together(bank_version_conflict
         approval.apply(change, operation_id, actor, "")
         assert profile_repository.row["staff_profile_version"] == 1
         assert bank_repository.persist_count == 1
+
+
+def test_reviewed_bank_add_when_no_existing_account_commits_successfully():
+    profile_repository, bank_repository = _ProfileRepository(), _BankRepository()
+    bank_repository.row["accounts"] = ()
+
+    class Connection:
+        commits = 0
+        rollbacks = 0
+
+        def begin(self):
+            self.before = deepcopy((vars(profile_repository), vars(bank_repository)))
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rollbacks += 1
+            profile_repository.__dict__.update(self.before[0])
+            bank_repository.__dict__.update(self.before[1])
+
+    connection = Connection()
+    factory = lambda: MySqlUnitOfWork(connection)
+    profile = StaffProfileMutationWorkflow(profile_repository, factory)
+    bank = StaffBankAccountWorkflow(bank_repository, factory)
+    approval = StaffProfileChangeApproval(factory, profile, bank, None, None, None)
+
+    proposed = {"bank": {"bank_code": "812", "branch_code": "0012", "account_no": "123456789013"}}
+    basis = {"bank": 0}
+    prepared, review = approval.prepare(7, proposed, basis)
+
+    assert prepared["bank"]["proposed"] == {
+        "bank_code": "812",
+        "branch_code": "0012",
+        "account_no": "123456789013",
+        "operation": "add",
+        "is_primary": True,
+    }
+    assert review["bank"]["before"] is None
+    assert review["bank"]["after"]["bank_code"] == "812"
+    assert review["bank"]["after"]["account_last4"] == "9013"
+
+    change = restore_staff_profile_change(7, prepared)
+    operation_id = UUID("01234567-89ab-cdef-0123-456789abcdef")
+    actor, _ = _identity()
+
+    approval.apply(change, operation_id, actor, "初次新增收款帳戶")
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
+    assert bank_repository.persist_count == 1
+    assert bank_repository.row["aggregate_version"] == 1
+    assert len(bank_repository.row["accounts"]) == 1
+    account = bank_repository.row["accounts"][0]
+    assert account["bank_code"] == "812"
+    assert account["account_no"] == "123456789013"
+    assert account["is_primary"] is True
 
 
 def test_staff_profile_preview_apply_and_replay_are_versioned():

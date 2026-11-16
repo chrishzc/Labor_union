@@ -7,6 +7,7 @@ import {
 } from '../api/orders/official_service_date_correction_client';
 import type { AssignmentSegment } from '../api/orders/order_query_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useStaffIdentityDirectory, useStaffIdentityLabels } from './StaffIdentityProvider';
 
@@ -19,15 +20,16 @@ interface Props {
   onBusyChange: (busy: boolean) => void;
   completed?: boolean;
   upcomingOnly?: boolean;
+  substitute?: { id: number; version: number; originalDates: readonly string[] };
 }
 
-export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusyChange, completed = false, upcomingOnly = false }: Props) {
+export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusyChange, completed = false, upcomingOnly = false, substitute }: Props) {
   const directory = useStaffIdentityDirectory();
   const staff = useStaffIdentityLabels();
   const [addedStaff, setAddedStaff] = useState<number[]>([]);
   const [removedBlocks, setRemovedBlocks] = useState<number[]>([]);
   const [overrides, setOverrides] = useState<Record<string, number | null>>({});
-  const [scope, setScope] = useState<'served' | 'upcoming'>(upcomingOnly ? 'upcoming' : 'served');
+  const [scope, setScope] = useState<'served' | 'upcoming'>(upcomingOnly || substitute ? 'upcoming' : 'served');
   const [editDates, setEditDates] = useState(false);
   const [replacements, setReplacements] = useState<Record<string, string>>({});
   const [adoptCalculatedAmounts, setAdoptCalculatedAmounts] = useState(false);
@@ -39,7 +41,10 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
   const [message, setMessage] = useState('');
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
   const original = new Map(segments.flatMap(segment => segment.official_service_dates.map(date => [date, segment] as const)));
-  const availableDays = [...original.keys()].filter(day => scope === 'upcoming' ? day >= today : completed ? day <= today : day < today).sort();
+  const availableDays = [...original.keys()].filter(day => {
+    if (substitute) return day >= today && substitute.originalDates.includes(day);
+    return scope === 'upcoming' ? day >= today : completed ? day <= today : day < today;
+  }).sort();
   const blocks = [
     ...segments.flatMap(segment => segment.assignment_id === null || removedBlocks.includes(segment.assignment_id)
       ? [] : [{ key: segment.assignment_id, staffId: segment.staff_id }]),
@@ -64,9 +69,11 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
   const replacementDates = availableDays.map(day => editDates ? replacements[day] ?? day : day);
   const allDates = [...original.keys()].filter(day => !availableDays.includes(day)).concat(replacementDates);
   const datesValid = replacementDates.every(Boolean) && new Set(allDates).size === allDates.length;
+  const substituteReady = !substitute || (moves.length === substitute.originalDates.length
+    && moves.every(move => move.staff_id !== original.get(move.source_date)?.staff_id));
   const canPreview = moves.length > 0 && Object.keys(allocation).length === availableDays.length
     && addedStaff.every(id => Object.values(allocation).includes(-id))
-    && datesValid && !!evidence.trim() && !!reason.trim();
+    && datesValid && substituteReady && !!evidence.trim() && !!reason.trim();
   async function submit() {
     setBusy(true);
     onBusyChange(true);
@@ -86,9 +93,19 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
             && item.official_service_dates.join() === saved.service_dates.join()))) {
           throw new Error('班表已提交，尚未確認最新結果。請重新確認原操作。');
         }
+        if (substitute) {
+          const task = await serviceStartClient.detail(substitute.id);
+          if (task.request_id !== substitute.id || task.case_no !== caseNo
+            || task.workflow_kind !== 'leave' || task.status !== 'applied') {
+            throw new Error('班表已提交，尚未確認代班待辦結果。請重新確認原操作。');
+          }
+        }
         onSaved();
       } else {
-        const change: AttributionChange = { moves, scope, evidence: evidence.trim() };
+        const change: AttributionChange = {
+          moves, scope, evidence: evidence.trim(),
+          ...(substitute ? { substitute_request_id: substitute.id, expected_substitute_request_version: substitute.version } : {}),
+        };
         const preview = await client.previewAttribution(caseNo, change);
         setAdoptCalculatedAmounts(false);
         setPending({ change, preview, key: crypto.randomUUID(), reason: reason.trim() });
@@ -106,8 +123,11 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
   }
   return <section className="formal-recommendation-inline-form order-service-attribution-panel" aria-label="多月嫂排班">
     <h3>多月嫂排班</h3>
+    {substitute && <p>待代班日期：{substitute.originalDates.join('、')}。請為每個日期選擇已同意代班的月嫂。</p>}
+    {substitute && availableDays.length !== substitute.originalDates.length &&
+      <p role="alert">部分待代班日期已過或與正式班表不符，請核對案件及待辦。</p>}
     {!pending ? <fieldset className="service-attribution-form" disabled={busy}>
-      {!completed && !upcomingOnly && <label>調整範圍 <select value={scope} onChange={event => {
+      {!completed && !upcomingOnly && !substitute && <label>調整範圍 <select value={scope} onChange={event => {
         setScope(event.target.value === 'upcoming' ? 'upcoming' : 'served');
         setAddedStaff([]); setRemovedBlocks([]); setOverrides({}); setReplacements({}); setEditDates(false);
       }}><option value="served">更正已服務紀錄</option><option value="upcoming">調整後續排班</option></select></label>}
@@ -129,7 +149,7 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
             else setRemovedBlocks(current => [...current, key]);
           },
         }} />
-      {availableDays.length > 0 && <label><input type="checkbox" checked={editDates} onChange={event => {
+      {!substitute && availableDays.length > 0 && <label><input type="checkbox" checked={editDates} onChange={event => {
         setEditDates(event.target.checked);
         if (!event.target.checked) setReplacements({});
       }} />調整服務日期</label>}
@@ -139,10 +159,10 @@ export function OrderServiceAttributionPanel({ caseNo, segments, onSaved, onBusy
       </div>}
       {editDates && !datesValid && <p role="status">請填妥改期日期，並排除重複的服務日。</p>}
       <div className="service-attribution-fields">
-        <label>調整依據（必填） <input maxLength={500} value={evidence} onChange={event => setEvidence(event.target.value)} /></label>
+        <label>{substitute ? '代班月嫂同意的協調依據（必填）' : '調整依據（必填）'} <input maxLength={500} value={evidence} onChange={event => setEvidence(event.target.value)} /></label>
         <label>調整原因（必填） <input maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label>
       </div>
-      <a href={`#clients?case=${encodeURIComponent(caseNo)}&field=intake&from=workbench`}>變更約定天數、時數或價金</a>
+      {!substitute && <a href={`#clients?case=${encodeURIComponent(caseNo)}&field=intake&from=workbench`}>變更約定天數、時數或價金</a>}
     </fieldset> : <div>
       <h4>核對逐日排班異動</h4>
       <table className="service-attribution-preview">

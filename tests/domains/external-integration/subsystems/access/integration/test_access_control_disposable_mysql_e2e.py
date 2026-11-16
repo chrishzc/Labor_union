@@ -9,7 +9,10 @@ import asyncio
 import base64
 import os
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from functools import partial
+from threading import Barrier
 from urllib.parse import parse_qs, urlparse
 
 import pymysql
@@ -162,6 +165,57 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         )
     assert root_secret
     assert _audit_counts() == audit_before
+    _assert_concurrent_receipt_commands(root, run_id)
+
+
+def _assert_concurrent_receipt_commands(root, run_id: str) -> None:
+    from subsystems.access import authentication_session as auth
+
+    create = partial(
+        auth.create_account_center_user_with_receipt, connection_factory=_connection,
+        actor=root, username=f"concurrent-{run_id}", password="Initial-fixture-password",
+        display_name="Concurrent account", reason="Concurrent creation",
+        idempotency_key=f"concurrent-create-{run_id}",
+    )
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        barrier = Barrier(4, timeout=10)
+
+        def run(command):
+            barrier.wait()
+            return command()
+
+        same = [pool.submit(run, create) for _ in range(4)]
+        created = [future.result(timeout=30) for future in same]
+        assert sum(not result.receipt.replayed for result in created) == 1
+        assert len({result.account.id for result in created}) == 1
+        assert len({result.receipt.receipt_identity for result in created}) == 1
+        account_id = created[0].account.id
+
+        reset = partial(
+            auth.reset_account_center_password, connection_factory=_connection,
+            actor=root, account_id=account_id, password="Updated-fixture-password",
+            reason="Concurrent password reset", expected_version=1,
+            idempotency_key=f"concurrent-reset-{run_id}",
+        )
+        same = [pool.submit(run, reset) for _ in range(4)]
+        receipts = [future.result(timeout=30) for future in same]
+        assert sum(not receipt.replayed for receipt in receipts) == 1
+        assert len({receipt.receipt_identity for receipt in receipts}) == 1
+        assert _user_state(account_id) == (True, 2)
+
+        conflict_key = f"concurrent-conflict-{run_id}"
+        barrier = Barrier(2, timeout=10)
+        different = [
+            pool.submit(run, partial(create, username=f"{label}-{run_id}", idempotency_key=conflict_key))
+            for label in ("left", "right")
+        ]
+        outcomes = [future.exception(timeout=30) for future in different]
+        assert sum(error is None for error in outcomes) == 1
+        assert len([error for error in outcomes if isinstance(error, ValueError) and str(error) == "idempotency_key_conflict"]) == 1
+
+    with _connection() as conn, conn.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) AS count FROM admin_users WHERE username IN (%s, %s)", (f"left-{run_id}", f"right-{run_id}"))
+        assert cursor.fetchone()["count"] == 1
 
 
 def _bootstrap_and_enroll(username: str):

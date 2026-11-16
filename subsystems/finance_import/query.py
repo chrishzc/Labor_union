@@ -452,6 +452,87 @@ class FinanceImportQueryService:
             "next_before_row_id": int(page[-1]["row_id"]) if len(rows) > limit else None,
         }
 
+    def excluded_bank_transactions(self, *, limit: int = 50, before_row_id: int | None = None):
+        _validate_page(limit, before_row_id, "before_row_id")
+        params: list[Any] = []
+        where_cursor = ""
+        if before_row_id is not None:
+            where_cursor = " AND bank.id < %s"
+            params.append(before_row_id)
+        params.append(limit + 1)
+
+        sql = f"""
+            SELECT
+                bank.id AS row_id,
+                bank.batch_id,
+                bank.format_id,
+                bank.source_file,
+                bank.sheet_name,
+                bank.source_row,
+                CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(bank.bank_references,'$.source'))='manual_supplement'
+                    THEN '人工補登'
+                    ELSE COALESCE(bank.source_reference, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(
+                        bank.bank_references, CASE bank.format_id
+                            WHEN 'taishin' THEN '$.sequence'
+                            WHEN 'legacy' THEN '$.transaction_reference'
+                            ELSE '$."交易參考編號"' END
+                    )), 'null')) END AS raw_reference,
+                bank.transaction_date,
+                bank.direction,
+                bank.debit,
+                bank.credit,
+                bank.summary,
+                bank.memo,
+                bank.counterparty_name,
+                exclusion.created_at AS excluded_at,
+                JSON_UNQUOTE(JSON_EXTRACT(exclusion.evidence_snapshot, '$.actor')) AS excluded_by,
+                JSON_UNQUOTE(JSON_EXTRACT(exclusion.evidence_snapshot, '$.reason')) AS exclusion_reason
+            FROM finance_import_rows bank
+            LEFT JOIN finance_import_integrity_events exclusion
+                ON exclusion.source_event_identity = CONCAT('bank-exclusion:', bank.id)
+            WHERE bank.reconciliation_status = 'excluded'{where_cursor}
+            ORDER BY bank.id DESC
+            LIMIT %s
+        """
+        with self._connection.cursor() as cursor:
+            cursor.execute(sql, tuple(params))
+            rows = cursor.fetchall() or []
+
+        page = rows[:limit]
+        items = []
+        for row in page:
+            amount_ntd = 0
+            if row.get("credit") or row.get("debit"):
+                try:
+                    amount_ntd = _integer_money(row)
+                except ValueError:
+                    amount_ntd = int(Decimal(str(row.get("credit") or row.get("debit") or 0)))
+            items.append({
+                "row_id": row["row_id"],
+                "row_identity": f"bank:{row['row_id']}",
+                "batch_id": row.get("batch_id"),
+                "bank": "sinopac" if row.get("format_id") in ("sinopac", "legacy") else "taishin",
+                "transaction_date": str(row["transaction_date"]) if row.get("transaction_date") else None,
+                "direction": row.get("direction") or "unknown",
+                "amount_ntd": amount_ntd,
+                "summary": row.get("summary"),
+                "memo": row.get("memo"),
+                "counterparty_name": row.get("counterparty_name"),
+                "source_file": _source_filename(row.get("source_file")),
+                "sheet_name": row.get("sheet_name"),
+                "source_row": row.get("source_row"),
+                "raw_reference": row.get("raw_reference"),
+                "excluded_at": row["excluded_at"].isoformat() if hasattr(row.get("excluded_at"), "isoformat") else str(row.get("excluded_at") or ""),
+                "excluded_by": row.get("excluded_by") or "",
+                "exclusion_reason": row.get("exclusion_reason") or "",
+            })
+
+        next_before_row_id = int(page[-1]["row_id"]) if len(rows) > limit else None
+        return {
+            "items": items,
+            "next_before_row_id": next_before_row_id,
+        }
+
     def import_history(self, *, limit, before):
         kind, record_id = None, None
         if before is not None:

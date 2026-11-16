@@ -7,6 +7,7 @@ import json
 import os
 import runpy
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from threading import Barrier
 from types import SimpleNamespace
@@ -26,13 +27,20 @@ h=runpy.run_path('tests/domains/scheduling/subsystems/scheduling/integration/tes
 def http():
     assert DATABASE.startswith('lu_test_') and mysql_adapter.DB_CONFIG['host'] in ('127.0.0.1','localhost')
     from api.dependencies import admin_auth
-    from api.routes import service_start,line_staff_self_service,line_mobile_admin,order_intake_terms_bootstrap,finance_import
+    from api.routes import (
+        finance_import, line_mobile_admin, line_staff_self_service, official_service_date_correction,
+        order_intake_terms_bootstrap, service_start, staff_leave_intake,
+    )
     from api.dependencies import line_identity
     from domains.line.identities import LineUserId
     from subsystems.access.authentication_session import AdminPrincipal
     from infrastructure.mysql.nas_mutations import PROCEDURES
     app=FastAPI()
-    for module in [service_start,line_staff_self_service,line_mobile_admin,order_intake_terms_bootstrap,finance_import]:app.include_router(module.router)
+    for module in (
+        service_start, line_staff_self_service, line_mobile_admin, order_intake_terms_bootstrap, finance_import,
+        staff_leave_intake, official_service_date_correction,
+    ):
+        app.include_router(module.router)
     principal=AdminPrincipal(1,'synthetic-union','測試工會人員','system_admin')
     for guard in [admin_auth.require_admin,admin_auth.require_system_admin,admin_auth.require_persisted_admin,admin_auth.require_line_matching_override]:
         app.dependency_overrides[guard]=lambda:principal
@@ -70,6 +78,37 @@ def rows(sql,params=()):
 def checked(response):
     assert response.status_code==200,response.text
     return response.json()['data']
+
+
+def postponement_submission(http, case, staff, dates, *, assignment_id=None):
+    from domains.scheduling.leave_result import LeaveDateChange, LeaveResultSubmission
+
+    cases = checked(http.post(
+        '/api/v1/line/staff-self-service/leave-results/cases', json={'line_id_token': staff[1]},
+    ))['items']
+    subject = next(item for item in cases if item['case_no'] == case
+                   and (assignment_id is None or item['assignment_id'] == assignment_id))
+    return LeaveResultSubmission(
+        case, staff[0], subject['assignment_id'], 'defer',
+        tuple(LeaveDateChange(date.fromisoformat(before), date.fromisoformat(after)) for before, after in dates),
+        subject['order_version'], subject['scheduling_version'], uuid4().hex,
+    )
+
+
+def apply_confirmed_postponement(submission):
+    """Enter the Scheduling owner at the point where the group handler has verified customer consent."""
+    from api.dependencies.service_start import build_service_start_application
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+
+    connection = mysql_adapter.get_connection()
+    try:
+        application = build_service_start_application(connection)
+        with MySqlUnitOfWork(connection) as unit:
+            result = application.submit_leave_in_current_unit_of_work(submission, enqueue_group_schedule=False)
+            unit.commit()
+        return asdict(result)
+    finally:
+        connection.close()
 
 
 def seed_case(http,*,count=1, shared_staff=None, clock=("08:00:00", "17:00:00"), hours=8):
@@ -237,25 +276,8 @@ def test_same_staff_same_day_nonoverlapping_shifts_commit_and_read_back(http):
     assert [(entry["case_no"], entry["starts_at"][11:16], entry["ends_at"][11:16]) for entry in shifts] == [
         (morning, "08:00", "12:00"), (afternoon, "13:00", "17:00"),
     ]
-    from api.routes.staff_leave_intake import router
-    if not getattr(http.app.state, "leave_results_registered", False):
-        http.app.include_router(router)
-        http.app.state.leave_results_registered = True
-    options = checked(http.post(
-        "/api/v1/line/staff-self-service/leave-results/cases",
-        json={"line_id_token": staff[0][1]},
-    ))["items"]
-    target = next(item for item in options if item["case_no"] == afternoon)
-    result = checked(http.post(
-        "/api/v1/line/staff-self-service/leave-results/submit",
-        json={
-            "line_id_token": staff[0][1], "case_no": afternoon,
-            "assignment_id": target["assignment_id"], "decision": "defer",
-            "expected_order_version": target["order_version"],
-            "expected_scheduling_version": target["scheduling_version"],
-            "dates": [{"original_date": "2027-01-05", "new_date": "2027-02-10"}],
-            "idempotency_key": uuid4().hex,
-        },
+    result = apply_confirmed_postponement(postponement_submission(
+        http, afternoon, staff[0], [('2027-01-05', '2027-02-10')],
     ))
     assert result["status"] == "applied"
     after = rows(

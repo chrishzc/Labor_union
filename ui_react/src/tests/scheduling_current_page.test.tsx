@@ -194,17 +194,24 @@ describe('SchedulingPage query-only presentation', () => {
     expect(holidayClient.query).toHaveBeenCalledTimes(2);
   });
 
-  it('從 allowlist deep-link 直接開啟請假代班並安全解碼合格案件編號', async () => {
+  it('安全解碼舊代班連結的案件編號，並帶往同案多月嫂排班', async () => {
     window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-SCH-001%20';
 
     render(<SchedulingPage />);
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('CASE-SCH-001'));
+    expect(await screen.findByRole('link', { name: '開啟本案多月嫂排班' }))
+      .toHaveAttribute('href', '#order-workbench-v2?case=CASE-SCH-001&work=service&staffing=upcoming');
+    expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.leave_sub"]')).toHaveClass('active');
     expect(document.querySelector('[data-surface-id="scheduling.calendar"]')).not.toBeInTheDocument();
   });
 
-  it('代班納入所有已有正式排班的進行中案件，排除未排班、服務完成與取消案件', async () => {
+  it('續辦舊假單時保留有正式排班的進行中案件，排除未排班、已完工與已取消案件', async () => {
+    vi.mocked(staffLeaveInboxClient.list).mockImplementation(async status => status === 'accepted_for_processing' ? [{
+      id: 77, staff_id: 11, staff_name: '去敏人員甲', leave_start_date: '2026-08-03',
+      leave_end_date: '2026-08-03', request_reason: '已受理舊假單',
+      request_status: 'accepted_for_processing', aggregate_version: 5,
+    }] : []);
     const page = await ordersQueryClient.getOrderSummaries();
     const base = page.items[0];
     const cases = [
@@ -238,6 +245,11 @@ describe('SchedulingPage query-only presentation', () => {
 
     render(<SchedulingPage />);
 
+    fireEvent.click(screen.getByText('歷史請假紀錄'));
+    const historyStatus = screen.getByRole('combobox', { name: '狀態' });
+    await waitFor(() => expect(historyStatus).toBeEnabled());
+    fireEvent.change(historyStatus, { target: { value: 'accepted_for_processing' } });
+    fireEvent.click(await screen.findByRole('button', { name: '選取並繼續調度' }));
     const select = screen.getByRole('combobox', { name: '請假代班訂單編號' });
     await waitFor(() => expect(select).toHaveValue('CASE-PLANNED'));
     expect(Array.from(select.querySelectorAll('option')).map((option) => option.value)).toEqual([
@@ -264,8 +276,8 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.queryByRole('combobox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="scheduling.tab.calendar"]')).toHaveClass('active');
 
-    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
-    expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(screen.queryByRole('link', { name: '開啟本案多月嫂排班' })).not.toBeInTheDocument();
   });
 
   it('loads a slow calendar in bounded batches without timeout retries or missing staff', async () => {
@@ -297,12 +309,13 @@ describe('SchedulingPage query-only presentation', () => {
     ['malformed percent', '%E0%A4%A'],
     ['超過 50 字', 'A'.repeat(51)],
     ['控制字元', 'CASE%00DL-003'],
-  ])('不預填不合法 case_no：%s', (_scenario, encodedCaseNo) => {
+  ])('不以不合法的案件編號開啟多月嫂排班：%s', async (_scenario, encodedCaseNo) => {
     window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodedCaseNo}`;
 
     render(<SchedulingPage />);
 
-    expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
+    await screen.findByText('此狀態沒有歷史請假紀錄。');
+    expect(screen.queryByRole('link', { name: '開啟本案多月嫂排班' })).not.toBeInTheDocument();
   });
 
   it('anchors calendar today to Asia/Taipei instead of the browser local timezone', () => {
@@ -922,20 +935,18 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('region', { name: '排班甘特月曆與服務人員檔期' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toBeEnabled());
-    fireEvent.change(screen.getByRole('combobox', { name: '請假代班訂單編號' }), { target: { value: 'CASE-SCH-001' } });
-    await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
+    expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/尚未查詢；不顯示推測/)).toBeInTheDocument();
+    expect(screen.getByText(/臨時代班請從原案件/)).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.extension"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());
     expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
     await waitFor(() => expect(screen.getByText('此狀態沒有歷史請假紀錄。')).toBeInTheDocument());
     expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('resolved');
   });

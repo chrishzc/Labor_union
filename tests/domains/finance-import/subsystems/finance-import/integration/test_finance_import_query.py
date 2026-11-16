@@ -225,6 +225,49 @@ def test_mistaken_import_exclusion_records_reason_without_removing_source(posted
         assert '"actor":"admin"' in writes[1][1][2]
 
 
+def test_excluded_bank_transactions_loads_audit_evidence_and_rows():
+    from unittest.mock import MagicMock
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [
+        {
+            "row_id": 42,
+            "batch_id": 9,
+            "format_id": "sinopac",
+            "source_file": "D:/statements/sinopac_2026.xlsx",
+            "sheet_name": "Sheet1",
+            "source_row": 5,
+            "raw_reference": "TX123456",
+            "transaction_date": "2026-11-01",
+            "direction": "incoming",
+            "credit": Decimal("15000"),
+            "debit": None,
+            "summary": "客戶匯款",
+            "memo": "誤入帳",
+            "counterparty_name": "王小明",
+            "excluded_at": datetime(2026, 11, 2, 14, 30),
+            "excluded_by": "superadmin",
+            "exclusion_reason": "廠商誤匯入非本工會帳款",
+        }
+    ]
+
+    service = FinanceImportQueryService(connection)
+    result = service.excluded_bank_transactions(limit=10)
+
+    assert len(result["items"]) == 1
+    item = result["items"][0]
+    assert item["row_id"] == 42
+    assert item["row_identity"] == "bank:42"
+    assert item["bank"] == "sinopac"
+    assert item["amount_ntd"] == 15000
+    assert item["excluded_by"] == "superadmin"
+    assert item["exclusion_reason"] == "廠商誤匯入非本工會帳款"
+    assert item["source_file"] == "sinopac_2026.xlsx"
+    assert result["next_before_row_id"] is None
+
+
 def test_bank_case_pairing_appends_only_the_selected_candidate(monkeypatch):
     from unittest.mock import MagicMock
     from infrastructure.mysql.finance_import_repository import MySqlFinanceImportRepository

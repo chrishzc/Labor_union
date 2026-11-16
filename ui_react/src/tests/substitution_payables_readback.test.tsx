@@ -159,7 +159,7 @@ describe('Scheduling substitution Staff Payables readback', () => {
     vi.spyOn(substitutionPayablesLineageClient, 'query').mockResolvedValue(lineage());
   });
 
-  it('從排班月曆切換至請假與代班，依序顯示全案待辦、手動調度及收合的歷史紀錄', async () => {
+  it('從排班月曆切換至代班待辦，顯示全案待辦與收合的歷史紀錄', async () => {
     if (window.location.hash !== '#scheduling') {
       await new Promise<void>((resolve) => {
         window.addEventListener('hashchange', () => resolve(), { once: true });
@@ -170,16 +170,16 @@ describe('Scheduling substitution Staff Payables readback', () => {
     expect(screen.queryByRole('link', { name: /開工、順延與代班待辦/ })).not.toBeInTheDocument();
     expect(serviceStartClient.todos).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: '代班待辦' }));
 
     await waitFor(() => expect(screen.getByText('目前沒有待處理事項。')).toBeVisible());
     const todos = screen.getByRole('region', { name: '待處理事項' });
     expect(todos).toHaveTextContent('0 件待處理');
     expect(serviceStartClient.todos).toHaveBeenCalledWith(1, undefined);
-    const manual = screen.getByRole('heading', { name: '手動調度' });
     const history = screen.getByText('歷史請假紀錄');
-    expect(todos.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(manual.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(todos.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/臨時代班請從原案件/)).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '舊請假調度與回讀' })).not.toBeInTheDocument();
     expect(history.closest('details')).not.toHaveAttribute('open');
     fireEvent.click(history);
     expect(await screen.findByText('此狀態沒有歷史請假紀錄。')).toBeVisible();

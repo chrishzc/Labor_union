@@ -9,7 +9,7 @@ import { Drawer } from './Drawer';
 import { FinanceStatementArchive } from './FinanceStatementArchive';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { bankReconciliationUnavailableReason, financeBankReviewPresentation, financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
-import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage } from '../api/finance_import/finance_import_query_schemas';
+import type { FinanceBankTransaction, FinanceBankTransactionPage, FinanceImportHistoryPage, FinanceExcludedBankTransactionPage } from '../api/finance_import/finance_import_query_schemas';
 import { financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 
@@ -96,6 +96,89 @@ function FinanceImportHistory({ revision, onClose }: { revision: number; onClose
   );
 }
 
+function FinanceExcludedTransactionsDrawer({ revision, onClose }: { revision: number; onClose: () => void }) {
+  const [cursors, setCursors] = useState<(number | undefined)[]>([undefined]);
+  const [retry, setRetry] = useState(0);
+  const [state, setState] = useState<LoadState<FinanceExcludedBankTransactionPage>>({ kind: 'loading' });
+  const beforeRowId = cursors.at(-1);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ kind: 'loading' });
+    void financeImportQueryClient.listExcludedBankTransactions(
+      { limit: 50, before_row_id: beforeRowId },
+      { signal: controller.signal },
+    ).then(data => {
+      if (!controller.signal.aborted) setState({ kind: 'ready', data });
+    }).catch(() => {
+      if (!controller.signal.aborted) setState({ kind: 'error', message: '暫時無法查詢已移除流水紀錄。' });
+    });
+    return () => controller.abort();
+  }, [beforeRowId, revision, retry]);
+
+  const page = state.kind === 'ready' ? state.data : undefined;
+  return (
+    <Drawer isOpen onClose={onClose} closeLabel="關閉" ariaLabel="已移除流水紀錄" title="已移除流水紀錄" size="xl">
+      <p>顯示已被系統管理員判定為誤匯入並排除之銀行流水與稽核紀錄。</p>
+      {state.kind === 'loading' && <p role="status">正在查詢已移除流水紀錄…</p>}
+      {state.kind === 'error' && (
+        <div role="alert">
+          {state.message} <button type="button" onClick={() => setRetry(value => value + 1)}>重新查詢已移除流水紀錄</button>
+        </div>
+      )}
+      {page?.items.length === 0 && <p>目前沒有已移除的流水紀錄。</p>}
+      {!!page?.items.length && (
+        <div className="finance-table-container">
+          <table className="finance-table">
+            <thead>
+              <tr>
+                <th>移除時間</th>
+                <th>移除人員</th>
+                <th>移除原因</th>
+                <th>交易日</th>
+                <th>銀行</th>
+                <th>方向</th>
+                <th className="finance-num">金額</th>
+                <th>摘要／備註</th>
+                <th>原始來源</th>
+              </tr>
+            </thead>
+            <tbody>
+              {page.items.map(entry => (
+                <tr key={entry.row_identity}>
+                  <td>{entry.excluded_at ? new Date(entry.excluded_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '—'}</td>
+                  <td>{entry.excluded_by || '系統'}</td>
+                  <td style={{ maxWidth: '200px', wordBreak: 'break-word' }}>{entry.exclusion_reason}</td>
+                  <td>{entry.transaction_date ?? '—'}</td>
+                  <td>{bankShortNameMap[entry.bank]}</td>
+                  <td>{entry.direction === 'incoming' ? '存入' : entry.direction === 'outgoing' ? '支出' : '未知'}</td>
+                  <td className="finance-num">NT$ {entry.amount_ntd.toLocaleString()}</td>
+                  <td>
+                    {entry.counterparty_name && <div>對象：{entry.counterparty_name}</div>}
+                    {entry.summary && <div>摘要：{entry.summary}</div>}
+                    {entry.memo && <div>備註：{entry.memo}</div>}
+                    {entry.raw_reference && <small className="bank-reconcile-sub">參考：{entry.raw_reference}</small>}
+                  </td>
+                  <td>
+                    {entry.source_file ?? '檔名無紀錄'}
+                    {entry.sheet_name ? <small className="bank-reconcile-sub">{entry.sheet_name}#{entry.source_row ?? '—'}</small> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {cursors.length > 1 && (
+        <button type="button" disabled={!page} onClick={() => setCursors(values => values.slice(0, -1))}>上一頁</button>
+      )}
+      {page?.next_before_row_id != null && (
+        <button type="button" onClick={() => setCursors(values => [...values, page.next_before_row_id!])}>下一頁</button>
+      )}
+    </Drawer>
+  );
+}
+
 export interface FinanceBankReconciliationWorkspaceProps {
   onCase: (caseNo: string) => void;
   revision: number;
@@ -170,6 +253,7 @@ export function FinanceBankReconciliationWorkspace({
   }
   const [transactions, setTransactions] = useState<LoadState<FinanceBankTransactionPage>>({ kind: 'loading' });
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [excludedOpen, setExcludedOpen] = useState(false);
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [targetBankFormat, setTargetBankFormat] = useState<string>('');
   const [viewedRow, setViewedRow] = useState<FinanceBankTransaction | null>(null);
@@ -310,6 +394,7 @@ export function FinanceBankReconciliationWorkspace({
             匯入台新對帳單
           </button>
           <button type="button" className="finance-btn-secondary" onClick={() => setHistoryOpen(true)}>匯入紀錄</button>
+          <button type="button" className="finance-btn-secondary" onClick={() => setExcludedOpen(true)}>已移除流水紀錄</button>
           <FinanceStatementArchive compact={true} />
           <button type="button" className="finance-btn-primary"
             disabled={importBusy || rematch.kind === 'loading'}
@@ -777,6 +862,7 @@ export function FinanceBankReconciliationWorkspace({
       </section>
 
       {historyOpen && <FinanceImportHistory revision={revision} onClose={() => setHistoryOpen(false)} />}
+      {excludedOpen && <FinanceExcludedTransactionsDrawer revision={revision} onClose={() => setExcludedOpen(false)} />}
 
       {pairing && <Drawer isOpen title="核對交易 · 人工配對" ariaLabel="人工配對"
         closeDisabled={rowActionBusy} onClose={() => setPairing(null)}

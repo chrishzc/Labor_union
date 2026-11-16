@@ -8,8 +8,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from dataclasses import asdict
 from infrastructure.mysql.line_repository_support import aware_utc
+from os import environ
 from pathlib import Path
+import re
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -267,6 +270,7 @@ class _MobileAdminProfileView(BaseModel):
     admin_user_id: int = Field(gt=0)
     display_name: str = Field(min_length=1, max_length=100)
     role: str = Field(min_length=1, max_length=100)
+    management_entry_url: str | None
 
 
 class _MobileCurrentAnomalyListRequest(_LiffAuthRequest):
@@ -1224,7 +1228,30 @@ def _admin_view(principal: AdminPrincipal) -> dict:
         "admin_user_id": principal.id,
         "display_name": principal.display_name,
         "role": principal.role,
+        "management_entry_url": _management_entry_url(),
     }
+
+
+def _management_entry_url() -> str | None:
+    configured = environ.get("PUBLIC_ORIGIN", "").strip() or "https://chrishzc.com"
+    if not re.fullmatch(r"[\x21-\x7e]+", configured) or "\\" in configured:
+        return None
+    try:
+        address = urlsplit(configured)
+        hostname = address.hostname or ""
+        if (address.scheme != "https" or address.username is not None
+                or not re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?", hostname)):
+            return None
+        port = address.port
+        if port == 0 or "?" in configured or "#" in configured:
+            return None
+    except ValueError:
+        return None
+    path = address.path.rstrip("/") or environ.get("WINDOWS_REMOTE_PREFIX", "/test").rstrip("/")
+    if not re.fullmatch(r"(?:/[a-zA-Z0-9_-]+)+", path):
+        return None
+    host = hostname if port is None else f"{hostname}:{port}"
+    return urlunsplit(("https", host, f"{path}/", "", ""))
 
 
 def _current_business_week(today: date) -> tuple[date, date]:

@@ -8,7 +8,7 @@ import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import { FinanceImportBatchListResponseSchema, FinanceImportManifestSchema, FinanceImportReviewPageSchema, FinanceImportRunPageSchema, financeEnvelope, type FinanceImportBatchSummary, type FinanceImportManifest, type FinanceImportReviewPage, type FinanceImportRunPage } from './finance_import_query_schemas';
 import { FinanceImportQueryError, mapFinanceImportQueryError } from './finance_import_query_errors';
-import { FinanceBankTransactionPageSchema, FinanceImportHistoryPageSchema, type FinanceBankTransactionPage, type FinanceImportHistoryPage } from './finance_import_query_schemas';
+import { FinanceBankTransactionPageSchema, FinanceImportHistoryPageSchema, FinanceExcludedBankTransactionPageSchema, type FinanceBankTransactionPage, type FinanceImportHistoryPage, type FinanceExcludedBankTransactionPage } from './finance_import_query_schemas';
 import type { FinanceBankTransaction } from './finance_import_query_schemas';
 export interface FinanceImportQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 let correlationSequence = 0;
@@ -48,6 +48,13 @@ export const financeImportQueryClient = {
     return decode(transport.get<unknown>('/api/v1/finance-import/import-history', {
       ...options(source, 'finance-import-history'), params: { before },
     }), financeEnvelope(FinanceImportHistoryPageSchema), '匯入紀錄');
+  },
+  async listExcludedBankTransactions(params: {
+    limit?: number; before_row_id?: number;
+  } = {}, source?: FinanceImportQueryOptions): Promise<FinanceExcludedBankTransactionPage> {
+    return decode(transport.get<unknown>('/api/v1/finance-import/bank-transactions/excluded', {
+      ...options(source, 'finance-bank-excluded'), params,
+    }), financeEnvelope(FinanceExcludedBankTransactionPageSchema), '已移除流水紀錄');
   },
   async listBatches(query: { limit?: number; beforeBatchId?: number } = {}, source?: FinanceImportQueryOptions): Promise<FinanceImportBatchSummary[]> {
     const limit = query.limit ?? 50; if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new FinanceImportQueryError('FINANCE_IMPORT_VALIDATION', 'limit必須介於1至100。');

@@ -165,7 +165,7 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
   };
   useUnsavedDraft('更換推薦月嫂', { '照護段': segmentIndex, '月嫂': staffId, '原因': reason }, { busy: busy || flow !== undefined, resetKey: replacementReceipt });
 
-  if (source?.started) return <section className="formal-recommendation-inline-form"><h4>本案已有實際服務</h4><p>更換接續人員時，請辦理服務中換人，保留原月嫂的服務與付款紀錄。</p><a href={serviceHandoverHref(caseNo)}>前往服務中換人 →</a><a href={`#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`}>辦理臨時代班 →</a></section>;
+  if (source?.started) return <section className="formal-recommendation-inline-form"><h4>本案已有實際服務</h4><p>更換接續人員時，請辦理服務中換人，保留原月嫂的服務與付款紀錄。</p><a href={serviceHandoverHref(caseNo)}>前往服務中換人 →</a><a href={`#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&staffing=upcoming`}>辦理臨時代班 →</a></section>;
   const continueReplacement = async (result: ServiceBeforeReplacementApplyResult) => {
     setReplacementReceipt(result); setError(null); setBusy(true);
     try {

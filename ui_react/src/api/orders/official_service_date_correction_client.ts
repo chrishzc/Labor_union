@@ -114,7 +114,13 @@ export type AttributionChange = {
   evidence: string;
   replacement_dates?: string[];
   scope?: 'served' | 'upcoming';
-} | { moves: AttributionMove[]; evidence: string; scope: 'served' | 'upcoming' };
+} | {
+  moves: AttributionMove[];
+  evidence: string;
+  scope: 'served' | 'upcoming';
+  substitute_request_id?: number;
+  expected_substitute_request_version?: number;
+};
 
 export type OfficialDateQuery = z.infer<typeof QuerySchema>;
 export type OfficialDatePreview = z.infer<typeof PreviewSchema>;

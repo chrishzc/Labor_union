@@ -60,6 +60,9 @@ class MySqlServiceStartRepository:
     def record_leave_dates(self, request_id, dates, *, defer=False):
         return record_leave_dates(self, request_id, dates, defer=defer)
 
+    def is_leave_request(self, request_id: int, *, lock: bool = False) -> bool:
+        return leave_context(self.request(request_id, lock=lock)) is not None
+
     def staff_options(self, keyword=""):
         with self.connection.cursor() as c:
             c.execute("SELECT s.id,s.name FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
@@ -386,6 +389,54 @@ class MySqlServiceStartRepository:
                 context['conflict_message'] = ('接任月嫂的排程有衝突，原排班與帳務尚未變更；請調整交接日或改選月嫂。'
                     if handover_context(request) else '提出的日期有排程衝突，原排班尚未變更；請依雙方重新談妥的日期記錄，或安排代班。')
                 c.execute('UPDATE scheduling_service_start_requests SET execution_dates=%s WHERE id=%s', (_json(context), request_id))
+
+    def pending_leave_attribution(self, case_no: str, request_id: int, version: int, *,
+                                  lock: bool) -> tuple[int, tuple[date, ...]]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT staff_id,execution_dates FROM scheduling_service_start_requests "
+                "WHERE id=%s AND case_no=%s AND aggregate_version=%s AND status='substitute_required' "
+                "AND confirmed_version_id IS NULL"
+                + (" FOR UPDATE" if lock else ""),
+                (request_id, case_no, version),
+            )
+            row = cursor.fetchone()
+        context = leave_context(row) if row else None
+        if not context or not context.get("dates"):
+            raise ValueError("service_attribution_substitute_request_conflict")
+        dates = tuple(sorted(date.fromisoformat(item["original_date"]) for item in context["dates"]))
+        return int(row["staff_id"]), dates
+
+    def effective_schedule_result(self, case_no: str) -> dict:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.actual_start_date,o.actual_end_date,o.lifecycle_version,t.first_payment_due_date "
+                "FROM orders o JOIN client_payment_terms t ON t.case_no=o.case_no WHERE o.case_no=%s",
+                (case_no,),
+            )
+            order = cursor.fetchone()
+            cursor.execute(
+                "SELECT a.staff_id,s.name,day.work_date FROM case_staff_assignments a "
+                "JOIN scheduling_aggregates g ON g.effective_generation_id=a.generation_id "
+                "JOIN staff s ON s.id=a.staff_id JOIN staff_schedule day ON day.assignment_id=a.id "
+                "AND day.effective_marker=1 AND day.is_work_day=1 "
+                "WHERE a.case_no=%s ORDER BY a.assignment_sequence,day.work_date",
+                (case_no,),
+            )
+            rows = cursor.fetchall()
+        staff = {}
+        for row in rows:
+            item = staff.setdefault(row["staff_id"], {
+                "staff_id": row["staff_id"], "staff_name": row["name"], "service_dates": [],
+            })
+            item["service_dates"].append(str(row["work_date"]))
+        return {
+            "actual_start_date": str(order["actual_start_date"]),
+            "actual_end_date": str(order["actual_end_date"]),
+            "order_version": int(order["lifecycle_version"]),
+            "first_payment_due_date": str(order["first_payment_due_date"]),
+            "assignments": list(staff.values()),
+        }
 
     def complete(self,request_id,result,actor,key,*,enqueue_group_schedule: bool = True):
         request=self.request(request_id,lock=True)

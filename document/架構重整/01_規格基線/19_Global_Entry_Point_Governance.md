@@ -65,6 +65,8 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **客戶資料與訂單異動申請退役**。自路由移除舊客戶表單頁面（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及送審、查詢、審核 API（`/api/v1/line/client-profile/*`、`/api/v1/client-profile/requests*`、`/api/v1/line/mobile-admin/client-profile/requests*`、`/api/v1/line/order-change/{query,preview,requests}`、`/api/v1/orders/change-requests*`）。舊 `POST /api/v1/line/order-change/apply` 維持 `410 Gone`，提示客戶在 LINE 聊天室留言。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
+- **舊請假送件**。`staff_leave_apply` 舊連結顯示雙方合意延期指引。月嫂直送 `POST /api/v1/line/staff-self-service/leave-results/submit` 及舊雙邊確認 `/api/v1/line/staff-self-service/leave-requests/{id}/confirm` 回 `410 Gone`。工會端原服務開始 `dates` 動作的局部代班分支拒絕新提交並回 `410 Gone`，舊成功操作可原鍵讀回。局部代班從 [多月嫂排班](31_MultiCaregiver_Admin_UI正式規格.md#4-局部代班工作面) 接續。
+
 ### 3.3 Windows NAS 維護入口
 
 - `initialize_nas_schema.bat`：僅執行備份後的 candidate 安全升級，不委派 fresh／reset（低階 Python／Unix `.sh` 仍保留供 disposable 環境測試）。

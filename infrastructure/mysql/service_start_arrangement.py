@@ -96,20 +96,7 @@ class MySqlServiceStartArrangement:
         with self.connection.cursor() as c:
             synchronize_client_charges(c, request['case_no'], actor=who, key=IdempotencyKey('start-finance:'+key),
                 correlation_id=cid, source_family='service_start', source_id=str(request_id))
-            c.execute('SELECT o.actual_start_date,o.actual_end_date,o.lifecycle_version,t.first_payment_due_date '
-                'FROM orders o JOIN client_payment_terms t ON t.case_no=o.case_no WHERE o.case_no=%s', (request['case_no'],))
-            order=c.fetchone()
-            c.execute('SELECT a.staff_id,s.name,day.work_date FROM case_staff_assignments a '
-                'JOIN scheduling_aggregates g ON g.effective_generation_id=a.generation_id '
-                'JOIN staff s ON s.id=a.staff_id JOIN staff_schedule day ON day.assignment_id=a.id '
-                'AND day.effective_marker=1 AND day.is_work_day=1 WHERE a.case_no=%s ORDER BY a.assignment_sequence,day.work_date', (request['case_no'],))
-            rows=c.fetchall()
-        staff={}
-        for row in rows:
-            staff.setdefault(row['staff_id'],{'staff_id':row['staff_id'],'staff_name':row['name'],'service_dates':[]})['service_dates'].append(str(row['work_date']))
-        return {'actual_start_date':str(order['actual_start_date']), 'actual_end_date':str(order['actual_end_date']),
-            'order_version':int(order['lifecycle_version']), 'first_payment_due_date':str(order['first_payment_due_date']),
-            'assignments':list(staff.values())}
+        return self.repository.effective_schedule_result(request["case_no"])
 
     def _handover(self, request, candidate, start, actor, cid, key):
         if not candidate:

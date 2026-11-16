@@ -11,7 +11,7 @@ beforeEach(()=>{
   assignments:[{assignment_id:7,candidate_key:null,staff_id:2,sequence:1,assigned_start_date:'2027-01-05',assigned_end_date:'2027-01-05',official_service_dates:['2027-01-05'],actual_hours:null,lineage_source_assignment_ids:[]}]}));
 });
 afterEach(()=>{sessionStorage.clear();vi.restoreAllMocks();});
-it('同一案件待辦顯示首次排班和請假，且首次排班一次儲存',async()=>{
+it('同一案件的首次排班仍可儲存，延期代班待辦連到多月嫂排班',async()=>{
  const leave={...item,request_id:9,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:'2027-02-10'}]};
  vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[item,leave],total:2,page:1,page_size:25});
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
@@ -19,9 +19,9 @@ it('同一案件待辦顯示首次排班和請假，且首次排班一次儲存'
  const completed=vi.fn(async()=>{});
  render(<ServiceStartSubstituteWorkbench caseNo="CASE" useScheduleSaveLabel onCompleted={completed}/>);
  const save=await screen.findByRole('button',{name:'儲存班表'});
- const workbench=screen.getByRole('region',{name:'服務開始、請假與代班待辦'});
+ const workbench=screen.getByRole('region',{name:'服務開始、延期與代班待辦'});
  expect(workbench).toContainElement(save);
- expect(workbench).toContainElement(screen.getByRole('button',{name:'儲存並更新排班'}));
+ expect(workbench).toContainElement(screen.getByRole('link',{name:'前往多月嫂排班'}));
  fireEvent.click(save);
  await screen.findByText('正式排班已完成');
  expect(command).toHaveBeenCalledTimes(1);
@@ -64,34 +64,33 @@ it('尚未願意或加入時沒有填日期與邀請旁路',async()=>{
  expect(screen.queryByRole('button',{name:'寄送本案群組邀請連結'})).not.toBeInTheDocument();
 });
 
-it('請假衝突只記錄雙方新協議，直接提交逐日日期且不詢問客戶',async()=>{
+it('延期衝突帶入原案件及指定待辦，不在待辦送出班表',async()=>{
  const leave={...item,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:'2027-02-10'}],
    conflict_message:'提出的日期有排程衝突，原排班尚未變更',selected_staff_id:null,selected_staff_name:null,willingness:null,joined:false};
  vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[leave],total:1,page:1,page_size:25});
- vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
- vi.mocked(ordersQueryClient.getAssignmentPlan).mockResolvedValue({...await ordersQueryClient.getAssignmentPlan('CASE'),assignments:[{assignment_id:7,candidate_key:null,staff_id:leave.selected_staff_id??leave.staff_id,sequence:1,assigned_start_date:'2027-02-11',assigned_end_date:'2027-02-11',official_service_dates:['2027-02-11'],actual_hours:null,lineage_source_assignment_ids:[]}]});
- const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...leave,status:'applied',result:{actual_start_date:'2027-01-06',actual_end_date:'2027-02-11',order_version:3,first_payment_due_date:'2027-01-06',group_record_queued:true,assignments:[{staff_id:leave.selected_staff_id??leave.staff_id,staff_name:'實際服務月嫂',service_dates:['2027-02-11']}]}});
+ const options=vi.spyOn(serviceStartClient,'options');
+ const command=vi.spyOn(serviceStartClient,'command');
  render(<ServiceStartSubstituteWorkbench/>);
- const date=await screen.findByLabelText('2027-01-05 實際服務日');
+ const link=await screen.findByRole('link',{name:'前往多月嫂排班'});
+ expect(link).toHaveAttribute('href','#order-workbench-v2?case=CASE&work=service&substitute=8');
+ expect(screen.getByText('原服務日：2027-01-05')).toBeInTheDocument();
+ expect(screen.getByText(leave.conflict_message)).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'儲存順延日期並更新排班'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'詢問該月嫂意願'})).not.toBeInTheDocument();
+ expect(options).not.toHaveBeenCalled();
  expect(command).not.toHaveBeenCalled();
- fireEvent.change(date,{target:{value:'2027-02-11'}});
- fireEvent.click(screen.getByRole('button',{name:'儲存順延日期並更新排班'}));
- await screen.findByText('正式排班已完成');
- expect(command).toHaveBeenCalledWith(8,'defer',expect.objectContaining({expected_version:4,dates:[{original_date:'2027-01-05',new_date:'2027-02-11'}]}));
- expect(screen.queryByText('請客戶確認')).not.toBeInTheDocument();
 });
 
-it('請假代班須願意並加入，才可記錄實際逐日服務日期',async()=>{
- const leave={...item,workflow_kind:'leave' as const,leave_dates:[{original_date:'2027-01-05',new_date:null}]};
- vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[leave],total:1,page:1,page_size:25});
- vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
- vi.mocked(ordersQueryClient.getAssignmentPlan).mockResolvedValue({...await ordersQueryClient.getAssignmentPlan('CASE'),assignments:[{assignment_id:7,candidate_key:null,staff_id:leave.selected_staff_id??leave.staff_id,sequence:1,assigned_start_date:'2027-02-11',assigned_end_date:'2027-02-11',official_service_dates:['2027-02-11'],actual_hours:null,lineage_source_assignment_ids:[]}]});
- const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...leave,status:'applied',result:{actual_start_date:'2027-01-06',actual_end_date:'2027-02-11',order_version:3,first_payment_due_date:'2027-01-06',group_record_queued:true,assignments:[{staff_id:leave.selected_staff_id??leave.staff_id,staff_name:'實際服務月嫂',service_dates:['2027-02-11']}]}});
- render(<ServiceStartSubstituteWorkbench/>);
- await screen.findByRole('button',{name:'儲存並更新排班'});
- fireEvent.change(screen.getByLabelText('2027-01-05 實際服務日'),{target:{value:'2027-02-11'}});
- fireEvent.click(screen.getByRole('button',{name:'儲存並更新排班'}));
- await waitFor(()=>expect(command).toHaveBeenCalledWith(8,'dates',expect.objectContaining({start_date:'2027-02-11',date_changes:[{original_date:'2027-01-05',new_date:'2027-02-11'}]})));
+it('代班月嫂尚未入群時，指定待辦仍可開啟多月嫂排班',async()=>{
+ const leave={...item,case_no:'CASE&1',workflow_kind:'leave' as const,joined:false,leave_dates:[{original_date:'2027-01-05',new_date:null}]};
+ const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(leave);
+ const command=vi.spyOn(serviceStartClient,'command');
+ render(<ServiceStartSubstituteWorkbench caseNo="CASE&1" requestId={8}/>);
+ const link=await screen.findByRole('link',{name:'前往多月嫂排班'});
+ expect(link).toHaveAttribute('href','#order-workbench-v2?case=CASE%261&work=service&substitute=8');
+ expect(screen.queryByRole('button',{name:'寄送本案群組邀請連結'})).not.toBeInTheDocument();
+ expect(detail).toHaveBeenCalledWith(8);
+ expect(command).not.toHaveBeenCalled();
 });
 
 function complete():ServiceStartView {

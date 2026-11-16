@@ -1,5 +1,5 @@
 """File: staff_leave_intake.py
-Description: 提供月嫂查詢班表、預檢合意延期檔期衝突、建立群組提案與提交請假。"""
+Description: 提供月嫂查詢班表、預檢合意延期檔期及建立群組提案。"""
 
 from typing import Annotated
 
@@ -32,8 +32,8 @@ router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling S
 from dataclasses import asdict
 from api.dependencies.service_start import get_service_start_application
 from api.routes.service_start import call as _result_call
-from api.schemas.service_start import LeaveDateChangeBody, StaffLeaveResultSubmission, ServiceStartView
-from domains.scheduling.leave_result import LeaveResultSubmission, LeaveDateChange
+from api.schemas.service_start import LeaveDateChangeBody
+from domains.scheduling.leave_result import LeaveDateChange
 
 
 class StaffLeaveDeferPreviewRequest(StaffLiffRequest):
@@ -130,13 +130,15 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_ser
     )
 
 
-@router.post('/leave-results/submit', response_model=BaseResponse[ServiceStartView])
-def submit_leave_result(body: StaffLeaveResultSubmission, app=Depends(get_service_start_application)):
-    _, staff = _verified_staff_context(body)
-    return BaseResponse(data=asdict(_result_call(lambda: app.submit_leave(LeaveResultSubmission(
-        body.case_no,int(staff['staff_id']),body.assignment_id,body.decision,
-        tuple(LeaveDateChange(d.original_date,d.new_date) for d in body.dates),
-        body.expected_order_version,body.expected_scheduling_version,body.idempotency_key)))))
+@router.post("/leave-results/submit", include_in_schema=False)
+def submit_leave_result():
+    raise typed_http_error(
+        410,
+        "conflict",
+        "staff_leave_direct_submit_retired",
+        "直接送出請假結果已停用。請從案件群組的小幫手發起「雙方合意延期」，由客戶確認。",
+        "staff-leave-direct-submit",
+    )
 
 
 @router.post("/leave-requests/preview", response_model=BaseResponse[StaffLeaveRequestPreviewResponse])
@@ -243,4 +245,4 @@ def cancel_staff_leave_request(
 def _retired_intake(body):
     _verified_staff_context(body)
     raise HTTPException(status_code=410, detail={'code':'leave_intake_replaced',
-        'message':'請重新開啟「排班資訊與請假」，直接送出雙方協調結果。'})
+        'message':'請從案件群組的小幫手發起「雙方合意延期」，由客戶確認。'})

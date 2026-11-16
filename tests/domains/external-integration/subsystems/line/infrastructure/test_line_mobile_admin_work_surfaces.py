@@ -151,6 +151,80 @@ assert.equal(get('reviewTotal').textContent,'0');
     subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True, timeout=20)
 
 
+def test_mobile_substitute_todo_opens_management_schedule_for_the_same_case():
+    import subprocess
+
+    script = r'''
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; }
+  append(...children) { this.children.push(...children); }
+  replaceChildren() { this.children = []; }
+  setAttribute() {}
+}
+
+const source = fs.readFileSync('line/static/mobile_admin.html', 'utf8');
+const start = source.indexOf('function serviceStartTodoCard(');
+assert(start >= 0);
+const context = vm.createContext({
+  document: { createElement: tag => new Element(tag) },
+  sessionStorage: { getItem: () => null },
+  URLSearchParams,
+});
+vm.runInContext(source.slice(start, source.indexOf('</script>', start)), context);
+const item = {
+  request_id: 8, case_no: 'CASE&1', workflow_kind: 'leave', status: 'substitute_required',
+  staff_name: '原月嫂', leave_dates: [{original_date: '2027-01-05'}],
+  willingness: 'willing', joined: false,
+};
+const card = context.serviceStartTodoCard(item, [], 'https://management.test/test/');
+const body = card.children[0].children;
+assert(body.some(node => node.textContent.includes('2027-01-05')));
+const schedule = body.find(node => node.tag === 'a');
+assert.equal(schedule.href, 'https://management.test/test/#order-workbench-v2?case=CASE%261&work=service&substitute=8');
+assert.equal(schedule.textContent, '前往多月嫂排班');
+assert(!body.some(node => ['button', 'input', 'select'].includes(node.tag)));
+const unavailable = context.serviceStartTodoCard(item, [], null).children[0].children;
+assert(!unavailable.some(node => node.tag === 'a'));
+assert(unavailable.some(node => node.textContent.includes('管理端連結暫時不可用')));
+'''
+    subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT, check=True, capture_output=True, text=True, timeout=20,
+    )
+
+
+@pytest.mark.parametrize(("origin", "prefix", "expected"), [
+    (None, None, "https://chrishzc.com/test/"),
+    ("https://management.test/test/", None, "https://management.test/test/"),
+    ("https://management.test", "/office", "https://management.test/office/"),
+    ("https://management.test/actual/", "/office", "https://management.test/actual/"),
+    ("http://management.test/test/", None, None),
+    ("//management.test/test/", None, None),
+    ("https://user@management.test/test/", None, None),
+    ("https://management.test/test/?next=elsewhere", None, None),
+    ("https://management.test/test/#elsewhere", None, None),
+    ("https://management.test/../test/", None, None),
+    ("https://management.test", "//other.test", None),
+])
+def test_verified_mobile_profile_exposes_only_a_trusted_management_entry(monkeypatch, origin, prefix, expected):
+    from api.routes import line_mobile_admin as routes
+
+    monkeypatch.delenv("PUBLIC_ORIGIN", raising=False)
+    monkeypatch.delenv("WINDOWS_REMOTE_PREFIX", raising=False)
+    if origin is not None:
+        monkeypatch.setenv("PUBLIC_ORIGIN", origin)
+    if prefix is not None:
+        monkeypatch.setenv("WINDOWS_REMOTE_PREFIX", prefix)
+    principal = SimpleNamespace(id=9, display_name="測試工會人員", role="line_manager")
+    monkeypatch.setattr(routes, "_mobile_admin_context", lambda _token: (principal, None))
+    response = routes.profile(routes._LiffAuthRequest(line_id_token="test-line-id-token"))
+    assert routes._MobileAdminProfileView.model_validate(response.data).management_entry_url == expected
+
+
 def test_customer_recommendation_followups_are_staff_authorized_and_read_only(monkeypatch):
     from subsystems.scheduling.matching_notification_contracts import CustomerRecommendationFollowup
     from subsystems.line.capabilities import LineCapability
@@ -207,7 +281,7 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert "/api/v1/line/mobile-admin/matching-followups" in source
     assert "客戶資料異動" not in source
     assert "客戶／月嫂身分重綁與異常" in source
-    assert "服務開始、請假、代班與換人" in source
+    assert "服務開始、延期、代班與換人" in source
     assert "月嫂回覆提醒" in source
     assert "月嫂確認與條件協調" not in source
     assert "待提醒" in source

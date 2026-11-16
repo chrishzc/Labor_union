@@ -450,6 +450,31 @@ class FinanceBankTransactionPageView(_StrictModel):
     next_before_row_id: int | None
 
 
+class FinanceExcludedBankTransactionView(_StrictModel):
+    row_id: int
+    row_identity: str
+    batch_id: int | None = None
+    bank: Literal["sinopac", "taishin"]
+    transaction_date: str | None = None
+    direction: Literal["incoming", "outgoing", "unknown"]
+    amount_ntd: int
+    summary: str | None = None
+    memo: str | None = None
+    counterparty_name: str | None = None
+    source_file: str | None = None
+    sheet_name: str | None = None
+    source_row: int | None = None
+    raw_reference: str | None = None
+    excluded_at: str
+    excluded_by: str
+    exclusion_reason: str
+
+
+class FinanceExcludedBankTransactionPageView(_StrictModel):
+    items: list[FinanceExcludedBankTransactionView]
+    next_before_row_id: int | None = None
+
+
 class FinanceImportHistoryEntryView(_StrictModel):
     identity: str
     started_at: str

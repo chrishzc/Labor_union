@@ -174,7 +174,7 @@ def test_account_mutation_request_is_closed_and_route_returns_typed_receipt(monk
 def test_disabling_account_keeps_receipt_and_revocation_without_audit() -> None:
     conn = MagicMock()
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.side_effect = [None, None, {"id": 2, "access_control_version": 3}, None]
+    cursor.fetchone.side_effect = [{"admin_user_id": 1}, None, None, {"id": 2, "access_control_version": 3}, None]
     actor = AdminPrincipal(1, "root", "Root", "system_admin", is_root=True)
 
     receipt = authentication.set_account_center_enabled(
@@ -201,17 +201,35 @@ def test_disabling_account_keeps_receipt_and_revocation_without_audit() -> None:
 def test_online_account_commands_stop_during_pending_receipt_conversion(command, extra) -> None:
     conn = MagicMock()
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = {"unprotected": 1}
+    cursor.fetchone.side_effect = [{"admin_user_id": 1}, {"unprotected": 1}]
     actor = AdminPrincipal(1, "root", "Root", "system_admin", is_root=True)
     with pytest.raises(account_center.AccountReceiptProtectionError, match="account_receipt_conversion_required") as caught:
         command(
             connection_factory=lambda: conn, actor=actor, account_id=2, expected_version=3,
             idempotency_key="fixture-command", reason="", **extra,
         )
-    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_count == 2
     conn.commit.assert_not_called()
     conn.rollback.assert_called_once()
     assert account_center._storage_unavailable(caught.value).status_code == 503
+
+
+def test_account_command_rechecks_current_root_before_touching_receipts() -> None:
+    conn = MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"admin_user_id": 9}
+    actor = AdminPrincipal(1, "former-root", "Former root", "system_admin", is_root=True)
+
+    with pytest.raises(ValueError, match="admin_version_conflict"):
+        authentication.set_account_center_enabled(
+            connection_factory=lambda: conn, actor=actor, account_id=2, enabled=False,
+            reason="", expected_version=3, idempotency_key="stale-root",
+        )
+
+    cursor.execute.assert_called_once()
+    assert "admin_root_account" in cursor.execute.call_args.args[0]
+    conn.commit.assert_not_called()
+    conn.rollback.assert_called_once()
 
 
 def test_account_command_errors_are_redacted_and_stable() -> None:

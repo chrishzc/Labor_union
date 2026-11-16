@@ -173,9 +173,9 @@
     <div class="section"><fieldset><legend>緊急聯絡</legend><div id="emergency" class="field-grid"></div></fieldset></div>
     <div class="section">
       <fieldset>
-        <legend>更換收款帳戶</legend>
+        <legend id="bank-legend">更換收款帳戶</legend>
         <p id="current-bank" class="help"></p>
-        <label class="bank-choice"><input id="replace-bank" type="checkbox">申請更換收款帳戶</label>
+        <label class="bank-choice"><input id="replace-bank" type="checkbox"><span id="replace-bank-label">申請更換收款帳戶</span></label>
         <div id="bank-fields" class="field-grid" hidden></div>
       </fieldset>
     </div>
@@ -374,13 +374,19 @@ function render(data) {
           numeric: key === "zip_code" || key === "tel_ext", wide: key === "address" });
     }
   }
-  document.getElementById("current-bank").textContent = data.bank
-    ? "目前帳號末四碼 " + data.bank.account_last4 : "尚未設定收款帳戶，請聯絡工會。";
-  replacement.disabled = !data.bank;
+  const hasBank = !!data.bank;
+  const bankLegend = document.getElementById("bank-legend");
+  const replaceBankLabel = document.getElementById("replace-bank-label");
+  if (bankLegend) bankLegend.textContent = hasBank ? "更換收款帳戶" : "設定收款帳戶";
+  if (replaceBankLabel) replaceBankLabel.textContent = hasBank ? "申請更換收款帳戶" : "申請設定收款帳戶";
+
+  document.getElementById("current-bank").textContent = hasBank
+    ? "目前帳號末四碼 " + data.bank.account_last4 : "尚未設定收款帳戶。勾選下方即可新增。";
+  replacement.disabled = false;
   input(bankFields, "bank_branch_code", "金融機構與分行代碼（共 7 碼）", "", {
     numeric: true, maximum: 7, hint: "請填寫 7 碼數字（前 3 碼為銀行代碼，後 4 碼為分行代碼）"
   });
-  input(bankFields, "account_no", "新收款帳號", "", {
+  input(bankFields, "account_no", hasBank ? "新收款帳號" : "收款帳號", "", {
     numeric: true, maximum: 20, wide: true
   });
   const preferences = document.getElementById("preferences");

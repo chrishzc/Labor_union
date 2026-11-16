@@ -125,7 +125,9 @@ describe('Route Guard & Shell Hash Navigation', () => {
     expect(screen.queryByText('帳務中心')).not.toBeInTheDocument();
   });
 
-  it('登入成功後應解鎖主版面並呈現預設待辦看板', async () => {
+  it.each(['', '#order-workbench-v2?case=CASE-32&work=service&substitute=81'])(
+    '登入成功後解鎖待辦看板並保留代班入口（%s）', async (entryHash) => {
+    window.location.hash = entryHash;
     render(<App />);
 
     // Stage 1
@@ -147,6 +149,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
       expect(screen.getByRole('button', { name: '帳務作業' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '稽核與系統' })).toBeInTheDocument();
     });
+    expect(window.location.hash).toBe(entryHash || '#order-workbench-v2');
   });
 
   it('在已認證狀態下，點擊側邊欄應切換頁面並同步更新 URL Hash', async () => {

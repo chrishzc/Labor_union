@@ -411,7 +411,6 @@ function requestedStaffPage() {
     staff_order_search: "/line-staff-orders",
     staff_schedule: "/line-staff-schedule",
     staff_profile_update: "/line-staff-profile-update",
-    staff_leave_apply: "/line-staff-schedule",
     staff_payout: "/line-staff-payout"
   }[target] || "";
 }
@@ -490,6 +489,12 @@ async function initialize() {
     location.replace("/line-gateway");
     return;
   }
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const target = parameters.get("target") || stateParameters.get("target");
+  if (target === "staff_leave_apply") {
+    showMessage("請假登記已停用。請從案件群組的小幫手發起「雙方合意延期」。");
+    return;
+  }
   const standalonePage = requestedStandalonePage();
   if (standalonePage) { location.replace(standalonePage); return; }
   const liffId = await loadLiffId();
@@ -499,8 +504,6 @@ async function initialize() {
   if (!liff.isLoggedIn()) { liff.login(); return; }
   if (mobileAdminPage) { location.replace(mobileAdminPage); return; }
   if (staffPage) { await openStaffPage(staffPage); return; }
-  const {parameters, stateParameters} = combinedEntryParameters();
-  const target = parameters.get("target") || stateParameters.get("target");
   const purposeParam = parameters.get("purpose") || stateParameters.get("purpose");
   const flowIdParam = parameters.get("flow_id") || stateParameters.get("flow_id") || "";
   const modeParam = parameters.get("mode") || stateParameters.get("mode") || "";

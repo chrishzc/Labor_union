@@ -238,7 +238,6 @@ const CANONICAL_RICH_MENU_ROUTES: Readonly<Record<string, string>> = {
   'target:gateway': '/line-gateway',
   'target:staff_order_search': '/line-staff-orders',
   'target:staff_schedule': '/line-staff-schedule',
-  'target:staff_leave_apply': '/line-staff-schedule',
   'target:staff_verification': '/line-identity?target=staff_verification',
   'target:staff_payout': '/line-staff-payout',
   'target:customer_service': '/line-mobile-admin?target=customer_service',

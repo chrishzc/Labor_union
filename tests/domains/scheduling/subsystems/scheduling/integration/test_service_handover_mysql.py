@@ -385,9 +385,6 @@ def test_original_assignment_change_blocks_old_candidate_delivery_and_date_save(
     from domains.line.identities import LineDeliveryTaskId
     from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
     from infrastructure.mysql import mysql_adapter
-    from api.routes.staff_leave_intake import router
-    if not getattr(http.app.state,'leave_results_registered',False):
-        http.app.include_router(router);http.app.state.leave_results_registered=True
     case,staff,assignment=setup(http)
     item=ready(http,case,assignment,staff[1])
     invitation=rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='service_start_invitation' AND source_aggregate_identity LIKE %s",(str(rows('SELECT selected_candidate_id id FROM scheduling_service_start_requests WHERE id=%s',(item['request_id'],))[0]['id'])+':%',))[0]['id']
@@ -398,12 +395,11 @@ def test_original_assignment_change_blocks_old_candidate_delivery_and_date_save(
                 return unit.service_starts.delivery_is_current(unit.delivery_tasks.get(LineDeliveryTaskId(invitation)))
         finally:connection.close()
     assert current()
-    options=checked(http.post('/api/v1/line/staff-self-service/leave-results/cases',json={'line_id_token':staff[0][1]}))['items']
-    subject=next(o for o in options if o['case_no']==case)
-    body={'line_id_token':staff[0][1],'case_no':case,'assignment_id':assignment,'decision':'defer',
-        'dates':[{'original_date':str(TODAY+timedelta(days=1)),'new_date':str(TODAY+timedelta(days=20))}],
-        'expected_order_version':subject['order_version'],'expected_scheduling_version':subject['scheduling_version'],'idempotency_key':uuid4().hex}
-    assert checked(http.post('/api/v1/line/staff-self-service/leave-results/submit',json=body))['status']=='applied'
+    command = base['postponement_submission'](
+        http, case, staff[0], [(str(TODAY + timedelta(days=1)), str(TODAY + timedelta(days=20)))],
+        assignment_id=assignment,
+    )
+    assert base['apply_confirmed_postponement'](command)['status'] == 'applied'
     assert not current()
     before=schedule(case);financial=money(case)
     assert save(http,item)[0].status_code==409

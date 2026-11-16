@@ -1,6 +1,6 @@
 """Public typed API contract for official date correction."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import replace
 from types import SimpleNamespace
 import pytest
@@ -27,6 +27,7 @@ from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateMonetaryImpactBlocked,
     OfficialServiceDateCorrectionWorkflow,
     ServiceAttributionChange,
+    SubstituteRequestLink,
 )
 
 
@@ -144,6 +145,102 @@ def test_batch_request_contract_accepts_moves_and_rejects_mixed_request():
                                   "expected_scheduling_version": 1, "preview_fingerprint": "a" * 64}).change().moves == expected
     with pytest.raises(ValidationError):
         preview.validate_python({**body, "staff_id": 8})
+    with pytest.raises(ValidationError):
+        preview.validate_python({**body, "substitute_request_id": 41})
+    linked = {**body, "scope": "upcoming", "substitute_request_id": 41, "expected_substitute_request_version": 3}
+    assert preview.validate_python(linked).change().substitute == SubstituteRequestLink(41, 3)
+
+
+def test_pending_substitute_attribution_validates_dates_and_closes_in_the_schedule_transaction(monkeypatch):
+    from unittest.mock import MagicMock
+    from zoneinfo import ZoneInfo
+    from subsystems.orders import official_service_date_correction_workflow as module
+
+    day = datetime.now(ZoneInfo("Asia/Taipei")).date() + timedelta(days=1)
+    untouched = day + timedelta(days=1)
+    facts = replace(_Workflow().query("ISSUE-346"), order_status="服務中", service_data_locked=False,
+                    actual_start_date=day, actual_end_date=untouched, assignments=(
+                        OfficialAssignmentDates(13, 7, 1, "active", (day, untouched)),
+                    ))
+    payroll = SimpleNamespace(blockers=(), actions=(), fingerprint=fingerprint_payload({"payroll": 1}),
+                              payroll=SimpleNamespace(assignments=()))
+    monkeypatch.setattr(module, "build_payroll_handover_impact", lambda *_args, **_kwargs: payroll)
+    monkeypatch.setattr(module, "_scope_attribution_payroll", lambda value, _affected: value)
+    operations = MagicMock()
+    repository, current_unit = operations.repository, operations.unit
+    units = MagicMock()
+    units.return_value.__enter__.return_value = current_unit
+    terms = SimpleNamespace(payroll=SimpleNamespace(source_terms=()), order=SimpleNamespace(terms=None))
+    repository.load_attribution.return_value = facts, terms, (), (), module.AttributionFundingFacts()
+    repository.load_substitute_request.return_value = (7, (day,))
+    repository.replay_attribution.return_value = None
+    workflow = OfficialServiceDateCorrectionWorkflow(repository, units)
+    link = SubstituteRequestLink(41, 3)
+    change = ServiceAttributionChange(0, 0, (), "月嫂已同意當日代班", scope="upcoming", substitute=link,
+                                      moves=(AttributionDayMove(13, 8, day, day),))
+
+    preview = workflow.preview_attribution(facts.case_no, change)
+    assert {item.staff_id: item.service_dates for item in preview.scheduling.assignments} == {
+        7: (untouched,), 8: (day,),
+    }
+    repository.load_substitute_request.assert_called_once_with(facts.case_no, link, lock=False)
+    repository.persist_attribution.assert_not_called()
+    repository.complete_substitute_request.assert_not_called()
+    for invalid in (
+        replace(change, scope="served"),
+        replace(change, moves=(AttributionDayMove(13, 8, day, untouched),)),
+        replace(change, moves=(AttributionDayMove(13, 7, day, day),)),
+        replace(change, moves=(AttributionDayMove(13, 8, day, day), AttributionDayMove(13, 8, untouched, untouched))),
+    ):
+        with pytest.raises(ValueError, match="service_attribution_substitute_dates_conflict"):
+            workflow.preview_attribution(facts.case_no, invalid)
+
+    kwargs = dict(expected_order_version=1, expected_scheduling_version=1,
+                  preview_fingerprint=preview.fingerprint.value, actor="admin",
+                  reason="臨時代班", idempotency_key="batch-1", correlation_id="correlation-1")
+    repository.load_substitute_request.side_effect = ValueError("service_attribution_substitute_request_conflict")
+    with pytest.raises(ValueError, match="service_attribution_substitute_request_conflict"):
+        workflow.apply_attribution(facts.case_no, change, **kwargs)
+    repository.load_substitute_request.assert_called_with(facts.case_no, link, lock=True)
+    repository.persist_attribution.assert_not_called()
+    current_unit.commit.assert_not_called()
+    repository.load_substitute_request.side_effect = None
+    repository.complete_substitute_request.side_effect = RuntimeError("completion failed")
+    with pytest.raises(RuntimeError, match="completion failed"):
+        workflow.apply_attribution(facts.case_no, change, **kwargs)
+    current_unit.commit.assert_not_called()
+    repository.complete_substitute_request.side_effect = None
+    operations.reset_mock()
+    receipt = workflow.apply_attribution(facts.case_no, change, **kwargs)
+    assert [step[0] for step in operations.mock_calls][-3:] == [
+        "repository.persist_attribution", "repository.complete_substitute_request", "unit.commit",
+    ]
+    repository.complete_substitute_request.assert_called_once_with(facts.case_no, link, actor="admin", key="batch-1")
+    repository.replay_attribution.return_value = receipt
+    assert workflow.apply_attribution(facts.case_no, change, **kwargs) == receipt
+    repository.complete_substitute_request.assert_called_once()
+
+
+def test_mysql_substitute_attribution_queries_exact_pending_leave_without_candidate_or_group():
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
+
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"staff_id": 7, "execution_dates": {
+        "kind": "leave-v1", "dates": [{"original_date": "2026-11-18"}, {"original_date": "2026-11-17"}],
+    }}
+    repository = MySqlServiceStartRepository(connection)
+    assert repository.pending_leave_attribution("ISSUE-346", 41, 3, lock=True) == (
+        7, (date(2026, 11, 17), date(2026, 11, 18)),
+    )
+    statement, params = cursor.execute.call_args.args
+    assert params == (41, "ISSUE-346", 3)
+    assert "id=%s AND case_no=%s AND aggregate_version=%s AND status='substitute_required'" in statement
+    assert statement.endswith("FOR UPDATE")
+    cursor.fetchone.return_value = None
+    with pytest.raises(ValueError, match="service_attribution_substitute_request_conflict"):
+        repository.pending_leave_attribution("WRONG-CASE", 41, 3, lock=False)
 
 
 @pytest.mark.parametrize("lock", [False, True], ids=["preview", "apply"])

@@ -591,6 +591,7 @@ def create_account_center_user_with_receipt(
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _lock_account_command_root(cursor, actor)
             require_protected_account_receipts(cursor)
             command_payload = {
                 "username": normalized_username,
@@ -668,6 +669,7 @@ def set_account_center_enabled(*, connection_factory: ConnectionFactory, actor: 
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _lock_account_command_root(cursor, actor)
             require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled}):
                 unit_of_work.commit()
@@ -698,6 +700,7 @@ def reset_account_center_password(*, connection_factory: ConnectionFactory, acto
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _lock_account_command_root(cursor, actor)
             require_protected_account_receipts(cursor)
             payload = {"password_hash": _token_hash(password)}
             if _replay_account_command(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload, protection_key=key):
@@ -727,6 +730,7 @@ def revoke_account_center_sessions(*, connection_factory: ConnectionFactory, act
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _lock_account_command_root(cursor, actor)
             require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {}):
                 unit_of_work.commit()
@@ -755,6 +759,7 @@ def reset_account_center_mfa(*, connection_factory: ConnectionFactory, actor: Ad
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _lock_account_command_root(cursor, actor)
             require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {}):
                 unit_of_work.commit()
@@ -790,6 +795,14 @@ def _require_root_actor(actor: AdminPrincipal, reason: str) -> None:
     """Require the sole account-center operator and an accountable reason."""
     if not actor.is_root:
         raise PermissionError("僅 root 可管理帳號")
+
+
+def _lock_account_command_root(cursor: Any, actor: AdminPrincipal) -> None:
+    # Serialize the sole operator's writes before probing for absent receipt keys.
+    cursor.execute("SELECT admin_user_id FROM admin_root_account WHERE singleton_key=1 FOR UPDATE")
+    root = cursor.fetchone()
+    if root is None or root["admin_user_id"] != actor.id:
+        raise ValueError("admin_version_conflict")
 
 
 def _lock_non_root_account(cursor: Any, account_id: int, expected_version: int) -> None:

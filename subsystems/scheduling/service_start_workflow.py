@@ -203,6 +203,8 @@ class ServiceStartWorkflow:
             self.repository.lock_command(request_id)
             replay = self.repository.command_replay('dates', key, payload)
             if replay is None:
+                if self.repository.is_leave_request(request_id, lock=True):
+                    raise ServiceStartConflict("leave_substitute_dates_retired", "請從原案件的多月嫂排班辦理代班。")
                 self.repository.require_joined_candidate(request_id, version)
                 self.repository.record_leave_dates(request_id, date_changes)
                 self.repository.record_candidate_date(request_id,start_date)

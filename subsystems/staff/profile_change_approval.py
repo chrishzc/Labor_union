@@ -113,10 +113,11 @@ class StaffProfileChangeApproval:
         if proposed.get("bank"):
             snapshot = self._bank.query(staff_id)
             primary = _primary(snapshot.accounts)
-            if primary is None:
-                raise ValueError("staff_profile_change_primary_required")
             version = ExpectedVersion(basis["bank"])
-            values = {**proposed["bank"], "operation": "replace", "account_id": primary.account_id}
+            if primary is None:
+                values = {**proposed["bank"], "operation": "add", "is_primary": True}
+            else:
+                values = {**proposed["bank"], "operation": "replace", "account_id": primary.account_id}
             preview = self._bank.preview(staff_id, values, version)
             sections["bank"] = VersionedChange(values, version, preview.preview_fingerprint)
             review["bank"] = {"before": preview.before, "after": preview.after}
@@ -174,9 +175,9 @@ class StaffProfileChangeApproval:
             raise ValueError("staff_profile_change_empty")
         if profile and not profile.proposed.keys() <= CONTACT_FIELDS:
             raise ValueError("staff_profile_change_fields_invalid")
-        if bank and (
-            bank.proposed.keys() != {"operation", "account_id", "bank_code", "branch_code", "account_no"}
-            or bank.proposed["operation"] != "replace"
+        if bank and not (
+            (bank.proposed.get("operation") == "replace" and bank.proposed.keys() == {"operation", "account_id", "bank_code", "branch_code", "account_no"})
+            or (bank.proposed.get("operation") == "add" and bank.proposed.keys() == {"operation", "bank_code", "branch_code", "account_no", "is_primary"})
         ):
             raise ValueError("staff_profile_change_bank_replacement_required")
         operation = f"staff-profile-change:{operation_id}"

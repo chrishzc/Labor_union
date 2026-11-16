@@ -182,7 +182,7 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
     expect(screen.queryByRole('button', { name: '辦理完工確認' })).not.toBeInTheDocument();
     expect(screen.getByText('預計服務完成時間・CASE-142')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '服務前更換月嫂 →' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '臨時代班 →' })).toHaveAttribute('href', '#scheduling?tab=leave_sub&case_no=CASE-142');
+    expect(screen.queryByRole('link', { name: '臨時代班 →' })).not.toBeInTheDocument();
 
     const completion = await screen.findByRole('button', { name: 'test-owner-background-readback' });
     expect(mocks.getOrderDetail).toHaveBeenCalledTimes(1);

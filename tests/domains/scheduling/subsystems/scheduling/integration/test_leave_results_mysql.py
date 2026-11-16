@@ -1,6 +1,7 @@
 """Real local owner transactions for agreed leave results; no provider worker runs."""
 import os
 import runpy
+from dataclasses import replace
 from datetime import date, timedelta
 from uuid import uuid4
 
@@ -9,29 +10,59 @@ import pytest
 base = runpy.run_path('tests/domains/scheduling/subsystems/scheduling/modules/service-start/test_service_start_mysql.py')
 http = base['http']
 rows, write, checked = base['rows'], base['write'], base['checked']
-action, willingness, joined = base['action'], base['willingness'], base['joined']
+postponement_submission = base['postponement_submission']
+apply_confirmed_postponement = base['apply_confirmed_postponement']
+RETIRED_SUBMIT = '/api/v1/line/staff-self-service/leave-results/submit'
+ORIGINAL_DATE = '2027-01-05'
+POSTPONED_DATE = '2027-02-10'
 pytestmark = pytest.mark.skipif(not os.getenv('SERVICE_START_TEST_DB'), reason='explicit local synthetic DB required')
 
 
 def setup(http, count=1):
-    from api.routes.staff_leave_intake import router
-    if not getattr(http.app.state,'leave_results_registered',False):
-        http.app.include_router(router)
-        http.app.state.leave_results_registered=True
     case, staff, segments = base['seed_case'](http, count=count)
     for index in range(count):
         checked(base['submit'](http,case,staff[index],segments[index],start=str(date(2027,1,5)+timedelta(days=30*index)))[0])
     return case, staff
 
 
-def submit(http, case, staff, decision='defer', dates=None, **overrides):
-    options = checked(http.post('/api/v1/line/staff-self-service/leave-results/cases',json={'line_id_token':staff[1]}))['items']
-    item = next(o for o in options if o['case_no']==case)
-    body = {'line_id_token':staff[1], 'case_no':case, 'assignment_id':item['assignment_id'],
-        'expected_order_version':item['order_version'],'expected_scheduling_version':item['scheduling_version'],
-        'decision':decision,'dates': dates or [{'original_date':'2027-01-05','new_date':'2027-02-10' if decision=='defer' else None}],
-        'idempotency_key':uuid4().hex,**overrides}
-    return http.post('/api/v1/line/staff-self-service/leave-results/submit',json=body),body
+def confirmed_command(http, case, staff, *, dates=((ORIGINAL_DATE, POSTPONED_DATE),)):
+    return postponement_submission(http, case, staff, dates)
+
+
+def block_staff_day(staff, day):
+    write(
+        "INSERT INTO scheduling_staff_unavailability_blocks"
+        "(staff_id,block_kind,start_date,end_date,status,reason,created_by) "
+        "VALUES (%s,'long_leave',%s,%s,'effective','synthetic','synthetic')",
+        (staff[0], day, day),
+    )
+
+
+def linked_substitute_change(command, item, substitute_staff):
+    return {
+        'scope': 'upcoming',
+        'evidence': 'Recorded consent from the substitute by phone',
+        'substitute_request_id': item['request_id'],
+        'expected_substitute_request_version': item['version'],
+        'moves': [{
+            'source_assignment_id': command.assignment_id,
+            'source_date': ORIGINAL_DATE,
+            'staff_id': substitute_staff[0],
+            'replacement_date': ORIGINAL_DATE,
+        }],
+    }
+
+
+def substitute_command(http, case, change):
+    path = f'/api/v1/orders/{case}/service-attribution'
+    preview = checked(http.post(path + '/preview', json=change))
+    return {
+        **change,
+        'expected_order_version': preview['order_version'],
+        'expected_scheduling_version': preview['scheduling_version'],
+        'preview_fingerprint': preview['preview_fingerprint'],
+        'reason': 'Temporary substitute',
+    }
 
 
 def schedule(case):
@@ -40,162 +71,199 @@ def schedule(case):
         'WHERE a.case_no=%s AND d.effective_marker=1 AND d.is_work_day=1 ORDER BY d.work_date',(case,))
 
 
-def test_agreed_defer_updates_dates_schedule_finance_and_only_original_group(http):
-    case,staff=setup(http)
-    before=schedule(case)
-    payments=rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))
-    result,body=submit(http,case,staff[0]);result=checked(result)
-    assert result['workflow_kind']=='leave' and result['status']=='applied'
-    assert result['result']['actual_start_date']=='2027-01-06'
-    assert result['result']['actual_end_date']=='2027-02-10'
-    assert result['result']['first_payment_due_date']=='2027-01-06'
-    after=schedule(case)
-    assert len(after)==len(before)==30
-    assert str(after[-1]['work_date'])=='2027-02-10'
-    assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))==payments
-    assert checked(http.post('/api/v1/line/staff-self-service/leave-results/submit',json=body))['request_id']==result['request_id']
-    tasks=rows("SELECT recipient_type,recipient_identity,payload_snapshot FROM line_delivery_tasks WHERE source_aggregate_type='service_start_schedule' AND source_aggregate_identity=%s",(str(result['request_id']),))
-    assert len(tasks)==1 and tasks[0]['recipient_type']=='group' and 'postback' not in tasks[0]['payload_snapshot']
-    assert not rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='staff_leave_customer_coordination' AND payload_snapshot LIKE %s",('%'+case+'%',))
-    assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==0
-    from domains.line.identities import LineDeliveryTaskId
-    from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
-    from infrastructure.mysql import mysql_adapter
-    task_id=rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='service_start_schedule' AND source_aggregate_identity=%s",(str(result['request_id']),))[0]['id']
-    connection=mysql_adapter.get_connection()
-    try:
-        with LineMySqlUnitOfWork(connection) as unit:
-            task=unit.delivery_tasks.get(LineDeliveryTaskId(task_id))
-            assert unit.service_starts.delivery_is_current(task)
-        write('UPDATE line_order_group_bindings SET aggregate_version=aggregate_version+1 WHERE case_no=%s',(case,))
-        with LineMySqlUnitOfWork(connection) as unit:
-            assert not unit.service_starts.delivery_is_current(task)
-    finally:connection.close()
-    body['dates'][0]['new_date']='2027-02-11'
-    assert http.post('/api/v1/line/staff-self-service/leave-results/submit',json=body).status_code==409
+def test_confirmed_postponement_updates_schedule_and_finance_without_push(http):
+    case, staff = setup(http)
+    before = schedule(case)
+    payments = rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,))
+    command = confirmed_command(http, case, staff[0])
+    result = apply_confirmed_postponement(command)
+    assert result['workflow_kind'] == 'leave' and result['status'] == 'applied'
+    assert result['result']['actual_start_date'] == '2027-01-06'
+    assert result['result']['actual_end_date'] == POSTPONED_DATE
+    assert result['result']['first_payment_due_date'] == '2027-01-06'
+    after = schedule(case)
+    assert len(after) == len(before) == 30
+    assert str(after[-1]['work_date']) == POSTPONED_DATE
+    assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,)) == payments
+    assert apply_confirmed_postponement(command)['request_id'] == result['request_id']
+    assert not result['result']['group_record_queued']
+    assert not rows(
+        "SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='service_start_schedule' "
+        "AND source_aggregate_identity=%s", (str(result['request_id']),),
+    )
+    assert not rows(
+        "SELECT id FROM line_delivery_tasks WHERE source_aggregate_type='staff_leave_customer_coordination' "
+        "AND payload_snapshot LIKE %s", ('%' + case + '%',),
+    )
+    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 0
+    from domains.scheduling.leave_result import LeaveDateChange
+    from domains.scheduling.service_start import ServiceStartConflict
+
+    with pytest.raises(ServiceStartConflict) as raised:
+        apply_confirmed_postponement(replace(
+            command, dates=(LeaveDateChange(date.fromisoformat(ORIGINAL_DATE), date(2027, 2, 11)),),
+        ))
+    assert raised.value.code == 'leave_result_key_reused'
+    assert schedule(case) == after
 
 
 def test_conflict_preserves_all_owner_facts_then_union_records_new_agreement(http):
-    case,staff=setup(http)
-    before=schedule(case)
-    finance=rows('SELECT * FROM client_payment_terms WHERE case_no=%s',(case,))
-    write("INSERT INTO scheduling_staff_unavailability_blocks(staff_id,block_kind,start_date,end_date,status,reason,created_by) VALUES (%s,'long_leave','2027-02-10','2027-02-10','effective','synthetic','synthetic')",(staff[0][0],))
-    result=checked(submit(http,case,staff[0])[0])
-    assert result['status']=='substitute_required' and result['conflict_message']
-    assert schedule(case)==before
-    assert rows('SELECT * FROM client_payment_terms WHERE case_no=%s',(case,))==finance
-    assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==1
-    assert submit(http,case,staff[0])[0].status_code==409
-    body={'expected_version':result['version'],'idempotency_key':uuid4().hex,
-          'dates':[{'original_date':'2027-01-05','new_date':'2027-02-11'}]}
-    path=f"/api/v1/scheduling/service-start/{result['request_id']}/defer"
-    updated=checked(http.post(path,json=body))
-    assert updated['status']=='applied'
-    assert checked(http.post(path,json=body))['status']=='applied'
+    from domains.scheduling.service_start import ServiceStartConflict
+
+    case, staff = setup(http)
+    before = schedule(case)
+    finance = rows('SELECT * FROM client_payment_terms WHERE case_no=%s', (case,))
+    block_staff_day(staff[0], POSTPONED_DATE)
+    command = confirmed_command(http, case, staff[0])
+    result = apply_confirmed_postponement(command)
+    assert result['status'] == 'substitute_required' and result['conflict_message']
+    assert schedule(case) == before
+    assert rows('SELECT * FROM client_payment_terms WHERE case_no=%s', (case,)) == finance
+    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 1
+    with pytest.raises(ServiceStartConflict) as raised:
+        apply_confirmed_postponement(replace(command, key=uuid4().hex))
+    assert raised.value.code == 'leave_result_already_pending'
+    body = {'expected_version': result['version'], 'idempotency_key': uuid4().hex,
+            'dates': [{'original_date': ORIGINAL_DATE, 'new_date': '2027-02-11'}]}
+    path = f"/api/v1/scheduling/service-start/{result['request_id']}/defer"
+    updated = checked(http.post(path, json=body))
+    assert updated['status'] == 'applied'
+    assert checked(http.post(path, json=body))['status'] == 'applied'
 
 
-def test_substitution_willingness_invitation_join_and_staff_entered_dates(http):
-    case,staff=setup(http)
-    before=schedule(case)
-    item=checked(submit(http,case,staff[0],decision='substitute')[0])
-    assert schedule(case)==before and item['status']=='substitute_required'
-    item,_=action(http,item,'inquire',staff_id=staff[1][0],start_date='2027-01-05',end_date='2027-01-05')
-    inquiry=rows("SELECT payload_snapshot FROM line_delivery_tasks WHERE source_aggregate_type='service_start_inquiry' AND source_aggregate_identity=(SELECT selected_candidate_id FROM scheduling_service_start_requests WHERE id=%s)",(item['request_id'],))[0]['payload_snapshot']
-    assert '服務日期：2027-01-05' in inquiry
-    assert http.post(f"/api/v1/scheduling/service-start/{item['request_id']}/invite",json={'expected_version':item['version'],'idempotency_key':uuid4().hex}).status_code==409
-    willingness(item,staff[1],'unwilling')
-    item=checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))
-    item,_=action(http,item,'inquire',staff_id=staff[2][0],start_date='2027-01-05',end_date='2027-01-05')
-    willingness(item,staff[1],'willing')
-    assert checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))['willingness']=='pending'
-    willingness(item,staff[2],'willing')
-    item=checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))
-    item,_=action(http,item,'invite')
-    body={'expected_version':item['version'],'idempotency_key':uuid4().hex,'start_date':'2027-01-05',
-          'date_changes':[{'original_date':'2027-01-05','new_date':'2027-01-05'}]}
-    path=f"/api/v1/scheduling/service-start/{item['request_id']}/dates"
-    assert http.post(path,json=body).status_code==409
-    joined(case,staff[2])
-    result=checked(http.post(path,json=body))
-    assert result['status']=='applied' and result['result']['group_record_queued']
-    after=schedule(case)
-    assert len(after)==30 and after[0]['staff_id']==staff[2][0]
-    assert all(row['staff_id']==staff[0][0] for row in after[1:])
-    assert checked(http.post(path,json=body))['status']=='applied'
+def test_linked_substitution_updates_only_requested_day_without_waiting_for_group_join(http):
+    case, staff = setup(http)
+    before = schedule(case)
+    order_dates = rows('SELECT actual_start_date, actual_end_date FROM orders WHERE case_no=%s', (case,))
+    due_dates = rows(
+        'SELECT first_payment_due_date, second_payment_due_date FROM client_payment_terms WHERE case_no=%s', (case,),
+    )
+    block_staff_day(staff[0], POSTPONED_DATE)
+    confirmation = confirmed_command(http, case, staff[0])
+    item = apply_confirmed_postponement(confirmation)
+    assert schedule(case) == before and item['status'] == 'substitute_required' and not item['joined']
+    task_path = f"/api/v1/scheduling/service-start/{item['request_id']}"
+    old_command = {'expected_version': item['version'], 'idempotency_key': uuid4().hex,
+                   'start_date': ORIGINAL_DATE,
+                   'date_changes': [{'original_date': ORIGINAL_DATE, 'new_date': ORIGINAL_DATE}]}
+    assert http.post(task_path + '/dates', json=old_command).status_code == 410
+    command = substitute_command(http, case, linked_substitute_change(confirmation, item, staff[1]))
+    headers = {'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case}
+    assert schedule(case) == before and checked(http.get(task_path))['status'] == 'substitute_required'
+    path = f'/api/v1/orders/{case}/service-attribution/apply'
+    receipt = checked(http.post(path, json=command, headers=headers))
+    result = checked(http.get(task_path))
+    assert result['status'] == 'applied' and not result['result']['group_record_queued']
+    assert schedule(case) == [
+        {**row, 'staff_id': staff[1][0]} if str(row['work_date']) == ORIGINAL_DATE else row for row in before
+    ]
+    assert rows('SELECT actual_start_date, actual_end_date FROM orders WHERE case_no=%s', (case,)) == order_dates
+    assert rows(
+        'SELECT first_payment_due_date, second_payment_due_date FROM client_payment_terms WHERE case_no=%s', (case,),
+    ) == due_dates
+    assert checked(http.post(path, json=command, headers=headers)) == receipt
+    assert checked(http.get(task_path))['version'] == result['version']
+    assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no': case}))['total'] == 0
 
 
-def test_submit_identity_stale_dates_and_rollback(http,monkeypatch):
-    case,staff=setup(http)
-    response,body=submit(http,case,staff[0],expected_scheduling_version=0)
-    assert response.status_code==409
-    body['line_id_token']=staff[1][1]
-    assert http.post('/api/v1/line/staff-self-service/leave-results/submit',json=body).status_code==409
-    assert submit(http,case,staff[0],dates=[{'original_date':'2027-01-04','new_date':'2027-02-10'}])[0].status_code==409
-    before=schedule(case)
+def test_confirmed_postponement_guards_scope_versions_dates_and_rollback(http, monkeypatch):
+    from domains.scheduling.leave_result import LeaveDateChange
+    from domains.scheduling.service_start import ServiceStartConflict
     from infrastructure.mysql.service_start_repository import MySqlServiceStartRepository
-    def fail(*args,**kwargs):raise RuntimeError('synthetic failure after financial writes')
+
+    case, staff = setup(http)
+    command = confirmed_command(http, case, staff[0])
+    invalid_commands = (
+        (replace(command, expected_scheduling_version=0), 'leave_result_stale'),
+        (replace(command, staff_id=staff[1][0]), 'leave_result_forbidden'),
+        (replace(command, dates=(LeaveDateChange(date(2027, 1, 4), date(2027, 2, 10)),)), 'leave_result_dates_changed'),
+    )
+    before = schedule(case)
+    for invalid, code in invalid_commands:
+        with pytest.raises(ServiceStartConflict) as raised:
+            apply_confirmed_postponement(invalid)
+        assert raised.value.code == code
+
+    def fail(*args, **kwargs):
+        raise RuntimeError('synthetic failure after financial writes')
+
     with monkeypatch.context() as patch:
-        patch.setattr(MySqlServiceStartRepository,'complete',fail)
-        with pytest.raises(RuntimeError,match='synthetic failure'):
-            submit(http,case,staff[0])
-    assert schedule(case)==before
-    assert rows('SELECT COUNT(*) n FROM scheduling_service_start_requests WHERE case_no=%s',(case,))[0]['n']==1
+        patch.setattr(MySqlServiceStartRepository, 'complete', fail)
+        with pytest.raises(RuntimeError, match='synthetic failure'):
+            apply_confirmed_postponement(command)
+    assert schedule(case) == before
+    assert rows('SELECT COUNT(*) n FROM scheduling_service_start_requests WHERE case_no=%s', (case,))[0]['n'] == 1
 
 
 def test_same_case_date_collision_is_internal_todo_and_other_staff_days_are_unchanged(http):
-    case,staff=setup(http,count=2)
-    before=schedule(case)
-    result=checked(submit(http,case,staff[1],dates=[{'original_date':'2027-02-04','new_date':'2027-02-05'}])[0])
-    assert result['status']=='substitute_required'
-    assert schedule(case)==before
-    body={'expected_version':result['version'],'idempotency_key':uuid4().hex,
-          'dates':[{'original_date':'2027-02-04','new_date':'2027-03-10'}]}
-    result=checked(http.post(f"/api/v1/scheduling/service-start/{result['request_id']}/defer",json=body))
-    assert result['status']=='applied'
-    assert [r for r in schedule(case) if r['staff_id']==staff[0][0]]==[r for r in before if r['staff_id']==staff[0][0]]
-    assert len(schedule(case))==len(before)
+    case, staff = setup(http, count=2)
+    before = schedule(case)
+    command = confirmed_command(http, case, staff[1], dates=[('2027-02-04', '2027-02-05')])
+    result = apply_confirmed_postponement(command)
+    assert result['status'] == 'substitute_required'
+    assert schedule(case) == before
+    body = {'expected_version': result['version'], 'idempotency_key': uuid4().hex,
+            'dates': [{'original_date': '2027-02-04', 'new_date': '2027-03-10'}]}
+    result = checked(http.post(f"/api/v1/scheduling/service-start/{result['request_id']}/defer", json=body))
+    assert result['status'] == 'applied'
+    assert [r for r in schedule(case) if r['staff_id'] == staff[0][0]] == [r for r in before if r['staff_id'] == staff[0][0]]
+    assert len(schedule(case)) == len(before)
 
 
-def test_substitute_may_record_actual_new_day_after_joining_and_conflict_stays_pending(http):
-    case,staff=setup(http)
-    item=checked(submit(http,case,staff[0],decision='substitute')[0])
-    item,_=action(http,item,'inquire',staff_id=staff[1][0],start_date='2027-01-05',end_date='2027-01-05')
-    willingness(item,staff[1],'willing');joined(case,staff[1])
-    item=checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))
-    before=schedule(case)
-    write("INSERT INTO scheduling_staff_unavailability_blocks(staff_id,block_kind,start_date,end_date,status,reason,created_by) VALUES (%s,'long_leave','2027-02-10','2027-02-10','effective','synthetic','synthetic')",(staff[1][0],))
-    body={'expected_version':item['version'],'idempotency_key':uuid4().hex,'start_date':'2027-02-10',
-          'date_changes':[{'original_date':'2027-01-05','new_date':'2027-02-10'}]}
-    path=f"/api/v1/scheduling/service-start/{item['request_id']}/dates"
-    item=checked(http.post(path,json=body))
-    assert item['status']=='substitute_required' and schedule(case)==before
-    body.update(expected_version=item['version'],idempotency_key=uuid4().hex,start_date='2027-02-11',
-                date_changes=[{'original_date':'2027-01-05','new_date':'2027-02-11'}])
-    result=checked(http.post(path,json=body))
-    assert result['status']=='applied'
-    assert any(str(row['work_date'])=='2027-02-11' and row['staff_id']==staff[1][0] for row in schedule(case))
+def test_linked_substitution_keeps_task_pending_on_changed_dates_and_conflict(http):
+    case, staff = setup(http)
+    before = schedule(case)
+    block_staff_day(staff[0], POSTPONED_DATE)
+    confirmation = confirmed_command(http, case, staff[0])
+    item = apply_confirmed_postponement(confirmation)
+    assert item['status'] == 'substitute_required'
+    change = linked_substitute_change(confirmation, item, staff[1])
+    preview_path = f'/api/v1/orders/{case}/service-attribution/preview'
+    changed_day = {**change, 'moves': [{**change['moves'][0], 'replacement_date': POSTPONED_DATE}]}
+    response = http.post(preview_path, json=changed_day)
+    assert response.status_code == 409
+    assert response.json()['detail']['error']['code'] == 'service_attribution_substitute_dates_conflict'
+    command = substitute_command(http, case, change)
+    block_staff_day(staff[1], ORIGINAL_DATE)
+    response = http.post(
+        f'/api/v1/orders/{case}/service-attribution/apply', json=command,
+        headers={'Idempotency-Key': uuid4().hex, 'X-Correlation-ID': case},
+    )
+    assert response.status_code == 409
+    assert schedule(case) == before
+    assert checked(http.get(f"/api/v1/scheduling/service-start/{item['request_id']}"))['status'] == 'substitute_required'
 
 
 def test_in_service_defer_preserves_started_days_and_receipt_history(http):
-    # Signed prerequisites are synthetic; the initial start uses the real owner.
-    from api.routes.staff_leave_intake import router
-    if not getattr(http.app.state,'leave_results_registered',False):
-        http.app.include_router(router);http.app.state.leave_results_registered=True
-    case,staff,segments=base['seed_case'](http)
-    checked(base['submit'](http,case,staff[0],segments[0],start='2026-10-05')[0])
-    before=schedule(case)
-    paid=rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))
-    result=checked(submit(http,case,staff[0],dates=[{'original_date':'2026-10-29','new_date':'2026-11-10'}])[0])
-    assert result['status']=='applied'
-    assert result['result']['actual_start_date']=='2026-10-05'
-    assert result['result']['first_payment_due_date']=='2026-10-05'
-    assert [r for r in schedule(case) if str(r['work_date'])<'2026-10-29']==[r for r in before if str(r['work_date'])<'2026-10-29']
-    assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id',(case,))==paid
+    from shared_kernel.clock import SystemBusinessClock
+
+    today = SystemBusinessClock().today()
+    start = today - timedelta(days=1)
+    day = str(today + timedelta(days=3))
+    new_day = str(today + timedelta(days=35))
+    case, staff, segments = base['seed_case'](http)
+    checked(base['submit'](http, case, staff[0], segments[0], start=str(start))[0])
+    before = schedule(case)
+    paid = rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,))
+    result = apply_confirmed_postponement(confirmed_command(http, case, staff[0], dates=[(day, new_day)]))
+    assert result['status'] == 'applied'
+    assert result['result']['actual_start_date'] == str(start)
+    assert result['result']['first_payment_due_date'] == str(start)
+    assert [r for r in schedule(case) if str(r['work_date']) < day] == [r for r in before if str(r['work_date']) < day]
+    assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,)) == paid
 
 
-def test_missing_group_never_falls_back_to_private_customer_or_original_staff(http):
-    case,staff=setup(http)
-    write("UPDATE line_order_group_bindings SET binding_status='unbound',group_id=NULL WHERE case_no=%s",(case,))
-    result=checked(submit(http,case,staff[0])[0])
-    assert result['status']=='applied' and not result['result']['group_record_queued']
-    assert not rows("SELECT id FROM line_delivery_tasks WHERE source_aggregate_identity=%s AND source_aggregate_type='service_start_schedule'",(str(result['request_id']),))
+def test_retired_staff_submit_does_not_change_owner_facts(http):
+    case, staff = setup(http)
+    before = schedule(case)
+    requests = rows('SELECT id,aggregate_version FROM scheduling_service_start_requests WHERE case_no=%s', (case,))
+    command = confirmed_command(http, case, staff[0])
+    response = http.post(RETIRED_SUBMIT, json={
+        'line_id_token': staff[0][1], 'case_no': case, 'assignment_id': command.assignment_id,
+        'decision': command.decision, 'expected_order_version': command.expected_order_version,
+        'expected_scheduling_version': command.expected_scheduling_version, 'idempotency_key': command.key,
+        'dates': [{'original_date': ORIGINAL_DATE, 'new_date': POSTPONED_DATE}],
+    })
+    assert response.status_code == 410
+    assert schedule(case) == before
+    assert rows('SELECT id,aggregate_version FROM scheduling_service_start_requests WHERE case_no=%s', (case,)) == requests

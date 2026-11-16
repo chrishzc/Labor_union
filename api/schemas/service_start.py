@@ -40,17 +40,6 @@ class ServiceStartDates(ServiceStartCommand):
     date_changes: list[LeaveDateChangeBody] | None = None
 
 
-class StaffLeaveResultSubmission(StaffLiffRequest):
-    model_config = ConfigDict(extra='forbid')
-    case_no: str = Field(min_length=1, max_length=50)
-    assignment_id: int = Field(gt=0)
-    decision: Literal['defer', 'substitute']
-    dates: list[LeaveDateChangeBody] = Field(min_length=1, max_length=366)
-    expected_order_version: int = Field(ge=0)
-    expected_scheduling_version: int = Field(ge=0)
-    idempotency_key: str = Field(min_length=1, max_length=140)
-
-
 class LeaveDeferDates(ServiceStartCommand):
     dates: list[LeaveDateChangeBody] = Field(min_length=1, max_length=366)
 

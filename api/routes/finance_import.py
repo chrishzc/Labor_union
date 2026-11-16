@@ -43,6 +43,7 @@ from subsystems.jobs.command_application import DurableJobCommandApplication
 from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.finance_import import (
     FinanceBankTransactionPageView,
+    FinanceExcludedBankTransactionPageView,
     FinanceImportHistoryPageView,
     FinanceImportIngestionOutcomeView,
     FinanceImportBatchApplyBody,
@@ -382,6 +383,21 @@ def exclude_bank_transaction(
             category, code, "銀行流水已變更或已核銷，請重新查詢。", correlation,
         ))
     return BaseResponse(data={"row_id": row_id}, message="已移除誤匯入明細")
+
+
+@router.get("/bank-transactions/excluded", response_model=BaseResponse[FinanceExcludedBankTransactionPageView])
+def list_excluded_bank_transactions(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before_row_id: Annotated[int | None, Query(ge=1)] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    query_service=Depends(get_finance_import_query_service),
+):
+    return _call_query(
+        lambda: _materialize(query_service.excluded_bank_transactions(limit=limit, before_row_id=before_row_id)),
+        "成功載入已移除銀行流水紀錄",
+        CorrelationId(_request_correlation(request)),
+    )
 
 
 @router.get("/import-history", response_model=BaseResponse[FinanceImportHistoryPageView])

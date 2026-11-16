@@ -780,8 +780,8 @@ function LeaveSubstitutionWorkspace({
       setAssignmentId(matchedAssignment.assignment_id);
       setScheduleId(matchedAssignment.official_schedules.find((day) => day.work_date >= item.leave_start_date && day.work_date <= item.leave_end_date)?.schedule_id ?? null);
     }
-    manualDispatchTitleRef.current?.focus();
   };
+  useEffect(() => { if (selectedInboxItem) manualDispatchTitleRef.current?.focus(); }, [selectedInboxItem]);
 
   useEffect(
     () => leaveSubstitutionFlowStore.subscribe(() => setStoreRevision((value) => value + 1)),
@@ -839,6 +839,8 @@ function LeaveSubstitutionWorkspace({
 
   const draft = normalizedCaseNo ? leaveSubstitutionFlowStore.get(normalizedCaseNo) : undefined;
   const machine = resolveLeaveSubstitutionMachineState(draft);
+  const showLegacyDispatch = selectedInboxItem !== null || draft?.receipt != null
+    || ['apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed'].includes(machine.type);
   const observedReceipt = machine.type === 'observed' ? machine.receipt : null;
   const assignments = draft?.assignments ?? [];
   const selectedAssignment = assignments.find((item) => item.assignment_id === assignmentId) ?? null;
@@ -956,7 +958,7 @@ function LeaveSubstitutionWorkspace({
   }, [scheduleId, selectedAssignment, selectedInboxItem]);
 
   const buildPreviewRequest = (): LeaveSubstitutionPreviewRequest | null => {
-    if (!selectedAssignment || !selectedSchedule) return null;
+    if (!selectedInboxItem || !selectedAssignment || !selectedSchedule) return null;
     if (resolutionType === 'substitute' && substituteStaffId === null) return null;
     return {
       original_assignment_id: selectedAssignment.assignment_id,
@@ -969,8 +971,8 @@ function LeaveSubstitutionWorkspace({
           ? replacementWorkDate
           : null,
       }],
-      leave_request_id: selectedInboxItem ? selectedInboxItem.id : null,
-      expected_leave_request_version: selectedInboxItem ? selectedInboxItem.aggregate_version : null,
+      leave_request_id: selectedInboxItem.id,
+      expected_leave_request_version: selectedInboxItem.aggregate_version,
     };
   };
 
@@ -1020,11 +1022,15 @@ function LeaveSubstitutionWorkspace({
 
   return (
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
+      {!showLegacyDispatch && <p>臨時代班請從原案件的「服務安排 → 多月嫂排班」辦理。
+        {suggestedCaseNo && <a href={`#order-workbench-v2?case=${encodeURIComponent(suggestedCaseNo)}&work=service&staffing=upcoming`}> 開啟本案多月嫂排班</a>}
+      </p>}
+      {showLegacyDispatch && <>
       <header className="leave-substitution-header">
         <div>
           <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 查看結果</p>
-          <h2 ref={manualDispatchTitleRef} tabIndex={-1}>手動調度</h2>
-          <p>處理電話或口頭請假。選定案件與服務日後，可安排代班或登記補班日期。</p>
+          <h2 ref={manualDispatchTitleRef} tabIndex={-1}>舊請假調度與回讀</h2>
+          <p>續辦已受理的舊請假資料，或核對先前已提交的排班結果。</p>
         </div>
         <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
       </header>
@@ -1056,7 +1062,7 @@ function LeaveSubstitutionWorkspace({
             }}
             style={{ padding: '5px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
           >
-            ✖ 取消關聯 (改為手動／電話調度)
+            返回歷史請假紀錄
           </button>
         </div>
       )}
@@ -1076,7 +1082,6 @@ function LeaveSubstitutionWorkspace({
                 setCaseNo(event.target.value);
                 setAssignmentId(null);
                 setScheduleId(null);
-                setSelectedInboxItem(null);
                 setReason('');
               }}
               style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
@@ -1365,10 +1370,11 @@ function LeaveSubstitutionWorkspace({
         </button>
       )}
       {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}
+      </>}
       <details className="scheduling-leave-history">
         <summary>歷史請假紀錄</summary>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <p>查閱舊 LINE 請假申請。已受理的舊案可帶入上方手動調度繼續處理。</p>
+          <p>查閱舊 LINE 請假申請。已受理的舊案可接續完成原調度。</p>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               狀態
@@ -2933,7 +2939,7 @@ const SchedulingWorkbench: React.FC = () => {
           className={`scheduling-tab-btn ${activeTab === 'leave_sub' ? 'active' : ''}`}
           onClick={() => { if (('leave_sub') !== activeTab) requestLeave(() => setActiveTab('leave_sub')); }}
         >
-          🚑 請假與代班
+          代班待辦
         </button>
         <button
           data-surface-id="scheduling.tab.holidays"

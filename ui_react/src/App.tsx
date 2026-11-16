@@ -170,9 +170,15 @@ const AppContent: React.FC = () => {
   const handleLoginSuccess = (_username: string) => {
     setIsLoggedIn(true);
     const targetPage = getPageFromHash();
-    committedHash.current = `#${targetPage}`;
+    const currentHash = window.location.hash;
+    const targetHash = targetPage === 'order-workbench-v2'
+      && currentHash.startsWith('#order-workbench-v2?')
+      && new URLSearchParams(currentHash.split('?')[1]).has('substitute')
+      ? currentHash
+      : `#${targetPage}`;
+    committedHash.current = targetHash;
     setCurrentPage(targetPage);
-    window.location.hash = `#${targetPage}`;
+    window.location.hash = targetHash;
   };
 
   const handleLogout = () => {

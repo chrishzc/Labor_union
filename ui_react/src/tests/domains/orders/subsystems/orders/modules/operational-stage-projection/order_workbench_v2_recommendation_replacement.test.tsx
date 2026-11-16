@@ -100,7 +100,7 @@ describe('推薦頁更換人員沿用原正式操作及收據', () => {
   it('已有實際服務時只轉往代班，不能取消推薦或重寫已服務記錄', async () => {
     mocks.assignment.mockResolvedValue({ case_no: CASE, service_started: true, assignments: [{ id: 1 }] });
     mount();
-    expect(await screen.findByRole('link', { name: '辦理臨時代班 →' })).toHaveAttribute('href', `#scheduling?tab=leave_sub&case_no=${CASE}`);
+    expect(await screen.findByRole('link', { name: '辦理臨時代班 →' })).toHaveAttribute('href', `#order-workbench-v2?case=${CASE}&work=service&staffing=upcoming`);
     expect(mocks.cancel).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled();
   });
   it('原推薦已取消後重新開啟仍保留原命令，不重複取消即可接續建立', async () => {

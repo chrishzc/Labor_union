@@ -114,7 +114,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
           caseNo={caseNo}
           onCommitted={() => load(true)}
           onSubstitutionReferral={() => {
-            window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+            window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&staffing=upcoming`;
           }}
         />
       )}

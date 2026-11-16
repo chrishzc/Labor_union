@@ -61,3 +61,28 @@ export const FinanceImportHistoryPageSchema = z.strictObject({
 export type FinanceBankTransactionPage = z.infer<typeof FinanceBankTransactionPageSchema>;
 export type FinanceBankTransaction = FinanceBankTransactionPage['items'][number];
 export type FinanceImportHistoryPage = z.infer<typeof FinanceImportHistoryPageSchema>;
+export const FinanceExcludedBankTransactionSchema = z.strictObject({
+  row_id: z.number().int().positive(),
+  row_identity: z.string().min(1),
+  batch_id: z.number().int().positive().nullable(),
+  bank: bankSchema,
+  transaction_date: z.string().nullable(),
+  direction: z.enum(['incoming', 'outgoing', 'unknown']),
+  amount_ntd: z.number().int().nonnegative(),
+  summary: z.string().nullable(),
+  memo: z.string().nullable(),
+  counterparty_name: z.string().nullable(),
+  source_file: z.string().nullable(),
+  sheet_name: z.string().nullable(),
+  source_row: z.number().int().positive().nullable(),
+  raw_reference: z.string().nullable(),
+  excluded_at: z.string(),
+  excluded_by: z.string(),
+  exclusion_reason: z.string(),
+});
+export const FinanceExcludedBankTransactionPageSchema = z.strictObject({
+  items: z.array(FinanceExcludedBankTransactionSchema),
+  next_before_row_id: z.number().int().positive().nullable(),
+});
+export type FinanceExcludedBankTransaction = z.infer<typeof FinanceExcludedBankTransactionSchema>;
+export type FinanceExcludedBankTransactionPage = z.infer<typeof FinanceExcludedBankTransactionPageSchema>;

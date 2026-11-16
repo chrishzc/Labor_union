@@ -19,7 +19,7 @@
 - 同日多筆 current assignment／waiting lock 必須逐筆呈現，不得用單一 map 結果覆蓋；至少顯示案件／客戶識別、訂單狀態、月嫂與 occupancy 類型。
 - waiting-deposit lock 與正式 assignment 必須使用不同語意／樣式呈現；一般洽談候選不得顯示成正式占用。
 - 出勤天數與休假調整只能從所選月嫂的 current、未取消正式 `assignment_id` 進入，不得由 `orders.staff_id`、姓名或前端推測正式歸屬。
-- 排班月曆處理逐日休假、順延、單日代班及唯讀月曆與精算。區段增減、換人及起訖調整由案件人力配置承接。
+- 排班月曆提供檔期、正式班次與精算查閱。局部代班與班次調整由案件人力配置承接。
 
 ### 2.2 月嫂配對中心
 
@@ -54,14 +54,10 @@
 - conflict／stale 時保留使用者可理解的 draft，但必須重新 Query／Preview；不得自動重送 Apply。
 - UI 不得直接 INSERT／UPDATE assignment、schedule、lock、payroll、payment 或 event table。
 
-## 4. 多日休假／順延／代班 UI
+## 4. 局部代班工作面
 
-- 每個選定休假日逐列顯示處置，合法選項為 owning Scheduling contract 允許的 `順延` 或 `代班`。
-- 代班必須由使用者明確選擇月嫂；候選顯示可先列同案既有月嫂，再列其他 current available staff，但正式可用性仍由 server fresh-read 判定。
-- 同一次多日期操作只形成一個 Preview candidate 與一個 Apply transaction；每個日期仍保存獨立 immutable outcome，由共同穩定 `batch_key` 串聯。
-- 任一 item 驗證失敗時整批不得留下部分正式 mutation。
-- 代班必須產生 current Scheduling contract 定義的獨立 assignment／lineage；原 assignment 與代班 assignment 同日不得重複成為正式服務 owner 或重複計薪。
-- 無合法代班人時，只能依 current Scheduling rule 採用可成立的順延／補足方案或回 blocker；UI 不猜測人選或日期。
+- 桌面「排班 → 代班待辦」與行動待辦皆顯示原案件及待代班日期。開啟待辦會進入同案「服務安排 → 多月嫂排班」，由服務端核對待辦並帶入原日期。行動入口沿用工會網站登入，登入後續接同一筆待辦。
+- 工會選擇已同意代班的月嫂並填寫協調依據與原因，逐日核對班表與應付影響。關聯待辦的畫面僅開放指定後續服務日的人員分配，回讀正式班表及待辦結果後顯示完成。正式規則見 [Scheduling §3.4.1](02_Assignments_Scheduling_Domain.md#multi-caregiver-service-correction)。
 
 ## 5. Read model 與日曆精算呈現
 

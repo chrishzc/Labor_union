@@ -6,7 +6,7 @@ from datetime import date
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Path
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pymysql.err import IntegrityError, OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -23,6 +23,7 @@ from subsystems.orders.official_service_date_correction_workflow import (
     OfficialDateOccupancyConflict,
     OfficialDateSelection,
     ServiceAttributionChange,
+    SubstituteRequestLink,
 )
 
 
@@ -75,10 +76,21 @@ class AttributionBatchPreviewBody(BaseModel):
     moves: tuple[AttributionMoveBody, ...] = Field(min_length=1, max_length=366)
     evidence: str = Field(min_length=1, max_length=500)
     scope: Literal["served", "upcoming"]
+    substitute_request_id: int | None = Field(default=None, gt=0, strict=True)
+    expected_substitute_request_version: int | None = Field(default=None, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_substitute_link(self):
+        if (self.substitute_request_id is None) != (self.expected_substitute_request_version is None):
+            raise ValueError("substitute request id and version must be provided together")
+        return self
 
     def change(self) -> ServiceAttributionChange:
         moves = tuple(AttributionDayMove(**move.model_dump()) for move in self.moves)
-        return ServiceAttributionChange(0, 0, (), self.evidence, scope=self.scope, moves=moves)
+        link = None
+        if self.substitute_request_id is not None and self.expected_substitute_request_version is not None:
+            link = SubstituteRequestLink(self.substitute_request_id, self.expected_substitute_request_version)
+        return ServiceAttributionChange(0, 0, (), self.evidence, scope=self.scope, moves=moves, substitute=link)
 
 
 class AttributionConfirmation(BaseModel):
@@ -345,6 +357,8 @@ _VALIDATION_MESSAGES = {
     'service_attribution_unperformed_date_blocked': '請選擇已服務的日期。後續服務請使用換人或代班。',
     'service_attribution_upcoming_date_blocked': '後續排班只能調整今天起的服務日期。',
     'service_attribution_assignment_conflict': '所選日期或月嫂與目前指派不符，請重新讀取排班。',
+    'service_attribution_substitute_request_conflict': '這筆代班待辦已更新或不適用本案，請重新查詢。',
+    'service_attribution_substitute_dates_conflict': '請將待辦所列原服務日全數改由其他月嫂承接，並保留原日期。',
     'service_attribution_assignment_limit': '最多可配置四個服務區段，請調整後重新預覽。',
     'service_attribution_retired_staff_blocked': '退役月嫂的既有班次可保留。新增或移動班次時，請選擇在職月嫂。',
     'service_attribution_target_assignment_ambiguous': '該月嫂已有多個區段，請先核對應承接的區段。',

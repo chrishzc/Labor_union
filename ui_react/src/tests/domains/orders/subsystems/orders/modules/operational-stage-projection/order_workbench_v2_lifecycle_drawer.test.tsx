@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
-const mocks = vi.hoisted(() => ({ core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn() }));
+const mocks = vi.hoisted(() => ({ core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn(), substitute: vi.fn() }));
+vi.mock('../../../../../../../api/scheduling/service_start_client', async (importOriginal) => {
+  const { serviceStartClient } = await importOriginal<typeof import('../../../../../../../api/scheduling/service_start_client')>();
+  return { serviceStartClient: { ...serviceStartClient, detail: mocks.substitute } };
+});
 interface OperationProps { caseNo: string; label: string; onObserved?: () => void; onBusyChange?: (busy: boolean) => void }
 function Operation({ label, onObserved, onBusyChange }: OperationProps) {
   const [draft, setDraft] = useState('');
@@ -82,9 +86,28 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     await screen.findByRole('heading', { name: '現行服務日期' });
     expect(screen.getByText('日期操作入口')).toBeVisible();
     expect(screen.getByText('排班操作入口')).toBeVisible();
-    expect(screen.getAllByRole('region', { name: '服務開始、請假與代班待辦' })).toHaveLength(1);
+    expect(screen.getAllByRole('region', { name: '服務開始、延期與代班待辦' })).toHaveLength(1);
     expect(screen.queryByRole('navigation', { name: '服務安排步驟' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
+  });
+
+  it.each([CASE, 'OTHER-CASE'])('只以服務端核對的待辦日期在原案件開啟多月嫂排班（%s）', async (taskCase) => {
+    mocks.substitute.mockResolvedValue({ request_id: 32, case_no: taskCase, version: 4,
+      workflow_kind: 'leave', status: 'substitute_required', leave_dates: [{ original_date: '2099-09-02', new_date: '2099-09-03' }] });
+    mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [{
+      assignment_id: 17, candidate_key: null, staff_id: 7, sequence: 1,
+      assigned_start_date: '2099-09-01', assigned_end_date: '2099-09-02',
+      official_service_dates: ['2099-09-01', '2099-09-02'], actual_hours: null, lineage_source_assignment_ids: [],
+    }] });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" substituteRequestId={32} onClose={vi.fn()} />);
+    expect(mocks.substitute).toHaveBeenCalledWith(32);
+    if (taskCase === CASE) {
+      expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
+      expect(screen.getByText(/待代班日期：2099-09-02/)).toBeVisible();
+    } else {
+      expect(await screen.findByText(/這筆代班待辦已處理或與本案不符/)).toBeVisible();
+      expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
+    }
   });
 
   it.each([

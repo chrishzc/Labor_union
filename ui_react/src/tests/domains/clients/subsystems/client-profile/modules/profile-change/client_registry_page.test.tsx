@@ -322,7 +322,7 @@ describe('Client registry owner editing', () => {
     expect(candidateMocks.add.mock.calls[1][0]).toEqual(candidateMocks.add.mock.calls[0][0]);
   });
 
-  it('keeps unknown willingness protected even if the visible candidate list later fails to reload', async () => {
+  it('blocks candidate reload while an unknown willingness result can still be confirmed', async () => {
     candidateMocks.pool.mockResolvedValue({ pool_id: 41, case_no: 'CASE-001', candidates: [{ id: 51, staff_id: 22, staff_name: '接任月嫂', status: 'active', willingness: 'pending', service_start_date: '2026-11-01', service_end_date: '2026-11-02', latest_willingness_event_id: null, information: { '1': null, '2': null } }] });
     candidateMocks.willingness.mockRejectedValue(new ApiTimeoutError(10000));
     window.location.hash = '#clients?case=CASE-001';
@@ -331,13 +331,18 @@ describe('Client registry owner editing', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '2. 確認接案意願' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '2. 確認接案意願' }));
     fireEvent.click(await screen.findByRole('button', { name: '記錄 接任月嫂 願意' }));
-    await screen.findByRole('button', { name: '確認目前回覆' });
-    expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
-    candidateMocks.pool.mockRejectedValue(new Error('候選查詢暫時失敗'));
-    fireEvent.click(screen.getByRole('button', { name: '重新讀取候選清單' }));
-    await screen.findByText('候選聯絡狀態不可用');
+    const confirmReply = await screen.findByRole('button', { name: '確認目前回覆' });
+    const reloadCandidates = screen.getByRole('button', { name: '重新讀取候選清單' });
+    const queryCount = candidateMocks.pool.mock.calls.length;
+    expect(reloadCandidates).toBeDisabled();
+    fireEvent.click(reloadCandidates);
+    expect(candidateMocks.pool).toHaveBeenCalledTimes(queryCount);
     expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '3. 選定與確認推薦' })).toBeDisabled();
+    expect(confirmReply).toBeEnabled();
+    fireEvent.click(confirmReply);
+    await waitFor(() => expect(candidateMocks.willingness).toHaveBeenCalledTimes(2));
+    expect(candidateMocks.willingness.mock.calls[1]).toEqual(candidateMocks.willingness.mock.calls[0]);
   });
 
   it('shows separate email sources and sends each edit to its own writer', async () => {

@@ -191,7 +191,7 @@ def _translate_errors():
                                "找不到此申請，或申請已到期。", "staff-profile-change") from None
     except ValueError:
         raise typed_http_error(422, "validation", "staff_profile_change_invalid",
-                               "請核對異動欄位與格式。更換收款帳戶須已有主要帳戶。", "staff-profile-change") from None
+                               "請核對異動欄位與格式。", "staff-profile-change") from None
     except StaffProfileStagingUnavailable:
         raise typed_http_error(503, "unavailable", "staff_profile_change_unavailable",
                                "暫時無法讀取或保存申請，請稍後重試。", "staff-profile-change", retryable=True) from None
