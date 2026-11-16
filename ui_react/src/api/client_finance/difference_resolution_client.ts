@@ -21,4 +21,12 @@ export const differenceResolutionClient={
     const data=(await transport.post<{data:unknown}>(path(caseNo,owner),command,options())).data;
     return owner==='client'?clientView.parse(data):owner==='payroll'?payrollView.parse(data):staffView.parse(data);
   },
+  async syncHistoricalBaseline(caseNo:string,signal?:AbortSignal){
+    const res = await transport.post<{data:{scanned_orders:number;created_count:number;updated_count:number;skipped_count:number;details:Array<{case_no:string;action:string;reason?:string}>}}>(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/payroll/sync-historical-baseline-obligations`,
+      {},
+      options(signal),
+    );
+    return res.data;
+  },
 };

@@ -64,6 +64,8 @@ _DEFAULT_POSTPONE_PREFIXES = ("雙方合意延期",)
 _POSTPONEMENT_RANGE_RE = re.compile(
     r"[：:]\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*(?:順延至|延至|->|→)\s*(\d{4}-\d{2}-\d{2}(?:[、,]\s*\d{4}-\d{2}-\d{2})*)\s*$"
 )
+_POSTPONEMENT_SEND_PREFIX = "雙方合意延期 提案 "
+_POSTPONEMENT_SEND_RE = re.compile(re.escape(_POSTPONEMENT_SEND_PREFIX) + r"([0-9a-f]{32})")
 
 
 def _match_postponement_text(text: str, prefixes: tuple[str, ...]) -> re.Match[str] | None:
@@ -73,6 +75,7 @@ def _match_postponement_text(text: str, prefixes: tuple[str, ...]) -> re.Match[s
     return None
 _FAMILY_START_PROPOSAL = "group_helper_start_proposal"
 _FAMILY_POSTPONE_PROPOSAL = "group_helper_postpone_proposal"
+_FAMILY_POSTPONE_CARD = "group_helper_postpone_card"
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
@@ -137,10 +140,13 @@ def _compute_expected_end_date(start_day: date, service_days: int, service_type:
 
 
 def _default_staff_schedule_url(flow_id: str, case_no: str, mode: str) -> str:
-    query = urlencode({"flow_id": flow_id, "case_no": case_no, "mode": mode})
+    query = urlencode({"flow_id": flow_id, "case_no": case_no, "mode": mode, "group_reply": "1"})
     liff_id = os.getenv("LINE_STAFF_SCHEDULE_LIFF_ID", "").strip()
     if liff_id and liff_id != "your_liff_id_here":
         return f"https://liff.line.me/{liff_id}/?{query}"
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if liff_id and liff_id != "your_liff_id_here":
+        return f"https://liff.line.me/{liff_id}/line-staff-schedule?{query}"
     base_url = (
         os.getenv("LINE_PUBLIC_BASE_URL", "").strip()
         or os.getenv("BASE_URL", "").strip()
@@ -234,6 +240,8 @@ def load_latest_group_helper_proposal(
     unit_of_work: Any,
     family: str,
     case_no: str,
+    *,
+    current_read: bool = False,
 ) -> dict[str, Any] | None:
     """Read the latest active (non-cleared) proposal snapshot for a case."""
     conn = getattr(unit_of_work, "_connection", None)
@@ -241,7 +249,8 @@ def load_latest_group_helper_proposal(
         with conn.cursor() as cursor:
             cursor.execute(
                 "SELECT result_snapshot FROM line_command_receipts "
-                "WHERE command_family=%s AND correlation_id=%s ORDER BY id DESC LIMIT 1",
+                "WHERE command_family=%s AND correlation_id=%s ORDER BY id DESC LIMIT 1"
+                + (" FOR SHARE" if current_read else ""),
                 (family, f"case:{case_no}"[:191]),
             )
             row = cursor.fetchone()
@@ -259,6 +268,20 @@ def load_latest_group_helper_proposal(
             return parsed
     return None
 
+
+def lock_group_postponement(unit_of_work: Any, case_no: str) -> None:
+    """Serialize proposal replacement and a customer's decision for the same case."""
+    repository = getattr(unit_of_work, "service_starts", None)
+    if repository is not None:
+        repository.lock_case(case_no)
+
+
+def postponement_proposal_ref(case_no: str, event_ref: str) -> str:
+    return fingerprint_payload({"case_no": case_no, "event_ref": event_ref}).value[:32]
+
+
+def postponement_group_message(proposal_ref: str) -> str:
+    return _POSTPONEMENT_SEND_PREFIX + proposal_ref
 
 class LineGroupHelperApplication:
     """Coordinate step-5 case-group helper menu & workflows using strict Reply-only delivery."""
@@ -305,7 +328,8 @@ class LineGroupHelperApplication:
         aliases = self._aliases()
         is_menu_cmd = text in aliases["group_helper_menu"]
         postpone_match = _match_postponement_text(text, aliases["group_postponement"])
-        if not (is_menu_cmd or postpone_match):
+        saved_postpone_match = _POSTPONEMENT_SEND_RE.fullmatch(text)
+        if not (is_menu_cmd or postpone_match or saved_postpone_match):
             return False
 
         ctx = self._resolve_group_context(unit_of_work, group_id, user_id)
@@ -318,7 +342,7 @@ class LineGroupHelperApplication:
             self._reply_helper_menu(inbox, unit_of_work, group_id, ctx)
             return True
 
-        if postpone_match:
+        if postpone_match or saved_postpone_match:
             if not (ctx["is_staff"] or ctx["is_admin"]):
                 self._reply_text(
                     inbox,
@@ -327,6 +351,9 @@ class LineGroupHelperApplication:
                     "「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期",
                     "postpone-role-hint",
                 )
+                return True
+            if saved_postpone_match:
+                self._send_saved_postponement(inbox, unit_of_work, group_id, ctx, saved_postpone_match.group(1))
                 return True
             raw_orig = [d.strip() for d in postpone_match.group(1).replace("、", ",").split(",") if d.strip()]
             raw_new = [d.strip() for d in postpone_match.group(2).replace("、", ",").split(",") if d.strip()]
@@ -406,10 +433,15 @@ class LineGroupHelperApplication:
         if data.startswith("group-helper:mutual-postponement"):
             self._handle_mutual_postponement(inbox, unit_of_work, group_id, ctx, data)
             return True
-        if data == "postponement:agree":
-            self._handle_postponement_agree(inbox, unit_of_work, group_id, ctx)
+        action, _, proposal_ref = data.removeprefix("postponement:").partition(":")
+        if data.startswith("postponement:") and action == "agree":
+            self._handle_postponement_agree(inbox, unit_of_work, group_id, ctx, proposal_ref)
             return True
-        if data == "postponement:reject":
+        if data.startswith("postponement:") and action == "reject":
+            if not (ctx["is_customer"] or ctx["is_staff"] or ctx["is_admin"]):
+                return True
+            if self._current_postponement_for_card(inbox, unit_of_work, group_id, ctx, proposal_ref) is None:
+                return True
             save_group_helper_proposal(
                 unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"], event.event_id.value, {"cleared": True}
             )
@@ -974,17 +1006,6 @@ class LineGroupHelperApplication:
                 )
                 return
 
-        pending = load_latest_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"])
-        if pending and pending.get("dates"):
-            changes = [
-                LeaveDateChange(date.fromisoformat(d["original_date"]), date.fromisoformat(d["new_date"]))
-                for d in pending["dates"]
-                if d.get("original_date") and d.get("new_date")
-            ]
-            if changes:
-                self._propose_postponement(inbox, unit_of_work, group_id, ctx, changes)
-                return
-
         staff_line_id = LineUserId(inbox.event.source.user_id.value)
         event_id = inbox.event.event_id.value
         flow_cmd = OpenLineIdentityFlowCommand(
@@ -1022,6 +1043,7 @@ class LineGroupHelperApplication:
             )
             return
 
+        lock_group_postponement(unit_of_work, ctx["case_no"])
         app = self._service_start_app(unit_of_work)
         arrangement = getattr(app, "arrangement", None)
         if arrangement is not None and hasattr(arrangement, "preview_leave_defer"):
@@ -1053,25 +1075,63 @@ class LineGroupHelperApplication:
 
         leave_start_label = "、".join(str(item.original_date) for item in changes)
         leave_end_label = "、".join(str(item.new_date) for item in changes)
+        event_id = inbox.event.event_id.value
         proposal = {
             "case_no": ctx["case_no"],
             "staff_id": ctx["staff_id"],
             "assignment_id": ctx["assignment_id"],
+            "proposal_ref": postponement_proposal_ref(ctx["case_no"], event_id),
             "dates": [{"original_date": str(c.original_date), "new_date": str(c.new_date)} for c in changes],
             "leave_start_date": leave_start_label,
             "leave_end_date": leave_end_label,
         }
-        save_group_helper_proposal(
+        proposal = save_group_helper_proposal(
             unit_of_work,
             _FAMILY_POSTPONE_PROPOSAL,
             ctx["case_no"],
-            inbox.event.event_id.value,
+            event_id,
             proposal,
         )
+        self._reply_postponement_card(inbox, unit_of_work, group_id, ctx, proposal)
+
+    def _send_saved_postponement(self, inbox, unit_of_work, group_id, ctx, proposal_ref):
+        proposal = self._current_postponement_for_card(inbox, unit_of_work, group_id, ctx, proposal_ref)
+        if proposal is None:
+            return
+        if proposal["staff_id"] != ctx["staff_id"]:
+            return
+        if load_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_CARD, ctx["case_no"], proposal_ref, current_read=True):
+            return
+        save_group_helper_proposal(
+            unit_of_work, _FAMILY_POSTPONE_CARD, ctx["case_no"], proposal_ref,
+            {"group_event": inbox.event.event_id.value},
+        )
+        self._reply_postponement_card(inbox, unit_of_work, group_id, ctx, proposal)
+
+    def _current_postponement_for_card(self, inbox, unit_of_work, group_id, ctx, proposal_ref):
+        lock_group_postponement(unit_of_work, ctx["case_no"])
+        proposal = load_latest_group_helper_proposal(
+            unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"], current_read=True,
+        )
+        if proposal_ref and proposal and proposal.get("dates") and proposal.get("proposal_ref") == proposal_ref:
+            return proposal
+        self._reply_text(
+            inbox, unit_of_work, group_id,
+            "這張延期確認單已失效。請使用原群組最新的確認單，或請月嫂重新送出。",
+            "postpone-stale-card",
+        )
+        return None
+
+    def _reply_postponement_card(self, inbox, unit_of_work, group_id, ctx, proposal):
+        leave_start_label = proposal["leave_start_date"]
+        leave_end_label = proposal["leave_end_date"]
         card = configured_payload(
             unit_of_work,
             "helper-postponement-card",
-            mutual_postponement_card(ctx["case_no"], ctx["staff_name"], leave_start_label, leave_end_label),
+            mutual_postponement_card(
+                ctx["case_no"], ctx["staff_name"], leave_start_label, leave_end_label,
+                proposal_ref=proposal["proposal_ref"],
+            ),
             {
                 "case_no": ctx["case_no"],
                 "staff_name": ctx["staff_name"],
@@ -1087,6 +1147,7 @@ class LineGroupHelperApplication:
         unit_of_work: Any,
         group_id: str,
         ctx: dict[str, Any],
+        proposal_ref: str,
     ) -> None:
         if ctx.get("is_staff") and not ctx.get("is_admin"):
             # Caregiver proposed this postponement; caregiver clicking agree on their own proposal has no response (silent ignore to keep chat clean)
@@ -1100,15 +1161,8 @@ class LineGroupHelperApplication:
                 "postpone-need-customer",
             )
             return
-        proposal = load_latest_group_helper_proposal(unit_of_work, _FAMILY_POSTPONE_PROPOSAL, ctx["case_no"])
-        if not proposal or not proposal.get("dates"):
-            self._reply_text(
-                inbox,
-                unit_of_work,
-                group_id,
-                "目前沒有待確認的延期提案，請月嫂先點選「雙方合意延期」選擇請假與補班日。",
-                "postpone-missing-proposal",
-            )
+        proposal = self._current_postponement_for_card(inbox, unit_of_work, group_id, ctx, proposal_ref)
+        if proposal is None:
             return
 
         changes = tuple(
@@ -1123,7 +1177,7 @@ class LineGroupHelperApplication:
             view = app.submit_leave_in_current_unit_of_work(
                 LeaveResultSubmission(
                     ctx["case_no"],
-                    int(ctx["staff_id"]),
+                    int(proposal["staff_id"]),
                     int(proposal["assignment_id"]),
                     "defer",
                     changes,

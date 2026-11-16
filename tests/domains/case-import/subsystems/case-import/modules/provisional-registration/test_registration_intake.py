@@ -16,16 +16,36 @@ from api.registration_intake import app, get_staging, get_verifier
 from domains.line.identities import LineUserId
 
 
-def test_intake_import_closure_cannot_load_sql_or_app_settings():
+def test_non_citizen_intake_can_preview_without_sql_app_settings_or_pandas():
     source = """
 import importlib.abc, sys
-class BlockSql(importlib.abc.MetaPathFinder):
+from types import SimpleNamespace
+class BlockDependencies(importlib.abc.MetaPathFinder):
  def find_spec(self, fullname, path=None, target=None):
-  if fullname.startswith(('infrastructure.mysql','pymysql','mysql','sqlalchemy','api.main','api.nas_apps','config.settings')):
-   raise AssertionError('SQL dependency crossed intake boundary')
-sys.meta_path.insert(0,BlockSql())
-import api.registration_intake
-assert all('approve' not in r.path and 'reject' not in r.path for r in api.registration_intake.app.routes)
+  if fullname.startswith(('infrastructure.mysql','pymysql','mysql','sqlalchemy','api.main','api.nas_apps','config.settings','pandas')):
+   raise ModuleNotFoundError(fullname)
+sys.meta_path.insert(0, BlockDependencies())
+from fastapi.testclient import TestClient
+from api.registration_intake import app, get_staging, get_verifier
+from domains.line.identities import LineUserId
+assert all('approve' not in route.path and 'reject' not in route.path for route in app.routes)
+app.dependency_overrides[get_staging] = lambda: SimpleNamespace(get_passbook_image=lambda *args, **kwargs: ({}, b'image'))
+app.dependency_overrides[get_verifier] = lambda: SimpleNamespace(verify=lambda _: SimpleNamespace(line_user_id=LineUserId('U-synthetic')))
+with TestClient(app) as client:
+ response = client.post('/api/v1/line/identity/registration/preview', json={
+  'line_id_token': 'synthetic-token', 'name': '測試申請', 'phone': '0900000000',
+  'address': '測試地址', 'expected_date': '2026-11-20', 'service_days': 10,
+  'email': 'test@example.com', 'birth_date': '1990-01-01', 'gender': '女', 'city': '新竹市',
+  'registration_kind': 'non_citizen', 'service_start_date': '2026-11-20',
+  'service_time': '08:30-12:30 (4小時)', 'residence_type': '電梯大樓',
+  'delivery_type': '自然產', 'service_type': '連續服務', 'baby_info': '單胞胎', 'notes': '無',
+  'passbook_image_id': 'pbk_synthetic_preview', 'survey_details': {
+   '特殊計費:胎數': '單胞胎', '服務時間內是否有其他寶寶': '無', '是否需要下廚：': '不需要下廚',
+   '補助款退款:銀行代號+分行代號': '0000000', '銀行帳號': '0000000000',
+  },
+ })
+ assert response.status_code == 200, response.status_code
+ assert response.json()['data']['status'] == 'ready'
 """
     result = subprocess.run([sys.executable, "-B", "-c", source], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

@@ -279,7 +279,8 @@ def test_staff_schedule_page_uses_mutual_postponement_without_legacy_leave_submi
     assert 'liff.login({redirectUri: redirect.toString()})' in source
 
 
-def test_staff_schedule_postpone_only_submits_the_latest_checked_pair_once() -> None:
+@pytest.mark.parametrize("fail_send", [False, True], ids=["one-tap", "retry-same-message"])
+def test_staff_schedule_postpone_only_submits_the_latest_checked_pair_once(fail_send: bool) -> None:
     source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
     script = source.split("<script>", 1)[1].split(
         'document.getElementById("loadSchedule").addEventListener', 1
@@ -289,6 +290,11 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const nodes = new Map();
 const node = () => ({ style: {}, append() {}, appendChild() {}, replaceChildren() {} });
+const messages = [];
+let lineContext = 'external';
+let writeScope = true;
+const expectRetry = FAIL_SEND;
+let failSend = expectRetry;
 const context = vm.createContext({
   document: {
     createElement: node,
@@ -297,16 +303,28 @@ const context = vm.createContext({
       return nodes.get(id);
     },
   },
-  AbortController, crypto, alert() {},
+  AbortController, crypto,
+  liff: {
+    isInClient: () => lineContext !== 'external',
+    getContext: () => ({type: lineContext, scope: writeScope ? ['chat_message.write'] : []}),
+    async sendMessages(payload) {
+      assert.equal(payload.length, 1);
+      assert.equal(payload[0].type, 'text');
+      messages.push(payload[0].text);
+      if (failSend) throw new Error('LINE did not acknowledge delivery');
+    },
+  },
 });
 const evaluate = (script) => vm.runInContext(script, context);
 evaluate(SOURCE);
 evaluate(`
   postponeCase = {case_no: 'TEST', assignment_id: 12, service_dates: ['2027-01-05', '2027-01-08']};
+  requirePostponeGroupReply = true;
   postponeSelectedDates = new Set(postponeCase.service_dates);
   postponeCalendar = {calendarWeekdays: ['日', '一', '二', '三', '四', '五', '六']};
   renderPostponeCalendar = () => {};
-  closeLiffWindow = () => {};
+  let closeCount = 0;
+  closeLiffWindow = () => { closeCount++; };
   const calls = [];
   leaveResultPost = (path, payload, signal) =>
     new Promise((resolve) => calls.push({path, payload, signal, resolve}));
@@ -341,6 +359,17 @@ const settle = () => new Promise(setImmediate);
   evaluate('calls[1].resolve({conflict: false})');
   await settle();
   assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
+  for (const unavailableContext of ['external', 'utou']) {
+    lineContext = unavailableContext;
+    await evaluate('submitPostponeProposal()');
+    assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview');
+    assert.match(nodes.get('postponeActionNotice').textContent, /從原 LINE 案件群組/);
+  }
+  lineContext = 'group';
+  writeScope = false;
+  await evaluate('submitPostponeProposal()');
+  assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview');
+  writeScope = true;
   evaluate(`
     void submitPostponeProposal();
     handlePostponeDateClick('2027-01-07');
@@ -349,11 +378,38 @@ const settle = () => new Promise(setImmediate);
   assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview,propose');
   assert.equal(evaluate('calls[2].payload.dates[0].new_date'), '2027-01-07');
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
-  evaluate("calls[2].resolve({conflict: false, case_no: 'TEST', assignment_id: 12})");
+  evaluate("calls[2].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: '延期提案通知'})");
   await settle();
+  assert.deepEqual(messages, ['延期提案通知']);
+  if (expectRetry) {
+    assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
+    assert.equal(nodes.get('postponeSubmitBtn').textContent, '重試送出延期訊息');
+    assert.equal(evaluate('closeCount'), 0);
+    assert.match(nodes.get('postponeActionNotice').textContent, /已儲存.*重試送出同一筆/);
+    evaluate("handlePostponeDateClick('2027-01-07')");
+    assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
+
+    failSend = false;
+    await evaluate('Promise.all([submitPostponeProposal(), submitPostponeProposal()])');
+    assert.deepEqual(messages, ['延期提案通知', '延期提案通知']);
+  }
+  assert.equal(evaluate('calls.map(call => call.path).join()'), 'preview,preview,propose');
+  assert.equal(evaluate('closeCount'), 1);
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  assert.match(nodes.get('postponeActionNotice').textContent, /延期訊息已送出/);
+
+  lineContext = 'external';
+  evaluate(`
+    requirePostponeGroupReply = false;
+    postponeCheck = {status: 'ready', intent: calls[2].payload};
+    void submitPostponeProposal();
+  `);
+  evaluate("calls[3].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: null})");
+  await settle();
+  assert.equal(evaluate('closeCount'), 1);
+  assert.match(nodes.get('postponeActionNotice').textContent, /已儲存.*手動回到原 LINE 群組/);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
-""".replace("SOURCE", json.dumps(script))
+""".replace("FAIL_SEND", json.dumps(fail_send)).replace("SOURCE", json.dumps(script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
 
 
@@ -639,6 +695,7 @@ async function check(search, retired = false) {
   assert.equal(await check('?purpose=admin_binding&flow_id=f1'), '/line-identity?purpose=admin_binding&flow_id=f1');
   assert.equal(await check('?liff.state=' + encodeURIComponent('/?purpose=staff_verification&flow_id=f2')), '/line-identity?purpose=staff_verification&flow_id=f2');
   assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone');
+  assert.equal(await check('?flow_id=f3&case_no=C-1&mode=postpone&group_reply=1'), '/line-staff-schedule?flow_id=f3&case_no=C-1&mode=postpone&group_reply=1');
   assert.equal(await check('?target=staff_schedule&case_no=C-1&mode=postpone'), '/line-identity?target=staff_schedule&case_no=C-1&mode=postpone');
   assert.equal(await check('?target=staff_leave_apply', true), null);
   assert.equal(await check('?liff.state=' + encodeURIComponent('/?target=staff_leave_apply'), true), null);

@@ -163,3 +163,52 @@ def test_ordered_chain_defers_1071_while_1070_is_pending_and_blocks_real_drift(
         migration._local_ordered_chain_plan(SimpleNamespace(), 'lu_test_dataset', drifted_snapshot)
     assert error.value.code == 'schema_state_blocked'
     assert error.value.details['artifact'] == pending_part
+
+
+def test_preserve_data_admission_orders_pending_receipt_status_changes(monkeypatch):
+    pending = '1071_pending_order_terms_receipt_status.sql'
+    historical_open = '1074_historical_open_order_terms_receipt_status.sql'
+    parts = (ARTIFACT, pending, historical_open)
+    descriptors = {part: migration.RELEASE_MANIFEST.descriptors[part] for part in parts}
+    paths = {part: migration.ROOT / 'db/schema_parts' / part for part in parts}
+    monkeypatch.setattr(migration, 'RELEASE_MANIFEST', SimpleNamespace(artifacts=()))
+    monkeypatch.setattr(migration, 'OWNED_OBJECTS', descriptors)
+    monkeypatch.setattr(migration, 'SCHEMA_PARTS', tuple(paths.values()))
+
+    historical = snapshot(OLD)
+    assert migration._owned_classification(historical) == {
+        ARTIFACT: 'absent', pending: 'drift', historical_open: 'drift',
+    }
+    assert migration._upgrade_admission_states(historical) == dict.fromkeys(parts, 'absent')
+
+    malformed = snapshot(OLD.replace("'訂單成立','服務中'", "'服務中','訂單成立'"))
+    assert migration._upgrade_admission_states(malformed) == dict.fromkeys(parts, 'drift')
+
+    monkeypatch.setattr(migration, 'OWNED_OBJECTS', {part: descriptors[part] for part in (ARTIFACT, historical_open)})
+    monkeypatch.setattr(migration, 'SCHEMA_PARTS', (paths[ARTIFACT], paths[historical_open]))
+    assert migration._upgrade_admission_states(historical) == {ARTIFACT: 'absent', historical_open: 'drift'}
+
+
+def test_preserve_data_recognizes_original_order_reopen_check():
+    artifact = '1062_order_reopen_reason_optional.sql'
+    table = 'order_reopen_events'
+    check = 'chk_order_reopen_event_text'
+    released = migration.RELEASE_MANIFEST.descriptors[artifact]
+    predecessor = migration._canonical_artifact_descriptor('123_order_reopen_workflow.sql')
+    metadata = snapshot(OLD)
+    metadata['columns'] = [
+        {'table_name': table, 'column_name': name, **contract}
+        for name, contract in released['parent_columns'][table].items()
+    ]
+    metadata['constraints'] = [{
+        'table_name': table,
+        'constraint_name': check,
+        'constraint_type': 'CHECK',
+        'enforced': 'YES',
+        'check_clause': predecessor['checks'][table, check],
+    }]
+    assert migration._release_descriptor_metadata_state(metadata, artifact, released) == 'absent'
+    metadata['constraints'][0]['check_clause'] = released['checks'][table, check]
+    assert migration._release_descriptor_metadata_state(metadata, artifact, released) == 'exact'
+    metadata['constraints'][0]['enforced'] = 'NO'
+    assert migration._release_descriptor_metadata_state(metadata, artifact, released) == 'drift'

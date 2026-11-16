@@ -576,31 +576,45 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
-@pytest.mark.parametrize("local_test", [False, True])
-def test_upgrade_preserves_order_and_never_switches_when_verification_fails(settings, monkeypatch, tmp_path, local_test):
+@pytest.mark.parametrize(("local_test", "verified"), [(False, False), (True, False), (True, True)])
+def test_upgrade_preserves_order_and_never_switches_when_verification_fails(
+    settings, monkeypatch, tmp_path, local_test, verified,
+):
+    from scripts import update_local_database as updater
+
     steps = []
     monkeypatch.setattr(nas, "protect_account_receipts", lambda *_args, **_kwargs: 0)
     if local_test:
-        from scripts import update_local_database as updater
-
         settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
-        monkeypatch.setattr(updater, "build_additive_preview", lambda *_: {
-            "status": "ready", "pending_releases": [{"release_id": "fixture", "artifact": "fixture.sql"}],
-        })
+
+    def candidate_preview(_config, database, _receipt_root):
+        assert verified and database.startswith("lu_nas_upgrade_")
+        steps.append("startup_check")
+        return {"status": "blocked"}
+
+    monkeypatch.setattr(updater, "build_additive_preview", candidate_preview)
     monkeypatch.setattr(nas.shutil, "which", lambda name: name)
-    monkeypatch.setattr(nas.migration, "build_plan", lambda *_: {"status": "ready", "candidate_exists": False})
+    monkeypatch.setattr(nas.migration, "build_plan", lambda *_: steps.append("plan") or {
+        "status": "ready", "candidate_exists": False, "source_objects": {"fixture.sql": "absent"},
+    })
     monkeypatch.setattr(nas, "backup", lambda *_: steps.append("backup") or tmp_path)
     monkeypatch.setattr(nas, "validate_backup", lambda *_: {"created_at": "fixture", "server": "fixture", "sha256": "a", "size": 1})
     monkeypatch.setattr(nas.migration, "restore_candidate", lambda *_: steps.append("restore"))
     monkeypatch.setattr(nas.migration, "apply_schema", lambda *_: steps.append("apply"))
     monkeypatch.setattr(nas, "schema_inventory", lambda *_args, **_kw: {})
-    monkeypatch.setattr(nas.migration, "verify_candidate", lambda *_: steps.append("verify") or {"status": "failed"})
+    monkeypatch.setattr(nas.migration, "verify_candidate", lambda *_: steps.append("verify") or {
+        "status": "verified" if verified else "failed",
+    })
     monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: pytest.fail("failed validation must not grant"))
     monkeypatch.setattr(nas.migration, "switch_environment", lambda *_args, **_kw: pytest.fail("failed validation must not switch"))
     before = settings["environment_file"].read_bytes()
-    with pytest.raises(nas.MaintenanceBlocked, match="驗證未通過"):
-        nas.upgrade(settings)
-    assert steps == ["backup", "restore", "apply", "verify"]
+    if verified:
+        with pytest.raises(updater.LocalDatabaseUpdateError, match="release chain is not current"):
+            nas.upgrade(settings)
+    else:
+        with pytest.raises(nas.MaintenanceBlocked, match="驗證未通過"):
+            nas.upgrade(settings)
+    assert steps == ["plan", "backup", "restore", "apply", "verify"] + (["startup_check"] if verified else [])
     assert settings["environment_file"].read_bytes() == before
 
 
@@ -609,10 +623,17 @@ def test_current_local_test_database_does_not_create_candidate(settings, monkeyp
 
     settings.update(host="127.0.0.1", database="lu_nas_fixture", settings_file=tmp_path / "absent")
     monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    monkeypatch.setattr(nas.migration, "build_plan", lambda *_: {
+        "status": "ready", "candidate_exists": False, "source_objects": {
+            "fixture.sql": "exact", "1031_weekly_report_batches.sql": "absent",
+        },
+    })
     preview = {"status": "current"}
     monkeypatch.setattr(updater, "build_additive_preview", lambda *_: preview)
     checked = []
     monkeypatch.setattr(updater, "require_current_database", checked.append)
+    monkeypatch.setattr(nas, "destination_ready", lambda *_args, **_kwargs:
+                        pytest.fail("current schema needs no backup destination"))
     monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("current schema needs no upgrade"))
     assert nas.upgrade(settings) is None
     assert checked == [preview]

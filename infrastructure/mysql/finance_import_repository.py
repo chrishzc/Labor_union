@@ -215,6 +215,7 @@ class MySqlFinanceImportRepository:
                 else sinopac_purpose_candidates(
                     cursor, source, event["classification_type"], _json_text_tuple(event["evidence"]),
                     _json_text_tuple(event["target_identities"]),
+                    case_no=case_no,
                 )
             )
             if not any(all(candidate[key] == value for key, value in choice.items()) for candidate in candidates):

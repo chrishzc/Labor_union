@@ -23,14 +23,20 @@ from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.line.group_helper_application import load_group_helper_proposal, save_group_helper_proposal
+from subsystems.line.group_helper_application import (
+    load_group_helper_proposal,
+    lock_group_postponement,
+    postponement_group_message,
+    postponement_proposal_ref,
+    save_group_helper_proposal,
+)
 from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
 
 
 router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling Staff Leave Intake"])
 
 from dataclasses import asdict
-from api.dependencies.service_start import get_service_start_application
+from api.dependencies.service_start import build_service_start_application, get_service_start_application
 from api.routes.service_start import call as _result_call
 from api.schemas.service_start import LeaveDateChangeBody
 from domains.scheduling.leave_result import LeaveDateChange
@@ -67,7 +73,7 @@ def preview_leave_defer(body: StaffLeaveDeferPreviewRequest, app=Depends(get_ser
 
 
 @router.post('/leave-results/propose')
-def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_service_start_application)):
+def propose_leave_defer(body: StaffLeaveDeferProposeRequest):
     """驗證無檔期衝突後建立群組延期提案（不消耗任何 Push 推播額度）。"""
     _, staff = _verified_staff_context(body)
     staff_id = int(staff['staff_id'])
@@ -88,11 +94,13 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_ser
     )
     family = 'group_helper_postpone_proposal'
     with open_line_unit_of_work() as line_uow:
-        saved = load_group_helper_proposal(line_uow, family, body.case_no, event_ref)
+        lock_group_postponement(line_uow, body.case_no)
+        saved = load_group_helper_proposal(line_uow, family, body.case_no, event_ref, current_read=True)
         if saved is not None:
             return _proposal_response(saved, proposal_payload)
+        arrangement = build_service_start_application(line_uow._connection).arrangement
         result = _result_call(
-            lambda: app.arrangement.preview_leave_defer(
+            lambda: arrangement.preview_leave_defer(
                 body.case_no, staff_id, body.assignment_id, changes
             )
         )
@@ -109,7 +117,8 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest, app=Depends(get_ser
             family,
             body.case_no,
             event_ref,
-            {**proposal_payload, 'liff_result': result},
+            {**proposal_payload, 'liff_result': result,
+             'proposal_ref': postponement_proposal_ref(body.case_no, event_ref)},
         )
         response = _proposal_response(saved, proposal_payload)
         line_uow.commit()
@@ -143,11 +152,11 @@ def _proposal_response(saved: dict[str, Any], requested: dict[str, Any]) -> Base
             'original_dates': [item['original_date'] for item in dates],
             'new_dates': [item['new_date'] for item in dates],
         }
-    group_message = (
-        f"雙方合意延期：{dates[0]['original_date']}→{dates[0]['new_date']}"
-        if len(dates) == 1
-        else None
-    )
+    group_message = None
+    if saved.get('proposal_ref'):
+        group_message = postponement_group_message(saved['proposal_ref'])
+    elif len(dates) == 1:
+        group_message = f"雙方合意延期：{dates[0]['original_date']}→{dates[0]['new_date']}"
     return BaseResponse(
         data={
             **result,

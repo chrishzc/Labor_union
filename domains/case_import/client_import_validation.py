@@ -9,8 +9,6 @@ import re
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
-
 from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
 
 GENDER_VALUES = {"男", "女"}
@@ -72,7 +70,9 @@ def normalize_hcm_review_status(value: object) -> str | None:
 
 
 def _is_blank(value: Any) -> bool:
-    if pd.isna(value):
+    from pandas import isna
+
+    if isna(value):
         return True
     return str(value).strip() == ""
 
@@ -105,7 +105,9 @@ def _is_valid_service_time(value):
     return minutes[1] > minutes[0] or re.search(r"(次日|翌日|\+1)", text) is not None
 
 def _is_valid_date(value: Any) -> bool:
-    if pd.isna(value):
+    from pandas import isna
+
+    if isna(value):
         return False
     if isinstance(value, datetime) or hasattr(value, "date"):
         return True

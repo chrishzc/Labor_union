@@ -208,6 +208,7 @@
     const flowId = urlParams.get('flow_id') || liffStateParams.get('flow_id') || '';
     const scheduleMode = urlParams.get('mode') || liffStateParams.get('mode') || '';
     const scheduleCaseNo = urlParams.get('case_no') || liffStateParams.get('case_no') || '';
+    const scheduleGroupReply = (urlParams.get('group_reply') || liffStateParams.get('group_reply')) === '1';
 
     // 解析直接跳轉的內部路徑（若 liff.state 本身即為 /line-... 路徑）
     let directPath = '';
@@ -337,6 +338,7 @@
                 const scheduleQuery = new URLSearchParams({ flow_id: flowId });
                 if (scheduleCaseNo) scheduleQuery.set('case_no', scheduleCaseNo);
                 if (scheduleMode) scheduleQuery.set('mode', scheduleMode);
+                if (scheduleGroupReply) scheduleQuery.set('group_reply', '1');
                 navigateTo(`/line-staff-schedule?${scheduleQuery.toString()}`, false);
                 return;
             }

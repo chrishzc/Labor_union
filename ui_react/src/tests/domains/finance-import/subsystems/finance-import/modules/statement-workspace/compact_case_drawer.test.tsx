@@ -24,7 +24,8 @@ import {financeImportCorrectionClient} from '../../../../../../../api/finance_im
 import {orderCancellationClient,type OrderCancellationQuery} from '../../../../../../../api/orders/order_cancellation_client';
 import {orderMutationFlowStore} from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import type {FinanceBankTransaction} from '../../../../../../../api/finance_import/finance_import_query_schemas';
-vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn()}}));
+import {differenceResolutionClient} from '../../../../../../../api/client_finance/difference_resolution_client';
+vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn(),pairBankTransaction:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
 vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn(),previewSubsidyPlan:vi.fn()}}));
 vi.mock('../../../../../../../api/line_order_groups/payment_overdue_reminder_client',()=>({paymentOverdueReminderClient:{case:vi.fn(),sendCase:vi.fn()}}));
@@ -32,7 +33,7 @@ vi.mock('../../../../../../../api/orders/order_query_client',()=>({ordersQueryCl
 vi.mock('../../../../../../../api/client_registry/client_registry_client',()=>({clientRegistryClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/case_virtual_account_client',()=>({caseVirtualAccountClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()=>({clientReceiptQueryClient:{query:vi.fn()}}));
-vi.mock('../../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn().mockResolvedValue({case_no:'115000701',version:0,items:[],events:[]}),apply:vi.fn()}}));
+vi.mock('../../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn().mockResolvedValue({case_no:'115000701',version:0,items:[],events:[]}),apply:vi.fn(),syncHistoricalBaseline:vi.fn()}}));
 const caseNo='115000701';
 const plan={case_no:caseNo,version:0,events:[]};
 it.each([['taishin','台新銀行'],['sinopac','永豐銀行']])('退款回讀分開顯示 %s 實付與內扣手續費，不計為月嫂已核銷',async(bank,bankLabel)=>{
@@ -820,6 +821,309 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       querySpy.mockRestore();
       previewSpy.mockRestore();
       orderMutationFlowStore.clearAll();
+    }
+  });
+
+  it('E2E 與黑箱：永豐出款付月嫂無應付明細時，無死胡同引導、可查看本案帳務並返回、且可更正用途為客戶退款', async () => {
+    const candidate = { case_no: caseNo, purpose: 'client_refund' as const, person_id: 5, person_name: '合成客戶' };
+    const row = {
+      row_id: 91,
+      row_identity: 'finance-import-row:91',
+      reference: '工作表1#91',
+      bank: 'sinopac' as const,
+      direction: 'outgoing' as const,
+      amount_ntd: 37485,
+      transaction_date: '2026-10-15',
+      status: 'pending' as const,
+      disposition: 'business_pending' as const,
+      classification_type: 'staff_payout' as const,
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      pairing_memo: 'HC115001',
+      purpose_review: {
+        classification_version: 1,
+        candidates: [candidate],
+      },
+      reconciliation_target: {
+        case_no: caseNo,
+        staff_id: 12,
+        obligation_identities: [],
+        requires_selection: true,
+      },
+    };
+
+    const pairSpy = vi.spyOn(financeImportQueryClient, 'pairBankTransaction').mockResolvedValue(91);
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    const onPosted = vi.fn();
+    const onBusyChange = vi.fn();
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted, onBusyChange }} />);
+      expect(await screen.findByRole('button', { name: '更正出款用途' })).toBeVisible();
+      expect(screen.getByText(/本案目前沒有可選款項/)).toBeVisible();
+      expect(screen.getByRole('button', { name: '查看本案帳務' })).toBeVisible();
+
+      // 黑箱：點擊查看本案帳務，切換至帳務檢視
+      fireEvent.click(screen.getByRole('button', { name: '查看本案帳務' }));
+      expect(await screen.findByText('調整本案服務條件／計價')).toBeVisible();
+      expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
+
+      // 黑箱：點擊返回核對交易，返回對核視圖
+      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+      expect(await screen.findByRole('button', { name: '更正出款用途' })).toBeVisible();
+
+      // 黑箱：更正出款用途並切換客戶退款
+      fireEvent.click(screen.getByRole('button', { name: '更正出款用途' }));
+      const fieldset = screen.getByRole('region', { name: '更正出款用途' });
+      expect(within(fieldset).getByText(/客戶退款/)).toBeVisible();
+
+      const confirmBtn = within(fieldset).getByRole('button', { name: '確認用途' });
+      fireEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(pairSpy).toHaveBeenCalledWith(91, candidate, 1);
+        expect(onPosted).toHaveBeenCalled();
+      });
+    } finally {
+      pairSpy.mockRestore();
+    }
+  });
+
+  it('E2E 與黑箱異常處理：更正出款用途之取消收合與衝突錯誤提示', async () => {
+    const candidate = { case_no: caseNo, purpose: 'client_refund' as const, person_id: 5, person_name: '合成客戶' };
+    const row = {
+      row_id: 92,
+      row_identity: 'finance-import-row:92',
+      reference: '工作表1#92',
+      bank: 'sinopac' as const,
+      direction: 'outgoing' as const,
+      amount_ntd: 20000,
+      transaction_date: '2026-10-15',
+      status: 'pending' as const,
+      disposition: 'business_pending' as const,
+      classification_type: 'staff_payout' as const,
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      purpose_review: {
+        classification_version: 2,
+        candidates: [candidate],
+      },
+      reconciliation_target: {
+        case_no: caseNo,
+        staff_id: 12,
+        obligation_identities: [],
+        requires_selection: true,
+      },
+    };
+
+    const pairSpy = vi.spyOn(financeImportQueryClient, 'pairBankTransaction').mockRejectedValue(new Error('版本衝突：流水分類已被其他人員更新'));
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    const onPosted = vi.fn();
+    const onBusyChange = vi.fn();
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted, onBusyChange }} />);
+      const correctBtn = await screen.findByRole('button', { name: '更正出款用途' });
+      fireEvent.click(correctBtn);
+
+      const fieldset = screen.getByRole('region', { name: '更正出款用途' });
+      expect(within(fieldset).getByRole('button', { name: '取消' })).toBeVisible();
+
+      // 測試取消收合
+      fireEvent.click(within(fieldset).getByRole('button', { name: '取消' }));
+      expect(screen.queryByRole('region', { name: '更正出款用途' })).not.toBeInTheDocument();
+
+      // 再次開啟並觸發衝突錯誤
+      fireEvent.click(screen.getByRole('button', { name: '更正出款用途' }));
+      const fieldsetAgain = screen.getByRole('region', { name: '更正出款用途' });
+      fireEvent.click(within(fieldsetAgain).getByRole('button', { name: '確認用途' }));
+
+      expect(await within(fieldsetAgain).findByRole('alert')).toHaveTextContent('版本衝突：流水分類已被其他人員更新');
+      expect(onPosted).not.toHaveBeenCalled();
+    } finally {
+      pairSpy.mockRestore();
+    }
+  });
+
+  it('E2E 與黑箱：台新出款由客戶退款切換為月嫂薪資', async () => {
+    const candidate = { case_no: caseNo, purpose: 'staff_salary' as const, person_id: 12, person_name: '合成月嫂' };
+    const row = {
+      row_id: 93,
+      row_identity: 'finance-import-row:93',
+      reference: '台新出款 93',
+      bank: 'taishin' as const,
+      direction: 'outgoing' as const,
+      amount_ntd: 15000,
+      transaction_date: '2026-10-15',
+      status: 'pending' as const,
+      disposition: 'business_pending' as const,
+      classification_type: 'client_refund' as const,
+      review_reason: null,
+      available_actions: [],
+      counterparty_name: null,
+      cases: [caseNo],
+      purpose_review: {
+        classification_version: 1,
+        candidates: [candidate],
+      },
+      reconciliation_target: {
+        case_no: caseNo,
+        staff_id: null,
+        obligation_identities: [],
+        requires_selection: true,
+      },
+    };
+
+    const pairSpy = vi.spyOn(financeImportQueryClient, 'pairBankTransaction').mockResolvedValue(93);
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [row],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    const onPosted = vi.fn();
+    const onBusyChange = vi.fn();
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted, onBusyChange }} />);
+      const correctBtn = await screen.findByRole('button', { name: '更正出款用途' });
+      fireEvent.click(correctBtn);
+
+      const fieldset = screen.getByRole('region', { name: '更正出款用途' });
+      expect(within(fieldset).getByText(/月嫂薪資/)).toBeVisible();
+
+      fireEvent.click(within(fieldset).getByRole('button', { name: '確認用途' }));
+
+      await waitFor(() => {
+        expect(pairSpy).toHaveBeenCalledWith(93, candidate, 1);
+        expect(onPosted).toHaveBeenCalled();
+      });
+    } finally {
+      pairSpy.mockRestore();
+    }
+  });
+
+  it('E2E 與黑箱：案件處於洽談中時，月嫂薪資顯示「尚未簽約排班」提示，且不顯示更新按鈕', async () => {
+    vi.mocked(financeAccountingClient.query).mockResolvedValue({
+      ...facts(),
+      staff_items: [],
+      staff_receivable_ntd: null,
+    });
+    vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({
+      case_no: caseNo,
+      order_status: '洽談中',
+      staff_id: null,
+      service_days: 0,
+      service_hours_per_day: 0,
+    } as never);
+
+    wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded />);
+
+    expect(await screen.findByText('案件處於洽談中／尚未簽約排班，尚未產生月嫂應付明細。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '更新帳務計算' })).not.toBeInTheDocument();
+  });
+
+  it('E2E 與黑箱：案件缺少月嫂或服務時數時，月嫂薪資顯示「缺少計薪依據」提示與前往調整按鈕', async () => {
+    vi.mocked(financeAccountingClient.query).mockResolvedValue({
+      ...facts(),
+      staff_items: [],
+      staff_receivable_ntd: null,
+    });
+    vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({
+      case_no: caseNo,
+      order_status: '訂單成立',
+      staff_id: null,
+      service_days: 30,
+      service_hours_per_day: 8,
+    } as never);
+
+    wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded />);
+
+    expect(await screen.findByText(/缺少計薪依據（未指派服務人員），請至上方【調整本案服務條件】確認。/)).toBeVisible();
+    const adjustBtn = screen.getByRole('button', { name: '前往調整服務條件' });
+    expect(adjustBtn).toBeVisible();
+    expect(screen.queryByRole('button', { name: '更新帳務計算' })).not.toBeInTheDocument();
+  });
+
+  it('E2E 與黑箱：歷史訂單已完成且具備條件但未生成明細時，顯示【更新帳務計算】按鈕，點擊成功呼叫 syncHistoricalBaseline 並刷新', async () => {
+    vi.mocked(financeAccountingClient.query).mockResolvedValue({
+      ...facts(),
+      staff_items: [],
+      staff_receivable_ntd: 37500,
+    });
+    vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({
+      case_no: caseNo,
+      order_status: '歷史訂單－服務完成',
+      staff_id: 101,
+      service_days: 15,
+      service_hours_per_day: 8,
+    } as never);
+
+    const syncSpy = vi.mocked(differenceResolutionClient.syncHistoricalBaseline).mockResolvedValue({
+      scanned_orders: 1,
+      created_count: 1,
+      updated_count: 0,
+      skipped_count: 0,
+      details: [{ case_no: caseNo, action: 'created' }],
+    });
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded />);
+
+      expect(await screen.findByText('本案具備計算條件，尚未建立月嫂應付明細。預計撥款日、已核銷與待出款金額待確認。')).toBeVisible();
+      const syncBtn = screen.getByRole('button', { name: '更新帳務計算' });
+      expect(syncBtn).toBeVisible();
+
+      fireEvent.click(syncBtn);
+
+      await waitFor(() => {
+        expect(syncSpy).toHaveBeenCalledWith(caseNo);
+        expect(screen.getByText('已更新帳務計算，正在刷新帳務資料…')).toBeVisible();
+      });
+    } finally {
+      syncSpy.mockRestore();
+    }
+  });
+
+  it('E2E 與黑箱異常：點擊【更新帳務計算】遇到後端錯誤時，呈現失敗狀態提示並允許重試', async () => {
+    vi.mocked(financeAccountingClient.query).mockResolvedValue({
+      ...facts(),
+      staff_items: [],
+      staff_receivable_ntd: 37500,
+    });
+    vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({
+      case_no: caseNo,
+      order_status: '歷史訂單－服務完成',
+      staff_id: 101,
+      service_days: 15,
+      service_hours_per_day: 8,
+    } as never);
+
+    const syncSpy = vi.mocked(differenceResolutionClient.syncHistoricalBaseline).mockRejectedValue(new Error('Network error'));
+
+    try {
+      wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded />);
+
+      const syncBtn = await screen.findByRole('button', { name: '更新帳務計算' });
+      fireEvent.click(syncBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText('更新帳務計算失敗，請稍後重試。')).toBeVisible();
+      });
+      expect(syncBtn).not.toBeDisabled();
+    } finally {
+      syncSpy.mockRestore();
     }
   });
 });

@@ -865,20 +865,6 @@ def upgrade(settings):
     require(has_tools, "安全升級需要 mysql 與 mysqldump。")
     source = settings["database"]
     read = reader(settings)
-    if is_local_nas_test:
-        source_preview = updater.build_additive_preview(read, source, updater.DEFAULT_RECEIPT_ROOT)
-        if source_preview.get("status") == "current":
-            updater.require_current_database(source_preview)
-            print("資料庫結構已是最新版本，無需升級。", flush=True)
-            return None
-        require(source_preview.get("status") == "ready" and source_preview.get("pending_releases"),
-                f"來源版本檢查未通過：{source_preview.get('blocked_reason') or source_preview.get('code')}。")
-        for pending in source_preview["pending_releases"]:
-            print(f"待升級：{pending['release_id']} ({pending['artifact']})", flush=True)
-
-    require(not protect_account_receipts(read, source, apply=False),
-            "來源含未保護的帳號收據。請先執行受控收據轉換，再升級副本。")
-    root = destination_ready(settings, writable=True)
     candidate = new_candidate("upgrade")
     write = writer(settings, candidate)
     for executable in ("mysql", "mysqldump"):
@@ -891,6 +877,19 @@ def upgrade(settings):
               migration.DatabaseDescriptor("candidate-write", candidate, write))
     plan = migration.build_plan(config, source, candidate)
     require(plan["status"] == "ready" and not plan["candidate_exists"], "升級預檢未通過，原資料庫不變。")
+    if is_local_nas_test:
+        source_objects = plan["source_objects"]
+        if migration._candidate_schema_is_exact(source_objects):
+            updater.require_current_database(updater.build_additive_preview(read, source, updater.DEFAULT_RECEIPT_ROOT))
+            print("資料庫結構已是最新版本，無需升級。", flush=True)
+            return None
+        for name, state in source_objects.items():
+            if not migration._candidate_schema_is_exact({name: state}):
+                print(f"待升級：{name}", flush=True)
+
+    require(not protect_account_receipts(read, source, apply=False),
+            "來源含未保護的帳號收據。請先執行受控收據轉換，再升級副本。")
+    root = destination_ready(settings, writable=True)
     archive = backup(settings)
     directory = nas_directory(root, "_maintenance", candidate)
     # Canonical restore requires its own backup receipt, bound to the exact dump.

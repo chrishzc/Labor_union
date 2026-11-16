@@ -460,13 +460,15 @@ class FinanceImportQueryService:
             for row, item in zip(page, items, strict=True):
                 if item["status"] != "pending" or item["disposition"] == "blocked":
                     continue
-                if (row["format_id"] == "sinopac" and row["direction"] == "outgoing"
+                if (row["format_id"] in {"sinopac", "taishin"} and row["direction"] == "outgoing"
                         and not row.get("is_manual_supplement") and row.get("classification_version") is not None
                         and (row["classification_type"] in {"staff_payout", "staff_salary", "client_refund"}
                              or row["review_reason"] == MANUAL_BANK_CASE_REASONS[0])):
+                    case_hint = (item.get("cases") or (None,))[0] or (item.get("reconciliation_target") or {}).get("case_no")
                     candidates = sinopac_purpose_candidates(
                         cursor, row, row["classification_type"], _text_tuple(row.get("classification_evidence") or []),
                         _text_tuple(row.get("target_identities") or []),
+                        case_no=case_hint,
                     )
                     if candidates:
                         item["purpose_review"] = {"classification_version": row["classification_version"], "candidates": candidates}

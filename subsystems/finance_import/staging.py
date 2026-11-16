@@ -139,14 +139,16 @@ def bank_case_candidates(cursor, row, identity_maps, *, recipient_evidence=None)
     return tuple(sorted(candidates, key=lambda item: (item["case_no"], item["purpose"], item["person_id"])))
 
 
-def sinopac_purpose_candidates(cursor, row, classification_type, evidence, target_identities):
-    if row["format_id"] != "sinopac" or row["direction"] != "outgoing":
+def sinopac_purpose_candidates(cursor, row, classification_type, evidence, target_identities, *, case_no=None):
+    if row["format_id"] not in {"sinopac", "taishin"} or row["direction"] != "outgoing":
         return ()
     if classification_type not in {"staff_payout", "staff_salary", "client_refund", "non_business_review"}:
         return ()
-    case_no = next((item.removeprefix("bank-paired-case:") for item in evidence
-                    if item.startswith("bank-paired-case:")), None)
-    if case_no is None:
+    committed_case = next((item.removeprefix("bank-paired-case:") for item in evidence
+                          if item.startswith("bank-paired-case:")), None)
+    if committed_case is not None:
+        case_no = committed_case
+    elif case_no is None:
         suffixes = sinopac_memo_case_suffixes(row.get("memo"))
         if suffixes:
             if len(suffixes) != 1:
@@ -173,12 +175,12 @@ def sinopac_purpose_candidates(cursor, row, classification_type, evidence, targe
             if len(cases) != 1:
                 return ()
             case_no = cases.pop()
-    cursor.execute("SELECT client_id FROM orders WHERE case_no=%s", (case_no,))
+    cursor.execute("SELECT client_id, staff_id FROM orders WHERE case_no=%s", (case_no,))
     order = cursor.fetchone()
     if order is None:
         return ()
     candidates = []
-    if classification_type != "client_refund":
+    if classification_type != "client_refund" and order.get("client_id") is not None:
         candidates.append({"case_no": case_no, "purpose": "client_refund", "person_id": int(order["client_id"])})
     if classification_type not in {"staff_payout", "staff_salary"}:
         cursor.execute(
@@ -191,9 +193,21 @@ def sinopac_purpose_candidates(cursor, row, classification_type, evidence, targe
             ") recipients ON recipients.staff_id=staff.id ORDER BY staff.id",
             (case_no, case_no, case_no),
         )
+        staff_rows = cursor.fetchall()
+        if not staff_rows and order.get("staff_id") is not None:
+            cursor.execute("SELECT id AS staff_id, name FROM staff WHERE id=%s", (order["staff_id"],))
+            staff_rows = cursor.fetchall()
+        if not staff_rows:
+            staff_ids = [int(t[6:]) for t in target_identities if t.startswith("staff:") and t[6:].isdigit()]
+            if staff_ids:
+                cursor.execute(
+                    "SELECT id AS staff_id, name FROM staff WHERE id IN (" + ",".join("%s" for _ in staff_ids) + ")",
+                    staff_ids,
+                )
+                staff_rows = cursor.fetchall()
         candidates.extend({"case_no": case_no, "purpose": "staff_salary", "person_id": int(item["staff_id"]),
                            "person_name": item["name"]}
-                          for item in cursor.fetchall())
+                          for item in staff_rows)
     return tuple(candidates)
 
 

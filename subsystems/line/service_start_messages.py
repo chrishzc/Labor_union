@@ -457,7 +457,8 @@ def confirm_start_date_card(
     }
 
 
-def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_date):
+def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_date, *, proposal_ref=None):
+    action_suffix = f":{proposal_ref}" if proposal_ref else ""
     return {
         'type': 'flex',
         'altText': '雙方合意延期確認單',
@@ -497,7 +498,7 @@ def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_da
                     _progress_card('合意延期確認進度：', staff_name=staff_name, staff_status='✓ 已提出'),
                 ],
             },
-            'footer': _cta_footer('同意延期補班', 'postponement:agree', '不同意，重新協調', 'postponement:reject'),
+            'footer': _cta_footer('同意延期補班', f'postponement:agree{action_suffix}', '不同意，重新協調', f'postponement:reject{action_suffix}'),
         },
     }
 

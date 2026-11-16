@@ -35,9 +35,16 @@ def test_optional_reason_release_fresh_alias_and_parent_descriptor_are_bound():
         migration._local_classify_statement('ALTER TABLE matching_response_events DROP CHECK chk_matching_response_target;')
 
 
-def test_constraint_retirement_distinguishes_exact_predecessor_successor_and_drift():
+@pytest.mark.parametrize('preserve_data', [False, True], ids=['local', 'preserve-data'])
+def test_constraint_retirement_distinguishes_exact_predecessor_successor_and_drift(preserve_data):
     descriptor, snapshot = _snapshot()
-    state = lambda value: migration.local_additive_descriptor_state(value, descriptor, ARTIFACT)
+    released = migration.RELEASE_MANIFEST.descriptors[ARTIFACT]
+
+    def state(value):
+        if preserve_data:
+            return migration._release_descriptor_metadata_state(value, ARTIFACT, released)
+        return migration.local_additive_descriptor_state(value, descriptor, ARTIFACT)
+
     assert state(snapshot) == 'exact'
     old = deepcopy(snapshot)
     old['constraints'] = [dict(table_name='matching_response_events', constraint_name='chk_matching_response_manual_reason',
@@ -53,3 +60,11 @@ def test_constraint_retirement_distinguishes_exact_predecessor_successor_and_dri
     missing = deepcopy(snapshot)
     missing['columns'] = []
     assert state(missing) == 'partial'
+
+
+def test_preserve_data_rejects_released_parent_column_mismatch():
+    _, snapshot = _snapshot()
+    released = deepcopy(migration.RELEASE_MANIFEST.descriptors[ARTIFACT])
+    released['parent_columns']['matching_response_events']['reason']['is_nullable'] = 'NO'
+    with pytest.raises(migration.UpgradeBlocked, match='differs from canonical SQL'):
+        migration._release_descriptor_metadata_state(snapshot, ARTIFACT, released)

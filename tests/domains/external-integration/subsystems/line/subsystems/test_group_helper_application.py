@@ -606,7 +606,9 @@ def test_pre_commenced_confirmed_schedule_keeps_confirm_start_and_hides_survey()
     _assert_all_reply_only(uow)
 
 
-def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push() -> None:
+def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(monkeypatch) -> None:
+    monkeypatch.delenv("LINE_STAFF_SCHEDULE_LIFF_ID", raising=False)
+    monkeypatch.setenv("LINE_LIFF_ID", "synthetic-shared-liff")
     app = _make_app()
     uow = _FakeGroupHelperUoW(is_started=True)
 
@@ -624,9 +626,11 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
     )
     assert uow.identity_flows.commands[0].purpose is LineIdentityFlowPurpose.STAFF_SELF_SERVICE
     liff_text = json.loads(uow.delivery_tasks.requests[-1].payload_json)["text"]
+    assert "https://liff.line.me/synthetic-shared-liff/line-staff-schedule?" in liff_text
     assert "flow_id=flow-999" in liff_text
     assert "case_no=C-2026-01" in liff_text
     assert "mode=postpone" in liff_text
+    assert "group_reply=1" in liff_text
     assert "15 分鐘" in liff_text
 
     # 2. Occupancy conflict blocks card creation
@@ -661,6 +665,7 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
     saved = uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")]
     assert saved["dates"] == [{"original_date": "2026-06-12", "new_date": "2026-06-15"}]
     assert uow.delivery_tasks.requests[-1].message_kind is LineMessageKind.FLEX
+    approve = f"postponement:agree:{saved['proposal_ref']}"
 
     # 4. Caregiver clicking agree on their own proposal has no response (silent ignore to keep chat clean)
     pre_len = len(uow.delivery_tasks.requests)
@@ -668,7 +673,7 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
         app.handle_postback(
             _make_inbox(
                 "evt-postpone-staff-agree",
-                {"type": "postback", "postback": {"data": "postponement:agree"}},
+                {"type": "postback", "postback": {"data": approve}},
                 user_id="U-staff-1",
             ),
             uow,
@@ -683,7 +688,7 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
         app.handle_postback(
             _make_inbox(
                 "evt-postpone-agree",
-                {"type": "postback", "postback": {"data": "postponement:agree"}},
+                {"type": "postback", "postback": {"data": approve}},
                 user_id="U-customer-1",
             ),
             uow,
@@ -698,23 +703,12 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
     assert leave_cmd.dates[0].new_date == date(2026, 6, 15)
     assert uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")]["cleared"] is True
 
-    # 5. Saved multi-date proposal picked up by tapping mutual-postponement menu button, then rejected cleanly
-    uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")] = {
-        "case_no": "C-2026-01",
-        "staff_id": 7,
-        "assignment_id": 22,
-        "dates": [
-            {"original_date": "2026-06-14", "new_date": "2026-06-20"},
-            {"original_date": "2026-06-15", "new_date": "2026-06-21"},
-        ],
-        "leave_start_date": "2026-06-14、2026-06-15",
-        "leave_end_date": "2026-06-20、2026-06-21",
-    }
+    # A new multi-date proposal after the first decision can be rejected independently.
     assert (
-        app.handle_postback(
+        app.handle_message(
             _make_inbox(
                 "evt-postpone-multi",
-                {"type": "postback", "postback": {"data": "group-helper:mutual-postponement"}},
+                {"type": "message", "message": {"type": "text", "text": "雙方合意延期：2026-06-14、2026-06-15→2026-06-20、2026-06-21"}},
                 user_id="U-staff-1",
             ),
             uow,
@@ -723,12 +717,13 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push()
     )
     assert uow.delivery_tasks.requests[-1].message_kind is LineMessageKind.FLEX
     assert "2026-06-14、2026-06-15" in uow.delivery_tasks.requests[-1].payload_json
+    multi_saved = uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")]
 
     assert (
         app.handle_postback(
             _make_inbox(
                 "evt-postpone-reject",
-                {"type": "postback", "postback": {"data": "postponement:reject"}},
+                {"type": "postback", "postback": {"data": f"postponement:reject:{multi_saved['proposal_ref']}"}},
                 user_id="U-customer-1",
             ),
             uow,
@@ -792,14 +787,17 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
 
     saved_calls: list[tuple[str, str, str, dict[str, Any]]] = []
     committed: list[bool] = []
-    uow_stub = SimpleNamespace(
-        _connection=None,
-        _helper_proposals={},
-        receipts=_FakeReceiptRepo(),
-        delivery_tasks=_FakeDeliveryRepo(),
-        commit=lambda: committed.append(True),
-    )
+    uow_stub = _FakeGroupHelperUoW(is_started=True)
+    uow_stub.commit = lambda: committed.append(True)
+    uow_stub.service_start_workflow = fake_service_start
+    uow_stub._connection = None
     monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(uow_stub))
+
+    def _build_on_line_connection(connection: Any) -> _FakeServiceStartWorkflow:
+        assert connection is uow_stub._connection
+        return fake_service_start
+
+    monkeypatch.setattr(staff_leave_intake, "build_service_start_application", _build_on_line_connection)
 
     save_group_helper_proposal = staff_leave_intake.save_group_helper_proposal
 
@@ -838,14 +836,30 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     assert ok_data["conflict"] is False
     assert ok_data["total_service_days_conserved"] is True
     assert ok_data["group_record_queued"] is False
-    assert ok_data["group_message"] == "雙方合意延期：2026-06-12→2026-06-15"
+    assert ok_data["group_message"].startswith("雙方合意延期 提案 ")
     assert len(saved_calls) == 1
     assert saved_calls[0][0] == "group_helper_postpone_proposal"
     assert saved_calls[0][1] == "C-2026-01"
     assert committed == [True]
     assert uow_stub.delivery_tasks.requests == []
 
-    # 3. Multi-day /propose saves all pairs and sets group_message=None so group menu button loads full batch
+    helper = _make_app()
+    single = saved_calls[0][3]
+    message = {"type": "message", "message": {"type": "text", "text": ok_data["group_message"]}}
+    assert helper.handle_message(_make_inbox("single-group-send", message), uow_stub)
+    assert helper.handle_message(_make_inbox("single-duplicate-send", message), uow_stub)
+    card, = uow_stub.delivery_tasks.requests
+    assert card.recipient.identity.value == "G-case-1"
+    assert card.correlation_id.value == "line-event:single-group-send"
+    assert f"postponement:agree:{single['proposal_ref']}" in card.payload_json
+
+    # The menu stays an edit entry even while a confirmation card is pending.
+    assert helper.handle_postback(_make_inbox("edit-group-proposal", {
+        "type": "postback", "postback": {"data": "group-helper:mutual-postponement"},
+    }), uow_stub)
+    assert "mode=postpone" in uow_stub.delivery_tasks.requests[-1].payload_json
+
+    # Multi-day submit uses the same single-step group trigger and replaces the pending proposal.
     multi_body = {
         **base_body,
         "dates": [
@@ -855,8 +869,30 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     }
     multi_res = client.post("/api/v1/line/staff-self-service/leave-results/propose", json=multi_body)
     assert multi_res.status_code == 200
-    assert multi_res.json()["data"]["group_message"] is None
-    assert len(saved_calls[-1][3]["dates"]) == 2
+    multi_message = multi_res.json()["data"]["group_message"]
+    multi = saved_calls[-1][3]
+    assert len(multi["dates"]) == 2
+    assert multi["proposal_ref"] != single["proposal_ref"]
+    assert helper.handle_message(_make_inbox("multi-group-send", {
+        "type": "message", "message": {"type": "text", "text": multi_message},
+    }), uow_stub)
+    card = uow_stub.delivery_tasks.requests[-1]
+    assert card.message_kind is LineMessageKind.FLEX
+    assert f"postponement:agree:{multi['proposal_ref']}" in card.payload_json
+    assert card.recipient.identity.value == "G-case-1"
+
+    for index, old_action in enumerate(("postponement:agree", f"postponement:agree:{single['proposal_ref']}", f"postponement:reject:{single['proposal_ref']}")):
+        assert helper.handle_postback(_make_inbox(f"old-card-{index}", {
+            "type": "postback", "postback": {"data": old_action},
+        }, user_id="U-customer-1"), uow_stub)
+        assert "已失效" in uow_stub.delivery_tasks.requests[-1].payload_json
+        assert not fake_service_start.leave_calls
+    assert helper.handle_postback(_make_inbox("new-card", {
+        "type": "postback", "postback": {"data": f"postponement:agree:{multi['proposal_ref']}"},
+    }, user_id="U-customer-1"), uow_stub)
+    command, push_schedule = fake_service_start.leave_calls[0]
+    assert len(command.dates) == 2 and push_schedule is False
+    _assert_all_reply_only(uow_stub)
 
 
 @pytest.mark.parametrize("legacy_receipt", [False, True])
@@ -867,11 +903,13 @@ def test_liff_postponement_replays_original_result_after_proposal_changes(
     application = _FakeServiceStartWorkflow(arrangement=arrangement)
     committed: list[bool] = []
     uow = SimpleNamespace(
+        _connection=None,
         _helper_proposals={},
         receipts=_FakeReceiptRepo(),
         commit=lambda: committed.append(True),
     )
     monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(uow))
+    monkeypatch.setattr(staff_leave_intake, "build_service_start_application", lambda _connection: application)
     staff = {"staff_id": 7}
     monkeypatch.setattr(staff_leave_intake, "_verified_staff_context", lambda _body: (None, staff))
     dates = [
@@ -889,7 +927,7 @@ def test_liff_postponement_replays_original_result_after_proposal_changes(
 
     def propose(payload: dict[str, Any]) -> dict[str, Any]:
         request = staff_leave_intake.StaffLeaveDeferProposeRequest.model_validate(payload)
-        return staff_leave_intake.propose_leave_defer(request, application).model_dump()
+        return staff_leave_intake.propose_leave_defer(request).model_dump()
 
     original = propose(body)
     if legacy_receipt:

@@ -386,6 +386,21 @@ def test_sinopac_purpose_review_rechecks_current_source_and_appends_classificati
         assert events == []
 
 
+def test_sinopac_purpose_candidates_uses_case_hint_without_memo_suffix():
+    from unittest.mock import MagicMock
+    from subsystems.finance_import.staging import sinopac_purpose_candidates
+
+    cursor = MagicMock()
+    cursor.fetchone.return_value = {"client_id": 101, "staff_id": 202}
+    cursor.fetchall.return_value = [{"staff_id": 202, "name": "測試月嫂"}]
+    row = {"format_id": "sinopac", "direction": "outgoing", "memo": "跨行轉出"}
+    candidates = sinopac_purpose_candidates(cursor, row, "staff_payout", (), (), case_no="115000078")
+    assert candidates == ({"case_no": "115000078", "purpose": "client_refund", "person_id": 101},)
+
+    candidates_refund = sinopac_purpose_candidates(cursor, row, "client_refund", (), (), case_no="115000078")
+    assert candidates_refund == ({"case_no": "115000078", "purpose": "staff_salary", "person_id": 202, "person_name": "測試月嫂"},)
+
+
 def test_query_rejects_missing_formal_batch() -> None:
     with pytest.raises(FinanceImportQueryNotFound):
         FinanceImportQueryService(_Connection(_Cursor([]))).list_reprocess_runs(
@@ -1031,3 +1046,89 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
         ("林小美", ["115000001"]),
         ("陳月嫂", ["115000009"]),
     ]
+
+
+def test_bank_transactions_populates_purpose_review_for_outgoing_rows() -> None:
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    class _BankCursor:
+        def __init__(self) -> None:
+            self._call_count = 0
+
+        def __enter__(self) -> "_BankCursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+            self.last_sql = " ".join(sql.split())
+            self.last_params = params
+
+        def fetchone(self) -> dict[str, object] | None:
+            if "COUNT(*) AS total" in self.last_sql:
+                return {"total": 1}
+            if "SELECT client_id, staff_id FROM orders" in self.last_sql:
+                return {"client_id": 7, "staff_id": 19}
+            if "SELECT name FROM staff WHERE id=%s" in self.last_sql:
+                return {"name": "陳月嫂"}
+            if "SELECT name FROM clients WHERE id=%s" in self.last_sql:
+                return {"name": "林小美"}
+            if "SELECT c.name FROM orders o JOIN clients c" in self.last_sql:
+                return {"name": "林小美"}
+            return None
+
+        def fetchall(self) -> list[dict[str, object]]:
+            if "FROM page" in self.last_sql or "finance_import_rows bank" in self.last_sql or "FROM finance_import_rows page" in self.last_sql:
+                return [
+                    {
+                        "row_id": 41,
+                        "batch_id": 1,
+                        "transaction_date": "2026-10-15",
+                        "format_id": "sinopac",
+                        "direction": "outgoing",
+                        "debit": Decimal("37485"),
+                        "credit": None,
+                        "source_file": "file.xlsx",
+                        "sheet_name": "工作表1",
+                        "source_row": 91,
+                        "counterparty_name": "陳月嫂",
+                        "cancellation_code": None,
+                        "bank_references": '{"sequence":"0091"}',
+                        "memo": "跨行轉出",
+                        "matched_identity_ids": "[19]",
+                        "target_identities": '["staff:19"]',
+                        "classification_type": "staff_payout",
+                        "classification_version": 2,
+                        "transaction_status": "pending",
+                        "disposition": "business_pending",
+                        "review_reason": "staff_account_matched",
+                        "available_actions": "[]",
+                        "safe_reference": "0091",
+                        "classification_evidence": "[]",
+                        "raw_reference": "0091",
+                        "recorded_pending_reason": None,
+                        "recorded_client_receipt_review": None,
+                        "is_manual_supplement": False,
+                    }
+                ]
+            if "proofs" in self.last_sql:
+                return [{"row_id": 41, "case_no": "115000009"}]
+            if "FROM staff_obligations" in self.last_sql:
+                return [{"case_no": "115000009", "obligation_identity": "staff:payout", "due_date": "2026-10-19", "amount_due_ntd": 37485}]
+            if "SELECT staff.id, staff.name FROM staff" in self.last_sql:
+                return [{"staff_id": 19, "name": "陳月嫂"}]
+            return []
+
+    service = FinanceImportQueryService(SimpleNamespace(cursor=lambda: _BankCursor()))
+    result = service.bank_transactions(
+        bank=None, direction=None, status="pending", start=None, end=None, search="", limit=50, before_row_id=None
+    )
+    assert len(result["items"]) == 1
+    item = result["items"][0]
+    assert item["purpose_review"] == {
+        "classification_version": 2,
+        "candidates": (
+            {"case_no": "115000009", "purpose": "client_refund", "person_id": 7},
+        ),
+    }

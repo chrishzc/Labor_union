@@ -450,7 +450,7 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
     <div style="border-bottom:1px solid #f2e6dc;padding-bottom:10px;margin-bottom:12px;">
       <span style="font-size:11px;font-weight:700;background:#fcebdd;color:#973b17;padding:3px 8px;border-radius:4px;border:1px solid #e9c5ad;">🔒 案件專屬排班調整</span>
       <h2 id="postponeHeading" style="font-size:16px;font-weight:700;color:#302923;margin:8px 0 2px;">案件：--</h2>
-      <p style="font-size:13px;color:#65564b;margin:0;">先在案件群組與客戶協調，確認請假與補班日；送出後將在群組由客戶確認（0 推播費）。</p>
+      <p style="font-size:13px;color:#65564b;margin:0;">先在原案件群組與客戶協調請假與補班日。</p>
     </div>
 
     <div class="guide-bar" style="background:#fffaf5;border-color:#f2d8c5;color:#7a3415;">
@@ -499,10 +499,10 @@ Description: 提供月嫂查班、不接案日期，以及雙方合意延期的�
 
     <div style="margin-top:14px;">
       <button type="button" id="postponeSubmitBtn" class="primary" style="width:100%;padding:14px;font-size:15px;" disabled onclick="submitPostponeProposal()">
-        建立延期提案（零推播）
+        送出延期提案
       </button>
       <p style="font-size:11px;color:#857163;text-align:center;margin:8px 0 0;">
-        建立提案後，請依畫面指示返回案件群組。客戶確認同意後才會更新排班。
+        送出後由客戶在原群組確認。客戶同意後才會更新排班。
       </p>
     </div>
   </section>
@@ -607,6 +607,7 @@ let lineIdToken = "";
 let flowId = "";
 let focusCaseNo = "";
 let scheduleMode = "";
+let requirePostponeGroupReply = false;
 let identityReady = false;
 
 // 專屬延期模式狀態
@@ -1433,12 +1434,12 @@ function updatePostponePairs() {
   if (difference !== 0 || original.length === 0) {
     balanceBadge.textContent = difference < 0 ? `尚缺 ${-difference} 天`
       : difference > 0 ? `多選 ${difference} 天` : "日期未變更";
-    submitBtn.textContent = "建立延期提案（零推播）";
+    submitBtn.textContent = "送出延期提案";
     return;
   }
 
   balanceBadge.textContent = `已調整 ${original.length} 天（天數相同）`;
-  submitBtn.textContent = `建立 ${original.length} 天延期提案（零推播）`;
+  submitBtn.textContent = `送出 ${original.length} 天延期提案`;
   for (let i = 0; i < original.length; i++) {
     const row = document.createElement("div");
     row.className = "pair-row";
@@ -1486,12 +1487,15 @@ function updatePostponePairs() {
 
 function renderPostponeCheck() {
   const notice = document.getElementById('postponeActionNotice');
-  const {status, message} = postponeCheck;
+  const {status, message, groupMessage} = postponeCheck;
   notice.hidden = !message;
   notice.className = status === 'conflict' || status === 'unavailable' || postponeCheck.submitFailed ? 'message error' : 'message';
   notice.textContent = message ?? '';
   document.getElementById('postponeRetryPreview').hidden = status !== 'unavailable';
-  document.getElementById('postponeSubmitBtn').disabled = status !== 'ready';
+  const submitBtn = document.getElementById('postponeSubmitBtn');
+  const canRetrySend = status === 'complete' && Boolean(groupMessage);
+  submitBtn.disabled = status !== 'ready' && !canRetrySend;
+  if (canRetrySend) submitBtn.textContent = '重試送出延期訊息';
 }
 
 async function checkPostponePairs() {
@@ -1541,42 +1545,68 @@ async function checkPostponePairs() {
   renderPostponeCheck();
 }
 
+function canSendPostponeToGroup() {
+  if (typeof liff === 'undefined' || !liff.isInClient?.()) return false;
+  const context = liff.getContext?.();
+  return context?.type === 'group' && context.scope?.includes('chat_message.write') &&
+    typeof liff.sendMessages === 'function';
+}
+
+async function sendPostponeMessage(groupMessage) {
+  postponeCheck = {status: 'submitting', message: '正在將延期訊息送到原群組…'};
+  renderPostponeCheck();
+  try {
+    if (!canSendPostponeToGroup()) throw new Error('LINE 群組傳訊無法使用');
+    await liff.sendMessages([{type: 'text', text: groupMessage}]);
+  } catch (_) {
+    postponeCheck = {
+      status: 'complete', groupMessage, submitFailed: true,
+      message: '延期提案已儲存，LINE 尚未確認訊息送出。請重試送出同一筆，日期會保留。',
+    };
+    renderPostponeCheck();
+    return;
+  }
+  postponeCheck = {status: 'complete', message: '延期訊息已送出。請在原 LINE 群組查看客戶確認卡。'};
+  renderPostponeCheck();
+  closeLiffWindow();
+}
+
 async function submitPostponeProposal() {
+  if (postponeCheck.status === 'complete' && postponeCheck.groupMessage) {
+    await sendPostponeMessage(postponeCheck.groupMessage);
+    return;
+  }
   if (postponeCheck.status !== 'ready') return;
+  if (requirePostponeGroupReply && !canSendPostponeToGroup()) {
+    postponeCheck = {...postponeCheck, submitFailed: true, message: '請從原 LINE 案件群組的小幫手開啟延期頁面，再送出提案。'};
+    renderPostponeCheck();
+    return;
+  }
   const {intent, idempotencyKey = crypto.randomUUID()} = postponeCheck;
   postponeCheck = {status: 'submitting', message: '正在確認檔期並建立延期提案…'};
   renderPostponeCheck();
   renderPostponeCalendar();
+  let proposed;
   try {
-    const proposed = await leaveResultPost('propose', {...intent, idempotency_key: idempotencyKey});
-    if (proposed?.conflict !== false || proposed.case_no !== intent.case_no || proposed.assignment_id !== intent.assignment_id) {
+    proposed = await leaveResultPost('propose', {...intent, idempotency_key: idempotencyKey});
+    if (proposed?.conflict !== false || proposed.case_no !== intent.case_no || proposed.assignment_id !== intent.assignment_id ||
+        (requirePostponeGroupReply && (typeof proposed.group_message !== 'string' || !proposed.group_message.trim()))) {
       throw new Error('延期提案回應不完整。');
     }
-    postponeCheck = {status: 'complete', message: '已建立延期提案。'};
-    renderPostponeCheck();
-    let sentToGroup = false;
-    if (typeof proposed.group_message === 'string' && proposed.group_message &&
-        typeof liff !== 'undefined' && typeof liff.isInClient === 'function' && liff.isInClient()) {
-      try {
-        await liff.sendMessages([{type: 'text', text: proposed.group_message}]);
-        sentToGroup = true;
-      } catch (_) {
-        sentToGroup = false;
-      }
-    }
-
-    alert(sentToGroup
-      ? `【延期訊息已送出】\n請返回案件群組查看確認卡，並等待客戶點選確認。\n\n本視窗將自動關閉返回群組。`
-      : `【延期提案已成功建立】\n已檢核無檔期衝突！請返回案件群組點選小幫手選單「雙方合意延期」送出確認卡（零推播額度）。`);
-
-    closeLiffWindow();
   } catch (error) {
     postponeCheck = error.httpStatus === 409
       ? {status: 'unavailable', message: '排班狀態有變動，請重新檢查檔期。'}
       : {status: 'ready', intent, idempotencyKey, submitFailed: true, message: '無法確認提案結果，請重試原操作。'};
     renderPostponeCheck();
     renderPostponeCalendar();
+    return;
   }
+  if (!requirePostponeGroupReply && (!proposed.group_message || !canSendPostponeToGroup())) {
+    postponeCheck = {status: 'complete', message: '延期提案已儲存。請手動回到原 LINE 群組，再點小幫手的「雙方合意延期」送出確認卡。'};
+    renderPostponeCheck();
+    return;
+  }
+  await sendPostponeMessage(proposed.group_message);
 }
 
 // 啟動專屬合意延期工作台
@@ -1726,6 +1756,7 @@ async function init() {
   flowId = params.get("flow_id") || "";
   focusCaseNo = params.get("case_no") || "";
   scheduleMode = params.get("mode") || "";
+  requirePostponeGroupReply = params.get("group_reply") === "1";
 
   // 延期專屬模式：先隱藏其他面板以提升速度與直覺體驗
   if (scheduleMode === 'postpone') {

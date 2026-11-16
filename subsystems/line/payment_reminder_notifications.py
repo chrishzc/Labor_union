@@ -5,6 +5,7 @@ Description: 排程發送繳款與逾期追蹤 Flex 卡片，並於客戶回覆�
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from hashlib import sha256
+from typing import Any
 from typing import Protocol
 
 from domains.line.canonical_payload import canonical_line_payload_json

@@ -1,4 +1,4 @@
-"""Opt-in real MySQL: full fresh source → SQL backup → restore → upgrade.
+"""Opt-in real MySQL: fresh source → SQL backup → restore → current no-op.
 
 Only a uniquely named container created by this test may be destroyed. Never
 uses the workstation .env, an existing container/volume, or a NAS connection.
@@ -21,7 +21,7 @@ from scripts import nas_database_maintenance as nas
 pytestmark = pytest.mark.skipif(os.getenv("NAS_WINDOWS_MAINTENANCE_MYSQL_TEST") != "1", reason="explicit isolated Docker opt-in")
 
 
-def test_sql_backup_restore_and_canonical_upgrade_keep_source_accounts_and_neighbour_data(tmp_path, monkeypatch):
+def test_sql_backup_restore_and_current_upgrade_noop_keep_source_accounts_and_neighbour_data(tmp_path, monkeypatch):
     name = "lu-test-nas-maintenance-" + uuid4().hex[:12]
     source_db = "lu_test_nas_source"
     secret = tmp_path / "secrets"
@@ -93,6 +93,13 @@ def test_sql_backup_restore_and_canonical_upgrade_keep_source_accounts_and_neigh
         assert restored.startswith("lu_nas_restore_")
         assert nas.migration._table_evidence(nas.writer(settings), restored) == source_before
         assert nas.migration._table_evidence(nas.reader(settings), source_db) == source_before
+        settings["database"], settings["runtime"] = restored, dotenv_values(runtime)
+        runtime_before_upgrade = runtime.read_bytes()
+        assert nas.upgrade(settings) is None
+        assert runtime.read_bytes() == runtime_before_upgrade
+        assert list(settings["backup_root"].glob("????-??/*.zip")) == [backup]
+        assert nas.migration._table_evidence(nas.reader(settings), restored) == source_before
+        assert nas.migration._table_evidence(nas.writer(settings), source_db) == source_before
         # The original application and backup credentials both work on the copy.
         for user, password in (("fixture_app", app_password), ("fixture_reader", read_password)):
             probe = pymysql.connect(host="127.0.0.1", port=port, user=user, password=password, database=restored)
@@ -100,18 +107,12 @@ def test_sql_backup_restore_and_canonical_upgrade_keep_source_accounts_and_neigh
                 cursor.execute("SELECT note,payload FROM nas_maintenance_probe WHERE id=1")
                 assert cursor.fetchone() == ("中文備份測試", b"\x00\xfffixture")
             probe.close()
-        settings["database"], settings["runtime"] = restored, dotenv_values(runtime)
-        nas.upgrade(settings)
-        upgraded = dotenv_values(runtime)["DB_DATABASE"]
-        assert upgraded.startswith("lu_nas_upgrade_")
-        assert nas.migration._table_evidence(nas.reader(settings), restored) == source_before
-        assert nas.migration._table_evidence(nas.writer(settings), source_db) == source_before
         connection = pymysql.connect(**base, autocommit=True)
         with connection.cursor() as cursor:
+            cursor.execute("SHOW DATABASES")
+            assert not any(row[0].startswith("lu_nas_upgrade_") for row in cursor.fetchall())
             cursor.execute("SELECT id FROM lu_test_neighbour.sentinel")
             assert cursor.fetchall() == ((7,),)
-            cursor.execute(f"SELECT note,payload FROM `{upgraded}`.nas_maintenance_probe WHERE id=1")
-            assert cursor.fetchone() == ("中文備份測試", b"\x00\xfffixture")
         connection.close()
     finally:
         if created:

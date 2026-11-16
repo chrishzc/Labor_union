@@ -9,6 +9,7 @@ import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { subscribeCaseAccountingChanges } from '../api/shared/case_accounting_changes';
 import { ClientRefundReturnReconciliationPanel } from './ClientRefundReturnReconciliationPanel';
+import { differenceResolutionClient } from '../api/client_finance/difference_resolution_client';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
 import {paymentOverdueReminderClient,type CasePaymentReminder} from '../api/line_order_groups/payment_overdue_reminder_client';
@@ -334,6 +335,10 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [showRefundCorrection, setShowRefundCorrection] = useState(false);
   const [showCancellation, setShowCancellation] = useState(false);
+  const [showPurposeConversion, setShowPurposeConversion] = useState(false);
+  const [selectedPurposeCandidate, setSelectedPurposeCandidate] = useState<NonNullable<FinanceBankTransaction['pairing_candidates']>[number] | null>(null);
+  const [purposeBusy, setPurposeBusy] = useState(false);
+  const [purposeError, setPurposeError] = useState('');
   const { requestLeave } = useUnsavedNavigation();
   const requiresSelection = target?.requires_selection ?? false;
   const selectedIds = requiresSelection ? chosenIds : target?.obligation_identities ?? [];
@@ -353,9 +358,10 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
     && row.status === 'pending' && row.disposition !== 'blocked'
     && (isStaff || row.classification_type === 'client_refund');
   const canCorrectToRefund = isStaff && (row.bank === 'sinopac' || row.bank === 'taishin') && row.direction === 'outgoing'
-    && row.status === 'pending' && data.client_items.some(item => item.direction === 'payable'
-      && (item.obligation_type === 'refund' || item.obligation_type === 'adjustment')
-      && (item.remaining_ntd ?? 0) > 0);
+    && row.status === 'pending';
+  const purposeCandidates = row.purpose_review?.candidates ?? [];
+  const canConvertPurpose = (row.bank === 'sinopac' || row.bank === 'taishin') && row.direction === 'outgoing'
+    && row.status === 'pending' && purposeCandidates.length > 0;
   const items = isStaff ? data.staff_items : data.client_items;
   const direction = isReceipt ? 'receivable' : 'payable';
   const obligations = items.filter(item => item.direction === direction && target.obligation_identities.includes(item.identity));
@@ -388,25 +394,112 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         onOpenEdit={onOpenParamsEdit}
       />
     )}
-    {canCorrectToRefund && <button type="button" className="finance-btn-secondary" disabled={selectionBusy}
+    {canConvertPurpose && !showCancellation && !showRefundCorrection && (
+      <button
+        type="button"
+        className="finance-btn-secondary"
+        disabled={selectionBusy || purposeBusy}
+        onClick={() => {
+          setShowPurposeConversion(open => !open);
+          if (!selectedPurposeCandidate && purposeCandidates.length > 0) {
+            setSelectedPurposeCandidate(purposeCandidates[0]);
+          }
+        }}
+      >
+        {showPurposeConversion ? '返回核對交易' : '更正出款用途'}
+      </button>
+    )}
+    {canCorrectToRefund && !showPurposeConversion && <button type="button" className="finance-btn-secondary" disabled={selectionBusy || purposeBusy}
       onClick={() => setShowRefundCorrection(open => !open)}>
       {showRefundCorrection ? '返回月嫂薪資核對' : '改核對客戶退款'}
     </button>}
-    {canOpenCancellation && !showRefundCorrection && <button type="button" className="finance-btn-secondary"
-      disabled={selectionBusy} onClick={() => requestLeave(() => setShowCancellation(true))}>
+    {canOpenCancellation && !showRefundCorrection && !showPurposeConversion && <button type="button" className="finance-btn-secondary"
+      disabled={selectionBusy || purposeBusy} onClick={() => requestLeave(() => setShowCancellation(true))}>
       {row.classification_type === 'client_refund' ? '取消結算（調整服務天數產生退款）' : '取消結算'}
     </button>}
-    {isStaff && requiresSelection && !showRefundCorrection && <fieldset disabled={selectionBusy}>
+    {showPurposeConversion && (
+      <section className="bank-fact-card" aria-label="更正出款用途" style={{ marginTop: '12px', marginBottom: '12px', padding: '16px', border: '1px solid #ebdcd1', borderRadius: '8px' }}>
+        <h4>更正出款用途</h4>
+        <p style={{ margin: '0 0 10px 0' }}>請核對原銀行流水（{row.bank === 'sinopac' ? '永豐' : '台新'} · {money(row.amount_ntd)}），選擇本筆出款的用途及對象：</p>
+        <fieldset disabled={purposeBusy} style={{ border: 0, padding: 0, margin: '10px 0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {purposeCandidates.map(candidate => {
+            const key = `${candidate.case_no}:${candidate.purpose}:${candidate.person_id}`;
+            const isSelected = selectedPurposeCandidate?.case_no === candidate.case_no
+              && selectedPurposeCandidate?.purpose === candidate.purpose
+              && selectedPurposeCandidate?.person_id === candidate.person_id;
+            return (
+              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="case-subview-purpose-candidate"
+                  checked={isSelected}
+                  onChange={() => setSelectedPurposeCandidate(candidate)}
+                />
+                <span>
+                  {candidate.case_no} · {candidate.purpose === 'client_refund' ? '客戶退款' : candidate.purpose === 'staff_salary' ? '月嫂薪資' : candidate.purpose}
+                  {candidate.person_name ? ` · ${candidate.person_name}` : ''}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+        {purposeError && <p role="alert" style={{ color: '#dc2626', margin: '0 0 10px 0' }}>{purposeError}</p>}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="finance-btn-primary"
+            disabled={!selectedPurposeCandidate || purposeBusy}
+            onClick={async () => {
+              if (!selectedPurposeCandidate) return;
+              setPurposeBusy(true);
+              reportBusy(true);
+              setPurposeError('');
+              try {
+                const version = row.purpose_review?.classification_version ?? 0;
+                await financeImportQueryClient.pairBankTransaction(row.row_id, selectedPurposeCandidate, version);
+                setShowPurposeConversion(false);
+                onPosted();
+              } catch (err) {
+                setPurposeError(err instanceof Error ? err.message : '變更出款用途失敗，請稍候重試。');
+              } finally {
+                setPurposeBusy(false);
+                reportBusy(false);
+              }
+            }}
+          >
+            {purposeBusy ? '處理中…' : '確認用途'}
+          </button>
+          <button
+            type="button"
+            className="finance-btn-secondary"
+            disabled={purposeBusy}
+            onClick={() => {
+              setShowPurposeConversion(false);
+              setPurposeError('');
+            }}
+          >
+            取消
+          </button>
+        </div>
+      </section>
+    )}
+    {isStaff && requiresSelection && !showRefundCorrection && !showPurposeConversion && <fieldset disabled={selectionBusy || purposeBusy}>
       <legend>本次核銷款項</legend>
       {obligations.length ? obligations.map(item=><label key={item.identity}>
         <input type="checkbox" aria-label={`核銷款項 ${item.identity}`} checked={selectedIds.includes(item.identity)}
           onChange={()=>setChosenIds(ids=>ids.includes(item.identity)?ids.filter(id=>id!==item.identity):[...ids,item.identity])}/>
         {item.label || '月嫂應付款'} · 待付 {money(item.remaining_ntd)} · {item.due_date ?? '未定日期'}
-      </label>) : <p>本案目前沒有可選款項。{canOpenCancellation
-        ? '若案件提前結束服務或實際服務天數變更，請點擊上方【取消結算】確認實際服務日產生退款。'
-        : '請回案件帳務確認正式款項資料。'}</p>}
+      </label>) : <div>
+        <p>本案目前沒有可選款項。
+          {isStaff ? ' 若此出款實為客戶退款，可點擊上方【更正出款用途】切換；若為月嫂薪資，請至案件帳務確認服務條件與應付明細。' : ''}
+          {canOpenCancellation
+            ? ' 若案件提前結束服務或實際服務天數變更，請點擊上方【取消結算】確認實際服務日產生退款。'
+            : ' 請回案件帳務確認正式款項資料。'}
+        </p>
+        {onViewCase && <button type="button" className="finance-btn-secondary" disabled={selectionBusy} onClick={() => requestLeave(() => onViewCase())}>查看本案帳務</button>}
+      </div>}
     </fieldset>}
-    {canCorrectToRefund && showRefundCorrection ? (
+    {showPurposeConversion ? null : canCorrectToRefund && showRefundCorrection ? (
       <FinanceImportCorrectionForm
         rowIdentity={row.row_identity}
         sourceLabel={row.reference}
@@ -461,6 +554,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const[freshBankRow,setFreshBankRow]=useState<FinanceBankTransaction|null>(null);
   const[cancellationObservedRowId,setCancellationObservedRowId]=useState<number|null>(null);
  const[bankRefreshError,setBankRefreshError]=useState('');
+ const[syncingPayroll,setSyncingPayroll]=useState(false);
+ const[syncPayrollMessage,setSyncPayrollMessage]=useState<string|null>(null);
  const reportReconciliationBusy=useCallback((busy:boolean)=>setReconciliationBusy(busy),[]);
  useEffect(()=>{bankReconciliation?.onBusyChange(accountingBusy);return()=>bankReconciliation?.onBusyChange(false);},[accountingBusy,bankReconciliation?.onBusyChange]);
  useEffect(()=>subscribeCaseAccountingChanges(caseNo=>{if(caseNo===initialCase)setPendingAccountingRefresh(true);}),[initialCase]);
@@ -519,6 +614,10 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const subsidyRefundPending=(selected??data?.scheme)==='advance'&&subsidyTotal>0;
  const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
  const govReceivedNtd=data?.cash_by_flow?.G??govBankFacts.reduce((s,b)=>s+b.amount_ntd,0);
+ const isPreliminary=orderStatus==='洽談中'||orderStatus==='媒合中'||orderStatus==='等待簽約';
+ const isMissingBasis=!isPreliminary&&Boolean(state.order&&(state.order.staff_id===null||state.order.service_days===0||state.order.service_hours_per_day===0));
+ const isHistoricalOrder=Boolean(orderStatus?.startsWith('歷史訂單－'));
+ const isEligibleToRecalculate=!isPreliminary&&!isMissingBasis&&(isHistoricalOrder||orderStatus==='訂單成立'||orderStatus==='服務中'||orderStatus==='訂單完成'||caseTotal!==null);
 
  const virtualAccount=state.registry?.finance?.values?.virtual_account??null;
  const isImportedVirtual=virtualAccount!==null && state.accountView?.imported_virtual_accounts?.length===1 && state.accountView.imported_virtual_accounts[0]===virtualAccount;
@@ -812,7 +911,63 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
           })
         ) : (
           <tr>
-            <td colSpan={8} className="finance-state">尚未建立月嫂應付明細。預計撥款日、已核銷與待出款金額待確認。</td>
+            <td colSpan={8} className="finance-state">
+              <div className="finance-empty-payroll-container" style={{ padding: '12px 8px', textAlign: 'center' }}>
+                {isPreliminary ? (
+                  <p>案件處於洽談中／尚未簽約排班，尚未產生月嫂應付明細。</p>
+                ) : isMissingBasis ? (
+                  <div>
+                    <p>缺少計薪依據（{!state.order?.staff_id ? '未指派服務人員' : '缺少服務天數或時數'}），請至上方【調整本案服務條件】確認。</p>
+                    <button
+                      type="button"
+                      className="finance-btn-secondary"
+                      style={{ marginTop: '8px' }}
+                      onClick={() => setEditingOpen(true)}
+                    >
+                      前往調整服務條件
+                    </button>
+                  </div>
+                ) : isEligibleToRecalculate ? (
+                  <div>
+                    <p>本案具備計算條件，尚未建立月嫂應付明細。預計撥款日、已核銷與待出款金額待確認。</p>
+                    <div style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="finance-btn-primary"
+                        disabled={syncingPayroll || accountingBusy}
+                        onClick={async () => {
+                          setSyncingPayroll(true);
+                          setSyncPayrollMessage(null);
+                          try {
+                            if (isHistoricalOrder) {
+                              const res = await differenceResolutionClient.syncHistoricalBaseline(initialCase);
+                              if (res.details?.[0]?.reason) {
+                                setSyncPayrollMessage(`同步結果：${res.details[0].reason}`);
+                              } else {
+                                setSyncPayrollMessage('已更新帳務計算，正在刷新帳務資料…');
+                              }
+                            } else {
+                              setEditingOpen(true);
+                              setSyncPayrollMessage('請於上方服務條件確認並儲存以完成帳務計算。');
+                            }
+                            refresh();
+                          } catch (err) {
+                            setSyncPayrollMessage('更新帳務計算失敗，請稍後重試。');
+                          } finally {
+                            setSyncingPayroll(false);
+                          }
+                        }}
+                      >
+                        {syncingPayroll ? '正在更新帳務計算…' : '更新帳務計算'}
+                      </button>
+                    </div>
+                    {syncPayrollMessage && <p role="status" style={{ marginTop: '6px', fontSize: '13px' }}>{syncPayrollMessage}</p>}
+                  </div>
+                ) : (
+                  <p>尚未建立月嫂應付明細。預計撥款日、已核銷與待出款金額待確認。</p>
+                )}
+              </div>
+            </td>
           </tr>
         )}
       </tbody>

@@ -4967,6 +4967,34 @@ def local_additive_recover_verified_ddl(
         return result
 
 
+def _upgrade_admission_states(snapshot: Mapping[str, Any]) -> dict[str, str]:
+    states = _owned_classification(snapshot, defer_missing_triggers=True)
+    terms_status_steps = {
+        "1070_historical_order_terms_receipt_status.sql",
+        "1071_pending_order_terms_receipt_status.sql",
+        "1074_historical_open_order_terms_receipt_status.sql",
+    }
+    pending_parent_columns: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for part in SCHEMA_PARTS:
+        name = part.name
+        state = states.get(name)
+        if name not in terms_status_steps or state not in {"absent", "drift"}:
+            continue
+        descriptor = _canonical_artifact_descriptor(name)
+        if state == "drift":
+            if not _local_parent_columns_dependency_pending(
+                snapshot, descriptor, name, pending_parent_columns
+            ):
+                continue
+            # Each artifact's execution still checks its immediate predecessor
+            # from a fresh snapshot after the preceding changes have run.
+            states[name] = "absent"
+        for table, columns in descriptor["parent_columns"].items():
+            for column, contract in columns.items():
+                pending_parent_columns[(table, column)] = contract
+    return states
+
+
 def build_plan(
     config: DatabaseConfig,
     source: str,
@@ -4976,9 +5004,7 @@ def build_plan(
     validate_database_names(source, candidate)
     source_identity = server_identity(config, source)
     source_snapshot = _schema_snapshot(config, source)
-    source_objects = _owned_classification(
-        source_snapshot, defer_missing_triggers=True
-    )
+    source_objects = _upgrade_admission_states(source_snapshot)
     blocking_states = _blocking_schema_states(
         source_objects, allowed_partial_artifacts
     )
@@ -6967,6 +6993,8 @@ def _release_descriptor_metadata_state(
         "1052_nas_registration_approval.sql",
         "1053_line_order_group_invitation_url.sql",
         "1058_client_refund_overage_receipt.sql",
+        "1061_matching_manual_reason_optional.sql",
+        "1062_order_reopen_reason_optional.sql",
         "1065_historical_order_reused_pairing_check.sql",
         "1070_historical_order_terms_receipt_status.sql",
         "1071_pending_order_terms_receipt_status.sql",
@@ -7056,6 +7084,8 @@ def _release_descriptor_metadata_state(
             defer_missing_triggers=defer_missing_triggers,
         )
     if part_name in {
+        "1061_matching_manual_reason_optional.sql",
+        "1062_order_reopen_reason_optional.sql",
         "1065_historical_order_reused_pairing_check.sql",
         "1072_case_architecture_bootstrap_reason_optional.sql",
         "1073_client_beclass_query_case_uniqueness.sql",
@@ -8581,9 +8611,7 @@ def apply_schema(
         )
     before = _schema_snapshot(config, candidate)
     states = _owned_classification(before)
-    preapply_states = _owned_classification(
-        before, defer_missing_triggers=True
-    )
+    preapply_states = _upgrade_admission_states(before)
     blocking_states = _blocking_schema_states(
         preapply_states, allowed_partial_artifacts
     )
