@@ -94,7 +94,7 @@ def test_uses_detected_sheet_and_header_row_not_filename(tmp_path):
     path = tmp_path / "任意名稱.xlsx"
     headers = [
         "帳號", "交易日 ", "計息日 ", "入帳日 ", "摘要", "幣別", "支出",
-        "存入", "餘額", "銷帳編號", "交易參考編號", "", "更正註記", "存摺備註",
+        "存入", "餘額", "銷帳編號", "交易參考編號", "備註", "更正註記", "存摺備註",
     ]
     rows = [
         ["說明"],
@@ -110,16 +110,20 @@ def test_uses_detected_sheet_and_header_row_not_filename(tmp_path):
     ]
     pd.DataFrame(rows).to_excel(path, sheet_name="任意分頁", index=False, header=False)
 
-    result = normalize_historical_multisheet_rows(path, "任意分頁", 4)
+    result = normalize_workbook(path)
 
-    assert len(result) == 1
-    assert result[0]["source_bank_account"] == "000012345678"
-    assert result[0]["cancellation_code"] == "000099"
-    assert result[0]["bank_references"]["transaction_reference"] == "000077"
-    assert result[0]["memo"] == "比對 001234567890"
-    assert result[0]["bank_references"]["comparison_field"] == "比對 001234567890"
-    assert result[0]["bank_references"]["存摺備註"] == "備註"
-    assert result[0]["direction"] == "incoming"
+    assert result["format_id"] == "legacy"
+    assert result["sheet_name"] == "任意分頁"
+    assert result["header_row"] == 4
+    [row] = result["normalized_rows"]
+    assert row["source_bank_account"] == "000012345678"
+    assert row["cancellation_code"] == "000099"
+    assert row["bank_references"]["transaction_reference"] == "000077"
+    assert row["memo"] == "比對 001234567890"
+    assert row["bank_references"]["comparison_field"] == "比對 001234567890"
+    assert row["raw_payload"]["備註"] == "比對 001234567890"
+    assert row["bank_references"]["存摺備註"] == "備註"
+    assert row["direction"] == "incoming"
 
 
 def test_rejects_missing_twelfth_comparison_column(tmp_path):

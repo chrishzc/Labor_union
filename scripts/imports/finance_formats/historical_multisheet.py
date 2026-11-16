@@ -124,13 +124,13 @@ def normalize_historical_multisheet_rows(
     if (
         len(headers) <= CORRECTION_MARKER_INDEX
         or headers[TRANSACTION_REFERENCE_INDEX] != "交易參考編號"
-        or headers[COMPARISON_FIELD_INDEX] != ""
+        or headers[COMPARISON_FIELD_INDEX] not in {"備註", ""}
         or headers[CORRECTION_MARKER_INDEX] != "更正註記"
         or len(headers) <= PASSBOOK_MEMO_INDEX
         or headers[PASSBOOK_MEMO_INDEX] != "存摺備註"
     ):
         raise ValueError(
-            "歷史對帳單第 12 欄必須是交易參考編號與更正註記之間的空白比對欄位"
+            "歷史對帳單第 12 欄須為「備註」，舊版可保留空白表頭，位置在交易參考編號與更正註記之間"
         )
     if (
         len(headers) > COUNTERPARTY_NAME_INDEX
