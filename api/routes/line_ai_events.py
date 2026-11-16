@@ -274,10 +274,12 @@ def create_qa_catalog_item(
 @router.get("/feedback/aggregate", response_model=BaseResponse[LineFeedbackAggregateView])
 def get_feedback_aggregate(
     _: AdminPrincipal = Depends(require_line_configuration_reader),
+    knowledge_only: bool = False,
 ):
     now = datetime.now(timezone.utc)
     window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
-    aggregate = get_line_feedback_application().aggregate(CATALOG_REVISION, window_start, now)
+    catalog_revision = None if knowledge_only else CATALOG_REVISION
+    aggregate = get_line_feedback_application().aggregate(catalog_revision, window_start, now)
     return BaseResponse(
         data=LineFeedbackAggregateView(
             catalog_revision=aggregate.catalog_revision,

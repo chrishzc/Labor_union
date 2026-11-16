@@ -31,8 +31,8 @@ _KNOWLEDGE_RESPONSE_PREFIX = "knowledge-answer-receipt:"
 
 @router.post("/preview", response_model=BaseResponse[LineFeedbackPreviewView])
 def preview_feedback(payload: RecordLineFeedbackRequest):
-    """Zero-write feedback preview bound to the verified actor and current binding."""
-    line_user_id, binding_version = _verified_bound_actor(payload)
+    """Preview feedback for the verified actor without writing."""
+    line_user_id, binding_version = _verified_feedback_actor(payload)
     command = _feedback_command(payload, line_user_id.value, binding_version)
     result = get_line_feedback_application().preview(command)
     return BaseResponse(
@@ -47,7 +47,7 @@ def preview_feedback(payload: RecordLineFeedbackRequest):
 
 @router.post("", response_model=BaseResponse[LineFeedbackReceiptView])
 def record_feedback(payload: RecordLineFeedbackRequest):
-    line_user_id, binding_version = _verified_bound_actor(payload)
+    line_user_id, binding_version = _verified_feedback_actor(payload)
     try:
         result = get_line_feedback_application().apply(
             _feedback_command(payload, line_user_id.value, binding_version)
@@ -69,7 +69,9 @@ def record_feedback(payload: RecordLineFeedbackRequest):
 @router.post("/query", response_model=BaseResponse[LineFeedbackReadbackView])
 def query_feedback(payload: LineFeedbackQueryRequest):
     """Read back only the verified actor's immutable feedback root and receipt."""
-    line_user_id, _ = _verified_bound_actor(payload)
+    line_user_id, binding_version = _verified_feedback_actor(payload)
+    if binding_version == 0:
+        _knowledge_feedback_source(payload.source_response_id, line_user_id.value, inline_only=True)
     result = get_line_feedback_application().query(
         line_user_id.value,
         payload.source_response_id,
@@ -80,7 +82,9 @@ def query_feedback(payload: LineFeedbackQueryRequest):
 
 
 def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding_version: int):
-    source = _knowledge_feedback_source(payload.source_response_id, actor_id)
+    source = _knowledge_feedback_source(
+        payload.source_response_id, actor_id, inline_only=binding_version == 0,
+    )
     catalog_revision = payload.catalog_revision
     if source is not None:
         context, catalog_revision = source
@@ -103,7 +107,7 @@ def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding
     )
 
 
-def _knowledge_feedback_source(source_response_id: str, actor_id: str):
+def _knowledge_feedback_source(source_response_id: str, actor_id: str, *, inline_only: bool = False):
     if not source_response_id.startswith(_KNOWLEDGE_RESPONSE_PREFIX):
         return None
     raw_id = source_response_id[len(_KNOWLEDGE_RESPONSE_PREFIX):]
@@ -124,12 +128,15 @@ def _knowledge_feedback_source(source_response_id: str, actor_id: str):
         context is None
         or context.source_response_id != source_response_id
         or catalog_revision is None
+        or (inline_only and context.line_delivery_task_id is not None)
     ):
         raise HTTPException(status_code=404, detail="line_feedback_source_unavailable")
     return context, catalog_revision
 
 
-def _verified_bound_actor(payload: RecordLineFeedbackRequest | LineFeedbackQueryRequest):
+def _verified_feedback_actor(
+    payload: RecordLineFeedbackRequest | LineFeedbackQueryRequest,
+) -> tuple[LineUserId, int]:
     token = payload.line_id_token.strip()
     if token:
         try:
@@ -145,9 +152,11 @@ def _verified_bound_actor(payload: RecordLineFeedbackRequest | LineFeedbackQuery
 
     with open_line_unit_of_work() as unit_of_work:
         fact = unit_of_work.identity_management.current_fact(LineIdentityCurrentFactQuery(line_user_id))
-    if fact.root_version is None or not fact.owner_projections:
-        raise HTTPException(status_code=403, detail="line_feedback_binding_not_current")
-    return line_user_id, fact.root_version
+    if fact.root_version is not None and fact.owner_projections:
+        return line_user_id, fact.root_version
+    if token and payload.source_response_id.startswith(_KNOWLEDGE_RESPONSE_PREFIX):
+        return line_user_id, 0
+    raise HTTPException(status_code=403, detail="line_feedback_binding_not_current")
 
 
 def _development_identity_fallback_enabled() -> bool:

@@ -84,15 +84,21 @@ class MySqlLineFeedbackRepository:
         self._source_events.register_source_event(event)
 
     def aggregate(
-        self, catalog_revision: int, window_start: datetime, window_end: datetime
+        self, catalog_revision: int | None, window_start: datetime, window_end: datetime
     ) -> FeedbackAggregate:
+        if catalog_revision is None:
+            source_filter = "JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.source_response_id')) LIKE %s"
+            source_value = "knowledge-answer-receipt:%"
+        else:
+            source_filter = "JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.catalog_revision'))=%s"
+            source_value = catalog_revision
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT event_code,COUNT(*) AS count FROM line_notification_source_events "
                 "WHERE source_domain=%s AND source_aggregate_type='line_feedback' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.catalog_revision'))=%s "
+                f"AND {source_filter} "
                 "AND occurred_at_utc >= %s AND occurred_at_utc < %s GROUP BY event_code",
-                (_FEEDBACK_DOMAIN, catalog_revision, window_start, window_end),
+                (_FEEDBACK_DOMAIN, source_value, window_start, window_end),
             )
             rows = tuple(cursor.fetchall() or ())
         counts = {str(row["event_code"]): int(row["count"]) for row in rows}

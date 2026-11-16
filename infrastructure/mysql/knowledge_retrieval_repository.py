@@ -389,7 +389,7 @@ class MySqlKnowledgeRetrievalRepository:
     ) -> KnowledgeAnswerFeedbackContext | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT receipt.id FROM knowledge_answer_receipts receipt "
+                "SELECT receipt.id,receipt.line_delivery_task_id FROM knowledge_answer_receipts receipt "
                 "JOIN knowledge_answer_requests request "
                 "ON request.id=receipt.answer_request_id "
                 "LEFT JOIN line_delivery_tasks task ON task.id=receipt.line_delivery_task_id "
@@ -405,6 +405,7 @@ class MySqlKnowledgeRetrievalRepository:
             source_response_id=f"knowledge-answer-receipt:{int(row['id'])}",
             response_revision=1,
             rule_revision=None,
+            line_delivery_task_id=row["line_delivery_task_id"],
         )
 
     def complete_index(self, job_id: int, index_version: int, content_set_digest: str):

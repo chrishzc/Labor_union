@@ -115,7 +115,7 @@ class LineFeedbackApplication:
         return _readback(root, replayed=True)
 
     def aggregate(
-        self, catalog_revision: int, window_start: datetime, window_end: datetime
+        self, catalog_revision: int | None, window_start: datetime, window_end: datetime
     ) -> FeedbackAggregate:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.feedback.aggregate(catalog_revision, window_start, window_end)

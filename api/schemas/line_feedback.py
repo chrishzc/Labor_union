@@ -38,7 +38,7 @@ class LineNavigationRecentRepliesView(_Closed):
 
 
 class LineFeedbackAggregateView(_Closed):
-    catalog_revision: int = Field(ge=1)
+    catalog_revision: int | None = Field(ge=1)
     window_start: str
     window_end: str
     resolved_count: int = Field(ge=0)

@@ -38,7 +38,10 @@ describe('AI 客服回饋與知識補強', () => {
     ];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       if (String(url).includes('/knowledge/questions')) return new Response(JSON.stringify(questions), { status: 200 });
-      return new Response(JSON.stringify({ data: { total_count: 3, resolved_count: 2, unresolved_count: 1, resolved_rate: 2 / 3 } }), { status: 200 });
+      if (String(url).endsWith('/line/ai-events/feedback/aggregate?knowledge_only=true')) {
+        return new Response(JSON.stringify({ data: { total_count: 3, resolved_count: 2, unresolved_count: 1, resolved_rate: 2 / 3 } }), { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
     });
 
     const createQa = vi.fn();

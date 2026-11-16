@@ -22,6 +22,7 @@ class KnowledgeAnswerFeedbackContext:
     source_response_id: str
     response_revision: int
     rule_revision: int | None
+    line_delivery_task_id: int | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.source_response_id, "feedback source response", 191)
@@ -105,7 +106,7 @@ class FeedbackReadback:
 
 @dataclass(frozen=True, slots=True)
 class FeedbackAggregate:
-    catalog_revision: int
+    catalog_revision: int | None
     window_start: datetime
     window_end: datetime
     resolved_count: int
@@ -128,8 +129,10 @@ class LineFeedbackRepository(Protocol):
     def append(self, root: FeedbackRoot) -> None: ...
 
     def aggregate(
-        self, catalog_revision: int, window_start: datetime, window_end: datetime
-    ) -> FeedbackAggregate: ...
+        self, catalog_revision: int | None, window_start: datetime, window_end: datetime
+    ) -> FeedbackAggregate:
+        """Aggregate one catalog revision, or Knowledge feedback across indexes when unset."""
+        ...
 
 
 __all__ = [

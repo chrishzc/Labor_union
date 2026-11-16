@@ -79,7 +79,7 @@ export const KnowledgeFeedbackPanel: React.FC<{
       const requestHeaders = headers();
       const [questionsResponse, feedbackResponse] = await Promise.all([
         applicationFetch('/api/v1/knowledge/questions?limit=200', { headers: requestHeaders, credentials: 'include' }),
-        applicationFetch('/api/v1/line/ai-events/feedback/aggregate', { headers: requestHeaders, credentials: 'include' }),
+        applicationFetch('/api/v1/line/ai-events/feedback/aggregate?knowledge_only=true', { headers: requestHeaders, credentials: 'include' }),
       ]);
       if (!questionsResponse.ok || !feedbackResponse.ok) throw new Error('feedback_observation_read_failed');
       const questionRows = await questionsResponse.json() as QuestionObservation[];
