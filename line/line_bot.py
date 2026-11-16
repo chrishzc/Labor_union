@@ -11,6 +11,7 @@ import asyncio
 import sys
 from typing import Any, Dict, Optional
 from pathlib import Path
+from urllib.parse import parse_qs
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
@@ -235,6 +236,14 @@ _GATEWAY_PAGE = Path(__file__).resolve().parent / "static" / "gateway.html"
 @router.get("/")
 async def health_check(request: Request):
     params = request.query_params
+    target = params.get("target")
+    if not target:
+        state_query = params.get("liff.state", "").partition("?")[2]
+        target = parse_qs(state_query).get("target", [""])[0]
+    if target == "ai_assistant":
+        from api.routes.line_service_help import service_help_page
+        return service_help_page()
+
     has_liff_params = any(
         k in params
         for k in (

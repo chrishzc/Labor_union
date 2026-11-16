@@ -21,7 +21,7 @@ def test_answer_feedback_uses_existing_preview_and_apply_contract() -> None:
     assert "'/api/v1/line/feedback'" in PAGE
     assert "knowledge-answer-receipt:${answerData.answer_receipt_id}" in PAGE
     assert "outcome === 'resolved'" in PAGE
-    assert "submitFeedback(card, actions, answerData, token, 'unresolved')" in PAGE
+    assert "submitFeedback(card, actions, feedbackSource, token, 'unresolved')" in PAGE
 
 
 # Execute the page's actual inline JavaScript, not a copied implementation.
@@ -82,10 +82,13 @@ const document = {
   getElementById: id => ({qaFlow: flow, askBtn: askButton})[id],
   createElement: tag => new Element(tag)
 };
-const response = (ok, data) => ({ok, json: async () => ({data})});
+const response = (ok, data, headers = {}) => ({
+  ok, status: ok ? 200 : 503, headers: {get: name => headers[name] ?? null},
+  json: async () => ({data})
+});
 const liff = {
   init: async () => {},
-  isLoggedIn: () => true,
+  isLoggedIn: () => scenario !== 'ask-no-identity',
   getIDToken: () => token
 };
 const context = vm.createContext({
@@ -103,8 +106,8 @@ function askWith(respond) {
     assert.equal(options.method, 'POST');
     const payload = JSON.parse(options.body);
     assert.equal(payload.question, question);
-    assert.equal(payload.line_id_token, token);
-    assert.ok(payload.interaction_id);
+    assert.equal(payload.line_id_token, scenario === 'ask-no-identity' ? '' : token);
+    assert.equal(Boolean(payload.interaction_id), scenario !== 'ask-no-identity');
     return respond({...answer, interaction_id: payload.interaction_id});
   };
   return context.submitQuestion(question);
@@ -120,6 +123,12 @@ function feedbackButtons(card) {
   const buttons = card.querySelectorAll('button');
   assert.deepEqual(buttons.map(button => button.textContent.replace(/^👍 /, '')), ['有幫助', '未解決']);
   return buttons;
+}
+
+function assertFeedbackUnavailable(card, hint) {
+  const buttons = feedbackButtons(card);
+  assert.ok(buttons.every(button => button.disabled && !button.onclick));
+  assert.match(card.querySelector('.feedback-status').textContent, hint);
 }
 
 async function main() {
@@ -154,36 +163,41 @@ async function main() {
     await askWith(queryFailures[scenario]);
     const failed = lastAnswer();
     assert.match(failed.textContent, /目前無法查詢答案/);
-    assert.equal(failed.querySelectorAll('button').length, 0);
+    assertFeedbackUnavailable(failed, /請重新提問/);
     await askWith(data => response(true, data));
     assert.match(lastAnswer().textContent, /工會核准的服務說明/);
     feedbackButtons(lastAnswer());
     return;
   }
 
-  if (scenario === 'ask-unsupported') {
-    await askWith(() => response(true, {outcome: 'unsupported'}));
-    const card = lastAnswer();
-    assert.match(card.textContent, /查無適用解答/);
-    assert.match(card.textContent, /LINE 官方帳號聊天室中留言/);
-    assert.equal(card.querySelectorAll('button').length, 0);
-    return;
-  }
-
-  if (scenario === 'ask-wrong-interaction' || scenario === 'ask-no-receipt') {
+  if (['ask-wrong-interaction', 'ask-no-receipt', 'ask-no-identity'].includes(scenario)) {
     const invalidField = scenario === 'ask-wrong-interaction' ?
       {interaction_id: 'another-interaction'} : {answer_receipt_id: null};
     await askWith(data => response(true, {...data, ...invalidField}));
     const card = lastAnswer();
     assert.match(card.textContent, /工會核准的服務說明/);
-    assert.equal(card.querySelectorAll('button').length, 0);
+    assertFeedbackUnavailable(card, scenario === 'ask-no-identity' ? /重新開啟/ : /請重新提問/);
     return;
   }
 
-  await askWith(data => response(true, data));
+  const unsupported = scenario === 'ask-unsupported';
+  const failed = scenario === 'ask-recorded-failure';
+  if (unsupported) {
+    await askWith(data => response(true, {
+      outcome: 'unsupported', interaction_id: data.interaction_id, feedback_request_id: 8
+    }));
+    assert.match(lastAnswer().textContent, /查無適用解答/);
+    assert.match(lastAnswer().textContent, /LINE 官方帳號聊天室中留言/);
+  } else if (failed) {
+    await askWith(() => response(false, null, {'X-LIFF-Feedback-Request-Id': '9'}));
+    assert.match(lastAnswer().textContent, /目前無法查詢答案/);
+  } else {
+    await askWith(data => response(true, data));
+  }
   const card = lastAnswer();
   const buttons = feedbackButtons(card);
-  const outcome = scenario.includes('unresolved') ? 'unresolved' : 'resolved';
+  assert.ok(buttons.every(button => !button.disabled));
+  const outcome = unsupported || scenario.includes('unresolved') ? 'unresolved' : 'resolved';
   const button = buttons[outcome === 'resolved' ? 0 : 1];
   const previewUrl = '/api/v1/line/feedback/preview';
   const applyUrl = '/api/v1/line/feedback';
@@ -197,14 +211,18 @@ async function main() {
   };
   let failure = failures[scenario];
   const calls = [];
+  const expectedSource = unsupported ? 'knowledge-answer-request:8' :
+    failed ? 'knowledge-answer-request:9' : 'knowledge-answer-receipt:7';
+  const expectedKey = unsupported ? 'liff-feedback-request:8' :
+    failed ? 'liff-feedback-request:9' : 'liff-feedback:7';
   context.fetch = async (url, options) => {
     calls.push(url);
     assert.equal(options.method, 'POST');
     const payload = JSON.parse(options.body);
     assert.equal(payload.line_id_token, token);
-    assert.equal(payload.idempotency_key, 'liff-feedback:7');
-    assert.equal(payload.source_response_id, 'knowledge-answer-receipt:7');
-    assert.equal(payload.catalog_revision, 2);
+    assert.equal(payload.idempotency_key, expectedKey);
+    assert.equal(payload.source_response_id, expectedSource);
+    assert.equal(payload.catalog_revision, unsupported || failed ? null : 2);
     assert.equal(payload.outcome, outcome);
     if (url === previewUrl) {
       if (failure === 'preview') throw new Error('simulated network failure');
@@ -248,7 +266,7 @@ main().catch(error => {console.error(error); process.exitCode = 1;});
 
 @pytest.mark.parametrize("scenario", [
     "ask-loading", "ask-http503", "ask-invalid-json", "ask-missing-data",
-    "ask-unsupported", "ask-wrong-interaction", "ask-no-receipt",
+    "ask-unsupported", "ask-recorded-failure", "ask-wrong-interaction", "ask-no-receipt", "ask-no-identity",
     "feedback-resolved", "feedback-unresolved",
     "feedback-resolved-apply-failure", "feedback-unresolved-apply-failure",
     "feedback-repeat-failure", "feedback-unresolved-wrong-receipt",

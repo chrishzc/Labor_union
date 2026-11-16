@@ -565,6 +565,14 @@ def test_root_endpoint_serves_gateway_html_for_purpose_and_schedule_liff_params(
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
 
+        for params in ({"target": "ai_assistant"}, {"liff.state": "/?target=ai_assistant"}):
+            res = client.get("/", params=params)
+            assert res.status_code == 200
+            assert res.history == []
+            assert 'id="qaFlow"' in res.text
+            assert "await liff.init" in res.text
+            assert res.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+
 
 def test_gateway_and_identity_route_all_guide_targets_without_dropping_context() -> None:
     gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")

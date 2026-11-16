@@ -41,11 +41,30 @@ const statusLabels: Record<QuestionDisplayStatus, string> = {
   failed: '系統異常',
 };
 
-function displayStatus(item: QuestionObservation): QuestionDisplayStatus {
+function feedbackStatus(item: QuestionObservation): 'answered' | 'needs_improvement' | null {
   if (item.feedback_outcome === 'resolved') return 'answered';
   if (item.feedback_outcome === 'unresolved') return 'needs_improvement';
-  if (item.request_status === 'answered') return 'awaiting_feedback';
+  return null;
+}
+
+function displayStatus(item: QuestionObservation): QuestionDisplayStatus {
+  if (item.request_status === 'answered') return feedbackStatus(item) ?? 'awaiting_feedback';
   return item.request_status;
+}
+
+function needsAttention(item: QuestionObservation): boolean {
+  return item.feedback_outcome === 'unresolved' || item.request_status === 'unsupported' || item.request_status === 'failed';
+}
+
+function QuestionStatusBadges({ item }: { item: QuestionObservation }) {
+  const status = displayStatus(item);
+  const feedback = feedbackStatus(item);
+  return <div>
+    <span className={`qa-lifecycle-badge is-${status}`}>{statusLabels[status]}</span>
+    {feedback && status !== feedback && (
+      <span className={`qa-lifecycle-badge is-${feedback}`}>{statusLabels[feedback]}</span>
+    )}
+  </div>;
 }
 
 function headers(): Record<string, string> {
@@ -99,30 +118,30 @@ export const KnowledgeFeedbackPanel: React.FC<{
 
   const counts = useMemo(() => ({
     awaiting: questions.filter((item) => displayStatus(item) === 'awaiting_feedback').length,
-    answered: questions.filter((item) => displayStatus(item) === 'answered').length,
-    gaps: questions.filter((item) => displayStatus(item) === 'needs_improvement').length,
-    unsupported: questions.filter((item) => displayStatus(item) === 'unsupported').length,
-    failed: questions.filter((item) => displayStatus(item) === 'failed').length,
+    answered: questions.filter((item) => item.feedback_outcome === 'resolved').length,
+    gaps: questions.filter((item) => item.feedback_outcome === 'unresolved').length,
+    unsupported: questions.filter((item) => item.request_status === 'unsupported').length,
+    failed: questions.filter((item) => item.request_status === 'failed').length,
+    attention: questions.filter(needsAttention).length,
   }), [questions]);
 
   const visibleQuestions = useMemo(() => questions.filter((item) => {
     const status = displayStatus(item);
-    if (filter === 'attention') return ['needs_improvement', 'unsupported', 'failed'].includes(status);
+    if (filter === 'attention') return needsAttention(item);
     if (filter === 'awaiting') return status === 'awaiting_feedback';
-    if (filter === 'gap') return status === 'needs_improvement';
-    if (filter === 'answered') return status === 'answered';
+    if (filter === 'gap') return item.feedback_outcome === 'unresolved';
+    if (filter === 'answered') return item.feedback_outcome === 'resolved';
     if (filter === 'unsupported') return status === 'unsupported';
     if (filter === 'failed') return status === 'failed';
     return true;
   }), [filter, questions]);
 
-  const attentionCount = counts.gaps + counts.unsupported + counts.failed;
   const readUnavailable = loading || notice !== null;
 
   return (
     <div className="knowledge-feedback-panel">
       <div className="studio-feedback-summary">
-        <div className="ai-feedback-metric"><span><AlertTriangle aria-hidden="true" />需要查看</span><strong>{readUnavailable ? '—' : attentionCount}</strong><small>含用戶未解決、無答案與系統異常</small></div>
+        <div className="ai-feedback-metric"><span><AlertTriangle aria-hidden="true" />需要查看</span><strong>{readUnavailable ? '—' : counts.attention}</strong><small>含用戶未解決、無答案與系統異常</small></div>
         <div className="ai-feedback-metric"><span><MessageCircle aria-hidden="true" />本次載入提問</span><strong>{readUnavailable ? '—' : questions.length}</strong><small>最多載入 200 筆</small></div>
         <div className="ai-feedback-metric is-positive"><span><ThumbsUp aria-hidden="true" />回饋有幫助</span><strong>{readUnavailable || feedback?.resolved_rate == null ? '—' : `${Math.round(feedback.resolved_rate * 100)}%`}</strong><small>回饋統計 · {readUnavailable ? '—' : feedback?.total_count ?? '—'} 筆回饋</small></div>
       </div>
@@ -137,7 +156,7 @@ export const KnowledgeFeedbackPanel: React.FC<{
         <div className="knowledge-question-list">
           {visibleQuestions.map((item) => {
             const status = displayStatus(item);
-            return <article key={item.id} className={`knowledge-question-card studio-feedback-row is-${status}`}><div><strong>{item.question}</strong><p className="studio-description">{formatTaipeiDateTime(item.created_at_utc, true)}</p></div><span className={`qa-lifecycle-badge is-${status}`}>{statusLabels[status]}</span><button type="button" className="studio-text-button" aria-label={`查看提問：${item.question}`} onClick={() => setSelectedQuestion(item)}>查看明細</button></article>;
+            return <article key={item.id} className={`knowledge-question-card studio-feedback-row is-${status}`}><div><strong>{item.question}</strong><p className="studio-description">{formatTaipeiDateTime(item.created_at_utc, true)}</p></div><QuestionStatusBadges item={item} /><button type="button" className="studio-text-button" aria-label={`查看提問：${item.question}`} onClick={() => setSelectedQuestion(item)}>查看明細</button></article>;
           })}
           {!loading && !notice && visibleQuestions.length === 0 && <div className="studio-empty" role="status">{questions.length === 0 ? '尚無真實問答紀錄。' : '目前沒有符合篩選條件的問題。'}</div>}
           {loading && <div className="ai-feedback-loading" role="status">載入問題與回饋中…</div>}
@@ -153,11 +172,11 @@ export const KnowledgeFeedbackPanel: React.FC<{
         {selectedQuestion?.source_identity?.startsWith('line-common-qa:') && onOpenQa && <button type="button" className="line-primary-btn" onClick={() => onOpenQa(qaIdentity(selectedQuestion.source_identity)!)}><Pencil aria-hidden="true" />檢查命中問答</button>}
         {selectedQuestion?.request_status === 'unsupported' && onCreateQa && <button type="button" className="line-primary-btn" onClick={() => onCreateQa(selectedQuestion.question)}><Plus aria-hidden="true" />新增問答草稿</button>}
       </div>}>
-        {selectedQuestion && <div className="studio-feedback-detail"><span className={`qa-lifecycle-badge is-${displayStatus(selectedQuestion)}`}>{statusLabels[displayStatus(selectedQuestion)]}</span><p className="studio-description">{formatTaipeiDateTime(selectedQuestion.created_at_utc, true)}</p><h3>民眾提問</h3><p>{selectedQuestion.question}</p><h3>本次回答</h3><p className="studio-answer-text">{selectedQuestion.answer_text || '本次沒有產生答案。'}</p>
+        {selectedQuestion && <div className="studio-feedback-detail"><QuestionStatusBadges item={selectedQuestion} /><p className="studio-description">{formatTaipeiDateTime(selectedQuestion.created_at_utc, true)}</p><h3>民眾提問</h3><p>{selectedQuestion.question}</p><h3>本次回答</h3><p className="studio-answer-text">{selectedQuestion.answer_text || '本次沒有產生答案。'}</p>
           {displayStatus(selectedQuestion) === 'awaiting_feedback' && <p className="knowledge-feedback-waiting">已產生回答；尚未收到用戶回饋，無法判定是否解決問題。</p>}
           {displayStatus(selectedQuestion) === 'needs_improvement' && <p className="knowledge-gap-reason">用戶回饋此回答未解決問題，建議檢查命中題目、答案內容或新增知識。</p>}
-          {selectedQuestion.request_status === 'unsupported' && <p className="knowledge-gap-reason">題庫中沒有足夠相符的已發布答案；這是系統結果，不是用戶對回答的回饋。</p>}
-          {selectedQuestion.request_status === 'failed' && <p className="knowledge-system-failure">處理失敗：{selectedQuestion.failure_code || '原因待查'}；這不會計入知識缺口。</p>}
+          {selectedQuestion.request_status === 'unsupported' && <p className="knowledge-gap-reason">題庫中沒有足夠相符的已發布答案。</p>}
+          {selectedQuestion.request_status === 'failed' && <p className="knowledge-system-failure">處理失敗：{selectedQuestion.failure_code || '原因待查'}</p>}
           <details className="studio-technical"><summary>命中題目與版本資訊</summary><p>{qaIdentity(selectedQuestion.source_identity) ? `命中題目：${qaIdentity(selectedQuestion.source_identity)} v${selectedQuestion.source_version ?? '—'}` : '沒有命中題目'}</p><p>索引版本：{selectedQuestion.index_version ?? '—'}</p></details>
         </div>}
       </Drawer>

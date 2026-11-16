@@ -75,6 +75,7 @@ class ServiceHelpAskResponse(BaseModel):
     suggestion: str | None = None
     interaction_id: str | None = None
     answer_receipt_id: int | None = None
+    feedback_request_id: int | None = None
 
 
 @page_router.get("/line-service-help", include_in_schema=False)
@@ -146,14 +147,7 @@ def ask_service_question(
     try:
         semantic_result = application.test_semantics(clean_question)
     except Exception as error:
-        if interaction_id is not None and actor_id is not None:
-            _persist_liff_outcome(
-                clean_question,
-                interaction_id,
-                actor_id,
-                "failed",
-            )
-        raise _knowledge_query_unavailable("knowledge_query_unavailable") from error
+        raise _liff_query_failed(clean_question, interaction_id, actor_id, "knowledge_query_unavailable") from error
 
     if semantic_result.outcome == "answered" and semantic_result.answer_text:
         answer_receipt_id = None
@@ -180,8 +174,9 @@ def ask_service_question(
         )
 
     if semantic_result.outcome == "unsupported":
+        feedback_request_id = None
         if interaction_id is not None and actor_id is not None:
-            _persist_liff_outcome(
+            feedback_request_id = _persist_liff_outcome(
                 clean_question,
                 interaction_id,
                 actor_id,
@@ -194,24 +189,15 @@ def ask_service_question(
                 index_version=semantic_result.index_version,
                 suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
                 interaction_id=interaction_id,
+                feedback_request_id=feedback_request_id,
             ),
             message="未找到相符解答，已引導真人客服",
         )
 
-    if interaction_id is not None and actor_id is not None:
-        _persist_liff_outcome(
-            clean_question,
-            interaction_id,
-            actor_id,
-            "failed",
-        )
-
-    if semantic_result.outcome in {"index_unavailable", "provider_error"}:
-        raise _knowledge_query_unavailable(
-            semantic_result.code or "knowledge_query_unavailable"
-        )
-
-    raise _knowledge_query_unavailable("knowledge_query_unavailable")
+    code = "knowledge_query_unavailable"
+    if semantic_result.outcome in {"index_unavailable", "provider_error"} and semantic_result.code:
+        code = semantic_result.code
+    raise _liff_query_failed(clean_question, interaction_id, actor_id, code)
 
 
 def _verified_liff_interaction(
@@ -285,12 +271,14 @@ def _replay_liff_response(
                 outcome="unsupported",
                 suggestion="抱歉，工會知識庫目前尚未收錄與您提問完全相符的標準解答。您可以直接在此 LINE 官方帳號聊天室中留言，工會真人客服專員將親自為您詳細解說！",
                 interaction_id=interaction_id,
+                feedback_request_id=int(previous["id"]),
             ),
             message="未找到相符解答，已引導真人客服",
         )
     if previous["request_status"] != "answered":
         # The existing failed request does not store the original provider code.
-        raise _knowledge_query_unavailable("knowledge_query_unavailable")
+        request_id = int(previous["id"]) if previous["request_status"] == "failed" else None
+        raise _knowledge_query_unavailable("knowledge_query_unavailable", request_id)
     if (
         previous["answer_receipt_id"] is None
         or not previous["answer_text"]
@@ -380,8 +368,17 @@ def _persist_liff_outcome(
     return request_id
 
 
-def _knowledge_query_unavailable(code: str) -> HTTPException:
-    return typed_http_error(
+def _liff_query_failed(
+    question: str, interaction_id: str | None, actor_id: str | None, code: str,
+) -> HTTPException:
+    request_id = None
+    if interaction_id is not None and actor_id is not None:
+        request_id = _persist_liff_outcome(question, interaction_id, actor_id, "failed")
+    return _knowledge_query_unavailable(code, request_id)
+
+
+def _knowledge_query_unavailable(code: str, feedback_request_id: int | None = None) -> HTTPException:
+    error = typed_http_error(
         503,
         "unavailable",
         code,
@@ -389,6 +386,9 @@ def _knowledge_query_unavailable(code: str) -> HTTPException:
         "line-service-help:ask",
         retryable=True,
     )
+    if feedback_request_id is not None:
+        error.headers = {"X-LIFF-Feedback-Request-Id": str(feedback_request_id)}
+    return error
 
 
 __all__ = ["page_router", "public_router"]

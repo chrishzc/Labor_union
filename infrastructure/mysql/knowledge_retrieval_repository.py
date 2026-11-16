@@ -39,7 +39,10 @@ from subsystems.knowledge_retrieval.contracts import (
     RetireKnowledgeItemCommand,
     ReviewKnowledgeItemCommand,
 )
-from subsystems.line.feedback_contracts import KnowledgeAnswerFeedbackContext
+from subsystems.line.feedback_contracts import (
+    KNOWLEDGE_LIFF_RESULT_PREFIX,
+    KnowledgeAnswerFeedbackContext,
+)
 
 
 KnowledgeAction = Literal["ingest", "review", "publish", "retire"]
@@ -406,6 +409,28 @@ class MySqlKnowledgeRetrievalRepository:
             response_revision=1,
             rule_revision=None,
             line_delivery_task_id=row["line_delivery_task_id"],
+        )
+
+    def inline_result_feedback_context(
+        self,
+        request_id: int,
+        actor_id: str,
+    ) -> KnowledgeAnswerFeedbackContext | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT requester_line_user_id FROM knowledge_answer_requests "
+                "WHERE id=%s AND requester_line_user_id=%s "
+                "AND SUBSTR(idempotency_key,1,LENGTH('liff-knowledge-answer:'))='liff-knowledge-answer:' "
+                "AND request_status IN ('unsupported','failed')",
+                (request_id, actor_id),
+            )
+            row = cursor.fetchone()
+        if row is None or row["requester_line_user_id"] != actor_id:
+            return None
+        return KnowledgeAnswerFeedbackContext(
+            source_response_id=f"{KNOWLEDGE_LIFF_RESULT_PREFIX}{request_id}",
+            response_revision=1,
+            rule_revision=None,
         )
 
     def complete_index(self, job_id: int, index_version: int, content_set_digest: str):
@@ -934,7 +959,7 @@ _GET_ANSWER_REQUEST = """SELECT q.id,q.question,q.request_status,q.correlation_i
 q.completed_at_utc,r.answer_text,r.index_version,r.authoritative,r.line_delivery_task_id,r.answered_at_utc
 FROM knowledge_answer_requests q LEFT JOIN knowledge_answer_receipts r ON r.answer_request_id=q.id
 WHERE q.id=%s"""
-_LIST_ANSWER_REQUESTS = """SELECT q.id,q.question,q.request_status,
+_LIST_ANSWER_REQUESTS = f"""SELECT q.id,q.question,q.request_status,
 q.created_at_utc,q.completed_at_utc,r.answer_text,r.index_version,
 (SELECT s.source_identity FROM knowledge_answer_sources s
  WHERE s.answer_receipt_id=r.id ORDER BY s.citation_order LIMIT 1) AS source_identity,
@@ -944,7 +969,13 @@ q.created_at_utc,q.completed_at_utc,r.answer_text,r.index_version,
  FROM line_notification_source_events e
  WHERE e.source_domain='line_feedback'
  AND e.source_aggregate_type='line_feedback'
- AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.source_response_id'))=CONCAT('knowledge-answer-receipt:',CAST(r.id AS CHAR))
+ AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.actor_id'))=q.requester_line_user_id
+ AND JSON_UNQUOTE(JSON_EXTRACT(e.facts_snapshot,'$.source_response_id'))=CASE
+   WHEN r.id IS NOT NULL THEN CONCAT('knowledge-answer-receipt:',CAST(r.id AS CHAR))
+   WHEN q.request_status IN ('unsupported','failed')
+   AND SUBSTR(q.idempotency_key,1,LENGTH('liff-knowledge-answer:'))='liff-knowledge-answer:'
+   THEN CONCAT('{KNOWLEDGE_LIFF_RESULT_PREFIX}',CAST(q.id AS CHAR))
+ END
  ORDER BY e.occurred_at_utc DESC,e.id DESC LIMIT 1) AS feedback_outcome,
 (SELECT j.last_error_code FROM knowledge_jobs j
  WHERE j.answer_request_id=q.id ORDER BY j.id DESC LIMIT 1) AS failure_code

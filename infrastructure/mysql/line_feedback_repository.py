@@ -14,6 +14,7 @@ from infrastructure.mysql.line_notification_repository import MySqlLineNotificat
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.feedback_contracts import (
+    KNOWLEDGE_LIFF_RESULT_PREFIX,
     FeedbackAggregate,
     FeedbackOutcome,
     FeedbackRoot,
@@ -87,18 +88,19 @@ class MySqlLineFeedbackRepository:
         self, catalog_revision: int | None, window_start: datetime, window_end: datetime
     ) -> FeedbackAggregate:
         if catalog_revision is None:
-            source_filter = "JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.source_response_id')) LIKE %s"
-            source_value = "knowledge-answer-receipt:%"
+            source = "JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.source_response_id'))"
+            source_filter = f"({source} LIKE %s OR {source} LIKE %s)"
+            source_values = ("knowledge-answer-receipt:%", f"{KNOWLEDGE_LIFF_RESULT_PREFIX}%")
         else:
             source_filter = "JSON_UNQUOTE(JSON_EXTRACT(facts_snapshot,'$.catalog_revision'))=%s"
-            source_value = catalog_revision
+            source_values = (catalog_revision,)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT event_code,COUNT(*) AS count FROM line_notification_source_events "
                 "WHERE source_domain=%s AND source_aggregate_type='line_feedback' "
                 f"AND {source_filter} "
                 "AND occurred_at_utc >= %s AND occurred_at_utc < %s GROUP BY event_code",
-                (_FEEDBACK_DOMAIN, source_value, window_start, window_end),
+                (_FEEDBACK_DOMAIN, *source_values, window_start, window_end),
             )
             rows = tuple(cursor.fetchall() or ())
         counts = {str(row["event_code"]): int(row["count"]) for row in rows}
@@ -123,7 +125,7 @@ def _root_from_row(row: dict[str, object]) -> FeedbackRoot:
         outcome=FeedbackOutcome(str(facts["outcome"])),
         binding_version=int(facts["binding_version"]),
         response_revision=int(facts["response_revision"]),
-        catalog_revision=int(facts["catalog_revision"]),
+        catalog_revision=None if facts["catalog_revision"] is None else int(facts["catalog_revision"]),
         rule_revision=(None if facts.get("rule_revision") is None else int(facts["rule_revision"])),
         command_fingerprint=PreviewFingerprint(str(facts["command_fingerprint"])),
         ticket_id=(None if facts.get("ticket_id") is None else int(facts["ticket_id"])),

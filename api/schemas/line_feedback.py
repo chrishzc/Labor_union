@@ -53,7 +53,7 @@ class RecordLineFeedbackRequest(_Closed):
     source_response_id: str = Field(min_length=1, max_length=191)
     outcome: str = Field(pattern="^(resolved|unresolved)$")
     response_revision: int = Field(ge=1)
-    catalog_revision: int = Field(ge=1)
+    catalog_revision: int | None = Field(ge=1)
     rule_revision: int | None = Field(default=None, ge=1)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
@@ -86,7 +86,7 @@ class LineFeedbackRootView(_Closed):
     outcome: str
     binding_version: int = Field(ge=0)
     response_revision: int = Field(ge=1)
-    catalog_revision: int = Field(ge=1)
+    catalog_revision: int | None = Field(ge=1)
     rule_revision: int | None = Field(default=None, ge=1)
     command_fingerprint: str
     ticket_id: int | None

@@ -402,10 +402,11 @@
     submitQuestion(question);
   }
 
-  function appendQueryUnavailable(flow) {
+  function appendQueryUnavailable(flow, feedbackSource, token) {
     const errCard = document.createElement('div');
     errCard.className = 'message-card message-ai';
     errCard.textContent = '目前無法查詢答案。請稍後再試，或在 LINE 聊天室留言。';
+    appendFeedbackControls(errCard, feedbackSource, token);
     flow.appendChild(errCard);
     errCard.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
@@ -419,17 +420,32 @@
     return lineIdToken;
   }
 
-  function appendFeedbackControls(card, answerData, token) {
+  function answerFeedbackSource(answerData) {
     if (
-      !token
-      || !Number.isInteger(answerData.answer_receipt_id)
+      !Number.isInteger(answerData.answer_receipt_id)
       || answerData.answer_receipt_id < 1
       || !Number.isInteger(answerData.index_version)
       || answerData.index_version < 1
     ) {
-      return;
+      return null;
     }
+    return {
+      sourceId: `knowledge-answer-receipt:${answerData.answer_receipt_id}`,
+      catalogRevision: answerData.index_version,
+      key: `liff-feedback:${answerData.answer_receipt_id}`
+    };
+  }
 
+  function resultFeedbackSource(requestId) {
+    if (!Number.isSafeInteger(requestId) || requestId < 1) return null;
+    return {
+      sourceId: `knowledge-answer-request:${requestId}`,
+      catalogRevision: null,
+      key: `liff-feedback-request:${requestId}`
+    };
+  }
+
+  function appendFeedbackControls(card, feedbackSource, token) {
     const actions = document.createElement('div');
     actions.className = 'feedback-actions';
 
@@ -443,31 +459,41 @@
     unresolvedButton.className = 'feedback-btn';
     unresolvedButton.textContent = '未解決';
 
-    resolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'resolved');
-    unresolvedButton.onclick = () => submitFeedback(card, actions, answerData, token, 'unresolved');
     actions.append(resolvedButton, unresolvedButton);
     card.appendChild(actions);
+    if (!token || !feedbackSource) {
+      resolvedButton.disabled = true;
+      unresolvedButton.disabled = true;
+      const status = document.createElement('div');
+      status.className = 'feedback-status';
+      status.textContent = !token
+        ? '請從 LINE 官方帳號聊天室重新開啟 AI 智慧問答，才能送出回饋。'
+        : '這次問答無法送出回饋，請重新提問。';
+      card.appendChild(status);
+      return;
+    }
+    resolvedButton.onclick = () => submitFeedback(card, actions, feedbackSource, token, 'resolved');
+    unresolvedButton.onclick = () => submitFeedback(card, actions, feedbackSource, token, 'unresolved');
   }
 
-  function feedbackPayload(answerData, token, outcome) {
-    const sourceResponseId = `knowledge-answer-receipt:${answerData.answer_receipt_id}`;
+  function feedbackPayload(feedbackSource, token, outcome) {
     return {
       line_id_token: token,
-      source_response_id: sourceResponseId,
+      source_response_id: feedbackSource.sourceId,
       outcome,
       response_revision: 1,
-      catalog_revision: answerData.index_version,
+      catalog_revision: feedbackSource.catalogRevision,
       rule_revision: null,
-      idempotency_key: `liff-feedback:${answerData.answer_receipt_id}`,
-      correlation_id: `liff-feedback:${answerData.answer_receipt_id}`
+      idempotency_key: feedbackSource.key,
+      correlation_id: feedbackSource.key
     };
   }
 
-  async function submitFeedback(card, actions, answerData, token, outcome) {
+  async function submitFeedback(card, actions, feedbackSource, token, outcome) {
     card.querySelector('.feedback-status')?.remove();
     const buttons = actions.querySelectorAll('button');
     buttons.forEach(button => { button.disabled = true; });
-    const payload = feedbackPayload(answerData, token, outcome);
+    const payload = feedbackPayload(feedbackSource, token, outcome);
 
     try {
       const previewResponse = await fetch('/api/v1/line/feedback/preview', {
@@ -528,8 +554,9 @@
 
     btn.disabled = true;
 
+    let token = '';
     try {
-      const token = await waitForLineIdentity();
+      token = await waitForLineIdentity();
       const interactionId = token ? createInteractionId() : '';
       const response = await fetch('/api/v1/line/service-help/ask', {
         method: 'POST',
@@ -544,12 +571,17 @@
       if (loadingCard.parentNode === flow) flow.removeChild(loadingCard);
 
       if (!response.ok || !result?.data) {
-        appendQueryUnavailable(flow);
+        const requestId = response.status === 503
+          ? Number(response.headers.get('X-LIFF-Feedback-Request-Id'))
+          : null;
+        appendQueryUnavailable(flow, resultFeedbackSource(requestId), token);
         return;
       }
 
       const aiMsg = document.createElement('div');
       aiMsg.className = 'message-card message-ai';
+      const isCurrentInteraction = interactionId && result.data.interaction_id === interactionId;
+      let feedbackSource;
 
       if (
         result.data.outcome === 'answered'
@@ -562,9 +594,7 @@
           ${result.data.source_ref ? `<div class="ai-source-ref">依據標準：${escapeHtml(result.data.source_ref)}</div>` : ''}
           <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">💡 若有特殊或客製化需求，您可隨時於 LINE 聊天室留言由真人為您服務。</div>
         `;
-        if (!interactionId || result.data.interaction_id === interactionId) {
-          appendFeedbackControls(aiMsg, result.data, token);
-        }
+        feedbackSource = isCurrentInteraction ? answerFeedbackSource(result.data) : null;
       } else if (result.data.outcome === 'unsupported') {
         aiMsg.innerHTML = `
           <div class="ai-badge unsupported">查無適用解答</div>
@@ -573,16 +603,18 @@
             👉 歡迎直接在目前這個 LINE 官方帳號聊天室中留言，工會真人專員將會親自為您詳細解說！
           </div>
         `;
+        feedbackSource = isCurrentInteraction ? resultFeedbackSource(result.data.feedback_request_id) : null;
       } else {
-        appendQueryUnavailable(flow);
+        appendQueryUnavailable(flow, null, token);
         return;
       }
+      appendFeedbackControls(aiMsg, feedbackSource, token);
       flow.appendChild(aiMsg);
       aiMsg.scrollIntoView({ behavior: 'smooth', block: 'end' });
     } catch (err) {
       console.error('提問失敗', err);
       if (loadingCard.parentNode === flow) flow.removeChild(loadingCard);
-      appendQueryUnavailable(flow);
+      appendQueryUnavailable(flow, null, token);
     } finally {
       btn.disabled = false;
     }

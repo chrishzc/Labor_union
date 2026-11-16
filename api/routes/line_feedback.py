@@ -21,7 +21,11 @@ from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from domains.line.identities import LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.feedback_application import FeedbackConflictError
-from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedback
+from subsystems.line.feedback_contracts import (
+    KNOWLEDGE_LIFF_RESULT_PREFIX,
+    FeedbackOutcome,
+    RecordLineFeedback,
+)
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 
 
@@ -94,6 +98,8 @@ def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding
             or payload.rule_revision != context.rule_revision
         ):
             raise HTTPException(status_code=409, detail="line_feedback_source_version_conflict")
+    elif catalog_revision is None:
+        raise HTTPException(status_code=422, detail="line_feedback_catalog_revision_required")
     return RecordLineFeedback(
         actor_id=actor_id,
         source_response_id=payload.source_response_id,
@@ -108,21 +114,27 @@ def _feedback_command(payload: RecordLineFeedbackRequest, actor_id: str, binding
 
 
 def _knowledge_feedback_source(source_response_id: str, actor_id: str, *, inline_only: bool = False):
-    if not source_response_id.startswith(_KNOWLEDGE_RESPONSE_PREFIX):
+    prefix, separator, raw_id = source_response_id.partition(":")
+    prefix += separator
+    if prefix not in (_KNOWLEDGE_RESPONSE_PREFIX, KNOWLEDGE_LIFF_RESULT_PREFIX):
         return None
-    raw_id = source_response_id[len(_KNOWLEDGE_RESPONSE_PREFIX):]
     try:
-        receipt_id = int(raw_id)
+        record_id = int(raw_id)
     except ValueError as error:
         raise HTTPException(status_code=422, detail="line_feedback_source_invalid") from error
-    if receipt_id < 1 or str(receipt_id) != raw_id:
+    if not 1 <= record_id < 2**64 or str(record_id) != raw_id:
         raise HTTPException(status_code=422, detail="line_feedback_source_invalid")
     with open_knowledge_retrieval_unit_of_work() as unit_of_work:
-        context = unit_of_work.knowledge.feedback_context(receipt_id, actor_id)
+        if prefix == KNOWLEDGE_LIFF_RESULT_PREFIX:
+            context = unit_of_work.knowledge.inline_result_feedback_context(record_id, actor_id)
+            if context is None:
+                raise HTTPException(status_code=404, detail="line_feedback_source_unavailable")
+            return context, None
+        context = unit_of_work.knowledge.feedback_context(record_id, actor_id)
         catalog_revision = (
             None
             if context is None
-            else unit_of_work.answer_receipt_catalog_revision(receipt_id)
+            else unit_of_work.answer_receipt_catalog_revision(record_id)
         )
     if (
         context is None
@@ -145,7 +157,11 @@ def _verified_feedback_actor(
             raise HTTPException(status_code=401, detail="liff_token_invalid") from error
         except LiffVerificationUnavailableError as error:
             raise HTTPException(status_code=503, detail="liff_verification_unavailable") from error
-    elif _development_identity_fallback_enabled() and payload.development_line_user_id.strip():
+    elif (
+        not payload.source_response_id.startswith(KNOWLEDGE_LIFF_RESULT_PREFIX)
+        and _development_identity_fallback_enabled()
+        and payload.development_line_user_id.strip()
+    ):
         line_user_id = LineUserId(payload.development_line_user_id.strip())
     else:
         raise HTTPException(status_code=401, detail="liff_token_required")
@@ -154,7 +170,7 @@ def _verified_feedback_actor(
         fact = unit_of_work.identity_management.current_fact(LineIdentityCurrentFactQuery(line_user_id))
     if fact.root_version is not None and fact.owner_projections:
         return line_user_id, fact.root_version
-    if token and payload.source_response_id.startswith(_KNOWLEDGE_RESPONSE_PREFIX):
+    if token and payload.source_response_id.startswith((_KNOWLEDGE_RESPONSE_PREFIX, KNOWLEDGE_LIFF_RESULT_PREFIX)):
         return line_user_id, 0
     raise HTTPException(status_code=403, detail="line_feedback_binding_not_current")
 

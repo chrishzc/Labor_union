@@ -12,6 +12,9 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text
 
 
+KNOWLEDGE_LIFF_RESULT_PREFIX = "knowledge-answer-request:"
+
+
 class FeedbackOutcome(StrEnum):
     RESOLVED = "resolved"
     UNRESOLVED = "unresolved"
@@ -39,7 +42,7 @@ class RecordLineFeedback:
     outcome: FeedbackOutcome
     binding_version: int
     response_revision: int
-    catalog_revision: int
+    catalog_revision: int | None
     rule_revision: int | None
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
@@ -47,8 +50,13 @@ class RecordLineFeedback:
     def __post_init__(self) -> None:
         require_canonical_text(self.actor_id, "feedback actor", 191)
         require_canonical_text(self.source_response_id, "feedback source response", 191)
-        if self.binding_version < 0 or self.response_revision < 1 or self.catalog_revision < 1:
+        if self.binding_version < 0 or self.response_revision < 1:
             raise ValueError("feedback versions are invalid")
+        if self.catalog_revision is None:
+            if not self.source_response_id.startswith(KNOWLEDGE_LIFF_RESULT_PREFIX):
+                raise ValueError("feedback catalog revision is required")
+        elif self.catalog_revision < 1:
+            raise ValueError("feedback catalog revision must be positive")
         if self.rule_revision is not None and self.rule_revision < 1:
             raise ValueError("feedback rule revision must be positive")
 
@@ -80,7 +88,7 @@ class FeedbackRoot:
     outcome: FeedbackOutcome
     binding_version: int
     response_revision: int
-    catalog_revision: int
+    catalog_revision: int | None
     rule_revision: int | None
     command_fingerprint: PreviewFingerprint
     ticket_id: int | None

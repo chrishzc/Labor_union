@@ -4,10 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
 from api.dependencies.llm_configuration import LlmConfigurationApplication, LlmSemanticTestResult
+from api.exception_handlers.typed_errors import _http_error_response
 from api.routes import llm_configuration as admin_llm
 from api.routes.line_service_help import ServiceHelpAskRequest, ask_service_question
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
@@ -165,6 +166,7 @@ class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
             )
 
         self.assertEqual(response.data.outcome, "unsupported")
+        self.assertEqual(response.data.feedback_request_id, 51)
         persist.assert_called_once_with(
             "題庫沒有這一題",
             "interaction-307-unsupported",
@@ -199,6 +201,9 @@ class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.status_code, 503)
         self.assertEqual(caught.exception.detail["error"]["code"], "timeout")
+        request = Request({"type": "http", "path": "/api/v1/line/service-help/ask", "headers": []})
+        response = _http_error_response(request, caught.exception)
+        self.assertEqual(response.headers["X-LIFF-Feedback-Request-Id"], "52")
         persist.assert_called_once_with(
             "服務問題",
             "interaction-307-failed",
@@ -234,6 +239,7 @@ class LineServiceHelpAnswerProvenanceTests(unittest.TestCase):
             caught.exception.detail["error"]["code"],
             "knowledge_query_unavailable",
         )
+        self.assertEqual(caught.exception.headers["X-LIFF-Feedback-Request-Id"], "53")
         persist.assert_called_once_with(
             "服務問題",
             "interaction-307-exception",

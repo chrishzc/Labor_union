@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KnowledgeFeedbackPanel } from '../../../../../../pages/line_management/KnowledgeFeedbackPanel';
 
@@ -6,13 +6,19 @@ import { KnowledgeFeedbackPanel } from '../../../../../../pages/line_management/
 describe('AI 客服回饋與知識補強', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('只依用戶回饋判定已回答或待補強，未回饋與無答案分開顯示', async () => {
+  it('分別顯示查詢狀態與回饋，並保留各自的篩選', async () => {
     const questions = [
+      {
+        id: 5, question: '查詢失敗後仍送出回饋', request_status: 'failed',
+        created_at_utc: '2026-09-09T06:00:00Z', completed_at_utc: '2026-09-09T06:00:02Z',
+        answer_text: null, index_version: null, source_identity: null, source_version: null,
+        feedback_outcome: 'resolved', failure_code: 'timeout',
+      },
       {
         id: 4, question: '民眾問了題庫沒有的問題', request_status: 'unsupported',
         created_at_utc: '2026-09-09T05:00:00Z', completed_at_utc: '2026-09-09T05:00:02Z',
         answer_text: null, index_version: 2, source_identity: null, source_version: null,
-        feedback_outcome: null, failure_code: null,
+        feedback_outcome: 'unresolved', failure_code: null,
       },
       {
         id: 3, question: '回答已送出但尚未回饋', request_status: 'answered',
@@ -49,6 +55,13 @@ describe('AI 客服回饋與知識補強', () => {
     render(<KnowledgeFeedbackPanel onCreateQa={createQa} onOpenQa={openQa} />);
 
     expect(await screen.findByText('民眾問了題庫沒有的問題')).toBeInTheDocument();
+    const unsupportedRow = screen.getByText('民眾問了題庫沒有的問題').closest('article')!;
+    expect(within(unsupportedRow).getByText('未找到答案')).toBeInTheDocument();
+    expect(within(unsupportedRow).getByText('用戶回饋未解決')).toBeInTheDocument();
+    const failedRow = screen.getByText('查詢失敗後仍送出回饋').closest('article')!;
+    expect(within(failedRow).getByText('系統異常')).toBeInTheDocument();
+    expect(within(failedRow).getByText('用戶確認有幫助')).toBeInTheDocument();
+    expect(within(screen.getByText('含用戶未解決、無答案與系統異常').parentElement!).getByText('3')).toBeInTheDocument();
     expect(screen.queryByText('回答已送出但尚未回饋')).not.toBeInTheDocument();
     expect(screen.queryByText('用戶認為有幫助')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('篩選結果'), { target: { value: 'all' } });
@@ -68,7 +81,8 @@ describe('AI 客服回饋與知識補強', () => {
     fireEvent.change(screen.getByLabelText('篩選結果'), { target: { value: 'gap' } });
     await waitFor(() => expect(screen.queryByText('用戶認為有幫助')).not.toBeInTheDocument());
     expect(screen.getByText('用戶認為沒有解決')).toBeInTheDocument();
-    expect(screen.queryByText('民眾問了題庫沒有的問題')).not.toBeInTheDocument();
+    expect(screen.getByText('民眾問了題庫沒有的問題')).toBeInTheDocument();
+    expect(screen.queryByText('查詢失敗後仍送出回饋')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看提問：用戶認為沒有解決' }));
     fireEvent.click(screen.getByRole('button', { name: '檢查命中問答' }));
     expect(openQa).toHaveBeenCalledWith('QA-032');
@@ -77,5 +91,8 @@ describe('AI 客服回饋與知識補強', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看提問：民眾問了題庫沒有的問題' }));
     fireEvent.click(screen.getByRole('button', { name: '新增問答草稿' }));
     expect(createQa).toHaveBeenCalledWith('民眾問了題庫沒有的問題');
+    fireEvent.click(screen.getByRole('button', { name: '關閉提問明細' }));
+    fireEvent.change(screen.getByLabelText('篩選結果'), { target: { value: 'failed' } });
+    expect(screen.getByText('查詢失敗後仍送出回饋')).toBeInTheDocument();
   });
 });

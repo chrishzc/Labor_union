@@ -25,6 +25,7 @@ from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineIdempotencyR
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.knowledge_retrieval.application import KnowledgeApplication
 from subsystems.line.feedback_application import LineFeedbackApplication
+from subsystems.line.feedback_contracts import KNOWLEDGE_LIFF_RESULT_PREFIX
 
 ROOT = Path(__file__).resolve().parents[6]
 P = {
@@ -337,3 +338,57 @@ def test_liff_visitor_feedback_appears_in_admin_questions_and_aggregate(env, mon
         line_feedback.record_feedback(chat_feedback)
     assert rejected.value.status_code == 404
     assert line_ai_events.get_feedback_aggregate(knowledge_only=True).data.total_count == 1
+
+    unsupported_question = question.model_copy(update={"question": "查無答案", "interaction_id": "unsupported"})
+    unsupported_semantics = SimpleNamespace(test_semantics=lambda _: SimpleNamespace(
+        outcome="unsupported", answer_text=None, index_version=19,
+    ))
+    unsupported = line_service_help.ask_service_question(unsupported_question, unsupported_semantics, verifier).data
+    assert unsupported.feedback_request_id is not None
+    assert line_service_help.ask_service_question(unsupported_question, unsupported_semantics, verifier).data.feedback_request_id == unsupported.feedback_request_id
+
+    failed_question = question.model_copy(update={"question": "查詢失敗", "interaction_id": "failed"})
+    failed_semantics = SimpleNamespace(test_semantics=lambda _: SimpleNamespace(
+        outcome="provider_error", answer_text=None, code="timeout",
+    ))
+    with pytest.raises(HTTPException) as unavailable:
+        line_service_help.ask_service_question(failed_question, failed_semantics, verifier)
+    assert unavailable.value.status_code == 503
+    assert unavailable.value.detail["error"]["code"] == "timeout"
+    failed_request_id = int(unavailable.value.headers["X-LIFF-Feedback-Request-Id"])
+    with pytest.raises(HTTPException) as replay:
+        line_service_help.ask_service_question(failed_question, failed_semantics, verifier)
+    assert replay.value.headers["X-LIFF-Feedback-Request-Id"] == str(failed_request_id)
+
+    for request_id, outcome in (
+        (unsupported.feedback_request_id, "unresolved"),
+        (failed_request_id, "resolved"),
+    ):
+        result_feedback = payload.model_copy(update={
+            "source_response_id": f"{KNOWLEDGE_LIFF_RESULT_PREFIX}{request_id}",
+            "catalog_revision": None,
+            "outcome": outcome,
+            "idempotency_key": f"visitor-result-{request_id}",
+        })
+        with pytest.raises(HTTPException) as rejected:
+            line_feedback.record_feedback(result_feedback.model_copy(update={"line_id_token": "U-other"}))
+        assert rejected.value.status_code == 404
+        assert line_feedback.preview_feedback(result_feedback).data.apply_ready
+        assert line_feedback.record_feedback(result_feedback).data.outcome == outcome
+        assert line_feedback.record_feedback(result_feedback).data.replayed
+        result_query = readback.model_copy(update={"source_response_id": result_feedback.source_response_id})
+        assert line_feedback.query_feedback(result_query).data.root.catalog_revision is None
+
+    for request_id in (rows[0]["id"], 99999):
+        with pytest.raises(HTTPException) as rejected:
+            line_feedback.record_feedback(payload.model_copy(update={
+                "source_response_id": f"{KNOWLEDGE_LIFF_RESULT_PREFIX}{request_id}",
+                "catalog_revision": None,
+            }))
+        assert rejected.value.status_code == 404
+    rows = {row["question"]: (row["request_status"], row["feedback_outcome"])
+            for row in knowledge_retrieval.list_knowledge_questions(200, None)}
+    assert rows["查無答案"] == ("unsupported", "unresolved")
+    assert rows["查詢失敗"] == ("failed", "resolved")
+    summary = line_ai_events.get_feedback_aggregate(knowledge_only=True).data
+    assert (summary.resolved_count, summary.unresolved_count, summary.total_count) == (1, 2, 3)
