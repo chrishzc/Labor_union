@@ -23,7 +23,7 @@ export const AccountingParametersBar: React.FC<AccountingParametersBarProps> = (
   disabled = false,
   onOpenEdit,
 }) => {
-  const isTwins = multiBirthCount === '雙胞胎' || (pricing?.terms.payroll.excess ?? 0) >= 450;
+  const isTwins = multiBirthCount === '雙胞胎';
   const identityName = pricing?.terms.identity_name || '一般市民';
   const subsidyHours = pricing?.terms.subsidy_hours ?? 0;
   const clientExcess = pricing?.terms.client.excess ?? 300;
@@ -33,7 +33,7 @@ export const AccountingParametersBar: React.FC<AccountingParametersBarProps> = (
       <div className="bank-params-summary-text">
         <span>⚡ <strong>本案計價依據：</strong></span>
         <span className={isTwins ? 'chip-twins-multi' : 'chip-twins-single'}>
-          {isTwins ? '雙胞胎' : '單胞胎'}
+          {isTwins ? '雙胞胎' : multiBirthCount === '單胞胎' ? '單胞胎' : '胎數待確認'}
         </span>
         <span className="chip-subsidy">
           {identityName} ({subsidyHours}h)
@@ -51,7 +51,7 @@ export const AccountingParametersBar: React.FC<AccountingParametersBarProps> = (
         onClick={onOpenEdit}
         title="原地調整本案帳務參數（胎數、補助上限、服務時薪）"
       >
-        ✏️ 原地更正參數
+        更正本案計價參數
       </button>
     </div>
   );

@@ -8,7 +8,14 @@ import { AccountingParametersCard } from '../../../../../../../components/Accoun
 import { AccountingParametersBar } from '../../../../../../../components/AccountingParametersBar';
 import { AccountingParametersDrawer } from '../../../../../../../components/AccountingParametersDrawer';
 import { accountingPricingClient, type CasePricing } from '../../../../../../../api/client_finance/accounting_pricing_client';
+import { clientRegistryClient } from '../../../../../../../api/client_registry/client_registry_client';
+import type { ClientRegistryDetail } from '../../../../../../../api/client_registry/client_registry_schemas';
 import { historicalServiceAccountingClient } from '../../../../../../../api/orders/historical_service_accounting_client';
+import { ApiHttpError, ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
+
+vi.mock('../../../../../../../api/client_registry/client_registry_client', () => ({
+  clientRegistryClient: { query: vi.fn(), preview: vi.fn(), apply: vi.fn() },
+}));
 
 vi.mock('../../../../../../../api/orders/historical_service_accounting_client', () => ({
   historicalServiceAccountingClient: { query: vi.fn(), preview: vi.fn(), apply: vi.fn() },
@@ -51,8 +58,60 @@ const mockPricing: CasePricing = {
   },
 };
 
+function registryBirthCount(value: '單胞胎' | '雙胞胎' | null, editable = true): ClientRegistryDetail {
+  return {
+    case_no: mockPricing.case_no,
+    client: {
+      client_id: 1,
+      version: 0,
+      values: {
+        name: null, gender: null, phone: null, city: null, address: null,
+        residence_type: null, delivery_type: null, baby_info: null, notes: null,
+      },
+      field_capabilities: {},
+    },
+    beclass: {
+      status: value === null ? 'unbound' : 'ready',
+      record_id: value === null ? null : 1,
+      source_kind: value === null ? null : 'admin_manual',
+      version: value === null ? null : value === '雙胞胎' ? 8 : 7,
+      values: value === null ? null : {
+        name: null, email: null, phone: null, tel: null, ext: null, city: null,
+        zip_code: null, address: null, admin_notes: null, multi_birth_count: value,
+      },
+      field_capabilities: value === null ? {} : {
+        multi_birth_count: {
+          owner: 'client_beclass', editable,
+          reason: editable ? null : 'multi_birth_count_locked_after_service_start',
+          options: ['單胞胎', '雙胞胎'],
+        },
+      },
+    },
+    order_information: { status: 'unbound', values: null, field_issues: {} },
+    finance: { status: 'not_ready', code: null, values: null },
+    order_terms: { status: 'not_ready', code: null, data: null, field_capabilities: {} },
+  };
+}
+
+const twinChange = { multi_birth_count: '雙胞胎' };
+const birthFingerprint = 'b'.repeat(64);
+
+function mockBirthCorrection() {
+  vi.mocked(clientRegistryClient.query).mockResolvedValue(registryBirthCount('單胞胎'));
+  vi.mocked(clientRegistryClient.preview).mockResolvedValue({
+    owner: 'client_beclass', aggregate_identity: mockPricing.case_no, current_version: 7,
+    before: { multi_birth_count: '單胞胎' }, after: twinChange, preview_fingerprint: birthFingerprint,
+  });
+  vi.mocked(clientRegistryClient.apply).mockResolvedValue({
+    owner: 'client_beclass', aggregate_identity: mockPricing.case_no, resulting_version: 8,
+    changed_fields: ['multi_birth_count'], preview_fingerprint: birthFingerprint,
+    readback: twinChange, idempotency_key: 'birth-key', replayed: false,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(clientRegistryClient.query).mockResolvedValue(registryBirthCount(null));
 });
 
 describe('AccountingParametersCard component', () => {
@@ -81,7 +140,7 @@ describe('AccountingParametersCard component', () => {
       />
     );
 
-    expect(screen.getByText('雙胞胎 (2位·加成)')).toBeInTheDocument();
+    expect(screen.getByText('雙胞胎 (2位)')).toBeInTheDocument();
     expect(screen.getByText('補助市民 (120h)')).toBeInTheDocument();
     expect(screen.getByText('$300')).toBeInTheDocument();
     expect(screen.getByText('$450')).toBeInTheDocument();
@@ -90,6 +149,13 @@ describe('AccountingParametersCard component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /調整帳務參數/ }));
     expect(handleOpenEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the registered singleton at a 450 hourly rate', () => {
+    render(<AccountingParametersCard caseNo={mockPricing.case_no} pricing={mockPricing}
+      multiBirthCount="單胞胎" onOpenEdit={vi.fn()} />);
+    expect(screen.getByText(/單胞胎/)).toBeVisible();
+    expect(screen.queryByText(/雙胞胎/)).not.toBeInTheDocument();
   });
 });
 
@@ -111,48 +177,145 @@ describe('AccountingParametersBar component', () => {
     expect(screen.getByText('$300/h')).toBeInTheDocument();
     expect(screen.getByText('NT$ 12,000')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /原地更正參數/ }));
+    fireEvent.click(screen.getByRole('button', { name: '更正本案計價參數' }));
     expect(handleOpenEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the registered birth count even when the hourly rate is 450', () => {
+    const { rerender } = render(<AccountingParametersBar caseNo={mockPricing.case_no}
+      pricing={mockPricing} multiBirthCount="單胞胎" onOpenEdit={vi.fn()} />);
+    expect(screen.getByText('單胞胎')).toBeVisible();
+    expect(screen.queryByText('雙胞胎')).not.toBeInTheDocument();
+
+    rerender(<AccountingParametersBar caseNo={mockPricing.case_no}
+      pricing={mockPricing} multiBirthCount={null} onOpenEdit={vi.fn()} />);
+    expect(screen.getByText(/胎數待確認/)).toBeVisible();
+    expect(screen.queryByText(/單胞胎|雙胞胎/)).not.toBeInTheDocument();
   });
 });
 
 describe('AccountingParametersDrawer component', () => {
-  it('loads case pricing, toggles twins, adjusts rates and applies changes', async () => {
+  it('confirms the BeClass change, saves the independent 420 rate and reopens as twins', async () => {
+    mockBirthCorrection();
     vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(structuredClone(mockPricing));
     vi.mocked(accountingPricingClient.applyCase).mockResolvedValue({ revision: 2 });
     const handleCommitted = vi.fn();
     const handleClose = vi.fn();
+    const props = { caseNo: mockPricing.case_no, onClose: handleClose, onCommitted: handleCommitted };
+    const { rerender } = render(<AccountingParametersDrawer {...props} isOpen />);
 
-    render(
-      <AccountingParametersDrawer
-        caseNo="115000088"
-        isOpen={true}
-        onClose={handleClose}
-        onCommitted={handleCommitted}
-        initialPricing={mockPricing}
-        initialMultiBirthCount="雙胞胎"
-      />
-    );
+    expect(await screen.findByRole('button', { name: /單胞胎/, pressed: true })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /雙胞胎/ }));
+    fireEvent.change(screen.getByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    const reason = '更正雙胞胎並調整月嫂時薪';
+    fireEvent.change(screen.getByLabelText(/調整原因說明/), { target: { value: reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
 
-    expect(await screen.findByText('調整本案帳務參數 · 115000088')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '調整歷史訂單服務天數' })).not.toBeInTheDocument();
-
-    // Toggle to single birth
-    const singleBtn = screen.getByRole('button', { name: /單胞胎/ });
-    fireEvent.click(singleBtn);
-
-    // Enter a reason and submit
-    const reasonInput = screen.getByLabelText(/調整原因說明/);
-    fireEvent.change(reasonInput, { target: { value: '更正為單胞胎計算' } });
-
-    const submitBtn = screen.getByRole('button', { name: /儲存本案帳務參數並重算/ });
-    fireEvent.click(submitBtn);
+    const confirm = await screen.findByRole('button', { name: '確認胎數並儲存' });
+    expect(clientRegistryClient.preview).toHaveBeenCalledWith(mockPricing.case_no, 'beclass', twinChange, 7);
+    expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
 
     await waitFor(() => {
-      expect(accountingPricingClient.applyCase).toHaveBeenCalledTimes(1);
       expect(handleCommitted).toHaveBeenCalledTimes(1);
       expect(handleClose).toHaveBeenCalledTimes(1);
     });
+    expect(clientRegistryClient.apply).toHaveBeenCalledExactlyOnceWith(
+      mockPricing.case_no, 'beclass', twinChange, 7, birthFingerprint, reason, expect.any(String),
+    );
+    const afterTerms = { ...mockPricing.terms, payroll: { ...mockPricing.terms.payroll, excess: 420 } };
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledExactlyOnceWith(
+      mockPricing.case_no, afterTerms, mockPricing.revision, reason, expect.any(String),
+    );
+    expect(clientRegistryClient.apply).toHaveBeenCalledBefore(vi.mocked(accountingPricingClient.applyCase));
+
+    rerender(<AccountingParametersDrawer {...props} isOpen={false} />);
+    vi.mocked(clientRegistryClient.query).mockResolvedValue(registryBirthCount('雙胞胎'));
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({
+      ...mockPricing, revision: 2, source: 'manual', terms: afterTerms,
+    });
+    rerender(<AccountingParametersDrawer {...props} isOpen />);
+    expect(await screen.findByRole('button', { name: /雙胞胎/, pressed: true })).toBeVisible();
+    expect(screen.getByLabelText('補助用盡後月嫂時薪')).toHaveValue(420);
+  });
+
+  it('retries only pricing after the confirmed BeClass correction has committed', async () => {
+    mockBirthCorrection();
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(mockPricing);
+    vi.mocked(accountingPricingClient.applyCase)
+      .mockRejectedValueOnce(new ApiHttpError(422, 'pricing_invalid', '計價設定未儲存'))
+      .mockResolvedValueOnce({ revision: 2 });
+    const handleClose = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen
+      onClose={handleClose} onCommitted={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /雙胞胎/ }));
+    fireEvent.change(screen.getByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認胎數並儲存' }));
+
+    expect(await screen.findByText(/胎數已儲存為雙胞胎/)).toBeVisible();
+    expect(handleClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('補助用盡後月嫂時薪')).toHaveValue(420);
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+
+    await waitFor(() => expect(handleClose).toHaveBeenCalledTimes(1));
+    expect(clientRegistryClient.preview).toHaveBeenCalledTimes(1);
+    expect(clientRegistryClient.apply).toHaveBeenCalledTimes(1);
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledTimes(2);
+  });
+
+  it('replays the same BeClass command after a timeout before attempting pricing', async () => {
+    mockBirthCorrection();
+    vi.mocked(clientRegistryClient.apply).mockRejectedValueOnce(new ApiTimeoutError(1000));
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(mockPricing);
+    vi.mocked(accountingPricingClient.applyCase).mockResolvedValue({ revision: 2 });
+    const handleClose = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen
+      onClose={handleClose} onCommitted={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /雙胞胎/ }));
+    fireEvent.change(screen.getByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認胎數並儲存' }));
+
+    const retry = await screen.findByRole('button', { name: /重試儲存/ });
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(handleClose).toHaveBeenCalledTimes(1));
+    expect(clientRegistryClient.preview).toHaveBeenCalledTimes(1);
+    expect(clientRegistryClient.apply).toHaveBeenCalledTimes(2);
+    const birthCalls = vi.mocked(clientRegistryClient.apply).mock.calls;
+    expect(birthCalls[1]).toEqual(birthCalls[0]);
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledExactlyOnceWith(mockPricing.case_no,
+      { ...mockPricing.terms, payroll: { ...mockPricing.terms.payroll, excess: 420 } },
+      mockPricing.revision, expect.any(String), expect.any(String));
+  });
+
+  it.each([
+    ['服務開始後胎數鎖定', registryBirthCount('單胞胎', false)],
+    ['正式胎數待確認', registryBirthCount(null)],
+  ])('單改費率不更正胎數（%s）', async (_scenario, detail) => {
+    vi.mocked(clientRegistryClient.query).mockResolvedValue(detail);
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(mockPricing);
+    vi.mocked(accountingPricingClient.applyCase).mockResolvedValue({ revision: 2 });
+    const handleClose = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen
+      onClose={handleClose} onCommitted={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: /雙胞胎/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /雙胞胎/, pressed: true })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+
+    await waitFor(() => expect(handleClose).toHaveBeenCalledTimes(1));
+    expect(clientRegistryClient.preview).not.toHaveBeenCalled();
+    expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledWith(mockPricing.case_no,
+      { ...mockPricing.terms, payroll: { ...mockPricing.terms.payroll, excess: 420 } },
+      mockPricing.revision, expect.any(String), expect.any(String));
   });
 
   it('saves historical days for the same case and refreshes reconciliation', async () => {
@@ -230,7 +393,6 @@ describe('AccountingParametersDrawer component', () => {
         onClose={vi.fn()}
         onCommitted={vi.fn()}
         initialPricing={mockPricing}
-        initialMultiBirthCount={null}
       />
     );
     const select = await screen.findByLabelText(/補助身分等級/);

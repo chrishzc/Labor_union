@@ -498,7 +498,7 @@ describe('同案通知與方案保存防重',()=>{
  });
 });
 describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
-  it('E2E：台新銀行退款流水無待退款項時，透過調整服務天數結算產生退款，並完成退款沖抵核銷', async () => {
+  it('台新退款流水從無待退款項到已有款項時，保留單一取消結算入口並切換可用操作', async () => {
     const refundObligationId = 'client-cancellation:refund:taishin';
     const row: FinanceBankTransaction = {
       row_id: 88,
@@ -623,10 +623,21 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
     try {
       wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
       expect(await screen.findByText('本案目前沒有可選待退款項')).toBeVisible();
-      const adjustBtn = await screen.findByRole('button', { name: /⚡ 調整服務天數結算退款/ });
-      expect(adjustBtn).toBeVisible();
+      expect(screen.getAllByRole('button', { name: /取消結算/ })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: /查看本案帳務/ })).toHaveLength(1);
+      expect(screen.queryByText(/請點選「前往本案帳務」/)).not.toBeInTheDocument();
 
-      fireEvent.click(adjustBtn);
+      fireEvent.click(screen.getByRole('button', { name: '更正款項用途／重新歸屬' }));
+      expect(screen.getByRole('combobox', { name: '款項用途' })).toHaveValue('client_refund');
+      fireEvent.click(screen.getByRole('button', { name: '收合更正表單' }));
+      expect(screen.queryByRole('combobox', { name: '款項用途' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '查看本案帳務' }));
+      expect(await screen.findByText('調整本案服務條件／計價')).toBeVisible();
+      expect(screen.getByRole('button', { name: '手動補登款項' })).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: '返回對核交易' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: /取消結算/ }));
       expect(await screen.findByLabelText('取消實際服務日 1')).toHaveValue('2026-10-10');
 
       fireEvent.click(screen.getByRole('button', { name: '預覽取消帳務' }));
@@ -634,7 +645,18 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
       fireEvent.click(confirmBtn);
 
       expect(await screen.findByText('取消結算已完成，請核對原流水與最新款項。')).toBeVisible();
-      expect(await screen.findByRole('checkbox', { name: /核銷款項/ })).toBeVisible();
+      const refundOption = await screen.findByRole('checkbox', { name: `核銷款項 ${refundObligationId}` });
+      expect(refundOption).toBeEnabled();
+      expect(screen.queryByText('本案目前沒有可選待退款項')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '查看本案帳務' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '更正款項用途／重新歸屬' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /取消結算/ }));
+      fireEvent.click(await screen.findByRole('button', { name: '返回核對交易' }));
+      const optionAfterReturn = await screen.findByRole('checkbox', { name: `核銷款項 ${refundObligationId}` });
+      fireEvent.click(optionAfterReturn);
+      expect(optionAfterReturn).toBeChecked();
+      expect(screen.getByRole('heading', { name: '核銷處置與預覽確認' })).toBeVisible();
     } finally {
       querySpy.mockRestore();
       previewSpy.mockRestore();
@@ -643,7 +665,7 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
     }
   });
 
-  it('黑箱：核對交易中折疊區塊引導使用原地更正參數抽屜，收斂重複入口', async () => {
+  it('核對交易時，服務條件折疊區及計價參數抽屜使用各自的入口', async () => {
     const row: FinanceBankTransaction = {
       row_id: 11,
       row_identity: 'finance-import-row:11',
@@ -669,10 +691,13 @@ describe('帳務核對之 E2E、黑箱、猴子與探索性測試', () => {
     });
 
     wrapper(<FinanceCaseAccounting initialCase={caseNo} bankReconciliation={{ row, onPosted: vi.fn(), onBusyChange: vi.fn() }} />);
-    const details = await screen.findByText('調整本案服務條件／計價');
+    const details = await screen.findByText('調整本案服務條件');
     fireEvent.click(details);
 
-    expect(await screen.findByText(/本案帳務計價參數（胎數、補助上限、時薪）已整合於下方/)).toBeVisible();
+    expect(await screen.findByText('目前無法讀取正式服務條件，請重新查詢案件後再更正。')).toBeVisible();
+    expect(screen.queryByText(/本案帳務計價參數（胎數、補助上限、時薪）已整合於下方/)).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '更正本案計價參數' }));
+    expect(screen.getByRole('dialog', { name: '調整本案帳務參數抽屜' })).toBeVisible();
   });
 
   it('猴子測試：快速隨機連點切換取消結算與核對視圖，無例外崩潰且狀態穩定', async () => {

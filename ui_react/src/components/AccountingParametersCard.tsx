@@ -48,7 +48,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
       active = false;
     };
   }, [caseNo, propPricing]);
-  const isTwins = multiBirthCount === '雙胞胎' || (pricing?.terms.payroll.excess ?? 0) >= 450;
+  const isTwins = multiBirthCount === '雙胞胎';
   const identityName = pricing?.terms.identity_name ?? '待確認';
   const subsidyHours = pricing?.terms.subsidy_hours;
   const clientCovered = pricing?.terms.client.covered;
@@ -96,7 +96,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
           <dt>胎數類別</dt>
           <dd>
             <span className={isTwins ? 'chip-twins-multi' : 'chip-twins-single'}>
-              {isTwins ? '雙胞胎 (2位·加成)' : '單胞胎 (1位)'}
+              {isTwins ? '雙胞胎 (2位)' : multiBirthCount === '單胞胎' ? '單胞胎 (1位)' : '胎數待確認'}
             </span>
           </dd>
         </div>
@@ -132,7 +132,7 @@ export const AccountingParametersCard: React.FC<AccountingParametersCardProps> =
 
       <div className="accounting-params-footer">
         <span>
-          {totalHours == null || coveredHours == null || excessHours == null ? '服務時數計價依據待確認' : <>💡 計價依據：服務總時數 {totalHours}h（補助範圍 {coveredHours}h + 超額 {excessHours}h）{isTwins ? '｜ 雙胞胎加成費率' : ''}</>}
+          {totalHours == null || coveredHours == null || excessHours == null ? '服務時數計價依據待確認' : <>💡 計價依據：服務總時數 {totalHours}h（補助範圍 {coveredHours}h + 超額 {excessHours}h）</>}
         </span>
         <span style={{ fontWeight: 600, color: 'var(--md-sys-color-primary)' }}>
           連動總額：客戶應繳 {displayCustomerAmount == null ? '待確認' : `NT$ ${displayCustomerAmount}`} ｜ 月嫂基準應付 {displayStaffAmount == null ? '待確認' : `NT$ ${displayStaffAmount}`}

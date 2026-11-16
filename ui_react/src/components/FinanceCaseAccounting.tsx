@@ -94,7 +94,6 @@ function CaseRefundReconciliation({
   reportBusy,
   selectionBusy,
   onViewCase,
-  onOpenCancellation,
 }: {
   row: FinanceBankTransaction;
   data: CaseAccounting;
@@ -106,7 +105,6 @@ function CaseRefundReconciliation({
   reportBusy: (busy: boolean) => void;
   selectionBusy: boolean;
   onViewCase?: () => void;
-  onOpenCancellation?: () => void;
 }) {
   const [showReassign, setShowReassign] = useState(false);
   const bankTotal = row.amount_ntd;
@@ -178,46 +176,7 @@ function CaseRefundReconciliation({
             </div>
             {!obligations.length ? (
               <div className="finance-reconciliation-empty-box">
-                <div className="finance-empty-header">
-                  <span className="finance-empty-badge">無可沖銷款項</span>
-                  <h5 className="finance-empty-title">本案目前沒有可選待退款項</h5>
-                </div>
-                <p className="finance-empty-desc">
-                  原銀行流水已帶入（{row.bank === 'sinopac' ? '永豐銀行' : '台新銀行'} {money(row.amount_ntd)}），但本案帳務尚未建立待退款或補助退款義務。請先至案件帳務確認正式款項資料後，再進行核對。
-                </p>
-                <div className="finance-empty-action-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {onOpenCancellation && (
-                    <button
-                      type="button"
-                      className="finance-btn-action-primary"
-                      onClick={onOpenCancellation}
-                      disabled={selectionBusy}
-                      style={{ background: 'var(--md-sys-color-primary, #6750a4)', color: '#fff' }}
-                    >
-                      ⚡ 調整服務天數結算退款（取消結算）
-                    </button>
-                  )}
-                  {onViewCase && (
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        type="button"
-                        className="finance-btn-action-primary"
-                        onClick={onViewCase}
-                        disabled={selectionBusy}
-                      >
-                        查看本案帳務（設定方案／補登款項）
-                      </button>
-                      <button
-                        type="button"
-                        className="finance-btn-action-secondary"
-                        onClick={() => setShowReassign((prev) => !prev)}
-                        disabled={selectionBusy}
-                      >
-                        {showReassign ? '收合更正表單' : '更正款項用途／重新歸屬'}
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <h5 className="finance-empty-title">本案目前沒有可選待退款項</h5>
               </div>
             ) : (
               <div className="finance-recon-obligations-list">
@@ -278,17 +237,17 @@ function CaseRefundReconciliation({
             </div>
           </div>
 
-          <div className="finance-recon-calc-explanation">
-            {!obligations.length ? (
-              <span>本案目前沒有可選款項，請點選「前往本案帳務」確認正式款項資料，或於下方進行流水用途更正。</span>
-            ) : !selectedIds.length ? (
-              <span>請先選擇本次要核銷的退款款項，再核對金額。</span>
-            ) : diff === 0 ? (
-              <span>退款金額與本次選取款項相符；請在下方檢查核銷影響並確認核銷。</span>
-            ) : (
-              <span>退款金額與選取款項存在差額，請在下方核銷表單選擇差額處理方式。</span>
-            )}
-          </div>
+          {obligations.length > 0 && (
+            <div className="finance-recon-calc-explanation">
+              {!selectedIds.length ? (
+                <span>請先選擇本次要核銷的退款款項，再核對金額。</span>
+              ) : diff === 0 ? (
+                <span>退款金額與本次選取款項相符；請在下方檢查核銷影響並確認核銷。</span>
+              ) : (
+                <span>退款金額與選取款項存在差額，請在下方核銷表單選擇差額處理方式。</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 無款項時提供合規處置指引面板 */}
@@ -297,12 +256,10 @@ function CaseRefundReconciliation({
             <h5>異常處置與業務指引</h5>
             <ul className="finance-recon-guidance-list">
               <li>
-                <strong>本案確有退款但尚未建立款項：</strong>
-                請點擊「查看本案帳務」，確認【02 補助退款方案】是否已選定為「方案二（客戶先墊後退）」或執行【手動補登款項】。設定完成後返回此抽屜即可核對。
+                本案確有退款但尚未建立款項，請查看本案帳務，確認補助退款方案是否為「方案二（客戶先墊後退）」或手動補登款項。
               </li>
               <li>
-                <strong>銀行出款非本案退款（流水誤判）：</strong>
-                請點擊「更正款項用途／重新歸屬」，重新指定受款案件或將用途變更為月嫂薪資、整期補助退款等其他款項性質。
+                流水歸錯案件或款項用途，請更正款項用途或重新歸屬。
               </li>
             </ul>
             <div className="finance-empty-action-group">
@@ -482,7 +439,6 @@ function CaseBankReconciliation({ row, data, onPosted, onBusyChange, onViewCase,
         reportBusy={reportBusy}
         selectionBusy={selectionBusy}
         onViewCase={onViewCase}
-        onOpenCancellation={canOpenCancellation ? () => requestLeave(() => setShowCancellation(true)) : undefined}
       />
     )}
     </>}
@@ -572,12 +528,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const refundAccountStatus=state.registry?.beclass?.values?.refund_account_status??null;
  const refundName=state.registry?.beclass?.values?.name??state.registry?.client?.values?.name??data?.client_name??'';
  const contactPhone=state.registry?.beclass?.values?.phone??state.registry?.client?.values?.phone??null;
- const multiBirthCount=state.registry?.beclass?.values?.multi_birth_count??(state.pricing&&state.pricing.terms.payroll.excess>=450?'雙胞胎':'單胞胎');
+ const multiBirthCount=state.registry?.beclass?.status==='ready'?state.registry.beclass.values?.multi_birth_count:null;
+ const isBankReconciliation=bankReconciliation&&!showFullCase;
 
  return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
  {data&&<details className="finance-case-block finance-case-edit-tools" onToggle={event=>{if(event.currentTarget.open)setEditingOpen(true);}}>
-   <summary>調整本案服務條件／計價</summary>
+   <summary>{isBankReconciliation?'調整本案服務條件':'調整本案服務條件／計價'}</summary>
    {editingOpen&&<div className="finance-case-block-body">
      <p>儲存成功後，本案帳務與原銀行流水的核銷款項會同步更新，請重新核對後核銷。</p>
      <fieldset disabled={reconciliationBusy||pricingEditState.busy}>
@@ -585,11 +542,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
          <OrderTermsMutationPanel caseNo={initialCase} query={state.registry.order_terms.data} fromRegistry onObserved={()=>setPendingAccountingRefresh(true)} onEditStateChange={setTermsEditState}/>:
          <p>目前無法讀取正式服務條件，請重新查詢案件後再更正。</p>}
      </fieldset>
-     {bankReconciliation && !showFullCase ? (
-       <div style={{ marginTop: '10px', padding: '10px 14px', background: '#f5f0eb', borderRadius: '6px', fontSize: '0.84rem', color: '#52433d' }}>
-         💡 本案帳務計價參數（胎數、補助上限、時薪）已整合於下方的<strong>【✏️ 原地更正參數】</strong>抽屜；如需調整請點擊該按鈕進行即時試算並儲存。
-       </div>
-     ) : (
+     {!isBankReconciliation && (
        <CasePricingAdjustmentPanel caseNo={initialCase} revision={revision} disabled={reconciliationBusy||termsEditState.busy}
          onCommitted={async()=>{setPendingAccountingRefresh(true);}} onStateChange={setPricingEditState}/>
      )}
@@ -1052,14 +1005,13 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
   </div>
  </div></details>
  </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} subsidyAmount={data.subsidy_ntd} bankMemos={data.bank_memos??[]} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
- {data && (
+ {data && paramsDrawerOpen && (
    <AccountingParametersDrawer
      key={initialCase}
      caseNo={initialCase}
      isOpen={paramsDrawerOpen}
      onClose={() => setParamsDrawerOpen(false)}
      initialPricing={state.pricing}
-     initialMultiBirthCount={multiBirthCount}
      canEditHistoricalDays={state.order?.order_status === '歷史訂單－服務完成'}
      onCommitted={() => {
        setPendingAccountingRefresh(true);
