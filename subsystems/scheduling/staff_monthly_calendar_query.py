@@ -107,6 +107,7 @@ def get_staff_monthly_calendar_schedule(
         num_days = monthrange(year, month)[1]
         month_start = date(year, month, 1)
         month_end = date(year, month, num_days)
+        service_window_start = month_start - timedelta(days=1)
 
         with conn.cursor() as cursor:
             cursor.execute("SELECT 1 AS staff_exists FROM staff WHERE id = %s", (staff_id,))
@@ -137,9 +138,10 @@ def get_staff_monthly_calendar_schedule(
                   AND (csa.status IS NULL OR csa.status <> 'cancelled')
                   AND ss.work_date BETWEEN %s AND %s
                 ORDER BY ss.work_date, ss.id
-            """, (staff_id, month_start - timedelta(days=1), month_end))
+            """, (staff_id, service_window_start, month_end))
             schedule_rows = cursor.fetchall()
 
+            official_service_dates: set[tuple[int, date]] = set()
             for row in schedule_rows:
                 work_date = _as_date(row.get("work_date"))
                 if work_date is None:
@@ -149,6 +151,7 @@ def get_staff_monthly_calendar_schedule(
                     # 排除 legacy 無法確認 ownership 的排班列，避免誤映到 assignment_id
                     continue
 
+                official_service_dates.add((assignment_id, work_date))
                 is_work_day = _coerce_bool(row.get("is_work_day"))
                 is_double_pay = _coerce_bool(row.get("is_double_pay"))
                 day = work_date.day
@@ -211,51 +214,55 @@ def get_staff_monthly_calendar_schedule(
                   )
                 ORDER BY csa.assigned_start_date,csa.id
                 """,
-                (staff_id, month_end, month_start),
+                (staff_id, month_end, service_window_start),
             )
             for row in cursor.fetchall():
                 assigned_start = _as_date(row["assigned_start_date"])
                 assigned_end = _as_date(row["assigned_end_date"])
                 if assigned_start is None or assigned_end is None:
                     continue
-                start = max(assigned_start, month_start)
+                start = max(assigned_start, service_window_start)
                 end = min(assigned_end, month_end)
-                while start <= end:
-                    day = start.day
-                    if not any(
-                        item.get("assignment_id") == row["assignment_id"]
-                        for item in grouped_rows.get(day, ())
-                    ):
-                        item = {
-                            "work_date": start.strftime("%Y-%m-%d"),
-                            "status": "historical_assignment",
-                            "assignment_id": row["assignment_id"],
-                            "case_no": row["case_no"],
-                            "staff_id": row["staff_id"],
-                            "client_name": row["client_name"],
-                            "order_status": row["order_status"],
-                            "staff_name": row["staff_name"],
-                            "is_work_day": False,
-                            "is_double_pay": False,
-                            "notes": "歷史指派區段",
-                        }
-                        raw = row.get("historical_service_time")
-                        evidence = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
-                        evidence = evidence if isinstance(evidence, dict) else {}
-                        _append_shift(grouped_rows, item, {
-                            "service_start_time": evidence.get("start_time"),
-                            "service_end_time": evidence.get("end_time"),
-                            "service_end_day_offset": evidence.get("end_day_offset"),
-                        }, start, month_start, month_end)
-                        schedule_map.setdefault(day, {
-                            "status": "historical",
-                            "case_no": row["case_no"],
-                            "client_name": row["client_name"],
-                            "is_work_day": False,
-                            "is_double_pay": False,
-                            "assignment_id": row["assignment_id"],
-                        })
-                    start += timedelta(days=1)
+                raw = row.get("historical_service_time")
+                evidence = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+                evidence = evidence if isinstance(evidence, dict) else {}
+                terms_row = {
+                    "service_start_time": evidence.get("start_time"),
+                    "service_end_time": evidence.get("end_time"),
+                    "service_end_day_offset": evidence.get("end_day_offset"),
+                }
+                for offset in range((end - start).days + 1):
+                    service_date = start + timedelta(days=offset)
+                    if (row["assignment_id"], service_date) in official_service_dates:
+                        continue
+                    item = {
+                        "work_date": service_date.isoformat(),
+                        "status": "historical_assignment",
+                        "assignment_id": row["assignment_id"],
+                        "case_no": row["case_no"],
+                        "staff_id": row["staff_id"],
+                        "client_name": row["client_name"],
+                        "order_status": row["order_status"],
+                        "staff_name": row["staff_name"],
+                        "is_work_day": False,
+                        "is_double_pay": False,
+                        "notes": "歷史指派區段",
+                    }
+                    _append_shift(grouped_rows, item, terms_row, service_date, month_start, month_end)
+
+            for day, items in grouped_rows.items():
+                if day in schedule_map:
+                    continue
+                historical = next((item for item in items if item["status"] == "historical_assignment"), None)
+                if historical is not None:
+                    schedule_map[day] = {
+                        "status": "historical",
+                        "case_no": historical["case_no"],
+                        "client_name": historical["client_name"],
+                        "is_work_day": False,
+                        "is_double_pay": False,
+                        "assignment_id": historical["assignment_id"],
+                    }
 
             cursor.execute(
                 """

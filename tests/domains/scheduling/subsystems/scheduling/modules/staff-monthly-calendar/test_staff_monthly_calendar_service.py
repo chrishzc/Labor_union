@@ -193,6 +193,48 @@ def test_same_day_shifts_and_overnight_continuation_are_distinct(monkeypatch):
     assert connection.closed is True
 
 
+def test_historical_overnight_assignment_preserves_each_service_date(monkeypatch):
+    assignment = {
+        "assignment_id": 10,
+        "case_no": "HIS-010",
+        "staff_id": 7,
+        "staff_name": "月嫂甲",
+        "client_name": "客戶甲",
+        "order_status": "歷史訂單－服務完成",
+        "assigned_start_date": date(2026, 10, 31),
+        "assigned_end_date": date(2026, 11, 3),
+        "historical_service_time": {"start_time": "22:00", "end_time": "06:00", "end_day_offset": 1},
+    }
+    official = row(
+        work_date=date(2026, 11, 2), assignment_id=10, case_no="HIS-010",
+        service_start_time="22:00", service_end_time="06:00", service_end_day_offset=1,
+    )
+    without_time = {
+        **assignment, "assignment_id": 11, "case_no": "HIS-011",
+        "assigned_end_date": date(2026, 10, 31), "historical_service_time": None,
+    }
+    connection = FakeConnection([{"id": 7}, [official], [assignment, without_time], [], [], []])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(7, 2026, 11)
+
+    assert [(item["work_date"], item["service_date"], item["status"]) for item in result["days"]
+            if item["assignment_id"] == 10] == [
+        ("2026-11-01", "2026-10-31", "historical_assignment"),
+        ("2026-11-01", "2026-11-01", "historical_assignment"),
+        ("2026-11-02", "2026-11-01", "historical_assignment"),
+        ("2026-11-02", "2026-11-02", "working"),
+        ("2026-11-03", "2026-11-02", "working"),
+        ("2026-11-03", "2026-11-03", "historical_assignment"),
+        ("2026-11-04", "2026-11-03", "historical_assignment"),
+    ]
+    assert not any(item["assignment_id"] == 11 for item in result["days"])
+    assert set(result["schedule_map"]) == set(range(1, 31))
+    assert result["schedule_map"][2]["status"] == "red"
+    assert result["schedule_map"][4]["status"] == "historical"
+    assert connection.cursor_obj.executed[2][1] == (7, date(2026, 11, 30), date(2026, 10, 31))
+
+
 def test_get_staff_monthly_calendar_schedule_projects_effective_unavailability(monkeypatch):
     unavailability_rows = [
         {

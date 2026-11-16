@@ -548,27 +548,83 @@ describe('SchedulingPage query-only presentation', () => {
     expect(overlay).not.toHaveClass('span-ghost-clickable');
   });
 
-  it('shows an unserved historical reservation as a read-only calendar span', async () => {
+  it.each([
+    { status: 'historical_reservation', label: '歷史預定', orderStatus: '歷史訂單－未服務' },
+    { status: 'historical_assignment', label: '歷史指派', orderStatus: '歷史訂單－服務完成' },
+  ] as const)('draws $status across its actual consecutive calendar dates', async ({ status, label, orderStatus }) => {
+    const { year, month } = taipeiCalendarDate(new Date());
+    const dayInMonth = `${year}-${String(month).padStart(2, '0')}`;
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      items: [{
+        case_no: 'HIS-082', client_name: '歷史摘要客戶', order_status: orderStatus,
+        staff_name: '去敏人員甲', identity_status: 'verified', start_date: `${dayInMonth}-01`,
+        end_date: `${dayInMonth}-10`, actual_start_date: null, actual_end_date: null,
+        service_days: 10, total_employer_self_pay_payable: null,
+      }],
+      next_cursor: null,
+      etag: 'a'.repeat(64),
+    });
     vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockResolvedValue(SCHEDULING_PROJECTION_EMPTY);
     vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
       staff_id: staffId, year, month,
-      days: [4, 5].map(day => ({
-        work_date: `${year}-${String(month).padStart(2, '0')}-0${day}`,
-        status: 'historical_reservation' as const, assignment_id: null,
-        case_no: 'HIS-082', client_name: '歷史客戶', staff_id: staffId,
-        order_status: '歷史訂單－未服務', is_work_day: false, is_double_pay: false,
-      })),
+      days: staffId === 11 ? [4, 5, 6, 8].map(day => {
+        const date = `${year}-${String(month).padStart(2, '0')}-0${day}`;
+        return {
+          work_date: date, status, assignment_id: status === 'historical_assignment' ? 82 : null,
+          case_no: 'HIS-082', client_name: '歷史月曆客戶', staff_id: staffId,
+          order_status: orderStatus, is_work_day: false, is_double_pay: false,
+          ...(status === 'historical_assignment' && {
+            service_date: date, starts_at: `${date}T09:00:00+08:00`, ends_at: `${date}T18:00:00+08:00`,
+          }),
+        };
+      }) : [],
       schedule_map: {},
     }));
 
     render(<SchedulingPage />);
 
-    await waitFor(() => expect(document.querySelectorAll('.gantt-span-bar.span-historical')).toHaveLength(2));
-    const reservation = document.querySelector('.gantt-span-bar.span-historical');
-    expect(reservation).toHaveAttribute('data-start-day', '4');
-    expect(reservation).toHaveAttribute('data-end-day', '5');
-    expect(reservation).toHaveTextContent('歷史預定');
-    expect(reservation).not.toHaveClass('span-ghost-clickable');
+    const [interval, separateDay] = await screen.findAllByRole('button', { name: /歷史摘要客戶.*HIS-082/ });
+    expect(interval).toHaveClass('span-historical');
+    expect(interval).toHaveAttribute('data-start-day', '4');
+    expect(interval).toHaveAttribute('data-end-day', '6');
+    expect(interval).toHaveTextContent(label);
+    expect(interval).not.toHaveClass('span-ghost-clickable');
+    // The three dates occupy 3/10 of the first 10-day column on a 36-column axis.
+    expect(parseFloat(interval.style.width)).toBeCloseTo(3 / 10 / 36 * 100, 5);
+    expect(interval).toHaveTextContent(`${dayInMonth}-04 ～ ${dayInMonth}-06`);
+    expect(separateDay).toHaveAttribute('data-start-day', '8');
+    expect(separateDay).toHaveAttribute('data-end-day', '8');
+    expect(separateDay).toHaveTextContent(`${dayInMonth}-08`);
+  });
+
+  it('keeps a historical overnight continuation separate from formal shifts for the same assignment', async () => {
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockResolvedValue(SCHEDULING_PROJECTION_EMPTY);
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => {
+      const ym = `${year}-${String(month).padStart(2, '0')}`;
+      const rows = [
+        { serviceDay: 10, workDay: 10, status: 'working' },
+        { serviceDay: 10, workDay: 11, status: 'working' },
+        { serviceDay: 11, workDay: 11, status: 'historical_assignment' },
+        { serviceDay: 11, workDay: 12, status: 'historical_assignment' },
+      ] as const;
+      return {
+        staff_id: staffId, year, month, schedule_map: {},
+        days: staffId === 11 ? rows.map(({ serviceDay, workDay, status }) => ({
+          work_date: `${ym}-${workDay}`, service_date: `${ym}-${serviceDay}`,
+          starts_at: `${ym}-${serviceDay}T22:00:00+08:00`, ends_at: `${ym}-${serviceDay + 1}T06:00:00+08:00`,
+          case_no: 'HIS-OVERNIGHT', assignment_id: 83, staff_id: staffId, status,
+          is_work_day: status === 'working', is_double_pay: false,
+        })) : [],
+      };
+    });
+
+    render(<SchedulingPage />);
+
+    const formal = await screen.findByRole('button', { name: /HIS-OVERNIGHT.*排班/ });
+    const continuation = screen.getByRole('button', { name: /HIS-OVERNIGHT.*歷史指派.*00:00–06:00 續班/ });
+    expect(continuation).toHaveClass('span-historical');
+    expect(continuation).toHaveAttribute('data-start-day', '12');
+    expect(formal).toHaveAttribute('data-end-day', '11');
   });
 
   it('keeps canonical occupancy ahead on overlapping dates while retaining the remaining historical dates', async () => {

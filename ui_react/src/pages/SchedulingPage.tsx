@@ -1892,13 +1892,14 @@ function monthlyShiftSpans(
   for (const shift of sortedDays) {
     if (shift.status === 'available') continue;
     const day = Number(shift.work_date.slice(8));
+    const isHistorical = tones[shift.status] === 'historical';
     const continuation = !!shift.service_date && shift.service_date !== shift.work_date;
     const orderKey = shift.case_no || shift.assignment_id
       ? `${shift.case_no ?? ''}#${shift.assignment_id ?? ''}`
       : null;
 
-    // 合併跨日續班與同案排休日為連續訂單區間，避免切成碎片
-    if (orderKey && (continuation || shift.status === 'resting')) {
+    // 合併正式跨日續班與同案排休日，歷史續班另列。
+    if (orderKey && !isHistorical && (continuation || shift.status === 'resting')) {
       const existing = activeOrderSpans.get(orderKey);
       if (existing && (existing.endDay >= day - 1)) {
         existing.endDay = Math.max(existing.endDay, day);
@@ -1923,7 +1924,7 @@ function monthlyShiftSpans(
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
       prior.endDay = day;
-      if (shift.work_date > prior.visualEndDate && !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate) {
+      if (shift.work_date > prior.visualEndDate && (isHistorical || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
         prior.visualEndDate = shift.work_date;
         prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
           ? prior.visualStartDate
@@ -1961,7 +1962,7 @@ function monthlyShiftSpans(
       tone: tones[shift.status],
       clientName: enrichment.clientName ?? shift.client_name ?? undefined,
       caseText: shift.case_no || labels[shift.status],
-      dateRangeText: enrichment.dateRangeText,
+      dateRangeText: isHistorical ? shift.work_date : enrichment.dateRangeText,
       dailyTimeText: time || enrichment.dailyTimeText,
       statusLabel: labels[shift.status],
       assignmentId: shift.assignment_id,
