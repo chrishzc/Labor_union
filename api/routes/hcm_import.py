@@ -221,14 +221,15 @@ async def _run_workbook_command(workbook, service, operation: str, arguments=())
 
 
 async def _persist_uploaded_workbook(workbook: UploadFile) -> Path:
-    if Path(str(workbook.filename or "")).suffix.lower() != ".xlsx":
+    suffix = Path(str(workbook.filename or "")).suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
         raise ValueError("hcm_workbook_must_be_xlsx")
     content = await workbook.read(_MAXIMUM_WORKBOOK_BYTES + 1)
     if not content:
         raise ValueError("hcm_workbook_empty")
     if len(content) > _MAXIMUM_WORKBOOK_BYTES:
         raise ValueError("hcm_workbook_exceeds_20_mib")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as target:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as target:
         target.write(content)
         return Path(target.name)
 

@@ -13,9 +13,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 
 另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold 與簡短受理回覆；2026-10-30 管理員自動告警退役，不建立 masked alert intent；一般留言不啟動聊天室 AI 或自動轉人工。「問題／其他問題／5／6」只開自助導覽，active hold 內仍附加原案件。專員正式結案時解除 hold 並通知完成。舊回答錯誤／繼續／恢復 AI 入口只提示停用，不開單、不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
 
-服務流程及收費補助只導向 AI 客服 LIFF：自助導覽按鈕使用既有 LIFF URI，舊文字／數字別名回共用 LIFF 導覽，不再讀取或回覆固定說明。資料修改受理、訂單修改受理及人工客服通知維持原流程；歷史設定與已提交 payload 不改寫。
-
-服務自助導覽只使用 `service-menu` 共用文案；訂單異動導覽只提供已設定的 `?target=order_update` URI，未設定時提示專員協助，不產生五分類按鈕或猜測連結。原資料／訂單受理及有效結果通知不變。
+服務流程及收費補助導向 AI 客服 LIFF，自助導覽使用 `service-menu` 共用文案。客戶資料與訂單變更的舊指令只提示在 LINE 聊天室留言，不提供表單連結。舊訂單異動送件回 typed 410。
 
 ## Implementation
   - `subsystems/line/webhook_immediate_reply.py` — 專人服務受理沿用既有文案與 Webhook Reply 投遞紀錄；工單留給背景流程保存。

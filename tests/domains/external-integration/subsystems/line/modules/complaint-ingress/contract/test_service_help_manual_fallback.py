@@ -159,7 +159,7 @@ def test_legacy_menu_opens_explanations_in_liff(monkeypatch):
     assert actions[3]['text'] == '修改登記資料'
 
 
-def test_profile_update_opens_verified_liff_without_ticket(monkeypatch):
+def test_profile_update_command_directs_to_chat_without_ticket(monkeypatch):
     monkeypatch.setenv("LINE_LIFF_ID", "synthetic-liff")
     unit = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
@@ -229,7 +229,7 @@ def test_service_help_and_faq_aliases_share_one_card() -> None:
     assert "月嫂身分認證" not in service_request.payload_json
 
 
-def test_order_update_menu_and_legacy_text_open_same_form(monkeypatch) -> None:
+def test_order_update_commands_direct_to_chat_without_form(monkeypatch) -> None:
     monkeypatch.setenv('LINE_LIFF_ID', '1234567890-order')
     menu_uow = _unit_of_work()
     request_uow = _unit_of_work()

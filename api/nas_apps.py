@@ -63,7 +63,7 @@ def line_app():
     from api.line_webhook_boundary import canonical_line_webhook
     from api.routes import (
         line_identity, line_order_change, line_staff_self_service,
-        private_operations, line_system_config, client_profile,
+        private_operations, line_system_config,
     )
     from api.routes.nas_line_operations import public_router as line_operations_router
     app = FastAPI(title="LINE public service", docs_url=None, redoc_url=None, openapi_url=None,
@@ -72,7 +72,6 @@ def line_app():
     app.add_middleware(ResponseCompressionMiddleware, minimum_size=1024, compresslevel=5)
     app.add_api_route("/webhook/line", canonical_line_webhook, methods=["POST"])
     app.include_router(line_identity.page_router)
-    app.include_router(line_order_change.page_router)
     for route in line_system_config.public_router.routes:
         if route.path == "/api/config/liff/runtime":
             app.router.routes.append(route)
@@ -81,7 +80,7 @@ def line_app():
         if "/admin/" not in route.path:
             app.router.routes.append(route)
     for router in (line_order_change.router, line_staff_self_service.router,
-                   client_profile.router, line_operations_router):
+                   line_operations_router):
         app.include_router(router)
     for route in private_operations.router.routes:
         if route.path in {"/internal/v1/runtime/check", "/internal/v1/runtime/line/run-once"}:

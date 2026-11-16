@@ -476,7 +476,7 @@ class LineWebhookIdentityHandlers:
                 "  WHEN '訂單成立' THEN 2 "
                 "  WHEN '媒合中' THEN 3 "
                 "  WHEN '訂單完成' THEN 4 "
-                "  ELSE 5 END, o.id DESC LIMIT 1",
+                "  ELSE 5 END, o.case_no DESC LIMIT 1",
                 (client_id,),
             )
             order_row = cursor.fetchone()
@@ -518,6 +518,9 @@ class LineWebhookIdentityHandlers:
                 )
                 staff_rows = list(cursor.fetchall() or ())
 
+            from subsystems.line.service_start_messages import resolve_case_bank_account_info
+            bank_account_info = resolve_case_bank_account_info(cursor, case_no)
+
         staff_names = "、".join(dict.fromkeys(str(r["staff_name"]).strip() for r in staff_rows if r.get("staff_name"))) or "待指派月嫂"
 
         from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
@@ -538,6 +541,7 @@ class LineWebhookIdentityHandlers:
             staff_names,
             sections,
             client_name=order_row.get("client_name"),
+            bank_account_info=bank_account_info,
         )
         unit_of_work.delivery_tasks.enqueue(
             LineDeliveryRequest(

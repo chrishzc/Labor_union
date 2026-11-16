@@ -37,7 +37,7 @@ _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=
 _INVALID_WORKBOOK_CODE = "historical_order_workbook_invalid"
 _VALIDATION_MESSAGES = {
     _INVALID_WORKBOOK_CODE: "歷史訂單工作簿處理時遇到未分類的驗證錯誤，請提供追蹤編號供管理員查核。",
-    "historical_order_workbook_must_be_xlsx": "歷史訂單匯入只接受 .xlsx 檔案。",
+    "historical_order_workbook_must_be_xlsx": "歷史訂單匯入只接受 .xlsx 或 .xls 檔案。",
     "historical_order_workbook_empty": "上傳的歷史訂單檔案是空檔。",
     "historical_order_workbook_exceeds_20_mib": "上傳的歷史訂單檔案超過 20 MiB。",
     "historical_order_sheet_not_found": "找不到指定的歷史訂單工作表。",
@@ -54,6 +54,10 @@ _VALIDATION_MESSAGES = {
     "xlsx_sheet_limit_exceeded": "單張工作表的使用範圍超過 5 萬列、256 欄或 50 萬格的其中一項限制。",
     "xlsx_invalid_cell_reference": "Excel 檔案內含無效的列號或儲存格位置。",
     "xlsx_xml_element_limit_exceeded": "Excel 檔案的樣式或共用文字數量超過匯入上限。",
+    "xls_file_too_large": "Excel 檔案超過 20 MiB。",
+    "xls_too_many_sheets": "Excel 檔案有超過 16 張工作表。",
+    "xls_sheet_limit_exceeded": "Excel 的使用範圍超過 5 萬列、256 欄或 50 萬格的其中一項限制。",
+    "xls_invalid_workbook": "無法讀取 .xls 檔案，請確認檔案可正常開啟並重新另存為 .xlsx。",
     "xlsx_invalid_archive": "無法讀取 Excel 檔案的內部結構，請確認檔案可正常開啟並重新另存為 .xlsx。",
     "historical_order_source_schedule_conflict": "歷史訂單工作簿存在跨案件月嫂排程重疊衝突。",
     "historical_client_payment_terms_missing": "歷史案件缺少客戶付款條款，無法建立帳務。",
@@ -268,13 +272,14 @@ def _error_payload(error: TypedError) -> dict[str, object]:
 
 
 async def _persist_uploaded_workbook(workbook: UploadFile) -> Path:
-    if Path(str(workbook.filename or "")).suffix.lower() != ".xlsx":
+    suffix = Path(str(workbook.filename or "")).suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
         raise ValueError("historical_order_workbook_must_be_xlsx")
     content = await workbook.read(_MAXIMUM_WORKBOOK_BYTES + 1)
     if not content:
         raise ValueError("historical_order_workbook_empty")
     if len(content) > _MAXIMUM_WORKBOOK_BYTES:
         raise ValueError("historical_order_workbook_exceeds_20_mib")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as target:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as target:
         target.write(content)
         return Path(target.name)

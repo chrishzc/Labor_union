@@ -63,14 +63,15 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
 
 
 async def _persist_workbook(workbook: UploadFile) -> Path:
-    if Path(str(workbook.filename or "")).suffix.lower() != ".xlsx":
+    suffix = Path(str(workbook.filename or "")).suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
         raise ValueError("legacy_virtual_account_workbook_must_be_xlsx")
     content = await workbook.read(_MAXIMUM_WORKBOOK_BYTES + 1)
     if not content:
         raise ValueError("legacy_virtual_account_workbook_empty")
     if len(content) > _MAXIMUM_WORKBOOK_BYTES:
         raise ValueError("legacy_virtual_account_workbook_exceeds_20_mib")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as target:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as target:
         target.write(content)
         return Path(target.name)
 

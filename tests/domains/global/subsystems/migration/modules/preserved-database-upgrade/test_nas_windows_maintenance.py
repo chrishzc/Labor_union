@@ -579,6 +579,7 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
 @pytest.mark.parametrize("local_test", [False, True])
 def test_upgrade_preserves_order_and_never_switches_when_verification_fails(settings, monkeypatch, tmp_path, local_test):
     steps = []
+    monkeypatch.setattr(nas, "protect_account_receipts", lambda *_args, **_kwargs: 0)
     if local_test:
         from scripts import update_local_database as updater
 
@@ -615,6 +616,22 @@ def test_current_local_test_database_does_not_create_candidate(settings, monkeyp
     monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("current schema needs no upgrade"))
     assert nas.upgrade(settings) is None
     assert checked == [preview]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"host": "nas.invalid", "ssl_mode": "VERIFY_IDENTITY", "receipt_target_pinned": False},
+        {"host": "nas.invalid", "ssl_mode": "DISABLED", "receipt_target_pinned": True},
+        {"host": "127.0.0.1", "database": "union_db", "runtime": {"APP_ENV": "development"}},
+        {"host": "127.0.0.1", "database": "lu_test_fixture", "runtime": {"APP_ENV": "production"}},
+    ],
+)
+def test_receipt_conversion_refuses_unverified_target_before_connection(settings, monkeypatch, override):
+    settings.update(override)
+    monkeypatch.setattr(nas, "load_settings", lambda *_: settings)
+    monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("invalid receipt target must not connect"))
+    assert nas.main(["protect-account-receipts"]) == 2
 
 
 def test_schedule_stale_is_typed_and_does_not_register(settings, tmp_path, monkeypatch):
@@ -818,7 +835,8 @@ def test_verify_restored_inventory_semantic_match_and_mismatches():
         nas.verify_restored_inventory(actual_wrong_charset, base)
 
 
-def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch):
+@pytest.mark.parametrize("conversion_ok", [True, False])
+def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch, conversion_ok):
     archive, _ = make_backup(settings, monkeypatch)
     executed_statements = []
     class DummyCursor:
@@ -844,8 +862,14 @@ def test_restore_automatically_applies_pending_additive_migration(settings, monk
     monkeypatch.setattr(nas.migration, "database_exists", lambda *_: False)
     monkeypatch.setattr(nas.migration, "restore_sql_dump", lambda *args, **kw: SimpleNamespace(returncode=0))
     monkeypatch.setattr(nas, "require_event_scheduler_safe", lambda *_: None)
-    monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: None)
-    monkeypatch.setattr(nas, "switch_runtime", lambda *args: None)
+    activation = []
+    def convert(_config, _database, *, apply):
+        activation.append(("protect", apply))
+        if not conversion_ok:
+            raise nas.MaintenanceBlocked("fixture receipt conversion failed")
+    monkeypatch.setattr(nas, "protect_account_receipts", convert)
+    monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: activation.append(("prepare", True)))
+    monkeypatch.setattr(nas, "switch_runtime", lambda *args: activation.append(("switch", True)))
 
     from scripts import update_local_database as updater
     previews = []
@@ -858,7 +882,13 @@ def test_restore_automatically_applies_pending_additive_migration(settings, monk
     monkeypatch.setattr(updater, "build_additive_preview", fake_preview)
     monkeypatch.setattr(updater, "require_current_database", lambda res: None)
 
-    run = nas.restore(settings, archive)
+    if conversion_ok:
+        nas.restore(settings, archive)
+        assert activation == [("protect", True), ("prepare", True), ("switch", True)]
+    else:
+        with pytest.raises(nas.MaintenanceBlocked, match="fixture receipt conversion failed"):
+            nas.restore(settings, archive)
+        assert activation == [("protect", True)]
     assert len(previews) == 1
     assert any("hcm_review_status" in str(stmt) for stmt in executed_statements)
 

@@ -31,7 +31,7 @@ const GROUPS = [
 ] as const;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
 const PRIMARY:Record<NotificationSource,string> = {
-  registration:'查看申請',identity:'審核身分綁定',profile:'審核資料異動',
+  registration:'查看申請',identity:'審核身分綁定',
   staff_profile:'審核月嫂資料異動',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',

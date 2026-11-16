@@ -292,7 +292,7 @@ def test_mobile_scheduling_review_uses_line_binding_and_discards_late_forms() ->
     assert "adminSessionToken" not in initialize
     assert 'id="mobileAdminContent" class="hidden"' in source
     assert "revealMobileAdmin();" in initialize
-    assert 'postJson("/api/v1/line/mobile-admin/client-profile/requests"' in source
+    assert "/api/v1/line/mobile-admin/client-profile/requests" not in source
     assert '/api/v1/line/mobile-admin/staff-leave-requests/page' not in source
     assert '/api/v1/line/mobile-admin/service-start/todos' in source
     assert "querySequence !== schedulingQuerySequence" in source

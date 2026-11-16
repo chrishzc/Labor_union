@@ -36,6 +36,7 @@ _RETIRED_CUSTOMER_SERVICE_COPY_KEYS = frozenset({
     "service-resolved",
     "service-profile-update",
     "service-order-update",
+    "order-update-menu",
     "complaint-handoff-received",
     "customer-service-ticket-reply",
     "helper-staff-assistance-ack",
@@ -94,7 +95,7 @@ def _text_defaults():
 
 
 def _card_defaults():
-    from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
+    from subsystems.line.service_help_application import _service_menu_payload
     from subsystems.line.order_group_application import group_invitation_payload
     from subsystems.line.service_start_messages import (
         confirm_start_date_card,
@@ -104,7 +105,6 @@ def _card_defaults():
         substitute_inquiry,
     )
     result = {"service-menu": _service_menu_payload(),
-              "order-update-menu": _order_update_menu_payload(),
               "helper-menu-card": group_helper_menu_card("{case_no}", "{staff_name}"),
               "helper-confirm-start-card": confirm_start_date_card("{case_no}", "{staff_name}", "{start_date}", "{end_date}"),
               "helper-postponement-card": mutual_postponement_card("{case_no}", "{staff_name}", "{leave_start_date}", "{leave_end_date}"),
@@ -266,12 +266,6 @@ def effective_copy_definition(definition):
             template['variables'] = deepcopy(first_reminder['variables'])
         if template["id"] in specs:
             key = template['id'].removeprefix('LINE-COPY-')
-            if key == 'order-update-menu':
-                current = json.loads(template['content'])
-                defaults = json.loads(specs[template['id']]['content'])
-                if isinstance(current, dict) and not set(current) <= set(defaults):
-                    # Project the former five-button menu without rewriting its history.
-                    template['content'] = specs[template['id']]['content']
             if key in {
                 "service-menu", "helper-menu-card", "deposit-reminder", "payment-second-reminder",
                 "payment-overdue-deposit", "payment-overdue-first", "payment-overdue-second",

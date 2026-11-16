@@ -132,8 +132,8 @@ def _raise(error, correlation: str | None = None):
         "staff_case_preference_detail_not_editable": "不提供新增或修改說明，請使用條件選單及服務起迄時間。",
         "staff_case_preference_time_required": "請設定服務開始、結束時間及結束日。",
         "staff_case_preference_time_invalid": "請確認開始、結束時間與是否跨日。",
-        "staff_case_preference_service_hours_invalid": "服務時數請選擇 4、8 或 24 小時。",
-        "staff_case_preference_time_duration_mismatch": "起迄時間必須符合服務時數：4 小時班共 4 小時；8 小時班共 8.5 小時（含休息 30 分鐘）；24 小時班共 24 小時。",
+        "staff_case_preference_service_hours_invalid": "服務時數請選擇 4 或 8 小時。",
+        "staff_case_preference_time_duration_mismatch": "起迄時間必須符合服務時數：4 小時班共 4 小時；8 小時班共 8.5 小時（含休息 30 分鐘）。",
     }
     raise typed_http_error(status, category, code, messages.get(code, code), correlation or uuid4().hex)
 

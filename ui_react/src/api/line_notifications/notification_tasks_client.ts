@@ -7,7 +7,7 @@ import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 import { sessionClient } from '../auth/session_client';
 
-export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','profile','staff_profile','followup','recommendation',
+export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','staff_profile','followup','recommendation',
   'service_start','deposit','payment_receipt','group','overdue','delivery','notification_failure','runtime']);
 export type NotificationSource = z.infer<typeof sourceSchema>;
 const groupSchema = z.enum(['review','reminder','support']);

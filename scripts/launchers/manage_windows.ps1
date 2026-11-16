@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore')]
+    [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore','root-maintenance','root-maintenance-check')]
     [string]$Action = 'menu',
     [switch]$LocalOnly
 )
@@ -292,9 +292,18 @@ function Invoke-DatabaseMaintenance {
     }
 }
 
+function Assert-RootMaintenanceRuntimeStopped {
+    $runtime = Get-ManagedState
+    if ($runtime) {
+        throw '請先選擇「2 停止全部」，再管理 root 帳號。'
+    }
+    Assert-NoRemainingRuntime $runtime
+}
+
 function Invoke-ManagerAction {
     param([string]$Selected)
     if ($Selected -eq 'status') { Show-ManagedStatus; return }
+    if ($Selected -eq 'root-maintenance-check') { Assert-RootMaintenanceRuntimeStopped; return }
     if ($Selected -eq 'check') {
         Assert-ProgramEnvironment
         if (-not (Get-Command 'docker.exe' -ErrorAction SilentlyContinue)) { throw "docker.exe is missing. 請確認已安裝並啟動 Docker Desktop。" }
@@ -343,6 +352,14 @@ function Invoke-ManagerAction {
             'database-backup' { Invoke-DatabaseMaintenance 'backup' }
             'database-upgrade' { Invoke-DatabaseMaintenance 'upgrade' }
             'database-restore' { Invoke-DatabaseMaintenance 'restore' }
+            'root-maintenance' {
+                Assert-RootMaintenanceRuntimeStopped
+                if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+                    throw '找不到系統執行環境，請先安裝程式依賴。'
+                }
+                & $PythonPath -m scripts.root_account_maintenance
+                if ($LASTEXITCODE -ne 0) { throw 'root 維護已停止，請依上方訊息確認。' }
+            }
             'start' { Start-ManagedRuntime }
             'stop' { Stop-ManagedRuntime }
             {$_ -in 'restart','update'} {
@@ -437,10 +454,10 @@ while ($true) {
     Write-Host "`nWindows 管理（切換主機前，請先整組停止舊主機）"
     Write-Host '1 啟動全部  2 停止全部  3 套用更新／整組重啟  4 只更新前端'
     Write-Host '5 狀態／版本  6 備份資料庫  7 安全升級資料庫  8 復原資料庫備份'
-    Write-Host '9 首次安裝程式依賴  10 檢查程式環境  0 離開'
+    Write-Host '9 首次安裝程式依賴  10 檢查程式環境  11 管理 root 帳號  0 離開'
     $choice = Read-Host '請選擇'
     if ($null -eq $choice -or $choice.Trim() -eq '0') { break }
-    $actions = @{'1'='start';'2'='stop';'3'='update';'4'='frontend';'5'='status';'6'='database-backup';'7'='database-upgrade';'8'='database-restore';'9'='setup';'10'='check'}
+    $actions = @{'1'='start';'2'='stop';'3'='update';'4'='frontend';'5'='status';'6'='database-backup';'7'='database-upgrade';'8'='database-restore';'9'='setup';'10'='check';'11'='root-maintenance'}
     $trimmed = $choice.Trim()
     if (-not $actions.ContainsKey($trimmed)) { continue }
     try { Invoke-ManagerAction $actions[$trimmed] }

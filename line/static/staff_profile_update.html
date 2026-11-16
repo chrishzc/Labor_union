@@ -247,16 +247,75 @@ function relationText(rows) {
 const standardRelationOptions = {
   service_regions: ["東區", "北區", "香山區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮", "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "寶山鄉"],
   service_periods: [
-    "8小時(08:30-17:00)", "8小時(09:30-18:00)",
-    "4小時(08:30-12:30)", "4小時(09:30-13:30)",
-    "9小時(08:30-17:30)", "9小時(09:00-18:00)",
-    "24小時(09:00-次日09:00)"
+    "4小時", "8小時"
   ],
   rest_schedule: ["週休二日", "隔週休", "排休", "配合案家需求", "不限"],
   baby_types: ["單胞胎", "雙胞胎", "早產兒照護", "大寶照護"],
   holiday_availability: ["國定假日可接案", "農曆春節可接案", "特殊節日可配合", "依勞基法休假"],
   transportation: ["機車", "自用小客車", "公車/客運", "步行/自行車", "家人接送"]
 };
+const standardStartTimes = ["8:00", "8:30", "9:00", "9:30"];
+
+function formatCanonicalPeriod(hoursStr, startTimeStr) {
+  const hours = parseInt(hoursStr, 10);
+  const [hStr, mStr] = startTimeStr.split(":");
+  const startH = parseInt(hStr, 10);
+  const startM = parseInt(mStr, 10);
+  const pad = n => String(n).padStart(2, "0");
+  const startNormalized = pad(startH) + ":" + pad(startM);
+  const durationMinutes = hours === 8 ? (8 * 60 + 30) : (hours * 60);
+  const endTotalMinutes = startH * 60 + startM + durationMinutes;
+  const endH = Math.floor(endTotalMinutes / 60);
+  const endM = endTotalMinutes % 60;
+  const endNormalized = pad(endH) + ":" + pad(endM);
+  return hours + "小時(" + startNormalized + "-" + endNormalized + ")";
+}
+
+function parseServicePeriods(rawPeriods) {
+  const selectedHours = new Set();
+  const selectedStarts = new Set();
+  for (const item of rawPeriods) {
+    const val = typeof item === "object" ? (item.value || "") : String(item);
+    const match = val.match(/^(\d+)小時(?:\((\d{2}):(\d{2})-.*\))?$/);
+    if (match) {
+      selectedHours.add(match[1] + "小時");
+      if (match[2]) {
+        const h = parseInt(match[2], 10);
+        const m = match[3];
+        selectedStarts.add(h + ":" + m);
+      }
+    } else if (val.includes("小時")) {
+      const hMatch = val.match(/(\d+)小時/);
+      if (hMatch) selectedHours.add(hMatch[1] + "小時");
+    }
+    if (typeof item === "object" && item.detail) {
+      const details = item.detail.split(/[,、，]/).map(s => s.trim());
+      for (const d of details) {
+        if (/^\d{1,2}:\d{2}$/.test(d)) {
+          const [dh, dm] = d.split(":");
+          selectedStarts.add(parseInt(dh, 10) + ":" + dm);
+        }
+      }
+    }
+  }
+  return {
+    hours: Array.from(selectedHours),
+    starts: Array.from(selectedStarts)
+  };
+}
+
+function composeServicePeriods(hoursList, startList) {
+  const targetHours = hoursList.length > 0 ? hoursList : (startList.length > 0 ? ["8小時"] : []);
+  if (targetHours.length === 0) return [];
+  if (startList.length === 0) return targetHours;
+  const result = [];
+  for (const hStr of targetHours) {
+    for (const sStr of startList) {
+      result.push(formatCanonicalPeriod(hStr, sStr));
+    }
+  }
+  return result;
+}
 
 function chipGroup(parent, key, label, currentValues, candidateList) {
   const group = document.createElement("div");
@@ -325,39 +384,18 @@ function render(data) {
     numeric: true, maximum: 20, wide: true
   });
   const preferences = document.getElementById("preferences");
+  const parsedPeriods = parseServicePeriods(data.relations.service_periods || []);
   for (const [key, label] of Object.entries(relationLabels)) {
+    if (key === "service_periods") {
+      chipGroup(preferences, "service_periods", "服務時段", parsedPeriods.hours, ["4小時", "8小時"]);
+      chipGroup(preferences, "preferred_start_time", "偏好服務開始時間", parsedPeriods.starts, standardStartTimes);
+      continue;
+    }
     const currentItems = data.relations[key] || [];
     const candidates = data.relation_options?.[key] || standardRelationOptions[key] || [];
     chipGroup(preferences, key, label, currentItems, candidates);
   }
   chipGroup(preferences, "transportation", "交通方式", data.transportation || [], standardRelationOptions.transportation);
-
-  const days = data.matching.preferred_service_days ?? {};
-  input(preferences, "minimum", "最少可承接天數", days.minimum, { numeric: true });
-  input(preferences, "maximum", "最多可承接天數", days.maximum, { numeric: true });
-  const hoursInput = input(preferences, "hours", "每日可服務時數", data.matching.daily_service_hours?.values.join(",") || "");
-  const hoursFast = document.createElement("div");
-  hoursFast.className = "chips-container";
-  hoursFast.style.marginTop = "8px";
-  ["4", "8", "9", "24"].forEach(h => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip-btn";
-    btn.style.fontSize = "16px";
-    btn.style.padding = "6px 14px";
-    btn.style.minHeight = "40px";
-    btn.textContent = "+ " + h + " 小時";
-    btn.onclick = () => {
-      const current = hoursInput.value.trim();
-      const parts = current ? current.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
-      if (!parts.includes(h)) {
-        parts.push(h);
-        hoursInput.value = parts.join(",");
-      }
-    };
-    hoursFast.append(btn);
-  });
-  hoursInput.parentElement.append(hoursFast);
 }
 
 function changes() {
@@ -367,6 +405,7 @@ function changes() {
   }
   const relations = {};
   for (const key of Object.keys(relationLabels)) {
+    if (key === "service_periods") continue;
     const container = document.getElementById("chips-" + key);
     const selectedBtns = container ? container.querySelectorAll('.chip-btn[aria-pressed="true"]') : [];
     const currentValues = Array.from(selectedBtns).map(btn => btn.dataset.value);
@@ -377,16 +416,23 @@ function changes() {
       relations[key] = currentValues.map(v => ({ value: v }));
     }
   }
-  const matching = {};
-  const days = snapshot.matching.preferred_service_days ?? {};
-  if (value("minimum") !== String(days.minimum ?? "") || value("maximum") !== String(days.maximum ?? "")) {
-    matching.preferred_service_days = { kind: "integer_range", minimum: Number(value("minimum")), maximum: Number(value("maximum")) };
+
+  const periodsContainer = document.getElementById("chips-service_periods");
+  const selectedPeriodBtns = periodsContainer ? periodsContainer.querySelectorAll('.chip-btn[aria-pressed="true"]') : [];
+  const selectedHours = Array.from(selectedPeriodBtns).map(btn => btn.dataset.value);
+
+  const startsContainer = document.getElementById("chips-preferred_start_time");
+  const selectedStartBtns = startsContainer ? startsContainer.querySelectorAll('.chip-btn[aria-pressed="true"]') : [];
+  const selectedStarts = Array.from(selectedStartBtns).map(btn => btn.dataset.value);
+
+  const nextPeriods = composeServicePeriods(selectedHours, selectedStarts);
+  const snapPeriods = (snapshot.relations.service_periods || []).map(item => item.value);
+  const isPeriodDiff = nextPeriods.length !== snapPeriods.length ||
+    nextPeriods.some((p, idx) => p !== snapPeriods[idx]);
+  if (isPeriodDiff) {
+    relations.service_periods = nextPeriods.map(v => ({ value: v }));
   }
-  if (value("hours") !== (snapshot.matching.daily_service_hours?.values.join(",") ?? "")) {
-    matching.daily_service_hours = {
-      kind: "integer_set", values: [...new Set(value("hours").split(/[,，]/).map(Number))].sort((a, b) => a - b)
-    };
-  }
+
   let bankUpdate = null;
   if (replacement.checked) {
     const rawBankBranch = value("bank_branch_code").replace(/\D/g, "");
@@ -405,7 +451,7 @@ function changes() {
     currentTrans.some((v, idx) => v !== snapTrans[idx]);
 
   return {
-    profile, relations, matching,
+    profile, relations,
     ...(isTransDiff ? { transportation: currentTrans } : {}),
     ...(bankUpdate ? { bank: bankUpdate } : {})
   };

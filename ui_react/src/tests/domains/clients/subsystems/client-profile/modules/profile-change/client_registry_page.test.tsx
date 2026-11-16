@@ -163,6 +163,15 @@ describe('Client registry owner editing', () => {
     });
   });
 
+  it('opens the customer roster when an old profile review link is used', () => {
+    window.location.hash = '#clients?tab=profile-requests&request=73';
+    render(<ClientRegistryPage />);
+    expect(screen.getByRole('tab', { name: '客戶清單' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab', { name: '資料修改審核' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '非市民申請' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '虛擬帳號匯入' })).toBeInTheDocument();
+  });
+
   it('reads historical staff through the canonical assignment query without a parallel source lookup', async () => {
     staffMocks.orderDetail.mockResolvedValue({ case_no: 'CASE-001', order_status: '歷史訂單－服務完成' });
     const evidence = vi.spyOn(historicalAdoptionEvidenceClient, 'queryByCase').mockRejectedValue(new Error('名冊不得另讀來源配對'));

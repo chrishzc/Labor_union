@@ -213,7 +213,8 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(screen.queryByRole('button', { name: /案件完成/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /2 工會處理/ }));
     expect(screen.getByText('官方帳號留言')).toBeInTheDocument();
-    expect(screen.getByText('工會人員查看並回覆一般詢問與客訴。')).toBeInTheDocument();
+    expect(screen.getByText('工會人員回覆詢問與客訴，並確認客戶資料或訂單變更後於後台維護。')).toBeInTheDocument();
+    expect(screen.queryByText('訂單異動申請')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /人工升級案件結案通知|service-resolved/ })).not.toBeInTheDocument();
     expect(onOpen).not.toHaveBeenCalled();
     expect(previews.render).not.toHaveBeenCalled();
@@ -250,9 +251,10 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.mocked(previews.catalog).mockResolvedValue([...current, ...['service-menu'].map(id => ({id,name:id,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
     fireEvent.click(screen.getByRole('tab', { name: '自助服務與留言' }));
-    await screen.findByText(/一般詢問及客訴由工會人員在 LINE 官方帳號處理/);
+    await screen.findByText(/一般詢問、客訴及客戶資料或訂單變更由工會人員在 LINE 官方帳號處理/);
     fireEvent.click(await screen.findByRole('button', { name: '1 開啟服務 1 則訊息' }));
     expect(screen.getByText(/統一在 AI 客服 LIFF 查看常見問答或提問/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /修改訂單資訊導覽/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /服務流程與收費說明.*調整訊息/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /查看服務導覽.*調整訊息/ }));
     expect(onOpen).toHaveBeenCalledWith('service-menu');

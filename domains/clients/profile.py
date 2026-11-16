@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from collections.abc import Collection
 from typing import Mapping
 
 
@@ -15,9 +14,6 @@ CLIENT_PROFILE_FIELDS = (
     "identity_status",
 )
 CLIENT_PROFILE_FIELD_SET = frozenset(CLIENT_PROFILE_FIELDS)
-CLIENT_PROFILE_APPLICANT_FIELDS = frozenset(
-    {"name", "gender", "phone", "delivery_type", "baby_info", "notes"}
-)
 RECLASSIFIABLE_CLIENT_IDENTITIES = frozenset({"補助市民", "原住民"})
 _SERVICE_STARTED_STATES = frozenset({
     "服務中", "訂單完成", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
@@ -58,17 +54,12 @@ class ClientProfileValidationError(ValueError):
         super().__init__(code if field is None else f"{code}:{field}")
 
 
-def validate_changes(
-    changes: Mapping[str, object],
-    *,
-    allowed_fields: Collection[str] | None = None,
-) -> dict[str, str]:
+def validate_changes(changes: Mapping[str, object]) -> dict[str, str]:
     if not isinstance(changes, Mapping) or not changes:
         raise ClientProfileValidationError("profile_changes_required")
     normalized: dict[str, str] = {}
-    effective_fields = CLIENT_PROFILE_FIELD_SET if allowed_fields is None else frozenset(allowed_fields)
     for field, value in changes.items():
-        if field not in effective_fields:
+        if field not in CLIENT_PROFILE_FIELD_SET:
             raise ClientProfileValidationError("profile_field_not_allowed", str(field))
         if field == "admin_notes" and value is None:
             value = ""

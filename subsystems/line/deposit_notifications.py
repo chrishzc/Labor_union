@@ -161,7 +161,14 @@ class DepositNotificationApplication:
         if not self._liff_id or self._liff_id == 'your_liff_id_here':
             raise DepositNotificationConflict('deposit_liff_not_configured')
         url = f'https://liff.line.me/{self._liff_id}/?' + urlencode({'target': 'deposit_payment', 'case_no': payment.case_no})
-        payload = deposit_notification_payload(payment.case_no, payment.amount_ntd, payment.due_date, kind, url)
+        payload = deposit_notification_payload(
+            payment.case_no,
+            payment.amount_ntd,
+            payment.due_date,
+            kind,
+            url,
+            virtual_account=payment.virtual_account,
+        )
         if unit is not None:
             payload = configured_payload(unit, 'deposit-reminder', payload,
                 {'case_no': payment.case_no, 'amount_ntd': f'{payment.amount_ntd:,}', 'due_date': str(payment.due_date)})
@@ -256,7 +263,16 @@ def handle_deposit_assistance(data, event, uow, *, reply_only=False) -> bool:
     return False
 
 
-def deposit_notification_payload(case_no, amount_ntd, due_date, kind, url=None):
+def deposit_notification_payload(
+    case_no,
+    amount_ntd,
+    due_date,
+    kind,
+    url=None,
+    *,
+    bank_account_info=None,
+    virtual_account=None,
+):
     if kind == SETTLED:
         raise DepositNotificationConflict('deposit_settled_push_retired')
     amount_str = f'{amount_ntd:,}' if isinstance(amount_ntd, int) else str(amount_ntd)
@@ -264,11 +280,34 @@ def deposit_notification_payload(case_no, amount_ntd, due_date, kind, url=None):
     actions = [
         {'type': 'button', 'style': 'primary', 'action': {'type': 'postback', 'label': '已經匯款', 'data': f'payment-ack:deposit:{case_no}', 'displayText': '已經匯款'}},
     ]
+
+    from subsystems.line.service_start_messages import resolve_case_bank_account_info, build_bank_account_box
+
+    if bank_account_info is None:
+        if virtual_account:
+            import os
+
+            b_name = os.getenv("CLIENT_DEPOSIT_BANK_NAME", "永豐銀行")
+            b_code = os.getenv("CLIENT_DEPOSIT_BANK_CODE", "807")
+            bank_account_info = {
+                "bank_name": b_name,
+                "bank_code": b_code,
+                "virtual_account": str(virtual_account),
+                "account_note": "案件專屬帳號",
+            }
+        elif case_no and not str(case_no).startswith("{"):
+            bank_account_info = resolve_case_bank_account_info(None, case_no)
+
+    bank_box = build_bank_account_box(bank_account_info)
+    body_contents = [
+        {'type': 'text', 'text': text, 'wrap': True},
+    ]
+    if bank_box:
+        body_contents.append(bank_box)
+    body_contents.append({'type': 'text', 'text': ASSISTANCE_ACK, 'size': 'sm', 'wrap': True})
+
     payload = {'type': 'flex', 'altText': f'案件〈{case_no}〉訂金繳費提醒：NT${amount_str}', 'contents': {'type': 'bubble',
                'header': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': '訂金繳費提醒', 'weight': 'bold', 'size': 'lg'}]},
-               'body': {'type': 'box', 'layout': 'vertical', 'spacing': 'sm', 'contents': [
-                   {'type': 'text', 'text': text, 'wrap': True},
-                   {'type': 'text', 'text': ASSISTANCE_ACK, 'size': 'sm', 'wrap': True},
-               ]},
+               'body': {'type': 'box', 'layout': 'vertical', 'spacing': 'sm', 'contents': body_contents},
                'footer': {'type': 'box', 'layout': 'vertical', 'contents': actions}}}
     return payload

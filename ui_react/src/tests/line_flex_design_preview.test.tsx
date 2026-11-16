@@ -26,7 +26,7 @@ describe('LINE studio public preview', () => {
     expect(screen.getByRole('heading', { name: 'LINE 表單' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /訊息卡片/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /接案意願詢問|服務日期表|重大異常通知/ })).not.toBeInTheDocument();
-    expect(screen.getByText('17 個項目')).toBeInTheDocument();
+    expect(screen.getByText('12 個項目')).toBeInTheDocument();
     await screen.findByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
     expect(lineMessagePreviewClient.catalog).not.toHaveBeenCalled();
   });
@@ -37,8 +37,7 @@ describe('LINE studio public preview', () => {
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
     expect(screen.getByRole('button', { name: /服務申請入口 選擇身分/ })).toHaveAttribute('aria-pressed', 'true');
     expect(window.location.hash).toBe('#line-liff-studio');
-    fireEvent.click(screen.getByRole('button', { name: /申請訂單異動 提出/ }));
-    expect(screen.queryByText('服務日期／天數')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /修改個人資料|申請訂單異動/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /寶寶日誌/ })).not.toBeInTheDocument();
   });
 
@@ -73,17 +72,7 @@ describe('LINE studio public preview', () => {
     expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href', 'https://line.example.test/line-non-citizen-registration',
     );
-    fireEvent.click(screen.getByRole('button', { name: /修改個人資料 申請變更/ }));
-    const officialLink = screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
-    expect(officialLink).toHaveAttribute('href', 'https://line.example.test/line-profile-guard');
-    expect(officialLink).toHaveAttribute('target', '_blank');
-
-    fireEvent.click(screen.getByRole('button', { name: /申請訂單異動 提出/ }));
-    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute('href', 'https://line.example.test/line-order-update?studio_preview=1');
-
-    fireEvent.click(screen.getByRole('button', { name: /媒合條件協調 回覆可調整/ }));
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    expect(screen.getByText(/必須由客戶收到的案件協調卡/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /修改個人資料|申請訂單異動/ })).not.toBeInTheDocument();
     expect(screen.queryByText('使用說明')).not.toBeInTheDocument();
     expect(screen.queryByText(/詳細與技術說明|獨立介面預覽|資安與存取摘要|關聯功能與目前狀態/)).not.toBeInTheDocument();
     expect(runtimeConfigClient.get).toHaveBeenCalledTimes(1);
@@ -95,7 +84,7 @@ describe('LINE studio public preview', () => {
     };
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'customer' } });
-    expect(screen.getByText('6 個項目')).toBeInTheDocument();
+    expect(screen.getByText('2 個項目')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(1);
 
     fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單' }), { target: { value: '找不到的服務' } });
@@ -106,7 +95,7 @@ describe('LINE studio public preview', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-    expect(screen.getByText('17 個項目')).toBeInTheDocument();
+    expect(screen.getByText('12 個項目')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單' }), { target: { value: 'register.html' } });
     expect(screen.getByText('1 個項目')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /需求調查 填寫基本資料/ })).toHaveAttribute('aria-pressed', 'true');

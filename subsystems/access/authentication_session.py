@@ -15,10 +15,16 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from threading import BoundedSemaphore
 from typing import Any, Protocol
 
 import pymysql
 
+from subsystems.access.account_receipt_fingerprints import (
+    account_receipt_key,
+    protect_receipt_fingerprint,
+    require_protected_account_receipts,
+)
 from subsystems.access.security_audit_query import mask_audit_details
 from subsystems.access.totp import (
     EncryptedTotpSecret,
@@ -34,9 +40,13 @@ from subsystems.access.totp import (
 )
 
 
-SCRYPT_N = 2**14
+SCRYPT_N = 2**17
 SCRYPT_R = 8
 SCRYPT_P = 1
+_CURRENT_SCRYPT = (SCRYPT_N, SCRYPT_R, SCRYPT_P)
+_LEGACY_SCRYPT = (2**14, 8, 1)
+_SCRYPT_MEMORY_LIMIT = 160 * 1024 * 1024
+_SCRYPT_CONCURRENCY = BoundedSemaphore(2)
 ADMIN_SESSION_MAXIMUM_MINUTES = 8 * 60
 LOGIN_ATTEMPT_WINDOW_MINUTES = 15
 LOGIN_ATTEMPT_MAXIMUM = 5
@@ -258,18 +268,18 @@ def _attempt_subject_hash(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
 
 
-def hash_admin_password(password: str) -> str:
-    if len(password) < 10:
-        raise ValueError("管理員密碼至少需要 10 個字元")
+def _derive_password(password: str, salt: bytes, params: tuple[int, int, int]) -> bytes:
+    n, r, p = params
+    with _SCRYPT_CONCURRENCY:
+        return hashlib.scrypt(
+            password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
+            maxmem=_SCRYPT_MEMORY_LIMIT, dklen=32,
+        )
+
+
+def _encode_current_password_hash(password: str) -> str:
     salt = os.urandom(16)
-    derived = hashlib.scrypt(
-        password.encode("utf-8"),
-        salt=salt,
-        n=SCRYPT_N,
-        r=SCRYPT_R,
-        p=SCRYPT_P,
-        dklen=32,
-    )
+    derived = _derive_password(password, salt, _CURRENT_SCRYPT)
     return "$".join(
         [
             "scrypt",
@@ -282,24 +292,36 @@ def hash_admin_password(password: str) -> str:
     )
 
 
+def hash_admin_password(password: str) -> str:
+    if len(password) < 10:
+        raise ValueError("管理員密碼至少需要 10 個字元")
+    return _encode_current_password_hash(password)
+
+
 def verify_admin_password(password: str, encoded_hash: str) -> bool:
     try:
         algorithm, n, r, p, salt_b64, expected_b64 = encoded_hash.split("$", 5)
-        if algorithm != "scrypt":
+        if algorithm != "scrypt" or (params := (int(n), int(r), int(p))) not in (_LEGACY_SCRYPT, _CURRENT_SCRYPT):
             return False
         salt = base64.urlsafe_b64decode(salt_b64.encode("ascii"))
         expected = base64.urlsafe_b64decode(expected_b64.encode("ascii"))
-        actual = hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=salt,
-            n=int(n),
-            r=int(r),
-            p=int(p),
-            dklen=len(expected),
-        )
+        if len(salt) != 16 or len(expected) != 32:
+            return False
+        actual = _derive_password(password, salt, params)
         return hmac.compare_digest(actual, expected)
     except (ValueError, TypeError, binascii.Error):
         return False
+
+
+def _upgrade_verified_account_hash(cursor: Any, user: dict[str, Any], password: str) -> None:
+    old_hash = user["password_hash"]
+    if user["is_root"] or not old_hash.startswith("scrypt$16384$8$1$"):
+        return
+    upgraded_hash = _encode_current_password_hash(password)
+    cursor.execute(
+        "UPDATE admin_users SET password_hash=%s WHERE id=%s AND BINARY password_hash=%s",
+        (upgraded_hash, user["id"], old_hash),
+    )
 
 
 def create_admin_user(
@@ -563,11 +585,13 @@ def create_account_center_user_with_receipt(
     normalized_name = display_name.strip()
     if not normalized_username or not normalized_name:
         raise ValueError("username 與 display_name 不可為空")
+    key = account_receipt_key()
     conn = connection_factory()
     unit_of_work = AccessControlUnitOfWork(conn)
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            require_protected_account_receipts(cursor)
             command_payload = {
                 "username": normalized_username,
                 "password_hash": _token_hash(password),
@@ -575,7 +599,7 @@ def create_account_center_user_with_receipt(
                 "linked_line_user_id": linked_line_user_id or None,
             }
             replayed = _replay_account_create(
-                cursor, idempotency_key, actor, reason, command_payload
+                cursor, idempotency_key, actor, reason, command_payload, protection_key=key,
             )
             if replayed is not None:
                 unit_of_work.commit()
@@ -599,6 +623,7 @@ def create_account_center_user_with_receipt(
                     "display_name": normalized_name, "role": "system_admin",
                     "access_control_version": 1,
                 },
+                protection_key=key,
             )
         unit_of_work.commit()
         return AccountCreationResult(
@@ -643,6 +668,7 @@ def set_account_center_enabled(*, connection_factory: ConnectionFactory, actor: 
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled}):
                 unit_of_work.commit()
                 return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=True)
@@ -666,13 +692,15 @@ def set_account_center_enabled(*, connection_factory: ConnectionFactory, actor: 
 def reset_account_center_password(*, connection_factory: ConnectionFactory, actor: AdminPrincipal, account_id: int, password: str, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Set a new password and revoke all existing sessions atomically."""
     _require_root_account_action(actor, account_id, reason)
+    key = account_receipt_key()
     conn = connection_factory()
     unit_of_work = AccessControlUnitOfWork(conn)
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            require_protected_account_receipts(cursor)
             payload = {"password_hash": _token_hash(password)}
-            if _replay_account_command(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload):
+            if _replay_account_command(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload, protection_key=key):
                 unit_of_work.commit()
                 return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
@@ -681,7 +709,7 @@ def reset_account_center_password(*, connection_factory: ConnectionFactory, acto
                 "UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(6)) WHERE admin_user_id=%s",
                 (account_id,),
             )
-            _save_account_command_receipt(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload)
+            _save_account_command_receipt(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload, protection_key=key)
         unit_of_work.commit()
         return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
@@ -699,6 +727,7 @@ def revoke_account_center_sessions(*, connection_factory: ConnectionFactory, act
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {}):
                 unit_of_work.commit()
                 return _account_command_receipt("account-sessions-revoke", idempotency_key, account_id, expected_version + 1, replayed=True)
@@ -726,6 +755,7 @@ def reset_account_center_mfa(*, connection_factory: ConnectionFactory, actor: Ad
     try:
         unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            require_protected_account_receipts(cursor)
             if _replay_account_command(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {}):
                 unit_of_work.commit()
                 return _account_command_receipt("account-mfa-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
@@ -809,12 +839,13 @@ def _account_command_receipt(
 def _replay_account_command(
     cursor: Any, family: str, idempotency_key: str, actor: AdminPrincipal,
     account_id: int, expected_version: int, reason: str, payload: dict[str, Any],
+    *, protection_key: bytes | None = None,
 ) -> bool:
     fingerprint = _account_command_fingerprint(
         actor=actor, account_id=account_id, expected_version=expected_version, reason=reason, payload=payload
     )
     cursor.execute(
-        "SELECT request_fingerprint FROM admin_command_receipts "
+        "SELECT request_fingerprint,idempotency_key FROM admin_command_receipts "
         "WHERE command_family=%s AND idempotency_key=%s FOR UPDATE",
         (family, idempotency_key),
     )
@@ -822,6 +853,9 @@ def _replay_account_command(
     if row is None:
         return False
     stored = str(row["request_fingerprint"] if isinstance(row, dict) else row[0])
+    if protection_key is not None:
+        stored_key = row["idempotency_key"] if isinstance(row, dict) else row[1]
+        fingerprint = protect_receipt_fingerprint(protection_key, family, stored_key, fingerprint)
     if not hmac.compare_digest(stored, fingerprint):
         raise ValueError("idempotency_key_conflict")
     return True
@@ -829,13 +863,14 @@ def _replay_account_command(
 
 def _replay_account_create(
     cursor: Any, idempotency_key: str, actor: AdminPrincipal, reason: str, payload: dict[str, Any],
+    *, protection_key: bytes,
 ) -> AdminPrincipal | None:
     """Return the original safe account view when a create command is replayed."""
     fingerprint = _account_command_fingerprint(
         actor=actor, account_id=0, expected_version=1, reason=reason, payload=payload
     )
     cursor.execute(
-        "SELECT request_fingerprint,result_snapshot FROM admin_command_receipts "
+        "SELECT request_fingerprint,result_snapshot,idempotency_key FROM admin_command_receipts "
         "WHERE command_family=%s AND idempotency_key=%s FOR UPDATE",
         ("account-create", idempotency_key),
     )
@@ -843,6 +878,8 @@ def _replay_account_create(
     if row is None:
         return None
     stored = str(row["request_fingerprint"] if isinstance(row, dict) else row[0])
+    stored_key = row["idempotency_key"] if isinstance(row, dict) else row[2]
+    fingerprint = protect_receipt_fingerprint(protection_key, "account-create", stored_key, fingerprint)
     if not hmac.compare_digest(stored, fingerprint):
         raise ValueError("idempotency_key_conflict")
     snapshot = row.get("result_snapshot") if isinstance(row, dict) else row[1]
@@ -861,10 +898,13 @@ def _save_account_command_receipt(
     cursor: Any, family: str, idempotency_key: str, actor: AdminPrincipal,
     account_id: int, expected_version: int, reason: str, payload: dict[str, Any],
     result_snapshot: dict[str, Any] | None = None,
+    *, protection_key: bytes | None = None,
 ) -> None:
     fingerprint = _account_command_fingerprint(
         actor=actor, account_id=account_id, expected_version=expected_version, reason=reason, payload=payload
     )
+    if protection_key is not None:
+        fingerprint = protect_receipt_fingerprint(protection_key, family, idempotency_key, fingerprint)
     cursor.execute(
         """INSERT INTO admin_command_receipts (
             command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot
@@ -912,6 +952,7 @@ def authenticate_admin(
                 unit_of_work.commit()
                 return None
 
+            _upgrade_verified_account_hash(cursor, row, password)
             factor = _active_factor_for_user(cursor, int(row["id"]))
             if factor is None:
                 enrollment = _issue_mfa_enrollment(cursor, row)
@@ -997,6 +1038,7 @@ def issue_password_login_challenge(
                 _record_login_attempt(cursor, normalized_username, source_identifier, "failed")
                 unit_of_work.commit()
                 return None
+            _upgrade_verified_account_hash(cursor, row, password)
             factor = _active_factor_for_user(cursor, int(row["id"]))
             if factor is None:
                 enrollment = _issue_mfa_enrollment(cursor, row)

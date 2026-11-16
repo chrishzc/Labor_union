@@ -10,6 +10,7 @@
 ## Implementation
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
 - Windows management entry: `Windows管理.bat`、`scripts/launchers/manage_windows.ps1` — single daily management surface using the existing supervisor and run-bound maintenance channel.
+- Root maintenance: option `11` dispatches `scripts/root_account_maintenance.py` under the Windows manager lock and checks that the managed runtime has stopped. Access owns verification and account changes ([authentication-session](../../../../external-integration/subsystems/access/modules/authentication-session.md)).
 - Explicit NAS maintenance menu: options 6/7/8 delegate backup/upgrade/restore to `scripts.nas_database_maintenance` (Global migration §9.5); backup permits a running runtime, upgrade/restore require this installation stopped. No implicit stop/restart or database operation on normal startup. Packaging remains an advanced `-Action package` consumer and is absent from the daily menu.
 - Windows source handoff: `scripts/package_windows_runtime.py` — secret-filtered current program ZIP with source hash manifest (`include_source` owned directly in this module); no configuration or runtime data.
 - private cycle composition: `api/dependencies/private_operations.py` — check-only handshake／heartbeat；正常 durable cycle 先 discover confirmed arrangements 與 due completion，再執行既有 canonical worker，不自行寫 Domain root。

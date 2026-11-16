@@ -5,8 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-提供工會人員 target-isolated mobile work surfaces：待辦工作台分組呈現 Client Profile pending 資料異動、
-LINE Identity pending 重綁／身分異常與 Scheduling 現行協調結果待辦，並提供 Matching／Scheduling
+提供工會人員 target-isolated mobile work surfaces：待辦工作台分組呈現 LINE Identity pending 重綁／身分異常與 Scheduling 現行協調結果待辦，並提供 Matching／Scheduling
 24 小時月嫂回覆提醒、客戶推薦聯絡／簽約／7 天內部提醒及排班案件工具入口；客服中心沿用 Customer Service workflow，狀態追蹤以 Orders 十三核心階段唯讀顯示未完成訂單、下一步與月嫂願意後的正式媒合提示，
 營運摘要只讀 current business week `operations-report.v3`。舊 `anomalies_center` target 僅相容導向狀態追蹤；待辦項目與數量只來自各 owner 的 bounded
 Query；24 小時只作未回覆提醒，不關閉回覆或發群組通知；初次搜尋零候選不計數。四個工會管理入口均以server-verified LINE token、
@@ -27,7 +26,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx` — notification `work=matching|recommendation|contracts|service|intake` 僅選擇現有工作區。
 - `api/routes/line_mobile_admin.py`
 - `api/routes/line_mobile_staff_leave_coordination.py` — 客戶同意順延的舊手機入口回 410；現行請假協調結果沿共用工會 result 待辦，不再操作客戶 consent。
-- 舊請假 source 與受理／退回入口回 410，不列共用待辦；歷史列表／readback 保留。現行請假使用 service-start／leave-result 原流程。客戶資料異動、推薦／簽約與回覆提醒均使用 owner 分頁及完整總數；已處理後重新讀取，不以本機扣數。
+- 舊請假 source 與受理／退回入口回 410，不列共用待辦；歷史列表／readback 保留。現行請假使用 service-start／leave-result 原流程。推薦／簽約與回覆提醒均使用 owner 分頁及完整總數；已處理後重新讀取，不以本機扣數。
 - `api/dependencies/line_identity.py`
 - `line/static/mobile_admin.html` — staff_review 最上方提供可展開系統狀態卡及手動刷新；只讀既有 runtime/query，不顯示通知對象設定，查詢錯誤不阻塞待辦。
 - `line/static/identity.html`
@@ -40,7 +39,6 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 
 ## Dependencies
 - outbound: `customer-service` — existing ticket Query／reply workflow only.
-- outbound: `clients/client-profile` — existing pending request Query與owner Preview／Apply；mobile只作presentation。
 - outbound: `scheduling/leave-substitution` — 現行協調結果及例外共用 service-start 原流程；舊請假僅保留歷史 Query。
 - outbound: `scheduling/matching-coordination` — 以 `/matching-followups` 唯讀呈現 24 小時月嫂未回覆提醒，以 `/customer-recommendation-followups` 唯讀呈現推薦聯絡、簽約與 7 天待辦，留言操作重用原客服介面。
 - outbound: `orders/order-summary` — bounded unfinished Order case options only；mobile不推算可編輯狀態。

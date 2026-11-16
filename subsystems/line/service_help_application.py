@@ -266,7 +266,7 @@ class LineServiceHelpApplication:
             getattr(source, "source_type", None) is LineSourceType.USER
             and getattr(source, "user_id", None) == line_user_id
         )
-        copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "other": "service-menu"}.get(suffix)
+        copy_key = {"menu": "service-menu", "other": "service-menu"}.get(suffix)
         if copy_key:
             payload = configured_payload(unit_of_work, copy_key, payload)
         request = LineDeliveryRequest(
@@ -489,19 +489,8 @@ def _qa_answer_payload(item: dict[str, Any]):
     }
 
 
-def _form_liff_url(target: str) -> str | None:
-    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
-    if not liff_id or liff_id == "your_liff_id_here":
-        return None
-    return f"https://liff.line.me/{liff_id}?target={target}"
-
-
 def _profile_update_payload():
     return _text_payload("如需修改聯絡電話、服務地址或個人登記資料，請直接在此聊天室留言，工會專員將由後台為您即時調整與確認。")
-
-
-def _order_update_liff_url():
-    return None
 
 
 def _order_update_menu_payload():
@@ -552,9 +541,6 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
 
 
 def _navigation_button(label, action_text, style):
-    if action_text == "order_update":
-        return {"type": "button", "style": style, "height": "sm",
-                "action": {"type": "uri", "label": label, "uri": _order_update_liff_url()}}
     if action_text in ("ai_assistant", "其他問題"):
         ai_url = _ai_assistant_liff_url()
         if ai_url:

@@ -50,7 +50,6 @@ class NotificationSource(StrEnum):
     IDENTITY = 'identity'
     CUSTOMER_BINDING = 'customer_binding'
     STAFF_BINDING = 'staff_binding'
-    PROFILE = 'profile'
     STAFF_PROFILE = 'staff_profile'
     FOLLOWUP = 'followup'
     RECOMMENDATION = 'recommendation'

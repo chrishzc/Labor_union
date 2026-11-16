@@ -12,13 +12,13 @@ from pathlib import Path
 import re
 from unicodedata import normalize
 
-from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import fingerprint_payload
-from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+from shared_kernel.workbook_resource_limits import validate_workbook
+from shared_kernel.xls_workbook import load_values_workbook
 
 
 _FIELD_ALIASES = {
@@ -87,9 +87,9 @@ class HistoricalOrderWorkbook:
 
 def load_historical_order_workbook(path: str | Path, sheet: str | None = None) -> HistoricalOrderWorkbook:
     workbook_path = Path(path)
-    validate_xlsx_workbook(workbook_path)
+    validate_workbook(workbook_path)
     content_digest = sha256(workbook_path.read_bytes()).hexdigest()
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    workbook = load_values_workbook(workbook_path)
     try:
         selected, header, data_start = _select_sheet(workbook, sheet)
         rows = _parse_rows(selected, header, data_start, workbook.epoch, content_digest)

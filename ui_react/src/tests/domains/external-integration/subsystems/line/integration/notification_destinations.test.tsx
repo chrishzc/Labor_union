@@ -43,7 +43,6 @@ it('入帳待辦帶齊快照欄位時，可直接點選已於官方帳號發送�
 });
 it.each([
  ['registration','查看申請','#clients?tab=applications&registration=73'],
- ['profile','審核資料異動','#clients?tab=profile-requests&request=73'],
  ['service_start','處理日期與代班','#scheduling?tab=coordination&case_no=116000001&request=73'],
  ['delivery','查看寄送工作','#line-management?tab=delivery&task=73'],
  ['notification_failure','處理通知建立異常',`#line-management?tab=delivery&view=failures&issue=${key}`],

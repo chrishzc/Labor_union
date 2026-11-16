@@ -17,7 +17,6 @@ import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
-import { OrderChangeRequestsPanel } from '../components/OrderChangeRequestsPanel';
 import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import {
@@ -244,7 +243,6 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
     <div className="order-v2-page">
       <ManagementPageHeader className="orders-page-header" title="待辦看板" />
       {caseLinkError && <p role="alert">{caseLinkError}</p>}
-      <OrderChangeRequestsPanel onOpenCase={setRequestedCase} />
 
       <details className="order-v2-overview-details">
         <summary>案件受理統計</summary>

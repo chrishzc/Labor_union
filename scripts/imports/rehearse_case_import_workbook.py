@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from shared_kernel.xls_workbook import excel_engine
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -81,8 +83,8 @@ def _sha256_text(value: str) -> str:
 
 
 def _validate_workbook_path(path: Path) -> None:
-    if path.suffix.casefold() != ".xlsx":
-        raise RehearsalBlocked("unsupported_extension", "目前只接受 .xlsx 活頁簿。")
+    if path.suffix.casefold() not in {".xlsx", ".xls"}:
+        raise RehearsalBlocked("unsupported_extension", "目前只接受 .xlsx 或 .xls 活頁簿。")
     if not path.is_file():
         raise RehearsalBlocked("workbook_not_found", "找不到指定的活頁簿。")
     size = path.stat().st_size
@@ -169,7 +171,7 @@ def _header_fingerprint(frame: pd.DataFrame) -> str:
 def rehearse_workbook(lane: str, workbook_path: Path, sheet: str | None = None) -> dict[str, Any]:
     _validate_workbook_path(workbook_path)
     policy = LANE_POLICIES[lane]
-    with pd.ExcelFile(workbook_path, engine="openpyxl") as workbook:
+    with pd.ExcelFile(workbook_path, engine=excel_engine(workbook_path)) as workbook:
         frames = _read_nonempty_sheets(workbook)
         sheet_name, frame = _choose_sheet(frames, policy, sheet)
         sheet_index = workbook.sheet_names.index(sheet_name)

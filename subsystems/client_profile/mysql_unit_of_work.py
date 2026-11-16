@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from infrastructure.mysql.client_profile_repository import MySqlClientProfileRepository
-from infrastructure.mysql.client_profile_binding_port import MySqlClientBindingPort
 from infrastructure.mysql.mysql_adapter import get_connection
 
 
@@ -11,7 +10,6 @@ class ClientProfileUnitOfWork:
     def __init__(self, connection) -> None:
         self._connection = connection
         self.client_profiles = MySqlClientProfileRepository(connection)
-        self.binding = MySqlClientBindingPort(connection)
         self._committed = False
         self._rolled_back = False
 

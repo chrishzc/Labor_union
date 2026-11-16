@@ -418,6 +418,55 @@ def test_line_profile_pages_are_retired_and_not_routed() -> None:
     assert "/line-profile-guard" not in routes
 
 
+def test_customer_order_update_form_is_retired() -> None:
+    assert not (ROOT / "line/static/order_update.html").exists()
+
+    menu = json.loads((ROOT / "config/line_menu.json").read_text(encoding="utf-8"))
+    customer = next(item for item in menu["menus"] if item["id"] == "customer_menu")
+    assert {"order_update", "profile_update"}.isdisjoint(
+        button["id"] for button in customer["buttons"]
+    )
+
+    gateway = (ROOT / "line/static/gateway.html").read_text(encoding="utf-8")
+    identity = (ROOT / "line/static/identity.html").read_text(encoding="utf-8")
+    assert "/line-order-update" not in gateway
+    assert "/line-order-update" not in identity
+
+
+def test_customer_order_change_application_routes_are_retired() -> None:
+    from fastapi.routing import iter_route_contexts
+
+    from api.main import app
+    from api.nas_apps import line_app
+    from api.routes.line_order_change import retired_order_change_ticket_apply
+
+    removed_routes = (
+        ("GET", "/line-order-update"),
+        ("POST", "/api/v1/line/order-change/query"),
+        ("POST", "/api/v1/line/order-change/preview"),
+        ("POST", "/api/v1/line/order-change/requests"),
+        ("GET", "/api/v1/orders/change-requests"),
+        ("GET", "/api/v1/orders/change-requests/legacy"),
+        ("POST", "/api/v1/orders/change-requests/{request_id}/complete"),
+    )
+    for application in (app, line_app()):
+        endpoints = {
+            (method, route.path): route.endpoint
+            for route in iter_route_contexts(application.routes)
+            for method in route.methods or ()
+        }
+        assert set(removed_routes).isdisjoint(endpoints)
+        assert endpoints[("POST", "/api/v1/line/order-change/apply")] is retired_order_change_ticket_apply
+
+    with pytest.raises(HTTPException) as retired:
+        retired_order_change_ticket_apply()
+
+    assert retired.value.status_code == 410
+    error = retired.value.detail["error"]
+    assert error["code"] == "order_change_ticket_apply_retired"
+    assert "官方帳號聊天室" in error["message"]
+
+
 def test_new_staff_page_routes_serve_split_assets() -> None:
     payout = line_identity.staff_payout_page()
     assert payout.status_code == 200

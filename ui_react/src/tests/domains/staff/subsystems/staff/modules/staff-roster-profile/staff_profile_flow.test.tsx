@@ -242,12 +242,12 @@ describe('Staff roster profile flow', () => {
     const table = await screen.findByRole('table', { name: '月嫂名冊清單' });
 
     const initialHeaders = within(table).getAllByRole('columnheader');
-    expect(initialHeaders).toHaveLength(30);
+    expect(initialHeaders).toHaveLength(31);
     expect(initialHeaders[0]).toHaveTextContent('公會編號');
     expect(initialHeaders[0]).toHaveClass('is-sticky-col');
     expect(initialHeaders[0].style.left).toBe('0px');
 
-    fireEvent.click(screen.getByRole('button', { name: /自訂顯示與凍結欄位 \(30\/30\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /自訂顯示與凍結欄位 \(31\/31\)/ }));
     const picker = screen.getByRole('dialog', { name: '自訂顯示與凍結欄位' });
 
     fireEvent.click(within(picker).getByRole('button', { name: '取消全選' }));
@@ -257,7 +257,7 @@ describe('Staff roster profile flow', () => {
     expect(lockedOnlyHeaders[1]).toHaveTextContent('操作');
 
     fireEvent.click(within(picker).getByRole('button', { name: '全選' }));
-    expect(within(table).getAllByRole('columnheader')).toHaveLength(30);
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(31);
 
     fireEvent.click(within(picker).getByRole('button', { name: '凍結姓名' }));
     const frozenHeaders = within(table).getAllByRole('columnheader');
@@ -287,7 +287,7 @@ describe('Staff roster profile flow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重設預設排版' }));
     const resetHeaders = within(table).getAllByRole('columnheader');
-    expect(resetHeaders).toHaveLength(30);
+    expect(resetHeaders).toHaveLength(31);
     expect(resetHeaders[0]).toHaveClass('is-sticky-col');
     expect((table.querySelectorAll('colgroup col')[1] as HTMLTableColElement).style.width).toBe('115px');
   });

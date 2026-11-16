@@ -840,10 +840,21 @@ class LineGroupHelperApplication:
         staff_name = ctx["staff_name"]
         client_name = ctx.get("client_name")
         sections = self._load_case_information_sections(unit_of_work, ctx)
+        conn = getattr(unit_of_work, "_connection", None)
+        bank_account_info = None
+        try:
+            from subsystems.line.service_start_messages import resolve_case_bank_account_info
+            if conn is not None:
+                with conn.cursor() as cur:
+                    bank_account_info = resolve_case_bank_account_info(cur, case_no)
+            else:
+                bank_account_info = resolve_case_bank_account_info(None, case_no)
+        except Exception:
+            bank_account_info = None
         card = configured_payload(
             unit_of_work,
             "helper-case-information-card",
-            case_information_card(case_no, staff_name, sections, client_name=client_name),
+            case_information_card(case_no, staff_name, sections, client_name=client_name, bank_account_info=bank_account_info),
             {"case_no": case_no, "staff_name": staff_name},
         )
         self._reply_flex(inbox, unit_of_work, group_id, card, "case-information")

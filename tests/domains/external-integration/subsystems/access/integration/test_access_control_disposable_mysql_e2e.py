@@ -6,6 +6,7 @@ Description: 在明確指定的 disposable MySQL 驗證帳號中心安全狀態�
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,7 @@ def _disposable_access_control_database(monkeypatch):
     assert DATABASE is not None and DATABASE.startswith("lu_test_")
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "v1")
+    monkeypatch.setenv("ACCESS_CONTROL_ACCOUNT_RECEIPT_HMAC_KEY", base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii"))
 
 
 def test_account_center_security_transitions_are_atomic_and_root_is_protected(monkeypatch) -> None:

@@ -82,6 +82,44 @@ def validate_xlsx_workbook(path: str | Path) -> None:
         raise ValueError("xlsx_invalid_archive") from error
 
 
+def validate_xls_workbook(path: str | Path) -> None:
+    """Bound legacy BIFF .xls size and shape before xlrd materializes cells."""
+    import xlrd
+
+    path = Path(path)
+    if path.stat().st_size > _MAX_ARCHIVE_BYTES:
+        raise ValueError("xls_file_too_large")
+    book = None
+    try:
+        book = xlrd.open_workbook(str(path), on_demand=True)
+        if book.nsheets > _MAX_SHEETS:
+            raise ValueError("xls_too_many_sheets")
+        total = 0
+        for index in range(book.nsheets):
+            sheet = book.sheet_by_index(index)
+            total += sheet.nrows * sheet.ncols
+            if sheet.nrows > _MAX_ROWS or sheet.ncols > _MAX_COLUMNS or total > _MAX_CELLS:
+                raise ValueError("xls_sheet_limit_exceeded")
+            book.unload_sheet(index)
+    except ValueError:
+        raise
+    except Exception as error:  # xlrd surfaces malformed BIFF as many exception types
+        raise ValueError("xls_invalid_workbook") from error
+    finally:
+        if book is not None:
+            book.release_resources()
+
+
+def validate_workbook(path: str | Path) -> None:
+    """Validate an uploaded workbook by content signature: legacy .xls or .xlsx."""
+    from shared_kernel.xls_workbook import is_xls_file
+
+    if is_xls_file(path):
+        validate_xls_workbook(path)
+    else:
+        validate_xlsx_workbook(path)
+
+
 def _sheet_size(stream) -> tuple[int, int]:
     rows = cells = row_cells = max_row = max_column = 0
     for event, node in ElementTree.iterparse(stream, events=("start", "end")):

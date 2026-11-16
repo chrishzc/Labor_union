@@ -15,7 +15,8 @@ import pandas as pd
 from domains.client_finance.virtual_account import allows_historical_non_citizen_account
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+from shared_kernel.workbook_resource_limits import validate_workbook
+from shared_kernel.xls_workbook import excel_engine
 from subsystems.client_finance.case_virtual_account import AccountMapping, AccountOccupant
 
 
@@ -280,9 +281,9 @@ class LegacyVirtualAccountWorkbookService:
 
 def _load_workbook(source_path: str) -> _Workbook:
     path = Path(source_path)
-    validate_xlsx_workbook(path)
+    validate_workbook(path)
     digest = sha256(path.read_bytes()).hexdigest()
-    with pd.ExcelFile(path, engine="openpyxl") as excel:
+    with pd.ExcelFile(path, engine=excel_engine(path)) as excel:
         candidates = []
         for index, name in enumerate(excel.sheet_names):
             frame = excel.parse(sheet_name=name, dtype=object)

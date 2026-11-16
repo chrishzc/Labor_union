@@ -22,7 +22,6 @@ from api.dependencies.admin_auth import (
     admin_actor_context,
     has_required_capability,
 )
-from api.dependencies.client_profile import get_client_profile_application
 from api.dependencies.line_identity import (
     get_liff_token_verifier,
     get_line_identity_review_application,
@@ -47,7 +46,6 @@ from api.routes.assignment_plan import (
     _query_payload,
 )
 from api.routes.customer_service import _retired_customer_service
-from api.routes import client_profile as client_profile_routes
 from api.routes import staff_leave_management as staff_leave_management_routes
 from api.schemas.assignment_plan import (
     AssignmentPlanQueryView,
@@ -60,16 +58,6 @@ from api.routes import line_payment_overdue_reminders as overdue_reminder_routes
 from api.routes import line_order_groups as order_group_routes
 from api.schemas.line_order_groups import OpeningGreetingSkipPageView, PaidOrderGroupTodoPageView
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
-from api.schemas.client_profile import (
-    ClientProfileApprovalApplyRequest,
-    ClientProfileApprovalPreviewRequest,
-    ClientProfileApprovalReceiptView,
-    ClientProfilePreviewView,
-    ClientProfileRejectPreviewRequest,
-    ClientProfileRejectRequest,
-    ClientProfileRequestPageView,
-    ClientProfileRequestView,
-)
 from api.schemas.line_identity import (
     CanonicalLineReviewDecisionPreviewResponse,
     CanonicalLineReviewNumberedPageResponse,
@@ -100,7 +88,6 @@ from subsystems.anomalies.current_issue_query import (
     CurrentIssueListRequest,
     CurrentIssueQueryApplication,
 )
-from subsystems.client_profile.application import ClientProfileApplication
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.identity_review_application import LineReviewDataConflictError, LineReviewNotFoundError
 from subsystems.line.review_contracts import (
@@ -145,30 +132,6 @@ class _PaidOrderGroupTodoRequest(_LiffAuthRequest):
     page: int = Field(default=1, ge=1, le=10000)
     page_size: int = Field(default=25, ge=1, le=50)
     view: Literal['paid_uncreated', 'opening_greeting_skips'] = 'paid_uncreated'
-
-
-class _MobileClientProfileListRequest(_LiffAuthRequest):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    status: str | None = "pending"
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=50, ge=1, le=100)
-
-
-class _MobileClientProfileApprovalPreviewRequest(ClientProfileApprovalPreviewRequest):
-    line_id_token: str = Field(min_length=1, max_length=4096)
-
-
-class _MobileClientProfileApprovalApplyRequest(ClientProfileApprovalApplyRequest):
-    line_id_token: str = Field(min_length=1, max_length=4096)
-
-
-class _MobileClientProfileRejectPreviewRequest(ClientProfileRejectPreviewRequest):
-    line_id_token: str = Field(min_length=1, max_length=4096)
-
-
-class _MobileClientProfileRejectRequest(ClientProfileRejectRequest):
-    line_id_token: str = Field(min_length=1, max_length=4096)
 
 
 class _MobileStaffLeaveListRequest(_LiffAuthRequest):
@@ -563,119 +526,6 @@ def matching_followups(payload: _MobileTodoPageRequest):
             "page_size": payload.page_size,
         },
         message="成功取得媒合人工跟進清單",
-    )
-
-
-@router.post(
-    "/client-profile/requests",
-    response_model=BaseResponse[ClientProfileRequestPageView],
-)
-def mobile_client_profile_requests(
-    payload: _MobileClientProfileListRequest,
-    application: ClientProfileApplication = Depends(get_client_profile_application),
-):
-    principal, _ = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_READ,
-    )
-    return client_profile_routes.list_requests(
-        status=payload.status,
-        page=payload.page,
-        page_size=payload.page_size,
-        _=principal,
-        application=application,
-    )
-
-
-@router.post(
-    "/client-profile/requests/{request_id}/approve/preview",
-    response_model=BaseResponse[ClientProfilePreviewView],
-)
-def mobile_client_profile_approval_preview(
-    request_id: int,
-    payload: _MobileClientProfileApprovalPreviewRequest,
-    application: ClientProfileApplication = Depends(get_client_profile_application),
-):
-    principal, _ = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    )
-    return client_profile_routes.preview_approval(
-        request_id,
-        ClientProfileApprovalPreviewRequest.model_validate(
-            payload.model_dump(exclude={"line_id_token"})
-        ),
-        principal,
-        application,
-    )
-
-
-@router.post(
-    "/client-profile/requests/{request_id}/approve/apply",
-    response_model=BaseResponse[ClientProfileApprovalReceiptView],
-)
-def mobile_client_profile_approval_apply(
-    request_id: int,
-    payload: _MobileClientProfileApprovalApplyRequest,
-    application: ClientProfileApplication = Depends(get_client_profile_application),
-):
-    principal, _ = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    )
-    return client_profile_routes.apply_approval(
-        request_id,
-        ClientProfileApprovalApplyRequest.model_validate(
-            payload.model_dump(exclude={"line_id_token"})
-        ),
-        principal,
-        application,
-    )
-
-
-@router.post(
-    "/client-profile/requests/{request_id}/reject/preview",
-    response_model=BaseResponse[ClientProfilePreviewView],
-)
-def mobile_client_profile_rejection_preview(
-    request_id: int,
-    payload: _MobileClientProfileRejectPreviewRequest,
-    application: ClientProfileApplication = Depends(get_client_profile_application),
-):
-    principal, _ = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    )
-    return client_profile_routes.preview_rejection(
-        request_id,
-        ClientProfileRejectPreviewRequest.model_validate(
-            payload.model_dump(exclude={"line_id_token"})
-        ),
-        principal,
-        application,
-    )
-
-
-@router.post(
-    "/client-profile/requests/{request_id}/reject",
-    response_model=BaseResponse[ClientProfileRequestView],
-)
-def mobile_client_profile_rejection_apply(
-    request_id: int,
-    payload: _MobileClientProfileRejectRequest,
-    application: ClientProfileApplication = Depends(get_client_profile_application),
-):
-    principal, _ = _mobile_admin_context(
-        payload.line_id_token,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    )
-    return client_profile_routes.reject_request(
-        request_id,
-        ClientProfileRejectRequest.model_validate(
-            payload.model_dump(exclude={"line_id_token"})
-        ),
-        principal,
-        application,
     )
 
 

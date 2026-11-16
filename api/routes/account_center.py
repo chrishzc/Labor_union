@@ -21,6 +21,7 @@ from api.schemas.account_center import (
     AccountSecurityActionRequest,
 )
 from api.schemas.base import BaseResponse
+from subsystems.access.account_receipt_fingerprints import AccountReceiptProtectionError
 from subsystems.access.authentication_session import (
     AccountCommandReceipt,
     AdminPrincipal,
@@ -90,7 +91,7 @@ async def create_account(
         )
     except ValueError as error:
         raise _command_error(error) from error
-    except AdminSessionStorageError as error:
+    except (AdminSessionStorageError, AccountReceiptProtectionError) as error:
         raise _storage_unavailable(error) from error
     return BaseResponse(
         data=_receipt_view(result.receipt, account=result.account),
@@ -111,7 +112,7 @@ async def set_enabled(
         )
     except ValueError as error:
         raise _command_error(error) from error
-    except AdminSessionStorageError as error:
+    except (AdminSessionStorageError, AccountReceiptProtectionError) as error:
         raise _storage_unavailable(error) from error
     return BaseResponse(data=_receipt_view(receipt))
 
@@ -129,7 +130,7 @@ async def reset_password(
         )
     except ValueError as error:
         raise _command_error(error) from error
-    except AdminSessionStorageError as error:
+    except (AdminSessionStorageError, AccountReceiptProtectionError) as error:
         raise _storage_unavailable(error) from error
     return BaseResponse(data=_receipt_view(receipt))
 
@@ -145,7 +146,7 @@ async def reset_mfa(
         receipt = await asyncio.to_thread(reset_account_center_mfa, connection_factory=connection_factory, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
     except ValueError as error:
         raise _command_error(error) from error
-    except AdminSessionStorageError as error:
+    except (AdminSessionStorageError, AccountReceiptProtectionError) as error:
         raise _storage_unavailable(error) from error
     return BaseResponse(data=_receipt_view(receipt))
 
@@ -161,7 +162,7 @@ async def revoke_sessions(
         receipt = await asyncio.to_thread(revoke_account_center_sessions, connection_factory=connection_factory, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
     except ValueError as error:
         raise _command_error(error) from error
-    except AdminSessionStorageError as error:
+    except (AdminSessionStorageError, AccountReceiptProtectionError) as error:
         raise _storage_unavailable(error) from error
     return BaseResponse(data=_receipt_view(receipt))
 
@@ -205,7 +206,15 @@ def _command_error(error: ValueError) -> HTTPException:
 
 
 def _storage_unavailable(error: Exception) -> HTTPException:
-    del error
+    if isinstance(error, AccountReceiptProtectionError):
+        return typed_http_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "unavailable",
+            str(error),
+            "帳號操作的收據保護尚未就緒，請聯絡維護人員。",
+            "account-center-command",
+            retryable=False,
+        )
     return typed_http_error(
         status.HTTP_503_SERVICE_UNAVAILABLE,
         "unavailable",

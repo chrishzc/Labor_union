@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `api/routes/customer_service.py`，舊工單摘要、列表、明細及提醒回 `410 Gone`，保留切換結案 Preview／Apply。
+- `api/routes/line_order_change.py` 保留舊工單送件的 typed `410 Gone`，引導客戶於 LINE 官方帳號留言。
 - management: `ui_react/src/pages/LineManagementPage.tsx` 將舊工單分頁連結導回身分與授權。
 - application: `subsystems/customer_service/application.py`、`subsystems/customer_service/escalation_application.py`
 - adapter: `infrastructure/mysql/customer_service_repository.py`

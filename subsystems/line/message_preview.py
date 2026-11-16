@@ -192,7 +192,6 @@ _BUILTINS = (
     ("card-candidate-information-2", "初步候選聯絡－訂單資訊二", "flex", True, True, False),
     ("card-candidate-information-3", "初步候選聯絡－每週服務說明", "flex", True, True, False),
     ("service-menu", "服務與問答導覽卡", "flex", False, False, False),
-    ("order-update-menu", "修改訂單資訊導覽卡", "flex", False, False, False),
     ("identity-pending", "身分申請受理通知", "text", False, False, False),
     ("identity-bound-customer", "客戶綁定成功", "text", False, False, False),
     ("identity-bound-staff", "月嫂綁定成功", "text", False, False, False),
@@ -360,9 +359,9 @@ class LineMessagePreviewApplication:
             if card_source is None:
                 return PreviewResult("unavailable", "所選案件與月嫂沒有此卡片所需的正式方案、候選紀錄或完整訂單／服務日期資料，請選擇其他對象。", "flex", facts=tuple(facts))
             payload = json.loads(card_source.payload_json)
-        elif key in {"service-menu", "order-update-menu"}:
-            from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
-            payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
+        elif key == "service-menu":
+            from subsystems.line.service_help_application import _service_menu_payload
+            payload = _service_menu_payload()
         elif key == "identity-pending" or key.startswith("identity-bound-"):
             from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS
             payload = {"type": "text", "text": (

@@ -305,6 +305,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     setOwnerFacts(caseNo);
     const view = render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType="normal" onClose={vi.fn()} />);
     await screen.findByRole('region', { name: '正式補件入口' });
+    expect(screen.queryByText('訂單異動申請紀錄')).not.toBeInTheDocument();
     const summary = screen.getByRole('region', { name: '案件摘要' });
     const recordsRegion = screen.getByRole('region', { name: '案件聯絡、服務資料與 LINE 歷程' });
     const body = view.container.querySelector('.order-case-task-body') as HTMLElement;

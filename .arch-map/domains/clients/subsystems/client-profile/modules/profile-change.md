@@ -7,14 +7,10 @@
 ## Implementation
 - `ui_react/src/components/ClientRegistryAccountingSummary.tsx` — 唯讀組合原 finance typed case Query，歷史辨識與人工設定分開。
 - 客戶補助身分限服務開始前由補助市民或原住民改一般市民，沿既有帳務計價 writer 同交易重算；BeClass 生日／整案日期為唯讀；客戶主檔行政註記沿管理端 Client Profile Preview／Apply，可清空；退款欄位沿 BeClass correction writer，名冊表格使用可聚焦的有界捲動區。
-- `ui_react/src/components/ClientProfileRequestWorkbench.tsx`、`ui_react/src/components/ClientProfileRequestReview.tsx` — 待審核清單與獨立單筆 Query；核准／退回仍用原 Preview／Apply、版本及冪等識別。名冊 `tab=applications&registration=<id>` 開啟指定需求申請，`tab=profile-requests&request=<id>` 開啟資料異動；不依賴清單第一頁，通知頁不再提供審核操作。
 - `domains/clients/profile.py`
 - `subsystems/client_profile/`
 - `infrastructure/mysql/client_profile_repository.py`
-- `infrastructure/mysql/client_profile_binding_port.py`
 - `api/dependencies/client_profile.py`
-- `api/routes/client_profile.py`
-- `api/schemas/client_profile.py`
 - `subsystems/client_profile/registry_query.py`
 - `subsystems/client_profile/case_inspection_export.py` — 案件總覽及固定關聯明細 XLSX，保留明細 grain，不重算 owner facts。
 - `infrastructure/mysql/client_case_inspection_repository.py` — 以名冊篩選取得案件，固定欄位關聯 Query，無 writer。
@@ -25,10 +21,9 @@
 - `api/routes/client_registry.py`
 - `api/schemas/client_registry.py`
 - `api/main.py` — bounded router composition only
-- `line/static/profile_update.html`
 - `ui_react/src/api/client_registry/`
 - `ui_react/src/pages/ClientRegistryPage.tsx`
-  - 支援案件／欄位 hash 深連結；管理端 `due_month`／`reject_reason` 走既有 Client Profile Preview／Apply，不擴張 applicant 欄位。
+  - 支援案件／欄位 hash 深連結；管理端 `due_month`／`reject_reason` 走既有 Client Profile Preview／Apply。
   - `service_type` 使用文字輸入與 Client Profile writer 保存非空原文（最多 100 字），不提供固定選單、不轉換別名，不重算 Orders 結束日。
 - `ui_react/src/components/HcmIntakeProfileRepairPanel.tsx` — 由 current HCM review 指定本案可編輯欄位，組合既有 Client Profile Preview／Apply，正式回讀後才刷新警示。
 - `ui_react/src/pages/ClientRosterPage.tsx`
@@ -53,7 +48,7 @@
 - outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。
 - inbound: `case-import/hcm-current-workbook-import` — Client Profile email-only 命令 fresh-lock 空白資格並保存 version／事件／receipt；借用 workbook outer UoW，無自有 commit。
 - Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。欄位、writer、版本及 BeClass 獨立聯絡欄位保持既有契約。
-- Client-owned `clients.email` 保存 HCM email，管理端 Q/P/A 與名冊／唯讀詳情顯示「HCM Email」；BeClass effective `email` 獨立顯示「BeClass Email」。LIFF applicant 範圍不擴張。
+- Client-owned `clients.email` 保存 HCM email，管理端 Q/P/A 與名冊／唯讀詳情顯示「HCM Email」；BeClass effective `email` 獨立顯示「BeClass Email」。
 - outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
 - outbound: `scheduling/service-before-replacement`、`scheduling/matching-schedule-confirmation` — Drawer 借用既有 Assignment Plan Query，歷程唯讀組合 Scheduling 更換主事件；換人 Q/P/A 保留於服務安排主流程，本區不再提供換人操作或擁有指派 writer。Staff 摘要 Query 僅補人員名稱與公會編號。
 - outbound: `scheduling/matching-coordination` — 更換登記後在 Drawer 重用 OrderCandidateQueryPanel、OrderCandidateContactStatusPanel、OrderFormalRecommendationPanel 續辦接任；每次保存刷新 current 候選與方案，正式指派仍由既有 gate 決定。
@@ -75,7 +70,7 @@
 - test_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 - test_root: `ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 
-- Client Profile 管理端一般維護／HCM 補件與申請審核皆依 Global §2.4 一次點擊送出；reason 可空白，變更歷程保留空白及操作人員／時間，內部仍使用既有 Preview／Apply。
+- Client Profile 管理端一般維護與 HCM 補件依 Global §2.4 一次點擊送出；reason 可空白，變更歷程保留空白及操作人員／時間，內部仍使用既有 Preview／Apply。
 
 ## Change triggers
-- Reconcile when allowlist、binding evidence、profile/request version、event／receipt／outbox、public route or LIFF readback changes.
+- Reconcile when profile allowlist, version, event, receipt, or admin route changes.

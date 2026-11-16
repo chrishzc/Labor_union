@@ -5,9 +5,11 @@ Description: 驗證直接靜態舊入口不再繞過 canonical LIFF 身分與異
 
 from pathlib import Path
 
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.nas_apps import line_app
 
 
 def test_static_bind_redirects_to_canonical_identity_and_preserves_navigation_query() -> None:
@@ -22,15 +24,18 @@ def test_static_bind_redirects_to_canonical_identity_and_preserves_navigation_qu
     )
 
 
-def test_profile_update_static_uses_verified_liff_preview_and_apply_contract() -> None:
-    source = Path("line/static/profile_update.html").read_text(encoding="utf-8")
+def test_customer_profile_application_routes_are_retired() -> None:
+    retired_prefixes = (
+        "/api/v1/line/client-profile",
+        "/api/v1/client-profile/requests",
+        "/api/v1/line/mobile-admin/client-profile/requests",
+    )
+    for application in (app, line_app()):
+        routes = [route.path for route in iter_route_contexts(application.routes)]
+        assert "/line-profile-guard" not in routes
+        assert "/line-profile-update" not in routes
+        assert not any(path.startswith(retired_prefixes) for path in routes)
+        assert "/line-staff-profile-update" in routes
 
-    assert "預覽異動" in source
-    assert "確認並送出申請" in source
-    assert 'id="submitButton" disabled' in source
-    assert "/api/v1/line/client-profile/query" in source
-    assert "/api/v1/line/client-profile/preview" in source
-    assert "/api/v1/line/client-profile/apply" in source
-    assert "line_user_id" not in source
-    assert "liff.getProfile" not in source
-    assert "liff.getIDToken" in source
+    for file in ("profile_update.html", "profile_guard.html"):
+        assert not (Path("line/static") / file).exists()

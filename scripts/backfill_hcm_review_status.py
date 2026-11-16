@@ -10,19 +10,19 @@ import os
 from pathlib import Path
 import re
 
-from openpyxl import load_workbook
 import pymysql
 
 from domains.case_import.client_import_validation import (
     HCM_REQUIRED_HEADERS,
     normalize_hcm_review_status,
 )
-from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+from shared_kernel.workbook_resource_limits import validate_workbook
+from shared_kernel.xls_workbook import load_values_workbook
 
 
 def _source_rows(path: Path):
-    validate_xlsx_workbook(path)
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    validate_workbook(path)
+    workbook = load_values_workbook(path)
     try:
         candidates = []
         for sheet in workbook.worksheets:

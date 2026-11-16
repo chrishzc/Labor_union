@@ -91,10 +91,6 @@ from infrastructure.mysql.matching_coordination_customer_service_source import (
 from infrastructure.mysql.staff_payout_self_service_query_repository import (
     MySqlStaffPayoutSelfServiceRepository,
 )
-from infrastructure.mysql.customer_order_change_repository import (
-    MySqlCustomerOrderChangeRepository,
-)
-from infrastructure.mysql.client_profile_binding_port import MySqlClientBindingPort
 from infrastructure.mysql.candidate_contact_pool_line_reply_repository import (
     MySqlCandidateContactPoolLineReplyRepository,
 )
@@ -142,8 +138,6 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.candidate_contact_pool_replies = MySqlCandidateContactPoolLineReplyRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
-        self.customer_order_changes = MySqlCustomerOrderChangeRepository(connection)
-        self.customer_order_change_bindings = MySqlClientBindingPort(connection)
         self.staff_payout_self_service = MySqlStaffPayoutSelfServiceRepository(connection)
         self.feedback = MySqlLineFeedbackRepository(connection)
         self.safe_review_links = MySqlLineSafeReviewLinkRepository(connection)

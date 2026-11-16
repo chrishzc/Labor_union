@@ -22,7 +22,7 @@
 
 - **常見問題與 AI 問答分流入口**：Rich Menu 統一採用「常見問題」按鈕，點選後由 LINE Bot 於聊天室即時 Reply 常見問題導覽卡片與 Quick Reply 懸浮分類選項（零推播成本），引導使用者先選分類、再查看具體問題項目與解答；卡片與解答底部固定提供「找不到答案？試試 AI 智慧問答」按鈕，點擊直接跳出專用 AI 問答 LIFF（`?target=ai_assistant` / `/line-service-help?tab=ai`）。
 - **分類導向**：原「服務流程介紹」（`service_flow`）與「費用與補助說明」（`fee_and_subsidy`）亦統一收斂為常見問題之分類卡片；費用與補助固定使用現行政策分類說明「一般市民最高 40 小時／補助市民最高 120 小時（實際補助金額依本案服務資料計算）」，烹飪備料固定明示「由客戶購買並準備食材」。
-- **客戶端自助表單退役與後台維護原則**：經工會實務反饋，客戶端無線上自填改單與改個資需求，易造成版本混亂。客戶圖文選單全面移除「改個人資料」與「改訂單內容」入口，聊天室亦不再提供線上自填表單連結。客戶若有聯絡方式、服務地址或訂單需求變更，一律由客戶於官方帳號或案件群組直接留言，由工會專員於管理後台手動確認並調整。既有 `profile_update` 與 `order_update` 表單僅作後端歷史與管理預覽相容，不主動對客發布。
+- **客戶端自助表單退役與後台維護原則**：經工會實務反饋，客戶端無線上自填改單與改個資需求，易造成版本混亂。客戶圖文選單全面移除「改個人資料」與「改訂單內容」入口，聊天室亦不再提供線上自填表單連結。客戶若有聯絡方式、服務地址或訂單需求變更，一律由客戶於官方帳號或案件群組直接留言，由工會專員於管理後台手動確認並調整。舊自填表單、送審與審核入口均已退役。
 - **已退役訊息範本入口（11 個獨立範本與 `service-flow`／`service-payment` 皆回 `404`）**：`service-flow` 與 `service-payment` 之獨立查詢／預覽／編輯回傳 typed `404`（不刪除既有資料庫設定）；另以下 11 個無現行引用之 standalone 訊息範本編輯及公版預覽入口已自目錄移除並回傳 `404`：`staff_switch_fail`、`staff_menu_not_set`、`esc_success`、`esc_fail`、`bind_link_msg`、`register_success`、`bind_success_existing`、`bind_confirm_rebind`、`bind_fail_no_data`、`client_rebind_approved`、`staff_verification_requested`（bootstrap 與資料庫設定歷史不刪除，其他規則明確引用者仍沿該 rule ID 維護）。
 
 ## 4. 可發布知識庫目錄（Knowledge Catalog）

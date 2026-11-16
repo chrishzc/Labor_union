@@ -136,7 +136,7 @@ class Element {
 }
 const nodes=new Map(); const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id)};
 const ctx=vm.createContext({document:{getElementById:get,createElement:t=>new Element(t)},crypto});
-for(const id of ['identityReviewCount','profileReviewCount','leaveReviewCount','serviceStartCount','matchingFollowupCount','customerRecommendationCount','depositCount','groupTodoCount','paymentOverdueCount','logReminderCount'])get(id).dataset.pendingCount='0';
+for(const id of ['identityReviewCount','leaveReviewCount','serviceStartCount','matchingFollowupCount','customerRecommendationCount','depositCount','groupTodoCount','paymentOverdueCount','logReminderCount'])get(id).dataset.pendingCount='0';
 vm.runInContext(`let reviewQuerySequence=0; const target='staff_review';
  let notificationSequence=0;let notificationSelection=null;const focusNotificationItems=(source,items)=>items;const reviewPageState={page:1,pageSize:50}; let pendingTotal=1;
  const postJson=async(url,body)=>url.endsWith('identity-reviews')?{items:body.review_status==='pending'&&pendingTotal?[{}]:[],total:body.review_status==='pending'?pendingTotal:0,page:body.page,page_size:body.page_size}:{status:'queued'};
@@ -202,10 +202,10 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert 'id="customerPane"' not in source
     assert "/api/v1/line/mobile-admin/order-statuses" in source
     assert "/api/v1/line/mobile-admin/operations-summary" in source
-    assert "/api/v1/line/mobile-admin/client-profile/requests" in source
+    assert "/api/v1/line/mobile-admin/client-profile/requests" not in source
     assert "/api/v1/line/mobile-admin/staff-leave-requests" not in source
     assert "/api/v1/line/mobile-admin/matching-followups" in source
-    assert "客戶資料異動" in source
+    assert "客戶資料異動" not in source
     assert "客戶／月嫂身分重綁與異常" in source
     assert "服務開始、請假、代班與換人" in source
     assert "月嫂回覆提醒" in source

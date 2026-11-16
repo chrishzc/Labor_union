@@ -510,3 +510,144 @@ def test_customer_menu_case_information_unbound_and_no_case_guidance():
     req = uow_unbound.delivery_tasks.requests[0]
     assert req.message_kind is LineMessageKind.TEXT
     assert "服務申請入口" in req.payload_json
+
+
+def test_case_bank_account_resolution_by_year_rules():
+    """驗證案件專屬匯款帳號之年度分水嶺規則：115年度前查匯入表，116年度後走內建流水。"""
+    from subsystems.line.service_start_messages import resolve_case_bank_account_info
+
+    class FakeCursor:
+        def __init__(self, mappings):
+            self.mappings = mappings
+            self._current_result = None
+
+        def execute(self, query, params):
+            case_no = params[0]
+            val = self.mappings.get(case_no)
+            self._current_result = {"virtual_account": val} if val else None
+
+        def fetchone(self):
+            return self._current_result
+
+    # 1. 115年度前：查得匯入帳號
+    cur = FakeCursor({"115000001": "99781699000123", "A115001": "99781699000555"})
+    info_115_found = resolve_case_bank_account_info(cur, "115000001")
+    assert info_115_found["bank_name"] == "永豐銀行"
+    assert info_115_found["bank_code"] == "807"
+    assert info_115_found["virtual_account"] == "99781699000123"
+    assert "匯入" in info_115_found["account_note"]
+
+    # 2. 115年度前（非市民）：查得匯入帳號
+    info_a115_found = resolve_case_bank_account_info(cur, "A115001")
+    assert info_a115_found["virtual_account"] == "99781699000555"
+
+    # 3. 115年度前：未匯入帳號（查無）
+    info_115_missing = resolve_case_bank_account_info(cur, "115000999")
+    assert info_115_missing["virtual_account"] == "尚未匯入（請洽工會專員）"
+    assert "待匯入" in info_115_missing["account_note"]
+
+    # 4. 116年度起：市民內建流水帳號（前綴 99781699 + 116 + 3碼流水號）
+    info_116_citizen = resolve_case_bank_account_info(cur, "116000001")
+    assert info_116_citizen["virtual_account"] == "99781699116001"
+    assert "內建流水" in info_116_citizen["account_note"]
+
+    # 5. 116年度起：非市民內建流水帳號（A116001 -> 流水號+500 -> 99781699116501）
+    info_116_non_citizen = resolve_case_bank_account_info(cur, "A116001")
+    assert info_116_non_citizen["virtual_account"] == "99781699116501"
+    assert "內建流水" in info_116_non_citizen["account_note"]
+
+
+def test_case_information_card_renders_bank_account_box():
+    """驗證案件資訊 Flex Bubble 在傳入 bank_account_info 時正確呈現匯款銀行與專屬帳號。"""
+    from subsystems.line.service_start_messages import case_information_card
+
+    sections = [
+        SimpleNamespace(
+            title="客戶付款約定",
+            rows=[
+                ("訂金金額", "NT$ 6,000"),
+                ("客戶應付總額", "NT$ 12,000"),
+            ],
+        ),
+    ]
+
+    bank_info = {
+        "bank_name": "永豐銀行",
+        "bank_code": "807",
+        "virtual_account": "99781699116001",
+        "account_note": "116年度起案件（內建流水帳號）",
+    }
+
+    card = case_information_card(
+        "116000001",
+        "陳月嫂",
+        sections,
+        client_name="王小美",
+        bank_account_info=bank_info,
+    )
+    card_json = json.dumps(card, ensure_ascii=False)
+
+    assert "案件專屬匯款帳號" in card_json
+    assert "永豐銀行（807）" in card_json
+    assert "99781699116001" in card_json
+    assert "ATM／網銀轉帳請輸入銀行代碼 807" in card_json
+    assert "clipboard" in card_json
+    assert "📋 複製帳號 (永豐807)" in card_json
+
+    # 驗證即使無 sections 也能正常呈現帳號區塊
+    empty_card = case_information_card(
+        "116000001",
+        "陳月嫂",
+        [],
+        bank_account_info=bank_info,
+    )
+    empty_card_json = json.dumps(empty_card, ensure_ascii=False)
+    assert "案件專屬匯款帳號" in empty_card_json
+    assert "99781699116001" in empty_card_json
+    assert "clipboard" in empty_card_json
+
+
+def test_all_payment_reminder_cards_render_bank_account_box_and_clipboard():
+    """驗證所有繳費提醒卡片（訂金繳費提醒、第二期款繳費提醒、各期逾期提醒）均包含匯款帳號與一鍵複製按鈕。"""
+    from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER
+    from subsystems.line.payment_reminder_notifications import payment_reminder_card_payload
+
+    # 1. 訂金繳費提醒卡
+    deposit_card = deposit_notification_payload("116000001", 6000, "2027-01-15", REMINDER)
+    dep_json = json.dumps(deposit_card, ensure_ascii=False)
+    assert "案件專屬匯款帳號" in dep_json
+    assert "永豐銀行（807）" in dep_json
+    assert "99781699116001" in dep_json
+    assert "clipboard" in dep_json
+    assert "📋 複製帳號 (永豐807)" in dep_json
+
+    # 2. 第二期款繳費提醒卡
+    second_card = payment_reminder_card_payload("second", "116000001", 12000, "2027-04-10", "reminder")
+    sec_json = json.dumps(second_card, ensure_ascii=False)
+    assert "案件專屬匯款帳號" in sec_json
+    assert "永豐銀行（807）" in sec_json
+    assert "99781699116001" in sec_json
+    assert "clipboard" in sec_json
+    assert "📋 複製帳號 (永豐807)" in sec_json
+
+    # 3. 逾期提醒卡（第一期款逾期）
+    overdue_card = payment_reminder_card_payload("first", "116000001", 8000, "2027-03-01", "overdue")
+    od_json = json.dumps(overdue_card, ensure_ascii=False)
+    assert "案件專屬匯款帳號" in od_json
+    assert "永豐銀行（807）" in od_json
+    assert "99781699116001" in od_json
+    assert "clipboard" in od_json
+    assert "📋 複製帳號 (永豐807)" in od_json
+
+    # 4. 驗證 115 年度歷史匯入帳號亦正確整合至繳費提醒卡
+    info_115 = {
+        "bank_name": "永豐銀行",
+        "bank_code": "807",
+        "virtual_account": "99781699000179",
+        "account_note": "115年度前案件（匯入專屬帳號）",
+    }
+    dep_115_card = deposit_notification_payload("115000179", 6000, "2026-11-20", REMINDER, bank_account_info=info_115)
+    dep_115_json = json.dumps(dep_115_card, ensure_ascii=False)
+    assert "99781699000179" in dep_115_json
+    assert "clipboard" in dep_115_json
+    assert "📋 複製帳號 (永豐807)" in dep_115_json

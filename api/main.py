@@ -37,7 +37,6 @@ from api.routes import (
     assignment_schedule_rest_dates,
     beclass_import_review,
     client_beclass_import,
-    client_profile,
     client_registry,
     legacy_virtual_account_import,
     case_virtual_account,
@@ -308,8 +307,6 @@ app.include_router(customer_service.router)
 app.include_router(customer_service.escalation_router)
 app.include_router(line_identity_management.router)
 app.include_router(line_order_change.router)
-app.include_router(line_order_change.page_router)
-app.include_router(line_order_change.admin_router)
 app.include_router(line_candidate_contact.page_router)
 app.include_router(line_deposit_payment.router)
 app.include_router(line_deposit_payment.page_router)
@@ -394,8 +391,6 @@ app.include_router(file_settings.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
-app.include_router(client_profile.router)
-app.include_router(client_profile.review_router)
 app.include_router(client_registry.router)
 app.include_router(legacy_virtual_account_import.router)
 app.include_router(case_virtual_account.router)

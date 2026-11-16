@@ -6,7 +6,6 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin, admin_actor_context, has_required_capability
 from api.dependencies.line_identity import get_line_identity_application, get_line_identity_review_application
-from api.dependencies.client_profile import get_client_profile_application
 from api.dependencies.staff_profile_change import staff_profile_change_staging
 from api.dependencies.line_runtime import get_line_order_group_query_application, get_line_delivery_task_admin_application
 from api.dependencies.service_start import get_service_start_application
@@ -46,7 +45,6 @@ SOURCES = {
     Source.IDENTITY: ('身分綁定審核', 'review', Cap.REVIEW_READ),
     Source.CUSTOMER_BINDING: ('客戶綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
     Source.STAFF_BINDING: ('月嫂綁定人工提醒', 'review', Cap.IDENTITY_BINDING_READ),
-    Source.PROFILE: ('客戶資料異動', 'review', Cap.CUSTOMER_SERVICE_READ),
     Source.STAFF_PROFILE: ('月嫂資料異動', 'review', 'data_browser.write'),
     Source.FOLLOWUP: ('月嫂回覆待跟進', 'review', Cap.MATCHING_READ),
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
@@ -148,10 +146,6 @@ def _read_source(source, cursor, principal):
                        '請核對異動前後內容。', reference_id=row['id'],
                        person=f"月嫂 #{row['staff_id']}", expected_version=row['version']) for row in rows]
         return NotificationPage(items=items, next_cursor=next_cursor)
-    elif source == Source.PROFILE:
-        rows, total = get_client_profile_application().list_requests(status='pending', page=page, page_size=SIZE)
-        items = [_item(source, r.request_id, '客戶資料異動待審核', '客戶已提出資料異動。', r.reason or '請核對異動前後內容。',
-                       reference_id=r.request_id, person=f'客戶 #{r.client_id}', expected_version=r.request_version) for r in rows]
     elif source == Source.FOLLOWUP:
         result = query_manual_followups(get_connection, now, page=page, limit=SIZE)
         total = result.total

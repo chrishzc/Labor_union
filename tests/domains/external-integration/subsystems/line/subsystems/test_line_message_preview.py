@@ -241,7 +241,7 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
     ids = {entry.id for entry in catalog}
     assert {"card-customer-confirmation", "card-candidate-information-package",
             "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3",
-            "service-menu", "order-update-menu", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
+            "service-menu", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
             "template-client_rebind_rejected", "template-staff_verification_rejected"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
     assert {entry.id for entry in catalog if entry.format == 'flex' and entry.name.startswith('正式媒合－')} == {'card-customer-confirmation'}
@@ -276,6 +276,7 @@ def test_unused_identity_templates_are_hidden_without_removing_rule_backed_notif
     "service-resolved",
     "service-profile-update",
     "service-order-update",
+    "order-update-menu",
     "complaint-handoff-received",
     "customer-service-ticket-reply",
 ])
@@ -296,7 +297,7 @@ def test_retired_group_notifications_are_absent_from_default_previews(key):
         application.render(key, None, None, None, actor(), sample=True)
 
 
-@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-other"])
+@pytest.mark.parametrize("key", ["service-menu", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-other"])
 def test_fixed_runtime_messages_need_no_database_and_expose_no_actions(key):
     def forbidden():
         pytest.fail("fixed runtime message must not read subjects or create an interaction")

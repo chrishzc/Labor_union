@@ -40,6 +40,7 @@
 
 - **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 僅執行 Docker MySQL 與共用檔案儲存；**三項入口一律透過加密 TLS MySQL 連線與受控 NAS 路徑執行，絕不啟用 SSH、遠端修改容器設定或放寬 `.env` 保護**。
 - **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7／8 偵測同一 installation 尚有受管 runtime 運作時即停止並要求先停止服務。
+- `Windows管理.bat` 選項 `11 管理 root 帳號` 見 [Access Control 的 Windows 主機離線管理](17_External_Integration_LINE_Access正式規格.md#34-windows-主機離線管理-root-帳號)。
 - **設定邊界**：讀取獨立 `.env.nas-maintenance` Fixed target NAS host／port（拒絕 `localhost`／開發庫及 process env override），`--dry-run` 零連線零寫入；備份儲存路徑唯一取自 `.env` `CONTROLLED_FILE_STORAGE_ROOT` 下的 `05_資料庫冷備份 (db_backups)`（僅接受 NAS UNC 且禁止 symlink／junction）。
 - **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 同樣使用備份、副本升級及驗證切換。來源提報待升級版本及缺少的驗證紀錄。若來源已符合現行版本，結束而不建立副本。副本通過正常啟動使用的版本檢查後，才可切換。此部署沿用該安裝的測試備份位置。
 

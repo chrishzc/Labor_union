@@ -83,12 +83,12 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "order_update_menu": {
         "tier": "navigation",
-        "public_route": "/line-order-update",
+        "public_route": None,
         "postback_identity": None,
     },
     "order_update_request": {
         "tier": "navigation",
-        "public_route": "/line-order-update",
+        "public_route": None,
         "postback_identity": None,
     },
     "service_flow": {
@@ -108,7 +108,7 @@ _ROUTE_METADATA: dict[str, dict[str, str | None]] = {
     },
     "profile_update": {
         "tier": "navigation",
-        "public_route": "/line-profile-guard",
+        "public_route": None,
         "postback_identity": None,
     },
     "other": {

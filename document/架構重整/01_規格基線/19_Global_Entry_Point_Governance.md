@@ -61,8 +61,8 @@ API endpoint 與 operator CLI 不得僅因前端無 static caller 即刪除，�
 - **HCM 修正版工作簿端點**：移除 `/api/v1/case-import/hcm/resubmissions/{preview|apply}` 與頁面入口；保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake 與既有 outbox／證據。
 - **管理員通知對象設定**：移除 `line-security` 頁與 mutation；管理員系統狀態顯示於 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，歷史 target 查詢保留。
 - **LINE 加入好友歡迎訊息設定**：`GET /api/v1/line/onboarding`、`POST /api/v1/line/onboarding/preview` 與 `PUT /api/v1/line/onboarding` 回傳 typed `410 Gone`；加入好友歡迎訊息改由 LINE 官方帳號後台設定，通知工作台與公版目錄不再列管歡迎詞。
-- **LINE 客服工單與舊訂單異動送件**。舊客服工單摘要、列表、明細、客服提醒、客服回覆與行動客服 API 回 `410 Gone`。切換結案保留原授權。舊訂單異動 `POST /api/v1/line/order-change/apply` 回 `410 Gone`，新版表單以 `POST /api/v1/line/order-change/requests` 送件。
-- **客戶端自填改單與改個資頁面退役**：`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 頁面端點及實體 HTML 直接自路由移除、不開放連線；客戶改單與改個資需求統一於 LINE 官方帳號對話留訊由工會專員於管理後台維護。
+- **LINE 客服工單退役**。舊客服工單摘要、列表、明細、客服提醒、客服回覆與行動客服 API 回 `410 Gone`。切換結案保留原授權。
+- **客戶資料與訂單異動申請退役**。自路由移除舊客戶表單頁面（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及送審、查詢、審核 API（`/api/v1/line/client-profile/*`、`/api/v1/client-profile/requests*`、`/api/v1/line/mobile-admin/client-profile/requests*`、`/api/v1/line/order-change/{query,preview,requests}`、`/api/v1/orders/change-requests*`）。舊 `POST /api/v1/line/order-change/apply` 維持 `410 Gone`，提示客戶在 LINE 聊天室留言。
 - **歷史服務天數與檔案／異常頁面**：前端獨立側欄入口移除（歷史服務天數操作內嵌於客戶名冊詳情抽屜），既然後端 Q/P/A、30 天排程清理（`run_automatic_retention_cycle`）與資料保留。
 
 ### 3.3 Windows NAS 維護入口

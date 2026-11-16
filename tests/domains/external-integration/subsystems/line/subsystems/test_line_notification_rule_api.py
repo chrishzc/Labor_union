@@ -55,7 +55,7 @@ def _copy_client(monkeypatch):
 def test_retired_explanation_templates_cannot_be_read_or_edited_even_if_saved(monkeypatch):
     client, application = _copy_client(monkeypatch)
     templates = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
-    for key in ('service-flow', 'service-payment', 'service-profile-update', 'service-order-update', 'service-contact', 'service-resolved'):
+    for key in ('service-flow', 'service-payment', 'service-profile-update', 'service-order-update', 'order-update-menu', 'service-contact', 'service-resolved'):
         saved_template = {'id': 'LINE-COPY-' + key, 'name': key, 'message_type': 'text',
             'enabled': True, 'content': '舊說明內容', 'variables': []}
         templates.append(saved_template)
@@ -661,24 +661,6 @@ def test_unused_standalone_template_editors_are_closed_but_saved_settings_and_ac
     for key in ('template-client_rebind_rejected','template-staff_verification_rejected','identity-pending',
                 'identity-bound-customer','identity-bound-staff','identity-bound-admin'):
         assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
-
-
-def test_legacy_order_menu_copy_is_projected_to_liff_without_mutating_saved_definition(monkeypatch):
-    import json
-    from copy import deepcopy
-    from subsystems.line.message_copy_catalog import effective_copy_definition
-    from subsystems.line.message_copy import copy_template_id
-    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-order')
-    definition = {'version':1, 'templates':[{'id':copy_template_id('order-update-menu'), 'name':'舊訂單異動導覽',
-        'message_type':'text', 'enabled':True, 'variables':[], 'content':json.dumps({
-            'contents/body/contents/0/action/label':'修改服務地址',
-            'contents/body/contents/4/action/label':'其他訂單內容'})}]}
-    before = deepcopy(definition)
-    projected = effective_copy_definition(definition)
-    view = next(row for row in projected['templates'] if row['id'] == copy_template_id('order-update-menu'))
-    assert '開啟訂單異動表單' in view['content'] and '修改服務天數' not in view['content']
-    assert 'contents/body/contents/4/action/label' not in json.loads(view['content'])
-    assert definition == before
 
 
 def test_fixed_feedback_and_liff_admin_alert_editors_are_closed_without_deleting_saved_settings(monkeypatch):

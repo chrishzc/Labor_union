@@ -82,12 +82,49 @@ const rosterServiceValue = (profile: StaffRosterServiceProfile | undefined, fiel
   return profileItemsText(profile[field]);
 };
 
+export const extractServiceHours = (items: readonly { value: string; detail: string | null }[] | undefined): string => {
+  if (!items || items.length === 0) return '尚未登錄';
+  const hours = new Set<string>();
+  for (const item of items) {
+    const match = item.value.match(/(\d+)小時/);
+    if (match) {
+      hours.add(`${match[1]}小時`);
+    } else if (item.value) {
+      hours.add(item.value);
+    }
+  }
+  return hours.size > 0 ? Array.from(hours).join('、') : '尚未登錄';
+};
+
+export const extractPreferredStartTimes = (items: readonly { value: string; detail: string | null }[] | undefined): string => {
+  if (!items || items.length === 0) return '尚未登錄';
+  const times = new Set<string>();
+  for (const item of items) {
+    const match = item.value.match(/\((\d{2}:\d{2})-/);
+    if (match) {
+      const [h, m] = match[1].split(':');
+      times.add(`${parseInt(h, 10)}:${m}`);
+    }
+    if (item.detail) {
+      const parts = item.detail.split(/[,、，]/).map((s) => s.trim());
+      for (const p of parts) {
+        if (/^\d{1,2}:\d{2}$/.test(p)) {
+          const [dh, dm] = p.split(':');
+          times.add(`${parseInt(dh, 10)}:${dm}`);
+        }
+      }
+    }
+  }
+  return times.size > 0 ? Array.from(times).sort().join('、') : '尚未登錄';
+};
+
 type StaffRosterColumnId =
   | 'union_no'
   | 'display_name'
   | 'phone'
   | 'education'
   | keyof StaffRosterServiceProfile
+  | 'preferred_start_time'
   | 'registered_at'
   | 'identity_card'
   | 'birthday'
@@ -114,7 +151,8 @@ const staffRosterColumns: readonly RosterColumnDefinition<StaffRosterColumnId>[]
   { id: 'education', label: '學歷', group: '基本識別', defaultWidth: 110, minWidth: 85 },
   { id: 'care_babies', label: '最多照顧寶寶數', group: '接案條件', defaultWidth: 135, minWidth: 100 },
   { id: 'service_regions', label: '可承接區域', group: '接案條件', defaultWidth: 180, minWidth: 110 },
-  { id: 'service_time_slots', label: '可承接時段', group: '接案條件', defaultWidth: 150, minWidth: 100 },
+  { id: 'service_time_slots', label: '可承接時段', group: '接案條件', defaultWidth: 130, minWidth: 90 },
+  { id: 'preferred_start_time', label: '偏好服務開始時間', group: '接案條件', defaultWidth: 160, minWidth: 110 },
   { id: 'cooking_skills', label: '下廚能力', group: '接案條件', defaultWidth: 150, minWidth: 100 },
   { id: 'transportation', label: '交通方式', group: '接案條件', defaultWidth: 140, minWidth: 100 },
   { id: 'weekly_rest', label: '週間服務／排休', group: '接案條件', defaultWidth: 150, minWidth: 100 },
@@ -149,9 +187,16 @@ const renderStaffDataCell = (
     case 'display_name': return { content: staff.displayName, title: staff.displayName };
     case 'phone': { const text = staff.phone ?? '未登錄'; return { content: text, title: text }; }
     case 'education': return { content: staff.displayEducation, title: staff.displayEducation };
+    case 'service_time_slots': {
+      const text = extractServiceHours(staff.serviceProfile?.service_time_slots);
+      return { content: text, title: text };
+    }
+    case 'preferred_start_time': {
+      const text = extractPreferredStartTimes(staff.serviceProfile?.service_time_slots);
+      return { content: text, title: text };
+    }
     case 'care_babies':
     case 'service_regions':
-    case 'service_time_slots':
     case 'cooking_skills':
     case 'transportation':
     case 'weekly_rest':
@@ -415,7 +460,11 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     <p>原登錄內容保留，供查閱，不列入配對條件。</p>
     {snapshot ? <dl className="staff-imported-service-grid">{IMPORTED_SERVICE_KEYS.map(key => <div key={key}>
       <dt>{MANUAL_RELATION_LABELS[key]}</dt><dd>{displayRelations(snapshot.after[key])}</dd>
-    </div>)}</dl> : <p>{phase === 'loading' ? '正在載入匯入服務資訊…' : '無法載入匯入的服務資料，請重新查詢。'}</p>}
+    </div>)}
+    <div>
+      <dt>偏好服務開始時間</dt>
+      <dd>{extractPreferredStartTimes(snapshot.after.service_periods)}</dd>
+    </div></dl> : <p>{phase === 'loading' ? '正在載入匯入服務資訊…' : '無法載入匯入的服務資料，請重新查詢。'}</p>}
   </section>;
 
   return <>

@@ -66,12 +66,12 @@ describe('通知事項實際接線',()=>{
     expect(send.mock.calls[0][0].payment).toEqual(item().payment);
   });
   it('一類讀取失敗不冒充零筆，也不阻斷其他來源；可以重試',async()=>{
-    vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'profile',label:'客戶資料異動',group:'review'}]);
-    vi.mocked(client.list).mockImplementation(async source=>{if(source==='profile')throw new Error('read failed');return {items:[item()],total:1,next_cursor:null};});
+    vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'identity',label:'身分綁定審核',group:'review'}]);
+    vi.mocked(client.list).mockImplementation(async source=>{if(source==='identity')throw new Error('read failed');return {items:[item()],total:1,next_cursor:null};});
     render(<NotificationTasksPage />);await screen.findByRole('heading',{name:'訂金逾期未清'});
     expect(await screen.findByRole('alert')).toHaveTextContent('部分事項未能載入');
-    const retry=screen.getByRole('button',{name:'重試客戶資料異動'});fireEvent.click(retry);
-    await waitFor(()=>expect(client.list).toHaveBeenCalledWith('profile'));
+    const retry=screen.getByRole('button',{name:'重試身分綁定審核'});fireEvent.click(retry);
+    await waitFor(()=>expect(client.list).toHaveBeenCalledWith('identity'));
   });
   it('更多事項沿用來源 cursor，不把第一批資料當成完整清單',async()=>{
     vi.mocked(client.list).mockImplementation(async (_source,cursor=0)=>({items:[item(cursor?{id:'overdue:first',title:'第一期款逾期未清'}:{})],total:26,next_cursor:cursor?null:1}));
@@ -117,8 +117,8 @@ it('空候選頁仍有後頁時提供載入更多，不宣稱已無待辦',async
 });
 
 it('目前分類與寄送紀錄不受其他分類讀取失敗影響',async()=>{
- vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'profile',label:'資料異動',group:'review'}]);
- vi.mocked(client.list).mockImplementation(async source=>{if(source==='profile')throw new Error('synthetic unavailable');return {items:[],total:0,next_cursor:null};});
+ vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'identity',label:'身分綁定審核',group:'review'}]);
+ vi.mocked(client.list).mockImplementation(async source=>{if(source==='identity')throw new Error('synthetic unavailable');return {items:[],total:0,next_cursor:null};});
  render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'目前無法完整讀取事項'});
  fireEvent.click(screen.getByRole('button',{name:/款項與日誌/}));
  await screen.findByRole('heading',{name:'目前沒有待辦事項'});

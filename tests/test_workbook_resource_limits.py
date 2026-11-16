@@ -84,3 +84,47 @@ def test_excessive_shared_strings_are_rejected(tmp_path: Path) -> None:
         archive.writestr("xl/sharedStrings.xml", "<sst>" + "<si/>" * 200_001 + "</sst>")
     with pytest.raises(ValueError, match="xlsx_xml_element_limit_exceeded"):
         validate_xlsx_workbook(path)
+
+
+# --- legacy .xls support -----------------------------------------------------
+
+_XLS_SAMPLE = Path("document") / "資料庫、資料處理" / "歷史對帳單.xls"
+
+
+def test_xls_workbook_is_accepted_by_content_signature(tmp_path: Path) -> None:
+    from shutil import copyfile
+    from shared_kernel.workbook_resource_limits import validate_workbook
+
+    renamed = tmp_path / "statement.bin"
+    copyfile(_XLS_SAMPLE, renamed)
+    validate_workbook(renamed)
+
+
+def test_fake_xls_is_rejected(tmp_path: Path) -> None:
+    from shared_kernel.workbook_resource_limits import validate_workbook
+
+    path = tmp_path / "fake.xls"
+    path.write_text("<html><table><tr><td>x</td></tr></table></html>", encoding="utf-8")
+    with pytest.raises(ValueError, match="xlsx_invalid_archive"):
+        validate_workbook(path)
+
+
+def test_truncated_xls_is_rejected(tmp_path: Path) -> None:
+    from shared_kernel.workbook_resource_limits import validate_workbook
+
+    path = tmp_path / "truncated.xls"
+    path.write_bytes(_XLS_SAMPLE.read_bytes()[:600])
+    with pytest.raises(ValueError, match="xls_invalid_workbook"):
+        validate_workbook(path)
+
+
+def test_xls_values_workbook_matches_openpyxl_contract() -> None:
+    from shared_kernel.xls_workbook import load_values_workbook
+
+    workbook = load_values_workbook(_XLS_SAMPLE)
+    try:
+        rows = list(workbook.worksheets[0].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    assert rows[2][0] == "帳號"
+    assert isinstance(rows[3][8], int)

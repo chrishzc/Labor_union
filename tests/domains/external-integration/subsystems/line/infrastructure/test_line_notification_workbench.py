@@ -337,6 +337,9 @@ def test_invalid_source_cursor_and_unknown_command_fields_are_rejected():
     app.dependency_overrides[require_admin]=lambda:PRINCIPAL
     with TestClient(app) as client:
         assert client.get('/api/v1/line/notification-tasks/not-a-source').status_code==422
+        assert client.get('/api/v1/line/notification-tasks/profile').status_code == 422
+        assert client.post('/api/v1/line/mobile-admin/notification-tasks/profile',
+                           json={'line_id_token': 'synthetic'}).status_code == 422
         assert client.get('/api/v1/line/notification-tasks/deposit?cursor=-1').status_code==422
         response=client.post('/api/v1/line/notification-task-actions/information/3/send',json={
             'recipient':'customer','message_text':'text','idempotency_key':'key','line_id_token':'cannot-change-auth-boundary'})
@@ -444,8 +447,8 @@ assert(calls.some(([type,value])=>type==='copy'&&value==='PUBLIC'));
 assert(calls.some(([type,value])=>type==='pane'&&value==='order_tracking'));
 assert.equal(document.getElementById('orderStatusSearch').value,'PUBLIC');
 assert(!calls.some(([url])=>String(url).includes('/send')||String(url).includes('/apply')));
-vm.runInContext("notificationSelection={item:{source:'profile',reference_id:77},matched:false}",ctx);
-const focused=vm.runInContext("focusNotificationItems('profile',[{request_id:76},{request_id:77},{request_id:78}])",ctx);
+vm.runInContext("notificationSelection={item:{source:'service_start',reference_id:77},matched:false}",ctx);
+const focused=vm.runInContext("focusNotificationItems('service_start',[{request_id:76},{request_id:77},{request_id:78}])",ctx);
 assert.equal(focused.length,1);assert.equal(focused[0].request_id,77);
 vm.runInContext("const studioPreview=false,idToken='synthetic';",ctx);
 ctx.safeErrorCode=()=> 'liff_expired';ctx.safeErrorMessage=()=> 'expired';
@@ -520,7 +523,7 @@ window.happyDOM.abort();
     assert result.returncode == 0, result.stderr
 
 
-def test_mobile_one_click_commands_keep_original_intent_refresh_todos_and_ignore_late_operations():
+def test_mobile_identity_decision_refreshes_todos_and_ignores_late_operations():
     import subprocess
     script=r'''
 import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
@@ -528,36 +531,31 @@ import {Window} from './ui_react/node_modules/happy-dom/lib/index.js';
 const source=fs.readFileSync('line/static/mobile_admin.html','utf8').replace(/\r\n/g,'\n');
 const extract=h=>{const i=source.indexOf(h);assert(i>=0,h);return source.slice(i,source.indexOf('\n}',i)+2)};
 const window=new Window();const document=window.document;
-document.body.innerHTML='<textarea id="reason-1"></textarea><textarea id="profile-reason-2"></textarea><textarea id="reply-3">已完成處理</textarea><input type="checkbox" id="resolve-3" checked>';
-const calls=[];const statuses=[];let currentReads=0;let failApply=true;let deferPreview=null;
+document.body.innerHTML='<textarea id="reason-1"></textarea>';
+const calls=[];const statuses=[];let currentReads=0;let deferPreview=null;let deferIdentity=false;
 const ctx=vm.createContext({document,crypto,showStatus:text=>statuses.push(text),
  postJson:async(url,body)=>{calls.push([url,body]);
-  if(url.includes('/identity-reviews/')&&url.endsWith('/preview'))return {request_id:1,decision:body.decision,expected_version:1,resulting_version:2,before_status:'pending',after_status:'rejected',preview_fingerprint:'a'.repeat(64)};
-  if(url.includes('/identity-reviews/'))return {request_id:1,status:'rejected',version:2,outcome:'created',receipt_identity:'owner-receipt'};
-  if(url.includes('/client-profile/')&&url.endsWith('/preview'))return new Promise((resolve,reject)=>{deferPreview={resolve,reject}});
-  if(url.includes('/customer-service/')&&url.endsWith('/preview'))return {ticket_id:3,current_version:1,expected_version:1,reply_character_count:6,will_enqueue_delivery:true,apply_ready:true,preview_fingerprint:'b'.repeat(64)};
-  if(failApply){failApply=false;throw Error('結果未明');}
-  return {ticket_id:3,resulting_version:2,delivery_enqueued:true,delivery_delivered:false,preview_fingerprint:'b'.repeat(64),readback:{ticket:{ticket_id:3,status:'resolved'}}};
+  if(url.endsWith('/preview')) {
+    if(deferIdentity)return new Promise((resolve,reject)=>{deferPreview={resolve,reject}});
+    return {request_id:1,decision:body.decision,expected_version:1,resulting_version:2,before_status:'pending',after_status:'rejected',preview_fingerprint:'a'.repeat(64)};
+  }
+  assert(url.endsWith('/apply'));
+  return {request_id:1,status:'rejected',version:2,outcome:'created',receipt_identity:'owner-receipt'};
  },loadReviewWorkbench:async()=>{currentReads++;vm.runInContext('++notificationSequence',ctx)},
  });
-vm.runInContext("let notificationSequence=0,notificationSelection={item:{source:'identity'}};const reviewPreviews=new Map(),profileReviewPreviews=new Map(),replyPreviews=new Map();const target='staff_review';const ticketPageState={page:1};",ctx);
-for(const header of ['function notificationViewCurrent(','function requireReviewPreview(','function requireReplyPreview(','async function previewReviewDecision(','async function applyReviewDecision(','async function previewProfileDecision(','async function applyProfileDecision(','async function previewTicketReply(','async function applyTicketReply('])vm.runInContext(extract(header),ctx);
+vm.runInContext("let notificationSequence=0,notificationSelection={item:{source:'identity'}};const reviewPreviews=new Map();const target='staff_review';",ctx);
+for(const header of ['function notificationViewCurrent(','function requireReviewPreview(','async function previewReviewDecision(','async function applyReviewDecision('])vm.runInContext(extract(header),ctx);
 await vm.runInContext("previewReviewDecision({request_id:1,version:1},'reject')",ctx);
 assert.equal(calls.filter(([u])=>u.includes('/identity-reviews/')).length,2);
 assert.equal(currentReads,1);assert.equal(calls[0][1].reason,'工會退回身分審核');
 assert(!document.querySelector('button'),'no second confirmation button may be added');
-await vm.runInContext('previewTicketReply({ticket_id:3,version:1})',ctx);
-await vm.runInContext('previewTicketReply({ticket_id:3,version:1})',ctx);
-const replyCalls=calls.filter(([u])=>u.includes('/customer-service/'));
-assert.equal(replyCalls.filter(([u])=>u.endsWith('/preview')).length,1,'unknown Apply must retain its original preview');
-const applies=replyCalls.filter(([u])=>u.endsWith('/apply'));assert.equal(applies.length,2);assert.equal(applies[0][1].idempotency_key,applies[1][1].idempotency_key);
-assert.equal(currentReads,2,'resolved ticket must refresh the shared todo list');
-const old=vm.runInContext("previewProfileDecision({request_id:2,request_version:1},'reject')",ctx);
+deferIdentity=true;
+const old=vm.runInContext("previewReviewDecision({request_id:1,version:1},'reject')",ctx);
 vm.runInContext('++notificationSequence',ctx);statuses.push('new screen');deferPreview.reject(Error('late failure'));await old;
 assert.equal(statuses.at(-1),'new screen','old failure must not overwrite new screen');
-const oldSuccess=vm.runInContext("previewProfileDecision({request_id:2,request_version:1},'reject')",ctx);
-vm.runInContext('++notificationSequence',ctx);deferPreview.resolve({current_version:1,preview_fingerprint:'c'.repeat(64),apply_ready:true});await oldSuccess;
-assert(!calls.some(([u])=>u.includes('/client-profile/')&&!u.endsWith('/preview')),'leaving before preview completes must not submit an Apply');
+const oldSuccess=vm.runInContext("previewReviewDecision({request_id:1,version:1},'reject')",ctx);
+vm.runInContext('++notificationSequence',ctx);deferPreview.resolve({request_id:1,decision:'reject',expected_version:1,resulting_version:2,before_status:'pending',after_status:'rejected',preview_fingerprint:'c'.repeat(64)});await oldSuccess;
+assert.equal(calls.filter(([u])=>u.endsWith('/apply')).length,1,'leaving before preview completes must not submit another Apply');
 window.happyDOM.abort();
 '''
     result=subprocess.run(['node','--input-type=module','-e',script],capture_output=True,text=True,timeout=25)

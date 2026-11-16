@@ -174,7 +174,7 @@ def test_account_mutation_request_is_closed_and_route_returns_typed_receipt(monk
 def test_disabling_account_keeps_receipt_and_revocation_without_audit() -> None:
     conn = MagicMock()
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.side_effect = [None, {"id": 2, "access_control_version": 3}, None]
+    cursor.fetchone.side_effect = [None, None, {"id": 2, "access_control_version": 3}, None]
     actor = AdminPrincipal(1, "root", "Root", "system_admin", is_root=True)
 
     receipt = authentication.set_account_center_enabled(
@@ -188,6 +188,30 @@ def test_disabling_account_keeps_receipt_and_revocation_without_audit() -> None:
     assert all("admin_audit_logs" not in sql and "admin_security_alert_outbox" not in sql for sql in statements)
     assert receipt.resulting_access_control_version == 4
     conn.commit.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("command", "extra"),
+    [
+        (authentication.set_account_center_enabled, {"enabled": False}),
+        (authentication.revoke_account_center_sessions, {}),
+        (authentication.reset_account_center_mfa, {}),
+    ],
+)
+def test_online_account_commands_stop_during_pending_receipt_conversion(command, extra) -> None:
+    conn = MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"unprotected": 1}
+    actor = AdminPrincipal(1, "root", "Root", "system_admin", is_root=True)
+    with pytest.raises(account_center.AccountReceiptProtectionError, match="account_receipt_conversion_required") as caught:
+        command(
+            connection_factory=lambda: conn, actor=actor, account_id=2, expected_version=3,
+            idempotency_key="fixture-command", reason="", **extra,
+        )
+    assert cursor.execute.call_count == 1
+    conn.commit.assert_not_called()
+    conn.rollback.assert_called_once()
+    assert account_center._storage_unavailable(caught.value).status_code == 503
 
 
 def test_account_command_errors_are_redacted_and_stable() -> None:

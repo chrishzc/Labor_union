@@ -37,11 +37,6 @@ def test_every_active_mobile_admin_route_rejects_a_web_admin_session_dependency(
         "/api/v1/line/mobile-admin/scheduling-review/options",
         "/api/v1/line/mobile-admin/scheduling-review/preview",
         "/api/v1/line/mobile-admin/scheduling-review/apply",
-        "/api/v1/line/mobile-admin/client-profile/requests",
-        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/approve/preview",
-        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/approve/apply",
-        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/reject/preview",
-        "/api/v1/line/mobile-admin/client-profile/requests/{request_id}/reject",
         "/api/v1/line/mobile-admin/staff-leave-requests",
         "/api/v1/line/mobile-admin/staff-leave-requests/{request_id}/review",
     }
@@ -52,41 +47,9 @@ def test_every_active_mobile_admin_route_rejects_a_web_admin_session_dependency(
         assert require_persisted_admin not in dependency_calls, path
 
 
-def test_client_profile_mobile_adapter_authorizes_line_binding_before_owner_query(monkeypatch) -> None:
-    events = []
-    principal = SimpleNamespace(id=7)
-    application = SimpleNamespace()
-
-    def authorize(token, capability):
-        events.append(("authorize", token, capability))
-        return principal, SimpleNamespace(actor_id="admin:7")
-
-    def owner_query(**kwargs):
-        events.append(("owner", kwargs))
-        return "owner-response"
-
-    monkeypatch.setattr(line_mobile_admin, "_mobile_admin_context", authorize)
-    monkeypatch.setattr(line_mobile_admin.client_profile_routes, "list_requests", owner_query)
-
-    response = line_mobile_admin.mobile_client_profile_requests(
-        line_mobile_admin._MobileClientProfileListRequest(
-            line_id_token="verified-token",
-            status="pending",
-            page=1,
-            page_size=50,
-        ),
-        application,
-    )
-
-    assert response == "owner-response"
-    assert events[0] == (
-        "authorize",
-        "verified-token",
-        line_mobile_admin.LineCapability.CUSTOMER_SERVICE_READ,
-    )
-    assert events[1][0] == "owner"
-    assert events[1][1]["_"] is principal
-    assert events[1][1]["application"] is application
+def test_retired_customer_profile_review_routes_are_unregistered() -> None:
+    prefix = "/api/v1/line/mobile-admin/client-profile/"
+    assert not any(route.path.startswith(prefix) for route in line_mobile_admin.router.routes)
 
 
 def test_retired_staff_leave_review_still_validates_line_bound_actor_without_writer(monkeypatch):

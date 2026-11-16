@@ -41,6 +41,12 @@ import pymysql
 
 from scripts import migrate_preserved_database_additive_schema as migration
 from infrastructure.file.controlled_file_storage import DATABASE_BACKUP_DIRECTORY, FileSystemControlledFileStorage
+from subsystems.access.account_receipt_fingerprints import (
+    KEY_SETTING,
+    account_receipt_key,
+    convert_account_receipt_fingerprints,
+    unprotected_account_receipt_count,
+)
 
 SETTINGS = ROOT / ".env.nas-maintenance"
 SCHEDULE = ROOT / "scratch/nas_database_maintenance/schedule.json"
@@ -208,6 +214,10 @@ def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
 
     # Strict NAS checks only if settings_file is present and explicitly pins NAS_EXPECTED_HOST
     is_strict_nas = bool(settings_file and settings_file.is_file() and values.get("NAS_EXPECTED_HOST"))
+    receipt_target_pinned = bool(
+        is_strict_nas and values.get("NAS_EXPECTED_PORT")
+        and all(runtime.get(name) for name in ("DB_HOST", "DB_PORT", "DB_DATABASE"))
+    )
     if is_strict_nas:
         require(values.get("NAS_MAINTENANCE_ENABLED") == "1", "NAS 維護尚未啟用，未連線或變更資料庫。")
         require((runtime.get("DEPLOYMENT_PROFILE") or "").lower() != "nas",
@@ -284,7 +294,7 @@ def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
     return {"host": host, "port": port, "database": database, "tls": tls, "tls_files": files,
             "ssl_mode": {"disabled": "DISABLED", "verify_ca": "VERIFY_CA", "verify_identity": "VERIFY_IDENTITY"}[mode],
             "environment_file": environment_file, "settings_file": settings_file or SETTINGS,
-            "backup_root": backup_dir, "values": values, "runtime": runtime}
+            "backup_root": backup_dir, "values": values, "runtime": runtime, "receipt_target_pinned": receipt_target_pinned}
 
 
 def is_nas_destination(path):
@@ -866,6 +876,8 @@ def upgrade(settings):
         for pending in source_preview["pending_releases"]:
             print(f"待升級：{pending['release_id']} ({pending['artifact']})", flush=True)
 
+    require(not protect_account_receipts(read, source, apply=False),
+            "來源含未保護的帳號收據。請先執行受控收據轉換，再升級副本。")
     root = destination_ready(settings, writable=True)
     candidate = new_candidate("upgrade")
     write = writer(settings, candidate)
@@ -896,6 +908,7 @@ def upgrade(settings):
     print("正在進行最後的完整資料驗證。", flush=True)
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")
+    require(not protect_account_receipts(write, candidate, apply=False), "副本含未保護的帳號收據，未切換資料庫。")
     if is_local_nas_test:
         updater.require_current_database(updater.build_additive_preview(write, candidate, directory))
     prepare_runtime_access(settings, candidate)
@@ -914,6 +927,56 @@ def upgrade(settings):
                                  directory / "switch.json", config=config,
                                  environment_writer=lambda path, payload: replace_runtime_file(path, payload, original_env_digest))
     return directory
+
+
+def protect_account_receipts(config, database, *, apply):
+    """Preview or convert password-bearing records on the exact selected database."""
+    settings = config.settings
+    connection = config.connect(database)
+    try:
+        connection.begin()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name")
+            require(cursor.fetchone()["database_name"] == database, "收據轉換資料庫目標不符。")
+            cursor.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema=%s AND table_name=%s "
+                "AND table_type='BASE TABLE'",
+                (database, "admin_command_receipts"),
+            )
+            if cursor.fetchone() is None:
+                require(not apply, "收據轉換缺少帳號收據資料表。")
+                connection.rollback()
+                return 0
+            count = unprotected_account_receipt_count(cursor)
+            if not apply or not count:
+                connection.rollback()
+                return count
+            file_key = settings["runtime"].get(KEY_SETTING)
+            process_key = os.environ.get(KEY_SETTING)
+            require(not (file_key and process_key and file_key != process_key),
+                    "收據金鑰的執行環境與受保護設定不同，已停止。")
+            key = account_receipt_key(process_key or file_key or "")
+            converted = convert_account_receipt_fingerprints(cursor, key)
+        connection.commit()
+        return converted
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def require_account_receipt_conversion_target(settings):
+    is_local = settings["host"].casefold().rstrip(".") in {"localhost", "127.0.0.1", "::1"}
+    if is_local:
+        require(
+            settings["database"].startswith("lu_test_")
+            and (settings["runtime"].get("APP_ENV") or "").casefold() in {"development", "dev", "local", "test"},
+            "本機收據轉換只允許使用開發環境的 lu_test_* 測試資料庫。",
+        )
+    else:
+        require(settings["receipt_target_pinned"] and settings["ssl_mode"] == "VERIFY_IDENTITY",
+                "正式收據轉換需指定 NAS 目標位址、連線埠、正式資料庫及可驗證主機身分的 TLS。")
 
 
 def restore(settings, archive):
@@ -969,6 +1032,7 @@ def restore(settings, archive):
             require(current.get("status") == "current",
                     f"備份已匯入副本，但與目前程式版本不相容（狀態：{current.get('status')}，原因：{reason}），尚未切換；原資料庫不變。")
     updater.require_current_database(current)
+    protect_account_receipts(config, candidate, apply=True)
     prepare_runtime_access(settings, candidate)
     try:
         from infrastructure.mysql.nas_mutations import ensure_nas_procedures
@@ -1223,7 +1287,7 @@ def format_maintenance_error(error: Exception, settings: dict | None = None) -> 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("backup", "upgrade", "restore"))
+    parser.add_argument("mode", choices=("backup", "upgrade", "restore", "protect-account-receipts"))
     parser.add_argument("--environment-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--settings-file", type=Path, default=SETTINGS)
     parser.add_argument("--dry-run", action="store_true")
@@ -1237,9 +1301,11 @@ def main(argv=None):
         require(not args.scheduled or args.mode == "backup", "排程只允許備份，不能自動升級或復原。")
         require(not args.install_daily or args.mode == "backup", "只有備份腳本可以設定排程。")
         settings = load_settings(args.environment_file, args.settings_file)
+        if args.mode == "protect-account-receipts":
+            require_account_receipt_conversion_target(settings)
         if args.dry_run:
             is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
-            if is_strict_nas:
+            if is_strict_nas and args.mode != "protect-account-receipts":
                 for executable in (("mysqldump",) if args.mode == "backup" else ("mysql", "mysqldump")):
                     reader(settings).client_prefix(executable)
             print("設定與工具檢查通過；未連線、未變更資料庫。")
@@ -1249,6 +1315,21 @@ def main(argv=None):
             print(f"已設定每日 {args.time} 備份。電腦須開機並登入 Windows。")
             return 0
         print(f"NAS：{settings['host']}:{settings['port']}　資料庫：{settings['database']}")
+        if args.mode == "protect-account-receipts":
+            database = settings["database"]
+            count = protect_account_receipts(reader(settings), database, apply=False)
+            print(f"需轉換的帳號指紋數：{count}。")
+            if not count:
+                return 0
+            answer = input(f"確認已停止管理服務後，輸入 PROTECT {database} 開始轉換：").strip()
+            if answer != f"PROTECT {database}":
+                print("已取消，資料庫不變。")
+                return 0
+            config = writer(settings)
+            with maintenance_lock(config):
+                converted = protect_account_receipts(config, database, apply=True)
+            print(f"收據轉換完成，已核對無未保護的帳號收據。轉換筆數：{converted}。")
+            return 0
         if args.mode == "backup" and not args.scheduled:
             print("1. 立即備份\n2. 設定每日備份（預設 18:00）\n直接 Enter 取消")
             answer = input("請選擇：").strip().strip("\ufeff")

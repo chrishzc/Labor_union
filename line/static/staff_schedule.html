@@ -12,53 +12,373 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
   <style>
     [hidden] { display: none !important; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #f8f5f0; color: #241c18; }
-    main { max-width: 760px; margin: 0 auto; padding: 20px 16px 44px; }
-    h1 { margin: 0 0 8px; font-size: 32px; font-weight: 800; color: #241c18; }
-    p { color: #54443b; font-size: 17px; line-height: 1.6; }
-    button { border: 0; border-radius: 12px; padding: 14px 18px; font-size: 18px; font-weight: 800; cursor: pointer; min-height: 52px; transition: all 0.15s ease; }
+    html, body { width: 100%; max-width: 100vw; overflow-x: hidden; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #f8f5f0; color: #241c18; -webkit-text-size-adjust: 100%; }
+    main { width: 100%; max-width: 760px; margin: 0 auto; padding: 20px 16px 44px; box-sizing: border-box; }
+    h1 { margin: 0 0 8px; font-size: 28px; font-weight: 800; color: #241c18; }
+    p { color: #54443b; font-size: 16px; line-height: 1.6; margin: 0 0 8px; }
+    button { border: 0; border-radius: 12px; padding: 12px 16px; font-size: 16px; font-weight: 800; cursor: pointer; min-height: 48px; transition: all 0.15s ease; box-sizing: border-box; }
     .primary { color: #fff; background: #973b17; border-radius: 12px; }
     .secondary { margin-top: 10px; color: #973b17; background: #fcebdd; border: 2px solid #e9c5ad; border-radius: 12px; }
     button:disabled { cursor: not-allowed; opacity: .6; background: #d1c7c0 !important; color: #fff !important; border-color: #bfb4ac !important; }
-    .panel { background: #fff; border: 2px solid #ded2c9; border-radius: 16px; padding: 20px; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .panel { background: #fff; border: 1.5px solid #ded2c9; border-radius: 16px; padding: 18px; margin-top: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); box-sizing: border-box; width: 100%; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: end; }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .field { margin-top: 14px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
+    .field { margin-top: 12px; }
     .full { grid-column: 1 / -1; }
-    .hint { margin: 7px 0 0; font-size: 15px; color: #54443b; }
-    .section-title { margin: 0 0 8px; font-size: 24px; font-weight: 800; color: #241c18; }
-    label { display: block; font-weight: 800; font-size: 18px; margin-bottom: 8px; color: #241c18; }
-    input, textarea, select { width: 100%; border: 2px solid #ded2c9; border-radius: 12px; padding: 12px 14px; font-size: 18px; min-height: 52px; color: #241c18; outline: none; }
+    .hint { margin: 6px 0 0; font-size: 14px; color: #54443b; line-height: 1.5; }
+    .section-title { margin: 0 0 8px; font-size: 20px; font-weight: 800; color: #241c18; }
+    label { display: block; font-weight: 800; font-size: 16px; margin-bottom: 6px; color: #241c18; }
+    input, textarea, select { width: 100%; max-width: 100%; border: 1.5px solid #ded2c9; border-radius: 12px; padding: 10px 12px; font-size: 16px; min-height: 48px; color: #241c18; outline: none; box-sizing: border-box; background: #fff; }
     input:focus, textarea:focus, select:focus { border-color: #973b17; box-shadow: 0 0 0 2px #fcebdd; }
-    textarea { min-height: 90px; resize: vertical; }
-    .message { margin-top: 16px; padding: 14px 18px; border-radius: 12px; background: #f2ede9; color: #241c18; font-size: 16px; line-height: 1.6; }
+    textarea { min-height: 80px; resize: vertical; }
+    .message { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: #f2ede9; color: #241c18; font-size: 15px; line-height: 1.5; box-sizing: border-box; word-break: break-word; }
     .error { background: #fee2e2; color: #b91c1c; }
-    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); border: 2px solid #ded2c9; border-radius: 14px; overflow: hidden; margin-top: 16px; }
-    .head, .day { min-height: 82px; border-right: 1.5px solid #ded2c9; border-bottom: 1.5px solid #ded2c9; padding: 6px; font-size: 15px; }
-    .head { min-height: auto; background: #f8f5f0; text-align: center; font-weight: 800; font-size: 16px; color: #54443b; padding: 10px 4px; }
-    .day:nth-child(7n), .head:nth-child(7n) { border-right: 0; }
-    .date { font-weight: 800; font-size: 18px; margin-bottom: 4px; }
-    button.day { border-radius: 0; text-align: left; min-width: 0; overflow-wrap: anywhere; }
-    button.day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #be123c; }
-    .shift-label, .more-shifts { display: block; font-size: 13px; font-weight: 700; }
-    .more-shifts { color: #9f1239; }
-    .shift-detail { padding: 10px 0; border-bottom: 1px solid #fecdd3; font-size: 16px; }
-    .work { background: #ffe4e6; }
-    .rest { background: #dcfce7; }
-    .waiting { background: #fef3c7; }
-    .unavailable { background: #ede9fe; }
-    .historical { background: #e0f2fe; }
-    .available { background: #fff; color: #54443b; }
-    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 15px; font-weight: 700; color: #54443b; }
-    .dot { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 5px; vertical-align: -1px; }
 
-    .calendar-matrix-card { border: 1px solid #eadbd0; border-radius: 12px; background: #fff; padding: 16px; margin-top: 12px; }
+    /* 月曆頂部導覽列（直觀月曆控制台） */
+    .month-nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding: 6px;
+      background: #faf8f6;
+      border: 1.5px solid #eadbd0;
+      border-radius: 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .month-nav-title-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: #fff;
+      border: 1.5px solid #ded2c9;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 16px;
+      font-weight: 800;
+      color: #302923;
+      cursor: pointer;
+      min-height: 40px;
+      flex: 1;
+      max-width: 220px;
+      transition: all 0.15s;
+    }
+    .month-nav-title-btn:hover, .month-nav-title-btn:active {
+      background: #fcebdd;
+      border-color: #973b17;
+      color: #973b17;
+    }
+    .month-nav-title-btn .dropdown-arrow {
+      font-size: 11px;
+      color: #973b17;
+    }
+    .month-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      min-height: 38px;
+      border: 1.5px solid #ded2c9;
+      border-radius: 10px;
+      background: #fff;
+      color: #65564b;
+      font-size: 20px;
+      font-weight: 800;
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.15s;
+    }
+    .month-nav-btn:hover, .month-nav-btn:active {
+      background: #fcebdd;
+      color: #973b17;
+      border-color: #e9c5ad;
+    }
+    .month-today-btn {
+      border: 1.5px solid #ded2c9;
+      background: #fff;
+      color: #65564b;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 10px;
+      padding: 6px 10px;
+      min-height: 38px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .month-today-btn:hover, .month-today-btn:active {
+      background: #973b17;
+      color: #fff;
+      border-color: #973b17;
+    }
+
+    /* 手機左右滑動容器與提示 */
+    .calendar-swipe-wrapper {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+      touch-action: pan-y;
+      box-sizing: border-box;
+    }
+    .calendar-swipe-hint {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: #857163;
+      margin-top: 8px;
+    }
+
+    /* 月份彈窗選擇器 (Month Picker Modal) */
+    .month-picker-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 16px;
+      backdrop-filter: blur(2px);
+    }
+    .month-picker-card {
+      background: #fff;
+      border-radius: 16px;
+      border: 2px solid #ded2c9;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+      width: 100%;
+      max-width: 340px;
+      padding: 16px;
+      animation: modalFadeIn 0.18s ease-out;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .month-picker-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .month-picker-year-ctrl {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .month-picker-year-label {
+      font-size: 18px;
+      font-weight: 800;
+      color: #241c18;
+    }
+    .month-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .month-grid-btn {
+      border: 1.5px solid #ded2c9;
+      border-radius: 10px;
+      background: #faf8f6;
+      color: #302923;
+      padding: 10px 4px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      min-height: 42px;
+      transition: all 0.15s;
+    }
+    .month-grid-btn.is-active {
+      background: #973b17 !important;
+      color: #fff !important;
+      border-color: #973b17 !important;
+    }
+    .month-grid-btn.is-current-month:not(.is-active) {
+      border-color: #973b17;
+      color: #973b17;
+      background: #fff5f0;
+    }
+    .month-picker-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      border-top: 1px solid #f0e4dc;
+      padding-top: 12px;
+    }
+
+    /* 月曆格線防跑版優化 (repeat(7, minmax(0, 1fr)) 絕對不撐爆寬度) */
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      border: 1.5px solid #ded2c9;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 10px;
+      background: #ded2c9;
+      gap: 1px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .head {
+      background: #f8f5f0;
+      text-align: center;
+      font-weight: 800;
+      font-size: 13px;
+      color: #54443b;
+      padding: 8px 2px;
+      min-height: auto;
+      box-sizing: border-box;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .head:first-child, .head:last-child {
+      color: #b91c1c;
+    }
+    .day {
+      background: #fff;
+      min-height: 64px;
+      padding: 4px 2px;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      box-sizing: border-box;
+      min-width: 0;
+      position: relative;
+    }
+    button.day {
+      border: 0;
+      border-radius: 0;
+      text-align: left;
+      cursor: pointer;
+      min-width: 0;
+      overflow: hidden;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    button.day:focus, button.day:hover {
+      outline: none;
+      filter: brightness(0.97);
+    }
+    button.day[aria-pressed="true"] {
+      box-shadow: inset 0 0 0 2px #973b17 !important;
+      z-index: 2;
+    }
+    .date-num {
+      font-weight: 800;
+      font-size: 14px;
+      line-height: 1.2;
+      margin-bottom: 2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      align-self: center;
+    }
+    .is-today .date-num {
+      background: #973b17;
+      color: #fff !important;
+    }
+    .shift-tag {
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+      padding: 2px 2px;
+      border-radius: 4px;
+      text-align: center;
+      margin-top: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      box-sizing: border-box;
+      display: block;
+    }
+    .more-shifts-tag {
+      font-size: 10px;
+      font-weight: 800;
+      color: #9f1239;
+      text-align: center;
+      margin-top: 1px;
+      display: block;
+    }
+    .shift-detail { padding: 10px 0; border-bottom: 1px solid #fecdd3; font-size: 15px; }
+
+    /* 四大排班狀態與色彩系統（高識別度、色彩和諧） */
+    /* 1. 確定開始日期 (粉橘色) */
+    .confirmed-start, .work { background: #fff6ee; }
+    .confirmed-start .shift-tag, .work .shift-tag { background: #fcebdd; color: #973b17; border: 1px solid #e9c5ad; }
+
+    /* 2. 待確定開始日期 (鵝黃色) */
+    .pending-start { background: #fffdf2; }
+    .pending-start .shift-tag { background: #fef3c7; color: #854d0e; border: 1px solid #fde68a; }
+
+    /* 3. 緩衝期 (天藍色) */
+    .buffer-period { background: #f0f9ff; }
+    .buffer-period .shift-tag { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+
+    /* 4. 洽談中 (淺紫色) */
+    .negotiating { background: #faf5ff; }
+    .negotiating .shift-tag { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+
+    /* 既有狀態相容 */
+    .waiting:not(.buffer-period, .negotiating, .pending-start) { background: #fffdf5; }
+    .waiting:not(.buffer-period, .negotiating, .pending-start) .shift-tag { background: #fef3c7; color: #854d0e; border: 1px solid #fde68a; }
+    .rest { background: #f6fcf8; }
+    .rest .shift-tag { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .unavailable { background: #faf5ff; }
+    .unavailable .shift-tag { background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe; }
+    .historical { background: #f0f9ff; }
+    .historical .shift-tag { background: #e0f2fe; color: #075985; border: 1px solid #bae6fd; }
+    .available { background: #fff; color: #54443b; }
+    .legend { display: flex; gap: 8px 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; font-weight: 700; color: #54443b; }
+    .legend span { display: inline-flex; align-items: center; }
+    .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+    /* 當日班次明細卡片優化 */
+    #calendarDayDetails {
+      margin-top: 14px;
+      padding: 14px;
+      background: #fff;
+      border: 1.5px solid #ded2c9;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+    }
+    #calendarDayDetails h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-weight: 800;
+      color: #241c18;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .shift-detail-card {
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #faf8f6;
+      border: 1px solid #eadbd0;
+      margin-bottom: 8px;
+    }
+    .shift-detail-card:last-child { margin-bottom: 0; }
+
+    .calendar-matrix-card { border: 1px solid #eadbd0; border-radius: 12px; background: #fff; padding: 14px; margin-top: 12px; width: 100%; box-sizing: border-box; }
     .calendar-month-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .calendar-month-header h3 { font-size: 17px; font-weight: 600; color: #302923; margin: 0; }
+    .calendar-month-header h3 { font-size: 16px; font-weight: 600; color: #302923; margin: 0; }
     .calendar-nav-btn { min-height: 32px; min-width: 32px; border: 1px solid #eadbd0; border-radius: 6px; background: #faf8f6; color: #65564b; font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-    .calendar-days-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
-    .service-date-weekday { text-align: center; font-size: 14px; font-weight: 500; color: #857163; padding: 6px 0; }
-    .calendar-date-cell { min-height: 48px; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #302923; font-size: 16px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; padding: 4px 2px; }
+    .calendar-days-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; width: 100%; box-sizing: border-box; }
+    .service-date-weekday { text-align: center; font-size: 13px; font-weight: 500; color: #857163; padding: 4px 0; }
+    .calendar-date-cell { min-height: 44px; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #302923; font-size: 15px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; padding: 3px 1px; min-width: 0; box-sizing: border-box; }
     .calendar-date-cell.is-service { background: #fcebdd; border-color: #e9c5ad; color: #973b17; font-weight: 600; }
     .calendar-date-cell.is-leave { background: #fff5f5 !important; border: 2px dashed #e53e3e !important; color: #c53030 !important; font-weight: 700; }
     .calendar-date-cell.is-makeup { background: #edf2e8 !important; border: 2px solid #d5dfcc !important; color: #466747 !important; font-weight: 700; }
@@ -71,16 +391,27 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
     .badge-missing { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: #fff5f5; color: #c53030; border: 1px solid #fed7d7; }
 
     /* 權限阻擋專用卡片 */
-    .blocked-card { background: #fff; border: 1px solid #eadbd0; border-radius: 12px; padding: 32px 18px; text-align: center; margin-top: 20px; }
-    .lock-icon { font-size: 42px; margin-bottom: 12px; }
+    .blocked-card { background: #fff; border: 1px solid #eadbd0; border-radius: 12px; padding: 28px 16px; text-align: center; margin-top: 16px; }
+    .lock-icon { font-size: 38px; margin-bottom: 10px; }
     .blocked-title { font-size: 18px; font-weight: 700; color: #302923; margin: 0 0 6px; }
-    .blocked-desc { font-size: 14px; color: #65564b; margin: 0 0 16px; line-height: 1.6; }
-    .blocked-box { background: #faf8f6; border: 1px solid #eadbd0; border-radius: 8px; padding: 12px 16px; margin: 16px auto; max-width: 360px; text-align: left; font-size: 13px; line-height: 1.8; color: #65564b; }
+    .blocked-desc { font-size: 14px; color: #65564b; margin: 0 0 14px; line-height: 1.5; }
+    .blocked-box { background: #faf8f6; border: 1px solid #eadbd0; border-radius: 8px; padding: 12px 14px; margin: 14px auto; max-width: 360px; text-align: left; font-size: 13px; line-height: 1.7; color: #65564b; }
     .blocked-row { display: flex; justify-content: space-between; }
     .error-text { color: #c53030; font-weight: 700; }
-    .close-btn { margin-top: 16px; padding: 11px 24px; border-radius: 8px; background: #fff; border: 1px solid #eadbd0; color: #302923; font-weight: 600; cursor: pointer; }
+    .close-btn { margin-top: 14px; padding: 10px 20px; border-radius: 8px; background: #fff; border: 1px solid #eadbd0; color: #302923; font-weight: 600; cursor: pointer; }
 
-    @media (max-width: 560px) { .toolbar, .form-grid { grid-template-columns: 1fr; } .full { grid-column: auto; } }
+    @media (max-width: 640px) {
+      main { padding: 12px 10px 36px; }
+      h1 { font-size: 22px; margin-bottom: 4px; }
+      .panel { padding: 14px 10px; border-radius: 14px; margin-top: 12px; }
+      .toolbar, .form-grid { grid-template-columns: 1fr; gap: 10px; }
+      .full { grid-column: auto; }
+      .day { min-height: 56px; padding: 3px 1px; }
+      .date-num { font-size: 13px; width: 20px; height: 20px; }
+      .shift-tag { font-size: 10px; padding: 1px 1px; }
+      .legend { gap: 6px 10px; font-size: 12px; margin-top: 8px; }
+      .dot { width: 10px; height: 10px; }
+    }
   </style>
 </head>
 <body>
@@ -178,25 +509,70 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
 
   <!-- 一般月曆查詢面板 (非延期專屬模式時顯示) -->
   <section id="calendarPanel" class="panel">
-    <div class="toolbar">
+    <!-- 直觀月份切換工具列：支援左右月按鈕、點選標題選擇指定月份、回本月快捷鍵 -->
+    <div class="month-nav-bar">
+      <button type="button" id="prevMonthBtn" class="month-nav-btn" aria-label="上一個月" title="上一個月">‹</button>
+      <button type="button" id="monthPickerTrigger" class="month-nav-title-btn" aria-label="選擇指定月份" title="點擊選擇指定月份">
+        <span id="currentMonthLabel">載入中...</span>
+        <span class="dropdown-arrow">▼</span>
+      </button>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button type="button" id="nextMonthBtn" class="month-nav-btn" aria-label="下一個月" title="下一個月">›</button>
+        <button type="button" id="todayMonthBtn" class="month-today-btn" aria-label="回到本月" title="回到當前月份">本月</button>
+      </div>
+    </div>
+
+    <!-- 兼容既有契約與無障礙之輸入框與查詢按鈕 -->
+    <div class="toolbar" style="display:none;" aria-hidden="true">
       <div>
         <label for="monthInput">查詢月份</label>
         <input id="monthInput" type="month">
       </div>
-      <button id="loadSchedule" class="primary" disabled>查詢班表</button>
+      <button id="loadSchedule" class="primary" type="button" disabled>查詢班表</button>
     </div>
+
     <div id="calendarStatus" class="message" style="display:none;"></div>
+
     <div class="legend">
-      <span><i class="dot" style="background:#ffe4e6"></i>服務日</span>
-      <span><i class="dot" style="background:#fef3c7"></i>已鎖定／待成立</span>
-      <span><i class="dot" style="background:#ede9fe"></i>正式不可服務</span>
-      <span><i class="dot" style="background:#dcfce7"></i>休息日</span>
-      <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>可排班</span>
+      <span><i class="dot" style="background:#fcebdd;border:1px solid #e9c5ad;"></i>確定開始日期</span>
+      <span><i class="dot" style="background:#fef3c7;border:1px solid #fde68a;"></i>待確定開始日期</span>
+      <span><i class="dot" style="background:#e0f2fe;border:1px solid #bae6fd;"></i>緩衝期</span>
+      <span><i class="dot" style="background:#f3e8ff;border:1px solid #e9d5ff;"></i>洽談中</span>
+      <span><i class="dot" style="background:#ede9fe;border:1px solid #ddd6fe;"></i>個人休假</span>
+      <span><i class="dot" style="background:#dcfce7;border:1px solid #bbf7d0;"></i>休息日</span>
+      <span><i class="dot" style="background:#fff;border:1px solid #ded2c9;"></i>可排班</span>
     </div>
-    <div id="calendar" class="calendar"></div>
+
+    <!-- 月曆手勢容器：支援手指左右滑動手勢 -->
+    <div id="calendarSwipeWrapper" class="calendar-swipe-wrapper">
+      <div id="calendar" class="calendar"></div>
+    </div>
+    <div class="calendar-swipe-hint">
+      <span>👆 支援左右滑動切換月份，點擊日期查看班次</span>
+    </div>
+
     <section id="calendarDayDetails" aria-label="當日班次" hidden></section>
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
+
+  <!-- 彈出式指定月份選擇器 (Month Picker Modal) -->
+  <div id="monthPickerModal" class="month-picker-modal" hidden>
+    <div class="month-picker-card" role="dialog" aria-modal="true" aria-labelledby="pickerYearLabel">
+      <div class="month-picker-header">
+        <div class="month-picker-year-ctrl">
+          <button type="button" id="pickerYearPrev" class="month-nav-btn" aria-label="上一年">‹</button>
+          <span id="pickerYearLabel" class="month-picker-year-label">2026 年</span>
+          <button type="button" id="pickerYearNext" class="month-nav-btn" aria-label="下一年">›</button>
+        </div>
+        <button type="button" id="pickerCloseBtn" class="month-nav-btn" style="font-size:15px;" aria-label="關閉">✕</button>
+      </div>
+      <div id="monthPickerGrid" class="month-grid"></div>
+      <div class="month-picker-footer">
+        <button type="button" id="pickerCurrentMonthBtn" class="month-today-btn" style="flex:1;">前往本月</button>
+        <button type="button" id="pickerCancelBtn" class="month-today-btn" style="background:#fff;">關閉</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 不接案日期（不可服務期間）管理面板 (個人排班專屬，合意延期專屬模式不顯示) -->
   <section id="unavailabilitySection" class="panel" aria-labelledby="unavailabilityTitle" hidden>
@@ -335,21 +711,83 @@ function dayPresentation(items) {
   const item = items.find(value => value.status === "staff_unavailability")
     || items.find(value => value.status === "working")
     || items.find(value => value.status === "waiting_deposit_lock")
+    || items.find(value => value.status === "buffer")
     || items.find(value => value.status === "historical_assignment")
     || items.find(value => value.status === "resting")
     || items[0];
-  if (!item || item.status === "available") return {className: "available", text: ""};
-  if (item.status === "working") {
-    const subject = item.client_name || item.case_no || "服務案件";
-    return {className: "work", text: `服務日｜${subject}`};
-  }
-  if (item.status === "waiting_deposit_lock") return {className: "waiting", text: "已鎖定／待成立"};
+  if (!item || item.status === "available") return {className: "available", text: "", kind: "available", clientName: ""};
+
+  const client = item.client_name ? item.client_name.trim() : "";
+  const caseNo = item.case_no || "";
+
+  // 1. 個人休假 (不可服務期間 / 系統契約相容: 正式不可服務)
   if (item.status === "staff_unavailability") {
-    return {className: "unavailable", text: item.unavailability_reason || "正式不可服務"};
+    return {
+      className: "unavailable",
+      text: item.unavailability_reason || "個人休假",
+      kind: "unavailable",
+      clientName: "",
+    };
   }
-  if (item.status === "historical_assignment") return {className: "historical", text: "歷史指派"};
-  if (item.status === "buffer") return {className: "waiting", text: "緩衝提醒"};
-  return {className: "rest", text: "休息日"};
+
+  // 2. 緩衝期 (完工後 7 天緩衝)
+  if (item.status === "buffer" || (item.notes && item.notes.includes("緩衝"))) {
+    return {
+      className: "waiting buffer-period",
+      text: client ? `緩衝期｜${client}` : "緩衝期",
+      kind: "buffer",
+      clientName: client,
+    };
+  }
+
+  // 3. 洽談中
+  if (item.order_status === "洽談中") {
+    return {
+      className: "waiting negotiating",
+      text: client ? `洽談中｜${client}` : "洽談中",
+      kind: "negotiating",
+      clientName: client,
+    };
+  }
+
+  // 4. 待確定開始日期 (已鎖定／待成立)
+  if (item.status === "waiting_deposit_lock") {
+    return {
+      className: "waiting pending-start",
+      text: client ? `待確定開始日期｜${client}` : "待確定開始日期（已鎖定／待成立）",
+      kind: "pending_start",
+      clientName: client,
+    };
+  }
+
+  // 5. 確定開始日期
+  if (item.status === "working" || item.is_work_day || item.order_status === "服務中") {
+    const subject = client || caseNo || "服務案件";
+    return {
+      className: "work confirmed-start",
+      text: `確定開始日期｜${subject}`,
+      kind: "confirmed_start",
+      clientName: client,
+    };
+  }
+
+  // 6. 歷史指派
+  if (item.status === "historical_assignment") {
+    return {
+      className: "historical",
+      text: client ? `歷史指派｜${client}` : "歷史指派",
+      kind: "historical",
+      clientName: client,
+    };
+  }
+
+  // 7. 休息日
+  return {
+    className: "rest",
+    text: "休息日",
+    kind: "rest",
+    clientName: client,
+  };
 }
 
 function shiftTime(item) {
@@ -361,22 +799,292 @@ function shiftTime(item) {
   return `${item.starts_at.slice(11, 16)}–${startDay === endDay ? "" : "翌日 "}${end}`;
 }
 
+function getCurrentTaipeiYearMonth() {
+  return new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Taipei", year: "numeric", month: "2-digit"}).format(new Date());
+}
+
+function updateMonthDisplay(year, month) {
+  const monthInput = document.getElementById("monthInput");
+  const value = `${year}-${String(month).padStart(2, "0")}`;
+  monthInput.value = value;
+  const label = document.getElementById("currentMonthLabel");
+  if (label) label.textContent = `${year} 年 ${month} 月`;
+}
+
+function changeCalendarMonth(delta) {
+  const monthInput = document.getElementById("monthInput");
+  let [year, month] = (monthInput.value || getCurrentTaipeiYearMonth()).split("-").map(Number);
+  month += delta;
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  } else if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+  updateMonthDisplay(year, month);
+  void loadSchedule();
+}
+
+function jumpToCurrentMonth() {
+  const current = getCurrentTaipeiYearMonth();
+  const [year, month] = current.split("-").map(Number);
+  updateMonthDisplay(year, month);
+  void loadSchedule();
+}
+
+let pickerYear = 2026;
+
+function openMonthPicker() {
+  const monthInput = document.getElementById("monthInput");
+  const [y] = (monthInput.value || getCurrentTaipeiYearMonth()).split("-").map(Number);
+  pickerYear = y;
+  renderMonthPicker();
+  const modal = document.getElementById("monthPickerModal");
+  modal.hidden = false;
+}
+
+function closeMonthPicker() {
+  const modal = document.getElementById("monthPickerModal");
+  modal.hidden = true;
+}
+
+function renderMonthPicker() {
+  const monthInput = document.getElementById("monthInput");
+  const [selY, selM] = (monthInput.value || getCurrentTaipeiYearMonth()).split("-").map(Number);
+  const [currY, currM] = getCurrentTaipeiYearMonth().split("-").map(Number);
+
+  const yearLabel = document.getElementById("pickerYearLabel");
+  yearLabel.textContent = `${pickerYear} 年`;
+
+  const grid = document.getElementById("monthPickerGrid");
+  grid.replaceChildren();
+
+  for (let m = 1; m <= 12; m++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "month-grid-btn";
+    btn.textContent = `${m} 月`;
+    if (pickerYear === currY && m === currM) {
+      btn.classList.add("is-current-month");
+      btn.title = "當前月份";
+    }
+    if (pickerYear === selY && m === selM) {
+      btn.classList.add("is-active");
+    }
+    btn.onclick = () => {
+      updateMonthDisplay(pickerYear, m);
+      closeMonthPicker();
+      void loadSchedule();
+    };
+    grid.appendChild(btn);
+  }
+}
+
+function initCalendarSwipe() {
+  const wrapper = document.getElementById("calendarSwipeWrapper");
+  if (!wrapper) return;
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+
+  wrapper.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTime = Date.now();
+  }, { passive: true });
+
+  wrapper.addEventListener("touchend", (e) => {
+    if (e.changedTouches.length !== 1) return;
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const diffX = endX - startX;
+    const diffY = endY - startY;
+    const duration = Date.now() - startTime;
+
+    if (Math.abs(diffX) > 42 && Math.abs(diffX) > Math.abs(diffY) * 1.2 && duration < 600) {
+      if (diffX < 0) {
+        changeCalendarMonth(1);
+      } else {
+        changeCalendarMonth(-1);
+      }
+    }
+  }, { passive: true });
+}
+
+function registerMonthNavigatorHandlers() {
+  const prevBtn = document.getElementById("prevMonthBtn");
+  const nextBtn = document.getElementById("nextMonthBtn");
+  const todayBtn = document.getElementById("todayMonthBtn");
+  const pickerTrigger = document.getElementById("monthPickerTrigger");
+
+  if (prevBtn) prevBtn.onclick = () => changeCalendarMonth(-1);
+  if (nextBtn) nextBtn.onclick = () => changeCalendarMonth(1);
+  if (todayBtn) todayBtn.onclick = () => jumpToCurrentMonth();
+  if (pickerTrigger) pickerTrigger.onclick = () => openMonthPicker();
+
+  const pickerPrev = document.getElementById("pickerYearPrev");
+  const pickerNext = document.getElementById("pickerYearNext");
+  const pickerClose = document.getElementById("pickerCloseBtn");
+  const pickerCancel = document.getElementById("pickerCancelBtn");
+  const pickerCurrent = document.getElementById("pickerCurrentMonthBtn");
+  const modal = document.getElementById("monthPickerModal");
+
+  if (pickerPrev) pickerPrev.onclick = () => { pickerYear--; renderMonthPicker(); };
+  if (pickerNext) pickerNext.onclick = () => { pickerYear++; renderMonthPicker(); };
+  if (pickerClose) pickerClose.onclick = closeMonthPicker;
+  if (pickerCancel) pickerCancel.onclick = closeMonthPicker;
+  if (pickerCurrent) pickerCurrent.onclick = () => { jumpToCurrentMonth(); closeMonthPicker(); };
+  if (modal) {
+    modal.onclick = (e) => {
+      if (e.target === modal) closeMonthPicker();
+    };
+  }
+
+  initCalendarSwipe();
+}
+
 function showCalendarDay(items, date) {
   const details = document.getElementById("calendarDayDetails");
   details.hidden = false;
   details.replaceChildren();
+
+  const d = new Date(date + "T00:00:00+08:00");
+  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+  const weekDayText = isNaN(d.getDay()) ? "" : ` (${weekDays[d.getDay()]})`;
+
+  const header = document.createElement("div");
+  header.style.display = "flex";
+  header.style.justifyContent = "space-between";
+  header.style.alignItems = "center";
+  header.style.marginBottom = "10px";
+
   const title = document.createElement("h3");
-  title.textContent = `${date} 班次`;
-  details.append(title);
-  if (!items.length) appendCalendarCell(details, "", "當日沒有排班紀錄。");
+  title.style.margin = "0";
+  title.textContent = `📅 ${date}${weekDayText} 班次`;
+  header.appendChild(title);
+
+  const countBadge = document.createElement("span");
+  countBadge.style.fontSize = "12px";
+  countBadge.style.fontWeight = "700";
+  countBadge.style.padding = "3px 8px";
+  countBadge.style.borderRadius = "6px";
+  countBadge.style.background = items.length ? "#fcebdd" : "#edf2e8";
+  countBadge.style.color = items.length ? "#973b17" : "#466747";
+  countBadge.textContent = items.length ? `${items.length} 筆安排` : "可排班";
+  header.appendChild(countBadge);
+
+  details.append(header);
+
+  if (!items.length) {
+    const emptyBox = document.createElement("div");
+    emptyBox.style.padding = "14px";
+    emptyBox.style.background = "#faf8f6";
+    emptyBox.style.borderRadius = "10px";
+    emptyBox.style.color = "#65564b";
+    emptyBox.style.fontSize = "14px";
+    emptyBox.style.textAlign = "center";
+    emptyBox.textContent = "當日為可排班狀態，尚無預約或指派。";
+    details.append(emptyBox);
+    return;
+  }
+
   for (const item of items) {
-    const block = appendCalendarCell(details, "shift-detail");
-    const state = dayPresentation([item]).text;
+    const card = document.createElement("div");
+    card.className = "shift-detail shift-detail-card";
+
+    const stateInfo = dayPresentation([item]);
     const time = shiftTime(item) || (item.is_work_day || item.status === "historical_assignment" ? "時段未確認" : "");
-    appendCalendarCell(block, "", [time, item.case_no, state].filter(Boolean).join(" · "));
-    if (item.service_date && item.service_date !== item.work_date && item.starts_at) {
-      appendCalendarCell(block, "hint", `原服務日 ${item.service_date} · ${item.starts_at.slice(11, 16)} 起`);
+
+    const row1 = document.createElement("div");
+    row1.style.display = "flex";
+    row1.style.justifyContent = "space-between";
+    row1.style.alignItems = "center";
+    row1.style.marginBottom = "4px";
+
+    const badge = document.createElement("span");
+    badge.style.fontSize = "12px";
+    badge.style.fontWeight = "800";
+    badge.style.padding = "2px 8px";
+    badge.style.borderRadius = "4px";
+
+    if (item.status === "working" || stateInfo.kind === "confirmed_start") {
+      badge.style.background = "#fcebdd";
+      badge.style.color = "#973b17";
+      badge.textContent = "確定開始日期";
+    } else if (stateInfo.kind === "buffer" || item.status === "buffer" || (item.notes && item.notes.includes("緩衝"))) {
+      badge.style.background = "#e0f2fe";
+      badge.style.color = "#0369a1";
+      badge.textContent = "緩衝期";
+    } else if (stateInfo.kind === "negotiating" || item.order_status === "洽談中") {
+      badge.style.background = "#f3e8ff";
+      badge.style.color = "#7e22ce";
+      badge.textContent = "洽談中";
+    } else if (item.status === "waiting_deposit_lock") {
+      badge.style.background = "#fef3c7";
+      badge.style.color = "#854d0e";
+      badge.textContent = "待確定開始日期（已鎖定／待成立）";
+    } else if (item.status === "staff_unavailability") {
+      badge.style.background = "#ede9fe";
+      badge.style.color = "#5b21b6";
+      badge.textContent = "個人休假";
+    } else if (item.status === "resting") {
+      badge.style.background = "#dcfce7";
+      badge.style.color = "#166534";
+      badge.textContent = "休息日";
+    } else if (item.status === "historical_assignment") {
+      badge.style.background = "#e0f2fe";
+      badge.style.color = "#075985";
+      badge.textContent = "歷史指派";
+    } else {
+      badge.style.background = "#f2ede9";
+      badge.style.color = "#241c18";
+      badge.textContent = stateInfo.text;
     }
+    row1.appendChild(badge);
+
+    if (time) {
+      const timeSpan = document.createElement("span");
+      timeSpan.style.fontSize = "13px";
+      timeSpan.style.fontWeight = "700";
+      timeSpan.style.color = "#302923";
+      timeSpan.textContent = `⏰ ${time}`;
+      row1.appendChild(timeSpan);
+    }
+    card.appendChild(row1);
+
+    if (item.case_no || item.client_name) {
+      const caseRow = document.createElement("div");
+      caseRow.style.fontSize = "14px";
+      caseRow.style.fontWeight = "700";
+      caseRow.style.color = "#241c18";
+      caseRow.style.margin = "4px 0";
+      const parts = [];
+      if (item.case_no) parts.push(`案件：${item.case_no}`);
+      if (item.client_name) parts.push(`客戶：${item.client_name}`);
+      caseRow.textContent = parts.join(" · ");
+      card.appendChild(caseRow);
+    }
+
+    if (item.status === "staff_unavailability" && item.unavailability_reason) {
+      const reasonRow = document.createElement("div");
+      reasonRow.style.fontSize = "13px";
+      reasonRow.style.color = "#5b21b6";
+      reasonRow.style.margin = "2px 0";
+      reasonRow.textContent = `原因：${item.unavailability_reason}`;
+      card.appendChild(reasonRow);
+    }
+
+    if (item.service_date && item.service_date !== item.work_date && item.starts_at) {
+      const contRow = document.createElement("div");
+      contRow.className = "hint";
+      contRow.style.margin = "4px 0 0";
+      contRow.textContent = `原服務日 ${item.service_date} · ${item.starts_at.slice(11, 16)} 起`;
+      card.appendChild(contRow);
+    }
+
+    details.append(card);
   }
 }
 
@@ -397,25 +1105,74 @@ function renderCalendar(schedule) {
   document.getElementById("calendarDayDetails").hidden = true;
   weekNames.forEach(name => appendCalendarCell(root, "head", name));
   for (let i = 0; i < first.getDay(); i++) appendCalendarCell(root, "day available");
+
+  const todayStr = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Taipei"}).format(new Date());
+  let defaultSelectCell = null;
+  let defaultSelectItems = [];
+  let defaultSelectDate = "";
+
   for (let day = 1; day <= lastDay; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const isToday = (dateStr === todayStr);
     const items = (byDay[day] || []).filter(item => item.status !== "available");
     const presentation = dayPresentation(items);
     const cell = document.createElement("button");
     cell.type = "button";
-    cell.className = `day ${presentation.className}`;
+    cell.className = `day ${presentation.className}${isToday ? " is-today" : ""}`;
     cell.setAttribute("aria-pressed", "false");
     cell.setAttribute("aria-label", `${month} 月 ${day} 日，${items.length} 筆紀錄`);
-    appendCalendarCell(cell, "date", String(day));
+
+    appendCalendarCell(cell, "date date-num", String(day));
     if (items.length) {
-      appendCalendarCell(cell, "shift-label", shiftTime(items[0]) || dayPresentation([items[0]]).text);
+      const firstItem = items[0];
+      // 內容優先顯示客戶姓名（長輩與月嫂一眼識別客戶案號與姓名）
+      let contentText = "";
+      if (firstItem.client_name && firstItem.client_name.trim()) {
+        contentText = firstItem.client_name.trim();
+      } else if (firstItem.status === "staff_unavailability") {
+        contentText = firstItem.unavailability_reason || "個人休假";
+      } else if (firstItem.status === "buffer" || (firstItem.notes && firstItem.notes.includes("緩衝"))) {
+        contentText = "緩衝期";
+      } else if (firstItem.status === "waiting_deposit_lock") {
+        contentText = firstItem.order_status === "洽談中" ? "洽談中" : "待確定";
+      } else if (firstItem.status === "working") {
+        contentText = "確定開工";
+      } else if (firstItem.status === "resting") {
+        contentText = "休息日";
+      } else {
+        contentText = presentation.text || "";
+      }
+      const shiftTagEl = appendCalendarCell(cell, "shift-label shift-tag", contentText);
+      shiftTagEl.title = `${presentation.text} · ${firstItem.client_name || firstItem.case_no || ""}`;
     }
-    if (items.length > 1) appendCalendarCell(cell, "more-shifts", `另 ${items.length - 1} 筆`);
-    cell.onclick = () => {
-      root.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+    if (items.length > 1) {
+      appendCalendarCell(cell, "more-shifts more-shifts-tag", `+${items.length - 1}`);
+    }
+
+    const clickAction = () => {
+      root.querySelectorAll('[aria-pressed="true"]').forEach(el => el.setAttribute("aria-pressed", "false"));
       cell.setAttribute("aria-pressed", "true");
-      showCalendarDay(items, `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+      showCalendarDay(items, dateStr);
     };
+    cell.onclick = clickAction;
+
+    if (isToday) {
+      defaultSelectCell = cell;
+      defaultSelectItems = items;
+      defaultSelectDate = dateStr;
+    } else if (!defaultSelectCell && items.length > 0) {
+      defaultSelectCell = cell;
+      defaultSelectItems = items;
+      defaultSelectDate = dateStr;
+    }
+
     root.append(cell);
+  }
+
+  // 自動高亮今天或當月第一筆排班
+  if (defaultSelectCell) {
+    defaultSelectCell.setAttribute("aria-pressed", "true");
+    showCalendarDay(defaultSelectItems, defaultSelectDate);
   }
 }
 
@@ -427,6 +1184,10 @@ async function loadSchedule() {
     return;
   }
   const [year, month] = value.split("-").map(Number);
+  const currentMonthLabel = document.getElementById("currentMonthLabel");
+  if (currentMonthLabel) {
+    currentMonthLabel.textContent = `${year} 年 ${month} 月`;
+  }
   const button = document.getElementById("loadSchedule");
   button.disabled = true;
   monthInput.disabled = true;
@@ -852,7 +1613,38 @@ async function setupPostponeWorkbench(caseItem) {
   postponeMonth = caseItem.service_dates[0]?.slice(0, 7) ?? document.getElementById('monthInput').value;
   updatePostponePairs();
   renderPostponeCheck();
+  initPostponeSwipe();
   void loadPostponeCalendar();
+}
+
+function initPostponeSwipe() {
+  const grid = document.getElementById("postponeCalGrid");
+  if (!grid || grid.dataset.swipeBound) return;
+  grid.dataset.swipeBound = "true";
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+
+  grid.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTime = Date.now();
+  }, { passive: true });
+
+  grid.addEventListener("touchend", (e) => {
+    if (e.changedTouches.length !== 1) return;
+    const diffX = e.changedTouches[0].clientX - startX;
+    const diffY = e.changedTouches[0].clientY - startY;
+    const duration = Date.now() - startTime;
+    if (Math.abs(diffX) > 42 && Math.abs(diffX) > Math.abs(diffY) * 1.2 && duration < 600) {
+      if (diffX < 0) {
+        navCalMonth(1);
+      } else {
+        navCalMonth(-1);
+      }
+    }
+  }, { passive: true });
 }
 
 async function loadPostponeCase() {
@@ -919,7 +1711,7 @@ function registerUnavailabilityHandlers() {
     item.style.background = "#ede9fe";
     item.style.color = "#4c1d95";
     item.style.fontWeight = "800";
-    item.textContent = `🚫 ${start} ～ ${end}｜${reason}（正式不可服務）`;
+    item.textContent = `🚫 ${start} ～ ${end}｜${reason}（個人休假）`; // 契約相容: 正式不可服務
     list.prepend(item);
   });
 }
@@ -927,6 +1719,9 @@ function registerUnavailabilityHandlers() {
 async function init() {
   const month = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Taipei", year: "numeric", month: "2-digit"}).format(new Date());
   document.getElementById("monthInput").value = month;
+  const [initY, initM] = month.split("-").map(Number);
+  const currentMonthLabel = document.getElementById("currentMonthLabel");
+  if (currentMonthLabel) currentMonthLabel.textContent = `${initY} 年 ${initM} 月`;
   const params = new URLSearchParams(location.search);
   flowId = params.get("flow_id") || "";
   focusCaseNo = params.get("case_no") || "";
@@ -988,6 +1783,7 @@ async function init() {
     await loadPostponeCase();
   } else {
     registerUnavailabilityHandlers();
+    registerMonthNavigatorHandlers();
     loadSchedule();
   }
 }

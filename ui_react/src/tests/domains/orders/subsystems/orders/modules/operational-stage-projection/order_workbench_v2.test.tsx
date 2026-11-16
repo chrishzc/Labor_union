@@ -314,6 +314,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     render(<OrderWorkbenchV2Page />);
 
     await screen.findByText('CASE-CURRENT-NOTICE');
+    expect(screen.queryByText('待處理訂單異動申請')).not.toBeInTheDocument();
     const card = cardFor('CASE-CURRENT-NOTICE');
     expect(within(card).getByTitle('服務日期確認')).toBeInTheDocument();
     expect(within(card).queryByText(settlementNotice.message)).not.toBeInTheDocument();

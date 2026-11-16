@@ -576,12 +576,177 @@ def group_guidelines_card():
     }
 
 
+def resolve_case_bank_account_info(cursor: Any, case_no: str) -> dict[str, str]:
+    """依年度規則解析案件專屬匯款帳號：115年度前為匯入虛擬帳號，116年度後為內建流水虛擬帳號。"""
+    import os
+
+    bank_name = os.getenv("CLIENT_DEPOSIT_BANK_NAME", "永豐銀行")
+    bank_code = os.getenv("CLIENT_DEPOSIT_BANK_CODE", "807")
+    normalized = str(case_no or "").strip()
+
+    is_imported_year = False
+    if normalized:
+        if normalized.startswith("A") and len(normalized) >= 4:
+            year_part = normalized[1:4]
+        else:
+            year_part = normalized[:3]
+        if year_part.isdigit() and int(year_part) <= 115:
+            is_imported_year = True
+
+    virtual_account = ""
+    account_note = ""
+
+    if is_imported_year:
+        if cursor is not None:
+            try:
+                cursor.execute(
+                    "SELECT virtual_account FROM client_legacy_virtual_accounts "
+                    "WHERE case_no = %s ORDER BY id DESC LIMIT 1",
+                    (normalized,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    virtual_account = str(row.get("virtual_account") if isinstance(row, dict) else row[0]).strip()
+            except Exception:
+                virtual_account = ""
+        else:
+            try:
+                from infrastructure.mysql.mysql_adapter import get_connection
+                with get_connection() as auto_conn:
+                    with auto_conn.cursor() as auto_cur:
+                        auto_cur.execute(
+                            "SELECT virtual_account FROM client_legacy_virtual_accounts "
+                            "WHERE case_no = %s ORDER BY id DESC LIMIT 1",
+                            (normalized,),
+                        )
+                        row = auto_cur.fetchone()
+                        if row:
+                            virtual_account = str(row.get("virtual_account") if isinstance(row, dict) else row[0]).strip()
+            except Exception:
+                virtual_account = ""
+        if not virtual_account:
+            virtual_account = "尚未匯入（請洽工會專員）"
+            account_note = "115年度前案件（待匯入專屬帳號）"
+        else:
+            account_note = "115年度前案件（匯入專屬帳號）"
+    else:
+        from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
+        built = build_client_virtual_account(normalized)
+        if built:
+            virtual_account = built
+            account_note = "116年度起案件（內建流水帳號）"
+        else:
+            virtual_account = "待建立流水帳號"
+            account_note = "116年度起案件"
+
+    return {
+        "bank_name": bank_name,
+        "bank_code": bank_code,
+        "virtual_account": virtual_account,
+        "account_note": account_note,
+    }
+
+
+def _build_bank_account_box(bank_account_info: Any) -> dict[str, Any] | None:
+    if not bank_account_info or not isinstance(bank_account_info, dict):
+        return None
+    v_account = bank_account_info.get("virtual_account")
+    if not v_account:
+        return None
+    b_name = bank_account_info.get("bank_name", "永豐銀行")
+    b_code = bank_account_info.get("bank_code", "807")
+
+    inner_contents: list[dict[str, Any]] = [
+        {
+            'type': 'box',
+            'layout': 'horizontal',
+            'justifyContent': 'space-between',
+            'alignItems': 'center',
+            'contents': [
+                {'type': 'text', 'text': '收款銀行', 'size': 'xs', 'color': '#64748B', 'flex': 4},
+                {'type': 'text', 'text': f'{b_name}（{b_code}）', 'size': 'xs', 'weight': 'bold', 'color': '#0F172A', 'align': 'end', 'flex': 6},
+            ],
+        },
+        {'type': 'separator', 'margin': 'xs', 'color': '#F1F5F9'},
+        {
+            'type': 'box',
+            'layout': 'horizontal',
+            'justifyContent': 'space-between',
+            'alignItems': 'center',
+            'contents': [
+                {'type': 'text', 'text': '匯款帳號', 'size': 'xs', 'color': '#64748B', 'flex': 4},
+                {'type': 'text', 'text': str(v_account), 'size': 'sm', 'weight': 'bold', 'color': '#1E3A8A', 'align': 'end', 'flex': 6, 'wrap': True},
+            ],
+        },
+    ]
+
+    is_pure_digits = str(v_account).strip().isdigit()
+    if is_pure_digits:
+        short_bank_name = b_name.replace("商業銀行", "").replace("銀行", "")
+        bank_label = f"{short_bank_name}{b_code}" if short_bank_name else b_code
+        inner_contents.append({
+            'type': 'button',
+            'style': 'secondary',
+            'height': 'sm',
+            'color': '#1E40AF',
+            'margin': 'sm',
+            'action': {
+                'type': 'clipboard',
+                'label': f'📋 複製帳號 ({bank_label})',
+                'clipboardText': str(v_account).strip(),
+            },
+        })
+
+    inner_contents.append({
+        'type': 'text',
+        'text': f'※ ATM／網銀轉帳請輸入銀行代碼 {b_code} 及上方專屬帳號',
+        'size': 'xxs',
+        'color': '#64748B',
+        'wrap': True,
+        'margin': 'xs',
+    })
+
+    return {
+        'type': 'box',
+        'layout': 'vertical',
+        'margin': 'md',
+        'spacing': 'xs',
+        'contents': [
+            {
+                'type': 'box',
+                'layout': 'horizontal',
+                'alignItems': 'center',
+                'spacing': 'xs',
+                'contents': [
+                    {'type': 'text', 'text': '🏦', 'size': 'sm', 'flex': 0},
+                    {'type': 'text', 'text': '案件專屬匯款帳號', 'weight': 'bold', 'size': 'sm', 'color': '#1E293B', 'flex': 1},
+                ],
+            },
+            {
+                'type': 'box',
+                'layout': 'vertical',
+                'backgroundColor': '#FFFFFF',
+                'cornerRadius': '10px',
+                'borderWidth': '1.5px',
+                'borderColor': '#93C5FD',
+                'paddingAll': '12px',
+                'spacing': 'xs',
+                'contents': inner_contents,
+            },
+        ],
+    }
+
+
+build_bank_account_box = _build_bank_account_box
+
+
 def case_information_card(
     case_no: str,
     staff_name: str,
     sections: Sequence[Any],
     *,
     client_name: str | None = None,
+    bank_account_info: Any = None,
 ) -> dict[str, Any]:
     """生成案件資訊（服務條件與費用約定）LINE Flex Bubble 卡片。"""
     body_contents: list[dict[str, Any]] = []
@@ -591,6 +756,9 @@ def case_information_card(
         '客戶付款約定': '💰',
         '其他約定': '📝',
     }
+
+    bank_box_added = False
+    bank_box = _build_bank_account_box(bank_account_info)
 
     if not sections:
         body_contents.append({
@@ -605,6 +773,9 @@ def case_information_card(
                 {'type': 'text', 'text': '目前無此案件之服務條件與費用約定資料。', 'size': 'sm', 'color': '#64748B', 'align': 'center'},
             ],
         })
+        if bank_box:
+            body_contents.append(bank_box)
+            bank_box_added = True
     else:
         for section in sections:
             sec_title = getattr(section, 'title', None) or (section.get('title') if isinstance(section, dict) else str(section))
@@ -664,6 +835,13 @@ def case_information_card(
                 'spacing': 'xs',
                 'contents': rows_box_contents,
             })
+
+            if sec_title == '客戶付款約定' and bank_box:
+                body_contents.append(bank_box)
+                bank_box_added = True
+
+        if bank_box and not bank_box_added:
+            body_contents.append(bank_box)
 
     subtitle_parts = [f'案件：{case_no}', f'月嫂：{staff_name}']
     if client_name:

@@ -100,16 +100,14 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     ] },
     { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', delivery: ['automatic'], ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'] }] },
   ] },
-  { id: 'support', name: '自助服務與留言', summary: '一般詢問及客訴由工會人員在 LINE 官方帳號處理。服務導覽、FAQ 和異動表單仍可直接開啟。', stages: [
+  { id: 'support', name: '自助服務與留言', summary: '服務導覽和常見問答可直接開啟。一般詢問、客訴及客戶資料或訂單變更由工會人員在 LINE 官方帳號處理。', stages: [
     { title: '開啟服務', nodes: [
       { id: 'service-menu', title: '查看服務導覽', delivery: ['reply'], ids: ['service-menu'] },
-      { id: 'order-update-menu', title: '修改訂單資訊導覽', delivery: ['reply'], ids: ['order-update-menu'] },
       { id: 'service-explanations', title: '服務流程與收費說明', internal: true, summary: '統一在 AI 客服 LIFF 查看常見問答或提問；說明內容由 AI 客服工作室維護，不另設固定回覆。' },
       { id: 'service-progress', title: '查詢服務進度', delivery: ['reply'], ids: ['service-progress', 'service-progress-unbound'], summary: '查看已綁定案件的進度回覆，以及尚未綁定時的入口提示。' },
     ] },
     { title: '工會處理', nodes: [
-      { id: 'official-account-chat', title: '官方帳號留言', internal: true, summary: '工會人員查看並回覆一般詢問與客訴。' },
-      { id: 'order-change-follow-up', title: '訂單異動申請', internal: true, summary: '客戶送出表單取得申請編號。工會在訂單管理查看並記錄辦理結果。' },
+      { id: 'official-account-chat', title: '官方帳號留言', internal: true, summary: '工會人員回覆詢問與客訴，並確認客戶資料或訂單變更後於後台維護。' },
       { id: 'admin-status', title: '查看系統狀態', internal: true, summary: '工會人員在手機待辦工作台查看系統狀態。' },
     ] },
   ] },

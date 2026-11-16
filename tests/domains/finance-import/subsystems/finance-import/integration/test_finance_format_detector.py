@@ -62,3 +62,27 @@ def test_rejects_multiple_matching_sheets(tmp_path):
         detect_statement_format(path)
 
     assert len(error.value.diagnostics) == 2
+
+
+XLS_SAMPLES = [
+    ("歷史對帳單.xls", "legacy", "永豐3131(虛擬)", 3),
+    ("台新範例對帳單.xls", "taishin", "交易明細查詢", 16),
+    ("永豐範例對帳單.xls", "sinopac", "交易明細報表", 3),
+]
+
+
+@pytest.mark.parametrize(("filename", "format_id", "sheet_name", "header_row"), XLS_SAMPLES)
+def test_detects_legacy_xls_samples(filename, format_id, sheet_name, header_row):
+    result = detect_statement_format(SAMPLES / filename)
+
+    assert result["format_id"] == format_id
+    assert result["sheet_name"] == sheet_name
+    assert result["header_row"] == header_row
+
+
+def test_xls_detection_rejects_fake_xls(tmp_path):
+    path = tmp_path / "fake.xls"
+    path.write_text("<html></html>", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        detect_statement_format(path)

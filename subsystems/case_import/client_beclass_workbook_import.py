@@ -14,7 +14,8 @@ from typing import Any, Callable, Protocol
 
 import pandas as pd
 
-from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
+from shared_kernel.workbook_resource_limits import validate_workbook
+from shared_kernel.xls_workbook import excel_engine
 
 from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
@@ -633,9 +634,9 @@ class ClientBeClassWorkbookImportService:
 
 def _load_workbook(source_path: str) -> _Workbook:
     path = Path(source_path)
-    validate_xlsx_workbook(path)
+    validate_workbook(path)
     digest = sha256(path.read_bytes()).hexdigest()
-    with pd.ExcelFile(path, engine="openpyxl") as excel:
+    with pd.ExcelFile(path, engine=excel_engine(path)) as excel:
         candidates = [(index, name, excel.parse(sheet_name=name, dtype=object)) for index, name in enumerate(excel.sheet_names)]
     matches = [(index, frame) for index, _, frame in candidates if not frame.dropna(how="all").empty and CLIENT_BECLASS_REQUIRED_HEADERS <= {str(column).strip() for column in frame.columns}]
     if len(matches) != 1:

@@ -106,6 +106,9 @@ def payment_reminder_card_payload(
     amount_ntd: int | str,
     due_date: date | str | None = None,
     kind: str = 'reminder',
+    *,
+    bank_account_info: Any = None,
+    virtual_account: str | None = None,
 ) -> dict:
     stage_name = STAGE_LABELS.get(stage, stage)
     is_overdue = kind == 'overdue'
@@ -121,16 +124,39 @@ def payment_reminder_card_payload(
     actions = [
         {'type': 'button', 'style': 'primary', 'action': {'type': 'postback', 'label': '已經匯款', 'data': f'payment-ack:{stage}:{case_no}', 'displayText': '已經匯款'}},
     ]
+
+    from subsystems.line.service_start_messages import resolve_case_bank_account_info, build_bank_account_box
+
+    if bank_account_info is None:
+        if virtual_account:
+            import os
+
+            b_name = os.getenv("CLIENT_DEPOSIT_BANK_NAME", "永豐銀行")
+            b_code = os.getenv("CLIENT_DEPOSIT_BANK_CODE", "807")
+            bank_account_info = {
+                "bank_name": b_name,
+                "bank_code": b_code,
+                "virtual_account": str(virtual_account),
+                "account_note": "案件專屬帳號",
+            }
+        elif case_no and not str(case_no).startswith("{"):
+            bank_account_info = resolve_case_bank_account_info(None, case_no)
+
+    bank_box = build_bank_account_box(bank_account_info)
+    body_contents = [
+        {'type': 'text', 'text': desc, 'wrap': True},
+    ]
+    if bank_box:
+        body_contents.append(bank_box)
+    body_contents.append({'type': 'text', 'text': ASSISTANCE_ACK, 'size': 'sm', 'wrap': True})
+
     return {
         'type': 'flex',
         'altText': f'案件〈{case_no}〉{title}：NT$ {amount_str}',
         'contents': {
             'type': 'bubble',
             'header': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': title, 'weight': 'bold', 'size': 'lg'}]},
-            'body': {'type': 'box', 'layout': 'vertical', 'spacing': 'sm', 'contents': [
-                {'type': 'text', 'text': desc, 'wrap': True},
-                {'type': 'text', 'text': ASSISTANCE_ACK, 'size': 'sm', 'wrap': True},
-            ]},
+            'body': {'type': 'box', 'layout': 'vertical', 'spacing': 'sm', 'contents': body_contents},
             'footer': {'type': 'box', 'layout': 'vertical', 'contents': actions},
         },
     }

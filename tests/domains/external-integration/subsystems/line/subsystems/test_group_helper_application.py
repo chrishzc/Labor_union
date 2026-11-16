@@ -1291,7 +1291,19 @@ def test_multi_caregiver_case_information_card_and_payment_terms() -> None:
         ),
     ]
 
-    card = case_information_card("115000179", "陳月嫂、林月嫂", sections, client_name="劉之君")
+    bank_info = {
+        "bank_name": "永豐銀行",
+        "bank_code": "807",
+        "virtual_account": "99781699000179",
+        "account_note": "115年度前案件（匯入專屬帳號）",
+    }
+    card = case_information_card(
+        "115000179",
+        "陳月嫂、林月嫂",
+        sections,
+        client_name="劉之君",
+        bank_account_info=bank_info,
+    )
     card_json = json.dumps(card, ensure_ascii=False)
 
     # 檢驗多月嫂姓名顯示在副標題與內文
@@ -1303,6 +1315,10 @@ def test_multi_caregiver_case_information_card_and_payment_terms() -> None:
     assert "NT$ 12,000" in card_json
     assert "第一期金額" in card_json
     assert "客戶應付總額" in card_json
+
+    # 檢驗匯款銀行與虛擬帳號
+    assert "永豐銀行（807）" in card_json
+    assert "99781699000179" in card_json
 
 
 def test_multi_caregiver_service_schedule_calendar_rendering() -> None:

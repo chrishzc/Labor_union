@@ -2,12 +2,10 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
-from pydantic import ValidationError
 from api.dependencies import admin_auth
 from api.dependencies.service_start import get_service_start_application
 from api.routes import service_start,matching_schedule_confirmation
 from subsystems.access.authentication_session import AdminPrincipal
-from api.schemas.line_order_change import LineOrderChangePreviewRequest
 from subsystems.line.message_preview_samples import current_message_sample
 
 @pytest.mark.parametrize('role,status',[('line_manager',200),('staff',403),('line_viewer',200)])
@@ -26,11 +24,6 @@ def test_retired_confirmation_api_has_no_mutation():
  with TestClient(app) as http:
   response=http.post('/api/v1/orders/CASE/matching-plans/1/schedule-confirmation/send',headers={'Idempotency-Key':'synthetic'})
   assert response.status_code==410
-
-
-def test_customer_retired_date_kind_is_rejected_at_transport_before_any_command():
- with pytest.raises(ValidationError):
-  LineOrderChangePreviewRequest(line_id_token='synthetic',case_no='CASE',expected_order_version=1,kind='service_days',requested={'start_date':'2027-01-05'})
 
 
 def test_public_preview_uses_current_buttons_and_buttonless_result():

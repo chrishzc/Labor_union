@@ -11,7 +11,7 @@
 ## 2. 官方帳號人工服務與舊工單交接
 
 - 工會人員日常查閱 LINE 官方帳號並在原對話回覆一般詢問及正式客訴。通用聯絡、正式客訴、問答負評與業務求助均停止新增客服工單、人工升級、對話暫停及客服提醒。
-- 舊求助 Postback 依原聊天室回一次留言指引。一般留言與舊通用求助文字交由工會在官方帳號查看。明確的綁定、自助導覽、FAQ、個資及訂單表單指令仍依既有入口處理。
+- 舊求助 Postback 依原聊天室回一次留言指引。一般留言與舊通用求助文字交由工會在官方帳號查看。綁定、自助導覽與 FAQ 指令沿用各自入口。舊改資料與改訂單指令只回覆留言指引（見 §5.3）。
 - 舊工單及事件留在原資料表。桌面 LINE 營運移除歷史客服紀錄入口，舊查詢 API 回傳 `410 Gone`。切換中既有工單留用原版本化結案 Preview／Apply 與證據檢核解除暫停，結案不建立客戶 LINE 通知。新建、認領、開始處理及系統回覆 API 退役。尚未處置且缺少必要證據的舊暫停由工會逐筆交接。
 
 ## 3. Webhook Reply-Only 與 Push 投遞分工（`line_webhook_reply`）
@@ -135,7 +135,7 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
 - **`#line-management`（LINE 營運）**：整合身分綁定查詢／撤銷與審核（`binding`）及服務群組作業（`order_groups`）。舊 `tab=tickets` 連結回到身分與授權。電腦與手機的通知事項移除客服工單來源。
 - **`#line-notifications`（通知與寄送）**：整合統一通知與發送工作台（`push_queue`，支援 `?tab=push_queue&message=<id>` 定位）與寄送追蹤／異常，並維護含 Flex 在內之通知文案／設計公版；繳款收據深連結（`#notifications?subtab=payment_receipt`）於通知事項頁跟催。
 - **`#line-interface`（LINE 介面設定）** 與 **`#line-ai-events`（AI 客服工作室）**：
-  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室固定涵蓋 15 個官方 LIFF 表單與行動工作面預覽項目（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與三個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
+  - `#line-interface` 包含圖文選單（`visitor`／`customer`／`staff`／`union_staff` 四角色草稿）、**LINE 表單工作室（`LiffCardStudio`）** 與 LINE 流程圖；表單工作室提供現行官方 LIFF 表單與行動工作面預覽（含 `gateway.html` 兩步導流、`register.html` 需求調查、`non_citizen_registration` 非市民服務申請與三個 `mobile_admin` 視圖，不含 `staff_baby_log.html` 與 Flex 訊息卡片），其中 `gateway` 與 `non_citizen_registration` 透過同源唯讀預覽端點 `/api/v1/line/identity/studio-preview/{gateway|non-citizen-registration}`（經 `applicationUrl` 支援前綴代理）載入互動預覽，右側僅呈現唯讀預覽與官方入口操作。
   - [LINE 介面設定的引導動作分頁](19_Global_Entry_Point_Governance.md#21-現行導航與頁面清冊)提供觸發指令編輯與唯讀預覽。AI 客服工作室的回答測試先以相同路由預覽檢查問句。命中引導動作時顯示導向結果及前往設定的連結，未命中時才執行模型回答測試。
 
 ### 5.2 手機審核中心、DB 版控 LIFF 設定與非市民入口契約
@@ -149,12 +149,9 @@ LINE 管理介面依 [`19_Global_Entry_Point_Governance.md`](19_Global_Entry_Poi
   - 既有站台透過 `PUT /api/config/liff/pages/gateway` 直接更新導流頁版型、四個選項與對應網址。只調整需要變更的 LIFF 頁面，保留相容自訂文案、其他設定及歷史版本。後端非市民申請設定 API 維持提供 `GET /api/config/liff/non-citizen`、`POST /api/config/liff/non-citizen`（首次初始化）與 `PUT /api/config/liff/non-citizen` 供版本化查詢與寫入；前台 `#line-interface` 之「非市民服務申請」僅顯示唯讀互動預覽，不內嵌頁面欄位編輯表單。各項設定共用 `If-Match` 衝突控制。新站台的初始設定包含完整兩步導流。既有版本仍可讀取與還原，重複套用同一導流設定不得新增重複選項。
   - 保留既有輔助導流與 `register` 補助問卷設定，非市民必填系統欄位受共用 schema 驗證保護不得停用或設為選填（違規回 `422`／`409`），且非市民必填規則不套用到其他申請類別。一般問卷（`/line-registration`）與非市民表單（`/line-non-citizen-registration`）共用之 `register.html` 固定提供必填閉鎖單選「**胎數（單胞胎／雙胞胎）**」（對應 `特殊計費:胎數` 並提示將影響服務時薪標準，不沿用「第一胎／第二胎」自由文字輸入，亦不更動既有 DB `LiffSettingsConfig` 系統欄位清單）；市民與非市民皆於銀行帳號欄位固定顯示「**請填入產婦本人銀行帳號**」備註，並新增必填「**存摺封面**」圖片上傳欄位（JPG / PNG / WebP），供工會人員於審核／建檔時核對銀行帳號與分行代碼，並一併歸檔至 NAS `02_客戶存摺封面` 資料夾。非市民 LIFF 不顯示舊「寶寶資訊」多行文字輸入框與 `LINE ID`（`id="line_id"`）輸入欄（改由客戶主動加入官方帳號並保留系統 `clients.line_id` 欄位），送出時由所選胎數（`單胞胎`／`雙胞胎`）同步帶入 `baby_info`，且執行期套用設定安全略過缺席之 DOM 節點。送出僅存入專用 Redis 待審申請並依實際回執顯示申請編號與「待工會核准」（不宣稱已建案或完成綁定），正式建案與 `A` 字頭編號規則見 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md#3-非市民自費進件與專用-redis-7-待審隔離架構)；新增頁面不新增 Rich Menu audience、選單發布或外部 provider 授權。
 
-### 5.3 資料異動審核與客戶自填表單退役
+### 5.3 客戶資料與訂單異動流程
 
-- **客戶端自填表單退役（`profile_update` / `order_update`）**：
-  - 經工會實務反饋與重大決策裁決，客戶端無線上自填改單與改個資需求。客戶圖文選單、導流頁面與聊天室引導全面移除相關入口。
-  - 原客戶自填入口端點（`/line-profile-guard`、`/line-profile-update`、`/line-order-update`）及實體 HTML 檔案（`profile_update.html`、`profile_guard.html`、`order_update.html`）**已完全退役且伺服器直接不提供連線**。
-  - 客戶若有聯絡方式、服務地址或訂單內容變更需求，統一於 LINE 官方帳號或案件群組直接留言，由工會專員於管理後台手動確認並調整，杜絕版本混亂與資料衝突。
+客戶如需變更聯絡方式、服務地址或訂單內容，在 LINE 官方帳號或案件群組留言，由工會專員確認後在客戶名冊或訂單管理直接維護。舊客戶自填表單、桌面審核與行動待辦入口均已退役，既有申請紀錄保留於資料庫。
 
 #### 月嫂更新個人資料
 

@@ -16,8 +16,12 @@ Owns admin authentication/session persistence orchestration, including the absol
 - `ui_react/src/api/auth/two_step_auth_schemas.ts` — password challenge discriminant and provisioning data.
 
 - `subsystems/access/authentication_session.py` — shared password hashing and account/session orchestration.
+- `subsystems/access/account_receipt_fingerprints.py` — keyed fingerprints for account creation and password reset, and conversion of stored receipt fingerprints within the caller's transaction.
+- `subsystems/access/root_account_maintenance.py` — offline root verification and Apply for one operation, including session and challenge revocation and atomic audit.
+- `scripts/root_account_maintenance.py` — interactive Windows operator adapter for the pinned MySQL TLS target and stopped-runtime checks.
 - `api/dependencies/admin_auth.py` — authenticated principal and bounded registry read/write capability guards.
 - `api/routes/admin_auth.py` — password challenges, TOTP enrollment confirmation and session transport; distinct safe keyring/schema failures, no session from enrollment.
+- `api/routes/account_center.py` — admin account query and command transport, including safe receipt protection errors.
 - `subsystems/access/incomplete_root_reset.py` — offline Query/Apply for the sole unused, unbound root at initial security version 1; local target/id/version and business-reference guards, fresh locked recheck after confirmation, atomic bounded deletion and retained audit.
 - `scripts/reset_incomplete_root_setup.py`、`scripts/launchers/reset_incomplete_root.bat` — default read-only preview and exact interactive confirmation for local incomplete-root reset; no HTTP entry or credential arguments.
 - `scripts/configure_initial_totp_key.py`、`scripts/launchers/configure_initial_totp_key.bat` — offline explicit initial key setup; valid keys remain unchanged, missing/invalid keys require empty local account/auth tables and exact confirmation; atomic ignored .env write, no database mutation or secret output.
@@ -36,7 +40,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 - Revoked sessions and disabled admin users remain invalid.
 - Existing stored sessions are evaluated by the absolute deadline; refresh does not extend that deadline.
 - Creating or resetting an admin password requires at least 10 characters, including root bootstrap; existing password hashes remain valid.
-- All management entries use one flow: create root → QR → TOTP confirmation → recovery codes → fresh two-step login. Setup and enrollment issue no session. Root/pending factor/challenge commit together; encryption or persistence failures roll back creation. Existing recovery rules and the unique root fact are unchanged.
+- First-root setup uses one flow: create root → QR → TOTP confirmation → recovery codes → fresh two-step login. Setup and enrollment issue no session. Root, pending factor and challenge commit together. Encryption or persistence failures roll back creation.
 - `has_root_admin` gates the sole first-install form. The automatic unfinished-root continuation state/entry is retired; expired initial enrollment stops and names the offline reset tool. Missing encryption configuration and schema failures have distinct safe errors; legacy development credentials never create accounts at startup.
 
 ## Verification
@@ -50,6 +54,9 @@ Owns admin authentication/session persistence orchestration, including the absol
 - layout_basis: Existing Access public account contract remains in the canonical subsystem `contract/` root; it verifies the API projection/request boundary together with the shared authentication policy. Session lifecycle integration remains in the existing sibling `integration/` root.
 - `tests/domains/external-integration/subsystems/access/integration/test_access_session_expiry_policy.py`
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_access_account_center_public_contract.py` — account request boundaries, safe public projection and shared password policy.
+- test_root: `tests/domains/external-integration/subsystems/access/contract/test_root_account_maintenance.py` — offline authorization, commits, failure recovery and terminal boundaries.
+- test_root: `tests/domains/external-integration/subsystems/access/regression/test_access_account_command_safety.py` — account commands, keyed receipt replay and password policy regressions.
+- test_root: `tests/domains/external-integration/subsystems/access/integration/test_access_control_disposable_mysql_e2e.py` — Access flows on disposable MySQL.
 - test_root: `ui_react/src/tests/FirstRootSetup.test.tsx` — create→QR→TOTP→recovery→login order, expired initial setup stops, no session before login, password clearing, public prefix, unavailable state and concurrent closure.
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_incomplete_root_reset_cli.py` — preview/confirmation/cancellation, remote and production refusal, safe errors.
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_initial_totp_key_cli.py` — preview/cancellation, persistent valid-key preservation, existing account refusal, environment/file changes and failed-write cleanup without secret output.

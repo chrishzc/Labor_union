@@ -82,7 +82,7 @@ flowchart TD
 | 模組節點群組 | 現行規格契約與邊界 |
 |---|---|
 | `Register_Form` / 待審儲存 | 依 [`17B_Case_Import與非市民Redis待審正式規格.md`](17B_Case_Import與非市民Redis待審正式規格.md) `REG-BOUNDARY`／`REG-REDIS`／`REG-EXPIRY`：表單送出後存於無 MySQL 憑證之專用持久化 Redis（14 天自動到期清理）；待工會核准時才經 Case Import writer 寫入 MySQL 正式客戶／訂單並依回執刪除待審資料，拒絕亦立即刪除。 |
-| `Profile_Update_Page` / `order_update` | **客戶端自填表單已退役**：依 [20 號規格](20_LINE客服與月嫂自助服務正式規格.md#53-資料異動審核與客戶自填表單退役) 與 [29 號規格](29_LINE服務說明、客服互動與選單角色正式規格.md#客戶端自助表單退役與後台維護原則)，`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 不提供連線，選單與聊天導流全面移除。客戶意向於對話留訊由工會於後台維護；月嫂本人資料更新維持由 `staff_profile_update.html` 進行。 |
+| `Profile_Update_Page` / `order_update` | **客戶端自填表單已退役**：依 [20 號規格](20_LINE客服與月嫂自助服務正式規格.md#53-客戶資料與訂單異動流程) 與 [29 號規格](29_LINE服務說明、客服互動與選單角色正式規格.md#客戶端自助表單退役與後台維護原則)，`/line-profile-guard`、`/line-profile-update`、`/line-order-update` 不提供連線，選單與聊天導流全面移除。客戶意向於對話留訊由工會於後台維護；月嫂本人資料更新維持由 `staff_profile_update.html` 進行。 |
 | `Staff_Binding_Page` / 自助頁 | 月嫂以姓名、身分證字號、生日綁定；衝突退為 typed conflict。整合 `staff_order_search`、只讀 `staff_schedule` 與 `staff_payout`（`staff_payout.html`），開工日與請假延期改由案件群組小幫手選單操作（0 Push 額度）；**寶寶日誌頁（`staff_baby_log.html`）已退役並回傳 `410`**。 |
 | `Admin_DM_Command` / `mobile_admin` | 一對一私訊輸入「綁定後台帳號」發放 15 分鐘一次性 Token → `identity.html?purpose=admin_binding` 驗證帳密（5 次防爆破）→ 完成綁定或更換原 LINE 綁定，套用 `union_staff_menu` 開啟 `line-mobile-admin`；群組輸入拒絕發放。 |
 | 雙身分與退役回收 | 依 [LINE 身分管理與解除規格](23_LINE身分管理與解除正式規格.md) 驗收聊天室角色切換、結案回復及月嫂退役回收。 |
@@ -96,7 +96,7 @@ flowchart TD
   Kind -->|一般留言或客訴| Read["工會查看官方帳號並回覆"]
   Kind -->|舊求助按鈕| Hint["Reply：請直接留言"]
   Hint --> Read
-  Guide -->|訂單異動表單| Request["訂單管理：取得申請編號並等待辦理"]
+  Read -->|客戶資料或訂單變更| Edit["工會確認後於客戶名冊或訂單管理維護"]
 ```
 
 - FAQ 未命中或未解決提供直接留言指引，未解決評價照常記錄。
@@ -143,7 +143,7 @@ flowchart TD
 | Gateway 直查主表直接升級角色 | verified token 進 LINE Identity application，`line_identity_bindings` 為唯一 binding writer | [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md) |
 | query string `userId` 當授權 | query string 僅供導航 hint，授權強制由伺服器驗證 session／token 衍生 | [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 身分管理與解除](23_LINE身分管理與解除正式規格.md) |
 | LINE 擁有未審新客暫存表 | 未核准前資料由 Case Import 專用持久化 Redis 14 天保管，核准始寫 MySQL | [Case Import 與非市民待審](17B_Case_Import與非市民Redis待審正式規格.md) |
-| `profile_update`／請假／改期直寫多表 | 一律透過 Client／Orders／Scheduling 各自 typed Query／Preview／Apply 提交，共用單一 UoW | [Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
+| 客戶資料維護／請假／改期直寫多表 | 一律透過 Client／Orders／Scheduling 各自 typed Query／Preview／Apply 提交，共用單一 UoW | [Orders Domain](01_Orders_Domain.md)、[Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
 | M3／M4 直接跨模組改排班或拆薪 | 僅產生轉換請求或提交經辦協調事件，實際異動與薪資由 Scheduling／Payroll 依有效日重算 | [Assignments / Scheduling Domain](02_Assignments_Scheduling_Domain.md)、[Payroll Domain](03_Payroll_Domain.md) |
 | 群組重大告警＋一次性免登入連結 | 管理員主動查詢，既有告警資料保留 | [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md)、[LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md) |
 | 月嫂填寫系統寶寶日誌與缺漏催繳 | 系統端表單與催繳完全退役（`410`），回歸 LINE 服務群組相簿與人工巡檢 | [LINE 客服與月嫂自助服務](20_LINE客服與月嫂自助服務正式規格.md)、[LINE 服務說明與選單角色](29_LINE服務說明、客服互動與選單角色正式規格.md) |
