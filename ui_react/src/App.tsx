@@ -9,6 +9,7 @@ import {
   MasterLayout,
   PAGE_SECTION_MAP,
   NAV_ITEMS,
+  canNavigateToPage,
   type SectionType,
   type PageType,
 } from './components/MasterLayout';
@@ -90,6 +91,8 @@ const LINE_TAB_PAGES: Record<string, PageType> = {
   liff: 'line-interface',
 };
 
+const DEFAULT_PAGE: PageType = 'order-workbench-v2';
+
 function getPageFromHash(): PageType {
   const [hashPath, hashQuery = ''] = window.location.hash.replace(/^#\/?/, '').split('?', 2);
   if (hashPath === 'line-management' || hashPath === 'line') {
@@ -102,15 +105,17 @@ function getPageFromHash(): PageType {
   if (hashPath in PAGE_SECTION_MAP) {
     return hashPath as PageType;
   }
-  return 'order-workbench-v2';
+  return DEFAULT_PAGE;
 }
 
 const AppContent: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
   const committedHash = useRef(window.location.hash);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
-  const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
+  const [requestedPage, setRequestedPage] = useState<PageType>(getPageFromHash);
   const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
+  const isRoot = sessionClient.getUser()?.is_root === true;
+  const currentPage = canNavigateToPage(requestedPage, isRoot) ? requestedPage : DEFAULT_PAGE;
 
   // 永遠自當前頁面確定性派生所屬分區，杜絕 HMR 快取或非同步狀態脫鉤
   const currentSection: SectionType = PAGE_SECTION_MAP[currentPage] || 'operations';
@@ -125,7 +130,7 @@ const AppContent: React.FC = () => {
       requestLeave(() => {
         committedHash.current = nextHash;
         window.history.replaceState(null, '', nextHash);
-        setCurrentPage(page);
+        setRequestedPage(page);
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       });
     };
@@ -135,6 +140,14 @@ const AppContent: React.FC = () => {
       window.removeEventListener('hashchange', handleHashChange, true);
     };
   }, [requestLeave]);
+
+  useEffect(() => {
+    if (!isLoggedIn || requestedPage === currentPage) return;
+    const allowedHash = `#${currentPage}`;
+    committedHash.current = allowedHash;
+    window.history.replaceState(null, '', allowedHash);
+    setRequestedPage(currentPage);
+  }, [currentPage, isLoggedIn, requestedPage]);
 
   useEffect(() => {
     const handleSessionUnauthorized = (event: Event) => {
@@ -161,7 +174,9 @@ const AppContent: React.FC = () => {
 
   const handleSelectSection = (section: SectionType) => {
     // 切換頂部大分區時，自動跳轉至該分區的第一個子頁面
-    const firstPage = NAV_ITEMS.find((item) => item.section === section);
+    const firstPage = NAV_ITEMS.find(
+      (item) => item.section === section && canNavigateToPage(item.id, isRoot),
+    );
     if (firstPage) {
       handleSelectPage(firstPage.id);
     }
@@ -177,7 +192,7 @@ const AppContent: React.FC = () => {
       ? currentHash
       : `#${targetPage}`;
     committedHash.current = targetHash;
-    setCurrentPage(targetPage);
+    setRequestedPage(targetPage);
     window.location.hash = targetHash;
   };
 

@@ -107,6 +107,10 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'database-backup', icon: Database, label: '資料庫備份', section: 'audit' },
 ];
 
+export function canNavigateToPage(page: PageType, isRoot: boolean): boolean {
+  return page !== 'account-management' || isRoot;
+}
+
 const SECTION_LABELS: Record<SectionType, string> = {
   operations: '營運作業',
   line: 'LINE 專區',
@@ -195,9 +199,12 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
     };
   }, [showLogoutModal]);
 
-  const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
-  const sidebarCurrentPage = currentPage;
   const currentUser = sessionClient.getUser();
+  const isRoot = currentUser?.is_root === true;
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => item.section === currentSection && canNavigateToPage(item.id, isRoot),
+  );
+  const sidebarCurrentPage = currentPage;
 
   const handleSectionClick = (section: SectionType) => {
     setIsSidebarOpen(false);

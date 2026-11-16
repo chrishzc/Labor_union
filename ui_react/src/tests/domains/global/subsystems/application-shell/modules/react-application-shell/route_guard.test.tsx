@@ -192,6 +192,60 @@ describe('Route Guard & Shell Hash Navigation', () => {
     await waitFor(() => expect(screen.getByTitle('帳務中心')).toBeInTheDocument());
   });
 
+  it('一般帳號的帳號中心深連結導回待辦看板，不載入帳號資料', async () => {
+    sessionClient.setSession('ordinary-token', {
+      id: 2,
+      username: 'staff-user',
+      display_name: '一般帳號',
+      role: 'system_admin',
+      capabilities: ['system.administration'],
+      is_root: false,
+    });
+    window.history.replaceState(null, '', '#/account-management?tab=accounts');
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.hash).toBe('#order-workbench-v2'));
+    expect(screen.getByTitle('待辦看板')).toHaveClass('active');
+    expect(screen.queryByRole('heading', { name: /系統帳號與安全管理/ })).not.toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) =>
+      String(url).includes('/api/v1/admin/accounts'),
+    )).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '稽核與系統' }));
+    expect(await screen.findByTitle('資料庫備份')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe('#contract-templates'));
+    expect(screen.queryByTitle('帳號權限')).not.toBeInTheDocument();
+
+    act(() => {
+      window.location.hash = '#account-management';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await waitFor(() => expect(window.location.hash).toBe('#order-workbench-v2'));
+    expect(screen.queryByRole('heading', { name: /系統帳號與安全管理/ })).not.toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) =>
+      String(url).includes('/api/v1/admin/accounts'),
+    )).toBe(false);
+  });
+
+  it('root 的帳號中心深連結仍可進入，並顯示側邊欄入口', async () => {
+    sessionClient.setSession('root-token', {
+      id: 1,
+      username: 'root-user',
+      display_name: '根帳號',
+      role: 'system_admin',
+      capabilities: ['system.administration'],
+      is_root: true,
+    });
+    window.history.replaceState(null, '', '#account-management');
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /系統帳號與安全管理/ })).toBeInTheDocument();
+    expect(screen.getByTitle('帳號權限')).toHaveClass('active');
+    expect(window.location.hash).toBe('#account-management');
+  });
+
   it('觸發 hashchange 事件時應響應式更新對應頁面視圖', async () => {
     sessionClient.setSession('valid-token', {
       id: 1,
