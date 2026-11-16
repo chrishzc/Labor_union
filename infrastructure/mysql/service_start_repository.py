@@ -45,8 +45,8 @@ class MySqlServiceStartRepository:
     def leave_cases(self, staff_id):
         return leave_cases(self.connection, staff_id)
 
-    def selected_leave_case(self, staff_id: int, case_no: str):
-        return selected_leave_case(self.connection, staff_id, case_no)
+    def selected_leave_case(self, staff_id: int, case_no: str, *, lock: bool = False):
+        return selected_leave_case(self.connection, staff_id, case_no, lock=lock)
 
     def handover_context(self, case_no, assignment_id=None):
         return load_handover(self, case_no, assignment_id)

@@ -1,7 +1,8 @@
 """Closed display-only LINE preview contracts; provider actions cannot cross this boundary."""
 
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Literal
+from typing_extensions import TypedDict
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 
 class PreviewDescriptorView(BaseModel):
@@ -37,6 +38,34 @@ class RenderPreviewRequest(BaseModel):
     staff_id: int | None = Field(default=None, gt=0)
 
 
+PreviewColor = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$")]
+PreviewPixels = Annotated[int, Field(strict=True, ge=0, le=1000)]
+
+
+class PreviewAppearanceView(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="forbid")
+    background_color: PreviewColor
+    color: PreviewColor
+    border_color: PreviewColor
+    border_width: PreviewPixels
+    corner_radius: PreviewPixels
+    padding_top: PreviewPixels
+    padding_right: PreviewPixels
+    padding_bottom: PreviewPixels
+    padding_left: PreviewPixels
+    gap: PreviewPixels
+    margin: PreviewPixels
+    width: PreviewPixels
+    height: PreviewPixels
+    flex: Annotated[int, Field(strict=True, ge=0, le=100)]
+    align: Literal["start", "center", "end"]
+    justify_content: Literal["start", "center", "end", "space-between", "space-around", "space-evenly"]
+    align_items: Literal["start", "center", "end", "stretch"]
+    button_style: Literal["primary", "secondary", "link"]
+    bubble_size: Literal["nano", "micro", "deca", "hecto", "kilo", "mega", "giga"]
+    wrap: Annotated[bool, Field(strict=True)]
+
+
 class PreviewNodeView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["text", "box", "button", "separator", "image"]
@@ -48,6 +77,14 @@ class PreviewNodeView(BaseModel):
     action_description: str
     children: list["PreviewNodeView"]
     image_data: str = ''
+    appearance: PreviewAppearanceView | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.appearance is None:
+            data.pop("appearance", None)
+        return data
 
 
 class RenderPreviewView(BaseModel):

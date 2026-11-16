@@ -10,9 +10,11 @@ import json
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from api.dependencies.admin_auth import admin_actor_context, require_line_configuration_reader
 from api.routes import line_message_preview as route
+from api.schemas.line_message_preview import PreviewNodeView
 from domains.line.configuration import LineConfigurationKind, LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
 from domains.line.canonical_payload import canonical_line_payload_json
@@ -20,7 +22,7 @@ from shared_kernel.identities import ActorContext
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.message_preview import (
     _CURRENT_FLOW_PREVIEWS, LineMessagePreviewApplication, MessagePreviewNotFound, PreviewCase, PreviewLeave,
-    PreviewOption, PreviewOptionPage, PreviewStaff,
+    PreviewOption, PreviewOptionPage, PreviewStaff, _project_node,
 )
 
 
@@ -142,6 +144,79 @@ def test_canonical_flex_preview_strips_all_executable_actions():
     for forbidden in ('"uri"', '"data"', '"line_user_id"', '"token"', "preview-only"):
         assert forbidden not in public
     assert "不會執行" in public
+
+
+def test_postponement_http_preview_retains_card_appearance_and_keeps_actions_inert(monkeypatch):
+    def forbidden():
+        pytest.fail("public sample must not open record reader")
+
+    web = client(monkeypatch, app(factory=forbidden))
+    response = web.post(
+        "/api/v1/line/message-previews/preview",
+        json={"id": "helper-postponement-card", "data_source": "sample"},
+    )
+    assert response.status_code == 200
+    bubble, = response.json()["data"]["bubbles"]
+    assert bubble["appearance"] == {"bubble_size": "mega"}
+    header, body, footer = bubble["children"]
+    assert header["appearance"] == {
+        "background_color": "#D97706", "padding_top": 16, "padding_right": 16,
+        "padding_bottom": 16, "padding_left": 16, "gap": 4,
+    }
+    assert header["children"][1]["appearance"] == {"color": "#FFFFFF", "margin": 8, "wrap": True}
+    date_panel = body["children"][0]["appearance"]
+    assert (date_panel["background_color"], date_panel["border_color"], date_panel["corner_radius"]) == (
+        "#FFFBEB", "#FDE68A", 10,
+    )
+    agree, reject = footer["children"]
+    assert agree["appearance"] == {"button_style": "primary", "color": "#C45C30", "height": 40}
+    assert reject["appearance"] == {"button_style": "secondary", "height": 40}
+    assert agree["text"] == "同意延期補班" and reject["text"] == "不同意，重新協調"
+    for secret in ("postponement:agree", "postponement:reject", '"action"', '"uri"', '"token"'):
+        assert secret not in response.text
+
+
+def test_projected_appearance_accepts_only_supported_visual_values():
+    node = _project_node({
+        "type": "box", "layout": "vertical", "backgroundColor": "url(https://example.invalid)", "width": "1001px",
+        "margin": "-8px", "flex": True, "paddingAll": "8px", "paddingTop": "0px",
+        "background": {"type": "linearGradient"}, "alignItems": "flex-end",
+        "contents": [
+            {"type": "button", "style": "unrecognized", "height": "var(--height)", "action": {
+                "type": "uri", "label": "開啟", "uri": "https://example.invalid/secret",
+            }},
+            {"type": "text", "text": "說明", "color": "#FFFFFF33", "wrap": False, "flex": 0},
+        ],
+    })
+    view = PreviewNodeView.model_validate(asdict(node))
+    dumped = view.model_dump()
+    assert dumped["appearance"] == {
+        "padding_top": 0, "padding_right": 8, "padding_bottom": 8, "padding_left": 8, "align_items": "end",
+    }
+    assert "appearance" not in dumped["children"][0]
+    assert dumped["children"][1]["appearance"] == {"color": "#FFFFFF33", "flex": 0, "wrap": False}
+    assert "example.invalid" not in view.model_dump_json()
+    with pytest.raises(ValidationError):
+        PreviewNodeView.model_validate({**dumped, "appearance": {"data": "hidden-action"}})
+
+
+def test_postponement_copy_uses_main_title_and_keeps_the_saved_badge():
+    from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
+
+    current = default_copy_templates()["helper-postponement-card"]
+    fields = {field["id"]: field for field in current["copy_fields"]}
+    badge = "contents/header/contents/0/contents/0/contents/0/text"
+    title = "contents/header/contents/1/text"
+    assert [field["id"] for field in fields.values() if field["kind"] == "title"] == [title]
+    assert fields[badge]["kind"] == "label" and fields[badge]["label"] == "狀態標籤"
+    saved = {
+        **current,
+        "content": json.dumps({**json.loads(current["content"]), badge: "原本的標籤", title: "原本的主標題"}),
+        "copy_fields": [{**field, "kind": "title" if field["id"] == badge else "label"} for field in fields.values()],
+    }
+    effective = effective_copy_definition({"templates": [saved]})["templates"][0]
+    assert json.loads(effective["content"]) == json.loads(saved["content"])
+    assert [field["id"] for field in effective["copy_fields"] if field["kind"] == "title"] == [title]
 
 
 def test_retired_customer_leave_confirmation_is_not_renderable():

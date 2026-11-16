@@ -7,7 +7,7 @@ test_root: ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx
 # Owned verification
 - `tests/domains/external-integration/subsystems/line/subsystems/test_line_message_preview.py` — 真實 typed facts、缺少對象／資料、純卡片組裝、closed action projection、授權、唯讀交易與 main mutation audit 零寫入。
 - 同檔保護正式來源清單、排除退役／測試模板、退役歡迎詞排除、登記／綁定文案、客服訊息、工會草稿卡與完整確認包使用 owner 唯讀 projection，不建立下載憑證。
-- 統一工作區 oracle 保護公版直接預覽、不呼叫真實對象搜尋、欄位與範例值表、僅試改不儲存、closed 查詢錯誤與舊預覽晚到不覆蓋新文案。
+- 統一工作區 oracle 保護以公版資料直接顯示手機預覽、僅試改不儲存、closed 查詢錯誤與舊預覽晚到不覆蓋新文案。
 - `line_notification_rules_mutation_panel.test.tsx` — 保護欄位與引用訊息內容編輯、手機預覽、一次點擊後內部zero-write Preview與同一候選的Save／Delete、選填原因、取消待發工作結果及closed error presentation；不要求人工再次確認。
 - 同檔統一工作區 oracle 保護排除歡迎詞、直接內容編輯、共享 revision 回讀、卡片說明文字、未儲存草稿、局部 Query failure 與移除獨立發送入口。
 - 同檔流程圖 oracle 保護精簡步驟、延後展開、多則訊息精確定位、current 規則狀態與 shadow rule 不冒充停用、訊息 query 重新載入、未儲存草稿離頁保護、失效目標與 Query 失敗不假裝成功；所有設定變更與外送操作保持零呼叫。
@@ -19,7 +19,7 @@ test_root: ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx
 
 test_root: tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py
 
-- 同一 React oracle 保護訊息清單六則分頁與搜尋定位、整張卡片同時編輯標題／自由段落／按鈕及插入系統資料、範例展開，以及多卡逐張切換不重建／發送訊息；實際畫面檢查說明固定 504px 與移除清單／編輯外框／預覽內層捲動。確認包預設顯示最後的確認卡。
+- 同一 React oracle 保護左側流程分類、步驟順序與搜尋定位、整張卡片同時編輯標題／自由段落／按鈕及插入系統資料，以及多卡逐張切換不重建／發送訊息。實際畫面檢查左流程、中央編輯、加寬右預覽同時顯示及窄版重排。確認包預設顯示最後的確認卡。
 - 同一 API／preview roots 保護沒有舊說明節點仍可增加段落、舊標題文案承接、所有內建卡片可編輯正文、客戶與月嫂及不同流程各自儲存，以及多月嫂 carousel 的說明只進入最後確認卡；圖片 root 同時保護清空說明不將 owner 表格誤放入互動卡。
 - 同一 catalog／React oracle 保護正式媒合只列完整推薦確認包、初步候選項目保留，三個原單卡編輯入口導向完整包；原唯讀單卡 preview 仍沿既有測試驗證。
 

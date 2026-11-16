@@ -470,8 +470,8 @@ def mutual_postponement_entry_card(case_no: str, liff_url: str) -> dict:
                 'contents': [
                     {'type': 'text', 'text': '雙方合意延期申請', 'weight': 'bold', 'size': 'lg', 'wrap': True},
                     _key_value_row('案件編號：', case_no),
-                    {'type': 'text', 'text': '請月嫂選擇請假日與補班日。系統會檢查檔期，並確認補助天數與時數是否維持。', 'size': 'sm', 'wrap': True},
-                    {'type': 'text', 'text': '若要再調整日期，可從原群組按同一個按鈕重新開啟。', 'size': 'sm', 'wrap': True},
+                    {'type': 'text', 'text': '請月嫂選擇原服務日和補班日。系統會檢查檔期、服務天數與補助時數。', 'size': 'sm', 'wrap': True},
+                    {'type': 'text', 'text': '需要再調整日期時，可從原群組開啟同一張卡。', 'size': 'sm', 'wrap': True},
                 ],
             },
             'footer': {
@@ -494,14 +494,14 @@ def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_da
     action_suffix = f":{proposal_ref}" if proposal_ref else ""
     return {
         'type': 'flex',
-        'altText': '雙方合意延期確認單',
+        'altText': '雙方合意延期確認單，請確認是否同意調整日期',
         'contents': {
             'type': 'bubble',
             'size': 'mega',
             'header': _card_header(
-                badge='月嫂已檢核檔期無衝突',
+                badge='等待客戶確認',
                 title='🤝 雙方合意延期確認單',
-                subtitle='雙方請假採順延補班 · 總補助天數守恆',
+                subtitle='請核對日期。同意後，系統會更新排班。',
                 bg_color='#D97706',
                 subtitle_color='#FEF3C7',
             ),
@@ -523,9 +523,9 @@ def mutual_postponement_card(case_no, staff_name, leave_start_date, leave_end_da
                         'spacing': 'xs',
                         'contents': [
                             _key_value_row('案件編號：', case_no),
-                            _key_value_row('原本請假日：', leave_start_date),
-                            _key_value_row('合意補班日：', leave_end_date, value_color='#92400E', value_size='sm'),
-                            {'type': 'text', 'text': '✓ 配合政府補助方案不提前解約 · 總天數維持不變', 'size': 'xxs', 'weight': 'bold', 'color': '#047857', 'wrap': True, 'margin': 'xs'},
+                            _key_value_row('原服務日：', leave_start_date),
+                            _key_value_row('補班日：', leave_end_date, value_color='#92400E', value_size='sm'),
+                            {'type': 'text', 'text': '✓ 服務總天數與補助時數維持不變', 'size': 'xxs', 'weight': 'bold', 'color': '#047857', 'wrap': True, 'margin': 'xs'},
                         ],
                     },
                     _progress_card('合意延期確認進度：', staff_name=staff_name, staff_status='✓ 已提出'),

@@ -24,10 +24,16 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.line.group_helper_application import (
+    POSTPONEMENT_DRAFT_FAMILY,
+    POSTPONEMENT_NOTICE_FAMILY,
+    latest_postponement_draft_revision,
+    legacy_postponement_group_message,
     load_group_helper_proposal,
     lock_group_postponement,
+    postponement_group_binding,
     postponement_group_message,
     postponement_proposal_ref,
+    require_postponement_assignment,
     save_group_helper_proposal,
 )
 from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
@@ -79,18 +85,14 @@ def preview_leave_defer(body: StaffLeaveDeferPreviewRequest, app=Depends(get_ser
     """零寫入預檢月嫂合意順延補班日的排班衝突與總服務天數守恆。"""
     _, staff = _verified_staff_context(body)
     changes = tuple(LeaveDateChange(d.original_date, d.new_date) for d in body.dates)
-    result = _result_call(
-        lambda: app.arrangement.preview_leave_defer(
-            body.case_no, int(staff['staff_id']), body.assignment_id, changes
-        )
-    )
+    result = _result_call(lambda: _preview_postponement(app, body, int(staff['staff_id']), changes))
     return BaseResponse(data=result, message=str(result.get('message') or '已完成檔期與補助天數檢核'))
 
 
 @router.post('/leave-results/propose')
 def propose_leave_defer(body: StaffLeaveDeferProposeRequest):
     """驗證無檔期衝突後建立群組延期提案（不消耗任何 Push 推播額度）。"""
-    _, staff = _verified_staff_context(body)
+    actor, staff = _verified_staff_context(body)
     staff_id = int(staff['staff_id'])
     changes = tuple(LeaveDateChange(d.original_date, d.new_date) for d in body.dates)
     leave_start_label = '、'.join(str(item.original_date) for item in changes)
@@ -107,18 +109,25 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest):
         body.idempotency_key
         or f"liff:{fingerprint_payload(proposal_payload).value[:24]}"
     )
-    family = 'group_helper_postpone_proposal'
+    proposal_ref = postponement_proposal_ref(body.case_no, event_ref)
     with open_line_unit_of_work() as line_uow:
         lock_group_postponement(line_uow, body.case_no)
-        saved = load_group_helper_proposal(line_uow, family, body.case_no, event_ref, current_read=True)
+        saved = load_group_helper_proposal(line_uow, POSTPONEMENT_DRAFT_FAMILY, body.case_no, proposal_ref, current_read=True)
+        if saved is None:
+            saved = load_group_helper_proposal(line_uow, 'group_helper_postpone_proposal', body.case_no, event_ref, current_read=True)
         if saved is not None:
             return _proposal_response(saved, proposal_payload)
-        arrangement = build_service_start_application(line_uow._connection).arrangement
-        result = _result_call(
-            lambda: arrangement.preview_leave_defer(
-                body.case_no, staff_id, body.assignment_id, changes
+        binding = postponement_group_binding(line_uow, body.case_no)
+        if binding is None:
+            raise typed_http_error(
+                409,
+                'conflict',
+                'leave_result_group_unavailable',
+                '本案目前沒有可用的 LINE 案件群組，請重新開啟申請或聯絡工會。',
+                'staff-leave-propose',
             )
-        )
+        app = build_service_start_application(line_uow._connection)
+        result = _result_call(lambda: _preview_postponement(app, body, staff_id, changes, lock=True))
         if result.get('conflict'):
             raise typed_http_error(
                 409,
@@ -127,17 +136,31 @@ def propose_leave_defer(body: StaffLeaveDeferProposeRequest):
                 str(result.get('message') or '此補班日已有其他案件排班或不可服務紀錄（檔期衝突），請重新與客戶協調其他日期！'),
                 'staff-leave-propose',
             )
+        draft_revision = latest_postponement_draft_revision(line_uow, body.case_no) + 1
         saved = save_group_helper_proposal(
             line_uow,
-            family,
+            POSTPONEMENT_DRAFT_FAMILY,
             body.case_no,
-            event_ref,
+            proposal_ref,
             {**proposal_payload, 'liff_result': result,
-             'proposal_ref': postponement_proposal_ref(body.case_no, event_ref)},
+             'proposal_ref': proposal_ref,
+             'group_binding_version': binding.version.value,
+             'line_actor_fingerprint': fingerprint_payload({'line_user_id': actor.value}).value,
+             'draft_revision': draft_revision,
+             'group_message': postponement_group_message(body.case_no, draft_revision)},
+        )
+        save_group_helper_proposal(
+            line_uow, POSTPONEMENT_NOTICE_FAMILY, body.case_no, str(draft_revision),
+            {'proposal_ref': proposal_ref},
         )
         response = _proposal_response(saved, proposal_payload)
         line_uow.commit()
         return response
+
+
+def _preview_postponement(app, body, staff_id, changes, *, lock=False):
+    require_postponement_assignment(app, body.case_no, staff_id, body.assignment_id, changes, lock=lock)
+    return app.arrangement.preview_leave_defer(body.case_no, staff_id, body.assignment_id, changes)
 
 
 def _proposal_response(saved: dict[str, Any], requested: dict[str, Any]) -> BaseResponse:
@@ -167,10 +190,10 @@ def _proposal_response(saved: dict[str, Any], requested: dict[str, Any]) -> Base
             'original_dates': [item['original_date'] for item in dates],
             'new_dates': [item['new_date'] for item in dates],
         }
-    group_message = None
-    if saved.get('proposal_ref'):
-        group_message = postponement_group_message(saved['proposal_ref'])
-    elif len(dates) == 1:
+    group_message = saved.get('group_message')
+    if group_message is None and saved.get('proposal_ref'):
+        group_message = legacy_postponement_group_message(saved['proposal_ref'])
+    elif group_message is None and len(dates) == 1:
         group_message = f"雙方合意延期：{dates[0]['original_date']}→{dates[0]['new_date']}"
     return BaseResponse(
         data={

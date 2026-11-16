@@ -23,9 +23,16 @@ export function LineCardCopyEditor({ fields, content, variables, disabled, onCha
   const textareas = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const kind = (field: CardCopyField) => field.kind ?? (field.label === '卡片標題' ? 'title' : field.label === '卡片文字' || field.label === '說明內容' ? 'body' : field.label === '按鈕名稱' ? 'button' : 'label');
   const titles = fields.filter(field => kind(field) === 'title');
+  const introductions = fields.filter(field => field.kind === 'label' && field.label === '副標題說明');
   const bodies = fields.filter(field => kind(field) === 'body');
   const buttons = fields.filter(field => kind(field) === 'button');
-  const others = fields.filter(field => !['title', 'body', 'button'].includes(kind(field)));
+  const others = fields.filter(field => !['title', 'body', 'button'].includes(kind(field)) && !introductions.includes(field));
+  const sections = [
+    { label: '標題', field: titles[0] },
+    { label: '說明', field: introductions[0] ?? bodies[0] },
+    { label: '內文', field: introductions.length ? bodies[0] : undefined },
+    { label: '按鈕', field: buttons[0] },
+  ];
   const update = (field: CardCopyField, value: string) => onChange(JSON.stringify({ ...values, [field.id]: value }));
   const insert = (field: CardCopyField, value: string, atEnd = false) => {
     const textarea = textareas.current[field.id];
@@ -39,13 +46,20 @@ export function LineCardCopyEditor({ fields, content, variables, disabled, onCha
   };
   const input = (field: CardCopyField, label: string) => <label key={field.id} className="notification-card-input" htmlFor={cardCopyFieldId(field.id)}>{label}<input id={cardCopyFieldId(field.id)} value={values[field.id] ?? ''} maxLength={field.max_length} aria-required={!field.optional} disabled={disabled} onChange={event => update(field, event.target.value)} /></label>;
   return <section className="notification-card-editor" aria-label="整張卡片文案編輯">
+    {sections.some(section => section.field) && <nav className="notification-card-section-links" aria-label="跳到編輯欄位">
+      {sections.map(({ label, field }) => field && <button key={field.id} type="button" disabled={disabled} onClick={() => document.getElementById(cardCopyFieldId(field.id))?.focus()}>{label}</button>)}
+    </nav>}
     {titles.map((field, index) => input(field, titles.length > 1 ? `卡片標題 ${index + 1}` : '卡片標題'))}
-    {bodies.map((field, index) => <div className="notification-card-body" key={field.id}>
-      <div className="notification-card-body-heading"><label htmlFor={cardCopyFieldId(field.id)}>{bodies.length > 1 ? `說明內容 ${index + 1}` : '說明內容'}</label><span>自由增減段落，換行會同步顯示</span></div>
-      <div className="notification-card-toolbar">{variables.length > 0 && <span>插入系統資料</span>}{variables.map(variable => <button key={variable} type="button" className="notification-card-insert" disabled={disabled} onClick={() => insert(field, `{${variable}}`)}>＋ {VARIABLE_NAMES[variable] ?? variable}</button>)}<button type="button" className="notification-card-insert" disabled={disabled} onClick={() => insert(field, '\n\n', true)}>＋ 新增段落</button></div>
-      <textarea id={cardCopyFieldId(field.id)} ref={element => { textareas.current[field.id] = element; if (index === 0) bodyRef.current = element; }} value={values[field.id] ?? ''} maxLength={field.max_length} aria-required={!field.optional} disabled={disabled} placeholder="在這裡新增說明、提醒或其他補充內容。" rows={16} onChange={event => update(field, event.target.value)} />
-      <div className="notification-card-body-help"><span>{variables.length > 0 ? '系統資料標記會在發送時自動帶入' : '可自行新增說明；案件資料仍由原流程帶入'}</span><span>{(values[field.id] ?? '').length.toLocaleString()} / {field.max_length.toLocaleString()} 字</span></div>
-    </div>)}
+    {introductions.map((field, index) => input(field, introductions.length > 1 ? `卡片開頭說明 ${index + 1}` : '卡片開頭說明'))}
+    {bodies.map((field, index) => {
+      const label = introductions.length && field.id.endsWith('/$description') ? '補充說明' : '說明內容';
+      return <div className="notification-card-body" key={field.id}>
+        <div className="notification-card-body-heading"><label htmlFor={cardCopyFieldId(field.id)}>{bodies.length > 1 ? `${label} ${index + 1}` : label}</label><span>自由增減段落，換行會同步顯示</span></div>
+        <div className="notification-card-toolbar">{variables.length > 0 && <span>插入系統資料</span>}{variables.map(variable => <button key={variable} type="button" className="notification-card-insert" disabled={disabled} onClick={() => insert(field, `{${variable}}`)}>＋ {VARIABLE_NAMES[variable] ?? variable}</button>)}<button type="button" className="notification-card-insert" disabled={disabled} onClick={() => insert(field, '\n\n', true)}>＋ 新增段落</button></div>
+        <textarea id={cardCopyFieldId(field.id)} ref={element => { textareas.current[field.id] = element; if (index === 0) bodyRef.current = element; }} value={values[field.id] ?? ''} maxLength={field.max_length} aria-required={!field.optional} disabled={disabled} placeholder="在這裡新增說明、提醒或其他補充內容。" rows={16} onChange={event => update(field, event.target.value)} />
+        <div className="notification-card-body-help"><span>{variables.length > 0 ? '系統資料標記會在發送時自動帶入' : '可自行新增說明；案件資料仍由原流程帶入'}</span><span>{(values[field.id] ?? '').length.toLocaleString()} / {field.max_length.toLocaleString()} 字</span></div>
+      </div>;
+    })}
     {buttons.length > 0 && <section className="notification-card-buttons" aria-label="按鈕名稱"><div><strong>按鈕名稱</strong><span>確認與協助流程保持原有設定</span></div><div className="notification-card-button-inputs">{buttons.map((field, index) => input(field, index === 0 ? '主要按鈕' : buttons.length === 2 ? '其他選擇' : `按鈕 ${index + 1}`))}</div></section>}
     {others.length > 0 && <details className="notification-card-other-copy"><summary>其他文字與訊息摘要</summary><div>{others.map(field => input(field, field.label + (others.filter(item => item.label === field.label).length > 1 ? ` · ${field.content.slice(0, 20)}` : '')))}</div></details>}
   </section>;

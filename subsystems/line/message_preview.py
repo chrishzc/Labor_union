@@ -6,8 +6,9 @@ Description: 協調 LINE 訊息與互動卡片的唯讀公版目錄與安全預�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
-from typing import Callable, ContextManager, Literal, Protocol
+from typing import Callable, ContextManager, Literal, Protocol, TypedDict
 
 from domains.line.configuration import LineConfigurationKind
 from shared_kernel.identities import ActorContext
@@ -94,6 +95,29 @@ class PreviewDescriptor:
     allows_draft: bool = False
 
 
+class PreviewAppearance(TypedDict, total=False):
+    background_color: str
+    color: str
+    border_color: str
+    border_width: int
+    corner_radius: int
+    padding_top: int
+    padding_right: int
+    padding_bottom: int
+    padding_left: int
+    gap: int
+    margin: int
+    width: int
+    height: int
+    flex: int
+    align: Literal["start", "center", "end"]
+    justify_content: Literal["start", "center", "end", "space-between", "space-around", "space-evenly"]
+    align_items: Literal["start", "center", "end", "stretch"]
+    button_style: Literal["primary", "secondary", "link"]
+    bubble_size: Literal["nano", "micro", "deca", "hecto", "kilo", "mega", "giga"]
+    wrap: bool
+
+
 @dataclass(frozen=True)
 class PreviewNode:
     kind: Literal["text", "box", "button", "separator", "image"]
@@ -105,6 +129,7 @@ class PreviewNode:
     action_description: str = ""
     children: tuple[PreviewNode, ...] = ()
     image_data: str = ''
+    appearance: PreviewAppearance | None = None
 
 
 @dataclass(frozen=True)
@@ -443,28 +468,95 @@ class LineMessagePreviewApplication:
                              bubbles=tuple(_project_node(b, documents, self._image_renderer) for b in bubbles), facts=tuple(facts))
 
 
+_SPACING = {"none": 0, "xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 20, "xxl": 24}
+_BUTTON_HEIGHTS = {"sm": 40, "md": 52}
+_ALIGNMENT_ALIASES = {"flex-start": "start", "flex-end": "end"}
+
+
+def _preview_pixels(value, named_sizes: dict[str, int] | None = None) -> int | None:
+    if not isinstance(value, str):
+        return None
+    if named_sizes and value in named_sizes:
+        return named_sizes[value]
+    if re.fullmatch(r"[0-9]{1,4}px", value):
+        pixels = int(value[:-2])
+        if pixels <= 1000:
+            return pixels
+    return None
+
+
+def _project_appearance(node, kind: str) -> PreviewAppearance | None:
+    appearance: PreviewAppearance = {}
+    for source, target in (
+        ("backgroundColor", "background_color"), ("color", "color"), ("borderColor", "border_color"),
+    ):
+        value = node.get(source)
+        if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?", value):
+            appearance[target] = value
+    for source, target in (
+        ("borderWidth", "border_width"), ("cornerRadius", "corner_radius"), ("width", "width"),
+        ("height", "height"), ("spacing", "gap"), ("margin", "margin"),
+        ("paddingTop", "padding_top"), ("paddingEnd", "padding_right"),
+        ("paddingBottom", "padding_bottom"), ("paddingStart", "padding_left"),
+    ):
+        value = node.get(source)
+        sizes = _SPACING if source in {"spacing", "margin"} or source.startswith("padding") else None
+        if source.startswith("padding"):
+            value = node.get(source, node.get("paddingAll"))
+        elif source == "height" and kind == "button":
+            sizes = _BUTTON_HEIGHTS
+        pixels = _preview_pixels(value, sizes)
+        if pixels is not None:
+            appearance[target] = pixels
+    flex = node.get("flex")
+    if type(flex) is int and 0 <= flex <= 100:
+        appearance["flex"] = flex
+    wrap = node.get("wrap")
+    if isinstance(wrap, bool):
+        appearance["wrap"] = wrap
+    for source, target, choices in (
+        ("align", "align", ("start", "center", "end")),
+        ("justifyContent", "justify_content", ("start", "center", "end", "space-between", "space-around", "space-evenly")),
+        ("alignItems", "align_items", ("start", "center", "end", "stretch")),
+    ):
+        value = node.get(source)
+        if isinstance(value, str):
+            value = _ALIGNMENT_ALIASES.get(value, value)
+            if value in choices:
+                appearance[target] = value
+    style = node.get("style")
+    if kind == "button" and style in ("primary", "secondary", "link"):
+        appearance["button_style"] = style
+    size = node.get("size")
+    if kind == "bubble" and size in ("nano", "micro", "deca", "hecto", "kilo", "mega", "giga"):
+        appearance["bubble_size"] = size
+    return appearance or None
+
+
 def _project_node(node, documents=None, image_renderer=None) -> PreviewNode:
     """Project display-only nodes; never expose postbacks, tokens, URLs or provider identities."""
     kind = node["type"]
+    appearance = _project_appearance(node, kind)
     if kind == 'image':
         import base64
         document = (documents or {}).get(node.get('url'))
         if document is None or image_renderer is None:
             raise ValueError('table image preview renderer is unavailable')
-        return PreviewNode('image', text=document.title,
+        return PreviewNode('image', text=document.title, appearance=appearance,
             image_data='data:image/png;base64,' + base64.b64encode(image_renderer(document)).decode('ascii'))
     if kind == "text":
         return PreviewNode("text", text=str(node.get("text", "")), bold=node.get("weight") == "bold",
-                           size=str(node.get("size", "sm")))
+                           size=str(node.get("size", "sm")), appearance=appearance)
     if kind == "button":
         action = node["action"]
         description = "開啟相關服務頁面" if action["type"] == "uri" else "將選擇交由原業務流程處理"
         return PreviewNode("button", text=str(action["label"]), primary=node.get("style") == "primary",
-                           action_description=description + "；此處只預覽，不會執行。")
+                           action_description=description + "；此處只預覽，不會執行。", appearance=appearance)
     if kind == "separator":
-        return PreviewNode("separator")
+        return PreviewNode("separator", appearance=appearance)
     children = [node[k] for k in ("header", "hero", "body", "footer") if k in node] if kind == "bubble" else node.get("contents", [])
     if kind not in {"bubble", "box"}:
         raise ValueError("unsupported preview component")
     return PreviewNode("box", layout="horizontal" if node.get("layout") in {"horizontal", "baseline"} else "vertical",
-                       children=tuple(_project_node(child, documents, image_renderer) for child in children))
+                       children=tuple(_project_node(child, documents, image_renderer) for child in children),
+                       appearance=appearance)

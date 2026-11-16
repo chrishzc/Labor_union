@@ -26,3 +26,4 @@
 .line-flow-internal .line-flow-delivery-labels {
   margin: 4px 0 0;
 }
+.line-flow-tabs { flex-wrap: wrap; }

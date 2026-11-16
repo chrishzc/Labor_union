@@ -201,6 +201,15 @@ def default_copy_templates():
                         parts[3] = "*"
                         field["path"] = "/".join(parts)
                         field["match"] = field["content"]
+        elif key == "helper-postponement-card":
+            field_labels = {
+                "contents/header/contents/0/contents/0/contents/0/text": ("狀態標籤", "label"),
+                "contents/header/contents/1/text": ("卡片主標題", "title"),
+                "contents/header/contents/2/text": ("副標題說明", "label"),
+            }
+            for field in fields:
+                if field["id"] in field_labels:
+                    field["label"], field["kind"] = field_labels[field["id"]]
         elif key == "helper-guidelines-card":
             field_labels = {
                 "altText": ("訊息摘要", "summary"),

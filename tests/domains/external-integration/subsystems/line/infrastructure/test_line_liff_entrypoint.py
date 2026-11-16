@@ -383,9 +383,9 @@ const settle = () => new Promise(setImmediate);
   assert.deepEqual(messages, ['延期提案通知']);
   if (expectRetry) {
     assert.equal(nodes.get('postponeSubmitBtn').disabled, false);
-    assert.equal(nodes.get('postponeSubmitBtn').textContent, '重試送出延期訊息');
+    assert.equal(nodes.get('postponeSubmitBtn').textContent, '重試送出延期申請');
     assert.equal(evaluate('closeCount'), 0);
-    assert.match(nodes.get('postponeActionNotice').textContent, /已儲存.*重試送出同一筆/);
+    assert.equal(nodes.get('postponeActionNotice').textContent, '日期已儲存，LINE 尚未確認送出。請重試送出同一筆申請。');
     evaluate("handlePostponeDateClick('2027-01-07')");
     assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
 
@@ -397,7 +397,7 @@ const settle = () => new Promise(setImmediate);
   assert.equal(evaluate('closeCount'), 0);
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
   assert.equal(nodes.get('postponeReturnToGroup').hidden, false);
-  assert.match(nodes.get('postponeActionNotice').textContent, /延期訊息已送出.*繼續改日期/);
+  assert.equal(nodes.get('postponeActionNotice').textContent, '延期申請已送出。可繼續調整日期，或回群組查看確認卡。');
   assert.equal(evaluate("postponeSelectedDates.has('2027-01-07')"), true);
   await evaluate('submitPostponeProposal()');
   evaluate("handlePostponeDateClick('2027-01-07'); handlePostponeDateClick('2027-01-07');");
@@ -419,26 +419,32 @@ const settle = () => new Promise(setImmediate);
   assert.equal(evaluate('closeCount'), 0);
 
   evaluate("handlePostponeDateClick('2027-01-09'); handlePostponeDateClick('2027-01-10');");
-  evaluate("calls[5].reject({httpStatus: 409, code: 'leave_result_dates_changed'})");
+  const staleCode = expectRetry ? 'leave_result_forbidden' : 'leave_result_dates_changed';
+  evaluate(`calls[5].reject({httpStatus: 409, code: '${staleCode}'})`);
   await settle();
   assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
   assert.equal(nodes.get('postponeRetryPreview').hidden, false);
   assert.equal(nodes.get('postponeRetryPreview').textContent, '讀取最新排班');
-  assert.match(nodes.get('postponeActionNotice').textContent, /正式排班已變更/);
+  assert.match(nodes.get('postponeActionNotice').textContent, /請先讀取最新排班/);
   evaluate("let refreshCount = 0; loadPostponeCase = async () => { refreshCount++; };");
   await evaluate('retryPostponeCheck()');
   assert.equal(evaluate('refreshCount'), 1);
 
   lineContext = 'external';
-  evaluate(`
+  await evaluate(`
     requirePostponeGroupReply = false;
     postponeCheck = {status: 'ready', intent: calls[2].payload};
-    void submitPostponeProposal();
+    submitPostponeProposal();
   `);
-  evaluate("calls[6].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: null})");
+  assert.equal(evaluate('calls.length'), 6);
+  assert.match(nodes.get('postponeActionNotice').textContent, /從原 LINE 案件群組/);
+  lineContext = 'group';
+  evaluate('void submitPostponeProposal()');
+  evaluate("calls[6].resolve({conflict: false, case_no: 'TEST', assignment_id: 12, group_message: '舊入口的新提案'})");
   await settle();
   assert.equal(evaluate('closeCount'), 0);
-  assert.match(nodes.get('postponeActionNotice').textContent, /已儲存.*手動回到原 LINE 群組/);
+  assert.equal(messages.at(-1), '舊入口的新提案');
+  assert.equal(nodes.get('postponeActionNotice').textContent, '延期申請已送出。可繼續調整日期，或回群組查看確認卡。');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """.replace("FAIL_SEND", json.dumps(fail_send)).replace("SOURCE", json.dumps(script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
@@ -471,8 +477,8 @@ evaluate(`
     if (path !== 'cases' || request.case_no !== focusCaseNo) throw new Error('case not requested');
     return response;
   };
-  setupPostponeWorkbench = async (item) => {
-    workbench = item;
+  setupPostponeWorkbench = async (items) => {
+    workbench = items;
     showPostponeSection("postponeWorkbench");
   };
 `);
@@ -493,9 +499,104 @@ evaluate(`
   assert.match(nodes.get('postponeUnavailableDescription').textContent, /沒有可調整的服務日/);
 
   await evaluate("response = {items: [{case_no: 'TEST-ORDER'}], availability: {code: 'eligible'}}; loadPostponeCase()");
-  assert.equal(evaluate('workbench.case_no'), 'TEST-ORDER');
+  assert.equal(evaluate('workbench[0].case_no'), 'TEST-ORDER');
   assert.equal(nodes.get('postponeWorkbench').hidden, false);
   assert.equal(nodes.get('postponeUnavailableSection').hidden, true);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+""".replace("SOURCE", json.dumps(script))
+    subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)
+
+
+def test_postponement_page_switches_formal_assignments_before_submit() -> None:
+    source = (ROOT / "line/static/staff_schedule.html").read_text(encoding="utf-8")
+    script = source.split("<script>", 1)[1].split(
+        'document.getElementById("loadSchedule").addEventListener', 1
+    )[0]
+    runner = r"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const nodes = new Map();
+const node = () => ({
+  style: {},
+  append() {},
+  appendChild() {},
+  replaceChildren(...children) { this.children = children; },
+});
+const context = vm.createContext({
+  AbortController, crypto,
+  document: {
+    createElement: node,
+    getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, node());
+      return nodes.get(id);
+    },
+  },
+  liff: {
+    isInClient: () => true,
+    getContext: () => ({type: 'group', scope: ['chat_message.write']}),
+    sendMessages: async () => {},
+  },
+});
+const evaluate = script => vm.runInContext(script, context);
+evaluate(SOURCE);
+evaluate(`
+  focusCaseNo = 'TEST-ORDER';
+  requirePostponeGroupReply = true;
+  postponeCalendar = {calendarWeekdays: ['日', '一', '二', '三', '四', '五', '六']};
+  initPostponeSwipe = () => {};
+  loadPostponeCalendar = async () => {};
+  renderPostponeCalendar = () => {};
+  const assignments = [
+    {case_no: 'TEST-ORDER', assignment_id: 12, service_dates: ['2027-01-05', '2027-01-08']},
+    {case_no: 'OTHER-ORDER', assignment_id: 99, service_dates: ['2027-01-11']},
+    {case_no: 'TEST-ORDER', assignment_id: 27, service_dates: ['2027-01-12']},
+  ];
+  const calls = [];
+  leaveResultPost = (path, payload, signal) => path === 'cases'
+    ? Promise.resolve({items: assignments})
+    : new Promise(resolve => calls.push({path, payload, signal, resolve}));
+`);
+const settle = () => new Promise(setImmediate);
+
+(async () => {
+  await evaluate('loadPostponeCase()');
+  const field = nodes.get('postponeAssignmentField');
+  const selector = nodes.get('postponeAssignment');
+  assert.equal(field.hidden, false);
+  assert.deepEqual(selector.children.map(option => option.value), ['12', '27']);
+
+  evaluate("handlePostponeDateClick('2027-01-12')");
+  assert.equal(evaluate("postponeSelectedDates.has('2027-01-12')"), false);
+  evaluate("handlePostponeDateClick('2027-01-05'); handlePostponeDateClick('2027-01-07')");
+  assert.equal(evaluate('calls[0].payload.assignment_id'), 12);
+
+  evaluate("selectPostponeAssignment('27'); calls[0].resolve({conflict: false})");
+  await settle();
+  assert.equal(evaluate('calls[0].signal.aborted'), true);
+  assert.equal(selector.value, '27');
+  assert.equal(nodes.get('postponeSubmitBtn').disabled, true);
+  assert.equal(evaluate("[...postponeSelectedDates].join()"), '2027-01-12');
+
+  evaluate("handlePostponeDateClick('2027-01-12'); handlePostponeDateClick('2027-01-14')");
+  evaluate('calls[1].resolve({conflict: false})');
+  await settle();
+  evaluate("void submitPostponeProposal(); selectPostponeAssignment('12')");
+  assert.equal(selector.disabled, true);
+  assert.equal(evaluate('postponeCase.assignment_id'), 27);
+  assert.equal(evaluate('calls[2].path'), 'propose');
+  assert.deepEqual(JSON.parse(evaluate('JSON.stringify(calls[2].payload.dates)')), [
+    {original_date: '2027-01-12', new_date: '2027-01-14'},
+  ]);
+  assert.equal(evaluate('calls[2].payload.assignment_id'), 27);
+  evaluate("calls[2].resolve({conflict: false, case_no: 'TEST-ORDER', assignment_id: 27, group_message: '延期提案'})");
+  await settle();
+  assert.equal(selector.disabled, false);
+  assert.equal(nodes.get('postponeReturnToGroup').hidden, false);
+
+  evaluate('assignments.splice(0, 2)');
+  await evaluate('loadPostponeCase()');
+  assert.equal(field.hidden, true);
+  assert.equal(selector.value, '27');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """.replace("SOURCE", json.dumps(script))
     subprocess.run(["node"], input=runner, text=True, encoding="utf-8", check=True, timeout=10)

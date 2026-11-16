@@ -222,6 +222,24 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     });
   });
 
+  it.each(['#line-interface?tab=message_flow', '#line-management?tab=message_flow', '#line-notifications?tab=push_queue&view=flow'])('舊流程圖連結 %s 直接開啟通知與發送工作台', async (alias) => {
+    authenticateSession();
+    window.history.replaceState(null, '', alias);
+    // happy-dom emits a hashchange for replaceState, unlike browsers.
+    const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => undefined);
+    const view = render(<App />);
+    try {
+      expect(await screen.findByRole('region', { name: 'LINE 流程圖' }, { timeout: 5000 })).toBeVisible();
+      expect(screen.queryByRole('button', { name: '完整流程圖' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument();
+      expect(screen.getByTitle('通知與寄送')).toHaveClass('active');
+      expect(replace).toHaveBeenCalledWith(null, '', expect.stringMatching(/#line-notifications\?tab=push_queue$/));
+    } finally {
+      view.unmount();
+      replace.mockRestore();
+    }
+  }, 10000);
+
   it('[Hash-8] LINE 專區舊深連結與分頁切換相容性解析', async () => {
     authenticateSession();
 

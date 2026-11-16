@@ -1,8 +1,8 @@
 /**
  * File: line_rules_query_flow.test.tsx
- * Description: 驗證通知規則只在頁籤啟用時查詢，並同時呈現真實 catalog 與 typed mutation 維護區。
+ * Description: 驗證通知工作台載入通知規則、顯示文案與提交唯讀手機預覽的接線。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineNotificationRulesCatalog } from '../../../../../../api/line_configuration/line_configuration_query_schemas';
@@ -22,58 +22,68 @@ function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RU
   };
 }
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.clearSession(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.clearSession(); window.history.replaceState(null, '', window.location.pathname); });
 
-describe('LINE 通知規則 query 與 mutation 接線', () => {
-  it('只在頁籤啟用時查一次，通知內容與發送設定沿用同一真實規則', async () => {
+function response(data: unknown): Response {
+  return new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+describe('LINE 通知工作台接線', () => {
+  it('進入工作台只查一次規則，以已載入規則的文案產生手機預覽', async () => {
     sessionClient.setSession('synthetic-line-rules-session', { id: 7, username: 'line-rules-test', display_name: '測試管理員', role: 'admin' });
+    const catalogPath = '/api/v1/line/message-previews/catalog';
+    const templatePath = '/api/v1/line/notification-rules/deposit_notice/message-template';
+    const previewPath = '/api/v1/line/message-previews/preview';
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
-      expect(String(input)).toBe('/api/v1/line/notification-rules/deposit_notice/message-template');
-      expect(options?.method).toBe('GET');
-      expect(options?.body).toBeUndefined();
-      return new Response(JSON.stringify({ success: true, data: {
-        rule_id: 'deposit_notice', template_id: 'deposit_notice', name: '訂金確認',
-        content: '訂金確認通知', revision: 1, variables: [], sample_preview: '訂金確認通知',
-      } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      switch (String(input)) {
+        case catalogPath:
+          return response([{ id: 'deposit_notice', template_id: 'deposit_message', name: '訂金確認', format: 'text', requires_case: false, requires_staff: false, builtin: false, allows_draft: true }]);
+        case templatePath:
+          return response({ rule_id: 'deposit_notice', template_id: 'deposit_message', name: '訂金確認',
+            content: '訂金確認通知', revision: 1, variables: [], sample_preview: '訂金確認通知' });
+        case previewPath:
+          return response({ status: 'ready', format: 'text', text: '訂金確認通知', note: '', bubbles: [], facts: [] });
+        default:
+          throw new Error(`Unexpected request ${options?.method} ${String(input)}`);
+      }
     });
     vi.stubGlobal('fetch', fetchSpy);
     const { identity, configuration } = dependencies();
     render(<LineManagementPage scope="notifications" lineIdentity={identity} lineConfiguration={configuration} />);
-    await screen.findByRole('button', { name: '編輯訂金確認內容' });
+    const flow = within(screen.getByRole('region', { name: 'LINE 流程圖' }));
+    fireEvent.click(await flow.findByRole('button', { name: '其他通知' }));
+    fireEvent.click(flow.getByRole('button', { name: '未歸入流程' }));
+    fireEvent.click(flow.getByRole('button', { name: '編輯訂金確認內容' }));
     expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(fetchSpy.mock.calls.filter(([input]) => String(input) === '/api/v1/line/notification-rules/deposit_notice/message-template')).toHaveLength(1);
-    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
-    fireEvent.click(screen.getByText('發送設定'));
-    fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
-    expect(screen.getByRole('region', { name: 'LINE 通知規則維護' })).toBeInTheDocument();
-    expect(screen.getByLabelText('收件者')).toHaveValue('client');
-    expect(screen.getByLabelText('排程方式')).toHaveValue('immediate');
-    fireEvent.click(screen.getByRole('button', { name: '返回內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-
-    fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
-    expect(screen.getAllByText('訂金確認').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByText('發送設定'));
-    fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
+    expect(screen.getByRole('textbox', { name: '通知內容' })).toHaveValue('訂金確認通知');
+    expect(screen.queryByRole('button', { name: '發送設定' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '公版預覽資料' })).not.toBeInTheDocument();
     expect(screen.queryByText('系統唯一規則識別碼：deposit_notice')).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'LINE 通知規則維護' })).toBeInTheDocument();
-    expect(screen.getByLabelText('收件者')).toHaveValue('client');
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+    const phone = within(screen.getByRole('complementary', { name: 'LINE 對話預覽' }));
+    expect(await phone.findByText('訂金確認通知')).toBeVisible();
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy).toHaveBeenCalledWith(catalogPath, expect.objectContaining({ method: 'GET' }));
+    expect(fetchSpy).toHaveBeenCalledWith(templatePath, expect.objectContaining({ method: 'GET' }));
+    const preview = fetchSpy.mock.calls.find(([input]) => String(input) === previewPath)?.[1];
+    expect(preview?.method).toBe('POST');
+    expect(JSON.parse(String(preview?.body))).toEqual({ id: 'deposit_notice', data_source: 'sample', content: '訂金確認通知' });
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(flow.getByRole('button', { name: '編輯訂金確認內容' }));
+    expect(screen.getByRole('textbox', { name: '通知內容' })).toHaveValue('訂金確認通知');
+    expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
   });
 
   it('revision 0 的空 definition 顯示真實空狀態而不是 mock 規則或歡迎詞', async () => {
     const empty = { revision: 0, definition: {} } as const;
     const { identity, configuration } = dependencies(empty);
+    const fetchSpy = vi.fn().mockResolvedValue(response([]));
+    vi.stubGlobal('fetch', fetchSpy);
     render(<LineManagementPage scope="notifications" lineIdentity={identity} lineConfiguration={configuration} />);
-    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    expect(await screen.findByText('沒有符合條件的通知')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('正在載入通知內容…')).not.toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenCalledWith('/api/v1/line/message-previews/catalog', expect.objectContaining({ method: 'GET' }));
     expect(document.querySelectorAll('[data-notification-id]')).toHaveLength(0);
     expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '編輯訂金確認內容' })).not.toBeInTheDocument();

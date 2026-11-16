@@ -87,7 +87,7 @@ const LINE_TAB_PAGES: Record<string, PageType> = {
   push_queue: 'line-notifications',
   delivery: 'line-notifications',
   richmenu: 'line-interface',
-  message_flow: 'line-interface',
+  message_flow: 'line-notifications',
   liff: 'line-interface',
 };
 
@@ -95,8 +95,10 @@ const DEFAULT_PAGE: PageType = 'order-workbench-v2';
 
 function getPageFromHash(): PageType {
   const [hashPath, hashQuery = ''] = window.location.hash.replace(/^#\/?/, '').split('?', 2);
+  const tab = new URLSearchParams(hashQuery).get('tab') ?? '';
+  if (hashPath === 'line-interface' && tab === 'message_flow') return 'line-notifications';
   if (hashPath === 'line-management' || hashPath === 'line') {
-    const tabPage = LINE_TAB_PAGES[new URLSearchParams(hashQuery).get('tab') ?? ''];
+    const tabPage = LINE_TAB_PAGES[tab];
     if (tabPage) return tabPage;
   }
   if (hashPath in HASH_ALIASES) {
@@ -113,6 +115,7 @@ const AppContent: React.FC = () => {
   const committedHash = useRef(window.location.hash);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [requestedPage, setRequestedPage] = useState<PageType>(getPageFromHash);
+  const [notificationNavigation, setNotificationNavigation] = useState(0);
   const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
   const isRoot = sessionClient.getUser()?.is_root === true;
   const currentPage = canNavigateToPage(requestedPage, isRoot) ? requestedPage : DEFAULT_PAGE;
@@ -123,14 +126,16 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const handleHashChange = (event: HashChangeEvent) => {
       const nextHash = window.location.hash;
-      if (nextHash === committedHash.current) return;
-      const previousHash = event.oldURL ? new URL(event.oldURL).hash : committedHash.current;
       const page = getPageFromHash();
+      if (page === 'line-notifications' && event.newURL && new URL(event.newURL).hash !== nextHash) return;
+      const previousHash = event.oldURL ? new URL(event.oldURL).hash : committedHash.current;
+      if (nextHash === committedHash.current && (page !== 'line-notifications' || nextHash === previousHash)) return;
       window.history.replaceState(null, '', previousHash || '#order-workbench-v2');
       requestLeave(() => {
         committedHash.current = nextHash;
         window.history.replaceState(null, '', nextHash);
         setRequestedPage(page);
+        if (page === 'line-notifications') setNotificationNavigation(value => value + 1);
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       });
     };
@@ -237,7 +242,7 @@ const AppContent: React.FC = () => {
 
         {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage scope="service" />}
-        {currentPage === 'line-notifications' && <LineManagementPage scope="notifications" />}
+        {currentPage === 'line-notifications' && <LineManagementPage key={notificationNavigation} scope="notifications" />}
         {currentPage === 'line-interface' && <LineManagementPage scope="interface" />}
         {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
 

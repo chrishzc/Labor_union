@@ -20,6 +20,7 @@ from api.dependencies.service_start import get_service_start_application
 from api.routes import staff_leave_intake
 from domains.line.delivery import LineMessageKind
 from domains.line.identities import (
+    LineGroupId,
     LineSourceIdentity,
     LineSourceType,
     LineUserId,
@@ -28,8 +29,13 @@ from domains.line.identities import (
 from domains.line.order_group import LineOrderGroupBindingStatus
 from domains.scheduling.service_start import ServiceStartConflict, ServiceStartDecision
 from infrastructure.mysql.customer_service_repository import _REMINDER_SOURCE_CASE
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
-from subsystems.line.group_helper_application import LineGroupHelperApplication
+from subsystems.line.group_helper_application import (
+    POSTPONEMENT_DRAFT_FAMILY,
+    POSTPONEMENT_NOTICE_FAMILY,
+    LineGroupHelperApplication,
+)
 from subsystems.line.service_start_messages import GROUP_ASSISTANCE_DIRECTIONS, HELPER_TEXT_DEFAULTS
 
 
@@ -74,11 +80,21 @@ class _FakeDeliveryRepo:
 class _FakeOrderGroupsRepo:
     def __init__(self, binding_status: LineOrderGroupBindingStatus = LineOrderGroupBindingStatus.ACTIVE) -> None:
         self.status = binding_status
+        self.group_id = "G-case-1"
+        self.version = 1
 
     def get_by_group(self, group_id: str) -> Any:
-        if group_id != "G-case-1":
+        if group_id != self.group_id:
             return None
-        return SimpleNamespace(case_no="C-2026-01", status=self.status)
+        return SimpleNamespace(
+            case_no="C-2026-01", status=self.status,
+            group_id=LineGroupId(group_id), version=SimpleNamespace(value=self.version),
+        )
+
+    def get_invitation(self, case_no: str, *, lock: bool = False) -> Any:
+        if case_no == "C-2026-01":
+            return SimpleNamespace(binding=self.get_by_group(self.group_id))
+        return None
 
 
 class _FakeCustomerServiceRepo:
@@ -129,6 +145,15 @@ class _FakeServiceStartWorkflow:
         self.start_result_status = "applied"
         self.leave_result_status = "applied"
         self.raise_on_start: ServiceStartConflict | None = None
+        self.leave_eligible = True
+
+    def selected_leave_case(self, staff_id: int, case_no: str, *, lock: bool = False) -> tuple[Any, Any]:
+        items = ()
+        if self.leave_eligible and staff_id == 7 and case_no == "C-2026-01":
+            items = (SimpleNamespace(
+                assignment_id=22, service_dates=tuple(f"2026-06-{day}" for day in range(12, 19)),
+            ),)
+        return items, None
 
     def submit_in_current_unit_of_work(self, submission: Any, *, enqueue_group_schedule: bool = True) -> Any:
         self.start_calls.append((submission, enqueue_group_schedule))
@@ -634,7 +659,7 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(m
     }
     body = json.dumps(card["contents"]["body"], ensure_ascii=False)
     assert "C-2026-01" in body
-    assert "同一個按鈕重新開啟" in body
+    assert "可從原群組開啟同一張卡" in body
     assert "https://" not in body + card["altText"]
     assert open_entry("evt-postpone-reopen") is True
     assert json.loads(uow.delivery_tasks.requests[-1].payload_json) == card
@@ -689,6 +714,17 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(m
     )
     assert len(uow.delivery_tasks.requests) == pre_len
     assert uow.service_start_workflow.leave_calls == []
+    for user_id, action in [
+        ("U-admin-1", approve),
+        ("U-admin-1", f"postponement:reject:{saved['proposal_ref']}"),
+    ]:
+        app.handle_postback(_make_inbox(
+            f"unauthorized-decision-{user_id}-{action}",
+            {"type": "postback", "postback": {"data": action}},
+            user_id=user_id,
+        ), uow)
+        assert uow.service_start_workflow.leave_calls == []
+        assert uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")] == saved
 
     # 4b. Customer agrees -> canonical writer with enqueue_group_schedule=False
     assert (
@@ -739,6 +775,59 @@ def test_workflow2_postponement_liff_conflict_and_in_group_agreement_zero_push(m
     )
     assert uow._helper_proposals[("group_helper_postpone_proposal", "C-2026-01")]["cleared"] is True
     assert "維持不變" in json.loads(uow.delivery_tasks.requests[-1].payload_json)["text"]
+    _assert_all_reply_only(uow)
+
+
+@pytest.mark.parametrize("has_line_actor", [True, False])
+def test_caregiver_withdraws_only_own_latest_postponement(has_line_actor: bool) -> None:
+    app = _make_app()
+    uow = _FakeGroupHelperUoW(is_started=True)
+    case_no = "C-2026-01"
+    proposal_key = ("group_helper_postpone_proposal", case_no)
+    current = {
+        "proposal_ref": "a" * 32,
+        "staff_id": 7,
+        "group_binding_version": 1,
+        "dates": [{"original_date": "2026-06-12", "new_date": "2026-06-15"}],
+    }
+    if has_line_actor:
+        current["line_actor_fingerprint"] = fingerprint_payload({"line_user_id": "U-staff-1"}).value
+    uow._helper_proposals[proposal_key] = current
+    uow._helper_proposals[(POSTPONEMENT_DRAFT_FAMILY, case_no)] = {"draft_revision": 3}
+    original_context = uow.group_helper_context
+
+    def context(case: str, actor: str) -> dict[str, Any] | None:
+        result = original_context(case, actor)
+        if result is not None and actor in {"U-other-staff", "U-other-line"}:
+            return {**result, "is_staff": True, "staff_id": 8 if actor == "U-other-staff" else 7}
+        return result
+
+    uow.group_helper_context = context
+
+    def withdraw(actor: str, event_id: str, ref: str = current["proposal_ref"], group_id: str = "G-case-1") -> bool:
+        return app.handle_postback(_make_inbox(
+            event_id, {"type": "postback", "postback": {"data": f"postponement:reject:{ref}"}},
+            user_id=actor, group_id=group_id,
+        ), uow)
+
+    assert withdraw("U-staff-1", "forwarded-card", group_id="G-other")
+    for actor in ("U-admin-1", "U-other-staff", "U-outsider"):
+        assert withdraw(actor, f"unauthorized-{actor}")
+    if has_line_actor:
+        assert withdraw("U-other-line", "different-line-user")
+    assert not uow.delivery_tasks.requests
+    assert uow._helper_proposals[proposal_key] == current
+
+    assert withdraw("U-staff-1", "stale-card", ref="b" * 32)
+    assert "已失效" in uow.delivery_tasks.requests[-1].payload_json
+    assert uow._helper_proposals[proposal_key] == current
+
+    assert withdraw("U-staff-1", "current-card")
+    reply = uow.delivery_tasks.requests[-1]
+    assert reply.recipient.identity.value == "G-case-1"
+    assert "月嫂已撤回本次提議" in json.loads(reply.payload_json)["text"]
+    assert uow._helper_proposals[proposal_key] == {"cleared": True, "draft_revision": 3}
+    assert uow.service_start_workflow.leave_calls == []
     _assert_all_reply_only(uow)
 
 
@@ -809,7 +898,8 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     save_group_helper_proposal = staff_leave_intake.save_group_helper_proposal
 
     def _spy_save(_uow: Any, family: str, case_no: str, event_ref: str, payload: dict[str, Any]) -> dict[str, Any]:
-        saved_calls.append((family, case_no, event_ref, payload))
+        if family == POSTPONEMENT_DRAFT_FAMILY:
+            saved_calls.append((family, case_no, event_ref, payload))
         return save_group_helper_proposal(_uow, family, case_no, event_ref, payload)
 
     monkeypatch.setattr(staff_leave_intake, "save_group_helper_proposal", _spy_save)
@@ -821,6 +911,14 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
         "assignment_id": 22,
         "dates": [{"original_date": "2026-06-12", "new_date": "2026-06-15"}],
     }
+
+    fake_service_start.leave_eligible = False
+    for suffix in ("preview", "propose"):
+        denied = client.post(f"/api/v1/line/staff-self-service/leave-results/{suffix}", json=base_body)
+        assert denied.status_code == 409
+        assert denied.json()["detail"]["error"]["code"] == "leave_result_forbidden"
+    assert saved_calls == [] and committed == [] and arrangement.preview_calls == []
+    fake_service_start.leave_eligible = True
 
     # 1. Conflict detected in /preview and blocked with 409 in /propose
     arrangement.conflict = True
@@ -843,19 +941,44 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     assert ok_data["conflict"] is False
     assert ok_data["total_service_days_conserved"] is True
     assert ok_data["group_record_queued"] is False
-    assert ok_data["group_message"].startswith("雙方合意延期 提案 ")
+    assert ok_data["group_message"] == (
+        "雙方合意延期申請已送出，請確認是否同意日期調整。\n提案編號：C-2026-01-1"
+    )
     assert len(saved_calls) == 1
-    assert saved_calls[0][0] == "group_helper_postpone_proposal"
+    assert saved_calls[0][0] == POSTPONEMENT_DRAFT_FAMILY
     assert saved_calls[0][1] == "C-2026-01"
     assert committed == [True]
     assert uow_stub.delivery_tasks.requests == []
+    active_key = ("group_helper_postpone_proposal", "C-2026-01")
+    assert active_key not in uow_stub._helper_proposals
 
     helper = _make_app()
     single = saved_calls[0][3]
+    assert uow_stub._helper_proposals[(POSTPONEMENT_NOTICE_FAMILY, "C-2026-01", "1")] == {
+        "proposal_ref": single["proposal_ref"],
+    }
     message = {"type": "message", "message": {"type": "text", "text": ok_data["group_message"]}}
+    foreign_notice = ok_data["group_message"].replace("C-2026-01-1", "C-2026-02-1")
+    assert not helper.handle_message(_make_inbox("foreign-case-notice", {
+        "type": "message", "message": {"type": "text", "text": foreign_notice},
+    }), uow_stub)
+    assert active_key not in uow_stub._helper_proposals
+    assert not uow_stub.delivery_tasks.requests
+    uow_stub.order_groups.group_id = "G-replacement"
+    uow_stub.order_groups.version = 2
+    assert helper.handle_message(_make_inbox("replaced-group-send", message, group_id="G-replacement"), uow_stub)
+    assert active_key not in uow_stub._helper_proposals
+    assert uow_stub.delivery_tasks.requests == []
+    uow_stub.order_groups.group_id = "G-case-1"
+    uow_stub.order_groups.version = 1
+    fake_service_start.leave_eligible = False
+    assert helper.handle_message(_make_inbox("now-ineligible-group-send", message), uow_stub)
+    assert active_key not in uow_stub._helper_proposals
+    assert uow_stub.delivery_tasks.requests[-1].message_kind is LineMessageKind.TEXT
+    fake_service_start.leave_eligible = True
     assert helper.handle_message(_make_inbox("single-group-send", message), uow_stub)
     assert helper.handle_message(_make_inbox("single-duplicate-send", message), uow_stub)
-    card, = uow_stub.delivery_tasks.requests
+    card, = (req for req in uow_stub.delivery_tasks.requests if req.message_kind is LineMessageKind.FLEX)
     assert card.recipient.identity.value == "G-case-1"
     assert card.correlation_id.value == "line-event:single-group-send"
     assert f"postponement:agree:{single['proposal_ref']}" in card.payload_json
@@ -865,6 +988,14 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
         "type": "postback", "postback": {"data": "group-helper:mutual-postponement"},
     }), uow_stub)
     assert "mode=postpone" in uow_stub.delivery_tasks.requests[-1].payload_json
+
+    delayed_res = client.post("/api/v1/line/staff-self-service/leave-results/propose", json={
+        **base_body, "dates": [{"original_date": "2026-06-12", "new_date": "2026-06-19"}],
+    })
+    assert delayed_res.status_code == 200
+    delayed_message = {"type": "message", "message": {"type": "text", "text": delayed_res.json()["data"]["group_message"]}}
+    assert not helper.handle_message(_make_inbox("delayed-wrong-group", delayed_message, group_id="G-other"), uow_stub)
+    assert uow_stub._helper_proposals[active_key]["proposal_ref"] == single["proposal_ref"]
 
     # Multi-day submit uses the same single-step group trigger and replaces the pending proposal.
     multi_body = {
@@ -880,6 +1011,7 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     multi = saved_calls[-1][3]
     assert len(multi["dates"]) == 2
     assert multi["proposal_ref"] != single["proposal_ref"]
+    assert uow_stub._helper_proposals[active_key]["proposal_ref"] == single["proposal_ref"]
     assert helper.handle_message(_make_inbox("multi-group-send", {
         "type": "message", "message": {"type": "text", "text": multi_message},
     }), uow_stub)
@@ -887,6 +1019,9 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     assert card.message_kind is LineMessageKind.FLEX
     assert f"postponement:agree:{multi['proposal_ref']}" in card.payload_json
     assert card.recipient.identity.value == "G-case-1"
+    assert helper.handle_message(_make_inbox("delayed-after-new-card", delayed_message), uow_stub)
+    assert "已失效" in uow_stub.delivery_tasks.requests[-1].payload_json
+    assert uow_stub._helper_proposals[active_key]["proposal_ref"] == multi["proposal_ref"]
 
     for index, old_action in enumerate(("postponement:agree", f"postponement:agree:{single['proposal_ref']}", f"postponement:reject:{single['proposal_ref']}")):
         assert helper.handle_postback(_make_inbox(f"old-card-{index}", {
@@ -899,12 +1034,26 @@ def test_liff_leave_results_preview_and_propose_routes_enforce_conflict_and_zero
     }, user_id="U-customer-1"), uow_stub)
     command, push_schedule = fake_service_start.leave_calls[0]
     assert len(command.dates) == 2 and push_schedule is False
+    assert helper.handle_message(_make_inbox("delayed-after-approval", delayed_message), uow_stub)
+    assert uow_stub._helper_proposals[active_key]["cleared"] is True
+    assert len(fake_service_start.leave_calls) == 1
+
+    compatible = client.post("/api/v1/line/staff-self-service/leave-results/propose", json={
+        **base_body, "dates": [{"original_date": "2026-06-12", "new_date": "2026-06-22"}],
+    })
+    assert compatible.status_code == 200
+    legacy_ref = saved_calls[-1][3]["proposal_ref"]
+    assert helper.handle_message(_make_inbox("legacy-group-send", {
+        "type": "message", "message": {"type": "text", "text": f"雙方合意延期 提案 {legacy_ref}"},
+    }), uow_stub)
+    assert uow_stub._helper_proposals[active_key]["proposal_ref"] == legacy_ref
+    assert f"postponement:agree:{legacy_ref}" in uow_stub.delivery_tasks.requests[-1].payload_json
     _assert_all_reply_only(uow_stub)
 
 
-@pytest.mark.parametrize("legacy_receipt", [False, True])
+@pytest.mark.parametrize("receipt_format", ["numbered", "opaque_draft", "legacy_active"])
 def test_liff_postponement_replays_original_result_after_proposal_changes(
-    monkeypatch: Any, legacy_receipt: bool,
+    monkeypatch: Any, receipt_format: str,
 ) -> None:
     arrangement = _FakeArrangement()
     application = _FakeServiceStartWorkflow(arrangement=arrangement)
@@ -913,12 +1062,13 @@ def test_liff_postponement_replays_original_result_after_proposal_changes(
         _connection=None,
         _helper_proposals={},
         receipts=_FakeReceiptRepo(),
+        order_groups=_FakeOrderGroupsRepo(),
         commit=lambda: committed.append(True),
     )
     monkeypatch.setattr(staff_leave_intake, "open_line_unit_of_work", lambda: nullcontext(uow))
     monkeypatch.setattr(staff_leave_intake, "build_service_start_application", lambda _connection: application)
     staff = {"staff_id": 7}
-    monkeypatch.setattr(staff_leave_intake, "_verified_staff_context", lambda _body: (None, staff))
+    monkeypatch.setattr(staff_leave_intake, "_verified_staff_context", lambda _body: (LineUserId("U-staff-1"), staff))
     dates = [
         {"original_date": "2026-06-12", "new_date": "2026-06-15"},
         {"original_date": "2026-06-13", "new_date": "2026-06-16"},
@@ -937,8 +1087,21 @@ def test_liff_postponement_replays_original_result_after_proposal_changes(
         return staff_leave_intake.propose_leave_defer(request).model_dump()
 
     original = propose(body)
-    if legacy_receipt:
-        uow._helper_proposals[family, body["case_no"], body["idempotency_key"]].pop("liff_result")
+    if receipt_format != "numbered":
+        draft = uow._helper_proposals[POSTPONEMENT_DRAFT_FAMILY, body["case_no"]]
+        historical_payload = {key: value for key, value in draft.items() if key != "group_message"}
+        uow._helper_proposals.clear()
+        uow.receipts.items.clear()
+        if receipt_format == "legacy_active":
+            historical_payload.pop("liff_result")
+            staff_leave_intake.save_group_helper_proposal(
+                uow, family, body["case_no"], body["idempotency_key"], historical_payload,
+            )
+        else:
+            staff_leave_intake.save_group_helper_proposal(
+                uow, POSTPONEMENT_DRAFT_FAMILY, body["case_no"], draft["proposal_ref"], historical_payload,
+            )
+        original["data"]["group_message"] = f"雙方合意延期 提案 {draft['proposal_ref']}"
     staff_leave_intake.save_group_helper_proposal(uow, family, body["case_no"], "group-confirmed", {"cleared": True})
     arrangement.conflict = True
 
@@ -955,7 +1118,7 @@ def test_liff_postponement_replays_original_result_after_proposal_changes(
     assert other_staff.value.status_code == 409
     assert len(arrangement.preview_calls) == 1
     assert committed == [True]
-    assert len(uow.receipts.items) == 2
+    assert len(uow.receipts.items) == (3 if receipt_format == "numbered" else 2)
     assert uow._helper_proposals[family, body["case_no"]] == {"cleared": True}
 
 

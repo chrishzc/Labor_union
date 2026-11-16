@@ -71,6 +71,14 @@ def schedule(case):
         'WHERE a.case_no=%s AND d.effective_marker=1 AND d.is_work_day=1 ORDER BY d.work_date',(case,))
 
 
+def order_status_and_deposit_settlement(case):
+    return rows(
+        'SELECT o.status, d.settlement_state FROM orders o '
+        'JOIN client_deposit_settlement_projection d ON d.case_no=o.case_no WHERE o.case_no=%s',
+        (case,),
+    )[0]
+
+
 def test_selected_leave_case_distinguishes_ineligible_order_from_unassigned_staff(http):
     case, staff = setup(http)
     path = '/api/v1/line/staff-self-service/leave-results/cases'
@@ -96,14 +104,22 @@ def test_selected_leave_case_distinguishes_ineligible_order_from_unassigned_staf
 
 def test_confirmed_postponement_updates_schedule_and_finance_without_push(http):
     case, staff = setup(http)
+    expected_status = {'status': '訂單成立', 'settlement_state': 'settled'}
+    assert order_status_and_deposit_settlement(case) == expected_status
     before = schedule(case)
     payments = rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,))
+    existing_deliveries = rows(
+        'SELECT id FROM line_delivery_tasks WHERE recipient_identity IN '
+        '(SELECT group_id FROM line_order_group_bindings WHERE case_no=%s) ORDER BY id',
+        (case,),
+    )
     command = confirmed_command(http, case, staff[0])
     result = apply_confirmed_postponement(command)
     assert result['workflow_kind'] == 'leave' and result['status'] == 'applied'
     assert result['result']['actual_start_date'] == '2027-01-06'
     assert result['result']['actual_end_date'] == POSTPONED_DATE
     assert result['result']['first_payment_due_date'] == '2027-01-06'
+    assert order_status_and_deposit_settlement(case) == expected_status
     after = schedule(case)
     assert len(after) == len(before) == 30
     assert str(after[-1]['work_date']) == POSTPONED_DATE
@@ -128,6 +144,27 @@ def test_confirmed_postponement_updates_schedule_and_finance_without_push(http):
         ))
     assert raised.value.code == 'leave_result_key_reused'
     assert schedule(case) == after
+
+    second = apply_confirmed_postponement(confirmed_command(
+        http, case, staff[0], dates=[('2027-01-06', '2027-02-11')],
+    ))
+    assert second['status'] == 'applied'
+    assert second['result']['actual_start_date'] == second['result']['first_payment_due_date'] == '2027-01-07'
+    assert order_status_and_deposit_settlement(case) == expected_status
+    reopened = checked(http.post(
+        '/api/v1/line/staff-self-service/leave-results/cases',
+        json={'line_id_token': staff[0][1], 'case_no': case},
+    ))
+    assert reopened['availability'] == {'code': 'eligible'}
+    assert [item['case_no'] for item in reopened['items']] == [case]
+    assert len(schedule(case)) == len(before)
+    assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,)) == payments
+    assert not second['result']['group_record_queued']
+    assert rows(
+        'SELECT id FROM line_delivery_tasks WHERE recipient_identity IN '
+        '(SELECT group_id FROM line_order_group_bindings WHERE case_no=%s) ORDER BY id',
+        (case,),
+    ) == existing_deliveries
 
 
 def test_conflict_preserves_all_owner_facts_then_union_records_new_agreement(http):
@@ -266,12 +303,15 @@ def test_in_service_defer_preserves_started_days_and_receipt_history(http):
     new_day = str(today + timedelta(days=35))
     case, staff, segments = base['seed_case'](http)
     checked(base['submit'](http, case, staff[0], segments[0], start=str(start))[0])
+    expected_status = {'status': '服務中', 'settlement_state': 'settled'}
+    assert order_status_and_deposit_settlement(case) == expected_status
     before = schedule(case)
     paid = rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,))
     result = apply_confirmed_postponement(confirmed_command(http, case, staff[0], dates=[(day, new_day)]))
     assert result['status'] == 'applied'
     assert result['result']['actual_start_date'] == str(start)
     assert result['result']['first_payment_due_date'] == str(start)
+    assert order_status_and_deposit_settlement(case) == expected_status
     assert [r for r in schedule(case) if str(r['work_date']) < day] == [r for r in before if str(r['work_date']) < day]
     assert rows('SELECT id,amount_ntd FROM client_ledger_entries WHERE case_no=%s ORDER BY id', (case,)) == paid
 

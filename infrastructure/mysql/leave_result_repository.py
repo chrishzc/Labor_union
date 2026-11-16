@@ -49,8 +49,8 @@ def leave_cases(connection, staff_id, *, lock=False, case_no=None):
     return tuple(LeaveCase(**{**item,'service_dates':tuple(item['service_dates'])}) for item in result.values())
 
 
-def selected_leave_case(connection, staff_id: int, case_no: str) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
-    cases = leave_cases(connection, staff_id, case_no=case_no)
+def selected_leave_case(connection, staff_id: int, case_no: str, *, lock: bool = False) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
+    cases = leave_cases(connection, staff_id, case_no=case_no, lock=lock)
     if cases:
         return cases, LeaveCaseAvailability('eligible')
 

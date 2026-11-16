@@ -77,9 +77,7 @@ import type {
 } from '../api/line_runtime_targets/line_runtime_target_schemas';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
-import { LineMessageFlow } from '../components/LineMessageFlow';
 import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
-import { notificationMessageHref } from '../adapters/line_configuration/line_message_flow_adapter';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import {
@@ -99,7 +97,7 @@ import { AiEventStudio } from './line_management/AiEventStudio';
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
-type LineTab = 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'guidance' | 'order_groups' | 'payment_overdue' | 'runtime';
+type LineTab = 'richmenu' | 'liff' | 'binding' | 'push_queue' | 'delivery' | 'guidance' | 'order_groups' | 'payment_overdue' | 'runtime';
 /** 依責任邊界切分的頁面範圍：客服受理、通知寄送、LINE 介面設定。 */
 export type LineScope = 'service' | 'notifications' | 'interface';
 const LiffCardStudio = lazy(() => import('./line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio })));
@@ -185,14 +183,13 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['delivery', '寄送與異常', 'line.tab.delivery'],
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['liff', '表單', 'line.tab.liff'],
-  ['message_flow', 'LINE 流程圖', 'line.tab.message-flow'],
   ['guidance', '引導動作', 'line.tab.guidance'],
 ];
 
 const SCOPE_VIEWS: Record<LineScope, { title: string; subtitle: string; tabs: readonly LineTab[]; fallback: LineTab }> = {
   service: { title: 'LINE 營運', subtitle: '管理身分授權與案件群組。', tabs: ['binding', 'order_groups'], fallback: 'binding' },
-  notifications: { title: '通知與寄送', subtitle: '設定通知規則，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
-  interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單、LINE 訊息流程與引導動作。', tabs: ['richmenu', 'liff', 'message_flow', 'guidance'], fallback: 'richmenu' },
+  notifications: { title: '通知與寄送', subtitle: '維護通知文案，查看寄送進度與失敗紀錄。', tabs: ['push_queue', 'delivery'], fallback: 'push_queue' },
+  interface: { title: 'LINE 介面設定', subtitle: '維護圖文選單、表單與引導動作。', tabs: ['richmenu', 'liff', 'guidance'], fallback: 'richmenu' },
 };
 
 const SAFE_CONFIGURATION_KINDS: readonly LineSafeConfigKind[] = [
@@ -287,7 +284,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   useEffect(() => { if (activeTab === 'payment_overdue') window.location.hash = '#finance?tab=receipts&view=overdue'; }, [activeTab]);
   const [notificationMessageId, setNotificationMessageId] = useState<string | null>(initialHashParams.get('message')?.slice(0, 191) || null);
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
-  const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
 
   const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(hashPage(initialHashParams, 'group_page'));
   const [orderGroupSearch, setOrderGroupSearch] = useState((initialHashParams.get('group_q') ?? '').slice(0, 50));
@@ -343,7 +339,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     const hubRoute = route === 'line-management' || route === 'line' || route === 'line-notifications' || route === 'line-interface';
     const legacyFormRoute = (route === 'line-liff-studio' || route === 'line-studio') && activeTab !== 'liff';
     if (!hubRoute && !legacyFormRoute) return;
-    const canonicalRoute = (route === 'line-notifications' || route === 'line-interface')
+    const canonicalRoute = scope === 'notifications' ? 'line-notifications' : (route === 'line-notifications' || route === 'line-interface')
       ? route
       : (route === 'line' ? 'line' : 'line-management');
     const params = currentHashParams();
@@ -355,9 +351,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     params.delete('rich');
     params.delete('rich_page');
     setParam('rule_q', notificationRuleSearch, '');
-    setParam('rule_state', notificationRuleEnabled, 'all');
     setParam('message', notificationMessageId ?? '', '');
-    if (activeTab === 'push_queue') ['notice', 'rule_event', 'rule_recipient', 'rule_page'].forEach(key => params.delete(key));
+    if (activeTab === 'push_queue') {
+      ['notice', 'rule_event', 'rule_recipient', 'rule_page', 'rule_state'].forEach(key => params.delete(key));
+      if (params.get('view') === 'flow') params.delete('view');
+    }
     setParam('group_page', orderGroupPageNumber, 1);
     setParam('group_q', orderGroupSearch, '');
     setParam('group_state', orderGroupStatus, 'all');
@@ -369,7 +367,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   }, [
     activeTab,
     scope,
-    notificationRuleEnabled,
     notificationRuleSearch,
     notificationMessageId,
     orderGroupPageNumber,
@@ -1045,14 +1042,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>
       )}
 
-      {!runtimeOnly && scope === 'interface' && <LineMessageFlow active={activeTab === 'message_flow'} configuration={lineConfiguration} onOpenMessage={id => {
-        window.location.hash = notificationMessageHref(id);
-      }} />}
-
       {activeTab === 'push_queue' && <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient}
-          search={notificationRuleSearch} enabled={notificationRuleEnabled} onSearchChange={setNotificationRuleSearch} onEnabledChange={setNotificationRuleEnabled}
+          search={notificationRuleSearch} onSearchChange={setNotificationRuleSearch}
           initialCategory={initialHashParams.get('category') === 'accounting' ? 'accounting' : 'all'}
-          selectedEntryId={notificationMessageId} onSelectedEntryChange={setNotificationMessageId} onReturnToFlow={() => { window.location.hash = '#line-management?tab=message_flow'; }}
+          selectedEntryId={notificationMessageId} onSelectedEntryChange={setNotificationMessageId}
         />}
 
       {activeTab === 'order_groups' && <LineOrderGroupWorkbench

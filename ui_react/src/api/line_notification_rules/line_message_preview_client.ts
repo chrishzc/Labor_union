@@ -4,17 +4,45 @@ import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { decodePayload } from '../shared/runtime_decoder';
 
+const ColorSchema = z.string().regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i).optional();
+const LengthSchema = z.number().int().min(0).max(1000).optional();
+const AppearanceSchema = z.strictObject({
+  background_color: ColorSchema,
+  color: ColorSchema,
+  border_color: ColorSchema,
+  border_width: LengthSchema,
+  corner_radius: LengthSchema,
+  padding_top: LengthSchema,
+  padding_right: LengthSchema,
+  padding_bottom: LengthSchema,
+  padding_left: LengthSchema,
+  gap: LengthSchema,
+  margin: LengthSchema,
+  width: LengthSchema,
+  height: LengthSchema,
+  flex: z.number().int().min(0).max(100).optional(),
+  align: z.enum(['start', 'center', 'end']).optional(),
+  justify_content: z.enum(['start', 'center', 'end', 'space-between', 'space-around', 'space-evenly']).optional(),
+  align_items: z.enum(['start', 'center', 'end', 'stretch']).optional(),
+  button_style: z.enum(['primary', 'secondary', 'link']).optional(),
+  bubble_size: z.enum(['nano', 'micro', 'deca', 'hecto', 'kilo', 'mega', 'giga']).optional(),
+  wrap: z.boolean().optional(),
+});
+
+export type PreviewAppearance = z.infer<typeof AppearanceSchema>;
 export interface PreviewNode {
   kind: 'text' | 'box' | 'button' | 'separator' | 'image';
   text: string; bold: boolean; size: string; layout: 'horizontal' | 'vertical';
   primary: boolean; action_description: string; children: PreviewNode[];
   image_data?: string;
+  appearance?: PreviewAppearance;
 }
 const NodeSchema: z.ZodType<PreviewNode> = z.lazy(() => z.strictObject({
   kind: z.enum(['text', 'box', 'button', 'separator', 'image']), text: z.string(), bold: z.boolean(),
   size: z.string(), layout: z.enum(['horizontal', 'vertical']), primary: z.boolean(),
   action_description: z.string(), children: z.array(NodeSchema),
   image_data: z.string().regex(/^(?:data:image\/png;base64,[A-Za-z0-9+/=]+)?$/).default(''),
+  appearance: AppearanceSchema.optional(),
 }));
 const DescriptorSchema = z.strictObject({ id: z.string(), template_id: z.string().nullable(), name: z.string(),
   format: z.enum(['text', 'flex']), requires_case: z.boolean(), requires_staff: z.boolean(), builtin: z.boolean(), allows_draft: z.boolean().default(false) });

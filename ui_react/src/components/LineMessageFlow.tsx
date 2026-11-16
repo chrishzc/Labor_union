@@ -4,46 +4,52 @@ import { ArrowRight, ChevronDown, MessageSquare, RefreshCw, X } from 'lucide-rea
 import { lineConfigurationQueryClient, type LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { adaptLineNotificationRulesCatalog, type LineNotificationRuleModel } from '../adapters/line_configuration/line_configuration_query_adapter';
-import { LINE_MESSAGE_FLOWS, MESSAGE_DELIVERY_LABELS, MESSAGE_FLOW_STATUS_LABELS, resolveFlowMessages, type FlowMessage } from '../adapters/line_configuration/line_message_flow_adapter';
+import { LINE_MESSAGE_FLOWS, MESSAGE_DELIVERY_LABELS, MESSAGE_FLOW_STATUS_LABELS, resolveFlowMessages, type FlowJourneyId, type FlowMessage } from '../adapters/line_configuration/line_message_flow_adapter';
 import './LineMessageFlow.css';
+
+export type LineMessageFlowSource =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; descriptors: readonly PreviewDescriptor[]; rules: readonly LineNotificationRuleModel[] };
 
 interface Props {
   active?: boolean;
   configuration?: LineConfigurationQueryClient;
   previews?: LineMessagePreviewClient;
-  onOpenMessage(id: string): void;
+  source?: LineMessageFlowSource;
+  onRefresh?(): void;
+  onOpenMessage(id: string, context: { journeyId: FlowJourneyId; button: HTMLButtonElement }): void;
 }
 
-export function LineMessageFlow({ active = true, configuration = lineConfigurationQueryClient, previews = lineMessagePreviewClient, onOpenMessage }: Props) {
-  const [journeyId, setJourneyId] = useState('matching');
+export function LineMessageFlow({ active = true, configuration = lineConfigurationQueryClient, previews = lineMessagePreviewClient, source, onRefresh, onOpenMessage }: Props) {
+  const [journeyId, setJourneyId] = useState<FlowJourneyId>('matching');
   const [stageIndex, setStageIndex] = useState<number | null>(null);
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
-  const [descriptors, setDescriptors] = useState<PreviewDescriptor[]>([]);
-  const [rules, setRules] = useState<LineNotificationRuleModel[]>([]);
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [fetched, setFetched] = useState<LineMessageFlowSource>({ status: 'loading' });
   const [reload, setReload] = useState(0);
+  const shouldFetch = active && !source;
   useEffect(() => {
-    if (!active) return;
+    if (!shouldFetch) return;
     const controller = new AbortController();
-    setState('loading');
+    setFetched({ status: 'loading' });
     void Promise.all([configuration.getNotificationRules({ signal: controller.signal }), previews.catalog({ signal: controller.signal })])
       .then(([catalog, items]) => {
         if (controller.signal.aborted) return;
-        setRules(adaptLineNotificationRulesCatalog(catalog).rules);
-        setDescriptors(items);
-        setState('ready');
-      }).catch(() => { if (!controller.signal.aborted) setState('error'); });
+        setFetched({ status: 'ready', descriptors: items, rules: adaptLineNotificationRulesCatalog(catalog).rules });
+      }).catch(() => { if (!controller.signal.aborted) setFetched({ status: 'error' }); });
     return () => controller.abort();
-  }, [active, configuration, previews, reload]);
+  }, [shouldFetch, configuration, previews, reload]);
 
   if (!active) return null;
-  const journey = LINE_MESSAGE_FLOWS.find(item => item.id === journeyId)!;
+  const current = source ?? fetched;
+  const refresh = onRefresh ?? (() => setReload(value => value + 1));
+  const journey = LINE_MESSAGE_FLOWS.find(item => item.id === journeyId) ?? LINE_MESSAGE_FLOWS[0];
   const stage = stageIndex === null ? null : journey.stages[stageIndex];
-  const openMessage = (message: FlowMessage) => onOpenMessage(message.descriptor.id);
-  const selectJourney = (id: string) => { setJourneyId(id); setStageIndex(null); setExpandedNode(null); };
+  const openMessage = (message: FlowMessage, button: HTMLButtonElement) => onOpenMessage(message.descriptor.id, { journeyId, button });
+  const selectJourney = (id: FlowJourneyId) => { setJourneyId(id); setStageIndex(null); setExpandedNode(null); };
   const statusLabel = (message: FlowMessage) => <span className={`line-flow-message-status ${message.status}`}>{MESSAGE_FLOW_STATUS_LABELS[message.status]}</span>;
   return <section className="line-message-flow" aria-label="LINE 流程圖">
-    <header className="line-flow-heading"><div><h2>LINE 流程圖</h2><p>先看流程，點選步驟再看訊息。</p></div><button className="line-secondary-btn" type="button" disabled={state === 'loading'} onClick={() => setReload(value => value + 1)}><RefreshCw size={16} aria-hidden="true" />重新整理</button></header>
+    {!source && <header className="line-flow-heading"><div><h2>LINE 流程圖</h2><p>點選步驟，查看這個環節的訊息。</p></div><button className="line-secondary-btn" type="button" disabled={current.status === 'loading'} onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新整理</button></header>}
     <div className="line-flow-workspace">
       <div className="line-flow-tabs" role="tablist" aria-label="流程類別">{LINE_MESSAGE_FLOWS.map((item, index) => <button type="button" key={item.id} role="tab" tabIndex={item.id === journeyId ? 0 : -1} aria-selected={item.id === journeyId} aria-controls="line-flow-journey" id={`line-flow-tab-${item.id}`} onClick={() => selectJourney(item.id)} onKeyDown={event => {
         const next = event.key === 'ArrowRight' ? (index + 1) % LINE_MESSAGE_FLOWS.length : event.key === 'ArrowLeft' ? (index + LINE_MESSAGE_FLOWS.length - 1) % LINE_MESSAGE_FLOWS.length : event.key === 'Home' ? 0 : event.key === 'End' ? LINE_MESSAGE_FLOWS.length - 1 : null;
@@ -52,11 +58,11 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
         event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
       }}>{item.name}</button>)}</div>
       {journey.summary && <p className="line-flow-journey-summary">{journey.summary}</p>}
-      {state === 'loading' ? <p className="line-flow-feedback" role="status">正在讀取正式訊息與啟用狀態…</p> : state === 'error' ? <div className="line-flow-feedback" role="alert"><p>流程訊息暫時無法載入，請重新整理。</p><button type="button" className="line-secondary-btn" onClick={() => setReload(value => value + 1)}>重新載入流程訊息</button></div> : <div id="line-flow-journey" role="tabpanel" aria-labelledby={`line-flow-tab-${journey.id}`}>
+      {current.status === 'loading' ? <p className="line-flow-feedback" role="status">正在讀取正式訊息與啟用狀態…</p> : current.status === 'error' ? <div className="line-flow-feedback" role="alert"><p>流程訊息暫時無法載入，請重新整理。</p><button type="button" className="line-secondary-btn" onClick={refresh}>重新載入流程訊息</button></div> : <div id="line-flow-journey" role="tabpanel" aria-labelledby={`line-flow-tab-${journey.id}`}>
         <div className="line-flow-steps" style={{ '--line-flow-stage-count': journey.stages.length } as CSSProperties}>{journey.stages.map((item, index) => {
           const count = item.nodes.reduce((sum, node) => {
             const hasCatalogEntry = node.ids || node.templates;
-            const count = hasCatalogEntry ? resolveFlowMessages(node, descriptors, rules).length : node.delivery ? 1 : 0;
+            const count = hasCatalogEntry ? resolveFlowMessages(node, current.descriptors, current.rules).length : node.delivery ? 1 : 0;
             return sum + (node.alternatives ? Math.min(count, 1) : count);
           }, 0);
           return <div className="line-flow-step-wrap" key={item.title}>
@@ -79,11 +85,11 @@ export function LineMessageFlow({ active = true, configuration = lineConfigurati
                 <p>{node.summary}</p>
               </article>;
             }
-            const items = resolveFlowMessages(node, descriptors, rules);
+            const items = resolveFlowMessages(node, current.descriptors, current.rules);
             const single = items.length === 1 ? items[0] : null;
-            return <div className="line-flow-message-group" key={node.id}><button type="button" className="line-flow-message-row" disabled={items.length === 0} aria-expanded={!single && items.length > 0 ? expandedNode === node.id : undefined} onClick={() => single ? openMessage(single) : setExpandedNode(expandedNode === node.id ? null : node.id)}>
+            return <div className="line-flow-message-group" key={node.id}><button type="button" className="line-flow-message-row" disabled={items.length === 0} aria-expanded={!single && items.length > 0 ? expandedNode === node.id : undefined} onClick={event => single ? openMessage(single, event.currentTarget) : setExpandedNode(expandedNode === node.id ? null : node.id)}>
               <span className="line-flow-row-name">{node.title}</span>{single ? statusLabel(single) : <span className="line-flow-group-count">{items.length ? `${items.length} ${node.alternatives ? '種公版' : '則訊息'}` : '缺少訊息設定'}</span>}<span className="line-flow-row-action">{single ? (node.previewOnly ? '預覽訊息' : '調整訊息') : items.length ? '查看訊息' : '尚未設定'}{single ? <ArrowRight size={14} /> : <ChevronDown size={14} className={expandedNode === node.id ? 'expanded' : ''} />}</span>
-            </button>{deliveryLabels}{items.length === 0 && <p className="line-flow-node-summary">此訊息的規則或模板尚未設定，請先同步通知設定。</p>}{node.summary && <p className="line-flow-node-summary">{node.summary}</p>}{!single && expandedNode === node.id && <div className="line-flow-nested">{items.map(item => <button type="button" key={item.descriptor.id} onClick={() => openMessage(item)}><span>{item.descriptor.name}</span>{statusLabel(item)}<ArrowRight size={14} aria-hidden="true" /></button>)}</div>}</div>;
+            </button>{deliveryLabels}{items.length === 0 && <p className="line-flow-node-summary">此訊息的規則或模板尚未設定，請先同步通知設定。</p>}{node.summary && <p className="line-flow-node-summary">{node.summary}</p>}{!single && expandedNode === node.id && <div className="line-flow-nested">{items.map(item => <button type="button" key={item.descriptor.id} onClick={event => openMessage(item, event.currentTarget)}><span>{item.descriptor.name}</span>{statusLabel(item)}<ArrowRight size={14} aria-hidden="true" /></button>)}</div>}</div>;
           })}
         </section> : <div className="line-flow-instruction" id="line-flow-stage-messages"><MessageSquare size={18} aria-hidden="true" /><p>點選上方步驟，查看這個環節的 LINE 訊息。</p></div>}
       </div>}

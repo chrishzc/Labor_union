@@ -127,8 +127,8 @@ class ServiceStartWorkflow:
     def leave_cases(self, staff_id):
         return self.repository.leave_cases(staff_id)
 
-    def selected_leave_case(self, staff_id: int, case_no: str) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
-        return self.repository.selected_leave_case(staff_id, case_no)
+    def selected_leave_case(self, staff_id: int, case_no: str, *, lock: bool = False) -> tuple[tuple[LeaveCase, ...], LeaveCaseAvailability]:
+        return self.repository.selected_leave_case(staff_id, case_no, lock=lock)
 
     def submit_leave(self, submission):
         with self.units() as unit:
