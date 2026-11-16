@@ -40,10 +40,10 @@ describe('LineRichMenuDraftActionEditor', () => {
   it('offers supported canonical LIFF choices and no switch or retired anomaly entry', () => {
     render(<Harness />); fireEvent.change(screen.getByLabelText('點擊後的動作'), { target: { value: 'uri' } });
     expect(screen.queryByRole('option', { name: /切換 Rich Menu/ })).not.toBeInTheDocument();
-    for (const pattern of [/訂單進度/, /月嫂身分綁定/, /申請訂單異動/]) expect(screen.getByRole('option', { name: pattern })).toBeInTheDocument();
+    for (const pattern of [/訂單進度/, /月嫂身分綁定/, /班表與請假/]) expect(screen.getByRole('option', { name: pattern })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /anomalies_center|異常中心/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=profile_update' } });
-    expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=profile_update');
+    fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=staff_schedule' } });
+    expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=staff_schedule');
   });
   it('processing versions expose the business reason without editable controls', () => {
     const initial = structuredClone(DRAFT); initial.publication_locks[0] = { ...initial.publication_locks[0], state: 'processing', readonly_reason: '此版本正在發布處理中' };

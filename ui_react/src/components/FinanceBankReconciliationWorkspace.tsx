@@ -793,10 +793,18 @@ export function FinanceBankReconciliationWorkspace({
             <legend>候選案件</legend>
             {pairing.pairing_candidates?.map(candidate => {
               const key = `${candidate.case_no}:${candidate.purpose}:${candidate.person_id}`;
-              return <p key={key}><label><input type="radio" name="bank-case-candidate"
-                checked={selectedPair === candidate} onChange={() => setSelectedPair(candidate)} />
-                {candidate.case_no} · {purposeLabels[candidate.purpose]}
-                {candidate.purpose === 'staff_salary' && ` · 月嫂編號 ${candidate.person_id}`}</label></p>;
+              return (
+                <p key={key}>
+                  <label>
+                    <input type="radio" name="bank-case-candidate"
+                      checked={selectedPair === candidate} onChange={() => setSelectedPair(candidate)} />
+                    {candidate.case_no} · {purposeLabels[candidate.purpose]}
+                    {candidate.purpose === 'staff_salary' && ` · 月嫂編號 ${candidate.person_id}`}
+                    {' · 預估補助入帳 '}{candidate.estimated_subsidy_payment_date ?? '—'}
+                    {' · 預估薪資入帳 '}{candidate.estimated_self_funded_staff_due_date ?? '—'}
+                  </label>
+                </p>
+              );
             })}
           </fieldset>
         </div>

@@ -18,9 +18,15 @@ function normalizeIdentity(value: string) { const normalized = value.trim(); if 
 function assertPageCursor(ids: readonly number[], cursor: number | null, pageSize: number, code: string, label: string): void { const expected = ids.length === pageSize ? ids[ids.length - 1] ?? null : null; if (cursor !== expected) throw new FinanceImportQueryError(code, `${label} cursor與回應頁面範圍不一致。`); }
 async function decode<T>(promise: Promise<unknown>, schema: ReturnType<typeof financeEnvelope>, label: string): Promise<T> { try { const raw = await promise; const parsed = schema.safeParse(raw); if (!parsed.success) throw new ApiDecodeError(`${label}回應結構異常。`, parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw); if (!parsed.data.success) throw new FinanceImportQueryError('FINANCE_IMPORT_FAILURE', parsed.data.error ?? parsed.data.message); return parsed.data.data as T; } catch (error) { throw mapFinanceImportQueryError(error); } }
 export const financeImportQueryClient = {
-  async pairBankTransaction(rowId: number, candidate: NonNullable<FinanceBankTransaction['pairing_candidates']>[number]) {
+  async pairBankTransaction(
+    rowId: number,
+    { case_no, purpose, person_id }: Pick<
+      NonNullable<FinanceBankTransaction['pairing_candidates']>[number], 'case_no' | 'purpose' | 'person_id'
+    >,
+  ) {
     const result = await decode<{row_id:number}>(transport.post(
-      `/api/v1/finance-import/bank-transactions/${rowId}/pair`, candidate, options(undefined, 'finance-bank-pair'),
+      `/api/v1/finance-import/bank-transactions/${rowId}/pair`, { case_no, purpose, person_id },
+      options(undefined, 'finance-bank-pair'),
     ), financeEnvelope(z.strictObject({row_id: z.literal(rowId)})), '人工配對');
     return result.row_id;
   },

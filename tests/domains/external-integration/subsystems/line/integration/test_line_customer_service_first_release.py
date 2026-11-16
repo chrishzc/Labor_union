@@ -147,7 +147,7 @@ def test_old_handoff_postback_background_path_is_inert():
 
 
 def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
-    from subsystems.line.service_help_application import _ai_assistant_payload
+    from subsystems.line.service_help_application import _category_faq_payload, CustomerServiceCategory
 
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
@@ -160,7 +160,11 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
     application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
 
     fee_payload = json.loads(unit_of_work.delivery_tasks.requests[1].payload_json)
-    assert fee_payload == _ai_assistant_payload()
+    expected_payload = _category_faq_payload(
+        CustomerServiceCategory.PAYMENT_SUBSIDY,
+        application._get_category_qa_items(CustomerServiceCategory.PAYMENT_SUBSIDY),
+    )
+    assert fee_payload == expected_payload
 
 
 def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):
@@ -304,12 +308,13 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "?entry=gateway" in action_uris or "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
     assert "?target=faq" not in action_uris  # FAQ is a tab of the merged LIFF entry.
-    assert "?target=ai_assistant" in action_uris
+    assert "常見問題" in message_texts
     assert "服務說明" not in message_texts
     assert "常見問答" not in message_texts
     assert customer_menu["size"] == {"width": 2500, "height": 843}
     assert customer_quadrants == [
-        ("常見問答", "uri", None, "?target=ai_assistant"),
+        ("案件資訊", "postback", None, "customer:case-information"),
+        ("常見問題", "message", "常見問題", None),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris
@@ -327,8 +332,8 @@ def test_staff_self_service_exposes_leave_flow_and_retires_baby_log():
     assert not (PROJECT_ROOT / "line/static/staff_baby_log.html").exists()
 
     assert "/api/v1/line/staff-self-service/leave-results/" in schedule
-    assert "leaveResultPost('submit',pending)" in schedule
-    assert '確認原操作結果' in schedule and 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in schedule
+    assert "leaveResultPost('propose'," in schedule
+    assert "submitPostponeProposal" in schedule
     assert '/leave-requests/preview' not in schedule
     assert 'confirmLeave' not in schedule
     assert "LINE provider" not in schedule
@@ -430,3 +435,78 @@ def test_customer_service_preview_apply_routes_keep_legacy_patch_as_retired_guar
         "/api/v1/customer-service/tickets/{ticket_id}/update/apply",
         "POST",
     ) in routes
+
+
+def test_customer_menu_case_information_postback_replies_flex_card():
+    """驗證客戶選單點擊【案件資訊】或傳送「案件資訊」文字，直接以 Flex 卡片回傳服務條件與費用約定。"""
+    from domains.line.identities import LineWebhookEventId, LineSourceType
+    from domains.line.delivery import LineMessageKind
+
+    now = datetime(2026, 11, 16, 8, 30, tzinfo=timezone.utc)
+    handlers = LineWebhookIdentityHandlers(lambda: now, lambda p, f: f"https://example.com/liff?p={p}&f={f}")
+
+    def make_inbox(postback_data=None, text_msg=None, user_id="U-customer-test"):
+        if postback_data:
+            payload = {"postback": {"data": postback_data}}
+        else:
+            payload = {"message": {"type": "text", "text": text_msg}}
+        event = SimpleNamespace(
+            event_id=LineWebhookEventId("evt-case-info-test"),
+            source=SimpleNamespace(source_type=LineSourceType.USER, user_id=LineUserId(user_id)),
+            occurred_at=now,
+            payload_json=json.dumps(payload),
+        )
+        return SimpleNamespace(event=event)
+
+    card_payload = {
+        "type": "flex",
+        "altText": "案件 115000179 服務條件與費用約定",
+        "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "contents": []}},
+    }
+    uow = SimpleNamespace(
+        delivery_tasks=DeliveryTasks(),
+        customer_case_information=lambda uid: {"card": card_payload},
+        platform_users=SimpleNamespace(apply_friend_event=lambda _: None),
+    )
+
+    # 1. Postback 點擊【案件資訊】
+    inbox_pb = make_inbox(postback_data="customer:case-information")
+    assert handlers.handle_reply_postback(inbox_pb, uow) is True
+    assert len(uow.delivery_tasks.requests) == 1
+    req1 = uow.delivery_tasks.requests[0]
+    assert req1.message_kind is LineMessageKind.FLEX
+    assert "115000179" in req1.payload_json
+
+    # 2. 聊天室打字「案件資訊」
+    inbox_msg = make_inbox(text_msg="案件資訊")
+    assert handlers.handle_reply_message(inbox_msg, uow) is True
+    assert len(uow.delivery_tasks.requests) == 2
+    req2 = uow.delivery_tasks.requests[1]
+    assert req2.message_kind is LineMessageKind.FLEX
+
+
+def test_customer_menu_case_information_unbound_and_no_case_guidance():
+    """驗證未綁定或無案件時回覆友善引導文字。"""
+    from domains.line.identities import LineWebhookEventId, LineSourceType
+    from domains.line.delivery import LineMessageKind
+
+    now = datetime(2026, 11, 16, 8, 30, tzinfo=timezone.utc)
+    handlers = LineWebhookIdentityHandlers(lambda: now, lambda p, f: f"https://example.com/liff?p={p}&f={f}")
+
+    event = SimpleNamespace(
+        event_id=LineWebhookEventId("evt-unbound-test"),
+        source=SimpleNamespace(source_type=LineSourceType.USER, user_id=LineUserId("U-unbound")),
+        occurred_at=now,
+        payload_json=json.dumps({"postback": {"data": "customer:case-information"}}),
+    )
+    inbox = SimpleNamespace(event=event)
+
+    uow_unbound = SimpleNamespace(
+        delivery_tasks=DeliveryTasks(),
+        customer_case_information=lambda uid: "您好！目前尚未連結您的客戶身分資料。\n若您已在工會或市府完成登記，請先點選下方【服務申請入口】完成身分連結；或直接在此留言由專員為您查詢。",
+    )
+    assert handlers.handle_reply_postback(inbox, uow_unbound) is True
+    assert len(uow_unbound.delivery_tasks.requests) == 1
+    req = uow_unbound.delivery_tasks.requests[0]
+    assert req.message_kind is LineMessageKind.TEXT
+    assert "服務申請入口" in req.payload_json

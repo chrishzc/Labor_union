@@ -164,6 +164,8 @@ class _FakeGroupHelperUoW:
         service_commenced: bool | None = None,
         schedule_rows: tuple[dict[str, Any], ...] = (),
         service_completed: bool = False,
+        order_information_sections: tuple[Any, ...] | None = None,
+        client_name: str | None = None,
     ) -> None:
         self._connection = None
         self.configurations = SimpleNamespace(
@@ -180,15 +182,18 @@ class _FakeGroupHelperUoW:
         self.service_commenced = is_started if service_commenced is None else service_commenced
         self.schedule_rows = schedule_rows
         self.service_completed = service_completed
+        self.order_information_sections = order_information_sections
+        self.client_name = client_name or "林小姐"
 
     def group_helper_context(self, case_no: str, user_id: str) -> dict[str, Any] | None:
         if case_no != "C-2026-01":
             return None
-        return {
+        ctx: dict[str, Any] = {
             "case_no": case_no,
             "order_status": "訂單完成" if self.service_completed else "matched" if not self.is_started else "in_service",
             "order_version": 3,
             "client_id": 88,
+            "client_name": self.client_name,
             "service_days": 25,
             "service_type": "25日",
             "planned_start_date": date(2026, 6, 1),
@@ -208,6 +213,9 @@ class _FakeGroupHelperUoW:
             "is_admin": user_id == "U-admin-1",
             "admin_user_id": 5 if user_id == "U-admin-1" else None,
         }
+        if self.order_information_sections is not None:
+            ctx["order_information_sections"] = self.order_information_sections
+        return ctx
 
 
 def _assert_all_reply_only(uow: _FakeGroupHelperUoW) -> None:
@@ -261,9 +269,11 @@ def test_satisfaction_survey_shows_for_staff_only_after_completion(confirmed_sta
 def test_satisfaction_survey_runtime_context_uses_order_state_and_effective_staff(status, has_agreed_date, staff_reference, visible) -> None:
     single_rows = iter((
         {"status": status, "actual_start_date": date(2026, 6, 10) if has_agreed_date else None, "client_id": 88},
-        {"staff_id": 7}, None, {"1": 1} if has_agreed_date else None,
+        {"1": 1} if has_agreed_date else None,
     ))
     row_sets = iter((
+        [{"staff_id": 7, "staff_name": "月嫂七", "assignment_id": 1, "scheduling_version": 1}],
+        [],
         [{"staff_id": 7, "is_work_day": True}],
         [{"subject_type": "staff", "subject_reference": staff_reference}],
     ))
@@ -1029,3 +1039,312 @@ def test_webhook_identity_handlers_routes_group_helper_without_name_error() -> N
     )
     assert len(uow.delivery_tasks.requests) == 4
     _assert_all_reply_only(uow)
+
+
+def test_group_helper_menu_includes_case_information_action() -> None:
+    app = _make_app()
+    uow = _FakeGroupHelperUoW(is_started=False)
+    assert app.handle_reply(
+        _make_inbox("evt-menu-case-info", {"type": "message", "message": {"type": "text", "text": "小幫手"}}),
+        uow,
+    ) is True
+    payload = json.loads(uow.delivery_tasks.requests[0].payload_json)
+    items = payload["contents"]["body"]["contents"]
+    actions = [item["action"] for item in items if "action" in item]
+    info_action = next((a for a in actions if a.get("data") == "group-helper:case-information"), None)
+    assert info_action is not None
+    assert info_action.get("label") == "案件資訊"
+    _assert_all_reply_only(uow)
+
+
+def test_group_helper_case_information_postback_and_text_reply() -> None:
+    from subsystems.orders.order_information import CandidateInformationSection
+
+    sample_sections = (
+        CandidateInformationSection(
+            "服務約定",
+            (
+                ("案件編號 (case_no)", "C-2026-01"),
+                ("服務人員姓名", "王淑芬"),
+                ("客戶名稱", "林小姐"),
+                ("預計服務開始日", "2026-06-01"),
+                ("預計服務結束日", "2026-06-25"),
+                ("每日服務時段", "09:00–17:30"),
+                ("每日服務時數", "8.0"),
+                ("服務方式", "週休2日"),
+                ("希望服務天數", "25"),
+                ("服務地址", "新竹市東區範例路 1 號"),
+                ("下廚需求", "需要下廚"),
+                ("胎數", "單胞胎"),
+            ),
+        ),
+        CandidateInformationSection(
+            "客戶付款約定",
+            (
+                ("訂金金額", "NT$ 6,000"),
+                ("預計訂金繳款日", "2026-05-15"),
+                ("第一期金額", "NT$ 12,000"),
+                ("預計第一期繳款日", "2026-06-01"),
+                ("第二期金額", "NT$ 0"),
+                ("預計第二期繳款日", "不適用"),
+                ("樓層費", "NT$ 0"),
+                ("樓層費預計繳款日", "不適用"),
+                ("客戶應付總額", "NT$ 18,000"),
+            ),
+        ),
+        CandidateInformationSection(
+            "其他約定",
+            (
+                ("特殊休假日", "待確認"),
+                ("注意事項", "希望人好相處的~謝謝"),
+            ),
+        ),
+    )
+
+    app = _make_app()
+    uow = _FakeGroupHelperUoW(is_started=False, order_information_sections=sample_sections)
+
+    # 1. 客戶點擊 Postback 按鈕
+    assert (
+        app.handle_postback(
+            _make_inbox(
+                "evt-case-info-pb",
+                {"type": "postback", "postback": {"data": "group-helper:case-information"}},
+                user_id="U-customer-1",
+            ),
+            uow,
+        )
+        is True
+    )
+    req = uow.delivery_tasks.requests[-1]
+    assert req.message_kind is LineMessageKind.FLEX
+    payload = json.loads(req.payload_json)
+    assert payload["type"] == "flex"
+    assert "C-2026-01" in payload["altText"]
+    bubble = payload["contents"]
+    assert bubble["header"]["contents"][1]["text"] == "服務條件與費用約定"
+    assert "王淑芬" in bubble["header"]["contents"][2]["text"]
+
+    body_nodes = bubble["body"]["contents"]
+    section_titles = [node["contents"][1]["text"] for node in body_nodes if node.get("layout") == "horizontal"]
+    assert "服務約定" in section_titles
+    assert "客戶付款約定" in section_titles
+    assert "其他約定" in section_titles
+
+    # 2. 不支援文字指令觸發（傳送「案件資訊」或「服務條件與費用」不回應）
+    assert (
+        app.handle_message(
+            _make_inbox(
+                "evt-case-info-txt",
+                {"type": "message", "message": {"type": "text", "text": "案件資訊"}},
+                user_id="U-staff-1",
+            ),
+            uow,
+        )
+        is False
+    )
+    assert (
+        app.handle_message(
+            _make_inbox(
+                "evt-case-info-txt2",
+                {"type": "message", "message": {"type": "text", "text": "服務條件與費用"}},
+                user_id="U-customer-1",
+            ),
+            uow,
+        )
+        is False
+    )
+    assert len(uow.delivery_tasks.requests) == 1
+
+    # 3. 無 sections 時優雅降級
+    empty_uow = _FakeGroupHelperUoW(is_started=False, order_information_sections=())
+    assert (
+        app.handle_postback(
+            _make_inbox(
+                "evt-case-info-empty",
+                {"type": "postback", "postback": {"data": "group-helper:case-information"}},
+                user_id="U-customer-1",
+            ),
+            empty_uow,
+        )
+        is True
+    )
+    empty_payload = json.loads(empty_uow.delivery_tasks.requests[-1].payload_json)
+    assert "目前無此案件之服務條件與費用約定資料" in str(empty_payload)
+
+
+def test_multi_caregiver_context_recognition_and_stress_test() -> None:
+    """壓力測試：多月嫂案件之身分辨識、各月嫂專屬綁定與合併顯示。"""
+    app = _make_app()
+    # 模擬案件 115000179：2 位月嫂（陳月嫂 staff_id=101、林月嫂 staff_id=102）
+    formal_rows = [
+        {"assignment_id": 201, "staff_id": 101, "staff_name": "陳月嫂", "scheduling_version": 3},
+        {"assignment_id": 202, "staff_id": 102, "staff_name": "林月嫂", "scheduling_version": 3},
+    ]
+    segment_rows = [
+        {"segment_id": 301, "staff_id": 101, "staff_name": "陳月嫂", "assigned_start_date": "2027-04-10"},
+        {"segment_id": 302, "staff_id": 102, "staff_name": "林月嫂", "assigned_start_date": "2027-04-25"},
+    ]
+    schedule_rows = [
+        {"work_date": date(2027, 4, 10), "is_work_day": True, "staff_id": 101, "staff_name": "陳月嫂"},
+        {"work_date": date(2027, 4, 25), "is_work_day": True, "staff_id": 102, "staff_name": "林月嫂"},
+    ]
+
+    def create_mock_conn(user_line_id: str, bindings_list: list[dict]):
+        single_rows = iter((
+            {
+                "case_no": "115000179", "status": "服務中", "actual_start_date": date(2027, 4, 10),
+                "actual_end_date": date(2027, 5, 7), "client_id": 888, "client_name": "劉之君",
+                "service_days": 20, "service_type": "週休2日", "lifecycle_version": 5,
+            },
+            {"1": 1},  # has_applied_start
+        ))
+        row_sets = iter((
+            formal_rows,
+            segment_rows,
+            schedule_rows,
+            bindings_list,
+        ))
+        cursor = SimpleNamespace(
+            execute=lambda *_: None,
+            fetchone=lambda: next(single_rows),
+            fetchall=lambda: next(row_sets),
+        )
+        return SimpleNamespace(cursor=lambda: nullcontext(cursor))
+
+    # 情境 1：第 1 位月嫂（陳月嫂 staff_id=101）操作
+    conn1 = create_mock_conn("U-caregiver-chen", [{"subject_type": "staff", "subject_reference": "101"}])
+    ctx1 = app._load_mysql_context(conn1, object(), "115000179", "U-caregiver-chen")
+    assert ctx1 is not None
+    assert ctx1["is_staff"] is True
+    assert ctx1["is_customer"] is False
+    assert ctx1["staff_id"] == 101
+    assert ctx1["assignment_id"] == 201
+    assert ctx1["staff_name"] == "陳月嫂、林月嫂"
+
+    # 情境 2：第 2 位月嫂（林月嫂 staff_id=102）操作
+    conn2 = create_mock_conn("U-caregiver-lin", [{"subject_type": "staff", "subject_reference": "102"}])
+    ctx2 = app._load_mysql_context(conn2, object(), "115000179", "U-caregiver-lin")
+    assert ctx2 is not None
+    assert ctx2["is_staff"] is True
+    assert ctx2["is_customer"] is False
+    assert ctx2["staff_id"] == 102
+    assert ctx2["assignment_id"] == 202
+    assert ctx2["staff_name"] == "陳月嫂、林月嫂"
+
+    # 情境 3：客戶本人（劉之君 client_id=888）操作
+    conn3 = create_mock_conn("U-client-liu", [{"subject_type": "customer", "subject_reference": "888"}])
+    ctx3 = app._load_mysql_context(conn3, object(), "115000179", "U-client-liu")
+    assert ctx3 is not None
+    assert ctx3["is_staff"] is False
+    assert ctx3["is_customer"] is True
+    assert ctx3["staff_name"] == "陳月嫂、林月嫂"
+
+    # 情境 4：群組外部無關人員操作
+    conn4 = create_mock_conn("U-stranger", [])
+    ctx4 = app._load_mysql_context(conn4, object(), "115000179", "U-stranger")
+    assert ctx4 is not None
+    assert ctx4["is_staff"] is False
+    assert ctx4["is_customer"] is False
+
+
+def test_multi_caregiver_case_information_card_and_payment_terms() -> None:
+    """壓力測試：多月嫂案件資訊卡片顯示多位月嫂姓名與全案金額。"""
+    from subsystems.line.service_start_messages import case_information_card
+
+    sections = [
+        SimpleNamespace(
+            title="服務約定",
+            rows=[
+                ("案件編號(case_no)", "115000179"),
+                ("服務人員姓名", "陳月嫂、林月嫂"),
+                ("客戶名稱", "劉之君"),
+                ("預計服務開始日", "2027-04-10"),
+                ("預計服務結束日", "2027-05-07"),
+                ("每日服務時段", "09:00–17:30"),
+                ("每日服務時數", "8.0"),
+                ("服務方式", "週休2日"),
+                ("希望服務天數", "20"),
+                ("服務地址", "新竹市東區西大路135巷10弄11號"),
+            ],
+        ),
+        SimpleNamespace(
+            title="客戶付款約定",
+            rows=[
+                ("訂金金額", "NT$ 0"),
+                ("預計訂金繳款日", "2026-10-24"),
+                ("第一期金額", "NT$ 12,000"),
+                ("預計第一期繳款日", "2027-04-10"),
+                ("第二期金額", "NT$ 0"),
+                ("預計第二期繳款日", "不適用"),
+                ("樓層費", "NT$ 0"),
+                ("樓層費預計繳款日", "不適用"),
+                ("客戶應付總額", "NT$ 12,000"),
+            ],
+        ),
+        SimpleNamespace(
+            title="其他約定",
+            rows=[
+                ("特殊休假日", "待確認"),
+                ("注意事項", "希望人好相處的~謝謝"),
+            ],
+        ),
+    ]
+
+    card = case_information_card("115000179", "陳月嫂、林月嫂", sections, client_name="劉之君")
+    card_json = json.dumps(card, ensure_ascii=False)
+
+    # 檢驗多月嫂姓名顯示在副標題與內文
+    assert "陳月嫂、林月嫂" in card_json
+    assert "劉之君" in card_json
+    assert "115000179" in card_json
+
+    # 檢驗金額
+    assert "NT$ 12,000" in card_json
+    assert "第一期金額" in card_json
+    assert "客戶應付總額" in card_json
+
+
+def test_multi_caregiver_service_schedule_calendar_rendering() -> None:
+    """壓力測試：多月嫂排班日曆色塊、圖例與統計。"""
+    from subsystems.line.service_start_messages import service_schedule_calendar_card
+
+    rows = [
+        {"work_date": "2027-04-10", "is_work_day": True, "staff_name": "陳月嫂"},
+        {"work_date": "2027-04-11", "is_work_day": True, "staff_name": "陳月嫂"},
+        {"work_date": "2027-04-12", "is_work_day": False, "staff_name": "陳月嫂"},
+        {"work_date": "2027-04-13", "is_work_day": True, "staff_name": "林月嫂"},
+        {"work_date": "2027-04-14", "is_work_day": True, "staff_name": "林月嫂"},
+    ]
+
+    card = service_schedule_calendar_card("115000179", rows, default_staff_name="指派月嫂", today=date(2027, 4, 11))
+    card_json = json.dumps(card, ensure_ascii=False)
+
+    assert "陳月嫂" in card_json
+    assert "林月嫂" in card_json
+    assert "2027 年 4 月" in card_json
+    assert "已服務 2 天" in card_json
+
+
+def test_staff_liffs_have_no_residual_old_service_start_or_leave_spec() -> None:
+    """自動化回歸檢核：月嫂 LIFF 檔案不得殘留舊版回報服務開始或舊請假代班代碼。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[6]
+
+    order_search_path = root / "line" / "static" / "staff_order_search.html"
+    order_search_content = order_search_path.read_text(encoding="utf-8")
+    assert "回報服務開始" not in order_search_content
+    assert "serviceStartCases" not in order_search_content
+    assert "loadServiceStartCases" not in order_search_content
+    assert "serviceStartPost" not in order_search_content
+    assert "送出協調結果" not in order_search_content
+
+    schedule_path = root / "line" / "static" / "staff_schedule.html"
+    schedule_content = schedule_path.read_text(encoding="utf-8")
+    assert "serviceStartSection" not in schedule_content
+    assert "loadServiceStartCases" not in schedule_content
+    assert "serviceStartPost" not in schedule_content
+    assert "回報服務開始安排" not in schedule_content
+    assert "leaveSection" not in schedule_content
+    assert "reloadLeaveCases" not in schedule_content

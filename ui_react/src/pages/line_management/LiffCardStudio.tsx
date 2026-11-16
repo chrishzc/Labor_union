@@ -3,7 +3,7 @@
  * Description: 依用途呈現 LIFF 表單預覽，支援同源前綴互動預覽並保留正式入口。
  */
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { CheckSquare, ChevronRight, FileText, Maximize2, PanelTop, Search, Smartphone, X } from 'lucide-react';
+import { ChevronRight, FileText, Maximize2, PanelTop, Search, Smartphone, X } from 'lucide-react';
 import { applicationUrl } from '../../api/shared/application_fetch';
 import {
   lineIdentityRuntimeConfigClient,
@@ -70,68 +70,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <strong>5. 費用與同意條款</strong>
         <label><input type="checkbox" disabled /> 已詳閱退費原則</label>
         <button type="button" className="mock-primary-btn" disabled>送出完整服務登記表單</button>
-      </div>
-    );
-  }
-
-  if (item.id === 'profile_guard') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator mock-step-danger">身分資格門禁</div>
-        <p className="mock-blocked-title">尚未完成工會服務綁定</p>
-        <small className="mock-blocked-description">
-          修改登記資料僅限已在工會完成媒合登記或服務綁定之產婦使用。系統查無此 LINE 帳號之客戶綁定，直接在此阻擋。
-        </small>
-        <button type="button" className="mock-primary-btn mock-action-spacing" disabled>
-          前往服務綁定 (/line-bind)
-        </button>
-        <button type="button" className="mock-primary-btn mock-secondary-preview-action" disabled>
-          填寫需求調查表單 (/line-registration)
-        </button>
-        <small className="mock-security-note">
-          伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 防竄改架構
-        </small>
-      </div>
-    );
-  }
-
-  if (item.id === 'profile_update') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">修改登記資料申請</div>
-        <p>產婦可查詢目前已登記資料，勾選欲異動之項目並送審：</p>
-        <label>欲異動項目</label>
-        <div className="mock-change-options">
-          <span><CheckSquare aria-hidden="true" /> 聯絡電話</span>
-          <span><CheckSquare aria-hidden="true" /> 生產方式</span>
-        </div>
-        <label>填寫異動內容</label>
-        <textarea rows={2} placeholder="請輸入欲變更的新內容" readOnly />
-        <button type="button" className="mock-primary-btn" disabled>預覽異動差異</button>
-        <small>正式異動流程示意後端 API；送出後等待工會人員審核。</small>
-      </div>
-    );
-  }
-
-  if (item.id === 'order_update') {
-    return (
-      <div className="mock-form-inputs">
-        <div className="mock-step-indicator">修改訂單資訊申請</div>
-        <p>選擇本人的有效訂單與異動項目，確認修改前後內容後送出申請。</p>
-        <label>選擇訂單</label>
-        <div className="mock-placeholder-box">
-          <strong>案件 CASE-2026-018</strong>
-          <small>訂單成立 ｜ 2026-10-01 至 2026-10-20</small>
-        </div>
-        <label>修改項目</label>
-        <div className="mock-change-options">
-          <span><CheckSquare aria-hidden="true" /> 服務地址</span>
-          <span><CheckSquare aria-hidden="true" /> 下廚需求</span>
-          <span><CheckSquare aria-hidden="true" /> 服務天數</span>
-          <span><CheckSquare aria-hidden="true" /> 每日時段</span>
-        </div>
-        <button type="button" className="mock-primary-btn" disabled>預覽修改內容</button>
-        <small>送出後取得訂單異動申請編號，等待工會在訂單管理辦理。</small>
       </div>
     );
   }
@@ -435,7 +373,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                 <button type="button" className="line-secondary-btn" onClick={clearFilters}>清除條件</button>
               </div>
             )}
-            {['身分與服務入口', '客戶服務', '月嫂服務', '工會工作'].map((group) => {
+            {['身分與服務入口', '月嫂服務', '工會工作'].map((group) => {
               const items = filteredItems.filter((item) => item.group === group);
               return items.length > 0 && (
                 <div key={group} className="liff-studio-group">

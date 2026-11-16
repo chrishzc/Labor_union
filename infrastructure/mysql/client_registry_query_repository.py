@@ -646,6 +646,20 @@ def _load_obligation_dates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[
     return result
 
 
+def load_registry_payment_estimates(cursor, case_nos: tuple[str, ...]) -> dict[str, dict[str, date | None]]:
+    if not case_nos:
+        return {}
+    placeholders = ",".join("%s" for _ in case_nos)
+    cursor.execute(
+        "SELECT o.case_no,o.status AS order_status,o.actual_end_date,"
+        "o.end_date AS planned_end_date,c.identity_status "
+        "FROM orders o JOIN clients c ON c.id=o.client_id "
+        f"WHERE o.case_no IN ({placeholders})",
+        case_nos,
+    )
+    return {str(row["case_no"]): _registry_payment_estimates(row) for row in cursor.fetchall()}
+
+
 def _registry_payment_estimates(row) -> dict[str, date | None]:
     cancelled = "取消" in str(row.get("order_status") or "")
     service_end = row.get("actual_end_date") or row.get("planned_end_date")

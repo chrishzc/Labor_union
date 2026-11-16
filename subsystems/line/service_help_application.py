@@ -10,8 +10,10 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.navigation_catalog import route_aliases
 
 from datetime import datetime, timedelta
+import json
 import os
-from typing import Callable
+from pathlib import Path
+from typing import Any, Callable, Sequence, Mapping
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
@@ -34,6 +36,9 @@ from shared_kernel.identities import IdempotencyReceipt
 from subsystems.line.runtime_human_escalation_source import normalize_complaint_text
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+QA_CATALOG_FILE = PROJECT_ROOT / "document" / "line" / "AI客服QA題庫.jsonl"
+
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
 _HANDOFF_CONTINUE_POSTBACK = "customer-service:handoff:continue-ai"
 _HANDOFF_RESUME_POSTBACK = "customer-service:handoff:resume-ai"
@@ -48,6 +53,7 @@ _RESUME_AI_ALIASES = {
 _REPLY_ONLY_SUFFIXES = frozenset({
     "menu", "order-update-menu", "registration", "clarification", "unavailable",
     "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "profile-update-form", "other",
+    "ai_assistant_menu", "knowledge", "category_faq",
 })
 
 
@@ -60,10 +66,57 @@ class LineServiceHelpApplication:
         self,
         now: Callable[[], datetime],
         identity_url: Callable[[str, str], str] | None = None,
+        qa_catalog_loader: Callable[[], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
+        self._qa_catalog_loader = qa_catalog_loader
         self._router = DeterministicLineRouter()
+        self._qa_cache: list[dict[str, Any]] | None = None
+        self._qa_cache_mtime: float | None = None
+
+    def _load_qa_items(self) -> list[dict[str, Any]]:
+        if self._qa_catalog_loader is not None:
+            return self._qa_catalog_loader()
+        if not QA_CATALOG_FILE.exists():
+            return []
+        try:
+            mtime = os.path.getmtime(QA_CATALOG_FILE)
+            if self._qa_cache is not None and self._qa_cache_mtime == mtime:
+                return self._qa_cache
+            items: list[dict[str, Any]] = []
+            with QA_CATALOG_FILE.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    if payload.get("enabled") is True and str(payload.get("answer", "")).strip():
+                        items.append(payload)
+            self._qa_cache = items
+            self._qa_cache_mtime = mtime
+            return items
+        except Exception:
+            return self._qa_cache or []
+
+    def _find_matching_qa(self, text: str) -> dict[str, Any] | None:
+        normalized = text.strip()
+        if not normalized:
+            return None
+        for item in self._load_qa_items():
+            if item.get("question") == normalized:
+                return item
+            if normalized in item.get("aliases", []):
+                return item
+        return None
+
+    def _get_category_qa_items(self, category: CustomerServiceCategory) -> list[dict[str, Any]]:
+        category_targets = {
+            CustomerServiceCategory.SERVICE_FLOW: {"服務流程", "服務登記", "月嫂媒合", "服務排程", "請假代班", "餐飲服務"},
+            CustomerServiceCategory.PAYMENT_SUBSIDY: {"費用", "收費與補助", "補助", "社福補助"},
+        }
+        targets = category_targets.get(category, set())
+        return [item for item in self._load_qa_items() if item.get("category") in targets]
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str, *, reply_only: bool = False) -> bool:
         normalized = text.strip()
@@ -94,12 +147,26 @@ class LineServiceHelpApplication:
             if outcome.route_key == "service_help_menu":
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu", reason_code=outcome.reason_code)
                 return True
+            if outcome.route_key == "ai_assistant_menu":
+                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _ai_assistant_payload(), "ai_assistant_menu", reason_code=outcome.reason_code)
+                return True
             if outcome.route_key in {"order_update_menu", "order_update_request"}:
                 self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _order_update_menu_payload(), "order-update-menu", reason_code=outcome.reason_code)
                 return True
             if outcome.category is None:
                 return False
             self._handle_category(inbox, unit_of_work, line_user_id, outcome.category)
+            return True
+        matched = self._find_matching_qa(normalized)
+        if matched is not None:
+            self._reply_or_enqueue(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                _qa_answer_payload(matched),
+                "knowledge",
+                reason_code="catalog_match",
+            )
             return True
         if isinstance(outcome, SafeMenu):
             return False
@@ -160,7 +227,8 @@ class LineServiceHelpApplication:
 
     def _handle_category(self, inbox, unit_of_work, line_user_id, category):
         if category in {CustomerServiceCategory.SERVICE_FLOW, CustomerServiceCategory.PAYMENT_SUBSIDY}:
-            payload = _ai_assistant_payload()
+            items = self._get_category_qa_items(category)
+            payload = _category_faq_payload(category, items)
         elif category is CustomerServiceCategory.SERVICE_PROGRESS:
             payload = self._progress_payload(inbox, unit_of_work, line_user_id)
         elif category is CustomerServiceCategory.PROFILE_UPDATE:
@@ -291,21 +359,96 @@ def _ai_assistant_liff_url():
     return f"https://liff.line.me/{liff_id}?target=ai_assistant"
 
 
-def _service_menu_payload():
+def _common_category_quick_replies(current: str | None = None) -> dict[str, object]:
+    items = []
+    if current:
+        items.append({"type": "action", "action": {"type": "message", "label": "📚 全部常見問題", "text": "常見問題"}})
+    presets = [
+        ("📋 服務流程", "常見問題：服務流程"),
+        ("💰 費用補助", "常見問題：收費與補助"),
+        ("🔍 查詢進度", "查詢服務進度"),
+        ("✏️ 修改資料", "修改登記資料"),
+        ("🤖 詢問 AI 客服", "AI客服"),
+    ]
+    for label, text in presets:
+        if current and current in label:
+            continue
+        items.append({"type": "action", "action": {"type": "message", "label": label, "text": text}})
+    return {"items": items[:13]}
+
+
+def _service_menu_payload(quick_reply=None):
     actions = (
-        ("如何申請服務？", "ai_assistant", "secondary"),
-        ("費用與補助怎麼算？", "ai_assistant", "secondary"),
-        ("如何查詢目前進度？", "查詢服務進度", "secondary"),
-        ("登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
-        ("詢問其他問題", "ai_assistant", "secondary"),
+        ("📋 服務流程與申請", "常見問題：服務流程", "secondary"),
+        ("💰 費用收費與政府補助", "常見問題：收費與補助", "secondary"),
+        ("🔍 如何查詢目前服務進度？", "查詢服務進度", "secondary"),
+        ("✏️ 登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
+        ("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"),
     )
     return _navigation_card_payload(
-        alt_text="服務與問答：請選擇需要的協助",
+        alt_text="新竹市月子工會：常見問題與服務說明",
         eyebrow="新竹市月子工會",
-        title="服務與問答",
-        description="常見問題與服務入口集中在這裡。如果沒看到想問的問題，可以試試看 AI 智慧問答！",
+        title="常見問題與服務說明",
+        description="整理家長最常詢問的服務重點與其他問題，點選下方分類查看常見問題。若找不到答案，歡迎試試 AI 智慧問答！",
         actions=actions,
-        hint="如需人員協助，請直接在此聊天室留言。",
+        hint="點選問題分類可展開常見題目；點選「問 AI 客服」可直接跳出智慧問答視窗。",
+        quick_reply=quick_reply or _common_category_quick_replies(),
+    )
+
+
+def _category_faq_payload(category: CustomerServiceCategory, qa_items: Sequence[dict[str, Any]] | None = None):
+    meta = {
+        CustomerServiceCategory.SERVICE_FLOW: (
+            "📋 服務流程 常見問題",
+            "整理月嫂媒合、申請流程與服務預約相關問題，點選題目即可查看說明：",
+            [
+                "服務流程如何進行？",
+                "如果和月嫂合作不適合，可以更換月嫂嗎？",
+                "服務天數或每日時數可以延長嗎？",
+                "實際生產日期和預產期不同時可以改期嗎？",
+            ],
+            "服務流程",
+        ),
+        CustomerServiceCategory.PAYMENT_SUBSIDY: (
+            "💰 費用與補助 常見問題",
+            "整理到宅月子費用收費、補助申請與退費相關問題，點選題目即可查看說明：",
+            [
+                "一般市民（最高40小時）",
+                "補助市民（最高120小時）",
+                "符合補助退還條件後，大約什麼時候會收到款項？",
+                "如果提前取消服務，退費或補收如何處理？",
+            ],
+            "費用",
+        ),
+    }
+    title, desc, default_questions, cat_name = meta.get(
+        category,
+        ("常見問題", "請點選下方題目查看說明：", ["如何申請服務？", "費用與補助怎麼算？"], "常見問題"),
+    )
+
+    questions = []
+    if qa_items:
+        for item in qa_items:
+            q = item.get("question")
+            if q and q not in questions:
+                questions.append(q)
+    if not questions:
+        questions = default_questions
+
+    actions = []
+    for q in questions[:4]:
+        label = q if len(q) <= 18 else q[:17] + "…"
+        actions.append((label, q, "secondary"))
+    actions.append(("🤖 找不到答案？試試 AI 智慧問答", "ai_assistant", "primary"))
+
+    return _navigation_card_payload(
+        alt_text=f"新竹市月子工會：{title}",
+        eyebrow="新竹市月子工會 · 常見問題",
+        title=title,
+        description=desc,
+        actions=actions,
+        hint="點選問題即可在對話中查看解答；點選「問 AI 客服」可直接彈出 LIFF 提問。",
+        quick_reply=_common_category_quick_replies(cat_name),
     )
 
 
@@ -313,11 +456,37 @@ def _ai_assistant_payload():
     return _navigation_card_payload(
         alt_text="服務說明請至 AI 客服查看",
         eyebrow="新竹市月子工會",
-        title="AI 客服與常見問答",
-        description="服務流程、收費與補助等說明，請至 AI 客服查看常見問答或提問。",
-        actions=(("開啟 AI 客服", "ai_assistant", "primary"),),
-        hint="如需人員協助，請直接在此聊天室留言。",
+        title="AI 客服智慧問答",
+        description="服務流程、收費與補助等問題，點選下方按鈕直接跳出 AI 客服視窗開始提問！",
+        actions=(("🤖 開啟 AI 智慧問答", "ai_assistant", "primary"),),
+        hint="點擊按鈕直接開啟 LIFF 智慧問答；如需人員協助，請直接在此聊天室留言。",
+        quick_reply={
+            "items": [
+                {"type": "action", "action": {"type": "message", "label": "📚 返回常見問題", "text": "常見問題"}},
+            ]
+        },
     )
+
+
+def _qa_answer_payload(item: dict[str, Any]):
+    sources = f"資料來源：{item['source_ref']}\n" if item.get("source_ref") else ""
+    text = (
+        f"{item['answer']}\n\n"
+        f"{sources}此資訊僅供說明，請以工會確認為準。\n\n"
+        "💡 若有特殊或客製化需求，歡迎開啟【AI 智慧問答】提問，或直接在此留言由專員為您服務。"
+    )
+    return {
+        "type": "text",
+        "text": text,
+        "quickReply": {
+            "items": [
+                {"type": "action", "action": {"type": "message", "label": "📚 返回常見問題", "text": "常見問題"}},
+                {"type": "action", "action": {"type": "message", "label": "🤖 詢問 AI 客服", "text": "AI客服"}},
+                {"type": "action", "action": {"type": "message", "label": "👍 有幫助", "text": "有幫助"}},
+                {"type": "action", "action": {"type": "message", "label": "👎 未解決", "text": "未解決"}},
+            ]
+        },
+    }
 
 
 def _form_liff_url(target: str) -> str | None:
@@ -339,8 +508,8 @@ def _order_update_menu_payload():
     return _text_payload("如需變更服務時段、服務天數或訂單內容，請直接在此聊天室留言，工會專員將由後台為您即時確認與調整。")
 
 
-def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, hint):
-    return {
+def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, hint, quick_reply=None):
+    payload = {
         "type": "flex",
         "altText": alt_text,
         "contents": {
@@ -377,6 +546,9 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
             },
         },
     }
+    if quick_reply:
+        payload["quickReply"] = quick_reply
+    return payload
 
 
 def _navigation_button(label, action_text, style):

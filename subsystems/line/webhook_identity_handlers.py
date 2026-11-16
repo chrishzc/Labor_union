@@ -32,7 +32,7 @@ from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
 _CUSTOMER_COMMANDS = {"服務登記", "綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
-_SERVICE_HELP_COMMANDS = {"服務與問答", "服務說明", "常見問答", "問答", "FAQ"}
+_SERVICE_HELP_COMMANDS = {"服務與問答", "服務說明", "常見問答", "常見問題", "常用問題", "問答", "FAQ", "AI客服", "AI問答", "AI智慧問答"}
 _SERVICE_HELP_CATEGORIES = {
     "服務流程": None,
     "收費與補助": None,
@@ -139,6 +139,10 @@ class LineWebhookIdentityHandlers:
         text = _message_text(inbox)
         if text is None:
             return
+        if text.strip() in {"案件資訊", "服務條件與費用"} and inbox.event.source.source_type is LineSourceType.USER:
+            if self._handle_customer_case_information(inbox, unit_of_work):
+                unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
+                return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             normalized = text.strip()
@@ -188,6 +192,10 @@ class LineWebhookIdentityHandlers:
             return True
         if stripped in resolved_aliases:
             return False
+        if stripped in {"案件資訊", "服務條件與費用"}:
+            if self._handle_customer_case_information(inbox, unit_of_work):
+                unit_of_work.platform_users.apply_friend_event(_friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY))
+                return True
         purpose = _identity_purpose_for_text(text)
         if purpose is not None:
             self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
@@ -211,6 +219,9 @@ class LineWebhookIdentityHandlers:
             and self._group_helper_application.handle_postback(inbox, unit_of_work)
         ):
             return True
+        data = _postback_data(inbox)
+        if data in {"customer:case-information", "customer:case-info"}:
+            return self._handle_customer_case_information(inbox, unit_of_work)
         if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
             return True
         data = _postback_data(inbox)
@@ -252,6 +263,10 @@ class LineWebhookIdentityHandlers:
             self._group_helper_application is not None
             and self._group_helper_application.handle_postback(inbox, unit_of_work)
         ):
+            return
+        data = _postback_data(inbox)
+        if data in {"customer:case-information", "customer:case-info"}:
+            self._handle_customer_case_information(inbox, unit_of_work)
             return
         if self._handle_knowledge_feedback_postback(inbox, unit_of_work):
             return
@@ -379,6 +394,164 @@ class LineWebhookIdentityHandlers:
                 unit_of_work=unit_of_work,
             )
         )
+
+    def _handle_customer_case_information(self, inbox, unit_of_work) -> bool:
+        line_user_id = _optional_user_id(inbox)
+        if line_user_id is None or inbox.event.source.source_type is not LineSourceType.USER:
+            return False
+
+        event_identity = inbox.event.event_id.value
+        correlation_id = CorrelationId(f"line-event:{event_identity}")
+
+        # 優先支援自訂 mock / loader (方便單元測試)
+        loader = getattr(unit_of_work, "customer_case_information", None)
+        if callable(loader):
+            result = loader(line_user_id.value)
+            if isinstance(result, dict) and result.get("card"):
+                card = result["card"]
+                unit_of_work.delivery_tasks.enqueue(
+                    LineDeliveryRequest(
+                        LineRecipient(LineRecipientType.USER, line_user_id),
+                        LineMessageKind.FLEX,
+                        canonical_line_payload_json(card),
+                        self._now(),
+                        IdempotencyKey(f"customer-case-info:{event_identity}"),
+                        correlation_id,
+                        REPLY_ONLY_WEBHOOK_SOURCE,
+                        event_identity,
+                    )
+                )
+                return True
+            if isinstance(result, str):
+                unit_of_work.delivery_tasks.enqueue(
+                    _text_delivery(
+                        line_user_id,
+                        _text_message_payload(result),
+                        event_identity,
+                        correlation_id,
+                        self._now(),
+                        f"customer-case-info-text:{event_identity}",
+                        source_type=REPLY_ONLY_WEBHOOK_SOURCE,
+                    )
+                )
+                return True
+
+        conn = getattr(unit_of_work, "_connection", None)
+        if conn is None:
+            return False
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT subject_reference FROM line_identity_role_bindings "
+                "WHERE line_user_id=%s AND subject_type='customer' AND binding_status='bound' LIMIT 1",
+                (line_user_id.value,),
+            )
+            binding = cursor.fetchone()
+
+            if not binding or not binding.get("subject_reference"):
+                msg = (
+                    "您好！目前尚未連結您的客戶身分資料。\n"
+                    "若您已在工會或市府完成登記，請先點選下方【服務申請入口】完成身分連結；或直接在此留言由專員為您查詢。"
+                )
+                unit_of_work.delivery_tasks.enqueue(
+                    _text_delivery(
+                        line_user_id,
+                        _text_message_payload(msg),
+                        event_identity,
+                        correlation_id,
+                        self._now(),
+                        f"customer-case-info-unbound:{event_identity}",
+                        source_type=REPLY_ONLY_WEBHOOK_SOURCE,
+                    )
+                )
+                return True
+
+            client_id = int(binding["subject_reference"])
+            cursor.execute(
+                "SELECT o.case_no, o.status, c.name AS client_name "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "WHERE o.client_id=%s "
+                "ORDER BY CASE o.status "
+                "  WHEN '服務中' THEN 1 "
+                "  WHEN '訂單成立' THEN 2 "
+                "  WHEN '媒合中' THEN 3 "
+                "  WHEN '訂單完成' THEN 4 "
+                "  ELSE 5 END, o.id DESC LIMIT 1",
+                (client_id,),
+            )
+            order_row = cursor.fetchone()
+
+            if not order_row:
+                cursor.execute("SELECT name FROM clients WHERE id=%s", (client_id,))
+                c_row = cursor.fetchone()
+                c_name = (c_row.get("name") if c_row else "").strip() or "客戶"
+                msg = (
+                    f"{c_name} 您好！目前尚無進行中的到宅月子案件。\n"
+                    "若您近期已送出登記，工會正在為您審核與媒合月嫂；若有任何疑問，歡迎直接在此留言，專員將竭誠為您服務！"
+                )
+                unit_of_work.delivery_tasks.enqueue(
+                    _text_delivery(
+                        line_user_id,
+                        _text_message_payload(msg),
+                        event_identity,
+                        correlation_id,
+                        self._now(),
+                        f"customer-case-info-nocase:{event_identity}",
+                        source_type=REPLY_ONLY_WEBHOOK_SOURCE,
+                    )
+                )
+                return True
+
+            case_no = str(order_row["case_no"])
+            cursor.execute(
+                "SELECT s.name AS staff_name FROM case_staff_assignments a "
+                "JOIN staff s ON s.id=a.staff_id WHERE a.case_no=%s ORDER BY a.assignment_sequence, a.id",
+                (case_no,),
+            )
+            staff_rows = list(cursor.fetchall() or ())
+            if not staff_rows:
+                cursor.execute(
+                    "SELECT s.name AS staff_name FROM caregiver_matching_plans p "
+                    "JOIN caregiver_matching_plan_segments ps ON ps.plan_id=p.id "
+                    "JOIN staff s ON s.id=ps.staff_id WHERE p.case_no=%s AND p.is_active=1 ORDER BY ps.segment_order, ps.id",
+                    (case_no,),
+                )
+                staff_rows = list(cursor.fetchall() or ())
+
+        staff_names = "、".join(dict.fromkeys(str(r["staff_name"]).strip() for r in staff_rows if r.get("staff_name"))) or "待指派月嫂"
+
+        from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
+        from subsystems.orders.order_information import build_formal_information_sections
+        from subsystems.line.service_start_messages import case_information_card
+
+        mysql_repo = MySqlOrderInformationRepository(conn)
+        snapshot = mysql_repo.load_owner_snapshot(case_no)
+        if snapshot is not None:
+            facts = dict(snapshot.facts)
+            facts["staff_name"] = staff_names
+            sections = build_formal_information_sections(1, facts, snapshot.field_issues)
+        else:
+            sections = ()
+
+        card = case_information_card(
+            case_no,
+            staff_names,
+            sections,
+            client_name=order_row.get("client_name"),
+        )
+        unit_of_work.delivery_tasks.enqueue(
+            LineDeliveryRequest(
+                LineRecipient(LineRecipientType.USER, line_user_id),
+                LineMessageKind.FLEX,
+                canonical_line_payload_json(card),
+                self._now(),
+                IdempotencyKey(f"customer-case-info:{event_identity}"),
+                correlation_id,
+                REPLY_ONLY_WEBHOOK_SOURCE,
+                event_identity,
+            )
+        )
+        return True
 
 
 def _identity_link_delivery(

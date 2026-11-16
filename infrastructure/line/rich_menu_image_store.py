@@ -94,7 +94,7 @@ def _get_icon_for_label(label: str) -> str:
         return "📝"
     if "AI" in label or "智慧" in label:
         return "🤖"
-    if "問答" in label or "FAQ" in label:
+    if "問題" in label or "問答" in label or "FAQ" in label:
         return "💡"
     if "說明" in label:
         return "🔍"
@@ -140,6 +140,8 @@ def _action_hint_text(action: object) -> str:
         return "點此聯絡 ›"
     if action_type == "richmenuswitch":
         return "點此切換 ›"
+    if action_type == "message":
+        return "點此查看 ›"
     return "點此使用 ›"
 
 

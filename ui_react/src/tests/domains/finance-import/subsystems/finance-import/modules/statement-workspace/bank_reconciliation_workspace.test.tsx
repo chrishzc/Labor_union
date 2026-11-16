@@ -673,22 +673,52 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     } finally { mocks.forEach(mock => mock.mockRestore()); window.location.hash = ''; }
   });
 
-  it('pairs an imported row with an explicitly selected candidate and opens its fresh reconciliation target', async () => {
-    const candidate = {case_no:'115000002',purpose:'client_refund' as const,person_id:12};
-    const source = {...sinopac,reconciliation_target:null, pairing_candidates:[candidate]};
-    const fresh = {...sinopac,reconciliation_target:{case_no:candidate.case_no,staff_id:null,obligation_identities:['refund:1'],requires_selection:true}};
-    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async request => ({
-      items:[request.row_id ? fresh : source],pending_count:1,next_before_row_id:null,
+  it('shows candidate date estimates and submits only the selected pairing identity', async () => {
+    const candidate = { case_no: '115000002', purpose: 'staff_salary' as const, person_id: 12 };
+    const bankRow = {
+      ...taishin, direction: 'outgoing' as const, classification_type: 'staff_salary', review_reason: 'bank_case_suffix_not_found',
+    };
+    const source = {
+      ...bankRow,
+      pairing_candidates: [
+        { ...candidate, estimated_subsidy_payment_date: '2026-10-15', estimated_self_funded_staff_due_date: '2026-09-15' },
+        { ...candidate, case_no: 'A15000003', estimated_subsidy_payment_date: null, estimated_self_funded_staff_due_date: '2026-08-15' },
+        { ...candidate, case_no: '115000004', estimated_subsidy_payment_date: null, estimated_self_funded_staff_due_date: null },
+      ],
+    };
+    const fresh = {
+      ...bankRow,
+      reconciliation_target: { case_no: candidate.case_no, staff_id: candidate.person_id, obligation_identities: ['staff:1'], requires_selection: true },
+    };
+    const real = await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_import_query_client')>(
+      '../../../../../../../api/finance_import/finance_import_query_client',
+    );
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(real.financeImportQueryClient.listBankTransactions);
+    vi.mocked(financeImportQueryClient.pairBankTransaction).mockImplementation(real.financeImportQueryClient.pairBankTransaction);
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
+    const get = vi.spyOn(transport, 'get').mockImplementation(async (_path, options) => ({
+      success: true,
+      message: '',
+      data: { items: [options?.params?.row_id ? fresh : source], pending_count: 1, next_before_row_id: null },
     }));
-    vi.mocked(financeImportQueryClient.pairBankTransaction).mockResolvedValue(source.row_id);
-    const onReconcile=vi.fn();
-    render(<FinanceBankReconciliationWorkspace {...defaultProps} onReconcile={onReconcile} />);
-    fireEvent.click(await screen.findByRole('button',{name:'核對交易'}));
-    expect(screen.getByRole('button',{name:'確認配對'})).toBeDisabled();
-    fireEvent.click(screen.getByRole('radio',{name:/115000002/}));
-    fireEvent.click(screen.getByRole('button',{name:'確認配對'}));
-    await waitFor(()=>expect(onReconcile).toHaveBeenCalledWith(fresh));
-    expect(financeImportQueryClient.pairBankTransaction).toHaveBeenCalledWith(source.row_id,candidate);
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: '', data: { row_id: source.row_id } });
+    try {
+      const onReconcile = vi.fn();
+      render(<FinanceBankReconciliationWorkspace {...defaultProps} onReconcile={onReconcile} />);
+      fireEvent.click(await screen.findByRole('button', { name: '核對交易' }));
+      const selected = screen.getByRole('radio', { name: /115000002.*預估補助入帳 2026-10-15.*預估薪資入帳 2026-09-15/ });
+      expect(screen.getByRole('radio', { name: /A15000003.*預估補助入帳 —.*預估薪資入帳 2026-08-15/ })).toBeVisible();
+      expect(screen.getByRole('radio', { name: /115000004.*預估補助入帳 —.*預估薪資入帳 —/ })).toBeVisible();
+      expect(screen.getByRole('button', { name: '確認配對' })).toBeDisabled();
+      fireEvent.click(selected);
+      fireEvent.click(screen.getByRole('button', { name: '確認配對' }));
+      await waitFor(() => expect(onReconcile).toHaveBeenCalledWith(fresh));
+      expect(post).toHaveBeenCalledWith(`/api/v1/finance-import/bank-transactions/${source.row_id}/pair`, candidate, expect.anything());
+    } finally {
+      get.mockRestore();
+      post.mockRestore();
+      token.mockRestore();
+    }
   });
 
   it('requires a reason to exclude a pending row and refreshes the list', async () => {

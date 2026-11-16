@@ -223,23 +223,6 @@ Description: 提供月嫂查班、合意延期檔期衝突預檢、群組提案�
       <div id="unavailRecordList" class="hint">目前尚無已登記的不接案日期。</div>
     </div>
   </section>
-
-  <!-- 一般請假與代班面板 (非延期專屬模式時顯示) -->
-  <section id="leaveSection" class="panel" aria-labelledby="leaveTitle">
-    <h2 id="leaveTitle" class="section-title">請假、順延與代班</h2>
-    <p>先在案件群組與客戶協調，再送出。已協調順延無衝突時會直接更新；需要安排代班或有排程衝突時，由工會處理。</p>
-    <div id="leaveCases"></div>
-    <p id="leaveStatus" role="status"></p>
-    <button type="button" id="reloadLeaveCases">更新請假與排班</button>
-  </section>
-
-  <!-- 回報服務開始安排面板 (非延期專屬模式時顯示) -->
-  <section id="serviceStartSection" class="panel" aria-label="回報服務開始安排">
-    <h2>回報服務開始安排</h2>
-    <p id="serviceStartStatus" role="status"></p>
-    <div id="serviceStartCases"></div>
-    <button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button>
-  </section>
 </main>
 
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -494,8 +477,6 @@ async function leaveResultPost(path, body, signal) {
 function showRoleBlockedView(customMessage) {
   document.getElementById("pageMainHeading").textContent = "雙方合意延期";
   document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("leaveSection").hidden = true;
-  document.getElementById("serviceStartSection").hidden = true;
   document.getElementById("postponeWorkbench").hidden = true;
   document.getElementById("unavailabilitySection").hidden = true;
   document.getElementById("expiredLinkSection").hidden = true;
@@ -512,8 +493,6 @@ function showRoleBlockedView(customMessage) {
 function showLinkExpiredView(customMessage) {
   document.getElementById("pageMainHeading").textContent = "雙方合意延期";
   document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("leaveSection").hidden = true;
-  document.getElementById("serviceStartSection").hidden = true;
   document.getElementById("postponeWorkbench").hidden = true;
   document.getElementById("unavailabilitySection").hidden = true;
   document.getElementById("roleBlockedSection").hidden = true;
@@ -847,8 +826,6 @@ async function setupPostponeWorkbench(caseItem) {
   postponeCheck = {status: 'idle'};
   document.getElementById("pageMainHeading").textContent = "雙方合意延期";
   document.getElementById("calendarPanel").hidden = true;
-  document.getElementById("leaveSection").hidden = true;
-  document.getElementById("serviceStartSection").hidden = true;
   document.getElementById("roleBlockedSection").hidden = true;
   document.getElementById("expiredLinkSection").hidden = true;
   document.getElementById("unavailabilitySection").hidden = true;
@@ -878,313 +855,32 @@ async function setupPostponeWorkbench(caseItem) {
   void loadPostponeCalendar();
 }
 
-async function loadLeaveCases() {
-  const root = document.getElementById('leaveCases');
-  root.replaceChildren();
-  const status = document.getElementById('leaveStatus');
-  status.textContent = '正在查詢本人正式排班…';
-
+async function loadPostponeCase() {
   try {
     const data = await leaveResultPost('cases', {});
-
-    // 如果是延期專屬模式，嚴格進行案件鎖定與身分校驗
-    if (scheduleMode === 'postpone') {
-      if (!focusCaseNo) {
-        showRoleBlockedView("未指定案件編號，請從 LINE 案件群組選單開啟專屬排班調整。");
-        return;
-      }
-      const matched = data.items.find(item => item.case_no === focusCaseNo);
-      if (!matched) {
-        showRoleBlockedView(`您非案件 ${focusCaseNo} 之指派月嫂，無法調整本案排班。`);
-        return;
-      }
-      await setupPostponeWorkbench(matched);
+    if (!focusCaseNo) {
+      showRoleBlockedView("未指定案件編號，請從 LINE 案件群組選單開啟專屬排班調整。");
       return;
     }
-
-    // 一般排班請假面板渲染 (保留相容性)
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (!key?.startsWith('leave-result-submit:')) continue;
-      let pending;
-      try { pending = JSON.parse(sessionStorage.getItem(key)); } catch { continue; }
-      if (!data.items.some(item => item.case_no === pending.case_no && item.assignment_id === pending.assignment_id))
-        data.items.push({...pending, order_version: pending.expected_order_version, scheduling_version: pending.expected_scheduling_version, service_dates: pending.dates.map(d => d.original_date)});
-    }
-    status.textContent = data.items.length ? '請選擇受影響的服務日，再填寫協調結果。' : '目前沒有可提交請假的正式排班。';
-    for (const item of data.items) {
-      const card = document.createElement('article');
-      card.className = 'panel';
-      card.dataset.caseNo = item.case_no;
-      card.dataset.assignmentId = item.assignment_id;
-      const h = document.createElement('h3');
-      h.textContent = '案件 ' + item.case_no;
-      card.append(h);
-
-      const form = document.createElement('form');
-      const choice = document.createElement('select');
-      choice.setAttribute('aria-label', '請假協調結果');
-      for (const [value, text] of [['defer', '已協調順延'], ['substitute', '需要安排代班']]) {
-        const o = document.createElement('option');
-        o.value = value;
-        o.textContent = text;
-        choice.append(o);
-      }
-      form.append(choice);
-
-      const dayList = document.createElement('fieldset');
-      const legend = document.createElement('legend');
-      legend.textContent = '選擇受影響的服務日';
-      dayList.append(legend);
-      dayList.style.maxHeight = '360px';
-      dayList.style.overflowY = 'auto';
-      form.append(dayList);
-
-      const previewNotice = document.createElement('p');
-      previewNotice.className = 'message';
-      previewNotice.setAttribute('role', 'status');
-      previewNotice.hidden = true;
-      let previewTimer = null;
-      let hasConflict = false;
-
-      const collectDeferDates = fieldsList => fieldsList.filter(f => f.check.checked).map(f => ({original_date: f.day, new_date: choice.value === 'defer' ? f.input.value : null}));
-      let fields = [];
-      const runDeferPreview = async () => {
-        if (choice.value !== 'defer') { previewNotice.hidden = true; previewNotice.textContent = ''; hasConflict = false; return null; }
-        const dates = collectDeferDates(fields);
-        if (!dates.length || dates.some(d => !d.new_date || d.new_date <= d.original_date)) { previewNotice.hidden = true; previewNotice.textContent = ''; hasConflict = false; return null; }
-        try {
-          const preview = await leaveResultPost('preview', {case_no: item.case_no, assignment_id: item.assignment_id, dates});
-          hasConflict = Boolean(preview.conflict);
-          previewNotice.hidden = false;
-          previewNotice.className = hasConflict ? 'message error' : 'message';
-          previewNotice.textContent = hasConflict ? ('檔期衝突：' + (preview.message || '此補班日已有其他案件排班，請重新與客戶協調其他日期！')) : (preview.message || '檔期無衝突，服務總天數與補助時數守恆。');
-          return preview;
-        } catch (error) {
-          hasConflict = true;
-          previewNotice.hidden = false;
-          previewNotice.className = 'message error';
-          previewNotice.textContent = '檔期衝突：' + error.message;
-          return {conflict: true, message: error.message};
-        }
-      };
-      const schedulePreview = () => { clearTimeout(previewTimer); previewTimer = setTimeout(() => { void runDeferPreview(); }, 120); };
-      fields = item.service_dates.map(day => {
-        const row = document.createElement('div');
-        row.className = 'field';
-        const label = document.createElement('label');
-        const check = document.createElement('input');
-        check.type = 'checkbox';
-        check.dataset.serviceDate = day;
-        check.setAttribute('aria-label', '原服務日 ' + day);
-        check.style.width = 'auto';
-        label.style.display = 'flex';
-        label.style.gap = '8px';
-        label.append(check, document.createTextNode('原服務日 ' + day));
-        const newLabel = document.createElement('label');
-        newLabel.textContent = '協議後日期';
-        newLabel.hidden = true;
-        const input = document.createElement('input');
-        input.type = 'date';
-        input.setAttribute('aria-label', day + ' 協議後日期');
-        input.disabled = true;
-        newLabel.append(input);
-        check.onchange = () => {
-          newLabel.hidden = !check.checked || choice.value !== 'defer';
-          input.disabled = !check.checked || choice.value !== 'defer';
-          input.required = check.checked && choice.value === 'defer';
-          schedulePreview();
-        };
-        input.onchange = () => schedulePreview();
-        row.append(label, newLabel);
-        dayList.append(row);
-        return {day, check, input, newLabel};
-      });
-
-      const send = document.createElement('button');
-      send.type = 'submit';
-      send.textContent = '送出請假協調結果';
-      const recover = document.createElement('button');
-      recover.type = 'button';
-      recover.textContent = '確認原操作結果';
-      const message = document.createElement('p');
-      message.setAttribute('role', 'status');
-
-      const storageKey = 'leave-result-submit:' + item.case_no + ':' + item.assignment_id;
-      let pending = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
-      let busy = false;
-
-      const lock = () => {
-        send.disabled = busy || Boolean(pending);
-        choice.disabled = busy || Boolean(pending);
-        recover.hidden = !pending;
-        recover.disabled = busy;
-        for (const f of fields) {
-          f.check.disabled = busy || Boolean(pending);
-          f.input.disabled = busy || Boolean(pending) || !f.check.checked || choice.value !== 'defer';
-        }
-      };
-
-      choice.onchange = () => {
-        fields.forEach(f => {
-          f.newLabel.hidden = !f.check.checked || choice.value !== 'defer';
-          f.input.disabled = !f.check.checked || choice.value !== 'defer';
-          f.input.required = f.check.checked && choice.value === 'defer';
-        });
-        lock();
-        schedulePreview();
-      };
-
-      const submit = async () => {
-        if (!pending || busy) return;
-        busy = true;
-        lock();
-        try {
-          const result = await leaveResultPost('submit',pending);
-          pending = null;
-          sessionStorage.removeItem(storageKey);
-          message.className = 'message';
-          message.textContent = result.status === 'applied' ? (result.result.group_record_queued ? '正式日期、排班及帳務已更新，日期表已交付案件群組寄送。' : '正式日期、排班及帳務已更新；本案尚缺案件群組設定，請聯絡工會。') : (result.conflict_message ? '日期有排程衝突，原排班尚未變更，已交工會處理。' : '已收到代班需求，交由工會安排；原排班尚未變更。');
-          for (const element of form.elements) element.disabled = true;
-          recover.hidden = true;
-        } catch (error) {
-          message.className = 'message error';
-          message.textContent = error.message;
-          if (error.httpStatus >= 400 && error.httpStatus < 500) {
-            pending = null;
-            sessionStorage.removeItem(storageKey);
-          }
-          busy = false;
-          lock();
-        } finally {
-          busy = false;
-          recover.disabled = false;
-        }
-      };
-
-      recover.onclick = () => void submit();
-      form.onsubmit = async event => {
-        event.preventDefault();
-        if (pending || busy) return;
-        const selected = fields.filter(f => f.check.checked);
-        if (!selected.length) {
-          message.className = 'message error';
-          message.textContent = '請至少選擇一個原服務日。';
-          return;
-        }
-        if (choice.value === 'defer' && selected.some(f => !f.input.value || f.input.value <= f.day)) {
-          message.className = 'message error';
-          message.textContent = '請填寫晚於原服務日的協議後日期。';
-          return;
-        }
-        if (choice.value === 'defer') {
-          const preview = await runDeferPreview();
-          if (preview && preview.conflict || hasConflict) {
-            message.className = 'message error';
-            message.textContent = previewNotice.textContent || '檔期衝突：此補班日已有其他案件排班，請重新與客戶協調其他日期！';
-            return;
-          }
-        }
-        pending = {
-          case_no: item.case_no,
-          assignment_id: item.assignment_id,
-          decision: choice.value,
-          dates: selected.map(f => ({original_date: f.day, new_date: choice.value === 'defer' ? f.input.value : null})),
-          expected_order_version: item.order_version,
-          expected_scheduling_version: item.scheduling_version,
-          idempotency_key:crypto.randomUUID()
-        };
-        sessionStorage.setItem(storageKey,JSON.stringify(pending));
-        void submit();
-      };
-
-      form.append(previewNotice, send, recover, message);
-      card.append(form);
-      root.append(card);
-      lock();
-    }
-  } catch (error) {
-    if (scheduleMode === 'postpone') {
-      const isExpired = error.code === 'line_flow_invalid' ||
-                        error.code === 'line_flow_not_found' ||
-                        (error.message && (
-                          error.message.includes('逾期') ||
-                          error.message.includes('失效') ||
-                          error.message.includes('expired')
-                        ));
-      if (isExpired) {
-        showLinkExpiredView("此延期操作連結已逾期失效（安全有效時間為 15 分鐘）。請返回案件群組重新點選小幫手選單【雙方合意延期】即可繼續操作。");
-        return;
-      }
-      showRoleBlockedView("「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期");
+    const matched = data.items.find(item => item.case_no === focusCaseNo);
+    if (!matched) {
+      showRoleBlockedView(`您非案件 ${focusCaseNo} 之指派月嫂，無法調整本案排班。`);
       return;
     }
-    status.textContent = error.message;
-  }
-}
-
-async function serviceStartPost(path, body) {
-  const response = await fetch('/api/v1/line/staff-self-service/service-start/' + path, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({...body, flow_id: flowId, line_id_token: lineIdToken})
-  });
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    const error = new Error(result.detail?.error?.message || result.detail?.message || result.message || '目前無法完成服務安排。');
-    error.httpStatus = response.status;
-    throw error;
-  }
-  return result.data;
-}
-
-async function loadServiceStartCases() {
-  const root = document.getElementById('serviceStartCases');
-  root.replaceChildren();
-  const status = document.getElementById('serviceStartStatus');
-  status.textContent = '正在查詢本人服務安排…';
-  try {
-    const data = await serviceStartPost('cases', {});
-    if (!data || !Array.isArray(data.items)) throw new Error('服務安排資料格式錯誤。');
-    status.textContent = data.items.length ? '請先與客戶在服務群組協調，再提交結果。' : '目前沒有可回報的服務安排。';
-    for (const item of data.items) {
-      const card = document.createElement('article');
-      card.className = 'panel';
-      const heading = document.createElement('h3');
-      heading.textContent = '案件 ' + item.case_no + '｜服務區段 ' + item.segment_start_date + '～' + item.segment_end_date;
-      card.append(heading);
-      const form = document.createElement('form');
-      const choice = document.createElement('select');
-      choice.setAttribute('aria-label', '協調結果');
-      for (const [value, text] of [['accepted', '接受，填寫開始日期'], ['declined', '無法配合，請工會安排代班']]) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = text;
-        choice.append(option);
-      }
-      const label = document.createElement('label');
-      label.textContent = '雙方約定的服務開始日';
-      const start = document.createElement('input');
-      start.type = 'date';
-      start.required = true;
-      start.setAttribute('aria-label', '雙方約定的服務開始日');
-      label.append(start);
-      choice.onchange = () => {
-        label.hidden = choice.value !== 'accepted';
-        start.required = choice.value === 'accepted';
-      };
-      const submit = document.createElement('button');
-      submit.type = 'submit';
-      submit.textContent = '送出協調結果';
-      const state = document.createElement('p');
-      state.setAttribute('role', 'status');
-      form.append(choice, label, submit, state);
-      card.append(form);
-      root.append(card);
-    }
+    await setupPostponeWorkbench(matched);
   } catch (error) {
-    status.textContent = error.message;
-    status.setAttribute('role', 'alert');
+    const isExpired = error.code === 'line_flow_invalid' ||
+                      error.code === 'line_flow_not_found' ||
+                      (error.message && (
+                        error.message.includes('逾期') ||
+                        error.message.includes('失效') ||
+                        error.message.includes('expired')
+                      ));
+    if (isExpired) {
+      showLinkExpiredView("此延期操作連結已逾期失效（安全有效時間為 15 分鐘）。請返回案件群組重新點選小幫手選單【雙方合意延期】即可繼續操作。");
+      return;
+    }
+    showRoleBlockedView("「雙方合意延期」功能僅供月嫂操作，由月嫂開啟選擇請假與補班日期");
   }
 }
 
@@ -1240,8 +936,6 @@ async function init() {
   if (scheduleMode === 'postpone') {
     document.getElementById("pageMainHeading").textContent = "雙方合意延期";
     document.getElementById("calendarPanel").hidden = true;
-    document.getElementById("leaveSection").hidden = true;
-    document.getElementById("serviceStartSection").hidden = true;
     document.getElementById("unavailabilitySection").hidden = true;
   } else {
     document.getElementById("unavailabilitySection").hidden = false;
@@ -1291,17 +985,14 @@ async function init() {
   identityReady = true;
   document.getElementById("loadSchedule").disabled = false;
   if (scheduleMode === 'postpone') {
-    await loadLeaveCases();
+    await loadPostponeCase();
   } else {
     registerUnavailabilityHandlers();
     loadSchedule();
-    await loadServiceStartCases();
-    await loadLeaveCases();
   }
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
-document.getElementById('reloadLeaveCases').onclick = () => void loadLeaveCases();
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 
 init();

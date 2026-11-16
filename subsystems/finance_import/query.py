@@ -5,7 +5,7 @@ Description: 讀取 Finance Import batch、review、reprocess 與已遮罩的 te
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -209,9 +209,13 @@ class FinanceImportQueryNotFound(ValueError):
 
 
 class FinanceImportQueryService:
-    def __init__(self, connection: Any, *, match_client_month=None) -> None:
+    def __init__(
+        self, connection: Any, *, match_client_month=None,
+        load_payment_estimates: Callable[[Any, tuple[str, ...]], Mapping[str, Mapping[str, date | None]]] | None = None,
+    ) -> None:
         self._connection = connection
         self._match_client_month = match_client_month
+        self._load_payment_estimates = load_payment_estimates
 
     def bank_transactions(
         self, *, bank, direction, status, start, end, search, limit, before_row_id, row_id=None,
@@ -428,6 +432,20 @@ class FinanceImportQueryService:
                 if candidates:
                     item["pairing_candidates"] = candidates
                     item["pairing_memo"] = re.sub(r"\d[\d\s\-－]{6,}\d", "****", row.get("memo") or "")[:500]
+            if self._load_payment_estimates is not None:
+                case_nos = tuple(dict.fromkeys(
+                    candidate["case_no"]
+                    for item in items
+                    for candidate in item.get("pairing_candidates", ())
+                ))
+                if case_nos:
+                    estimates_by_case = self._load_payment_estimates(cursor, case_nos)
+                    for item in items:
+                        if "pairing_candidates" in item:
+                            item["pairing_candidates"] = tuple(
+                                {**candidate, **estimates_by_case.get(candidate["case_no"], {})}
+                                for candidate in item["pairing_candidates"]
+                            )
         return {
             "items": items,
             "pending_count": pending_count,

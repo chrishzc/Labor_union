@@ -1,10 +1,10 @@
-<!-- File: service_help.html | Description: 提供常見問答瀏覽與 AI 智慧問答專屬 LIFF 介面，完全不消耗 LINE Push 額度。 -->
+<!-- File: service_help.html | Description: 提供 AI 智慧問答專屬 LIFF 介面，常見問答已由 LINE 聊天室 Reply 承接，完全不消耗 LINE Push 額度。 -->
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>新竹市月子工會 - 服務諮詢與問答</title>
+  <title>新竹市月子工會 - AI 智慧問答</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -69,41 +69,6 @@
       margin-top: 2px;
     }
 
-    /* 頂部 Tab 切換 */
-    .tab-nav {
-      display: flex;
-      background: #F1F5F9;
-      border-radius: var(--radius-md);
-      padding: 4px;
-      margin-top: 14px;
-      max-width: 600px;
-      margin-left: auto;
-      margin-right: auto;
-    }
-
-    .tab-btn {
-      flex: 1;
-      border: 0;
-      background: transparent;
-      padding: 10px 14px;
-      font-size: 15px;
-      font-weight: 600;
-      border-radius: 8px;
-      cursor: pointer;
-      color: var(--text-muted);
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-
-    .tab-btn.active {
-      background: var(--surface);
-      color: var(--primary);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-    }
-
     main {
       flex: 1;
       max-width: 600px;
@@ -112,224 +77,9 @@
       padding: 16px 16px 40px;
     }
 
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-      animation: fadeIn 0.25s ease-out;
-    }
-
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* 搜尋欄 */
-    .search-wrap {
-      margin-bottom: 14px;
-      position: relative;
-    }
-
-    .search-input {
-      width: 100%;
-      padding: 12px 16px 12px 40px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      background: var(--surface);
-      font-size: 15px;
-      font-family: inherit;
-      color: var(--text);
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .search-input:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 14px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      font-size: 16px;
-    }
-
-    /* 分類標籤滑動條 */
-    .categories-bar {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 8px;
-      margin-bottom: 16px;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .categories-bar::-webkit-scrollbar {
-      display: none;
-    }
-
-    .category-chip {
-      padding: 6px 14px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted);
-      white-space: nowrap;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .category-chip.active {
-      background: var(--primary);
-      color: #FFF;
-      border-color: var(--primary);
-    }
-
-    /* FAQ 卡片列表 */
-    .faq-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .faq-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-      transition: all 0.2s;
-      box-shadow: var(--shadow);
-    }
-
-    .faq-header {
-      padding: 14px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .faq-title-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .faq-tag {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 7px;
-      border-radius: 4px;
-      background: var(--surface-soft);
-      color: var(--primary);
-      flex-shrink: 0;
-    }
-
-    .faq-question {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .faq-arrow {
-      font-size: 14px;
-      color: var(--text-muted);
-      transition: transform 0.25s ease;
-      flex-shrink: 0;
-      margin-left: 8px;
-    }
-
-    .faq-item.open .faq-arrow {
-      transform: rotate(180deg);
-    }
-
-    .faq-body {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s ease, padding 0.3s ease;
-      background: #FAFAFA;
-      border-top: 1px solid transparent;
-      padding: 0 16px;
-      font-size: 14px;
-      color: #334155;
-      line-height: 1.65;
-    }
-
-    .faq-item.open .faq-body {
-      max-height: 400px;
-      padding: 14px 16px;
-      border-top-color: var(--border);
-    }
-
-    /* 醒目引導 AI 問答橫幅卡片（依使用者需求重點呈現） */
-    .ai-guide-banner {
-      margin-top: 24px;
-      background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      color: #FFF;
-      box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.25);
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
-    }
-
-    .banner-icon {
-      font-size: 28px;
-      background: rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      width: 44px;
-      height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .banner-body {
-      flex: 1;
-    }
-
-    .banner-body h4 {
-      font-size: 16px;
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-
-    .banner-body p {
-      font-size: 13px;
-      opacity: 0.9;
-      line-height: 1.5;
-      margin-bottom: 12px;
-    }
-
-    .btn-switch-ai {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: #FFF;
-      color: var(--primary);
-      border: 0;
-      border-radius: 8px;
-      padding: 10px 18px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-      transition: transform 0.15s, background 0.15s;
-    }
-
-    .btn-switch-ai:active {
-      transform: scale(0.98);
     }
 
     /* 真人服務備註橫幅 */
@@ -346,7 +96,7 @@
       gap: 8px;
     }
 
-    /* AI 智慧問答分頁樣式 */
+    /* AI 智慧問答樣式 */
     .ai-intro-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -565,57 +315,19 @@
   <div class="header-top">
     <div>
       <div class="logo-badge">新竹市月子工會</div>
-      <h1 class="header-title">服務諮詢中心</h1>
+      <h1 class="header-title">AI 智慧問答助理</h1>
     </div>
   </div>
-
-  <nav class="tab-nav">
-    <button type="button" class="tab-btn active" id="tabBtnFaq" onclick="switchTab('faq')">
-      📚 常見問答
-    </button>
-    <button type="button" class="tab-btn" id="tabBtnAi" onclick="switchTab('ai')">
-      🤖 AI 智慧問答
-    </button>
-  </nav>
 </header>
 
 <main>
-  <section class="tab-content active" id="tabFaq">
-    <div class="search-wrap">
-      <span class="search-icon">🔍</span>
-      <input type="text" class="search-input" id="faqSearchInput" placeholder="搜尋常見問題或關鍵字..." oninput="filterFaqs()">
-    </div>
-
-    <div class="categories-bar" id="categoriesBar">
-      <div class="category-chip active" onclick="selectCategory('all', this)">全部問題</div>
-    </div>
-
-    <div class="faq-list" id="faqList">
-      <div style="text-align: center; padding: 24px; color: var(--text-muted);">正在載入常見問答資料...</div>
-    </div>
-
-    <!-- 底部醒目引導 AI 智慧問答卡片 -->
-    <div class="ai-guide-banner">
-      <div class="banner-icon">💡</div>
-      <div class="banner-body">
-        <h4>沒看到您想問的問題？</h4>
-        <p>歡迎試試看我們的 <strong>AI 智慧問答</strong>！輸入您的口語提問，由 AI 助理為您即時檢索工會知識庫標準解答。</p>
-        <button type="button" class="btn-switch-ai" onclick="switchTab('ai', true)">👉 立即體驗【AI 智慧問答】</button>
-      </div>
-    </div>
-
-    <div class="human-help-banner">
-      <span>💬 如需真人專員協助，您亦可直接於 <strong>LINE 聊天室</strong> 中直接留言打字，工會專員將由真人親自為您服務！</span>
-    </div>
-  </section>
-
-  <section class="tab-content" id="tabAi">
+  <section id="tabAi">
     <div class="ai-intro-card">
       <div class="ai-intro-header">
         <div class="ai-avatar">🤖</div>
         <div>
-          <div class="ai-intro-title">AI 智慧諮詢助理</div>
-          <div class="ai-intro-text">根據工會核准知識庫即時回答您的疑問</div>
+          <div class="ai-intro-title">工會 AI 智慧問答助理</div>
+          <div class="ai-intro-text">分類常見問答已由 LINE 官方帳號聊天室「常見問題」直接提供；若找不到解答，歡迎由 AI 助理為您即時檢索回答。</div>
         </div>
       </div>
       <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">
@@ -632,7 +344,7 @@
     <div class="qa-flow" id="qaFlow">
       <div class="message-card message-ai">
         <div class="ai-badge">✨ 智慧助理在線</div>
-        <div>我是新竹市月子工會的 AI 助理。您可以詢問到宅月子服務、補助、服務時數或預約流程。</div>
+        <div>我是新竹市月子工會的 AI 智慧問答助理。您可以詢問到宅月子服務、補助、服務時數或預約流程。若需要瀏覽條列分類常見問答，亦可隨時回 LINE 聊天室點選「常見問題」！</div>
       </div>
     </div>
 
@@ -651,8 +363,6 @@
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-  let allFaqs = null; // null means the catalog has not loaded successfully.
-  let currentCategory = 'all';
   let lineIdToken = '';
   let liffIdentityPromise = null;
 
@@ -669,145 +379,12 @@
     return null;
   }
 
-  // 切換分頁
-  function switchTab(tab, focusInput = false) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-
-    if (tab === 'ai') {
-      document.getElementById('tabBtnAi').classList.add('active');
-      document.getElementById('tabAi').classList.add('active');
-      if (focusInput) {
-        setTimeout(() => document.getElementById('askInput').focus(), 150);
-      }
-    } else {
-      document.getElementById('tabBtnFaq').classList.add('active');
-      document.getElementById('tabFaq').classList.add('active');
-    }
-  }
-
   async function readJson(response) {
     try {
       return await response.json();
     } catch (_) {
       return null;
     }
-  }
-
-  function showFaqUnavailable() {
-    allFaqs = null;
-    document.getElementById('faqSearchInput').disabled = true;
-    document.getElementById('faqList').innerHTML = '<div style="text-align: center; color: #DC2626; padding: 20px;">問答服務暫時無法使用，請稍後重新整理頁面。</div>';
-  }
-
-  // 載入 FAQ 資料
-  async function loadFaqs() {
-    allFaqs = null;
-    document.getElementById('faqSearchInput').disabled = true;
-    try {
-      const response = await fetch('/api/v1/line/service-help/faq');
-      const result = await readJson(response);
-      if (!response.ok || !result?.data || !Array.isArray(result.data.items) || !Array.isArray(result.data.categories)) {
-        showFaqUnavailable();
-        return;
-      }
-      allFaqs = result.data.items;
-      renderCategories(result.data.categories);
-      renderFaqList(allFaqs);
-      document.getElementById('faqSearchInput').disabled = false;
-    } catch (err) {
-      console.error('FAQ 載入失敗', err);
-      showFaqUnavailable();
-    }
-  }
-
-  function renderCategories(categories) {
-    const bar = document.getElementById('categoriesBar');
-    bar.replaceChildren();
-
-    const allChip = document.createElement('div');
-    allChip.className = 'category-chip active';
-    allChip.textContent = '全部問題';
-    allChip.onclick = () => selectCategory('all', allChip);
-    bar.appendChild(allChip);
-
-    categories.forEach(cat => {
-      const chip = document.createElement('div');
-      chip.className = 'category-chip';
-      chip.textContent = cat;
-      chip.onclick = () => selectCategory(cat, chip);
-      bar.appendChild(chip);
-    });
-  }
-
-  function selectCategory(cat, element) {
-    if (allFaqs === null) return;
-    currentCategory = cat;
-    document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
-    element.classList.add('active');
-    filterFaqs();
-  }
-
-  function filterFaqs() {
-    if (allFaqs === null) return;
-    const keyword = document.getElementById('faqSearchInput').value.trim().toLowerCase();
-    const filtered = allFaqs.filter(item => {
-      const matchCat = (currentCategory === 'all' || item.category === currentCategory);
-      const matchKeyword = !keyword ||
-        item.question.toLowerCase().includes(keyword) ||
-        item.answer.toLowerCase().includes(keyword) ||
-        item.tag.toLowerCase().includes(keyword);
-      return matchCat && matchKeyword;
-    });
-    renderFaqList(filtered);
-  }
-
-  function renderFaqList(faqs) {
-    const container = document.getElementById('faqList');
-    container.replaceChildren();
-
-    if (faqs.length === 0) {
-      container.innerHTML = '<div style="text-align: center; padding: 24px; color: var(--text-muted);">查無相符問題，歡迎使用下方【AI 智慧問答】直接提問！</div>';
-      return;
-    }
-
-    faqs.forEach(faq => {
-      const item = document.createElement('div');
-      item.className = 'faq-item';
-
-      const header = document.createElement('div');
-      header.className = 'faq-header';
-      header.onclick = () => item.classList.toggle('open');
-
-      const titleWrap = document.createElement('div');
-      titleWrap.className = 'faq-title-wrap';
-
-      const tag = document.createElement('span');
-      tag.className = 'faq-tag';
-      tag.textContent = faq.tag || faq.category;
-
-      const question = document.createElement('span');
-      question.className = 'faq-question';
-      question.textContent = faq.question;
-
-      titleWrap.append(tag, question);
-
-      const arrow = document.createElement('span');
-      arrow.className = 'faq-arrow';
-      arrow.textContent = '▼';
-
-      header.append(titleWrap, arrow);
-
-      const body = document.createElement('div');
-      body.className = 'faq-body';
-
-      const answer = document.createElement('div');
-      answer.textContent = faq.answer;
-
-      body.append(answer);
-      item.append(header, body);
-      container.appendChild(item);
-    });
   }
 
   // AI 提問互動
@@ -1031,17 +608,12 @@
 
   // 初始化
   window.onload = async () => {
-    // 依 URL 參數決定初始分頁
-    const target = getQueryParam('target') || getQueryParam('tab');
-    if (target === 'ai_assistant' || target === 'ai') {
-      switchTab('ai');
-    } else {
-      switchTab('faq');
-    }
-
     liffIdentityPromise = initializeLiffIdentity();
-    loadFaqs();
     await liffIdentityPromise;
+    setTimeout(() => {
+      const input = document.getElementById('askInput');
+      if (input) input.focus();
+    }, 250);
   };
 </script>
 </body>

@@ -41,6 +41,8 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
       case_no: z.string().min(1),
       purpose: z.enum(['staff_salary', 'client_refund', 'client_subsidy_return']),
       person_id: z.number().int().positive(),
+      estimated_subsidy_payment_date: z.iso.date().nullish(),
+      estimated_self_funded_staff_due_date: z.iso.date().nullish(),
     })).optional(),
     pairing_memo: z.string().nullish(),
   })),

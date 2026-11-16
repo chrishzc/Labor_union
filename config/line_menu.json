@@ -62,7 +62,7 @@
         },
         {
           "id": "ai_assistant",
-          "label": "常見問答",
+          "label": "常見問題",
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
           "bounds": {
@@ -72,10 +72,10 @@
             "height": 843
           },
           "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=ai_assistant",
-            "uri_source": "liff",
+            "type": "message",
+            "text": "常見問題",
+            "uri": null,
+            "uri_source": "literal",
             "data": null
           },
           "border_radius": 54
@@ -102,21 +102,41 @@
       },
       "buttons": [
         {
-          "id": "customer_ai_assistant",
-          "label": "常見問答",
+          "id": "customer_case_info",
+          "label": "案件資訊",
           "text_color": "#FFFFFF",
-          "background_color": "#3B82F6",
+          "background_color": "#1E3A8A",
           "bounds": {
             "x": 0,
             "y": 0,
-            "width": 2500,
+            "width": 1250,
             "height": 843
           },
           "action": {
-            "type": "uri",
+            "type": "postback",
             "text": null,
-            "uri": "?target=ai_assistant",
-            "uri_source": "liff",
+            "uri": null,
+            "uri_source": "literal",
+            "data": "customer:case-information"
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "customer_ai_assistant",
+          "label": "常見問題",
+          "text_color": "#FFFFFF",
+          "background_color": "#3B82F6",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "常見問題",
+            "uri": null,
+            "uri_source": "literal",
             "data": null
           },
           "border_radius": 54

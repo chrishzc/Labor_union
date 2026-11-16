@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HASH_ALIASES } from '../App';
 import { NAV_ITEMS } from '../components/MasterLayout';
 import { LineManagementPage } from '../pages/LineManagementPage';
@@ -21,18 +21,17 @@ const EXPECTED_HASHES = [
   'finance', 'payment-reminder-settings', 'accounting-parameters', 'account-management', 'contract-templates', 'database-backup',
 ] as const;
 
-// Explicit test oracle: presentation names map to the same 18 canonical LIFF assets.
+// Explicit test oracle: presentation names map to canonical LIFF assets.
 const LIFF_ASSETS = [
   ['gateway.html', '服務申請入口'], ['register.html', '需求調查'],
   ['非市民服務申請', '非市民服務申請'],
-  ['bind.html', '連結客戶資料'], ['profile_guard.html', '修改資料前的身分確認'],
-  ['profile_update.html', '修改個人資料'], ['order_update.html', '申請訂單異動'],
+  ['bind.html', '連結客戶資料'],
   ['staff_order_search.html', '我的案件'],
   ['staff_schedule.html', '班表與請假'],
   ['staff_profile_update.html', '更新個人資料'],
   ['staff_payout.html', '薪資與付款紀錄'],
   ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],
-  ['mobile_admin.html · 客服中心', '客服中心'], ['mobile_admin.html · 狀態追蹤', '訂單進度'],
+  ['mobile_admin.html · 狀態追蹤', '訂單進度'],
   ['mobile_admin.html · 營運摘要', '營運摘要'],
 ] as const;
 function liffAsset(file: string) {
@@ -51,6 +50,9 @@ function visibleLiffNames() {
 }
 
 describe('React entrypoint registry', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', window.location.pathname);
+  });
   it('canonical 側欄只保留資料中心，且沒有重複 identity', () => {
     const pages = NAV_ITEMS.map((item) => item.id);
     expect(new Set(pages).size).toBe(pages.length);
@@ -82,9 +84,9 @@ describe('React entrypoint registry', () => {
   it('AI 工作頁保留回答測試，LINE 介面設定承載引導動作及深連結', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
-      const data = url === '/api/v1/line/ai-events/catalog'
-        ? { revision: 7, entries: [{ alias: '測試正式引導問句', route_key: 'profile_guard', tier: 'customer', public_route: '/line-profile-guard', source_identity: 'test-catalog:7', revision: 7 }] }
-        : url === '/api/v1/line/identity/runtime-config' ? { liff_id: 'test-liff-id' } : { items: [], next_cursor: null };
+      const data = url.includes('/api/v1/line/ai-events/catalog')
+        ? { revision: 7, entries: [{ alias: '測試正式引導問句', route_key: 'admin_binding', tier: 'admin', public_route: null, source_identity: 'test-catalog:7', revision: 7 }] }
+        : url.includes('/api/v1/line/identity/runtime-config') ? { liff_id: 'test-liff-id' } : { items: [], next_cursor: null };
       return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     const studio = render(React.createElement(AiCustomerServiceStudioPage));
@@ -99,11 +101,11 @@ describe('React entrypoint registry', () => {
     render(React.createElement(LineManagementPage, { scope: 'interface' }));
     expect(screen.getByRole('button', { name: '引導動作' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('searchbox', { name: '搜尋引導動作' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '預覽引導動作' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '預覽引導動作' })).toBeDisabled();
     expect(await screen.findByRole('button', { name: '測試正式引導問句' })).toBeInTheDocument();
-    expect(fetchSpy).toHaveBeenCalledWith('/api/v1/line/ai-events/catalog', expect.objectContaining({ credentials: 'include' }));
+    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/v1/line/ai-events/catalog'), expect.objectContaining({ credentials: 'include' }));
     expect(screen.queryByText(/INITIAL_RULES|本機示範資料/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('客服測試問句')).toHaveValue('我想修改登記資料');
+    expect(screen.getByLabelText('客服測試問句')).toHaveValue('');
 
     window.history.replaceState(null, '', window.location.pathname);
     fetchSpy.mockRestore();
@@ -111,7 +113,7 @@ describe('React entrypoint registry', () => {
 
 
 
-  it('LIFF 視覺頁保留 16 個正式表單，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 12 個正式表單，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',
@@ -128,15 +130,11 @@ describe('React entrypoint registry', () => {
         'register.html',
         '非市民服務申請',
         'bind.html',
-        'profile_guard.html',
-        'profile_update.html',
-        'order_update.html',
         'staff_order_search.html',
         'staff_schedule.html',
         'staff_profile_update.html',
         'staff_payout.html',
         'identity.html',
-        'mobile_admin.html',
         'mobile_admin.html',
         'mobile_admin.html',
         'mobile_admin.html',
@@ -175,29 +173,6 @@ describe('React entrypoint registry', () => {
       'https://line-test.example.dev/line-bind',
     );
 
-    fireEvent.click(liffAsset('profile_guard.html'));
-    expect(screen.getByText('尚未完成工會服務綁定')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
-      'href',
-      'https://line-test.example.dev/line-profile-guard',
-    );
-
-    fireEvent.click(liffAsset('profile_update.html'));
-    expect(screen.getByText('修改登記資料申請')).toBeInTheDocument();
-    expect(screen.getByText(/正式異動流程示意後端 API；送出後等待工會人員審核/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
-      'href',
-      'https://line-test.example.dev/line-profile-guard',
-    );
-
-    fireEvent.click(liffAsset('order_update.html'));
-    expect(screen.getByText('修改訂單資訊申請')).toBeInTheDocument();
-    expect(screen.getByText(/正式訂單維持不變並等待工會確認/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
-      'href',
-      'https://line-test.example.dev/line-order-update?studio_preview=1',
-    );
-
     expect(screen.queryByRole('button', { name: /候選月嫂案件回覆|媒合條件協調/ })).not.toBeInTheDocument();
 
     fireEvent.click(liffAsset('staff_profile_update.html'));
@@ -219,13 +194,6 @@ describe('React entrypoint registry', () => {
     expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-mobile-admin?target=staff_review&studio_preview=1',
-    );
-
-    fireEvent.click(liffAsset('mobile_admin.html · 客服中心'));
-    expect(screen.getByText(/集中查看待處理客服案件/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
-      'href',
-      'https://line-test.example.dev/line-mobile-admin?target=customer_service&studio_preview=1',
     );
 
     fireEvent.click(liffAsset('mobile_admin.html · 狀態追蹤'));
@@ -259,7 +227,6 @@ describe('React entrypoint registry', () => {
       'mobile_admin.html',
       'mobile_admin.html',
       'mobile_admin.html',
-      'mobile_admin.html',
     ].sort()));
     expect(screen.queryByRole('button', { name: /服務申請入口/ })).not.toBeInTheDocument();
 
@@ -270,7 +237,7 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'customer' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'profile_guard.html', 'profile_update.html', 'order_update.html', 'identity.html', '非市民服務申請',
+      'identity.html', '非市民服務申請',
     ].sort()));
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });

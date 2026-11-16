@@ -40,6 +40,7 @@ from subsystems.line.service_start_messages import (
     HELPER_TEXT_DEFAULTS,
     GROUP_ASSISTANCE_DIRECTIONS,
     SATISFACTION_SURVEY_ACTION,
+    case_information_card,
     confirm_start_date_card,
     group_guidelines_card,
     group_helper_menu_card,
@@ -361,6 +362,9 @@ class LineGroupHelperApplication:
         if data == "group-helper:service-schedule":
             self._handle_service_schedule(inbox, unit_of_work, group_id, ctx)
             return True
+        if data == "group-helper:case-information":
+            self._handle_case_information(inbox, unit_of_work, group_id, ctx)
+            return True
         if data.startswith("group-helper:mutual-postponement"):
             self._handle_mutual_postponement(inbox, unit_of_work, group_id, ctx, data)
             return True
@@ -425,7 +429,7 @@ class LineGroupHelperApplication:
         with conn.cursor() as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.start_date,o.actual_start_date,o.actual_end_date,"
-                "o.service_days,o.lifecycle_version,o.client_id,c.service_type "
+                "o.service_days,o.lifecycle_version,o.client_id,c.service_type,c.name AS client_name "
                 "FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s",
                 (case_no,),
             )
@@ -438,20 +442,20 @@ class LineGroupHelperApplication:
                 "FROM case_staff_assignments a "
                 "JOIN scheduling_aggregates g ON g.effective_generation_id=a.generation_id "
                 "JOIN staff s ON s.id=a.staff_id "
-                "WHERE a.case_no=%s ORDER BY a.assignment_sequence,a.id LIMIT 1",
+                "WHERE a.case_no=%s ORDER BY a.assignment_sequence,a.id",
                 (case_no,),
             )
-            formal = cursor.fetchone()
+            formal_rows = list(cursor.fetchall() or ())
 
             cursor.execute(
                 "SELECT ps.id AS segment_id,ps.staff_id,s.name AS staff_name,ps.assigned_start_date "
                 "FROM caregiver_matching_plans p "
                 "JOIN caregiver_matching_plan_segments ps ON ps.plan_id=p.id "
                 "JOIN staff s ON s.id=ps.staff_id "
-                "WHERE p.case_no=%s AND p.is_active=1 ORDER BY ps.segment_order,ps.id LIMIT 1",
+                "WHERE p.case_no=%s AND p.is_active=1 ORDER BY ps.segment_order,ps.id",
                 (case_no,),
             )
-            segment = cursor.fetchone()
+            segment_rows = list(cursor.fetchall() or ())
 
             cursor.execute(
                 "SELECT 1 FROM scheduling_service_start_requests "
@@ -478,12 +482,31 @@ class LineGroupHelperApplication:
             )
             bindings = list(cursor.fetchall() or ())
 
-        staff_id = int((formal or segment or {}).get("staff_id") or 0) or None
-        staff_name = str((formal or segment or {}).get("staff_name") or "指派月嫂")
+        all_staff_assignments = formal_rows or segment_rows
+        assigned_staff_ids = {str(r["staff_id"]) for r in all_staff_assignments}
+        all_staff_names = list(dict.fromkeys(str(r.get("staff_name") or "").strip() for r in all_staff_assignments if r.get("staff_name")))
+        combined_staff_name = "、".join(all_staff_names) or "指派月嫂"
+
+        matched_staff_id = None
+        for b in bindings:
+            if b.get("subject_type") == "staff" and str(b.get("subject_reference")) in assigned_staff_ids:
+                matched_staff_id = int(b.get("subject_reference"))
+                break
+        if matched_staff_id is None and getattr(unit_of_work, "customer_service", None) is not None:
+            sub = unit_of_work.customer_service.staff_subject(user_id)
+            if sub and str(sub.get("staff_id")) in assigned_staff_ids:
+                matched_staff_id = int(sub["staff_id"])
+
+        is_staff = matched_staff_id is not None
+        user_formal = next((r for r in formal_rows if matched_staff_id and int(r["staff_id"]) == matched_staff_id), None) or (formal_rows[0] if formal_rows else None)
+        user_segment = next((r for r in segment_rows if matched_staff_id and int(r["staff_id"]) == matched_staff_id), None) or (segment_rows[0] if segment_rows else None)
+
+        staff_id = matched_staff_id or int((user_formal or user_segment or {}).get("staff_id") or 0) or None
+        staff_name = combined_staff_name
         actual_start = _iso_date_or_none(order.get("actual_start_date"))
         planned_start = (
             actual_start
-            or _iso_date_or_none((segment or {}).get("assigned_start_date"))
+            or _iso_date_or_none((user_segment or {}).get("assigned_start_date"))
             or _iso_date_or_none(order.get("start_date"))
             or self._business_today()
         )
@@ -502,10 +525,11 @@ class LineGroupHelperApplication:
         is_admin = any(b.get("subject_type") == "admin" for b in bindings)
         admin_ref = next((b.get("subject_reference") for b in bindings if b.get("subject_type") == "admin"), None)
         admin_user_id = int(admin_ref) if isinstance(admin_ref, str) and admin_ref.isdigit() else None
-        is_staff = any(
-            b.get("subject_type") == "staff" and (staff_id is None or str(b.get("subject_reference")) == str(staff_id))
-            for b in bindings
-        )
+        if not is_staff:
+            is_staff = any(
+                b.get("subject_type") == "staff" and (staff_id is None or str(b.get("subject_reference")) == str(staff_id))
+                for b in bindings
+            )
         if not is_staff and getattr(unit_of_work, "customer_service", None) is not None:
             sub = unit_of_work.customer_service.staff_subject(user_id)
             is_staff = bool(sub and (staff_id is None or int(sub["staff_id"]) == staff_id))
@@ -535,15 +559,16 @@ class LineGroupHelperApplication:
             "order_status": order.get("status"),
             "order_version": int(order.get("lifecycle_version") or 0),
             "client_id": int(client_id) if client_id is not None else None,
+            "client_name": str(order.get("client_name") or "").strip() or None,
             "service_days": int(order.get("service_days") or 20),
             "service_type": order.get("service_type"),
             "planned_start_date": planned_start,
             "actual_end_date": _iso_date_or_none(order.get("actual_end_date")),
             "staff_id": staff_id,
             "staff_name": staff_name,
-            "segment_id": int(segment["segment_id"]) if segment and segment.get("segment_id") else None,
-            "assignment_id": int(formal["assignment_id"]) if formal and formal.get("assignment_id") else None,
-            "scheduling_version": int(formal["scheduling_version"]) if formal and formal.get("scheduling_version") is not None else 0,
+            "segment_id": int(user_segment["segment_id"]) if user_segment and user_segment.get("segment_id") else None,
+            "assignment_id": int(user_formal["assignment_id"]) if user_formal and user_formal.get("assignment_id") else None,
+            "scheduling_version": int(user_formal["scheduling_version"]) if user_formal and user_formal.get("scheduling_version") is not None else 0,
             "is_started": has_confirmed_start,
             "has_confirmed_start": has_confirmed_start,
             "service_commenced": service_commenced,
@@ -809,6 +834,68 @@ class LineGroupHelperApplication:
             today=self._business_today(),
         )
         self._reply_flex(inbox, unit_of_work, group_id, card, "service-schedule")
+
+    def _handle_case_information(self, inbox: Any, unit_of_work: Any, group_id: str, ctx: dict[str, Any]) -> None:
+        case_no = ctx["case_no"]
+        staff_name = ctx["staff_name"]
+        client_name = ctx.get("client_name")
+        sections = self._load_case_information_sections(unit_of_work, ctx)
+        card = configured_payload(
+            unit_of_work,
+            "helper-case-information-card",
+            case_information_card(case_no, staff_name, sections, client_name=client_name),
+            {"case_no": case_no, "staff_name": staff_name},
+        )
+        self._reply_flex(inbox, unit_of_work, group_id, card, "case-information")
+
+    def _load_case_information_sections(self, unit_of_work: Any, ctx: dict[str, Any]) -> Sequence[Any]:
+        if "order_information_sections" in ctx:
+            return ctx["order_information_sections"]
+
+        repo = getattr(unit_of_work, "order_information", None)
+        if repo is not None and hasattr(repo, "load_owner_snapshot"):
+            snapshot = repo.load_owner_snapshot(ctx["case_no"], ctx.get("assignment_id"))
+            if snapshot is not None:
+                from subsystems.orders.order_information import build_formal_information_sections
+                facts = dict(snapshot.facts)
+                if ctx.get("staff_name"):
+                    facts["staff_name"] = ctx["staff_name"]
+                return build_formal_information_sections(1, facts, snapshot.field_issues)
+
+        conn = getattr(unit_of_work, "_connection", None)
+        if conn is not None:
+            from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
+            from subsystems.orders.order_information import build_formal_information_sections
+
+            mysql_repo = MySqlOrderInformationRepository(conn)
+            snapshot = mysql_repo.load_owner_snapshot(ctx["case_no"], ctx.get("assignment_id"))
+            if snapshot is not None:
+                facts = dict(snapshot.facts)
+                if ctx.get("staff_name"):
+                    facts["staff_name"] = ctx["staff_name"]
+                return build_formal_information_sections(1, facts, snapshot.field_issues)
+
+            try:
+                from infrastructure.mysql.order_information_repository import (
+                    _CASE_SQL, _apply_explicit_rate_correction, _facts, _merge_contract_payment_facts
+                )
+                from collections.abc import Mapping
+                with conn.cursor() as cursor:
+                    cursor.execute(_CASE_SQL, (ctx["case_no"],))
+                    case = cursor.fetchone()
+                    if isinstance(case, Mapping):
+                        case = _apply_explicit_rate_correction(cursor, case, ctx["case_no"])
+                        facts, issues = _facts(case, {
+                            "assigned_start_date": case.get("planned_start_date") or ctx.get("planned_start_date"),
+                            "assigned_end_date": case.get("planned_end_date") or ctx.get("actual_end_date"),
+                            "staff_name": ctx.get("staff_name"),
+                        })
+                        _merge_contract_payment_facts(conn, ctx["case_no"], facts, use_current_order_payments=True)
+                        return build_formal_information_sections(1, facts, issues)
+            except Exception:
+                pass
+
+        return ()
 
     def _handle_mutual_postponement(
         self,

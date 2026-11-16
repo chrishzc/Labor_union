@@ -415,6 +415,8 @@ class FinanceBankPairingCandidateView(_StrictModel):
     case_no: str
     purpose: Literal["staff_salary", "client_refund", "client_subsidy_return"]
     person_id: int
+    estimated_subsidy_payment_date: str | None = None
+    estimated_self_funded_staff_due_date: str | None = None
 
 
 class FinanceBankTransactionView(_StrictModel):

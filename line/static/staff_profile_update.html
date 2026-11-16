@@ -90,15 +90,62 @@
       cursor: pointer;
       box-shadow: 0 4px 10px rgba(171, 66, 31, .2);
     }
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
+    .submit-panel button:hover:not(:disabled) { background: var(--accent-hover); }
+    .submit-panel button:disabled { opacity: .65; cursor: wait; }
+
+    /* 長者友善接案偏好 Chip / Pill 切換標籤 */
+    .preference-group {
+      margin-top: 14px;
+      padding: 16px;
+      background: #faf8f5;
+      border: 1.5px solid #ded2c9;
+      border-radius: 14px;
+    }
+    .preference-group-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #241c18;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .chips-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 48px;
+      padding: 10px 18px;
+      border-radius: 24px;
+      border: 2px solid #cfb8aa;
+      background: #fff;
+      color: #3e2723;
       font-size: 18px;
       font-weight: 700;
       cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+      touch-action: manipulation;
     }
-    .submit-panel button:hover:not(:disabled) { background: var(--accent-hover); }
-    .submit-panel button:disabled { opacity: .65; cursor: wait; }
+    .chip-btn:hover {
+      background: #fff5f0;
+      border-color: #ab421f;
+    }
+    .chip-btn[aria-pressed="true"] {
+      background: #ab421f;
+      border-color: #883314;
+      color: #ffffff;
+      box-shadow: 0 3px 8px rgba(171, 66, 31, 0.25);
+    }
+    .chip-icon {
+      font-size: 16px;
+      line-height: 1;
+    }
     .status { margin-top: 14px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--paper); }
     .status[data-state="ready"] { display: none; }
     .status[data-state="error"] { color: #972923; background: #fff1ef; border-color: #e6ada7; }
@@ -197,6 +244,66 @@ function relationText(rows) {
   return rows.map(row => row.detail ? row.value + "：" + row.detail : row.value).join("\n");
 }
 
+const standardRelationOptions = {
+  service_regions: ["東區", "北區", "香山區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮", "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "寶山鄉"],
+  service_periods: [
+    "8小時(08:30-17:00)", "8小時(09:30-18:00)",
+    "4小時(08:30-12:30)", "4小時(09:30-13:30)",
+    "9小時(08:30-17:30)", "9小時(09:00-18:00)",
+    "24小時(09:00-次日09:00)"
+  ],
+  rest_schedule: ["週休二日", "隔週休", "排休", "配合案家需求", "不限"],
+  baby_types: ["單胞胎", "雙胞胎", "早產兒照護", "大寶照護"],
+  holiday_availability: ["國定假日可接案", "農曆春節可接案", "特殊節日可配合", "依勞基法休假"],
+  transportation: ["機車", "自用小客車", "公車/客運", "步行/自行車", "家人接送"]
+};
+
+function chipGroup(parent, key, label, currentValues, candidateList) {
+  const group = document.createElement("div");
+  group.className = "preference-group";
+  group.id = "group-" + key;
+
+  const title = document.createElement("div");
+  title.className = "preference-group-title";
+  title.textContent = label;
+  group.append(title);
+
+  const container = document.createElement("div");
+  container.className = "chips-container";
+  container.id = "chips-" + key;
+
+  const currentSet = new Set(currentValues.map(v => typeof v === "object" ? v.value : v));
+  const allCandidates = [...new Set([...(candidateList || []), ...currentSet])];
+
+  allCandidates.forEach(val => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip-btn";
+    const isSelected = currentSet.has(val);
+    btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+    btn.dataset.value = val;
+
+    const icon = document.createElement("span");
+    icon.className = "chip-icon";
+    icon.textContent = isSelected ? "✓" : "+";
+
+    const text = document.createElement("span");
+    text.textContent = val;
+
+    btn.append(icon, text);
+    btn.onclick = () => {
+      const nowPressed = btn.getAttribute("aria-pressed") === "true";
+      const nextPressed = !nowPressed;
+      btn.setAttribute("aria-pressed", nextPressed ? "true" : "false");
+      icon.textContent = nextPressed ? "✓" : "+";
+    };
+    container.append(btn);
+  });
+
+  group.append(container);
+  parent.append(group);
+}
+
 function render(data) {
   const groups = { contact: ["phone", "tel", "tel_ext", "email"], "address-fields": ["city", "zip_code", "address"],
     emergency: ["emergency_contact_name", "emergency_contact_phone"] };
@@ -219,42 +326,38 @@ function render(data) {
   });
   const preferences = document.getElementById("preferences");
   for (const [key, label] of Object.entries(relationLabels)) {
-    const hint = key === "service_periods"
-      ? "一行一項，標準格式：8小時(08:30-17:00)、8小時(09:30-18:00)、4小時(08:30-12:30)、4小時(09:30-13:30)、24小時(09:00-次日09:00)"
-      : "一行一項。可選值：" + (data.relation_options?.[key] ? data.relation_options[key].join("、") : "");
-    const element = input(preferences, key, label, relationText(data.relations[key]), { multiline: true, hint });
-    if (key === "service_periods") {
-      const quickBox = document.createElement("div");
-      quickBox.style.display = "flex";
-      quickBox.style.flexWrap = "wrap";
-      quickBox.style.gap = "6px";
-      quickBox.style.marginTop = "6px";
-      const standardSlots = [
-        "8小時(08:30-17:00)", "8小時(09:30-18:00)",
-        "4小時(08:30-12:30)", "4小時(09:30-13:30)",
-        "24小時(09:00-次日09:00)"
-      ];
-      standardSlots.forEach(slot => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = "+ " + slot;
-        btn.style.cssText = "font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #ded2c9;background:#f8f5f0;color:#54443b;cursor:pointer;";
-        btn.onclick = () => {
-          const current = element.value.trim();
-          if (!current.includes(slot)) {
-            element.value = current ? current + "\n" + slot : slot;
-          }
-        };
-        quickBox.appendChild(btn);
-      });
-      element.parentElement.appendChild(quickBox);
-    }
+    const currentItems = data.relations[key] || [];
+    const candidates = data.relation_options?.[key] || standardRelationOptions[key] || [];
+    chipGroup(preferences, key, label, currentItems, candidates);
   }
-  input(preferences, "transportation", "交通方式", data.transportation.join("\n"), { multiline: true, hint: "一行一項。" });
+  chipGroup(preferences, "transportation", "交通方式", data.transportation || [], standardRelationOptions.transportation);
+
   const days = data.matching.preferred_service_days ?? {};
   input(preferences, "minimum", "最少可承接天數", days.minimum, { numeric: true });
   input(preferences, "maximum", "最多可承接天數", days.maximum, { numeric: true });
-  input(preferences, "hours", "每日可服務時數", data.matching.daily_service_hours?.values.join(","), { hint: "用逗號分隔，例如 4,8。" });
+  const hoursInput = input(preferences, "hours", "每日可服務時數", data.matching.daily_service_hours?.values.join(",") || "");
+  const hoursFast = document.createElement("div");
+  hoursFast.className = "chips-container";
+  hoursFast.style.marginTop = "8px";
+  ["4", "8", "9", "24"].forEach(h => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip-btn";
+    btn.style.fontSize = "16px";
+    btn.style.padding = "6px 14px";
+    btn.style.minHeight = "40px";
+    btn.textContent = "+ " + h + " 小時";
+    btn.onclick = () => {
+      const current = hoursInput.value.trim();
+      const parts = current ? current.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+      if (!parts.includes(h)) {
+        parts.push(h);
+        hoursInput.value = parts.join(",");
+      }
+    };
+    hoursFast.append(btn);
+  });
+  hoursInput.parentElement.append(hoursFast);
 }
 
 function changes() {
@@ -264,11 +367,14 @@ function changes() {
   }
   const relations = {};
   for (const key of Object.keys(relationLabels)) {
-    if (value(key) !== relationText(snapshot.relations[key])) {
-      relations[key] = lines(value(key)).map(line => {
-        const separator = line.indexOf("：");
-        return separator < 0 ? { value: line } : { value: line.slice(0, separator), detail: line.slice(separator + 1) };
-      });
+    const container = document.getElementById("chips-" + key);
+    const selectedBtns = container ? container.querySelectorAll('.chip-btn[aria-pressed="true"]') : [];
+    const currentValues = Array.from(selectedBtns).map(btn => btn.dataset.value);
+    const snapshotValues = (snapshot.relations[key] || []).map(item => item.value);
+    const isDifferent = currentValues.length !== snapshotValues.length ||
+      currentValues.some((v, idx) => v !== snapshotValues[idx]);
+    if (isDifferent) {
+      relations[key] = currentValues.map(v => ({ value: v }));
     }
   }
   const matching = {};
@@ -290,9 +396,17 @@ function changes() {
       account_no: value("account_no")
     };
   }
+
+  const transportContainer = document.getElementById("chips-transportation");
+  const selectedTransBtns = transportContainer ? transportContainer.querySelectorAll('.chip-btn[aria-pressed="true"]') : [];
+  const currentTrans = Array.from(selectedTransBtns).map(btn => btn.dataset.value);
+  const snapTrans = snapshot.transportation || [];
+  const isTransDiff = currentTrans.length !== snapTrans.length ||
+    currentTrans.some((v, idx) => v !== snapTrans[idx]);
+
   return {
     profile, relations, matching,
-    ...(value("transportation") === snapshot.transportation.join("\n") ? {} : { transportation: lines(value("transportation")) }),
+    ...(isTransDiff ? { transportation: currentTrans } : {}),
     ...(bankUpdate ? { bank: bankUpdate } : {})
   };
 }

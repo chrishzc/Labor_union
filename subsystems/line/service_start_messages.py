@@ -260,6 +260,7 @@ def group_helper_menu_card(case_no, staff_name, *, is_started: bool = False):
     menu_items = [
         ('📅', '#D1FAE5', '確認開工日', '日期滾輪發起，需客戶與月嫂雙方同意', '確認開工日', 'group-helper:confirm-start-date'),
         ('📋', '#DBEAFE', '服務排程', schedule_desc, '服務排程', 'group-helper:service-schedule'),
+        ('📄', '#E0E7FF', '案件資訊', '查看確認月嫂時之服務條件與費用約定', '案件資訊', 'group-helper:case-information'),
         ('🤝', '#FEF3C7', '雙方合意延期', '檢核班表無衝突，送出延期卡客戶確認', '雙方合意延期', 'group-helper:mutual-postponement'),
         ('📖', '#F1F5F9', '客戶常見疑問', '常見問題說明 · 一鍵發送標準回答', '客戶常見疑問', 'group-helper:group-guidelines'),
     ]
@@ -271,7 +272,7 @@ def group_helper_menu_card(case_no, staff_name, *, is_started: bool = False):
         for icon, chip_bg, title, description, label, data in menu_items
     ]
     # Keep the FAQ row at its saved copy-field position.
-    rows.insert(3, {'type': 'text', 'text': GROUP_ASSISTANCE_DIRECTIONS, 'size': 'xs', 'color': '#64748B', 'wrap': True})
+    rows.insert(len(menu_items) - 1, {'type': 'text', 'text': GROUP_ASSISTANCE_DIRECTIONS, 'size': 'xs', 'color': '#64748B', 'wrap': True})
     return {
         'type': 'flex',
         'altText': '服務案件小幫手選單',
@@ -569,6 +570,136 @@ def group_guidelines_card():
                             for question, label, data in faq_items
                         ],
                     },
+                ],
+            },
+        },
+    }
+
+
+def case_information_card(
+    case_no: str,
+    staff_name: str,
+    sections: Sequence[Any],
+    *,
+    client_name: str | None = None,
+) -> dict[str, Any]:
+    """生成案件資訊（服務條件與費用約定）LINE Flex Bubble 卡片。"""
+    body_contents: list[dict[str, Any]] = []
+
+    section_icons = {
+        '服務約定': '📋',
+        '客戶付款約定': '💰',
+        '其他約定': '📝',
+    }
+
+    if not sections:
+        body_contents.append({
+            'type': 'box',
+            'layout': 'vertical',
+            'backgroundColor': '#FFFFFF',
+            'cornerRadius': '10px',
+            'borderWidth': '1px',
+            'borderColor': '#E2E8F0',
+            'paddingAll': '16px',
+            'contents': [
+                {'type': 'text', 'text': '目前無此案件之服務條件與費用約定資料。', 'size': 'sm', 'color': '#64748B', 'align': 'center'},
+            ],
+        })
+    else:
+        for section in sections:
+            sec_title = getattr(section, 'title', None) or (section.get('title') if isinstance(section, dict) else str(section))
+            raw_rows = getattr(section, 'rows', None) or (section.get('rows') if isinstance(section, dict) else ())
+
+            icon = section_icons.get(sec_title, '📄')
+
+            body_contents.append({
+                'type': 'box',
+                'layout': 'horizontal',
+                'alignItems': 'center',
+                'spacing': 'xs',
+                'margin': 'md' if body_contents else 'none',
+                'contents': [
+                    {'type': 'text', 'text': icon, 'size': 'sm', 'flex': 0},
+                    {'type': 'text', 'text': sec_title, 'weight': 'bold', 'size': 'sm', 'color': '#1E293B', 'flex': 1},
+                ],
+            })
+
+            rows_box_contents: list[dict[str, Any]] = []
+            for idx, r in enumerate(raw_rows):
+                if isinstance(r, (list, tuple)) and len(r) == 2:
+                    label, val = r
+                elif isinstance(r, dict):
+                    label, val = r.get('label', ''), r.get('value', '')
+                else:
+                    label, val = str(r), ''
+
+                if idx > 0:
+                    rows_box_contents.append({'type': 'separator', 'margin': 'xs', 'color': '#F1F5F9'})
+
+                is_payment_total = '總額' in str(label) or '應付' in str(label)
+                val_color = '#C45C30' if is_payment_total else '#0F172A'
+                val_size = 'sm' if is_payment_total else 'xs'
+
+                rows_box_contents.append({
+                    'type': 'box',
+                    'layout': 'horizontal',
+                    'justifyContent': 'space-between',
+                    'alignItems': 'flex-start',
+                    'spacing': 'sm',
+                    'margin': 'xs',
+                    'contents': [
+                        {'type': 'text', 'text': str(label), 'size': 'xs', 'color': '#64748B', 'flex': 4, 'wrap': True},
+                        {'type': 'text', 'text': str(val), 'size': val_size, 'weight': 'bold', 'color': val_color, 'align': 'end', 'wrap': True, 'flex': 6},
+                    ],
+                })
+
+            body_contents.append({
+                'type': 'box',
+                'layout': 'vertical',
+                'backgroundColor': '#FFFFFF',
+                'cornerRadius': '10px',
+                'borderWidth': '1px',
+                'borderColor': '#E2E8F0',
+                'paddingAll': '12px',
+                'spacing': 'xs',
+                'contents': rows_box_contents,
+            })
+
+    subtitle_parts = [f'案件：{case_no}', f'月嫂：{staff_name}']
+    if client_name:
+        subtitle_parts.append(f'客戶：{client_name}')
+    subtitle = '｜'.join(subtitle_parts)
+
+    return {
+        'type': 'flex',
+        'altText': f'案件 {case_no} 服務條件與費用約定',
+        'contents': {
+            'type': 'bubble',
+            'size': 'mega',
+            'header': _card_header(
+                badge='服務案件小幫手',
+                title='服務條件與費用約定',
+                subtitle=subtitle,
+                bg_color='#C45C30',
+                gradient_end='#E07A4F',
+                subtitle_color='#FFEDD5',
+                status_badge=('方案約定', '#10B981', '#FFFFFF'),
+            ),
+            'body': {
+                'type': 'box',
+                'layout': 'vertical',
+                'backgroundColor': '#FAF7F4',
+                'paddingAll': '12px',
+                'spacing': 'xs',
+                'contents': body_contents,
+            },
+            'footer': {
+                'type': 'box',
+                'layout': 'vertical',
+                'backgroundColor': '#F0EBE5',
+                'paddingAll': '10px',
+                'contents': [
+                    {'type': 'text', 'text': '本約定為確認月嫂時之正式方案 · 實際服務日程以「服務排程」為準', 'size': 'xxs', 'color': '#64748B', 'align': 'center', 'wrap': True},
                 ],
             },
         },
