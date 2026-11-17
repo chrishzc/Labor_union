@@ -1773,8 +1773,25 @@ interface GanttSpan {
   dateRangeText?: string;
   dailyTimeText?: string;
   statusLabel?: string;
+  historicalCaseDates?: string;
   lane?: number;
   shift?: StaffMonthlySchedule['days'][number];
+}
+
+interface OrderServiceRange {
+  start: string;
+  end: string;
+}
+
+async function loadHistoricalCaseRange(caseNo: string, signal: AbortSignal): Promise<OrderServiceRange | null> {
+  try {
+    const order = await ordersQueryClient.getOrderDetail(caseNo, { signal });
+    const start = order.actual_start_date ?? order.start_date;
+    const end = order.actual_end_date ?? order.end_date;
+    return start && end && start <= end ? { start, end } : null;
+  } catch {
+    return null;
+  }
 }
 
 type HistoricalOrderDateState =
@@ -1897,6 +1914,37 @@ function assignNonOverlappingLanes(spans: GanttSpan[]): GanttSpan[] {
     occupiedByLane[assignedLane].push({ start: span.visualStartDate, end: span.visualEndDate });
     return { ...span, lane: assignedLane };
   });
+}
+
+function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<string, OrderServiceRange | null>): GanttSpan[] {
+  const positioned: GanttSpan[] = [];
+  const completeCases = new Map<string, GanttSpan>();
+  for (const span of spans) {
+    if (span.tone !== 'historical' || span.shift?.status === 'historical_reservation') {
+      positioned.push(span);
+      continue;
+    }
+    const range = ranges?.get(span.caseText);
+    if (!range) {
+      positioned.push({ ...span, historicalCaseDates: '整案日期不可用', dateRangeText: '整案日期不可用' });
+      continue;
+    }
+    const previous = completeCases.get(span.caseText);
+    if (previous) {
+      if (previous.dailyTimeText !== span.dailyTimeText) previous.dailyTimeText = undefined;
+      continue;
+    }
+    const text = range.start === range.end ? range.start : `${range.start} ～ ${range.end}`;
+    completeCases.set(span.caseText, {
+      ...span,
+      visualStartDate: range.start,
+      visualEndDate: range.end,
+      historicalCaseDates: text,
+      dateRangeText: text,
+      lane: undefined,
+    });
+  }
+  return assignNonOverlappingLanes([...positioned, ...completeCases.values()]);
 }
 
 function monthlyShiftSpans(
@@ -2311,6 +2359,7 @@ const SchedulingWorkbench: React.FC = () => {
   const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
   const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
   const [monthlyRowsByStaff, setMonthlyRowsByStaff] = useState<Record<number, StaffMonthlySchedule | undefined>>({});
+  const [historicalRangesByStaff, setHistoricalRangesByStaff] = useState<Record<number, ReadonlyMap<string, OrderServiceRange | null>>>({});
   const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
   const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
   const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
@@ -2662,6 +2711,7 @@ const SchedulingWorkbench: React.FC = () => {
     setCalendarError(null);
 
     const loadRows = async () => {
+      const caseRequests = new Map<string, Promise<OrderServiceRange | null>>();
       const loadStaffRow = async (staff: (typeof staffToLoad)[number]) => {
         // Each row needs two independent projections. Limit active rows so queued
         // browser requests do not consume their timeout before reaching the API.
@@ -2705,6 +2755,19 @@ const SchedulingWorkbench: React.FC = () => {
       };
       const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
         const result = await loadStaffRow(staff);
+        const caseNos = new Set(result.monthly?.days.flatMap(day =>
+          day.status === 'historical_assignment' && day.case_no ? [day.case_no] : [],
+        ));
+        const ranges = new Map<string, OrderServiceRange | null>();
+        for (const caseNo of caseNos) {
+          if (controller.signal.aborted) break;
+          let request = caseRequests.get(caseNo);
+          if (!request) {
+            request = loadHistoricalCaseRange(caseNo, controller.signal);
+            caseRequests.set(caseNo, request);
+          }
+          ranges.set(caseNo, await request);
+        }
         if (mountedRef.current && !controller.signal.aborted && !cancelled) {
           pendingStaffIds.delete(result.staffId);
           calendarLoadedKeyRef.current.set(result.staffId, rangeKey);
@@ -2712,6 +2775,7 @@ const SchedulingWorkbench: React.FC = () => {
           setCalendarRows(current => ({ ...current, [result.staffId]: result.state }));
           setHistoricalOverlaysByStaff(current => ({ ...current, [result.staffId]: result.overlays }));
           setMonthlyRowsByStaff(current => ({ ...current, [result.staffId]: result.monthly }));
+          setHistoricalRangesByStaff(current => ({ ...current, [result.staffId]: ranges }));
           setHistoricalOverlayErrors(current => {
             const next = { ...current };
             if (result.historicalError) next[result.staffId] = result.historicalError;
@@ -3395,9 +3459,11 @@ const SchedulingWorkbench: React.FC = () => {
                     projectionAssignments: row?.kind === 'loaded' ? (row.assignments ?? []) : [],
                   };
                   const hasShiftRows = monthly?.days.some(day => day.starts_at || (day.status !== 'available' && day.status !== 'historical_assignment'));
-                  const spans = hasShiftRows && monthly?.year === month.year && monthly.month === month.month
+                  const monthMatches = monthly?.year === month.year && monthly.month === month.month;
+                  const monthlySpans = hasShiftRows && monthMatches
                     ? assignNonOverlappingLanes(monthlyShiftSpans(monthly, enrichmentContext))
-                    : buildGanttSpans(row ?? undefined, range.totalDays, null, historicalOverlaysByStaff[staff.id], enrichmentContext);
+                    : buildGanttSpans(row ?? undefined, range.totalDays, null, monthMatches ? historicalOverlaysByStaff[staff.id] : [], enrichmentContext);
+                  const spans = showHistoricalCaseRanges(monthlySpans, historicalRangesByStaff[staff.id]);
                   if (ghostConfig) {
                     spans.push(...caseShiftSpans(
                       ghostConfig,
@@ -3616,7 +3682,9 @@ const SchedulingWorkbench: React.FC = () => {
               {selectedShift.caseText}
               {selectedShift.statusLabel ? ` · ${selectedShift.statusLabel}` : ''}
             </strong>
-            {selectedShift.tone === 'historical' ? (
+            {selectedShift.historicalCaseDates ? (
+              <p>📅 整案服務起訖：{selectedShift.historicalCaseDates}</p>
+            ) : selectedShift.tone === 'historical' ? (
               <HistoricalOrderServiceDates key={selectedShift.caseText} caseNo={selectedShift.caseText} />
             ) : (
               <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
