@@ -1,0 +1,44 @@
+# Use with docker-compose.yml for deployment tests with synthetic data.
+services:
+  redis:
+    networks: [union-network, registration-shared-test]
+  registration-intake:
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      APP_ENV: production
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:?LINE channel required}
+      REGISTRATION_USE_SHARED_REDIS_FOR_TEST: "1"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      registration-token-verifier:
+        condition: service_started
+    networks: [registration-shared-test, registration-verification, registration-ingress]
+  registration-token-verifier:
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+    command: [uvicorn, api.registration_token_verification:app, --host, 0.0.0.0, --port, "8081", --no-access-log]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:?LINE channel required}
+    networks: [registration-verification, registration-egress]
+networks:
+  registration-shared-test:
+    internal: true
+  registration-verification:
+    internal: true
+  registration-ingress:
+    internal: true
+  registration-egress:
+    driver: bridge

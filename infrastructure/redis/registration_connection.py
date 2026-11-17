@@ -19,12 +19,13 @@ class RegistrationRedisConfigurationError(RuntimeError):
 def registration_redis_client(*, role: str):
     if role not in {"intake", "admin"}:
         raise ValueError("registration_redis_role_invalid")
+    shared_test = os.getenv("REGISTRATION_USE_SHARED_REDIS_FOR_TEST") == "1"
     local_environment = (
         os.getenv("APP_ENV", "").strip().lower() in {"development", "dev", "local", "test", "testing"}
         and os.getenv("DEPLOYMENT_PROFILE", "").strip().lower() != "nas"
         and os.getenv("ACCESS_CONTROL_PROFILE", "").strip().lower() != "production"
     )
-    password_file = os.environ.get(f"REGISTRATION_REDIS_{role.upper()}_PASSWORD_FILE")
+    password_file = None if shared_test else os.environ.get(f"REGISTRATION_REDIS_{role.upper()}_PASSWORD_FILE")
     credential_error = f"registration_redis_{role}_credential_required"
     try:
         path = Path(password_file) if password_file else None
@@ -50,10 +51,12 @@ def registration_redis_client(*, role: str):
             retry=Retry(NoBackoff(), 0),
         )
 
-    if not local_environment:
+    if not local_environment and not shared_test:
         raise RegistrationRedisConfigurationError(credential_error)
 
-    redis_url = os.environ.get("REGISTRATION_REDIS_URL") or os.environ.get("REDIS_URL")
+    redis_url = os.environ.get("REDIS_URL")
+    if not shared_test:
+        redis_url = os.environ.get("REGISTRATION_REDIS_URL") or redis_url
     if redis_url:
         return Redis.from_url(
             redis_url,
@@ -63,12 +66,16 @@ def registration_redis_client(*, role: str):
             retry=Retry(NoBackoff(), 0),
         )
 
-    host = os.environ.get("REGISTRATION_REDIS_HOST", os.environ.get("REDIS_HOST", "127.0.0.1"))
-    port = int(os.environ.get("REGISTRATION_REDIS_PORT", os.environ.get("REDIS_PORT", "6379")))
-    password = os.environ.get(f"REGISTRATION_REDIS_{role.upper()}_PASSWORD") or os.environ.get("REDIS_PASSWORD")
+    host = os.environ.get("REDIS_HOST", "127.0.0.1")
+    port = os.environ.get("REDIS_PORT", "6379")
+    password = os.environ.get("REDIS_PASSWORD")
+    if not shared_test:
+        host = os.environ.get("REGISTRATION_REDIS_HOST", host)
+        port = os.environ.get("REGISTRATION_REDIS_PORT", port)
+        password = os.environ.get(f"REGISTRATION_REDIS_{role.upper()}_PASSWORD") or password
     return Redis(
         host=host,
-        port=port,
+        port=int(port),
         password=password,
         decode_responses=True,
         socket_connect_timeout=2,

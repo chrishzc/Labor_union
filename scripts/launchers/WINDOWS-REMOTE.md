@@ -214,3 +214,8 @@ https://line.chrishzc.com/webhook/line
 - `NOT_RUN`：LINE 端實際訊息投遞。目前 delivery tasks／attempts 都為 0，無既有送達紀錄可核對；依使用者要求，沒有人工觸發工作週期或發送測試訊息。後續自然產生的正常通知才能作實際送達證據。
 
 受限目錄的 `line-worker-repair-receipt.json` 保存本次結果。先前 `normal-operations-receipt.json` 的 LINE 503 是修復前的階段紀錄。
+### 無正式資料時測試非市民申請
+
+在管理 API 使用的 `.env` 設定 `REGISTRATION_USE_SHARED_REDIS_FOR_TEST=1`，並保留原本的 `REDIS_URL`，例如 `redis://127.0.0.1:6379/0`。重啟 API 後設定生效。
+
+需要測試 LINE 收件時，在原 Compose 專案使用 `docker compose -f docker-compose.yml -f docker-compose.registration-test.yml up -d redis registration-intake registration-token-verifier`，並將測試入口接到該次部署的收件服務。此配置的收件端使用一般 Redis 的第 0 號資料庫，管理端的 `REDIS_URL` 須指向同一資料庫。正式資料環境使用原專用 Redis 配置。

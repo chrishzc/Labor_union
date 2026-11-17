@@ -74,6 +74,28 @@ def test_local_registration_can_still_use_generic_redis(role, environment):
 
 
 @pytest.mark.parametrize("role", ["intake", "admin"])
+@pytest.mark.parametrize("mode", ["1", "0"])
+def test_only_explicit_deployment_test_uses_the_same_generic_redis(role, mode, tmp_path):
+    secret_file = tmp_path / "synthetic"
+    secret_file.write_text("synthetic-test-password", encoding="utf-8")
+    settings = {
+        "APP_ENV": "production",
+        "ACCESS_CONTROL_PROFILE": "production",
+        "REGISTRATION_USE_SHARED_REDIS_FOR_TEST": mode,
+        "REDIS_URL": "redis://127.0.0.1:16479/0",
+        "REGISTRATION_REDIS_URL": "redis://other-redis:16379/4",
+        f"REGISTRATION_REDIS_{role.upper()}_PASSWORD_FILE": str(secret_file),
+    }
+    with patch.dict("os.environ", settings, clear=True):
+        client = registration_redis_client(role=role)
+    options = client.connection_pool.connection_kwargs
+    if mode == "1":
+        assert (options["host"], options["port"], options["db"], options.get("username")) == ("127.0.0.1", 16479, 0, None)
+    else:
+        assert (options["host"], options["username"]) == ("registration-redis", f"registration-{role}")
+
+
+@pytest.mark.parametrize("role", ["intake", "admin"])
 @pytest.mark.parametrize("invalid_port", [None, "not-a-port", "65536"])
 def test_registration_entrypoint_returns_typed_unavailable_for_invalid_configuration(role, invalid_port, tmp_path):
     from fastapi import HTTPException
