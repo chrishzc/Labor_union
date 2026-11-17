@@ -13,9 +13,42 @@ function Get-FrontendControlDirectory {
 function Write-FrontendControlJson {
     param([string]$Path, $Value)
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, [System.Management.Automation.Language.NullString]::Value) }
-    else { [IO.File]::Move($temporary, $Path) }
+    try {
+        [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, [System.Management.Automation.Language.NullString]::Value) }
+                else { [IO.File]::Move($temporary, $Path) }
+                return
+            }
+            catch {
+                $cause = $_.Exception.GetBaseException()
+                $code = $cause.HResult -band 0xffff
+                # Older supervisors can briefly read request.json without delete sharing.
+                if ($cause -isnot [IO.IOException] -or $code -notin @(32, 33, 1175) -or $attempt -ge 19) {
+                    throw "Could not publish control file '$Path': $($cause.Message)"
+                }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Read-FrontendControlJson {
+    param([string]$Path)
+    $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+    try {
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8)
+        try { $reader.ReadToEnd() | ConvertFrom-Json }
+        finally { $reader.Dispose() }
+    }
+    finally { $stream.Dispose() }
 }
 
 function Assert-FrontendArtifact {
@@ -126,7 +159,7 @@ function Receive-FrontendControlRequest {
     $directory = Get-FrontendControlDirectory
     $path = Join-Path $directory 'request.json'
     if (-not (Test-Path -LiteralPath $path)) { return }
-    try { $request = Get-Content -Raw -LiteralPath $path -Encoding UTF8 | ConvertFrom-Json } catch { return }
+    try { $request = Read-FrontendControlJson $path } catch { return }
     if ($request.id -notmatch '^[0-9a-f]{32}$' -or $request.id -eq $script:LastFrontendRequest) { return }
     $script:LastFrontendRequest = $request.id
     try {
@@ -161,7 +194,7 @@ function Submit-RuntimeStop {
             id=[guid]::NewGuid().ToString('N');run_id=$state.run_id;operation='stop_runtime'
         }
         if (-not $owner.Process.WaitForExit(180000)) { throw 'Runtime stop is still pending; do not start another host.' }
-        $finished = Get-Content -Raw -LiteralPath (Join-Path $directory 'state.json') -Encoding UTF8 | ConvertFrom-Json
+        $finished = Read-FrontendControlJson (Join-Path $directory 'state.json')
         if ($finished.run_id -ne $state.run_id -or $finished.runtime_status -ne 'stopped' -or
             $finished.cleanup_confirmed -ne $true) {
             throw 'Runtime cleanup was not confirmed; do not start another host.'
@@ -194,7 +227,7 @@ function Initialize-AdoptedRemoteRuntime {
     param([string]$StatePath)
     # Until the legacy supervisor exits, failure must never clean up its children.
     $script:SkipRuntimeCleanup = $true
-    $state = Get-Content -Raw -LiteralPath $StatePath -Encoding UTF8 | ConvertFrom-Json
+    $state = Read-FrontendControlJson $StatePath
     if ($state.contract -ne 'windows-frontend-adoption/v1' -or $state.project_root -ne $ProjectRoot -or
         $state.api_port -ne $ApiPort -or $state.react_port -ne $ReactPort) { throw 'Adoption binding mismatch.' }
     [void](Assert-FrontendArtifact $state.artifact_path)
@@ -222,7 +255,7 @@ function Get-FrontendUpdateSupervisor {
     $directory = Get-FrontendControlDirectory
     $statePath = Join-Path $directory 'state.json'
     if (Test-Path -LiteralPath $statePath) {
-        $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
+        $state = Read-FrontendControlJson $statePath
         $snapshot = Get-ProcessSnapshot ([int]$state.supervisor_pid)
         if ($state.contract -eq 'windows-frontend-control/v1' -and $state.project_root -eq $ProjectRoot -and
             $state.api_port -eq $ApiPort -and $state.react_port -eq $ReactPort -and
@@ -295,7 +328,7 @@ function Get-FrontendUpdateSupervisor {
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path -LiteralPath $readyPath)) { throw 'Replacement supervisor did not become ready; current runtime was retained.' }
-    $ready = Get-Content -Raw -LiteralPath $readyPath -Encoding UTF8 | ConvertFrom-Json
+    $ready = Read-FrontendControlJson $readyPath
     if ($ready.pid -ne $replacement.Id -or ([datetime]$ready.start_time).ToUniversalTime().Ticks -ne $replacement.StartTime.ToUniversalTime().Ticks) { throw 'Replacement supervisor identity mismatch.' }
     $verified = Get-ProcessSnapshot ([int]$legacy.ProcessId)
     if ($verified.State -ne 'alive' -or -not (Test-SameProcessIdentity ([pscustomobject]@{StartTime=$legacySnapshot.StartTime}) $verified)) { throw 'Legacy supervisor changed before handoff.' }
@@ -305,7 +338,7 @@ function Get-FrontendUpdateSupervisor {
     [void]$verified.Process.WaitForExit(5000)
     for ($attempt=0; $attempt -lt 120; $attempt++) {
         if (Test-Path -LiteralPath $statePath) {
-            $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
+            $state = Read-FrontendControlJson $statePath
             if ($state.supervisor_pid -eq $replacement.Id) { return $state }
         }
         if ($replacement.HasExited) { throw "Supervisor handoff needs recovery from $adoptionPath; preserved children were not intentionally stopped." }
@@ -327,7 +360,7 @@ function Submit-FrontendUpdate {
         $responsePath = Join-Path $directory ($id + '.response.json')
         for ($attempt=0; $attempt -lt 480; $attempt++) {
             if (Test-Path -LiteralPath $responsePath) {
-                $response = Get-Content -Raw -LiteralPath $responsePath -Encoding UTF8 | ConvertFrom-Json
+                $response = Read-FrontendControlJson $responsePath
                 if ($response.id -ne $id) { throw 'Frontend response identity mismatch.' }
                 if ($response.status -ne 'updated') { throw "Frontend update $($response.status): $($response.error)" }
                 Write-Host "[Ready] Frontend updated on 127.0.0.1:$ReactPort; API, workers and Tunnel were not restarted."
