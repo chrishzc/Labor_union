@@ -143,7 +143,7 @@ describe('Staff roster profile flow', () => {
     render(<StaffPage />);
     await screen.findByText('去敏人員甲');
     const initialCount = document.querySelector('.staff-directory-count')?.textContent;
-    expect(document.querySelector('.staff-quick-query')).not.toHaveAttribute('open');
+    expect(screen.queryByText('快速查詢資格主檔')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '沒有符合的人員' } });
     await screen.findByText('搜尋結果 0 位服務人員');
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('Staff roster profile flow', () => {
     expect(staffProfileClient.query).not.toHaveBeenCalled();
   });
 
-  it('loads the complete roster before sorting union numbers, selectors and search', async () => {
+  it('loads the complete roster before sorting and searching union numbers', async () => {
     const entry = (id: number, union_no: string | null) => ({ id, union_no, name: `排序測試${id}`, phone: null, education: null });
     const firstPage = { items: [entry(11, 'A10'), entry(12, null), entry(13, 'A02'), entry(14, 'A2'), entry(15, 'A1')], next_cursor: 15 };
     const secondPage = { items: [entry(16, '0003'), entry(17, 'A3'), entry(18, null)], next_cursor: null };
@@ -163,8 +163,6 @@ describe('Staff roster profile flow', () => {
     const numbers = () => within(screen.getByRole('table', { name: '月嫂名冊清單' })).getAllByRole('row').slice(1)
       .map(row => within(row).getAllByRole('cell')[0].textContent);
     expect(numbers()).toEqual(['0003', 'A1', 'A02', 'A2', 'A3', 'A10', '未設定', '未設定']);
-    expect(Array.from((screen.getByLabelText('查詢服務人員') as HTMLSelectElement).options).slice(1).map(option => option.value))
-      .toEqual(['16', '15', '13', '14', '17', '11', '12', '18']);
     expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
       { pageSize: 200, afterId: 15, includeProfile: true, lifecycleState: 'active' }, expect.objectContaining({ signal: expect.any(AbortSignal) }),

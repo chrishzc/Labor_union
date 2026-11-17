@@ -1778,6 +1778,45 @@ interface GanttSpan {
   shift?: StaffMonthlySchedule['days'][number];
 }
 
+type HistoricalOrderDateState =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; start: string | null; end: string | null };
+
+function HistoricalOrderServiceDates({ caseNo }: { caseNo: string }) {
+  const [dates, setDates] = useState<HistoricalOrderDateState>({ status: 'loading' });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadDates() {
+      try {
+        const order = await ordersQueryClient.getOrderDetail(caseNo, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setDates({
+          status: 'ready',
+          start: order.actual_start_date ?? order.start_date,
+          end: order.actual_end_date ?? order.end_date,
+        });
+      } catch {
+        if (!controller.signal.aborted) setDates({ status: 'error' });
+      }
+    }
+    void loadDates();
+    return () => controller.abort();
+  }, [caseNo]);
+
+  let text = '查詢中';
+  if (dates.status === 'error') {
+    text = '查詢失敗';
+  } else if (dates.status === 'ready') {
+    text = dates.start === dates.end
+      ? dates.start ?? '尚未登錄'
+      : `${dates.start ?? '開始日尚未登錄'} ～ ${dates.end ?? '結束日尚未登錄'}`;
+  }
+
+  return <p aria-live="polite">📅 整案服務起訖：{text}</p>;
+}
+
 function resolveOrderSpanEnrichment(
   caseNo: string | null | undefined,
   assignmentId: number | null | undefined,
@@ -3579,12 +3618,20 @@ const SchedulingWorkbench: React.FC = () => {
               {selectedShift.caseText}
               {selectedShift.statusLabel ? ` · ${selectedShift.statusLabel}` : ''}
             </strong>
-            <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
+            {selectedShift.tone === 'historical' ? (
+              selectedShift.shift?.case_no && (
+                <HistoricalOrderServiceDates key={selectedShift.shift.case_no} caseNo={selectedShift.shift.case_no} />
+              )
+            ) : (
+              <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
+            )}
             {selectedShift.dailyTimeText && <p>⏰ 每日時段：{selectedShift.dailyTimeText}</p>}
             {selectedShift.shift && (
               <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
             )}
-            {selectedShift.shift?.service_date && <p>首個服務日 {selectedShift.shift.service_date}</p>}
+            {selectedShift.shift?.service_date && (
+              <p>{selectedShift.tone === 'historical' ? '班次服務日' : '首個服務日'} {selectedShift.shift.service_date}</p>
+            )}
             {(selectedShift.shift?.assignment_id ?? selectedShift.assignmentId) && (
               <p>指派 {selectedShift.shift?.assignment_id ?? selectedShift.assignmentId}</p>
             )}

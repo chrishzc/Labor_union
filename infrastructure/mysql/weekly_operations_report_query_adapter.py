@@ -91,6 +91,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 planned_end_date=_optional_date(row.get("planned_end_date")),
                 seq_num=_optional_int(row.get("seq_num")),
                 case_category=row.get("case_category"),
+                cancel_reason=_optional_text(row.get("cancel_reason")),
             )
             for row in rows
         ]
@@ -265,9 +266,19 @@ _CASE_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,
        c.name AS applicant_name,c.identity_status,c.hcm_review_status,c.city,c.address,
        {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,o.service_days,o.service_hours_per_day,
-       o.start_date AS planned_start_date,o.end_date AS planned_end_date
+       o.start_date AS planned_start_date,o.end_date AS planned_end_date,
+       COALESCE(cancellation.reason,o.cancel_reason) AS cancel_reason
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
+LEFT JOIN order_lifecycle_control_state cancellation_state
+       ON cancellation_state.case_no=o.case_no AND cancellation_state.control_type='cancellation'
+       AND cancellation_state.control_key='order_cancelled' AND cancellation_state.state='active'
+LEFT JOIN order_lifecycle_control_events cancellation_control
+       ON cancellation_control.id=cancellation_state.current_event_id
+       AND cancellation_control.case_no=cancellation_state.case_no
+LEFT JOIN order_cancellation_events cancellation
+       ON cancellation.idempotency_key=cancellation_control.idempotency_key
+       AND cancellation.case_no=cancellation_control.case_no
 WHERE {_REPORT_CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """

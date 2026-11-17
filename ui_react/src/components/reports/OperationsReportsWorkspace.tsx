@@ -134,7 +134,7 @@ const WeeklyCaseTotalsRow: React.FC<{
       const text = value === null && index < 2 ? '未完整登錄' : displayWeeklyMetric(value);
       return <td key={name} aria-label={`${name}：${text}`}>{text}</td>;
     })}
-    <td colSpan={7} />
+    <td colSpan={8} />
   </tr>;
 };
 
@@ -171,7 +171,9 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
       <td>{row ? displayWeeklyValue(row.service_hours_per_day) : ''}</td>
       <td>{row ? displayWeeklyValue(row.planned_start_date) : ''}</td>
       <td>{row ? displayWeeklyValue(row.planned_end_date) : ''}</td>
-      <td>{row?.service_status ?? ''}</td><td>{row?.district ?? ''}</td><td>{row?.notes ?? ''}</td>
+      <td>{row?.service_status ?? ''}</td><td>{row?.district ?? ''}</td>
+      <td className="reports-case-cancel-reason">{row?.cancel_reason ?? ''}</td>
+      <td>{row?.notes ?? ''}</td>
     </tr>);
   };
 
@@ -197,7 +199,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
             <th rowSpan={2} scope="col">平台案件申請數</th>
             <th colSpan={2} scope="colgroup">市民案件審核</th><th colSpan={2} scope="colgroup">社福案件審核</th><th colSpan={2} scope="colgroup">原住民案件審核</th>
             <th colSpan={4} scope="colgroup">申請案件狀況</th>
-            {['服務天數', '每日服務時數', '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '備註']
+            {['服務天數', '每日服務時數', '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '取消原因', '備註']
               .map((label) => <th key={label} rowSpan={2} scope="col">{label}</th>)}
           </tr>
           <tr>{['一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合', '原住民符合', '原住民不符合', '訂單成立', '洽談中', '取消', '審核不符合']

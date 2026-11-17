@@ -472,7 +472,7 @@ def _raise_value_error(
     elif code == "office_schedule_reallocation_reason_required":
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409
-        message = "月嫂人選或分配天數與原簽約方案不同，請填寫調整原因及協調依據後重新預覽。"
+        message = "月嫂人選或分配天數與原簽約方案不同，請填寫調整原因及協調依據後重試。"
     elif "blocked" in code:
         category = ErrorCategory.DOMAIN_BLOCKED
         status_code = 409

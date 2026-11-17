@@ -17,7 +17,35 @@
 .client-roster-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0 0 8px; }
 .client-roster-pagination span { color: #65483b; }
 .client-roster-table-frame { display: flex; flex-direction: column; max-height: min(65vh, 720px); margin-top: 10px; max-width: 100%; border: 1px solid #ead3c8; border-radius: 12px; background: white; }
-.client-roster-table-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; color: #74593f; }
+.client-roster-page--embedded .client-roster-table-frame {
+  --client-roster-navbar-height: 64px;
+  --client-roster-workspace-bottom-padding: var(--space-6);
+  --client-roster-hub-bottom-padding: var(--space-6);
+  --client-roster-page-bottom-padding: 0px;
+  max-block-size: calc(
+    100dvh - var(--client-roster-navbar-height) - var(--client-roster-workspace-bottom-padding)
+    - var(--client-roster-hub-bottom-padding) - var(--client-roster-page-bottom-padding)
+  );
+}
+@media (max-width: 1200px) {
+  .client-roster-page--embedded .client-roster-table-frame { --client-roster-workspace-bottom-padding: var(--space-5); }
+}
+@media (max-width: 900px) {
+  .client-roster-page--embedded .client-roster-table-frame {
+    --client-roster-navbar-height: 57px;
+    --client-roster-workspace-bottom-padding: var(--space-4);
+  }
+}
+@media (max-width: 820px) {
+  .client-roster-page--embedded .client-roster-table-frame { --client-roster-hub-bottom-padding: var(--space-4); }
+}
+@media (max-width: 560px) {
+  .client-roster-page--embedded .client-roster-table-frame {
+    --client-roster-workspace-bottom-padding: 12px;
+    --client-roster-page-bottom-padding: var(--space-4);
+  }
+}
+.client-roster-table-title { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; color: #74593f; }
 .client-roster-table-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto; }
 .client-roster-page .roster-picker-reset { background: white; color: #65483b; border-color: #d8b9a7; }
 .client-roster-table-wrap { min-height: 0; flex: 1 1 auto; max-width: 100%; overflow: auto; }

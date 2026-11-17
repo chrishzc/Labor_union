@@ -7,7 +7,7 @@ import type {
   HistoricalScheduleSavePayload,
   ServiceDateConfirmationQueryView,
 } from '../api/orders/order_mutation_schemas';
-import { ordersMutationClient, previewOfficeSchedule, saveHistoricalSchedule, type OfficeScheduleQuote } from '../api/orders/order_mutation_client';
+import { ordersMutationClient, saveHistoricalSchedule } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import {
@@ -51,7 +51,7 @@ interface OrderServiceDatesPanelProps {
   officeScheduleStaff?: ServiceDateConfirmationQueryView['bound_staff'];
 }
 
-type WorkingAction = 'load' | 'preview' | 'apply' | null;
+type WorkingAction = 'load' | 'apply' | null;
 type DateLoadMode = 'read' | 'calculate' | 'resume';
 type ServiceMode = '休周六' | '休周日' | '週休2日' | '連續服務';
 type ServiceDatesRecovery =
@@ -111,12 +111,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const staffDirectory = useStaffIdentityDirectory();
   const [officeStaff, setOfficeStaff] = useState<typeof officeScheduleStaff | null>(null);
   const [officeEditing, setOfficeEditing] = useState(false);
-  const [officeQuote, setOfficeQuote] = useState<{ payload: string; quote: OfficeScheduleQuote } | null>(null);
   const [officeReasonRequired, setOfficeReasonRequired] = useState(false);
   useEffect(() => {
     setOfficeEditing(false);
     setOfficeStaff(null);
-    setOfficeQuote(null);
     setOfficeReasonRequired(false);
   }, [caseNo]);
   const [working, setWorking] = useState<WorkingAction>(null);
@@ -131,7 +129,6 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     key: string;
     office: boolean;
     payload: HistoricalScheduleSavePayload;
-    previewFingerprint?: string;
     receipt?: HistoricalArrangementReceiptView;
   }>());
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
@@ -679,12 +676,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     expected_confirmed_version: queryView.current_version,
     reason: reason.trim(),
   } : null;
-  const currentQuote = officeSchedule && officeQuote?.payload === JSON.stringify(schedulePayload) ? officeQuote.quote : null;
-
   const cancelOfficeEditing = () => {
     setOfficeEditing(false);
     setOfficeStaff(null);
-    setOfficeQuote(null);
     setOfficeReasonRequired(false);
     setAllocation({});
     setRestWeekdays(null);
@@ -693,36 +687,15 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     void loadServiceDates('read');
   };
 
-  const runOfficeSchedulePreview = async () => {
-    if (!schedulePayload || readController.current !== null || actionInFlight.current.has(caseNo)) return;
-    actionInFlight.current.add(caseNo);
-    setWorking('preview');
-    setError(null);
-    try {
-      const quote = await previewOfficeSchedule(caseNo, schedulePayload);
-      if (renderedCaseNo.current === caseNo) setOfficeQuote({ payload: JSON.stringify(schedulePayload), quote });
-    } catch (caught) {
-      if (renderedCaseNo.current === caseNo) {
-        if ((caught instanceof OrderMutationError || caught instanceof ApiHttpError)
-          && caught.code === 'office_schedule_reallocation_reason_required') setOfficeReasonRequired(true);
-        setError(errorMessage(caught));
-      }
-    } finally {
-      actionInFlight.current.delete(caseNo);
-      if (renderedCaseNo.current === caseNo) setWorking(null);
-    }
-  };
-
   const runScheduleSave = async () => {
     if (!queryView || readController.current !== null || actionInFlight.current.has(caseNo)) return;
     let request = scheduleRequests.current.get(caseNo);
     if (!request) {
-      if (!schedulePayload || (multiCaregiverEditing && !currentQuote)) return;
+      if (!schedulePayload) return;
       request = {
         key: crypto.randomUUID(),
         office: officeSchedule,
         payload: schedulePayload,
-        previewFingerprint: currentQuote?.preview_fingerprint,
       };
       scheduleRequests.current.set(caseNo, request);
     }
@@ -733,7 +706,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     let conflict: string | null = null;
     try {
       const receipt = request.receipt ?? await (request.office
-        ? saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }, true, request.previewFingerprint)
+        ? saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }, true)
         : saveHistoricalSchedule(caseNo, request.payload, { idempotencyKey: request.key }));
       request.receipt = receipt;
       const [observed, plan] = await Promise.all([
@@ -769,18 +742,21 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       setSuccess('班表已儲存並回讀正式排班。');
       setOfficeEditing(false);
       setOfficeStaff(null);
-      setOfficeQuote(null);
+      setOfficeReasonRequired(false);
       onObserved?.();
     } catch (caught) {
       const rejected = !request.receipt && (caught instanceof OrderMutationError || caught instanceof ApiHttpError)
         && caught.status >= 400 && caught.status < 500;
       if (rejected) {
         scheduleRequests.current.delete(caseNo);
-        setOfficeQuote(null);
       }
       if (renderedCaseNo.current === caseNo) {
         setError(request.receipt ? '班表已提交，請重新讀取結果。' : errorMessage(caught));
-        if (rejected && isServiceDateConflict(caught)) conflict = errorMessage(caught);
+        if (rejected && request.office && caught.code === 'office_schedule_reallocation_reason_required') {
+          setOfficeReasonRequired(true);
+        } else if (rejected && isServiceDateConflict(caught)) {
+          conflict = errorMessage(caught);
+        }
       }
     } finally {
       actionInFlight.current.delete(caseNo);
@@ -806,6 +782,11 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     && selectedDates.some(date => !selectedOfficeStaff.some(person => person.staff_id === allocation[date]));
   const emptyOfficeBlock = multiCaregiverEditing && selectedOfficeStaff.length > 1
     && selectedOfficeStaff.some(person => !selectedDates.some(date => allocation[date] === person.staff_id));
+  const officeScheduleIssue = selectedDates.length !== requiredDateCount
+    ? `請先回到服務日期月曆選滿 ${requiredDateCount} 個服務日，再進行月嫂分配。`
+    : missingOfficeDates ? '請分配所有服務日。'
+    : emptyOfficeBlock ? '請為每位月嫂分配服務日，或移除未排班的月嫂。'
+    : needsScheduleReason ? '請填寫調整原因及協調依據。' : null;
 
   useEffect(() => {
     if (initialCalculation.current === caseNo || queryView?.case_no !== caseNo || queryView.current_dates.length > 0
@@ -849,7 +830,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         <div className="service-date-start-field">
           <label>實際開始日
             <input ref={startDateRef} aria-required="true" type="date" aria-label="實際開始日" value={startDate}
-              disabled={saving || !!scheduleRecovery || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
+              disabled={saving || !!scheduleRecovery || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
               onChange={(event) => changeStartDate(event.target.value)} />
           </label>
           {!schedulePending && actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
@@ -861,7 +842,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             原訂服務方式 <strong>{originalServiceType}</strong>
           </p>}
       <fieldset aria-label="人工選定休假星期"
-        disabled={saving || !!scheduleRecovery || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
+        disabled={saving || !!scheduleRecovery || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}>
         <legend>本次計算的休假星期</legend>
         <div className="service-date-weekday-choices">
           {REST_WEEKDAYS.map(({ value, label }) => <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1026,31 +1007,15 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
               return next;
             })} />}
           {effectiveServiceDates === null && <label className="service-date-reason">{scheduleReasonRequired ? '調整原因及協調依據（必填）' : '原因（選填）'}<textarea required={scheduleReasonRequired} maxLength={500} value={reason} disabled={working !== null || !!scheduleRecovery || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
-          {currentQuote && <section aria-label="核對首份班表及應付">
-            <h4>核對首份班表及應付</h4>
-            {currentQuote.staff_entitlements.map(item => <div key={item.staff_id}>
-              <p>{staffIdentity.label(item.staff_id)} · {scheduleSegments?.find(segment => segment.staff_id === item.staff_id)?.service_dates.length} 日 · 應付 NT$ {item.amount_ntd.toLocaleString('zh-TW')}</p>
-              {item.funding.map(part => <p key={part.kind}>{part.kind === 'client' ? '自備款' : '補助款'} NT$ {part.amount_ntd.toLocaleString('zh-TW')}</p>)}
-            </div>)}
-          </section>}
           <div className="service-date-footer">
-            {schedulePending && multiCaregiverEditing && !scheduleRecovery && working === null && <p>
-              {selectedDates.length !== requiredDateCount ? `請先回到服務日期月曆選滿 ${requiredDateCount} 個服務日，再進行月嫂分配。`
-                : missingOfficeDates ? '請分配所有服務日。'
-                : emptyOfficeBlock ? '請為每位月嫂分配服務日，或移除未排班的月嫂。'
-                : needsScheduleReason ? '請填寫調整原因及協調依據。'
-                : currentQuote ? '核對班表和應付金額後，即可儲存。'
-                : '請先預覽班表及應付，再確認儲存。'}
-            </p>}
+            {schedulePending && multiCaregiverEditing && !scheduleRecovery && working === null && officeScheduleIssue &&
+              <p>{officeScheduleIssue}</p>}
             {schedulePending && !multiCaregiverEditing && (officeSchedule ? selectedOfficeStaff : queryView.bound_staff).length > 1 && !scheduleSegments &&
               <p>請完成每位月嫂的日期分配。</p>}
             {!schedulePending && effectiveServiceDates === null && queryView.current_dates.length > 0 &&
               <p>雙方確認後會依服務日期自動排班。</p>}
-            {schedulePending && multiCaregiverEditing && !scheduleRecovery &&
-              <button type="button" disabled={!canSaveSchedule || needsScheduleReason || currentQuote !== null}
-                onClick={() => void runOfficeSchedulePreview()}>{working === 'preview' ? '預覽中…' : '預覽班表及應付'}</button>}
             {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看排班結果 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary"
-              disabled={schedulePending ? working !== null || (!scheduleRecovery && (!canSaveSchedule || needsScheduleReason || (multiCaregiverEditing && !currentQuote))) : !canSave}
+              disabled={schedulePending ? working !== null || (!scheduleRecovery && (!canSaveSchedule || needsScheduleReason)) : !canSave}
               onClick={() => void (schedulePending ? runScheduleSave() : runApply(true))}>
               {working === 'apply' ? '儲存並確認中…' : schedulePending
                 ? scheduleRecovery ? scheduleRecovery.receipt ? '重新讀取班表' : '確認原儲存結果'

@@ -493,8 +493,8 @@ def save_office_schedule(
     expected_scheduling_version, expected_confirmed_version, idempotency_key, actor,
     reason, correlation_id, preview_fingerprint=None,
 ):
-    reallocation_reason = reason.strip() if preview_fingerprint else ""
-    reason = reason.strip() or "工會確認服務日期並建立正式班表"
+    reallocation_reason = reason.strip()
+    reason = reallocation_reason or "工會確認服務日期並建立正式班表"
     key = IdempotencyKey(idempotency_key)
     who = ActorContext(actor)
     cid = CorrelationId(correlation_id)
@@ -555,7 +555,7 @@ def save_office_schedule(
         staff_ids = {segment.staff_id for segment in segments}
         if (current.effective_assignments and {a.staff_id for a in current.effective_assignments} != staff_ids
                 and not reallocation_reason):
-            raise ValueError("office_schedule_incumbent_conflict")
+            raise ValueError("office_schedule_reallocation_reason_required")
         start = actual_repository.load_actual_start_query(case_no, for_update=True)
         if start.service_data_locked:
             raise ValueError("office_schedule_locked_blocked")

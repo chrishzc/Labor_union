@@ -157,19 +157,22 @@ describe('Staff #staff entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('選擇服務人員時 Roster lifecycle 與 qualification 各一個 GET，且不發 mutation', async () => {
+  it('搜尋名冊只查清單，點選搜尋結果後才載入資格、任職與可服務資料', async () => {
     authenticate();
     const requests = installFetchStub();
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '去敏人員甲' } });
+    await screen.findByText('搜尋結果 1 位服務人員');
+    expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(0);
+    expect(countPath(requests, STAFF_QUALIFICATION_ENDPOINT)).toBe(0);
+    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
+    fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
 
     await waitFor(() => expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1));
     await waitFor(() => expect(countPath(requests, STAFF_QUALIFICATION_ENDPOINT)).toBe(1));
-    expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBeLessThanOrEqual(1);
-    expect(countPath(requests, PREFERENCE_MANUAL_ENDPOINT)).toBe(0);
-    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(0);
+    await waitFor(() => expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(1));
     expectOnlyGet(requests);
   });
 
@@ -195,10 +198,7 @@ describe('Staff #staff entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
-    await waitFor(() => expect(screen.getByLabelText('查詢服務人員')).toHaveValue('11'));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(1);
+    await waitFor(() => expect(countPath(requests, AVAILABILITY_ENDPOINT)).toBe(1));
     expectOnlyGet(requests);
   });
 

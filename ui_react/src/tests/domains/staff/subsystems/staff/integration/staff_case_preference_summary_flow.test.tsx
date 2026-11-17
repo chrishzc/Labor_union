@@ -56,7 +56,6 @@ describe('Staff case preference summary flow', () => {
   it('keeps imported service information inside professional data and only two preferences in the drawer', async () => {
     render(<StaffPage />);
     await screen.findByText('去敏人員甲');
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     const card = document.querySelector('[data-control-id="staff.row.11"]') as HTMLElement;
     fireEvent.click(within(card).getByRole('button', { name: /查看 .* 的詳情/ }));
     const area = document.querySelector('[data-surface-id="staff.qualification.preferences"]') as HTMLElement;

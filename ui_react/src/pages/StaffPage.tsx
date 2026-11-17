@@ -1140,12 +1140,6 @@ const StaffRosterPage: React.FC = () => {
 
 
   const { requestLeave } = useUnsavedNavigation();
-  const changeSelectedStaff = (value: string) => {
-    if (selectedStaff !== null) return;
-    invalidateSlice();
-    setSelectedStaffId(value ? Number(value) : null);
-  };
-
   const openStaffDetail = (staff: StaffDirectoryCardViewModel) => {
     if (interactionLocked) return;
     if (selectedStaffId !== staff.id) invalidateSlice();
@@ -1325,69 +1319,18 @@ const StaffRosterPage: React.FC = () => {
             </button>
           )}
         </div>
-        <div className="staff-filter-pills-row">
-          <span className="staff-directory-count" role="status">
-            {searchQuery.trim()
-              ? directorySearch.status === 'loading' || directorySearch.status === 'idle'
-                ? '搜尋中…'
-                : directorySearch.status === 'error'
-                  ? '搜尋未完成'
-                  : `搜尋結果 ${filteredStaffItems.length} 位服務人員`
-              : `目前已載入 ${directory.items.length} 位服務人員`}
-          </span>
-          <details className="staff-quick-query">
-            <summary>快速查詢資格主檔</summary>
-          <div className="staff-query-selector" data-surface-id="staff.selector">
-            <label htmlFor="staff-query-staff">查詢服務人員</label>
-            <select
-              id="staff-query-staff"
-              data-control-id="staff.selector.staff"
-              disabled={interactionLocked || selectedStaff !== null}
-              value={selectedStaffId ?? ''}
-              onChange={(event) => changeSelectedStaff(event.target.value)}
-            >
-              <option value="">請選擇服務人員</option>
-              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>)}
-            </select>
-          </div>
-          </details>
-        </div>
+        <span className="staff-directory-count" role="status">
+          {searchQuery.trim()
+            ? directorySearch.status === 'loading' || directorySearch.status === 'idle'
+              ? '搜尋中…'
+              : directorySearch.status === 'error'
+                ? '搜尋未完成'
+                : `搜尋結果 ${filteredStaffItems.length} 位服務人員`
+            : `目前已載入 ${directory.items.length} 位服務人員`}
+        </span>
       </div>
 
         <section data-surface-id="staff.directory" role="tabpanel" id={`${rosterTabsId}-panel`} aria-labelledby={`${rosterTabsId}-${rosterLifecycle}`}>
-          {selectedStaffId !== null && qualification.status === 'error' && (
-            <div role="alert" className="staff-directory-message error">
-              資格主檔查詢失敗：{qualification.message}
-              <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>
-                重試資格主檔
-              </button>
-            </div>
-          )}
-          {selectedStaffId !== null && selectedStaff === null && qualification.status === 'ready' && (
-            <div className="sr-only" data-surface-id="staff.qualification-master">
-              <p>整體狀態：{qualification.data.overallAvailabilityLabel}</p>
-              {qualification.data.sections.map((section) => {
-                const label = qualificationSectionLabel(section.kind);
-                return (
-                  <div key={section.kind} role="group" aria-label={label}>
-                    <h4>{label} · {section.availabilityLabel}</h4>
-                    {section.items.length === 0 ? (
-                      <small>{qualificationEmptyMessage(section)}</small>
-                    ) : (
-                      <ul>
-                        {section.items.map((item) => (
-                          <li key={item.code}>
-                            <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
           {directory.status === 'loading' && (
             <div className="staff-directory-message" data-control-id="staff.directory.query" role="status">
               正在載入服務人員摘要名冊…

@@ -146,14 +146,6 @@
   border-color: var(--md-sys-color-primary-hover);
 }
 
-.staff-filter-pills-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
 .staff-filter-pills {
   display: flex;
   align-items: center;
@@ -191,38 +183,38 @@
 .staff-roster-tabs .staff-filter-pill.active { background: #9a3412; border-color: #9a3412; }
 .staff-roster-tabs .staff-filter-pill:focus-visible { outline: 3px solid #9a3412; outline-offset: 3px; }
 
-.staff-query-selector {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  border: 1px solid #ead9d3;
-  border-radius: 10px;
-  background: #fff;
-  font-size: 0.88rem;
-}
-
-.staff-query-selector select {
-  min-height: 36px;
-  padding: 6px 10px;
-  border: 1px solid #d9c6bf;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 0.88rem;
-}
-
-.staff-query-selector span {
-  color: #6d625e;
-  font-size: 0.82rem;
-}
-
 /* ==========================================================================
    Caregiver Directory Table
    ========================================================================== */
-.staff-directory-frame { background: #fff; border: 1px solid #ead3c8; border-radius: 12px; overflow: hidden; }
-.staff-directory-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #f1ddd5; color: #74593f; font-size: 0.92rem; }
-.staff-directory-table-wrap { position: relative; max-height: 55vh; overflow: auto; scrollbar-gutter: stable; background: #fff; }
+.staff-directory-frame {
+  --staff-navbar-height: 64px;
+  --staff-workspace-bottom-padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  max-block-size: calc(100dvh - var(--staff-navbar-height) - var(--staff-workspace-bottom-padding));
+  background: #fff;
+  border: 1px solid #ead3c8;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+@media (max-width: 1200px) {
+  .staff-directory-frame { --staff-workspace-bottom-padding: var(--space-5); }
+}
+
+@media (max-width: 900px) {
+  .staff-directory-frame {
+    --staff-navbar-height: 57px;
+    --staff-workspace-bottom-padding: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .staff-directory-frame { --staff-workspace-bottom-padding: 12px; }
+}
+
+.staff-directory-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #f1ddd5; color: #74593f; font-size: 0.92rem; }
+.staff-directory-table-wrap { position: relative; min-block-size: 0; overflow: auto; scrollbar-gutter: stable; background: #fff; }
 .staff-directory-table { width: 100%; text-align: left; color: #432c23; }
 .staff-directory-table caption { padding: 11px 14px; text-align: left; color: #74593f; }
 .staff-directory-table th, .staff-directory-table td { padding: 11px 13px; border-top: 1px solid #f1ddd5; vertical-align: middle; }
@@ -354,13 +346,6 @@
 .staff-view-btn {
   flex: 1;
 }
-
-.staff-quick-query { color: #74593f; font-size: .82rem; }
-.staff-quick-query > summary { cursor: pointer; padding: 10px 0; font-weight: 650; }
-.staff-quick-query > summary:focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; }
-.staff-quick-query .staff-query-selector { margin: 4px 0 0; padding: 10px 12px; flex-wrap: wrap; }
-.staff-quick-query label { font-size: .82rem; }
-.staff-quick-query select { min-height: 40px; font-size: .82rem; max-width: 100%; }
 
 .staff-close-btn {
   border: 1px solid #b49388;

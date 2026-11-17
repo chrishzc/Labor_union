@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CORE_STAGE_CODES,
   SUBSTATUS_BY_STAGE_STATUS,
   substatusCodesForStage,
+  type CoreStageProjection,
 } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../../../../../../../api/orders/order_core_stage_projection_client';
 import { OrderWorkbenchV2Page } from '../../../../../../../pages/OrderWorkbenchV2Page';
@@ -21,7 +22,7 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({
   ordersQueryClient: { getOrderSummaries: vi.fn() },
 }));
 
-function stages(caseNo: string) {
+function stages(caseNo: string): CoreStageProjection[] {
   return CORE_STAGE_CODES.map((code, index) => ({
     ordinal: index + 1,
     code,
@@ -99,6 +100,53 @@ describe('待辦看板依目前狀態整合歷史訂單', () => {
     expect(screen.getByRole('region', { name: '13 個核心訂單階段' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '全部進行中' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '全部進行中' })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  it('第 9 步顯示待排班的歷史配對與日期確認狀態，並優先顯示有效推薦方案', async () => {
+    const pending = historical('CASE-UNSCHEDULED', '歷史訂單－未服務');
+    const confirmed = historical('CASE-CONFIRMED', '歷史訂單－未服務');
+    pending.core_stages = pending.core_stages.map((stage) => stage.code === 'confirmed_service_dates'
+      ? {
+          ...stage,
+          status: 'unavailable',
+          substatus_code: 'date_confirmation_unavailable',
+          source: { ...stage.source, identity: null, version: null },
+          availability_reason: 'confirmed_service_date_lineage_missing',
+        }
+      : stage);
+    mocks.core.mockResolvedValue(page([confirmed, pending]));
+    const summary = {
+      client_name: '測試客戶',
+      order_status: '歷史訂單－未服務',
+      start_date: '2026-12-01',
+      end_date: '2026-12-20',
+      actual_start_date: null,
+      actual_end_date: null,
+      identity_status: null,
+      service_days: 20,
+      total_employer_self_pay_payable: null,
+      staff_name: '歷史配對月嫂',
+      staff_display_label: 'E001 歷史配對月嫂',
+      scheduled_staff_display_label: null,
+    };
+    mocks.summaries.mockResolvedValue({
+      items: [
+        { ...summary, case_no: pending.case_no, recommended_staff_display_label: null },
+        { ...summary, case_no: confirmed.case_no, recommended_staff_display_label: 'E002 目前方案月嫂' },
+      ],
+      next_cursor: null,
+      etag: 'd'.repeat(64),
+    });
+
+    render(<OrderWorkbenchV2Page />);
+    const pendingRow = within(await screen.findByRole('row', { name: /CASE-UNSCHEDULED/ }));
+    const confirmedRow = within(await screen.findByRole('row', { name: /CASE-CONFIRMED/ }));
+    await pendingRow.findByText('測試客戶');
+    expect.soft(pendingRow.queryByText('E001 歷史配對月嫂')).toBeInTheDocument();
+    expect.soft(pendingRow.queryByText('日期未確認')).toBeInTheDocument();
+    expect(confirmedRow.getByText('E002 目前方案月嫂')).toBeInTheDocument();
+    expect(confirmedRow.getByText('日期已確認')).toBeInTheDocument();
+    expect(confirmedRow.queryByText('E001 歷史配對月嫂')).not.toBeInTheDocument();
   });
 
   it('拒絕伺服器把歷史已完成案件回傳到進行中清單，避免錯誤分類冒充成功', async () => {

@@ -5,7 +5,6 @@ import { applicationFetch } from '../shared/application_fetch';
  */
 import { sessionClient } from '../auth/session_client';
 import { WeeklyOperationsReportError } from './weekly_operations_report_errors';
-import { WEEKLY_REPORT_SCHEMA_VERSION } from './weekly_operations_report_schemas';
 import { validateOperationsReportDateRange } from './weekly_operations_report_query_client';
 
 export interface WeeklyOperationsReportExportArtifact {
@@ -49,7 +48,7 @@ export const weeklyOperationsReportExportClient = {
     if (!contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_EXPORT_MEDIA_TYPE', '營運週報匯出回應不是 XLSX。');
     }
-    if (response.headers.get('X-Operations-Report-Version') !== WEEKLY_REPORT_SCHEMA_VERSION) {
+    if (response.headers.get('X-Operations-Report-Version') !== 'operations-report.v4') {
       throw new WeeklyOperationsReportError(
         'WEEKLY_REPORT_EXPORT_VERSION_MISMATCH',
         '週報匯出 API 尚未提供新版統計，請待後端更新後重新載入；未下載舊格式檔案。',

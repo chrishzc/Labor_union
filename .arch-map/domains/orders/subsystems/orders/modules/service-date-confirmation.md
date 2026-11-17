@@ -45,7 +45,7 @@
 ## Contracts
 - `GET／POST /api/v1/orders/{case_no}/service-dates` — confirmed-date Query／Preview／Apply。
 - `POST /api/v1/orders/{case_no}/service-dates/schedule/apply` — 歷史重啟一次儲存班表。Query 的 `historical_schedule_pending` 投影有效空重啟世代。
-- `POST /api/v1/orders/{case_no}/service-dates/office-schedule/{preview,apply}` — 一般案件從「多月嫂排班」預覽及首次儲存正式班表。允許交錯日期，預覽即核對原承諾與調整原因，委派 `scheduling/service-start` 共用正式排班 writer。
+- `POST /api/v1/orders/{case_no}/service-dates/office-schedule/apply` — 一般案件從「多月嫂排班」直接儲存首份正式班表。允許交錯日期，委派 `scheduling/service-start` 共用正式排班 writer。既有 `office-schedule/preview` API 可獨立查閱，不是該畫面的儲存前置。
 - `POST /api/v1/orders/{case_no}/service-dates/arrangement/{preview,apply}` — 既有獨立正式安排 API。`arrangement_pending` 投影有效空重啟世代與已確認日期版本。
 - `document/架構重整/01_規格基線/01A_訂單看板與事前日期及歷史採納規格.md` §3.2 — 日期確認與歷史重啟儲存班表。
 

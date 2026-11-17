@@ -123,7 +123,7 @@ describe('weekly operations report clients', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(WEEKLY_OPERATIONS_RESPONSE));
     const report = await weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/operations-reports/weekly?start_date=2026-08-20&end_date=2026-08-26&schema_version=operations-report.v4');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/operations-reports/weekly?start_date=2026-08-20&end_date=2026-08-26&schema_version=operations-report.v5');
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer weekly-report-token');
     expect(report.case_rows).toHaveLength(2);
@@ -240,11 +240,11 @@ describe('weekly report API version compatibility', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('兩版仍拒絕混合欄位與未知版本', async () => {
+  it('拒絕混合欄位與未知版本', async () => {
     const legacy = legacyResponse();
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({ ...legacy, data: { ...legacy.data, annual_totals: [] } }))
-      .mockResolvedValueOnce(jsonResponse({ ...legacy, data: { ...legacy.data, schema_version: 'operations-report.v5' } }));
+      .mockResolvedValueOnce(jsonResponse({ ...legacy, data: { ...legacy.data, schema_version: 'operations-report.v6' } }));
     await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
     await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
   });

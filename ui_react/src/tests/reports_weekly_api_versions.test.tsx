@@ -30,7 +30,7 @@ describe('週報混合 API 版本畫面', () => {
     const exportSpy = vi.spyOn(weeklyOperationsReportExportClient, 'download');
     render(<ReportsPage />);
     const table = await screen.findByRole('table', { name: '週報案件受理總表' });
-    expect(screen.getByText(/週報 API 尚未更新至新版統計/)).toBeInTheDocument();
+    expect(screen.getByText(/年度累計、月小計與新版 Excel 暫不可用/)).toBeInTheDocument();
     expect(within(table).getByText('101')).toBeInTheDocument();
     expect(within(table).getByRole('row', { name: '週次 2026-08-17' })).toBeInTheDocument();
     expect(within(table).queryByRole('row', { name: '115年度累計' })).not.toBeInTheDocument();
@@ -46,10 +46,10 @@ describe('週報混合 API 版本畫面', () => {
       .mockResolvedValueOnce(legacyReport())
       .mockResolvedValueOnce(WEEKLY_OPERATIONS_REPORT);
     render(<ReportsPage />);
-    await screen.findByText(/週報 API 尚未更新至新版統計/);
+    await screen.findByText(/年度累計、月小計與新版 Excel 暫不可用/);
     fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
     await screen.findByRole('row', { name: '115年度累計' });
-    expect(screen.queryByText(/週報 API 尚未更新至新版統計/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/年度累計、月小計與新版 Excel 暫不可用/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下載營運報表 XLSX' })).toBeEnabled();
   });
 

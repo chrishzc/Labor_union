@@ -5,7 +5,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
-import { WeeklyOperationsReportSchema } from '../api/reports/weekly_operations_report_schemas';
+import { WeeklyOperationsReportSchema, WeeklyOperationsReportV5Schema } from '../api/reports/weekly_operations_report_schemas';
 import { ReportsPage } from '../pages/ReportsPage';
 import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
 
@@ -70,7 +70,7 @@ describe('週報年度累計與月小計', () => {
     expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
       '平台序號', '年度月份', '週報週數', '申請人', '推廣次數', '詢問人次', '平台案件申請數',
       '市民案件審核', '社福案件審核', '原住民案件審核', '申請案件狀況', '服務天數', '每日服務時數',
-      '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '備註',
+      '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '取消原因', '備註',
       '一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合', '原住民符合', '原住民不符合',
       '訂單成立', '洽談中', '取消', '審核不符合',
     ]);
@@ -78,9 +78,27 @@ describe('週報年度累計與月小計', () => {
     const cells = within(first).getAllByRole('cell');
     expect(cells.map((cell) => cell.textContent)).toEqual([
       '101', '8月', '115/08/20', '2026-08-17 ~ 2026-08-23', '王**', '12', '8', '1',
-      '1', '', '', '', '', '', '1', '', '', '', '10', '8', '2026-08-17', '2026-08-28', '服務中', '板橋區', '',
+      '1', '', '', '', '', '', '1', '', '', '', '10', '8', '2026-08-17', '2026-08-28', '服務中', '板橋區', '', '',
     ]);
     expect(within(first).queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
+  });
+
+  it('將已取消訂單的原因顯示在區域與備註之間，缺值時留空', async () => {
+    const report = WeeklyOperationsReportV5Schema.parse({
+      ...WEEKLY_OPERATIONS_REPORT,
+      schema_version: 'operations-report.v5',
+      case_rows: WEEKLY_OPERATIONS_REPORT.case_rows.map((row, index) => index === 0
+        ? { ...row, order_status: '訂單取消', order_established: 0, cancelled: 1, cancel_reason: '改由家人照顧' }
+        : { ...row, cancel_reason: null }),
+    });
+    vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue(report);
+    render(<ReportsPage />);
+    const table = await screen.findByRole('table', { name: '週報案件受理總表' });
+    const cancelled = within(table).getByRole('row', { name: '週次 2026-08-17' });
+    const missing = within(table).getByRole('row', { name: '週次 2026-08-24' });
+    expect(within(cancelled).getAllByRole('cell').slice(-3).map((cell) => cell.textContent))
+      .toEqual(['板橋區', '改由家人照顧', '']);
+    expect(within(missing).getAllByRole('cell').at(-2)).toBeEmptyDOMElement();
   });
 
   it('年度在最上方，跨月整週只出現一次，各月小計在該月最後一組資料下方', async () => {

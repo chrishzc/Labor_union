@@ -1,6 +1,6 @@
 """
 File: test_weekly_operations_report_totals.py
-Description: 驗證週報年度累計、星期一歸月、三軌 25 欄明細與三分區 XLSX 輸出。
+Description: 驗證週報年度累計、星期一歸月、案件明細與三分區 XLSX 輸出。
 """
 from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta
@@ -239,18 +239,18 @@ def test_template_headers_flags_and_service_columns_are_fixed():
     assert tuple(cell.value for cell in sheet[2]) == (
         "平台序號", "年度月份", None, "週報週數", "申請人", "推廣次數", "詢問人次", "平台案件申請數",
         "市民案件審核", None, "社福案件審核", None, "原住民案件審核", None, "申請案件狀況", None, None, None,
-        "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "備註",
+        "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "取消原因", "備註",
     )
     assert tuple(sheet.cell(3, col).value for col in range(9, 19)) == (
         "一般市民符合", "一般市民不符合", "補助市民符合", "補助市民不符合", "原住民符合", "原住民不符合",
         "訂單成立", "洽談中", "取消", "審核不符合",
     )
-    assert {"I2:J2", "K2:L2", "M2:N2", "O2:R2", "S2:S3", "Y2:Y3"}.issubset({str(r) for r in sheet.merged_cells.ranges})
+    assert {"I2:J2", "K2:L2", "M2:N2", "O2:R2", "S2:S3", "Y2:Y3", "Z2:Z3"}.issubset({str(r) for r in sheet.merged_cells.ranges})
     assert sheet.cell(5, 1).value == 731
     assert tuple(sheet.cell(5, col).value for col in range(15, 19)) == (1, None, None, None)
     assert tuple(sheet.cell(6, col).value for col in range(15, 19)) == (None, None, None, 1)
     assert tuple(sheet.cell(4, col).value for col in range(15, 19)) == (1, 0, 0, 1)
-    assert tuple(sheet.cell(5, col).value for col in (19, 20, 23, 24, 25)) == (20, 8, "服務中", "東區", None)
+    assert tuple(sheet.cell(5, col).value for col in (19, 20, 23, 24, 25, 26)) == (20, 8, "服務中", "東區", None, None)
 
 
 def test_empty_cases_keep_week_rows_and_monthly_zero():
@@ -316,7 +316,7 @@ def test_lifecycle_counts_are_preserved_but_xlsx_uses_existing_template_flags():
     assert tuple(sheet.cell(3, col).value for col in range(15, 19)) == ("訂單成立", "洽談中", "取消", "審核不符合")
     assert sheet.cell(2, 15).value == "申請案件狀況"
     assert sheet.cell(2, 19).value == "服務天數"
-    assert sheet.max_column == 25
+    assert sheet.max_column == 26
     total_rows = [row for row in range(4, sheet.max_row + 1)
                   if isinstance(sheet.cell(row, 1).value, str)]
     for row_number, total in zip(total_rows, (annual, august, september), strict=True):
@@ -382,7 +382,7 @@ def test_missing_empty_and_additional_source_status_are_not_lost():
     assert sum(total.order_status_counts.values()) == 3
     assert total.review_rejected_count == 0
     sheet = _workbook(report).worksheets[0]
-    assert sheet.max_column == 25
+    assert sheet.max_column == 26
     assert sheet.cell(3, 18).value == "審核不符合"
     assert sheet.cell(2, 19).value == "服務天數"
 
@@ -433,7 +433,7 @@ def test_indigenous_track_rejections_noncitizen_void_and_sheet_layouts():
 
     wb = _workbook(report)
     case_sheet = wb["週報案件受理總表"]
-    assert case_sheet.max_column == 25
+    assert case_sheet.max_column == 26
     assert case_sheet.cell(2, 13).value == "原住民案件審核"
     assert (case_sheet.cell(3, 13).value, case_sheet.cell(3, 14).value) == ("原住民符合", "原住民不符合")
     assert case_sheet.cell(4, 13).value == 3

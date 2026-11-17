@@ -91,11 +91,7 @@ describe('StaffPage directory presentation', () => {
     expect(drawer).toHaveTextContent('聯絡電話：09********');
     await waitFor(() => expect(within(drawer as HTMLElement).getAllByText('在職').length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
-    const selector = screen.getByLabelText('查詢服務人員');
-    expect(selector).toBeDisabled();
-    fireEvent.change(selector, { target: { value: '12' } });
-    expect(selector).toHaveValue('11');
-    expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
+    expect(screen.queryByLabelText('查詢服務人員')).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });
 

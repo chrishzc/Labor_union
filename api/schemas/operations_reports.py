@@ -1,6 +1,6 @@
 """
 File: operations_reports.py
-Description: 定義實際週界營運報表 operations-report.v3／v4 的獨立 strict wire views。
+Description: 定義實際週界營運報表 operations-report.v3／v4／v5 的獨立 strict wire views。
 """
 
 from datetime import date, datetime
@@ -132,6 +132,10 @@ class WeeklyReportCaseRowView(_StrictModel):
     week_label: str
 
 
+class WeeklyReportCaseRowCancellationView(WeeklyReportCaseRowView):
+    cancel_reason: str | None
+
+
 class WeeklyReportServiceRowView(_StrictModel):
     assignment_id: int = Field(gt=0)
     case_no: str
@@ -184,7 +188,14 @@ class WeeklyOperationsReportTotalsView(WeeklyOperationsReportView):
     monthly_subtotals: list[WeeklyReportCaseTotalsView]
 
 
-WeeklyOperationsReportSchemaVersion = Literal["operations-report.v3", "operations-report.v4"]
+class WeeklyOperationsReportCancellationView(WeeklyOperationsReportTotalsView):
+    schema_version: Literal["operations-report.v5"]
+    case_rows: list[WeeklyReportCaseRowCancellationView]
+
+
+WeeklyOperationsReportSchemaVersion = Literal[
+    "operations-report.v3", "operations-report.v4", "operations-report.v5",
+]
 
 
 class SaveWeeklyReportMetricRequest(BaseModel):

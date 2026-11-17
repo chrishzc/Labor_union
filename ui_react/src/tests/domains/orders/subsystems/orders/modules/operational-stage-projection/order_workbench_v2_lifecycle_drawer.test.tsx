@@ -91,6 +91,27 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
   });
 
+  it('編輯既有多月嫂班表時收起現行服務日期與待辦，返回後恢復原區塊', async () => {
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+    const title = await screen.findByRole('heading', { name: '現行服務日期' });
+    const tasks = screen.getByRole('region', { name: '服務開始、延期與代班待辦' });
+    const openEditor = screen.getByRole('button', { name: '多月嫂排班' });
+    await waitFor(() => expect(openEditor).toBeEnabled());
+
+    fireEvent.click(openEditor);
+
+    expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
+    expect(title).not.toBeVisible();
+    expect(tasks).not.toBeVisible();
+    expect(screen.queryByRole('heading', { name: '現行服務日期' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回服務安排' }));
+
+    expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '現行服務日期' })).toBe(title);
+    expect(screen.getByRole('region', { name: '服務開始、延期與代班待辦' })).toBe(tasks);
+  });
+
   it.each([CASE, 'OTHER-CASE'])('只以服務端核對的待辦日期在原案件開啟多月嫂排班（%s）', async (taskCase) => {
     mocks.substitute.mockResolvedValue({ request_id: 32, case_no: taskCase, version: 4,
       workflow_kind: 'leave', status: 'substitute_required', leave_dates: [{ original_date: '2099-09-02', new_date: '2099-09-03' }] });

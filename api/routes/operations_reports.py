@@ -23,6 +23,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.operations_reports import (
     CaseStatisticsView,
     SaveWeeklyReportMetricRequest,
+    WeeklyOperationsReportCancellationView,
     WeeklyOperationsReportView,
     WeeklyOperationsReportTotalsView,
     WeeklyOperationsReportSchemaVersion,
@@ -68,7 +69,9 @@ def query_case_statistics(
 
 @router.get(
     "/weekly",
-    response_model=BaseResponse[WeeklyOperationsReportView | WeeklyOperationsReportTotalsView],
+    response_model=BaseResponse[
+        WeeklyOperationsReportView | WeeklyOperationsReportTotalsView | WeeklyOperationsReportCancellationView
+    ],
 )
 def query_weekly_operations_report(
     request: Request,
@@ -156,8 +159,8 @@ def export_weekly_operations_report_xlsx(
     )
 
 
-def _case_row_view_dict(row) -> dict[str, object]:
-    return {
+def _case_row_view_dict(row, *, include_cancel_reason: bool) -> dict[str, object]:
+    data = {
         "serial_number": row.serial_number,
         "month_label": row.month_label,
         "application_date_roc": row.application_date_roc,
@@ -189,6 +192,9 @@ def _case_row_view_dict(row) -> dict[str, object]:
         "week_end_date": row.week_end_date,
         "week_label": row.week_label,
     }
+    if include_cancel_reason:
+        data["cancel_reason"] = row.cancel_reason
+    return data
 
 
 def _subsidy_row_view_dict(row) -> dict[str, object]:
@@ -238,8 +244,8 @@ def _service_row_view_dict(row) -> dict[str, object]:
 def _weekly_report_view(
     report,
     schema_version: WeeklyOperationsReportSchemaVersion = "operations-report.v4",
-) -> WeeklyOperationsReportView | WeeklyOperationsReportTotalsView:
-    # 舊版 strict client 不接受新增欄位；只有明確要求 v4 才輸出新版統計。
+) -> WeeklyOperationsReportView | WeeklyOperationsReportTotalsView | WeeklyOperationsReportCancellationView:
+    include_cancel_reason = schema_version == "operations-report.v5"
     data = {
         "schema_version": schema_version,
         "period": {
@@ -251,7 +257,10 @@ def _weekly_report_view(
         "generated_at": report.generated_at,
         "source_revision": report.source_revision,
         "summary": _slots_dict(report.summary),
-        "case_rows": [_case_row_view_dict(row) for row in report.case_rows],
+        "case_rows": [
+            _case_row_view_dict(row, include_cancel_reason=include_cancel_reason)
+            for row in report.case_rows
+        ],
         "subsidy_partitions": [
             {
                 "citizen_kind": partition.citizen_kind,
@@ -269,6 +278,8 @@ def _weekly_report_view(
         return WeeklyOperationsReportView.model_validate(data)
     data["annual_totals"] = [_slots_dict(total) for total in report.annual_totals]
     data["monthly_subtotals"] = [_slots_dict(total) for total in report.monthly_subtotals]
+    if include_cancel_reason:
+        return WeeklyOperationsReportCancellationView.model_validate(data)
     return WeeklyOperationsReportTotalsView.model_validate(data)
 
 

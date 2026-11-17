@@ -85,6 +85,10 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
   const serviceDays = item.service_days;
   const employerSelfPayPayable = item.total_employer_self_pay_payable;
   const staffName = item.staff_name?.trim() || null;
+  const historicalStaffLabel =
+    item.order_status === '歷史訂單－未服務' && !item.scheduled_staff_display_label
+      ? item.staff_display_label
+      : null;
   return {
     id: item.case_no,
     clientName: item.client_name,
@@ -108,7 +112,7 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
     depositSettledText: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶款項）`,
     assignedDoulaName: staffName,
     assignedDoulaDisplay:
-      item.recommended_staff_display_label ?? '尚無有效推薦方案',
+      item.recommended_staff_display_label ?? historicalStaffLabel ?? '尚無有效推薦方案',
     serviceTimeTuple: null,
     requiresCooking: null,
     floorFee: null,

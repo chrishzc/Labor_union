@@ -1,6 +1,6 @@
 """
 File: test_weekly_operations_report_api_versions.py
-Description: 驗證週報 v3 與 v4 strict wire 契約及 XLSX 版本標頭隔離。
+Description: 驗證週報查詢版本的 strict wire 契約及 XLSX 版本標頭隔離。
 """
 import json
 
@@ -113,7 +113,7 @@ def test_explicit_v3_matches_default_and_v4_only_adds_required_totals(api):
     }
 
 
-@pytest.mark.parametrize("version", ["operations-report.v2", "operations-report.v5", "", "4"])
+@pytest.mark.parametrize("version", ["operations-report.v2", "operations-report.v6", "", "4"])
 def test_unsupported_versions_are_rejected_before_query(api, version):
     client, _, calls, _ = api
     response = client.get("/api/v1/operations-reports/weekly", params={**PARAMS, "schema_version": version})
@@ -154,13 +154,13 @@ def test_export_marks_actual_new_format_and_preserves_media_and_filename(api, mo
     assert seen == [report]
 
 
-def test_openapi_exposes_default_v3_and_both_response_versions(api):
+def test_openapi_exposes_default_v3_and_supported_response_versions(api):
     _, _, _, app = api
     schema = app.openapi()
     operation = schema["paths"]["/api/v1/operations-reports/weekly"]["get"]
     version = next(p for p in operation["parameters"] if p["name"] == "schema_version")
     assert version["schema"]["default"] == "operations-report.v3"
-    assert version["schema"]["enum"] == ["operations-report.v3", "operations-report.v4"]
+    assert version["schema"]["enum"] == ["operations-report.v3", "operations-report.v4", "operations-report.v5"]
     models = schema["components"]["schemas"]
     assert "annual_totals" not in models["WeeklyOperationsReportView"]["properties"]
     assert {"annual_totals", "monthly_subtotals"}.issubset(models["WeeklyOperationsReportTotalsView"]["required"])

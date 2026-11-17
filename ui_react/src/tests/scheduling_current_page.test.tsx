@@ -2,7 +2,7 @@
  * File: scheduling_current_page.test.tsx
  * Description: 驗證 Scheduling 投影、typed controls 與 bounded deep-link 行為。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
@@ -554,6 +554,17 @@ describe('SchedulingPage query-only presentation', () => {
   ] as const)('draws $status across its actual consecutive calendar dates', async ({ status, label, orderStatus }) => {
     const { year, month } = taipeiCalendarDate(new Date());
     const dayInMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const previousMonth = new Date(Date.UTC(year, month - 2, 20)).toISOString().slice(0, 10);
+    const actualStart = status === 'historical_assignment' ? previousMonth : null;
+    const actualEnd = status === 'historical_assignment' ? `${dayInMonth}-09` : null;
+    const orderDetail = vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({
+      case_no: 'HIS-082', client_id: 1, staff_id: 11, client_name: '歷史摘要客戶',
+      staff_name: '去敏人員甲', order_status: orderStatus, identity_status: 'verified',
+      cancel_reason: null, line_group_id: null, contract_identity: null, deposit_date: null,
+      start_date: `${previousMonth.slice(0, 7)}-19`, end_date: `${dayInMonth}-10`,
+      actual_start_date: actualStart, actual_end_date: actualEnd, service_days: 10,
+      service_hours_per_day: 9, deposit_service_days: null, floor_fee: 0, custom_rest_dates: null,
+    });
     vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
       items: [{
         case_no: 'HIS-082', client_name: '歷史摘要客戶', order_status: orderStatus,
@@ -595,6 +606,25 @@ describe('SchedulingPage query-only presentation', () => {
     expect(separateDay).toHaveAttribute('data-start-day', '8');
     expect(separateDay).toHaveAttribute('data-end-day', '8');
     expect(separateDay).toHaveTextContent(`${dayInMonth}-08`);
+
+    expect(orderDetail).not.toHaveBeenCalled();
+    fireEvent.click(interval);
+    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
+    const start = actualStart ?? `${previousMonth.slice(0, 7)}-19`;
+    const end = actualEnd ?? `${dayInMonth}-10`;
+    expect(await drawer.findByText(new RegExp(`整案服務起訖.*${start} ～ ${end}`))).toBeInTheDocument();
+    expect(drawer.getByText(`日曆日期 ${dayInMonth}-04 至當月 6 日`)).toBeInTheDocument();
+    if (status === 'historical_assignment') {
+      expect(drawer.getByText(`班次服務日 ${dayInMonth}-04`)).toBeInTheDocument();
+
+      fireEvent.click(drawer.getByRole('button', { name: 'Close drawer' }));
+      orderDetail.mockRejectedValueOnce(new Error('order unavailable'));
+      fireEvent.click(separateDay);
+      const reopenedDrawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
+      expect(await reopenedDrawer.findByText(/整案服務起訖.*查詢失敗/)).toBeInTheDocument();
+      expect(reopenedDrawer.queryByText(new RegExp(`整案服務起訖.*${dayInMonth}`))).not.toBeInTheDocument();
+      expect(reopenedDrawer.getByText(`日曆日期 ${dayInMonth}-08`)).toBeInTheDocument();
+    }
   });
 
   it('keeps a historical overnight continuation separate from formal shifts for the same assignment', async () => {

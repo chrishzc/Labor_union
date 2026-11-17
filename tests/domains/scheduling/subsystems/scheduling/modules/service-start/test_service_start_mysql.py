@@ -111,7 +111,7 @@ def apply_confirmed_postponement(submission):
         connection.close()
 
 
-def seed_case(http,*,count=1, shared_staff=None, clock=("08:00:00", "17:00:00"), hours=8):
+def seed_case(http,*,count=1, shared_staff=None, clock=("08:00:00", "17:00:00"), hours=8, with_commitment=True):
     case='116'+str(rows('SELECT COUNT(*) n FROM orders')[0]['n']+1).zfill(6)
     client=write("INSERT INTO clients(case_no,name,identity_status,service_type,created_at) VALUES (%s,'Synthetic service start','一般市民','連續服務','2026-10-01')",(case,))
     write("INSERT INTO orders(case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day,floor_fee,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,'待補件',0,'2027-01-01',%s,%s,0,%s,%s,0)",(case,client,count*30,hours,*clock))
@@ -132,13 +132,15 @@ def seed_case(http,*,count=1, shared_staff=None, clock=("08:00:00", "17:00:00"),
         write("INSERT INTO line_identity_role_bindings(line_user_id,subject_type,binding_status,subject_reference) VALUES (%s,'staff','bound',%s)",(line,str(identity)))
         staff.append((identity,line))
     plan=write("INSERT INTO caregiver_matching_plans(case_no,status,is_active,start_date,end_date,created_by) VALUES (%s,'proposed',1,'2027-01-01',%s,'synthetic signed prerequisite')",(case,date(2027,1,1)+timedelta(days=count*30-1)))
-    commitment=write('INSERT INTO precontract_service_commitments(case_no,matching_plan_id,commitment_key,plan_snapshot_sha256,created_by) VALUES (%s,%s,%s,%s,%s)',(case,plan,case+':commitment','0'*64,'synthetic signed prerequisite'))
+    if with_commitment:
+        commitment=write('INSERT INTO precontract_service_commitments(case_no,matching_plan_id,commitment_key,plan_snapshot_sha256,created_by) VALUES (%s,%s,%s,%s,%s)',(case,plan,case+':commitment','0'*64,'synthetic signed prerequisite'))
     segments=[]
     for index,(staff_id,line) in enumerate(staff[:count]):
         start=date(2027,1,1)+timedelta(days=index*30)
         segment=write('INSERT INTO caregiver_matching_plan_segments(plan_id,segment_order,staff_id,assigned_start_date,assigned_end_date) VALUES (%s,%s,%s,%s,%s)',(plan,index+1,staff_id,start,start+timedelta(days=29)))
         segments.append(segment)
-        for i in range(30):write('INSERT INTO precontract_service_commitment_days(commitment_id,matching_segment_id,staff_id,service_date) VALUES (%s,%s,%s,%s)',(commitment,segment,staff_id,start+timedelta(days=i)))
+        if with_commitment:
+            for i in range(30):write('INSERT INTO precontract_service_commitment_days(commitment_id,matching_segment_id,staff_id,service_date) VALUES (%s,%s,%s,%s)',(commitment,segment,staff_id,start+timedelta(days=i)))
     write("INSERT INTO order_contract_flow_events(case_no,contract_identity,event_type,actor,reason,idempotency_key) VALUES (%s,%s,'contract_completed','synthetic','signed fixture',%s)",(case,case+':signed',case+':signed'))
     # Signed client contract qualifies the canonical waiting-lock writer.
     write("INSERT INTO matching_response_events(plan_id,response_type,response_value,response_source,actor_id,reason,idempotency_key,payload_fingerprint,occurred_at_utc) VALUES (%s,'customer_decision','accepted','admin','synthetic','prerequisite',%s,%s,UTC_TIMESTAMP(6))",(plan,case+':customer','0'*64))
@@ -198,6 +200,10 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, inte
     before = checked(http.get(endpoint))
     days = tuple(date(2027, 1, 5) + timedelta(days=i) for i in range(count*30))
     allocations = [days[i::count] if interleaved else days[i*30:(i+1)*30] for i in range(count)]
+    if interleaved:
+        allocations[1] = allocations[1] + allocations[0][-1:]
+        allocations[0] = allocations[0][:-1]
+        allocations[1] = tuple(sorted(allocations[1]))
     body = {
         'actual_start_date': str(days[0]), 'expected_order_version': before['order_version'],
         'expected_scheduling_version': before['scheduling_version'],
@@ -205,11 +211,13 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, inte
         'segments': [{'staff_id': staff[i][0], 'service_dates': list(map(str, dates))}
                      for i, dates in enumerate(allocations)],
     }
-    if interleaved:
-        body['reason'] = '確認兩位月嫂交錯服務'
-        quote = checked(http.post(endpoint + '/office-schedule/preview', json=body))
-        body['preview_fingerprint'] = quote['preview_fingerprint']
     headers = {'Idempotency-Key': case + ':office'}
+    if interleaved:
+        blocked = http.post(endpoint + '/office-schedule/apply', json=body, headers=headers)
+        assert blocked.status_code == 409, blocked.text
+        assert blocked.json()['detail']['error']['code'] == 'office_schedule_reallocation_reason_required'
+        assert checked(http.get(endpoint)) == before
+        body['reason'] = '確認兩位月嫂交錯服務與天數調整'
     saved = checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers))
     assert checked(http.post(endpoint + '/office-schedule/apply', json=body, headers=headers)) == saved
     observed = checked(http.get(endpoint))
@@ -217,13 +225,49 @@ def test_office_schedule_saves_dates_and_caregivers_once(http, placeholder, inte
     assert observed['scheduling_version'] == saved['scheduling_version']
     work_days = rows("SELECT staff_id,work_date FROM staff_schedule WHERE case_no=%s "
                      "AND effective_marker=1 AND is_work_day=1 ORDER BY work_date", (case,))
-    assert [(row['staff_id'], row['work_date']) for row in work_days] == [
-        (staff[i % count if interleaved else i//30][0], day) for i, day in enumerate(days)
-    ]
+    expected_by_day = {day: staff[index][0] for index, allocation in enumerate(allocations) for day in allocation}
+    assert [(row['staff_id'], row['work_date']) for row in work_days] == [(expected_by_day[day], day) for day in days]
     assert len(saved['assignment_ids']) == count
     if placeholder:
         assert rows('SELECT status FROM case_staff_assignments WHERE id=%s', (previous_assignment,))[0]['status'] == 'cancelled'
     assert checked(http.get('/api/v1/scheduling/service-start/todos', params={'case_no':case}))['total'] == 0
+
+
+@pytest.mark.parametrize(('missing', 'error_code'), [
+    ('active_plan', 'office_schedule_commitment_blocked'),
+    ('commitment', 'office_schedule_commitment_blocked'),
+    ('availability', 'staff_occupancy_conflict'),
+])
+def test_office_schedule_direct_save_blocks_missing_prerequisites(http, missing, error_code):
+    from api.routes.service_date_confirmation import router
+
+    if not getattr(http.app.state, 'service_dates_registered', False):
+        http.app.include_router(router)
+        http.app.state.service_dates_registered = True
+    case, staff, _ = seed_case(http, with_commitment=missing != 'commitment')
+    write("UPDATE orders SET status='訂單成立' WHERE case_no=%s", (case,))
+    if missing == 'active_plan':
+        write("UPDATE caregiver_matching_plans SET is_active=NULL WHERE case_no=%s", (case,))
+    if missing == 'availability':
+        write(
+            "INSERT INTO scheduling_staff_unavailability_blocks "
+            "(staff_id,block_kind,start_date,end_date,status,reason,created_by) "
+            "VALUES (%s,'long_leave','2027-01-05','2027-01-05','effective','fixture','fixture')",
+            (staff[0][0],),
+        )
+    endpoint = f'/api/v1/orders/{case}/service-dates'
+    before = checked(http.get(endpoint))
+    days = [str(date(2027, 1, 5) + timedelta(days=index)) for index in range(30)]
+    response = http.post(endpoint + '/office-schedule/apply', json={
+        'actual_start_date': days[0], 'expected_order_version': before['order_version'],
+        'expected_scheduling_version': before['scheduling_version'],
+        'expected_confirmed_version': before['current_version'], 'reason': '',
+        'segments': [{'staff_id': staff[0][0], 'service_dates': days}],
+    }, headers={'Idempotency-Key': case + ':office'})
+    assert response.status_code == 409, response.text
+    assert response.json()['detail']['error']['code'] == error_code
+    assert checked(http.get(endpoint)) == before
+    assert not rows('SELECT id FROM staff_schedule WHERE case_no=%s', (case,))
 
 
 def test_office_schedule_preview_detects_assignment_linked_to_another_case(http):

@@ -28,6 +28,7 @@ export function displayWeeklyValue(value: string | number | null): string {
 }
 
 export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) {
+  const totalsAvailable = source.schema_version !== 'operations-report.v3';
   const subsidyTotalRows = source.subsidy_partitions.reduce((sum, partition) => sum + partition.row_count, 0);
   const subsidyTotalAmount = source.subsidy_partitions.reduce((sum, partition) => sum + partition.total_amount_ntd, 0);
   const subsidyPartitions = source.subsidy_partitions.map((partition) => ({
@@ -50,6 +51,7 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) 
     summary: source.summary,
     caseRows: source.case_rows.map((row) => ({
       ...row,
+      cancel_reason: 'cancel_reason' in row ? row.cancel_reason : null,
       reviewLabel: REVIEW_LABELS[row.review_result],
     })),
     subsidy: {
@@ -59,9 +61,9 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) 
     },
     serviceRows: source.service_rows,
     weeklyMetrics: source.weekly_metrics,
-    totalsAvailable: source.schema_version === 'operations-report.v4',
-    annualTotals: source.schema_version === 'operations-report.v4' ? source.annual_totals : null,
-    monthlySubtotals: source.schema_version === 'operations-report.v4' ? source.monthly_subtotals : null,
+    totalsAvailable,
+    annualTotals: totalsAvailable ? source.annual_totals : null,
+    monthlySubtotals: totalsAvailable ? source.monthly_subtotals : null,
     dataQualityIssues: source.data_quality_issues,
   };
 }

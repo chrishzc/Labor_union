@@ -156,7 +156,7 @@ describe('Staff action async race guards', () => {
     expect(screen.queryByText(/Preview 指紋/)).not.toBeInTheDocument();
   });
 
-  it('lifecycle pending Preview freezes the drawer identity against background selector changes', async () => {
+  it('lifecycle pending Preview keeps the selected drawer identity through Apply', async () => {
     await openLifecycle();
     const pending = deferred<typeof STAFF_LIFECYCLE_PREVIEW>();
     vi.mocked(staffLifecycleClient.preview).mockReturnValueOnce(pending.promise);
@@ -166,10 +166,8 @@ describe('Staff action async race guards', () => {
     fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
     await waitFor(() => expect(staffLifecycleClient.preview).toHaveBeenCalledTimes(1));
 
-    const selector = screen.getByLabelText('查詢服務人員');
-    expect(selector).toBeDisabled();
-    fireEvent.change(selector, { target: { value: '12' } });
-    expect(selector).toHaveValue('11');
+    const drawer = screen.getByRole('dialog', { name: '月嫂詳情 — A001 去敏人員甲' });
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
     await act(async () => {
       pending.resolve(STAFF_LIFECYCLE_PREVIEW);
       await Promise.resolve();

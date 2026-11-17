@@ -128,7 +128,7 @@ describe('Staff lifecycle flow', () => {
 
     const expectLocked = () => {
       expect(screen.queryByRole('tablist', { name: '月嫂個人檔案分頁' })).not.toBeInTheDocument();
-      expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
+      expect(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' })).toHaveAttribute('aria-disabled', 'true');
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
       expect(screen.getAllByLabelText('生效日期').at(-1)).toBeDisabled();
       expect(screen.getAllByLabelText('異動原因（選填）').at(-1)).toBeDisabled();

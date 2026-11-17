@@ -256,7 +256,8 @@ class MySqlAssignmentPlanRepository:
                 _require_exact_commitment_days(cursor, case_no, tuple(
                     ExecutionServiceDay(segment.staff_id, service_date)
                     for segment in intent.segments for service_date in segment.official_service_dates
-                ), lock_ids, lock=False, execution_reader=self._office_execution)
+                ), lock_ids, lock=False, execution_reader=self._office_execution,
+                    office_preview=self._office_execution is not None)
         return facts
 
     def preflight_impacted_staff_ids(

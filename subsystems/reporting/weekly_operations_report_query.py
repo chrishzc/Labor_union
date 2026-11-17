@@ -59,6 +59,7 @@ class WeeklyCaseFact:
     planned_end_date: date | None
     seq_num: int | None = None
     case_category: str | None = None
+    cancel_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +179,6 @@ class WeeklyCaseRow:
     planned_end_date: date | None
     district: str | None
     data_quality_codes: tuple[str, ...]
-    # 模板雙層表頭 23 欄擴充
     serial_number: int = 1
     month_label: str = ""
     application_date_roc: str = ""
@@ -197,6 +197,7 @@ class WeeklyCaseRow:
     notes: str = ""
     indigenous_eligible: int = 0
     indigenous_ineligible: int = 0
+    cancel_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,7 +561,8 @@ class WeeklyOperationsReportQuery:
 
         app_date = fact.created_at.date() if fact.created_at is not None else None
 
-        status = reporting_order_status(fact.order_status)
+        order_status = reporting_order_status(fact.order_status)
+        status = order_status
         if is_rejected:
             status = "審核不符合"
 
@@ -601,6 +603,7 @@ class WeeklyOperationsReportQuery:
             review_rejected=int(is_rejected),
             service_status=serv_status,
             notes="",
+            cancel_reason=fact.cancel_reason if order_status == "訂單取消" else None,
         )
 
     @staticmethod

@@ -417,6 +417,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     if (timeline.status === 'ready') setVisitedGroups((previous) => previous.includes(activeGroup) ? previous : [...previous, activeGroup]);
   }, [timeline.status, activeGroup]);
   const groupDefinition = WORK_GROUPS.find((group) => group.id === activeGroup)!;
+  const currentGroupNotices = [...blockers, ...warnings].filter(
+    (notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode),
+  );
   const groupTitle = showCompletion && activeGroup === 'service' && !editingCompletedDates ? '服務完工' : groupDefinition.title;
   const openGroup = (group: WorkGroup) => {
     setVisitedGroups((previous) => Array.from(new Set([...previous, activeGroup, group])));
@@ -497,6 +500,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
   const hasOfficialSchedule = assignmentPlan.status === 'ready'
     && assignmentPlan.data.assignments.some(segment => segment.official_service_dates.length > 0);
+  const editingOfficialSchedule = activeGroup === 'service' && hasOfficialSchedule
+    && !completedService && attributionPanel !== null;
   const canChangeActualStart = !terminalStatus && currentBranch !== 'cancelled'
     && (currentBranch === 'historical' || (assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0));
   const serviceDateWorkspace = <>
@@ -584,8 +589,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             {branchType === 'historical' && currentBranch !== 'cancelled' && intakeOrderStatus !== null && <OrderIntakeRepairPanel caseNo={caseNo} orderStatus={intakeOrderStatus} onChanged={refreshFacts} summaryHref={`#clients?case=${encodeURIComponent(caseNo)}&field=intake&from=workbench`} />}
           </>}
         {currentBranch === 'normal' && workbenchScope === 'in_progress' && !terminalStatus && (
-          <section className={`order-v2-drawer-current-task${activeGroup === 'contracts' ? ' contract-workspace' : ''}`} aria-label="案件工作內容">
-            {[...blockers, ...warnings].filter((notice) => (groupDefinition.stages as readonly string[]).includes(notice.stageCode)).map((notice) => <p className="order-case-review-note" key={notice.key} role="status">{notice.key !== 'intake_validation:orders_terms_missing' && <><strong>{notice.stage}</strong>：</>}{notice.message}</p>)}
+          <section hidden={editingOfficialSchedule && currentGroupNotices.length === 0} className={`order-v2-drawer-current-task${activeGroup === 'contracts' ? ' contract-workspace' : ''}`} aria-label="案件工作內容">
+            {currentGroupNotices.map((notice) => <p className="order-case-review-note" key={notice.key} role="status">{notice.key !== 'intake_validation:orders_terms_missing' && <><strong>{notice.stage}</strong>：</>}{notice.message}</p>)}
             <fieldset disabled={operationBusy || factsRefreshing}>
               {(activeGroup === 'intake' || visitedGroups.includes('intake')) && <div hidden={activeGroup !== 'intake'}>
               {intakeOrderStatus !== null && (
@@ -652,7 +657,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               {(activeGroup === 'contracts' || visitedGroups.includes('contracts')) && <div hidden={activeGroup !== 'contracts'}>
                 <ContractExternalSigningActions caseNo={caseNo} revision={refreshRevision} onCommitted={() => { setSelectedGroup('contracts'); refreshFacts(); }} onOpenServiceDates={() => openGroup('service')} onOpenRecommendation={() => { setReplacementRequest(value => value + 1); openGroup('recommendation'); }} />
               </div>}
-              {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service'}>
+              {(activeGroup === 'service' || visitedGroups.includes('service')) && <div hidden={activeGroup !== 'service' || editingOfficialSchedule}>
                 {serviceDateWorkspace}
                 {!historicalArrangementPending && <>
                   {datesPending && <p role="status">請先完成上方服務日期的儲存或回讀。</p>}

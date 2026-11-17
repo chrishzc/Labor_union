@@ -9,6 +9,7 @@
 .reports-case-table th, .reports-case-table td { border: 1px solid var(--md-sys-color-outline-variant); text-align: center; vertical-align: middle; }
 .reports-case-table thead th { white-space: normal; min-width: 68px; max-width: 140px; }
 .reports-case-table tbody th small { font-weight: normal; white-space: nowrap; }
+.reports-case-table td.reports-case-cancel-reason { min-width: 120px; max-width: 240px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reports-case-table caption { padding: 8px 0; text-align: left; }
 .reports-table-container:focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 3px; }
 .reports-state.error{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}.reports-state.error button{padding:7px 12px;border:1px solid currentColor;border-radius:var(--radius-md);background: var(--md-sys-color-primary);color: var(--md-sys-color-on-primary);font-weight:700 border-color: var(--md-sys-color-primary); }.reports-quality{margin-top:var(--space-5);padding:var(--space-4);border:1px solid #e8b44b;border-radius:var(--radius-md);background:#fff9e8}.reports-quality h3{margin-bottom:var(--space-2);font-size:1rem}.reports-quality ul{display:grid;gap:var(--space-2);padding-left:20px}.reports-quality li span{display:block;color:var(--md-sys-color-on-surface-variant);font-size:.78rem}

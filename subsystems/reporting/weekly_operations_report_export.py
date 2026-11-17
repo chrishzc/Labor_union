@@ -21,6 +21,8 @@ from subsystems.reporting.weekly_operations_report_query import (
 
 
 SHEET_NAMES = ("週報案件受理總表", "補助案件統計表", "每周服務中說明")
+_CASE_LAST_COLUMN = 26
+_CASE_CANCEL_REASON_COLUMN = 25
 
 _HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 _YELLOW_FILL = PatternFill(fill_type="solid", fgColor="FFFF00")
@@ -66,8 +68,6 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
 
 
 def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
-    # 固定沿用擴充雙層表頭 A:Y；六項資格與生命週期逐項計數分開。
-    last_col = 25
     # R1: 報表期間註記
     ws.append(("報表期間", report.period_label))
     ws.cell(row=1, column=1).font = Font(bold=True)
@@ -81,7 +81,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         "社福案件審核", None,
         "原住民案件審核", None,
         "申請案件狀況", None, None, None,
-        "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "備註",
+        "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "取消原因", "備註",
     ]
     ws.append(h1)
 
@@ -93,13 +93,13 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         "補助市民符合", "補助市民不符合",
         "原住民符合", "原住民不符合",
         "訂單成立", "洽談中", "取消", "審核不符合",
-        None, None, None, None, None, None, None,
+        None, None, None, None, None, None, None, None,
     ]
     ws.append(h2)
 
     # 合併雙層表頭單元格
     for col_letter in ["A", "D", "E", "F", "G", "H",
-                       *(get_column_letter(c) for c in range(19, last_col + 1))]:
+                       *(get_column_letter(c) for c in range(19, _CASE_LAST_COLUMN + 1))]:
         ws.merge_cells(f"{col_letter}2:{col_letter}3")
     ws.merge_cells("B2:C3")
     ws.merge_cells("I2:J2")
@@ -109,7 +109,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
 
     # 樣式表頭
     for r in (2, 3):
-        for c in range(1, last_col + 1):
+        for c in range(1, _CASE_LAST_COLUMN + 1):
             cell = ws.cell(row=r, column=c)
             cell.font = Font(bold=True)
             cell.fill = _HEADER_FILL
@@ -171,10 +171,11 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 row.planned_end_date.isoformat() if row and row.planned_end_date else "",
                 row.service_status if row else "",
                 (row.district or "") if row else "",
+                row.cancel_reason if row else None,
                 "",  # 備註欄保持空白供工會自行操作
             ])
             curr_r = ws.max_row
-            for c in range(1, last_col + 1):
+            for c in range(1, _CASE_LAST_COLUMN + 1):
                 cell = ws.cell(row=curr_r, column=c)
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = _BORDER_THIN
@@ -182,6 +183,10 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                     cell.fill = _METRIC_FILL
                     if idx == 0:
                         cell.font = Font(bold=True)
+            if row and row.cancel_reason is not None:
+                reason_cell = ws.cell(row=curr_r, column=_CASE_CANCEL_REASON_COLUMN)
+                reason_cell.data_type = "s"  # 以文字儲存使用者輸入，避免 Excel 將它當成公式。
+                reason_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
         end_row = ws.max_row
         if end_row > start_row:
@@ -200,11 +205,11 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 _append_case_totals(ws, monthly_totals[month_key])
 
     ws.freeze_panes = f"A{4 + len(report.annual_totals)}"
-    _auto_fit_columns(ws, min_col=1, max_col=last_col)
+    _auto_fit_columns(ws, min_col=1, max_col=_CASE_LAST_COLUMN)
+    ws.column_dimensions[get_column_letter(_CASE_CANCEL_REASON_COLUMN)].width = 32
 
 
 def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
-    last_col = 25
     label = (
         f"{total.year - 1911}年度累計" if total.month is None
         else f"{total.year - 1911}年{total.month}月小計"
@@ -228,7 +233,7 @@ def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
         "HCM 審核不符合優先列入審核不符合，每案最多計入一個狀況欄。訂單成立含服務中與完成。",
         "系統",
     )
-    for column in range(1, last_col + 1):
+    for column in range(1, _CASE_LAST_COLUMN + 1):
         cell = ws.cell(row=row_number, column=column)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(fill_type="solid", fgColor="262626")

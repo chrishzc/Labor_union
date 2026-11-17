@@ -325,7 +325,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByText('查看已保存日期與版本')).not.toBeInTheDocument();
     expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
       expected_confirmed_version: 2, segments: [{ staff_id: 12, service_dates: initialDates }],
-    }), expect.anything(), true, undefined);
+    }), expect.anything(), true);
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 
@@ -365,36 +365,35 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByText('已有排班')).not.toBeInTheDocument();
   });
 
-  it('多月嫂預覽失敗後可取消，重新讀取原日期，且未提交排班', async () => {
+  it('多月嫂儲存受拒後可取消並重新讀取原日期', async () => {
     currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
-    mocks.previewOfficeSchedule.mockRejectedValue(new ApiHttpError(409, 'office_schedule_assignment_ownership_blocked', '請核對原指派'));
+    mocks.saveHistoricalSchedule.mockRejectedValue(new ApiHttpError(409, 'office_schedule_assignment_ownership_blocked', '請核對原指派'));
     render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
       officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
     fireEvent.click(await screen.findByRole('button', { name: '多月嫂排班' }));
     expect(mocks.previewOfficeSchedule).not.toHaveBeenCalled();
     expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('服務日期選擇')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '預覽班表及應付' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存班表' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('請核對原指派');
     fireEvent.click(screen.getByRole('button', { name: '取消多月嫂編輯' }));
     expect(await screen.findByRole('button', { name: '多月嫂排班' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '服務日期 2026-10-03' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledTimes(1);
+    expect(mocks.getAssignmentPlan).not.toHaveBeenCalled();
     expect(mocks.applyServiceDates).not.toHaveBeenCalled();
   });
 
-  it('多月嫂模式只顯示個人月曆，交錯排班可預覽並儲存', async () => {
+  it('多月嫂模式完成交錯日期分配後直接儲存，補上必要原因後保留原分配再送出', async () => {
     currentQuery = { ...currentQuery, current_version: 2, current_dates: initialDates };
-    const fingerprint = 'c'.repeat(64);
-    mocks.previewOfficeSchedule
+    mocks.saveHistoricalSchedule
       .mockRejectedValueOnce(new ApiHttpError(409, 'office_schedule_reallocation_reason_required', '請填寫調整原因及協調依據'))
-      .mockResolvedValue({ preview_fingerprint: fingerprint, staff_entitlements: [] });
-    mocks.saveHistoricalSchedule.mockImplementation(async () => {
-      currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
-      return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5, 6] };
-    });
+      .mockImplementation(async () => {
+        currentQuery = { ...currentQuery, order_version: 12, scheduling_version: 8 };
+        return { case_no: CASE, scheduling_version: 8, generation_number: 2, assignment_ids: [5, 6] };
+      });
     mocks.getAssignmentPlan.mockResolvedValue({
       case_no: CASE, scheduling_version: 8, scheduling_generation: 2,
       assignments: [
@@ -412,7 +411,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.queryByLabelText('服務日期選擇')).not.toBeInTheDocument();
     expect(screen.getAllByRole('group', { name: '服務日期月曆' })).toHaveLength(2);
     const saveButton = screen.getByRole('button', { name: '儲存班表' });
-    const previewButton = screen.getByRole('button', { name: '預覽班表及應付' });
+    expect(screen.queryByRole('button', { name: '預覽班表及應付' })).not.toBeInTheDocument();
     expect(saveButton).toBeDisabled();
     const first = within(screen.getByRole('region', { name: /王月嫂/ }));
     const second = within(screen.getByRole('region', { name: /林月嫂/ }));
@@ -421,21 +420,20 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-01/ }));
     fireEvent.click(second.getByRole('button', { name: /^服務日期 2026-10-02/ }));
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-04/ }));
-    expect(previewButton).toBeEnabled();
-    fireEvent.click(previewButton);
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
     expect(await screen.findByRole('alert')).toHaveTextContent('請填寫調整原因及協調依據');
     expect(saveButton).toBeDisabled();
-    expect(previewButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('調整原因及協調依據（必填）'), { target: { value: '已與兩位月嫂確認' } });
-    fireEvent.click(previewButton);
-    await waitFor(() => expect(saveButton).toBeEnabled());
-    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
+    expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
     await screen.findByText('班表已儲存並回讀正式排班。');
-    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledExactlyOnceWith(CASE, expect.objectContaining({
-      reason: '已與兩位月嫂確認',
-      segments: [{ staff_id: 12, service_dates: [initialDates[0], initialDates[2]] }, { staff_id: 13, service_dates: [initialDates[1]] }],
-    }), expect.anything(), true, fingerprint);
+    const segments = [{ staff_id: 12, service_dates: [initialDates[0], initialDates[2]] }, { staff_id: 13, service_dates: [initialDates[1]] }];
+    expect(mocks.previewOfficeSchedule).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).toHaveBeenCalledTimes(2);
+    expect(mocks.saveHistoricalSchedule).toHaveBeenNthCalledWith(1, CASE, expect.objectContaining({ reason: '', segments }), expect.anything(), true);
+    expect(mocks.saveHistoricalSchedule).toHaveBeenNthCalledWith(2, CASE, expect.objectContaining({ reason: '已與兩位月嫂確認', segments }), expect.anything(), true);
+    expect(mocks.saveHistoricalSchedule.mock.calls[0][2].idempotencyKey).not.toBe(mocks.saveHistoricalSchedule.mock.calls[1][2].idempotencyKey);
   });
 
   it('正式實際開始日變更後自動重算，人工選日須明確採用新建議', async () => {

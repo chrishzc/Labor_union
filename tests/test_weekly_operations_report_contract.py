@@ -386,6 +386,46 @@ def test_operations_report_rejects_inverted_date_range():
     assert response.json()["detail"]["error"]["code"] == "weekly_operations_report_invalid"
 
 
+def test_weekly_report_projects_order_cancellation_reasons_in_v5_and_excel():
+    reason = '= "改由家人照顧"'
+
+    class CancellationFacts(_Facts):
+        def list_case_facts(self, start_date, end_date):
+            active, rejected = super().list_case_facts(start_date, end_date)
+            return [
+                replace(active, seq_num=7, order_status="訂單取消", cancel_reason=reason),
+                replace(rejected, seq_num=8, cancel_reason="不應顯示"),
+                replace(active, seq_num=9, client_id=9, case_no="115000009", order_status="訂單取消"),
+            ]
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(
+        CancellationFacts(), lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+    )
+    client = TestClient(app)
+    base = "/api/v1/operations-reports/weekly"
+    params = {"start_date": "2026-08-20", "end_date": "2026-08-26"}
+    response = client.get(base, params={**params, "schema_version": "operations-report.v5"})
+    assert response.status_code == 200
+    rows = {row["case_no"]: row for row in response.json()["data"]["case_rows"]}
+    assert rows["115000007"]["cancel_reason"] == reason
+    assert rows["115000008"]["cancel_reason"] is None
+    assert rows["115000009"]["cancel_reason"] is None
+    for version in ("operations-report.v3", "operations-report.v4"):
+        legacy = client.get(base, params={**params, "schema_version": version})
+        assert legacy.status_code == 200
+        assert all("cancel_reason" not in row for row in legacy.json()["data"]["case_rows"])
+
+    export = client.get(f"{base}/export", params=params)
+    assert export.status_code == 200
+    sheet = load_workbook(BytesIO(export.content))["週報案件受理總表"]
+    assert tuple(sheet.cell(2, col).value for col in (24, 25, 26)) == ("區域", "取消原因", "備註")
+    case_rows = {row[0].value: row for row in sheet.iter_rows(min_row=4) if isinstance(row[0].value, int)}
+    assert case_rows[7][24].value == reason
+    assert case_rows[7][24].data_type == "s"
+    assert all(case_rows[serial][24].value is None for serial in (8, 9))
+
+
 def test_weekly_service_keeps_partial_rows_and_uses_order_completion_only():
     class PartialFacts(_Facts):
         def list_service_facts(self, _start_date, _end_date):
@@ -510,6 +550,9 @@ def test_case_source_keeps_date_scoped_rows_inside_requested_window_only():
     assert "OR c.created_at IS NULL" not in _CASE_FACTS_SQL
     assert "c.created_at >= %s AND c.created_at < %s" in _CASE_FACTS_SQL
     assert "c.city,c.address" in _CASE_FACTS_SQL
+    assert "order_cancellation_events" in _CASE_FACTS_SQL
+    assert "cancel_reason" not in _CASE_STATISTICS_FACTS_SQL
+    assert "order_cancellation_events" not in _CASE_STATISTICS_FACTS_SQL
     for source in (_CASE_FACTS_SQL, _CASE_STATISTICS_FACTS_SQL):
         assert "c.hcm_review_status" in source
         assert "reject_reason" not in source

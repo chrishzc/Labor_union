@@ -53,7 +53,7 @@ describe('StaffPage real data boundary', () => {
     vi.setSystemTime(new Date('2026-08-22T16:30:00Z'));
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
     await waitFor(() => expect(staffQualificationMasterClient.query).toHaveBeenCalled());
     expect(staffQualificationMasterClient.query).toHaveBeenCalledWith(
       11,
@@ -66,7 +66,7 @@ describe('StaffPage real data boundary', () => {
     vi.mocked(staffQualificationMasterClient.query).mockResolvedValue(STAFF_QUALIFICATION_MASTER);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
 
     for (const label of ['技能', '料理能力', '證照', '醫療／體檢', '資格有效期', '不可服務期間']) {
       await waitFor(() => expect(screen.getByRole('group', { name: label })).toBeInTheDocument());
@@ -136,7 +136,7 @@ describe('StaffPage real data boundary', () => {
       .mockResolvedValueOnce(STAFF_QUALIFICATION_MASTER);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('row', { name: '開啟 去敏人員甲 的詳情' }));
 
     fireEvent.click(await screen.findByRole('button', { name: '重試資格主檔' }));
     await waitFor(() => expect(screen.getByText(/整體狀態/)).toBeInTheDocument());
