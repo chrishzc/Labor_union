@@ -64,6 +64,30 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.apply.mockImplementation(async () => { commitFacts(); return receipt(); });
   });
 
+  it('取消完成後直接提供帶入新非市民案入口，不自動建案', async () => {
+    render(<OrderCancellationPanel caseNo={CASE} />);
+    await open(); await apply();
+    await screen.findByText('訂單取消已完成正式回讀：訂單取消');
+    expect(screen.getByRole('link', { name: '以此案資料建立非市民新案' })).toHaveAttribute('href', `#clients?tab=applications&source_case=${encodeURIComponent(CASE)}`);
+    expect(mocks.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('重新開啟已取消案件仍提供帶入入口，不要求再次取消', async () => {
+    facts = { ...facts, lifecycle_status: '訂單取消' };
+    render(<OrderCancellationPanel caseNo={CASE} />);
+    await open();
+    expect(screen.getByRole('link', { name: '以此案資料建立非市民新案' })).toHaveAttribute('href', `#clients?tab=applications&source_case=${encodeURIComponent(CASE)}`);
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it('允許歷史取消服務補登時仍直接提供帶入入口', async () => {
+    facts = { ...facts, lifecycle_status: '訂單取消', historical_mid_service_confirmation_available: true };
+    render(<OrderCancellationPanel caseNo={CASE} />);
+    await open();
+    expect(screen.getByRole('link', { name: '以此案資料建立非市民新案' })).toHaveAttribute('href', `#clients?tab=applications&source_case=${encodeURIComponent(CASE)}`);
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
   it('未服務案件以零日預覽，明確確認後才送出並回讀', async () => {
     const onObserved = vi.fn(); const onBusyChange = vi.fn();
     render(<OrderCancellationPanel caseNo={CASE} onObserved={onObserved} onBusyChange={onBusyChange} />);

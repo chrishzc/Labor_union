@@ -11,11 +11,12 @@ import { LineIdentityClientError } from '../api/line_identity/line_identity_erro
 import type {
   LineBindingSubjectType, LineIdentityBindingView, LineIdentityBindingPageView,
   LineIdentityCandidate,
+  LineIdentityCandidatePage, LineIdentityReplacementPreviewView,
   LineIdentityReviewView, LineIdentityReviewPageView, LineIdentityReviewDecision,
   LineIdentityReviewPreviewView, LineIdentityReviewType, UnboundPairingCandidatesView,
   UnboundProvisionalCandidate, UnboundOrderCandidate,
 } from '../api/line_identity/line_identity_schemas';
-import { adaptLineIdentityRevocationPreview, maskLineUserId } from '../adapters/line_identity/line_identity_adapter';
+import { adaptLineIdentityReplacementPreview, adaptLineIdentityRevocationPreview, maskLineUserId } from '../adapters/line_identity/line_identity_adapter';
 import { Drawer } from './Drawer';
 import './LineIdentityWorkbench.css';
 
@@ -142,6 +143,7 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
   const [search, setSearch] = useState(initial.get('binding_q') ?? ''); const [page, setPage] = useState(() => { const value=Number(initial.get('binding_page'));return Number.isSafeInteger(value)&&value>0?value:1; });
   const [result, setResult] = useState<LineIdentityBindingPageView | null>(null); const [loading, setLoading] = useState(true); const [listError, setListError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<LineIdentityBindingView | null>(null);
+  const [replacement, setReplacement] = useState<LineIdentityBindingView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowBusy, setRowBusy] = useState(false);
   const [rowNotice, setRowNotice] = useState<string | null>(null);
@@ -277,12 +279,14 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
           <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.retryRevocation} onClick={() => void runRowAction(item, 'restore')}>修復訪客選單</button>}
       </div></td><td data-label="更新時間">{date(item.updated_at)}</td><td className="identity-binding-actions"><div>
       {item.status === 'bound' && <>
+        {item.subject_type === 'customer' && client.listReplacementCandidates && client.previewReplacement && client.applyReplacement && <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow} onClick={() => setReplacement(item)}>更正綁定對象</button>}
         <button type="button" className="identity-button" disabled={rowBusy || !!unverifiedRow || !client.previewRevocation || !client.applyRevocation} onClick={() => { setRowError(null); setConfirmDelete(false); setConfirmation(item); }}>解除綁定</button>
       </>}
       {(item.status === 'revoked' || item.status === 'revocation_pending') && client.deleteRevokedBinding && <button type="button" className="identity-button identity-delete-action"
         disabled={rowBusy || !!unverifiedRow || !item.updated_at}
         onClick={() => { setRowError(null); setConfirmDelete(true); setConfirmation(item); }}>刪除停用資料</button>}
     </div></td></tr>)}</tbody></table></div><Pagination page={result.page} pageSize={result.page_size} total={result.total} onPage={setPage} /></> : <Empty filtered={!!search.trim()||role!=='all'} label="目前沒有身分綁定紀錄" onClear={()=>{setSearch('');setRole('all');setPage(1);}} />)}
+    {replacement && <ReplacementDialog item={replacement} client={client} onClose={() => setReplacement(null)} onChanged={() => { setReplacement(null); setRowNotice('綁定對象已更正，並已重新查詢確認。'); onChanged(); }} />}
     {confirmation && <dialog ref={confirmationDialog} className="identity-confirmation" aria-labelledby="identity-confirmation-title"
       onCancel={event => { event.preventDefault(); if (!rowBusy) setConfirmation(null); }}>
       <h2 id="identity-confirmation-title">{confirmDelete ? '永久刪除停用綁定資料？' : '是否確認解除綁定？'}</h2>
@@ -300,6 +304,104 @@ function BindingPanel({ client, reload, onChanged }: { client: Client; reload: n
       </div>
     </dialog>}
   </>;
+}
+
+function ReplacementDialog({ item, client, onClose, onChanged }: {
+  item: LineIdentityBindingView; client: Client; onClose: () => void; onChanged: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const request = useRef<AbortController | null>(null);
+  const intent = useRef({ idempotency_key: identity(), correlation_id: identity() });
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [candidates, setCandidates] = useState<LineIdentityCandidatePage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selection, setSelection] = useState<{ candidate: LineIdentityCandidate; preview: LineIdentityReplacementPreviewView } | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    const trigger = document.activeElement;
+    element?.showModal();
+    element?.querySelector('button')?.focus();
+    return () => { request.current?.abort(); element?.close(); if (trigger instanceof HTMLElement) trigger.focus(); };
+  }, []);
+  useEffect(() => {
+    const abort = new AbortController();
+    setLoading(true); setCandidates(null); setError(null);
+    const timer = window.setTimeout(() => {
+      void (client.listReplacementCandidates?.({ subject_type: item.subject_type, search: search.trim() || undefined, page, page_size: pageSize }, { signal: abort.signal }) ?? Promise.reject(unavailable()))
+        .then(value => { if (!abort.signal.aborted) setCandidates(value); })
+        .catch(value => { if (!abort.signal.aborted) setError(errorText(value)); })
+        .finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    }, 150);
+    return () => { abort.abort(); window.clearTimeout(timer); };
+  }, [client, item.subject_type, search, page]);
+  const choose = async (candidate: LineIdentityCandidate) => {
+    if (request.current) return;
+    const abort = new AbortController(); request.current = abort; setBusy(true); setError(null);
+    try {
+      const preview = await (client.previewReplacement?.(item.line_user_id, candidate.subject_reference, { subjectType: item.subject_type, signal: abort.signal }) ?? Promise.reject(unavailable()));
+      if (abort.signal.aborted) return;
+      intent.current = { idempotency_key: identity(), correlation_id: identity() };
+      setSelection({ candidate, preview });
+    } catch (value) { if (!abort.signal.aborted) setError(errorText(value)); }
+    finally { if (!abort.signal.aborted) { request.current = null; setBusy(false); } }
+  };
+  const confirm = async (readOnly = false) => {
+    if (!selection || request.current) return;
+    const abort = new AbortController(); request.current = abort; setBusy(true); setError(null);
+    let submitted = false;
+    try {
+      if (!readOnly) {
+        await (client.applyReplacement?.(item.line_user_id, {
+          expected_version: selection.preview.binding.version,
+          target_subject_reference: selection.preview.target_subject_reference,
+          reason: reason.trim(), ...intent.current,
+        }, { subjectType: item.subject_type, signal: abort.signal }) ?? Promise.reject(unavailable()));
+        submitted = true;
+      }
+      const current = await (client.getBinding?.(item.line_user_id, { subjectType: item.subject_type, signal: abort.signal }) ?? Promise.reject(unavailable()));
+      if (abort.signal.aborted) return;
+      if (current.status !== 'bound' || current.line_user_id !== item.line_user_id || current.subject_type !== item.subject_type
+        || current.subject_reference !== selection.preview.target_subject_reference || current.version <= selection.preview.binding.version) {
+        setUncertain(true); setError('最新綁定尚未確認為所選對象，請重新查詢或關閉視窗後核對清單。'); return;
+      }
+      onChanged();
+    } catch (value) {
+      if (!abort.signal.aborted) {
+        setError(errorText(value));
+        if (submitted || (value instanceof LineIdentityClientError && value.outcomeUnknown)) setUncertain(true);
+      }
+    } finally { if (!abort.signal.aborted) { request.current = null; setBusy(false); } }
+  };
+  const blockers = selection ? adaptLineIdentityReplacementPreview(selection.preview).blockers : [];
+  return <dialog ref={dialog} className="identity-confirmation identity-replacement" aria-labelledby="identity-replacement-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <h2 id="identity-replacement-title">更正綁定對象</h2>
+    <p>目前綁定：{item.subject_name} · {reference(item)}</p>
+    {error && <p className="identity-error" role="alert">{error}</p>}
+    {!selection ? <>
+      <SearchField value={search} onChange={value => { setSearch(value); setPage(1); }} label="搜尋目標客戶姓名或案件編號" />
+      {loading && <p role="status">正在查詢可更正對象…</p>}
+      {candidates && <><div className="identity-order-options">{candidates.items.length ? candidates.items.map(candidate => <div className="identity-order-option" key={candidate.subject_reference}>
+        <div><strong>{candidate.subject_name}</strong><small className="identity-secondary">{reference(candidate)}</small></div>
+        <button type="button" className="identity-button" disabled={busy} onClick={() => void choose(candidate)} aria-label={`選擇${candidate.subject_name} ${reference(candidate)}`}>選擇</button>
+      </div>) : <p>沒有符合的可更正客戶。</p>}</div><Pagination page={candidates.page} pageSize={candidates.page_size} total={candidates.total} onPage={setPage} /></>}
+    </> : <>
+      <div className="identity-comparison"><div><span>來源客戶</span><strong>{selection.preview.binding.subject_name}</strong><small>{reference(selection.preview.binding)}</small></div>
+        <div><span>目標客戶</span><strong>{selection.preview.target_subject_name}</strong><small>{reference(selection.candidate)}</small></div></div>
+      <p>請確認兩側為同一位客戶。確認後，原客戶的 LINE 綁定會轉移至目標客戶。</p>
+      {blockers.length > 0 && <ul className="identity-error">{blockers.map(value => <li key={value}>{value}</li>)}</ul>}
+      <label className="identity-field">更正原因（選填）<textarea rows={2} maxLength={1000} value={reason} disabled={busy || uncertain} onChange={event => setReason(event.target.value)} /></label>
+    </>}
+    <div className="identity-confirmation-actions">
+      <button type="button" className="identity-button" disabled={busy} onClick={onClose}>關閉</button>
+      {selection && !uncertain && <button type="button" className="identity-button" disabled={busy} onClick={() => { setSelection(null); setError(null); }}>重新選擇</button>}
+      {selection && <button type="button" className="identity-row-action" disabled={busy || blockers.length > 0} onClick={() => void confirm(uncertain)}>{busy ? '正在處理…' : uncertain ? '重新查詢綁定結果' : '確認轉移綁定'}</button>}
+    </div>
+  </dialog>;
 }
 
 function DeletePendingRequest({ label, title, remove, onChanged }: {

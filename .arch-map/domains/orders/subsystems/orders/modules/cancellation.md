@@ -33,6 +33,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — §3.5 cancellation 與 Preview／Apply typed errors。
 - `/api/v1/orders/{case_no}/cancellation/{preview,apply}` — `api/routes/order_cancellation.py`。
 - 正式取消視窗先讀全案結算預覽，再由人員確認 Apply。Client Finance 在既有交易關卡建立一般退款或調整款，案件帳務以正式結算識別回讀，銀行核銷沿各原 owner。
+- 取消完成及重新讀取已取消案件時提供原案資料帶入非市民新案的導覽入口；只導向 Case Import 手動建案，不自動建案或更動綁定，沿用既有 busy 與未儲存離頁保護。
 
 ## Verification
 - layout_status: custom_current

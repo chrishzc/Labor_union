@@ -37,6 +37,7 @@
 .identity-pending-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .identity-confirmation{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(420px,calc(100% - 32px));max-height:calc(100% - 32px);padding:24px;border:1px solid var(--line-color-border-subtle);border-radius:16px;background:var(--line-color-surface,#fff);color:var(--line-color-text,#211814)}
 .identity-confirmation::backdrop{background:rgb(30 18 12 / 45%)}
+.identity-confirmation.identity-replacement{width:min(640px,calc(100% - 32px));overflow-y:auto}
 .identity-confirmation h2{margin:0 0 16px;font-size:1.25rem}
 .identity-confirmation-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .identity-table strong{font-size:1rem}

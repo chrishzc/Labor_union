@@ -5,6 +5,8 @@ import {
   type NonCitizenCaseNumber,
   type RegistrationApplication,
 } from '../api/registration_applications/client';
+import { clientRegistryClient } from '../api/client_registry/client_registry_client';
+import type { ClientRegistryDetail } from '../api/client_registry/client_registry_schemas';
 import type { RegistryEditState } from './ClientRegistryDetailEditor';
 import './RegistrationApplications.css';
 
@@ -52,7 +54,31 @@ const defaultForm: ManualCaseForm = {
   refund_account_no: '',
 };
 
-export function RegistrationApplications({ onEditStateChange, initialId, onCommitted }: { onEditStateChange: (state: RegistryEditState) => void; initialId?: number; onCommitted?: () => Promise<void> }) {
+function formFromSource(detail: ClientRegistryDetail): ManualCaseForm {
+  const profile = detail.client.values;
+  const survey = detail.beclass.status === 'ready' ? detail.beclass.values : null;
+  const terms = detail.order_terms.data?.terms;
+  const hours = terms?.service_hours_per_day;
+  return {
+    ...defaultForm,
+    name: profile.name ?? '', phone: profile.phone ?? '', gender: profile.gender ?? '',
+    email: profile.email ?? survey?.email ?? '', city: profile.city ?? '', address: profile.address ?? '',
+    due_month: profile.due_month ?? '', birth_date: survey?.birth_date ?? '',
+    notes: profile.notes ?? '', service_type: profile.service_type ?? detail.service_type ?? '',
+    residence_type: profile.residence_type ?? '', delivery_type: profile.delivery_type ?? '',
+    service_start_date: terms?.planned_start_date ?? detail.order_dates?.planned_start_date ?? '',
+    service_days: terms?.service_days ?? '', service_end_date: '',
+    service_time: hours === 4 ? '08:30-12:30 (4小時)' : hours === 8 ? '08:30-16:30 (8小時)' : '',
+    startTime: terms?.service_time.start_time?.slice(0, 5) ?? '',
+    endTime: terms?.service_time.end_time?.slice(0, 5) ?? '',
+    requires_cooking: terms?.requires_cooking ?? false,
+    baby_info: survey?.multi_birth_count ?? profile.baby_info ?? '',
+    refund_bank_code: detail.beclass.full_refund_account_visible ? survey?.refund_bank_code ?? '' : '',
+    refund_account_no: detail.beclass.full_refund_account_visible ? survey?.refund_account_no ?? '' : '',
+  };
+}
+
+export function RegistrationApplications({ onEditStateChange, initialId, sourceCaseNo, onCommitted }: { onEditStateChange: (state: RegistryEditState) => void; initialId?: number; sourceCaseNo?: string; onCommitted?: () => Promise<void> }) {
   const [items, setItems] = useState<RegistrationApplication[]>([]);
   const [selected, setSelected] = useState<RegistrationApplication | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,6 +94,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
   const [manualForm, setManualForm] = useState(defaultForm);
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState('');
+  const [manualSource, setManualSource] = useState('');
 
   useEffect(() => { onEditStateChange({ dirty: showManualModal, busy: busy || manualBusy }); }, [busy, manualBusy, showManualModal, onEditStateChange]);
 
@@ -82,10 +109,32 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     return () => { active = false; };
   }, [showManualModal]);
 
+  useEffect(() => {
+    if (!sourceCaseNo) return;
+    const controller = new AbortController();
+    setManualBusy(true); setManualError(''); setManualSource(''); setShowManualModal(false);
+    setError(false); setMessage('');
+    void clientRegistryClient.query(sourceCaseNo, controller.signal, true).then(detail => {
+      if (controller.signal.aborted) return;
+      setManualForm(formFromSource(detail));
+      setManualSource(detail.case_no);
+      setNumberPreview(null);
+      setShowManualModal(true);
+    }).catch(failure => {
+      if (controller.signal.aborted) return;
+      setError(true);
+      setMessage(failure instanceof Error ? failure.message : '來源案件暫時無法讀取。');
+    }).finally(() => {
+      if (!controller.signal.aborted) setManualBusy(false);
+    });
+    return () => controller.abort();
+  }, [sourceCaseNo]);
+
   const openManual = () => {
     setManualError('');
     setNumberPreview(null);
     setManualForm(defaultForm);
+    setManualSource('');
     setShowManualModal(true);
   };
 
@@ -145,9 +194,10 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     if (!manualForm.phone.trim()) return '請輸入連絡電話。';
     if (!manualForm.service_start_date) return '請選擇預計服務開始日。';
     if (!Number.isInteger(manualForm.service_days) || Number(manualForm.service_days) <= 0) return '服務天數必須為大於 0 的整數。';
-    if (!manualForm.service_time) return '請選擇服務時段。';
-    if (clockMinutes(manualForm.endTime) - clockMinutes(manualForm.startTime) !== serviceHours * 60) {
-      return `起訖時間差須等於所選的 ${serviceHours} 小時。`;
+    if (!manualForm.service_time) return '請選擇每日服務時數。';
+    const windowMinutes = clockMinutes(manualForm.endTime) - clockMinutes(manualForm.startTime);
+    if (!Number.isFinite(windowMinutes) || windowMinutes < serviceHours * 60) {
+      return `起訖時間差須至少涵蓋所選的 ${serviceHours} 小時。`;
     }
     if (!manualForm.baby_info) return '請選擇胎數。';
     if (!manualForm.email.trim()) return '請輸入電子郵件。';
@@ -177,6 +227,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
         service_time: `${startTime}-${endTime} (${serviceHours}小時)`,
       });
       setShowManualModal(false);
+      setManualSource('');
       setManualForm(defaultForm);
       setMessage(`${receipt.message} 虛擬帳號 ${receipt.virtual_account}。`);
       setError(false);
@@ -208,7 +259,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
         <button
           type="button"
           className="registration-applications__manual-btn"
-          disabled={busy}
+          disabled={busy || manualBusy}
           onClick={openManual}
         >
           新增非市民案件
@@ -217,6 +268,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
       </div>
     </header>
 
+    {manualBusy && !showManualModal && <p role="status">正在帶入來源案件資料…</p>}
     {message && <p className="registration-applications__message" role={error ? 'alert' : 'status'}>{message}</p>}
     {busy && <p className="registration-applications__loading" role="status">正在處理需求申請…</p>}
 
@@ -284,6 +336,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
           <button type="button" className="manual-case-modal__close" onClick={() => { if (!manualBusy) setShowManualModal(false); }}>✕</button>
         </header>
 
+        {manualSource && <p role="status">資料來源案件：{manualSource}。請核對並補齊資料；此操作會建立新案，原案及 LINE 綁定不會變更。</p>}
         {manualError && <p className="manual-case-modal__error" role="alert">{manualError}</p>}
 
         <form onSubmit={e => { e.preventDefault(); void handleManualSubmit(); }} className="manual-case-form">
@@ -370,7 +423,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
               </label>
 
               <label className="full-width">
-                <span className="required">服務時段</span>
+                <span className="required">每日服務時數（預設時段）</span>
                 <select
                   required
                   value={manualForm.service_time}
@@ -383,13 +436,13 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
                   }}
                   disabled={manualBusy}
                 >
-                  <option value="">請選擇服務時段</option>
-                  <option value="08:30-12:30 (4小時)">08:30–12:30（4 小時）</option>
-                  <option value="08:30-16:30 (8小時)">08:30–16:30（8 小時）</option>
-                  <option value="09:00-17:00 (8小時)">09:00–17:00（8 小時）</option>
-                  <option value="13:00-17:00 (4小時)">13:00–17:00（4 小時）</option>
+                  <option value="">請選擇每日服務時數</option>
+                  <option value="08:30-12:30 (4小時)">4 小時（預設 08:30–12:30）</option>
+                  <option value="08:30-16:30 (8小時)">8 小時（預設 08:30–16:30）</option>
+                  <option value="09:00-17:00 (8小時)">8 小時（預設 09:00–17:00）</option>
+                  <option value="13:00-17:00 (4小時)">4 小時（預設 13:00–17:00）</option>
                 </select>
-                <small className="hint">可調整起訖時間，時間差須等於所選時數。</small>
+                <small className="hint">實際起訖時間可在下方調整，時間差須至少涵蓋所選時數；多出的時間可協調為休息，不增加服務時數。</small>
               </label>
               <label>
                 <span className="required">每日開始時間</span>

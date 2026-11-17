@@ -258,6 +258,18 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     }));
   });
 
+  it.each(['normal', 'cancelled'] as const)('案件動作區在 %s 案件都可帶入建立新非市民案', async (branch) => {
+    const caseNo = 'CASE-SOURCE-ENTRY';
+    clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo, 'matching_pool', { branch, lifecycle: branch === 'cancelled' ? '訂單取消' : '洽談中' })]));
+    setOwnerFacts(caseNo);
+    render(<OrderWorkbenchV2Drawer caseNo={caseNo} branchType={branch} onClose={vi.fn()} />);
+    const entry = await screen.findByRole('button', { name: '以此案資料建立非市民新案' });
+    await waitFor(() => expect(entry).toBeEnabled());
+    fireEvent.click(entry);
+    expect(window.location.hash).toBe(`#clients?tab=applications&source_case=${encodeURIComponent(caseNo)}`);
+    window.history.replaceState(null, '', '/');
+  });
+
   it('既有問題深連結只開啟同案候選月嫂',async()=>{
     const caseNo='CASE-QUESTION';window.history.replaceState(null,'',`#order-workbench-v2?case=${caseNo}&work=matching&question=73`);
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([timeline(caseNo,'matching_pool',{lifecycle:'洽談中'})]));

@@ -530,6 +530,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <h1 ref={pageHeadingRef} tabIndex={-1}>案件處理</h1>
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
+            <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => requestLeave(() => {
+              window.location.hash = `#clients?tab=applications&source_case=${encodeURIComponent(caseNo)}`;
+            })}>以此案資料建立非市民新案</button>
             {timeline.status === 'ready' && currentBranch !== 'cancelled' && !terminalStatus &&
               <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
           </div>

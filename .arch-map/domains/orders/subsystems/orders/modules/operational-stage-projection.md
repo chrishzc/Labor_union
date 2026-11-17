@@ -55,6 +55,7 @@
 
 ## Contracts
 
+- 案件工作畫面的上方動作區提供「以此案資料建立非市民新案」，導向 Case Import 的來源案帶入表單；不依案件狀態限制，沿用既有 busy 與未儲存離頁保護。
 - 正式推薦與更換推薦月嫂的新選項，將 saved candidate pool 與 `/staff/summaries?lifecycle_state=active` 的 current identity 集合交集；只過濾該操作的 presentation，候選池、原推薦與歷史案件 Query 不刪改。
 - `api/routes/orders_stage_projection.py` — `/api/orders/operational-timelines` typed read-only contract。
 - `api/routes/orders_core_stage_projection.py` — `/api/orders/core-stage-timelines` Beta typed read-only contract；十三核心階段中的 11～13 直接沿用 service completion、client settlement、staff payout owner 子投影。

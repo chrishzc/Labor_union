@@ -38,9 +38,9 @@ def validate_non_citizen_service_time(value: str) -> None:
     match = _SERVICE_TIME.fullmatch(value)
     if match is not None:
         start, end = (datetime.strptime(match[field], "%H:%M") for field in ("start", "end"))
-        if (end - start).total_seconds() == int(match["hours"]) * 3600:
+        if (end - start).total_seconds() >= int(match["hours"]) * 3600:
             return
-    raise ValueError("服務時段須為同一天，起訖時間差須等於所選的 4 或 8 小時。")
+    raise ValueError("服務時段須為同一天，起訖時間差須至少涵蓋所選的 4 或 8 小時。")
 
 
 def non_citizen_case_number(approved_at: datetime, sequence: int) -> str:

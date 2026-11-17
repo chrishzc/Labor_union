@@ -17,7 +17,7 @@ export const ClientRegistryPage: React.FC = () => {
     const activeTab: RegistryTab = tab === 'applications' || tab === 'virtual-accounts' ? tab : 'roster';
     return { caseNo: params.get('case') ?? '', field: params.get('field') ?? '', fromWorkbench: params.get('from') === 'workbench',
       tab: activeTab,
-      registration:params.get('registration') ?? '' };
+      sourceCaseNo: params.get('source_case') ?? '', registration:params.get('registration') ?? '' };
   };
   const [location, setLocation] = useState(readLocation);
   const [activeTab, setActiveTab] = useState<RegistryTab>(()=>readLocation().tab);
@@ -28,7 +28,7 @@ export const ClientRegistryPage: React.FC = () => {
     if (tab === activeTab || editState.current.busy) return;
     requestLeave(() => { editState.current = { dirty: false, busy: false }; setActiveTab(tab);
       const params=new URLSearchParams(window.location.hash.split('?')[1]);
-      params.set('tab',tab);if(tab!=='applications')params.delete('registration');
+      params.set('tab',tab);if(tab!=='applications'){params.delete('registration');params.delete('source_case');}
       window.history.replaceState(null,'',`#clients?${params}`);currentHash.current=window.location.hash;setLocation(readLocation());
     });
   };
@@ -53,7 +53,7 @@ export const ClientRegistryPage: React.FC = () => {
       <button type="button" role="tab" aria-selected={activeTab === 'applications'} onClick={() => selectTab('applications')}>非市民申請</button>
     </div>
     <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'applications' ? '非市民申請' : '虛擬帳號匯入'}>
-      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : activeTab === 'applications' ? <RegistrationApplications key={location.registration} initialId={location.registration?Number(location.registration):undefined} onEditStateChange={onEditStateChange} /> : <LegacyVirtualAccountImport />}
+      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : activeTab === 'applications' ? <RegistrationApplications key={`${location.registration}:${location.sourceCaseNo}`} sourceCaseNo={location.sourceCaseNo || undefined} initialId={location.registration?Number(location.registration):undefined} onEditStateChange={onEditStateChange} /> : <LegacyVirtualAccountImport />}
     </section>
   </div></>;
 };

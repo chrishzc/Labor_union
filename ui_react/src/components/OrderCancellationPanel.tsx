@@ -1,4 +1,4 @@
-import { useUnsavedDraft } from './UnsavedChanges';
+import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { CancellationSettlementNotices } from './CancellationSettlementNotices';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
@@ -19,6 +19,7 @@ export function isCancellationTerminalStatus(status: string | null | undefined) 
 }
 
 export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, allowHistoricalRepair = true, inBankReconciliation = false }) => {
+  const { requestLeave } = useUnsavedNavigation();
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
@@ -382,6 +383,13 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
         <a href={`#finance?tab=case-accounting&case_no=${encodeURIComponent(caseNo)}&from=workbench`}>查看本案帳務</a>
         <CancellationSettlementNotices key={caseNo} caseNo={caseNo} settlementOnly />
       </>}
+      {(query?.lifecycle_status === '訂單取消' || flowPhase === 'observed' || phase === 'observed') && <p>
+        <a href={`#clients?tab=applications&source_case=${encodeURIComponent(caseNo)}`} aria-disabled={busy}
+          onClick={event => {
+            event.preventDefault();
+            if (!busy) requestLeave(() => { window.location.hash = `#clients?tab=applications&source_case=${encodeURIComponent(caseNo)}`; });
+          }}>以此案資料建立非市民新案</a>
+      </p>}
       {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}
     </section>
   );

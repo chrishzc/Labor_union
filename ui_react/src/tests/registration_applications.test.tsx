@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RegistrationApplications } from '../components/RegistrationApplications';
 import { registrationApplicationsClient as client } from '../api/registration_applications/client';
 import { sessionClient } from '../api/auth/session_client';
+import { clientRegistryClient } from '../api/client_registry/client_registry_client';
+import type { ClientRegistryDetail } from '../api/client_registry/client_registry_schemas';
 
 const application = { registration_id: 5, version: 1, name: '測試申請人', phone: '0900000000',
   approved: false, status: 'pending' as const, submitted_at_utc: '2026-11-05T00:00:00Z', expires_at_utc: '2026-11-19T00:00:00Z', registration_kind: 'subsidy' as const, case_no: null, approved_at_utc: null,
@@ -11,10 +13,135 @@ const envelope = (data: unknown) => ({ success: true, message: '', data, error: 
 const response = (data: unknown) => ({ ok: true, status: 200, statusText: 'OK',
   headers: new Headers({ 'content-type': 'application/json' }), json: async () => envelope(data) });
 
+const sourceDetail: ClientRegistryDetail = {
+  case_no: '115000001',
+  client: { client_id: 8, version: 1, field_capabilities: {}, values: {
+    name: '來源客戶', gender: '女', phone: '0912345678', city: '新竹市', address: '測試地址',
+    residence_type: '電梯大樓', delivery_type: '自然產', baby_info: '單胞胎', notes: '來源備註',
+    identity_status: '一般市民', email: 'source@example.test', service_type: '連續服務',
+  } },
+  beclass: { status: 'ready', record_id: 3, source_kind: 'imported', version: 1, field_capabilities: {},
+    full_refund_account_visible: true, values: {
+      name: '來源客戶', email: 'source@example.test', phone: '0912345678', tel: null, ext: null,
+      city: '新竹市', zip_code: null, address: '測試地址', admin_notes: null, multi_birth_count: '雙胞胎',
+      refund_bank_code: '0000001', refund_account_no: '000000000001', birth_date: '1990-01-01',
+    } },
+  order_information: { status: 'unbound', values: null, field_issues: {} },
+  finance: { status: 'not_ready', code: null, values: null },
+  order_terms: { status: 'ready', code: null, field_capabilities: {}, data: {
+    case_no: '115000001', order_version: 1, scheduling_version: 1, scheduling_generation: 1,
+    client_finance_version: null, payroll_version: null, service_data_locked: false,
+    terms: { planned_start_date: '2026-12-01', service_days: 12, service_hours_per_day: 8,
+      requires_cooking: true, floor_fee_ntd: 0,
+      service_time: { start_time: '08:45', end_time: '16:45', end_day_offset: 0 } },
+  } },
+};
+
 beforeEach(() => sessionClient.setSession('test-session', { id: 7, username: 'staff', display_name: 'Staff', role: 'admin' }));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.clearSession(); });
 
 describe('saved demand application review', () => {
+  it('ignores a late response after changing source cases', async () => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
+    let finishFirst: ((detail: ClientRegistryDetail) => void) | undefined;
+    const first = new Promise<ClientRegistryDetail>(resolve => { finishFirst = resolve; });
+    vi.spyOn(clientRegistryClient, 'query').mockReturnValueOnce(first).mockResolvedValueOnce({
+      ...sourceDetail, case_no: '115000002',
+      client: { ...sourceDetail.client, values: { ...sourceDetail.client.values, name: '新來源客戶' } },
+    });
+    const { rerender } = render(<RegistrationApplications sourceCaseNo="115000001" onEditStateChange={vi.fn()} />);
+    rerender(<RegistrationApplications sourceCaseNo="115000002" onEditStateChange={vi.fn()} />);
+    await screen.findByText(/資料來源案件：115000002/);
+    fireEvent.change(screen.getByPlaceholderText('姓名'), { target: { value: '人員已核對' } });
+    await act(async () => { finishFirst?.(sourceDetail); await first; });
+    expect(screen.getByPlaceholderText('姓名')).toHaveValue('人員已核對');
+    expect(screen.queryByText(/資料來源案件：115000001/)).not.toBeInTheDocument();
+  });
+  it('carries source fields into the manual form and creates a separate new case', async () => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
+    const query = vi.spyOn(clientRegistryClient, 'query').mockResolvedValue(sourceDetail);
+    const create = vi.spyOn(client, 'createManualNonCitizen').mockResolvedValue({
+      case_no: 'A115001', virtual_account: '99781699115501', client_id: 21, message: '新案已建立',
+    });
+    render(<RegistrationApplications sourceCaseNo="115000001" onEditStateChange={vi.fn()} />);
+    await screen.findByText(/資料來源案件：115000001/);
+    expect(query).toHaveBeenCalledWith('115000001', expect.any(AbortSignal), true);
+    expect(screen.getByPlaceholderText('姓名')).toHaveValue('來源客戶');
+    expect(screen.getByLabelText('胎數')).toHaveValue('雙胞胎');
+    expect(screen.getByLabelText('每日開始時間')).toHaveValue('08:45');
+    expect(screen.getByLabelText('退款銀行帳號')).toHaveValue('000000000001');
+    await screen.findByText('A115001');
+    fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
+    await screen.findByText(/新案已建立/);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      name: '來源客戶', identity_status: '非市民', service_days: 12,
+      service_time: '08:45-16:45 (8小時)', baby_info: '雙胞胎', line_id: '',
+    }));
+    expect(create.mock.calls[0][0]).not.toHaveProperty('line_user_id');
+    expect(create.mock.calls[0][0]).not.toHaveProperty('client_id');
+    expect(create.mock.calls[0][0]).not.toHaveProperty('case_no');
+    expect(screen.queryByText(/資料來源案件/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['08:00', '17:00', true],
+    ['08:00', '16:00', true],
+    ['08:00', '15:59', false],
+    ['17:00', '08:00', false],
+    ['', '17:00', false],
+  ])('validates window %s–%s against selected 8 hours', async (start, end, accepted) => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
+    vi.spyOn(clientRegistryClient, 'query').mockResolvedValue(sourceDetail);
+    const create = vi.spyOn(client, 'createManualNonCitizen').mockResolvedValue({
+      case_no: 'A115001', virtual_account: '99781699115501', client_id: 21, message: '新案已建立',
+    });
+    render(<RegistrationApplications sourceCaseNo="115000001" onEditStateChange={vi.fn()} />);
+    await screen.findByText(/資料來源案件/);
+    await screen.findByText('A115001');
+    fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: start } });
+    fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: end } });
+    const form = screen.getByRole('button', { name: '確認建立新案' }).closest('form');
+    if (!form) throw new Error('找不到建案表單');
+    fireEvent.submit(form);
+    if (accepted) {
+      await screen.findByText(/新案已建立/);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ service_time: `${start}-${end} (8小時)` }));
+    } else {
+      expect(await screen.findByRole('alert')).toHaveTextContent('起訖時間差須至少涵蓋所選的 8 小時。');
+      expect(create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('leaves masked refund values blank for staff to complete', async () => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
+    vi.spyOn(clientRegistryClient, 'query').mockResolvedValue({ ...sourceDetail,
+      beclass: { ...sourceDetail.beclass, full_refund_account_visible: false,
+        values: sourceDetail.beclass.values && { ...sourceDetail.beclass.values, refund_account_no: '****0001' } },
+    });
+    const create = vi.spyOn(client, 'createManualNonCitizen');
+    render(<RegistrationApplications sourceCaseNo="115000001" onEditStateChange={vi.fn()} />);
+    await screen.findByText(/資料來源案件/);
+    expect(screen.getByLabelText('退款銀行帳號')).toHaveValue('');
+    expect(screen.getByLabelText('退款銀行帳號')).toBeRequired();
+    await screen.findByText('A115001');
+    const form = screen.getByRole('button', { name: '確認建立新案' }).closest('form');
+    if (!form) throw new Error('找不到建案表單');
+    fireEvent.submit(form);
+    expect(await screen.findByRole('alert')).toHaveTextContent('退款銀行代號');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('does not open an empty form when the source query fails', async () => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(clientRegistryClient, 'query').mockRejectedValue(new Error('來源案件讀取失敗'));
+    render(<RegistrationApplications sourceCaseNo="missing" onEditStateChange={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('來源案件讀取失敗');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
   it('requires a complete non-citizen case result after approval', async () => {
     const pending = { ...application, registration_kind: 'non_citizen' as const };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...pending, approved: true, status: 'approved' as const, version: 2 })));
@@ -87,7 +214,7 @@ describe('saved demand application review', () => {
     fireEvent.change(screen.getByPlaceholderText('姓名'), { target: { value: '測試客戶' } });
     fireEvent.change(screen.getByPlaceholderText('手機或市話'), { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText(/預計服務開始日/), { target: { value: '2026-12-01' } });
-    fireEvent.change(screen.getByLabelText(/服務時段/), { target: { value: '08:30-16:30 (8小時)' } });
+    fireEvent.change(screen.getByLabelText(/每日服務時數/), { target: { value: '08:30-16:30 (8小時)' } });
     const babyInfo = screen.getByRole('combobox', { name: '胎數' });
     expect(babyInfo).toBeRequired();
     expect(babyInfo).toHaveValue('');
@@ -109,7 +236,7 @@ describe('saved demand application review', () => {
     }
     fireEvent.change(screen.getByLabelText('每日開始時間'), { target: { value: '08:45' } });
     fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
-    expect(await screen.findByText('起訖時間差須等於所選的 8 小時。')).toBeInTheDocument();
+    expect(await screen.findByText('起訖時間差須至少涵蓋所選的 8 小時。')).toBeInTheDocument();
     expect(create).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '16:45' } });
     fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));

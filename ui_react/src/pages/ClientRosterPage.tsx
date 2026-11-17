@@ -427,6 +427,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           : <OrderCancellationPanel key={selectedCaseNo} caseNo={selectedCaseNo} allowHistoricalRepair={false}
               onObserved={() => void refreshAfterOrderOperation()} onBusyChange={setOrderOperationBusy} />}
       </> : <>
+      {canManageOrder && detail?.case_no === selectedCaseNo && <div className="registry-return-row">
+        <button type="button" disabled={editState.busy || deletionBusy} onClick={() => requestLeave(() => {
+          window.location.hash = `#clients?tab=applications&source_case=${encodeURIComponent(detail.case_no)}`;
+        })}>以此案資料建立非市民新案</button>
+      </div>}
       {(onReturnToCase || (canManageOrder && detail && (canReopen || !isCancellationTerminalStatus(selectedOrderStatus)))) && selectedCaseNo && <div className="registry-return-row">
       {onReturnToCase && <button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
         if (editState.busy || deletionBusy) return;

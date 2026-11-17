@@ -126,14 +126,65 @@ describe('身分與授權精簡工作區', () => {
     await waitFor(() => expect(api.listBindings).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'ORD-071', page: 1 }), expect.any(Object)));
     await screen.findByText(binding.subject_name);
   });
-  it('清單不提供更正或綁定明細抽屜', async () => {
+  it('客戶列提供更正入口，清單不預先載入候選或開啟明細抽屜', async () => {
     const api = client([binding, staff]);
     render(<LineIdentityWorkbench client={api} />);
     await screen.findByText(staff.subject_name, { exact: false });
-    expect(screen.queryByRole('button', { name: '更正綁定對象' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '更正綁定對象' })).toHaveLength(1);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(api.getBinding).not.toHaveBeenCalled();
     expect(api.listReplacementCandidates).not.toHaveBeenCalled();
+  });
+  it('選定目標後先預覽，確認才按 customer role 提交並回讀', async () => {
+    const api = client([binding, staff]);
+    const changed = { ...binding, subject_reference: '9', subject_name: candidate.subject_name, version: 8 };
+    api.getBinding.mockResolvedValue(changed);
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: '更正綁定對象' }));
+    const dialog = await screen.findByRole('dialog', { name: '更正綁定對象' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: '選擇更正客戶乙 ORD-009' }));
+    await within(dialog).findByRole('button', { name: '確認轉移綁定' });
+    expect(within(dialog).getByText('ORD-009')).toBeInTheDocument();
+    expect(api.applyReplacement).not.toHaveBeenCalled();
+    expect(api.previewReplacement).toHaveBeenCalledWith(binding.line_user_id, '9', expect.objectContaining({ subjectType: 'customer' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '確認轉移綁定' }));
+    await screen.findByText('綁定對象已更正，並已重新查詢確認。');
+    expect(api.applyReplacement).toHaveBeenCalledWith(binding.line_user_id, expect.objectContaining({ expected_version: 7, target_subject_reference: '9', reason: '' }), expect.objectContaining({ subjectType: 'customer' }));
+    expect(api.getBinding).toHaveBeenCalledWith(binding.line_user_id, expect.objectContaining({ subjectType: 'customer' }));
+    expect(document.body.textContent).not.toContain(binding.line_user_id);
+  });
+  it('預覽目標已有綁定時阻擋提交', async () => {
+    const api = client();
+    api.previewReplacement.mockResolvedValue({ binding, target_subject_reference: '9', target_subject_name: candidate.subject_name, blockers: ['line_identity_replacement_subject_already_bound'] });
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: '更正綁定對象' }));
+    fireEvent.click(await screen.findByRole('button', { name: '選擇更正客戶乙 ORD-009' }));
+    expect(await screen.findByRole('button', { name: '確認轉移綁定' })).toBeDisabled();
+    expect(api.applyReplacement).not.toHaveBeenCalled();
+  });
+  it('Apply 版本衝突顯示重新查詢提示，不回報轉移成功', async () => {
+    const api = client();
+    api.applyReplacement.mockRejectedValue(new LineIdentityClientError('CONFLICT', 'stale'));
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: '更正綁定對象' }));
+    fireEvent.click(await screen.findByRole('button', { name: '選擇更正客戶乙 ORD-009' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認轉移綁定' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('資料已變更，請重新查詢後再次確認。');
+    expect(screen.queryByText('綁定對象已更正，並已重新查詢確認。')).not.toBeInTheDocument();
+    expect(api.applyReplacement).toHaveBeenCalledTimes(1);
+    expect(api.getBinding).not.toHaveBeenCalled();
+  });
+  it('轉移回應結果不明時只回讀，不再次送出 Apply', async () => {
+    const api = client();
+    api.applyReplacement.mockRejectedValue(new LineIdentityClientError('TIMEOUT', 'unknown', { outcomeUnknown: true }));
+    api.getBinding.mockResolvedValue({ ...binding, subject_reference: '9', version: 8 });
+    render(<LineIdentityWorkbench client={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: '更正綁定對象' }));
+    fireEvent.click(await screen.findByRole('button', { name: '選擇更正客戶乙 ORD-009' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認轉移綁定' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重新查詢綁定結果' }));
+    await screen.findByText('綁定對象已更正，並已重新查詢確認。');
+    expect(api.applyReplacement).toHaveBeenCalledTimes(1);
   });
   it('解除綁定在置中確認前零寫入，確認後只操作該身分且不需原因', async () => {
     const api = client();

@@ -136,12 +136,41 @@ def test_manual_case_api_preserves_birth_date_cooking_and_holiday_preference(
     assert receipt["virtual_account"].endswith("501")
 
 
+@pytest.mark.parametrize(("service_time", "hours", "start", "end"), [
+    ("08:00-17:00 (8小時)", 8, "08:00", "17:00"),
+    ("08:00-16:00 (8小時)", 8, "08:00", "16:00"),
+    ("08:30-17:00 (8小時)", 8, "08:30", "17:00"),
+    ("08:30-16:30 (4小時)", 4, "08:30", "16:30"),
+    ("08:00-12:00 (4小時)", 4, "08:00", "12:00"),
+])
+def test_manual_case_preserves_selected_hours_when_window_includes_rest(
+    monkeypatch, manual_case_client, service_time, hours, start, end
+):
+    cursor = _FakeCursor(fetchone_results=[{"next_sequence": 1}])
+    conn = _FakeConnection(cursor)
+    workflow = Mock()
+    workflow.preview.return_value.import_version = 0
+    workflow.apply_in_current_uow.return_value.client_id = 101
+    monkeypatch.setattr(non_citizen_registration_application, "CaseImportWorkflow", Mock(return_value=workflow))
+    monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
+    response = manual_case_client.post("/api/v1/admin/registration-applications/manual-non-citizen", json={
+        **_REQUIRED_DETAILS, "name": "測試客戶", "phone": "0900000000",
+        "service_start_date": "2026-12-01", "service_days": 10, "service_time": service_time,
+    })
+    assert response.status_code == 200
+    intent = workflow.apply_in_current_uow.call_args.args[0].intent
+    assert intent.order.service_hours_per_day == hours
+    assert intent.order.service_start_time.strftime("%H:%M") == start
+    assert intent.order.service_end_time.strftime("%H:%M") == end
+    assert conn.committed
+
+
 @pytest.mark.parametrize(("field", "value", "error_field"), [
     ("service_time", "29:00-18:00 (8小時)", "服務時段"),
     ("service_time", "09:00-18:00 (108小時)", "服務時段"),
     ("service_time", "09:00-18:00 (1.2小時)", "服務時段"),
-    ("service_time", "08:30-17:00 (8小時)", "服務時段"),
-    ("service_time", "08:30-16:30 (4小時)", "服務時段"),
+    ("service_time", "08:30-16:00 (8小時)", "服務時段"),
+    ("service_time", "08:30-12:00 (4小時)", "服務時段"),
     ("service_time", "20:00-04:00 (8小時)", "服務時段"),
     ("baby_info", "第一胎", "胎數"),
     ("email", "name@example", "電子郵件"),
