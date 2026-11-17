@@ -11,18 +11,20 @@ import { ordersQueryClient } from '../api/orders/order_query_client';
 import { FinancePage } from '../pages/FinancePage';
 import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
 import { monthlyAccountingClient, type MonthlyAccountingReport } from '../api/finance_import/monthly_accounting_client';
-import { CORE_STAGE_CODES } from '../api/orders/order_core_stage_projection_schemas';
+import { CORE_STAGE_CODES, CORE_STAGE_SUBSTATUS_CODES } from '../api/orders/order_core_stage_projection_schemas';
 import { orderCoreStageProjectionClient } from '../api/orders/order_core_stage_projection_client';
 import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
 
+type CoreStageTimelines = Awaited<ReturnType<typeof orderCoreStageProjectionClient.getCoreStageTimelines>>;
+
 const emptyTimelines = {
   items: [],
-  stage_counts: Object.fromEntries(CORE_STAGE_CODES.map(code => [code, 0])) as Awaited<ReturnType<typeof orderCoreStageProjectionClient.getCoreStageTimelines>>["stage_counts"],
-  substatus_counts: {},
+  stage_counts: Object.fromEntries(CORE_STAGE_CODES.map(code => [code, 0])) as CoreStageTimelines['stage_counts'],
+  substatus_counts: Object.fromEntries(CORE_STAGE_SUBSTATUS_CODES.map(code => [code, 0])) as CoreStageTimelines['substatus_counts'],
   historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
   next_cursor: null,
   etag: 'c'.repeat(64),
-} satisfies Awaited<ReturnType<typeof orderCoreStageProjectionClient.getCoreStageTimelines>>;
+} satisfies CoreStageTimelines;
 
 const ORDER_PAGE = {
   items: [{
