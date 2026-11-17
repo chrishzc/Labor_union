@@ -1783,54 +1783,25 @@ interface OrderServiceRange {
   end: string;
 }
 
-async function loadHistoricalCaseRange(caseNo: string, signal: AbortSignal): Promise<OrderServiceRange | null> {
+interface HistoricalCaseRanges {
+  planned: OrderServiceRange | null;
+  service: OrderServiceRange | null;
+}
+
+function orderServiceRange(start: string | null, end: string | null): OrderServiceRange | null {
+  return start && end && start <= end ? { start, end } : null;
+}
+
+async function loadHistoricalCaseRanges(caseNo: string, signal: AbortSignal): Promise<HistoricalCaseRanges | null> {
   try {
     const order = await ordersQueryClient.getOrderDetail(caseNo, { signal });
-    const start = order.actual_start_date ?? order.start_date;
-    const end = order.actual_end_date ?? order.end_date;
-    return start && end && start <= end ? { start, end } : null;
+    return {
+      planned: orderServiceRange(order.start_date, order.end_date),
+      service: orderServiceRange(order.actual_start_date ?? order.start_date, order.actual_end_date ?? order.end_date),
+    };
   } catch {
     return null;
   }
-}
-
-type HistoricalOrderDateState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; start: string | null; end: string | null };
-
-function HistoricalOrderServiceDates({ caseNo }: { caseNo: string }) {
-  const [dates, setDates] = useState<HistoricalOrderDateState>({ status: 'loading' });
-
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadDates() {
-      try {
-        const order = await ordersQueryClient.getOrderDetail(caseNo, { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        setDates({
-          status: 'ready',
-          start: order.actual_start_date ?? order.start_date,
-          end: order.actual_end_date ?? order.end_date,
-        });
-      } catch {
-        if (!controller.signal.aborted) setDates({ status: 'error' });
-      }
-    }
-    void loadDates();
-    return () => controller.abort();
-  }, [caseNo]);
-
-  let text = '查詢中';
-  if (dates.status === 'error') {
-    text = '查詢失敗';
-  } else if (dates.status === 'ready') {
-    text = dates.start === dates.end
-      ? dates.start ?? '尚未登錄'
-      : `${dates.start ?? '開始日尚未登錄'} ～ ${dates.end ?? '結束日尚未登錄'}`;
-  }
-
-  return <p aria-live="polite">📅 整案服務起訖：{text}</p>;
 }
 
 function resolveOrderSpanEnrichment(
@@ -1854,23 +1825,24 @@ function resolveOrderSpanEnrichment(
     };
   }
   const optAssign = context.staffAssignments.find(
-    (item) => (assignmentId != null && item.id === assignmentId) || item.case_no === caseNo,
+    (item) => item.case_no === caseNo && (assignmentId == null || item.id === assignmentId),
   );
   const projAssign = context.projectionAssignments.find(
-    (item) => (assignmentId != null && item.assignment_id === assignmentId) || item.case_no === caseNo,
+    (item) => item.case_no === caseNo && (assignmentId == null || item.assignment_id === assignmentId),
   );
   const summary = context.orderSummariesByCaseNo[caseNo];
+  const caseDates = assignmentId == null ? summary : undefined;
 
   const fullStartDate =
-    optAssign?.actual_start_date
+    (assignmentId == null ? optAssign?.actual_start_date : undefined)
     ?? optAssign?.assigned_start_date
-    ?? summary?.startDate
+    ?? caseDates?.startDate
     ?? projAssign?.assigned_start_date
     ?? spanStartDate;
   const fullEndDate =
-    optAssign?.actual_end_date
+    (assignmentId == null ? optAssign?.actual_end_date : undefined)
     ?? optAssign?.assigned_end_date
-    ?? summary?.endDate
+    ?? caseDates?.endDate
     ?? projAssign?.assigned_end_date
     ?? spanEndDate;
   const dateRangeText = fullStartDate === fullEndDate
@@ -1916,26 +1888,29 @@ function assignNonOverlappingLanes(spans: GanttSpan[]): GanttSpan[] {
   });
 }
 
-function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<string, OrderServiceRange | null>): GanttSpan[] {
+function showHistoricalCaseRanges(spans: GanttSpan[], ranges?: ReadonlyMap<string, HistoricalCaseRanges | null>): GanttSpan[] {
   const positioned: GanttSpan[] = [];
   const completeCases = new Map<string, GanttSpan>();
   for (const span of spans) {
-    if (span.tone !== 'historical' || span.shift?.status === 'historical_reservation') {
+    if (span.tone !== 'historical') {
       positioned.push(span);
       continue;
     }
-    const range = ranges?.get(span.caseText);
+    const reservation = span.shift?.status === 'historical_reservation';
+    const caseRanges = ranges?.get(span.caseText);
+    const range = reservation ? caseRanges?.planned : caseRanges?.service;
     if (!range) {
       positioned.push({ ...span, historicalCaseDates: '整案日期不可用', dateRangeText: '整案日期不可用' });
       continue;
     }
-    const previous = completeCases.get(span.caseText);
+    const key = `${reservation ? 'reservation' : 'assignment'}:${span.caseText}`;
+    const previous = completeCases.get(key);
     if (previous) {
       if (previous.dailyTimeText !== span.dailyTimeText) previous.dailyTimeText = undefined;
       continue;
     }
     const text = range.start === range.end ? range.start : `${range.start} ～ ${range.end}`;
-    completeCases.set(span.caseText, {
+    completeCases.set(key, {
       ...span,
       visualStartDate: range.start,
       visualEndDate: range.end,
@@ -1989,7 +1964,8 @@ function monthlyShiftSpans(
       const existing = activeOrderSpans.get(orderKey);
       if (existing && (existing.endDay >= day - 1)) {
         existing.endDay = Math.max(existing.endDay, day);
-        if (shift.work_date > existing.visualEndDate && !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate) {
+        if (shift.work_date > existing.visualEndDate
+          && (shift.assignment_id != null || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
           existing.visualEndDate = shift.work_date;
           existing.dateRangeText = existing.visualStartDate === existing.visualEndDate
             ? existing.visualStartDate
@@ -2010,7 +1986,8 @@ function monthlyShiftSpans(
     const prior = previous.get(key);
     if (prior?.endDay === day - 1) {
       prior.endDay = day;
-      if (shift.work_date > prior.visualEndDate && (isHistorical || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
+      if (shift.work_date > prior.visualEndDate
+        && (isHistorical || shift.assignment_id != null || !context?.orderSummariesByCaseNo[shift.case_no ?? '']?.endDate)) {
         prior.visualEndDate = shift.work_date;
         prior.dateRangeText = prior.visualStartDate === prior.visualEndDate
           ? prior.visualStartDate
@@ -2359,7 +2336,7 @@ const SchedulingWorkbench: React.FC = () => {
   const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
   const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
   const [monthlyRowsByStaff, setMonthlyRowsByStaff] = useState<Record<number, StaffMonthlySchedule | undefined>>({});
-  const [historicalRangesByStaff, setHistoricalRangesByStaff] = useState<Record<number, ReadonlyMap<string, OrderServiceRange | null>>>({});
+  const [historicalRangesByStaff, setHistoricalRangesByStaff] = useState<Record<number, ReadonlyMap<string, HistoricalCaseRanges | null>>>({});
   const [orderSummariesByCaseNo, setOrderSummariesByCaseNo] = useState<Record<string, OrderSummaryInfo>>({});
   const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
   const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
@@ -2711,7 +2688,7 @@ const SchedulingWorkbench: React.FC = () => {
     setCalendarError(null);
 
     const loadRows = async () => {
-      const caseRequests = new Map<string, Promise<OrderServiceRange | null>>();
+      const caseRequests = new Map<string, Promise<HistoricalCaseRanges | null>>();
       const loadStaffRow = async (staff: (typeof staffToLoad)[number]) => {
         // Each row needs two independent projections. Limit active rows so queued
         // browser requests do not consume their timeout before reaching the API.
@@ -2756,14 +2733,14 @@ const SchedulingWorkbench: React.FC = () => {
       const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
         const result = await loadStaffRow(staff);
         const caseNos = new Set(result.monthly?.days.flatMap(day =>
-          day.status === 'historical_assignment' && day.case_no ? [day.case_no] : [],
+          (day.status === 'historical_assignment' || day.status === 'historical_reservation') && day.case_no ? [day.case_no] : [],
         ));
-        const ranges = new Map<string, OrderServiceRange | null>();
+        const ranges = new Map<string, HistoricalCaseRanges | null>();
         for (const caseNo of caseNos) {
           if (controller.signal.aborted) break;
           let request = caseRequests.get(caseNo);
           if (!request) {
-            request = loadHistoricalCaseRange(caseNo, controller.signal);
+            request = loadHistoricalCaseRanges(caseNo, controller.signal);
             caseRequests.set(caseNo, request);
           }
           ranges.set(caseNo, await request);
@@ -3684,8 +3661,6 @@ const SchedulingWorkbench: React.FC = () => {
             </strong>
             {selectedShift.historicalCaseDates ? (
               <p>📅 整案服務起訖：{selectedShift.historicalCaseDates}</p>
-            ) : selectedShift.tone === 'historical' ? (
-              <HistoricalOrderServiceDates key={selectedShift.caseText} caseNo={selectedShift.caseText} />
             ) : (
               <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
             )}

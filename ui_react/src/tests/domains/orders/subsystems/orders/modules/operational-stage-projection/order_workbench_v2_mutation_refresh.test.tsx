@@ -156,7 +156,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     mocks.summaries.mockResolvedValueOnce({ items: [summary], next_cursor: null, etag: 'c'.repeat(64) });
     render(<OrderWorkbenchV2Page />);
     const card = (await screen.findByText('CASE-REFRESH')).closest('tr')!;
-    expect(within(card).getByText('排班資料不可用')).toBeInTheDocument();
+    expect(within(card).getByText('尚未取得排班資料')).toBeInTheDocument();
     expect(await within(card).findByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
     expect(within(card).queryByText(/實際服務/)).not.toBeInTheDocument();
     fireEvent.click(card);
@@ -177,6 +177,6 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     expect(await within(updatedCard).findByText('服務進行中')).toBeInTheDocument();
     expect(await within(updatedCard).findByText('2026-09-14 ~ 2026-10-23')).toBeInTheDocument();
     expect(within(updatedCard).getByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
-    expect(within(updatedCard).queryByText('排班資料不可用')).not.toBeInTheDocument();
+    expect(within(updatedCard).queryByText('尚未取得排班資料')).not.toBeInTheDocument();
   });
 });

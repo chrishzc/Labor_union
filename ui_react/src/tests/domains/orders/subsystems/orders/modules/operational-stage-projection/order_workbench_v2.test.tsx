@@ -197,9 +197,13 @@ function cardFor(caseNo: string): HTMLElement {
 
 function formalServicePage(substatus?: CoreStageSubstatusCode) {
   const planned = ['CASE-PLAN-1', 'CASE-PLAN-2', 'CASE-PLAN-3'].map((caseNo) =>
-    timeline(caseNo, 'formal_service', 'not_started'));
-  const active = ['CASE-ACTIVE-1', 'CASE-ACTIVE-2', 'CASE-ACTIVE-3', 'CASE-ACTIVE-4'].map((caseNo) =>
-    timeline(caseNo, 'formal_service', 'in_progress'));
+    timeline(caseNo, 'formal_service', 'not_started', { lifecycle: '訂單成立' }));
+  const active = [
+    timeline('CASE-ACTIVE-1', 'formal_service'),
+    timeline('CASE-ACTIVE-2', 'formal_service', 'in_progress', { lifecycle: '歷史訂單－服務中', branch: 'historical' }),
+    timeline('CASE-ACTIVE-3', 'formal_service'),
+    timeline('CASE-ACTIVE-4', 'formal_service'),
+  ];
   const all = [...active, ...planned];
   const items = substatus === 'waiting_to_start'
     ? planned
@@ -351,6 +355,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([
       {
         ...orderSummary('CASE-PLAN-1', '林小芳', '歷史月嫂', '2026-10-01', '2026-10-20'),
+        order_status: '訂單成立',
         staff_display_label: 'A001 歷史月嫂',
         scheduled_staff_display_label: 'A005 已排班月嫂',
         recommended_staff_display_label: null,
@@ -358,7 +363,18 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
       {
         ...orderSummary('CASE-ACTIVE-1', '王小明', '歷史月嫂', '2026-09-01', '2026-09-20'),
         staff_display_label: 'A001 歷史月嫂',
+        scheduled_staff_display_label: 'A005 已排班月嫂',
+        recommended_staff_display_label: 'A010 陳月嫂、A020 林月嫂',
+      },
+      {
+        ...orderSummary('CASE-ACTIVE-2', '歷史案件客戶', '歷史月嫂', '2026-09-01', '2026-09-20'),
+        order_status: '歷史訂單－服務中',
+        staff_display_label: 'A001 歷史月嫂',
         scheduled_staff_display_label: null,
+        recommended_staff_display_label: null,
+      },
+      {
+        ...orderSummary('CASE-ACTIVE-3', '已推薦案件客戶', null, '2026-09-01', '2026-09-20'),
         recommended_staff_display_label: 'A010 陳月嫂、A020 林月嫂',
       },
     ]));
@@ -388,7 +404,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     await waitFor(() => {
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('王小明')).toBeInTheDocument();
-      expect(within(cardFor('CASE-ACTIVE-1')).getByText('A010 陳月嫂、A020 林月嫂')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE-1')).getByText('A005 已排班月嫂')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE-2')).getByText('A001 歷史月嫂')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE-3')).getByText('A010 陳月嫂、A020 林月嫂')).toBeInTheDocument();
       expect(within(cardFor('CASE-PLAN-1')).getByText('尚無有效推薦方案')).toBeInTheDocument();
       expect(within(cardFor('CASE-PLAN-1')).queryByText('A005 已排班月嫂')).not.toBeInTheDocument();
     });
