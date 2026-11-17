@@ -1774,7 +1774,6 @@ interface GanttSpan {
   dailyTimeText?: string;
   statusLabel?: string;
   lane?: number;
-  assignmentId?: number | null;
   shift?: StaffMonthlySchedule['days'][number];
 }
 
@@ -2004,7 +2003,6 @@ function monthlyShiftSpans(
       dateRangeText: isHistorical ? shift.work_date : enrichment.dateRangeText,
       dailyTimeText: time || enrichment.dailyTimeText,
       statusLabel: labels[shift.status],
-      assignmentId: shift.assignment_id,
       shift,
     };
     spans.push(span);
@@ -3502,11 +3500,11 @@ const SchedulingWorkbench: React.FC = () => {
                                 title={`${titleParts.join('｜')}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (sp.shift) {
+                                  if (sp.shift || sp.tone === 'historical') {
                                     setSelectedShift(sp);
-                                  } else if (selectedCaseNo && sp.tone !== 'historical') {
+                                  } else if (selectedCaseNo) {
                                     handleOpenStaffGhostDrawer(staff);
-                                  } else if (sp.tone !== 'historical') {
+                                  } else {
                                     setSelectedShift(sp);
                                   }
                                 }}
@@ -3619,21 +3617,16 @@ const SchedulingWorkbench: React.FC = () => {
               {selectedShift.statusLabel ? ` · ${selectedShift.statusLabel}` : ''}
             </strong>
             {selectedShift.tone === 'historical' ? (
-              selectedShift.shift?.case_no && (
-                <HistoricalOrderServiceDates key={selectedShift.shift.case_no} caseNo={selectedShift.shift.case_no} />
-              )
+              <HistoricalOrderServiceDates key={selectedShift.caseText} caseNo={selectedShift.caseText} />
             ) : (
               <p>📅 服務起訖：{selectedShift.dateRangeText ?? `${selectedShift.visualStartDate} ～ ${selectedShift.visualEndDate}`}</p>
             )}
             {selectedShift.dailyTimeText && <p>⏰ 每日時段：{selectedShift.dailyTimeText}</p>}
-            {selectedShift.shift && (
+            {selectedShift.tone !== 'historical' && selectedShift.shift && (
               <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
             )}
-            {selectedShift.shift?.service_date && (
-              <p>{selectedShift.tone === 'historical' ? '班次服務日' : '首個服務日'} {selectedShift.shift.service_date}</p>
-            )}
-            {(selectedShift.shift?.assignment_id ?? selectedShift.assignmentId) && (
-              <p>指派 {selectedShift.shift?.assignment_id ?? selectedShift.assignmentId}</p>
+            {selectedShift.tone !== 'historical' && selectedShift.shift?.service_date && (
+              <p>首個服務日 {selectedShift.shift.service_date}</p>
             )}
           </div>
         )}

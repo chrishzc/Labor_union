@@ -127,7 +127,9 @@ describe('SchedulingPage query-only presentation', () => {
     expect(afternoon).toHaveAttribute('data-start-day', '12');
     expect(morning.style.top).not.toBe(afternoon.style.top);
     fireEvent.click(afternoon);
-    expect(await screen.findByText('指派 102')).toBeInTheDocument();
+    const drawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
+    expect(drawer.getByText(/AFTERNOON/)).toBeInTheDocument();
+    expect(drawer.queryByText(/^指派\s+\d+$/)).not.toBeInTheDocument();
   });
 
   it('排班月曆讀取當月假日，返回分頁後更新標示且不改正式排班', async () => {
@@ -549,9 +551,10 @@ describe('SchedulingPage query-only presentation', () => {
   });
 
   it.each([
-    { status: 'historical_reservation', label: '歷史預定', orderStatus: '歷史訂單－未服務' },
-    { status: 'historical_assignment', label: '歷史指派', orderStatus: '歷史訂單－服務完成' },
-  ] as const)('draws $status across its actual consecutive calendar dates', async ({ status, label, orderStatus }) => {
+    { status: 'historical_reservation', label: '歷史預定', orderStatus: '歷史訂單－未服務', hasTime: false },
+    { status: 'historical_assignment', label: '歷史指派', orderStatus: '歷史訂單－服務完成', hasTime: true },
+    { status: 'historical_assignment', label: '歷史指派區間', orderStatus: '歷史訂單－服務完成', hasTime: false },
+  ] as const)('shows full case dates from a $label interval', async ({ status, label, orderStatus, hasTime }) => {
     const { year, month } = taipeiCalendarDate(new Date());
     const dayInMonth = `${year}-${String(month).padStart(2, '0')}`;
     const previousMonth = new Date(Date.UTC(year, month - 2, 20)).toISOString().slice(0, 10);
@@ -578,13 +581,15 @@ describe('SchedulingPage query-only presentation', () => {
     vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockResolvedValue(SCHEDULING_PROJECTION_EMPTY);
     vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
       staff_id: staffId, year, month,
-      days: staffId === 11 ? [4, 5, 6, 8].map(day => {
-        const date = `${year}-${String(month).padStart(2, '0')}-0${day}`;
+      days: staffId === 11 ? (
+        `${year}-${String(month).padStart(2, '0')}` === previousMonth.slice(0, 7) ? [20, 21] : [4, 5, 6, 8]
+      ).map(day => {
+        const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         return {
           work_date: date, status, assignment_id: status === 'historical_assignment' ? 82 : null,
           case_no: 'HIS-082', client_name: '歷史月曆客戶', staff_id: staffId,
           order_status: orderStatus, is_work_day: false, is_double_pay: false,
-          ...(status === 'historical_assignment' && {
+          ...(hasTime && {
             service_date: date, starts_at: `${date}T09:00:00+08:00`, ends_at: `${date}T18:00:00+08:00`,
           }),
         };
@@ -594,12 +599,13 @@ describe('SchedulingPage query-only presentation', () => {
 
     render(<SchedulingPage />);
 
-    const [interval, separateDay] = await screen.findAllByRole('button', { name: /歷史摘要客戶.*HIS-082/ });
+    const [interval, separateDay] = await screen.findAllByRole('button', { name: /歷史(?:摘要|月曆)客戶.*HIS-082/ });
     expect(interval).toHaveClass('span-historical');
     expect(interval).toHaveAttribute('data-start-day', '4');
     expect(interval).toHaveAttribute('data-end-day', '6');
     expect(interval).toHaveTextContent(label);
     expect(interval).not.toHaveClass('span-ghost-clickable');
+    expect(parseFloat(interval.style.left)).toBeCloseTo(((month - 1) * 3 + 0.3) / 36 * 100, 5);
     // The three dates occupy 3/10 of the first 10-day column on a 36-column axis.
     expect(parseFloat(interval.style.width)).toBeCloseTo(3 / 10 / 36 * 100, 5);
     expect(interval).toHaveTextContent(`${dayInMonth}-04 ～ ${dayInMonth}-06`);
@@ -613,17 +619,26 @@ describe('SchedulingPage query-only presentation', () => {
     const start = actualStart ?? `${previousMonth.slice(0, 7)}-19`;
     const end = actualEnd ?? `${dayInMonth}-10`;
     expect(await drawer.findByText(new RegExp(`整案服務起訖.*${start} ～ ${end}`))).toBeInTheDocument();
-    expect(drawer.getByText(`日曆日期 ${dayInMonth}-04 至當月 6 日`)).toBeInTheDocument();
-    if (status === 'historical_assignment') {
-      expect(drawer.getByText(`班次服務日 ${dayInMonth}-04`)).toBeInTheDocument();
-
+    expect(drawer.queryByText(/日曆日期|日曆區段|班次服務日/)).not.toBeInTheDocument();
+    expect(drawer.queryByText(/^指派\s+\d+$/)).not.toBeInTheDocument();
+    if (hasTime) {
       fireEvent.click(drawer.getByRole('button', { name: 'Close drawer' }));
       orderDetail.mockRejectedValueOnce(new Error('order unavailable'));
       fireEvent.click(separateDay);
       const reopenedDrawer = within(await screen.findByRole('dialog', { name: '排班與訂單明細' }));
       expect(await reopenedDrawer.findByText(/整案服務起訖.*查詢失敗/)).toBeInTheDocument();
       expect(reopenedDrawer.queryByText(new RegExp(`整案服務起訖.*${dayInMonth}`))).not.toBeInTheDocument();
-      expect(reopenedDrawer.getByText(`日曆日期 ${dayInMonth}-08`)).toBeInTheDocument();
+      expect(reopenedDrawer.queryByText(/日曆日期|日曆區段|班次服務日/)).not.toBeInTheDocument();
+
+      fireEvent.click(reopenedDrawer.getByRole('button', { name: 'Close drawer' }));
+      fireEvent.click(screen.getByRole('button', { name: '查看上個月' }));
+      const previousInterval = await screen.findByRole('button', { name: new RegExp(`HIS-082.*${previousMonth}`) });
+      expect(previousInterval).toHaveAttribute('data-start-day', '20');
+      expect(previousInterval).toHaveAttribute('data-end-day', '21');
+      const previousMonthNumber = Number(previousMonth.slice(5, 7));
+      const previousMonthDays = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+      expect(parseFloat(previousInterval.style.left)).toBeCloseTo(((previousMonthNumber - 1) * 3 + 1.9) / 36 * 100, 5);
+      expect(parseFloat(previousInterval.style.width)).toBeCloseTo((0.1 + 1 / (previousMonthDays - 20)) / 36 * 100, 5);
     }
   });
 
