@@ -176,7 +176,7 @@ describe('Data Import simple result flows', () => {
     fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     expect(within(card).queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
-    expect(within(card).getByRole('status')).toHaveTextContent('需重新選取原檔案查詢結果');
+    expect(within(card).getByRole('status')).toHaveTextContent('返回時請選原檔案查詢結果');
     expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
@@ -294,7 +294,7 @@ describe('Data Import simple result flows', () => {
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(7);
       expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
       expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
-      expect(within(card).getByRole('status')).toHaveTextContent('這不代表匯入失敗');
+      expect(within(card).getByRole('status')).toHaveTextContent('匯入結果尚未確認');
       expect(within(card).getByRole('status')).toHaveTextContent('client_beclass_workbook_coordinator_lock_timeout');
     } finally { vi.useRealTimers(); }
   });

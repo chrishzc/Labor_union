@@ -34,9 +34,8 @@ describe('帳務範本集中於通知與發送',()=>{
   it('其他通知編輯入口仍在 LINE，不導向帳務',()=>{
     window.history.replaceState(null,'','#line-management?tab=push_queue&message=service-start-inquiry');
     render(<LineManagementPage scope="notifications"/>);
-    expect(screen.getByRole('region',{name:'通知內容工作台'})).toBeInTheDocument();
-    expect(window.location.hash).toContain('#line-management?');
-    expect(window.location.hash).toContain('message=service-start-inquiry');
+    expect(screen.getByRole('region',{name:'通知內容工作台'})).toHaveTextContent('service-start-inquiry');
+    expect(window.location.hash).toBe('#line-notifications?tab=push_queue&message=service-start-inquiry');
     expect(screen.getByRole('button',{name:'通知與發送'})).toBeInTheDocument();
   });
   it('原帳務網址開啟 LINE 內同一則範本', async () => {

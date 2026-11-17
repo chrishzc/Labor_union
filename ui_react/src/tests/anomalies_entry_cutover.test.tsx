@@ -45,7 +45,7 @@ describe('Anomalies page retirement', () => {
     expect(Object.hasOwn(PAGE_SECTION_MAP, 'anomalies')).toBe(false);
     expect(screen.queryByRole('button', { name: /異常審核|查看待處理異常/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /帳號權限/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /儲存空間管理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /儲存空間管理/ })).not.toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
   });
 

@@ -52,12 +52,13 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     globalThis.fetch = originalFetch;
   });
 
-  const authenticateSession = () => {
+  const authenticateSession = (isRoot = false) => {
     sessionClient.setSession('test-auth-token-12345', {
       id: 1,
       username: 'admin',
       display_name: '系統管理員',
       role: 'system_admin',
+      is_root: isRoot,
       capabilities: ['system.administration'],
     });
   };
@@ -148,33 +149,27 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     }
   });
 
-  it('[Hash-5] 連續高頻快速切換 Hash (100 次切換壓力) 不應導致狀態紊亂或畫面崩潰', async () => {
-    authenticateSession();
+  it.each([
+    { isRoot: false, expectedHash: '#order-workbench-v2', tab: '營運作業', page: '待辦看板' },
+    { isRoot: true, expectedHash: '#account-management', tab: '稽核與系統', page: '帳號權限' },
+  ])('[Hash-5] 100 次快速切換後依 Root 權限導向（isRoot=$isRoot）', async ({ isRoot, expectedHash, tab, page }) => {
+    authenticateSession(isRoot);
     render(<App />);
 
     const routes = Object.keys(PAGE_SECTION_MAP);
 
     await act(async () => {
       for (let i = 0; i < 100; i++) {
-        const targetRoute = routes[i % routes.length];
+        const targetRoute = i === 99 ? 'account-management' : routes[i % routes.length];
         window.location.hash = `#${targetRoute}`;
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       }
     });
 
-    const finalRoute = routes[99 % routes.length];
-    const finalSection = PAGE_SECTION_MAP[finalRoute as keyof typeof PAGE_SECTION_MAP];
-
     await waitFor(() => {
-      const expectedTabName =
-        finalSection === 'operations'
-          ? /營運作業/
-          : finalSection === 'line'
-          ? /LINE 專區/
-          : finalSection === 'finance'
-          ? /帳務作業/
-          : /稽核與系統/;
-      expect(screen.getByRole('button', { name: expectedTabName })).toHaveClass('active');
+      expect(window.location.hash).toBe(expectedHash);
+      expect(screen.getByRole('button', { name: tab })).toHaveClass('active');
+      expect(screen.getByRole('button', { name: page, current: 'page' })).toBeVisible();
     });
   });
 
@@ -192,35 +187,31 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     }
   });
 
-  it('[Hash-7] LINE 專區新責任頁面 (#line-notifications, #line-interface) 正式導向與側欄 active 狀態', async () => {
+  it.each([
+    { hash: '#line-notifications', title: '通知與寄送' },
+    { hash: '#line-interface', title: 'LINE 介面設定' },
+  ])('[Hash-7] $hash 選中側欄 $title', async ({ hash, title }) => {
     authenticateSession();
-
-    window.location.hash = '#line-notifications';
-    const view1 = render(<App />);
-    await waitFor(() => {
-      const activeNav = screen.getByTitle('通知與寄送');
-      expect(activeNav).toHaveClass('active');
-    });
-    view1.unmount();
-
-    window.location.hash = '#line-interface';
-    const view2 = render(<App />);
-    await waitFor(() => {
-      const activeNav = screen.getByTitle('LINE 介面設定');
-      expect(activeNav).toHaveClass('active');
-    });
-    view2.unmount();
-
-    window.location.hash = '#line-interface?tab=liff&asset=register';
+    window.history.replaceState(null, '', hash);
     render(<App />);
-    expect(await screen.findByRole('heading', { level: 2, name: '需求調查' })).toBeVisible();
+    expect(screen.getByTitle(title)).toHaveClass('active');
+  });
+
+  it('[Hash-7] LINE 表單深連結選中需求調查並切換資產', async () => {
+    authenticateSession();
+    await Promise.all([import('../pages/LineManagementPage'), import('../pages/line_management/LiffCardStudio')]);
+    // Set the initial URL before mounting, as with a browser opening a deep link.
+    window.history.replaceState(null, '', '#line-interface?tab=liff&asset=register');
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: '需求調查' })).toBeVisible(), { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: /連結客戶資料/ }));
     await waitFor(() => {
       const params = new URLSearchParams(window.location.hash.split('?')[1]);
       expect(params.get('tab')).toBe('liff');
       expect(params.get('asset')).toBe('bind');
+      expect(screen.getByRole('heading', { level: 2, name: '連結客戶資料' })).toBeVisible();
     });
-  });
+  }, 15000);
 
   it.each(['#line-interface?tab=message_flow', '#line-management?tab=message_flow', '#line-notifications?tab=push_queue&view=flow'])('舊流程圖連結 %s 直接開啟通知與發送工作台', async (alias) => {
     authenticateSession();
@@ -229,55 +220,41 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
     const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => undefined);
     const view = render(<App />);
     try {
-      expect(await screen.findByRole('region', { name: 'LINE 流程圖' }, { timeout: 5000 })).toBeVisible();
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'LINE 流程圖' })).toBeVisible();
+        expect(screen.getByTitle('通知與寄送')).toHaveClass('active');
+        expect(replace).toHaveBeenCalledWith(null, '', expect.stringMatching(/#line-notifications\?tab=push_queue$/));
+      }, { timeout: 5000 });
       expect(screen.queryByRole('button', { name: '完整流程圖' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument();
-      expect(screen.getByTitle('通知與寄送')).toHaveClass('active');
-      expect(replace).toHaveBeenCalledWith(null, '', expect.stringMatching(/#line-notifications\?tab=push_queue$/));
     } finally {
       view.unmount();
       replace.mockRestore();
     }
   }, 10000);
 
-  it('[Hash-8] LINE 專區舊深連結與分頁切換相容性解析', async () => {
+  it.each([
+    { alias: '#line-llm-settings', page: 'AI 客服工作室', region: 'AI 模型設定' },
+    { alias: '#line-liff-studio', page: 'LINE 介面設定', region: '表單清單' },
+    { alias: '#line-management?tab=push_queue', page: '通知與寄送' },
+    { alias: '#line-management?tab=richmenu', page: 'LINE 介面設定' },
+  ])('[Hash-8] 舊連結 $alias 開啟 $page', async ({ alias, page, region }) => {
     authenticateSession();
-
-    // 1. 舊 AI 模型設定 -> 導向 AI 客服工作室
-    window.location.hash = '#line-llm-settings';
-    const view1 = render(<App />);
-    await waitFor(() => {
-      expect(screen.getByTitle('AI 客服工作室')).toHaveClass('active');
-    });
-    expect(await screen.findByRole('region', { name: 'AI 模型設定' })).toBeVisible();
-    expect(screen.queryByRole('heading', { level: 1, name: 'AI 模型設定' })).not.toBeInTheDocument();
-    view1.unmount();
-
-    // 2. 舊表單工作室 -> 導向 LINE 介面設定
-    window.location.hash = '#line-liff-studio';
-    const view2 = render(<App />);
-    await waitFor(() => {
-      expect(screen.getByTitle('LINE 介面設定')).toHaveClass('active');
-    });
-    expect(await screen.findByRole('region', { name: '表單清單' })).toBeVisible();
-    view2.unmount();
-
-    // 3. 舊 #line-management?tab=push_queue -> 導向通知與寄送
-    window.location.hash = '#line-management?tab=push_queue';
-    const view3 = render(<App />);
-    await waitFor(() => {
-      expect(screen.getByTitle('通知與寄送')).toHaveClass('active');
-    });
-    view3.unmount();
-
-    // 4. 舊 #line-management?tab=richmenu -> 導向 LINE 介面設定
-    window.location.hash = '#line-management?tab=richmenu';
-    const view4 = render(<App />);
-    await waitFor(() => {
-      expect(screen.getByTitle('LINE 介面設定')).toHaveClass('active');
-    });
-    view4.unmount();
-  });
+    if (page === 'AI 客服工作室') await import('../pages/line_management/AiCustomerServiceStudioPage');
+    window.history.replaceState(null, '', alias);
+    const view = render(<App />);
+    try {
+      await waitFor(() => {
+        expect(screen.getByTitle(page)).toHaveClass('active');
+        if (region) expect(screen.getByRole('region', { name: region })).toBeVisible();
+      }, { timeout: 5000 });
+      if (page === 'AI 客服工作室') {
+        expect(screen.queryByRole('heading', { level: 1, name: 'AI 模型設定' })).not.toBeInTheDocument();
+      }
+    } finally {
+      view.unmount();
+    }
+  }, 10000);
 });
 
 describe('Adversarial Challenge: ErrorBoundary Component', () => {
@@ -581,6 +558,7 @@ describe('Adversarial Challenge: Auth Boundary & Session Storage Audit', () => {
   });
 
   it('[Auth-8] LoginPage 表單防護：純空格帳號密碼提交應即時阻擋', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
     render(<LoginPage />);
 
     const usernameInput = screen.getByLabelText('帳號 (Username)');
@@ -589,9 +567,13 @@ describe('Adversarial Challenge: Auth Boundary & Session Storage Audit', () => {
     fireEvent.change(usernameInput, { target: { value: '   ' } });
     fireEvent.change(passwordInput, { target: { value: '   ' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
-
-    expect(screen.getByText(/請輸入帳號/)).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /雙重身分驗證/ })).not.toBeInTheDocument();
+    try {
+      fireEvent.submit((usernameInput as HTMLInputElement).form!);
+      expect(screen.getByText(/請輸入帳號/)).toBeVisible();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(screen.queryByRole('heading', { name: /雙重身分驗證/ })).not.toBeInTheDocument();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

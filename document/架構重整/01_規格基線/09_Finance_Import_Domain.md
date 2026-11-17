@@ -58,7 +58,7 @@
 - **`FI-DEC-001`（Preview 與稽核）**：File Watcher 偵測 `downloads/bank/*.xlsx` 後僅負責驗證穩定檔案並觸發受控匯入指令，禁止直接連 DB 或修改業務投影。Preview 須列出新增數、重複數、預計 dispatch 類型與整數金額、待分類／`business_pending`／blocked 數、判定證據與 `plan_fingerprint`。
 - **`FI-DEC-002`（修改分流）**：禁止直接編輯 canonical row。銀行檔錯誤走重新匯入＋`SourceSuperseded`（作廢舊事實）；主檔缺漏回 owning Domain 補齊再重預覽；分類歧義經 Correction Workbench 補 `evidence`（必填）與 `reason`（選填）；已入帳錯配回 owning Domain 走 `reversal／adjustment／refund`。
 - **`FI-DEC-003`（整批與合格候選範圍）**：通過驗證之 candidates 一次 Apply；`non_business_review` 與 `business_pending` 留待處理；integrity／collision／stale／formal conflict 阻擋整批 Apply。客戶補助退款預檢於 Preview 階段即檢查擬建／沿用退款與接續核銷資格（缺資金／墊款資格轉 `business_pending` 並明確標示，不阻擋同批其他合法款）。禁止未經稽核的勾選略過機制。
-- **React 單鍵匯入 Terminal Receipt**：使用者選檔後點擊一次「匯入銀行交易明細」（原因選填），系統依序執行 `Upload/Ingest → 內部 Preview → 符合 apply_allowed 且有候選時自動 Durable Apply → terminal receipt`。受理 `202 Accepted` 非完成態；僅當 batch job `succeeded` 且從 `finance_import_apply_receipts` 讀回 `resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 後始可顯示入帳完成；結果未明以原鍵重查。
+- **React 單鍵匯入 Terminal Receipt**：使用者選檔後直接點擊一次「匯入銀行交易明細」，畫面不提供入帳原因欄。系統依序執行 `Upload/Ingest → 內部 Preview → 符合 apply_allowed 且有候選時自動 Durable Apply → terminal receipt`。受理 `202 Accepted` 非完成態；僅當 batch job `succeeded` 且從 `finance_import_apply_receipts` 讀回 `resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 後始可顯示入帳完成；結果未明以原鍵重查。
 
 ### 3.4 Owner Review（`finance_import_manual_review`）與 `IMPORT-006`
 

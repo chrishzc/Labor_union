@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
-import { MatchingScheduleAndAssignmentActions } from '../../../../../../../components/MatchingScheduleAndAssignmentActions';
+import { ServiceStartSubstituteWorkbench } from '../../../../../../../components/ServiceStartSubstituteWorkbench';
 import { serviceStartClient, type ServiceStartView } from '../../../../../../../api/scheduling/service_start_client';
 import { serviceArrangementStatusClient } from '../../../../../../../api/scheduling/service_arrangement_status_client';
 import { assignmentPlanMutationClient } from '../../../../../../../api/scheduling/assignment_plan_mutation_client';
@@ -42,7 +42,7 @@ function completedTodo(): ServiceStartView {
   } };
 }
 async function saveDates() {
-  fireEvent.click(await screen.findByRole('button', { name: '儲存並更新排班' }));
+  fireEvent.click(await screen.findByRole('button', { name: '儲存班表' }));
 }
 function activePlan() {
   return { planId: 51, status: accepted ? 'accepted' : 'proposed', activeLockId: lockId, planVersion: 1,
@@ -69,9 +69,8 @@ function CurrentFlow({ onObserved }: { onObserved: () => void }) {
   const [revision, setRevision] = useState(0);
   return <>
     <OrderFormalRecommendationPanel caseNo={CASE} revision={revision} assignmentExists={observed} onObserved={onObserved} onOpenServiceDates={() => setDatesOpen(true)} />
-    {datesOpen && <MatchingScheduleAndAssignmentActions caseNo={CASE} planId={51} planSegments={activePlan().segments}
-      waitingLockAcquired={lockId !== null} assignmentExists={observed} onOpenDates={() => setDatesOpen(false)}
-      onAssignmentCompleted={async () => { await onObserved(); setObserved(true); setRevision(value => value + 1); }} />}
+    {datesOpen && <ServiceStartSubstituteWorkbench caseNo={CASE} useScheduleSaveLabel
+      onCompleted={async () => { await onObserved(); setObserved(true); setRevision(value => value + 1); }} />}
   </>;
 }
 async function open(onObserved = vi.fn()) {
@@ -161,7 +160,7 @@ describe('待辦看板目前自動等待訂金鎖及正式排班', () => {
     const navigation = screen.getByRole('button', { name: '前往確認服務日期' });
     expect(screen.getByText('配對及服務日期確認後，系統會自動保留月嫂檔期，不需另行操作。')).toBeInTheDocument();
     fireEvent.click(navigation);
-    expect(await screen.findByRole('button', { name: '儲存並更新排班' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '儲存班表' })).toBeDisabled();
     expect(serviceStartClient.todos).toHaveBeenCalledWith(1, CASE);
     expect(serviceStartClient.command).not.toHaveBeenCalled();
     expect(onObserved).not.toHaveBeenCalled(); expectNoUiMutation();

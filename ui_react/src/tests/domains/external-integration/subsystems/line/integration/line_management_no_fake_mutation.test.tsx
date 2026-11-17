@@ -88,6 +88,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/多日排程關懷設定/)).not.toBeInTheDocument();
+    fireEvent.change(within(ruleWorkspace as HTMLElement).getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '訂金確認通知' } });
     fireEvent.click(await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯訂金確認通知內容' }));
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));

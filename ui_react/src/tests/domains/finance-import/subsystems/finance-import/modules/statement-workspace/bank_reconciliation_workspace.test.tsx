@@ -949,11 +949,10 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByText(/已核銷 · 唯讀查閱/)).toBeInTheDocument();
   });
 
-  it('does not render formal reconciliation reason input in import panel', () => {
+  it('allows single-step import without a reason field', () => {
     render(<FinanceBankReconciliationWorkspace {...defaultProps} financeWorkbook={new File(['test'], 'test.xlsx')} />);
-
-    expect(screen.queryByText(/正式銷帳原因/)).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('輸入銷帳說明')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /原因/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /匯入銀行交易明細/ })).toBeEnabled();
   });
 
   const exchangePath = process.env.FI_REVIEW_EXCHANGE;

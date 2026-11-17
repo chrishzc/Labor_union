@@ -11,8 +11,7 @@ describe('Audit & System navigation retirement', () => {
     expect(rawSectionMap['file-settings']).toBeUndefined();
     expect(rawSectionMap['storage-management']).toBeUndefined();
 
-    // Audit section only contains account-management and contract-templates
     const auditItems = NAV_ITEMS.filter(item => item.section === 'audit');
-    expect(auditItems.map(item => item.id)).toEqual(['account-management', 'contract-templates']);
+    expect(auditItems.map(item => item.id)).toEqual(['account-management', 'contract-templates', 'database-backup']);
   });
 });

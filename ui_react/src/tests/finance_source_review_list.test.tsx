@@ -131,7 +131,7 @@ describe('current bank review reasons',()=>{
 
   it('keeps the recognition result for a historical non-business row',()=>{
     expect(financeImportReviewReason({...source,available_actions:[],classification_type:'non_business_review',direction:'outgoing',review_reason:'taishin_outgoing_unrecognized'}))
-      .toContain('備註未辨識到月嫂姓名或可唯一定位案件的六碼');
+      .toContain('備註未辨識到月嫂、客戶姓名或可唯一定位案件的六碼');
   });
 
   it.each([null,'unrecognized_historical_reason'])('does not invent a current cause from missing or unknown history: %s',review_reason=>{

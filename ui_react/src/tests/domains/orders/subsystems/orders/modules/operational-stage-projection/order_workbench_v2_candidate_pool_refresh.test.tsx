@@ -124,6 +124,7 @@ function summaries(updated = false): OrderSummaryPage {
       client_name: updated ? '回讀後測試客戶' : '回讀前測試客戶',
       order_status: '訂單成立',
       staff_name: updated ? '回讀後測試月嫂' : null,
+      recommended_staff_display_label: updated ? 'T003 回讀後測試月嫂' : null,
       identity_status: null,
       start_date: updated ? '2026-09-10' : '2026-09-01',
       end_date: updated ? '2026-09-30' : '2026-09-21',
@@ -180,7 +181,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
     expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
     expect(screen.getByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
-    expect(screen.getByText('編號待確認 回讀後測試月嫂')).toBeInTheDocument();
+    expect(screen.getByText('T003 回讀後測試月嫂')).toBeInTheDocument();
     expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
     expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
     expect(originalSignal.aborted).toBe(true);

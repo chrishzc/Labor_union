@@ -246,6 +246,7 @@ describe('LINE 管理頁真實資料呈現', () => {
       update: vi.fn(),
     };
     render(<LineManagementPage scope="notifications" lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} notificationTemplateClient={notificationTemplateClient} />);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '訂金通知' } });
     await screen.findByRole('button', { name: '編輯訂金通知內容' });
     expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '發送佇列與歷程' })).not.toBeInTheDocument();

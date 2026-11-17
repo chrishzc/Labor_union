@@ -1,30 +1,28 @@
 vi.mock('../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),payroll:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),staff:vi.fn(async(case_no:string)=>({case_no,items:[],events:[]}))}}));
 /**
  * File: finance_request_lifecycle.test.tsx
- * Description: 驗證Finance查詢在StrictMode與scope切換時維持單次請求並丟棄過期結果。
+ * Description: 驗證帳務查詢在 StrictMode 與工作區切換時取消過期請求。
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
-import { cashRequirementsQueryClient } from '../api/accounts_payable/cash_requirements_query_client';
-import { clientFinanceHistoryClient } from '../api/client_finance/client_finance_history_client';
 import { FinancePage } from '../pages/FinancePage';
-import { historicalCompletionClient } from '../api/orders/historical_completion_client';
 import { financeAccountingClient, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
 import { monthlyAccountingClient, type MonthlyAccountingReport } from '../api/finance_import/monthly_accounting_client';
-import {
-  ACCOUNTS_PAYABLE_RESPONSE,
-  FINANCE_BATCH_RESPONSE,
-  FINANCE_MANIFEST_RESPONSE,
-  RECEIPT_RESPONSE,
-  STAFF_PAYABLES_RESPONSE,
-} from './fixtures/finance/finance_query_contract_fixtures';
+import { CORE_STAGE_CODES } from '../api/orders/order_core_stage_projection_schemas';
+import { orderCoreStageProjectionClient } from '../api/orders/order_core_stage_projection_client';
+import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
+
+const emptyTimelines = {
+  items: [],
+  stage_counts: Object.fromEntries(CORE_STAGE_CODES.map(code => [code, 0])) as Awaited<ReturnType<typeof orderCoreStageProjectionClient.getCoreStageTimelines>>["stage_counts"],
+  substatus_counts: {},
+  historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
+  next_cursor: null,
+  etag: 'c'.repeat(64),
+} satisfies Awaited<ReturnType<typeof orderCoreStageProjectionClient.getCoreStageTimelines>>;
 
 const ORDER_PAGE = {
   items: [{
@@ -60,27 +58,13 @@ function deferred<T>() {
 describe('Finance query request lifecycle', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    window.location.hash = '#finance?tab=client-receipts&case_no=CASE-FIN-001';
-    vi.spyOn(clientFinanceHistoryClient, 'query').mockResolvedValue({ case_no: 'CASE-FIN-001', account_version: '0', obligations: [], ledger_entries: [] });
-    vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([]);
+    window.history.replaceState(null, '', '#finance?tab=case-accounting&case_no=CASE-FIN-001');
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(ORDER_PAGE);
-    vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue(RECEIPT_RESPONSE.data);
-    vi.spyOn(financeAccountingClient,'query').mockImplementation(async caseNo=>caseAccounting(caseNo));
-    vi.spyOn(monthlyAccountingClient,'query').mockResolvedValue(monthly);
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '去敏人員', phone: null, education: null }], next_cursor: null });
-    vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue(STAFF_PAYABLES_RESPONSE.data);
-    vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
-    vi.spyOn(accountsPayableQueryClient, 'queryCase').mockResolvedValue({
-      case_no: 'CASE-FIN-001',
-      target_payment_date: '2026-09-15',
-      items: [],
-    });
-    vi.spyOn(financeImportQueryClient, 'listBatches').mockResolvedValue(FINANCE_BATCH_RESPONSE.data);
-    vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
-    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ batch_identity: 'BATCH-FIN-021', source_reviews: [], next_after_source_review_id: null, items: [], next_after_row_id: null });
-    vi.spyOn(financeImportQueryClient, 'listReprocessRuns').mockResolvedValue({ items: [], next_before_run_id: null });
+    vi.spyOn(orderCoreStageProjectionClient, 'getCoreStageTimelines').mockResolvedValue(emptyTimelines);
+    vi.spyOn(financeAccountingClient, 'query').mockImplementation(async caseNo => caseAccounting(caseNo));
+    vi.spyOn(monthlyAccountingClient, 'query').mockResolvedValue(monthly);
+    vi.spyOn(financeImportQueryClient, 'listBankTransactions').mockResolvedValue({ items: [], pending_count: 0, next_before_row_id: null });
   });
-
   afterEach(() => {
     cleanup();
     window.location.hash = '';
@@ -88,102 +72,75 @@ describe('Finance query request lifecycle', () => {
   });
 
   it('opens the exact workbench case and provides a return link to that case', async () => {
-    window.location.hash = '#finance?tab=client-receipts&case_no=CASE-FIN-001&from=workbench';
+    window.history.replaceState(null, '', '#finance?tab=client-receipts&case_no=CASE-FIN-001&from=workbench');
     render(<FinancePage />);
-    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-C-1"]')).toBeInTheDocument());
+    expect(await screen.findByRole('heading', { name: /CASE-FIN-001/ })).toBeVisible();
     expect(screen.getByRole('link', { name: '← 返回案件處理' })).toHaveAttribute('href', '#order-workbench-v2?case=CASE-FIN-001');
-    expect(screen.getByRole('combobox', { name: '選擇案件' })).toHaveValue('CASE-FIN-001');
     expect(financeAccountingClient.query).toHaveBeenCalledWith('CASE-FIN-001', expect.any(AbortSignal));
   });
 
-  it('hosts the existing historical accounting-completion workflow on the selected finance case', async () => {
-    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({ ...ORDER_PAGE, items: [{ ...ORDER_PAGE.items[0], order_status: '歷史訂單－服務完成' }] });
-    const query = vi.spyOn(historicalCompletionClient, 'query').mockRejectedValue(new Error('test owner unavailable'));
+  it('keeps the historical case in the shared accounting drawer without an independent history card', async () => {
+    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({
+      ...realisticOrderDetail,
+      case_no: 'CASE-FIN-001',
+      order_status: '歷史訂單－服務完成',
+    });
     render(<FinancePage />);
-    fireEvent.click(await screen.findByText('歷史收付款與既有查證工具'));
-    fireEvent.click(screen.getByRole('button',{name:'開啟本案既有帳務工具'}));
-    await screen.findByRole('heading', { name: '歷史案件帳務完成' });
-    await waitFor(() => expect(query).toHaveBeenCalledWith('CASE-FIN-001', expect.objectContaining({ signal: expect.any(AbortSignal) })));
-    expect(await screen.findByRole('alert')).toHaveTextContent('歷史案件完成狀態目前無法載入。');
+    await waitFor(() => expect(financeAccountingClient.query).toHaveBeenCalledWith('CASE-FIN-001', expect.any(AbortSignal)));
+    expect(await screen.findByRole('region', { name: /各期繳款與通知/ })).toBeVisible();
+    expect(screen.queryByText('歷史收付款與既有查證工具')).not.toBeInTheDocument();
   });
 
-  it('issues one initial query generation under StrictMode', async () => {
+  it('cancels the discarded initial generation under StrictMode', async () => {
+    window.history.replaceState(null, '', '#finance');
     render(<StrictMode><FinancePage /></StrictMode>);
-    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-C-1"]')).toBeInTheDocument());
-
-    expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
-    expect(financeAccountingClient.query).toHaveBeenCalledTimes(1);
-    expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('目前沒有符合條件的進行中案件。')).toBeVisible();
+    const signals = vi.mocked(ordersQueryClient.getOrderSummaries).mock.calls.map(([, options]) => options?.signal);
+    expect(signals).toHaveLength(2);
+    expect(signals.map(signal => signal?.aborted)).toEqual([true, false]);
+    expect(financeAccountingClient.query).not.toHaveBeenCalled();
   });
 
-  it('aborts an inactive tab request and ignores its late result', async () => {
-    window.location.hash = '#finance';
-    vi.spyOn(clientFinanceHistoryClient, 'queryAll').mockResolvedValue([]);
+  it('aborts an inactive monthly request and ignores its late result', async () => {
+    window.history.replaceState(null, '', '#finance?tab=monthly');
     const pending = deferred<MonthlyAccountingReport>();
-    vi.mocked(monthlyAccountingClient.query).mockReturnValueOnce(pending.promise);
-    render(<StrictMode><FinancePage /></StrictMode>);
+    vi.mocked(monthlyAccountingClient.query).mockReturnValue(pending.promise);
+    render(<FinancePage />);
     await waitFor(() => expect(monthlyAccountingClient.query).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(monthlyAccountingClient.query).mock.calls[0]?.[1];
-
-    fireEvent.click(screen.getByRole('button', { name: '應付款' }));
-    await waitFor(() => expect(cashRequirementsQueryClient.queryAll).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     expect(signal?.aborted).toBe(true);
-
-    await act(async () => {
-      pending.resolve(monthly);
-      await Promise.resolve();
-    });
-
-    expect(clientReceiptQueryClient.query).not.toHaveBeenCalled();
-    expect(screen.getByRole('region', { name: '付款清單' })).toBeInTheDocument();
+    await act(async () => { pending.resolve(monthly); });
+    expect(await screen.findByText('目前沒有符合條件的銀行交易資料。')).toBeVisible();
+    expect(screen.queryByRole('tab', { name: '已核銷收付款' })).not.toBeInTheDocument();
   });
 
-  it('aborts active detail requests on unmount', async () => {
-    const pending = deferred<typeof RECEIPT_RESPONSE.data>();
-    vi.mocked(clientReceiptQueryClient.query).mockReturnValueOnce(pending.promise);
+  it('aborts active case detail requests on unmount', async () => {
+    const pending = deferred<CaseAccounting>();
+    vi.mocked(financeAccountingClient.query).mockReturnValueOnce(pending.promise);
     render(<FinancePage />);
-    await waitFor(() => expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1));
-    const signal = vi.mocked(clientReceiptQueryClient.query).mock.calls[0]?.[1]?.signal;
-
+    await waitFor(() => expect(financeAccountingClient.query).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(financeAccountingClient.query).mock.calls[0]?.[1];
     cleanup();
     expect(signal?.aborted).toBe(true);
-    await act(async () => {
-      pending.resolve(RECEIPT_RESPONSE.data);
-      await Promise.resolve();
-    });
-    expect(document.querySelector('[data-obligation-id="OBL-C-1"]')).not.toBeInTheDocument();
+    await act(async () => { pending.resolve(caseAccounting('CASE-FIN-001')); });
+    expect(screen.queryByRole('heading', { name: /CASE-FIN-001/ })).not.toBeInTheDocument();
   });
 
   it('keeps the newly selected case when an aborted detail request rejects late', async () => {
-    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValueOnce({
-      ...ORDER_PAGE,
-      items: [
-        ORDER_PAGE.items[0],
-        { ...ORDER_PAGE.items[0], case_no: 'CASE-FIN-002', client_name: '去敏客戶乙' },
-      ],
-    });
-    const pending = deferred<typeof RECEIPT_RESPONSE.data>();
-    vi.mocked(clientReceiptQueryClient.query)
-      .mockReturnValueOnce(pending.promise)
-      .mockResolvedValueOnce({
-        ...RECEIPT_RESPONSE.data,
-        case_no: 'CASE-FIN-002',
-        obligations: [{ ...RECEIPT_RESPONSE.data.obligations[0], obligation_identity: 'OBL-C-2' }],
-      });
+    const pending = deferred<CaseAccounting>();
+    vi.mocked(financeAccountingClient.query).mockReturnValueOnce(pending.promise);
     render(<FinancePage />);
-    await waitFor(() => expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1));
-    const firstSignal = vi.mocked(clientReceiptQueryClient.query).mock.calls[0]?.[1]?.signal;
-
-    fireEvent.change(screen.getByRole('combobox', { name: '選擇案件' }), { target: { value: 'CASE-FIN-002' } });
-    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-C-2"]')).toBeInTheDocument());
-    expect(firstSignal?.aborted).toBe(true);
-
-    await act(async () => {
-      pending.reject(new Error('stale detail failure'));
-      await Promise.resolve();
+    await waitFor(() => expect(financeAccountingClient.query).toHaveBeenCalledTimes(1));
+    const firstSignal = vi.mocked(financeAccountingClient.query).mock.calls[0]?.[1];
+    act(() => {
+      window.history.replaceState(null, '', '#finance?tab=case-accounting&case_no=CASE-FIN-002');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
-
-    expect(document.querySelector('[data-obligation-id="OBL-C-2"]')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await screen.findByRole('heading', { name: /CASE-FIN-002/ });
+    expect(firstSignal?.aborted).toBe(true);
+    await act(async () => { pending.reject(new Error('stale detail failure')); });
+    expect(screen.getByRole('heading', { name: /CASE-FIN-002/ })).toBeVisible();
+    expect(screen.queryByText(/帳務資料暫時無法取得/)).not.toBeInTheDocument();
   });
 });

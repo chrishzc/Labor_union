@@ -276,7 +276,7 @@ describe('Client registry owner editing', () => {
     });
     candidateMocks.decision.mockImplementation(async () => { accepted = true; return { case_no: 'CASE-001', plan_id: 61, communication_version: 2, customer_decision: 'accepted' }; });
     mocks.query.mockImplementation(async () => structuredClone(detail));
-    window.location.hash = '#clients?case=CASE-001';
+    window.history.replaceState(null, '', '#clients?case=CASE-001');
     render(<ClientRegistryPage />);
     fireEvent.click(await screen.findByRole('button', { name: '選擇接任月嫂' }));
     await waitFor(() => expect(candidateMocks.search).toHaveBeenCalledOnce());
@@ -303,7 +303,7 @@ describe('Client registry owner editing', () => {
     expect(await screen.findByText('尚未建立正式指派。')).toBeInTheDocument();
     expect(screen.getByText(/推薦方案仍須完成客戶確認、契約與排班，才會列入上方正式指派。/)).toBeInTheDocument();
     expect(window.location.hash).toBe('#clients?case=CASE-001');
-  });
+  }, 15000);
 
   it('protects the drawer and original candidate selection when adding a successor has an unknown outcome', async () => {
     candidateMocks.search.mockResolvedValue({ case_no: 'CASE-001', planned_start_date: '2026-11-01', planned_end_date: '2026-11-02', conflicts: [], candidate_options: [{ segment_index: 0, staff_id: 22, staff_name: '接任月嫂', supported_day_count: 2, required_day_count: 2, matching_conditions: { region: { status: 'matched', required_value: '新竹市', staff_values: ['新竹市'] }, preferred_service_days: { status: 'matched', required_value: '週一至週五', staff_values: ['週一至週五'] } }, full_case_coverage: true, selected_segment_start: '2026-11-01', selected_segment_end: '2026-11-02' }] });

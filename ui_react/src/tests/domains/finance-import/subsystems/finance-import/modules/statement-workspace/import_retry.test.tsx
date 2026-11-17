@@ -40,6 +40,25 @@ function chooseWorkbook(){
   fireEvent.click(screen.getByRole('button',{name:'匯入銀行交易明細'}));
 }
 
+function exposeIngestedRow(classification: string, direction: 'incoming' | 'outgoing', bank: 'sinopac' | 'taishin') {
+  vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+    items: [{
+      row_id: 41, row_identity: 'finance-import-row:41', transaction_date: '2026-10-20',
+      bank, direction, amount_ntd: 12000, classification_type: classification, status: 'pending',
+      disposition: 'business_pending', review_reason: null, available_actions: [], reference: 'Sheet1#2',
+      counterparty_name: null, cases: [],
+    }], pending_count: 1, next_before_row_id: null,
+  });
+}
+
+async function expectNotDispatched(reason: RegExp) {
+  await waitFor(() => expect(screen.getAllByText(reason).some(element => element.checkVisibility())).toBe(true));
+  expect(financeImportMutationClient.preview).toHaveBeenCalledOnce();
+  expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  expect(financeImportMutationClient.queryBatchOutcome).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '確認套用本次明細' })).not.toBeInTheDocument();
+}
+
 describe('finance import operation identity after an observed result',()=>{
   it.each(['advance', 'sharedName', 'split'] as const)('submits a resolved automatic subsidy match on upload (%s)', async (kind) => {
     const split = kind === 'split';
@@ -68,30 +87,29 @@ describe('finance import operation identity after an observed result',()=>{
     expect(financeImportMutationClient.queryBatchOutcome).not.toHaveBeenCalled();
   });
 
-  it('records the blocked subsidy reason without presenting a batch confirmation', async () => {
+  it('shows the blocked subsidy reason without dispatching Apply', async () => {
+    exposeIngestedRow('client_subsidy_return', 'outgoing', 'taishin');
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...preview,
       counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 }, rows: [{
         row_identity: 'finance-import-row:41', canonical_fact_version: 0, amount_ntd: 11970,
         classification_type: 'client_subsidy_return', disposition: 'business_pending', target_identities: ['client:1'],
         evidence: [], available_actions: [], integrity_violations: [], fingerprint_collision: false,
-        formal_reference_conflict: false, pending_reason: '客戶實際墊款依據不足',
+        formal_reference_conflict: false, pending_reason: 'subsidy_advance_not_due',
         subsidy_preflight: { case_no: '115000001', scheme: 'advance', subsidy_ntd: 12000,
           total_ntd: 30000, confirmation_only: false, payable_amount_ntd: null,
           payable_due_date: null, bank_cash_ntd: 11970, transfer_fee_ntd: null,
           settlement_ntd: null, remaining_ntd: null, blocker: '客戶實際墊款依據不足' },
       }] });
     chooseWorkbook();
-    await waitFor(() => expect(financeImportMutationClient.preview).toHaveBeenCalled());
+    await expectNotDispatched(/早於本筆正式到期日/);
     expect(screen.queryByRole('region', { name: '補助處理預檢' })).not.toBeInTheDocument();
-    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
-    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0].counts.ready_dispatch).toBe(0);
-    expect(screen.queryByRole('button', { name: '確認套用本次明細' })).not.toBeInTheDocument();
   });
 
   it.each([
-    ['staff_payout', 'staff_payout_amount_mismatch'],
-    ['client_refund', 'outgoing_client_refund_amount_mismatch'],
-  ])('submits a pending-only %s batch to preserve its actual reason', async (classification, reason) => {
+    ['staff_payout', 'outgoing_staff_payout_amount_mismatch', /銀行實付與本次待付合計不符合足額/],
+    ['client_refund', 'outgoing_client_refund_amount_mismatch', /待退款項不符/],
+  ] as const)('shows a pending-only %s reason without dispatching Apply', async (classification, reason, message) => {
+    exposeIngestedRow(classification, 'outgoing', 'taishin');
     const pending: FinanceImportBatchPreview = {
       ...preview, counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 },
       rows: [{
@@ -102,18 +120,12 @@ describe('finance import operation identity after an observed result',()=>{
       }],
     };
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue(pending);
-    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockResolvedValue({
-      job_id: 'job-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: null,
-      receipt: { batch_identity: pending.batch_identity, resulting_batch_version: 1,
-        preview_fingerprint: fingerprint, reconciled_count: 0, existing_count: 0, pending_count: 0 },
-    });
     chooseWorkbook();
-    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
-    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(pending);
-    await waitFor(() => expect(financeImportMutationClient.queryBatchOutcome).toHaveBeenCalledOnce());
+    await expectNotDispatched(message);
   });
 
-  it('submits a review-only batch so the recorded reason remains available after reload', async () => {
+  it('shows candidate installments for a review-only batch without dispatching Apply', async () => {
+    exposeIngestedRow('client_receipt', 'incoming', 'sinopac');
     const pending = {
       ...preview, counts: { ...preview.counts, ready_dispatch: 0, business_pending: 1 },
       rows: [{
@@ -129,23 +141,8 @@ describe('finance import operation identity after an observed result',()=>{
       }],
     };
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue(pending);
-    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockImplementation(async () => {
-      vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
-        items: [{
-          row_id: 41, row_identity: 'finance-import-row:41', transaction_date: '2026-10-20', bank: 'sinopac',
-          direction: 'incoming', amount_ntd: 12000, classification_type: 'client_receipt', status: 'pending',
-          disposition: 'business_pending', review_reason: null, available_actions: [], reference: 'Sheet1#2',
-          counterparty_name: null, cases: [], recorded_client_receipt_review: pending.rows[0].client_receipt_review,
-        }], pending_count: 1, next_before_row_id: null,
-      });
-      return { job_id: 'job-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: null,
-        receipt: { batch_identity: pending.batch_identity, resulting_batch_version: 1,
-          preview_fingerprint: fingerprint, reconciled_count: 0, existing_count: 0, pending_count: 0 } };
-    });
     chooseWorkbook();
-    await waitFor(() => expect(financeImportMutationClient.apply).toHaveBeenCalledOnce());
-    expect(vi.mocked(financeImportMutationClient.apply).mock.calls[0][0]).toBe(pending);
-    expect(await screen.findByText(/第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/)).toBeVisible();
+    await expectNotDispatched(/第一期（到期日 2026-10-19）、第二期（到期日 2026-10-27）/);
   });
 
   it('allows a new confirmed submission after known failure, without reusing the failed job key',async()=>{

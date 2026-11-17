@@ -32,9 +32,7 @@ const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
 
 function canApplyImportedBatch(preview: FinanceImportBatchPreview): boolean {
-  return preview.apply_allowed && (preview.counts.ready_dispatch > 0 || preview.rows.some(
-    row => row.disposition === 'business_pending' && (row.client_receipt_review != null || row.pending_reason != null),
-  ));
+  return preview.apply_allowed && preview.counts.ready_dispatch > 0;
 }
 
 function currentMonth(): string {

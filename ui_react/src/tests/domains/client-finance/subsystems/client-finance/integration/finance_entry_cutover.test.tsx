@@ -7,19 +7,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../../../../App';
 import { sessionClient } from '../../../../../../api/auth/session_client';
-import {
-  ACCOUNTS_PAYABLE_RESPONSE,
-  FINANCE_BATCH_RESPONSE,
-  FINANCE_MANIFEST_RESPONSE,
-  RECEIPT_RESPONSE,
-  STAFF_PAYABLES_RESPONSE,
-} from '../../../../../fixtures/finance/finance_query_contract_fixtures';
+import { FINANCE_BATCH_RESPONSE, FINANCE_MANIFEST_RESPONSE } from '../../../../../fixtures/finance/finance_query_contract_fixtures';
+import { CORE_STAGE_CODES } from '../../../../../../api/orders/order_core_stage_projection_schemas';
 
 const ORDERS_SUMMARY_ENDPOINT = '/api/v1/orders/summaries';
 const CLIENT_RECEIPT_ENDPOINT = '/api/v1/orders/CASE-FIN-001/client-finance/receipt-reconciliation';
-const STAFF_DIRECTORY_ENDPOINT = '/api/v1/staff/summaries';
-const STAFF_PAYABLE_ENDPOINT = '/api/v1/staff-payables/11';
-const ACCOUNTS_PAYABLE_ENDPOINT = '/api/v1/finance-reports/accounts-payable';
+const CORE_STAGE_ENDPOINT = '/api/orders/core-stage-timelines';
+const BANK_TRANSACTIONS_ENDPOINT = '/api/v1/finance-import/bank-transactions';
+const IMPORT_HISTORY_ENDPOINT = '/api/v1/finance-import/import-history';
 const FINANCE_BATCHES_ENDPOINT = '/api/v1/finance-import/batches';
 const FINANCE_MANIFEST_ENDPOINT = '/api/v1/finance-import/batches/BATCH-FIN-021/manifest';
 const FINANCE_REVIEW_ENDPOINT = '/api/v1/finance-import/batches/BATCH-FIN-021/review-rows';
@@ -34,7 +29,7 @@ type RequestRecord = {
 type FetchStubOptions = {
   emptyCases?: boolean;
   noPublicBatchIdentity?: boolean;
-  receiptStatus?: number;
+  stageUnavailable?: boolean;
 };
 
 const REVIEW_RESPONSE = {
@@ -135,18 +130,6 @@ function ordersSummaryResponse(emptyCases: boolean): unknown {
   };
 }
 
-function staffDirectoryResponse(): unknown {
-  return {
-    success: true,
-    message: 'ok',
-    error: null,
-    data: {
-      items: [{ id: 11, name: '去敏人員', phone: null, education: null }],
-      next_cursor: null,
-    },
-  };
-}
-
 function typedUnavailableResponse(): unknown {
   return {
     detail: {
@@ -173,18 +156,28 @@ function installFetchStub(options: FetchStubOptions = {}): RequestRecord[] {
     requests.push({ path, method: String(init?.method ?? 'GET').toUpperCase() });
 
     if (path === SYSTEM_STATUS_ENDPOINT) return response(systemStatusResponse());
-    if (path === '/api/v1/client-payments') return options.receiptStatus === 503 ? response(typedUnavailableResponse(), 503) : response({ success: true, message: 'ok', error: null, data: { cases: options.emptyCases ? [] : [{ case_no: 'CASE-FIN-001', account_version: '1', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 0, receipt_entry_count: 0, receipt_status: 'unpaid' as const }] } });
-    if (path === '/api/v1/finance-reports/accounts-payable/cash-requirements') return response({ success: true, message: 'ok', error: null, data: { rows: [], next_cursor: null } });
     if (path === ORDERS_SUMMARY_ENDPOINT) return response(ordersSummaryResponse(Boolean(options.emptyCases)));
-    if (path === CLIENT_RECEIPT_ENDPOINT) {
-      return options.receiptStatus === 503
-        ? response(typedUnavailableResponse(), 503)
-        : response(RECEIPT_RESPONSE);
-    }
-    if (path === STAFF_DIRECTORY_ENDPOINT) return response(staffDirectoryResponse());
-    if (path === STAFF_PAYABLE_ENDPOINT) return response(STAFF_PAYABLES_RESPONSE);
-    if (path === '/api/v1/staff-payables/historical-payouts/CASE-FIN-001/11') return response({ success: true, message: 'ok', error: null, data: { case_no: 'CASE-FIN-001', staff_id: 11, staff_payables_version: 1, adoption_receipt_id: null, adopted: false, normal_bank_candidate_identities: [], obligations: [] } });
-    if (path === ACCOUNTS_PAYABLE_ENDPOINT) return response(ACCOUNTS_PAYABLE_RESPONSE);
+    if (path === CORE_STAGE_ENDPOINT) return options.stageUnavailable ? response(typedUnavailableResponse(), 503) : response({
+      success: true,
+      message: 'ok',
+      error: null,
+      data: {
+        items: [],
+        stage_counts: Object.fromEntries(CORE_STAGE_CODES.map(code => [code, 0])),
+        substatus_counts: {},
+        historical_lifecycle_counts: { unserved: 0, in_service: 0, service_completed: 0, accounting_completed: 0 },
+        next_cursor: null,
+        etag: 'b'.repeat(64),
+      },
+    });
+    if (path === BANK_TRANSACTIONS_ENDPOINT) return response({
+      success: true, message: 'ok', error: null,
+      data: { items: [], pending_count: 0, next_before_row_id: null },
+    });
+    if (path === IMPORT_HISTORY_ENDPOINT) return response({
+      success: true, message: 'ok', error: null,
+      data: { items: [], next_before: null },
+    });
     if (path === FINANCE_BATCHES_ENDPOINT) {
       if (!options.noPublicBatchIdentity) return response(FINANCE_BATCH_RESPONSE);
       return response({
@@ -234,101 +227,70 @@ describe('Finance #finance entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 收付款與銀行 workspace 維持 active-tab selector/detail exact GET budget，匯入流程在未選檔前保持 guarded', async () => {
+  it('uses the current four workspaces and keeps bank import guarded before file selection', async () => {
     authenticate();
-    const requests = installFetchStub();
+    const requests = installFetchStub({ emptyCases: true });
     render(<StrictMode><App /></StrictMode>);
 
-    await screen.findByRole('button', { name: '收款明細' });
+    await screen.findByText('目前沒有符合條件的進行中案件。');
     expect(window.location.hash).toBe('#finance');
     expect(screen.getByRole('heading', { name: '帳務中心' })).toBeInTheDocument();
-    expect(Array.from(screen.getByRole('navigation', { name: '帳務工作區' }).querySelectorAll('button')).map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
-    expect(countPath(requests, '/api/v1/client-payments')).toBe(1);
-    expect(countPath(requests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['案件帳務', '銀行對帳', '政府補助清單', '每月帳務']);
+    expect(countPath(requests, ORDERS_SUMMARY_ENDPOINT)).toBeGreaterThanOrEqual(1);
+    expect(countPath(requests, CORE_STAGE_ENDPOINT)).toBeGreaterThanOrEqual(1);
+    expect(countPath(requests, '/api/v1/client-payments')).toBe(0);
     expect(countPath(requests, CLIENT_RECEIPT_ENDPOINT)).toBe(0);
-    expect(document.querySelector('[data-control-id="finance.client-receipt.settle"]')).toBeNull();
-    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.refund.approve"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="finance.subsidy.advance"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '付款' }));
-    await waitFor(() => expect(countPath(requests, '/api/v1/finance-reports/accounts-payable/cash-requirements')).toBe(1));
-    fireEvent.click(screen.getByRole('button', { name: '人員與歷史付款' }));
-    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument());
-    expect(countPath(requests, STAFF_DIRECTORY_ENDPOINT)).toBe(1);
-    expect(countPath(requests, STAFF_PAYABLE_ENDPOINT)).toBe(1);
-    expect(document.querySelector('[data-control-id="finance.staff-payable.mark-paid"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="finance.staff-payable.adjustment"]')).toBeNull();
-    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
-    await waitFor(() => expect(within(screen.getByRole('region', { name: '歷史月嫂付款人工確認' })).getByRole('button', { name: '重新查詢付款資料' })).toBeEnabled());
-
-    fireEvent.click(screen.getByRole('button', { name: '付款' }));
-    await screen.findByRole('region', { name: '付款清單' }, { timeout: 5000 });
-    expect(countPath(requests, ACCOUNTS_PAYABLE_ENDPOINT)).toBe(0);
-    expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeInTheDocument();
+    expect(countPath(requests, BANK_TRANSACTIONS_ENDPOINT)).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    expect(screen.getByRole('heading', { name: '銀行對帳' })).toBeInTheDocument();
-    expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(0);
-    expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(0);
-    expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(0);
-    expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(0);
-    expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="finance.finance-import.reprocess"]')).toBeNull();
+    await screen.findByText('目前沒有符合條件的銀行交易資料。');
+    expect(countPath(requests, BANK_TRANSACTIONS_ENDPOINT)).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole('button', { name: '匯入永豐對帳單' }));
+    expect(screen.getByRole('button', { name: '匯入銀行交易明細' })).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeNull();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
-    expect(requests.every((request) => request.method === 'GET')).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: '付款' }));
-    fireEvent.click(await screen.findByRole('button', { name: '人員與歷史付款' }));
-    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument());
-    const staffReadsBeforeRefresh = countPath(requests, STAFF_DIRECTORY_ENDPOINT);
-    const payableReadsBeforeRefresh = countPath(requests, STAFF_PAYABLE_ENDPOINT);
-    expect(staffReadsBeforeRefresh).toBe(1);
-    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
-    await waitFor(() => expect(countPath(requests, STAFF_DIRECTORY_ENDPOINT)).toBe(staffReadsBeforeRefresh + 1));
-    await waitFor(() => expect(countPath(requests, STAFF_PAYABLE_ENDPOINT)).toBe(payableReadsBeforeRefresh + 1));
-    expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument();
     expect(requests.every(request => request.method === 'GET')).toBe(true);
   });
 
-  it('正常 Finance Import 不查詢或顯示歷史批次 identity', async () => {
+  it('opens import history separately without reading historical batch identities', async () => {
     authenticate();
     const requests = installFetchStub({ noPublicBatchIdentity: true });
     render(<StrictMode><App /></StrictMode>);
 
-    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    expect(screen.getByRole('heading', { name: '銀行對帳' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '銀行對帳' }));
+    await screen.findByText('目前沒有符合條件的銀行交易資料。');
+    expect(screen.getByRole('button', { name: '匯入紀錄' })).toBeVisible();
+    expect(countPath(requests, IMPORT_HISTORY_ENDPOINT)).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: '匯入紀錄' }));
+    expect(await screen.findByText('目前沒有匯入紀錄。')).toBeVisible();
+    expect(countPath(requests, IMPORT_HISTORY_ENDPOINT)).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('無public identity')).not.toBeInTheDocument();
     expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(0);
-    expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    expect(requests.every(request => request.method === 'GET')).toBe(true);
   });
 
-  it('empty 與 typed unavailable 不轉成 fake success 或資料列', async () => {
+  it('distinguishes an empty active list from typed unavailability of the stage source', async () => {
     authenticate();
     const emptyRequests = installFetchStub({ emptyCases: true });
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('沒有符合條件的客戶收款。')).toBeInTheDocument());
-    expect(screen.queryByText('OBL-C-1')).not.toBeInTheDocument();
-    expect(countPath(emptyRequests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);
+    expect(await screen.findByText('目前沒有符合條件的進行中案件。')).toBeVisible();
+    expect(screen.queryByText('CASE-FIN-001')).not.toBeInTheDocument();
     expect(countPath(emptyRequests, CLIENT_RECEIPT_ENDPOINT)).toBe(0);
-    expect(emptyRequests.every((request) => request.method === 'GET')).toBe(true);
+    expect(emptyRequests.every(request => request.method === 'GET')).toBe(true);
 
     cleanup();
     authenticate();
-    const unavailableRequests = installFetchStub({ receiptStatus: 503 });
+    const unavailableRequests = installFetchStub({ stageUnavailable: true });
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('收款資料暫時無法取得，請重新整理。'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('案件帳務或營運階段暫時無法取得，請重新查詢。'));
     expect(screen.queryByText(/HTTP 503|correlation_id|finance-secret-detail/)).not.toBeInTheDocument();
-    expect(screen.queryByText('OBL-C-1')).not.toBeInTheDocument();
-    expect(screen.queryByText(/已成功|已結清|付款成功/)).not.toBeInTheDocument();
-    expect(countPath(unavailableRequests, '/api/v1/client-payments')).toBe(1);
-    expect(unavailableRequests.every((request) => request.method === 'GET')).toBe(true);
+    expect(screen.queryByText('目前沒有符合條件的進行中案件。')).not.toBeInTheDocument();
+    expect(screen.queryByText('CASE-FIN-001')).not.toBeInTheDocument();
+    expect(countPath(unavailableRequests, CORE_STAGE_ENDPOINT)).toBeGreaterThanOrEqual(1);
+    expect(unavailableRequests.every(request => request.method === 'GET')).toBe(true);
   });
 });

@@ -158,7 +158,7 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
         sequence: index + 1,
         assigned_start_date: '2026-10-01',
         assigned_end_date: '2026-10-20',
-        official_service_dates: ['2026-10-01'],
+        official_service_dates: [`2026-10-0${index + 1}`],
         actual_hours: 9,
         lineage_source_assignment_ids: [],
       })),
@@ -172,8 +172,12 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '多月嫂排班' }));
     const editor = screen.getByRole('region', { name: '多月嫂排班' });
-    expect(within(editor).getByLabelText('原服務區段')).toHaveValue('101');
-    expect(within(editor).getByRole('checkbox', { name: '2026-10-01' })).toBeInTheDocument();
+    const calendars = within(editor).getByRole('region', { name: '月嫂分配' });
+    const blocks = within(calendars).getAllByRole('region');
+    expect(blocks).toHaveLength(assignmentIds.length);
+    blocks.forEach((block, index) => {
+      expect(within(block).getByRole('button', { name: `服務日期 2026-10-0${index + 1}，由此區塊負責` })).toBeVisible();
+    });
   });
 
   it('shows automatic completion status without a manual completion action and refreshes on owner state changes', async () => {

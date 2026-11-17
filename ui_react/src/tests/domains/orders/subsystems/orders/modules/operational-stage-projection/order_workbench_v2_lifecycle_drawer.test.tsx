@@ -168,7 +168,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
   });
 
-  it('受控重開入口只在取消支線顯示', async () => {
+  it('一般與取消工作台均不掛載客戶名冊擁有的受控重開入口', async () => {
     const normal = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(1));
@@ -179,11 +179,11 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     mocks.detail.mockResolvedValue({ case_no: CASE, client_name: '測試客戶', client_id: 1, order_status: '訂單取消', identity_status: null, actual_start_date: '2026-09-01' });
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="cancelled" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
-    const button = await screen.findByRole('button', { name: '重開訂單' });
+    await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
-    expect(button).toBeEnabled();
-    expect(screen.getByRole('region', { name: '操作面板 reopen' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重開訂單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '操作面板 reopen' })).not.toBeInTheDocument();
   });
 
   it('結果未明時 close／Escape／backdrop 皆不卸載，不能切換到其他受控操作', async () => {
@@ -223,11 +223,11 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.getByText('此面板已觀察完成')).toBeInTheDocument();
     expect(screen.getByText('Owner context revision 1')).toBeInTheDocument();
     await act(async () => { resolve(page(true)); });
-    expect(screen.getByRole('button', { name: '重開訂單' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '重開訂單' })).not.toBeInTheDocument();
     expect(screen.queryByText('正常完工操作入口')).not.toBeInTheDocument();
     expect(screen.getAllByText('訂單取消').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('受控操作草稿')).toBe(input);
     fireEvent.click(screen.getByRole('button', { name: '返回案件處理' }));
-    expect(screen.getByRole('button', { name: '重開訂單' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '重開訂單' })).not.toBeInTheDocument();
   });
 });

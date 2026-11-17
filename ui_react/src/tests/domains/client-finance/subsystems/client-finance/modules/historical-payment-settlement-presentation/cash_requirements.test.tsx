@@ -9,6 +9,7 @@ import { accountsPayableExportClient } from '../../../../../../../api/accounts_p
 import { CashRequirementsPanel } from '../../../../../../../components/CashRequirementsPanel';
 import { FinancePaymentsWorkspace } from '../../../../../../../components/FinancePaymentsWorkspace';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
+import { monthlyAccountingClient } from '../../../../../../../api/finance_import/monthly_accounting_client';
 import { caseCategoriesClient } from '../../../../../../../api/client_finance/case_categories_client';
 import { ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 
@@ -109,16 +110,27 @@ describe('cash planning panel', () => {
 });
 
 describe('existing payable composition', () => {
-  it('keeps accounting export independent while replacing the old two tabs with filters', async () => {
-    window.location.hash = '#finance?tab=accounts-payable';
+  it('keeps the accounting export available when the retired payment-destination link opens monthly accounting', async () => {
+    window.location.hash = '#finance?tab=payment-destination';
+    vi.spyOn(monthlyAccountingClient, 'query').mockImplementation(async range => ({
+      ...range, as_of: '2026-11-17', excluded_cases: [], undated_item_count: 0, rows: [],
+    }));
+    const download = vi.spyOn(accountsPayableExportClient, 'download');
+    render(<FinancePage />);
+    expect(await screen.findByRole('button', { name: '匯出應付帳款 Excel（會計十欄版）' })).toBeEnabled();
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getByRole('button', { name: '每月帳務' })).toHaveAttribute('aria-current', 'page');
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('filters cash requirements and keeps the export independent of the filtered rows', async () => {
     vi.spyOn(caseCategoriesClient, 'query').mockResolvedValue(new Map([['C-1', 'subsidy']]));
     const confirmed = vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
     const forecast = vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([row({ pending_reasons: ['退款收款資料待確認'] })]);
     const download = vi.spyOn(accountsPayableExportClient, 'download');
-    render(<FinancePage />);
+    render(<FinancePaymentsWorkspace revision={1} targetMonth="2026-11" onMonthChange={vi.fn()}
+      onOpenStaff={vi.fn()} onOpenCase={vi.fn()} onOpenSubsidy={vi.fn()} onOpenBank={vi.fn()} />);
     await screen.findByLabelText('付款摘要');
     expect(screen.queryByRole('tablist', { name: '應付帳款檢視' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['案件帳務', '銀行對帳', '政府補助清單', '每月帳務']);
     expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
     expect(screen.getByText('退款收款資料待確認')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'partially_paid' } });

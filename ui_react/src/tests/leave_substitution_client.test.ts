@@ -159,11 +159,11 @@ describe('leave substitution client', () => {
         items: [{ ...LEAVE_PREVIEW_REQUEST.items[0], work_date: '2026-02-30' }],
       }),
     ).rejects.toBeInstanceOf(LeaveSubstitutionValidationError);
-    const missingDoublePay = {
+    const unsupportedDoublePay = {
       ...LEAVE_PREVIEW_REQUEST,
-      items: LEAVE_PREVIEW_REQUEST.items.map(({ is_double_pay: _missing, ...item }) => item),
+      items: LEAVE_PREVIEW_REQUEST.items.map(item => ({ ...item, is_double_pay: true })),
     } as unknown as typeof LEAVE_PREVIEW_REQUEST;
-    await expect(client.preview(LEAVE_CASE_NO, missingDoublePay)).rejects.toBeInstanceOf(
+    await expect(client.preview(LEAVE_CASE_NO, unsupportedDoublePay)).rejects.toBeInstanceOf(
       LeaveSubstitutionValidationError,
     );
     const { leave_request_id: _missing, ...withoutLinkedRequestId } = LEAVE_PREVIEW_REQUEST;

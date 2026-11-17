@@ -89,7 +89,8 @@ describe('財務中心 Government Subsidy cross-order query', () => {
     expect(subsidyPeriodClient.query).toHaveBeenCalledWith(
       { unit: 'quarter', year: new Date().getFullYear(), index: Math.floor(new Date().getMonth() / 3) + 1 }, expect.any(AbortSignal));
     expect(screen.getByText('排班資料待確認')).toBeInTheDocument();
-    expect(screen.getByText(/・2 件・本期補助總額/)).toBeInTheDocument();
+    expect(screen.getByText(/本期目前計算應收/)).toHaveTextContent('待確認');
+    expect(screen.getAllByRole('row')).toHaveLength(3);
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('NT$ 23,100')).toBeInTheDocument();
     expect(screen.getAllByText('2026-09-30')).toHaveLength(2);
@@ -97,7 +98,7 @@ describe('財務中心 Government Subsidy cross-order query', () => {
     expect(screen.queryByText('government_subsidy.claim_batches.query')).not.toBeInTheDocument();
     expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
     expect(document.querySelector('a[href^="/api/v1/government-subsidy/"]')).toBeNull();
-    expect(screen.getByRole('button', { name: '核銷本期入款' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '確認記錄本次處理' })).toBeDisabled();
     const targetQuarter = Math.floor(new Date().getMonth() / 3) + 1 === 3 ? 4 : 3;
     fireEvent.change(screen.getByLabelText('季度'), { target: { value: String(targetQuarter) } });
     await waitFor(() => expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(

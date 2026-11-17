@@ -555,6 +555,7 @@ export function FinanceBankReconciliationWorkspace({
           </button>
         )}
         {batchPreview.kind === 'error' && <p className="finance-state error" role="alert">{batchPreview.message}</p>}
+        {batchOutcome.kind === 'error' && <p className="finance-state error" role="alert">{batchOutcome.message}</p>}
         {applyJob.kind === 'error' && Boolean(submittedFinanceCommand) && batchPreview.kind === 'ready' && (
           <button type="button" className="finance-btn-primary" disabled={batchOutcome.kind === 'loading'} onClick={() => onApply(batchPreview.data)}>
             以原操作確認匯入結果

@@ -167,6 +167,6 @@ describe('正式指派自動回讀與排班明細', () => {
     await waitFor(() => expect(mocks.getAssignmentPlan).toHaveBeenCalledTimes(2));
 
     fireEvent.click(screen.getByRole('button', { name: '模擬請假代班' }));
-    expect(window.location.hash).toBe('#scheduling?tab=leave_sub&case_no=CASE-ASSIGNMENT-PLAN');
+    expect(window.location.hash).toBe('#order-workbench-v2?case=CASE-ASSIGNMENT-PLAN&work=service&staffing=upcoming');
   });
 });

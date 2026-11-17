@@ -158,7 +158,7 @@ describe('current finance workspaces', () => {
     expect(table.getByRole('row', { name: /UNPAID/ })).toHaveTextContent('NT$ 4,000');
     expect(table.getByRole('row', { name: /PAID.*已付清/ })).toBeVisible();
     const drawer = await openCase(table, missing);
-    expect(await drawer.findByText('本案目前無月嫂應付項目。')).toBeVisible();
+    expect(await drawer.findByText(/尚未(?:產生|建立)月嫂應付明細/)).toBeVisible();
     expect(drawer.queryByText('出款已結清')).not.toBeInTheDocument();
   });
 
@@ -191,7 +191,7 @@ describe('current finance workspaces', () => {
     expect(await screen.findByText('待付 NT$ 0')).toBeVisible();
     const drawer = await openCase(await monthDetails(), 'HANDOVER');
     expect(await drawer.findByText('超付款待核對')).toBeVisible();
-    expect(drawer.getByText('已付 NT$ 17,500')).toBeVisible();
+    expect(drawer.getByText('已核銷 NT$ 17,500')).toBeVisible();
   });
 
   it('preserves a historically paid receipt without inventing a canonical bank receipt', async () => {
@@ -291,7 +291,7 @@ describe('current finance workspaces', () => {
     fireEvent.click(screen.getByRole('button', { name: '每月帳務' }));
     const fromPayable = await openCase(await monthDetails(), caseNo);
     expect(await fromPayable.findByText('實撥 NT$ 12,000')).toBeVisible();
-    expect(fromPayable.getByRole('columnheader', { name: '預計退款日' })).toBeVisible();
+    expect(fromPayable.getByRole('columnheader', { name: '預計給付／退款日' })).toBeVisible();
     expect(fromPayable.getByText('客戶退款待結：', { exact: false })).toHaveTextContent('NT$ 8,000');
     expect(vi.mocked(financeAccountingClient.query).mock.calls.map(([selected]) => selected)).toEqual([caseNo, caseNo]);
     expect(recovery).not.toHaveBeenCalled();

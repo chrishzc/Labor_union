@@ -13,7 +13,7 @@
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx` — 四個主工作區：案件帳務（預設）、銀行對帳、政府補助清單、每月帳務；案件、銀行來源、清單及月報開同一右側案件抽屜，既有收款／付款／人員付款／待確認／通知／逾期工具保留在相關工具，舊深連結仍解析。歷史工具保留低頻入口；舊全域帳戶維護於 2026-11-02 依使用者指示完整退役。
-- workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
+- workbench referral: Finance 以 `case_no` 定位案件帳務，`from=workbench` 提供返回同案入口。歷史帳務完成由 Orders 依正式結清事實投影，帳務抽屜不提供手動完成入口。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 應收由 Finance Import workspace 組合 owner 月份款項 Query，政府整期及付款沿既有 owner projection／cash planning；未定應收另列待確認，正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
 - overdue reminder composition: 主入口轉至 `FinanceWarningWorkspace.tsx` 的逾期款項頁，原 `FinanceReceiptsWorkspace.tsx` overdue props 保留；只移動入口，不改逾期資格、金額或寄送 writer。

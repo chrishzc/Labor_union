@@ -5,7 +5,6 @@ import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { historicalCompletionClient } from '../../../../../../../api/orders/historical_completion_client';
-import { HistoricalCompletionSchema } from '../../../../../../../api/orders/historical_completion_schemas';
 import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import { RECEIPT_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
@@ -231,7 +230,7 @@ function useLiveDateWorkspace() {
 }
 
 describe('historical Drawer immutable evidence boundary', () => {
-  it('從同案帳務頁 Query／Preview／Confirm／Apply，回到案件後回讀完成狀態並移除操作', async () => {
+  it('同案帳務不提供手動完成，返回案件時回讀 owner 已投影的完成狀態', async () => {
     let status = '歷史訂單－服務完成';
     mocks.core.mockImplementation(async () => ({ items: [timeline(status)] }));
     mocks.detail.mockImplementation(async () => orderDetail(status));
@@ -240,18 +239,8 @@ describe('historical Drawer immutable evidence boundary', () => {
       service_days: 20, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'a'.repeat(64) }));
     vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue({ ...RECEIPT_RESPONSE.data, case_no: 'CASE-FUTURE' });
     vi.spyOn(accountsPayableQueryClient, 'queryCase').mockResolvedValue({ case_no: 'CASE-FUTURE', target_payment_date: '2026-09-01', items: [] });
-    const projection = HistoricalCompletionSchema.parse({ case_no: 'CASE-FUTURE', state: 'completed', step_11_status: 'completed', step_11_completed: true,
-      historical_alerts_completed: true, active_alerts: [], owner_versions: [{ owner: 'orders', version: '12' }, { owner: 'client_finance', version: '2' }],
-      owner_source_versions: [{ kind: 'staff_obligation', identity: 'obligation:17', version: '2' }], source_fingerprint: 'a'.repeat(64), projection_fingerprint: 'b'.repeat(64) });
-    const query = vi.spyOn(historicalCompletionClient, 'query').mockResolvedValue(projection);
-    const preview = { case_no: 'CASE-FUTURE', before_status: '歷史訂單－服務完成' as const, after_status: '歷史訂單－帳務完成' as const,
-      expected_order_version: '12', resulting_order_version: '13', expected_client_finance_version: '2', expected_source_versions: projection.owner_source_versions,
-      business_date: '2026-09-01', preview_fingerprint: 'c'.repeat(64) };
-    const previewQuery = vi.spyOn(historicalCompletionClient, 'preview').mockResolvedValue(preview);
-    const apply = vi.spyOn(historicalCompletionClient, 'apply').mockImplementation(async () => {
-      status = '歷史訂單－帳務完成';
-      return { case_no: 'CASE-FUTURE', lifecycle_event_id: 99, resulting_order_version: '13', after_status: '歷史訂單－帳務完成', replayed: false };
-    });
+    const preview = vi.spyOn(historicalCompletionClient, 'preview');
+    const apply = vi.spyOn(historicalCompletionClient, 'apply');
     const onObserved = vi.fn();
     const view = render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
     await screen.findByRole('heading', { name: '服務完工' });
@@ -260,19 +249,13 @@ describe('historical Drawer immutable evidence boundary', () => {
     const readsBefore = mocks.core.mock.calls.length;
     act(() => window.history.replaceState(null, '', entry.getAttribute('href')!));
     view.rerender(<FinancePage />);
+    const returnEntry = await screen.findByRole('link', { name: '← 返回案件處理' });
+    expect(screen.queryByLabelText('完成原因（選填）')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /儲存帳務完成|確認推進至帳務完成/ })).not.toBeInTheDocument();
+    expect(preview).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
-    fireEvent.change(await screen.findByLabelText('完成原因（選填）'), { target: { value: '確認歷史訂單客戶款項及月嫂款項皆已結清' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存帳務完成' }));
-    expect(screen.queryByRole('checkbox', { name: '我已確認客戶款項及所有月嫂款項均已結清' })).not.toBeInTheDocument();
-    await waitFor(() => expect(mocks.summaries).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByRole('button', { name: '確認推進至帳務完成' })).not.toBeInTheDocument());
-    expect(query).toHaveBeenCalledWith('CASE-FUTURE', expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(previewQuery).toHaveBeenCalledWith('CASE-FUTURE');
-    expect(apply).toHaveBeenCalledTimes(1);
-    expect(apply).toHaveBeenCalledWith(preview, '確認歷史訂單客戶款項及月嫂款項皆已結清');
-    expect(mocks.summaries.mock.invocationCallOrder.at(-1)).toBeGreaterThan(apply.mock.invocationCallOrder[0]!);
-    const returnEntry = screen.getByRole('link', { name: '← 返回案件處理' });
     expect(returnEntry).toHaveAttribute('href', '#order-workbench-v2?case=CASE-FUTURE');
+    status = '歷史訂單－帳務完成';
     act(() => window.history.replaceState(null, '', returnEntry.getAttribute('href')!));
     view.rerender(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
     await screen.findByRole('heading', { name: '服務完工' });
@@ -378,10 +361,10 @@ describe('historical Drawer immutable evidence boundary', () => {
     const serviceEntry = within(dialog).getByRole('button', { name: /確認服務日期與排班/ });
     await waitFor(() => expect(serviceEntry).toBeEnabled());
     fireEvent.click(serviceEntry);
-    const caseHeader = within(dialog).getByRole('heading', { name: '案件處理', level: 1 }).closest('header')!;
-    expect(within(caseHeader).getByText('尚未選定月嫂')).toBeInTheDocument();
+    const caseSummary = within(dialog).getByRole('region', { name: '案件摘要' });
+    expect(await within(caseSummary).findByText('尚未選定月嫂')).toBeInTheDocument();
     const evidenceRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
-    expect(within(caseHeader).queryByText(/陳月嫂/)).not.toBeInTheDocument();
+    expect(within(caseSummary).queryByText(/陳月嫂/)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('region', { name: '案件 CASE-FUTURE 正式指派與排班回讀' })).not.toBeInTheDocument();
     expect(mocks.serviceDatesRender).not.toHaveBeenCalled();
     expect(within(dialog).getAllByText('尚未確認').length).toBeGreaterThan(0);
@@ -399,10 +382,10 @@ describe('historical Drawer immutable evidence boundary', () => {
     mocks.matchingContact.mockResolvedValue({ plan: { id: 7, case_no: 'CASE-FUTURE' },
       segments: [{ segment_id: 8, staff_id: 42, staff_name: '陳月嫂' }] });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
-    const header = screen.getByRole('heading', { name: '案件處理' }).closest('header')!;
-    expect(await within(header).findByText(/陳月嫂/)).toBeInTheDocument();
-    expect(within(header).getByText('實際開始').parentElement).toHaveTextContent('尚未確認');
-    expect(within(header).queryByText(/待建立正式排班|尚未正式指派/)).not.toBeInTheDocument();
+    const caseSummary = screen.getByRole('region', { name: '案件摘要' });
+    expect(await within(caseSummary).findByText(/陳月嫂/)).toBeInTheDocument();
+    expect(within(caseSummary).getByText('實際開始').parentElement).toHaveTextContent('尚未確認');
+    expect(within(caseSummary).queryByText(/待建立正式排班|尚未正式指派/)).not.toBeInTheDocument();
   });
 
   it('shows failed formal reads as unavailable while retaining the historical source period', async () => {

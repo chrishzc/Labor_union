@@ -40,7 +40,8 @@ it('explains retained dates separately from buffer reminders without excluding a
   await waitFor(() => expect(mocks.search).toHaveBeenCalled());
   await screen.findByText('未設定 衝突測試月嫂');
   fireEvent.click(screen.getByText('查看衝突日期與原因'));
-  expect(screen.getByText('其他案件已保留檔期：2026-11-15')).toBeVisible();
-  expect(screen.getByText('七天緩衝期（僅提醒，不阻擋）：2026-12-01')).toBeVisible();
+  const conflictDates = screen.getAllByRole('listitem');
+  expect(conflictDates.find(item => item.textContent?.includes('2026-11-15'))).toHaveTextContent('其他案件等待訂金保留（黃色鎖）');
+  expect(conflictDates.find(item => item.textContent?.includes('2026-12-01'))).toHaveTextContent('七天緩衝期重疊，僅提醒');
   expect(screen.getByRole('button', { name: '加入候選池（衝突測試月嫂）' })).toBeEnabled();
 });

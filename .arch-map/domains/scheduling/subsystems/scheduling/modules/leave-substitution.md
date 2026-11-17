@@ -55,6 +55,7 @@
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover_transaction.py`
 - test_root: `ui_react/src/tests/substitution_payables_readback.test.tsx`
 - test_root: `ui_react/src/tests/scheduling_leave_substitution_flow.test.tsx`
+- test_root: `ui_react/src/tests/leave_substitution_client.test.ts`
 - test_root: `tests/test_leave_substitution_public_contract.py`
 - integration_root: `tests/test_g13_leave_cancellation_disposable_mysql_e2e.py`
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_staff_leave_customer_defer.py`

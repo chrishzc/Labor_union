@@ -30,7 +30,8 @@ describe('Order Workbench V2 parity reconciliation', () => {
   it('uses the workbench as the sole canonical order navigation after #148', () => {
     expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
     expect(appSource).toMatch(/currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page(?:\s+homeNavigationRequest=\{workbenchHomeRequest\})?\s*\/>/);
-    expect(appSource).toContain("return 'order-workbench-v2'");
+    expect(appSource).toContain("const DEFAULT_PAGE: PageType = 'order-workbench-v2'");
+    expect(appSource).toContain('return DEFAULT_PAGE');
     expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: LayoutDashboard, label: '待辦看板'");
     expect(layoutSource).not.toContain("'order-tracker'");
     expect(layoutSource).not.toContain("'orders'");
