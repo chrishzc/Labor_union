@@ -425,7 +425,6 @@ export const FinancePage: React.FC = () => {
           revision={reload}
           initialSubTab={entry.subTab}
           onCase={openCase}
-          onNotice={(caseNo, stage) => openCase(caseNo, stage)}
         />
       )}
 

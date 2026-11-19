@@ -90,13 +90,14 @@ Orders 在其 lifecycle aggregate outer UoW 提交 terminal closure event／rece
 
 - LINE consumer 核對 source subject、Orders 版本與 capability：一般客戶無 staff binding（含 source subject 為 NULL 且案件 owner 未綁定 LINE）時保存 `noop_not_staff` receipt（若 owner 已有非空 LINE User ID 而 source subject 為 NULL，則屬 subject mismatch 零寫入）。
 - 存在有效 staff binding 時，僅在 (1) staff binding 仍為 `active`、(2) 該 LINE User ID 所有 active client-role case 皆經 owner readback 證明 terminal、(3) source event 未處理且版本一致時，才建立一次 `staff_default_restore` menu intent／receipt；任一條件不滿足則保存對應 typed decision（`blocked_active_client_case`、`blocked_revoked_staff`、`noop_replay`）。
-- 已保存 receipt 的 source 不再重複喚醒；不阻擋 [LINE 客服與月嫂自助服務 §4.4](20_LINE客服與月嫂自助服務正式規格.md) 原案件群組完工通知。
+- 已保存 receipt 的 source 不再重複喚醒；不阻擋 [LINE 客服與月嫂自助服務 §4.4](20_LINE客服與月嫂自助服務正式規格.md#44-滿意度調查問卷) 的群組小幫手問卷 Reply 流程。
 
 ## 8. 管理 UI 與驗收標準
 
 ### 8.1 權限與操作介面
 
 - 權限分層：`line.identity.binding.read`（查詢）、`line.identity.binding.manage`（replacement／正常解除／retry／重新同步選單／永久刪除停用綁定）、`line.identity.binding.override`（僅後端緊急覆寫）。
+- 客戶與月嫂未綁定的人工提醒入口依 [通知事項契約](20_LINE客服與月嫂自助服務正式規格.md#511-通知事項分類與處理入口)；客戶的歷史案件資格由 [歷史通知接續責任分界](27_歷史訂單生命週期與服務天數帳務正式規格.md#81-歷史案件接續通知的責任分界) 擁有。這只決定是否需要提醒，不改變本人綁定、人工審核、解除或 replacement 的原資格。
 - 管理端以「身分綁定／待審核／待配對」分頁呈現，一次僅掛載目前任務，依使用者點選列傳遞 `subject_type`，綁定清單不提供明細抽屜；審核不預選核准，申請受理、系統停用與選單回復完成分開呈現。
 - 客戶綁定列提供「更正綁定對象」，由具管理權限人員選擇目標客戶，沿既有 replacement Preview／Apply 核對來源與目標姓名及案號後確認。人員負責核對是否同一人，不按姓名或電話自動選人或轉綁；不依取消、新案建立、歷史／重啟身分或銷帳狀態新增前置檢查。操作與 [Case Import 資料帶入建案](17B_Case_Import與非市民Redis待審正式規格.md#311-原案資料帶入與獨立操作nc-manual-0104nc-separate-01) 各自獨立。
 - 客戶 replacement 沿既有版本驗證，在同一交易更換 customer binding 的 subject reference、清除原客戶投影及設定目標客戶投影，保存事件、稽核及選單工作，保留其他角色。LINE 綁定對象為客戶，不直接綁案號；不建立同角色雙重有效綁定或多案件選擇介面。未綁定者不需轉移；轉移失敗不回滾先前建立的新案。後端既有理由、權限與版本契約保留，不新增補救原因或轉換流程專用欄位。

@@ -1,15 +1,20 @@
 """Read stage-local canonical remaining balances, never sum across payment stages."""
 from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+from infrastructure.mysql.order_notification_continuation_query_repository import (
+    historical_case_sql, notification_continuation_eligible_sql,
+)
 
 _FROM = (
     ' FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
     'JOIN orders orders_root ON orders_root.case_no=o.case_no '
     "WHERE o.direction='receivable_from_client' AND o.obligation_type IN ('deposit','first','second') "
     "AND orders_root.status IN ('洽談中','訂單成立','服務中','訂單完成') "
-    "AND EXISTS (SELECT 1 FROM order_contract_flow_events flow "
+    "AND (EXISTS (SELECT 1 FROM order_contract_flow_events flow "
     "WHERE flow.case_no=orders_root.case_no AND flow.event_type='contract_completed' "
-    "AND flow.contract_identity=orders_root.contract_identity) "
-    "AND o.status='open' AND o.amount_due_ntd>0 AND e.after_amount_ntd>0 AND o.due_date IS NOT NULL"
+    "AND flow.contract_identity=orders_root.contract_identity) OR "
+    + historical_case_sql('orders_root') + ') AND '
+    + notification_continuation_eligible_sql('orders_root') + ' '
+    + "AND o.status='open' AND o.amount_due_ntd>0 AND e.after_amount_ntd>0 AND o.due_date IS NOT NULL"
 )
 _SELECT = ('SELECT o.case_no,o.obligation_type,o.obligation_identity,o.projection_version,'
            'o.current_event_id,o.due_date,o.amount_due_ntd')

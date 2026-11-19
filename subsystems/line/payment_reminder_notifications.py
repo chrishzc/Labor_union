@@ -50,10 +50,10 @@ def source_reference(facts, recipient):
 def initial_qualifies(facts, now):
     payment=facts.payment
     local=now.astimezone(TAIPEI_TIME_ZONE)
-    if facts.case_status=='訂單完成':
+    if not facts.notification_continuation.allows_automatic_payment(payment.due_date) or facts.case_status=='訂單完成':
         return False
     if payment.payment_stage=='deposit':
-        return facts.contract_completed and payment.remaining_amount_ntd>0
+        return facts.reminder_eligible and payment.remaining_amount_ntd>0
     if payment.payment_stage=='first':
         return False  # The opening greeting owns the first reminder, if applicable.
     return payment.remaining_amount_ntd>0 and payment.due_date==local.date()
@@ -70,7 +70,9 @@ def initial_eligible(facts, now, schedule):
 
 
 def followup_eligible(repository, facts, recipient, original, now, schedule, *, queued=False):
-    return bool(facts.contract_completed and original and original.sent_at
+    return bool(facts.reminder_eligible
+        and facts.notification_continuation.allows_automatic_payment(facts.payment.due_date)
+        and original and original.sent_at
         and (original.recipient_id==recipient.recipient.identity.value
              or (facts.payment.payment_stage=='first' and original.sent_to_group
                  and recipient.recipient.recipient_type is LineRecipientType.USER))

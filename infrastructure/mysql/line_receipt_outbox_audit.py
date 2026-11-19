@@ -50,7 +50,7 @@ class MySqlLineIdempotencyReceiptRepository:
             str(row["result_reference"]),
         )
 
-    def append(self, receipt: IdempotencyReceipt) -> None:
+    def append(self, receipt: IdempotencyReceipt, *, result_snapshot=None) -> None:
         try:
             with self._connection.cursor() as cursor:
                 cursor.execute(
@@ -61,6 +61,7 @@ class MySqlLineIdempotencyReceiptRepository:
                         receipt.payload_fingerprint.value,
                         receipt.result_reference,
                         receipt.key.value,
+                        None if result_snapshot is None else canonical_json_value(result_snapshot),
                     ),
                 )
         except IntegrityError as error:
@@ -299,7 +300,7 @@ _RECEIPT_SELECT_SQL = (
 )
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO line_command_receipts (idempotency_key,command_family,"
-    "payload_fingerprint,result_reference,correlation_id) VALUES (%s,%s,%s,%s,%s)"
+    "payload_fingerprint,result_reference,correlation_id,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s)"
 )
 _OUTBOX_INSERT_SQL = (
     "INSERT INTO line_domain_outbox (aggregate_type,aggregate_identity,intent_type,"

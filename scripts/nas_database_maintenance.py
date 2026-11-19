@@ -659,7 +659,7 @@ def backup(settings):
                "database": database, "host": config.host, "port": config.port, "server": identity["server"],
                "sha256": digest(path), "size": path.stat().st_size, "inventory": before, "archive": archive_name,
                "bundle": bundle_name, "month": month, "sql_sha256": sql["sha256"], "sql_size": sql["size"],
-               "kind": "online_sql_snapshot"}
+               "kind": "online_sql_snapshot", "retention_managed": settings.get("scheduled_backup") is True}
     checksum_text = receipt["sha256"] + "  " + archive_name + "\n"
     receipt_text = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
     pending_bundle = directory / (bundle_name + ".pending")
@@ -1142,6 +1142,92 @@ def available_backups(settings):
     yield from found
 
 
+def _retention_path(root, path):
+    """Resolve the exact ZIP within its canonical month before any removal."""
+    root, path = Path(root), Path(path)
+    parsed = _backup_kind_and_stamp(path)
+    require(root.name == BACKUP_FOLDER and parsed is not None and parsed[0] == "zip"
+            and path.parent.parent == root and path.parent.name == parsed[1][:4] + "-" + parsed[1][4:6],
+            "滾動保存範圍無法確認，未清理備份。")
+    require(not any(node.is_symlink() or node.is_junction() for node in (path, *path.parents)),
+            "滾動保存遇到連結或轉接點，未清理備份。")
+    require(path.resolve().is_relative_to(root.resolve()) and path.is_file(),
+            "滾動保存範圍無法確認，未清理備份。")
+    return datetime.strptime(parsed[1], "%Y%m%d_%H%M%S").replace(tzinfo=TAIPEI)
+
+
+def retain_scheduled_backups(settings, latest, *, now=None):
+    """Called under the maintenance lock only after a new scheduled backup succeeds.
+
+    The union of calendar-day, ISO-week and calendar-month buckets determines
+    retention. Unmarked, manual and legacy backups never enter this policy.
+    """
+    root = destination_ready(settings)
+    now = (now or backup_time()).astimezone(TAIPEI)
+    latest = Path(latest)
+    _retention_path(root, latest)
+    current = validate_backup(latest)
+    target = (settings["host"], int(settings["port"]), settings["database"])
+    matches = lambda info: (info.get("host"), info.get("port"), info.get("database")) == target
+    require(current.get("retention_managed") is True and matches(current),
+            "本次備份不符合排程保存範圍，未清理備份。")
+    candidates = []
+    for path in root.glob("????-??/union_db_*.zip"):
+        moment = _retention_path(root, path)
+        info = read_backup_receipt(path)
+        if info.get("retention_managed") is not True or not matches(info):
+            continue
+        # Verify the retained representatives as well as expired candidates.
+        # A corrupt newer representative must never evict an older good copy.
+        verified = validate_backup(path)
+        candidates.append((path, moment, verified["bundle_sha256"]))
+    keep = {latest}
+    today = now.date()
+    this_week = today - timedelta(days=today.weekday())
+    this_month = today.year * 12 + today.month - 1
+    weeks, months = {}, {}
+    for path, moment, _ in sorted(candidates, key=lambda item: (item[1], item[0].name), reverse=True):
+        day = moment.date()
+        if moment > now:
+            keep.add(path)
+            continue
+        if 0 <= (today - day).days < 14:
+            keep.add(path)
+        week = day - timedelta(days=day.weekday())
+        if timedelta(0) <= this_week - week < timedelta(weeks=8):
+            weeks.setdefault(week, path)
+        month = day.year * 12 + day.month - 1
+        if 0 <= this_month - month < 12:
+            months.setdefault(month, path)
+    keep.update(weeks.values())
+    keep.update(months.values())
+    expired = [(path, checksum) for path, _, checksum in candidates if path not in keep]
+    if not expired:
+        return 0
+    # Validate the entire removal set before the first deletion, then retain
+    # the exact plan and per-file completion facts for interrupted runs.
+    for path, checksum in expired:
+        _retention_path(root, path)
+        require(digest(path) == checksum, "備份在清理前已改變，未清理備份。")
+    directory = nas_directory(root, "_retention")
+    journal = directory / (now.strftime("%Y%m%d_%H%M%S_") + uuid4().hex + ".json")
+    receipt = {"format":"nas-backup-retention/v1", "status":"planned", "time":now.isoformat(),
+        "policy":{"days":14, "weeks":8, "months":12},
+        "latest":str(latest.relative_to(root)),
+        "planned":[{"file":str(path.relative_to(root)), "sha256":checksum} for path, checksum in expired],
+        "removed":[]}
+    save(journal, receipt)
+    for path, checksum in expired:
+        _retention_path(root, path)
+        require(digest(path) == checksum, "備份在清理前已改變，已停止後續清理。")
+        path.unlink()
+        receipt["removed"].append(str(path.relative_to(root)))
+        save(journal, receipt)
+    receipt["status"] = "completed"
+    save(journal, receipt)
+    return len(expired)
+
+
 def record_backup_result(settings, status, *, message=None, created_at=None):
     private_directory(LOCAL_STATUS.parent)
     previous = json.loads(LOCAL_STATUS.read_text(encoding="utf-8")) if LOCAL_STATUS.is_file() else {}
@@ -1296,10 +1382,12 @@ def main(argv=None):
     parser.add_argument("--install-daily", action="store_true")
     args = parser.parse_args(argv)
     settings = None
+    cleanup_warning = None
     try:
         require(not args.scheduled or args.mode == "backup", "排程只允許備份，不能自動升級或復原。")
         require(not args.install_daily or args.mode == "backup", "只有備份腳本可以設定排程。")
         settings = load_settings(args.environment_file, args.settings_file)
+        settings["scheduled_backup"] = args.mode == "backup" and args.scheduled
         if args.mode == "protect-account-receipts":
             require_account_receipt_conversion_target(settings)
         if args.dry_run:
@@ -1356,12 +1444,33 @@ def main(argv=None):
         with maintenance_lock(config):
             if args.mode == "backup":
                 path = backup(settings)
+                if args.scheduled:
+                    validate_backup(path)  # Backup success must precede best-effort retention.
+                    try:
+                        removed = retain_scheduled_backups(settings, path)
+                        print(f"滾動保存完成，清理 {removed} 份過期排程備份。")
+                    except Exception as cleanup_error:
+                        # Cleanup is secondary to the verified backup. Keep its
+                        # failure separate so a good restore point stays passed.
+                        try:
+                            root = destination_ready(settings)
+                            _retention_path(root, path)
+                            folder = nas_directory(root, "_retention")
+                            save(folder / (uuid4().hex + ".json"), {
+                                "format":"nas-backup-retention/v1", "status":"failed",
+                                "time":backup_time().isoformat(), "latest":str(path.relative_to(root)),
+                                "error_type":type(cleanup_error).__name__})
+                        except Exception:
+                            pass  # An unavailable NAS cannot accept a failure receipt.
+                        cleanup_warning = "備份已完成，過期備份清理未完成；請通知維護人員。"
+                        print(cleanup_warning)
             elif args.mode == "upgrade":
                 path = upgrade(settings)
             else:
                 path = restore(settings, selected_backup)
         if args.mode == "backup":
-            record_backup_result(settings, "passed", created_at=read_backup_receipt(path)["created_at"])
+            record_backup_result(settings, "passed", message=cleanup_warning,
+                                 created_at=read_backup_receipt(path)["created_at"])
             print(f"備份成功，儲存位置：{path}")
         elif path is not None:
             print(f"副本驗證與設定切換完成。請重新啟動工會系統，再確認登入與資料。紀錄：{path}")

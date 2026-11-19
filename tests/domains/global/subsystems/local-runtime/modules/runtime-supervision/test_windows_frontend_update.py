@@ -35,6 +35,7 @@ $script:IdentityRegistry=[System.Collections.Generic.List[object]]::new()
 $script:UnknownRootPids=[System.Collections.Generic.List[int]]::new()
 $script:CleanupUnknown=$false; $script:Stopping=$false; $script:ExitCode=0
 $script:RunId='frontend-test'; $script:RunStartedAt=[DateTime]::UtcNow
+$script:BusinessTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById('Taipei Standard Time')
 $script:RemoteFrontendControlEnabled=$true
 '''
 

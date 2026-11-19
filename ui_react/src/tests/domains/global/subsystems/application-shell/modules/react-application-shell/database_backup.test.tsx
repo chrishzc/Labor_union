@@ -20,6 +20,8 @@ describe('資料庫備份時間', () => {
     show();
     const input = await screen.findByLabelText('每天執行時間');
     expect(input).toHaveValue('18:00');
+    expect(screen.getByText(/最近 14 天全部保留，最近 8 週每週保留最新一份，最近 12 個月每月保留最新一份/)).toBeInTheDocument();
+    expect(screen.getByText(/既有備份、手動及升級前備份不自動刪除/)).toBeInTheDocument();
     fireEvent.change(input, { target: { value: '17:30' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存時間' }));
     await screen.findByText('已設定每天 17:30 自動備份。');
@@ -50,5 +52,12 @@ describe('資料庫備份時間', () => {
     expect(screen.getByText('NAS 備份區目前無法使用，備份不會改存本機。')).toBeInTheDocument();
     expect(screen.getByText('正式復原演練與備份隔離性仍待維護人員驗收。')).toBeInTheDocument();
     expect(client.save).not.toHaveBeenCalled();
+  });
+  it('備份成功但清理未完成時保留成功時間並顯示警告', async () => {
+    vi.mocked(client.read).mockResolvedValue({ ...initial, last_result: { status: 'passed', time: initial.last_backup,
+      message: '備份已完成，過期備份清理未完成；請通知維護人員。' } });
+    show();
+    expect(await screen.findByText('備份已完成，過期備份清理未完成；請通知維護人員。')).toBeInTheDocument();
+    expect(screen.queryByText(/最近一次備份失敗/)).not.toBeInTheDocument();
   });
 });

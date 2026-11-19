@@ -26,7 +26,7 @@ function Write-FrontendControlJson {
                 $code = $cause.HResult -band 0xffff
                 # Older supervisors can briefly read request.json without delete sharing.
                 if ($cause -isnot [IO.IOException] -or $code -notin @(32, 33, 1175) -or $attempt -ge 19) {
-                    throw "Could not publish control file '$Path': $($cause.Message)"
+                    throw "Could not publish control file '$Path' after $($attempt + 1) attempts (100 ms retry interval): $($cause.Message)"
                 }
                 Start-Sleep -Milliseconds 100
             }
@@ -42,13 +42,26 @@ function Write-FrontendControlJson {
 function Read-FrontendControlJson {
     param([string]$Path)
     $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
-    try {
-        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8)
-        try { $reader.ReadToEnd() | ConvertFrom-Json }
-        finally { $reader.Dispose() }
+    for ($attempt = 0; ; $attempt++) {
+        try {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+            try {
+                $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8)
+                try { return ($reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop) }
+                finally { $reader.Dispose() }
+            }
+            finally { $stream.Dispose() }
+        }
+        catch {
+            $cause = $_.Exception.GetBaseException()
+            $code = $cause.HResult -band 0xffff
+            if ($cause -isnot [IO.IOException] -or $code -notin @(32, 33, 1175)) { throw }
+            if ($attempt -ge 19) {
+                throw "Could not read control file '$Path' after 20 attempts (100 ms retry interval). Close the program holding this file and retry. $($cause.Message)"
+            }
+            Start-Sleep -Milliseconds 100
+        }
     }
-    finally { $stream.Dispose() }
 }
 
 function Assert-FrontendArtifact {

@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-line-order-group-history-delete-v1",
+  "release_id": "labor-union-validation-schema-line-delivery-retention-v1",
   "source_bindings": {
-    "assembly_sha256": "11a620c1b3b63874937e8ea6f9cba3eab76001d1f6fb6d2fe1427cd54f66831b",
-    "validation_manifest_sha256": "f20568c7503a8a6ec35a2b4609962fbd751db3adbc7c33d064eb1fb45d8cd827",
+    "assembly_sha256": "422eddd8d9e89c91a1970427588b376ccb45bb3648f7e323abd6ebbb3b7b6478",
+    "validation_manifest_sha256": "e5785e4f051e2146de007b4064708a42cb07a836cce898d849f76882b146f983",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "70e401dbe23d9252e5a06811bbec59829994a52c3e985fc34cf2bbeb981c1fa9",
+  "sql_sha256": "10cd08ea5f4a307d516b54d260aae7d52858cfdbc8d897f9012a9d46d9d36a9d",
   "objects": {
     "tables": 400,
     "views": 2,

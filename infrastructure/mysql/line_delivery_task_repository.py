@@ -51,6 +51,7 @@ from subsystems.line.delivery_admin_contracts import (
     LineDeliveryAdminRecord,
     LineDeliveryAttemptRecord,
 )
+from subsystems.line.delivery_retention import LineDeliveryRetentionFacts, RETENTION_PAYLOAD
 
 
 class MySqlLineDeliveryTaskRepository:
@@ -97,6 +98,53 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_SELECT_SQL + (" FOR UPDATE" if lock else ""), (task_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _snapshot(row)
+
+    def retention_candidates(self, cutoff, limit: int) -> tuple[LineDeliveryTaskId, ...]:
+        if not 1 <= limit <= 25:
+            raise ValueError('delivery retention batch size must be between 1 and 25')
+        instant = database_utc(cutoff)
+        with self._connection.cursor() as cursor:
+            cursor.execute(_RETENTION_CANDIDATES_SQL, (instant, instant, limit))
+            return tuple(LineDeliveryTaskId(int(row['id'])) for row in cursor.fetchall())
+
+    def retention_facts(self, task_id: LineDeliveryTaskId) -> LineDeliveryRetentionFacts | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute('SELECT id,processing_status,updated_at_utc,lease_owner,lease_acquired_at_utc,'
+                'lease_expires_at_utc,error_code,completed_attempts,payload_snapshot FROM line_delivery_tasks '
+                'WHERE id=%s FOR UPDATE', (task_id.value,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            cursor.execute('SELECT error_code,completed_at_utc FROM line_delivery_attempt_events '
+                'WHERE task_id=%s ORDER BY attempt_number FOR UPDATE', (task_id.value,))
+            attempts = tuple(cursor.fetchall())
+            cursor.execute('SELECT intent_status FROM line_notification_intents '
+                'WHERE delivery_task_id=%s FOR UPDATE', (task_id.value,))
+            intents = tuple(cursor.fetchall())
+        payload = json.loads(canonical_json_value(row['payload_snapshot']))
+        return LineDeliveryRetentionFacts(task_id, LineDeliveryStatus(row['processing_status']),
+            aware_utc(row['updated_at_utc']),
+            any(row[key] is not None for key in ('lease_owner','lease_acquired_at_utc','lease_expires_at_utc')),
+            row['error_code'], int(row['completed_attempts']),
+            tuple(aware_utc(attempt['completed_at_utc']) for attempt in attempts),
+            attempts[-1]['error_code'] if attempts else None,
+            tuple(intent['intent_status'] for intent in intents), payload.get('_retention_expired') is True)
+
+    def expire_retention_details(self, facts: LineDeliveryRetentionFacts, key: IdempotencyKey) -> None:
+        with self._connection.cursor() as cursor:
+            try:
+                cursor.execute('SET @line_delivery_retention_key=%s', (key.value,))
+                cursor.execute('DELETE FROM line_delivery_attempt_events WHERE task_id=%s', (facts.task_id.value,))
+            finally:
+                cursor.execute('SET @line_delivery_retention_key=NULL')
+            cursor.execute('UPDATE line_notification_intents SET payload_snapshot=%s '
+                           'WHERE delivery_task_id=%s', (RETENTION_PAYLOAD, facts.task_id.value))
+            cursor.execute('UPDATE line_delivery_tasks SET payload_snapshot=%s,error_message=NULL,'
+                'updated_at_utc=updated_at_utc WHERE id=%s AND processing_status=%s AND updated_at_utc=%s '
+                'AND lease_owner IS NULL AND lease_acquired_at_utc IS NULL AND lease_expires_at_utc IS NULL',
+                (RETENTION_PAYLOAD, facts.task_id.value, facts.status.value, database_utc(facts.updated_at)))
+            if cursor.rowcount != 1:
+                raise RuntimeError('line_delivery_retention_task_changed')
 
     def table_image_document(self, key: str, index: int):
         from subsystems.line.table_image_contracts import TableDocument
@@ -386,7 +434,7 @@ class MySqlLineDeliveryTaskRepository:
         return normalized
 
     def list_admin(self, query: LineDeliveryAdminQuery) -> LineDeliveryAdminPage:
-        clauses: list[str] = []
+        clauses: list[str] = ["COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$._retention_expired')),'false')<>'true'"]
         parameters: list[object] = []
         if query.statuses:
             clauses.append(
@@ -747,6 +795,21 @@ def _redact_invitation_payload(payload_json: str) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+_RETENTION_CANDIDATES_SQL = (
+    "SELECT task.id FROM line_delivery_tasks task WHERE task.processing_status IN ('sent','cancelled') "
+    "AND task.updated_at_utc<%s AND task.lease_owner IS NULL AND task.lease_acquired_at_utc IS NULL "
+    "AND task.lease_expires_at_utc IS NULL AND COALESCE(task.error_code,'')<>'line_reply_outcome_uncertain' "
+    "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(task.payload_snapshot,'$._retention_expired')),'false')<>'true' "
+    "AND task.completed_attempts=(SELECT COUNT(*) FROM line_delivery_attempt_events a WHERE a.task_id=task.id) "
+    "AND NOT EXISTS(SELECT 1 FROM line_delivery_attempt_events a WHERE a.task_id=task.id AND a.completed_at_utc>=%s) "
+    "AND COALESCE((SELECT a.error_code FROM line_delivery_attempt_events a WHERE a.task_id=task.id "
+    "ORDER BY a.attempt_number DESC LIMIT 1),'')<>'line_reply_outcome_uncertain' "
+    "AND NOT EXISTS(SELECT 1 FROM line_notification_intents i WHERE i.delivery_task_id=task.id "
+    "AND i.intent_status<>CASE task.processing_status WHEN 'sent' THEN 'provider_accepted' ELSE 'cancelled' END) "
+    "ORDER BY task.updated_at_utc,task.id LIMIT %s"
+)
 
 
 _SELECT_COLUMNS = (

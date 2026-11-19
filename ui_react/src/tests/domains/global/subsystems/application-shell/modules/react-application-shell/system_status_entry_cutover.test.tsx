@@ -12,6 +12,7 @@ import {
   SYSTEM_STATUS_ENDPOINT,
 } from '../../../../../../../api/system/system_status_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { notificationTasksClient } from '../../../../../../../api/line_notifications/notification_tasks_client';
 
 const snapshotEnvelope = (overrides: Record<string, unknown> = {}) => ({
   success: true,
@@ -50,6 +51,7 @@ function authenticate(): void {
 describe('System Status entry cutover contract', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(notificationTasksClient,'pendingCount').mockResolvedValue(0);
     sessionClient.clearSession();
     act(() => {
       window.history.replaceState(null, '', '#');

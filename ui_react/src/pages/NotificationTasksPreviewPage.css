@@ -104,3 +104,8 @@
   .notification-preview-actions { flex-direction: column; }
   .notification-preview-actions .np-button { width: 100%; }
 }
+
+.binding-reminder-dismiss { margin-top: 18px; padding-top: 16px; border-top: 1px solid #f0e3da; }
+.binding-reminder-dismiss summary { cursor: pointer; font-weight: 600; }
+.binding-reminder-dismiss label { display: grid; gap: 8px; margin: 12px 0; }
+.binding-reminder-dismiss textarea { width: 100%; min-height: 76px; padding: 10px; border: 1px solid #dfc9bc; border-radius: 8px; font: inherit; box-sizing: border-box; }

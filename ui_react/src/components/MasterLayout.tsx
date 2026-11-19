@@ -30,6 +30,7 @@ import {
   type PerformanceSnapshot,
 } from '../api/system/system_status_client';
 import { sessionClient } from '../api/auth/session_client';
+import { notificationTasksClient, NOTIFICATION_TASKS_CHANGED } from '../api/line_notifications/notification_tasks_client';
 
 export type SectionType = 'operations' | 'line' | 'finance' | 'audit';
 export type PageType = 
@@ -140,6 +141,51 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   const [isDegraded, setIsDegraded] = useState<boolean>(false);
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [notificationCount,setNotificationCount] = useState<number|null>(null);
+  const [notificationCountLoading,setNotificationCountLoading] = useState(true);
+  const notificationRefresh = useRef<() => void>(() => {});
+  const previousPage = useRef(currentPage);
+  useEffect(() => {
+    const abort = new AbortController();
+    let busy = false;
+    let refreshAgain = false;
+    const load = async () => {
+      if (busy) { refreshAgain = true; return; }
+      busy = true;
+      setNotificationCountLoading(true);
+      try {
+        const count = await notificationTasksClient.pendingCount(abort.signal);
+        if (!abort.signal.aborted) setNotificationCount(count);
+      } catch {
+        if (!abort.signal.aborted) setNotificationCount(null);
+      } finally {
+        busy = false;
+        if (!abort.signal.aborted) {
+          setNotificationCountLoading(false);
+          if (refreshAgain) { refreshAgain = false; void load(); }
+        }
+      }
+    };
+    const refresh = () => { void load(); };
+    const focus = () => { if (!busy) void load(); };
+    notificationRefresh.current = refresh;
+    window.addEventListener(NOTIFICATION_TASKS_CHANGED,refresh);
+    window.addEventListener('focus',focus);
+    void load();
+    return () => {
+      abort.abort();
+      notificationRefresh.current = () => {};
+      window.removeEventListener(NOTIFICATION_TASKS_CHANGED,refresh);
+      window.removeEventListener('focus',focus);
+    };
+  },[]);
+  useEffect(() => {
+    if (previousPage.current !== currentPage && (previousPage.current === 'notifications' || currentPage === 'notifications')) {
+      notificationRefresh.current();
+    }
+    previousPage.current = currentPage;
+  },[currentPage]);
+  const notificationCountLabel = notificationCountLoading ? '正在確認待辦數量' : notificationCount === null ? '待辦數量無法確認，點此查看' : `${notificationCount} 項待辦`;
   const logoutCancelRef = useRef<HTMLButtonElement | null>(null);
   const logoutTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -289,11 +335,12 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             className={`notification-entry-button${currentPage === 'notifications' ? ' active' : ''}`}
             aria-label="開啟通知事項"
             aria-current={currentPage === 'notifications' ? 'page' : undefined}
-            title="通知事項"
+            title={notificationCountLabel}
             onClick={() => onSelectPage('notifications')}
           >
             <Bell size={17} aria-hidden="true" />
-            <span>通知事項</span>
+            <span className="notification-entry-label">通知事項</span>
+            <span className="notification-entry-count" aria-label={notificationCountLabel} aria-live="polite">{notificationCountLoading ? '…' : notificationCount ?? '?'}</span>
           </button>
 
           <details className="user-profile-menu">

@@ -231,3 +231,108 @@ def test_invalid_schedule_cannot_be_stored_or_executed(value):
 def test_followup_uses_taipei_date_and_next_slot_after_full_24_hours():
     sent=datetime(2026,11,5,6,tzinfo=timezone.utc)  # Taipei 14:00.
     assert followup_at(date(2026,11,5),sent,PaymentReminderSchedule()).isoformat()=='2026-11-07T10:00:00+08:00'
+
+
+@pytest.mark.parametrize('stage',['deposit','second'])
+@pytest.mark.parametrize('continuation_day',[None,date(2026,11,6)])
+def test_historical_old_or_unproven_cutoff_never_queues_automatic_initial(stage,continuation_day):
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit(stage)
+    unit.facts=replace(unit.facts,contract_completed=False,
+        notification_continuation=OrderNotificationContinuationFacts(True,True,continuation_day))
+    assert unit.worker().run_once()==0
+    assert unit.rows==[] and unit.commits==0
+
+
+@pytest.mark.parametrize('formally_arranged',[False,True])
+def test_historical_continuation_uses_arrangement_and_keeps_today_payment_rules(formally_arranged):
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit('second')
+    unit.facts=replace(unit.facts,contract_completed=False,
+        notification_continuation=OrderNotificationContinuationFacts(True,formally_arranged,date(2026,11,5)))
+    assert unit.worker().run_once()==int(formally_arranged)
+    if formally_arranged:
+        assert payment_reminder_delivery_is_current(unit,unit.rows[0],unit.now)
+        assert not unit.facts.contract_completed
+        unit.sent();unit.now+=timedelta(days=1,hours=1)
+        assert unit.worker().run_once()==1
+        assert payment_reminder_delivery_is_current(unit,unit.rows[1],unit.now)
+
+
+@pytest.mark.parametrize('initial_queued',[False,True])
+def test_new_historical_facts_cancel_preexisting_automatic_work_at_provider(initial_queued):
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit('deposit');unit.worker().run_once()
+    if not initial_queued:
+        unit.sent();unit.now+=timedelta(days=1,hours=1);unit.worker().run_once()
+    task=unit.rows[-1]
+    unit.facts=replace(unit.facts,
+        notification_continuation=OrderNotificationContinuationFacts(True,True,date(2026,11,6)))
+    assert not payment_reminder_delivery_is_current(unit,task,unit.now)
+    assert task.status=='cancelled'
+    unit.now+=timedelta(days=1)
+    assert unit.worker().run_once()==0
+
+
+
+@pytest.mark.parametrize('arranged,cutoff,key,expected',[
+    (False,None,'deposit-reminder:human',False),
+    (True,None,'deposit-reminder:human',True),
+    (True,None,'legacy-deposit-automatic',False),
+    (True,date(2026,11,6),'legacy-deposit-automatic',False),
+    (True,date(2026,11,6),'deposit-reminder:human',True),
+    (True,date(2026,11,5),'legacy-deposit-automatic',True),
+])
+def test_independent_deposit_provider_requires_continuation_and_explicit_old_debt_choice(arranged,cutoff,key,expected):
+    from unittest.mock import Mock
+    from subsystems.client_finance.deposit_payment_query import DepositPayment
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    from subsystems.line.deposit_notifications import REMINDER,payment_source,deposit_delivery_is_current
+    from shared_kernel.identities import CorrelationId
+    payment=DepositPayment('H','H:deposit',1,100,date(2026,11,5),'12345678901234',None,None,
+        OrderNotificationContinuationFacts(True,arranged,cutoff))
+    recipient=LineRecipient(LineRecipientType.USER,LineUserId(USER))
+    task=SimpleNamespace(task_id=SimpleNamespace(value=9),request=SimpleNamespace(
+        source_aggregate_type=REMINDER,source_aggregate_identity=payment_source(payment),
+        recipient=recipient,idempotency_key=IdempotencyKey(key),correlation_id=CorrelationId('deposit-source')))
+    unit=SimpleNamespace(deposit_payments=SimpleNamespace(get=Mock(return_value=payment)),
+        deposit_notifications=SimpleNamespace(customer_line_user_id=Mock(return_value=USER),contract_completed=Mock(return_value=False)),
+        delivery_tasks=SimpleNamespace(cancel=Mock()),commit=Mock())
+    assert deposit_delivery_is_current(unit,task,NOW) is expected
+    assert unit.delivery_tasks.cancel.call_count==int(not expected)
+
+
+def test_first_greeting_does_not_include_old_historical_payment(monkeypatch):
+    from infrastructure.mysql import service_start_day_repository as repository
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit('first')
+    unit.facts=replace(unit.facts,
+        notification_continuation=OrderNotificationContinuationFacts(True,True,date(2026,11,6)))
+    query=SimpleNamespace(for_case=lambda case:(unit.facts,),get=lambda *args,**kwargs:unit.facts)
+    monkeypatch.setattr(repository,'MySqlClientPaymentReminderQueryRepository',lambda connection:query)
+    current=repository.MySqlServiceStartDayRepository(None)
+    assert current.first_payment('CASE-1') is None
+    unit.facts=replace(unit.facts,
+        notification_continuation=OrderNotificationContinuationFacts(True,True,date(2026,11,5)))
+    assert current.first_payment('CASE-1')==unit.facts.payment
+
+
+def test_customer_binding_reminders_count_and_items_share_owner_eligibility():
+    from unittest.mock import Mock
+    from domains.line.identity_binding import LineBindingSubjectType
+    from infrastructure.mysql.line_identity_management_repository import MySqlLineIdentityManagementRepository
+    from infrastructure.mysql.order_notification_continuation_query_repository import notification_continuation_eligible_sql
+    from subsystems.line.identity_management_contracts import LineIdentityCandidateQuery
+    cursor=Mock();cursor.__enter__=Mock(return_value=cursor);cursor.__exit__=Mock(return_value=False)
+    cursor.fetchone.return_value={'total':1}
+    cursor.fetchall.return_value=({'subject_reference':1,'subject_name':'case client','phone':None,'case_no':'H'},)
+    repo=MySqlLineIdentityManagementRepository(SimpleNamespace(cursor=lambda:cursor))
+    result=repo.binding_reminders(LineIdentityCandidateQuery(LineBindingSubjectType.CUSTOMER,page=2,page_size=5))
+    count,items=cursor.execute.call_args_list
+    count_where=count.args[0].split(' WHERE ',1)[1]
+    items_where=items.args[0].split(' WHERE ',1)[1].rsplit(' ORDER BY ',1)[0]
+    assert count_where==items_where
+    assert notification_continuation_eligible_sql('o') in count_where
+    assert count.args[1]==items.args[1][:-2]
+    assert items.args[1][-2:]==(5,5)
+    assert result.total==1 and result.items[0].case_no=='H'

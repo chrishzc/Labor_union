@@ -32,9 +32,12 @@ class LineNotificationWarningSkipPreviewView(_ClosedModel):
     notification_reason: StrictStr
     owner_snapshot_token: Sha256Hex
     preview_fingerprint: Sha256Hex
+    source_event_ids: list[int]
+    tasks: list[dict[str, int | str]]
 
 
 class LineNotificationWarningSkipApplyRequest(_ClosedModel):
+    reason: Annotated[StrictStr, Field(min_length=1, max_length=500)]
     owner_snapshot_token: Sha256Hex
     preview_fingerprint: Sha256Hex
     idempotency_key: Annotated[StrictStr, Field(min_length=1, max_length=191)]

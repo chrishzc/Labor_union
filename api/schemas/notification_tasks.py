@@ -7,6 +7,7 @@ from datetime import date
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, BeforeValidator
 from api.routes.line_payment_overdue_reminders import PaymentSnapshot
+from api.schemas.line_tasks import NotificationHandlingView
 
 
 class LogReminderContext(BaseModel):
@@ -38,6 +39,7 @@ class NotificationFailureSourceView(BaseModel):
 
 
 class NotificationFailureDetailView(BaseModel):
+    handling: NotificationHandlingView
     model_config = ConfigDict(extra='forbid')
     case_no: str
     notification_reason: Literal['recipient_unavailable', 'template_or_schedule_invalid']

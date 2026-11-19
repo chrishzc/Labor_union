@@ -203,3 +203,32 @@ def test_case_notice_query_returns_period_history_and_does_not_enqueue():
     current=next(row for row in rows if row.payment_stage==PAYMENT.payment_stage)
     assert current.can_send and current.history[0].sent_at is None and current.message
     unit.delivery_tasks.enqueue.assert_not_called();unit.commit.assert_not_called()
+
+
+
+def test_historical_old_debt_stays_manual_without_inventing_contract_completion():
+    from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit()
+    facts=ClientPaymentReminderFacts(PAYMENT,date(2032,5,10),False,'服務中',
+        OrderNotificationContinuationFacts(True,True,date(2032,5,11)))
+    unit.payment_overdue_reminders.case_facts=Mock(return_value=(facts,))
+    unit.payment_overdue_reminders.history=Mock(return_value=())
+    app=PaymentOverdueReminderApplication(lambda:unit,lambda:NOW)
+    assert app.case(PAYMENT.case_no)[0].can_send
+    assert app.send_case(PAYMENT,'human-selected-old-debt',ActorContext('union'))==(1,'pending')
+    assert not facts.contract_completed
+    assert not facts.notification_continuation.allows_automatic_payment(PAYMENT.due_date)
+    unit.delivery_tasks.enqueue.assert_called_once()
+
+
+def test_historical_without_formal_schedule_cannot_be_manually_queued_from_case():
+    from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+    from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
+    unit=Unit()
+    facts=ClientPaymentReminderFacts(PAYMENT,date(2032,5,10),False,'訂單成立',
+        OrderNotificationContinuationFacts(True,False))
+    unit.payment_overdue_reminders.case_facts=Mock(return_value=(facts,))
+    with pytest.raises(PaymentOverdueReminderConflict,match='payment_case_source_changed'):
+        PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send_case(PAYMENT,'not-arranged',ActorContext('union'))
+    unit.delivery_tasks.enqueue.assert_not_called()

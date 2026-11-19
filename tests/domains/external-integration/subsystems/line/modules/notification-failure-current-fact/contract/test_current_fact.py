@@ -321,11 +321,12 @@ def test_failure_work_is_associated_with_its_original_source_only():
         'source_aggregate_type':'order','source_aggregate_identity':'CASE-006','source_version':1,'facts_snapshot':original['facts_snapshot'],
         'decision_id':31,'decision_status':'intent_created','reason_code':'rule_matched','intent_id':41,
         'delivery_status':'failed','delivery_task_id':51}
-    cursor = _Cursor(all_rows=((original,other),(replay,)),one_rows=(
+    cursor = _Cursor(all_rows=((original,other),(replay,),({'source_event_id':11,'delivery_task_id':99},
+        {'source_event_id':11,'delivery_task_id':100})),one_rows=(
         {'revision_id':7,'definition_snapshot':json.dumps({'rules':[{'id':'rule-a','event_code':'deposit_confirmed','enabled':True,'predicates':[]}]})},None))
     result = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(QUERY)
-    assert result.related_task_ids == (51,99)
-    assert result.source_task_ids == ((11,(51,99)),(12,()))
+    assert result.related_task_ids == (51,99,100)
+    assert result.source_task_ids == ((11,(51,99,100)),(12,()))
 
 
 @pytest.mark.parametrize('status,expected', [('sent',(98,96,94)),('processing',(99,98,97,96,94)),('failed',(99,98,97,96,94))])

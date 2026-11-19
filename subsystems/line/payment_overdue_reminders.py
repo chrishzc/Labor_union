@@ -106,11 +106,12 @@ class PaymentOverdueReminderApplication:
                 matches = [row for row in facts if row.payment.payment_stage == stage]
                 fact = matches[0] if len(matches) == 1 else None
                 payment = fact.payment if fact else None
-                recipient = repo.recipient(payment) if payment and fact.contract_completed and payment.remaining_amount_ntd > 0 else None
+                recipient = repo.recipient(payment) if payment and fact.reminder_eligible and payment.remaining_amount_ntd > 0 else None
                 pending = bool(payment and repo.has_pending(payment.obligation_identity))
                 reason = ("本期期款或日期來源待確認／已無待收款" if payment is None else
                     "本期已繳齊，無需繳款提醒" if payment.remaining_amount_ntd <= 0 else
-                    "本案雙方簽約尚未完成" if not fact.contract_completed else
+                    "本案尚未符合歷史通知接續資格" if not fact.notification_continuation.eligible else
+                    "本案雙方簽約尚未完成" if not fact.reminder_eligible else
                     "尚未綁定客戶 LINE" if recipient is None else
                     "本期已有寄送工作，請先確認原工作結果" if pending else None)
                 p_load = self._payload(unit,payment) if payment is not None else None
@@ -158,7 +159,7 @@ class PaymentOverdueReminderApplication:
                 raise PaymentOverdueReminderConflict('payment_overdue_changed')
             if case_scope:
                 matches=[row for row in repository.case_facts(current.case_no) if row.payment.payment_stage==current.payment_stage]
-                if len(matches)!=1 or not matches[0].contract_completed or matches[0].payment!=current:
+                if len(matches)!=1 or not matches[0].reminder_eligible or matches[0].payment!=current:
                     raise PaymentOverdueReminderConflict('payment_case_source_changed')
             if repository.has_pending(current.obligation_identity,lock=True):
                 raise PaymentOverdueReminderConflict('payment_overdue_reminder_in_flight')

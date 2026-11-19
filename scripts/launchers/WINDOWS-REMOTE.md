@@ -216,6 +216,4 @@ https://line.chrishzc.com/webhook/line
 受限目錄的 `line-worker-repair-receipt.json` 保存本次結果。先前 `normal-operations-receipt.json` 的 LINE 503 是修復前的階段紀錄。
 ### 無正式資料時測試非市民申請
 
-在管理 API 使用的 `.env` 設定 `REGISTRATION_USE_SHARED_REDIS_FOR_TEST=1`，並保留原本的 `REDIS_URL`，例如 `redis://127.0.0.1:6379/0`。重啟 API 後設定生效。
-
-需要測試 LINE 收件時，在原 Compose 專案使用 `docker compose -f docker-compose.yml -f docker-compose.registration-test.yml up -d redis registration-intake registration-token-verifier`，並將測試入口接到該次部署的收件服務。此配置的收件端使用一般 Redis 的第 0 號資料庫，管理端的 `REDIS_URL` 須指向同一資料庫。正式資料環境使用原專用 Redis 配置。
+在管理 API 使用的 `.env` 設定 `REGISTRATION_USE_SHARED_REDIS_FOR_TEST=1`，並保留原本的 `REDIS_URL`，例如 `redis://127.0.0.1:6379/0`。由 `Windows管理.bat` 啟動或重啟時會一併套用測試 Compose，讓收件、LINE 驗證和管理 API 使用同一次測試部署。收件端使用一般 Redis 的第 0 號資料庫，管理端需指向同一資料庫。測試 LINE 時請將測試入口接到該次部署的收件服務。正式資料環境使用原專用 Redis 配置。

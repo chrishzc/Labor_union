@@ -167,6 +167,30 @@ class LineIdentityManagementApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.binding_reminders(query)
 
+    def dismiss_customer_binding_reminder(self, subject_reference: int, case_no: str,
+            reason: str, key: IdempotencyKey, actor: ActorContext) -> bool:
+        require_line_capability(actor, LineCapability.IDENTITY_BINDING_MANAGE)
+        if subject_reference <= 0 or not case_no.strip() or not reason.strip():
+            raise ValueError('binding_reminder_reason_required')
+        fingerprint = fingerprint_payload({'action':'dismiss_customer_binding_reminder',
+            'subject_reference':subject_reference, 'case_no':case_no, 'reason':reason.strip()})
+        reference = f'binding-reminder-dismissed:customer:{subject_reference}:{case_no}'
+        with self._unit_of_work_factory() as unit:
+            if not unit.identity_management.lock_customer_reminder_subject(subject_reference, case_no):
+                raise LookupError('binding_reminder_subject_changed')
+            existing = unit.receipts.get(key, for_update=True)
+            if existing is not None:
+                if existing.payload_fingerprint != fingerprint or existing.result_reference != reference:
+                    raise RuntimeError('binding_reminder_idempotency_conflict')
+                return True
+            unit.receipts.append(IdempotencyReceipt(key, fingerprint, reference), result_snapshot={
+                'subject_reference':subject_reference, 'case_no':case_no, 'reason':reason.strip(),
+                'actor_id':actor.actor_id, 'dismissed_at':self._now().isoformat()})
+            unit.audit.append(LineAuditIntent('line.binding_reminder.dismissed', actor.actor_id,
+                'customer_binding_reminder', f'{subject_reference}:{case_no}'))
+            unit.commit()
+            return False
+
     def subject_contexts(self, subjects):
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.subject_contexts(subjects)

@@ -4,6 +4,8 @@ The owner applications retain validation, concurrency, idempotency and commits.
 These endpoints never execute a provider or publish menus.
 """
 from typing import Annotated, Literal
+from dataclasses import asdict
+from subsystems.line.notification_handling import failure_handling
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 from api.dependencies.admin_auth import require_capability, admin_actor_context, has_required_capability
@@ -23,6 +25,28 @@ router = APIRouter(prefix='/api/v1/line/notification-task-actions', tags=['Notif
 mobile_router = APIRouter(prefix='/api/v1/line/mobile-admin/notification-task-actions', tags=['Notification Workbench'])
 
 
+class DismissCustomerBindingReminder(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    subject_reference: int = Field(gt=0)
+    case_no: str = Field(min_length=1, max_length=50)
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+@router.post('/customer-binding-reminder/dismiss')
+def dismiss_customer_binding_reminder(body: DismissCustomerBindingReminder,
+        principal=Depends(require_capability(LineCapability.IDENTITY_BINDING_MANAGE))):
+    from api.dependencies.line_identity import get_line_identity_management_application
+    try:
+        replayed = get_line_identity_management_application().dismiss_customer_binding_reminder(
+            body.subject_reference, body.case_no, body.reason,
+            IdempotencyKey(body.idempotency_key), admin_actor_context(principal))
+    except (LookupError, RuntimeError) as error:
+        raise typed_http_error(409, 'conflict', str(error),
+            '提醒對象或操作已改變，請重新整理後核對。', 'notification-binding') from error
+    return BaseResponse(data={'dismissed':True, 'replayed':replayed})
+
+
 def _failure_detail(issue_key, principal):
     from api.routes.notification_tasks import failure_readback
     with open_line_unit_of_work() as unit:
@@ -36,12 +60,17 @@ def _failure_detail(issue_key, principal):
                   'notification_source_not_currently_applicable':'案件狀況已改變，原通知目前已不適用。請返回並重新整理待辦。'}
         sources = []
         active_task_ids = set()
+        task_records = []
         for task_id in current.related_task_ids:
             task = unit.delivery_tasks.get(LineDeliveryTaskId(task_id))
             if task is None:
                 raise typed_http_error(503, 'unavailable', 'notification_failure_task_unavailable', '原寄送工作暫時無法核對，請重試。', 'notification-failure')
             if task.status.value in ('pending','processing','failed','retryable_failed'):
                 active_task_ids.add(task_id)
+            record = unit.delivery_tasks.get_admin(LineDeliveryTaskId(task_id))
+            if record is None:
+                raise typed_http_error(503, 'unavailable', 'notification_failure_task_unavailable', '原寄送工作暫時無法核對，請重試。', 'notification-failure')
+            task_records.append(record)
         source_tasks = dict(current.source_task_ids)
         for identity in current.unresolved_source_ids:
             if identity not in source_tasks:
@@ -58,7 +87,9 @@ def _failure_detail(issue_key, principal):
                     '本筆通知已有原寄送工作，請接續下方原工作的重試或取消入口處理，不另建補送。' if has_original_work else
                     labels.get(preview['unavailable_reason'], '目前無法確認補送資格，請核對通知設定與原案件資料後重新核對。') if not preview['can_replay'] else
                     None if has_required_capability(principal, LineCapability.CONFIG_MANAGE.value) else '目前帳號沒有補送通知的權限，請由有權限的工會人員處理。'})
-        return {'case_no':current.case_no,'notification_reason':current.notification_reason.value,'sources':sources,
+        handling = failure_handling(current, task_records, admin_actor_context(principal), issue_key,
+            can_replay=any(s['can_replay'] for s in sources))
+        return {'handling': asdict(handling), 'case_no':current.case_no,'notification_reason':current.notification_reason.value,'sources':sources,
                 'related_task_ids':list(current.related_task_ids)}
 
 

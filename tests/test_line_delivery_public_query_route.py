@@ -61,6 +61,10 @@ def _record() -> LineDeliveryAdminRecord:
 
 
 class _Application:
+    def handling(self, task, actor):
+        from subsystems.line.notification_handling import NotificationHandling
+        return NotificationHandling('delivery_task',str(task.task_id.value),False,())
+
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -130,6 +134,18 @@ def test_delivery_query_rejects_identity_and_arbitrary_source_filters(monkeypatc
     assert identity.status_code == 422
     assert source.status_code == 422
     assert application.calls == []
+
+
+def test_expired_delivery_detail_is_typed_gone_and_does_not_expose_history(monkeypatch):
+    application = _Application()
+    application.get = lambda *_: (replace(_record(), payload_json='{"_retention_expired":true}'), ())
+    response = _client(monkeypatch, application).get('/api/v1/line/tasks/1')
+    assert response.status_code == 410
+    assert 'line_delivery_history_expired' in response.text
+    assert response.json()['detail']['error']['category']=='not_found'
+    assert '六個月' in response.text
+    assert 'attempts' not in response.json()
+    assert 'payload_json' not in response.text
 
 
 def test_delivery_source_groups_are_safe_and_bounded() -> None:

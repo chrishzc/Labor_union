@@ -806,6 +806,7 @@ def _persist_lifecycle(repository, request, preview, receipt):
         reason=request.reason,
         correlation_id=request.correlation_id,
         trigger_event=_actual_start_trigger_event(preview),
+        actual_start_date=preview.after_actual_start_date,
     )
     return repository.persist_lifecycle_impact(command)
 

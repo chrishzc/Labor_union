@@ -13,8 +13,9 @@
 - **Webhook Inbox（`received → processing → completed | retry_pending | failed | ignored`）**：同 HTTP 批內事件共保存於單一 ingestion 交易，個別 event 獨立處理與交易隔離；缺 `webhookEventId` 以版本指紋識別。dispatch 任一步業務失敗整筆業務 UoW 回滾，再另開交易記 `retryable_failed`／`terminal_failed`。`follow / unfollow` 為官方帳號好友事件：僅維護目前好友狀態（時間早於 `last_event_at` 之晚到事件僅留歷史而不倒退目前好友狀態），系統不於 `follow` 建立身分流程或發送歡迎訊息（加入好友歡迎訊息改由 LINE 官方帳號設定）。
 - **M2 路由優先序**：採用確定性規則處理明確自助指令。一般詢問、客服及客訴由工會在 LINE 官方帳號直接處理。Webhook 完成驗簽及收件後，提交即時 Reply 所需的業務寫入與投遞紀錄，再呼叫 LINE Reply。其餘業務交背景處理，背景不補發 Reply 或以 Push 替代。詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
 - **同事件即時與背景處理**。同一事件兼有即時 Reply 與背景業務時，保留 Inbox 租約至 Reply 嘗試結束後交回背景。程序中斷時沿既有租約逾期回收，詳見 [LINE Reply 規格](20_LINE客服與月嫂自助服務正式規格.md#32-line_webhook_reply-執行與驗證契約)。
-- **Delivery Task（`pending → processing → sent | retry_pending | failed | cancelled`）**：
+- **Delivery Task（`pending → processing → sent | retryable_failed | failed | cancelled`）**：
   - Worker 每輪逐筆取得短效未過期租約（預設批大小 25 筆）並於送前重驗未取消；同鍵入列必回既有 task／receipt。
+  - 重試、取消與最終失敗工作之結清依 [LINE 異常處理契約](#42-不再寄送與結清)。
   - **業務通知投影規則**：
     - 契約簽署與 LINE 通知分工見 [簽約規格 §3.3](21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#33-檔期衝突檢核送交記錄與官方帳號提醒)。
     - **`order.service_start_day`（開工當天群組問候）**：依 Scheduling 確認的正式開工日，在台北時間開工當天依現有開工日通知時段，向本案已綁定的服務群組排入每案一則純文字 Push。依 [LINE-PAY-02](20_LINE客服與月嫂自助服務正式規格.md#62-繳款提醒與人工收據規範)，第一期款有未結清餘額時，才將繳款提醒追加到同一則文字。無第一期款或已結清時仍發送問候。第一期款排程與通用通知規則不得另外排入開工問候或同日第一期首次提醒。重跑排程及重試沿用同一通知識別。送出前重驗正式開工日、群組綁定及第一期款狀態，避免已結清仍催繳。缺有效群組時留供工會查核，不改投私聊；過去開工日不因啟用此通知而補發。`order.pre_start_reminder` 維持停用。
@@ -53,7 +54,56 @@
 
 - **群組告警與管理員個人 Push 全面退役（`NAS-LINE-03`）**：`設定異常通知群組` 及管理員個人告警 Push（含 `runtime_health_event`、`customer_service_escalation`、`runtime.alert.review_required`、`complaint.ingress.hold_high_ticket`）已正式退役，舊 target 寫入回 `410 Gone`、未寄工作於 provider 前取消。管理員主動於 LIFF 待辦工作台頂端透過唯讀摘要端點 `/api/v1/line/mobile-admin/notification-task-actions/runtime/query`（驗權後回整體／worker 狀態與計數，禁曝錯誤詳情或對象）檢視運行現況（無主動推送案件狀態標 `unknown`）。
 - **M4 Safe Review Link**：`IssueSafeReviewLink`／`Redeem`／`Revoke`／`Query` 使用 `issued → redeemed | expired | revoked` 一次性憑證（DB 存 digest＋immutable `runtime_alert_target` 證據，LINE payload 禁夾帶原始 token／URL）。
-- **`LINE-006`（`case_no + notification_reason`）**：`LINE Notification` 計算每個適用失敗來源是否皆具備有效 terminal `manual-replay:{source_event_id}:{idempotency_key}` 後繼成功（未取消案件之未送達來源不因設定錯誤失效）；工會可逐筆人工確認略過（`POST /api/v1/line/notification-rules/failures/{issue_key}/skip/{preview|apply}` 寫入綁定 exact owner snapshot token 之 `line.notification.warning_skip` audit 後清除 current issue；來源變更後可重現）。
+- **`LINE-006`（`case_no + notification_reason`）**：LINE 擁有目前失敗來源、投遞結果與人工處置，Anomalies 只消費 typed current predicate。只要通知仍適用，單純修正設定不代表已送達；人工結清依本節辦理。
+
+### 4.1 共用待辦判定與操作資格
+
+- LINE 提供同一份 typed 處理投影，包含明確處理目標、`needs_attention`、`allowed_actions` 與 `blocked_reason`。目標只分為寄送工作及 `LINE-006` 通知異常；有正式來源對應時，投影須指出會處理的原來源及相關工作範圍，沒有來源對應的工作維持單筆 task 目標，不猜測或按案號擴大範圍。
+- `needs_attention` 由目前 owner facts、來源適用性、投遞結果及有效人工結清共同決定。原失敗次數、未解決來源 ID 與 attempt 紀錄屬證據，不能單獨覆蓋人工結清判定。通知事項、寄送異常清單、詳情、數量及 Anomalies consumer 使用同一判定；待辦移除不立即刪除寄送紀錄；完整內容與嘗試明細的六個月保存依 §4.4，必要處理憑證另外保留。
+- `allowed_actions` 由後端依目前狀態、來源是否啟用及人員原有 capability 計算；前端依此顯示按鈕，Apply 仍 fresh-read 並重新驗權。無可執行操作時顯示原因及核對入口，不以缺少按鈕代替原因。退役來源禁止重試或補送，但已失敗或尚未送出的工作仍可依 §4.2 結清。
+- 共用範圍僅為 LINE 異常的判定與操作契約；重用既有 Delivery、manual replay、人工略過、audit、receipt 與 outer Unit of Work。各業務通知資格仍由原 owner 提供，不建立管理全部提醒的 generic failure root、通用業務狀態機或第二套 retry／fallback。
+- Query 零寫入、零排送；讀回失敗或不完整須明示，不能當成零筆、已解決或可安全結清。清單的數量與分頁都以相同目前資格計算；有後頁但本頁零筆時仍可繼續讀取。
+
+### 4.2 不再寄送與結清
+
+- 管理端以「不再寄送／結清」表示停止選定範圍的後續投遞並消除待辦。既有 `POST /api/v1/line/notification-rules/failures/{issue_key}/skip/{preview|apply}` 承接通知異常的結清，沿用 exact owner snapshot、PreviewFingerprint 與 `line.notification.warning_skip` audit，不新增平行 token 或處置狀態；單筆工作沿 Delivery 控制入口辦理。兩者同用 §4.1 的目前判定，不另提供只隱藏待辦而繼續寄送的略過方式。
+- Preview 顯示案件或工作識別、原來源、納入的工作、目前狀態與操作影響。結清須保存操作者、原因、目標、實際處理範圍、時間及冪等收據；權限沿原 `TASK_CONTROL`／`CONFIG_MANAGE`，跨範圍操作須滿足各項原權限，不因共用介面放寬。
+- `pending`／`retryable_failed` 可取消；`failed` 可由人員結清並轉為 `cancelled`。取消只改工作生命週期，保留既有失敗時間、嘗試次數、attempt 結果及稽核，不改成 `sent`，不重做核銷、排班或案件狀態。`sent` 只留寄送紀錄，不提供以結清撤回訊息的操作。
+- `processing` 或 provider 結果不明時，一般結清不得回報已安全停送；保留待核對結果與阻擋原因，沿既有租約回收及正式結果核對流程處理後，再依目前狀態結清。worker 與 Apply 同時執行時，依目前租約與狀態驗證，不能把已發生或效果未明的外部呼叫當作未送出。
+- 通知異常結清涵蓋 Preview 明示之原來源及其目前未送出重試／manual replay 後繼工作。Apply 在同一 LINE outer Unit of Work 鎖定並 fresh 驗證目前來源與工作；如已進入發送、結果不明或範圍變動，回 typed conflict，不能只隱藏一部分待辦。確認可結清後先取消相關未送出工作，再以取消後的 authoritative readback 保存有效處置及收據，提交後 bounded recheck；不可用本操作自身造成的版本變化製造 stale 或重新開啟待辦。
+- 結清後，同一已處置來源不得由排程、retry 或 replay 自動重建寄送工作；送出前亦須核對目前處置。新的業務事件或後續 owner facts 形成新的適用通知時，依正式資格重新判斷，不受前次處置永久封鎖。不能僅因本次取消改變任務結果便視為新的業務事件。
+- 批次處理先以明確環境、篩選及分頁預覽固定候選目標，再由人員選定；不按「全部失敗」直接清資料。依 canonical 處理目標去重，每個目標維持原單一 outer commit，回報各項成功、衝突或失敗；重試只接續未成功項目，保留已成功的收據。結清本身不刪除業務資料、來源、attempt、投遞歷史或核銷證據；其後到期整理僅依 §4.4，不刪除核銷及停送憑證。
+
+### 4.3 結清驗收
+
+| ID | S：情境與前提 | T：人員任務 | A：操作 | R：可判定結果 |
+|---|---|---|---|---|
+| LINE-CLOSE-01 | `failed` 工作仍列待辦，含已退役且禁止重試的來源 | 結清不需補送的通知 | 預覽並確認「不再寄送／結清」 | 有合法結清入口，工作轉 `cancelled` 且待辦移除；零 provider call，失敗 attempt 與處置原因可查 |
+| LINE-CLOSE-02 | 同一來源出現在通知異常與寄送失敗清單，含待送的補送工作 | 一次結清原來源 | 由任一入口開啟同一處理範圍並確認，再重查兩份清單及數量、執行 worker | 選定範圍的未送出工作停止；兩份待辦及數量一致移除，寄送歷史保留；worker 不補送 |
+| LINE-CLOSE-03 | 原來源缺少映射或 recheck target，但有真實失敗 task | 處理既有工作 | 開啟單筆 task，預覽結清範圍並確認 | 僅結清該 task，不推測其他來源或整案範圍；不因缺映射永久列為無法處理的待辦 |
+| LINE-CLOSE-04 | 相同結清命令重送，或 Preview 後工作已進入發送／資料變動 | 防止重複與錯誤結清 | 重送相同冪等鍵，另以變動前 Preview 提交 | 前者回原收據；後者回 typed conflict 且不回報結清成功，沒有部分隱藏或新增補送 |
+| LINE-CLOSE-05 | provider 結果不明、讀回不完整或權限不足 | 核對能否結清 | 查清單、詳情並嘗試結清 | 有明確阻擋原因，結果不明或讀回不完整不能假裝零筆或成功；權限不足零 mutation |
+| LINE-CLOSE-06 | 原來源已結清，之後又有新的業務事件及適用通知 | 接續新的正常作業 | 重跑原排程，另處理新事件 | 原來源不自動重建寄送工作；新事件依其正式資格建立通知，不因前次結清永久封鎖 |
+| LINE-CLOSE-07 | 測試環境有多頁失敗工作，部分目標同源、部分已變動 | 批次結清選定項目 | 預覽並選定目標，執行後重送未成功項目 | 同源目標不重複處理，各項結果及收據可讀回；變動項目回衝突，未選項目及其他環境不受影響 |
+
+
+### 4.4 寄送紀錄六個月滾動保存
+
+- 使用者核定完整寄送內容與嘗試明細滾動保留六個月。以目前時間轉 Asia/Taipei 後向前六個日曆月計算 cutoff，月末不存在同日則取該月最後一日，保留時分秒；轉 UTC 與資料庫比較。嚴格早於 cutoff 才到期，恰在邊界仍保留。
+- 只有 `sent`／`cancelled` 且最後更新時間與所有 attempt 完成時間均早於 cutoff、所有租約欄位空、寄送結果已確認者可整理。`pending`／`processing`／`retryable_failed`／未解決 `failed`、目前或最後 attempt 尚有 `line_reply_outcome_uncertain`、linked intent 尚未到相符終態及未來時間一律保留。單純建立時間久遠不構成到期。
+- 到期同交易刪除該工作 attempt 明細，將 task 與所有 linked notification intent 完整 payload 替換為明確 `_retention_expired=true` 標記，移除 task 長錯誤說明。不得僅隱藏 UI 而保留相同正文副本。line inbox 的入站內容、業務來源與其他 Domain facts 不屬本次寄送紀錄清理範圍。
+- task 精簡主列保留原 ID、recipient/source 身分、原 payload fingerprint、idempotency/correlation key、終態、時間與累計嘗試數，供既有 source linkage、付款已通知及防重送核對；不變更原 fingerprint 或原最後更新時間。LINE command receipts、audit、人工結清原因、綁定誤報消除及來源停送憑證不刪除。這些是必要操作證據，不能當成可復原完整內容的歷史。
+- 清理屬 LINE owner 維護工作，沿 canonical worker 的 additional worker 接線，每輪有界最多 25 筆候選，每筆 fresh lock task、attempt 與 intent，由一個 outer UoW 保存精確 task/cutoff 清理憑證、執行刪除與去內容化、提交；失敗 rollback 該筆，不產生 provider call。舊資料庫須先套正式 additive guard migration，禁止關閉既有 append-only trigger。
+- attempt DELETE 只接受精確 session command key 對應 durable `line_command_receipts` 的 `line-delivery-retention:<task_id>` result_reference，snapshot task_id/cutoff 一致，且 DB fresh task 仍為無租約的合法終態、最後更新及該 attempt 完成時間早於 cutoff；保留原 registry-delete 例外。session command key 於 finally 清除，不以無憑證旗標開放刪除。
+- 清理後列表及總數同時排除到期標記，直接開啟舊 detail 回 typed `410 line_delivery_history_expired`，顯示內容與明細已到期，而非假空白或泛用 500。既有工作鍵 enqueue 仍回同 task，不重建、不重新發送；原圖片下載不再提供已清除內容；原來源或其精確 replay 內容已到期時，Preview／Apply 拒絕以舊來源補送，回 `notification_source_history_expired`，新業務事件仍按目前資格判斷。尚未處理的異常不受六個月限制。
+- 重跑略過已整理 task，不新增重複憑證。DB 備份可能包含當時尚未到期的內容，依 [NAS 備份保存](10A_NAS_Fresh初始化與維護復原規格.md#52-每日排程備份滾動保存) 管理；本節不回寫或刪除既有備份，也不自動還原內容。
+
+| ID | S | T | A | R |
+|---|---|---|---|---|
+| LINE-RET-01 | 六個月前後及月底、跨年工作同時存在 | 按六個日曆月整理已完成歷史 | 固定臺灣時鐘，執行 worker 並讀回 task、attempt、intent | 嚴格早於 cutoff 的合法終態去正文及明細，邊界與新工作不變；所有正文副本同步整理 |
+| LINE-RET-02 | 待送、處理中、重試、未解決失敗或結果不明已超過六個月 | 保留仍需處理的工作 | 執行相同清理 | payload、attempt、狀態與待辦不變；不發送 LINE |
+| LINE-RET-03 | 工作已到期整理、來源已人工結清 | 防止清理後重送與誤報復活 | 用原鍵 enqueue、重跑清理、查詢兩份待辦與舊 detail | enqueue 回同 task，重跑零重複整理；停送／消除憑證保留；舊 detail typed410，列表count/items一致排除 |
+| LINE-RET-04 | 刪除命令缺憑證、task/key不符、未到期或尚有租約 | 維持 DB 防刪保護 | 真 MySQL 執行正負 scoped DELETE 並注入中途失敗 | 只有合法到期精確 task 可刪；負例拒絕且無部分清理，原 registry-delete保護仍有效 |
 
 ## 5. Rich Menu、通知文案編輯與表格圖片
 

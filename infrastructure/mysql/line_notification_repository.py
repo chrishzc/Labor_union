@@ -269,7 +269,7 @@ class MySqlLineNotificationRepository:
             sources.append(
                 LineNotificationFailedSourceFact(
                     source_event_id=source_id,
-                    currently_applicable=bool(row["is_latest_source_version"]) and bool(row["source_case_current"])
+                    currently_applicable=not self._source_closed(source_id) and bool(row["is_latest_source_version"]) and bool(row["source_case_current"])
                     and current_rule_applies and self._source_currently_applicable(NotificationSourceEvent(
                         identity=str(row['source_event_identity']), event_code=str(row['event_code']),
                         historical_silent=False, facts=facts, source_domain=str(row['source_domain']),
@@ -287,10 +287,20 @@ class MySqlLineNotificationRepository:
             authoritative_complete=authoritative_complete,
         )
         unresolved_ids = set(readback.unresolved_source_ids)
+        original_tasks = {}
+        if unresolved_ids:
+            placeholders = ','.join('%s' for _ in unresolved_ids)
+            with self._connection.cursor() as cursor:
+                cursor.execute('SELECT decision.source_event_id,intent.delivery_task_id '
+                    'FROM line_notification_decisions decision '
+                    'JOIN line_notification_intents intent ON intent.decision_id=decision.id '
+                    f'WHERE decision.source_event_id IN ({placeholders}) AND intent.delivery_task_id IS NOT NULL',
+                    tuple(sorted(unresolved_ids)))
+                for task in _strict_dict_rows(tuple(cursor.fetchall() or ()), 'line_failure_task_scope_invalid'):
+                    original_tasks.setdefault(int(task['source_event_id']), set()).add(int(task['delivery_task_id']))
         source_tasks = []
         for original_id in sorted(unresolved_ids):
-            task_ids = {int(row['delivery_task_id']) for row in source_rows[original_id]
-                        if row.get('delivery_task_id') is not None}
+            task_ids = original_tasks.get(original_id, set())
             exact_replays = {replay.source_event_id for replay in replay_by_original[original_id] if replay.exact_lineage}
             task_ids.update(int(row['delivery_task_id']) for row in replay_rows
                             if int(row['replay_source_event_id']) in exact_replays and row.get('delivery_task_id') is not None)
@@ -336,10 +346,40 @@ class MySqlLineNotificationRepository:
                 current = readbacks[query]
                 if not current.authoritative_complete:
                     raise RuntimeError('line_failure_task_readback_incomplete')
-                needs_attention = needs_attention or original_id in current.unresolved_source_ids
+                needs_attention = needs_attention or (current.predicate_active and original_id in current.unresolved_source_ids)
             if needs_attention:
                 unresolved.append(task_id)
         return tuple(unresolved)
+
+    def lock_failure_sources(self, source_event_ids):
+        if not source_event_ids:
+            return
+        placeholders = ','.join('%s' for _ in source_event_ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(f'SELECT id FROM line_notification_source_events WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE',
+                tuple(sorted(source_event_ids)))
+            if len(cursor.fetchall()) != len(source_event_ids):
+                raise LineNotificationManualReplayValidationError('notification_source_not_currently_applicable')
+
+    def _source_closed(self, source_event_id):
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM line_command_receipts "
+                "WHERE JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.action'))=%s "
+                "AND JSON_CONTAINS(JSON_EXTRACT(result_snapshot,'$.source_event_ids'),CAST(%s AS JSON)) LIMIT 1",
+                ('line.notification.warning_skip', str(source_event_id)))
+            return cursor.fetchone() is not None
+
+    def _source_history_expired(self, source_event_id):
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM line_notification_source_events source "
+                "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+                "JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+                "JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
+                "WHERE (source.id=%s OR (source.source_domain='manual_replay' "
+                "AND source.source_event_identity LIKE %s)) "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(task.payload_snapshot,'$._retention_expired'))='true' LIMIT 1",
+                (source_event_id, f'manual-replay:{source_event_id}:%'))
+            return cursor.fetchone() is not None
 
     def _apply_warning_disposition(self, readback):
         from dataclasses import replace
@@ -396,7 +436,7 @@ class MySqlLineNotificationRepository:
             str(row.get("source_event_identity", ""))
         )
         if original_source_id is None:
-            return ()
+            original_source_id = int(row['source_event_id'])
         return self.line006_recheck_targets_for_source(original_source_id)
 
     def manual_replay_delivery_validation_failure(
@@ -412,6 +452,17 @@ class MySqlLineNotificationRepository:
             row = cursor.fetchone()
         if not isinstance(row, dict):
             return None
+        original_id = _manual_replay_original_source_id(str(row.get('source_event_identity', '')))
+        if original_id is None:
+            with self._connection.cursor() as cursor:
+                cursor.execute('SELECT source.id FROM line_notification_source_events source '
+                    'JOIN line_notification_decisions decision ON decision.source_event_id=source.id '
+                    'JOIN line_notification_intents intent ON intent.decision_id=decision.id '
+                    'WHERE intent.delivery_task_id=%s LIMIT 1', (delivery_task_id,))
+                source_row = cursor.fetchone()
+            original_id = None if source_row is None else int(source_row['id'])
+        if original_id is not None and self._source_closed(original_id):
+            return 'notification_source_closed'
         if row.get('event_code') in {'deposit_confirmed','client.second_payment_settled'}:
             return 'payment_receipt_requires_human_send'
         if row.get('event_code') in RETIRED_ADMIN_NOTIFICATION_EVENTS:
@@ -638,6 +689,10 @@ class MySqlLineNotificationRepository:
         occurred_at: datetime,
     ) -> None:
         from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
+        if self._source_closed(source_event_id):
+            raise LineNotificationManualReplayValidationError('notification_source_closed')
+        if self._source_history_expired(source_event_id):
+            raise LineNotificationManualReplayValidationError('notification_source_history_expired')
         if source.event_code in {'deposit_confirmed','client.second_payment_settled'}:
             raise LineNotificationManualReplayValidationError('payment_receipt_requires_human_send')
         if source.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
@@ -713,6 +768,13 @@ class MySqlLineNotificationRepository:
                 'client.second_payment_due', 'client.second_payment_settled',
                 'scheduling.leave.extension_requested', 'client.leave.extension_agreed', 'client.leave.extension_rejected'}:
             return False
+        if source.source_domain in {'orders', 'client_finance', 'scheduling', 'matching'} and isinstance(source.facts, dict):
+            case_no = source.facts.get('case_no')
+            if isinstance(case_no, str) and case_no:
+                from infrastructure.mysql.order_notification_continuation_query_repository import MySqlOrderNotificationContinuationQueryRepository
+                continuation = MySqlOrderNotificationContinuationQueryRepository(self._connection).get(case_no, lock=for_update)
+                if continuation is not None and not continuation.eligible:
+                    return False
         if source.event_code != 'service_time_checkpoint':
             return True
         if source.source_aggregate_type != 'case_staff_assignment' or not isinstance(source.facts, dict):
@@ -860,6 +922,8 @@ class MySqlLineNotificationRepository:
         templates: dict[str, object],
         template_revision_id: int,
     ) -> None:
+        if self._source_closed(source_event_id):
+            return
         rule_id = rule.get("id")
         selector = rule.get("recipient_selector")
         if not isinstance(rule_id, str) or not isinstance(selector, str):
@@ -1260,11 +1324,11 @@ _LINE006_RECHECK_TARGETS_SQL = (
 )
 
 _LINE006_REPLAY_IDENTITY_FOR_TASK_SQL = (
-    "SELECT source.source_event_identity FROM line_delivery_tasks task "
+    "SELECT source.id AS source_event_id,source.source_event_identity FROM line_delivery_tasks task "
     "JOIN line_notification_intents intent ON intent.delivery_task_id=task.id "
     "JOIN line_notification_decisions decision ON decision.id=intent.decision_id "
     "JOIN line_notification_source_events source ON source.id=decision.source_event_id "
-    "WHERE task.id=%s AND source.source_domain='manual_replay'"
+    "WHERE task.id=%s"
 )
 
 _MANUAL_REPLAY_TASK_VALIDATION_SQL = (

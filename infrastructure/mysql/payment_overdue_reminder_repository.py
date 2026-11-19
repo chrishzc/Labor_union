@@ -94,7 +94,7 @@ class MySqlPaymentOverdueReminderRepository:
             return False
         if task.request.source_aggregate_type == CASE_SOURCE_TYPE:
             matches=[row for row in self.case_facts(payment.case_no) if row.payment.payment_stage==payment.payment_stage]
-            if len(matches)!=1 or not matches[0].contract_completed or matches[0].payment!=payment:
+            if len(matches)!=1 or not matches[0].reminder_eligible or matches[0].payment!=payment:
                 return False
         recipient = self.recipient(payment,lock=True)
         # The queued payload is immutable display copy. Freshness belongs to its

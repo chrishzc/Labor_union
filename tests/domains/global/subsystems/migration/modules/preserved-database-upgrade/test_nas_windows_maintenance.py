@@ -945,3 +945,124 @@ def test_restore_blocks_incompatible_version_with_clear_reason(settings, monkeyp
 
     with pytest.raises(nas.MaintenanceBlocked, match="不相容.*schema_state_drift_detected.*未切換"):
         nas.restore(settings, archive)
+
+
+# NAS-RET-01..04: tmp_path ZIPs only; no connection to an actual NAS or DB.
+def retention_bundle(settings, moment, *, managed=True, host=None, database=None):
+    moment = datetime.fromisoformat(moment).replace(tzinfo=nas.TAIPEI)
+    stem = moment.strftime("union_db_%Y%m%d_%H%M%S")
+    folder = settings["backup_root"] / moment.strftime("%Y-%m")
+    folder.mkdir(exist_ok=True)
+    path = folder / (stem + ".zip")
+    sql = b"-- synthetic fixture\n-- Dump completed on fixture\n"
+    packed = gzip.compress(sql)
+    archive = stem + ".sql.gz"
+    sha = nas.hashlib.sha256(packed).hexdigest()
+    receipt = {"format":"nas-sql-backup/v2", "status":"completed", "created_at":moment.isoformat(),
+        "database":database or settings["database"], "host":host or settings["host"], "port":settings["port"],
+        "sha256":sha, "size":len(packed), "archive":archive, "bundle":path.name, "month":folder.name,
+        "sql_sha256":nas.hashlib.sha256(sql).hexdigest(), "sql_size":len(sql), "retention_managed":managed}
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(archive, packed)
+        zf.writestr(archive + ".sha256", sha + "  " + archive + "\n")
+        zf.writestr(stem + ".json", json.dumps(receipt))
+    return path
+
+
+def test_retention_union_calendar_boundaries_latest_representatives_and_idempotency(settings):
+    moments = ["2025-12-31T18:00:00", "2026-01-31T18:00:00", "2026-02-15T18:00:00",
+        "2026-02-28T18:00:00", "2026-11-15T18:00:00", "2026-11-21T18:00:00",
+        "2026-11-22T18:00:00", "2026-11-30T18:00:00", "2026-12-22T18:00:00",
+        "2026-12-23T18:00:00", "2026-12-27T18:00:00", "2026-12-31T18:00:00",
+        "2027-01-05T18:00:00", "2027-01-05T19:00:00"]
+    paths = {day:retention_bundle(settings, day) for day in moments}
+    latest = paths["2027-01-05T18:00:00"]
+    now = datetime(2027, 1, 5, 18, tzinfo=nas.TAIPEI)
+    expired = {"2025-12-31T18:00:00", "2026-01-31T18:00:00", "2026-02-15T18:00:00",
+               "2026-11-15T18:00:00", "2026-11-21T18:00:00", "2026-12-22T18:00:00"}
+    assert nas.retain_scheduled_backups(settings, latest, now=now) == len(expired)
+    assert {key for key,path in paths.items() if not path.exists()} == expired
+    assert nas.retain_scheduled_backups(settings, latest, now=now) == 0
+    journals = list((settings["backup_root"] / "_retention").glob("*.json"))
+    assert len(journals) == 1
+    receipt = json.loads(journals[0].read_text(encoding="utf-8"))
+    assert receipt["status"] == "completed" and len(receipt["removed"]) == len(expired)
+    assert {r["file"] for r in receipt["planned"]} == set(receipt["removed"])
+    assert len(list(settings["backup_root"].glob("????-??/*.zip"))) == len(moments) - len(expired)
+
+
+def test_retention_future_same_week_does_not_displace_valid_representative(settings):
+    now = datetime(2027, 1, 5, 18, tzinfo=nas.TAIPEI)
+    latest = retention_bundle(settings, "2027-01-05T18:00:00")
+    previous = retention_bundle(settings, "2026-11-22T18:00:00")
+    monthly = retention_bundle(settings, "2026-11-30T18:00:00")
+    future = retention_bundle(settings, "2027-01-06T18:00:00")
+    assert nas.retain_scheduled_backups(settings, latest, now=now) == 0
+    assert all(path.exists() for path in (latest, previous, monthly, future))
+
+
+def test_retention_preserves_unmarked_wrong_target_legacy_and_partial(settings):
+    latest = retention_bundle(settings, "2027-01-05T18:00:00")
+    unmarked = retention_bundle(settings, "2025-01-01T18:00:00", managed=None)
+    other = retention_bundle(settings, "2025-01-02T18:00:00", host="other.invalid")
+    other_db = retention_bundle(settings, "2025-01-03T18:00:00", database="other_db")
+    legacy = unmarked.parent / "union_db_20250104_180000.sql.gz"
+    legacy.write_bytes(b"legacy")
+    partial = settings["backup_root"] / "_partial" / "fixture.pending"
+    partial.parent.mkdir();partial.write_bytes(b"incomplete")
+    before = {path:path.read_bytes() for path in (unmarked, other, other_db, legacy, partial)}
+    assert nas.retain_scheduled_backups(settings, latest, now=datetime(2027,1,5,18,tzinfo=nas.TAIPEI)) == 0
+    assert all(path.read_bytes() == content for path,content in before.items())
+
+
+@pytest.mark.parametrize("damage", ["payload", "symlink", "junction"])
+def test_retention_damage_blocks_all_removals(settings, monkeypatch, damage):
+    latest = retention_bundle(settings, "2027-01-05T18:00:00")
+    old = retention_bundle(settings, "2025-01-01T18:00:00")
+    damaged = retention_bundle(settings, "2025-02-01T18:00:00")
+    if damage == "payload":
+        # Keep a valid receipt but tamper the payload, as a NAS corruption would.
+        with zipfile.ZipFile(damaged) as zf:
+            entries = {name:zf.read(name) for name in zf.namelist()}
+        name = next(name for name in entries if name.endswith(".sql.gz"))
+        entries[name] = b"damaged"
+        with zipfile.ZipFile(damaged,"w") as zf:
+            for name, value in entries.items():zf.writestr(name,value)
+    else:
+        method = "is_symlink" if damage == "symlink" else "is_junction"
+        original = getattr(Path,method)
+        monkeypatch.setattr(Path,method,lambda self: self==damaged.parent or original(self))
+    with pytest.raises(nas.MaintenanceBlocked):
+        nas.retain_scheduled_backups(settings,latest,now=datetime(2027,1,5,18,tzinfo=nas.TAIPEI))
+    assert old.exists() and damaged.exists() and latest.exists()
+    assert not (settings["backup_root"] / "_retention").exists()
+
+
+def test_retention_new_scheduled_receipt_marker_only(settings, monkeypatch):
+    manual, _ = make_backup(settings, monkeypatch)
+    settings["scheduled_backup"] = True
+    scheduled = nas.backup(settings)
+    assert nas.validate_backup(manual)["retention_managed"] is False
+    assert nas.validate_backup(scheduled)["retention_managed"] is True
+
+
+def test_retention_backup_failure_never_runs_cleanup(settings, monkeypatch):
+    monkeypatch.setattr(nas,"load_settings",lambda *_:settings)
+    monkeypatch.setattr(nas,"maintenance_lock",lambda *_:nullcontext())
+    monkeypatch.setattr(nas,"backup",lambda *_: (_ for _ in ()).throw(nas.MaintenanceBlocked("synthetic failure")))
+    monkeypatch.setattr(nas,"retain_scheduled_backups",lambda *_:pytest.fail("failed backup cannot clean"))
+    assert nas.main(["backup","--scheduled"]) == 2
+
+
+def test_retention_cleanup_failure_preserves_success_status_and_failure_receipt(settings, monkeypatch):
+    latest = retention_bundle(settings, "2027-01-05T18:00:00")
+    monkeypatch.setattr(nas,"load_settings",lambda *_:settings)
+    monkeypatch.setattr(nas,"maintenance_lock",lambda *_:nullcontext())
+    monkeypatch.setattr(nas,"backup",lambda *_:latest)
+    monkeypatch.setattr(nas,"retain_scheduled_backups",lambda *_: (_ for _ in ()).throw(nas.MaintenanceBlocked("synthetic failure")))
+    assert nas.main(["backup","--scheduled"]) == 0
+    status=json.loads(nas.LOCAL_STATUS.read_text(encoding="utf-8"))
+    assert status["status"]=="passed" and status["last_success"]
+    assert status["message"] == "備份已完成，過期備份清理未完成；請通知維護人員。"
+    receipt=json.loads(next((settings["backup_root"] / "_retention").glob("*.json")).read_text(encoding="utf-8"))
+    assert receipt["status"]=="failed" and latest.exists()

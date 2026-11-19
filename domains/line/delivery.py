@@ -71,6 +71,7 @@ _ALLOWED_DELIVERY_TRANSITIONS = {
     },
     LineDeliveryStatus.FAILED: {
         LineDeliveryStatus.PENDING,
+        LineDeliveryStatus.CANCELLED,
     },
 }
 

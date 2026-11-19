@@ -48,6 +48,7 @@ class HistoricalRestartArrangementPreview:
     confirmed_version: int
     fingerprint: PreviewFingerprint
     lifecycle: LifecycleImpactCandidate
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +247,7 @@ class HistoricalRestartArrangementWorkflow:
                 reason=command.reason,
                 correlation_id=command.correlation_id,
                 trigger_event=command.command_family,
+                actual_start_date=preview.actual_start_date,
             )
         )
         return receipt
@@ -275,6 +277,7 @@ class HistoricalRestartArrangementWorkflow:
         })
         return HistoricalRestartArrangementPreview(
             candidate, facts.order_version, facts.current_version, fingerprint, lifecycle,
+            lifecycle_facts.lifecycle.actual_start_date,
         )
 
 

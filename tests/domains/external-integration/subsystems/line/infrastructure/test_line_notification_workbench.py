@@ -1,5 +1,6 @@
 """Shared notification read contract and thin command/auth boundaries."""
 from types import SimpleNamespace
+from domains.line.delivery import LineDeliveryStatus
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -88,7 +89,7 @@ def test_notification_failure_repair_keeps_todo_and_pending_replay_blocks_duplic
     unit=SimpleNamespace(anomaly_rechecks=SimpleNamespace(query_current=lambda _:projection),notification_rules=SimpleNamespace(
         current_failure_fact=owner,list_case_timeline=lambda _:({'source_event_id':11,'event_code':'client.second_payment_due','recipient_identity':'must-not-leak'},),
         preview_manual_replay=lambda _: {'can_replay':ready,'unavailable_reason':None if ready else 'recipient_unavailable'}),
-        delivery_tasks=SimpleNamespace(get=lambda _:SimpleNamespace(status=SimpleNamespace(value=work_status))))
+        delivery_tasks=SimpleNamespace(get=lambda _:SimpleNamespace(status=SimpleNamespace(value=work_status)), get_admin=lambda _:SimpleNamespace(status=LineDeliveryStatus(work_status),error_code=None)))
     monkeypatch.setattr(actions,'open_line_unit_of_work',lambda:nullcontext(unit))
     issue='ci_'+'1'*64
     assert not actions.notification_failure_detail(issue,PRINCIPAL).data['sources'][0]['can_replay']
@@ -134,6 +135,7 @@ def test_replay_uses_original_notification_policy_and_keeps_immutable_replay_lin
     from infrastructure.mysql import line_notification_repository as repository_module
     from subsystems.line.notification_policy import NotificationSourceEvent
     repo=repository_module.MySqlLineNotificationRepository(None)
+    repo._source_closed=lambda _:False
     original=NotificationSourceEvent('original','order.service_completed',False,{'case_no':'CASE-1'},'orders','order','CASE-1',1,datetime.now(UTC))
     replay=NotificationSourceEvent('manual-replay:11:same-intent',original.event_code,False,original.facts,'manual_replay','order','CASE-1',1,datetime.now(UTC))
     checked=[];intents=[]
@@ -575,7 +577,7 @@ def test_original_task_blocks_only_its_own_source_on_desktop_and_liff(monkeypatc
     unit=SimpleNamespace(anomaly_rechecks=SimpleNamespace(query_current=lambda _:projection),notification_rules=SimpleNamespace(
         current_failure_fact=owner,list_case_timeline=lambda _:({'source_event_id':11,'event_code':'order.service_start_day'},{'source_event_id':12,'event_code':'order.service_completed'}),
         preview_manual_replay=lambda _: {'can_replay':True,'unavailable_reason':None}),
-        delivery_tasks=SimpleNamespace(get=lambda _:SimpleNamespace(status=SimpleNamespace(value=task_status))))
+        delivery_tasks=SimpleNamespace(get=lambda _:SimpleNamespace(status=SimpleNamespace(value=task_status)), get_admin=lambda _:SimpleNamespace(status=LineDeliveryStatus(task_status),error_code=None)))
     monkeypatch.setattr(actions,'open_line_unit_of_work',lambda:nullcontext(unit))
     monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda *args:(PRINCIPAL,None))
     issue='ci_'+'1'*64

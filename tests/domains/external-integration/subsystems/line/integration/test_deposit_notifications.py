@@ -114,6 +114,16 @@ def db():
     raw.create_function('SUBSTRING_INDEX',3,lambda value,delimiter,count:delimiter.join(value.split(delimiter)[:count]))
     raw.executescript('''
     CREATE TABLE orders(case_no TEXT PRIMARY KEY,client_id INTEGER,status TEXT,contract_identity TEXT);
+    ALTER TABLE orders ADD COLUMN actual_start_date TEXT;
+    CREATE TABLE historical_order_adoption_receipts(case_no TEXT,outcome TEXT);
+    CREATE TABLE order_lifecycle_state_events(id INTEGER PRIMARY KEY,case_no TEXT,trigger_event TEXT,
+        before_status TEXT,after_status TEXT,business_date TEXT,facts_snapshot TEXT);
+    CREATE TABLE scheduling_aggregates(case_no TEXT,effective_generation_id INTEGER);
+    CREATE TABLE scheduling_generations(id INTEGER PRIMARY KEY,case_no TEXT,status TEXT,effective_marker INTEGER);
+    CREATE TABLE case_staff_assignments(id INTEGER PRIMARY KEY,case_no TEXT,generation_id INTEGER,status TEXT);
+    CREATE TABLE staff_schedule(case_no TEXT,assignment_id INTEGER,generation_id INTEGER,effective_marker INTEGER,is_work_day INTEGER);
+    CREATE TABLE order_actual_start_apply_receipts(case_no TEXT,lifecycle_event_id INTEGER,
+        scheduling_command_receipt_id INTEGER,actual_start_date TEXT);
     CREATE TABLE order_contract_flow_events(case_no TEXT,contract_identity TEXT,event_type TEXT);
     CREATE TABLE client_finance_accounts(case_no TEXT PRIMARY KEY,aggregate_version INTEGER);
     CREATE TABLE line_order_group_bindings(case_no TEXT,group_id TEXT,binding_status TEXT,aggregate_version INTEGER);

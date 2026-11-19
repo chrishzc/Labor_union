@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Callable
+from domains.line.identities import LineDeliveryTaskId
+from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
 
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey, IdempotencyReceipt
 from shared_kernel.fingerprints import fingerprint_payload
@@ -28,6 +30,8 @@ class LineNotificationWarningSkipPreview:
     notification_reason: str
     owner_snapshot_token: str
     preview_fingerprint: str
+    source_event_ids: tuple[int, ...]
+    tasks: tuple[dict, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +56,24 @@ def _warning_skip_preview(unit_of_work, issue_key: str, *, for_update: bool = Fa
     readback = unit_of_work.notification_rules.current_failure_fact(query)
     if not readback.authoritative_complete or not readback.predicate_active:
         raise LineNotificationWarningSkipConflict("line_warning_skip_not_current")
+    if for_update:
+        unit_of_work.notification_rules.lock_failure_sources(readback.unresolved_source_ids)
+        readback = unit_of_work.notification_rules.current_failure_fact(query)
+        if not readback.authoritative_complete or not readback.predicate_active:
+            raise LineNotificationWarningSkipConflict('line_warning_skip_not_current')
+    tasks = []
+    for identity in sorted(readback.related_task_ids):
+        task = unit_of_work.delivery_tasks.get(LineDeliveryTaskId(identity), lock=for_update)
+        record = unit_of_work.delivery_tasks.get_admin(LineDeliveryTaskId(identity))
+        if task is None or record is None:
+            raise LineNotificationWarningSkipConflict('line_warning_skip_task_unavailable')
+        if task.status.value == 'processing' or record.error_code == 'line_reply_outcome_uncertain':
+            raise LineNotificationWarningSkipConflict('line_warning_skip_outcome_unconfirmed')
+        tasks.append({'task_id': identity, 'status': task.status.value})
     preview = LineNotificationWarningSkipPreview(issue_key, query.case_no, query.notification_reason.value,
         readback.owner_snapshot_token, fingerprint_payload({"operation": LINE_NOTIFICATION_WARNING_SKIP_ACTION,
-            "issue_key": issue_key, "owner_snapshot_token": readback.owner_snapshot_token}).value)
+            "issue_key": issue_key, "owner_snapshot_token": readback.owner_snapshot_token,
+            'tasks': tasks}).value, readback.unresolved_source_ids, tuple(tasks))
     return preview, readback, query
 
 
@@ -69,11 +88,13 @@ class LineNotificationManualReplayApplication:
             return _warning_skip_preview(unit_of_work, issue_key)[0]
 
     def apply_warning_skip(self, issue_key: str, expected_snapshot: str, approved_fingerprint: str,
-                           actor: ActorContext, idempotency_key: IdempotencyKey) -> LineNotificationWarningSkipReceipt:
+                           actor: ActorContext, idempotency_key: IdempotencyKey, *, reason: str) -> LineNotificationWarningSkipReceipt:
         require_line_capability(actor, LineCapability.CONFIG_MANAGE)
+        if not reason.strip() or len(reason) > 500:
+            raise LineNotificationWarningSkipConflict('line_warning_skip_reason_required')
         command_fingerprint = fingerprint_payload({"operation": LINE_NOTIFICATION_WARNING_SKIP_ACTION,
             "issue_key": issue_key, "owner_snapshot_token": expected_snapshot,
-            "preview_fingerprint": approved_fingerprint, "actor": actor.actor_id})
+            "preview_fingerprint": approved_fingerprint, "actor": actor.actor_id, 'reason': reason.strip()})
         with self._unit_of_work_factory() as unit_of_work:
             existing = unit_of_work.receipts.get(idempotency_key, for_update=True)
             if existing is not None:
@@ -87,6 +108,16 @@ class LineNotificationManualReplayApplication:
             preview, readback, query = _warning_skip_preview(unit_of_work, issue_key, for_update=True)
             if preview.owner_snapshot_token != expected_snapshot or preview.preview_fingerprint != approved_fingerprint:
                 raise LineNotificationWarningSkipConflict("line_warning_skip_stale")
+            if preview.tasks:
+                require_line_capability(actor, LineCapability.TASK_CONTROL)
+            for task in preview.tasks:
+                if task['status'] in ('pending', 'retryable_failed', 'failed'):
+                    unit_of_work.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
+                        LineDeliveryTaskId(task['task_id']), actor, idempotency_key,
+                        CorrelationId(idempotency_key.value)))
+            readback = unit_of_work.notification_rules.current_failure_fact(query)
+            if not readback.authoritative_complete:
+                raise LineNotificationWarningSkipConflict('line_warning_skip_readback_conflict')
             unit_of_work.audit.append(LineAuditIntent(LINE_NOTIFICATION_WARNING_SKIP_ACTION, actor.actor_id,
                                                      "line_notification_failure", readback.owner_snapshot_token))
             after = unit_of_work.notification_rules.current_failure_fact(query)
@@ -95,7 +126,10 @@ class LineNotificationManualReplayApplication:
             unit_of_work.anomaly_rechecks.delete_current(issue_key)
             unit_of_work.anomaly_rechecks.append_recheck_intent(
                 build_line_notification_failure_recheck_intent(after, cause_identity=idempotency_key.value))
-            unit_of_work.receipts.append(IdempotencyReceipt(idempotency_key, command_fingerprint, issue_key))
+            unit_of_work.receipts.append(IdempotencyReceipt(idempotency_key, command_fingerprint, issue_key),
+                result_snapshot={'action': LINE_NOTIFICATION_WARNING_SKIP_ACTION, 'issue_key': issue_key,
+                    'source_event_ids': list(preview.source_event_ids), 'tasks': list(preview.tasks),
+                    'actor_id': actor.actor_id, 'reason': reason.strip(), 'closed_at': self._now().isoformat()})
             unit_of_work.commit()
         return LineNotificationWarningSkipReceipt(issue_key, False)
 

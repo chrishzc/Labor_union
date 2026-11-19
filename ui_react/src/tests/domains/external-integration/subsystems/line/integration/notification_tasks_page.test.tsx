@@ -34,7 +34,7 @@ describe('通知事項實際接線',()=>{
     const send=vi.spyOn(client,'send');render(<NotificationTasksPage />);
     await screen.findByRole('heading',{name:'人工提醒綁定 LINE'});
     if(source==='staff_binding')expect(screen.getAllByText('月嫂資料').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button',{name:'查看人工提醒方式'}));
+    expect(screen.queryByRole('button',{name:'查看人工提醒方式'})).not.toBeInTheDocument();
     expect(screen.getByRole('link',{name:'電話聯絡 0987654321'})).toHaveAttribute('href','tel:0987654321');
     fireEvent.click(screen.getByRole('button',{name:'複製綁定提醒'}));
     await screen.findByText('已複製，請由您透過既有聯絡方式轉達。');
@@ -120,7 +120,7 @@ it('目前分類與寄送紀錄不受其他分類讀取失敗影響',async()=>{
  vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'identity',label:'身分綁定審核',group:'review'}]);
  vi.mocked(client.list).mockImplementation(async source=>{if(source==='identity')throw new Error('synthetic unavailable');return {items:[],total:0,next_cursor:null};});
  render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'目前無法完整讀取事項'});
- fireEvent.click(screen.getByRole('button',{name:/款項與日誌/}));
+ fireEvent.click(screen.getByRole('button',{name:/款項與群組/}));
  await screen.findByRole('heading',{name:'目前沒有待辦事項'});
  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
@@ -140,4 +140,35 @@ it('權限及登入問題使用人員可理解的原因與下一步',()=>{
  expect(notificationFailure(new ApiHttpError(403,'internal_code','目前帳號無法發送提醒。'))).toContain('由有權限的工會人員處理');
  expect(notificationFailure(new ApiHttpError(403,'internal_code','目前帳號無法發送提醒。'))).not.toContain('internal_code');
  expect(notificationFailure(new ApiHttpError(401,'expired','unauthorized'))).toBe('登入已失效，請重新登入後再試。');
+});
+
+it('從設定頁返回時重讀待辦及計數，不沿用離頁前清單',async()=>{
+  render(<NotificationTasksPage/>);
+  await screen.findByRole('heading',{name:'訂金逾期未清'});
+  vi.mocked(client.list).mockResolvedValue({items:[],total:0,next_cursor:null});
+  window.history.replaceState(null,'','#line-notifications');
+  fireEvent(window,new Event('hashchange'));
+  window.history.replaceState(null,'','#notifications');
+  fireEvent(window,new Event('hashchange'));
+  await screen.findByRole('heading',{name:'目前沒有待辦事項'});
+  expect(screen.getByRole('button',{name:/需要處理/})).toHaveTextContent('0');
+  expect(screen.getByRole('button',{name:/款項與群組/})).toBeVisible();
+});
+
+it('本案綁定誤報填寫原因才可人工消除，刷新移除且不發送LINE',async()=>{
+  const reminder=item({id:'customer_binding:7',source:'customer_binding',reference_id:7,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',payment:null,unavailable_reason:null});
+  vi.mocked(client.catalog).mockResolvedValue([{source:'customer_binding',label:'綁定提醒',group:'review'}]);
+  vi.mocked(client.list).mockResolvedValue({items:[reminder],total:1,next_cursor:null});
+  const dismiss=vi.spyOn(client,'dismissCustomerBinding').mockImplementation(async()=>{
+    vi.mocked(client.list).mockResolvedValue({items:[],total:0,next_cursor:null});
+    return {dismissed:true,replayed:false};
+  });
+  const send=vi.spyOn(client,'send');render(<NotificationTasksPage/>);
+  await screen.findByRole('heading',{name:'人工提醒綁定 LINE'});
+  const button=screen.getByRole('button',{name:'確認消除此提醒'});expect(button).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('消除原因'),{target:{value:'已核對為完工歷史案件'}});
+  fireEvent.click(button);
+  await waitFor(()=>expect(dismiss).toHaveBeenCalledWith(expect.objectContaining({reference_id:7,case_no:'116000001'}),'已核對為完工歷史案件',expect.any(String)));
+  await waitFor(()=>expect(screen.queryByRole('heading',{name:'人工提醒綁定 LINE'})).not.toBeInTheDocument());
+  expect(send).not.toHaveBeenCalled();
 });

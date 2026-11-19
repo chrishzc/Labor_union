@@ -17,3 +17,15 @@
 .task-operation-selector button[aria-pressed=true] { border-color: var(--md-sys-color-primary); color: var(--md-sys-color-primary); }
 .task-operation-workspace a.np-button { text-decoration: none; }
 .task-operation-workspace .notification-preview-actions { display: flex; gap: 9px; flex-wrap: wrap; margin: 10px 0; }
+
+.notification-closure-batch { margin-top: 14px; padding: 18px; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 10px; background: var(--md-sys-color-surface, #fff); }
+.notification-closure-batch h3 { margin: 0 0 8px; }
+.notification-closure-batch p { margin: 8px 0 14px; line-height: 1.6; }
+.notification-closure-choice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; line-height: 1.6; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
+.notification-closure-choice input { flex: 0 0 auto; margin-top: 5px; }
+.notification-closure-reason { display: grid; gap: 8px; max-width: 560px; margin: 18px 0 10px; font-weight: 600; }
+.notification-closure-reason textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px 12px; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 400; }
+.notification-closure-blocked { margin: 14px 0; font-size: .9rem; }
+.notification-closure-blocked summary { cursor: pointer; }
+.notification-closure-batch ul { padding-left: 22px; }
+.notification-closure-batch li { margin: 12px 0; line-height: 1.6; overflow-wrap: anywhere; }

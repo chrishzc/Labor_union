@@ -609,6 +609,7 @@ def test_historical_arrangement_preview_apply_and_replay_keep_one_generation():
     lifecycle = repository.lifecycle_commands[0]
     assert lifecycle.candidate.after_status is OrderLifecycleStatus.IN_SERVICE
     assert lifecycle.candidate.actual_end_date == facts.current_dates[-1]
+    assert lifecycle.actual_start_date == date(2026, 9, 6)
     assert lifecycle.expected_order_version == 3
     assert lifecycle.resulting_order_version == 4
     assert not lifecycle.candidate.service_completion_reached
@@ -822,3 +823,28 @@ def test_restart_detection_is_bound_to_the_current_generation_receipt():
     assert "restart_event.case_no=aggregate.case_no" in statement
     assert parameters == ("HIST-73",)
     assert result == (None, ())
+
+
+
+def test_arrangement_lifecycle_snapshot_keeps_the_confirmed_actual_start_for_continuation():
+    from infrastructure.mysql.order_lifecycle_impact_writer import _lifecycle_payload
+    from subsystems.orders.historical_restart_arrangement import HistoricalRestartArrangementPreview
+    facts=_pending_arrangement_facts()
+    segments=(ArrangementSegmentIntent(12,facts.current_dates[:2]),
+              ArrangementSegmentIntent(13,facts.current_dates[2:]))
+    candidate=_arrangement_candidate(facts,segments)
+    roots=_arrangement_lifecycle_facts(facts,date(2026,9,6))
+    lifecycle=build_historical_restart_arrangement_lifecycle_impact(
+        roots.lifecycle,roots.order.terms,candidate,
+        datetime(2026,10,1,11,30,tzinfo=TAIPEI_TIME_ZONE))
+    preview=HistoricalRestartArrangementPreview(candidate,3,2,PreviewFingerprint('a'*64),lifecycle,date(2026,9,6))
+    class Repository:
+        command=None
+        def persist_arrangement(self,command): return object()
+        def persist_arrangement_lifecycle(self,command): self.command=command
+    repository=Repository()
+    workflow=HistoricalRestartArrangementWorkflow(repository,lambda:None)
+    workflow._persist(preview,'a'*64,'continuation-audit','admin','核對排班','continuation-audit')
+    snapshot=_lifecycle_payload(repository.command)
+    assert snapshot['actual_start_date']=='2026-09-06'
+    assert repository.command.candidate.business_date==date(2026,10,1)

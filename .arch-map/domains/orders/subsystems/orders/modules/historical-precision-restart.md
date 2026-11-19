@@ -9,6 +9,8 @@
 
 ## Implementation
 - primary:
+  - `subsystems/orders/notification_continuation_query.py`
+  - `infrastructure/mysql/order_notification_continuation_query_repository.py` — Orders-owned 歷史通知接續資格與可證實的接續日，供 LINE／Finance 唯讀共用。
   - `domains/orders/historical_precision_restart.py`
   - `subsystems/orders/historical_precision_restart_workflow.py`
   - `infrastructure/mysql/historical_precision_restart_repository.py`

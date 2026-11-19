@@ -162,7 +162,7 @@ describe('正式案件與政府清單',()=>{
   const row=screen.getByRole('row',{name:/115000701/});
   expect(row).toHaveTextContent('開始 2026-10-01');expect(row).toHaveTextContent('結束 待確認');expect(row).toHaveTextContent('帳務來源待確認');
   expect(screen.getByRole('row',{name:/115000702/})).toHaveTextContent('帳務來源待確認');
-  expect(within(row).getByRole('button',{name:'發出提醒'})).toBeDisabled();
+  expect(within(row).queryByRole('button',{name:'發出提醒'})).not.toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button',{name:'查看案件'}));expect(onCase).toHaveBeenCalledWith('115000701');
   expect(screen.getByRole('row',{name:/115000702/})).toBeInTheDocument();
  });
@@ -192,7 +192,8 @@ it('filters the complete ongoing scope with six columns and displays all ongoing
  expect(screen.getByRole('button',{name:cases[20]})).toBeInTheDocument();
  expect(screen.getByText(/搜尋範圍共 1 案/)).toBeInTheDocument();
  const actions=within(screen.getByRole('row',{name:new RegExp(cases[20])})).getAllByRole('button');
- expect(actions.slice(-2).map(button=>button.textContent)).toEqual(['查看案件','發出提醒']);
+ expect(actions.slice(-1).map(button=>button.textContent)).toEqual(['查看案件']);
+ expect(screen.queryByRole('button',{name:'發出提醒'})).not.toBeInTheDocument();
  fireEvent.change(screen.getByLabelText('目前階段'),{target:{value:'all'}});
  fireEvent.change(screen.getByLabelText('時效篩選'),{target:{value:'future'}});
  expect(screen.getByText(/搜尋範圍共 20 案/)).toBeInTheDocument();

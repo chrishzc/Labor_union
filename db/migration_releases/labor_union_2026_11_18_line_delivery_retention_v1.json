@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-delivery-retention-2026-11-18-v1",
+  "release_metadata": {
+    "release_name": "LINE delivery retention guard",
+    "application_version": "line-delivery-retention-v1",
+    "published_at": "2026-11-18",
+    "description": "Preserve registry deletion and allow receipt-scoped cleanup of expired terminal delivery attempts without deleting deduplication task facts."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-line-order-group-history-delete-2026-11-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1079_line_delivery_retention_guards.sql",
+      "relative_path": "db/schema_parts/1079_line_delivery_retention_guards.sql",
+      "sha256": "39ce2bc4685b93cda93afbf3baaee92e7d321b85b94c58bea28ff0fee68f92b7",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-isolated-candidate-before-switch; restore-protected-predecessor-only-through-approved-recovery",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "line-delivery-retention-guard-exact",
+      "phase": "post-schema",
+      "policy": "Verify the exact receipt-scoped retention guard while preserving every existing row.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "line-delivery-retention-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "line-delivery-retention-guard-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_18_line_delivery_retention_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_18_line_delivery_retention_v1.descriptors.json",
+    "sha256": "13d142cf88e44f762388210eccc1226ae4c539c89d25bee54f8b81c8f43e1708",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

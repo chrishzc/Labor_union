@@ -5,6 +5,7 @@ Description: 定義 LINE Delivery 控制輸入與 canonical 查詢輸出模型�
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -98,7 +99,17 @@ class LineDeliveryPublicPageView(_StrictModel):
     total_pages: int
 
 
+class NotificationHandlingView(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    target_kind: Literal['delivery_task', 'notification_failure']
+    target_identity: str
+    needs_attention: bool
+    allowed_actions: list[Literal['retry', 'cancel', 'replay', 'close']]
+    blocked_reason: str | None
+
+
 class LineDeliveryPublicDetailView(_StrictModel):
+    handling: NotificationHandlingView
     task: LineDeliveryPublicItemView
     attempts: list[LineDeliveryPublicAttemptView]
     retry_allowed: bool

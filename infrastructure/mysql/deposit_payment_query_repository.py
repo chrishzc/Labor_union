@@ -2,6 +2,7 @@
 from datetime import date, datetime
 
 from subsystems.client_finance.deposit_payment_query import DepositPayment
+from infrastructure.mysql.order_notification_continuation_query_repository import MySqlOrderNotificationContinuationQueryRepository
 from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account
 
 
@@ -38,11 +39,14 @@ class MySqlDepositPaymentQueryRepository:
             if obligation['status']=='settled' and settlement is None:
                 return None
             account = resolve_case_virtual_account(cursor, case_no)
+        continuation = MySqlOrderNotificationContinuationQueryRepository(self._connection).get(case_no,lock=lock)
+        if continuation is None:
+            return None
         return DepositPayment(
             case_no, str(obligation['obligation_identity']), int(obligation['projection_version']),
             int(obligation['amount_due_ntd']), _date(obligation['due_date']), account['virtual_account'],
             str(settlement['settlement_identity']) if settlement else None,
-            _date(settlement['occurred_on']) if settlement else None,
+            _date(settlement['occurred_on']) if settlement else None, continuation,
         )
 
 

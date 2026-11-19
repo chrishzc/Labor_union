@@ -56,6 +56,7 @@
 - inbound: `staff/module:staff-retirement` — only after a committed Staff retirement candidate, through the typed effect port and shared outer UoW.
 
 ## Contracts
+- `POST /api/v1/line/notification-task-actions/customer-binding-reminder/dismiss` — identity-management application 以本案客戶鎖、既有 command receipt 及 audit 保存誤報消除，binding-reminders count/items 同一範圍排除；不修改 owner facts。
 - `binding_reminders(LineIdentityCandidateQuery)` — existing identity application/repository owns bounded unbound current-customer and active-staff reminder query; typed name/phone/case projection excludes active canonical claims and creates no state or delivery task. Notification workbench uses the original binding-read capability.
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9 — one role-scoped contract, selected-role state and bounded failure streak.
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.5 — Orders terminal closure is the source; LINE fresh-reads role bindings and active client cases before a single staff default-menu intent.

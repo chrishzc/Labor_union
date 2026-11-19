@@ -231,6 +231,7 @@ def webhook_reply_dispatcher(now, handoff):
 
 
 def _additional_workers(worker_identity: str, now, images, provider) -> dict[str, object]:
+    from subsystems.line.delivery_retention import LineDeliveryRetentionApplication
     from api.dependencies.line_deposit import get_deposit_notifications
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationWorker
     return {
@@ -291,6 +292,7 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
             worker_identity,
             now,
         ),
+        "delivery_retention": LineDeliveryRetentionApplication(open_line_unit_of_work, now, worker_identity),
     }
 
 

@@ -20,7 +20,7 @@ from subsystems.line.delivery_contracts import (
     REPLY_ONLY_WEBHOOK_SOURCE,
     RETIRED_CONTRACT_DELIVERY_SOURCES,
     RecordLineDeliveryAttemptCommand,
-    candidate_coordination_delivery_retired,
+    retired_delivery_reason,
     customer_service_delivery_retired,
 )
 from shared_kernel.identities import ActorContext
@@ -102,6 +102,7 @@ class LineDeliveryWorker:
             "contract_signing_reminder_retired": "retired-contract-signing-reminder",
             "contract_document_delivery_retired": "retired-contract-document-delivery",
             "customer_service_delivery_retired": "retired-customer-service-delivery",
+            "notification_source_closed": "closed-notification-source",
         }.get(validation_failure)
         if retired_key_prefix is not None:
             with self._unit_of_work_factory() as unit:
@@ -274,26 +275,9 @@ class LineDeliveryWorker:
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
-        if task.request.source_aggregate_type in RETIRED_CONTRACT_DELIVERY_SOURCES:
-            if task.request.source_aggregate_type == "contract_document_version":
-                return "contract_document_delivery_retired"
-            return "contract_signing_reminder_retired"
-        if candidate_coordination_delivery_retired(task.request):
-            return "candidate_coordination_retired"
-        if customer_service_delivery_retired(task.request):
-            return "customer_service_delivery_retired"
-        if task.request.source_aggregate_type in {"runtime_health_event", "customer_service_escalation"}:
-            return "line_admin_push_retired"
-        if task.request.source_aggregate_type in {'staff_leave_customer_coordination', 'staff_leave_customer_decision'}:
-            return 'leave_customer_confirmation_retired'
-        if task.request.source_aggregate_type=='matching_schedule_recipient':
-            return 'schedule_confirmation_retired'
-        if (task.request.source_aggregate_type == "matching_coordination_outbox"
-                and task.request.source_aggregate_identity.endswith(":zero-candidate:client-decision")):
-            return "matching_zero_pool_notification_retired"
-        if (task.request.recipient.recipient_type.value == "group"
-                and task.request.source_aggregate_type == "matching_plan_decision"):
-            return "line_alert_group_retired"
+        retired = retired_delivery_reason(task.request)
+        if retired is not None:
+            return retired
         with self._unit_of_work_factory() as unit_of_work:
             notification_rules = getattr(unit_of_work, "notification_rules", None)
             validator = getattr(

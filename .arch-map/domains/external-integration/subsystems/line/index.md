@@ -7,6 +7,7 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `delivery-retention` — 六個月內容與嘗試明細整理、精簡防重送憑證；path: `modules/delivery-retention.md`
 - `table-image-delivery` — 初步候選與正式推薦的唯讀快照圖片、opaque URL 及私人媒體轉送；path: `modules/table-image-delivery.md`
 - `liff-configuration` — database-owned LIFF page/theme read/write/history/rollback; path: `modules/liff-configuration.md`
 - `payment-overdue-reminders` — 各期獨立的繳款逾期待辦、人工提醒及寄送前複核；path: `modules/payment-overdue-reminders.md`

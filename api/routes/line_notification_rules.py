@@ -95,7 +95,7 @@ def apply_notification_warning_skip(payload: LineNotificationWarningSkipApplyReq
     try:
         result = get_line_notification_manual_replay_application().apply_warning_skip(issue_key,
             payload.owner_snapshot_token, payload.preview_fingerprint, admin_actor_context(principal),
-            IdempotencyKey(payload.idempotency_key))
+            IdempotencyKey(payload.idempotency_key), reason=payload.reason)
         return BaseResponse(data=asdict(result))
     except (LineNotificationWarningSkipConflict, CurrentIssueOwnerSnapshotUnavailable) as error:
         code = str(error) if isinstance(error, LineNotificationWarningSkipConflict) else "line_warning_skip_busy"
@@ -243,6 +243,10 @@ def preview_notification_manual_replay(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if result.get('unavailable_reason') == 'notification_source_history_expired':
+        raise typed_http_error(409, 'conflict', 'notification_source_history_expired',
+            '原通知的六個月保存期限已過，不再提供原來源補送。新業務事件仍依目前資格處理。',
+            'notification-manual-replay')
     return BaseResponse(data=PreviewLineNotificationManualReplayView.model_validate({key: result[key] for key in PreviewLineNotificationManualReplayView.model_fields}))
 
 
@@ -266,6 +270,7 @@ def apply_notification_manual_replay(
     except LineNotificationManualReplayValidationError as error:
         messages = {
             'notification_replay_in_progress':'原通知已有待完成的寄送工作，請查看寄送狀況。',
+            'notification_source_history_expired':'原通知的六個月保存期限已過，不再提供原來源補送。新業務事件仍依目前資格處理。',
             'recipient_unavailable':'收件對象尚不可用，請核對 LINE 綁定或案件群組。',
             'template_or_schedule_invalid':'通知內容或排程設定需要修正。',
             'notification_configuration_unavailable':'通知設定暫時無法完整核對，請稍後重試。',

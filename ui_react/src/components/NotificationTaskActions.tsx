@@ -1,6 +1,6 @@
 /** Notification links and guidance for work performed outside this system. */
-import { useState } from 'react';
-import type { NotificationItem } from '../api/line_notifications/notification_tasks_client';
+import { useRef, useState } from 'react';
+import { notificationTasksClient, notificationFailure, type NotificationItem } from '../api/line_notifications/notification_tasks_client';
 export function notificationHref(item:NotificationItem):string | null {
   const caseNo = encodeURIComponent(item.case_no ?? '');
   switch(item.source) {
@@ -19,21 +19,38 @@ export function notificationHref(item:NotificationItem):string | null {
   }
 }
 
-export function NotificationTaskActions({item}:{item:NotificationItem;onCommitted:()=>Promise<void>;sourceReadError?:string}) {
-  if(item.source==='customer_binding' || item.source==='staff_binding') return <BindingReminder item={item} />;
+export function NotificationTaskActions({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>;sourceReadError?:string}) {
+  if(item.source==='customer_binding' || item.source==='staff_binding') return <BindingReminder key={item.id} item={item} onCommitted={onCommitted} />;
   if(item.source==='group') return <section aria-label="案件建群方式"><h3>建立與綁定案件群組</h3><pre style={{whiteSpace:'pre-wrap',font:'inherit'}}>{item.message}</pre><a className="np-button" href={`#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no!)}`}>查看本案群組設定</a></section>;
   return null;
 }
 
-function BindingReminder({item}:{item:NotificationItem}) {
+function BindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>}) {
   const [notice,setNotice]=useState('');
+  const [reason,setReason]=useState('');
+  const [busy,setBusy]=useState(false);
+  const command=useRef<{key:string;reason:string}|null>(null);
+  const locked=useRef(false);
+  const dismiss=async()=>{
+    if(locked.current || !reason.trim())return;
+    locked.current=true;setBusy(true);
+    command.current ??= {key:crypto.randomUUID(),reason:reason.trim()};
+    try {await notificationTasksClient.dismissCustomerBinding(item,command.current.reason,command.current.key);setNotice('本案綁定提醒已消除，處理原因已保留。');await onCommitted();}
+    catch(error){setNotice(notificationFailure(error));}
+    finally{locked.current=false;setBusy(false);}
+  };
   const phone=(item.recipient ?? '').replace(/[\s-]/g,'');
   return <section aria-label="人工綁定提醒方式"><h3>聯絡 {item.person}</h3>
     {/^0\d{8,9}$/.test(phone)?<a className="np-button" href={`tel:${phone}`}>電話聯絡 {item.recipient}</a>:<p>尚無可用電話，請先核對聯絡資料。</p>}
     <button type="button" className="np-button" onClick={()=>void navigator.clipboard.writeText(item.message ?? '').then(()=>setNotice('已複製，請由您透過既有聯絡方式轉達。')).catch(()=>setNotice('無法複製，請直接選取上方提醒內容。'))}>複製綁定提醒</button>
     <a className="np-button" href={`#line-management?tab=binding&binding_role=${item.source==='customer_binding'?'customer':'staff'}&binding_q=${encodeURIComponent(item.person)}`}>查看綁定狀態</a>
     {item.case_no && <a className="np-button" href={`#clients?case=${encodeURIComponent(item.case_no)}`}>查看本案資料</a>}
-    <p>聯絡後仍保留此事項；完成綁定{item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，重新查詢即移除。</p>
+    <p>完成綁定{item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，重新整理即移除。</p>
+    {item.source==='customer_binding' && item.reference_id && item.case_no && <details className="binding-reminder-dismiss"><summary>誤報／不需提醒</summary>
+      <p>僅消除此客戶在本案的綁定提醒，不變更訂單或綁定狀態。其他案件仍會獨立判斷。</p>
+      <label>消除原因<textarea value={reason} maxLength={500} disabled={busy || command.current!==null} onChange={event=>setReason(event.target.value)} placeholder="例如：已確認為服務完成的歷史案件" /></label>
+      <button type="button" className="np-button" disabled={busy || !reason.trim()} onClick={()=>void dismiss()}>{busy?'處理中…':'確認消除此提醒'}</button>
+    </details>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }

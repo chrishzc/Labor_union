@@ -613,6 +613,34 @@ def test_manual_replay_api_requires_previewable_source_and_reason(monkeypatch) -
     ]
 
 
+def test_expired_manual_replay_preview_returns_typed_conflict_without_mutation(monkeypatch):
+    calls = []
+
+    class Replay:
+        def preview(self, source_event_id, _actor):
+            calls.append(('preview', source_event_id))
+            return {'source_event_id': source_event_id,
+                'event_code': 'service_time_checkpoint', 'historical_silent': False,
+                'matching_rule_count': 1, 'will_create_new_immutable_source': True,
+                'can_replay': False, 'unavailable_reason': 'notification_source_history_expired'}
+
+        def apply(self, *_args):
+            pytest.fail('expired preview must not apply a replay')
+
+    monkeypatch.setattr(line_notification_rules, 'get_line_notification_manual_replay_application', lambda: Replay())
+    app = FastAPI()
+    app.include_router(line_notification_rules.router)
+    app.dependency_overrides[require_line_configuration_manager] = _principal
+    response = TestClient(app).post('/api/v1/line/notification-rules/sources/12/manual-replay/preview')
+    assert response.status_code == 409
+    error = response.json()['detail']['error']
+    assert error['code'] == 'notification_source_history_expired'
+    assert error['category'] == 'conflict'
+    assert '六個月' in error['message']
+    assert 'data' not in response.json()
+    assert calls == [('preview', 12)]
+
+
 def test_service_guide_alias_reads_and_saves_one_canonical_setting_without_rewriting_legacy(monkeypatch):
     import json
     client, application = _copy_client(monkeypatch)

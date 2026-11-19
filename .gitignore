@@ -127,3 +127,4 @@ desktop.ini
 ~$*
 
 tools/mysql/
+.playwright-mcp/

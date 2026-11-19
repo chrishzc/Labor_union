@@ -17,6 +17,7 @@ $PythonPath = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $runtimeDirectory = Join-Path $ProjectRoot 'scratch\windows-remote'
 $statePath = Join-Path $runtimeDirectory 'frontend-control\state.json'
 $supervisorPath = Join-Path $PSScriptRoot 'supervise_local_runtime.ps1'
+. (Join-Path $PSScriptRoot 'windows_frontend_control.ps1')
 $tokenPath = Join-Path $runtimeDirectory 'cloudflare-state\tunnel-token'
 Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONUTF8 = '1'
@@ -105,12 +106,7 @@ function Assert-NoRemainingRuntime {
 
 function Get-ManagedState {
     if (-not (Test-Path -LiteralPath $statePath)) { return $null }
-    try {
-        $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
-    } catch {
-        Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
-        return $null
-    }
+    $state = Read-FrontendControlJson $statePath
     if (-not $state) {
         Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
         return $null
@@ -195,12 +191,16 @@ function Start-ManagedRuntime {
         if (-not $connector -and -not (Test-Path -LiteralPath $installedConnector)) { throw 'Install cloudflared first.' }
     }
     if (-not $Artifact) { $Artifact = New-ManagedArtifact }
-    # Only normal application startup loads its own configuration. The manager
-    # never parses or changes .env during startup. Database maintenance is a
-    # separate explicit action; startup never performs an upgrade or reset.
+    # Database maintenance is a separate explicit action.
     & $PythonPath -m scripts.check_runtime_database
     if ($LASTEXITCODE -ne 0) { throw 'Database readiness failed; no runtime was started.' }
-    & docker.exe compose up -d redis
+    $sharedRegistrationRedis = & $PythonPath -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); print('1' if os.getenv('REGISTRATION_USE_SHARED_REDIS_FOR_TEST') == '1' else '0')"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read registration Redis mode; no runtime was started.' }
+    if ($sharedRegistrationRedis -eq '1') {
+        & docker.exe compose -f docker-compose.yml -f docker-compose.registration-test.yml up -d redis registration-intake registration-token-verifier
+    } else {
+        & docker.exe compose up -d redis
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Redis startup failed; no runtime was started.' }
     $env:WINDOWS_REMOTE_ARTIFACT_DIR = $Artifact
     $runLabel = [guid]::NewGuid().ToString('N')
@@ -214,7 +214,7 @@ function Start-ManagedRuntime {
     for ($attempt = 0; $attempt -lt 180; $attempt++) {
         if ($owner.HasExited) { throw "Startup failed. See $logPath and $errorPath" }
         if (Test-Path -LiteralPath $statePath) {
-            $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
+            $state = Read-FrontendControlJson $statePath
             if ($state.supervisor_pid -eq $owner.Id -and $state.runtime_status -eq 'ready') {
                 $remoteUrl = Get-RemoteDisplayUrl
                 Write-Host "[Ready] Local: http://localhost:5173/admin/ | Remote: $remoteUrl"

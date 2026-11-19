@@ -1,12 +1,16 @@
 """Finance-owned balances with read-only Orders contract/start-date evidence."""
 from infrastructure.mysql.overdue_payment_query_repository import _payment
+from infrastructure.mysql.order_notification_continuation_query_repository import (
+    notification_continuation_columns, notification_continuation_from_row,
+)
 from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
 
 _SELECT = (
     'SELECT o.case_no,o.obligation_type,o.obligation_identity,o.projection_version,'
     'o.current_event_id,o.due_date,o.amount_due_ntd,r.actual_start_date,r.status case_status,'
     "EXISTS (SELECT 1 FROM order_contract_flow_events f WHERE f.case_no=r.case_no "
-    "AND f.event_type='contract_completed' AND f.contract_identity=r.contract_identity) contract_completed "
+    "AND f.event_type='contract_completed' AND f.contract_identity=r.contract_identity) contract_completed,"
+    + notification_continuation_columns('r') + ' '
 )
 _FROM = (
     'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
@@ -56,4 +60,5 @@ class MySqlClientPaymentReminderQueryRepository:
 
 
 def _facts(row):
-    return ClientPaymentReminderFacts(_payment(row),row['actual_start_date'],bool(row['contract_completed']),str(row['case_status']))
+    return ClientPaymentReminderFacts(_payment(row),row['actual_start_date'],bool(row['contract_completed']),
+        str(row['case_status']),notification_continuation_from_row(row))

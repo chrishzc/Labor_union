@@ -49,6 +49,29 @@ RETIRED_CANDIDATE_COORDINATION_SOURCES = (
 CANDIDATE_RECONTACT_SOURCE_PREFIX = "mobile-matching-followup:"
 
 
+def retired_delivery_reason(request: LineDeliveryRequest) -> str | None:
+    source = request.source_aggregate_type
+    if source in RETIRED_CONTRACT_DELIVERY_SOURCES:
+        return 'contract_document_delivery_retired' if source == 'contract_document_version' else 'contract_signing_reminder_retired'
+    if source in RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES:
+        return 'payment_receipt_requires_human_send'
+    if candidate_coordination_delivery_retired(request):
+        return 'candidate_coordination_retired'
+    if customer_service_delivery_retired(request):
+        return 'customer_service_delivery_retired'
+    if source in {'runtime_health_event', 'customer_service_escalation'}:
+        return 'line_admin_push_retired'
+    if source in {'staff_leave_customer_coordination', 'staff_leave_customer_decision'}:
+        return 'leave_customer_confirmation_retired'
+    if source == 'matching_schedule_recipient':
+        return 'schedule_confirmation_retired'
+    if source == 'matching_coordination_outbox' and request.source_aggregate_identity.endswith(':zero-candidate:client-decision'):
+        return 'matching_zero_pool_notification_retired'
+    if source == 'matching_plan_decision' and request.recipient.recipient_type.value == 'group':
+        return 'line_alert_group_retired'
+    return None
+
+
 def candidate_coordination_delivery_retired(request: LineDeliveryRequest) -> bool:
     return (
         request.source_aggregate_type in RETIRED_CANDIDATE_COORDINATION_SOURCES

@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { transport } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
+import { LineDeliveryQueryError } from '../line_delivery/line_delivery_query_errors';
 import { sessionClient } from '../auth/session_client';
 
 export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','staff_profile','followup','recommendation',
@@ -37,7 +38,43 @@ export function notificationOptions(signal?:AbortSignal) {
   if (!token) throw new Error('請先登入。');
   return {token,signal};
 }
+export const NOTIFICATION_TASKS_CHANGED = 'notification-tasks-changed';
+export function notifyNotificationTasksChanged() {
+  window.dispatchEvent(new Event(NOTIFICATION_TASKS_CHANGED));
+}
 export const notificationTasksClient = {
+  async dismissCustomerBinding(item:NotificationItem,reason:string,key:string) {
+    if(item.source!=='customer_binding' || !item.reference_id || !item.case_no)throw new Error('提醒對象不完整，請重新整理。');
+    const raw=await transport.post<{data:unknown}>('/api/v1/line/notification-task-actions/customer-binding-reminder/dismiss',{
+      subject_reference:item.reference_id,case_no:item.case_no,reason,idempotency_key:key,
+    },notificationOptions());
+    const result=z.object({dismissed:z.literal(true),replayed:z.boolean()}).strict().parse(raw.data);
+    notifyNotificationTasksChanged();
+    return result;
+  },
+  async pendingCount(signal?:AbortSignal):Promise<number> {
+    const sources = await notificationTasksClient.catalog(signal);
+    const items = new Map<string,NotificationItem>();
+    await Promise.all(sources.map(async ({source}) => {
+      let cursor:number|string = 0;
+      const visited = new Set<string>();
+      while (true) {
+        signal?.throwIfAborted();
+        const key = `${typeof cursor}:${cursor}`;
+        if (visited.has(key)) throw new Error('通知事項分頁無法確認。');
+        visited.add(key);
+        const page = await notificationTasksClient.list(source,cursor,signal);
+        for (const item of page.items) {
+          if (item.source !== source) throw new Error('通知事項來源無法確認。');
+          items.set(item.id,item);
+        }
+        if (page.next_cursor === null) break;
+        cursor = page.next_cursor;
+      }
+    }));
+    const covered = new Set([...items.values()].flatMap(item => item.failure?.related_task_ids ?? []));
+    return [...items.values()].filter(item => item.source !== 'delivery' || !covered.has(item.reference_id!)).length;
+  },
   async catalog(signal?:AbortSignal) {
     const raw = await transport.get<{data:unknown}>('/api/v1/line/notification-tasks',notificationOptions(signal));
     return catalogSchema.parse(raw.data);
@@ -74,6 +111,9 @@ export const notificationTasksClient = {
   },
 };
 export function notificationFailure(error:unknown):string {
+  if(error instanceof LineDeliveryQueryError && error.status===410 && error.code==='line_delivery_history_expired') {
+    return '此寄送紀錄已超過六個月，內容與嘗試明細已清除；必要處理憑證仍保留。';
+  }
   if (error instanceof ApiHttpError) {
     if(error.code==='line_binding_current_fact_incomplete')return '客戶的 LINE 綁定資料不完整，請先至身分綁定核對。';
     if(error.code==='payment_overdue_recipient_unavailable')return '尚無可用的 LINE 收件對象，請先核對身分綁定或案件群組。';

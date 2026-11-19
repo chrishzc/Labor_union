@@ -53,7 +53,10 @@ class MySqlLineIdentityManagementRepository:
             from domains.orders.lifecycle import OrderLifecycleStatus
             root = 'clients t JOIN orders o ON o.client_id=t.id AND o.case_no=t.case_no'
             case_column = 'o.case_no'
-            active = 'o.status IN (%s,%s,%s,%s)'
+            from infrastructure.mysql.order_notification_continuation_query_repository import notification_continuation_eligible_sql
+            active = 'o.status IN (%s,%s,%s,%s) AND '+notification_continuation_eligible_sql('o')
+            active += (" AND NOT EXISTS (SELECT 1 FROM line_command_receipts dismissed "
+                "WHERE dismissed.result_reference=CONCAT('binding-reminder-dismissed:customer:',t.id,':',o.case_no))")
             parameters = [s.value for s in (OrderLifecycleStatus.PENDING_COMPLETION,
                 OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE)]
         elif query.subject_type is LineBindingSubjectType.STAFF:
@@ -76,6 +79,13 @@ class MySqlLineIdentityManagementRepository:
             items = tuple(LineIdentityBindingReminder(str(r['subject_reference']), str(r['subject_name'] or ''),
                 r['phone'] or None, r['case_no']) for r in cursor.fetchall())
         return LineIdentityBindingReminderPage(items, total)
+
+    def lock_customer_reminder_subject(self, subject_reference: int, case_no: str) -> bool:
+        """Serialize acknowledgements on the exact customer/case, without changing owner facts."""
+        with self._connection.cursor() as cursor:
+            cursor.execute('SELECT id FROM clients WHERE id=%s AND case_no=%s FOR UPDATE',
+                           (subject_reference, case_no))
+            return cursor.fetchone() is not None
 
     def list_unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
         with self._connection.cursor() as cursor:

@@ -131,7 +131,7 @@ def _read_source(source, cursor, principal):
         total = result.total
         guidance = ('客戶請核對姓名與電話。' if role is LineBindingSubjectType.CUSTOMER
                     else '月嫂請核對姓名、身分證字號與生日。')
-        exit_condition = ('完成綁定，或案件取消、完工、成為歷史案件後，此事項自動移除。'
+        exit_condition = ('完成綁定，或案件取消、完工後，此事項自動移除；誤報可填寫原因人工消除。'
                           if role is LineBindingSubjectType.CUSTOMER else
                           '完成綁定，或月嫂停用、暫停、退役後，此事項自動移除。')
         items = [_item(source, r.subject_reference, f'人工提醒{label}綁定 LINE',

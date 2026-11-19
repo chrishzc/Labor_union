@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from typing import Literal, NoReturn
 from uuid import uuid4
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -177,6 +178,7 @@ def task_list(
     responses={
         **_PUBLIC_QUERY_ERROR_RESPONSES,
         404: {"model": GlobalTypedErrorResponseView, "description": "找不到 LINE 發送任務。"},
+        410: {"model": GlobalTypedErrorResponseView, "description": "寄送內容與嘗試明細已到期清除。"},
     },
 )
 def task_detail(
@@ -184,7 +186,8 @@ def task_detail(
     principal: AdminPrincipal = Depends(require_line_task_reader),
 ):
     try:
-        task, attempts = get_line_delivery_task_admin_application().get(
+        application = get_line_delivery_task_admin_application()
+        task, attempts = application.get(
             LineDeliveryTaskId(task_id),
             admin_actor_context(principal),
         )
@@ -195,7 +198,11 @@ def task_detail(
     except Exception as error:
         _raise_query_error(503, "line_delivery_query_unavailable", "LINE 發送任務查詢暫時無法完成。")
     try:
+        import json
+        if json.loads(task.payload_json).get('_retention_expired') is True:
+            _raise_query_error(410, "line_delivery_history_expired", "此寄送紀錄已超過六個月，內容與嘗試明細已清除；必要處理憑證仍保留。", retryable=False)
         data = LineDeliveryPublicDetailView(
+            handling=asdict(application.handling(task, admin_actor_context(principal))),
             task=_public_item(task),
             attempts=[_public_attempt(item) for item in attempts],
             retry_allowed=(
@@ -204,6 +211,8 @@ def task_detail(
                 and task.source_aggregate_type not in RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES
             ),
         )
+    except HTTPException:
+        raise
     except Exception as error:
         _raise_query_error(
             503,
@@ -369,6 +378,7 @@ def _raise_query_error(
     category = {
         403: "forbidden",
         404: "not_found",
+        410: "not_found",
         422: "validation",
         503: "unavailable",
     }.get(status_code, "internal")

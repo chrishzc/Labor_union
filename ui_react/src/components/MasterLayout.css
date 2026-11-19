@@ -93,9 +93,19 @@
   background: #fff3ec;
   border-color: #e8b89f;
 }
+.notification-entry-count {
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--md-sys-color-primary);
+  color: #fff;
+  font-size: .75rem;
+  line-height: 1.4;
+  text-align: center;
+}
 @media (max-width: 1200px) {
-  .notification-entry-button { width: 40px; padding: 7px; }
-  .notification-entry-button > span { display: none; }
+  .notification-entry-button { padding: 7px; }
+  .notification-entry-button > .notification-entry-label { display: none; }
 }
 
 .system-status-indicator {

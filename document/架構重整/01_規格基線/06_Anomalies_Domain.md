@@ -98,9 +98,9 @@ Operational／readback failure 由 durable-job／runtime health 處理；若 DB 
 2. automatic delivery 的 bounded retry 已耗盡並得到 terminal failed，需要人工 replay／處置；
 3. provider outcome 經既有 bounded reconciliation 後仍無法確定，且已進入正式人工處理邊界。
 
-所有目前警示均可逐筆確認略過（包含 `LINE-006`），詳細人工略過契約由 [LINE Gateway 與通知投遞](17A_LINE_Gateway_Inbox與通知投遞正式規格.md) 擁有。同一 exact owner snapshot 已保存人工略過 audit 時不再需要人工提醒（不宣稱 delivery 成功，不改通知來源或任務結果；來源／結果變更後可重新成立）。
+`LINE-006` 的人工結清、停送範圍及有效處置由 [LINE Gateway 共用判定與結清契約](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#41-共用待辦判定與操作資格) 擁有。Anomalies 消費 LINE 的 authoritative current predicate，不從失敗次數或未解決來源 ID 另算是否需處理，也不自行操作任務、保存結清 root 或宣稱 delivery 成功。
 
-人工修正設定或 binding 後不得直接刪 issue；owner 必須 fresh 驗證 source 仍 applicable、recipient／binding／configuration 都合法且已取得 terminal success，或已保存該 exact owner snapshot 的人工略過 audit，或 authoritative owner facts 證明該通知已不再需要。
+人工修正設定或 binding 後不得直接刪 issue；由 LINE fresh 驗證目前處理結果，只有 authoritative complete readback 的 predicate false 時，Anomalies 才依原 bounded recheck 移除 current row。結清與新事件的判定依同一 LINE owner 契約，不建立 Anomalies-owned 處置分支。
 
 ## 7. LINE Identity 非異常規則
 
@@ -135,6 +135,6 @@ Operational／readback failure 由 durable-job／runtime health 處理；若 DB 
 - `BECLASS-001` 只存在 Case Import／Client owner follow-up，不出現在 current anomaly projection；
 - 退役 13 碼不再有 runtime producer／public current definition／React current mapping；
 - `LINE-006` pending／processing／retryable／readback-incomplete 本身不產生 issue，只有需要人工介入才產生；
-- 同一 exact owner snapshot 記錄人工略過 audit 後，fresh owner readback 證明 predicate false 並刪除 current row；來源／結果變更後可重新成立；
+- 人工結清與新事件情境依 [LINE 結清驗收](17A_LINE_Gateway_Inbox與通知投遞正式規格.md#43-結清驗收) `LINE-CLOSE-01`～`07`；Anomalies 只核對 authoritative predicate 與 current row 同步，不另保存投遞處置；
 - legal `customer + staff` dual-role 與同一 Client 多案件不產生 `LINE-004`；same-type replacement 走 LINE Identity normal operation；
 - predicate false 且 authoritative complete 時 current row 實際刪除。

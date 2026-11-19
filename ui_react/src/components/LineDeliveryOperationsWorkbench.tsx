@@ -3,22 +3,24 @@
  * Description: LINE 寄送與異常作業工作區，提供寄送任務與通知建立異常之查詢、重試與補送操作。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { LineNotificationClosureBatch } from './LineNotificationClosureBatch';
 import { LineDeliveryTaskWorkbench } from './LineDeliveryTaskWorkbench';
 import { LineDeliveryTaskActions } from './LineDeliveryTaskActions';
 import { LineNotificationFailureActions } from './LineNotificationFailureActions';
-import { notificationTasksClient, notificationFailure, type NotificationPage } from '../api/line_notifications/notification_tasks_client';
+import { notificationTasksClient, notificationFailure, notifyNotificationTasksChanged, type NotificationPage } from '../api/line_notifications/notification_tasks_client';
 import { useUnsavedNavigation } from './UnsavedChanges';
 import './TaskOperation.css';
 
 export function LineDeliveryOperationsWorkbench() {
   const initial=new URLSearchParams(window.location.hash.split('?')[1]);
+  const [showBatch,setShowBatch]=useState(false);
   const [failures,setFailures]=useState(initial.get('view')==='failures');
   const [task,setTask]=useState(initial.get('task') ?? '');
   const [issue,setIssue]=useState(initial.get('issue') ?? '');
   const [cursor,setCursor]=useState<number|string>(0),[revision,setRevision]=useState(0);
   const [result,setResult]=useState<NotificationPage|null>(null),[error,setError]=useState('');
   const {requestLeave}=useUnsavedNavigation();
-  const refresh=useCallback(async()=>{setRevision(value=>value+1);},[]);
+  const refresh=useCallback(async()=>{notifyNotificationTasksChanged();setRevision(value=>value+1);},[]);
   const navigate=(nextFailures:boolean,nextTask='',nextIssue='')=>requestLeave(()=>{
     setFailures(nextFailures);setTask(nextTask);setIssue(nextIssue);setCursor(0);
     const params=new URLSearchParams(window.location.hash.split('?')[1]);
@@ -32,10 +34,21 @@ export function LineDeliveryOperationsWorkbench() {
     void notificationTasksClient.list('notification_failure',cursor,abort.signal)
       .then(value=>{if(!abort.signal.aborted)setResult(value);}).catch(e=>{if(!abort.signal.aborted)setError(notificationFailure(e));});return()=>abort.abort();
   },[failures,cursor,revision]);
+  useEffect(()=>{
+    const recheck=()=>{
+      const params=new URLSearchParams(window.location.hash.split('?')[1]);
+      setFailures(params.get('view')==='failures');setTask(params.get('task') ?? '');setIssue(params.get('issue') ?? '');
+      setCursor(0);setRevision(value=>value+1);
+    };
+    window.addEventListener('hashchange',recheck);
+    return()=>window.removeEventListener('hashchange',recheck);
+  },[]);
   const invalidTask=!!task && (!Number.isSafeInteger(Number(task)) || Number(task)<=0);
   const invalidIssue=!!issue && !/^ci_[0-9a-f]{64}$/.test(issue);
   return <section className="task-operation-workspace" aria-label="LINE 寄送與異常作業">
     <header><h2>寄送與異常</h2><nav className="task-operation-selector" aria-label="寄送與異常分類"><button className="np-button" aria-pressed={!failures} onClick={()=>navigate(false)}>寄送工作</button><button className="np-button" aria-pressed={failures} onClick={()=>navigate(true)}>通知建立異常</button></nav></header>
+    <button className="np-button" aria-expanded={showBatch} onClick={()=>requestLeave(()=>setShowBatch(value=>!value))}>{showBatch?'收起批次結清':'開啟批次結清'}</button>
+    {showBatch && <LineNotificationClosureBatch onCommitted={refresh}/>}
     {failures?<>
       {invalidIssue?<p role="alert">異常編號無效，請從通知事項重新開啟。</p>:issue && <div className="notification-task-operation"><LineNotificationFailureActions key={issue} issueKey={issue} onCommitted={refresh}/></div>}
       {error && <p role="alert">{error}</p>}{!result && !error && <p role="status">正在查詢通知建立異常…</p>}

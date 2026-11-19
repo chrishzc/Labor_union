@@ -234,10 +234,22 @@ describe('精簡案件抽屜',()=>{
     expect(screen.queryByText('另有銀行資料待核對，由銀行對帳處理')).not.toBeInTheDocument();
     expect(screen.getByText('2026-11-02 · 永豐')).toBeVisible();
     expect(within(screen.getByLabelText('案件精簡摘要')).getByText('待確認')).toBeVisible();
-    expect(screen.getByRole('button',{name:'通知訂金'})).toBeDisabled();
-    expect(screen.getByRole('button',{name:'通知第二期'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'查看訂金通知'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'查看第二期通知'})).toBeEnabled();
     expect(screen.getByRole('button',{name:'設定補助退款方案'})).toBeEnabled();
   });
+ it('已繳齊仍可開啟同一期通知紀錄，不能再寄送',async()=>{
+  const rows=[notice('deposit'),notice(),notice('second')];
+  rows[0].history=[{task_id:9,requested_at:'2026-11-03T01:00:00Z',sent_at:'2026-11-03T02:30:00Z',status:'sent',content:'原訂金提醒',actor:'合成人員'}];
+  vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(rows);
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  fireEvent.click(await screen.findByRole('button',{name:'查看訂金通知'}));
+  expect(screen.getByRole('region',{name:'本期繳款通知'})).toBeVisible();
+  expect(screen.getByText('原訂金提醒')).toBeVisible();
+  expect(screen.getByText('本期已繳齊')).toBeVisible();
+  expect(screen.getByRole('button',{name:'發送通知'})).toBeDisabled();
+  expect(paymentOverdueReminderClient.sendCase).not.toHaveBeenCalled();
+ });
  it('排隊時間不能冒充成功通知，成功時間以台灣時區顯示',async()=>{
   const rows=[notice('deposit'),notice(),notice('second')];
   rows[1].history=[{task_id:1,requested_at:'2026-11-04T02:00:00Z',sent_at:null,status:'pending',content:'待送',actor:null}];
@@ -254,7 +266,11 @@ describe('精簡案件抽屜',()=>{
   wrapper(<FinanceCaseAccounting initialCase={caseNo}/>);
   expect(await screen.findByText(/通知資料暫時無法取得/)).toBeVisible();
   expect(screen.queryByText('尚未通知')).not.toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'通知第一期'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'查看第一期通知'})).toBeEnabled();
+  fireEvent.click(screen.getByRole('button',{name:'查看第一期通知'}));
+  expect(screen.getByText('本期通知來源待確認。')).toBeVisible();
+  expect(screen.queryByRole('button',{name:'發送通知'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'返回案件'}));
   expect(screen.getByRole('button',{name:'設定補助退款方案'})).toBeEnabled();
  });
  it('提前設定人工方案不採自動分類預選，成功返回同案並重讀正式結果',async()=>{

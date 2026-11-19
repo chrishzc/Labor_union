@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from subsystems.line.delivery_retention import LineDeliveryRetentionFacts
     from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationPort
     from subsystems.line.payment_receipt_notifications import PaymentReceiptPort
@@ -590,6 +591,12 @@ class LineIdentityReviewRepositoryPort(Protocol):
 
 
 class LineDeliveryTaskRepositoryPort(Protocol):
+    def retention_candidates(self, cutoff: datetime, limit: int) -> tuple[LineDeliveryTaskId, ...]: ...
+
+    def retention_facts(self, task_id: LineDeliveryTaskId) -> LineDeliveryRetentionFacts | None: ...
+
+    def expire_retention_details(self, facts: LineDeliveryRetentionFacts, key: IdempotencyKey) -> None: ...
+
     def table_image_document(self, key: str, index: int) -> TableDocument | bytes: ...
     def exists_for_key(self, key: IdempotencyKey) -> bool: ...
 
@@ -668,6 +675,7 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 
 
 class LineNotificationRuleRepositoryPort(Protocol):
+    def lock_failure_sources(self, source_event_ids: tuple[int, ...]) -> None: ...
     def cancel_rule(self, rule_id: str, *, reason: str) -> int: ...
 
     def lock_and_cancel_rule_intents(
@@ -909,7 +917,7 @@ class LineOrderGroupBindingRepositoryPort(Protocol):
 class LineIdempotencyReceiptPort(Protocol):
     def get(self, key: IdempotencyKey, *, for_update: bool = False) -> IdempotencyReceipt | None: ...
 
-    def append(self, receipt: IdempotencyReceipt) -> None: ...
+    def append(self, receipt: IdempotencyReceipt, *, result_snapshot=None) -> None: ...
 
 
 class LineOutboxRepositoryPort(OutboxWriter, Protocol):

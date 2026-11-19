@@ -31,12 +31,10 @@ function dateStatus(row: Row, today: string) {
 
 export function FinanceCaseList({
   onCase,
-  onNotice,
   revision = 0,
   initialSubTab = 'ongoing',
 }: {
   onCase: (caseNo: string) => void;
-  onNotice?: (caseNo: string, stage: CasePaymentReminder['payment_stage']) => void;
   revision?: number;
   initialSubTab?: 'ongoing' | 'all';
 }) {
@@ -291,16 +289,6 @@ export function FinanceCaseList({
                       <div className="finance-ongoing-actions">
                         <button className="finance-btn-secondary" onClick={() => onCase(order.case_no)}>
                           查看案件
-                        </button>
-                        <button
-                          className="finance-btn-primary"
-                          disabled={isCompleted || !onNotice || !notice?.can_send || !progress?.sources_complete || current === 'scheme'}
-                          title={isCompleted ? '案件款項已齊' : current === 'scheme' ? '客戶各期款已齊' : notice?.unavailable_reason ?? '查看目前期款通知'}
-                          onClick={() => {
-                            if (!isCompleted && current && current !== 'scheme') onNotice?.(order.case_no, current);
-                          }}
-                        >
-                          發出提醒
                         </button>
                       </div>
                     </td>

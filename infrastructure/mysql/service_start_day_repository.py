@@ -7,6 +7,7 @@ from hashlib import sha256
 
 from domains.line.delivery import LineMessageKind, LineRecipientType
 from infrastructure.mysql.client_payment_reminder_query_repository import MySqlClientPaymentReminderQueryRepository
+from infrastructure.mysql.order_notification_continuation_query_repository import notification_continuation_eligible_sql
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.line.service_start_day import (
@@ -20,14 +21,15 @@ class MySqlServiceStartDayRepository:
 
     def due_cases(self, day, after='', limit=100):
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT case_no FROM orders WHERE actual_start_date=%s AND case_no>%s "
-                           "AND status IN ('訂單成立','服務中') ORDER BY case_no LIMIT %s", (day, after, limit))
+            cursor.execute("SELECT o.case_no FROM orders o WHERE o.actual_start_date=%s AND o.case_no>%s "
+                           "AND o.status IN ('訂單成立','服務中') AND "+notification_continuation_eligible_sql('o')+
+                           " ORDER BY o.case_no LIMIT %s", (day, after, limit))
             return tuple(str(row['case_no']) for row in cursor.fetchall())
 
     def has_missing_group(self, case_no, day):
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT 1 FROM orders o WHERE o.case_no=%s AND o.actual_start_date=%s "
-                           "AND o.status IN ('訂單成立','服務中') "
+                           "AND o.status IN ('訂單成立','服務中') AND "+notification_continuation_eligible_sql('o')+' '+
                            "AND NOT EXISTS (SELECT 1 FROM line_order_group_bindings b WHERE b.case_no=o.case_no "
                            "AND b.binding_status IN ('bound','inviting','active','attention') AND b.group_id IS NOT NULL)",
                            (case_no, day))
@@ -39,7 +41,8 @@ class MySqlServiceStartDayRepository:
         if len(rows) != 1:
             return None
         facts = payments.get(rows[0].payment.obligation_identity, lock=True)
-        if facts is None or facts.payment.remaining_amount_ntd <= 0:
+        if (facts is None or facts.payment.remaining_amount_ntd <= 0
+                or not facts.notification_continuation.allows_automatic_payment(facts.payment.due_date)):
             return None
         return facts.payment
 
@@ -63,7 +66,8 @@ class MySqlServiceStartDayRepository:
     def current(self, case_no: str, service_date: date, *, lock=False):
         with self.connection.cursor() as cursor:
             # Match the existing Orders -> Scheduling/Finance lock order.
-            cursor.execute("SELECT actual_start_date,status FROM orders WHERE case_no=%s"
+            cursor.execute("SELECT o.actual_start_date,o.status FROM orders o WHERE o.case_no=%s AND "
+                           + notification_continuation_eligible_sql('o')
                            + (' FOR UPDATE' if lock else ''), (case_no,))
             order = cursor.fetchone()
             if (not order or order['actual_start_date'] != service_date

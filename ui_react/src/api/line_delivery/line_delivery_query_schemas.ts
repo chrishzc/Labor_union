@@ -66,7 +66,16 @@ export const LineDeliveryPageSchema = z.strictObject({
   total_pages: z.number().int().nonnegative(),
 });
 
+export const NotificationHandlingSchema = z.strictObject({
+  target_kind: z.enum(['delivery_task', 'notification_failure']),
+  target_identity: z.string().min(1),
+  needs_attention: z.boolean(),
+  allowed_actions: z.array(z.enum(['retry', 'cancel', 'replay', 'close'])),
+  blocked_reason: z.string().nullable(),
+});
+
 export const LineDeliveryDetailSchema = z.strictObject({
+  handling: NotificationHandlingSchema,
   task: LineDeliveryItemSchema,
   attempts: z.array(LineDeliveryAttemptSchema),
   retry_allowed: z.boolean().optional(),

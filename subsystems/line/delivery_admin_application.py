@@ -21,8 +21,12 @@ from subsystems.line.delivery_contracts import (
     RETIRED_CONTRACT_DELIVERY_SOURCES,
     RETIRED_PAYMENT_RECEIPT_DELIVERY_SOURCES,
     customer_service_delivery_retired,
+    retired_delivery_reason,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
+from subsystems.line.notification_handling import delivery_handling, current_failure_target, failure_handling
+from subsystems.line.notification_failure_current_fact import LineNotificationFailureCurrentFactQuery, LineNotificationFailureReason
+from dataclasses import replace
 
 
 class LineDeliveryTaskNotFoundError(LookupError):
@@ -67,6 +71,34 @@ class LineDeliveryTaskAdminApplication:
     def cancel(self, command: ControlLineDeliveryTaskCommand):
         return self._control("cancel", command)
 
+    def handling(self, task, actor):
+        with self._unit_of_work_factory() as unit:
+            snapshot = unit.delivery_tasks.get(task.task_id)
+            if snapshot is None:
+                raise LineDeliveryTaskNotFoundError('找不到原寄送工作。')
+            return self._handling(unit, task, actor, snapshot)
+
+    def _handling(self, unit, task, actor, snapshot):
+        target = current_failure_target(unit, task.task_id.value)
+        result = delivery_handling(task, actor, target=target, request=snapshot.request)
+        if target is None:
+            return result
+        projection = unit.anomaly_rechecks.query_current(target)
+        if projection is None:
+            raise LineDeliveryTaskStateConflictError('原通知異常已變動，請重新查詢。')
+        subject = projection.candidate.subject_identity
+        current = unit.notification_rules.current_failure_fact(LineNotificationFailureCurrentFactQuery(
+            subject['case_no'], LineNotificationFailureReason(subject['notification_reason'])))
+        records = [unit.delivery_tasks.get_admin(LineDeliveryTaskId(identity)) for identity in current.related_task_ids]
+        if any(record is None for record in records):
+            raise LineDeliveryTaskStateConflictError('原通知範圍尚未完整核對。')
+        group = failure_handling(current, records, actor, target, can_replay=False)
+        if group.blocked_reason:
+            return replace(result, allowed_actions=(), blocked_reason=group.blocked_reason)
+        if any(record.task_id != task.task_id and record.status.value in ('pending','processing','retryable_failed') for record in records):
+            return replace(result, allowed_actions=tuple(action for action in result.allowed_actions if action!='retry'))
+        return result
+
     def run_now(self, command: ControlLineDeliveryTaskCommand):
         return self._control("run_now", command)
 
@@ -92,7 +124,7 @@ class LineDeliveryTaskAdminApplication:
                 raise LineDeliveryTaskStateConflictError(
                     "LINE delivery control idempotency conflict"
                 )
-            current = unit_of_work.delivery_tasks.get(command.task_id)
+            current = unit_of_work.delivery_tasks.get(command.task_id, lock=True)
             if current is None:
                 raise LineDeliveryTaskNotFoundError(
                     f"找不到 LINE 發送任務 #{command.task_id.value}"
@@ -103,8 +135,25 @@ class LineDeliveryTaskAdminApplication:
                 raise LineDeliveryTaskStateConflictError("入帳確認推播已停用，請改由官方帳號發送。")
             if action != "cancel" and customer_service_delivery_retired(current.request):
                 raise LineDeliveryTaskStateConflictError("客服工單通知已停用，請於官方帳號處理對話。")
+            if action != 'cancel' and retired_delivery_reason(current.request) is not None:
+                raise LineDeliveryTaskStateConflictError('此通知來源已停用，無法發送或重試。')
             if existing is not None:
                 return current
+            if action == 'retry':
+                record = unit_of_work.delivery_tasks.get_admin(command.task_id)
+                handling = self._handling(unit_of_work, record, command.actor, current)
+                if 'retry' not in handling.allowed_actions:
+                    raise LineDeliveryTaskStateConflictError(handling.blocked_reason or '此來源已有其他工作或目前不允許重試。')
+            if action == 'cancel':
+                if current.status.value == 'processing':
+                    raise LineDeliveryTaskStateConflictError('工作正在寄送，請先核對結果。')
+                record = unit_of_work.delivery_tasks.get_admin(command.task_id)
+                handling = delivery_handling(record, command.actor,
+                    target=current_failure_target(unit_of_work, command.task_id.value), request=current.request)
+                if handling.target_kind == 'notification_failure':
+                    raise LineDeliveryTaskStateConflictError('請由原通知異常預覽並結清相關工作。')
+                if current.status.value != 'cancelled' and 'cancel' not in handling.allowed_actions:
+                    raise LineDeliveryTaskStateConflictError(handling.blocked_reason or '目前無法結清此工作。')
             try:
                 task = self._apply_action(unit_of_work, action, command)
             except (ValueError, RuntimeError) as error:
@@ -114,7 +163,9 @@ class LineDeliveryTaskAdminApplication:
                     command.idempotency_key,
                     fingerprint,
                     result_reference,
-                )
+                ), result_snapshot={'action': f'line.delivery.{action}',
+                    'task_ids': [command.task_id.value], 'reason': command.reason,
+                    'actor_id': command.actor.actor_id, 'closed_at': self._clock().isoformat()}
             )
             unit_of_work.audit.append(
                 LineAuditIntent(

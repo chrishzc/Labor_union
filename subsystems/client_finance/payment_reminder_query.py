@@ -4,6 +4,7 @@ from datetime import date
 from typing import Protocol
 
 from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +13,12 @@ class ClientPaymentReminderFacts:
     service_start_date: date | None
     contract_completed: bool
     case_status: str
+    notification_continuation: OrderNotificationContinuationFacts = OrderNotificationContinuationFacts()
+
+    @property
+    def reminder_eligible(self) -> bool:
+        continuation = self.notification_continuation
+        return continuation.eligible and (self.contract_completed or continuation.historical)
 
 
 class ClientPaymentReminderQueryPort(Protocol):

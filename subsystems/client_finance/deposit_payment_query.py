@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
+from subsystems.orders.notification_continuation_query import OrderNotificationContinuationFacts
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,7 @@ class DepositPayment:
     virtual_account: str | None
     settlement_identity: str | None
     received_on: date | None
+    notification_continuation: OrderNotificationContinuationFacts = OrderNotificationContinuationFacts()
 
     @property
     def settled(self) -> bool:

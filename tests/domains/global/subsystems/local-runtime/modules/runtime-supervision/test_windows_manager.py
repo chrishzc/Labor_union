@@ -22,6 +22,7 @@ $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $ProjectRoot=$env:MANAGER_TEST_DIRECTORY
 $toolsMysqlDir=Join-Path $ProjectRoot 'tools\mysql'
 $runtimeDirectory=Join-Path $ProjectRoot 'scratch\windows-remote'
@@ -131,6 +132,8 @@ def test_batch_menu_dispatches_every_option_and_continues_after_error(tmp_path):
     root = tmp_path / '獅子 管理'
     launcher = root / 'scripts/launchers/manage_windows.ps1'
     launcher.parent.mkdir(parents=True)
+    for name in ('windows_frontend_control.ps1', 'supervise_local_runtime.ps1'):
+        (launcher.parent / name).write_bytes((MANAGER.parent / name).read_bytes())
     record = r'''
 function Invoke-ManagerAction {
     param($Selected)
@@ -158,7 +161,8 @@ function Invoke-ManagerAction {
 
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup ordering')
 @pytest.mark.parametrize('failure', ['', 'build', 'database', 'redis', 'supervisor'])
-def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure):
+@pytest.mark.parametrize('shared_redis_mode', ['0', '1'])
+def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure, shared_redis_mode):
     result = run_manager_functions(r'''
 $LocalOnly=$true
 $PythonPath='Invoke-TestPython'
@@ -175,11 +179,20 @@ function New-ManagedArtifact {
     return (Join-Path $ProjectRoot 'artifact')
 }
 function Invoke-TestPython {
+    if($args[0] -eq '-c'){
+        if($args[1] -notmatch 'REGISTRATION_USE_SHARED_REDIS_FOR_TEST'){throw 'Unexpected setting read'}
+        $global:LASTEXITCODE=0
+        return $env:SHARED_REDIS_MODE
+    }
     if(($args -join '|') -ne '-m|scripts.check_runtime_database'){throw 'Unexpected Python invocation'}
     $script:calls.Add('database');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'database')
 }
 function docker.exe {
-    if(($args -join '|') -ne 'compose|up|-d|redis'){throw 'Unexpected container operation'}
+    $expectedDockerArgs='compose|up|-d|redis'
+    if($env:SHARED_REDIS_MODE -eq '1'){
+        $expectedDockerArgs='compose|-f|docker-compose.yml|-f|docker-compose.registration-test.yml|up|-d|redis|registration-intake|registration-token-verifier'
+    }
+    if(($args -join '|') -ne $expectedDockerArgs){throw 'Unexpected container operation'}
     $script:calls.Add('redis');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'redis')
 }
 function Start-Process {
@@ -196,7 +209,7 @@ if($rejected -ne [bool]$env:FAIL_AT){throw 'Startup failure was hidden or startu
 $expected=@('build','database','redis','supervisor')
 if($env:FAIL_AT){$expected=$expected[0..([array]::IndexOf($expected,$env:FAIL_AT))]}
 if(($script:calls -join ',') -ne ($expected -join ',')){throw ('Unexpected startup effects: '+($script:calls -join ','))}
-''', tmp_path, FAIL_AT=failure)
+''', tmp_path, FAIL_AT=failure, SHARED_REDIS_MODE=shared_redis_mode)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -316,6 +329,7 @@ $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $runtimeDirectory=$env:MANAGER_TEST_DIRECTORY
 $script:databaseCalls=[System.Collections.Generic.List[string]]::new()
 $script:shown=[System.Collections.Generic.List[string]]::new()
@@ -349,6 +363,7 @@ $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $PythonPath='Invoke-TestPython'
 $script:running=$true;$script:pythonExit=0;$script:stops=0
 $script:calls=[System.Collections.Generic.List[string]]::new()
@@ -386,6 +401,7 @@ $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Manager syntax error'}
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $runtimeDirectory=$env:MANAGER_TEST_DIRECTORY
 $script:actions=[System.Collections.Generic.List[string]]::new()
 function Set-RuntimeEnvironment {}
@@ -416,6 +432,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 function Get-Process {param($Id,$ErrorAction);if($env:ORPHAN_TEST -eq 'registered'){return [pscustomobject]@{StartTime=[datetime]'2026-01-01T00:00:00Z'}}}
 function Get-CimInstance {
     param($ClassName,$Filter,$ErrorAction)
@@ -443,6 +460,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $ProjectRoot = 'C:\project\root'
 $runtimeDirectory = $env:MANAGER_TEST_DIRECTORY
 $statePath = Join-Path $runtimeDirectory 'state.json'
@@ -501,6 +519,7 @@ $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
 foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+. (Join-Path (Split-Path -Parent $env:MANAGER_TEST_PATH) 'windows_frontend_control.ps1')
 $ProjectRoot = 'C:\project\root'
 $runtimeDirectory = $env:MANAGER_TEST_DIRECTORY
 $statePath = Join-Path $runtimeDirectory 'state.json'
@@ -547,3 +566,81 @@ Write-Output 'PASS'
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows file sharing')
+@pytest.mark.parametrize('operation', ['read', 'write', 'manager'])
+@pytest.mark.parametrize('persistent', [False, True])
+def test_control_file_lock_retries_and_preserves_state(tmp_path, operation, persistent):
+    directory = tmp_path / 'scratch/windows-remote/frontend-control'
+    directory.mkdir(parents=True)
+    state = directory / 'state.json'
+    original = '{"marker":"original"}'
+    state.write_text(original, encoding='utf-8')
+    # The holder runs independently of the reader/writer being tested.
+    holder = subprocess.Popen([
+        str(POWERSHELL), '-NoProfile', '-NonInteractive', '-Command', r"""
+$stream=[IO.File]::Open($env:LOCK_TEST_PATH,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+try {
+    [Console]::WriteLine('LOCKED'); [Console]::Out.Flush()
+    Start-Sleep -Milliseconds ([int]$env:LOCK_TEST_DURATION)
+} finally { $stream.Dispose() }
+"""], env={**os.environ, 'LOCK_TEST_PATH': str(state),
+           'LOCK_TEST_DURATION': '30000' if persistent else '1500'},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == 'LOCKED'
+        result = run_manager_functions(r"""
+$timer=[Diagnostics.Stopwatch]::StartNew()
+$failure=$null
+try {
+    switch ($env:LOCK_TEST_OPERATION) {
+        'read' { $value=Read-FrontendControlJson $statePath; if($value.marker -ne 'original'){throw 'Wrong state'} }
+        'write' { Write-FrontendControlJson $statePath @{marker='updated'} }
+        'manager' { Get-ManagedState | Out-Null }
+    }
+} catch { $failure=$_ }
+$timer.Stop()
+if($env:LOCK_TEST_PERSISTENT -eq '1') {
+    if(-not $failure){throw 'Locked file accepted'}
+    if($timer.Elapsed.TotalSeconds -lt 1.8 -or $timer.Elapsed.TotalSeconds -gt 8){throw 'Retry duration outside bound'}
+    if($failure.Exception.Message -notmatch '20 attempts'){throw ('Missing retry context: '+$failure)}
+} else {
+    if($failure){throw $failure}
+    if($env:LOCK_TEST_OPERATION -ne 'manager') {
+        $probe=[IO.File]::Open($statePath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        $probe.Dispose()
+    }
+}
+Write-Output 'PASS'
+""", tmp_path, LOCK_TEST_OPERATION=operation,
+            LOCK_TEST_PERSISTENT='1' if persistent else '0')
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'PASS' in result.stdout
+    finally:
+        if holder.poll() is None:
+            holder.terminate()
+        holder.communicate(timeout=10)
+    if persistent:
+        assert state.read_text(encoding='utf-8') == original
+    elif operation == 'write':
+        assert json.loads(state.read_text(encoding='utf-8'))['marker'] == 'updated'
+    assert not list(directory.glob('*.tmp'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows file sharing')
+def test_invalid_state_is_preserved_and_read_handle_is_released(tmp_path):
+    directory = tmp_path / 'scratch/windows-remote/frontend-control'
+    directory.mkdir(parents=True)
+    state = directory / 'state.json'
+    state.write_text('{invalid', encoding='utf-8')
+    result = run_manager_functions(r"""
+$rejected=$false
+try { Get-ManagedState | Out-Null } catch { $rejected=$true }
+if(-not $rejected){throw 'Invalid JSON accepted'}
+if(-not(Test-Path -LiteralPath $statePath)){throw 'Invalid state removed'}
+$probe=[IO.File]::Open($statePath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+$probe.Dispose()
+""", tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert state.read_text(encoding='utf-8') == '{invalid'

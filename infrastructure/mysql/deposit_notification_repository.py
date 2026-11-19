@@ -4,6 +4,7 @@ Description: 查詢帳務訂金核銷與提醒投遞狀態，排除已於官方�
 """
 from domains.line.identities import LineDeliveryTaskId
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
+from infrastructure.mysql.order_notification_continuation_query_repository import historical_case_sql
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from subsystems.line.deposit_notifications import (
     DepositSettlementIntent, DepositNotificationTodo, DepositNotificationTodoPage, REMINDER, SETTLED, payment_source,
@@ -94,7 +95,9 @@ class MySqlDepositNotificationRepository:
                     "AND d.status<>'cancelled' AND (d.amount_due_ntd>0 OR (d.status='settled' AND e.after_amount_ntd>0)) AND o.status IN ('洽談中','訂單成立','服務中') "
                     "AND (d.status='settled' OR EXISTS (SELECT 1 FROM order_contract_flow_events flow "
                     "WHERE flow.case_no=o.case_no AND flow.event_type='contract_completed' "
-                    "AND flow.contract_identity=o.contract_identity)) "
+                    "AND flow.contract_identity=o.contract_identity) OR "
+                    + historical_case_sql('o') + ") "
+                    +
                     "AND d.case_no>%s" + (" AND d.case_no=%s" if case_no is not None else "")
                     + " ORDER BY d.case_no LIMIT %s",
                     (after_case_no, case_no, 100) if case_no is not None else (after_case_no, 100),
@@ -104,7 +107,7 @@ class MySqlDepositNotificationRepository:
                 break
             for row in rows:
                 payment = payments.get(str(row['case_no']))
-                if payment is None:
+                if payment is None or (not payment.settled and not payment.notification_continuation.eligible):
                     continue
                 with self._connection.cursor() as cursor:
                     cursor.execute(

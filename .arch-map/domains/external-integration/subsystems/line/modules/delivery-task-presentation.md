@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/components/LineDeliveryTaskWorkbench.tsx`
+- `ui_react/src/components/LineNotificationClosureBatch.tsx` — 固定候選、canonical 目標去重、逐項結清收據與未知結果同鍵接續，未選項目不異動。
 - `ui_react/src/components/LineDeliveryOperationsWorkbench.tsx`、`ui_react/src/components/LineDeliveryTaskActions.tsx`、`ui_react/src/components/LineNotificationFailureActions.tsx` — LINE 正式「寄送與異常」頁；`tab=delivery&task=<id>` 單筆讀取寄送工作，`tab=delivery&view=failures&issue=<key>` 單筆核對原異常。清單分頁不影響選定 ID，重試／取消／補送仍沿既有 writer；不以通知設定頁替代原工作。
 - transport: `api/routes/line_tasks.py` — 現行訂金、各期逾期、日誌、資訊問答與服務日期／代班來源映射到既有公開分類；list／detail 不回傳 raw recipient、payload 或 provider error。未知來源仍 fail closed。
 - public detail schema: `api/schemas/line_tasks.py`、`ui_react/src/api/line_delivery/line_delivery_query_schemas.ts`。既有簽署提醒、契約下載及已退役入帳確認推播（`manual_client_payment_receipt`、`client_deposit_settled`、`client_second_payment_settled`）沿原類別讀取投遞歷史，detail 回傳 `retry_allowed=false`，畫面不提供重試。
@@ -18,6 +19,7 @@
 - 開工文字問候 `order_service_start_greeting` 歸 order 分類。舊開工、完工問卷及第二期群組寄送紀錄沿用 order 或 finance 分類供查閱。
 
 ## Contracts
+- 已到期整理的 task 不列清單或總數；舊 detail typed 410，六個月及例外依 `delivery-retention` owner。
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — LINE delivery與provider邊界。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 

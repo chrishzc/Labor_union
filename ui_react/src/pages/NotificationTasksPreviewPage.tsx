@@ -9,7 +9,7 @@ import {
   ClipboardCheck, Clock3, ExternalLink, FileText, Inbox, MessageCircle,
   RefreshCw, Search, Send, ShieldCheck, TriangleAlert, Wallet, X,
 } from 'lucide-react';
-import { notificationTasksClient as client, notificationFailure, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
+import { notificationTasksClient as client, notificationFailure, notifyNotificationTasksChanged, type NotificationItem, type NotificationPage, type NotificationSource, type NotificationCatalog } from '../api/line_notifications/notification_tasks_client';
 import { NotificationTaskActions, notificationHref } from '../components/NotificationTaskActions';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import type { LineDeliveryStatus, LineDeliverySourceType } from '../api/line_delivery/line_delivery_query_schemas';
@@ -26,7 +26,7 @@ function deliveryGroup(source:LineDeliverySourceType):Group {
 const GROUPS = [
   { id: 'all', label: '全部事項', icon: Inbox },
   { id: 'review', label: '審核與協調', icon: ClipboardCheck },
-  { id: 'reminder', label: '款項與日誌', icon: Wallet },
+  { id: 'reminder', label: '款項與群組', icon: Wallet },
   { id: 'support', label: '系統與寄送異常', icon: ShieldCheck },
 ] as const;
 const DELIVERY_LABELS:Record<string,string> = {pending:'待寄送',processing:'寄送中',retryable_failed:'等待重試',sent:'已送出',failed:'寄送失敗',cancelled:'已取消'};
@@ -79,12 +79,18 @@ export function NotificationTasksPage() {
     }).catch(error=>{if(!abort.signal.aborted)setQueryError(notificationFailure(error));}).finally(()=>{if(!abort.signal.aborted)setLoading(false);});
     return()=>abort.abort();
   },[revision]);
+  useEffect(()=>{
+    const recheck=()=>{if(window.location.hash.split('?')[0]==='#notifications'){setRevision(value=>value+1);setRecordRevision(value=>value+1);}};
+    window.addEventListener('hashchange',recheck);
+    return()=>window.removeEventListener('hashchange',recheck);
+  },[]);
   const refreshSource=useCallback(async(source:NotificationSource)=>{
     const version=generation.current;const result=await client.list(source);
     if(version!==generation.current)return;
     setPools(old=>({...old,[source]:result}));setFailures(old=>({...old,[source]:undefined}));
   },[]);
   const refreshAfterCommit=useCallback(async()=>{
+    notifyNotificationTasksChanged();
     const version=generation.current;
     // One original command can change several sources (for example a shared
     // assistance ticket). Re-read the bounded owner pages without closing an
@@ -170,6 +176,7 @@ export function NotificationTasksPage() {
     {loading && <p role="status">正在讀取待處理事項…</p>}
     {tab==='records' && recordError && <p role="alert">{recordError}</p>}
     {tab==='records' && recordLoading && <p role="status">正在讀取寄送紀錄…</p>}
+    {tab==='records' && <p className="notification-preview-footnote">已完成或已結清的寄送內容與嘗試明細滾動保留六個月。待處理或結果未明的工作會保留至核對完成。</p>}
 
     <nav className="notification-preview-tabs" aria-label="通知事項檢視">
       <button type="button" aria-pressed={tab === 'tasks'} className={tab === 'tasks' ? 'active' : ''} onClick={() => changeTab('tasks')}>需要處理<span>{loading?'—':allItems.length}{catalog.some(s=>pools[s.source]?.next_cursor!=null)?'+':''}</span></button>
@@ -216,10 +223,10 @@ export function NotificationTasksPage() {
             {selected.source==='deposit' && <><a href={`#finance?tab=client-receipts&case_no=${encodeURIComponent(selected.case_no ?? '')}`}>核對繳費資料與到期日</a><a href="#line-management?tab=push_queue">核對通知及繳費頁面設定</a><p>銀行代碼需由系統設定補齊；案件專屬虛擬帳號沿原規則產生。</p></>}
           </div>}
           {selected.delivery_status && !selected.delivery && <p>最近寄送狀態：{DELIVERY_LABELS[selected.delivery_status] ?? selected.delivery_status}</p>}
-          <div className="notification-preview-actions"><button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>
+          <div className="notification-preview-actions">{!['customer_binding','staff_binding'].includes(selected.source) && <button type="button" className="np-button primary" disabled={busy || loading || (!!selected.unavailable_reason && selected.primary.includes('發送'))} onClick={()=>void act(selected)}>{selected.primary.includes('發送')?<Send size={16} aria-hidden="true" />:<ExternalLink size={16} aria-hidden="true" />}{busy?'處理中…':selected.primary}</button>}
             {selected.secondary && <button type="button" className="np-button" disabled={busy} onClick={()=>void secondary(selected)}>{selected.secondary}<ChevronRight size={15} aria-hidden="true" /></button>}
           </div>
-          {expanded===selected.id && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} sourceReadError={failures[selected.source]} onCommitted={refreshAfterCommit} /></div>}
+          {(expanded===selected.id || ['customer_binding','staff_binding'].includes(selected.source)) && <div className="notification-task-operation" key={selected.id}><NotificationTaskActions item={selected} sourceReadError={failures[selected.source]} onCommitted={refreshAfterCommit} /></div>}
           <p className="notification-preview-footnote"><ShieldCheck size={14} aria-hidden="true" />處理完成後，待辦會自動更新。</p>
           {notice && <div className="notification-preview-notice" role="status"><MessageCircle size={17} aria-hidden="true" /><p>{notice}</p><button type="button" aria-label="關閉操作訊息" onClick={() => setNotice('')}><X size={15} aria-hidden="true" /></button></div>}
         </> : <div className="notification-preview-empty detail-empty"><Check size={28} aria-hidden="true" /><p>選擇事項即可查看明細。</p></div>}
