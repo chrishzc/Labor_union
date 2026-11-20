@@ -244,7 +244,7 @@ def package_send(monkeypatch):
     monkeypatch.setattr(candidate_workflow, "MySqlOrderInformationRepository", lambda _: Repository())
     monkeypatch.setattr(candidate_workflow, "MySqlLineDeliveryTaskRepository", lambda _: SimpleNamespace(enqueue=enqueue))
     monkeypatch.setattr(candidate_workflow, "_run_in_application_uow", lambda operation: operation(connection, cursor))
-    monkeypatch.setattr(candidate_workflow, "candidate_contact_open", lambda *_: True)
+    monkeypatch.setattr(candidate_workflow, "require_candidate_matching_open", lambda *_: None)
     monkeypatch.setattr(candidate_workflow, "_require_current_candidate", lambda *_: {})
     monkeypatch.setattr(candidate_workflow, "configured_message_payload", lambda _connection, _key, card, _values: card)
     monkeypatch.setattr("subsystems.line.table_image_messages.image_url", lambda _key, index, _now: f"https://example.test/image/{index}")

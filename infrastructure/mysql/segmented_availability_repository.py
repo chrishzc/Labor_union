@@ -10,9 +10,27 @@ import json
 from typing import Any, Callable, Protocol
 
 from domains.orders.actual_start import calculate_service_dates
+from domains.scheduling.matching_communication import CandidateMatchingError, candidate_inquiry_period
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+from infrastructure.mysql.replacement_matching_query import require_candidate_matching_open
 from infrastructure.mysql.scheduling_occupancy_facts import load_historical_reservation_rows
 from domains.orders.terms import canonical_service_mode
+
+
+_ACTIVE_STAFF_SQL = (
+    "FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id "
+    "WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'"
+)
+
+
+def lock_active_candidate_staff(cursor: Any, staff_ids: list[int]) -> None:
+    placeholders = ",".join("%s" for _ in staff_ids)
+    cursor.execute(
+        f"SELECT s.id {_ACTIVE_STAFF_SQL} AND s.id IN ({placeholders}) ORDER BY s.id FOR UPDATE",
+        tuple(staff_ids),
+    )
+    if len(cursor.fetchall()) != len(staff_ids):
+        raise CandidateMatchingError("candidate_staff_not_active")
 
 
 class SegmentedAvailabilityFactsPort(Protocol):
@@ -24,8 +42,9 @@ class SegmentedAvailabilityFactsPort(Protocol):
 
 
 class MySqlSegmentedAvailabilityFactsRepository:
-    def __init__(self, connection_factory: Callable[[], Any]):
+    def __init__(self, connection_factory: Callable[[], Any], *, candidate_inquiry: bool = False):
         self._connection_factory = connection_factory
+        self._candidate_inquiry = candidate_inquiry
 
     def load_case_facts(self, case_no: str) -> dict[str, Any]:
         connection = self._connection_factory()
@@ -33,6 +52,8 @@ class MySqlSegmentedAvailabilityFactsRepository:
         try:
             cursor = connection.cursor()
             order = self._load_order(cursor, case_no)
+            if order and self._candidate_inquiry:
+                require_candidate_matching_open(cursor, case_no)
             if not order or order["status"] not in {"洽談中", "訂單成立"}:
                 return {"order": order}
             return self._load_negotiation_facts(cursor, order)
@@ -89,17 +110,21 @@ class MySqlSegmentedAvailabilityFactsRepository:
         # end_date is an Orders projection, never an extra intake answer.
         # A missing persisted projection must not block the initial inquiry.
         order = dict(order)
-        if order.get("end_date") is None:
-            mode = canonical_service_mode(order.get("service_type"))
-            if mode is None:
-                raise ValueError("matching_preference_source_not_ready")
-            rest_dates = order.get("custom_rest_dates") or ()
-            if isinstance(rest_dates, str):
-                rest_dates = json.loads(rest_dates)
-            holidays = tuple(sorted({_as_date(value) for value in rest_dates}))
-            order["end_date"] = calculate_service_dates(
-                _as_date(order["start_date"]), int(order["service_days"]), mode, holidays,
-            )[-1]
+        if self._candidate_inquiry:
+            if order.get("start_date") is None:
+                raise CandidateMatchingError("candidate_inquiry_dates_missing")
+            try:
+                self._derive_planned_end(order)
+                start, end = _as_date(order["start_date"]), _as_date(order["end_date"])
+                if start == date.min or end == date.max:
+                    raise ValueError("inquiry period must allow buffer days")
+            except (TypeError, ValueError, IndexError, OverflowError) as error:
+                if str(error) == "matching_preference_source_not_ready":
+                    raise
+                raise CandidateMatchingError("candidate_inquiry_dates_invalid") from error
+            candidate_inquiry_period(start, end)
+        else:
+            self._derive_planned_end(order)
         confirmed_service_dates = self._load_confirmed_service_dates(cursor, order["case_no"])
         window_start, window_end = _availability_window(order, confirmed_service_dates)
         shift_start = (_as_date(window_start) - timedelta(days=1)).isoformat()
@@ -123,6 +148,21 @@ class MySqlSegmentedAvailabilityFactsRepository:
             ],
         }
 
+    @staticmethod
+    def _derive_planned_end(order: dict[str, Any]) -> None:
+        if order.get("end_date") is not None:
+            return
+        mode = canonical_service_mode(order.get("service_type"))
+        if mode is None:
+            raise ValueError("matching_preference_source_not_ready")
+        rest_dates = order.get("custom_rest_dates") or ()
+        if isinstance(rest_dates, str):
+            rest_dates = json.loads(rest_dates)
+        holidays = tuple(sorted({_as_date(value) for value in rest_dates}))
+        order["end_date"] = calculate_service_dates(
+            _as_date(order["start_date"]), int(order["service_days"]), mode, holidays,
+        )[-1]
+
     def _load_confirmed_service_dates(self, cursor: Any, case_no: str) -> list[dict[str, Any]]:
         cursor.execute(
             "SELECT d.service_date FROM confirmed_service_date_versions v "
@@ -133,7 +173,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
         return cursor.fetchall() or []
 
     def _load_active_staff(self, cursor: Any) -> list[dict[str, Any]]:
-        cursor.execute("SELECT s.id,s.name,s.union_no FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.id")
+        cursor.execute(f"SELECT s.id,s.name,s.union_no {_ACTIVE_STAFF_SQL} ORDER BY s.id")
         staff_rows = cursor.fetchall() or []
         by_id = {int(row["id"]): row for row in staff_rows}
         _attach_region_rows(cursor, by_id)

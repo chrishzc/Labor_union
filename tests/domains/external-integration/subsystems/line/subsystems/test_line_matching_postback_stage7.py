@@ -3,10 +3,14 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from domains.line.identities import LineSourceType, LineUserId
+from domains.scheduling.matching_communication import CandidateMatchingError
 from subsystems.line.matching_postback_application import (
     LineMatchingPostbackApplication,
 )
+from subsystems.line.webhook_event_consumer import TerminalLineEventError
 
 NOW = datetime(2026, 8, 9, tzinfo=timezone.utc)
 
@@ -88,6 +92,18 @@ def test_m3_rejected_alias_is_normalized_to_legacy_declined_root_value() -> None
     )
 
     assert spy.calls[0][1]["decision"] == "declined"
+
+
+def test_matching_acceptance_with_closed_case_is_terminal() -> None:
+    def record_response(*_args, **_kwargs):
+        raise CandidateMatchingError("candidate_contact_order_not_negotiating")
+
+    handler = LineMatchingPostbackApplication(
+        SimpleNamespace(record_line_response_in_unit_of_work=record_response)
+    )
+
+    with pytest.raises(TerminalLineEventError, match="candidate_contact_order_not_negotiating"):
+        handler.handle(_inbox("matching:safe-token-12345678901234567890:accepted"), object())
 
 
 def test_schedule_rejection_postback_uses_the_bound_line_user_and_event_identity() -> None:

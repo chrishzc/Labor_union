@@ -12,6 +12,7 @@ from subsystems.orders.reopen_workflow import (
     OrderReopenWorkflow,
     ReopenWorkflowFacts,
 )
+from subsystems.orders.terms_workflow import CommandClaimState
 
 
 class _UnitOfWork:
@@ -28,16 +29,18 @@ class _UnitOfWork:
 class _Repository:
     def __init__(self, facts):
         self.facts = facts
-        self.claim = None
         self.saved = None
+        self.retirements = []
 
     def load_for_preview(self, _): return self.facts
     def load_for_apply(self, _): return self.facts
     def claim_command(self, *_):
-        from subsystems.orders.terms_workflow import CommandClaimState
-        return CommandClaimState.CREATED
-    def find_receipt(self, *_args, **_kwargs): return None
+        return CommandClaimState.MATCHED if self.saved else CommandClaimState.CREATED
+    def find_receipt(self, *_args, **_kwargs):
+        return self.saved.stored_receipt if self.saved else None
     def append_reopen_event(self, *_): return 10
+    def retire_prior_matching_plans(self, request, cancellation_event_id, reopen_event_id):
+        self.retirements.append((request.case_no, cancellation_event_id, reopen_event_id))
     def clear_cancellation_control(self, *_): return 11
     def append_reopen_lifecycle(self, *_): return 12
     def update_reopened_order(self, command): self.projection = command
@@ -54,10 +57,13 @@ def test_reopen_preview_and_apply_use_source_transaction_contract():
     workflow = OrderReopenWorkflow(repository, _UnitOfWork, FixedBusinessClock(datetime(2026, 8, 3, 9, 0).astimezone()))
     preview = workflow.preview("CASE-1")
     request = OrderReopenApplyRequest("CASE-1", ExpectedVersion(4), ExpectedVersion(2), ExpectedVersion(3), preview.fingerprint, IdempotencyKey("reopen-1"), ActorContext("admin"), "correct cancellation", CorrelationId("corr-1"))
+    assert repository.retirements == []
     receipt = workflow.apply(request)
     assert receipt.order_version == 5
     assert receipt.lifecycle_status is OrderLifecycleStatus.DISCUSSION
     assert repository.saved.stored_receipt.receipt == receipt
+    assert workflow.apply(request) == receipt
+    assert repository.retirements == [("CASE-1", 7, 10)]
 
 
 @pytest.mark.parametrize("owner_created", [None, "client_finance_version", "payroll_version"])
@@ -73,6 +79,7 @@ def test_reopen_missing_roots_and_fresh_presence_conflict(owner_created):
             workflow.apply(request)
         assert error.value.error.category.value == "conflict"
         assert repository.saved is None
+        assert repository.retirements == []
     else:
         receipt = workflow.apply(request)
         assert receipt.requires_fresh_scheduling_preview

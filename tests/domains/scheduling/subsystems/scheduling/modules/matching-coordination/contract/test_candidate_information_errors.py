@@ -4,11 +4,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies.admin_auth import require_line_matching_sender
+from api.dependencies.admin_auth import require_line_matching_sender, require_system_admin
 from api.exception_handlers.typed_errors import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import candidate_contact_pool as routes
+from api.routes import caregiver_segment_availability as availability_routes
 from api.schemas.candidate_contact_pool import SendCandidateInformationRequest
 from api.schemas.errors import GlobalTypedErrorResponseView
+from domains.scheduling.matching_communication import CandidateMatchingError
 from subsystems.access.authentication_session import AdminPrincipal
 from pydantic import ValidationError
 
@@ -58,3 +60,42 @@ def test_information_errors_survive_global_boundary_without_exposing_unknown_det
         assert code not in response.text
     else:
         assert error.code == code
+
+
+@pytest.mark.parametrize("operation", ["search", "add"])
+@pytest.mark.parametrize(("code", "action"), [
+    ("candidate_contact_order_not_negotiating", "重新讀取案件進度"),
+    ("candidate_matching_assignment_present", "已有正式指派"),
+    ("candidate_matching_data_needs_review", "資料待核對"),
+    ("candidate_matching_service_started", "已有正式服務紀錄"),
+    ("candidate_inquiry_dates_missing", "補存預計服務日期"),
+    ("candidate_inquiry_dates_invalid", "保存正確日期"),
+    ("candidate_inquiry_dates_too_long", "超過 60 天"),
+    ("candidate_staff_not_active", "確認月嫂名冊"),
+])
+def test_matching_blockers_reach_candidate_workbench(monkeypatch, operation, code, action):
+    def blocked(*args, **kwargs):
+        raise CandidateMatchingError(code)
+
+    app = FastAPI()
+    install_typed_error_handlers(app)
+    app.include_router(routes.router)
+    app.include_router(availability_routes.router)
+    principal = AdminPrincipal(None, "operator-1", "Synthetic operator", "system_admin")
+    app.dependency_overrides[require_line_matching_sender] = lambda: principal
+    app.dependency_overrides[require_system_admin] = lambda: principal
+    if operation == "search":
+        monkeypatch.setattr(availability_routes, "search_candidate_inquiry_availability", blocked)
+        path = "availability/search"
+        payload = {"as_of": "2026-11-20", "segment_drafts": []}
+    else:
+        monkeypatch.setattr(routes.workflow, "add_candidates", blocked)
+        path = "candidates"
+        payload = {
+            "actor": "operator-1", "event_key": "candidate-error-test",
+            "candidates": [{"staff_id": 7, "start_date": "2026-11-20", "end_date": "2026-11-21"}],
+        }
+    response = TestClient(app).post(f"/api/v1/orders/CASE-1/candidate-contact-pool/{path}", json=payload)
+    assert response.status_code == 409
+    error = GlobalTypedErrorResponseView.model_validate(response.json()).detail.error
+    assert error.category == "conflict" and error.code == code and action in error.message

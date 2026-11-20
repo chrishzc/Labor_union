@@ -3,7 +3,9 @@ Description: 提供候選聯繫池 API 路由與 typed schema 邊界。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from api.candidate_matching_errors import candidate_matching_http_error
 from api.error_contracts import typed_http_error
+from domains.scheduling.matching_communication import CandidateMatchingError
 from subsystems.line.table_image_contracts import TableImageUnavailable
 
 from api.dependencies.admin_auth import (
@@ -42,7 +44,7 @@ from infrastructure.mysql.segmented_availability_repository import MySqlSegmente
 
 
 workflow.get_connection = get_connection
-workflow.segmented_facts_port = MySqlSegmentedAvailabilityFactsRepository(get_connection)
+workflow.segmented_facts_port = MySqlSegmentedAvailabilityFactsRepository(get_connection, candidate_inquiry=True)
 
 router = APIRouter(prefix="/api/v1", tags=["Matches Candidate Contact Pool"])
 
@@ -53,6 +55,8 @@ def _require_actor(principal: AdminPrincipal, actor: str) -> None:
 
 
 def _information_error(error: ValueError) -> HTTPException:
+    if isinstance(error, CandidateMatchingError):
+        return candidate_matching_http_error(error, "candidate-information")
     # Translate only known sending failures; the Global boundary sanitizes unknown errors.
     messages = {
         "caregiver_has_no_line_delivery_identity": (
@@ -158,6 +162,8 @@ def add_candidate_contact_pool_entries(case_no: str, req: AddCandidatesRequest, 
             data=AddCandidatesResult.model_validate(result),
             message="候選月嫂已加入聯繫池",
         )
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "candidate-add") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -279,6 +285,8 @@ def preview_manual_candidate_information_confirmation(
             ),
             message="已預覽候選月嫂資訊人工確認",
         )
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "candidate-information") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -311,6 +319,8 @@ def apply_manual_candidate_information_confirmation(
             ),
             message="候選月嫂資訊人工確認已留存",
         )
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "candidate-information") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -334,5 +344,7 @@ def record_candidate_willingness(case_no: str, candidate_id: int, req: Candidate
             data=CandidateWillingnessResult.model_validate(result),
             message="候選月嫂意願已更新",
         )
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "candidate-willingness") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

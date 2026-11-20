@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.dependencies.admin_auth import require_system_admin
+from api.candidate_matching_errors import candidate_matching_http_error
 from api.error_contracts import internal_query_error, typed_http_error
+from domains.scheduling.matching_communication import CandidateMatchingError
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.segmented_availability_query import (
@@ -294,10 +296,12 @@ def search_candidate_inquiry(
             case_no=case_no,
             segment_drafts=[draft.model_dump(mode="json", exclude_none=True) for draft in request.segment_drafts],
             as_of=request.as_of,
-            facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection),
+            facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection, candidate_inquiry=True),
             filter_policy=request.filters.model_dump(),
         )
         return _response_from_service(result, "預計服務期間候選查詢完成；未確認需求待確認。")
+    except CandidateMatchingError as exc:
+        raise candidate_matching_http_error(exc, "candidate-inquiry-availability") from exc
     except ValueError as exc:
         _raise_availability_value_error(exc, "預計服務期間候選查詢未通過。", "candidate-inquiry-availability")
     except Exception as exc:

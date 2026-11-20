@@ -194,6 +194,7 @@ def test_willing_candidate_recommendation_uses_inquiry_period_without_preview_da
         "_lock_matching_plan_case_root",
         lambda *_args: None,
     )
+    monkeypatch.setattr(matching_plan_workflow, "require_candidate_matching_open", lambda *_: None)
     monkeypatch.setattr(
         matching_plan_workflow,
         "_load_matching_plan_create_receipt",
@@ -500,6 +501,7 @@ def test_current_willing_candidate_creates_plan_without_candidate_display_dates(
         "_lock_matching_plan_case_root",
         lambda *_args: None,
     )
+    monkeypatch.setattr(matching_plan_workflow, "require_candidate_matching_open", lambda *_: None)
     monkeypatch.setattr(
         matching_plan_workflow,
         "_load_matching_plan_create_receipt",
@@ -539,6 +541,7 @@ def test_formal_plan_still_rejects_current_schedule_conflict(monkeypatch):
         "_lock_matching_plan_case_root",
         lambda *_args: None,
     )
+    monkeypatch.setattr(matching_plan_workflow, "require_candidate_matching_open", lambda *_: None)
     monkeypatch.setattr(
         matching_plan_workflow,
         "_load_matching_plan_create_receipt",

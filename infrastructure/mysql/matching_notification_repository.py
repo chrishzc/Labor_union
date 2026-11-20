@@ -24,6 +24,7 @@ from domains.scheduling.matching_communication import (
     MatchingResponseSource,
 )
 from infrastructure.mysql.line_repository_support import database_utc, aware_utc
+from infrastructure.mysql.replacement_matching_query import candidate_matching_blocker
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.scheduling.matching_notification_contracts import (
@@ -50,6 +51,49 @@ class MySqlMatchingNotificationRepository:
         self._connection = connection
         self._locked_waiting_staff: dict[str, tuple[int, ...]] = {}
 
+    def retire_for_controlled_reopen(
+        self,
+        case_no: str,
+        *,
+        actor_id: str,
+        cancellation_event_id: int,
+        reopen_event_id: int,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, communication_version FROM caregiver_matching_plans "
+                "WHERE case_no=%s AND is_active=1 AND status IN ('draft','proposed','accepted') "
+                "ORDER BY id FOR UPDATE",
+                (case_no,),
+            )
+            for plan in cursor.fetchall():
+                plan_id = int(plan["id"])
+                prior_version = int(plan["communication_version"])
+                cursor.execute(
+                    "UPDATE caregiver_matching_plans "
+                    "SET status='superseded', is_active=NULL, communication_version=communication_version+1 "
+                    "WHERE id=%s AND case_no=%s AND is_active=1 AND communication_version=%s",
+                    (plan_id, case_no, prior_version),
+                )
+                if cursor.rowcount != 1:
+                    raise MatchingCommunicationConflictError("matching plan version is stale")
+                cursor.execute(
+                    "INSERT INTO caregiver_matching_plan_events "
+                    "(plan_id, segment_id, event_type, event_key, actor, payload) "
+                    "VALUES (%s,NULL,'plan_cancelled',%s,%s,%s)",
+                    (
+                        plan_id,
+                        f"reopen-recommendation:{reopen_event_id}:{plan_id}",
+                        actor_id,
+                        json.dumps({
+                            "source": "controlled_reopen",
+                            "cancellation_event_id": cancellation_event_id,
+                            "reopen_event_id": reopen_event_id,
+                            "prior_communication_version": prior_version,
+                        }),
+                    ),
+                )
+
     def get_contact_state(
         self,
         case_no: str,
@@ -68,9 +112,8 @@ class MySqlMatchingNotificationRepository:
             responses = self._latest_responses(cursor, plan_id)
             deliveries = self._latest_deliveries(cursor, plan_id)
             manual_profiles = self._manual_profile_events(cursor, plan_id)
-            if plan["order_status"] == "訂單成立":
-                from infrastructure.mysql.replacement_matching_query import replacement_matching_open
-                plan["replacement_matching_open"] = replacement_matching_open(cursor, case_no)
+            plan["matching_blocker"] = candidate_matching_blocker(cursor, case_no)
+            plan["replacement_matching_open"] = plan["order_status"] == "訂單成立" and plan["matching_blocker"] is None
         return _contact_state(plan, segments, responses, deliveries, manual_profiles)
 
     def get_manual_customer_profiles_result(
@@ -651,6 +694,7 @@ def _contact_state(plan, segments, responses, deliveries, manual_profiles=()):
         contact_segments,
         _manual_profile_evidence(manual_profiles, segments),
         bool(plan.get("replacement_matching_open", False)),
+        plan.get("matching_blocker"),
     )
 
 

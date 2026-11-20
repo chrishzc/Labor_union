@@ -161,6 +161,7 @@ def test_confirmation_preview_is_readable_with_or_without_line_binding(hours_per
         plan_status="proposed",
         order_status="洽談中",
         replacement_matching_open=False,
+        matching_blocker=None,
         all_willing=True,
         customer_decision="pending",
         customer_line_user_id=object() if line_bound else None,

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+from domains.scheduling.matching_communication import CustomerMatchingDecision
+from infrastructure.mysql.replacement_matching_query import require_candidate_matching_open
 from subsystems.scheduling.ports import (
     SegmentedAvailabilityFactsPort,
     unconfigured_connection_factory,
@@ -409,6 +411,7 @@ def _create_matching_plan_version_with_receipt(
             raise ValueError("matching plan create idempotency key does not match original command")
         return {**replay, "replayed": True}
 
+    require_candidate_matching_open(cursor, case_no_value)
     _validate_current_availability(
         case_no_value,
         normalized_segments,
@@ -447,8 +450,6 @@ def _create_matching_plan_version_in_transaction(
     require_willing_candidate: bool = False,
 ) -> dict[str, Any]:
     try:
-        _lock_matching_plan_case_root(cursor, case_no_value)
-
         if require_willing_candidate:
             _require_current_willing_candidate(
                 connection,
@@ -465,7 +466,12 @@ def _create_matching_plan_version_in_transaction(
             (case_no_value,),
         )
         plans = cursor.fetchall() or []
-        if any(row["status"] == "accepted" for row in plans):
+        active_plan = next((row for row in plans if row["is_active"] == 1), None)
+        if active_plan is not None and (
+            active_plan["status"] == "accepted"
+            or _lock_current_customer_decision(cursor, active_plan["id"])
+            is CustomerMatchingDecision.ACCEPTED
+        ):
             raise ValueError("case is not editable while an accepted plan exists")
 
         cursor.execute(
@@ -626,6 +632,20 @@ def _create_matching_plan_version_in_transaction(
         pass
 
 
+def _lock_current_customer_decision(cursor: Any, plan_id: int) -> CustomerMatchingDecision:
+    cursor.execute(
+        "SELECT response_value FROM matching_response_events "
+        "WHERE plan_id = %s AND segment_id IS NULL AND response_type = 'customer_decision' "
+        "ORDER BY occurred_at_utc DESC, id DESC LIMIT 1 FOR UPDATE",
+        (plan_id,),
+    )
+    response = cursor.fetchone()
+    return (
+        CustomerMatchingDecision(response["response_value"])
+        if response is not None else CustomerMatchingDecision.PENDING
+    )
+
+
 def _lock_matching_plan_case_root(cursor: Any, case_no_value: str) -> None:
     cursor.execute(
         "SELECT o.case_no, o.status, o.start_date, o.end_date\n"
@@ -636,8 +656,6 @@ def _lock_matching_plan_case_root(cursor: Any, case_no_value: str) -> None:
     order_row = cursor.fetchone()
     if order_row is None:
         raise ValueError("case not found")
-    if order_row["status"] not in {"洽談中", "訂單成立"}:
-        raise ValueError("case is not in negotiation stage")
     _normalize_db_date(order_row["start_date"], "start_date")
     # Initial inquiry derives this projection from Orders terms when absent.
     # Fresh availability still validates the exact submitted segment dates.

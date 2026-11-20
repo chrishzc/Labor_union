@@ -324,6 +324,7 @@ class MatchingContactState:
     segments: tuple[MatchingSegmentContact, ...]
     customer_profiles_manual_confirmation: "ManualCustomerProfilesEvidence | None" = None
     replacement_matching_open: bool = False
+    matching_blocker: str | None = None
 
     @property
     def all_willing(self) -> bool:

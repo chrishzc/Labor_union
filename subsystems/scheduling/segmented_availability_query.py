@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
 from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
+from domains.scheduling.matching_communication import CandidateMatchingError, candidate_inquiry_period
 
 from domains.scheduling.staff_matching_preferences import (
     region_condition,
@@ -169,8 +170,17 @@ def _search_availability(
     # are informational and never remove an otherwise eligible candidate.
     del filter_policy
 
-    planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
-    planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
+    if inquiry and (order_row.get("start_date") is None or order_row.get("end_date") is None):
+        raise CandidateMatchingError("candidate_inquiry_dates_missing")
+    try:
+        planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
+        planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
+    except ValueError as error:
+        if inquiry:
+            raise CandidateMatchingError("candidate_inquiry_dates_invalid") from error
+        raise
+    if inquiry:
+        candidate_inquiry_period(planned_start, planned_end)
     if planned_start > planned_end:
         raise ValueError("planned_start_date cannot be after planned_end_date")
     if not inquiry and loaded_facts.get("confirmed_service_dates"):
@@ -181,8 +191,7 @@ def _search_availability(
         planned_start, planned_end = matching_service_date_bounds(
             official_dates, int(order_row["service_days"]),
         )
-    maximum_period_days = 60 if inquiry else int(order_row["service_days"]) + 45
-    if (planned_end - planned_start).days + 1 > maximum_period_days:
+    if not inquiry and (planned_end - planned_start).days + 1 > int(order_row["service_days"]) + 45:
         raise ValueError("service period exceeds the Orders selectable range")
 
     candidate_rows = loaded_facts["staff_rows"]
@@ -195,6 +204,18 @@ def _search_availability(
         for staff_id, conditions in matching_conditions.items()
     }
     candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
+    if inquiry and len(segment_drafts) == 1 and isinstance(segment_drafts[0], dict):
+        draft = segment_drafts[0]
+        staff_id = draft.get("staff_id")
+        if staff_id is not None and staff_id not in candidate_staff_ids:
+            raise CandidateMatchingError("candidate_staff_not_active")
+        try:
+            draft_start_value, draft_end_value = draft.get("start_date"), draft.get("end_date")
+            draft_start = planned_start if draft_start_value is None else _as_optional_date(draft_start_value, "start_date")
+            draft_end = planned_end if draft_end_value is None else _as_optional_date(draft_end_value, "end_date")
+        except ValueError as error:
+            raise CandidateMatchingError("candidate_inquiry_dates_invalid") from error
+        candidate_inquiry_period(draft_start, draft_end)
     assignments = loaded_facts["assignments"]
     occupancy_periods: dict[tuple[int, str, str], set[tuple[str, str]]] = {}
 

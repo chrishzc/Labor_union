@@ -1,4 +1,4 @@
-"""Established cases may resume matching only in a committed, unassigned R-04 generation."""
+"""R-04 matching continuation for candidate contact and customer confirmation."""
 
 from dataclasses import replace
 
@@ -21,27 +21,28 @@ class Cursor:
         return self.row
 
 
-@pytest.mark.parametrize('status,receipt,allowed', [
-    ('洽談中', None, True), ('訂單成立', {'id': 91}, True),
-    ('訂單成立', None, False), ('服務中', {'id': 91}, False),
-    ('訂單取消', {'id': 91}, False),
+@pytest.mark.parametrize('status,blocker,allowed', [
+    ('洽談中', None, True), ('訂單成立', None, True),
+    ('訂單成立', 'candidate_contact_order_not_negotiating', False),
+    ('服務中', 'candidate_matching_service_started', False),
+    ('訂單取消', 'candidate_contact_order_not_negotiating', False),
 ])
-def test_candidate_contact_requires_current_r04_receipt_for_established_case(status, receipt, allowed):
-    cursor = Cursor(receipt)
+def test_candidate_contact_requires_current_r04_receipt_for_established_case(status, blocker, allowed):
+    cursor = Cursor({'blocker': blocker})
     assert candidate_contact_open(cursor, 'CASE-1', status) is allowed
     if status == '訂單成立':
         sql, args = cursor.queries[0]
-        assert 'event.replacement_generation_id=aggregate.effective_generation_id' in sql
+        assert 'generation.id=aggregate.effective_generation_id' in sql
+        assert 'event.replacement_generation_id=generation.id' in sql
         assert 'scheduling_service_before_replacement_receipts' in sql
-        assert 'assignment.generation_id=aggregate.effective_generation_id' in sql
+        assert 'assignment.generation_id=generation.id' in sql
         assert args == ('CASE-1',)
-    else:
+    elif status not in {'洽談中', '訂單成立'}:
         assert not cursor.queries
 
 
 def test_old_replacement_no_longer_authorizes_matching_after_current_generation_has_assignments():
-    # The SELECT has no result when the current generation differs or has an assignment.
-    assert not replacement_matching_open(Cursor(None), 'CASE-1')
+    assert not replacement_matching_open(Cursor({'blocker': 'candidate_matching_assignment_present'}), 'CASE-1')
 
 
 @pytest.mark.parametrize('replacement_open', [False, True])
@@ -80,8 +81,8 @@ def test_real_customer_confirmation_preview_uses_same_replacement_gate_as_send(r
             'blockers': [], 'order_information_1_ready': True, 'order_information_2_ready': True,
             'weekly_service_ready': True, 'weekly_service_row_count': 0,
             'order_information_1': [], 'order_information_2': [], 'weekly_service_rows': [],
-            'caregiver_resumes': [{'staff_id': 2, 'staff_name': 'Synthetic successor', 'ready': False,
-                                  'filename': None, 'version': None, 'blocker': '履歷可由工會另行提供'}],
+            'caregiver_resumes': [{'staff_id': 2, 'staff_name': 'Synthetic successor', 'ready': True,
+                                  'filename': 'synthetic-resume.pdf', 'version': 1, 'blocker': None}],
         },
     )
     application = MatchingNotificationApplication(lambda: nullcontext(SimpleNamespace(matching_notifications=repository)),

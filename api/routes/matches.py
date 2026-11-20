@@ -29,6 +29,7 @@ from api.dependencies.admin_auth import (
     require_system_admin,
 )
 from api.schemas.base import BaseResponse
+from api.candidate_matching_errors import candidate_matching_http_error
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.matches import (
     MatchAssignRequest,
@@ -50,6 +51,7 @@ from subsystems.scheduling.matching_recommendation_application import (
     query_matching_recommendations,
 )
 from domains.scheduling.matching_communication import (
+    CandidateMatchingError,
     CaregiverWillingness,
     CustomerMatchingDecision,
     MatchingNotificationKind,
@@ -287,6 +289,8 @@ def send_matching_plan_information_route(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "matching-information") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -337,6 +341,8 @@ def record_matching_customer_decision_route(
         raise _manual_matching_rejection(error) from error
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "matching-customer-decision") from error
     except ValueError as error:
         if str(error) == "automatic_waiting_deposit_occupancy_conflict":
             raise typed_http_error(409, "domain_blocked", str(error), "月嫂檔期衝突，無法自動保留，請更換月嫂或調整服務日期。", "matching-decision") from error
@@ -380,6 +386,8 @@ def record_matching_plan_willingness_route(
         raise _manual_matching_rejection(error) from error
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "matching-willingness") from error
     except ValueError as error:
         if str(error) == "recommendation_has_assignment":
             raise typed_http_error(409, "domain_blocked", "recommendation_has_assignment", "本案已有正式指派，請由正式換人或請假代班處理月嫂意願變更。", "") from error
@@ -417,6 +425,8 @@ def send_matching_plan_resumes_route(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "matching-customer-confirmation") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -452,6 +462,8 @@ def send_matching_plan_customer_confirmation_route(
         raise typed_http_error(503, 'unavailable', 'line_table_image_unavailable', '圖片服務目前無法使用，請確認服務設定後再寄送。', 'customer-confirmation') from None
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, "matching-customer-confirmation") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -622,6 +634,8 @@ def create_matching_plan_version_route(
         )
         response_error.detail['occupancy_conflicts'] = [asdict(item) for item in error.conflicts]
         raise response_error from error
+    except CandidateMatchingError as error:
+        raise candidate_matching_http_error(error, f"matching-plan-create:{case_no}") from error
     except ValueError as error:
         message = str(error)
         if message == "case not found":

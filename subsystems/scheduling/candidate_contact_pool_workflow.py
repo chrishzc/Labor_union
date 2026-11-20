@@ -19,7 +19,9 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineUserId
-from infrastructure.mysql.replacement_matching_query import candidate_contact_open
+from domains.scheduling.matching_communication import CandidateMatchingError, candidate_inquiry_period
+from infrastructure.mysql.replacement_matching_query import require_candidate_matching_open
+from infrastructure.mysql.segmented_availability_repository import lock_active_candidate_staff
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
 from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
@@ -252,7 +254,7 @@ def _require_current_candidate(case_no: str, staff_id: int, start_date: str, end
     # Contacting a candidate is coordination, not a reservation or assignment.
     # Keep fresh coverage evidence even when dates need union coordination.
     if not isinstance(candidate, Mapping):
-        raise ValueError("candidate_no_longer_fully_available")
+        raise CandidateMatchingError("candidate_staff_not_active")
     return dict(candidate)
 
 
@@ -310,7 +312,7 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
     event_key = _required_text(event_key, "event_key", 100)
     if not isinstance(candidates, list) or not candidates:
         raise ValueError("candidate_list_required")
-    validated = []
+    selections = []
     seen: set[int] = set()
     for item in candidates:
         if not isinstance(item, Mapping):
@@ -321,12 +323,10 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
         seen.add(staff_id)
         start_date = _required_text(item.get("start_date"), "start_date", 10)
         end_date = _required_text(item.get("end_date"), "end_date", 10)
-        candidate = _require_current_candidate(case_no, staff_id, start_date, end_date)
-        candidate["coverage_fingerprint"] = _coverage_fingerprint(case_no, candidate)
-        validated.append(candidate)
+        selections.append((staff_id, start_date, end_date))
     return _run_in_application_uow(
         lambda connection, cursor: _add_candidates_in_transaction(
-            connection, cursor, case_no, validated, actor, event_key
+            connection, cursor, case_no, selections, actor, event_key
         )
     )
 
@@ -335,15 +335,22 @@ def _add_candidates_in_transaction(
     connection: Any,
     cursor: Any,
     case_no: str,
-    validated: list[dict[str, Any]],
+    selections: list[tuple[int, str, str]],
     actor: str,
     event_key: str,
 ) -> dict[str, Any]:
     try:
         cursor.execute("SELECT case_no,status FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
         order = cursor.fetchone()
-        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
-            raise ValueError("candidate_contact_order_not_negotiating")
+        if not isinstance(order, Mapping):
+            raise CandidateMatchingError("candidate_contact_order_not_negotiating")
+        require_candidate_matching_open(cursor, case_no)
+        lock_active_candidate_staff(cursor, [staff_id for staff_id, _, _ in selections])
+        validated = []
+        for staff_id, start_date, end_date in selections:
+            candidate = _require_current_candidate(case_no, staff_id, start_date, end_date)
+            candidate["coverage_fingerprint"] = _coverage_fingerprint(case_no, candidate)
+            validated.append(candidate)
         cursor.execute("SELECT id FROM caregiver_candidate_contact_pools WHERE case_no=%s FOR UPDATE", (case_no,))
         pool = cursor.fetchone()
         if isinstance(pool, Mapping):
@@ -588,10 +595,7 @@ def preview_manual_information_confirmation(
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        cursor.execute("SELECT status FROM orders WHERE case_no=%s", (case_no,))
-        order = cursor.fetchone()
-        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
-            raise ValueError("candidate_contact_order_not_negotiating")
+        require_candidate_matching_open(cursor, case_no)
         state = query_pool(case_no, connection=connection)
         return _manual_information_preview(
             state, candidate_id, info_type, confirmation_method, reason, actor
@@ -659,7 +663,7 @@ def _apply_manual_information_confirmation_in_transaction(
         cursor.execute(
             "SELECT status FROM orders WHERE case_no=%s FOR UPDATE", (case_no,)
         )
-        order = cursor.fetchone()
+        cursor.fetchone()
         state = query_pool(case_no, connection=connection, for_update=True)
         existing = next(
             (event for event in state.events if event.event_key == event_key),
@@ -695,8 +699,7 @@ def _apply_manual_information_confirmation_in_transaction(
         preview = _manual_information_preview(
             state, candidate_id, info_type, confirmation_method, reason, actor
         )
-        if not isinstance(order, Mapping) or not candidate_contact_open(cursor, case_no, order.get("status")):
-            raise ValueError("candidate_contact_order_not_negotiating")
+        require_candidate_matching_open(cursor, case_no)
         if preview["expected_version"] != expected_version:
             raise ValueError("candidate_contact_pool_version_stale")
         if preview["preview_fingerprint"] != preview_fingerprint:
@@ -904,8 +907,7 @@ def send_information(case_no: Any, candidate_id: Any, actor: Any, event_key: Any
 
 
 def _candidate_line_recipient(cursor, case_no, entry):
-    if not candidate_contact_open(cursor, case_no, entry.get("order_status")):
-        raise ValueError("candidate_contact_order_not_negotiating")
+    require_candidate_matching_open(cursor, case_no)
     recipient = entry.get("line_user_id")
     if not isinstance(recipient, str) or not recipient.strip():
         raise ValueError("caregiver_has_no_line_delivery_identity")
@@ -1077,9 +1079,11 @@ def _send_information_in_transaction(
 def _current_service_period(row: Mapping[str, object]) -> tuple[date, date]:
     start = row.get("order_start_date", row.get("start_date"))
     end = row.get("order_end_date", row.get("end_date"))
-    if type(start) is not date or type(end) is not date or start > end:
-        raise ValueError("candidate_contact_current_service_period_invalid")
-    return start, end
+    if start is None or end is None:
+        raise CandidateMatchingError("candidate_inquiry_dates_missing")
+    if type(start) is not date or type(end) is not date:
+        raise CandidateMatchingError("candidate_inquiry_dates_invalid")
+    return candidate_inquiry_period(start, end)
 
 
 def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason: Any, actor: Any, event_key: Any) -> dict[str, Any]:
@@ -1117,8 +1121,7 @@ def _record_willingness_in_transaction(
         )
         row = cursor.fetchone()
         if not isinstance(row, Mapping): raise ValueError("candidate_contact_not_found")
-        if not candidate_contact_open(cursor, case_no, row.get("order_status")):
-            raise ValueError("candidate_contact_order_not_negotiating")
+        require_candidate_matching_open(cursor, case_no)
         payload = {"willingness": willingness, "reason": reason}
         cursor.execute("SELECT id,pool_id,candidate_id,event_type,actor,payload FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()

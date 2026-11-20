@@ -1,6 +1,7 @@
 """I281: immutable receipt replay for matching-plan create commands."""
 
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,70 @@ SEGMENTS = [{
     "assigned_start_date": "2026-12-01",
     "assigned_end_date": "2026-12-20",
 }]
+
+
+@pytest.mark.parametrize("is_active", [None, 1])
+def test_only_current_accepted_plan_blocks_new_plan(is_active):
+    cursor = Mock(lastrowid=72)
+    cursor.fetchall.side_effect = [
+        [{"id": 71, "version": 3, "status": "accepted", "is_active": is_active}],
+        [],
+        [],
+        [],
+    ]
+    cursor.fetchone.return_value = {"max_version": 3}
+    segments = workflow._normalize_segments(SEGMENTS)
+    args = (object(), cursor, CASE_NO, segments, "operator", workflow._segments_signature(segments))
+
+    if is_active:
+        with pytest.raises(ValueError, match="while an accepted plan exists"):
+            workflow._create_matching_plan_version_in_transaction(*args)
+        assert cursor.execute.call_count == 1
+    else:
+        plan = workflow._create_matching_plan_version_in_transaction(*args)
+        assert (plan["plan_id"], plan["version"], plan["status"], plan["result"]) == (
+            72, 4, "proposed", "created",
+        )
+
+
+@pytest.mark.parametrize("latest_decision", ["accepted", "declined", "contact_requested", None])
+def test_latest_customer_decision_protects_current_proposed_plan(latest_decision):
+    cursor = Mock(lastrowid=72)
+    cursor.fetchall.side_effect = [
+        [
+            {"id": 71, "version": 3, "status": "proposed", "is_active": 1},
+            {"id": 70, "version": 2, "status": "accepted", "is_active": None},
+        ],
+        [],
+        [],
+        [],
+    ]
+    decision_query = (
+        "SELECT response_value FROM matching_response_events "
+        "WHERE plan_id = %s AND segment_id IS NULL AND response_type = 'customer_decision' "
+        "ORDER BY occurred_at_utc DESC, id DESC LIMIT 1 FOR UPDATE"
+    )
+
+    def fetchone():
+        statement, params = cursor.execute.call_args.args
+        if "matching_response_events" in statement:
+            assert " ".join(statement.split()) == decision_query
+            assert params == (71,)
+            return {"response_value": latest_decision} if latest_decision else None
+        return {"max_version": 3}
+
+    cursor.fetchone.side_effect = fetchone
+    segments = workflow._normalize_segments(SEGMENTS)
+    args = (object(), cursor, CASE_NO, segments, "operator", workflow._segments_signature(segments))
+
+    if latest_decision == "accepted":
+        with pytest.raises(ValueError, match="while an accepted plan exists"):
+            workflow._create_matching_plan_version_in_transaction(*args)
+        assert all(call.args[0].startswith("SELECT") for call in cursor.execute.call_args_list)
+    else:
+        plan = workflow._create_matching_plan_version_in_transaction(*args)
+        assert (plan["plan_id"], plan["version"], plan["result"]) == (72, 4, "created")
+    assert any("matching_response_events" in call.args[0] for call in cursor.execute.call_args_list)
 
 
 def _receipt(*, fingerprint: str, case_no: str = CASE_NO) -> dict[str, object]:
@@ -110,6 +175,7 @@ def test_i281_matching_plan_create_receipt_persists_initial_result_and_readback_
     )
     saved = []
     monkeypatch.setattr(workflow, "_lock_matching_plan_case_root", lambda *_args: None)
+    monkeypatch.setattr(workflow, "require_candidate_matching_open", lambda *_args: None)
     monkeypatch.setattr(workflow, "_load_matching_plan_create_receipt", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow, "_validate_current_availability", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(

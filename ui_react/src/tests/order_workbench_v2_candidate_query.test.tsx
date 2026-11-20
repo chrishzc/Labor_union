@@ -6,7 +6,7 @@ import { CandidateInquiryDialog } from '../components/CandidateInquiryDialog';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
-import { ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
+import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({
   searchInquiryCandidates: vi.fn(),
@@ -163,6 +163,47 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       actor: 'operator-1',
       eventKey: 'orders-candidate-pool-add-original-key',
     }));
+  });
+
+  it.each([
+    ['candidate_contact_order_not_negotiating', '本案目前無法繼續媒合'],
+    ['candidate_matching_assignment_present', '正式換人或代班'],
+    ['candidate_matching_data_needs_review', '排班資料待核對'],
+    ['candidate_matching_service_started', '辦理代班'],
+    ['candidate_inquiry_dates_missing', '保存案件日期'],
+    ['candidate_inquiry_dates_invalid', '保存正確的案件日期'],
+    ['candidate_inquiry_dates_too_long', '超過 60 天'],
+  ])('查詢遇到 %s 時顯示業務指引', async (code, message) => {
+    mocks.searchInquiryCandidates.mockRejectedValue(new ApiHttpError(409, code, code));
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(message);
+    expect(alert).not.toHaveTextContent(code);
+    expect(alert).toHaveTextContent('被既有條件阻擋');
+  });
+
+  it('新增時月嫂不具資格會提示確認名冊或改選', async () => {
+    mocks.searchInquiryCandidates.mockResolvedValue(availability());
+    mocks.addCandidates.mockRejectedValue(new ApiHttpError(409, 'candidate_staff_not_active', 'candidate_staff_not_active'));
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
+    fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('確認月嫂名冊或改選其他月嫂');
+  });
+
+  it('寫入後回讀資料待核對時保留未確認操作', async () => {
+    mocks.searchInquiryCandidates.mockResolvedValue(availability());
+    mocks.addCandidates.mockResolvedValue({ pool_id: 9, candidate_ids: [17] });
+    mocks.queryPool.mockRejectedValue(new ApiHttpError(409, 'candidate_matching_data_needs_review', 'generation 42'));
+    const onReadback = vi.fn();
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} onPoolReadback={onReadback} />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
+    fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('排班資料待核對');
+    expect(alert).not.toHaveTextContent('generation 42');
+    expect(onReadback).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '加入候選池（1）' })).toBeDisabled();
   });
 
   it('displays union number plus name and sorts candidates naturally without changing staff identity', async () => {
@@ -383,7 +424,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     await waitFor(() => expect(mocks.queryPool).toHaveBeenCalledWith('115000204'));
     await waitFor(() => expect(onPoolReadback).toHaveBeenCalledTimes(1));
     expect(mocks.sendInformation).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Pool #9 · 已回讀 1 位本次寫入候選：未設定 正式合格月嫂。/)).toBeInTheDocument();
+    expect(await screen.findByText(/已回讀 1 位本次寫入候選：未設定 正式合格月嫂。/)).toBeInTheDocument();
   });
 
   it('回讀 receipt candidate id 對應到不同人員時 fail closed，不刷新待辦投影', async () => {

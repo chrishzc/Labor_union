@@ -94,6 +94,11 @@ class InMemoryOrderReopenRepository:
         self.last_reopen_request = request
         return 101
 
+    def retire_prior_matching_plans(
+        self, request: OrderReopenApplyRequest, cancellation_event_id: int, reopen_event_id: int
+    ) -> None:
+        pass
+
     def clear_cancellation_control(
         self, request: OrderReopenApplyRequest, reopen_event_id: int
     ) -> int:

@@ -48,6 +48,13 @@ const MATCHING_BLOCKER_CODES = new Set([
   'matching_preference_source_not_ready',
   'official_service_dates_incomplete',
   'caregiver_availability_stage_conflict',
+  'candidate_contact_order_not_negotiating',
+  'candidate_matching_assignment_present',
+  'candidate_matching_data_needs_review',
+  'candidate_matching_service_started',
+  'candidate_inquiry_dates_missing',
+  'candidate_inquiry_dates_invalid',
+  'candidate_inquiry_dates_too_long',
 ]);
 
 function CandidateServicePreferences({ candidate }: { candidate: MatchingCandidateOption }) {
@@ -64,6 +71,14 @@ function CandidateServicePreferences({ candidate }: { candidate: MatchingCandida
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiHttpError) {
+    if (error.code === 'candidate_contact_order_not_negotiating') return '本案目前無法繼續媒合，請重新讀取案件進度並確認後續作業。';
+    if (error.code === 'candidate_matching_assignment_present') return '本案已有正式指派，請依案件情況辦理正式換人或代班。';
+    if (error.code === 'candidate_matching_data_needs_review') return '目前排班資料待核對，請先確認排班紀錄。';
+    if (error.code === 'candidate_matching_service_started') return '本案已有正式服務紀錄，請依案件情況辦理代班。';
+    if (error.code === 'candidate_inquiry_dates_missing') return '預計服務日期尚未完整，請先保存案件日期後再重新查詢。';
+    if (error.code === 'candidate_inquiry_dates_invalid') return '預計服務日期不合法，請確認並保存正確的案件日期後再重新查詢。';
+    if (error.code === 'candidate_inquiry_dates_too_long') return '預計服務期間超過 60 天，請確認並保存案件日期後再重新查詢。';
+    if (error.code === 'candidate_staff_not_active') return '這位月嫂目前不具新增資格，請確認月嫂名冊或改選其他月嫂。';
     if (error.code === 'matching_preference_source_not_ready') return '案件服務期間或來源資料尚未備妥，請先確認案件服務方式與日期，再重新查詢。';
     if (error.code === 'official_service_dates_incomplete') return '服務日期尚未完整，請到「服務安排 → 確認日期」完成日期後再查詢。';
     if (error.code === 'caregiver_availability_stage_conflict') return '目前案件狀態不允許查詢候選，請重新讀取案件進度，確認目前應辦事項。';
@@ -434,7 +449,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
         <div className="order-v2-notice warning" role="status">
           <strong>候選池回讀完成</strong>
           <span>
-            Pool #{completedAdd.data.pool_id} · 已回讀 {completedAdd.readbackStaff.length} 位本次寫入候選：
+            已回讀 {completedAdd.readbackStaff.length} 位本次寫入候選：
             {completedAdd.readbackStaff.map((candidate) => candidate.staffName).join('、')}。
           </span>
         </div>

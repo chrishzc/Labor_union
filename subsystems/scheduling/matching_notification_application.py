@@ -32,6 +32,7 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
     MatchingRecipientMismatchError,
     MatchingResponseSource,
+    CandidateMatchingError,
     matching_order_is_open,
     record_caregiver_willingness,
     record_customer_decision,
@@ -148,7 +149,11 @@ class MatchingNotificationApplication:
             blockers: list[str] = []
             if not state.plan_is_active or state.plan_status != "proposed":
                 blockers.append("正式媒合方案已失效或不再處於推薦階段。")
-            if not matching_order_is_open(state.order_status, replacement_round=state.replacement_matching_open):
+            if state.matching_blocker == "candidate_matching_data_needs_review":
+                blockers.append("目前排班資料待核對。請先確認排班紀錄，再重新查詢。")
+            elif state.matching_blocker is not None or not matching_order_is_open(
+                state.order_status, replacement_round=state.replacement_matching_open,
+            ):
                 blockers.append("案件已不在洽談中，不能寄送確認資訊。")
             if not state.all_willing:
                 blockers.append("仍有月嫂尚未確認願意承接正式方案。")
@@ -692,6 +697,8 @@ def _require_sendable_state(state, expected_version):
     _require_expected_state(state, expected_version)
     if not state.plan_is_active or state.plan_status != "proposed":
         raise MatchingCommunicationStaleError("matching plan is not active and proposed")
+    if state.matching_blocker is not None:
+        raise CandidateMatchingError(state.matching_blocker)
     if not matching_order_is_open(state.order_status, replacement_round=state.replacement_matching_open):
         raise MatchingCommunicationStaleError("order is no longer in negotiation")
 

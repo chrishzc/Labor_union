@@ -59,6 +59,16 @@ class MatchingPlanServiceCursor:
             self.current = self.fixtures.get("order")
             return
 
+        if "AS blocker FROM orders WHERE orders.case_no" in statement:
+            order = self.fixtures.get("order")
+            if order is None:
+                self.current = None
+            else:
+                self.current = {"blocker": (
+                    None if order["status"] == "洽談中" else "candidate_contact_order_not_negotiating"
+                )}
+            return
+
         if "FROM matching_plan_create_receipts" in statement:
             self.current = self.fixtures.get("receipt")
             return
@@ -760,7 +770,7 @@ def test_reject_when_case_not_found_or_not_in_negotiation(monkeypatch):
         }
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection_non_negotiation)
-    with pytest.raises(ValueError, match="negotiation"):
+    with pytest.raises(ValueError, match="candidate_contact_order_not_negotiating"):
         service.create_matching_plan_version("C-015", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_non_negotiation.rollbacks == 1
     assert connection_non_negotiation.closed_count == 1
@@ -829,7 +839,7 @@ def test_reject_when_accepted_plan_or_active_lock_exists(monkeypatch):
                 "end_date": "2026-07-02",
             },
             "plans": [
-                {"id": 501, "version": 2, "status": "accepted", "is_active": None},
+                {"id": 501, "version": 2, "status": "accepted", "is_active": 1},
                 {"id": 500, "version": 1, "status": "draft", "is_active": None},
             ],
             "active_lock_count": 0,

@@ -16,6 +16,9 @@ from domains.orders.reopen import (
     ReopenFinancialEventKind,
     ReopenOrderFacts,
 )
+from domains.scheduling.matching_communication import MatchingCommunicationConflictError
+from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
+from shared_kernel.errors import ErrorCategory, TypedError
 from subsystems.orders.cancellation_workflow import ORDER_CANCELLATION_SOURCE_EVENT_FAMILY
 from subsystems.orders.order_lifecycle_command_envelope import (
     lock_order_lifecycle_command_envelope,
@@ -31,6 +34,7 @@ from subsystems.orders.reopen_workflow import (
     OrderReopenReceipt,
     ReopenOrderPersistenceCommand,
     ReopenReceiptPersistenceCommand,
+    ReopenWorkflowError,
     ReopenWorkflowFacts,
     StoredReopenReceipt,
 )
@@ -73,6 +77,24 @@ class MySqlOrderReopenRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_EVENT_INSERT_SQL, _event_values(request, preview))
             return int(cursor.lastrowid)
+
+    def retire_prior_matching_plans(
+        self, request: OrderReopenApplyRequest, cancellation_event_id: int, reopen_event_id: int
+    ) -> None:
+        try:
+            MySqlMatchingNotificationRepository(self._connection).retire_for_controlled_reopen(
+                request.case_no,
+                actor_id=request.actor.actor_id,
+                cancellation_event_id=cancellation_event_id,
+                reopen_event_id=reopen_event_id,
+            )
+        except MatchingCommunicationConflictError as error:
+            raise ReopenWorkflowError(TypedError(
+                ErrorCategory.CONFLICT,
+                "matching_plan_version_conflict",
+                "A matching plan changed during order reopening.",
+                request.correlation_id,
+            )) from error
 
     def clear_cancellation_control(self, request, reopen_event_id):
         with self._connection.cursor() as cursor:

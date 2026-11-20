@@ -2,14 +2,18 @@
 
 from datetime import date, timedelta
 
+import pytest
+
+from domains.scheduling.matching_communication import CandidateMatchingError
 from infrastructure.mysql.segmented_availability_repository import (
     MySqlSegmentedAvailabilityFactsRepository,
 )
 from subsystems.scheduling import segmented_availability_query as query
 
 
-def _repository_facts(monkeypatch, *, end_date="2026-09-03", service_days=3, service_type=None, rest_dates=None):
-    repository = MySqlSegmentedAvailabilityFactsRepository(lambda: None)
+def _repository_facts(monkeypatch, *, start_date="2026-09-01", end_date="2026-09-03", service_days=3,
+                      service_type=None, rest_dates=None, candidate_inquiry=False):
+    repository = MySqlSegmentedAvailabilityFactsRepository(lambda: None, candidate_inquiry=candidate_inquiry)
     loaded_windows = []
     monkeypatch.setattr(
         repository,
@@ -45,7 +49,7 @@ def _repository_facts(monkeypatch, *, end_date="2026-09-03", service_days=3, ser
     order = {
         "case_no": "CASE-RECONTACT",
         "status": "洽談中",
-        "start_date": "2026-09-01",
+        "start_date": start_date,
         "end_date": end_date,
         "service_days": service_days,
         "service_type": service_type,
@@ -77,9 +81,31 @@ def test_inquiry_projects_missing_end_from_orders_terms_without_confirming_dates
 
 def test_missing_planned_end_uses_the_same_rest_rules_as_contract_dates(monkeypatch):
     facts, _ = _repository_facts(monkeypatch, end_date=None, service_days=5,
-                                 service_type="週休2日", rest_dates='["2026-09-02"]')
+                                 service_type="週休2日", rest_dates='["2026-09-02"]',
+                                 candidate_inquiry=True)
     assert facts["order"]["end_date"] == date(2026, 9, 8)
     assert facts["confirmed_service_dates"] == [{"service_date": "2026-08-01"}]
+
+
+@pytest.mark.parametrize(("start", "end", "code"), [
+    (None, None, "candidate_inquiry_dates_missing"),
+    ("0000-00-00", "2026-09-03", "candidate_inquiry_dates_invalid"),
+    ("2026-09-01", "2026-02-29", "candidate_inquiry_dates_invalid"),
+    ("2026-09-01", "2026-08-31", "candidate_inquiry_dates_invalid"),
+    ("2026-09-01", "2026-10-31", "candidate_inquiry_dates_too_long"),
+])
+def test_candidate_inquiry_rejects_unusable_orders_planning_dates(monkeypatch, start, end, code):
+    with pytest.raises(CandidateMatchingError, match=code):
+        _repository_facts(monkeypatch, start_date=start, end_date=end, candidate_inquiry=True)
+
+
+def test_candidate_inquiry_rejects_selected_person_missing_from_active_roster(monkeypatch):
+    facts, _ = _repository_facts(monkeypatch, candidate_inquiry=True)
+    facts_port = type("Facts", (), {"load_case_facts": lambda _self, _case_no: facts})()
+    with pytest.raises(CandidateMatchingError, match="candidate_staff_not_active"):
+        query.search_candidate_inquiry_availability(
+            "CASE-RECONTACT", [{"staff_id": 19}], "2026-08-31", facts_port=facts_port,
+        )
 
 
 def test_candidate_inquiry_keeps_current_order_window_while_loading_old_conflicts(

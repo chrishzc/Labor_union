@@ -14,8 +14,15 @@ def test_readding_existing_candidate_updates_period_and_resets_old_confirmation(
             if not sql.startswith("SELECT "): self.writes.append((sql, params))
         def fetchone(self): return next(self.reads)
     cursor = Cursor()
-    monkeypatch.setattr(workflow, "candidate_contact_open", lambda *a: True)
-    result = workflow._add_candidates_in_transaction(None, cursor, "TEST", [{"staff_id": 2, "case_period_start": "2026-11-15", "case_period_end": "2026-12-11", "coverage_fingerprint": "a" * 64}], "operator", "refresh-period")
+    monkeypatch.setattr(workflow, "require_candidate_matching_open", lambda *_: None)
+    monkeypatch.setattr(workflow, "lock_active_candidate_staff", lambda *_: None)
+    monkeypatch.setattr(workflow, "_require_current_candidate", lambda *args: {
+        "staff_id": args[1], "case_period_start": args[2], "case_period_end": args[3],
+    })
+    monkeypatch.setattr(workflow, "_coverage_fingerprint", lambda *_: "a" * 64)
+    result = workflow._add_candidates_in_transaction(
+        None, cursor, "TEST", [(2, "2026-11-15", "2026-12-11")], "operator", "refresh-period",
+    )
     assert result["candidate_ids"] == [2]
     assert len([sql for sql, _ in cursor.writes if sql.startswith("UPDATE caregiver_candidate_contact_entries")]) == 1
     event = next(params for sql, params in cursor.writes if "'willingness_changed'" in sql)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 
 from shared_kernel.validation import (
@@ -46,6 +47,18 @@ class MatchingCommunicationStaleError(ValueError):
     """Raised when a response targets an inactive or superseded plan."""
 
 
+class CandidateMatchingError(MatchingCommunicationStaleError):
+    """Candidate inquiry or Apply is blocked by current case or roster facts."""
+
+
+def candidate_inquiry_period(start: date, end: date) -> tuple[date, date]:
+    if start > end:
+        raise CandidateMatchingError("candidate_inquiry_dates_invalid")
+    if (end - start).days + 1 > 60:
+        raise CandidateMatchingError("candidate_inquiry_dates_too_long")
+    return start, end
+
+
 class MatchingRecipientMismatchError(PermissionError):
     """Raised when a LINE response belongs to a different person."""
 
@@ -71,7 +84,7 @@ class MatchingPlanReference:
 
 
 def matching_order_is_open(order_status: str, *, replacement_round: bool = False) -> bool:
-    """R-04 may reopen matching without changing the Orders lifecycle root."""
+    """R-04 or controlled reopen can open matching for an established order."""
     return order_status == "洽談中" or (order_status == "訂單成立" and replacement_round)
 
 

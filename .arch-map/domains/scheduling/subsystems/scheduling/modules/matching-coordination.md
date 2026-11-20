@@ -13,6 +13,7 @@
 - entrypoint: `api/routes/commute.py` — admin-only single caregiver POST、usage GET、manual billing reconciliation POST、case-scoped `GET /orders/{case_no}/commute-history`（最新 50 筆 metadata-only 紀錄）；由 `api/main.py` 組裝。
 - presentation: `ui_react/src/api/scheduling/commute_client.ts`、`ui_react/src/components/CaregiverCommute.tsx`、`ui_react/src/components/CaregiverCommute.css` — 既有新增候選／候選卡片／分段已選月嫂內的逐位按鈕，通勤時間與距離直接在指定月嫂卡片呈現；同一分頁以案件＋月嫂共用結果與 pending 狀態，關閉／切換案件不重查，重新整理或登入狀態變更清除。共享用量只在新增候選抽屜顯示，不掛載 50 筆歷史清單，無整批／自動查詢。
 - `api/routes/candidate_contact_pool.py`
+- `api/candidate_matching_errors.py` — 候選資格與日期、人選拒絕的 typed HTTP 轉換；共用錯誤信封沿既有 Global 契約，不承接業務判定。
 - `api/schemas/candidate_contact_pool.py`
 - primary:
   - `ui_react/src/components/CandidateInquiryDialog.tsx` — 候選新增與共用資訊的 native modal；保留焦點與操作期間保護。接案意願改在月嫂卡片內展開填寫。
@@ -83,6 +84,8 @@
 - outbound: `customer-service` — 推薦協助借用既有 create-or-append ticket writer；`subsystems/line/matching_postback_application.py` 將後續留言轉交同一客服需求，不建立 escalation 或群組通知。
 - outbound: `orders/order-information` — 候選資訊使用命名投影；預覽與寄送共用相同內容，不建立虛構 assignment。
 - outbound: `orders/orders` — case/lifecycle boundary.
+- outbound: `orders/controlled-reopen` — 借用目前解除取消的重開收據及其取消、排班收據判定重新媒合資格；`infrastructure/mysql/replacement_matching_query.py` 統一候選查詢／寫入、推薦與客戶確認的開放條件及資料待核對原因，不改寫 Orders 狀態或歷史收據。
+- inbound: `orders/controlled-reopen` — 重開 Apply 借 `MySqlMatchingNotificationRepository.retire_for_controlled_reopen` 在原 UoW 退役原有效推薦並追加取消事件；保留原接受歷史，不移植至新方案。
 - outbound: `clients/client-profile` — `clients.service_type` 原文是案件服務方式唯一來源；此 Query 不取得 writer ownership。
 - outbound: `staff/case-preference-manual` — 姓名旁的兩項提示使用同一份 `staff_regions`／`staff_weekly_rest` canonical facts；名冊保存後下次查詢直接反映，原值與明確未知狀態經 typed `matching_conditions` 投影，偏好不排除候選或禁止加入。
 - outbound: `orders/service-date-confirmation` — 初步候選週說明的當次日期先經 Orders Preview 驗證，保存沿用既有 Q/P/A；客戶寄送內容以 current 日期組成既有不可變快照。
