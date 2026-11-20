@@ -38,7 +38,9 @@
 4. 訂金有效核銷 ∨ 有效訂金未付人工放行 → **訂單成立**（不代表已簽回，亦不單獨授權 execution conversion）
 5. 其餘 → **洽談中**（缺進件欄位則維持 `待補件`）
 
-- **`case_terminal_closure` 交接**：案件進入終局閉環時，Orders 在同一 outer UoW 寫入 `case_terminal_closure` event（含 `case_no`、`terminal_kind`、resulting version、nullable `source_subject` 與 idempotency identity）並發布 outbox；由 [LINE 身分管理 §7.2](23_LINE身分管理與解除正式規格.md#72-orders-terminal-closure-auto-restore) 檢查該人員全部案件是否皆已終局以觸發預設選單恢復（未綁定客戶依 skip receipt 略過）。
+- **`case_terminal_closure` 交接**：上列判定的是訂單狀態，不是 LINE 選單是否恢復。案件進入終局閉環時，Orders 在同一 outer UoW 寫入 `case_terminal_closure` event（含 `case_no`、`terminal_kind`、resulting version、nullable `source_subject` 與 idempotency identity）並發布 outbox。由 [LINE 身分管理 §7.2](23_LINE身分管理與解除正式規格.md#72-orders-terminal-closure-auto-restore) 核對來源身分、版本與能力。只有該 LINE 帳號的 staff 綁定仍有效、該帳號所有有效客戶角色案件均經各自負責方回讀確認已終局，且事件未處理、版本一致，才建立一次預設選單恢復工作與收據；這不等於選單已恢復。核對來源後，一般客戶沒有 staff 綁定時依該節保存 `noop_not_staff` 收據，例如來源身分為空且案件客戶未綁 LINE。案件客戶已綁 LINE 卻缺少來源身分時，屬身分不符，不寫入。
+  - **正例**：同一 LINE 帳號的 staff 綁定有效，有兩件有效客戶角色案件。兩件回讀皆已終局，且其餘交接條件符合時，才建立一次該事件的恢復工作與收據。
+  - **反例**：同一帳號的其中一件有效客戶角色案件已終局，但另一件尚未終局，其餘交接條件皆符合。這次交接不建立恢復工作，記下 `blocked_active_client_case`。
 
 ### 3.2 `AutoCompleteOrderService` 與完工後日期更正
 
