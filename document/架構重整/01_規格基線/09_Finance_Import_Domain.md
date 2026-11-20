@@ -33,7 +33,9 @@
 4. **Reconciliation**：唯一以 owning Domain 正式 ledger／allocation 為準（相容欄位 `pending → reconciled` 不作第二套 SSOT）；正式退匯／沖正／調整不將核銷軸改回 `pending`。
 5. **Current issue projection**：僅 `IMPORT-006` active predicate 成立時存在，無 `open／claimed／resolved／reopen` lifecycle。
 
-- **同批 vs 跨批重複規則**（詳 [銀行流水去重規則](22_銀行流水匯入與帳務異常處理正式規格.md#32-重複排除與去重規則bank-04)）：本批新建的 canonical bank fact 於同批其他列保留 `skipped_existing` occurrence；先前批次已存在之相同 fingerprint 僅於本次操作 receipt 計數，不新增 occurrence、分類或待核銷名單，原交易核銷狀態維持不變。
+- **同批與跨批的重複交易**（判定方式見[銀行流水去重規則](22_銀行流水匯入與帳務異常處理正式規格.md#32-重複排除與去重規則bank-04)）：以銀行交易指紋判定是否為同一筆交易。同一交易在本批首次入庫時，只建立一筆銀行原始交易（canonical bank fact），保留同批各來源列位置（occurrence），重複列記為 `skipped_existing`。如果該交易已在先前批次入庫，本次只計入回執的重複筆數；不新增來源位置、分類或待核銷項目，也不改原交易的核銷狀態。
+  - **同批例**：經辦匯入一份銀行明細，首次入庫的同一筆交易出現在第 17、18 列。核對匯入結果時，應只有一筆原始交易，保留兩個來源列位置，第 18 列記為重複。
+  - **跨批例**：同一筆交易已在先前批次入庫並核銷，經辦匯入另一份也含該交易的明細。本次回執只增加一筆重複，不新增來源位置、分類或待核銷項目；原交易仍維持已核銷。
 
 ## 3. 公開契約與流程
 
