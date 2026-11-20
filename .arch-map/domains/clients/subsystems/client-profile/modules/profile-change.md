@@ -31,6 +31,8 @@
   - 具 Orders 管理權限者從已取消案件詳情進入 `ui_react/src/components/OrderControlledReopenPanel.tsx`，沿用原 Preview／Apply 並回讀詳情、變更歷程與清單。
   - 名冊案件詳情提供既有 Orders 取消權限的「取消訂單」入口，組合相同正式取消面板與回讀，永久刪除仍由原 root-only 面板承接。
 - `ui_react/src/components/ClientRegistryDetailEditor.tsx` — 單一客戶清單 Drawer 直接組合主檔、報名、照護、Orders Terms 與唯讀帳務；各區 Preview／Apply、異步結果 guard、草稿保持及 mutation／回讀關閉鎖。報名／照護共用 BeClass version，保存後舊預覽失效。樓層費金額由既有 Orders Terms writer 保存。
+  - 姓名、電話、Email、縣市與地址只在客戶主檔提供修改入口；主檔空白才採用唯一 BeClass 有效值，查閱不寫入或製造草稿。按儲存才將採用補值及實際變更交 Client Profile writer，原 BeClass 來源與專屬欄位保留，不雙寫。
+  - 胎數只由 BeClass effective `multi_birth_count` 與原 correction writer 顯示／維護，限單胞胎／雙胞胎。舊 `clients.baby_info` 保留 Query 歷史值並標唯讀，Client Profile 與 HCM 主檔補件不提供獨立修改；未獨立顯示舊文字不是漏欄。主檔 Email 等非空欄位仍拒絕清空，不以模擬成功取代正式驗證。
   - 虛擬帳號設定借用 Client Finance 單案帳號 Query／Apply 直接儲存，無原因或預覽；名冊不直接寫對照。帳號草稿／結果未明／回讀失敗納入 Drawer 關閉鎖，正式回讀等候名冊詳情與清單完成。
   - 案件處理缺件入口以 `field=intake&from=workbench` 深連結到本案訂單條件，組合既有 Orders 補件 Preview／Apply；只編輯實際缺漏，保留已存在的日期與天數。儲存、收據及名冊／Orders 回讀完成後再允許返回相同案件；歷史與不適用進件修復的案件保留原 bootstrap 入口。完成補件後仍可開啟既有完整服務條件操作。
   - 變更歷程置於 Drawer 最下方，依選取案件與正式 detail 回讀自動重新 Query；保留 server 時間／流程順序、原因、操作人員及臺北時間。失敗可單獨重讀，晚回應不污染已切換案件；獨立歷程分頁已合併。
@@ -48,8 +50,8 @@
 - outbound: `case-import/pairing-current-facts` — 有效退款帳戶及原問卷補正沿既有BeClass correction writer；一般查閱與事件／回執遮蔽帳號。
 - outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。
 - inbound: `case-import/hcm-current-workbook-import` — Client Profile email-only 命令 fresh-lock 空白資格並保存 version／事件／receipt；借用 workbook outer UoW，無自有 commit。
-- Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。欄位、writer、版本及 BeClass 獨立聯絡欄位保持既有契約。
-- Client-owned `clients.email` 保存 HCM email，管理端 Q/P/A 與名冊／唯讀詳情顯示「HCM Email」；BeClass effective `email` 獨立顯示「BeClass Email」。
+- Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。單一入口採用的 BeClass 電話沿相同驗證、writer 與主檔版本。
+- Client-owned `clients.email` 保留 HCM 匯入來源；案件編輯統一顯示「Email」，主檔空白才採用 BeClass effective `email`。HCM 補件沿既有 Client Profile writer，BeClass 原始值與既有修正保留來源用途。
 - outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
 - outbound: `scheduling/service-before-replacement`、`scheduling/matching-schedule-confirmation` — Drawer 借用既有 Assignment Plan Query，歷程唯讀組合 Scheduling 更換主事件；換人 Q/P/A 保留於服務安排主流程，本區不再提供換人操作或擁有指派 writer。Staff 摘要 Query 僅補人員名稱與公會編號。
 - outbound: `scheduling/matching-coordination` — 更換登記後在 Drawer 重用 OrderCandidateQueryPanel、OrderCandidateContactStatusPanel、OrderFormalRecommendationPanel 續辦接任；每次保存刷新 current 候選與方案，正式指派仍由既有 gate 決定。

@@ -143,5 +143,5 @@ export type ClientRegistryDetail = z.infer<typeof ClientRegistryDetailSchema>;
 export type ClientRegistryChangeHistoryItem = z.infer<typeof ClientRegistryChangeHistoryItemSchema>;
 export type RegistryMutationPreview = z.infer<typeof RegistryMutationPreviewSchema>;
 export type RegistryMutationReceipt = z.infer<typeof RegistryMutationReceiptSchema>;
-export type ClientProfileChanges = Partial<z.infer<typeof profileValues>>;
+export type ClientProfileChanges = Partial<Omit<z.infer<typeof profileValues>, 'baby_info'>>;
 export type BeClassChanges = Partial<Omit<z.infer<typeof beclassValues>, 'birth_date' | 'refund_account_status'> & z.infer<typeof orderInformationValues>>;

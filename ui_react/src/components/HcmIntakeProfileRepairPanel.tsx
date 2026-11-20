@@ -7,7 +7,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 const PROFILE_FIELDS: Record<string, keyof ClientProfileChanges> = {
   姓名: 'name', 性別: 'gender', 行動電話: 'phone', email: 'email', 縣市: 'city',
   '預產期/預計服務開始月份': 'due_month', 不符合原因: 'reject_reason',
-  居住型態: 'residence_type', 生產方式: 'delivery_type', 寶寶資訊: 'baby_info',
+  居住型態: 'residence_type', 生產方式: 'delivery_type',
   服務方式: 'service_type',
 };
 

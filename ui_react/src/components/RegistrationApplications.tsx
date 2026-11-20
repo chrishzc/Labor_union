@@ -59,6 +59,8 @@ function formFromSource(detail: ClientRegistryDetail): ManualCaseForm {
   const survey = detail.beclass.status === 'ready' ? detail.beclass.values : null;
   const terms = detail.order_terms.data?.terms;
   const hours = terms?.service_hours_per_day;
+  const birthCount = detail.order_information.field_issues.multi_birth_count
+    ? undefined : survey?.multi_birth_count ?? profile.baby_info;
   return {
     ...defaultForm,
     ...(survey ? { beclass_details: {
@@ -76,7 +78,7 @@ function formFromSource(detail: ClientRegistryDetail): ManualCaseForm {
     startTime: terms?.service_time.start_time?.slice(0, 5) ?? '',
     endTime: terms?.service_time.end_time?.slice(0, 5) ?? '',
     requires_cooking: terms?.requires_cooking ?? false,
-    baby_info: survey?.multi_birth_count ?? profile.baby_info ?? '',
+    baby_info: birthCount === '單胞胎' || birthCount === '雙胞胎' ? birthCount : '',
     refund_bank_code: detail.beclass.full_refund_account_visible ? survey?.refund_bank_code ?? '' : '',
     refund_account_no: detail.beclass.full_refund_account_visible ? survey?.refund_account_no ?? '' : '',
   };

@@ -528,7 +528,7 @@ def _field_capabilities(
 
 
 def _readonly_fields(owner):
-    return {"identity_status"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
+    return {"identity_status", "baby_info"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
 
 
 def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:

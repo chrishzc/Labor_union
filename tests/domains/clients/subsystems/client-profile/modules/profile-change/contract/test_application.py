@@ -93,6 +93,17 @@ def test_admin_email_repair_uses_profile_version_receipt():
             application.preview_admin("CASE-001", {"email": invalid}, ExpectedVersion(1))
 
 
+@pytest.mark.parametrize("value", ["初生兒", "單胞胎", "雙胞胎"])
+def test_legacy_baby_info_is_readable_but_not_a_profile_mutation(value):
+    repository = _Repository()
+    application = _application(repository)
+    assert application.query_admin("CASE-001").values["baby_info"] == "初生兒"
+    with pytest.raises(ClientProfileValidationError, match="profile_field_not_allowed:baby_info"):
+        application.preview_admin("CASE-001", {"baby_info": value}, ExpectedVersion(0))
+    assert repository.profile["baby_info"] == "初生兒"
+    assert repository.profile["client_profile_version"] == 0
+
+
 class _Uow(AbstractContextManager):
     def __init__(self, repository):
         self.client_profiles = repository

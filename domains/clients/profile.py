@@ -9,7 +9,7 @@ from typing import Mapping
 
 CLIENT_PROFILE_FIELDS = (
     "name", "gender", "phone", "email", "city", "address",
-    "residence_type", "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
+    "residence_type", "delivery_type", "notes", "due_month", "reject_reason", "service_type",
     "admin_notes",
     "identity_status",
 )
@@ -72,7 +72,7 @@ def validate_changes(changes: Mapping[str, object]) -> dict[str, str]:
             raise ClientProfileValidationError("profile_value_cannot_be_empty", field)
         maximum = {
             "name": 100, "phone": 10, "email": 100, "city": 20, "address": 255,
-            "baby_info": 255, "notes": 1000, "gender": 2,
+            "notes": 1000, "gender": 2,
             "residence_type": 10, "delivery_type": 10,
             "due_month": 10, "reject_reason": 500, "service_type": 100, "admin_notes": 2000,
             "identity_status": 10,

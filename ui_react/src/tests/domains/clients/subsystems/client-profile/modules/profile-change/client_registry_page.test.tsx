@@ -85,7 +85,7 @@ const detail = {
       address: { owner: 'client_profile', editable: true, reason: null, options: null },
       residence_type: { owner: 'client_profile', editable: true, reason: null, options: ['電梯大樓', '公寓', '透天', '其他'] },
       delivery_type: { owner: 'client_profile', editable: true, reason: null, options: ['自然產', '剖腹產', '未定'] },
-      baby_info: { owner: 'client_profile', editable: true, reason: null, options: null },
+      baby_info: { owner: 'client_profile', editable: false, reason: 'read_only_source', options: null },
       notes: { owner: 'client_profile', editable: true, reason: null, options: null },
     },
   },
@@ -345,22 +345,106 @@ describe('Client registry owner editing', () => {
     expect(candidateMocks.willingness.mock.calls[1]).toEqual(candidateMocks.willingness.mock.calls[0]);
   });
 
-  it('shows separate email sources and sends each edit to its own writer', async () => {
+  it('edits shared customer fields only in the profile and saves them through its writer', async () => {
     window.location.hash = '#clients?case=CASE-001';
     render(<ClientRegistryPage />);
-    const hcm = await screen.findByLabelText('HCM Email');
-    const beclass = screen.getByLabelText('BeClass Email');
-    expect(hcm).toHaveValue('hcm@example.com');
-    expect(beclass).toHaveValue('beclass@example.com');
-    expect(hcm).toHaveAttribute('type', 'email');
-    fireEvent.change(hcm, { target: { value: 'hcm-updated@example.com' } });
-    fireEvent.click(within(hcm.closest('section')!).getByRole('button', { name: '儲存' }));
-    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { email: 'hcm-updated@example.com' }, 2));
-    expect(beclass).toHaveValue('beclass@example.com');
-    fireEvent.change(beclass, { target: { value: 'beclass-updated@example.com' } });
-    fireEvent.click(within(beclass.closest('section')!).getByRole('button', { name: '儲存' }));
-    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'beclass', { email: 'beclass-updated@example.com' }, 3));
-    expect(hcm).toHaveValue('hcm-updated@example.com');
+    const profile = await screen.findByRole('region', { name: '客戶主檔' });
+    const beclass = screen.getByRole('region', { name: '報名問卷資料（BeClass）' });
+    for (const field of ['name', 'email', 'phone', 'city', 'address']) {
+      expect(profile.querySelector(`#registry-profile-${field}`)).toBeInTheDocument();
+      expect(beclass.querySelector(`#registry-beclass-${field}`)).not.toBeInTheDocument();
+    }
+    for (const label of ['姓名', '電話（手機／市話）', 'Email', '縣市', '地址']) {
+      expect(screen.getAllByLabelText(label)).toHaveLength(1);
+    }
+    expect(screen.queryByLabelText('HCM Email')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('BeClass Email')).not.toBeInTheDocument();
+    const email = within(profile).getByLabelText('Email');
+    expect(email).toHaveValue('hcm@example.com');
+    expect(within(profile).getByLabelText('電話（手機／市話）')).toHaveValue('0911111111');
+    expect(email).toHaveAttribute('type', 'email');
+    fireEvent.change(email, { target: { value: 'updated@example.com' } });
+    fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
+    await screen.findByText('客戶主檔已儲存。');
+    expect(mocks.preview).toHaveBeenCalledExactlyOnceWith('CASE-001', 'profile', { email: 'updated@example.com' }, 2);
+    expect(mocks.apply).toHaveBeenCalledExactlyOnceWith('CASE-001', 'profile', { email: 'updated@example.com' }, 2, 'a'.repeat(64), '', expect.any(String));
+    expect(email).toHaveValue('updated@example.com');
+    for (const label of ['市話', '分機', '郵遞區號', '報名註記', '退款銀行及分行代碼（7碼）', '退款帳號（文字，保留前導零）', '胎數（單胞胎／雙胞胎）']) {
+      expect(within(beclass).getByLabelText(label)).toBeEnabled();
+    }
+  });
+
+  it.each([null, '', '   '])('uses registration data for blank profile fields without creating a draft: %s', async (blank) => {
+    const adopted = { name: '報名姓名', email: 'registration@example.test', phone: '0933333333', city: '新竹縣', address: '合成報名地址' };
+    const initial = ClientRegistryDetailSchema.parse({
+      ...detail,
+      client: { ...detail.client, values: { ...detail.client.values, name: blank, email: blank, phone: blank, city: blank, address: blank } },
+      beclass: { ...detail.beclass, values: { ...detail.beclass.values, ...adopted } },
+    });
+    let stored = initial;
+    const editState = vi.fn();
+    const refresh = vi.fn(async () => stored);
+    mocks.apply.mockImplementation(async (_caseNo, target, changes, version) => {
+      expect(target).toBe('profile');
+      stored = { ...stored, client: { ...stored.client, version: version + 1, values: { ...stored.client.values, ...changes } } };
+      return {};
+    });
+    render(<ClientRegistryDetailEditor detail={initial} onRefresh={refresh} onStateChange={editState} />);
+    const profile = screen.getByRole('region', { name: '客戶主檔' });
+    for (const [label, value] of [['姓名', adopted.name], ['Email', adopted.email], ['電話（手機／市話）', adopted.phone], ['縣市', adopted.city], ['地址', adopted.address]]) {
+      expect(within(profile).getByLabelText(label)).toHaveValue(value);
+    }
+    expect(editState).toHaveBeenLastCalledWith({ dirty: false, busy: false });
+    expect(mocks.preview).not.toHaveBeenCalled();
+    fireEvent.change(within(profile).getByLabelText('地址'), { target: { value: '未儲存地址' } });
+    expect(editState).toHaveBeenLastCalledWith({ dirty: true, busy: false });
+    fireEvent.click(within(profile).getByRole('button', { name: '取消變更' }));
+    expect(within(profile).getByLabelText('地址')).toHaveValue(adopted.address);
+    expect(editState).toHaveBeenLastCalledWith({ dirty: false, busy: false });
+    fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
+    await screen.findByText('客戶主檔已儲存。');
+    expect(mocks.preview).toHaveBeenCalledExactlyOnceWith('CASE-001', 'profile', adopted, 2);
+    expect(mocks.apply).toHaveBeenCalledExactlyOnceWith('CASE-001', 'profile', adopted, 2, 'a'.repeat(64), '', expect.any(String));
+    expect(stored.client.values).toMatchObject(adopted);
+    expect(initial.client.values.address).toBe(blank);
+    expect(stored.beclass).toEqual(initial.beclass);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it.each(['unbound', 'duplicate_binding'])('does not adopt registration values when the source is %s', (status) => {
+    const initial = ClientRegistryDetailSchema.parse({
+      ...detail,
+      client: { ...detail.client, values: { ...detail.client.values, email: null } },
+      beclass: { ...detail.beclass, status },
+    });
+    render(<ClientRegistryDetailEditor detail={initial} onRefresh={async () => initial} onStateChange={() => undefined} />);
+    expect(screen.getByLabelText('Email')).toHaveValue('');
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+
+  it('keeps blank registration values empty and retains an email draft when the writer rejects clearing it', async () => {
+    const initial = ClientRegistryDetailSchema.parse({
+      ...detail,
+      client: { ...detail.client, values: { ...detail.client.values, address: null } },
+      beclass: { ...detail.beclass, values: { ...detail.beclass.values, address: '  ' } },
+    });
+    const refresh = vi.fn(async () => initial);
+    mocks.preview.mockRejectedValue(new ApiHttpError(422, 'profile_value_must_be_text', 'Email 不可清空'));
+    render(<ClientRegistryDetailEditor detail={initial} onRefresh={refresh} onStateChange={() => undefined} />);
+    const profile = screen.getByRole('region', { name: '客戶主檔' });
+    expect(within(profile).getByLabelText('地址')).toHaveValue('');
+    fireEvent.change(within(profile).getByLabelText('Email'), { target: { value: '' } });
+    fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
+    await screen.findByText(/Email 不可清空/);
+    expect(mocks.preview).toHaveBeenCalledExactlyOnceWith('CASE-001', 'profile', { email: null }, 2);
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.queryByText('客戶主檔已儲存。')).not.toBeInTheDocument();
+    expect(within(profile).getByLabelText('Email')).toHaveValue('');
+    fireEvent.click(within(profile).getByRole('button', { name: '取消變更' }));
+    expect(within(profile).getByLabelText('Email')).toHaveValue('hcm@example.com');
+    expect(initial.beclass.values?.email).toBe('beclass@example.com');
   });
 
   it('opens an anomaly case and saves its due date and rejection reason through profile Preview/Apply', async () => {
@@ -403,25 +487,26 @@ describe('Client registry owner editing', () => {
   });
 
   it.each(['order_terms_start_date_required', 'order_terms_service_days_required', 'order_terms_floor_fee_required'])(
-    'saves only the edited profile field despite unavailable finance and incomplete terms (%s)', async (code) => {
+    'saves edited and adopted profile fields despite unavailable finance and incomplete terms (%s)', async (code) => {
       const incomplete = { ...detail,
         client: { ...detail.client, values: { ...detail.client.values, name: null, city: null } },
         finance: { status: 'not_ready' as const, code: 'client_finance_bootstrap_required', values: null },
         order_terms: { status: 'not_ready' as const, code, data: null, field_capabilities: {} },
       };
       mocks.query.mockResolvedValueOnce(incomplete).mockResolvedValue({ ...incomplete,
-        client: { ...incomplete.client, version: 3, values: { ...incomplete.client.values, phone: '0933333333' } },
+        client: { ...incomplete.client, version: 3, values: { ...incomplete.client.values, name: '王小明', city: '新竹市', phone: '0933333333' } },
       });
       render(<ClientRegistryPage />);
         fireEvent.click(await screen.findByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
       const profile = (await screen.findByRole('heading', { name: '客戶主檔' })).closest('section') as HTMLElement;
       fireEvent.change(within(profile).getByLabelText('電話（手機／市話）'), { target: { value: '0933333333' } });
       fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
-      await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', { phone: '0933333333' }, 2));
+      const changes = { name: '王小明', city: '新竹市', phone: '0933333333' };
+      await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith('CASE-001', 'profile', changes, 2));
       expect(within(profile).queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
       await screen.findByText('客戶主檔已儲存。');
       expect(mocks.apply).toHaveBeenCalledTimes(1);
-      expect(mocks.apply.mock.calls[0][2]).toEqual({ phone: '0933333333' });
+      expect(mocks.apply.mock.calls[0][2]).toEqual(changes);
       expect(within(profile).getByLabelText('電話（手機／市話）')).toHaveValue('0933333333');
     },
   );
@@ -625,7 +710,8 @@ describe('Client registry owner editing', () => {
 
     const beclass = (await screen.findByRole('heading', { name: '報名問卷資料（BeClass）' })).closest('section') as HTMLElement;
     expect(within(beclass).getByText('資料來源：後台人工補登（無 BeClass 匯入紀錄）')).toBeInTheDocument();
-    expect(within(beclass).getByRole('textbox', { name: '報名姓名' })).toHaveValue('');
+    expect(within(beclass).queryByRole('textbox', { name: '報名姓名' })).not.toBeInTheDocument();
+    expect(within(beclass).getByRole('textbox', { name: '報名註記' })).toHaveValue('');
     expect(within(beclass).getByRole('combobox', { name: '胎數（單胞胎／雙胞胎）' })).toHaveValue('');
     expect(screen.queryByText(/尚未綁定 BeClass/)).not.toBeInTheDocument();
   });
@@ -636,7 +722,7 @@ describe('Client registry owner editing', () => {
     mocks.query.mockResolvedValue({ ...detail, case_no: 'CASE-108' });
     render(<ClientRegistryPage />);
     expect(await screen.findByRole('dialog', { name: '案件 CASE-108 詳細資料' })).toBeInTheDocument();
-    expect(await screen.findByLabelText('HCM Email')).toHaveValue('hcm@example.com');
+    expect(await screen.findByLabelText('Email')).toHaveValue('hcm@example.com');
     expect(mocks.query).toHaveBeenCalledWith('CASE-108', undefined, true);
     expect(screen.queryByRole('tab', { name: '名冊資料' })).not.toBeInTheDocument();
   });
@@ -679,10 +765,10 @@ describe('Client registry owner editing', () => {
     window.location.hash = '#clients?case=CASE-001';
     mocks.preview.mockImplementation(async (_case, _owner, changes, version) => ({ owner: 'client_beclass', aggregate_identity: 'CASE-001', current_version: version, before: {}, after: changes, preview_fingerprint: 'b'.repeat(64) }));
     render(<ClientRegistryPage />);
-    const hcm = await screen.findByLabelText('HCM Email');
+    const hcm = await screen.findByLabelText('Email');
     fireEvent.change(hcm, { target: { value: 'unsaved@example.com' } });
     const beclass = screen.getByRole('region', { name: '報名問卷資料（BeClass）' });
-    fireEvent.change(within(beclass).getByLabelText('BeClass Email'), { target: { value: 'beclass-draft@example.com' } });
+    fireEvent.change(within(beclass).getByLabelText('報名註記'), { target: { value: '報名註記草稿' } });
     expect(within(beclass).getByRole('button', { name: '儲存' })).toBeEnabled();
     expect(mocks.preview).not.toHaveBeenCalled();
     expect(mocks.apply).not.toHaveBeenCalled();
@@ -699,10 +785,10 @@ describe('Client registry owner editing', () => {
     await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(2));
     expect(mocks.apply.mock.calls[0].slice(0, 4)).toEqual(['CASE-001', 'beclass', changes, 3]);
     expect(hcm).toHaveValue('unsaved@example.com');
-    expect(within(beclass).getByLabelText('BeClass Email')).toHaveValue('beclass-draft@example.com');
+    expect(within(beclass).getByLabelText('報名註記')).toHaveValue('報名註記草稿');
     expect(within(beclass).getByRole('button', { name: '儲存' })).toBeEnabled();
     fireEvent.click(within(beclass).getByRole('button', { name: '儲存' }));
-    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { email: 'beclass-draft@example.com' }, 4));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { admin_notes: '報名註記草稿' }, 4));
   });
 
   it('shows changes before discarding drafts from the drawer or tabs', async () => {
@@ -792,13 +878,13 @@ describe('Client registry owner editing', () => {
     }));
     mocks.apply.mockImplementation(async (_caseNo, _owner, changes) => {
       stored.beclass.version += 1;
-      if ('email' in changes) Object.assign(stored.beclass.values, changes);
+      if ('admin_notes' in changes) Object.assign(stored.beclass.values, changes);
       else Object.assign(stored.order_information.values, changes);
       return {};
     });
     window.location.hash = '#clients?case=CASE-001';
     render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
-    fireEvent.change(await screen.findByLabelText('BeClass Email'), { target: { value: 'synthetic@example.test' } });
+    fireEvent.change(await screen.findByLabelText('報名註記'), { target: { value: '合成報名註記' } });
     fireEvent.change(screen.getByLabelText('飲食習慣與中藥接受度'), { target: { value: '合成測試變更' } });
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
@@ -810,7 +896,7 @@ describe('Client registry owner editing', () => {
     expect(mocks.apply).toHaveBeenCalledTimes(2);
     expect(mocks.preview.mock.calls.map(call => call[3])).toEqual([3, 4]);
     expect(mocks.apply.mock.calls.map(call => call[3])).toEqual([3, 4]);
-    expect(stored.beclass.values.email).toBe('synthetic@example.test');
+    expect(stored.beclass.values.admin_notes).toBe('合成報名註記');
     expect(stored.order_information.values.dietary_habits).toBe('合成測試變更');
   });
 

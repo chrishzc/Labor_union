@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clientRegistryClient } from '../../../../../../../api/client_registry/client_registry_client';
 import type { ClientRegistryDetail } from '../../../../../../../api/client_registry/client_registry_schemas';
-import { HcmIntakeProfileRepairPanel } from '../../../../../../../components/HcmIntakeProfileRepairPanel';
+import { canRepairHcmProfileField, HcmIntakeProfileRepairPanel } from '../../../../../../../components/HcmIntakeProfileRepairPanel';
 
 const fingerprint = 'a'.repeat(64);
 const detail: ClientRegistryDetail = {
@@ -36,6 +36,17 @@ beforeEach(() => {
   }));
 });
 afterEach(() => vi.restoreAllMocks());
+
+it('does not expose the legacy baby information as an independent profile repair', () => {
+  expect(canRepairHcmProfileField('寶寶資訊')).toBe(false);
+  expect(canRepairHcmProfileField('胎數')).toBe(false);
+  render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['寶寶資訊']} disabled={false} onSaved={vi.fn()} onBusyChange={vi.fn()} />);
+  expect(screen.queryByLabelText('寶寶資訊')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '儲存缺件資料' })).not.toBeInTheDocument();
+  expect(clientRegistryClient.query).not.toHaveBeenCalled();
+  expect(clientRegistryClient.preview).not.toHaveBeenCalled();
+  expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+});
 
 async function editDraft(note = '補齊電話與服務方式') {
   fireEvent.change(await screen.findByLabelText('電話（手機／市話）'), { target: { value: '0912345678' } });

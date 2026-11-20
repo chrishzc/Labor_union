@@ -278,12 +278,29 @@ def test_registry_http_composition_identifies_each_field_owner_and_editability(v
     assert payload["client"]["field_capabilities"]["city"] == {
         "owner": "client_profile", "editable": True, "reason": None, "options": None,
     }
+    assert "baby_info" in payload["client"]["values"]
+    assert payload["client"]["field_capabilities"]["baby_info"] == {
+        "owner": "client_profile", "editable": False, "reason": "read_only_source", "options": None,
+    }
     assert payload["beclass"]["field_capabilities"]["phone"]["owner"] == "client_beclass"
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["options"] == ("單胞胎", "雙胞胎")
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["editable"] is False
     assert payload["beclass"]["field_capabilities"]["multi_birth_count"]["reason"] == "multi_birth_count_locked_after_service_start"
     assert payload["order_information"]["values"]["multi_birth_count"] == "雙胞胎"
     assert payload["order_terms"]["field_capabilities"]["planned_start_date"]["owner"] == "order_terms"
+
+
+@pytest.mark.parametrize("value", ["初生兒", "單胞胎", "雙胞胎"])
+def test_registry_profile_request_rejects_legacy_baby_info(value):
+    from pydantic import ValidationError
+    from api.schemas.client_registry import ClientProfileAdminPreviewRequest
+
+    with pytest.raises(ValidationError) as error:
+        ClientProfileAdminPreviewRequest.model_validate({
+            "changes": {"baby_info": value}, "expected_version": 0,
+        })
+    assert error.value.errors()[0]["loc"] == ("changes", "baby_info")
+    assert error.value.errors()[0]["type"] == "extra_forbidden"
 
 
 def test_registry_http_composition_allows_preassignment_terms_without_downstream_roots():

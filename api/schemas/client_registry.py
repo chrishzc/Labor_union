@@ -217,7 +217,6 @@ class ClientProfileChangeSet(_StrictModel):
     address: str | None = None
     residence_type: str | None = None
     delivery_type: str | None = None
-    baby_info: str | None = None
     notes: str | None = None
 
 

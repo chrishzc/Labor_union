@@ -255,11 +255,12 @@ describe('ClientRosterPage', () => {
     const detail = await screen.findByLabelText('CASE-001 案件資料編輯');
     expect(detail).toHaveTextContent('客戶主檔');
     expect(within(detail).getByLabelText('客戶備註（主檔）')).toHaveValue('主檔註記');
-    expect(detail).toHaveTextContent('HCM Email');
-    expect(within(detail).getByLabelText('HCM Email')).toHaveValue('hcm@example.com');
+    const profile = within(detail).getByRole('region', { name: '客戶主檔' });
+    expect(within(profile).getByLabelText('Email', { exact: true })).toHaveValue('hcm@example.com');
+    expect(within(detail).getAllByLabelText('Email', { exact: true })).toHaveLength(1);
     expect(detail).toHaveTextContent('報名問卷資料（BeClass）');
-    expect(within(detail).getByLabelText('BeClass Email')).toHaveValue('client@example.com');
-    expect(detail).toHaveTextContent('BeClass Email');
+    const registration = within(detail).getByRole('region', { name: '報名問卷資料（BeClass）' });
+    expect(within(registration).queryByLabelText(/Email/)).not.toBeInTheDocument();
     expect(detail).toHaveTextContent('BeClass 照護與特殊計費');
     expect(within(detail).getByLabelText('飲食習慣與中藥接受度')).toHaveValue('不吃牛肉');
     expect(detail).toHaveTextContent('訂單條件');

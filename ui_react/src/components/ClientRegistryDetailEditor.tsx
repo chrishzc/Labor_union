@@ -14,8 +14,8 @@ import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
 import '../pages/ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { identity_status: '補助身分', name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', notes: '客戶備註（主檔）', admin_notes: '行政註記（客戶主檔）', service_type: '服務方式（排班參考）' };
-const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', refund_bank_code: '退款銀行及分行代碼（7碼）', refund_account_no: '退款帳號（文字，保留前導零）', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
+const profileLabels: Record<string, string> = { identity_status: '補助身分', name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', notes: '客戶備註（主檔）', admin_notes: '行政註記（客戶主檔）', service_type: '服務方式（排班參考）' };
+const beclassLabels: Record<string, string> = { tel: '市話', ext: '分機', zip_code: '郵遞區號', admin_notes: '報名註記', refund_bank_code: '退款銀行及分行代碼（7碼）', refund_account_no: '退款帳號（文字，保留前導零）', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const careLabels: Record<string, string> = {
   dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
   cooking_oil_type: '料理用油', maternal_allergy: '過敏體質', special_care_notes: '特殊照護注意事項',
@@ -36,8 +36,18 @@ const idle = (): Action => ({ preview: null, changes: {}, message: '', loading: 
 const labels = { profile: profileLabels, beclass: beclassLabels, care: careLabels };
 const title = { profile: '客戶主檔', beclass: '報名問卷資料（BeClass）', care: 'BeClass 照護與特殊計費' };
 const owner = (section: Section) => section === 'profile' ? 'profile' : 'beclass';
-const source = (detail: ClientRegistryDetail, section: Section): Draft => section === 'profile'
-  ? detail.client.values : section === 'beclass' ? detail.beclass.values ?? {} : detail.order_information.values ?? {};
+const sharedProfileFields = ['name', 'email', 'phone', 'city', 'address'] satisfies (keyof ClientRegistryDetail['client']['values'])[];
+const source = (detail: ClientRegistryDetail, section: Section): Draft => {
+  if (section !== 'profile') return section === 'beclass' ? detail.beclass.values ?? {} : detail.order_information.values ?? {};
+  const values = { ...detail.client.values };
+  if (detail.beclass.status === 'ready') {
+    for (const field of sharedProfileFields) {
+      const fallback = detail.beclass.values?.[field];
+      if (!values[field]?.trim() && fallback?.trim()) values[field] = fallback;
+    }
+  }
+  return values;
+};
 const display = (value: Scalar | undefined) => value === null || value === undefined || value === '' ? '未登錄' : typeof value === 'boolean' ? value ? '是' : '否' : String(value);
 const diff = (draft: Draft, values: Draft, section: Section): Draft => Object.fromEntries(Object.keys(labels[section])
   .filter((field) => (draft[field] === '' ? null : draft[field] ?? null) !== (values[field] === '' ? null : values[field] ?? null))
@@ -163,7 +173,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     setActions((current) => ({ ...current, [section]: { ...approved, loading: true, message: '正在儲存…' } }));
     try {
       if (!approved.preview || !approved.key) {
-        const submitted = changes[section];
+        const submitted = section === 'profile' ? diff(drafts.profile, currentDetail.client.values, section) : changes[section];
         const result = await clientRegistryClient.preview(detail.case_no, owner(section), submitted as ClientProfileChanges | BeClassChanges, expectedVersion);
         if (!alive.current || sequence !== request.current) return;
         approved = { ...idle(), preview: result, changes: submitted, key: `client-${owner(section)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}` };
@@ -186,6 +196,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     return <section className="registry-editor" aria-label={title[section]}>
       <h3>{title[section]}</h3>
       <small>資料來源：{section === 'profile' ? '客戶主檔' : detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（無 BeClass 匯入紀錄）' : 'BeClass 有效修正資料；保留原始匯入內容'}</small>
+      {section === 'profile' && <p className="registry-section-note">基本資料空白時帶入報名資料，儲存後更新主檔。</p>}
       {section === 'profile' && !detail.client.field_capabilities.identity_status?.editable && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div></dl>}
       {section === 'beclass' && <><p>退款帳戶：{detail.beclass.status !== 'ready' ? '來源待確認' : detail.beclass.values?.refund_account_status === 'complete' ? '已登錄' : '待補齊'}</p>{!detail.beclass.full_refund_account_visible && <p>目前帳號：{detail.beclass.values?.refund_account_no ?? '待補齊'}</p>}<p>{!detail.beclass.full_refund_account_visible && '退款帳號顯示末四碼；更正時請完整輸入。'}缺少銀行或帳號時為待補，儲存不會更動既有退款快照。</p><p>生日（唯讀）：{display(detail.beclass.values?.birth_date)}</p></>}
       {unavailable ? <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，請先處理綁定異常。' : '此案件尚無可編輯的 BeClass 資料。'}</p> : <>

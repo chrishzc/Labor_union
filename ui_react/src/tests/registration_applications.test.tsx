@@ -46,6 +46,36 @@ beforeEach(() => sessionClient.setSession('test-session', { id: 7, username: 'st
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.clearSession(); });
 
 describe('saved demand application review', () => {
+  it.each([
+    ['雙胞胎', '舊寶寶文字', '雙胞胎', null],
+    [null, '單胞胎', '單胞胎', null],
+    [null, '雙胞胎', '雙胞胎', null],
+    ['第一胎', '單胞胎', '', null],
+    ['', '單胞胎', '', null],
+    [null, '初生兒', '', null],
+    [null, '單胞胎', '', 'multi_birth_count_invalid'],
+  ])('prefills survey %j and legacy value %j as %j when source issue is %j', async (surveyBirthCount, legacyBirthCount, expected, sourceIssue) => {
+    vi.spyOn(client, 'pending').mockResolvedValue([]);
+    vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
+    vi.spyOn(clientRegistryClient, 'query').mockResolvedValue({
+      ...sourceDetail,
+      client: { ...sourceDetail.client, values: { ...sourceDetail.client.values, baby_info: legacyBirthCount } },
+      beclass: { ...sourceDetail.beclass, values: { ...sourceDetail.beclass.values!, multi_birth_count: surveyBirthCount } },
+      order_information: { ...sourceDetail.order_information, field_issues: sourceIssue ? { multi_birth_count: sourceIssue } : {} },
+    });
+    const create = vi.spyOn(client, 'createManualNonCitizen');
+    render(<RegistrationApplications sourceCaseNo="115000001" onEditStateChange={vi.fn()} />);
+    await screen.findByText(/資料來源案件：115000001/);
+    expect(screen.getByLabelText('胎數')).toHaveValue(expected);
+    expect(screen.getByLabelText('胎數')).toHaveTextContent('單胞胎');
+    expect(screen.getByLabelText('胎數')).toHaveTextContent('雙胞胎');
+    expect(screen.queryByLabelText('寶寶資訊')).not.toBeInTheDocument();
+    if (!expected) {
+      fireEvent.click(screen.getByRole('button', { name: '確認建立新案' }));
+      expect(create).not.toHaveBeenCalled();
+    }
+  });
+
   it('ignores a late response after changing source cases', async () => {
     vi.spyOn(client, 'pending').mockResolvedValue([]);
     vi.spyOn(client, 'nextNonCitizenNumber').mockResolvedValue({ case_no: 'A115001', virtual_account: '99781699115501' });
