@@ -4618,6 +4618,7 @@ def _local_validate_backup(
     *,
     backup_dump_path: Path | None,
     backup_receipt_path: Path | None,
+    verify_current_rows: bool = True,
 ) -> dict[str, Any]:
     """Validate a machine-local pre-Apply dump and its stable evidence."""
     if backup_dump_path is None or backup_receipt_path is None:
@@ -4669,7 +4670,8 @@ def _local_validate_backup(
         raise LocalAdditiveBlocked(
             "local pre-apply backup data digest is missing", code="backup_required"
         )
-    _local_verify_backup_rows(config, source, receipt)
+    if verify_current_rows:
+        _local_verify_backup_rows(config, source, receipt)
     return {
         **receipt,
         "dump_path": dump["path"],
@@ -5198,6 +5200,9 @@ def qualify_registry_signing_source_recovery(
     backup = _local_validate_backup(
         config, source, qualification, baseline_sha,
         backup_dump_path=backup_receipt.with_suffix(".sql"), backup_receipt_path=backup_receipt,
+        # This archive proves the DDL prefix; the new copy flow backs up and
+        # verifies current rows, including repairs made after the interruption.
+        verify_current_rows=False,
     )
     if events[0].get("data_fingerprint_sha256") != backup["data_fingerprint_sha256"]:
         raise UpgradeBlocked("registry signing recovery journal backup rows differ")

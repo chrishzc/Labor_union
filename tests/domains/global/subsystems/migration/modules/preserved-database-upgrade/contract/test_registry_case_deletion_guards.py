@@ -219,6 +219,36 @@ def test_interrupted_signing_source_admits_only_hash_bound_prefix_and_original_b
     assert current == saved
 
 
+def test_interrupted_signing_recovery_accepts_repaired_rows_but_direct_resume_stays_strict(
+    interrupted_signing_source, monkeypatch,
+):
+    source, release, current, root, backup_path, _, config = interrupted_signing_source
+    journal = m._local_journal_path(root, source, release)
+    paths = (backup_path, backup_path.with_suffix(".sql"), journal)
+    originals = {path: path.read_bytes() for path in paths}
+    captures = []
+
+    def changed_rows(*args):
+        captures.append(args)
+        return {"data_row_counts": {"unexpected": 1}, "data_fingerprints": {},
+                "data_fingerprint_sha256": "f" * 64}
+
+    monkeypatch.setattr(m, "_local_capture_backup_rows", changed_rows)
+    evidence = m.qualify_registry_signing_source_recovery(config, source, current, receipt_root=root)
+    assert evidence["verified_prefix_length"] == 29
+    assert captures == []
+
+    backup = json.loads(backup_path.read_text(encoding="utf-8"))
+    qualification = m._local_discover_qualification(release_id=release, artifact_name=SIGNING_ARTIFACT)
+    with pytest.raises(m.LocalAdditiveBlocked, match="source backup row fingerprint changed"):
+        m._local_validate_backup(
+            config, source, qualification, backup["schema_sha256"],
+            backup_dump_path=backup_path.with_suffix(".sql"), backup_receipt_path=backup_path,
+        )
+    assert len(captures) == 1
+    assert {path: path.read_bytes() for path in paths} == originals
+
+
 def test_interrupted_signing_source_preserves_mysql_trigger_order(interrupted_signing_source):
     source, _, current, root, _, _, config = interrupted_signing_source
     names = [row["trigger_name"] for row in current["triggers"]]
@@ -268,7 +298,7 @@ def test_signing_backup_trigger_parser_preserves_version_comments_inside_literal
 
 @pytest.mark.parametrize("fault", ["missing_journal", "tampered_journal", "foreign_source", "uncertain_ddl",
     "schema_drift", "noncanonical_progress", "missing_backup", "wrong_host", "wrong_server", "wrong_release",
-    "wrong_baseline", "tampered_dump", "changed_rows", "missing_backup_triggers", "duplicate_backup_trigger",
+    "wrong_baseline", "tampered_dump", "changed_backup_rows", "missing_backup_triggers", "duplicate_backup_trigger",
     "backup_trigger_drift"])
 def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signing_source, monkeypatch, fault):
     source, release, current, root, backup_path, statements, config = interrupted_signing_source
@@ -295,8 +325,10 @@ def test_interrupted_signing_source_rejects_unproven_recovery(interrupted_signin
     elif fault == "tampered_dump":
         with backup_path.with_suffix(".sql").open("ab") as handle:
             handle.write(b"changed")
-    elif fault == "changed_rows":
-        monkeypatch.setattr(m, "_local_capture_backup_rows", lambda *_: {"data_row_counts": {"unexpected": 1}, "data_fingerprints": {}, "data_fingerprint_sha256": "f" * 64})
+    elif fault == "changed_backup_rows":
+        backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        backup["data_fingerprint_sha256"] = "f" * 64
+        backup_path.write_text(json.dumps(backup), encoding="utf-8")
     elif fault in {"missing_backup_triggers", "duplicate_backup_trigger", "backup_trigger_drift"}:
         dump = backup_path.with_suffix(".sql")
         content = dump.read_bytes()
