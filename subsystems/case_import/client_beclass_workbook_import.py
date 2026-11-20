@@ -18,7 +18,10 @@ from shared_kernel.workbook_resource_limits import validate_workbook
 from shared_kernel.xls_workbook import excel_engine
 
 from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row
-from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
+from domains.case_import.client_beclass_binding import (
+    ClientBeClassCaseUnavailableReason,
+    ClientCaseBindingStatus,
+)
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
 from subsystems.case_import.beclass_review_intake import canonical_review_identifier, record_invalid_beclass_row
@@ -53,6 +56,19 @@ class ClientBeClassCaseCandidate:
 
     def as_view(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ClientBeClassCaseAvailability:
+    candidates: tuple[ClientBeClassCaseCandidate, ...]
+    unavailable: dict[str, ClientBeClassCaseUnavailableReason]
+
+    def reason_for(self, case_no: str | None = None) -> ClientBeClassCaseUnavailableReason:
+        if case_no is not None:
+            return self.unavailable.get(case_no, ClientBeClassCaseUnavailableReason.STALE)
+        if len(self.unavailable) == 1:
+            return next(iter(self.unavailable.values()))
+        return ClientBeClassCaseUnavailableReason.STALE
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +195,7 @@ class ClientBeClassWorkbookImportRepositoryPort(Protocol):
     def load_row_receipt(self, key: str): ...
     def source_state(self, payload: dict[str, object]) -> str: ...
     def resolve_client_case_binding(self, name, phone, *, for_update: bool): ...
-    def available_case_candidates(self, name, phone, *, for_update: bool, case_no=None) -> tuple[ClientBeClassCaseCandidate, ...]: ...
+    def case_availability(self, name, phone, *, for_update: bool, case_no: str | None = None) -> ClientBeClassCaseAvailability: ...
     def claim_workbook(self, key, fingerprint, correlation_id) -> str: ...
     def claim_row(self, key, fingerprint, correlation_id) -> str: ...
     def create_bound_source_if_absent(self, payload, client_case, *, allow_additional_case: bool = False) -> int | None: ...
@@ -239,9 +255,10 @@ class ClientBeClassWorkbookImportService:
                 or issue and issue.issue_codes[0] in _AMBIGUOUS_BINDINGS
             ):
                 payload = _normalized_payload(row)
-                available = self._repository.available_case_candidates(
+                availability = self._repository.case_availability(
                     payload["name"], payload["phone"], for_update=False
                 )
+                available = availability.candidates
                 if available and outcome != "create":
                     manual_rows.append(ClientBeClassManualRow(
                         row_number, payload["query_no"], payload["name"],
@@ -252,7 +269,7 @@ class ClientBeClassWorkbookImportService:
                     outcome, issue = "manual", None
                 elif not available and outcome == "create":
                     outcome, issue = "existing_conflict", _case_unavailable_issue(
-                        row_number, payload["query_no"]
+                        row_number, payload["query_no"], availability.reason_for()
                     )
             outcomes[outcome] += 1
             if issue is not None:
@@ -361,6 +378,7 @@ class ClientBeClassWorkbookImportService:
             for case_no in sorted(case_nos)
         ]
         source_prefix = _source_identity(workbook.digest, row_number)
+        reason = ClientBeClassCaseUnavailableReason.STALE
         with self._unit_of_work_factory() as unit_of_work:
             pending = []
             for binding in selected_bindings:
@@ -374,12 +392,13 @@ class ClientBeClassWorkbookImportService:
                     if self._repository.bound_case_no_for_root(stored["root_id"]) == case_no:
                         continue
                     break
-                candidates = self._repository.available_case_candidates(
+                availability = self._repository.case_availability(
                     payload["name"], payload["phone"], case_no=case_no, for_update=True
                 )
-                if len(candidates) != 1:
+                if len(availability.candidates) != 1:
+                    reason = availability.reason_for(case_no)
                     break
-                pending.append((candidates[0], source_identity, fingerprint))
+                pending.append((availability.candidates[0], source_identity, fingerprint))
             else:
                 if not pending or (
                     len(pending) == len(selected_bindings)
@@ -389,7 +408,7 @@ class ClientBeClassWorkbookImportService:
                     unit_of_work.commit()
                     bindings.extend(selected_bindings)
                     return "created"
-        issues.append(_case_unavailable_issue(row_number, payload["query_no"]))
+        issues.append(_case_unavailable_issue(row_number, payload["query_no"], reason))
         return "existing_conflict"
 
     def _write_manual_bindings(self, payload, pending, actor, correlation_id) -> bool:
@@ -525,12 +544,17 @@ class ClientBeClassWorkbookImportService:
                 unit_of_work.commit()
                 return outcome
             bound_root = resolution.bound_root()
-            if check_case_availability and not self._repository.available_case_candidates(
-                payload["name"], payload["phone"], case_no=bound_root["case_no"], for_update=True
-            ):
-                if row_issues is not None:
-                    row_issues.append(_case_unavailable_issue(row_number, payload["query_no"]))
-                return "existing_conflict"
+            if check_case_availability:
+                case_no = str(bound_root["case_no"])
+                availability = self._repository.case_availability(
+                    payload["name"], payload["phone"], case_no=case_no, for_update=True
+                )
+                if not availability.candidates:
+                    if row_issues is not None:
+                        row_issues.append(_case_unavailable_issue(
+                            row_number, payload["query_no"], availability.reason_for(case_no)
+                        ))
+                    return "existing_conflict"
             source_id = self._repository.create_bound_source_if_absent(
                 payload, bound_root
             )
@@ -697,9 +721,11 @@ _AMBIGUOUS_BINDINGS = {
 }
 
 
-def _case_unavailable_issue(row_number, query_no):
+def _case_unavailable_issue(
+    row_number: int, query_no: str | None, reason: ClientBeClassCaseUnavailableReason,
+) -> ClientBeClassWorkbookRowIssue:
     return ClientBeClassWorkbookRowIssue(
-        row_number, query_no, ("HCM 案號",), ("case_import_candidate_stale",)
+        row_number, query_no, ("HCM 案號",), (reason.value,)
     )
 
 

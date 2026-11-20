@@ -26,6 +26,9 @@ const REASON_LABELS: Record<string, string> = {
   client_case_binding_multiple_clients: '姓名與電話對應多位客戶，無法確定對象',
   client_case_binding_case_not_unique: '客戶沒有唯一可配對案件',
   case_import_candidate_stale: '案件已無法綁定，請重新預覽後再選案',
+  client_beclass_case_already_bound: '此案件已有 BeClass 問卷綁定',
+  client_beclass_case_manually_registered: '此案件已有 BeClass 人工補登資料',
+  client_beclass_hcm_case_missing: '找不到與此案件同案號的 HCM 資料',
   blocked_identity: '姓名或身分證字號缺漏／格式錯誤',
   identity_conflict: '身分資料與既有人員衝突，無法確定對象',
   unmatched_case: '找不到對應案件',
@@ -220,15 +223,31 @@ export function adaptHcmImportResult(receipt: HcmWorkbookReceipt): WorkbookImpor
       : null);
 }
 
+const CLIENT_BECLASS_REPREVIEW_CODES = new Set([
+  'case_import_candidate_stale',
+  'client_beclass_case_already_bound',
+  'client_beclass_case_manually_registered',
+  'client_beclass_hcm_case_missing',
+]);
+
+export function adaptClientBeClassImportRowIssues(rows: NonNullable<ClientBeClassWorkbookReceipt['row_issues']>) {
+  return rows.map(row => ({
+    sourceRow: row.source_row,
+    identifier: row.query_no,
+    fields: row.fields,
+    reasons: row.issue_codes.map(reasonLabel),
+  }));
+}
+
 export function adaptClientBeClassImportResult(receipt: ClientBeClassWorkbookReceipt): WorkbookImportResult {
   const summary = result(receipt.source_row_count, receipt.created_count,
     receipt.exact_replay_count + receipt.existing_source_count,
     receipt.review_required_count + receipt.existing_conflict_count, receipt.replayed_workbook,
-    receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.query_no, fields: row.fields, reasons: row.issue_codes.map(reasonLabel) })) ?? null);
+    receipt.row_issues ? adaptClientBeClassImportRowIssues(receipt.row_issues) : null);
   return {
     ...summary,
     manualBindings: receipt.manual_bindings ?? [],
-    requiresRepreview: receipt.row_issues?.some(row => row.issue_codes.includes('case_import_candidate_stale')),
+    requiresRepreview: receipt.row_issues?.some(row => row.issue_codes.some(code => CLIENT_BECLASS_REPREVIEW_CODES.has(code))),
   };
 }
 

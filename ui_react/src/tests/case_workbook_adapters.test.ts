@@ -62,6 +62,22 @@ describe('Four mutually exclusive import result counters', () => {
     expect(adaptClientBeClassImportResult({ source_content_digest: digest, source_row_count: 10, created_count: 4, exact_replay_count: 1, existing_source_count: 2, review_required_count: 1, existing_conflict_count: 2, replayed_workbook: false })).toMatchObject({ sourceCount: 10, importedCount: 4, duplicateCount: 3, notImportedCount: 3 });
   });
 
+  it.each([
+    ['client_beclass_case_already_bound', '此案件已有 BeClass 問卷綁定'],
+    ['client_beclass_case_manually_registered', '此案件已有 BeClass 人工補登資料'],
+    ['client_beclass_hcm_case_missing', '找不到與此案件同案號的 HCM 資料'],
+  ])('BeClass explains %s and allows a fresh preview', (code, reason) => {
+    const rowIssues = [{ source_row: 2, query_no: 'BC-TEST', fields: ['HCM 案號'], issue_codes: [code] }];
+    expect(adaptClientBeClassImportResult({
+      source_content_digest: digest, source_row_count: 1, created_count: 0,
+      exact_replay_count: 0, existing_source_count: 0, review_required_count: 0,
+      existing_conflict_count: 1, replayed_workbook: false, row_issues: rowIssues,
+    })).toMatchObject({
+      requiresRepreview: true,
+      notImportedRows: [{ sourceRow: 2, identifier: 'BC-TEST', fields: ['HCM 案號'], reasons: [reason] }],
+    });
+  });
+
   it('Staff review overlays never add another row to the result', () => {
     expect(adaptStaffHistoricalImportResult({ source_content_digest: digest, source_row_count: 10, created_count: 3, adopted_existing_count: 3, exact_replay_count: 2, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 8, preview_fingerprint: fingerprint, replayed_workbook: false })).toMatchObject({ sourceCount: 10, importedCount: 6, duplicateCount: 2, notImportedCount: 2 });
   });

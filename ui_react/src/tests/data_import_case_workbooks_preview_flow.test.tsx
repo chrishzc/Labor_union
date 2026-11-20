@@ -343,6 +343,36 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByText(/需檢查|問題列|第.*列/)).not.toBeInTheDocument();
   });
 
+  it('shows the blocked BeClass row and the available pairing in the same preview', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.preview).mockResolvedValueOnce({
+      source_content_digest: digest, sheet_identity: identity, source_row_count: 2,
+      create_count: 0, review_required_count: 0, existing_conflict_count: 1,
+      existing_source_count: 0, preview_fingerprint: fingerprint,
+      row_issues: [{
+        source_row: 2, query_no: 'BC-BLOCKED', fields: ['HCM 案號'],
+        issue_codes: ['client_beclass_case_manually_registered'],
+      }],
+      manual_rows: [{
+        source_row: 3, query_no: 'BC-PENDING', name: '測試客戶',
+        masked_phone: '09•••••678', city: null, submitted_at: null, case_nos: ['HCM-A'],
+      }],
+      candidates: [{
+        case_no: 'HCM-A', client_id: 7, name: '測試客戶', masked_phone: '09•••••678',
+        city: null, created_at: null, start_date: null,
+      }],
+    });
+    render(<UnsavedChangesProvider><DataImportPage /></UnsavedChangesProvider>);
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+
+    const details = await within(card).findByRole('region', { name: '未匯入明細' });
+    expect(within(details).getByText('BC-BLOCKED')).toBeInTheDocument();
+    expect(within(details).getByText('此案件已有 BeClass 人工補登資料')).toBeInTheDocument();
+    expect(within(details).queryByText('BC-PENDING')).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: '開啟人工配對' })).toBeEnabled();
+    expect(clientBeClassWorkbookPreviewClient.apply).not.toHaveBeenCalled();
+  });
+
   it('keeps one operation identity and file lock while allowing navigation for an unknown result', async () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));

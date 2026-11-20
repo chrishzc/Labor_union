@@ -10,7 +10,7 @@ import { adaptClientBeClassWorkbookPreview, type ClientBeClassWorkbookPreviewMod
 import { adaptHcmWorkbookPreview } from '../adapters/case_import/hcm_workbook_adapter';
 import { adaptStaffHistoricalWorkbookPreview } from '../adapters/case_import/staff_historical_workbook_adapter';
 import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
-import { adaptClientBeClassImportResult, adaptHcmImportResult, adaptHistoricalOrderImportResult, adaptStaffHistoricalImportResult, type WorkbookImportResult } from '../adapters/workbook_import_result_adapter';
+import { adaptClientBeClassImportResult, adaptClientBeClassImportRowIssues, adaptHcmImportResult, adaptHistoricalOrderImportResult, adaptStaffHistoricalImportResult, type WorkbookImportResult } from '../adapters/workbook_import_result_adapter';
 import { ClientBeClassWorkbookSnapshot, clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import type { ClientBeClassPairing } from '../api/case_import/client_beclass_workbook/schemas';
 import { HcmWorkbookSnapshot, hcmWorkbookPreviewClient } from '../api/case_import/hcm_workbook_client';
@@ -316,6 +316,9 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   const unknown = applyState.kind === 'error' && applyState.outcomeUnknown;
   const result = done ? applyState.result : null;
   const manual = Boolean(beclassPreview?.manualRows.length);
+  const previewIssues = manual && applyState.kind === 'idle' ? beclassPreview?.rowIssues : undefined;
+  const notImportedRows = result ? result.notImportedRows : previewIssues && adaptClientBeClassImportRowIssues(previewIssues);
+  const showNotImportedRows = result ? result.notImportedCount !== 0 : Boolean(notImportedRows?.length);
   const status = waiting ? '匯入處理中' : unknown ? '結果待確認' : done ? '已完成' : ready ? '待確認' : '待選檔';
   const previewGuidanceId = `imports-${id}-preview-guidance`;
   const applyGuidanceId = `imports-${id}-apply-guidance`;
@@ -366,11 +369,11 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
             </tr>)}</tbody>
           </table></div>
         </section>}
-        {result && result.notImportedCount !== 0 && <section className="import-not-imported-details" aria-label="未匯入明細">
+        {showNotImportedRows && <section className="import-not-imported-details" aria-label="未匯入明細">
           <h4>未匯入明細</h4>
-          {result.notImportedRows === null ? <p>這份匯入收據未保存逐筆明細，無法從收據確認未匯入的是哪些資料。</p> : <div className="import-details-scroll"><table>
+          {notImportedRows == null ? <p>這份匯入收據未保存逐筆明細，無法從收據確認未匯入的是哪些資料。</p> : <div className="import-details-scroll"><table>
             <thead><tr><th scope="col">{id === 'hcm-current' ? '來源資料序號' : 'Excel 列號'}</th><th scope="col">案件／查詢編號</th><th scope="col">問題欄位</th><th scope="col">未匯入原因</th></tr></thead>
-            <tbody>{result.notImportedRows.map(row => <tr key={row.sourceRow}><td>{row.sourceRow}</td><td>{row.identifier || '未提供（依來源位置定位）'}</td><td>{row.fields.join('、') || '—'}</td><td>{row.reasons.join('；') || '資料未通過匯入檢查'}</td></tr>)}</tbody>
+            <tbody>{notImportedRows.map(row => <tr key={row.sourceRow}><td>{row.sourceRow}</td><td>{row.identifier || '未提供（依來源位置定位）'}</td><td>{row.fields.join('、') || '—'}</td><td>{row.reasons.join('；') || '資料未通過匯入檢查'}</td></tr>)}</tbody>
           </table></div>}
         </section>}
       </section>}

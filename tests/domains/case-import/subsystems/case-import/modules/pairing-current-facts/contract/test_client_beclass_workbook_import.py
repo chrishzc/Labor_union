@@ -565,11 +565,11 @@ class _ManualPairingRepository(_Repository):
     def claim_workbook(self, key, fingerprint, correlation):
         return "created" if self.claims.setdefault(key, fingerprint) == fingerprint else "conflict"
 
-    def available_case_candidates(self, name, phone, *, for_update, case_no=None):
+    def case_availability(self, name, phone, *, for_update, case_no=None):
         if for_update:
             assert case_no is not None
         unavailable = self.unavailable | {row["bound_case_no"] for row in self.created}
-        return tuple(
+        candidates = tuple(
             intake.ClientBeClassCaseCandidate(
                 number, 8 if number in self.other_client_cases else 7, name,
                 intake.mask_client_beclass_phone(phone), "新竹市",
@@ -578,6 +578,7 @@ class _ManualPairingRepository(_Repository):
             for index, number in enumerate(("HCM-A", "HCM-B", "HCM-C"), start=1)
             if number not in unavailable and (case_no is None or case_no == number)
         )
+        return intake.ClientBeClassCaseAvailability(candidates, {})
 
     def source_state(self, payload):
         if any(row["query_no"] == payload["query_no"] for row in self.created):
@@ -661,6 +662,101 @@ def test_same_client_workbook_confirmed_case_pairings_and_receipt(tmp_path, monk
     with pytest.raises(HTTPException) as conflict:
         apply(form.replace("HCM-B", "HCM-C"))
     assert conflict.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("has_hcm", "origin", "occupant_client", "issue_code"),
+    [
+        (True, "imported", 7, "client_beclass_case_already_bound"),
+        (True, "imported", 8, "client_beclass_case_already_bound"),
+        (True, "admin_manual", None, "client_beclass_case_manually_registered"),
+        (False, None, None, "client_beclass_hcm_case_missing"),
+    ],
+)
+def test_workbook_reports_current_case_unavailability(
+    monkeypatch, has_hcm, origin, occupant_client, issue_code,
+):
+    case_a, case_b = "HCM-0007", "HCM-0008"
+
+    class CandidateCursor:
+        blocked = False
+        rows = ()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def execute(self, sql, params):
+            if "FROM clients c STRAIGHT_JOIN orders" in sql:
+                cases = (params[2],) if len(params) == 3 else case_nos
+                self.rows = tuple(
+                    {
+                        "case_no": case, "client_id": 7, "name": params[0],
+                        "phone": params[1], "city": None, "created_at": None,
+                        "start_date": None, "hcm_client_id": (
+                            None if self.blocked and case == case_a and not has_hcm else 7
+                        ),
+                    }
+                    for case in cases if case in case_nos
+                    and (not self.blocked or has_hcm or case != case_a or "LEFT JOIN clients hcm" in sql)
+                )
+            elif "FROM beclass_records" in sql:
+                self.rows = (
+                    ({"bound_case_no": case_a, "record_origin": origin},)
+                    if self.blocked and origin and case_a in params
+                    and ("client_id=%s" not in sql or occupant_client in (None, params[0]))
+                    else ()
+                )
+            else:
+                pytest.fail(f"Unexpected case availability query: {sql}")
+
+        def fetchall(self):
+            return self.rows
+
+    case_nos = (case_a,)
+    cursor = CandidateCursor()
+    repository = _ManualPairingRepository()
+    lookup = ClientBeClassWorkbookImportRepository(SimpleNamespace(cursor=lambda: cursor))
+    monkeypatch.setattr(repository, "case_availability", lookup.case_availability)
+    service = _service(repository)
+    workbook = _workbook(_valid_row("BC-BLOCKED"))
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: workbook)
+    repository.binding_resolution = ClientCaseBindingResolution(
+        ClientCaseBindingStatus.UNIQUE, 1, 1, 7, case_a,
+    )
+    assert service.preview("ignored.xlsx", manual_pairing=True).create_count == 1
+    cursor.blocked = True
+    preview = service.preview("ignored.xlsx", manual_pairing=True)
+    assert preview.existing_conflict_count == 1
+    assert preview.row_issues[0].issue_codes == (issue_code,)
+
+    cursor.blocked = False
+    automatic_preview = service.preview("ignored.xlsx", manual_pairing=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "_claim_workbook", lambda *_: setattr(cursor, "blocked", True))
+        automatic = service.apply(
+            "ignored.xlsx", "automatic-key", automatic_preview.preview_fingerprint, "admin", "corr",
+            manual_pairings=(),
+        )
+    assert automatic.existing_conflict_count == 1
+    assert automatic.row_issues[0].issue_codes == (issue_code,)
+    assert repository.created == []
+
+    case_nos = (case_a, case_b)
+    repository.binding_resolution = ClientCaseBindingResolution(
+        ClientCaseBindingStatus.CASE_NOT_UNIQUE, 1, 2,
+    )
+    cursor.blocked = False
+    pending = service.preview("ignored.xlsx", manual_pairing=True)
+    assert pending.manual_rows[0].case_nos == (case_a, case_b)
+    cursor.blocked = True
+    receipt = service.apply("ignored.xlsx", "blocked-key", pending.preview_fingerprint, "admin", "corr",
+                            manual_pairings=((2, case_a), (2, case_b)))
+    assert receipt.existing_conflict_count == 1
+    assert receipt.row_issues[0].issue_codes == (issue_code,)
+    assert repository.created == []
 
 
 def test_confirmed_pairings_resume_after_rows_commit_before_workbook_receipt(monkeypatch):

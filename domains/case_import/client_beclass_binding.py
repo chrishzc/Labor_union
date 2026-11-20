@@ -16,6 +16,13 @@ class ClientCaseBindingStatus(StrEnum):
     UNIQUE = "unique"
 
 
+class ClientBeClassCaseUnavailableReason(StrEnum):
+    ALREADY_BOUND = "client_beclass_case_already_bound"
+    MANUALLY_REGISTERED = "client_beclass_case_manually_registered"
+    HCM_CASE_MISSING = "client_beclass_hcm_case_missing"
+    STALE = "case_import_candidate_stale"
+
+
 @dataclass(frozen=True, slots=True)
 class ClientCaseBindingResolution:
     status: ClientCaseBindingStatus
@@ -87,6 +94,7 @@ def classify_client_case_binding(
 
 
 __all__ = [
+    "ClientBeClassCaseUnavailableReason",
     "ClientCaseBindingResolution",
     "ClientCaseBindingStatus",
     "classify_client_case_binding",
