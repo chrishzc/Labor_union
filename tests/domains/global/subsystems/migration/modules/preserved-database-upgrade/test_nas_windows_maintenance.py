@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import Mock
 import zipfile
 
 import pytest
@@ -660,6 +661,25 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
+def mock_source_answer_reader(monkeypatch, settings, steps, rows, *, read_error=None):
+    cursor = Mock()
+    cursor.execute.side_effect = read_error
+    cursor.fetchall.return_value = rows
+    connection = Mock()
+    connection.cursor.return_value = nullcontext(cursor)
+    connection.close.side_effect = lambda: steps.append("close_source_read")
+
+    def connect(**options):
+        assert options["database"] == settings["database"]
+        assert options["user"] == settings["values"]["NAS_BACKUP_USER"]
+        assert options["init_command"] == "SET SESSION TRANSACTION READ ONLY"
+        steps.append("read_source_answers")
+        return connection
+
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    return cursor
+
+
 @pytest.mark.parametrize("deployment", ["pinned_remote", "unpinned_remote", "local_test"])
 @pytest.mark.parametrize("verified", [False, True])
 def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedures_fail(
@@ -685,11 +705,21 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
 
     monkeypatch.setattr(updater, "build_additive_preview", candidate_preview)
     monkeypatch.setattr(nas.shutil, "which", lambda name: name)
+    source_cursor = mock_source_answer_reader(monkeypatch, settings, steps, [
+        {"case_no": "synthetic", "survey_details": {"特殊計費:胎數": "雙胞胎"}},
+    ])
+
     def plan(*_args, **kwargs):
         assert kwargs["source_recovery_root"] == updater.DEFAULT_RECEIPT_ROOT
         steps.append("plan")
         return {
-        "status": "ready", "candidate_exists": False, "source_objects": {"fixture.sql": "absent"},
+            "status": "ready",
+            "candidate_exists": False,
+            "source_objects": {
+                "1037_twins_payroll_policy.sql": "absent" if local_test else "exact",
+                "fixture.sql": "absent",
+            },
+            "source_data": {"beclass_records": {}, "orders": {}},
         }
     monkeypatch.setattr(nas.migration, "build_plan", plan)
     monkeypatch.setattr(nas, "backup", lambda *_: steps.append("backup") or tmp_path)
@@ -726,9 +756,64 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
     else:
         with pytest.raises(nas.MaintenanceBlocked, match="驗證未通過"):
             nas.upgrade(settings)
-    assert steps == ["plan", "backup", "restore", "apply", "verify"] + (
+    source_read_steps = [] if local_test else ["read_source_answers", "close_source_read"]
+    assert steps == ["plan"] + source_read_steps + ["backup", "restore", "apply", "verify"] + (
         ["startup_check"] if verified and local_test else ["prepare", "procedures", "close"] if verified else [])
+    if local_test:
+        source_cursor.execute.assert_not_called()
+    else:
+        source_cursor.execute.assert_called_once()
+        assert source_cursor.execute.call_args.args[0].startswith("SELECT ")
+        assert "FOR UPDATE" not in source_cursor.execute.call_args.args[0]
     assert settings["environment_file"].read_bytes() == before
+
+
+@pytest.mark.parametrize("read_fails", [False, True])
+def test_upgrade_source_answer_preflight_blocks_before_backup_or_candidate_writes(
+    settings, monkeypatch, read_fails,
+):
+    monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
+    monkeypatch.setattr(nas.migration, "build_plan", lambda *_args, **_kwargs: {
+        "status": "ready",
+        "candidate_exists": False,
+        "source_objects": {"1037_twins_payroll_policy.sql": "exact"},
+        "source_data": {"beclass_records": {}, "orders": {}},
+    })
+    for owner, name in (
+        (nas, "destination_ready"),
+        (nas, "backup"),
+        (nas.migration, "restore_candidate"),
+        (nas.migration, "apply_schema"),
+    ):
+        monkeypatch.setattr(owner, name, Mock(side_effect=AssertionError(f"unexpected {name}")))
+
+    steps = []
+    mock_source_answer_reader(monkeypatch, settings, steps, [
+        {"case_no": "private-case", "survey_details": {"特殊計費:胎數": "private-answer"}},
+        {"case_no": "duplicate", "survey_details": {"特殊計費:胎數": "duplicate-answer"}},
+        {"case_no": "duplicate", "survey_details": {"特殊計費:胎數": "單胞胎"}},
+    ], read_error=nas.pymysql.MySQLError("private-provider-detail") if read_fails else None)
+    before = settings["environment_file"].read_bytes()
+    with pytest.raises(nas.MaintenanceBlocked) as raised:
+        nas.upgrade(settings)
+    assert steps == ["read_source_answers", "close_source_read"]
+    message = str(raised.value)
+    if read_fails:
+        assert "無法唯讀核對來源問卷胎數" in message
+    else:
+        assert "1 筆問卷的胎數無法判定（multi_birth_count_ambiguous）" in message
+    for private_value in ("private-case", "private-answer", "duplicate", "private-provider-detail"):
+        assert private_value not in message
+    assert settings["environment_file"].read_bytes() == before
+
+
+def test_source_answer_preflight_defers_missing_source_tables():
+    read = Mock()
+    nas.source_answer_preflight(read, "union_db", {
+        "source_objects": {"1037_twins_payroll_policy.sql": "exact"},
+        "source_data": {"orders": {}},
+    })
+    read.connect.assert_not_called()
 
 
 @pytest.mark.parametrize("missing", ["mysql", "mysqldump"])

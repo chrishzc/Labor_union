@@ -107,6 +107,8 @@ def project_order_information(raw_payload: object, corrections: object = None) -
         clean = [value for value in clean if value is not None]
         if not clean:
             continue
+        if canonical_key == "multi_birth_count":
+            clean = ["雙胞胎" if value == "雙胞胎(+150時薪)" else value for value in clean]
         if len({_comparison_value(value) for value in clean}) != 1:
             issues[canonical_key] = "ambiguous"
             continue

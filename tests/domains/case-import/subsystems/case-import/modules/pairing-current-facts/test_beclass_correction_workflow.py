@@ -1,12 +1,13 @@
 """Case Import-owned correction contract preserving imported originals."""
 
+import json
 from contextlib import AbstractContextManager
 
 import pytest
 
 from domains.case_import.beclass_correction import BeClassCorrectionError
 from domains.orders.lifecycle import OrderLifecycleStatus
-from domains.case_import.order_information import ORDER_INFORMATION_KEYS
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS, project_order_information
 from domains.case_import.registration_details import REGISTRATION_DETAIL_FIELDS, project_registration_details, mask_beclass_values
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -152,14 +153,53 @@ def test_beclass_correction_accepts_only_canonical_multi_birth_count():
 
     assert preview.before == {"multi_birth_count": None}
     assert preview.after == {"multi_birth_count": "雙胞胎"}
-    with pytest.raises(ValueError, match="beclass_multi_birth_count_invalid"):
-        workflow.preview(
-            "CASE-001", {"multi_birth_count": "第二胎"}, ExpectedVersion(0)
-        )
+    for invalid_answer, expected_error in (
+        ("第二胎", "beclass_multi_birth_count_invalid"),
+        ("雙胞胎(+150時薪)", "beclass_value_too_long:multi_birth_count"),
+    ):
+        with pytest.raises(ValueError, match=expected_error):
+            workflow.preview(
+                "CASE-001", {"multi_birth_count": invalid_answer}, ExpectedVersion(0)
+            )
     with pytest.raises(ValueError, match="beclass_value_cannot_be_empty"):
         workflow.preview(
             "CASE-001", {"multi_birth_count": None}, ExpectedVersion(0)
         )
+
+
+def test_legacy_twin_survey_answer_projects_to_canonical_value_without_rewriting_source():
+    survey = {"特殊計費:胎數": " 雙胞胎(+150時薪) "}
+
+    for payload in (survey, json.dumps(survey, ensure_ascii=False)):
+        projection = project_order_information(payload)
+
+        assert projection.values["multi_birth_count"] == "雙胞胎"
+        assert "multi_birth_count" not in projection.issues
+    assert survey == {"特殊計費:胎數": " 雙胞胎(+150時薪) "}
+
+
+@pytest.mark.parametrize(
+    ("other_answer", "expected_value", "expected_issue"),
+    [("雙胞胎", "雙胞胎", None), ("單胞胎", None, "ambiguous")],
+)
+def test_legacy_twin_survey_answer_is_normalized_before_comparing_aliases(
+    other_answer, expected_value, expected_issue
+):
+    projection = project_order_information({
+        "特殊計費:胎數": "雙胞胎(+150時薪)",
+        "特殊計費：胎數": other_answer,
+    })
+
+    assert projection.values["multi_birth_count"] == expected_value
+    assert projection.issues.get("multi_birth_count") == expected_issue
+
+
+@pytest.mark.parametrize("answer", ["未知", "雙胞胎(+100時薪)", "第二胎"])
+def test_unknown_multi_birth_survey_answers_stay_invalid(answer):
+    projection = project_order_information({"特殊計費:胎數": answer})
+
+    assert projection.values["multi_birth_count"] is None
+    assert projection.issues["multi_birth_count"] == "invalid"
 
 
 def test_manual_beclass_can_be_created_without_an_imported_record():
@@ -236,7 +276,6 @@ def test_care_corrections_preserve_original_types_without_financial_effect():
 
 
 def test_effective_care_correction_clears_source_ambiguity_and_preserves_explicit_null():
-    from domains.case_import.order_information import project_order_information
     projection = project_order_information(None, {"dietary_habits": "已核對", "parking_space_provided": None, "other_babies_present": False})
     assert projection.values["dietary_habits"] == "已核對"
     assert projection.values["parking_space_provided"] is None

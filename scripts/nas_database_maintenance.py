@@ -6,6 +6,7 @@ backfills and preservation checks. Operational databases are never dropped.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import gzip
@@ -39,6 +40,7 @@ if str(ROOT) not in sys.path:
 from dotenv import dotenv_values
 import pymysql
 
+from domains.case_import.order_information import project_order_information
 from scripts import migrate_preserved_database_additive_schema as migration
 from infrastructure.file.controlled_file_storage import DATABASE_BACKUP_DIRECTORY, FileSystemControlledFileStorage
 from subsystems.access.account_receipt_fingerprints import (
@@ -804,6 +806,41 @@ def switch_runtime(settings, candidate, original_env_digest, directory):
          "database": candidate, "restart_required": True})
 
 
+def source_answer_preflight(read, source, plan):
+    if plan["source_objects"].get("1037_twins_payroll_policy.sql") != "exact":
+        return
+    if not {"beclass_records", "orders"} <= plan["source_data"].keys():
+        return
+
+    try:
+        connection = read.connect(source)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT b.bound_case_no AS case_no,b.survey_details "
+                    "FROM beclass_records b JOIN orders o ON o.case_no=b.bound_case_no "
+                    "WHERE b.bound_case_no IS NOT NULL"
+                )
+                rows = cursor.fetchall()
+        finally:
+            connection.close()
+    except pymysql.MySQLError:
+        raise MaintenanceBlocked("無法唯讀核對來源問卷胎數，升級已停止。") from None
+
+    # Multiple bound records remain the canonical backfill's binding check.
+    records_per_case = Counter(row["case_no"] for row in rows)
+    affected = sum(
+        records_per_case[row["case_no"]] == 1
+        and "multi_birth_count" in project_order_information(row["survey_details"]).issues
+        for row in rows
+    )
+    require(
+        not affected,
+        f"來源有 {affected} 筆問卷的胎數無法判定（multi_birth_count_ambiguous）。"
+        "本次升級尚未開始備份或建立副本，原資料庫保留。",
+    )
+
+
 def upgrade(settings):
     print("正在核對資料庫版本，原資料庫不會被清空。", flush=True)
     from scripts import update_local_database as updater
@@ -847,10 +884,6 @@ def upgrade(settings):
     plan = migration.build_plan(config, source, candidate,
                                 source_recovery_root=updater.DEFAULT_RECEIPT_ROOT)
     require(plan["status"] == "ready" and not plan["candidate_exists"], "升級預檢未通過，原資料庫不變。")
-    if plan.get("source_recovery") is not None:
-        print("已核對 1080 中斷紀錄，將在新副本完成升級，原資料庫保留。", flush=True)
-    if plan.get("source_recovery") is not None:
-        print("已核對 1080 中斷紀錄，將在新副本完成升級，原資料庫保留。", flush=True)
     if is_local_nas_test:
         source_objects = plan["source_objects"]
         if migration._candidate_schema_is_exact(source_objects):
@@ -861,6 +894,9 @@ def upgrade(settings):
             if not migration._candidate_schema_is_exact({name: state}):
                 print(f"待升級：{name}", flush=True)
 
+    source_answer_preflight(read, source, plan)
+    if plan.get("source_recovery") is not None:
+        print("已核對 1080 中斷紀錄，將在新副本完成升級，原資料庫保留。", flush=True)
     require(not protect_account_receipts(read, source, apply=False),
             "來源含未保護的帳號收據。請先執行受控收據轉換，再升級副本。")
     root = destination_ready(settings, writable=True)

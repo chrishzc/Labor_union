@@ -241,8 +241,9 @@ def test_twins_view_metadata_state_and_canonical_descriptor(monkeypatch):
     assert state == "exact"
 
 
-def test_backfill_inserts_only_missing_twin_assignment_snapshots(monkeypatch):
-    twin_payload = {"特殊計費:胎數": "雙胞胎"}
+@pytest.mark.parametrize("twin_answer", ["雙胞胎", "雙胞胎(+150時薪)"])
+def test_backfill_inserts_only_missing_twin_assignment_snapshots(monkeypatch, twin_answer):
+    twin_payload = {"特殊計費:胎數": twin_answer}
     monkeypatch.setattr(
         backfill,
         "_load_bound_beclass_rows",
@@ -292,12 +293,13 @@ def test_backfill_inserts_only_missing_twin_assignment_snapshots(monkeypatch):
     ]
 
 
-def test_backfill_fails_closed_for_existing_non_450_snapshot(monkeypatch):
+@pytest.mark.parametrize("twin_answer", ["雙胞胎", "雙胞胎(+150時薪)"])
+def test_backfill_fails_closed_for_existing_non_450_snapshot(monkeypatch, twin_answer):
     monkeypatch.setattr(
         backfill,
         "_load_bound_beclass_rows",
         lambda *_args, **_kwargs: (
-            {"case_no": "TW-1", "survey_details": {"特殊計費:胎數": "雙胞胎"}},
+            {"case_no": "TW-1", "survey_details": {"特殊計費:胎數": twin_answer}},
         ),
     )
     monkeypatch.setattr(
