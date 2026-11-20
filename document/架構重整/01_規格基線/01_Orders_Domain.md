@@ -112,4 +112,6 @@
 
 1. 涵蓋全生命週期狀態轉移、`service_time_terms` 三欄缺漏 fail closed、跨日 offset 拒絕猜測、訂金於開工前後沖正之差異行為、已鎖定案退款不解鎖，以及完工後 `floor_fee_correction` 與 `official-service-dates` 守恆。
    服務中以每日 4 小時、30 天的測試案件驗證預設鎖定、逐次解除、直接改為每日 8 小時、調整總天數與替代班表、確認保存與回讀。核對有效日期、工時、客戶應付、月嫂薪資及既有收付紀錄，並涵蓋未解鎖、無權限、已完工、檔期或版本衝突的拒絕。
+   對照條款：生命週期見 §3.1；時段三欄、跨日偏移、服務中條件與樓層費更正見 §3.4；訂金沖正見 §3.3；完工鎖及正式服務日更正見 §2 與 §3.2。
 2. 驗證 `AutoCompleteOrderService` 與 `leave-substitution` 搶鎖 CAS 衝突零部分寫入、取消與違約金全案結算及 `direction` enum 一致、代班不重開簽約與不影響原月嫂合法薪資。
+   對照條款：完工與代班競爭見 §3.2；取消、違約金及帳務方向見 §3.6；代班的簽約與原月嫂薪資邊界見 [Scheduling §3.4](02_Assignments_Scheduling_Domain.md#leave-substitution) 與其下 §3.4.1。
