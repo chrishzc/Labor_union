@@ -44,7 +44,6 @@
 - 非市民依正式身分／綁定費率規則分類，排除於原受理統計及同 candidate XLSX；獨立 `case_category=non_citizen` 統計以臺灣時間的正式建案日歸屬月／季／年，提供完整年度累計。LIFF 採核准時間，後台手動案採建案快照。未核准待審案與無可追溯建案時間的舊案不計入。
 - Reporting adapter 借用 `infrastructure/mysql/case_category_query.py` 的唯讀分類 SQL；身分根值與費率規則仍屬原 owner。Reports／看板共用 `ui_react/src/components/WorkbenchCaseStatistics.tsx` 與其 CSS（Orders presentation owner）。
 - 服務工時及補助列保留原姓名，另借用同一 Staff join 的 nullable `staff_union_no`，供管理端顯示「公會編號 姓名」；報表金額、工作日、週序及既有 XLSX 欄位不變。
-- React 週報日期欄位完成輸入並 blur／Enter 後才套用查詢，編輯中的局部年份不發出跨千年查詢；沿用既有欄位與重新載入入口，套用新期間立即清除舊報表／匯出可用狀態。
 - `operations-report.v5` 提供取消原因（相容 `v3`、`v4`）、canonical `start_date`／`end_date`與Monday-keyed weekly metrics — `document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §2。
 - `GET /api/v1/operations-reports/case-statistics`、曆年計數與歷史狀態合併 — `document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §4。
 
@@ -60,6 +59,18 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
 - kind: implements_requirement
   source: reporting-case-category-boundary
   target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^noncitizen-statistics-20261029'
+```
+
+### 週報日期的編輯與套用 ^reporting-weekly-date-selection
+
+[需求書 §2.1「套用週報查詢日期」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-report-date-selection) 定義畫面行為。React `OperationsReportsWorkspace.tsx` 將編輯值存在 `dateDraft`，查詢只消費已套用的 `startDate`／`endDate`。Enter 觸發欄位失焦，兩者都由 `changeDateRange` 驗證日期及起迄順序。有效的新期間會清除舊匯出狀態並切為 loading，然後呼叫 `weeklyOperationsReportQueryClient.query`；未套用或無效時停用重新載入與匯出。查詢 effect 會中止舊請求，並用請求序號忽略過期回應。
+
+驗證定位：`ui_react/src/tests/reports_query_page.test.tsx` 的「年份未輸完時不送出跨千年查詢，離開欄位後才查詢」覆蓋起訖兩欄；「日期範圍與 reload 變更會清除 stale export success」另核對舊下載訊息。這兩個測試 mock 查詢與匯出，不驗證 API 實際資料。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-weekly-date-selection
+  target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^weekly-report-date-selection'
 ```
 
 ### 週報取消原因的讀取與輸出 ^reporting-weekly-cancel-reason
