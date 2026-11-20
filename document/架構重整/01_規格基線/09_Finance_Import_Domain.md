@@ -47,6 +47,7 @@
   - **台新（Taishin）與 Legacy**：台新政府入款與政府來源退回依「新竹市政府／市府」等政府來源標記；台新個人補助出款（`P台`／`R台`）與永豐出款四階段配對、`0～100` 元內扣手續費及方案候選辨識，一律遵循 [銀行明細判定與支出核銷契約](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation) 與 [補助方案判定表](22A_案件帳務三方案與補助流向正式規格.md#subsidy-flow)。
 - **新來源入庫與人工配對**：見[銀行流水匯入正式規格 §3.1](22_銀行流水匯入與帳務異常處理正式規格.md#31-成功明細資格bank-01bank-02)。
 - **同案多筆補款防誤判**：同一案件多筆不同銀行列各自實付不同時，保留各筆並合計供核銷，禁止只因命中同一期款或單筆不等於應收而標為 `suspected_duplicate_business_match`；若多筆各自足額指向同一期款，則轉合計超收人工核對。
+  - **同一期款補款例**：一期應收 NT$1,000。經辦匯入兩筆已定位到本案同一期的不同銀行交易，分別實付 NT$400 與 NT$600；核對時保留兩筆，合計 NT$1,000 供核銷，不因同一期或單筆金額不等於應收而標為重複。若兩筆都實付 NT$1,000，則將合計超收轉人工核對。
 - **`FinanceImportAttempt`**：在主 Apply 交易外記錄 command identity、digest、phase、typed error、起迄時間與 outcome（不記完整帳號、姓名或 raw row）；exact retry 直接重播原 attempt／receipt。
 
 ### 3.2 Business Dispatch 與 Historical Reprocess
