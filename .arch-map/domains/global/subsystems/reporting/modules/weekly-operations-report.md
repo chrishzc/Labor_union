@@ -61,6 +61,20 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
   target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^noncitizen-statistics-20261029'
 ```
 
+### 週報人工指標的儲存與輸出 ^reporting-weekly-metrics-null-zero
+
+[需求書 §2.1「每週人工指標：未登錄與實際零」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-metrics-null-zero) 定義畫面和匯出行為。`WeeklyMetricsEditor.tsx` 將空欄轉成 `null`，數字 `0` 則原樣經 `weekly_report_metrics_client.ts` 交給管理員的週指標 PUT 路由。`WeeklyReportMetricsService.save_metric` 在寫入前驗證星期一與非負數，再用 `week_start_date` 更新 `weekly_report_metrics` 的兩個可空欄位；非星期一由路由回傳 400，不寫入。
+
+週報明細用 `week_start_date` 對應當週指標，不從案件列推算。React 的 `OperationsReportsWorkspace.tsx` 對該週只畫一次，經 `displayWeeklyMetric` 將 `null` 顯示為「未登錄／待補正」；XLSX 由 `weekly_operations_report_export.py` 每週各寫一次，`null` 寫為「未登錄」。兩邊的實際零都保留。
+
+驗證定位：`tests/test_weekly_operations_report_contract.py::test_weekly_metrics_list_and_save_are_monday_keyed` 驗證 API 的週起日、`0`、`null` 和拒絕週二；同檔 `test_weekly_metric_storage_preserves_null_zero_and_rejects_non_monday_key` 使用替身連線驗證服務層。這兩例不驗證真實 MySQL 或畫面／XLSX。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-weekly-metrics-null-zero
+  target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^weekly-metrics-null-zero'
+```
+
 ### 週報日期的編輯與套用 ^reporting-weekly-date-selection
 
 [需求書 §2.1「套用週報查詢日期」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-report-date-selection) 定義畫面行為。React `OperationsReportsWorkspace.tsx` 將編輯值存在 `dateDraft`，查詢只消費已套用的 `startDate`／`endDate`。Enter 觸發欄位失焦，兩者都由 `changeDateRange` 驗證日期及起迄順序。有效的新期間會清除舊匯出狀態並切為 loading，然後呼叫 `weeklyOperationsReportQueryClient.query`；未套用或無效時停用重新載入與匯出。查詢 effect 會中止舊請求，並用請求序號忽略過期回應。
