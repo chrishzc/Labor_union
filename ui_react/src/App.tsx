@@ -98,13 +98,13 @@ function getPageFromHash(): PageType {
   const tab = new URLSearchParams(hashQuery).get('tab') ?? '';
   if (hashPath === 'line-interface' && tab === 'message_flow') return 'line-notifications';
   if (hashPath === 'line-management' || hashPath === 'line') {
-    const tabPage = LINE_TAB_PAGES[tab];
+    const tabPage = Object.hasOwn(LINE_TAB_PAGES, tab) ? LINE_TAB_PAGES[tab] : undefined;
     if (tabPage) return tabPage;
   }
-  if (hashPath in HASH_ALIASES) {
+  if (Object.hasOwn(HASH_ALIASES, hashPath)) {
     return HASH_ALIASES[hashPath];
   }
-  if (hashPath in PAGE_SECTION_MAP) {
+  if (Object.hasOwn(PAGE_SECTION_MAP, hashPath)) {
     return hashPath as PageType;
   }
   return DEFAULT_PAGE;

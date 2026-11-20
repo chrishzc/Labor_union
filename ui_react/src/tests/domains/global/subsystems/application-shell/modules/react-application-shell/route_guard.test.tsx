@@ -14,7 +14,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionClient.clearSession();
-    window.location.hash = '';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
     globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
@@ -102,7 +102,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
   afterEach(() => {
     sessionClient.clearSession();
-    window.location.hash = '';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
     globalThis.fetch = originalFetch;
   });
 
@@ -282,6 +282,60 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     await waitFor(() => {
       expect(screen.getByTitle('排班日曆')).toHaveClass('active');
+    });
+  });
+
+  describe('已登入時解析 hash 路由', () => {
+    const unknownPaths = ['hasOwnProperty', 'constructor', 'toString', '__proto__', 'unknown-page'];
+
+    beforeEach(() => {
+      sessionClient.setSession('valid-token', {
+        id: 1,
+        username: 'admin',
+        display_name: '系統管理員',
+        role: 'system_admin',
+        capabilities: ['system.administration'],
+      });
+    });
+
+    it.each(unknownPaths)('首次開啟 #%s 時顯示待辦看板', async (path) => {
+      window.history.replaceState(null, '', `#${path}`);
+      await act(async () => {
+        render(<App />);
+      });
+
+      expect(screen.getByRole('heading', { name: '待辦看板' })).toBeInTheDocument();
+      expect(screen.getByTitle('待辦看板')).toHaveClass('active');
+    });
+
+    it.each(unknownPaths)('從排班頁切換至 #%s 時顯示待辦看板', async (path) => {
+      window.history.replaceState(null, '', '#scheduling');
+      await act(async () => {
+        render(<App />);
+      });
+      expect(screen.getByTitle('排班日曆')).toHaveClass('active');
+
+      await act(async () => {
+        window.history.replaceState(null, '', `#${path}`);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+
+      expect(screen.getByRole('heading', { name: '待辦看板' })).toBeInTheDocument();
+      expect(screen.getByTitle('待辦看板')).toHaveClass('active');
+    });
+
+    it.each([
+      ['#line-management?tab=hasOwnProperty', 'LINE 營運'],
+      ['#line?tab=constructor', 'LINE 營運'],
+      ['#line-management?tab=toString', 'LINE 營運'],
+      ['#line?tab=__proto__', 'LINE 營運'],
+      ['#line?tab=unknown-tab', 'LINE 營運'],
+      ['#line?tab=delivery', '通知與寄送'],
+    ])('%s 選取「%s」', (hash, navTitle) => {
+      window.history.replaceState(null, '', hash);
+      render(<App />);
+
+      expect(screen.getByTitle(navTitle)).toHaveClass('active');
     });
   });
 
