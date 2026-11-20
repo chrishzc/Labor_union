@@ -295,3 +295,47 @@ def test_historical_manual_creation_and_duplicate_check_are_retired(manual_case_
     assert manual_case_client.post(path, json={**payload, "mode": "historical"}).status_code == 422
     assert manual_case_client.post(path, json={**payload, "case_no": "A115001"}).status_code == 422
     assert manual_case_client.post(f"{path}/check", json={}).status_code in (404, 405)
+
+
+def test_manual_case_copies_saved_beclass_details_without_overwriting_new_form(monkeypatch, manual_case_client):
+    from domains.case_import.order_information import project_order_information
+
+    cursor = _FakeCursor(fetchone_results=[{"next_sequence": 1}])
+    conn = _FakeConnection(cursor)
+    workflow = Mock()
+    workflow.preview.return_value.import_version = 0
+    workflow.apply_in_current_uow.return_value.client_id = 101
+    monkeypatch.setattr(non_citizen_registration_application, "CaseImportWorkflow", Mock(return_value=workflow))
+    monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
+    care = {"dietary_habits": "清淡", "maternal_allergy": "花生", "special_care_notes": "已保存照護說明",
+            "vegetarian_preference": False, "alcohol_ratio": 0, "parking_space_provided": True,
+            "other_babies_present": "是", "multi_birth_count": None}
+    response = manual_case_client.post("/api/v1/admin/registration-applications/manual-non-citizen", json={
+        **_REQUIRED_DETAILS, "name": "新案姓名", "phone": "0900000000",
+        "service_start_date": "2026-12-01", "service_days": 10, "service_time": "09:00-17:00 (8小時)",
+        "beclass_details": {**care, "tel": "030000000", "ext": "123", "zip_code": "300", "admin_notes": "來源報名備註"},
+    })
+    assert response.status_code == 200
+    sql, params = next((sql, params) for sql, params in cursor.executed_queries if sql.startswith("INSERT INTO beclass_records"))
+    assert sql.count("%s") == len(params)
+    survey = json.loads(params[-1])
+    values = project_order_information(survey).values
+    assert {key: values[key] for key in care if key != "multi_birth_count"} == {key: value for key, value in care.items() if key != "multi_birth_count"}
+    assert values["multi_birth_count"] == "單胞胎"
+    assert params[0] == "新案姓名"
+    assert params[-5:-1] == ("030000000", "123", "300", "來源報名備註")
+    assert conn.committed
+
+
+def test_manual_case_rejects_unowned_copy_fields_before_writing(monkeypatch, manual_case_client):
+    conn = _FakeConnection(_FakeCursor())
+    monkeypatch.setattr("infrastructure.mysql.mysql_adapter.get_connection", lambda: conn)
+    response = manual_case_client.post("/api/v1/admin/registration-applications/manual-non-citizen", json={
+        **_REQUIRED_DETAILS, "name": "測試客戶", "phone": "0900000000",
+        "service_start_date": "2026-12-01", "service_days": 10, "service_time": "09:00-17:00 (8小時)",
+        "beclass_details": {"line_user_id": "not-a-binding"},
+    })
+    assert response.status_code == 422
+    assert not conn.began
+    assert not conn.committed
+    assert not conn._cursor.executed_queries

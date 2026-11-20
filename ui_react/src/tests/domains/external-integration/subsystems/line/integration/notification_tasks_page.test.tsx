@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationTasksPage } from '../../../../../../pages/NotificationTasksPreviewPage';
 import { notificationTasksClient as client, notificationFailure, type NotificationItem } from '../../../../../../api/line_notifications/notification_tasks_client';
@@ -86,12 +86,14 @@ describe('通知事項實際接線',()=>{
     render(<NotificationTasksPage />);await screen.findByRole('heading',{name:'待辦簽約'});
     fireEvent.click(screen.getByRole('button',{name:'開啟案件工作區'}));expect(window.location.hash).toBe('#order-workbench-v2?case=116000001&work=contracts');
   });
-  it('寄送紀錄讀取原本工作清單，狀態篩選交由 server 分頁',async()=>{
+  it('通知事項不提供寄送紀錄也不查詢歷史工作',async()=>{
     render(<NotificationTasksPage />);await screen.findByRole('heading',{name:'訂金逾期未清'});
-    fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
-    fireEvent.change(screen.getByRole('combobox',{name:'寄送狀態'}),{target:{value:'failed'}});
-    await waitFor(()=>expect(lineDeliveryQueryClient.list).toHaveBeenLastCalledWith({page:1,pageSize:6,status:'failed'},expect.objectContaining({signal:expect.any(AbortSignal)})));
-    expect(within(screen.getByLabelText('通知事項清單')).queryByText('筆範例')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:/寄送紀錄/})).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox',{name:'寄送狀態'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'重新整理'}));
+    await waitFor(()=>expect(client.catalog).toHaveBeenCalledTimes(2));
+    await screen.findByRole('heading',{name:'訂金逾期未清'});
+    expect(lineDeliveryQueryClient.list).not.toHaveBeenCalled();
   });
 });
 
@@ -116,15 +118,12 @@ it('空候選頁仍有後頁時提供載入更多，不宣稱已無待辦',async
  await screen.findByRole('heading',{name:'訂金逾期未清'});
 });
 
-it('目前分類與寄送紀錄不受其他分類讀取失敗影響',async()=>{
+it('目前分類不受其他分類讀取失敗影響',async()=>{
  vi.mocked(client.catalog).mockResolvedValue([{source:'overdue',label:'各期款項逾期',group:'reminder'},{source:'identity',label:'身分綁定審核',group:'review'}]);
  vi.mocked(client.list).mockImplementation(async source=>{if(source==='identity')throw new Error('synthetic unavailable');return {items:[],total:0,next_cursor:null};});
  render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'目前無法完整讀取事項'});
  fireEvent.click(screen.getByRole('button',{name:/款項與群組/}));
  await screen.findByRole('heading',{name:'目前沒有待辦事項'});
- expect(screen.queryByRole('alert')).not.toBeInTheDocument();
- fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
- await screen.findByRole('heading',{name:'沒有符合條件的事項'});
  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
@@ -151,11 +150,11 @@ it('從設定頁返回時重讀待辦及計數，不沿用離頁前清單',async
   window.history.replaceState(null,'','#notifications');
   fireEvent(window,new Event('hashchange'));
   await screen.findByRole('heading',{name:'目前沒有待辦事項'});
-  expect(screen.getByRole('button',{name:/需要處理/})).toHaveTextContent('0');
+  expect(screen.getByLabelText('通知事項清單')).toHaveTextContent('已載入 0 筆，符合 0 筆');
   expect(screen.getByRole('button',{name:/款項與群組/})).toBeVisible();
 });
 
-it('本案綁定誤報填寫原因才可人工消除，刷新移除且不發送LINE',async()=>{
+it('本案綁定提醒可直接移除，不需填原因且不發送LINE',async()=>{
   const reminder=item({id:'customer_binding:7',source:'customer_binding',reference_id:7,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',payment:null,unavailable_reason:null});
   vi.mocked(client.catalog).mockResolvedValue([{source:'customer_binding',label:'綁定提醒',group:'review'}]);
   vi.mocked(client.list).mockResolvedValue({items:[reminder],total:1,next_cursor:null});
@@ -165,10 +164,10 @@ it('本案綁定誤報填寫原因才可人工消除，刷新移除且不發送L
   });
   const send=vi.spyOn(client,'send');render(<NotificationTasksPage/>);
   await screen.findByRole('heading',{name:'人工提醒綁定 LINE'});
-  const button=screen.getByRole('button',{name:'確認消除此提醒'});expect(button).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('消除原因'),{target:{value:'已核對為完工歷史案件'}});
+  const button=screen.getByRole('button',{name:'移除提醒'});expect(button).toBeEnabled();
+  expect(screen.queryByRole('textbox',{name:'消除原因'})).not.toBeInTheDocument();
   fireEvent.click(button);
-  await waitFor(()=>expect(dismiss).toHaveBeenCalledWith(expect.objectContaining({reference_id:7,case_no:'116000001'}),'已核對為完工歷史案件',expect.any(String)));
+  await waitFor(()=>expect(dismiss).toHaveBeenCalledWith(expect.objectContaining({reference_id:7,case_no:'116000001'}),'使用者移除提醒',expect.any(String)));
   await waitFor(()=>expect(screen.queryByRole('heading',{name:'人工提醒綁定 LINE'})).not.toBeInTheDocument());
   expect(send).not.toHaveBeenCalled();
 });

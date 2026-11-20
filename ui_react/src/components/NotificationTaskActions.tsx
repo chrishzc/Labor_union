@@ -27,15 +27,14 @@ export function NotificationTaskActions({item,onCommitted}:{item:NotificationIte
 
 function BindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:()=>Promise<void>}) {
   const [notice,setNotice]=useState('');
-  const [reason,setReason]=useState('');
   const [busy,setBusy]=useState(false);
   const command=useRef<{key:string;reason:string}|null>(null);
   const locked=useRef(false);
   const dismiss=async()=>{
-    if(locked.current || !reason.trim())return;
+    if(locked.current)return;
     locked.current=true;setBusy(true);
-    command.current ??= {key:crypto.randomUUID(),reason:reason.trim()};
-    try {await notificationTasksClient.dismissCustomerBinding(item,command.current.reason,command.current.key);setNotice('本案綁定提醒已消除，處理原因已保留。');await onCommitted();}
+    command.current ??= {key:crypto.randomUUID(),reason:'使用者移除提醒'};
+    try {await notificationTasksClient.dismissCustomerBinding(item,command.current.reason,command.current.key);setNotice('本案綁定提醒已移除。');await onCommitted();}
     catch(error){setNotice(notificationFailure(error));}
     finally{locked.current=false;setBusy(false);}
   };
@@ -46,11 +45,7 @@ function BindingReminder({item,onCommitted}:{item:NotificationItem;onCommitted:(
     <a className="np-button" href={`#line-management?tab=binding&binding_role=${item.source==='customer_binding'?'customer':'staff'}&binding_q=${encodeURIComponent(item.person)}`}>查看綁定狀態</a>
     {item.case_no && <a className="np-button" href={`#clients?case=${encodeURIComponent(item.case_no)}`}>查看本案資料</a>}
     <p>完成綁定{item.source==='customer_binding'?'、案件取消或完工':'、月嫂停用或退役'}後，重新整理即移除。</p>
-    {item.source==='customer_binding' && item.reference_id && item.case_no && <details className="binding-reminder-dismiss"><summary>誤報／不需提醒</summary>
-      <p>僅消除此客戶在本案的綁定提醒，不變更訂單或綁定狀態。其他案件仍會獨立判斷。</p>
-      <label>消除原因<textarea value={reason} maxLength={500} disabled={busy || command.current!==null} onChange={event=>setReason(event.target.value)} placeholder="例如：已確認為服務完成的歷史案件" /></label>
-      <button type="button" className="np-button" disabled={busy || !reason.trim()} onClick={()=>void dismiss()}>{busy?'處理中…':'確認消除此提醒'}</button>
-    </details>}
+    {item.source==='customer_binding' && item.reference_id && item.case_no && <button type="button" className="np-button" disabled={busy} onClick={()=>void dismiss()}>{busy?'處理中…':'移除提醒'}</button>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }

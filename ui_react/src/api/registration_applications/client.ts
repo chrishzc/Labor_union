@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { BeClassChanges, ClientRegistryDetail } from '../client_registry/client_registry_schemas';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
@@ -18,7 +19,10 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
 });
 export type RegistrationApplication = z.infer<typeof view>;
 
+export type BeClassCopyDetails = Pick<BeClassChanges, 'tel' | 'ext' | 'zip_code' | 'admin_notes'> & Partial<NonNullable<ClientRegistryDetail['order_information']['values']>>;
+
 export interface ManualNonCitizenCaseInput {
+  beclass_details?: BeClassCopyDetails;
   mode?: 'new';
   name: string;
   phone: string;

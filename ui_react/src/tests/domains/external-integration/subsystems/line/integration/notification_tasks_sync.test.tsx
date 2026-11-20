@@ -25,20 +25,20 @@ it('正式頁完成後返回通知，重新查詢推薦來源',async()=>{
  expect(vi.mocked(client.list).mock.calls.filter(x=>x[0]==='recommendation')).toHaveLength(2);
  expect(client.list).toHaveBeenCalledTimes(2);
 });
-it('款項分類交給原寄送 API 全部資料分頁篩選，不只篩目前六筆',async()=>{
- render(<NotificationTasksPage/>);fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
- await screen.findByRole('heading',{name:'LINE 寄送工作'});
- vi.mocked(delivery.list).mockResolvedValue({items:[task],total:41,page:1,page_size:6,total_pages:7});
- fireEvent.click(screen.getByRole('button',{name:/款項與日誌/}));
- await waitFor(()=>expect(delivery.list).toHaveBeenLastCalledWith({page:1,pageSize:6,status:undefined,category:'reminder'},expect.anything()));
- expect(await screen.findByText('共 41 筆')).toBeVisible();
- expect(screen.getByRole('heading',{name:'LINE 寄送工作'})).toBeVisible();
+it('切換待辦分類不查詢歷史寄送紀錄',async()=>{
+ render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'目前沒有待辦事項'});
+ fireEvent.click(screen.getByRole('button',{name:/款項與群組/}));
+ expect(screen.queryByRole('button',{name:/寄送紀錄/})).not.toBeInTheDocument();
+ expect(delivery.list).not.toHaveBeenCalled();
 });
-it('寄送紀錄前往正式寄送工作，不在通知頁提供重試操作',async()=>{
- render(<NotificationTasksPage/>);fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
- await screen.findByRole('heading',{name:'LINE 寄送工作'});fireEvent.click(screen.getByRole('button',{name:'查看寄送工作'}));
+it('寄送異常待辦仍前往正式寄送工作',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'delivery',label:'寄送異常',group:'support'}]);
+ vi.mocked(client.list).mockResolvedValue({items:[{...item('delivery'),id:'delivery:1',reference_id:1,title:'LINE 寄送異常',delivery_status:'failed'}],total:1,next_cursor:null});
+ render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'LINE 寄送異常'});
+ fireEvent.click(screen.getByRole('button',{name:'查看寄送工作'}));
  expect(window.location.hash).toBe('#line-management?tab=delivery&task=1');
  expect(screen.queryByRole('button',{name:'重試寄送工作'})).not.toBeInTheDocument();
+ expect(delivery.list).not.toHaveBeenCalled();
 });
 
 it('手機空候選頁不顯示已無事項，跨多個空頁後只計算實際卡片',async()=>{

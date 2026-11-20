@@ -28,7 +28,7 @@
   - `api/routes/registration_applications.py` — 支援非市民申請查詢／核准、手動建案、唯讀預估配號。
   - `ui_react/src/api/registration_applications/client.ts`
   - `ui_react/src/components/RegistrationApplications.tsx` — 非市民申請清單、明細核准、手動新案預估配號。
-    - `sourceCaseNo` 使用既有 Client Registry typed Query 帶入來源案資料至手動新案表單；不複製 LINE binding，送出仍走既有手動建案 API。
+    - `sourceCaseNo` 使用既有 Client Registry typed Query 帶入來源案資料至手動新案表單，並以有界 `beclass_details` 保留目前報名聯絡補充與照護資料；表單姓名、地址、胎數等重新輸入值優先，不複製來源身分、LINE binding，送出仍走既有手動建案 API。
   - `ui_react/src/components/RegistrationApplications.css` — 申請清單、明細、手動建新案表單樣式。
   - `ui_react/src/pages/ClientRegistryPage.tsx`（非市民申請分頁，支援手動建新案與名冊／虛擬帳號匯入）
   - `ui_react/src/pages/ClientRosterPage.tsx` — 案件詳情提供資料帶入入口，透過 `#clients?tab=applications&source_case=...` 導向手動非市民新案。

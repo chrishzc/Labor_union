@@ -22,11 +22,16 @@ const sourceDetail: ClientRegistryDetail = {
   } },
   beclass: { status: 'ready', record_id: 3, source_kind: 'imported', version: 1, field_capabilities: {},
     full_refund_account_visible: true, values: {
-      name: '來源客戶', email: 'source@example.test', phone: '0912345678', tel: null, ext: null,
-      city: '新竹市', zip_code: null, address: '測試地址', admin_notes: null, multi_birth_count: '雙胞胎',
+      name: '來源客戶', email: 'source@example.test', phone: '0912345678', tel: '030000000', ext: '123',
+      city: '新竹市', zip_code: '300', address: '測試地址', admin_notes: '已保存的報名備註', multi_birth_count: '雙胞胎',
       refund_bank_code: '0000001', refund_account_no: '000000000001', birth_date: '1990-01-01',
     } },
-  order_information: { status: 'unbound', values: null, field_issues: {} },
+  order_information: { status: 'ready', values: {
+    dietary_habits: '清淡', vegetarian_preference: false, alcohol_ratio: 0, cooking_oil_type: '橄欖油',
+    maternal_allergy: '花生', special_care_notes: '已保存照護注意事項', meal_preferences: '不吃香菜',
+    cooking_tools: '電鍋', bath_water_prep: '熱水器', breastfeeding_method: '親餵',
+    multi_birth_count: '雙胞胎', stair_floor_fee_mode: '一樓', parking_space_provided: true, other_babies_present: '是',
+  }, field_issues: {} },
   finance: { status: 'not_ready', code: null, values: null },
   order_terms: { status: 'ready', code: null, field_capabilities: {}, data: {
     case_no: '115000001', order_version: 1, scheduling_version: 1, scheduling_generation: 1,
@@ -77,6 +82,7 @@ describe('saved demand application review', () => {
     await screen.findByText(/新案已建立/);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       name: '來源客戶', identity_status: '非市民', service_days: 12,
+      beclass_details: { ...sourceDetail.order_information.values, tel: '030000000', ext: '123', zip_code: '300', admin_notes: '已保存的報名備註' },
       service_time: '08:45-16:45 (8小時)', baby_info: '雙胞胎', line_id: '',
     }));
     expect(create.mock.calls[0][0]).not.toHaveProperty('line_user_id');

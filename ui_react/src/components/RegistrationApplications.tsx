@@ -61,6 +61,10 @@ function formFromSource(detail: ClientRegistryDetail): ManualCaseForm {
   const hours = terms?.service_hours_per_day;
   return {
     ...defaultForm,
+    ...(survey ? { beclass_details: {
+      tel: survey.tel, ext: survey.ext, zip_code: survey.zip_code, admin_notes: survey.admin_notes,
+      ...(detail.order_information.status === 'ready' ? detail.order_information.values : {}),
+    } } : {}),
     name: profile.name ?? '', phone: profile.phone ?? '', gender: profile.gender ?? '',
     email: profile.email ?? survey?.email ?? '', city: profile.city ?? '', address: profile.address ?? '',
     due_month: profile.due_month ?? '', birth_date: survey?.birth_date ?? '',

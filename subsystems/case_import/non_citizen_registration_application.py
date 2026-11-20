@@ -9,7 +9,8 @@ from datetime import date, datetime, timedelta, timezone
 import json
 from typing import Any, Mapping
 
-from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
+from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS, normalize_beclass_changes
+from domains.case_import.order_information import ORDER_INFORMATION_KEYS, order_information_survey
 from domains.case_import.client_import_validation import EMAIL_PATTERN
 from domains.case_import.cooking_requirement import normalize_cooking_requirement
 from domains.case_import.non_citizen_registration import validate_non_citizen_service_time
@@ -135,6 +136,13 @@ def create_manual_non_citizen_case(
     if holiday_double_pay is not None and holiday_double_pay not in ("是", "否"):
         raise ValueError("三節假日雙倍薪水意願須選擇是或否。")
 
+    copied_details = payload.get("beclass_details") or {}
+    allowed_copy_fields = {"tel", "ext", "zip_code", "admin_notes", *ORDER_INFORMATION_KEYS}
+    if not isinstance(copied_details, Mapping) or set(copied_details) - allowed_copy_fields:
+        raise ValueError("BeClass 複製欄位不正確。")
+    copied_details = {key: value for key, value in copied_details.items() if key != "multi_birth_count"}
+    copied_details = normalize_beclass_changes(copied_details) if copied_details else {}
+
     created_at_utc = datetime.now(timezone.utc)
     with CaseImportMySqlUnitOfWork(connection) as uow:
         case_no = allocate_non_citizen_case_number(connection, created_at_utc)
@@ -221,16 +229,20 @@ def create_manual_non_citizen_case(
                 "_source": "manual_non_citizen_creation",
                 "_created_at": created_at.isoformat(),
             }
+            survey.update(order_information_survey(copied_details))
+            # The visible new-case form owns the final birth count.
+            survey["特殊計費:胎數"] = multi_birth_count
             if holiday_double_pay is not None:
                 survey[HOLIDAY_DOUBLE_PAY_SURVEY_FIELD] = holiday_double_pay
             cursor.execute(
                 "INSERT INTO beclass_records (name, email, birth_date, phone, city, address, "
-                "refund_bank_code, refund_account_no, created_at, query_no, bound_case_no, client_id, survey_details) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s, %s, %s)",
+                "refund_bank_code, refund_account_no, created_at, query_no, bound_case_no, client_id, tel, ext, zip_code, admin_notes, survey_details) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     name, record["email"], birth_date, phone, record["city"], record["address"],
                     refund_bank_code, refund_account_no,
                     case_no, case_no, receipt.client_id,
+                    *(copied_details.get(field) for field in ("tel", "ext", "zip_code", "admin_notes")),
                     json.dumps(survey, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
                 ),
             )

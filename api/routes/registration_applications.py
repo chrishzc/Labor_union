@@ -58,6 +58,7 @@ class ApprovalRequest(BaseModel):
 
 class ManualNonCitizenCaseCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    beclass_details: dict[str, str | bool | int | float | None] | None = None
     mode: Literal["new"] = "new"
     name: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=8, max_length=20)

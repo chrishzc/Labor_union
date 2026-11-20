@@ -66,6 +66,11 @@ _ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def order_information_survey(values: Mapping[str, object]) -> dict[str, object]:
+    """Encode validated named care facts for a newly created BeClass record."""
+    return {_ALIASES[key][0]: value for key, value in values.items() if key in _ALIASES}
+
+
 def project_order_information(raw_payload: object, corrections: object = None) -> OrderInformationProjection:
     """Normalize one BeClass payload into the current named owner facts.
 
