@@ -11,7 +11,7 @@
 - primary: `scripts/launchers/supervise_local_runtime.ps1`
 - Windows management entry: `Windows管理.bat`、`scripts/launchers/manage_windows.ps1` — single daily management surface using the existing supervisor and run-bound maintenance channel.
 - Root maintenance: option `11` dispatches `scripts/root_account_maintenance.py` under the Windows manager lock and checks that the managed runtime has stopped. Access owns verification and account changes ([authentication-session](../../../../external-integration/subsystems/access/modules/authentication-session.md)).
-- Explicit NAS maintenance menu: options 6/7/8 delegate backup/upgrade/restore to `scripts.nas_database_maintenance` (Global migration §9.5); backup permits a running runtime, upgrade/restore require this installation stopped. No implicit stop/restart or database operation on normal startup. Packaging remains an advanced `-Action package` consumer and is absent from the daily menu.
+- Explicit NAS maintenance: see [Windows 管理器的資料庫維護入口](#windows-管理器的資料庫維護入口). Normal startup does not stop or restart services for maintenance or invoke database maintenance. Packaging remains an advanced `-Action package` consumer, not a daily menu action.
 - Windows source handoff: `scripts/package_windows_runtime.py` — secret-filtered current program ZIP with source hash manifest (`include_source` owned directly in this module); no configuration or runtime data.
 - private cycle composition: `api/dependencies/private_operations.py` — check-only handshake／heartbeat；正常 durable cycle 先 discover confirmed arrangements 與 due completion，再執行既有 canonical worker，不自行寫 Domain root。
 - A normal NAS/production durable cycle also runs the existing bounded controlled-file finalize runner for new shared-root 01–04 locators, including an explicit UNC root in source mode (APP_ENV=development). Local development/test, missing root configuration and check-only handshakes do not run it; no legacy file scan/migration. Root resolution and directory layout remain Global controlled-files owned.
@@ -32,6 +32,17 @@
 - Windows Cloudflare 連線：`deployment/windows-remote/path-router.mjs` 只轉送 root `/test` segment 至獨立受 Access 保護的 origin，不改 root DNS／既有 Tunnel；上游 `fetch` 維持 `no-store`（edge bypass），僅通過路徑、方法、200 狀態、MIME、無 Cookie／redirect 與內部資格證明之純 JS／CSS 設定瀏覽器私有 `immutable` 並剝除內部標頭，其餘一律 `no-store`。`start_windows_remote.bat --connect` 由原 supervisor 監督 API、static gateway 與 token-file cloudflared；背景工作／推播沿用本機標準啟動規則，不因遠端連線額外停用。`test_windows_remote_router.mjs` 與既有 Python supervisor／gateway tests 共用本 Module test root。
 - Windows 前端獨立換版：`scripts/launchers/start_windows_remote.bat --update-frontend` 先建置／驗證新 artifact，再由 `scripts/launchers/windows_frontend_control.ps1` 經本機 run-bound request 交由同一 supervisor 只重啟 Remote React。新版啟動失敗回復原 artifact，前端失敗不連帶停止 API／Worker／Tunnel；舊 supervisor 可按 PID／native start time 與 role 一次性接手既有程序，不進入 DB gate／完整啟動／`.env`。測試 `test_windows_frontend_update.py` 位於本 Module root；正式邊界見 Deployment §5.4。
 - Windows LINE Webhook 部署：同一 Windows Tunnel 另以 `line.chrishzc.com` 精確 `/webhook/line/?` 路徑連至執行中 API 8000，無人員 Access；canonical handler／LINE 簽章與 inbox owner 不變，管理與私人路徑由 Tunnel catch-all 拒絕。Cloudflare 外部設定與人工 Verify 交接記於 `scripts/launchers/WINDOWS-REMOTE.md`，不讀寫 `.env`、不把此接線擴成公開 LIFF／管理 API。
+
+### Windows 管理器的資料庫維護入口
+
+[行為與驗收的權威條文：NAS 維護規格](../../../../../../document/架構重整/01_規格基線/10A_NAS_Fresh初始化與維護復原規格.md#windows-管理器的安全升級契約)。Local Runtime 擁有管理器的參數、選單分派與受管服務狀態檢查；Migration 擁有維護操作、資料庫選路及結果。
+
+| 啟動介面 | 互動升級 | 指定動作 |
+|---|---|---|
+| 根目錄 `Windows管理.bat` | 不帶參數進入管理器，選 `7`。 | 以 `-Action database-upgrade` 啟動；BAT 將參數轉交 PowerShell。 |
+| 直接啟動 `scripts/launchers/manage_windows.ps1` | 預設 `menu`，選 `7`。 | 直接指定 `-Action database-upgrade`。 |
+
+四種走法匯入 `Invoke-ManagerAction` 的 `database-upgrade`，再到 `Invoke-DatabaseMaintenance 'upgrade'`。Python 環境不存在或同一安裝仍有受管服務時，管理器回報錯誤而不呼叫維護模組；通過才委派 `scripts.nas_database_maintenance upgrade`。其 `backup` 和 `restore` 分別由選項 `6`、`8` 分派，不是升級別名。受管服務運作時仍允許備份，升級與復原則受上述檢查限制。獨立的 NAS 升級批次不經管理器，見 [Migration 架構](../../migration/modules/preserved-database-upgrade.md#windows-nas-維護交接)；不要把管理器前置檢查套用到所有入口。
 
 ## Contracts
 - Windows 統一操作：根目錄 `Windows管理.bat` → `scripts/launchers/manage_windows.ps1` → 既有 supervisor；整組停止重用 frontend-control run-bound channel，新增 starting／ready／stopping／stopped／failed 與 cleanup-confirmed readback，不新增公開維運 API。舊 `start_windows_remote.bat` 只轉接參數；舊開發／NAS／DB 維護入口仍有各自 consumer，不退役。
