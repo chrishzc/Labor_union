@@ -48,6 +48,18 @@
 - `operations-report.v5` 提供取消原因（相容 `v3`、`v4`）、canonical `start_date`／`end_date`與Monday-keyed weekly metrics — `document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §2。
 - `GET /api/v1/operations-reports/case-statistics`、曆年計數與歷史狀態合併 — `document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §4。
 
+### 營運案件分類與帳務合計 ^reporting-case-category-boundary
+
+[需求書 §5「非市民自費案件獨立統計」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029) 定義營運分流。待辦看板的 `WorkbenchCaseStatistics.tsx` 經 `weekly_operations_report_query_client.ts` 呼叫 `GET /api/v1/operations-reports/case-statistics`。`api/routes/operations_reports.py` 將 `case_category` 傳到 `WeeklyOperationsReportQuery.query_case_statistics`：補助區用 `subsidy`（預設），非市民區用 `non_citizen`，Query 依類別選用各自的統計來源。
+
+「全部案件」的跨類合計歸 Client Finance §2.3，不是上述查詢的第三種 `case_category`，也不回灌 Reporting。核對分流時，從下方 Verification 的案件統計契約測試入口追查；營運與帳務合計的正反驗收見需求書 §5。測試定位不代表已執行。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-case-category-boundary
+  target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^noncitizen-statistics-20261029'
+```
+
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
