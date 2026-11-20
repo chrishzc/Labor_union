@@ -4,8 +4,10 @@ from contextlib import AbstractContextManager
 
 import pytest
 
+from domains.case_import.beclass_correction import BeClassCorrectionError
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.case_import.order_information import ORDER_INFORMATION_KEYS
+from domains.case_import.registration_details import REGISTRATION_DETAIL_FIELDS, project_registration_details, mask_beclass_values
 from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import (
@@ -25,6 +27,61 @@ class _Uow(AbstractContextManager):
 
     def commit(self):
         pass
+
+
+def test_registration_details_projection_and_private_outputs():
+    number = chr(65) + "123456789"
+    values = project_registration_details({"身分證字號": number.lower(), "三節假日是否願意支付雙倍薪水": "否"})
+    assert values == {"id_number": number, "holiday_double_pay": "否"}
+    assert mask_beclass_values(values) == {"id_number": "**********", "holiday_double_pay": "否"}
+    assert project_registration_details({"身分證字號": "invalid", "三節假日是否願意支付雙倍薪水": "unknown"}) == {"id_number": None, "holiday_double_pay": None}
+
+
+@pytest.mark.parametrize("holiday_double_pay", ["是", "否", None])
+def test_registration_corrections_share_version_preserve_source_and_do_not_sync_finance(holiday_double_pay):
+    repository = _Repository()
+    number = chr(65) + "123456789"
+    repository.original["id_number"] = number
+    source_answer = "否" if holiday_double_pay == "是" else "是"
+    repository.original["holiday_double_pay"] = source_answer
+    repository.financial_fields_locked = True
+    sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    current = workflow.query("CASE-001")
+    assert current.effective["holiday_double_pay"] == source_answer
+    changes = {"id_number": None, "holiday_double_pay": holiday_double_pay}
+    preview = workflow.preview("CASE-001", changes, ExpectedVersion(0))
+    receipt = workflow.apply("CASE-001", changes, ExpectedVersion(0), preview.preview_fingerprint,
+        IdempotencyKey("registration-details"), ActorContext("tester"), "", CorrelationId("registration-details"))
+    assert receipt.readback.effective["id_number"] is None
+    assert receipt.readback.effective["holiday_double_pay"] == holiday_double_pay
+    assert workflow.query("CASE-001").effective["holiday_double_pay"] == holiday_double_pay
+    assert repository.corrections["holiday_double_pay"] == holiday_double_pay
+    assert repository.version == 1
+    assert repository.original["id_number"] == number
+    assert repository.original["holiday_double_pay"] == source_answer
+    assert sync.calls == [] and sync.snapshot_sync_calls == []
+    assert workflow.apply("CASE-001", changes, ExpectedVersion(0), preview.preview_fingerprint,
+        IdempotencyKey("registration-details"), ActorContext("tester"), "", CorrelationId("registration-details")).replayed
+
+
+@pytest.mark.parametrize(("changes", "code"), [
+    ({"id_number": "invalid"}, "id_number_invalid"),
+    ({"id_number": 123}, "id_number_invalid"),
+    ({"holiday_double_pay": "maybe"}, "holiday_double_pay_invalid"),
+    ({"holiday_double_pay": True}, "holiday_double_pay_invalid"),
+    ({"obsolete_field": "legacy"}, "beclass_field_not_allowed"),
+])
+def test_registration_correction_rejects_invalid_values(changes, code):
+    repository = _Repository()
+    sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, sync)
+    with pytest.raises(BeClassCorrectionError) as error:
+        workflow.preview("CASE-001", changes, ExpectedVersion(0))
+    assert error.value.code == code
+    assert repository.version == 0
+    assert not (repository.corrections or repository.claims or repository.receipts)
+    assert sync.calls == [] and sync.snapshot_sync_calls == []
 
 
 class _Repository:
@@ -261,7 +318,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in ORDER_INFORMATION_KEYS},
+            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in (*ORDER_INFORMATION_KEYS, *REGISTRATION_DETAIL_FIELDS)},
         },
         "corrections": {},
         "source_kind": "admin_manual",
@@ -284,7 +341,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order(
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in ORDER_INFORMATION_KEYS},
+            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in (*ORDER_INFORMATION_KEYS, *REGISTRATION_DETAIL_FIELDS)},
         },
         "corrections": {},
         "source_kind": "admin_manual",

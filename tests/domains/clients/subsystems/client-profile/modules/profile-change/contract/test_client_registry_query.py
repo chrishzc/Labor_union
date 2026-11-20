@@ -406,6 +406,31 @@ def test_registry_refund_account_requires_edit_capability_and_detail_opt_in(monk
     assert (response.headers.get("Cache-Control") == "no-store") is visible
 
 
+@pytest.mark.parametrize("overlay,expected", [({}, "是"), ({"holiday_double_pay": "否"}, "否"), ({"holiday_double_pay": None}, None)])
+def test_registration_identity_is_full_only_on_single_detail_and_overlay_null_does_not_fall_back(monkeypatch, overlay, expected):
+    import json
+    monkeypatch.setattr('infrastructure.mysql.client_registry_query_repository._finance_values',
+        lambda *_: ('not_ready', 'client_finance_bootstrap_required', None))
+    number = chr(65) + '123456789'
+    connection = _SqlConnection([
+        {'client_id': 7, 'case_no': 'CASE-IDENTITY', 'order_status': '洽談中', 'name': '合成客戶'},
+        ({'beclass_record_id': 12, 'record_origin': 'imported', 'survey_details': json.dumps({'身分證字號': number, '三節假日是否願意支付雙倍薪水': '是'})},),
+        {'aggregate_version': 3, 'effective_values_json': json.dumps(overlay)},
+    ])
+    principal = AdminPrincipal(None, 'synthetic', '合成測試', 'operator', capabilities=frozenset({'data_browser.read'}))
+    def unavailable(_):
+        raise ValueError('order_terms_incomplete')
+    response = Response()
+    result = get_client_registry(response=response, case_no='CASE-IDENTITY', principal=principal,
+        include_refund_account=False,
+        application=ClientRegistryQueryApplication(MySqlClientRegistryQueryRepository(connection)),
+        order_terms=SimpleNamespace(query_registry=unavailable)).data
+    assert result.beclass.values.id_number == number
+    assert result.beclass.values.holiday_double_pay == expected
+    assert response.headers['Cache-Control'] == 'no-store'
+    assert 'id_number' not in type(result.client.values).model_fields
+
+
 def test_mysql_registry_uses_order_client_owner_and_bound_beclass_case_identity():
     connection = _SqlConnection([
         {

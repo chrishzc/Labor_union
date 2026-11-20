@@ -31,6 +31,7 @@
   - 具 Orders 管理權限者從已取消案件詳情進入 `ui_react/src/components/OrderControlledReopenPanel.tsx`，沿用原 Preview／Apply 並回讀詳情、變更歷程與清單。
   - 名冊案件詳情提供既有 Orders 取消權限的「取消訂單」入口，組合相同正式取消面板與回讀，永久刪除仍由原 root-only 面板承接。
 - `ui_react/src/components/ClientRegistryDetailEditor.tsx` — 單一客戶清單 Drawer 直接組合主檔、報名、照護、Orders Terms 與唯讀帳務；各區 Preview／Apply、異步結果 guard、草稿保持及 mutation／回讀關閉鎖。報名／照護共用 BeClass version，保存後舊預覽失效。樓層費金額由既有 Orders Terms writer 保存。
+  - 身分證字號在客戶主檔區塊維護，三節假日雙薪意願在 BeClass 區塊維護。兩欄沿 Case Import 問卷、有效修正及 BeClass version 保存。主檔組合保存依 owner 分別回讀，保留部分成功結果與未完成草稿。
   - 姓名、電話、Email、縣市與地址只在客戶主檔提供修改入口；主檔空白才採用唯一 BeClass 有效值，查閱不寫入或製造草稿。按儲存才將採用補值及實際變更交 Client Profile writer，原 BeClass 來源與專屬欄位保留，不雙寫。
   - 胎數只由 BeClass effective `multi_birth_count` 與原 correction writer 顯示／維護，限單胞胎／雙胞胎。舊 `clients.baby_info` 保留 Query 歷史值並標唯讀，Client Profile 與 HCM 主檔補件不提供獨立修改；未獨立顯示舊文字不是漏欄。主檔 Email 等非空欄位仍拒絕清空，不以模擬成功取代正式驗證。
   - 虛擬帳號設定借用 Client Finance 單案帳號 Query／Apply 直接儲存，無原因或預覽；名冊不直接寫對照。帳號草稿／結果未明／回讀失敗納入 Drawer 關閉鎖，正式回讀等候名冊詳情與清單完成。

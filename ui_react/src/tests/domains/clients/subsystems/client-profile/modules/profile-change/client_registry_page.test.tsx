@@ -163,6 +163,71 @@ describe('Client registry owner editing', () => {
     });
   });
 
+  it('saves identity alone from the profile block through BeClass and keeps the registration draft', async () => {
+    const initial = ClientRegistryDetailSchema.parse(detail);
+    let stored = structuredClone(initial);
+    mocks.apply.mockImplementation(async (_case, _owner, submitted, version) => {
+      stored = { ...stored, beclass: { ...stored.beclass, version: version + 1, values: { ...stored.beclass.values!, ...submitted } } };
+      return {};
+    });
+    function Harness() {
+      const [current, setCurrent] = useState(initial);
+      return <ClientRegistryDetailEditor detail={current} onRefresh={async () => { const updated = structuredClone(stored); setCurrent(updated); return updated; }} onStateChange={() => undefined} />;
+    }
+    render(<Harness />);
+    const number = String.fromCharCode(65) + '123456789';
+    const profile = screen.getByRole('region', { name: '客戶主檔' });
+    const registration = screen.getByRole('region', { name: '報名問卷資料（BeClass）' });
+    expect(within(registration).queryByLabelText('身分證字號')).not.toBeInTheDocument();
+    const holiday = within(registration).getByLabelText(/^三節假日雙薪意願/);
+    fireEvent.change(holiday, { target: { value: '是' } });
+    fireEvent.change(within(profile).getByLabelText('身分證字號'), { target: { value: number } });
+    fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
+    await screen.findByText('身分證字號已儲存。');
+    expect(mocks.preview).toHaveBeenCalledExactlyOnceWith('CASE-001', 'beclass', { id_number: number }, 3);
+    expect(within(profile).getByLabelText('身分證字號')).toHaveValue(number);
+    expect(holiday).toHaveValue('是');
+    fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+    await screen.findByText('報名問卷資料（BeClass）已儲存。');
+    expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { holiday_double_pay: '是' }, 4);
+    expect(stored.beclass.values?.holiday_double_pay).toBe('是');
+    for (const [answer, expected, version] of [['否', '否', 5], ['', null, 6]] as const) {
+      fireEvent.change(holiday, { target: { value: answer } });
+      fireEvent.click(within(registration).getByRole('button', { name: '儲存' }));
+      await screen.findByText('報名問卷資料（BeClass）已儲存。');
+      expect(mocks.preview).toHaveBeenLastCalledWith('CASE-001', 'beclass', { holiday_double_pay: expected }, version);
+      expect(stored.beclass.values?.holiday_double_pay).toBe(expected);
+      expect(holiday).toHaveValue(answer);
+    }
+  });
+
+  it('preserves the committed profile and identity draft when the second owner rejects the save', async () => {
+    const initial = ClientRegistryDetailSchema.parse(detail);
+    let stored = structuredClone(initial);
+    mocks.preview.mockImplementation(async (_case, owner, submitted, version) => {
+      if (owner === 'beclass') throw new ApiHttpError(422, 'id_number_invalid', '身分證格式不正確');
+      return { owner: 'client_profile', aggregate_identity: 'CASE-001', current_version: version, before: {}, after: submitted, preview_fingerprint: 'a'.repeat(64) };
+    });
+    mocks.apply.mockImplementation(async (_case, _owner, submitted, version) => {
+      stored = { ...stored, client: { ...stored.client, version: version + 1, values: { ...stored.client.values, ...submitted } } };
+      return {};
+    });
+    function Harness() {
+      const [current, setCurrent] = useState(initial);
+      return <ClientRegistryDetailEditor detail={current} onRefresh={async () => { const updated = structuredClone(stored); setCurrent(updated); return updated; }} onStateChange={() => undefined} />;
+    }
+    render(<Harness />);
+    const profile = screen.getByRole('region', { name: '客戶主檔' });
+    fireEvent.change(within(profile).getByLabelText('姓名'), { target: { value: '已保存姓名' } });
+    fireEvent.change(within(profile).getByLabelText('身分證字號'), { target: { value: 'invalid' } });
+    fireEvent.click(within(profile).getByRole('button', { name: '儲存' }));
+    await screen.findByText(/身分證格式不正確/);
+    expect(mocks.apply).toHaveBeenCalledTimes(1);
+    expect(within(profile).getByLabelText('姓名')).toHaveValue('已保存姓名');
+    expect(within(profile).getByLabelText('身分證字號')).toHaveValue('invalid');
+    expect(screen.getByText('客戶主檔已儲存。')).toBeVisible();
+  });
+
   it('opens the customer roster when an old profile review link is used', () => {
     window.location.hash = '#clients?tab=profile-requests&request=73';
     render(<ClientRegistryPage />);

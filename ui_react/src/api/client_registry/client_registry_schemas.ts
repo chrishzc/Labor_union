@@ -15,6 +15,8 @@ const profileValues = z.strictObject({
   baby_info: nullableText, notes: nullableText,
 });
 const beclassValues = z.strictObject({
+  id_number: nullableText.optional(),
+  holiday_double_pay: z.enum(['是', '否']).nullish(),
   refund_account_status: z.enum(['complete', 'incomplete']).nullable().optional(),
   birth_date: nullableText.optional(), refund_bank_code: nullableText.optional(), refund_account_no: nullableText.optional(),
   name: nullableText, email: nullableText, phone: nullableText, tel: nullableText,

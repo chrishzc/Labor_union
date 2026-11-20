@@ -40,7 +40,7 @@ from api.schemas.client_registry import (
     RegistryMutationReceiptView,
 )
 from api.schemas.order_terms import OrderTermsQueryView
-from domains.case_import.refund_account import mask_refund_values
+from domains.case_import.registration_details import mask_beclass_values
 from domains.case_import.beclass_correction import BECLASS_CORRECTION_FIELDS, BeClassCorrectionError
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from domains.clients.profile import (
@@ -303,7 +303,7 @@ def get_client_registry(
     correlation = uuid4().hex
     try:
         detail = application.query(case_no, include_refund_account=True) if full_account else application.query(case_no)
-        if full_account:
+        if full_account or detail.beclass.values and detail.beclass.values.get("id_number"):
             response.headers["Cache-Control"] = "no-store"
         client_capabilities = _field_capabilities(detail.client.values, "client_profile", True)
         if detail.identity_change_available and has_required_capability(principal, "data_browser.write"):
@@ -372,7 +372,7 @@ def preview_client_profile(
             owner="client_profile",
             aggregate_identity=case_no,
             current_version=preview.current_version,
-            before=mask_refund_values(preview.before),
+            before=mask_beclass_values(preview.before),
             after=dict(preview.requested),
             preview_fingerprint=preview.preview_fingerprint.value,
         ), message="成功產生客戶主檔變更預覽")
@@ -433,8 +433,8 @@ def preview_beclass_correction(
             owner="client_beclass",
             aggregate_identity=case_no,
             current_version=preview.current_version,
-            before=mask_refund_values(preview.before),
-            after=mask_refund_values(preview.after),
+            before=mask_beclass_values(preview.before),
+            after=mask_beclass_values(preview.after),
             preview_fingerprint=preview.preview_fingerprint.value,
         ), message="成功產生 BeClass 修正預覽")
     except Exception as error:
@@ -469,7 +469,7 @@ def apply_beclass_correction(
             preview_fingerprint=receipt.preview_fingerprint.value,
             idempotency_key=receipt.idempotency_key.value,
             replayed=receipt.replayed,
-            readback=mask_refund_values({
+            readback=mask_beclass_values({
                 field: value for field, value in receipt.readback.effective.items()
                 if field in BECLASS_CORRECTION_FIELDS
             }),

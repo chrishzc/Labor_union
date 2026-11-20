@@ -32,6 +32,7 @@
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
 - `domains/case_import/beclass_correction.py`
 - `domains/case_import/order_information.py` — Case Import-owned 原始照護欄位與有效 correction 的 named scalar projection，供名冊及訂單資訊使用。
+- `domains/case_import/registration_details.py` — 身分證字號與三節假日雙薪意願的 bounded 問卷投影、證號格式正規化及非必要輸出去敏。
 - `subsystems/case_import/beclass_correction_workflow.py`
 - `infrastructure/mysql/beclass_correction_repository.py`
 - `infrastructure/mysql/effective_case_service_rate.py`
@@ -39,6 +40,7 @@
 - `POST /api/v1/admin/registries/clients/{case_no}/beclass/{preview|apply}`
 
 ## Correction boundary
+- `registration_details` 投影本案唯一綁定問卷的 `id_number`／`holiday_double_pay`，兩欄沿用 BeClass correction state／version／event／receipt。
 - HCM／Client BeClass 唯一配對後，未知下廚需求由 Orders-owned cooking correction command 在同一 caller UoW 補入；已有帳務或無逐日排班不阻擋此單欄補正，服務資料鎖、fresh version 與已知值異動規則仍由 Orders 擁有。
 - Effective corrections resolve the unique `bound_case_no`; `query_no` remains immutable source provenance and original imported BeClass fields remain unchanged.
 - Workbook Apply stores one source copy per selected case within the workbook row transaction. The unique source key is `(query_no, bound_case_no)` and each case resolves its own correction record.

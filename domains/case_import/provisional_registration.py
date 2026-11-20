@@ -13,12 +13,10 @@ from typing import Any, Literal, Mapping
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from domains.case_import.refund_account import refund_fields_from_survey
+from domains.case_import.registration_details import normalize_id_number
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 
-_FULLWIDTH_ASCII_TRANSLATION = str.maketrans(
-    {chr(codepoint): chr(codepoint - 0xFEE0) for codepoint in range(0xFF01, 0xFF5F)}
-)
 HOLIDAY_DOUBLE_PAY_SURVEY_FIELD = "三節假日是否願意支付雙倍薪水"
 
 
@@ -204,18 +202,12 @@ def _optional_payload(intent: ProvisionalRegistrationIntent) -> dict[str, str | 
 
 
 def _optional_id_number(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = value.strip()
-    if not normalized:
-        return None
-    candidate = normalized.translate(_FULLWIDTH_ASCII_TRANSLATION).upper()
-    if not re.fullmatch(r"[A-Z][0-9]{9}", candidate):
+    try:
+        return normalize_id_number(value)
+    except ValueError:
         raise ProvisionalRegistrationDomainError(
-            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
-            "id_number is invalid",
-        )
-    return candidate
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "id_number is invalid",
+        ) from None
 
 
 def _optional(value: str | None, field_name: str) -> str | None:

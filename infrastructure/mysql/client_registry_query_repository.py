@@ -4,6 +4,7 @@ Description: 提供案件中心客戶名冊查詢、訂單條件與歷史帳務�
 """
 
 from __future__ import annotations
+from domains.case_import.registration_details import REGISTRATION_DETAIL_FIELDS, project_registration_details
 
 import json
 import re
@@ -356,6 +357,9 @@ class MySqlClientRegistryQueryRepository:
                 if field in effective_values and field != "birth_date"
             })
         if beclass_status == "ready":
+            registration = project_registration_details(beclass_rows[0].get("survey_details") if beclass_rows else None)
+            registration.update({field: effective_values[field] for field in REGISTRATION_DETAIL_FIELDS if field in effective_values})
+            beclass_values.update(registration)
             order_information = project_order_information(
                 beclass_rows[0].get("survey_details") if beclass_rows else None
             )

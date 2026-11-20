@@ -7,11 +7,12 @@ from math import isfinite
 
 from domains.case_import.order_information import ORDER_INFORMATION_KEYS, VALID_MULTI_BIRTH_COUNTS
 from domains.case_import.refund_account import REFUND_FIELDS, normalize_refund_field
+from domains.case_import.registration_details import REGISTRATION_DETAIL_FIELDS, normalize_holiday_double_pay, normalize_id_number
 
 
 BECLASS_CORRECTION_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
-    *ORDER_INFORMATION_KEYS, *REFUND_FIELDS,
+    *ORDER_INFORMATION_KEYS, *REFUND_FIELDS, *REGISTRATION_DETAIL_FIELDS,
 )
 _MAXIMUMS = {
     "name": 100,
@@ -42,6 +43,12 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
     for field, raw_value in changes.items():
         if field not in BECLASS_CORRECTION_FIELDS:
             raise BeClassCorrectionError("beclass_field_not_allowed", str(field))
+        if field in REGISTRATION_DETAIL_FIELDS:
+            try:
+                normalized[field] = normalize_id_number(raw_value) if field == "id_number" else normalize_holiday_double_pay(raw_value)
+            except ValueError as error:
+                raise BeClassCorrectionError(str(error), field) from None
+            continue
         if field in REFUND_FIELDS:
             try:
                 normalized[field] = normalize_refund_field(raw_value, bank=field == "refund_bank_code")
