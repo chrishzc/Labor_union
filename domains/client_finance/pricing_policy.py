@@ -7,6 +7,8 @@ from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 
+from domains.client_finance.subsidy_coverage import is_full_subsidy_case, normalize_subsidy_policy_identity
+
 
 class IdentityRule(StrEnum):
     CITIZEN = "citizen"
@@ -68,6 +70,12 @@ class CasePricingTerms:
         covered = min(total, self.subsidy_hours)
         return covered, total - covered
 
+    def is_full_subsidy(self, total_hours: Decimal | None) -> bool | None:
+        if self.identity_name == "補助市民" and self.rule is IdentityRule.CITIZEN:
+            # The same label denotes a general citizen in a bound legacy policy.
+            return False
+        return is_full_subsidy_case(self.identity_name, total_hours, self.subsidy_hours)
+
     def client_charge(self, hours: Decimal, consumed: Decimal = Decimal(0)) -> int:
         remaining = max(Decimal(0), self.subsidy_hours - consumed)
         covered = min(Decimal(str(hours)), remaining)
@@ -113,7 +121,6 @@ class PricingPolicy:
             # Bound historical policies retain the exact meaning of their stored keys.
             identity = {"一般市民": "補助市民", "低收入戶": "社福", "中低收入戶": "社福"}.get(identity, identity)
         else:
-            from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
             identity = normalize_subsidy_policy_identity(identity)
         result = next((item for item in self.identities if item.identity_name == identity), None)
         if result is None:

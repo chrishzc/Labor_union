@@ -195,19 +195,26 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
         return PricingImpact(covered, excess, terms.client_charge(hours) + facts.floor_fee,
             staff_covered, staff_excess, staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment,
             subsidy_claim_amount(hours, terms.subsidy_hours, terms.payroll.covered), terms.subsidy_return(hours))
-    consumed = Decimal(0)
-    client = 0
-    for day in sorted(facts.days, key=lambda item: item.occurred_on):
-        client += terms.client_charge(day.hours, consumed)
-        consumed += day.hours
-    covered, excess = terms.split_hours(consumed)
+    service_hours = tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on))
+    total_hours = sum((hours for hours, _ in service_hours), Decimal(0))
+    covered, excess = terms.split_hours(total_hours)
     staff_covered, staff_excess = price_hours(
-        tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on)),
+        service_hours,
         TieredPayrollRate(terms.payroll.covered, terms.payroll.excess, terms.subsidy_hours, terms.rule.value == "social"),
     )
-    return PricingImpact(covered, excess, client + facts.floor_fee, staff_covered,
-        staff_excess, staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment,
-        subsidy_claim_amount(consumed, terms.subsidy_hours, terms.payroll.covered), terms.subsidy_return(consumed))
+    staff_total = staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment
+    if terms.is_full_subsidy(total_hours):
+        subsidy = calculate_case_total_amount(terms, service_hours, facts.floor_fee)
+        return PricingImpact(covered, excess, 0, staff_covered, staff_excess, staff_total, subsidy, 0)
+
+    consumed = Decimal(0)
+    client = facts.floor_fee
+    for hours, _ in service_hours:
+        client += terms.client_charge(hours, consumed)
+        consumed += hours
+    return PricingImpact(covered, excess, client, staff_covered,
+        staff_excess, staff_total, subsidy_claim_amount(total_hours, terms.subsidy_hours, terms.payroll.covered),
+        terms.subsidy_return(total_hours))
 
 
 def case_total_amount(facts: CasePricingFacts) -> int:

@@ -655,6 +655,11 @@ def test_receipt_conversion_refuses_unverified_target_before_connection(settings
     assert nas.main(["protect-account-receipts"]) == 2
 
 
+def test_receipt_conversion_allows_local_lu_nas_upgrade_in_development(settings):
+    settings.update({"host": "127.0.0.1", "database": "lu_nas_upgrade_20261115133214_e5055f9a", "runtime": {"APP_ENV": "development"}})
+    nas.require_account_receipt_conversion_target(settings)
+
+
 def test_schedule_stale_is_typed_and_does_not_register(settings, tmp_path, monkeypatch):
     monkeypatch.setattr(nas, "SCHEDULE", tmp_path / "schedule.json")
     nas.save(nas.SCHEDULE, {"version": 4, "time": "18:00", "enabled": True})

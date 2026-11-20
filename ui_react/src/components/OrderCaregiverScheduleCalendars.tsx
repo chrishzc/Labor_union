@@ -18,6 +18,7 @@ export interface CaregiverScheduleManagement {
 
 interface Props {
   caseNo?: string;
+  actualStartDate?: string | null;
   blocks: CaregiverScheduleBlock[];
   dates: string[];
   allocation: Record<string, number>;
@@ -25,7 +26,7 @@ interface Props {
   management?: CaregiverScheduleManagement;
 }
 
-export function OrderCaregiverScheduleCalendars({ caseNo, blocks, dates, allocation, onSelect, management }: Props) {
+export function OrderCaregiverScheduleCalendars({ caseNo, actualStartDate, blocks, dates, allocation, onSelect, management }: Props) {
   const staff = useStaffIdentityLabels();
   const headingId = useId();
   const [adding, setAdding] = useState(false);
@@ -66,7 +67,7 @@ export function OrderCaregiverScheduleCalendars({ caseNo, blocks, dates, allocat
           {visibleMonth && firstMonth && lastMonth && <OrderServiceDateCalendar month={visibleMonth}
             onMonthChange={value => setMonths(current => ({ ...current, [block.key]: value }))}
             selectedDates={selected} showHolidays={false} monthRange={caseNo ? undefined : [firstMonth, lastMonth]}
-            staffSchedule={caseNo ? { caseNo, staffId: block.staffId } : undefined}
+            staffSchedule={caseNo ? { caseNo, staffId: block.staffId, actualStartDate } : undefined}
             isDateDisabled={date => !allowedDates.has(date)}
             dayLabel={date => {
               const owner = blocks.find(item => item.key === allocation[date]);

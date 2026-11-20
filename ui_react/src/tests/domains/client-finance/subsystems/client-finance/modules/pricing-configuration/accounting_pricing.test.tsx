@@ -25,7 +25,7 @@ describe('Standalone accounting parameter policy', () => {
     const policy = { effective_on: '2026-10-29', identities: [
       { ...current.terms, identity_name: '補助市民', rule: 'citizen' as const, subsidy_hours: 40, client: { covered: 300, excess: 320 }, payroll: { covered: 300, excess: 310 } },
       { ...current.terms, identity_name: '社福' },
-      { ...current.terms, identity_name: '原住民', rule: 'citizen' as const, subsidy_hours: 80 },
+      { ...current.terms, identity_name: '原民', rule: 'citizen' as const, subsidy_hours: 80 },
     ], twins_client: { covered: 450, excess: 460 }, twins_payroll: { covered: 450, excess: 470 }, indigenous_deposit_service_days: 3 };
     const original = structuredClone(policy);
     const draft = pricingPolicyDraft(policy);
@@ -42,10 +42,11 @@ describe('Standalone accounting parameter policy', () => {
     fireEvent.click(screen.getByRole('button', { name: '版本 7' }));
     expect(screen.getByText('原版本名稱：補助市民')).toBeInTheDocument();
     expect(screen.getByText('原版本名稱：社福')).toBeInTheDocument();
+    expect(screen.getByText('原版本名稱：原民')).toBeInTheDocument();
     expect(screen.getByLabelText('社福 補助上限')).toHaveValue(120);
     expect(screen.getByLabelText('社福 補助上限')).toBeDisabled();
     expect(screen.getByLabelText('社福 訂金天數')).toHaveValue(0);
-    expect(screen.getByLabelText('原住民 訂金天數')).toHaveValue(3);
+    expect(screen.getByLabelText('原民 訂金天數')).toHaveValue(3);
     expect(policy).toEqual(original);
     expect(accountingPricingClient.savePolicy).not.toHaveBeenCalled();
   });
@@ -221,7 +222,7 @@ describe('Client registry case pricing section', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉案件' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: '儲存變更並離開' }));
-    await screen.findByText('資料已變更，或涉及已核銷補助的更正；請重新查詢並核對。');
+    await screen.findByText('計價資料已變更，請重新查詢後再儲存。');
     await waitFor(() => expect(within(dialog).getByRole('button', { name: '捨棄變更並離開' })).toBeEnabled());
     expect(screen.queryByText('已離開案件')).not.toBeInTheDocument();
     expect(screen.getByLabelText('客戶用盡後時薪')).toHaveValue(300);
@@ -237,5 +238,15 @@ describe('Client registry case pricing section', () => {
     fireEvent.change(await screen.findByLabelText('客戶用盡後時薪'), { target: { value: '300' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存本案調整' }));
     await screen.findByText('本案調整將產生退款，但缺少客戶退款銀行帳戶；請先至客戶資料補齊退款帳號後再儲存。');
+  });
+
+  it('explains a typed historical payable rejection and preserves the rate draft', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(current);
+    vi.mocked(accountingPricingClient.applyCase).mockRejectedValue(new ApiHttpError(409, 'historical_pricing_original_payable_required', '資料已變更，請重新查詢後再儲存。'));
+    render(<UnsavedChangesProvider><NavigationHarness /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('月嫂用盡後時薪'), { target: { value: '420' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案調整' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('本案缺少原始月嫂應付，請先核對歷史薪資資料。');
+    expect(screen.getByLabelText('月嫂用盡後時薪')).toHaveValue(420);
   });
 });

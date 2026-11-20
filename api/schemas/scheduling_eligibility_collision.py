@@ -43,6 +43,9 @@ class SchedulingCollisionView(BaseModel):
     owner: str = Field(min_length=1, max_length=191)
     source_identity: str = Field(min_length=1, max_length=191)
     detail: str = Field(min_length=1, max_length=500)
+    actual_start_date: date | None = None
+    service_start_at: datetime | None = None
+    service_end_at: datetime | None = None
 
 
 class SchedulingCoverageView(BaseModel):

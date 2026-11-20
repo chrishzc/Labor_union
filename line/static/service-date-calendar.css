@@ -10,3 +10,85 @@
   line-height: 1.2;
   text-align: center;
 }
+
+.service-date-calendar-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.service-date-calendar-scroll .calendar-days-grid {
+  min-width: 56rem;
+  align-items: start;
+}
+.service-date-scroll-hint,
+.service-date-mobile-hint { color: var(--md-sys-color-on-surface-variant, #65564b); font-size: .8rem; margin: 0 0 6px; }
+.service-date-mobile-hint,
+.service-date-occupancy-count { display: none; }
+.service-date-occupied-day { min-width: 0; display: flex; flex-direction: column; }
+.service-date-occupied-day > .calendar-date-cell { width: 100%; }
+
+.order-case-page .service-date-occupied-day > .service-date-occupancy-toggle,
+.service-date-occupied-day > .service-date-occupancy-toggle {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #632d3b;
+  font-size: .75rem;
+  text-align: left;
+}
+
+.order-case-page .service-date-occupied-day > .service-date-occupancy-toggle:hover,
+.service-date-occupied-day > .service-date-occupancy-toggle[aria-expanded="true"] {
+  background: #f7ebee;
+  color: #632d3b;
+  border-color: #813c4f;
+}
+
+.service-date-occupancy-toggle:focus-visible { outline: 2px solid #813c4f; outline-offset: -2px; }
+.service-date-occupancy-toggle .service-date-occupancy { min-width: 0; display: grid; gap: 2px; padding: 4px; border-radius: 4px; background: #f7ebee; }
+.service-date-occupancy-toggle .service-date-occupancy strong { white-space: nowrap; }
+.service-date-occupancy-toggle .service-date-occupancy small { font-size: .75rem; }
+.service-date-occupancy-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid #ddc4cc; border-radius: 8px; background: #fbf6f7; }
+.service-date-occupancy-detail h4 { margin: 0 0 6px; color: #632d3b; }
+.service-date-occupancy-detail ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.service-date-occupancy-detail li { display: flex; flex-wrap: wrap; gap: 4px 10px; overflow-wrap: anywhere; }
+
+@media (min-width: 1000px) {
+  .service-date-scroll-hint { display: none; }
+}
+
+@media (max-width: 720px) {
+  .service-date-calendar-scroll { overflow-x: visible; }
+  .service-date-calendar-scroll .calendar-days-grid {
+    min-width: 0;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .service-date-scroll-hint,
+  .service-date-desktop-hint,
+  .service-date-occupancy-toggle .service-date-occupancy,
+  .service-date-occupancy-overflow { display: none; }
+
+  .service-date-mobile-hint { display: block; }
+  .order-case-page .service-date-occupied-day > .service-date-occupancy-toggle,
+  .service-date-occupied-day > .service-date-occupancy-toggle {
+    place-items: center;
+    align-content: center;
+    min-height: 36px;
+    padding: 1px;
+  }
+  .service-date-occupancy-count {
+    display: block;
+    padding: 2px 3px;
+    border-radius: 4px;
+    background: #f7ebee;
+    color: #632d3b;
+    white-space: nowrap;
+  }
+}

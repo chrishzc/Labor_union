@@ -1,11 +1,12 @@
 import type { MatchingAvailability } from '../api/scheduling/matching_candidate_workflow_client';
+import { calendarServicePeriod } from '../../../line/static/service-date-calendar.js';
 
 const reasonLabels: Record<string, string> = {
-  active_lock: '其他案件等待訂金保留（黃色鎖）',
+  active_lock: '其他案件等待訂金保留，僅提醒',
   assignment: '已有正式排班',
   schedule: '已有服務排程',
   staff_unavailability: '月嫂不可服務',
-  historical_reservation: '其他案件歷史預定',
+  historical_reservation: '其他案件歷史／暫定檔期，僅供參考',
   requires_review: '既有排程待核對',
   coverage_gap: '此段服務尚缺可用人選',
   outside_case_period: '超出本案服務期間',
@@ -23,22 +24,25 @@ export function CandidateAvailabilityNotice({ availability, staffId, showAdvisor
   if (!option && conflicts.length === 0) return <p className="order-case-review-note" role="status">
     此月嫂目前未列入可詢問人選，請先核對狀態。
   </p>;
-  const hasWaitingDepositLock = conflicts.some(conflict => conflict.reason_code === 'active_lock');
-  const hasConflict = conflicts.some(conflict => !['active_lock', 'buffer'].includes(conflict.reason_code))
-    || (!hasWaitingDepositLock && option?.full_case_coverage === false);
+  const hasConflict = conflicts.some(conflict => !['active_lock', 'buffer', 'historical_reservation'].includes(conflict.reason_code))
+    || option?.full_case_coverage === false;
   const datesByReason = new Map<string, Set<string>>();
-  for (const { reason_code, work_date } of conflicts) {
+  for (const { reason_code, work_date, case_no, service_start_at, service_end_at } of conflicts) {
     const dates = datesByReason.get(reason_code) ?? new Set<string>();
-    dates.add(work_date);
+    const period = calendarServicePeriod(service_start_at, service_end_at);
+    const dateWithUnknownTime = case_no || reason_code === 'active_lock' ? `${work_date}（服務時段待確認）` : work_date;
+    const servicePeriod = period?.full ?? dateWithUnknownTime;
+    dates.add(case_no ? `案件 ${case_no}，${servicePeriod}` : servicePeriod);
     datesByReason.set(reason_code, dates);
   }
 
   return <>
     {hasConflict && <p className="order-case-review-note" role="status">有檔期衝突，待公會協調</p>}
-    {showAdvisories && hasWaitingDepositLock && <p className="order-case-review-note" role="status">其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。</p>}
+    {showAdvisories && datesByReason.has('active_lock') && <p className="order-case-review-note" role="status">{reasonLabels.active_lock}。</p>}
     {showAdvisories && datesByReason.has('buffer') && <p role="status">{reasonLabels.buffer}</p>}
+    {datesByReason.has('historical_reservation') && <p role="status">{reasonLabels.historical_reservation}</p>}
     {datesByReason.size > 0 && <details>
-      <summary>查看衝突日期與原因</summary>
+      <summary>{hasConflict ? '查看衝突日期與原因' : '查看檔期日期與原因'}</summary>
       <ul>{Array.from(datesByReason, ([reason, dates]) => (
         <li key={reason}>{reasonLabels[reason] ?? '檔期待核對'}：{Array.from(dates).sort().join('、')}</li>
       ))}</ul>

@@ -3,7 +3,7 @@
  * Description: 客戶名冊右側抽屜個案計價調整面板，支援人工設定時薪、補助上限與明確錯誤提示。
  */
 import { useEffect, useRef, useState } from 'react';
-import { accountingPricingClient, PricingTermsSchema, pricingTermsError, pricingIdentityLabel, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
+import { accountingPricingClient, PricingTermsSchema, pricingRequestError, pricingTermsError, pricingIdentityLabel, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges } from './UnsavedChanges';
 import '../pages/AccountingParametersPage.css';
@@ -44,8 +44,12 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
       setCurrent(value);
       setDraft(structuredClone(value.terms));
       setStatus('ready'); setMessage('');
-    } catch {
-      if (alive.current && sequence === request.current) { setStatus('error'); setMessage('本案計價資料暫時無法讀取；請先確認服務條件及帳務資料。'); }
+    } catch (error) {
+      if (alive.current && sequence === request.current) {
+        setStatus('error');
+        const fallback = '本案計價資料暫時無法讀取。請先確認服務條件及帳務資料。';
+        setMessage(error instanceof ApiHttpError ? pricingRequestError(error, fallback) : fallback);
+      }
     }
   };
   useEffect(() => { if (!busyRef.current) void load(); }, [caseNo, revision]);
@@ -76,13 +80,7 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
       if (!alive.current) return;
       if (!applied && error instanceof ApiHttpError && error.status < 500) {
         pending.current = null; setStatus('error');
-        setMessage(
-          error.code === 'client_refund_recipient_snapshot_missing'
-            ? '本案調整將產生退款，但缺少客戶退款銀行帳戶；請先至客戶資料補齊退款帳號後再儲存。'
-            : error.status === 409
-            ? '資料已變更，或涉及已核銷補助的更正；請重新查詢並核對。'
-            : '本案調整未完成，請確認資料及權限。'
-        );
+        setMessage(pricingRequestError(error, '本案調整未完成，請確認資料及權限。'));
       } else { setStatus('unknown'); setMessage('儲存或回讀結果待確認；請重試原操作，系統會沿用同一識別防止重複調整。'); }
     } finally { inFlight.current = false; }
   }

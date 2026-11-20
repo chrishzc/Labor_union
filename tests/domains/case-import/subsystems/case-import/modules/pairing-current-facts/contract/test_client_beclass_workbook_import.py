@@ -372,6 +372,33 @@ def test_apply_creates_valid_row_and_records_invalid_review(monkeypatch):
     assert repository.locks == []
 
 
+@pytest.mark.parametrize("care_fields, expected_note, invalid_birth", [
+    ({}, None, False),
+    ({"特殊照護時應注意事項": "Synthetic care note"}, "Synthetic care note", False),
+    ({"特殊照護時應注意事項": "Synthetic care note", "特殊計費:胎數": "invalid"}, "Synthetic care note", True),
+])
+def test_optional_care_fields_do_not_block_source_or_other_registry_values(monkeypatch, care_fields, expected_note, invalid_birth):
+    from api.schemas.client_registry import ClientRegistryOrderInformationView
+    from domains.case_import.order_information import project_order_information
+
+    repository = _Repository()
+    service = _service(repository)
+    row = {**_valid_row(), **care_fields}
+    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(row))
+    preview = service.preview("ignored.xlsx")
+    receipt = service.apply("ignored.xlsx", "partial-care", preview.preview_fingerprint, "admin", "partial-care")
+
+    assert receipt.created_count == 1
+    assert receipt.review_required_count == 0
+    source = json.loads(repository.created[0]["survey_details"])
+    assert all(source[key] == value for key, value in care_fields.items())
+    projection = project_order_information(source)
+    view = ClientRegistryOrderInformationView(status="ready", values=projection.values, field_issues=projection.issues)
+    assert view.values.special_care_notes == expected_note
+    assert view.values.dietary_habits is None
+    assert (view.field_issues.get("multi_birth_count") == "invalid") is invalid_birth
+
+
 def test_apply_rejects_preview_fingerprint_drift(monkeypatch):
     repository = _Repository()
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))

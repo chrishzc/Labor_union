@@ -102,6 +102,25 @@ def test_full_subsidy_rule_uses_effective_limit_and_includes_the_fee_without_cus
             assert candidate.subsidy_return_plan is None
 
 
+def test_legacy_bound_citizen_terms_preserve_customer_collection():
+    from decimal import Decimal
+    from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
+
+    rates = HourlyRates(300, 300)
+    policy = PricingPolicy(date(2026, 10, 29), (
+        CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(40), rates, rates),
+        CasePricingTerms("社福", IdentityRule.SOCIAL, Decimal(120), rates, rates),
+        CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(0), rates, rates),
+    ), rates, rates)
+    original = facts(paid=False)
+    source = replace(original, identity_status="補助市民", pricing=policy.for_case("補助市民"),
+                     floor_fee=MoneyNTD(1000), charge_days=original.charge_days[:5], existing_obligations=())
+
+    candidate = build_client_finance_terms_candidate(source, "legacy-citizen-terms")
+    assert [stage.amount.amount for stage in candidate.stage_plans] == [13000, 0, 0]
+    assert source.pricing.identity_name == "補助市民"
+
+
 def test_eligibility_alone_does_not_create_a_customer_refund():
     source=replace(facts(), identity_status='一般市民', existing_obligations=())
     assert build_client_finance_terms_candidate(source,'no-confirmed-payee').subsidy_return_plan is None

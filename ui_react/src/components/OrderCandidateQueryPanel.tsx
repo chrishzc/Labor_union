@@ -393,21 +393,22 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                     {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '儲存中…' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}
                   </button>
                 </div> : (
-                  <label key={candidate.staff_id}>
-                    <input
-                      type="checkbox"
-                      aria-label={`選擇正式候選 ${candidate.staff_name}`}
-                      checked={selectedStaffIds.has(candidate.staff_id)}
-                      onChange={() => toggleCandidate(candidate.staff_id)}
-                      disabled={busy}
-                    />
-                    <span>
-                      <span className="candidate-name-and-preferences"><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><CandidateServicePreferences candidate={candidate} /></span>
-                      空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
-                      {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
-                      {queryState.data.conflicts.some((conflict) => conflict.staff_id === candidate.staff_id && conflict.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
-                    </span>
-                  </label>
+                  <article key={candidate.staff_id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`選擇正式候選 ${candidate.staff_name}`}
+                        checked={selectedStaffIds.has(candidate.staff_id)}
+                        onChange={() => toggleCandidate(candidate.staff_id)}
+                        disabled={busy}
+                      />
+                      <span>
+                        <span className="candidate-name-and-preferences"><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><CandidateServicePreferences candidate={candidate} /></span>
+                        空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
+                      </span>
+                    </label>
+                    <CandidateAvailabilityNotice availability={queryState.data} staffId={candidate.staff_id} />
+                  </article>
                 ))}
               </div>
               {presentation === 'legacy' && <button

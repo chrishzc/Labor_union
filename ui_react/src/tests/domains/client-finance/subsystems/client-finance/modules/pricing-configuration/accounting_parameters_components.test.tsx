@@ -1,6 +1,6 @@
 /**
  * File: accounting_parameters_components.test.tsx
- * Description: 驗證帳務參數卡、內嵌列與右側調整抽屜（含原住民 80h／350 元預設）行為。
+ * Description: 驗證帳務參數卡、內嵌列與右側調整抽屜的正式計價來源及儲存行為。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -384,21 +384,44 @@ describe('AccountingParametersDrawer component', () => {
     expect(onCommitted).toHaveBeenCalledTimes(1);
   });
 
-  it('switches indigenous identity preset to 80h cap and 350 covered rate', async () => {
-    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(structuredClone(mockPricing));
-    render(
-      <AccountingParametersDrawer
-        caseNo="115000088"
-        isOpen={true}
-        onClose={vi.fn()}
-        onCommitted={vi.fn()}
-        initialPricing={mockPricing}
-      />
-    );
-    const select = await screen.findByLabelText(/補助身分等級/);
-    fireEvent.change(select, { target: { value: 'indigenous' } });
-    expect(screen.getByLabelText(/補助時數上限/)).toHaveValue(80);
-    expect(screen.getByLabelText('補助範圍內客戶時薪')).toHaveValue(350);
-    expect(screen.getByText(/原住民市民（預設上限 80h · 350 元）/)).toBeInTheDocument();
+  it.each([
+    ['一般市民', '一般市民', 'citizen', 40, 360],
+    ['低收入戶', '補助市民', 'social', 120, 320],
+    ['原住民市民', '原住民', 'citizen', 80, 350],
+    ['非市民', '非市民', 'non_citizen', 0, 0],
+  ] as const)('displays saved %s rules and saves excess rates without changing identity', async (name, label, rule, hours, covered) => {
+    const terms: CasePricing['terms'] = { identity_name: name, rule, subsidy_hours: hours,
+      client: { covered, excess: 310 }, payroll: { covered, excess: 390 } };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({ ...mockPricing, terms });
+    vi.mocked(accountingPricingClient.applyCase).mockResolvedValue({ revision: 2 });
+    const onClose = vi.fn();
+    render(<AccountingParametersDrawer caseNo={mockPricing.case_no} isOpen onClose={onClose} onCommitted={vi.fn()} />);
+
+    const identity = await screen.findByLabelText('補助身分');
+    expect(identity).toHaveValue(label);
+    expect(identity).toHaveAttribute('readonly');
+    if (name !== label) expect(screen.getByText(`原版本名稱：${name}`)).toBeVisible();
+    const cap = screen.getByLabelText(/補助時數上限/);
+    const clientCovered = screen.getByLabelText('補助範圍內客戶時薪');
+    const payrollCovered = screen.getByLabelText('補助範圍內月嫂時薪');
+    expect(cap).toHaveValue(hours);
+    expect(clientCovered).toHaveValue(covered);
+    expect(payrollCovered).toHaveValue(covered);
+    for (const input of [cap, clientCovered, payrollCovered]) {
+      if (rule === 'non_citizen') expect(input).toBeDisabled();
+      else expect(input).toBeEnabled();
+    }
+    const clientExcess = screen.getByLabelText('補助用盡後客戶時薪');
+    expect(clientExcess).toHaveValue(310);
+    fireEvent.change(screen.getByLabelText('補助用盡後月嫂時薪'), { target: { value: '420' } });
+    expect(clientExcess).toHaveValue(310);
+    expect(screen.queryByText(/160 小時|即時試算|基準應付總額/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案帳務參數並重算' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(accountingPricingClient.applyCase).toHaveBeenCalledExactlyOnceWith(mockPricing.case_no,
+      { ...terms, payroll: { covered, excess: 420 } }, mockPricing.revision, '', expect.any(String));
+    expect(accountingPricingClient.previewCase).not.toHaveBeenCalled();
+    expect(clientRegistryClient.preview).not.toHaveBeenCalled();
   });
 });

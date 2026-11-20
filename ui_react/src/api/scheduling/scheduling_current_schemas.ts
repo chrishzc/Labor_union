@@ -15,6 +15,7 @@ export const SchedulingAssignmentStatusSchema = z.enum([
 
 export const SchedulingOccupancyKindSchema = z.enum([
   'official_workday',
+  'historical_reservation',
   'assignment_rest',
   'assignment_buffer',
   'waiting_deposit_service',
@@ -50,6 +51,9 @@ export const SchedulingCurrentDayEntrySchema = z
     availability_block_id: z.number().int().positive().nullable(),
     unavailability_kind: z.string().min(1).nullable(),
     unavailability_reason: z.string().max(500).nullable(),
+    actual_start_date: SchedulingIsoDateSchema.nullish(),
+    service_start_at: SchedulingIsoDateTimeSchema.nullish(),
+    service_end_at: SchedulingIsoDateTimeSchema.nullish(),
   })
   .strict()
   .superRefine((entry, context) => {

@@ -186,6 +186,9 @@ def _collision_payload(collision: CollisionResult) -> dict:
         "owner": collision.owner,
         "source_identity": collision.source_identity,
         "detail": collision.detail,
+        "actual_start_date": collision.actual_start_date,
+        "service_start_at": collision.service_start_at,
+        "service_end_at": collision.service_end_at,
     }
 
 

@@ -73,7 +73,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
         cursor.execute(
-            "SELECT o.case_no, o.status, o.start_date, o.end_date,"
+            "SELECT o.case_no, o.status, o.start_date, o.end_date,o.actual_start_date,"
             "o.service_days,o.service_hours_per_day,o.requires_cooking,o.custom_rest_dates,c.city,c.address,c.service_type,"
             "o.service_start_time,o.service_end_time,o.service_end_day_offset,"
             "COALESCE(g.aggregate_version, 0) AS scheduling_version "
@@ -117,9 +117,10 @@ class MySqlSegmentedAvailabilityFactsRepository:
             "staff_unavailability_rows": self._load_staff_unavailability_rows(
                 cursor, shift_start, shift_end
             ),
-            "historical_reservation_rows": load_historical_reservation_rows(
-                cursor, window_start=shift_start, window_end=shift_end,
-            ),
+            "historical_reservation_rows": [
+                {**row, "service_time": read_service_time_terms(row)}
+                for row in load_historical_reservation_rows(cursor, window_start=shift_start, window_end=shift_end)
+            ],
         }
 
     def _load_confirmed_service_dates(self, cursor: Any, case_no: str) -> list[dict[str, Any]]:
@@ -143,7 +144,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_assignments(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT a.id, a.case_no, a.staff_id, a.assigned_start_date, a.assigned_end_date FROM case_staff_assignments a "
+            "SELECT a.id, a.case_no, a.staff_id, a.assigned_start_date, a.assigned_end_date,o.actual_start_date,o.case_no AS owner_case_no FROM case_staff_assignments a LEFT JOIN orders o ON o.case_no=a.case_no "
             "WHERE (a.status IS NULL OR a.status NOT IN ('cancelled','replaced','completed')) "
             "AND a.generation_id IS NULL "
             "AND a.assigned_start_date <= %s AND a.assigned_end_date >= %s "
@@ -157,7 +158,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_assignment_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT s.assignment_id,s.case_no,s.staff_id,s.work_date,"
+            "SELECT s.assignment_id,a.case_no,s.staff_id,s.work_date,o.actual_start_date,"
             "o.service_start_time,o.service_end_time,o.service_end_day_offset FROM staff_schedule s "
             "INNER JOIN case_staff_assignments a ON a.id = s.assignment_id "
             "JOIN orders o ON o.case_no=a.case_no "
@@ -186,7 +187,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_active_lock_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT d.staff_id,d.lock_date,d.active_marker,p.case_no,"
+            "SELECT d.staff_id,d.lock_date,d.active_marker,p.case_no,o.actual_start_date,"
             "o.service_start_time,o.service_end_time,o.service_end_day_offset FROM caregiver_availability_lock_days d "
             "INNER JOIN caregiver_availability_locks h ON h.id = d.lock_id "
             "JOIN caregiver_matching_plans p ON p.id=h.plan_id JOIN orders o ON o.case_no=p.case_no "

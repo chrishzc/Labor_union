@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from domains.orders.terms import ServiceTimeTerms
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
 
@@ -130,6 +130,8 @@ class StaffOccupancyFact:
     all_day: bool = False
     block_end: date | None = None
     possible_end: date | None = None
+    actual_start_date: date | None = None
+    reservation_only: bool = False
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff id")
@@ -434,7 +436,7 @@ def _validate_external_occupancy(
 def first_shift_conflict(case_no, service_time, assignments, occupancy):
     by_staff: dict[int, list[StaffOccupancyFact]] = {}
     for fact in occupancy:
-        if fact.source_case_no != case_no:
+        if fact.source_case_no != case_no and not fact.reservation_only:
             by_staff.setdefault(fact.staff_id, []).append(fact)
     for assignment in assignments:
         for day in assignment.service_dates:
@@ -446,6 +448,12 @@ def first_shift_conflict(case_no, service_time, assignments, occupancy):
 
 def service_shift_may_overlap(service_date, service_time, occupied: StaffOccupancyFact) -> bool:
     """Keep ambiguous occupancy closed; compare known windows as half-open."""
+    if occupied.block_end is not None and not occupied.all_day and occupied.service_time:
+        return any(
+            service_shift_may_overlap(service_date, service_time, replace(occupied, occupancy_date=day, block_end=None))
+            for offset in (-1, 0, 1)
+            if occupied.occupancy_date <= (day := service_date + timedelta(days=offset)) <= occupied.block_end
+        )
     delta = (occupied.occupancy_date - service_date).days
     wanted = service_time.service_interval(service_date) if service_time else None
     if occupied.possible_end is not None:

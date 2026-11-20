@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FC } from 'react';
-import { buildCalendarMonth, calendarOccupancyByDate, calendarWeekdays, shiftCalendarMonth } from '../../../line/static/service-date-calendar.js';
+import { useEffect, useId, useMemo, useState, type FC } from 'react';
+import { buildCalendarMonth, calendarOccupancyDetailsByDate, calendarWeekdays, shiftCalendarDate, shiftCalendarMonth, type CalendarOccupancyDetail } from '../../../line/static/service-date-calendar.js';
 import '../../../line/static/service-date-calendar.css';
 import { holidayClient } from '../api/scheduling/holiday_client';
 import { schedulingCurrentClient, type SchedulingCurrentQuery } from '../api/scheduling/scheduling_current_client';
@@ -16,11 +16,11 @@ interface Props {
   monthRange?: readonly [string, string];
   dayLabel?: (date: string) => string;
   dayDetails?: (date: string) => { holidayName?: string | null; rest?: boolean; laterSegment?: boolean };
-  staffSchedule?: { staffId: number; caseNo: string };
+  staffSchedule?: { staffId: number; caseNo: string; actualStartDate?: string | null };
 }
 
-type StaffScheduleRequest = SchedulingCurrentQuery & { caseNo: string };
-type StaffScheduleResult = { request: StaffScheduleRequest; days: Map<string, string[]> | null };
+type StaffScheduleRequest = SchedulingCurrentQuery & { caseNo: string; actualStartDate?: string | null; firstDate: string };
+type StaffScheduleResult = { request: StaffScheduleRequest; days: Map<string, CalendarOccupancyDetail[]> | null };
 
 // The same case calendar is used before service and for audited corrections after completion.
 export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, selectedDates, isDateDisabled, onToggle, hint, showHolidaySelectionHint, showHolidays = true, monthRange, dayLabel, dayDetails, staffSchedule }) => {
@@ -30,22 +30,29 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
   const [holidayError, setHolidayError] = useState<string | null>(null);
   const [holidayReload, setHolidayReload] = useState(0);
   const [scheduleResult, setScheduleResult] = useState<StaffScheduleResult | null>(null);
+  const [activeDetail, setActiveDetail] = useState<{ request: StaffScheduleRequest; date: string } | null>(null);
+  const detailId = useId();
   const staffId = staffSchedule?.staffId;
   const caseNo = staffSchedule?.caseNo;
+  const actualStartDate = staffSchedule?.actualStartDate;
   const scheduleRequest = useMemo<StaffScheduleRequest | null>(() => staffId && caseNo ? {
-    caseNo, staffId, rangeStart: firstDate, rangeEnd: lastDate,
-  } : null, [caseNo, firstDate, lastDate, staffId]);
+    caseNo, staffId, actualStartDate, firstDate, rangeStart: shiftCalendarDate(firstDate, -1), rangeEnd: lastDate,
+  } : null, [actualStartDate, caseNo, firstDate, lastDate, staffId]);
   const visibleSchedule = scheduleRequest === scheduleResult?.request ? scheduleResult : null;
+  const detailDate = activeDetail && activeDetail.request === scheduleRequest ? activeDetail.date : null;
+  const detailItems = detailDate ? visibleSchedule?.days?.get(detailDate) : undefined;
+  const hasOccupancy = Boolean(visibleSchedule?.days?.size);
 
   useEffect(() => {
     if (!scheduleRequest) return;
-    const { caseNo, ...query } = scheduleRequest;
+    const { caseNo, actualStartDate, firstDate, ...query } = scheduleRequest;
     const controller = new AbortController();
     void schedulingCurrentClient.queryCurrentCalendar(query, { signal: controller.signal }).then(projection => {
       if (controller.signal.aborted) return;
-      const days = calendarOccupancyByDate(projection.days.flatMap(day => day.entries.map(entry => ({
+      const days = calendarOccupancyDetailsByDate(projection.days.flatMap(day => day.entries.map(entry => ({
         date: day.calendar_date, caseNo: entry.case_no, kind: entry.occupancy_kind,
-      }))), caseNo);
+        actualStartDate: entry.actual_start_date, serviceStartAt: entry.service_start_at, serviceEndAt: entry.service_end_at,
+      }))), { caseNo, actualStartDate, firstDate, lastDate: query.rangeEnd });
       setScheduleResult({ request: scheduleRequest, days });
     }).catch(() => {
       if (!controller.signal.aborted) setScheduleResult({ request: scheduleRequest, days: null });
@@ -82,6 +89,9 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
       {showHolidays && holidayError && <div role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></div>}
       {scheduleRequest && !visibleSchedule && <small role="status">正在讀取月嫂檔期…</small>}
       {visibleSchedule?.days === null && <small role="alert">無法讀取月嫂檔期。</small>}
+      {hasOccupancy && <p className="service-date-scroll-hint">可橫向捲動月曆查看各日檔期。</p>}
+      {hasOccupancy && <p className="service-date-mobile-hint">點選檔期筆數查看案號與時段</p>}
+      <div className={hasOccupancy ? 'service-date-calendar-scroll' : undefined}>
       <div className="calendar-days-grid" role="group" aria-label="服務日期月曆" data-surface-id="orders.date.service-date-selection">
         {calendarWeekdays.map(weekday => <span key={weekday} className="service-date-weekday" aria-hidden="true">{weekday}</span>)}
         {Array.from({ length: leadingDays }, (_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
@@ -90,21 +100,45 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
           const details = dayDetails?.(date);
           const holidayName = showHolidays ? holidayNames[date] : undefined;
           const occupancy = visibleSchedule?.days?.get(date);
-          const occupancyText = occupancy ? `，${occupancy.join('、')}` : '';
+          const occupancyText = occupancy ? `，${[...new Set(occupancy.map(item => item.label))].join('、')}` : '';
           const label = dayLabel?.(date);
-          return <button key={date} data-control-id="orders.date.service-date-select" type="button" aria-label={`${label ?? `服務日期 ${date}`}${occupancyText}`} aria-pressed={selected}
+          const dateButton = <button key={date} data-control-id="orders.date.service-date-select" type="button" aria-label={`${label ?? `服務日期 ${date}`}${occupancyText}`} aria-pressed={selected}
             title={`${label ?? `${date}${holidayName ? ` ${holidayName}` : details?.rest ? ' 建議休假' : ''}${selected ? '（已選服務日）' : ''}`}${occupancyText}`}
             className={`calendar-date-cell${selected ? ' selected' : ''}${selected && details?.laterSegment ? ' later-segment' : ''}`}
             disabled={isDateDisabled(date)} onClick={() => onToggle(date)}>
             <time dateTime={date} title={date}>{Number(date.slice(8))}</time>
             {holidayName && <small className="service-date-holiday" aria-label={holidayName} title={holidayName}>{holidayName}</small>}
             {!holidayName && details?.rest && !selected && <small>休</small>}
-            {occupancy?.map(label => <small key={label} className="service-date-occupancy">{label}</small>)}
           </button>;
+          if (!occupancy || !scheduleRequest) return dateButton;
+          return <div className="service-date-occupied-day" key={date}>
+            {dateButton}
+            <button type="button" className="service-date-occupancy-toggle" aria-label={`查看 ${date} 檔期明細`}
+              aria-expanded={detailDate === date} aria-controls={detailId}
+              onClick={() => setActiveDetail(detailDate === date ? null : { request: scheduleRequest, date })}>
+              <span className="service-date-occupancy-count">{occupancy.length}筆</span>
+              {occupancy.slice(0, 2).map(item => <span className="service-date-occupancy" key={`${item.label}-${item.caseNo}-${item.period?.full}`}>
+                <strong>{item.caseNo ?? item.label}</strong>
+                {item.caseNo && <small>{item.label}{item.continues && '・跨日續班'}</small>}
+                {item.period && <small>{item.period.summary}</small>}
+              </span>)}
+              {occupancy.length > 2 && <small className="service-date-occupancy-overflow">另有 {occupancy.length - 2} 筆</small>}
+            </button>
+          </div>;
         })}
       </div>
-      {visibleSchedule?.days && visibleSchedule.days.size > 0 &&
-        <p className="service-date-calendar-hint">檔期標示供排班參考，是否衝突依服務時段判定。</p>}
+      </div>
+      {hasOccupancy && <div id={detailId} className="service-date-occupancy-detail" hidden={!detailItems}>
+        {detailItems && <>
+          <h4>{detailDate} 檔期明細</h4>
+          <ul>{detailItems.map(item => <li key={`${item.label}-${item.caseNo}-${item.period?.full}`}>
+            <strong>{item.caseNo ? `案件 ${item.caseNo}` : item.label}</strong>
+            {item.caseNo && <span>{item.label}{item.continues && '・跨日續班'}</span>}
+            {item.period ? <span>{item.period.full}</span> : item.caseNo && <span>服務時段待確認</span>}
+          </li>)}</ul>
+        </>}
+      </div>}
+      {hasOccupancy && <p className="service-date-calendar-hint"><span className="service-date-desktop-hint">點選案件檔期可查看時段。</span>歷史／暫定檔期僅供參考，正式衝突由系統比對服務時段。</p>}
       {hint && <p className="service-date-calendar-hint">{hint}</p>}
       {showHolidaySelectionHint && Object.keys(holidayNames).some(date => !isDateDisabled(date)) &&
         <p className="service-date-calendar-hint">選取國定假日即確認當日服務。</p>}

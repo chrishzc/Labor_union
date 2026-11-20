@@ -22,7 +22,7 @@ export const SchedulingCollisionKindSchema = z.enum([
   'legacy_schedule',
   'data_integrity',
 ]);
-export const SchedulingCollisionSeveritySchema = z.enum(['hard_block', 'requires_review']);
+export const SchedulingCollisionSeveritySchema = z.enum(['hard_block', 'requires_review', 'advisory']);
 
 export const SchedulingQualificationCheckSchema = z.strictObject({
   code: z.string().min(1).max(100),
@@ -43,6 +43,9 @@ export const SchedulingCollisionSchema = z.strictObject({
   collision_date: SchedulingEligibilityDateSchema.nullable(),
   start_date: SchedulingEligibilityDateSchema.nullable(),
   end_date: SchedulingEligibilityDateSchema.nullable(),
+  actual_start_date: SchedulingEligibilityDateSchema.nullish(),
+  service_start_at: SchedulingEligibilityDateTimeSchema.nullish(),
+  service_end_at: SchedulingEligibilityDateTimeSchema.nullish(),
   owner: z.string().min(1).max(191),
   source_identity: z.string().min(1).max(191),
   detail: z.string().min(1).max(500),

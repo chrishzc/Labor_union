@@ -948,7 +948,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           {!multiCaregiverEditing && <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
-            staffSchedule={calendarStaffId ? { staffId: calendarStaffId, caseNo } : undefined}
+            staffSchedule={calendarStaffId ? { staffId: calendarStaffId, caseNo, actualStartDate: actualStart?.current_actual_start_date } : undefined}
             isDateDisabled={date => effectiveServiceDates !== null || !!scheduleRecovery || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
             onToggle={date => {
               const selected = displayedDates.includes(date);
@@ -972,6 +972,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           {schedulePending && multiCaregiverEditing ? <fieldset disabled={working !== null || !!scheduleRecovery || isRecoveryActive}>
             <OrderCaregiverScheduleCalendars key={caseNo}
               caseNo={caseNo}
+              actualStartDate={actualStart?.current_actual_start_date}
               blocks={selectedOfficeStaff.map(person => ({ key: person.staff_id, staffId: person.staff_id, name: person.staff_name }))}
               dates={selectedDates}
               allocation={selectedOfficeStaff.length === 1

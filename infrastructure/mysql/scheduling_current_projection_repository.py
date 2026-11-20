@@ -6,6 +6,7 @@ Description: 從 MySQL 載入 current Scheduling assignment、全案首個服務
 from __future__ import annotations
 
 from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+from infrastructure.mysql.scheduling_occupancy_facts import historical_reservation_occupancy, load_historical_reservation_rows
 
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
@@ -39,12 +40,16 @@ class MySqlSchedulingCurrentProjectionRepository:
             occupancy = _stored_occupancy(cursor, assignments)
             waiting_locks = _waiting_locks(cursor, query)
             unavailability_blocks = _unavailability_blocks(cursor, query)
+            reservations = tuple(historical_reservation_occupancy(row) for row in load_historical_reservation_rows(
+                cursor, staff_ids=(query.staff_id,), window_start=query.range_start - timedelta(days=1), window_end=query.range_end,
+            ))
         return SchedulingCurrentFacts(
             query.staff_id,
             assignments,
             occupancy,
             waiting_locks,
             unavailability_blocks,
+            reservations,
         )
 
 
@@ -255,6 +260,7 @@ def _assignment_fact(row, case_first_service_date, official_dates, buffer_dates)
         buffer_dates,
         float(row["service_hours_per_day"]),
         service_time,
+        row.get("actual_start_date"),
     )
 
 
@@ -284,6 +290,7 @@ def _waiting_lock_fact(row, locked_dates):
         assigned_end_date,
         tuple(item for item in locked_dates if item <= assigned_end_date),
         read_service_time_terms(row),
+        row.get("actual_start_date"),
     )
 
 
@@ -327,7 +334,7 @@ _ASSIGNMENT_SELECT_SQL = (
     "a.assigned_start_date,a.assigned_end_date,"
     "sa.aggregate_version AS scheduling_version,"
     "o.service_hours_per_day,o.service_start_time,o.service_end_time,"
-    "o.service_end_day_offset "
+    "o.service_end_day_offset,o.actual_start_date "
     "FROM case_staff_assignments a "
     "JOIN scheduling_generations g ON g.id=a.generation_id "
     "AND g.status='effective' AND g.effective_marker=1 "
@@ -369,7 +376,7 @@ _OCCUPANCY_SELECT_SQL = (
 _WAITING_SEGMENT_SELECT_SQL = (
     "SELECT l.id AS lock_id,s.id AS segment_id,p.case_no,s.staff_id,"
     "s.assigned_start_date,s.assigned_end_date,"
-    "o.service_start_time,o.service_end_time,o.service_end_day_offset "
+    "o.service_start_time,o.service_end_time,o.service_end_day_offset,o.actual_start_date "
     "FROM caregiver_availability_locks l "
     "JOIN caregiver_matching_plans p ON p.id=l.plan_id "
     "JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "

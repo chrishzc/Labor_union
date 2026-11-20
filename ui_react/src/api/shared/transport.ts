@@ -33,7 +33,7 @@ const GlobalFieldErrorSchema = z.strictObject({
   message: z.string(),
 });
 
-const GlobalTypedErrorSchema = z.strictObject({
+export const GlobalTypedErrorSchema = z.strictObject({
   category: z.enum([
     'validation',
     'forbidden',

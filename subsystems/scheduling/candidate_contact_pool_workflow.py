@@ -859,7 +859,10 @@ def preview_weekly_service(case_no: str, candidate_id: int, service_dates: tuple
         for conflict in availability["conflicts"]:
             if conflict["staff_id"] != projection["staff_id"]:
                 continue
-            message = "七天緩衝期重疊，僅提醒" if conflict["reason_code"] == "buffer" else "服務檔期衝突，請協調日期；正式排班禁止重疊寫入"
+            message = {
+                "buffer": "七天緩衝期重疊，僅提醒",
+                "historical_reservation": "歷史或暫定檔期重疊，僅提醒，可繼續排班",
+            }.get(conflict["reason_code"], "服務檔期衝突，請協調日期；正式排班禁止重疊寫入")
             warning = f'{conflict["work_date"]}：{message}。'
             if warning not in warnings:
                 warnings.append(warning)

@@ -29,23 +29,62 @@ beforeEach(() => {
   mocks.command.mockImplementation((caseNo, candidates) => ({ caseNo, candidates, actor: 'operator-1', eventKey: `add-${candidates[0].staff_id}` }));
 });
 
-async function search(onPoolReadback = vi.fn()) {
-  render(<OrderCandidateQueryPanel caseNo="CASE-ADD" presentation="workbench" includeMultiCaregiver={false} onPoolReadback={onPoolReadback} />);
+async function search(onPoolReadback = vi.fn(), presentation: 'workbench' | 'legacy' = 'workbench') {
+  render(<OrderCandidateQueryPanel caseNo="CASE-ADD" presentation={presentation} includeMultiCaregiver={false} onPoolReadback={onPoolReadback} />);
   await screen.findByText('未設定 月嫂甲');
   return onPoolReadback;
 }
 
-it('identifies the reserved dates before joining a candidate and keeps coordination available', async () => {
+it.each(['workbench', 'legacy'] as const)('shows a waiting-deposit reminder and keeps all candidate days available in %s', async presentation => {
   mocks.query.mockResolvedValue(pool([]));
   mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
     candidate_options: [option(11, '月嫂甲')], conflicts: [
-      { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock' },
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock', case_no: 'CASE-DEPOSIT',
+        service_start_at: '2026-09-01T20:00:00+08:00', service_end_at: '2026-09-02T04:00:00+08:00' },
+    ] });
+  await search(vi.fn(), presentation);
+  expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
+  expect(screen.getByText(/空閒 5\/5 天/)).toBeVisible();
+  expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('查看檔期日期與原因'));
+  expect(screen.getByText(/案件 CASE-DEPOSIT，2026-09-01 20:00 至 2026-09-02 04:00/)).toBeVisible();
+  if (presentation === 'workbench') {
+    expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
+  } else {
+    const selection = screen.getByRole('checkbox', { name: '選擇正式候選 月嫂甲' });
+    expect(selection).not.toBeChecked();
+    fireEvent.click(selection);
+    expect(screen.getByRole('button', { name: '加入候選池（1）' })).toBeEnabled();
+  }
+});
+
+it('keeps a confirmed scheduling conflict visible alongside the waiting-deposit reminder', async () => {
+  mocks.query.mockResolvedValue(pool([]));
+  mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
+    candidate_options: [{ ...option(11, '月嫂甲'), supported_day_count: 4, full_case_coverage: false }], conflicts: [
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'active_lock', case_no: 'CASE-DEPOSIT' },
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-02', reason_code: 'schedule', case_no: 'CASE-SCHEDULE' },
     ] });
   await search();
-  expect(screen.getByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).toBeVisible();
-  expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
+  expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
+  expect(screen.getByText('有檔期衝突，待公會協調')).toBeVisible();
   fireEvent.click(screen.getByText('查看衝突日期與原因'));
-  expect(screen.getByText('其他案件等待訂金保留（黃色鎖）：2026-09-01')).toBeInTheDocument();
+  expect(screen.getByText(/案件 CASE-DEPOSIT，2026-09-01（服務時段待確認）/)).toBeVisible();
+  expect(screen.getByText(/^已有服務排程：案件 CASE-SCHEDULE/)).toBeVisible();
+});
+
+it('shows a historical reservation and its case without blocking candidate selection', async () => {
+  mocks.query.mockResolvedValue(pool([]));
+  mocks.search.mockResolvedValueOnce({ case_no: 'CASE-ADD', planned_start_date: '2026-09-01', planned_end_date: '2026-09-05',
+    candidate_options: [option(11, '月嫂甲')], conflicts: [
+      { staff_id: 11, segment_index: 0, work_date: '2026-09-01', reason_code: 'historical_reservation',
+        case_no: 'CASE-HISTORY', actual_start_date: null, service_start_at: null, service_end_at: null },
+    ] });
+  await search();
+  expect(screen.getByText('其他案件歷史／暫定檔期，僅供參考')).toBeVisible();
+  expect(screen.queryByText('有檔期衝突，待公會協調')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('查看檔期日期與原因'));
+  expect(screen.getByText(/案件 CASE-HISTORY，2026-09-01（服務時段待確認）/)).toBeVisible();
   expect(screen.getByRole('button', { name: '加入候選池（月嫂甲）' })).toBeEnabled();
 });
 

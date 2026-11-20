@@ -39,6 +39,7 @@ class SchedulingOccupancyKind(StrEnum):
     WAITING_DEPOSIT_SERVICE = "waiting_deposit_service"
     WAITING_DEPOSIT_BUFFER = "waiting_deposit_buffer"
     STAFF_UNAVAILABILITY = "staff_unavailability"
+    HISTORICAL_RESERVATION = "historical_reservation"
 
 
 class SchedulingCurrentErrorCode(StrEnum):
@@ -72,6 +73,7 @@ class EffectiveAssignmentCurrentFact:
     active_buffer_dates: tuple[date, ...]
     service_hours_per_day: float | int
     service_time_terms: ServiceTimeTerms
+    actual_start_date: date | None = None
 
     def __post_init__(self) -> None:
         _validate_assignment_identities(self)
@@ -106,6 +108,7 @@ class WaitingDepositLockCurrentFact:
     assigned_end_date: date
     locked_service_dates: tuple[date, ...]
     service_time_terms: ServiceTimeTerms | None = None
+    actual_start_date: date | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.lock_id, "waiting lock id")
@@ -126,6 +129,7 @@ class SchedulingCurrentFacts:
     stored_occupancy: tuple[StoredEffectiveOccupancyFact, ...]
     waiting_locks: tuple[WaitingDepositLockCurrentFact, ...]
     unavailability_blocks: tuple["StaffUnavailabilityCurrentFact", ...] = ()
+    historical_reservations: tuple[StaffOccupancyFact, ...] = ()
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff id")
@@ -150,6 +154,7 @@ class SchedulingCurrentFacts:
             "staff unavailability blocks",
         )
         _validate_staff_ownership(self)
+        _validate_fact_tuple(self.historical_reservations, StaffOccupancyFact, "historical reservations")
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +184,9 @@ class SchedulingDayEntry:
     availability_block_id: int | None = None
     unavailability_kind: str | None = None
     unavailability_reason: str | None = None
+    actual_start_date: date | None = None
+    service_start_at: datetime | None = None
+    service_end_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.occupancy_kind is not SchedulingOccupancyKind.STAFF_UNAVAILABILITY:
@@ -382,6 +390,20 @@ def _build_entries(facts, status_by_assignment, query_dates, evaluated_at):
         )
     for waiting_lock in facts.waiting_locks:
         _append_waiting_lock_entries(entries, occupied_dates, waiting_lock)
+    for reservation in facts.historical_reservations:
+        if any(assignment.case_no == reservation.source_case_no for assignment in facts.assignments):
+            continue
+        first = max(reservation.occupancy_date, query_dates[0] - timedelta(days=1))
+        last = min(reservation.block_end, query_dates[-1])
+        for day in _inclusive_dates(first, last) if first <= last else ():
+            interval = reservation.service_time.service_interval(day) if reservation.service_time else None
+            entry = SchedulingDayEntry(SchedulingOccupancyKind.HISTORICAL_RESERVATION,
+                reservation.source_case_no, actual_start_date=reservation.actual_start_date,
+                service_start_at=interval[0] if interval else None, service_end_at=interval[1] if interval else None)
+            if reservation.actual_start_date is None:
+                entries.setdefault(day, []).append(entry)
+            else:
+                _claim_entry(entries, occupied_dates, day, entry, reservation.service_time, reservation.staff_id)
     for block in facts.unavailability_blocks:
         _append_staff_unavailability_entries(
             entries, occupied_dates, block, query_dates[0], query_dates[-1]
@@ -472,6 +494,9 @@ def _append_assignment_interval_entry(
         assignment.case_no,
         assignment_id=assignment.assignment_id,
         assignment_status=assignment_status,
+        actual_start_date=assignment.actual_start_date,
+        service_start_at=assignment.service_time_terms.service_interval(occupied_date)[0],
+        service_end_at=assignment.service_time_terms.service_interval(occupied_date)[1],
     )
     _claim_entry(entries, occupied_dates, occupied_date, entry, assignment.service_time_terms, assignment.staff_id)
 
@@ -499,6 +524,9 @@ def _append_waiting_lock_entries(entries, occupied_dates, waiting_lock):
             waiting_lock.case_no,
             lock_id=waiting_lock.lock_id,
             segment_id=waiting_lock.segment_id,
+            actual_start_date=waiting_lock.actual_start_date,
+            service_start_at=waiting_lock.service_time_terms.service_interval(lock_date)[0] if waiting_lock.service_time_terms else None,
+            service_end_at=waiting_lock.service_time_terms.service_interval(lock_date)[1] if waiting_lock.service_time_terms else None,
         )
         _claim_entry(entries, occupied_dates, lock_date, entry, waiting_lock.service_time_terms, waiting_lock.staff_id)
     for buffer_date in _expected_buffer_dates(
@@ -534,6 +562,7 @@ def _claim_entry(entries, occupied_dates, occupied_date, entry, service_time=Non
     if entry.occupancy_kind in {
         SchedulingOccupancyKind.ASSIGNMENT_BUFFER,
         SchedulingOccupancyKind.WAITING_DEPOSIT_BUFFER,
+        SchedulingOccupancyKind.WAITING_DEPOSIT_SERVICE,
         SchedulingOccupancyKind.ASSIGNMENT_REST,
     }:
         entries.setdefault(occupied_date, []).append(entry)
@@ -541,6 +570,12 @@ def _claim_entry(entries, occupied_dates, occupied_date, entry, service_time=Non
     fact = _entry_occupancy_fact(occupied_date, entry, service_time, staff_id)
     for offset in (-1, 0, 1):
         for existing, prior in occupied_dates.get(occupied_date + timedelta(days=offset), ()):
+            if existing.case_no == entry.case_no and entry.case_no is not None:
+                continue
+            if (existing.occupancy_kind in {SchedulingOccupancyKind.OFFICIAL_WORKDAY, SchedulingOccupancyKind.HISTORICAL_RESERVATION}
+                    and entry.occupancy_kind in {SchedulingOccupancyKind.OFFICIAL_WORKDAY, SchedulingOccupancyKind.HISTORICAL_RESERVATION}
+                    and not (existing.actual_start_date and entry.actual_start_date)):
+                continue
             if fact.all_day and prior.all_day:
                 overlaps = offset == 0
             elif fact.all_day:
@@ -558,7 +593,8 @@ def _claim_entry(entries, occupied_dates, occupied_date, entry, service_time=Non
 
 
 def _entry_occupancy_fact(day, entry, service_time, staff_id):
-    all_day = entry.occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
+    all_day = (entry.occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
+               or entry.occupancy_kind is SchedulingOccupancyKind.HISTORICAL_RESERVATION and service_time is None)
     return StaffOccupancyFact(staff_id, day, entry.case_no or "staff", service_time, all_day, day if all_day else None)
 
 
@@ -667,6 +703,9 @@ def _day_payload(item):
                 "availability_block_id": entry.availability_block_id,
                 "unavailability_kind": entry.unavailability_kind,
                 "unavailability_reason": entry.unavailability_reason,
+                "actual_start_date": entry.actual_start_date.isoformat() if entry.actual_start_date else None,
+                "service_start_at": entry.service_start_at.isoformat() if entry.service_start_at else None,
+                "service_end_at": entry.service_end_at.isoformat() if entry.service_end_at else None,
             }
             for entry in item.entries
         ),
@@ -779,6 +818,7 @@ def _validate_staff_ownership(facts):
             *facts.stored_occupancy,
             *facts.waiting_locks,
             *facts.unavailability_blocks,
+            *facts.historical_reservations,
         )
     }
     if staff_ids and staff_ids != {facts.staff_id}:

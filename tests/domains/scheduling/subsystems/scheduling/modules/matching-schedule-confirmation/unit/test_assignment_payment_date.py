@@ -83,7 +83,7 @@ def test_formal_assignment_preserves_only_current_unpaid_override(
                                     True, date(2026, 12, 30), True, False, False,
                                     deposit_gate_override_active=True)
     facts = AssignmentPlanWorkflowFacts(
-        SimpleNamespace(current_waiting_lock_ids=(1,), effective_assignments=(), order_version=7),
+        SimpleNamespace(current_waiting_lock_ids=(1,), effective_assignments=(), order_version=7, office_schedule=False),
         replace(inputs.order_terms, service_time=ServiceTimeTerms(time(9), time(17), 0)),
         source, inputs.payroll, roots,
     )

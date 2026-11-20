@@ -12,6 +12,7 @@
 ### 2.1 SSOT 與入口分流（`IMPORT-ENTRY-02`）
 
 - Case Import 擁有 BeClass／HCM 原始 row identity、檔案摘要、正規化候選、驗證結果、accepted source→internal mapping 與 bootstrap receipt（不直接持有正式客戶、訂單、排班或帳務根事實；建案一律透過單一 outer UoW 委派各 owner）。
+- **BeClass 照護欄位局部處理**。選填照護答案缺少或空白時只讓該欄留空，不阻擋其他有效資料寫入或名冊讀取；單一照護答案無效時保留該欄問題，其他有效照護欄位仍可顯示。原始題名與非空答案保留於來源，未辨識題名不得以空值覆寫其他有效欄位。必要基本欄位、來源歧義及版本檢查仍沿原驗證。
 - **入口規則**：
   - **HCM**：僅限經認證後台 Web Upload（`WHOLE_WORKBOOK + archive_required`）；archive 成功若 DB 交易回滾必執行補償刪除。以非空合法 `查詢序號(案件編號)` 為唯一建案鍵：新案建立建置 policy 綁定與訂單；已存在案號同內容 exact replay、異內容 `skipped_existing` 零覆寫（唯允許對空白 `clients.email` 執行 email-only 補填）；不同案號但 `IP + 姓名` 命中既有客戶時照常建案並發非阻擋 link review 警示。
   - **Client BeClass／Staff**：現行來源透過 LIFF → owning Domain API；`Client／Staff Historical Adoption` 採 `ROW_ATOMIC_RESUMABLE + archive_required`（支援斷點續跑；同身分證＋姓名＋嚴格較新報名時間始更新歷史 Staff 純量，空值不覆蓋、`IP位址` 允許 `NULL`）。

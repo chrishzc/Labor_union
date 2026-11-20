@@ -36,6 +36,26 @@ def test_historical_volume_preserves_original_installments_and_manual_amounts():
     assert facts.days==() and facts.historical_service_hours==160
 
 
+def test_historical_repricing_preserves_original_customer_funding():
+    from subsystems.client_finance.pricing_configuration import HistoricalAmountFacts, build_historical_repricing_plan
+
+    rates = HourlyRates(350, 350)
+    current = CasePricingTerms("原住民", IdentityRule.CITIZEN, Decimal(80), rates, rates)
+    facts = CasePricingFacts("historical", 0, (1, 1, 1), current, "policy", (), 1000,
+                             historical_service_hours=Decimal(80))
+    candidate = replace(current, subsidy_hours=Decimal(79))
+    plan = build_historical_repricing_plan(
+        facts, candidate,
+        (HistoricalAmountFacts("original-first", 29000, 29000, "automatic"),),
+        HistoricalAmountFacts("original-payable", 29000, 29000, "automatic"),
+        subsidy_source=HistoricalAmountFacts("original-refund", 28000, 28000, "automatic"),
+    )
+    assert pricing_impact(current, facts).client_amount == 29000
+    assert [(item.identity, item.effective) for item in plan.client_updates] == [
+        ("original-first", 29000), ("original-refund", 27650),
+    ]
+
+
 def test_citizen_identities_are_distinct_through_import_subsidy_and_payment_rules():
     from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, normalize_subsidy_policy_identity
     from subsystems.case_import.hcm_adapter import _client_attributes, build_approved_case_architecture_bootstrap_intent
@@ -126,6 +146,36 @@ def test_covered_rates_match_and_excess_tiers_remain_independent():
     assert impact.staff_total_amount == 120 * 350 + 40 * 310 + 1000
     assert impact.subsidy_amount == 120 * 350
     assert impact.subsidy_return_amount == 0
+
+
+@pytest.mark.parametrize(("identity", "rule", "limit", "partial_due", "partial_return"), [
+    ("補助市民", IdentityRule.SOCIAL, 120, 1350, 0),
+    ("原住民", IdentityRule.CITIZEN, 80, 29000, 27650),
+])
+def test_case_pricing_query_and_preview_use_full_subsidy_funding(
+    identity, rule, limit, partial_due, partial_return,
+):
+    rates = HourlyRates(350, 350)
+    current = CasePricingTerms(identity, rule, Decimal(limit), rates, rates)
+    facts = CasePricingFacts("case-1", 0, (1, 2, 3), current, "policy",
+        tuple(PricingServiceDay(date(2026, 10, day), Decimal(8)) for day in range(1, 11)), 1000)
+
+    class Repository:
+        def case(self, case_no, *, lock=False):
+            assert not lock
+            return facts
+
+    application = PricingConfigurationApplication(Repository(), lambda: pytest.fail("preview opened transaction"))
+    _, impact = application.query_case("case-1")
+    assert (impact.client_amount, impact.subsidy_amount, impact.subsidy_return_amount) == (0, 29000, 0)
+    assert impact.staff_total_amount == 29000
+
+    candidate = replace(current, subsidy_hours=Decimal(79))
+    preview = application.preview_case("case-1", candidate, 0)
+    assert preview.before == impact
+    assert (preview.after.client_amount, preview.after.subsidy_amount, preview.after.subsidy_return_amount) == (
+        partial_due, 27650, partial_return,
+    )
 
 
 def test_cutoff_inside_a_service_day_and_customer_advance_refund():

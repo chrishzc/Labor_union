@@ -19,20 +19,36 @@ def load_case_service_time(cursor, case_no, *, lock):
     return read_service_time_terms(row) if row is not None else None
 
 
-def load_occupancy_snapshot(cursor, staff_ids, case_no, *, lock):
+def load_case_actual_start_date(cursor, case_no, *, lock):
+    cursor.execute(
+        "SELECT actual_start_date FROM orders WHERE case_no=%s" + _lock_suffix(lock),
+        (case_no,),
+    )
+    row = cursor.fetchone()
+    return row.get("actual_start_date") if row else None
+
+
+def load_occupancy_snapshot(cursor, staff_ids, case_no, *, lock, actual_start_date=None):
     if not staff_ids:
         return (), ()
+    current_actual = actual_start_date or load_case_actual_start_date(cursor, case_no, lock=lock)
     schedules = _effective_occupancy_rows(cursor, staff_ids, lock)
     waiting = _waiting_lock_rows(cursor, staff_ids, lock)
     facts = tuple(
         StaffOccupancyFact(
             int(row["staff_id"]), row["occupancy_date"], str(row["case_no"]),
             read_service_time_terms(row),
+            actual_start_date=row.get("actual_start_date"),
+            reservation_only=bool(row.get("owner_case_no")) and not (current_actual and row.get("actual_start_date")),
         )
-        for row in (*schedules, *waiting)
-    ) + _unavailability_occupancy(cursor, staff_ids, lock) + _legacy_assignment_occupancy(cursor, staff_ids, lock)
+        for row in schedules
+    ) + tuple(
+        StaffOccupancyFact(int(row["staff_id"]), row["occupancy_date"], str(row["case_no"]), read_service_time_terms(row),
+                           reservation_only=True)
+        for row in waiting
+    ) + _unavailability_occupancy(cursor, staff_ids, lock) + _legacy_assignment_occupancy(cursor, staff_ids, lock, current_actual)
     facts += tuple(
-        historical_reservation_occupancy(row)
+        historical_reservation_occupancy(row, current_actual)
         for row in load_historical_reservation_rows(cursor, staff_ids=staff_ids, lock=lock)
     )
     lock_ids = tuple(sorted({int(row["lock_id"]) for row in waiting if str(row["case_no"]) == case_no}))
@@ -66,7 +82,7 @@ def load_historical_reservation_rows(cursor, *, staff_ids=None, window_start=Non
         params.append(window_end)
     cursor.execute(
         "SELECT receipt.id AS source_id,pairing.staff_id,o.case_no,o.status AS order_status,"
-        "o.start_date,o.end_date,c.name AS client_name,s.name AS staff_name "
+        "o.start_date,o.end_date,o.actual_start_date,o.service_start_time,o.service_end_time,o.service_end_day_offset,c.name AS client_name,s.name AS staff_name "
         "FROM orders o "
         "JOIN historical_order_adoption_receipts receipt ON receipt.case_no=o.case_no AND receipt.outcome='adopted' "
         "LEFT JOIN historical_order_adoption_receipts newer ON newer.case_no=receipt.case_no "
@@ -89,10 +105,13 @@ def load_historical_reservation_rows(cursor, *, staff_ids=None, window_start=Non
     return tuple({(row["case_no"], row["staff_id"]): row for row in rows}.values())
 
 
-def historical_reservation_occupancy(row):
+def historical_reservation_occupancy(row, current_actual=None):
+    terms = read_service_time_terms(row)
     return StaffOccupancyFact(
         int(row["staff_id"]), row["start_date"], str(row["case_no"]),
-        all_day=True, block_end=row["end_date"],
+        service_time=terms, all_day=terms is None, block_end=row["end_date"],
+        actual_start_date=row.get("actual_start_date"),
+        reservation_only=not (current_actual and row.get("actual_start_date")),
     )
 
 
@@ -101,7 +120,7 @@ def _effective_occupancy_rows(cursor, staff_ids, lock):
     cursor.execute(
         "SELECT s.id AS source_id,s.staff_id,s.work_date AS occupancy_date,"
         "COALESCE(a.case_no,'legacy_schedule') AS case_no,"
-        "o.service_start_time,o.service_end_time,o.service_end_day_offset "
+        "o.case_no AS owner_case_no,o.actual_start_date,o.service_start_time,o.service_end_time,o.service_end_day_offset "
         "FROM staff_schedule s "
         "LEFT JOIN scheduling_generations g ON g.id=s.generation_id "
         "LEFT JOIN case_staff_assignments a ON a.id=s.assignment_id "
@@ -115,10 +134,11 @@ def _effective_occupancy_rows(cursor, staff_ids, lock):
     return tuple(cursor.fetchall())
 
 
-def _legacy_assignment_occupancy(cursor, staff_ids, lock):
+def _legacy_assignment_occupancy(cursor, staff_ids, lock, current_actual=None):
     return tuple(
         StaffOccupancyFact(int(row["staff_id"]), row["assigned_start_date"], str(row["case_no"]),
-                           possible_end=row["assigned_end_date"])
+                           possible_end=row["assigned_end_date"], actual_start_date=row.get("actual_start_date"),
+                           reservation_only=bool(row.get("owner_case_no")) and not (current_actual and row.get("actual_start_date")))
         for row in _legacy_assignment_rows(cursor, staff_ids, lock)
     )
 
@@ -126,8 +146,8 @@ def _legacy_assignment_occupancy(cursor, staff_ids, lock):
 def _legacy_assignment_rows(cursor, staff_ids, lock):
     placeholders = ",".join("%s" for _ in staff_ids)
     cursor.execute(
-        "SELECT a.id,a.staff_id,a.case_no,a.assigned_start_date,a.assigned_end_date "
-        "FROM case_staff_assignments a "
+        "SELECT a.id,a.staff_id,a.case_no,a.assigned_start_date,a.assigned_end_date,o.case_no AS owner_case_no,o.actual_start_date "
+        "FROM case_staff_assignments a LEFT JOIN orders o ON o.case_no=a.case_no "
         f"WHERE a.staff_id IN ({placeholders}) AND a.generation_id IS NULL "
         "AND a.status IN ('planned','active') "
         "AND a.assigned_start_date IS NOT NULL AND a.assigned_end_date IS NOT NULL "

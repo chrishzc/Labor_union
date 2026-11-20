@@ -1021,7 +1021,7 @@ def _validate_availability(
             "daily_service_hours": False,
         },
     )
-    conflicts = result.get("conflicts", ())
+    conflicts = tuple(item for item in result.get("conflicts", ()) if item.get("reason_code") not in {"historical_reservation", "active_lock"})
     reasons = {item.get("reason_code") for item in conflicts}
     if reasons & _OCCUPANCY_LABELS.keys():
         periods = result.get("occupancy_periods", {})

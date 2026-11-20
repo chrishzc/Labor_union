@@ -33,7 +33,7 @@ def persist_scheduling_replacement(
     if candidate.assignments:
         staff_ids = tuple(sorted({assignment.staff_id for assignment in candidate.assignments}))
         service_time = command.service_time or load_case_service_time(cursor, candidate.case_no, lock=True)
-        occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=True)
+        occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=True, actual_start_date=command.actual_start_date)
         conflict = first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied)
         if conflict is not None:
             raise AssignmentPlanDomainError(

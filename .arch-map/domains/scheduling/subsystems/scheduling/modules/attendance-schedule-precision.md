@@ -16,6 +16,8 @@
 - entrypoints:
   - `api/routes/order_schedule_calculation.py`
   - `api/schemas/orders.py`
+  - `api/routes/scheduling_eligibility_collision.py`
+  - `api/schemas/scheduling_eligibility_collision.py`
   - `ui_react/src/api/scheduling/schedule_precision_client.ts`
 
 ## Dependencies
@@ -28,6 +30,8 @@
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling 服務日精算語意。
 
 ## Verification
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/attendance-schedule-precision/`
+- layout_status: `custom_current`
 - higher_boundary:
   - `tests/domains/scheduling/subsystems/scheduling/integration/test_service_end_date_calculation_correctness.py`
 

@@ -205,6 +205,10 @@ class CaregiverConflict(BaseModel):
     staff_id: int | None
     work_date: date
     reason_code: str
+    case_no: str | None = None
+    actual_start_date: date | None = None
+    service_start_at: datetime | None = None
+    service_end_at: datetime | None = None
 
 
 class CaregiverSegmentAvailabilityResponse(BaseModel):

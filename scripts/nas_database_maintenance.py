@@ -969,9 +969,9 @@ def require_account_receipt_conversion_target(settings):
     is_local = settings["host"].casefold().rstrip(".") in {"localhost", "127.0.0.1", "::1"}
     if is_local:
         require(
-            settings["database"].startswith("lu_test_")
+            settings["database"].startswith(("lu_test_", "lu_nas_upgrade_"))
             and (settings["runtime"].get("APP_ENV") or "").casefold() in {"development", "dev", "local", "test"},
-            "本機收據轉換只允許使用開發環境的 lu_test_* 測試資料庫。",
+            "本機收據轉換只允許使用開發環境的 lu_test_* 或 lu_nas_upgrade_* 測試資料庫。",
         )
     else:
         require(settings["receipt_target_pinned"] and settings["ssl_mode"] == "VERIFY_IDENTITY",

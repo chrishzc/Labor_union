@@ -608,18 +608,20 @@ def create_matching_plan_version_route(
             'draft_overlap': '方案服務段落重疊',
         }
         details = []
-        for reason in sorted({reason for reason, _ in error.conflicts}):
-            dates = sorted({day for code, day in error.conflicts if code == reason})
+        for reason in sorted({item.reason_code for item in error.conflicts}):
+            dates = sorted({item.work_date for item in error.conflicts if item.reason_code == reason})
             date_text = '、'.join(dates[:6])
             if len(dates) > 6:
                 date_text += f'等共 {len(dates)} 日'
             details.append(f"{labels.get(reason, '檔期不可用')}：{date_text}")
-        raise typed_http_error(
+        response_error = typed_http_error(
             409, 'domain_blocked', 'matching_plan_staff_occupancy_conflict',
             '推薦月嫂檔期衝突，不能建立方案。' + '；'.join(details)
             + '。請返回尋找人選改選月嫂，或到服務安排調整日期後重新查詢。',
             f'matching-plan-create:{case_no}',
-        ) from error
+        )
+        response_error.detail['occupancy_conflicts'] = [asdict(item) for item in error.conflicts]
+        raise response_error from error
     except ValueError as error:
         message = str(error)
         if message == "case not found":

@@ -78,8 +78,7 @@ def test_candidate_coverage_uses_confirmed_service_dates_and_backend_ranges(has_
 
     if has_historical_reservation:
         assert any(item["reason_code"] == "historical_reservation" for item in result["conflicts"])
-        assert result["feasibility"] != "complete"
-        return
+        assert result["feasibility"] == "complete"
 
     candidate = result["candidate_options"][0]
     assert candidate["staff_name"] == "月嫂甲"
@@ -175,6 +174,9 @@ def test_single_recommendation_uses_all_saved_dates_without_rewriting_inquiry():
 def test_actual_occupancy_after_original_inquiry_end_names_caregiver_and_period(source, row, period):
     facts = _ExtendedDates()
     facts.facts[source] = [row]
+    if source in {"historical_reservation_rows", "active_lock_rows"}:
+        _validate_availability(_recommendation(), facts)
+        return
     with pytest.raises(MatchingDecisionNotReadyError) as caught:
         _validate_availability(_recommendation(), facts)
     message = _availability_blocker(caught.value)
@@ -224,3 +226,105 @@ def test_invalid_saved_date_count_fails_as_date_validation():
     with pytest.raises(ValueError, match="current confirmed service dates mismatch") as caught:
         _validate_availability(_recommendation(), facts)
     assert "服務日期與分段" in _availability_blocker(caught.value)
+
+
+@pytest.mark.parametrize("current_actual,other_actual,blocked", [
+    (None, None, False), (None, "2026-08-02", False),
+    ("2026-08-02", None, False), ("2026-08-02", "2026-08-02", True),
+])
+def test_only_two_actual_start_cases_block_matching_and_retain_source_shift(current_actual, other_actual, blocked):
+    from subsystems.scheduling.matching_plan_workflow import (
+        MatchingPlanAvailabilityConflict, _validate_current_availability,
+    )
+    class Facts(_Facts):
+        def load_case_facts(self, case_no):
+            facts = super().load_case_facts(case_no)
+            facts["order"]["actual_start_date"] = current_actual
+            facts["schedule_rows"] = [{"assignment_id": 90, "case_no": "OTHER", "staff_id": 7,
+                "work_date": "2026-08-02", "actual_start_date": other_actual,
+                "service_time": ServiceTimeTerms(time(8), time(12), 0)}]
+            return facts
+    facts = Facts()
+    result = search_segmented_caregiver_availability("CASE-68", 1, [{"staff_id": 7}], "2026-08-01", facts)
+    conflict = next(item for item in result["conflicts"] if item.get("case_no") == "OTHER")
+    assert conflict["reason_code"] == ("schedule" if blocked else "historical_reservation")
+    assert conflict["actual_start_date"] == other_actual
+    assert conflict["service_start_at"] == "2026-08-02T08:00:00+08:00"
+    assert conflict["service_end_at"] == "2026-08-02T12:00:00+08:00"
+    assert result["feasibility"] == ("partial" if blocked else "complete")
+    segments = [{"staff_id": 7, "assigned_start_date": "2026-08-02", "assigned_end_date": "2026-08-04"}]
+    if blocked:
+        with pytest.raises(MatchingPlanAvailabilityConflict) as captured:
+            _validate_current_availability("CASE-68", segments, "2026-08-01", facts, False)
+        assert any(item.case_no == "OTHER" and item.service_end_at == conflict["service_end_at"]
+                   for item in captured.value.conflicts)
+    else:
+        _validate_current_availability("CASE-68", segments, "2026-08-01", facts, False)
+
+
+@pytest.mark.parametrize("source", ["unknown_source_time", "unknown_requested_time", "assignment_without_shift"])
+def test_schedule_review_retains_known_case_and_shift_evidence(source):
+    class Facts(_Facts):
+        def load_case_facts(self, case_no):
+            facts = super().load_case_facts(case_no)
+            facts["order"]["actual_start_date"] = "2026-08-02"
+            other = {"case_no": "OTHER", "staff_id": 7, "actual_start_date": "2026-08-01"}
+            if source == "assignment_without_shift":
+                facts["assignments"] = [{
+                    **other, "id": 90, "owner_case_no": "OTHER",
+                    "assigned_start_date": "2026-08-02", "assigned_end_date": "2026-08-02",
+                }]
+            else:
+                if source == "unknown_requested_time":
+                    facts["order"]["service_time"] = None
+                facts["schedule_rows"] = [{
+                    **other, "assignment_id": 90, "work_date": "2026-08-02",
+                    "service_time": ServiceTimeTerms(time(8), time(12), 0)
+                    if source == "unknown_requested_time" else None,
+                }]
+            return facts
+
+    result = search_segmented_caregiver_availability("CASE-68", 1, [{"staff_id": 7}], "2026-08-01", Facts())
+    assert result["feasibility"] == "partial"
+    conflict, = [item for item in result["conflicts"] if item["reason_code"] == "requires_review"]
+    assert conflict["case_no"] == "OTHER"
+    assert conflict["actual_start_date"] == "2026-08-01"
+    if source == "unknown_requested_time":
+        assert conflict["service_start_at"] == "2026-08-02T08:00:00+08:00"
+        assert conflict["service_end_at"] == "2026-08-02T12:00:00+08:00"
+    else:
+        assert conflict["service_start_at"] is None
+        assert conflict["service_end_at"] is None
+
+
+@pytest.mark.parametrize("current_actual,other_actual", [(None, None), ("2026-08-02", None), (None, "2026-08-02"), ("2026-08-02", "2026-08-02")])
+@pytest.mark.parametrize("known_time", [False, True])
+def test_waiting_deposit_is_visible_advisory_for_all_actual_start_states(current_actual, other_actual, known_time):
+    from subsystems.scheduling.matching_plan_workflow import _validate_current_availability
+    class Facts(_Facts):
+        def load_case_facts(self, case_no):
+            facts = super().load_case_facts(case_no)
+            facts["order"]["actual_start_date"] = current_actual
+            facts["active_lock_rows"] = [{"staff_id": 7, "case_no": "WAITING", "lock_date": "2026-08-02",
+                "active_marker": 1, "actual_start_date": other_actual,
+                "service_time": ServiceTimeTerms(time(8), time(12), 0) if known_time else None}]
+            return facts
+    facts = Facts()
+    result = search_segmented_caregiver_availability("CASE-68", 1, [{"staff_id": 7}], "2026-08-01", facts)
+    assert result["feasibility"] == "complete"
+    conflict, = result["conflicts"]
+    assert conflict["reason_code"] == "active_lock" and conflict["case_no"] == "WAITING"
+    assert conflict["actual_start_date"] == other_actual
+    assert conflict["service_start_at"] == ("2026-08-02T08:00:00+08:00" if known_time else None)
+    _validate_current_availability("CASE-68", [{"staff_id": 7, "assigned_start_date": "2026-08-02", "assigned_end_date": "2026-08-04"}], "2026-08-01", facts, False)
+
+
+def test_unknown_historical_candidate_time_is_not_fabricated():
+    class Facts(_Facts):
+        def load_case_facts(self, case_no):
+            facts = super().load_case_facts(case_no)
+            facts["historical_reservation_rows"] = [{"staff_id": 7, "case_no": "HISTORY", "start_date": "2026-08-02", "end_date": "2026-08-02"}]
+            return facts
+    result = search_segmented_caregiver_availability("CASE-68", 1, [{"staff_id": 7}], "2026-08-01", Facts())
+    conflict, = result["conflicts"]
+    assert conflict["service_start_at"] is None and conflict["service_end_at"] is None

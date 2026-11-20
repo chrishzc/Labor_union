@@ -309,6 +309,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       conflicts: [
         { segment_index: 0, staff_id: 8893, work_date: '2026-09-01', reason_code: 'active_lock' },
         { segment_index: 0, staff_id: 8893, work_date: '2026-09-02', reason_code: 'buffer' },
+        { segment_index: 0, staff_id: 8893, work_date: '2026-09-03', reason_code: 'schedule' },
       ],
     }));
     render(<OrderCandidateQueryPanel caseNo="115000204" />);
@@ -325,7 +326,8 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(screen.getByText(/空閒 5\/5 天/)).toBeInTheDocument();
     expect(screen.getByText(/空閒 0\/5 天/)).toBeInTheDocument();
     expect(screen.getByText(/有檔期衝突，待公會協調/)).toBeInTheDocument();
-    expect(screen.getByText(/七天緩衝期重疊，僅提醒/)).toBeInTheDocument();
+    expect(screen.getByText('七天緩衝期重疊，僅提醒')).toBeVisible();
+    expect(screen.getByText('其他案件等待訂金保留，僅提醒。')).toBeVisible();
     expect(screen.getByText('服務期間：2026-09-01 ～ 2026-09-05')).toBeInTheDocument();
     expect(screen.queryByText(/2026-09-01 · 檔期衝突/)).not.toBeInTheDocument();
     expect(screen.queryByText(/2026-09-02 · 七天緩衝期/)).not.toBeInTheDocument();

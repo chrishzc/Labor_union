@@ -807,10 +807,12 @@ def _split_charge_days(facts):
 
 
 def _stage_plan(facts, payment_stage, charge_days, floor_fee):
-    daily_amounts = tuple(_daily_charge(facts, item) for item in charge_days)
-    amount = MoneyNTD(0) if _full_subsidy(facts) else MoneyNTD(sum(item.amount for item in daily_amounts)) + floor_fee
+    full_subsidy = _full_subsidy(facts)
+    amount = MoneyNTD(0)
+    if not full_subsidy:
+        amount = MoneyNTD(sum(_daily_charge(facts, item).amount for item in charge_days)) + floor_fee
     due_date = _stage_due_date(facts.payment_terms, payment_stage, amount)
-    if _full_subsidy(facts):
+    if full_subsidy:
         prior = next((item for item in facts.existing_obligations if item.payment_stage is payment_stage), None)
         if prior is not None and prior.due_date is not None:
             due_date = prior.due_date
@@ -823,10 +825,10 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 
 def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
-    from domains.client_finance.subsidy_coverage import is_full_subsidy_case
+    if facts.pricing is None:
+        return False
     hours = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
-    return is_full_subsidy_case(facts.identity_status, hours,
-                               facts.pricing.subsidy_hours if facts.pricing else None) is True
+    return facts.pricing.is_full_subsidy(hours) is True
 
 
 def _daily_charge(facts, charge_day):

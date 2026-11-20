@@ -766,6 +766,7 @@ def _persist_scheduling(repository, request, preview, command_fingerprint):
         actor=request.actor,
         reason=request.reason,
         correlation_id=request.correlation_id,
+        actual_start_date=preview.after_actual_start_date,
     )
     return repository.replace_scheduling_generation(command)
 

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { calendarOccupancyDetailsByDate } from '../../../../../../../../../line/static/service-date-calendar.js';
 import { OrderServiceDatesPanel } from '../../../../../../../components/OrderServiceDatesPanel';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { OrderMutationConflictError } from '../../../../../../../api/orders/order_mutation_errors';
@@ -7,6 +8,33 @@ import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { ServiceDateConfirmationQueryView, ServiceDateConfirmationPreviewView } from '../../../../../../../api/orders/order_mutation_schemas';
 import type { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
 vi.mock('../../../../../../../api/scheduling/holiday_client', () => ({ holidayClient: { query: vi.fn(async () => ({ holidays: [] })) } }));
+
+describe('月嫂月曆實際開始日', () => {
+  const date = '2026-10-02';
+
+  it.each([
+    { currentStart: null, otherStart: null, confirmed: false },
+    { currentStart: null, otherStart: undefined, confirmed: false },
+    { currentStart: null, otherStart: date, confirmed: false },
+    { currentStart: undefined, otherStart: null, confirmed: false },
+    { currentStart: undefined, otherStart: undefined, confirmed: false },
+    { currentStart: undefined, otherStart: date, confirmed: false },
+    { currentStart: date, otherStart: null, confirmed: false },
+    { currentStart: date, otherStart: undefined, confirmed: false },
+    { currentStart: date, otherStart: date, confirmed: true },
+  ])('本案 $currentStart、他案 $otherStart 時顯示對應檔期標籤', ({ currentStart, otherStart, confirmed }) => {
+    const occupancy = calendarOccupancyDetailsByDate([
+      { date, caseNo: 'OFFICIAL', kind: 'official_workday', actualStartDate: otherStart },
+      { date, caseNo: 'HISTORICAL', kind: 'historical_reservation', actualStartDate: otherStart },
+      { date, caseNo: 'CURRENT', kind: 'official_workday', actualStartDate: currentStart },
+    ], { caseNo: 'CURRENT', actualStartDate: currentStart, firstDate: '2026-10-01', lastDate: '2026-10-31' });
+
+    expect(occupancy.get(date)?.map(({ caseNo, label }) => ({ caseNo, label }))).toEqual([
+      { caseNo: 'OFFICIAL', label: confirmed ? '已有排班' : '歷史／暫定' },
+      { caseNo: 'HISTORICAL', label: confirmed ? '服務檔期' : '歷史／暫定' },
+    ]);
+  });
+});
 
 const mocks = vi.hoisted(() => ({
   getActualStart: vi.fn(), getOrderCalendarDetail: vi.fn(), calculate: vi.fn(),
@@ -335,32 +363,64 @@ describe('服務日期自動讀取與單次儲存流程', () => {
       calendar_date, entries: [{ occupancy_kind, case_no }],
     });
     mocks.queryStaffCalendar.mockResolvedValueOnce({ days: [
+      { calendar_date: '2026-09-30', entries: [{ occupancy_kind: 'official_workday', case_no: 'OVERNIGHT-CASE',
+        actual_start_date: '2026-09-30', service_start_at: '2026-09-30T22:00:00+08:00', service_end_at: '2026-10-01T06:00:00+08:00' }] },
       { calendar_date: '2026-10-02', entries: [
-        { occupancy_kind: 'official_workday', case_no: 'OTHER-CASE' },
-        { occupancy_kind: 'official_workday', case_no: 'ANOTHER-CASE' },
+        { occupancy_kind: 'official_workday', case_no: 'OTHER-CASE', actual_start_date: '2026-09-28',
+          service_start_at: '2026-10-02T09:00:00+08:00', service_end_at: '2026-10-02T17:00:00+08:00' },
+        { occupancy_kind: 'historical_reservation', case_no: 'ANOTHER-CASE', actual_start_date: null },
+        { occupancy_kind: 'official_workday', case_no: 'EVENING-CASE', actual_start_date: '2026-10-01',
+          service_start_at: '2026-10-02T18:00:00+08:00', service_end_at: '2026-10-02T21:00:00+08:00' },
       ] },
       entries('2026-10-03', 'official_workday', CASE),
       entries('2026-10-04', 'assignment_rest', 'OTHER-CASE'),
       entries('2026-10-05', 'waiting_deposit_service', 'OTHER-CASE'),
       entries('2026-10-06', 'staff_unavailability', null),
+      { calendar_date: '2026-10-07', entries: [{ occupancy_kind: 'historical_reservation', case_no: 'ADOPTED-CASE',
+        actual_start_date: '2026-10-01' }] },
     ] }).mockRejectedValueOnce(new Error('offline'));
     render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart
       officeScheduleStaff={[{ staff_id: 12, staff_name: '王月嫂' }]} />);
 
-    const scheduled = await screen.findByRole('button', { name: '服務日期 2026-10-02，已有排班' });
+    const scheduled = await screen.findByRole('button', { name: '服務日期 2026-10-02，已有排班、歷史／暫定' });
     expect(scheduled).toBeEnabled();
-    expect(within(scheduled).getAllByText('已有排班')).toHaveLength(1);
+    const occupied = screen.getByRole('button', { name: '查看 2026-10-02 檔期明細' });
+    expect(within(occupied).getByText('3筆')).toBeInTheDocument();
+    expect(occupied).toHaveAttribute('aria-expanded', 'false');
+    expect(within(occupied).getByText('OTHER-CASE')).toBeVisible();
+    expect(within(occupied).getByText('ANOTHER-CASE')).toBeVisible();
+    expect(within(occupied).getByText('09:00–17:00')).toBeVisible();
+    fireEvent.click(occupied);
+    expect(occupied).toHaveAttribute('aria-expanded', 'true');
+    expect(scheduled).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('案件 OTHER-CASE')).toBeVisible();
+    expect(screen.getByText('案件 ANOTHER-CASE')).toBeVisible();
+    expect(screen.getByText('案件 EVENING-CASE')).toBeVisible();
+    expect(screen.getByText('服務時段待確認')).toBeVisible();
+    expect(screen.getByText('2026-10-02 09:00 至 2026-10-02 17:00')).toBeVisible();
+    expect(screen.getByText('2026-10-02 18:00 至 2026-10-02 21:00')).toBeVisible();
+    const overnight = screen.getByRole('button', { name: '查看 2026-10-01 檔期明細' });
+    expect(within(overnight).getByText('1筆')).toBeInTheDocument();
+    expect(within(overnight).getByText('22:00–跨日 06:00')).toBeVisible();
+    fireEvent.click(overnight);
+    expect(screen.getByText('2026-09-30 22:00 至 2026-10-01 06:00')).toBeVisible();
+    expect(scheduled).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '服務日期 2026-10-03' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '查看 2026-10-03 檔期明細' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-04' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-05，檔期保留' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-06，不可服務' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '服務日期 2026-10-07，服務檔期' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '查看 2026-10-07 檔期明細' }));
+    expect(screen.getByText('案件 ADOPTED-CASE')).toBeVisible();
+    expect(screen.getByText('服務時段待確認')).toBeVisible();
     expect(mocks.queryStaffCalendar).toHaveBeenNthCalledWith(1,
-      { staffId: 12, rangeStart: '2026-10-01', rangeEnd: '2026-10-31' }, { signal: expect.any(AbortSignal) });
+      { staffId: 12, rangeStart: '2026-09-30', rangeEnd: '2026-10-31' }, { signal: expect.any(AbortSignal) });
 
     fireEvent.click(screen.getByRole('button', { name: '下一個月' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取月嫂檔期。');
     expect(mocks.queryStaffCalendar).toHaveBeenNthCalledWith(2,
-      { staffId: 12, rangeStart: '2026-11-01', rangeEnd: '2026-11-30' }, { signal: expect.any(AbortSignal) });
+      { staffId: 12, rangeStart: '2026-10-31', rangeEnd: '2026-11-30' }, { signal: expect.any(AbortSignal) });
     expect(mocks.queryStaffCalendar.mock.calls[0][1].signal.aborted).toBe(true);
     expect(screen.queryByText('已有排班')).not.toBeInTheDocument();
   });
@@ -415,8 +475,8 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(saveButton).toBeDisabled();
     const first = within(screen.getByRole('region', { name: /王月嫂/ }));
     const second = within(screen.getByRole('region', { name: /林月嫂/ }));
-    expect(await second.findByRole('button', { name: /^服務日期 2026-10-02.*已有排班$/ })).toBeEnabled();
-    expect(first.queryByText('已有排班')).not.toBeInTheDocument();
+    expect(await second.findByRole('button', { name: '服務日期 2026-10-02，尚未分配，歷史／暫定' })).toBeEnabled();
+    expect(first.queryByText('歷史／暫定')).not.toBeInTheDocument();
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-01/ }));
     fireEvent.click(second.getByRole('button', { name: /^服務日期 2026-10-02/ }));
     fireEvent.click(first.getByRole('button', { name: /^服務日期 2026-10-04/ }));

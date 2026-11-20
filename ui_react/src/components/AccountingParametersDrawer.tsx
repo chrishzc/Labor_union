@@ -1,6 +1,6 @@
 /**
  * File: AccountingParametersDrawer.tsx
- * Description: 專案右側滑出式帳務參數調整抽屜（符合 Drawer.css 標準），支援原地調整單雙胞胎、補助上限、客戶與月嫂時薪並即時試算。
+ * Description: 帳務參數調整抽屜，支援更正正式胎數、補助上限、客戶與月嫂時薪。
  */
 
 import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
@@ -9,6 +9,8 @@ import {
   type CasePricing,
   type PricingTerms,
   PricingTermsSchema,
+  pricingIdentityLabel,
+  pricingRequestError,
   pricingTermsError,
 } from '../api/client_finance/accounting_pricing_client';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
@@ -26,7 +28,6 @@ interface AccountingParametersDrawerProps {
   onCommitted: () => Promise<void> | void;
   initialPricing?: CasePricing | null;
   canEditHistoricalDays?: boolean;
-  totalHours?: number;
 }
 
 type BirthCount = '單胞胎' | '雙胞胎';
@@ -55,7 +56,6 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   onCommitted,
   initialPricing,
   canEditHistoricalDays = false,
-  totalHours = 160,
 }) => {
   const [current, setCurrent] = useState<CasePricing | null>(null);
   const [birthCount, setBirthCount] = useState<BirthCount | null>(null);
@@ -78,7 +78,6 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
   const savedBirthLabel = savedBirthCount ?? '待確認';
   const birthDraftChanges = isOpen && birthChanged ? [{ label: '胎數', before: savedBirthLabel, after: birthCount }] : [];
   const pricingDraftChanges = isOpen && current && draft ? [
-    { label: '補助身分', before: current.terms.identity_name, after: draft.identity_name },
     { label: '補助上限', before: String(current.terms.subsidy_hours), after: String(draft.subsidy_hours) },
     ...(['client', 'payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => ({
       label: `${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '超額'}時薪`,
@@ -155,55 +154,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
     });
   };
 
-  // 身分切換
-  const handleIdentityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    if (!draft) return;
-    const val = e.target.value;
-    let rule: 'citizen' | 'social' | 'non_citizen' = 'citizen';
-    let subsidyHours = 120;
-    let identityName = '補助市民';
-
-    if (val === 'low_income') {
-      rule = 'social';
-      identityName = '低收入戶';
-      subsidyHours = 120;
-    } else if (val === 'indigenous') {
-      rule = 'citizen';
-      identityName = '原住民';
-      subsidyHours = 80;
-    } else if (val === 'regular_citizen') {
-      rule = 'citizen';
-      identityName = '一般市民';
-      subsidyHours = 0;
-    } else if (val === 'non_citizen') {
-      rule = 'non_citizen';
-      identityName = '非市民';
-      subsidyHours = 0;
-    }
-
-    setDraft({
-      ...draft,
-      rule,
-      identity_name: identityName,
-      subsidy_hours: subsidyHours,
-      client: {
-        ...draft.client,
-        covered: subsidyHours === 0 ? 0 : val === 'indigenous' ? 350 : draft.client.covered,
-      },
-      payroll: val === 'indigenous' ? { ...draft.payroll, covered: 350 } : draft.payroll,
-    });
-  };
-
-  // 計算即時影響
-  const subsidyHours = draft?.subsidy_hours ?? 0;
-  const clientCovered = draft?.client.covered ?? 0;
-  const clientExcess = draft?.client.excess ?? 300;
-  const staffExcess = draft?.payroll.excess ?? 0;
-
-  const coveredHours = Math.min(totalHours, subsidyHours);
-  const excessHours = Math.max(0, totalHours - coveredHours);
-  const previewClientTotal = coveredHours * clientCovered + excessHours * clientExcess;
-  const previewStaffTotal = totalHours * staffExcess;
+  const identityLabel = draft ? pricingIdentityLabel(draft) : '';
 
   // 儲存送出
   const handleApply = async () => {
@@ -278,6 +229,8 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
         setError('計價參數已儲存。帳務畫面更新失敗，請重新整理。');
       } else if (outcomeUncertain) {
         setError(`${owner}儲存結果尚未確認。請按「重試儲存」確認原操作。`);
+      } else if (stage === 'pricing' && err instanceof ApiHttpError) {
+        setError(pricingRequestError(err, '計價參數未儲存。'));
       } else if (err instanceof ApiHttpError && err.status === 409) {
         setError(`${owner}資料版本已更新，請重新開啟抽屜載入最新資料。`);
       } else {
@@ -384,32 +337,9 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
 
               {/* 2. 補助身分與資格 */}
               <div className="accounting-drawer-form-group">
-                <label className="accounting-drawer-label" htmlFor="param-identity-select">
-                  🏛️ 補助身分等級
-                </label>
-                <select
-                  id="param-identity-select"
-                  className="form-select"
-                  value={
-                    draft.rule === 'social'
-                      ? 'low_income'
-                      : draft.rule === 'non_citizen'
-                      ? 'non_citizen'
-                      : draft.subsidy_hours === 0
-                      ? 'regular_citizen'
-                      : draft.identity_name === '原住民'
-                      ? 'indigenous'
-                      : 'citizen_subsidy'
-                  }
-                  disabled={fieldsDisabled}
-                  onChange={handleIdentityChange}
-                >
-                  <option value="citizen_subsidy">補助市民（一般補助 · 上限 120h）</option>
-                  <option value="low_income">低收入戶市民（全額免自備 · 上限 120h）</option>
-                  <option value="indigenous">原住民市民（預設上限 80h · 350 元）</option>
-                  <option value="regular_citizen">一般市民（無補助自備 · 上限 0h）</option>
-                  <option value="non_citizen">非市民（全額自費 · 上限 0h）</option>
-                </select>
+                <label className="accounting-drawer-label" htmlFor="param-identity">補助身分</label>
+                <input id="param-identity" className="form-input" value={identityLabel} readOnly />
+                {identityLabel !== draft.identity_name && <p className="accounting-drawer-hint">原版本名稱：{draft.identity_name}</p>}
               </div>
 
               {/* 3. 補助時數上限 */}
@@ -430,7 +360,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
                   }
                 />
                 <p className="accounting-drawer-hint">
-                  本案累計總服務時數約 {totalHours} 小時。超出補助上限之 {excessHours} 小時將計入超額自費。
+                  補助上限按本案實際服務時數累計，超過上限的時數按用盡後時薪計價。
                 </p>
               </div>
 
@@ -524,26 +454,7 @@ export const AccountingParametersDrawer: React.FC<AccountingParametersDrawerProp
                 </table>
               </div>
 
-              {/* 5. 即時試算連動影響 */}
-              <div className="accounting-impact-card">
-                <div className="accounting-impact-header">
-                  <span>✨ 即時試算連動影響</span>
-                </div>
-                <div className="accounting-impact-grid">
-                  <div>
-                    <span>客戶應收總額 (自備+超額):</span>
-                    <strong>NT$ {previewClientTotal.toLocaleString()}</strong>
-                  </div>
-                  <div>
-                    <span>月嫂基準應付總額:</span>
-                    <strong style={{ color: 'var(--md-sys-color-primary)' }}>
-                      NT$ {previewStaffTotal.toLocaleString()}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* 6. 調整原因備註 */}
+              {/* 調整原因備註 */}
               <div className="accounting-drawer-form-group">
                 <label className="accounting-drawer-label" htmlFor="param-reason-input">
                   📝 調整原因說明（留存稽核）

@@ -245,7 +245,7 @@ def test_willing_candidate_recommendation_uses_inquiry_period_without_preview_da
 def test_recommendation_still_blocks_real_candidate_period_conflicts(monkeypatch, reason):
     monkeypatch.setattr(
         matching_plan_workflow, "search_candidate_inquiry_availability",
-        lambda **_kwargs: {"feasibility": "complete", "conflicts": [{"reason_code": reason, "work_date": "2026-11-15"}, {"reason_code": "buffer", "work_date": "2026-11-16"}],
+        lambda **_kwargs: {"feasibility": "complete", "conflicts": [{"segment_index": 0, "staff_id": 1, "reason_code": reason, "work_date": "2026-11-15"}, {"reason_code": "buffer", "work_date": "2026-11-16"}],
                           "complete_combinations": [[{"segment_index": 0, "staff_id": 1,
                                                       "start_date": "2026-11-05", "end_date": "2026-11-24"}]]},
     )
@@ -254,14 +254,15 @@ def test_recommendation_still_blocks_real_candidate_period_conflicts(monkeypatch
             "PREVIEW-DATE-DRIFT", [{"staff_id": 1, "assigned_start_date": "2026-11-05", "assigned_end_date": "2026-11-24"}],
             "2026-10-13", object(), True,
         )
-    assert caught.value.conflicts == ((reason, '2026-11-15'),)
+    assert caught.value.conflicts == (matching_plan_workflow.MatchingPlanOccupancyConflict(0, 1, '2026-11-15', reason),)
 
 
 def test_recommendation_api_explains_actual_occupancy_and_repair_routes(monkeypatch):
     from fastapi import HTTPException
     from api.routes import matches
     def conflict(**_kwargs):
-        raise matching_plan_workflow.MatchingPlanAvailabilityConflict((('active_lock', '2026-11-15'),))
+        raise matching_plan_workflow.MatchingPlanAvailabilityConflict((
+            matching_plan_workflow.MatchingPlanOccupancyConflict(0, 1, '2026-11-15', 'staff_unavailability'),))
     monkeypatch.setattr(matches, 'create_matching_plan_version', conflict)
     with pytest.raises(HTTPException) as caught:
         matches.create_matching_plan_version_route(
@@ -271,7 +272,7 @@ def test_recommendation_api_explains_actual_occupancy_and_repair_routes(monkeypa
     error = caught.value.detail['error']
     assert caught.value.status_code == 409
     assert error['code'] == 'matching_plan_staff_occupancy_conflict'
-    assert '其他案件保留' in error['message']
+    assert '不能服務' in error['message']
     assert '2026-11-15' in error['message']
     assert '返回尋找人選' in error['message']
     assert '調整日期' in error['message']
@@ -442,17 +443,18 @@ def test_waiting_deposit_reservation_is_visible_but_does_not_block_single_recomm
     inquiry = search_candidate_inquiry_availability('CASE-WAITING-DEPOSIT', [], '2026-11-30', port)
     assert any(item['reason_code'] == 'active_lock' and item['work_date'] == '2026-12-10'
                for item in inquiry['conflicts'])
-    assert not inquiry['complete_combinations']
+    assert inquiry['complete_combinations']
     matching_plan_workflow._validate_current_availability('CASE-WAITING-DEPOSIT', segments, '2026-11-30', port, True)
 
+    facts['order']['actual_start_date'] = '2026-12-01'
     facts['schedule_rows'] = [{
         'case_no': 'THIRD-CASE', 'staff_id': 1, 'assignment_id': 2,
-        'work_date': '2026-12-10', 'service_time': service_time,
+        'work_date': '2026-12-10', 'service_time': service_time, 'actual_start_date': '2026-12-01',
     }]
     with pytest.raises(matching_plan_workflow.MatchingPlanAvailabilityConflict) as caught:
         matching_plan_workflow._validate_current_availability('CASE-WAITING-DEPOSIT', segments, '2026-11-30', port, True)
-    assert ('schedule', '2026-12-10') in caught.value.conflicts
-    assert all(reason != 'active_lock' for reason, _ in caught.value.conflicts)
+    assert any(item.reason_code == 'schedule' and item.work_date == '2026-12-10' for item in caught.value.conflicts)
+    assert all(item.reason_code != 'active_lock' for item in caught.value.conflicts)
 
 
 def test_current_willing_candidate_creates_plan_without_candidate_display_dates(monkeypatch):

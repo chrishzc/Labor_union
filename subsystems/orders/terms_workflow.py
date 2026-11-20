@@ -195,6 +195,7 @@ class SchedulingReplacementCommand:
     correlation_id: Any
     preserve_leave_occupancy: bool = False
     service_time: Any = None
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

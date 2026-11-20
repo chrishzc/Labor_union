@@ -204,25 +204,47 @@ def _search_availability(
             occupancy_periods.setdefault(key, set()).add((start, end))
 
     assignment_schedule_days: list[dict[str, Any]] = []
+    evidence: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+
+    def record(item, row, interval=None):
+        if item["reason_code"] in {"assignment", "schedule"} and item["assignment_id"] is None:
+            item["reason_code"] = "requires_review"
+        key = (int(item["staff_id"]), item["work_date"], item["reason_code"])
+        evidence.setdefault(key, []).append({
+            "case_no": row.get("case_no"),
+            "actual_start_date": _as_optional_date(row["actual_start_date"], "actual_start_date").isoformat() if row.get("actual_start_date") else None,
+            "service_start_at": interval[0].isoformat() if interval else None,
+            "service_end_at": interval[1].isoformat() if interval else None,
+        })
+        assignment_schedule_days.append(item)
+
+    def span(first, last, terms=None):
+        if terms:
+            return terms.service_interval(first)[0], terms.service_interval(last)[1]
+        return None
+
+    def reservation(row):
+        return bool(row.get("case_no")) and not (order_row.get("actual_start_date") and row.get("actual_start_date"))
+
     for assignment in assignments:
         if assignment.get("case_no") != case_no:
-            assignment_schedule_days.extend(
-                {**item, "assignment_id": None}
-                for item in _expand_assignment_days(assignment, planned_start, planned_end)
-            )
+            for item in _expand_assignment_days(assignment, planned_start, planned_end):
+                record({**item, "assignment_id": None, "reason_code": "historical_reservation" if assignment.get("owner_case_no") and reservation(assignment) else "assignment"}, assignment,
+                       span(_as_optional_date(assignment["assigned_start_date"], "assigned_start_date"), _as_optional_date(assignment["assigned_end_date"], "assigned_end_date")))
     wanted_time = order_row.get("service_time")
     for row in loaded_facts["schedule_rows"]:
         if row.get("case_no") == case_no:
             continue
         for day, interval in _matching_shifts(row, "work_date", wanted_time, planned_start, planned_end):
-            assignment_schedule_days.append({
+            reason = "historical_reservation" if reservation(row) else "schedule"
+            record({
                 "assignment_id": row["assignment_id"] if wanted_time and row.get("service_time") else None,
                 "staff_id": row["staff_id"],
                 "work_date": day.isoformat(),
-                "reason_code": "schedule",
-            })
+                "reason_code": reason,
+            }, row, interval)
             if include_occupancy_periods and interval is not None:
-                add_period(row["staff_id"], day.isoformat(), "schedule", *map(_format_shift_time, interval))
+                add_period(row["staff_id"], day.isoformat(), reason, *map(_format_shift_time, interval))
     for row in loaded_facts["legacy_schedule_rows"]:
         assignment_schedule_days.append(
             {
@@ -256,18 +278,19 @@ def _search_availability(
             continue
         first = _as_optional_date(row["start_date"], "historical_reservation.start_date")
         last = _as_optional_date(row["end_date"], "historical_reservation.end_date")
-        fact = StaffOccupancyFact(int(row["staff_id"]), first, row["case_no"], all_day=True, block_end=last)
+        terms = row.get("service_time")
+        fact = StaffOccupancyFact(int(row["staff_id"]), first, row["case_no"], terms, all_day=terms is None, block_end=last)
         start = max(first - timedelta(days=1), planned_start)
-        end = min(last, planned_end)
+        end = min(last + timedelta(days=1), planned_end)
         for offset in range((end - start).days + 1):
             day = start + timedelta(days=offset)
             if service_shift_may_overlap(day, wanted_time, fact):
-                assignment_schedule_days.append({
+                record({
                     "staff_id": fact.staff_id,
                     "work_date": day.isoformat(),
-                    "reason_code": "historical_reservation",
-                })
-                add_period(fact.staff_id, day.isoformat(), "historical_reservation",
+                    "reason_code": "historical_reservation" if reservation(row) else "requires_review",
+                }, row, span(first, last, terms))
+                add_period(fact.staff_id, day.isoformat(), "historical_reservation" if reservation(row) else "requires_review",
                            first.isoformat(), last.isoformat())
 
     active_lock_days = []
@@ -275,12 +298,15 @@ def _search_availability(
         if row.get("case_no") == case_no or not row["active_marker"]:
             continue
         for day, interval in _matching_shifts(row, "lock_date", wanted_time, planned_start, planned_end):
-            if wanted_time and row.get("service_time"):
-                active_lock_days.append({"staff_id": row["staff_id"], "lock_date": day.isoformat(), "active_marker": row["active_marker"]})
-                if include_occupancy_periods and interval is not None:
-                    add_period(row["staff_id"], day.isoformat(), "active_lock", *map(_format_shift_time, interval))
-            else:
-                assignment_schedule_days.append({"staff_id": row["staff_id"], "work_date": day.isoformat(), "assignment_id": None})
+            active_lock_days.append({"staff_id": row["staff_id"], "lock_date": day.isoformat(), "active_marker": row["active_marker"]})
+            evidence.setdefault((int(row["staff_id"]), day.isoformat(), "active_lock"), []).append({
+                "case_no": row.get("case_no"),
+                "actual_start_date": _as_optional_date(row["actual_start_date"], "actual_start_date").isoformat() if row.get("actual_start_date") else None,
+                "service_start_at": interval[0].isoformat() if interval else None,
+                "service_end_at": interval[1].isoformat() if interval else None,
+            })
+            if include_occupancy_periods and interval is not None:
+                add_period(row["staff_id"], day.isoformat(), "active_lock", *map(_format_shift_time, interval))
     active_lock_days.extend(
         _active_waiting_buffer_days(
             loaded_facts["waiting_buffer_rows"], planned_start, planned_end
@@ -310,6 +336,11 @@ def _search_availability(
         assignment_schedule_days=assignment_schedule_days,
         active_lock_days=active_lock_days,
     )
+    conflicts = [
+        {**conflict, **detail}
+        for conflict in result["conflicts"]
+        for detail in evidence.get((conflict["staff_id"], conflict["work_date"], conflict["reason_code"]), ({},))
+    ]
     return {
         "case_no": order_row["case_no"],
         "planned_start_date": result["validated_input"]["planned_start_date"],
@@ -331,7 +362,7 @@ def _search_availability(
             if include_candidate_options
             else []
         ),
-        "conflicts": result["conflicts"],
+        "conflicts": conflicts,
         **({"occupancy_periods": occupancy_periods} if include_occupancy_periods else {}),
     }
 

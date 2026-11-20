@@ -729,7 +729,7 @@ def test_conflicts_rejects_without_tx(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     with pytest.raises(service.MatchingPlanAvailabilityConflict, match="matching_plan_staff_occupancy_conflict") as rejected:
         service.create_matching_plan_version("C-019", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
-    assert rejected.value.conflicts == (("staff_not_available", "2026-07-01"),)
+    assert tuple((item.reason_code, item.work_date) for item in rejected.value.conflicts) == (("staff_not_available", "2026-07-01"),)
     assert connection.commits == 0
     assert connection.rollbacks == 1
     assert all("INSERT INTO caregiver_matching_plans" not in sql for sql, _ in connection.cursor_obj.executed)

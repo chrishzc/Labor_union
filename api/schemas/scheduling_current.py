@@ -42,6 +42,9 @@ class SchedulingCurrentDayEntryView(BaseModel):
     availability_block_id: int | None = Field(default=None, gt=0)
     unavailability_kind: str | None = None
     unavailability_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    actual_start_date: date | None = None
+    service_start_at: datetime | None = None
+    service_end_at: datetime | None = None
 
 
 class SchedulingCurrentDayView(BaseModel):

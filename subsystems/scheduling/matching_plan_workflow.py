@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -25,10 +26,22 @@ _STRICT_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EVENT_KEY = re.compile(r"^.{1,191}$", re.DOTALL)
 
 
+@dataclass(frozen=True, slots=True)
+class MatchingPlanOccupancyConflict:
+    segment_index: int
+    staff_id: int | None
+    work_date: str
+    reason_code: str
+    case_no: str | None = None
+    actual_start_date: str | None = None
+    service_start_at: str | None = None
+    service_end_at: str | None = None
+
+
 class MatchingPlanAvailabilityConflict(ValueError):
     """Retain the fresh occupancy evidence that rejected a recommendation."""
 
-    def __init__(self, conflicts: tuple[tuple[str, str], ...]):
+    def __init__(self, conflicts: tuple[MatchingPlanOccupancyConflict, ...]):
         super().__init__('matching_plan_staff_occupancy_conflict')
         self.conflicts = conflicts
 
@@ -334,15 +347,12 @@ def _validate_current_availability(
     # not reintroduce optional discovery filters that can reject the exact
     # combination the UI just offered.
     if require_willing_candidate:
-        # A single recommendation does not reserve dates. Exclude other cases'
-        # waiting-deposit locks before deriving coverage for the inquiry window.
         availability = search_candidate_inquiry_availability(
             case_no=case_no_value,
             segment_drafts=availability_kwargs["segment_drafts"],
             as_of=as_of_value,
             facts_port=facts_port,
             filter_policy=availability_kwargs["filter_policy"],
-            include_waiting_deposit_locks=False,
         )
     else:
         availability = search_segmented_caregiver_availability(**availability_kwargs)
@@ -354,10 +364,10 @@ def _validate_current_availability(
     conflicts = availability.get("conflicts")
     if not isinstance(conflicts, list):
         raise ValueError("availability result malformed")
-    hard_conflicts = tuple(sorted({
-        (str(item['reason_code']), str(item['work_date']))
-        for item in conflicts if item.get('reason_code') != 'buffer'
-    }))
+    hard_conflicts = tuple(
+        MatchingPlanOccupancyConflict(**item)
+        for item in conflicts if item.get('reason_code') not in {'buffer', 'historical_reservation', 'active_lock'}
+    )
     if hard_conflicts:
         raise MatchingPlanAvailabilityConflict(hard_conflicts)
 

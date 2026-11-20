@@ -9,7 +9,7 @@ from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
@@ -59,6 +59,7 @@ class CollisionKind(StrEnum):
 class CollisionSeverity(StrEnum):
     HARD_BLOCK = "hard_block"
     REQUIRES_REVIEW = "requires_review"
+    ADVISORY = "advisory"
 
 
 class TemporalFactState(StrEnum):
@@ -108,6 +109,7 @@ class SchedulingCaseFacts:
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
     service_time: ServiceTimeTerms | None = None
     confirmed_service_dates: tuple[date, ...] = ()
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +130,8 @@ class SchedulingAssignmentFact:
     start_date: date | None
     end_date: date | None
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
+    actual_start_date: date | None = None
+    owner_known: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +145,8 @@ class SchedulingScheduleFact:
     effective: bool
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
     service_time: ServiceTimeTerms | None = None
+    actual_start_date: date | None = None
+    owner_known: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +230,9 @@ class CollisionResult:
     owner: str
     source_identity: str
     detail: str
+    actual_start_date: date | None = None
+    service_start_at: datetime | None = None
+    service_end_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -726,8 +735,8 @@ def _collisions(
         for collision_date in _iter_dates(start, end):
             collisions.append(
                 CollisionResult(
-                    CollisionKind.ASSIGNMENT_INTERVAL,
-                    CollisionSeverity.REQUIRES_REVIEW,
+                    CollisionKind.HISTORICAL_RESERVATION if assignment.owner_known and not (facts.case.actual_start_date and assignment.actual_start_date) else CollisionKind.ASSIGNMENT_INTERVAL,
+                    CollisionSeverity.ADVISORY if assignment.owner_known and not (facts.case.actual_start_date and assignment.actual_start_date) else CollisionSeverity.REQUIRES_REVIEW,
                     staff_id,
                     assignment.case_no,
                     assignment.assignment_id,
@@ -738,6 +747,7 @@ def _collisions(
                     "Scheduling",
                     f"assignment:{assignment.assignment_id}",
                     "其他案件指派缺少可核對的逐日班次",
+                    actual_start_date=assignment.actual_start_date,
                 )
             )
 
@@ -765,12 +775,21 @@ def _collisions(
             if schedule.assignment_id is None
             else CollisionKind.OFFICIAL_SCHEDULE
         )
-        collisions.extend(_shift_collisions(
+        shift_collisions = _shift_collisions(
             facts.case.service_time, period, schedule.work_date,
             schedule.service_time if schedule.assignment_id is not None else None,
             kind, staff_id, schedule.case_no, schedule.assignment_id,
             schedule.schedule_id, f"staff_schedule:{schedule.schedule_id}",
-        ))
+        )
+        for item in shift_collisions:
+            tentative = schedule.owner_known and schedule.assignment_id is not None and not (facts.case.actual_start_date and schedule.actual_start_date)
+            interval = schedule.service_time.service_interval(schedule.work_date) if schedule.service_time else None
+            collisions.append(replace(item,
+                kind=CollisionKind.HISTORICAL_RESERVATION if tentative else item.kind,
+                severity=CollisionSeverity.ADVISORY if tentative else item.severity,
+                actual_start_date=schedule.actual_start_date,
+                service_start_at=interval[0] if interval else None,
+                service_end_at=interval[1] if interval else None))
 
     for buffer in facts.buffers:
         if buffer.staff_id != staff_id or buffer.case_no == case_no:
@@ -817,7 +836,10 @@ def _collisions(
                 )
             )
             continue
-        collisions.extend(_shift_collisions(
+        interval = lock.service_time.service_interval(lock.lock_date) if lock.service_time else None
+        collisions.extend(replace(item, severity=CollisionSeverity.ADVISORY,
+            service_start_at=interval[0] if interval else None,
+            service_end_at=interval[1] if interval else None) for item in _shift_collisions(
             facts.case.service_time, period, lock.lock_date, lock.service_time,
             CollisionKind.WAITING_DEPOSIT_LOCK, staff_id, lock.case_no, None,
             lock.lock_day_id, f"caregiver_availability_lock_days:{lock.lock_day_id}",
@@ -868,16 +890,22 @@ def _collisions(
         occupied = reservation.occupancy
         if occupied.staff_id != staff_id or occupied.source_case_no == facts.case.case_no:
             continue
-        overlap = _overlap(occupied.occupancy_date - timedelta(days=1), occupied.block_end, period)
+        overlap = _overlap(occupied.occupancy_date - timedelta(days=1), occupied.block_end + timedelta(days=1), period)
         if overlap is None:
             continue
         for collision_date in _iter_dates(*overlap):
             if service_shift_may_overlap(collision_date, facts.case.service_time, occupied):
                 collisions.append(CollisionResult(
-                    CollisionKind.HISTORICAL_RESERVATION, CollisionSeverity.HARD_BLOCK,
+                    CollisionKind.HISTORICAL_RESERVATION,
+                    CollisionSeverity.ADVISORY if occupied.reservation_only else (
+                        CollisionSeverity.HARD_BLOCK if occupied.service_time and facts.case.service_time else CollisionSeverity.REQUIRES_REVIEW),
                     staff_id, occupied.source_case_no, None, reservation.source_id, collision_date,
                     occupied.occupancy_date, occupied.block_end, "Scheduling",
-                    f"historical_order_adoption_receipts:{reservation.source_id}", "其他案件已保留歷史預定檔期",
+                    f"historical_order_adoption_receipts:{reservation.source_id}",
+                    "服務時段待確認" if not (occupied.service_time and facts.case.service_time) else "其他案件已保留歷史預定檔期",
+                      actual_start_date=occupied.actual_start_date,
+                      service_start_at=occupied.service_time.service_interval(occupied.occupancy_date)[0] if occupied.service_time else None,
+                      service_end_at=occupied.service_time.service_interval(occupied.block_end)[1] if occupied.service_time else None,
                 ))
 
     service_dates = frozenset(facts.case.confirmed_service_dates)

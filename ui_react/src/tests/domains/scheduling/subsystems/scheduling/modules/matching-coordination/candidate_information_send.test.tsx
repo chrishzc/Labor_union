@@ -123,12 +123,12 @@ it('shows current reservations before LINE inquiry or manual willingness and ref
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
 
   const card = within(await screen.findByRole('article'));
-  fireEvent.click(await card.findByText('查看衝突日期與原因'));
-  expect(card.getByText('其他案件等待訂金保留（黃色鎖）：2026-10-01')).toBeInTheDocument();
+  fireEvent.click(await card.findByText('查看檔期日期與原因'));
+  expect(card.getByText('其他案件等待訂金保留，僅提醒：2026-10-01（服務時段待確認）')).toBeInTheDocument();
   expect(card.queryByText(/月嫂不可服務/)).not.toBeInTheDocument();
   fireEvent.click(card.getByRole('button', { name: '手動記錄接案意願（測試月嫂）' }));
   expect(card.getByRole('radio', { name: '願意承接' })).toBeEnabled();
-  expect(card.queryByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).not.toBeInTheDocument();
+  expect(card.queryByText('其他案件等待訂金保留，僅提醒。')).not.toBeInTheDocument();
   await openSharedPreview();
   expect(card.getByRole('button', { name: '確認寄送（測試月嫂）' })).toBeEnabled();
   expect(client.sendInformation).not.toHaveBeenCalled();
@@ -142,7 +142,7 @@ it('shows current reservations before LINE inquiry or manual willingness and ref
   expect(card.getByText('七天緩衝期重疊，僅提醒：2026-10-03')).toBeInTheDocument();
   expect(card.queryByText('七天緩衝期重疊，僅提醒', { exact: true })).not.toBeInTheDocument();
   expect(card.getByText('有檔期衝突，待公會協調')).toBeVisible();
-  expect(card.queryByText('其他案件有等待訂金保留，仍可詢問及選定推薦月嫂。')).not.toBeInTheDocument();
+  expect(card.queryByText('其他案件等待訂金保留，僅提醒。')).not.toBeInTheDocument();
 });
 
 it('offers a retry when the current availability cannot be checked', async () => {

@@ -46,7 +46,7 @@ class MySqlMatchingRecommendationRepository:
             facts, _ = load_occupancy_snapshot(cursor, tuple(int(row["id"]) for row in staff), case_no, lock=False)
             occupied = {}
             for fact in facts:
-                if fact.source_case_no == case_no:
+                if fact.source_case_no == case_no or fact.reservation_only:
                     continue
                 occupied.setdefault(fact.staff_id, set()).update(
                     day for day in service_dates if service_shift_may_overlap(day, service_time, fact)

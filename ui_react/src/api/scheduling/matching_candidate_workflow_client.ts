@@ -1,4 +1,4 @@
-import { taipeiDate } from '../../shared/taipeiTime';
+import { formatTaipeiDateTime, taipeiDate } from '../../shared/taipeiTime';
 /**
  * File: matching_candidate_workflow_client.ts
  * Description: 查詢單月嫂或多月嫂候選，並以既有正式 route 建立一至四段媒合方案。
@@ -6,7 +6,7 @@ import { taipeiDate } from '../../shared/taipeiTime';
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
-import { transport, type RequestOptions } from '../shared/transport';
+import { GlobalTypedErrorSchema, transport, type RequestOptions } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 
 const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -64,6 +64,38 @@ const CandidateOptionSchema = z.strictObject({
     preferred_service_days: MatchingConditionSchema,
   }),
 });
+const OccupancyConflictSchema = z.strictObject({
+  segment_index: z.number().int().nonnegative(),
+  staff_id: z.number().int().positive().nullable(),
+  work_date: IsoDateSchema,
+  reason_code: z.string().min(1),
+  case_no: z.string().min(1).max(50).nullish(),
+  actual_start_date: IsoDateSchema.nullish(),
+  service_start_at: z.iso.datetime({ offset: true }).nullish(),
+  service_end_at: z.iso.datetime({ offset: true }).nullish(),
+});
+const MatchingPlanConflictResponseSchema = z.strictObject({
+  detail: z.strictObject({ error: GlobalTypedErrorSchema, occupancy_conflicts: z.array(OccupancyConflictSchema) }),
+});
+
+function matchingPlanConflict(error: unknown): unknown {
+  if (!(error instanceof ApiHttpError) || error.status !== 409) return error;
+  const decoded = MatchingPlanConflictResponseSchema.safeParse(error.raw);
+  if (!decoded.success || decoded.data.detail.error.code !== 'matching_plan_staff_occupancy_conflict') return error;
+  const { error: typedError, occupancy_conflicts } = decoded.data.detail;
+  const evidence = [...new Set(occupancy_conflicts.flatMap(conflict => {
+    if (!conflict.case_no) return [];
+    const time = conflict.service_start_at && conflict.service_end_at
+      ? `${formatTaipeiDateTime(conflict.service_start_at)} 至 ${formatTaipeiDateTime(conflict.service_end_at)}`
+      : `${conflict.work_date}（服務時段待確認）`;
+    return [`案件 ${conflict.case_no}，${time}`];
+  }))];
+  const message = evidence.length
+    ? `${typedError.message} 衝突案件與服務時段：${evidence.slice(0, 6).join('；')}${evidence.length > 6 ? `；另有 ${evidence.length - 6} 筆` : ''}。`
+    : typedError.message;
+  return new ApiHttpError(error.status, typedError.code, message, typedError.retryable, error.raw);
+}
+
 const AvailabilitySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   planned_start_date: IsoDateSchema,
@@ -72,12 +104,7 @@ const AvailabilitySchema = z.strictObject({
   complete_combinations: z.array(z.array(SegmentCandidateSchema)),
   segment_candidates: z.array(SegmentCandidateSchema),
   candidate_options: z.array(CandidateOptionSchema),
-  conflicts: z.array(z.strictObject({
-    segment_index: z.number().int().nonnegative(),
-    staff_id: z.number().int().positive().nullable(),
-    work_date: IsoDateSchema,
-    reason_code: z.string().min(1),
-  })),
+  conflicts: z.array(OccupancyConflictSchema),
 });
 const FormalPlanSchema = z.strictObject({
   plan_id: z.number().int().positive(),
@@ -270,7 +297,7 @@ export const matchingCandidateWorkflowClient = {
           event_key: canonical.key,
         },
         authOptions(),
-      ),
+      ).catch(error => { throw matchingPlanConflict(error); }),
       'FORMAL_MATCHING_PLAN_CREATE_FAILED',
     );
     return assertPlanReceiptIdentity(canonical, data);

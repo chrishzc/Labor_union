@@ -347,7 +347,7 @@ class MySqlOrderActualStartRepository:
                 for row in rows
             ):
                 raise ValueError("actual_start_staff_ineligible_blocked")
-            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
+            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock, actual_start_date=candidate.new_actual_start_date)
             service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
         if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
             raise ValueError("actual_start_staff_schedule_conflict")
