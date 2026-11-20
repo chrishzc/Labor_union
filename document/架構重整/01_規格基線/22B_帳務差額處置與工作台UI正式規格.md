@@ -50,7 +50,7 @@
 - **同案多筆合計核對**：同案辨識之多筆銀行入款（例如分次補齊 `9,000 + 1,000 = 10,000`）於抽屜並列各筆原始明細與合計，合計相符即直接核銷，不得僅因單筆不同或有多期待收而誤報金額錯誤、疑似重匯或強設前置確認。
   - **正例**：A 案有一筆待收 10,000 元，銀行的 9,000 元和 1,000 元入款都已確認屬於 A 案。承辦人在 A 案抽屜可看到兩筆原始明細與 10,000 元合計。合計符合該期應收，可按精確核銷處理，不因單筆不足而另列差額。
   - **反例**：若 1,000 元確定只屬於 B 案，不能併入 A 案的 9,000 元，不得把它們合算為 A 案的 10,000 元精確核銷。
-- **永豐客戶存入 3 階段與原因碼對齊**：依 [Client Finance §3.5](04_Client_Finance_Domain.md#35-專屬虛擬帳號與單案修改99781699va-0106) 依序驗證案件 → 金額唯一配對 → 交易日與到期日年月比對；當月多個候選統一回報 `sinopac_client_receipt_multiple_month_candidates`；缺日期回 `due_date_missing`／`bank_transaction_date_missing`；少收／超收沿 `client_receipt_underpaid`／`client_receipt_overpaid`（精確與部分收款不以退款帳戶為前置）。
+- **永豐客戶存入 3 階段與原因碼對齊**：依 [Client Finance §3.5](04_Client_Finance_Domain.md#35-專屬虛擬帳號與單案修改99781699va-0106) 先用 14 碼銷帳編號定位唯一案件。若只有一筆未清期款的金額與入款完全相同，直接精確核銷；若無法依金額定位，才比對交易日與到期日的年月。同月唯一等額時自動核銷；同月唯一但不同額時呈現差額。跨月、仍有多個候選或缺日期時留待核對，並於案件抽屜呈現，畫面標籤與下一步依 §3.4。當月多個候選統一回報 `sinopac_client_receipt_multiple_month_candidates`；缺日期回 `due_date_missing`／`bank_transaction_date_missing`；少收／超收沿 `client_receipt_underpaid`／`client_receipt_overpaid`（精確與部分收款不以退款帳戶為前置）。
 
 <a id="client-receipt-scope-and-case-settlement"></a>
 
