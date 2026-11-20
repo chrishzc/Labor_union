@@ -87,6 +87,20 @@ API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.p
   target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^weekly-report-date-selection'
 ```
 
+### 案件受理總表的週資料、月小計與年度累計 ^reporting-weekly-monthly-rollup
+
+[需求書 §2.2「案件受理總表的月小計歸屬」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-monthly-rollup) 定義時間口徑與顯示順序。`WeeklyOperationsReportQuery.query` 先以起迄日取案件，再依 `week_start_date` 的年／月建立 `monthly_subtotals`；`weekly_metrics` 以相同的星期一鍵對應，週指標不依案件筆數或選取天數複製或攤分。`annual_totals` 的年度案件數另依案件實際日期查該曆年 1 月 1 日到查詢迄日（上限為該年 12 月 31 日），不從月小計回加。
+
+`OperationsReportsWorkspace.tsx` 與 `weekly_operations_report_export.py` 消費這兩組統計，年度累計先於週資料，月小計在相同月份最後一組週資料後；畫面與 XLSX 不各自重算歸屬。
+
+驗證定位：`tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_weekly_operations_report_totals.py` 的 `test_partial_date_selection_keeps_case_filter_but_never_splits_week_metrics` 與 `test_early_january_week_remains_in_previous_december` 覆蓋查詢與歸屬；`test_cross_year_months_follow_monday_and_annual_cases_follow_calendar_year` 另核對 XLSX 列順序。這些是合成資料的查詢與活頁簿測試，不是 React 或真實資料庫驗收。
+
+```yaml archmap-impact
+- kind: implements_requirement
+  source: reporting-weekly-monthly-rollup
+  target: 'document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#^weekly-monthly-rollup'
+```
+
 ### 週報取消原因的讀取與輸出 ^reporting-weekly-cancel-reason
 
 [需求書 §2.2「案件受理總表的取消原因」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#weekly-case-cancel-reason) 定義顯示條件。由 `weekly_operations_report_query_adapter.py` 依該案目前生效的 cancellation control 找到 Orders 取消事件；現行 adapter 以 `COALESCE(cancellation.reason, o.cancel_reason)` 讀取可用原因。接著 `WeeklyOperationsReportQuery._case_row` 只在訂單狀態為「訂單取消」時保留值，其他返回 `None`。這是週報明細投影，不是待辦看板的統計欄位。
