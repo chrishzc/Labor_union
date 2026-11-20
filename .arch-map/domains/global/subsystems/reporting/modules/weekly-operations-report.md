@@ -40,8 +40,8 @@
 ## Contracts
 - HCM 審核不符合優先於訂單狀況，六項資格欄位每筆至多一個；資格來源缺漏保留待確認。確認符合並歸一般市民的案件只計一般市民符合；原住民及其來源別名（`原民`、`原住民市民`）依審查結果計入原住民符合或原住民不符合；實為非市民誤報、原 HCM 作廢者依 `QUAL-STAT-03` 維持計入一般市民不符合且不轉換成 `A` 案。週報畫面、同候選 Excel 與待辦看板共用分類。
 - 2026-11-04 核准搬移：營運畫面只留案件／工時兩分頁，補助統計及季度／年度移至 Finance 唯一入口；原三 worksheet、typed API／owner formula／XLSX 不變。案件操作仍使用 Finance 原抽屜，原查詢條件與來源位置保留；不維護第二套 CSV。
-- 週報 React／XLSX 案件受理總表使用 A:Z 26 欄雙層表頭，取消原因讀取 Orders 生效的取消事件或歷史訂單資料。`補助案件統計表` 支援三軌獨立分區（`general`、`subsidized`、`indigenous`）與頂端六列兩年度統計。看板 summary 與 `WorkbenchCaseStatistics` 同步呈現在三大資格群組共六欄與模板四欄計數；非市民仍獨立顯示六種狀態。正式欄位裁決：`document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §2–§5。
-- 非市民依正式身分／綁定費率規則分類，排除於原受理統計及同 candidate XLSX；獨立 `case_category=non_citizen` 統計以臺灣時間的正式建案日歸屬月／季／年，提供完整年度累計與六種狀態。LIFF 採核准時間，後台手動案採建案快照。未核准待審案與無可追溯建案時間的舊案不計入。
+- 週報 React／XLSX 案件受理總表使用 A:Z 26 欄雙層表頭，取消原因讀取 Orders 生效的取消事件或歷史訂單資料。`補助案件統計表` 支援三軌獨立分區（`general`、`subsidized`、`indigenous`）與頂端六列兩年度統計。看板 summary 與 `WorkbenchCaseStatistics` 同步呈現在三大資格群組共六欄與模板四欄計數，非市民區塊獨立呈現。正式欄位裁決：`document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md` §2–§5。
+- 非市民依正式身分／綁定費率規則分類，排除於原受理統計及同 candidate XLSX；獨立 `case_category=non_citizen` 統計以臺灣時間的正式建案日歸屬月／季／年，提供完整年度累計。LIFF 採核准時間，後台手動案採建案快照。未核准待審案與無可追溯建案時間的舊案不計入。
 - Reporting adapter 借用 `infrastructure/mysql/case_category_query.py` 的唯讀分類 SQL；身分根值與費率規則仍屬原 owner。Reports／看板共用 `ui_react/src/components/WorkbenchCaseStatistics.tsx` 與其 CSS（Orders presentation owner）。
 - 服務工時及補助列保留原姓名，另借用同一 Staff join 的 nullable `staff_union_no`，供管理端顯示「公會編號 姓名」；報表金額、工作日、週序及既有 XLSX 欄位不變。
 - React 週報日期欄位完成輸入並 blur／Enter 後才套用查詢，編輯中的局部年份不發出跨千年查詢；沿用既有欄位與重新載入入口，套用新期間立即清除舊報表／匯出可用狀態。
@@ -51,6 +51,8 @@
 ### 營運案件分類與帳務合計 ^reporting-case-category-boundary
 
 [需求書 §5「非市民自費案件獨立統計」](../../../../../../document/架構重整/01_規格基線/34_營運報表與統計口徑正式規格.md#noncitizen-statistics-20261029) 定義營運分流。待辦看板的 `WorkbenchCaseStatistics.tsx` 經 `weekly_operations_report_query_client.ts` 呼叫 `GET /api/v1/operations-reports/case-statistics`。`api/routes/operations_reports.py` 將 `case_category` 傳到 `WeeklyOperationsReportQuery.query_case_statistics`：補助區用 `subsidy`（預設），非市民區用 `non_citizen`，Query 依類別選用各自的統計來源。
+
+API 的 `data.summary.order_status_counts` 依 `api/schemas/operations_reports.py` 定義六個狀態鍵，含「訂單完成」。`WorkbenchCaseStatistics.tsx` 的非市民區塊只依 `STATUS_LABELS` 讀取需求書 §5 指定的五個值，不把所有 API 鍵直接轉成欄位；期間件數與年度累計讀取 API 獨立欄位，不加總畫面上的狀態欄。查詢端的驗證入口是 `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/test_non_citizen_statistics.py::test_non_citizen_calendar_periods_and_full_annual_count`；它不驗證 React 欄位是否顯示。
 
 「全部案件」的跨類合計歸 Client Finance §2.3，不是上述查詢的第三種 `case_category`，也不回灌 Reporting。核對分流時，從下方 Verification 的案件統計契約測試入口追查；營運與帳務合計的正反驗收見需求書 §5。測試定位不代表已執行。
 
