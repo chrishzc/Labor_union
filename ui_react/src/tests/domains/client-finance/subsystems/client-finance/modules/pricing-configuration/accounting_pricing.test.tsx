@@ -18,7 +18,7 @@ const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: '
   impact: { covered_hours: 120, excess_hours: 40, client_amount: 14000, staff_covered_amount: 42000,
     staff_excess_amount: 14000, staff_total_amount: 56000, subsidy_amount: 42000, subsidy_return_amount: 0 } };
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { vi.resetAllMocks(); });
 
 describe('Standalone accounting parameter policy', () => {
   it('renames a legacy draft by its rule while preserving historical amounts and custom identities', async () => {
@@ -170,12 +170,78 @@ describe('Client registry case pricing section', () => {
     expect(accountingPricingClient.previewCase).not.toHaveBeenCalled();
     await screen.findByRole('button', { name: '重試原操作與回讀' });
     expect(screen.getByLabelText('客戶用盡後時薪')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '重新讀取本案參數' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試原操作與回讀' }));
     await screen.findByText('本案人工計價已儲存並確認；帳務已同步。');
     const calls = vi.mocked(accountingPricingClient.applyCase).mock.calls;
     expect(calls).toHaveLength(2);
     expect(calls[0][3]).toBe('');
-    expect(calls[0][4]).toEqual(calls[1][4]);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(committed).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['case_pricing_stale', 'case_pricing_preview_stale', 'pricing_write_conflict'])('reloads the draft after %s and saves against the latest revision', async code => {
+    const initial = { ...current, revision: 2 };
+    const latest: CasePricing = { ...initial, revision: 3, source: 'manual', terms: {
+      ...initial.terms, identity_name: '社福', payroll: { ...initial.terms.payroll, excess: 380 },
+    } };
+    let completeReload: (value: CasePricing) => void = () => {};
+    const reload = new Promise<CasePricing>(resolve => { completeReload = resolve; });
+    const queryCase = vi.mocked(accountingPricingClient.queryCase);
+    queryCase.mockResolvedValueOnce(initial).mockRejectedValueOnce(new ApiNetworkError()).mockReturnValueOnce(reload);
+    const applyCase = vi.mocked(accountingPricingClient.applyCase);
+    applyCase.mockRejectedValueOnce(new ApiHttpError(409, code, 'changed')).mockImplementationOnce(async (_case, terms) => {
+      queryCase.mockResolvedValueOnce({ ...latest, revision: 4, terms });
+      return { revision: 4 };
+    });
+    const committed = vi.fn(async () => {});
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={committed} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+
+    const rate = await screen.findByLabelText('客戶用盡後時薪');
+    const reason = screen.getByLabelText('調整原因（選填）');
+    const save = screen.getByRole('button', { name: '儲存本案調整' });
+    fireEvent.change(rate, { target: { value: '300' } });
+    fireEvent.change(reason, { target: { value: '更正費率' } });
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取本案參數' }));
+    await screen.findByText('尚有未儲存的修改，請先儲存或取消修改。');
+    expect(queryCase).toHaveBeenCalledTimes(1);
+    expect(rate).toHaveValue(300);
+
+    fireEvent.click(save);
+    await screen.findByText('計價資料已變更，請重新查詢後再儲存。');
+    expect(applyCase).toHaveBeenCalledTimes(1);
+    expect(applyCase.mock.calls[0][2]).toBe(2);
+    const reloadButton = screen.getByRole('button', { name: '重新讀取本案參數' });
+    fireEvent.click(reloadButton);
+    expect(queryCase).toHaveBeenCalledTimes(2);
+    await screen.findByText('未能讀取最新計價資料，草稿已保留。請再試一次。');
+    expect(save).toBeDisabled();
+    expect(rate).toHaveValue(300);
+    expect(reason).toHaveValue('更正費率');
+
+    fireEvent.click(reloadButton);
+    expect(queryCase).toHaveBeenCalledTimes(3);
+    fireEvent.change(rate, { target: { value: '310' } });
+    fireEvent.change(reason, { target: { value: '更正自費費率' } });
+    completeReload(latest);
+    await screen.findByText(/版本 3/);
+    expect(screen.getByRole('status')).toHaveTextContent('請核對');
+    expect(rate).toHaveValue(310);
+    expect(screen.getByLabelText('月嫂用盡後時薪')).toHaveValue(380);
+    expect(reason).toHaveValue('更正自費費率');
+    expect(applyCase).toHaveBeenCalledTimes(1);
+    expect(committed).not.toHaveBeenCalled();
+
+    fireEvent.click(save);
+    await screen.findByText('本案人工計價已儲存並確認；帳務已同步。');
+    expect(screen.getByText(/版本 4/)).toBeInTheDocument();
+    expect(applyCase).toHaveBeenCalledTimes(2);
+    const [, terms, revision, submittedReason, key] = applyCase.mock.calls[1];
+    expect(terms).toEqual({ ...latest.terms, client: { ...latest.terms.client, excess: 310 } });
+    expect(revision).toBe(3);
+    expect(submittedReason).toBe('更正自費費率');
+    expect(key).not.toBe(applyCase.mock.calls[0][4]);
+    expect(queryCase).toHaveBeenCalledTimes(4);
     expect(committed).toHaveBeenCalledTimes(1);
   });
 
@@ -248,5 +314,7 @@ describe('Client registry case pricing section', () => {
     fireEvent.click(screen.getByRole('button', { name: '儲存本案調整' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('本案缺少原始月嫂應付，請先核對歷史薪資資料。');
     expect(screen.getByLabelText('月嫂用盡後時薪')).toHaveValue(420);
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取本案參數' }));
+    expect(accountingPricingClient.queryCase).toHaveBeenCalledTimes(1);
   });
 });

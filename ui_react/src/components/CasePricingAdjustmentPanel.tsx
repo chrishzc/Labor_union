@@ -10,18 +10,35 @@ import '../pages/AccountingParametersPage.css';
 
 type Props = { caseNo: string; revision: unknown; disabled?: boolean; onCommitted: () => Promise<unknown>; onStateChange: (state: { dirty: boolean; busy: boolean }) => void };
 const sameTerms = (a: PricingTerms, b: PricingTerms) => JSON.stringify(a) === JSON.stringify(b);
+const staleMessage = '計價資料已變更，請重新查詢後再儲存。';
+
+function rebasePricingDraft(previous: PricingTerms, draft: PricingTerms, latest: PricingTerms): PricingTerms {
+  return {
+    ...latest,
+    subsidy_hours: draft.subsidy_hours === previous.subsidy_hours ? latest.subsidy_hours : draft.subsidy_hours,
+    client: {
+      covered: draft.client.covered === previous.client.covered ? latest.client.covered : draft.client.covered,
+      excess: draft.client.excess === previous.client.excess ? latest.client.excess : draft.client.excess,
+    },
+    payroll: {
+      covered: draft.payroll.covered === previous.payroll.covered ? latest.payroll.covered : draft.payroll.covered,
+      excess: draft.payroll.excess === previous.payroll.excess ? latest.payroll.excess : draft.payroll.excess,
+    },
+  };
+}
 
 export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false, onCommitted, onStateChange }: Props) {
   const [current, setCurrent] = useState<CasePricing | null>(null);
   const [draft, setDraft] = useState<PricingTerms | null>(null);
   const [reason, setReason] = useState('');
-  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'unknown' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'unknown' | 'error' | 'stale'>('loading');
   const [message, setMessage] = useState('');
   const alive = useRef(true);
   const request = useRef(0);
   const pending = useRef<{ terms: PricingTerms; revision: number; reason: string; key: string } | null>(null);
   const inFlight = useRef(false);
   const busy = status === 'saving' || status === 'unknown';
+  const needsReload = status === 'stale';
   const busyRef = useRef(busy); busyRef.current = busy;
   const dirty = !!(current && draft && (!sameTerms(current.terms, draft) || reason !== ''));
   const subsidyError = draft ? pricingTermsError(draft) : '';
@@ -30,39 +47,41 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
     { label: '補助上限', before: String(current.terms.subsidy_hours), after: String(draft.subsidy_hours) },
     ...(['client', 'payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).filter(tier => current.terms[owner][tier] !== draft[owner][tier]).map(tier => ({ label: `${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`, before: String(current.terms[owner][tier]), after: String(draft[owner][tier]) }))),
     ...(reason ? [{ label: '調整原因', before: '', after: reason }] : []),
-  ].filter(item => item.before !== item.after) : [], { busy, save: disabled ? undefined : apply, discard: reset });
+  ].filter(item => item.before !== item.after) : [], { busy, save: disabled || needsReload ? undefined : apply, discard: reset });
   useEffect(() => { onStateChange({ dirty, busy }); }, [dirty, busy, onStateChange]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; ++request.current; }; }, []);
 
-  const load = async () => {
-    if (dirtyRef.current) { setMessage('尚有未儲存的修改，請先儲存或取消修改。'); return; }
+  const load = async (previous?: PricingTerms) => {
+    if (!previous && dirtyRef.current) { setMessage('尚有未儲存的修改，請先儲存或取消修改。'); return; }
     const sequence = ++request.current;
     try {
       const value = await accountingPricingClient.queryCase(caseNo);
       if (!alive.current || sequence !== request.current) return;
-      if (dirtyRef.current) { setMessage('尚有未儲存的修改，請先儲存或取消修改。'); return; }
+      if (!previous && dirtyRef.current) { setMessage('尚有未儲存的修改，請先儲存或取消修改。'); return; }
       setCurrent(value);
-      setDraft(structuredClone(value.terms));
-      setStatus('ready'); setMessage('');
+      setDraft(old => previous && old ? rebasePricingDraft(previous, old, value.terms) : structuredClone(value.terms));
+      setStatus('ready');
+      setMessage(previous ? '已讀取最新計價資料並保留您的修改。請核對欄位後再儲存。' : '');
     } catch (error) {
       if (alive.current && sequence === request.current) {
-        setStatus('error');
-        const fallback = '本案計價資料暫時無法讀取。請先確認服務條件及帳務資料。';
+        setStatus(previous ? 'stale' : 'error');
+        const fallback = previous ? '未能讀取最新計價資料，草稿已保留。請再試一次。' : '本案計價資料暫時無法讀取。請先確認服務條件及帳務資料。';
         setMessage(error instanceof ApiHttpError ? pricingRequestError(error, fallback) : fallback);
       }
     }
   };
-  useEffect(() => { if (!busyRef.current) void load(); }, [caseNo, revision]);
+  useEffect(() => { if (!busyRef.current && !needsReload) void load(); }, [caseNo, revision]);
 
   const update = (change: Partial<PricingTerms>) => {
-    setDraft(old => old ? { ...old, ...change } : old); setMessage('');
+    setDraft(old => old ? { ...old, ...change } : old);
+    if (!needsReload) setMessage('');
   };
   function reset() {
     if (current) setDraft(structuredClone(current.terms));
-    setReason(''); setMessage('');
+    setReason(''); setMessage(needsReload ? staleMessage : '');
   }
   async function apply() {
-    if (!current || !draft || inFlight.current || disabled || (!dirty && !pending.current)) return;
+    if (!current || !draft || inFlight.current || disabled || needsReload || (!dirty && !pending.current)) return;
     if (!pending.current && (!PricingTermsSchema.safeParse(draft).success || subsidyError)) { setStatus('error'); setMessage(subsidyError || '請確認補助上限與時薪；用盡後時薪須為正整數。'); return; }
     const command = pending.current ?? { terms: structuredClone(draft), revision: current.revision, reason: reason.trim(), key: `case-pricing:${crypto.randomUUID()}` };
     pending.current = command; inFlight.current = true; ++request.current; setStatus('saving'); setMessage('');
@@ -79,14 +98,16 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
     } catch (error) {
       if (!alive.current) return;
       if (!applied && error instanceof ApiHttpError && error.status < 500) {
-        pending.current = null; setStatus('error');
-        setMessage(pricingRequestError(error, '本案調整未完成，請確認資料及權限。'));
+        pending.current = null;
+        const stale = error.status === 409 && ['case_pricing_stale', 'case_pricing_preview_stale', 'pricing_write_conflict'].includes(error.code);
+        setStatus(stale ? 'stale' : 'error');
+        setMessage(stale ? staleMessage : pricingRequestError(error, '本案調整未完成，請確認資料及權限。'));
       } else { setStatus('unknown'); setMessage('儲存或回讀結果待確認；請重試原操作，系統會沿用同一識別防止重複調整。'); }
     } finally { inFlight.current = false; }
   }
   return <section ref={unsavedRef} className="registry-editor pricing-case" aria-label="個案計價調整"><h3>個案計價調整</h3>
     <p className="pricing-notice">本案人工設定不受政策生效日或服務開始日影響。給付方式與訂金天數沿用原身分規則；變更時薪或補助上限，可能連動訂金與各期金額。</p>
-    {message && <p className="pricing-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'}>{message}</p>}
+    {message && <p className="pricing-status" role={status === 'error' || status === 'unknown' || needsReload ? 'alert' : 'status'}>{message}</p>}
     {status === 'loading' && <p role="status">正在讀取本案參數…</p>}
     {current && draft && <><p className="pricing-note">計價身分：{pricingIdentityLabel(current.terms)}；來源：{current.source === 'manual' ? '本案人工設定' : current.source === 'policy' ? '案件綁定政策' : '原案件規則'}（版本 {current.revision}）</p>
       {pricingIdentityLabel(current.terms) !== current.terms.identity_name && <p className="pricing-note">原版本名稱：{current.terms.identity_name}；本案仍依原版本的補助上限與給付規則計算。</p>}
@@ -97,8 +118,8 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
         <label className="pricing-field">調整原因（選填）<textarea maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label>
       </fieldset>
       <p className="pricing-note">月嫂給付：客戶負擔部分為服務結束月次月 15 日；直接補助部分為次次月 15 日。兩者均不以實際入帳月起算。既有收付款與已簽文件保留原紀錄。</p>
-      <div className="pricing-actions"><button type="button" disabled={busy || disabled} onClick={reset}>取消修改</button><button type="button" className="pricing-primary" disabled={disabled || status === 'saving' || (!pending.current && (!!subsidyError || !dirty))} onClick={() => void apply()}>{status === 'saving' ? '儲存並確認中…' : pending.current ? '重試原操作與回讀' : '儲存本案調整'}</button></div>
+      <div className="pricing-actions"><button type="button" disabled={busy || disabled} onClick={reset}>取消修改</button><button type="button" className="pricing-primary" disabled={disabled || status === 'saving' || needsReload || (!pending.current && (!!subsidyError || !dirty))} onClick={() => void apply()}>{status === 'saving' ? '儲存並確認中…' : pending.current ? '重試原操作與回讀' : '儲存本案調整'}</button></div>
     </>}
-    {!busy && <button className="pricing-reload" disabled={disabled} onClick={() => void load()}>重新讀取本案參數</button>}
+    {!busy && <button className="pricing-reload" disabled={disabled} onClick={() => void load(needsReload ? current?.terms : undefined)}>重新讀取本案參數</button>}
   </section>;
 }
