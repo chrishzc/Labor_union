@@ -212,55 +212,30 @@ def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
     runtime = dotenv_values(environment_file, encoding="utf-8", interpolate=False)
     values = dotenv_values(settings_file, encoding="utf-8", interpolate=False) if (settings_file and settings_file.is_file()) else {}
 
-    # Strict NAS checks only if settings_file is present and explicitly pins NAS_EXPECTED_HOST
-    is_strict_nas = bool(settings_file and settings_file.is_file() and values.get("NAS_EXPECTED_HOST"))
     receipt_target_pinned = bool(
-        is_strict_nas and values.get("NAS_EXPECTED_PORT")
+        values.get("NAS_EXPECTED_HOST") == runtime.get("DB_HOST")
+        and values.get("NAS_EXPECTED_PORT") == runtime.get("DB_PORT")
         and all(runtime.get(name) for name in ("DB_HOST", "DB_PORT", "DB_DATABASE"))
     )
-    if is_strict_nas:
-        require(values.get("NAS_MAINTENANCE_ENABLED") == "1", "NAS 維護尚未啟用，未連線或變更資料庫。")
-        require((runtime.get("DEPLOYMENT_PROFILE") or "").lower() != "nas",
-                "此工具供電腦執行程式的部署使用；舊 NAS 多帳號部署請由原維護工具處理。")
 
     host = (runtime.get("DB_HOST") or "127.0.0.1").strip()
     require(host, "請在 .env 設定 DB_HOST。")
 
-    if is_strict_nas:
-        try:
-            address = ipaddress.ip_address(host.strip("[]"))
-            require(not address.is_loopback and not address.is_unspecified, "這是 NAS 專用工具，不能操作本機開發資料庫。")
-        except ValueError:
-            pass
-        require(host and host.casefold().rstrip(".") not in {"localhost", "127.0.0.1", "::1", "0.0.0.0", "::"},
-                "這是 NAS 專用工具，不能操作本機開發資料庫。")
-        require(host == values.get("NAS_EXPECTED_HOST"), "NAS 位址與已登記的維護目標不同，已停止。")
-
     port = int(runtime.get("DB_PORT") or "3306")
     require(1 <= port <= 65535, "DB_PORT 必須介於 1 到 65535。")
-    if is_strict_nas and values.get("NAS_EXPECTED_PORT"):
-        require(port == int(values.get("NAS_EXPECTED_PORT")), "NAS 連線埠與維護目標不同。")
 
     database = (runtime.get("DB_DATABASE") or "union_db").strip()
     require(IDENTIFIER.fullmatch(database), "不是有效的資料庫名稱。")
-    if is_strict_nas:
-        require(database == "union_db" or database.startswith("lu_nas_"), "不是核准的 NAS 業務資料庫。")
-
-    if is_strict_nas:
-        for key in ("CONTROLLED_FILE_STORAGE_ROOT", *(key for key in runtime if key.startswith("DB_"))):
-            require(key not in os.environ or os.environ[key] == runtime.get(key), "目前執行環境與設定檔不同，已停止，請維護人員確認。")
-        required = ("NAS_BACKUP_USER", "NAS_BACKUP_PASSWORD", "NAS_MAINTENANCE_USER", "NAS_MAINTENANCE_PASSWORD")
-        require(all(values.get(key) for key in required), "缺少備份或升級維護帳號，請維護人員設定。")
 
     default_user = runtime.get("DB_USER") or "root"
     default_password = runtime.get("DB_PASSWORD") or ""
     values.setdefault("NAS_MAINTENANCE_ENABLED", "1")
     values.setdefault("NAS_EXPECTED_HOST", host)
     values.setdefault("NAS_EXPECTED_PORT", str(port))
-    values.setdefault("NAS_BACKUP_USER", values.get("NAS_MAINTENANCE_USER") or default_user)
-    values.setdefault("NAS_BACKUP_PASSWORD", values.get("NAS_MAINTENANCE_PASSWORD") or default_password)
-    values.setdefault("NAS_MAINTENANCE_USER", default_user)
-    values.setdefault("NAS_MAINTENANCE_PASSWORD", default_password)
+    values["NAS_MAINTENANCE_USER"] = values.get("NAS_MAINTENANCE_USER") or default_user
+    values["NAS_MAINTENANCE_PASSWORD"] = values.get("NAS_MAINTENANCE_PASSWORD") or default_password
+    values["NAS_BACKUP_USER"] = values.get("NAS_BACKUP_USER") or values["NAS_MAINTENANCE_USER"]
+    values["NAS_BACKUP_PASSWORD"] = values.get("NAS_BACKUP_PASSWORD") or values["NAS_MAINTENANCE_PASSWORD"]
     require(values.get("NAS_MAINTENANCE_USER"), "請在 .env 設定 DB_USER。")
 
     mode = (runtime.get("DB_SSL_MODE") or "disabled").lower()
@@ -287,10 +262,12 @@ def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
             storage_root = environment_file.parent / storage_root
     else:
         storage_root = ROOT / "backups"
-    if is_strict_nas:
-        require(storage_value, "請在 .env 設定 CONTROLLED_FILE_STORAGE_ROOT；不會改存本機。")
-        require(is_nas_destination(storage_root), "正式備份的 CONTROLLED_FILE_STORAGE_ROOT 必須是 NAS 共用資料夾的完整 UNC 路徑，不能使用本機磁碟。")
     backup_dir = storage_root / BACKUP_FOLDER
+    explicit_backup = (runtime.get("NAS_BACKUP_DIR") or values.get("NAS_BACKUP_DIR") or "").strip()
+    if explicit_backup:
+        backup_dir = Path(explicit_backup)
+        if not backup_dir.is_absolute():
+            backup_dir = environment_file.parent / backup_dir
     return {"host": host, "port": port, "database": database, "tls": tls, "tls_files": files,
             "ssl_mode": {"disabled": "DISABLED", "verify_ca": "VERIFY_CA", "verify_identity": "VERIFY_IDENTITY"}[mode],
             "environment_file": environment_file, "settings_file": settings_file or SETTINGS,
@@ -312,9 +289,6 @@ def is_nas_destination(path):
 
 
 def is_nas_maintenance_target(settings):
-    if (settings.get("settings_file", Path()).is_file()
-            and settings.get("values", {}).get("NAS_EXPECTED_HOST")):
-        return True
     host = settings["host"].casefold().rstrip(".")
     try:
         return not ipaddress.ip_address(host.strip("[]")).is_loopback
@@ -324,28 +298,12 @@ def is_nas_maintenance_target(settings):
 
 def destination_ready(settings, *, writable=False, create=False):
     root = settings["backup_root"]
-    requires_nas_storage = is_nas_maintenance_target(settings)
-    if requires_nas_storage:
-        require(is_nas_destination(root), "備份位置不是正式 NAS 共用資料夾，已停止；不會改存本機。")
     require(not root.is_symlink() and not root.is_junction(), "NAS 備份根目錄不能是符號連結或本機轉接點。")
     if writable or create:
-        parent = root.parent
-        if requires_nas_storage:
-            require(root.name == BACKUP_FOLDER and is_nas_destination(parent), "NAS 備份區目前無法讀取，請確認 NAS 根目錄設定。")
-            require(not parent.is_symlink() and not parent.is_junction(), "NAS 根目錄不能是符號連結或本機轉接點。")
-            require(FileSystemControlledFileStorage(parent).readiness().ready,
-                    "NAS 根目錄目前無法讀取，請確認 NAS 連線及帳號權限；不會自動建立共用根目錄。")
-            try:
-                from infrastructure.file.storage_layout import StorageLayoutError, ensure_storage_layout
-                ensure_storage_layout(parent)
-            except StorageLayoutError as error:
-                raise MaintenanceBlocked(str(error)) from None
-            except OSError:
-                raise MaintenanceBlocked("無法建立 NAS 備份資料夾，請確認執行帳號的新增資料夾權限。") from None
-            require(not root.is_symlink() and not root.is_junction(), "NAS 備份根目錄不能是符號連結或本機轉接點。")
-        else:
-            parent.mkdir(parents=True, exist_ok=True)
+        try:
             root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise MaintenanceBlocked("無法建立備份資料夾，請確認位置及執行帳號的新增資料夾權限。") from None
     readiness = FileSystemControlledFileStorage(root).readiness()
     require(readiness.ready, "NAS 備份區目前無法讀取，請確認 NAS 連線及帳號權限。")
     if writable:
@@ -874,9 +832,6 @@ def upgrade(settings):
         return directory
 
     require(has_tools, "安全升級需要 mysql 與 mysqldump。")
-    if is_nas_target:
-        require(is_nas_destination(settings["backup_root"]),
-                "備份位置不是正式 NAS 共用資料夾，已停止；不會改存本機。")
     source = settings["database"]
     read = reader(settings)
     candidate = new_candidate("upgrade")
@@ -1160,7 +1115,7 @@ def _retention_path(root, path):
     """Resolve the exact ZIP within its canonical month before any removal."""
     root, path = Path(root), Path(path)
     parsed = _backup_kind_and_stamp(path)
-    require(root.name == BACKUP_FOLDER and parsed is not None and parsed[0] == "zip"
+    require(parsed is not None and parsed[0] == "zip"
             and path.parent.parent == root and path.parent.name == parsed[1][:4] + "-" + parsed[1][4:6],
             "滾動保存範圍無法確認，未清理備份。")
     require(not any(node.is_symlink() or node.is_junction() for node in (path, *path.parents)),
@@ -1253,7 +1208,7 @@ def record_backup_result(settings, status, *, message=None, created_at=None):
 
 def backup_status():
     result = {"enabled": False, "time": "18:00", "version": 0, "last_backup": None, "last_result": None,
-              "configured": False, "storage_ready": False, "storage_message": "正式 NAS 備份位置尚未設定。",
+              "configured": False, "storage_ready": False, "storage_message": "備份位置尚未設定。",
               "disaster_recovery_ready": False}
     if SCHEDULE.is_file():
         saved = json.loads(SCHEDULE.read_text(encoding="utf-8"))
@@ -1271,7 +1226,7 @@ def backup_status():
         try:
             destination_ready(settings)
             result["storage_ready"] = True
-            result["storage_message"] = "NAS 備份區目前可讀取；備份時會再驗證寫入。"
+            result["storage_message"] = "備份區目前可讀取；備份時會再驗證寫入。"
             latest = next(available_backups(settings), None)
             if latest:
                 result["last_backup"] = latest[1]["created_at"]
@@ -1405,8 +1360,7 @@ def main(argv=None):
         if args.mode == "protect-account-receipts":
             require_account_receipt_conversion_target(settings)
         if args.dry_run:
-            is_strict_nas = settings.get("settings_file", Path()).is_file() and settings.get("values", {}).get("NAS_EXPECTED_HOST")
-            if is_strict_nas and args.mode != "protect-account-receipts":
+            if args.mode != "protect-account-receipts":
                 for executable in (("mysqldump",) if args.mode == "backup" else ("mysql", "mysqldump")):
                     reader(settings).client_prefix(executable)
             print("設定與工具檢查通過；未連線、未變更資料庫。")
@@ -1443,11 +1397,7 @@ def main(argv=None):
                 print("已取消。")
                 return 0
         if args.mode in {"upgrade", "restore"}:
-            print("請先關閉工會系統與背景服務，並確認所有使用者已停止操作。")
-            answer = input("已停止服務且要繼續，請輸入「確認」或「Y」：").strip().strip("\ufeff").casefold()
-            if answer not in {"確認", "y", "yes", "1"}:
-                print("已取消，資料庫不變。")
-                return 0
+            print("開始內部資料庫維護，請保持工會系統與背景服務停止。")
         config = reader(settings) if args.mode == "backup" else writer(settings)
         selected_backup = None
         if args.mode == "restore":

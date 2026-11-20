@@ -38,17 +38,17 @@
 
 ## 5. Windows 三大維護入口與每日 NAS SQL 備份（`nas_database_maintenance.py`）
 
-- **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 僅執行 Docker MySQL 與共用檔案儲存；**三項入口一律透過加密 TLS MySQL 連線與受控 NAS 路徑執行，絕不啟用 SSH、遠端修改容器設定或放寬 `.env` 保護**。
+- **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 執行 Docker MySQL 與共用檔案儲存。維護入口沿用設定中的 MySQL TLS 模式，不啟用 SSH 或遠端修改容器設定，保留 `.env` 的存取權限與切換一致性檢查。備份、升級及復原的備份位置均可使用本機磁碟、映射磁碟或網路共用。
 - **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7／8 偵測同一 installation 尚有受管 runtime 運作時即停止並要求先停止服務。
 - `Windows管理.bat` 選項 `11 管理 root 帳號` 見 [Access Control 的 Windows 主機離線管理](17_External_Integration_LINE_Access正式規格.md#34-windows-主機離線管理-root-帳號)。
-- **設定邊界**：`.env.nas-maintenance` 提供固定 NAS host／port 時，沿用 opt-in、拒絕 `localhost`／開發庫及 process env override 的檢查。缺少此檔案不改變遠端升級流程。依 `.env` 的主機判定遠端 NAS，選項 7 仍執行備份與副本升級，不使用本機直連快速升級。`--dry-run` 零連線零寫入；遠端備份儲存路徑唯一取自 `.env` `CONTROLLED_FILE_STORAGE_ROOT` 下的 `05_資料庫冷備份 (db_backups)`，僅接受 NAS UNC 且禁止 symlink／junction。
+- **設定邊界**：選項 6、7、8 為內部維護入口，以指定 `.env` 的實際主機、連接埠及資料庫為準，不限制維護啟用旗標、部署名稱、固定目標或庫名前綴，也不因程序環境變數與檔案不同而阻擋。程序中的連線覆寫不取代指定檔案。未另填維護帳密時沿用 `.env` 的原帳密；明確提供的維護帳密仍可使用。備份目的目錄優先使用 `.env` 的 `NAS_BACKUP_DIR`，其次使用選填維護設定檔的同名值；未指定時使用 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)`，根目錄未設定則使用專案 `backups/05_資料庫冷備份 (db_backups)`。允許本機、映射磁碟或 UNC 路徑，寫入時可建立所需目錄，不要求預建 NAS 根目錄。升級及復原顯示停機提醒，不再要求額外輸入確認。`--dry-run` 零連線零寫入；路徑不得越界或經 symlink／junction，寫入前仍須通過可讀寫檢查。遠端升級持續使用備份與新副本流程，不使用原庫直連快速升級。
 - **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 與正式遠端 NAS 共用保留資料的副本預檢。預檢列出待套用的遷移檔案，再備份、建立副本並升級；直連升級回條僅用於直連升級。若來源已通過正常啟動使用的現行版本檢查，結束而不建立備份或副本。副本通過相同的啟動版本檢查後才可切換。此部署沿用該安裝的測試備份位置。
 - **1080 直連中斷的副本恢復**：既有原庫若因直連 DDL 逾時停在 1080 的已驗證前綴，選項 7 只讀核對原 `fast_additive` journal、升級前備份、資料指紋及目前完整結構。僅 hash-bound 的 canonical 前綴可進入副本恢復；修復 DDL 由原 runner 在新副本執行，原庫與原紀錄不改寫。缺少備份、紀錄或結構不符，以及 DDL 結果未明時，停止且保留現況，不在原庫盲目續跑。
 
 | 維護操作 | 核心契約與失敗保護 |
 |---|---|
 | **每日／手動 SQL 備份** | `mysqldump --single-transaction --quick` 串流輸出至 `_partial/` 暫存 `.sql.gz`（含 InnoDB SQL、views、routines、triggers、events，禁止期間執行 DDL），通過 UTF-8、SQL 尾註、schema 一致與寫後讀回檢核後，打包成單一 `union_db_YYYYMMDD_HHMMSS.zip`（內含 `.sql.gz`、`.sql.gz.sha256` 與成功紀錄 `.json`）原子發布至 `YYYY-MM/`（不再另寫 `_receipts/`）；寫入前驗證 `write/rename/readback probe` |
-| **安全資料升級（Upgrade）** | 人工停機確認 → zero-write canonical plan → 完整備份 → 建立全新 `lu_nas_upgrade_*` schema 執行 `restore → schema／backfill → verify → switch`（已 exact 物件共用入場快照，最後完整 fresh-read 不省略）→ 僅等量授予原雙帳號 schema 權限並實測原 credential 登入 |
+| **安全資料升級（Upgrade）** | 顯示停機提醒，無額外輸入確認 → zero-write canonical plan → 完整備份 → 建立全新 `lu_nas_upgrade_*` schema 執行 `restore → schema／backfill → verify → switch`（已 exact 物件共用入場快照，最後完整 fresh-read 不省略）→ 僅等量授予原雙帳號 schema 權限並實測原 credential 登入 |
 | **備份復原（Restore）** | 由 NAS 專區或手動單選無 symlink `.zip`（或向下相容選取保留完整 `.sha256` 與 `_receipts/` 之既有 `.sql.gz` 備份組）檔案（非預設路徑可叫用 Windows 原生選檔窗），驗封裝結構、校驗碼、gzip CRC、解壓後 digest 與 current schema 相容性後，串流匯入全新 `lu_nas_restore_*`（含 SQL events 且全域開啟 `event_scheduler` 時停機隔離處理），通過逐表 CHECK 與帳號認證檢查後方原子切換 `.env` 唯一 `DB_DATABASE`（先複製原 `.env` ACL 規則至暫存檔，digest 變動即停止；SQL 不包含實體照片與 MFA keyring，須另作災難備份） |
 | **排程與管理端 UI** | 正式機可安裝每日預設臺灣時間 `18:00` 之工作排程（僅限 backup）；管理端「稽核與系統 → 資料庫備份」（[Global Entry Point Governance](19_Global_Entry_Point_Governance.md) 核准路由 `database-backup`）顯示設定時間、最近成功／失敗狀態並提供 CAS version 控制之安全修改（409 stale；不外洩帳號／設定／SQL 或提供檔案下載） |
 
@@ -92,11 +92,11 @@ Windows 選項 7／8 切換後暫留原庫，供本次維護驗收與必要回�
    - **T**：維護人員在同一次維護中升級副本至現行版本並啟動系統。
    - **A**：執行選項 7，核對備份、來源與副本的資料、設定切換及啟動檢查，再對新庫重跑選項 7。以結構不符或啟動版本檢查失敗的副本驗證切換保護。
    - **R**：正向情境產生一份來源備份，原庫結構及資料保留，只切換 `DB_DATABASE`，且新庫通過啟動檢查。重跑不新增備份或副本。負向情境不切換資料庫。
-5. **未提供固定目標檔的遠端 NAS 升級**
-   - **S**：`.env` 指向遠端 NAS，來源停在 1079，已設定可用的 NAS UNC 備份根目錄，未提供 `.env.nas-maintenance`。
-   - **T**：維護人員透過 Windows 選項 7 安全升級資料庫。
-   - **A**：確認停止操作後執行升級；另以缺少 MySQL 工具、非 UNC 備份位置及未知結構驗證失敗處理。
-   - **R**：正向情境沿完整備份、副本升級與驗證流程，不呼叫本機原庫直連快速升級。負向情境不寫入來源、不切換設定，也不建立本機備份退路；中斷紀錄及原庫保留供核對。
+5. **內部維護不受部署政策阻擋**
+   - **S**：`.env` 指向維護資料庫，備份目的地為可寫入的本機、映射磁碟或網路目錄。選填維護檔可能缺少、停用或保有過期固定目標；可不另填維護帳密。
+   - **T**：維護人員透過 Windows 選項 6 備份、7 安全升級及 8 復原資料庫。
+   - **A**：依序執行三項維護；升級及復原前停止系統，不再次輸入確認。使用自訂備份目錄、未建立的本機備份目錄與預設備份目錄；另以缺少 MySQL 工具、無寫入權限、損壞備份及未知結構驗證失敗處理。
+   - **R**：三項維護採用指定 `.env` 的實際連線與可用帳密，政策旗標、固定目標、庫名前綴、非 UNC 路徑及殘留程序環境不阻擋。遠端升級沿完整備份、副本升級與驗證流程，復原只匯入新副本。負向情境不切換設定，不偷偷改用另一備份位置；中斷紀錄及原庫保留供核對。
 6. **1080 直連逾時後的部分結構恢復**
    - **S**：原 journal 已驗證至 1080 第 29 條 DROP，對應 trigger 尚未重建，原始備份與資料指紋完整。
    - **T**：維護人員保留原庫，將新副本恢復至現行版本。

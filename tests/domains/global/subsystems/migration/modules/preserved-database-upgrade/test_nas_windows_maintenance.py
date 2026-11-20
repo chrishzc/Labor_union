@@ -1,4 +1,4 @@
-"""NAS SQL maintenance: no local target, no source reset, verified switch only."""
+"""Internal SQL maintenance: flexible deployment, no source reset, verified switch."""
 import json
 import gzip
 import io
@@ -68,45 +68,112 @@ def unpinned_remote_settings(settings, tmp_path):
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "127.0.0.2", "::1", "0.0.0.0", "::"])
-def test_local_development_targets_rejected_before_connection(settings, host, monkeypatch):
+def test_local_development_targets_load_without_connection(settings, host, monkeypatch):
     path = settings["environment_file"]
     path.write_text(f"DB_HOST={host}\nDB_DATABASE=union_db\n", encoding="utf-8")
     monkeypatch.setattr(nas.pymysql, "connect", lambda **_: pytest.fail("no local connection allowed"))
-    with pytest.raises(nas.MaintenanceBlocked, match="本機"):
-        nas.load_settings(path, settings["settings_file"])
+    assert nas.load_settings(path, settings["settings_file"])["host"] == host
 
 
-def test_opt_in_and_target_pin_are_required(settings):
+def test_old_opt_in_and_target_pin_do_not_block_maintenance(settings):
     path = settings["settings_file"]
     original = path.read_text(encoding="utf-8")
     path.write_text(original.replace("ENABLED=1", "ENABLED=0"), encoding="utf-8")
-    with pytest.raises(nas.MaintenanceBlocked, match="尚未啟用"):
-        nas.load_settings(settings["environment_file"], path)
+    assert nas.load_settings(settings["environment_file"], path)["host"] == "nas.invalid"
     path.write_text(original.replace("EXPECTED_HOST=nas.invalid", "EXPECTED_HOST=other.invalid"), encoding="utf-8")
-    with pytest.raises(nas.MaintenanceBlocked, match="位址"):
-        nas.load_settings(settings["environment_file"], path)
+    assert nas.load_settings(settings["environment_file"], path)["host"] == "nas.invalid"
 
 
-def test_missing_shared_storage_root_has_no_local_default_or_legacy_override(settings):
+@pytest.mark.parametrize("host", ["127.0.0.1", "192.168.1.239"])
+def test_maintenance_uses_selected_env_without_deployment_gates(settings, tmp_path, monkeypatch, host):
+    runtime = settings["environment_file"]
+    runtime.write_text(f"DB_HOST={host}\nDB_PORT=3307\nDB_DATABASE=custom_business\n"
+                       "DB_USER=fixture_app\nDB_PASSWORD=fixture_runtime\nDEPLOYMENT_PROFILE=nas\n", encoding="utf-8")
+    config = settings["settings_file"]
+    config.write_text("NAS_MAINTENANCE_ENABLED=0\nNAS_EXPECTED_HOST=obsolete.invalid\n"
+                      "NAS_EXPECTED_PORT=9999\n", encoding="utf-8")
+    monkeypatch.setenv("DB_HOST", "unselected.invalid")
+    monkeypatch.setenv("DB_PASSWORD", "unselected")
+    monkeypatch.setenv("CONTROLLED_FILE_STORAGE_ROOT", "unselected-storage")
+    monkeypatch.setattr(nas, "ROOT", tmp_path)
+    loaded = nas.load_settings(runtime, config)
+    assert (loaded["host"], loaded["port"], loaded["database"]) == (host, 3307, "custom_business")
+    assert loaded["values"]["NAS_BACKUP_USER"] == loaded["values"]["NAS_MAINTENANCE_USER"] == "fixture_app"
+    assert loaded["values"]["NAS_BACKUP_PASSWORD"] == loaded["values"]["NAS_MAINTENANCE_PASSWORD"] == "fixture_runtime"
+    assert loaded["backup_root"] == tmp_path / "backups" / nas.BACKUP_FOLDER
+    assert nas.is_nas_maintenance_target(loaded) == (host != "127.0.0.1")
+    assert not loaded["backup_root"].exists()
+
+
+@pytest.mark.parametrize("explicit_location", ["runtime", "maintenance", "storage_root"])
+def test_maintenance_accepts_and_creates_selected_local_backup(settings, tmp_path, monkeypatch, explicit_location):
+    runtime = settings["environment_file"]
+    config = settings["settings_file"]
+    chosen = tmp_path / "new-local-root" / "chosen-folder"
+    content = runtime.read_text(encoding="utf-8")
+    if explicit_location == "storage_root":
+        content = content.replace(r"\\nas.invalid\fixture", str(chosen))
+        expected = chosen / nas.BACKUP_FOLDER
+    else:
+        config.write_text(config.read_text(encoding="utf-8") + f"NAS_BACKUP_DIR={chosen}\n", encoding="utf-8")
+        if explicit_location == "runtime":
+            content += f"NAS_BACKUP_DIR={chosen / 'runtime-wins'}\n"
+            chosen /= "runtime-wins"
+        expected = chosen
+    runtime.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(nas, "is_nas_destination", lambda _: False)
+    loaded = nas.load_settings(runtime, config)
+    assert loaded["backup_root"] == expected
+    assert not expected.exists()
+    assert nas.destination_ready(loaded, writable=True) == expected
+    assert expected.is_dir() and not list(expected.iterdir())
+
+
+def test_maintenance_keeps_explicit_maintenance_credentials(settings):
+    loaded = nas.load_settings(settings["environment_file"], settings["settings_file"])
+    assert loaded["values"]["NAS_BACKUP_USER"] == "fixture_reader"
+    assert loaded["values"]["NAS_MAINTENANCE_USER"] == "fixture_writer"
+    assert loaded["values"]["NAS_BACKUP_PASSWORD"] == "fixture_readonly"
+    assert loaded["values"]["NAS_MAINTENANCE_PASSWORD"] == "fixture_admin"
+
+
+def test_internal_upgrade_main_has_no_extra_confirmation_and_keeps_failure_visible(settings, tmp_path, monkeypatch):
+    runtime = settings["environment_file"]
+    runtime.write_text(runtime.read_text(encoding="utf-8") + f"NAS_BACKUP_DIR={tmp_path / 'local-upgrade'}\n", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("internal upgrade does not prompt"))
+    monkeypatch.setattr(nas, "maintenance_lock", lambda *_: nullcontext())
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: pytest.fail("no database connection"))
+    calls = []
+    def failed_upgrade(current):
+        calls.append(current["backup_root"])
+        raise nas.MaintenanceBlocked("synthetic integrity failure")
+    monkeypatch.setattr(nas, "upgrade", failed_upgrade)
+    assert nas.main(["upgrade", "--environment-file", str(runtime),
+                     "--settings-file", str(settings["settings_file"])]) == 2
+    assert calls == [tmp_path / "local-upgrade"]
+    assert (tmp_path / "local-upgrade").is_dir()
+
+
+def test_missing_shared_storage_root_accepts_explicit_backup_directory(settings):
     path = settings["environment_file"]
     path.write_text('\n'.join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith("CONTROLLED_FILE_STORAGE_ROOT=")), encoding="utf-8")
     config = settings["settings_file"]
     config.write_text(config.read_text(encoding="utf-8") + 'NAS_BACKUP_DIR=\\\\other.invalid\\legacy\\' + nas.BACKUP_FOLDER + '\n', encoding="utf-8")
-    with pytest.raises(nas.MaintenanceBlocked, match="不會改存本機"):
-        nas.load_settings(path, config)
+    loaded = nas.load_settings(path, config)
+    assert loaded["backup_root"] == Path(r"\\other.invalid\legacy") / nas.BACKUP_FOLDER
 
 
-def test_backup_destination_is_derived_only_from_runtime_storage_root(settings):
+def test_explicit_backup_destination_overrides_shared_storage_root(settings):
     config = settings["settings_file"]
     config.write_text(config.read_text(encoding="utf-8") + 'NAS_BACKUP_DIR=\\\\other.invalid\\legacy\n', encoding="utf-8")
     loaded = nas.load_settings(settings["environment_file"], config)
-    assert loaded["backup_root"] == Path(r"\\nas.invalid\fixture") / nas.BACKUP_FOLDER
+    assert loaded["backup_root"] == Path(r"\\other.invalid\legacy")
 
 
 def test_process_storage_override_cannot_redirect_backup(settings, monkeypatch):
     monkeypatch.setenv("CONTROLLED_FILE_STORAGE_ROOT", r"\\other.invalid\share")
-    with pytest.raises(nas.MaintenanceBlocked, match="執行環境與設定檔不同"):
-        nas.load_settings(settings["environment_file"], settings["settings_file"])
+    loaded = nas.load_settings(settings["environment_file"], settings["settings_file"])
+    assert loaded["backup_root"] == Path(r"\\nas.invalid\fixture") / nas.BACKUP_FOLDER
 
 
 def test_windows_source_mode_flag_does_not_override_pinned_nas_target(settings, monkeypatch):
@@ -115,17 +182,19 @@ def test_windows_source_mode_flag_does_not_override_pinned_nas_target(settings, 
     monkeypatch.setenv("APP_ENV", "development")
     assert nas.load_settings(path, settings["settings_file"])["host"] == "nas.invalid"
     monkeypatch.setenv("DB_HOST", "other.invalid")
-    with pytest.raises(nas.MaintenanceBlocked, match="執行環境與設定檔不同"):
-        nas.load_settings(path, settings["settings_file"])
+    assert nas.load_settings(path, settings["settings_file"])["host"] == "nas.invalid"
 
 
 @pytest.mark.parametrize("root", ["D:/backups", "Z:/share", r"\\localhost\share"])
-def test_runtime_local_storage_root_is_rejected_for_nas_backup(settings, monkeypatch, root):
+def test_runtime_local_storage_root_is_accepted_for_backup(settings, monkeypatch, root):
     monkeypatch.setattr(nas, "is_nas_destination", IS_NAS_DESTINATION)
     path = settings["environment_file"]
     path.write_text(path.read_text(encoding="utf-8").replace(r"\\nas.invalid\fixture", root), encoding="utf-8")
-    with pytest.raises(nas.MaintenanceBlocked, match="完整 UNC 路徑"):
-        nas.load_settings(path, settings["settings_file"])
+    loaded = nas.load_settings(path, settings["settings_file"])
+    expected = Path(root)
+    if not expected.is_absolute():
+        expected = path.parent / expected
+    assert loaded["backup_root"] == expected / nas.BACKUP_FOLDER
 
 
 @pytest.mark.parametrize("path", ["D:/LaborUnionBackups", "C:/work/05_資料庫冷備份 (db_backups)", r"\\localhost\share\db_backups", r"\\127.0.0.2\share\db_backups", r"\\?\C:\db_backups"])
@@ -133,13 +202,14 @@ def test_local_and_loopback_backup_roots_are_never_nas(path):
     assert not IS_NAS_DESTINATION(Path(path))
 
 
-def test_offline_nas_fails_before_mysql_and_does_not_create_root(settings, monkeypatch):
+def test_unreadable_destination_fails_before_mysql(settings, monkeypatch):
     root = settings["backup_root"] / "missing-mount"
     settings["backup_root"] = root
+    monkeypatch.setattr(nas.FileSystemControlledFileStorage, "readiness", lambda *_: SimpleNamespace(ready=False))
     monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("offline destination must precede database connection"))
     with pytest.raises(nas.MaintenanceBlocked, match="無法讀取"):
         nas.backup(settings)
-    assert not root.exists()
+    assert root.is_dir() and not list(root.iterdir())
 
 
 def test_denied_nas_write_fails_before_dump_without_local_fallback(settings, monkeypatch):
@@ -187,11 +257,13 @@ def test_shared_root_still_uses_readonly_backup_session(settings, monkeypatch):
 
 
 @pytest.mark.parametrize("key", ["NAS_BACKUP_USER", "NAS_BACKUP_PASSWORD", "NAS_MAINTENANCE_USER", "NAS_MAINTENANCE_PASSWORD"])
-def test_each_maintenance_credential_remains_required(settings, key):
+def test_missing_maintenance_credential_uses_existing_runtime_account(settings, key):
     path = settings["settings_file"]
     path.write_text('\n'.join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith(key + "=")), encoding="utf-8")
-    with pytest.raises(nas.MaintenanceBlocked, match="缺少備份或升級維護帳號"):
-        nas.load_settings(settings["environment_file"], path)
+    loaded = nas.load_settings(settings["environment_file"], path)
+    expected = {"NAS_MAINTENANCE_USER": "fixture_app", "NAS_MAINTENANCE_PASSWORD": "fixture_runtime",
+                "NAS_BACKUP_USER": "fixture_writer", "NAS_BACKUP_PASSWORD": "fixture_admin"}
+    assert loaded["values"][key] == expected[key]
 
 
 def make_backup(settings, monkeypatch, exit_code=0):
@@ -220,13 +292,12 @@ def test_first_backup_creates_only_fixed_child_under_existing_nas_root(settings,
     assert nas.validate_backup(archive)["status"] == "completed"
 
 
-def test_missing_nas_root_is_never_created(settings, monkeypatch):
+def test_missing_backup_root_is_created_for_first_backup(settings, monkeypatch):
     parent = settings["backup_root"].parent / "unavailable-share"
     settings["backup_root"] = parent / nas.BACKUP_FOLDER
-    monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("missing share must precede database access"))
-    with pytest.raises(nas.MaintenanceBlocked, match="不會自動建立共用根目錄"):
-        nas.backup(settings)
-    assert not parent.exists()
+    archive, _ = make_backup(settings, monkeypatch)
+    assert archive.is_file() and archive.parent.parent == settings["backup_root"]
+    assert parent.is_dir()
 
 
 def test_readonly_status_does_not_create_missing_backup_child(settings):
@@ -278,7 +349,7 @@ def test_missing_or_empty_default_backup_opens_file_picker_without_path_input(se
 def test_restore_main_accepts_manual_file_before_any_default_destination_or_database_check(settings, monkeypatch, tmp_path):
     archive, _ = make_backup(settings, monkeypatch)
     settings["backup_root"] = tmp_path / "new-share" / nas.BACKUP_FOLDER
-    monkeypatch.setattr("builtins.input", lambda *_: "確認")
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("restore does not prompt for confirmation"))
     monkeypatch.setattr(nas, "select_backup_file", lambda *_: archive)
     monkeypatch.setattr(nas, "load_settings", lambda *_: settings)
     monkeypatch.setattr(nas, "writer", lambda *_: object())
@@ -467,15 +538,16 @@ def test_same_second_backup_never_overwrites_existing_artifact(settings, monkeyp
 
 def test_offline_failure_is_visible_without_claiming_backup_readiness(settings, tmp_path, monkeypatch):
     monkeypatch.setattr(nas, "SCHEDULE", tmp_path / "schedule.json")
-    monkeypatch.setattr(nas, "load_settings", lambda *_: settings)
+    monkeypatch.setattr(nas, "load_settings", lambda *_, **_kw: settings)
     nas.record_backup_result(settings, "passed", created_at="2026-10-30T10:00:00+00:00")
     settings["backup_root"] = settings["backup_root"] / "offline"
+    monkeypatch.setattr(nas.FileSystemControlledFileStorage, "readiness", lambda *_: SimpleNamespace(ready=False))
     assert nas.main(["backup", "--scheduled"]) == 2
     status = nas.backup_status()
     assert status["configured"] and not status["storage_ready"] and not status["disaster_recovery_ready"]
     assert status["last_result"]["status"] == "failed"
     assert status["last_backup"] == "2026-10-30T10:00:00+00:00"
-    assert not settings["backup_root"].exists()
+    assert settings["backup_root"].is_dir() and not list(settings["backup_root"].iterdir())
 
 
 def test_compressed_import_streams_sql_bytes_to_client_without_plaintext_file(tmp_path):
@@ -599,6 +671,7 @@ def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedure
     local_test = deployment == "local_test"
     if deployment == "unpinned_remote":
         settings = request.getfixturevalue("unpinned_remote_settings")
+    monkeypatch.setattr(nas, "is_nas_destination", lambda _: False)
     monkeypatch.setattr(updater, "update_local_database", lambda **_:
                         pytest.fail("NAS upgrade must not alter the configured source"))
     monkeypatch.setattr(nas, "protect_account_receipts", lambda *_args, **_kwargs: 0)
@@ -671,16 +744,19 @@ def test_unpinned_remote_upgrade_requires_native_tools_before_database_access(
         nas.upgrade(unpinned_remote_settings)
 
 
-def test_unpinned_remote_upgrade_rejects_local_backup_before_database_access(
+def test_unpinned_remote_upgrade_accepts_local_backup_before_source_preflight(
     unpinned_remote_settings, monkeypatch,
 ):
     monkeypatch.setattr(nas, "resolve_client_tool", lambda name: name)
     monkeypatch.setattr(nas, "is_nas_destination", lambda _: False)
-    monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("backup path must be checked before connection"))
-    with pytest.raises(nas.MaintenanceBlocked, match="不會改存本機"):
+    def blocked_plan(*_args, **_kwargs):
+        raise nas.migration.UpgradeBlocked("synthetic source preflight failure")
+    monkeypatch.setattr(nas.migration, "build_plan", blocked_plan)
+    monkeypatch.setattr(nas, "backup", lambda *_: pytest.fail("failed source preflight cannot start backup"))
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: pytest.fail("no live database"))
+    with pytest.raises(nas.migration.UpgradeBlocked, match="synthetic source preflight failure"):
         nas.upgrade(unpinned_remote_settings)
-    with pytest.raises(nas.MaintenanceBlocked, match="不會改存本機"):
-        nas.destination_ready(unpinned_remote_settings, writable=True)
+    assert nas.destination_ready(unpinned_remote_settings, writable=True) == unpinned_remote_settings["backup_root"]
 
 
 @pytest.mark.parametrize("state", ["partial", "drift"])
@@ -731,7 +807,7 @@ def test_current_local_test_database_does_not_create_candidate(settings, monkeyp
 )
 def test_receipt_conversion_refuses_unverified_target_before_connection(settings, monkeypatch, override):
     settings.update(override)
-    monkeypatch.setattr(nas, "load_settings", lambda *_: settings)
+    monkeypatch.setattr(nas, "load_settings", lambda *_, **_kw: settings)
     monkeypatch.setattr(nas, "reader", lambda *_: pytest.fail("invalid receipt target must not connect"))
     assert nas.main(["protect-account-receipts"]) == 2
 
@@ -752,7 +828,7 @@ def test_schedule_stale_is_typed_and_does_not_register(settings, tmp_path, monke
 @pytest.mark.skipif(os.name != "nt", reason="Windows schedule command composition")
 def test_daily_schedule_uses_hidden_interactive_account_without_password_and_records_version(settings, tmp_path, monkeypatch):
     monkeypatch.setattr(nas, "SCHEDULE", tmp_path / "schedule.json")
-    monkeypatch.setattr(nas, "load_settings", lambda *_args: settings)
+    monkeypatch.setattr(nas, "load_settings", lambda *_args, **_kw: settings)
     calls = []
     monkeypatch.setattr(nas.subprocess, "run", lambda command, **kw: calls.append(command) or SimpleNamespace(returncode=0))
     result = nas.configure_daily_backup(environment_file=settings["environment_file"], settings_file=settings["settings_file"], expected_version=0)
@@ -1066,7 +1142,11 @@ def retention_bundle(settings, moment, *, managed=True, host=None, database=None
     return path
 
 
-def test_retention_union_calendar_boundaries_latest_representatives_and_idempotency(settings):
+@pytest.mark.parametrize("custom_root", [False, True])
+def test_retention_union_calendar_boundaries_latest_representatives_and_idempotency(settings, tmp_path, custom_root):
+    if custom_root:
+        settings["backup_root"] = tmp_path / "custom-backup-folder"
+        settings["backup_root"].mkdir()
     moments = ["2025-12-31T18:00:00", "2026-01-31T18:00:00", "2026-02-15T18:00:00",
         "2026-02-28T18:00:00", "2026-11-15T18:00:00", "2026-11-21T18:00:00",
         "2026-11-22T18:00:00", "2026-11-30T18:00:00", "2026-12-22T18:00:00",
@@ -1144,7 +1224,7 @@ def test_retention_new_scheduled_receipt_marker_only(settings, monkeypatch):
 
 
 def test_retention_backup_failure_never_runs_cleanup(settings, monkeypatch):
-    monkeypatch.setattr(nas,"load_settings",lambda *_:settings)
+    monkeypatch.setattr(nas,"load_settings",lambda *_, **_kw:settings)
     monkeypatch.setattr(nas,"maintenance_lock",lambda *_:nullcontext())
     monkeypatch.setattr(nas,"backup",lambda *_: (_ for _ in ()).throw(nas.MaintenanceBlocked("synthetic failure")))
     monkeypatch.setattr(nas,"retain_scheduled_backups",lambda *_:pytest.fail("failed backup cannot clean"))
@@ -1153,7 +1233,7 @@ def test_retention_backup_failure_never_runs_cleanup(settings, monkeypatch):
 
 def test_retention_cleanup_failure_preserves_success_status_and_failure_receipt(settings, monkeypatch):
     latest = retention_bundle(settings, "2027-01-05T18:00:00")
-    monkeypatch.setattr(nas,"load_settings",lambda *_:settings)
+    monkeypatch.setattr(nas,"load_settings",lambda *_, **_kw:settings)
     monkeypatch.setattr(nas,"maintenance_lock",lambda *_:nullcontext())
     monkeypatch.setattr(nas,"backup",lambda *_:latest)
     monkeypatch.setattr(nas,"retain_scheduled_backups",lambda *_: (_ for _ in ()).throw(nas.MaintenanceBlocked("synthetic failure")))
