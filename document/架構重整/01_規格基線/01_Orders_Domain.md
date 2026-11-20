@@ -54,7 +54,9 @@
 
 ### 3.3 訂金 Reversal 與開工重認
 
-- 訂金有效性唯一衍生自 Client Finance（每次核銷或沖正於同一 UoW 送出 `deposit_reconciled | deposit_reversed` 並附 `deposit_settlement_identity`）：尚未開始服務時沖正阻擋進入服務；已服務／已完工後沖正僅重開帳務義務與異常，不倒退狀態或解鎖服務資料；若於原 `actual_start_date` 後補繳且 identity 不同，須重新確認 actual start。
+- **訂金沖正與服務狀態**：訂金是否有效，以 Client Finance 為準。每次核銷或沖正，都在同一工作單元（UoW）送出 `deposit_reconciled` 或 `deposit_reversed`，並附 `deposit_settlement_identity`。尚未開始服務的案件，訂金沖正後不可進入服務。已開始服務或已完工的案件，沖正只重開帳務義務並列為異常，不倒退服務狀態，也不解鎖服務資料。若在原 `actual_start_date` 之後補繳，且新一筆的 `deposit_settlement_identity` 不同，須重新確認實際開工。
+  - **開工前例**：某已成立但未開工的案件，有一筆 NT$2,000 訂金已核銷。經辦沖正後，該筆應收重開 NT$2,000，訂金列為未核銷，案件不可進入服務。
+  - **開工後例**：另一筆已在服務中的案件也沖正訂金。案件列為帳務異常，但仍為「服務中」，不得因沖正退回未開工。
 
 ### 3.4 Order Terms Preview／Apply 與時段／下廚契約
 
