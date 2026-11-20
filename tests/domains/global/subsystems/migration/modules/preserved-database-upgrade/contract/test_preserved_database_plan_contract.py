@@ -24,6 +24,186 @@ from scripts import migrate_preserved_database_additive_schema as runner
 from scripts.schema_assembly import load_schema_assembly
 
 
+@pytest.fixture
+def metadata_snapshot_rows(monkeypatch):
+    rows = {
+        "columns": [{"table_name": "target", "column_name": "id"},
+                    {"table_name": "unrelated", "column_name": "id"}],
+        "indexes": [{"table_name": "target", "index_name": "PRIMARY"}],
+        "triggers": [
+            {"trigger_name": "trg_named", "event_object_table": "unrelated", "action_statement": "BEGIN SET @value=1; END"},
+            {"trigger_name": "trg_unexpected", "event_object_table": "target", "action_statement": "BEGIN SET @value=2; END"},
+            {"trigger_name": "trg_unrelated", "event_object_table": "unrelated", "action_statement": "BEGIN SET @value=3; END"},
+        ],
+        "views": [{"table_name": "view_target", "view_definition": "select 1"},
+                  {"table_name": "view_unrelated", "view_definition": "select 2"}],
+        "constraints": [{"table_name": "target", "constraint_name": "PRIMARY"}],
+        "key_columns": [{"table_name": "target", "column_name": "id"}],
+        "foreign_keys": [{"table_name": "target", "constraint_name": "fk_target"}],
+    }
+    calls = []
+    closed = []
+    metadata_sources = {
+        "information_schema.columns": "columns",
+        "information_schema.statistics": "indexes",
+        "information_schema.triggers": "triggers",
+        "information_schema.views": "views",
+        "information_schema.table_constraints": "constraints",
+        "information_schema.key_column_usage": "key_columns",
+        "information_schema.referential_constraints": "foreign_keys",
+    }
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, query, parameters=()):
+            calls.append((query, parameters))
+            self.query = query
+            if query.startswith("SHOW CREATE TABLE"):
+                assert query == "SHOW CREATE TABLE `target`"
+            else:
+                assert parameters[0] == "candidate"
+        def fetchall(self):
+            for token, category in metadata_sources.items():
+                if token in self.query:
+                    return rows[category]
+            pytest.fail(f"unexpected metadata query: {self.query}")
+        def fetchone(self): return {"Create Table": "CREATE TABLE `target` (`id` int)"}
+
+    class Config:
+        def connect(self, database):
+            assert database == "candidate"
+            return self
+        def cursor(self): return Cursor()
+        def close(self): closed.append(True)
+
+    monkeypatch.setattr(runner, "_show_create_owned_table_names", lambda: {"target"})
+    return Config(), rows, calls, closed
+
+
+@pytest.mark.parametrize("scope", ["full", "triggers", "table"])
+def test_schema_snapshot_preserves_projection_and_hash_with_bounded_metadata(
+    monkeypatch, metadata_snapshot_rows, scope,
+):
+    config, rows, calls, closed = metadata_snapshot_rows
+    owned_part = None if scope == "full" else "fixture.sql"
+    if scope == "triggers":
+        monkeypatch.setattr(runner, "_snapshot_scope_for_owned_part", lambda _: (set(), {"trg_named"}, set()))
+        expected = {key: [] for key in rows}
+        expected["triggers"] = [rows["triggers"][0]]
+        expected["show_create_tables"] = {}
+    else:
+        expected = {key: value.copy() for key, value in rows.items()}
+        expected["show_create_tables"] = {"target": "CREATE TABLE `target` (`id` int)"}
+        if scope == "table":
+            monkeypatch.setattr(runner, "_snapshot_scope_for_owned_part",
+                                lambda _: ({"target"}, {"trg_named"}, {"view_target"}))
+            expected["columns"] = [rows["columns"][0]]
+            expected["triggers"] = rows["triggers"][:2]
+            expected["views"] = [rows["views"][0]]
+    actual = runner._schema_snapshot(config, "candidate", owned_part=owned_part)
+    assert actual == {"sha256": runner._sha256_bytes(runner._canonical_json(expected)), **expected}
+    assert closed == [True]
+    if scope == "triggers":
+        assert len(calls) == 1
+        assert calls[0] == (
+            "SELECT trigger_name,event_manipulation,event_object_table,action_timing,action_statement "
+            "FROM information_schema.triggers WHERE trigger_schema=%s "
+            "AND (trigger_name IN (%s)) ORDER BY trigger_name",
+            ("candidate", "trg_named"),
+        )
+    else:
+        assert len(calls) == 8
+        trigger_query, parameters = next(item for item in calls if "information_schema.triggers" in item[0])
+        if scope == "table":
+            assert " OR event_object_table IN (%s)" in trigger_query
+            assert parameters == ("candidate", "trg_named", "target")
+        else:
+            assert " IN (" not in trigger_query
+
+
+@pytest.mark.parametrize("change", ["changed", "missing"])
+def test_trigger_only_snapshot_keeps_detecting_fresh_definition_changes(
+    monkeypatch, metadata_snapshot_rows, change,
+):
+    config, rows, _, _ = metadata_snapshot_rows
+    monkeypatch.setattr(runner, "_snapshot_scope_for_owned_part", lambda _: (set(), {"trg_named"}, set()))
+    before = runner._schema_snapshot(config, "candidate", owned_part="fixture.sql")
+    if change == "changed":
+        rows["triggers"][0] = {**rows["triggers"][0], "action_statement": "BEGIN SET @value=99; END"}
+    else:
+        rows["triggers"].pop(0)
+    after = runner._schema_snapshot(config, "candidate", owned_part="fixture.sql")
+    assert after["sha256"] != before["sha256"]
+    assert after["triggers"] == ([rows["triggers"][0]] if change == "changed" else [])
+
+
+@pytest.mark.parametrize("empty_database", [False, True])
+def test_table_evidence_batches_primary_metadata_without_weakening_data_checks(empty_database):
+    calls = []
+    closed = []
+    table_names = [] if empty_database else ["composite", "empty", "without_pk"]
+    data_rows = [{"first": 1, "second": 4}, {"first": 2, "second": 3}]
+    checksums = {"composite": 123, "empty": 0, "without_pk": 456}
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, query, parameters=()):
+            self.query = query
+            calls.append((query, parameters))
+            if "information_schema" in query:
+                assert parameters == ("candidate",)
+            elif query.startswith("SELECT `"):
+                assert query in {
+                    "SELECT `first`,`second` FROM `composite` ORDER BY `first`,`second`",
+                    "SELECT `id` FROM `empty` ORDER BY `id`",
+                }
+        def fetchall(self):
+            if "information_schema.tables" in self.query:
+                return [{"TABLE_NAME": name} for name in table_names]
+            if "information_schema.key_column_usage" in self.query:
+                assert self.query.endswith("ORDER BY table_name,ordinal_position")
+                return [{"TABLE_NAME": "composite", "COLUMN_NAME": "first"},
+                        {"TABLE_NAME": "composite", "COLUMN_NAME": "second"},
+                        {"TABLE_NAME": "empty", "COLUMN_NAME": "id"}]
+            return data_rows.copy() if "`composite`" in self.query else []
+        def fetchone(self):
+            table = self.query.split("`")[1]
+            if self.query.startswith("CHECKSUM TABLE"):
+                return {"Checksum": checksums[table]}
+            assert self.query.startswith("SELECT COUNT(*) AS n")
+            return {"n": {"composite": 2, "empty": 0, "without_pk": 1}[table]}
+
+    class Config:
+        def connect(self, database):
+            assert database == "candidate"
+            return self
+        def cursor(self): return Cursor()
+        def close(self): closed.append(True)
+
+    config = Config()
+    first = runner._table_evidence(config, "candidate")
+    if empty_database:
+        assert first == {} and len(calls) == 1
+    else:
+        assert first == {
+            "composite": {"count": 2, "checksum": 123,
+                          "primary_key_sha256": runner._sha256_bytes(runner._canonical_json(data_rows))},
+            "empty": {"count": 0, "checksum": 0,
+                      "primary_key_sha256": runner._sha256_bytes(runner._canonical_json([]))},
+            "without_pk": {"count": 1, "checksum": 456, "primary_key_sha256": None},
+        }
+        assert sum("information_schema.key_column_usage" in query for query, _ in calls) == 1
+        assert sum(query.startswith("CHECKSUM TABLE") for query, _ in calls) == 3
+        assert sum(query.startswith("SELECT COUNT(*)") for query, _ in calls) == 3
+        checksums["composite"] = 999
+        second = runner._table_evidence(config, "candidate")
+        assert second["composite"]["checksum"] == 999 and second != first
+        assert sum("information_schema.key_column_usage" in query for query, _ in calls) == 2
+    assert len(closed) == (1 if empty_database else 2)
+
+
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
     required_manifests = {
         "labor_union_2026_08_12_line_stage13_strict_v1.json",

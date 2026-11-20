@@ -1363,39 +1363,42 @@ def _schema_snapshot(
     connection = config.connect(database)
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
+            def table_metadata(query: str) -> list[dict[str, Any]]:
+                if scoped_tables == set():
+                    return []
+                cursor.execute(query, (database,))
+                rows = [_normalized_row(row) for row in cursor.fetchall()]
+                if scoped_tables is not None:
+                    rows = [row for row in rows if row["table_name"] in scoped_tables]
+                return rows
+
+            columns = table_metadata(
                 "SELECT table_name,column_name,column_type,is_nullable,"
                 "column_default,extra,generation_expression,character_set_name,collation_name "
                 "FROM information_schema.columns "
-                "WHERE table_schema=%s ORDER BY table_name,ordinal_position",
-                (database,),
+                "WHERE table_schema=%s ORDER BY table_name,ordinal_position"
             )
-            columns = [_normalized_row(row) for row in cursor.fetchall()]
-            if scoped_tables is not None:
-                columns = [
-                    row for row in columns
-                    if row["table_name"] in scoped_tables
-                ]
-            cursor.execute(
+            indexes = table_metadata(
                 "SELECT table_name,index_name,non_unique,"
                 "GROUP_CONCAT(column_name ORDER BY seq_in_index) AS columns "
                 "FROM information_schema.statistics WHERE table_schema=%s "
                 "GROUP BY table_name,index_name,non_unique "
-                "ORDER BY table_name,index_name",
-                (database,),
+                "ORDER BY table_name,index_name"
             )
-            indexes = [_normalized_row(row) for row in cursor.fetchall()]
-            if scoped_tables is not None:
-                indexes = [
-                    row for row in indexes
-                    if row["table_name"] in scoped_tables
-                ]
-            cursor.execute(
+            trigger_query = (
                 "SELECT trigger_name,event_manipulation,event_object_table,"
                 "action_timing,action_statement FROM information_schema.triggers "
-                "WHERE trigger_schema=%s ORDER BY trigger_name",
-                (database,),
+                "WHERE trigger_schema=%s"
             )
+            trigger_parameters = [database]
+            if scoped_tables is not None and scoped_triggers is not None:
+                predicates = []
+                for column, names in (("trigger_name", scoped_triggers), ("event_object_table", scoped_tables)):
+                    if names:
+                        predicates.append(column + " IN (" + ",".join("%s" for _ in names) + ")")
+                        trigger_parameters.extend(sorted(names))
+                trigger_query += " AND (" + " OR ".join(predicates) + ")" if predicates else " AND FALSE"
+            cursor.execute(trigger_query + " ORDER BY trigger_name", tuple(trigger_parameters))
             triggers = [_normalized_row(row) for row in cursor.fetchall()]
             if scoped_tables is not None and scoped_triggers is not None:
                 triggers = [
@@ -1403,18 +1406,17 @@ def _schema_snapshot(
                     if row["trigger_name"] in scoped_triggers
                     or row["event_object_table"] in scoped_tables
                 ]
-            cursor.execute(
-                "SELECT table_name,view_definition FROM information_schema.views "
-                "WHERE table_schema=%s ORDER BY table_name",
-                (database,),
-            )
-            views = [_normalized_row(row) for row in cursor.fetchall()]
+            views = []
+            if scoped_views != set():
+                cursor.execute(
+                    "SELECT table_name,view_definition FROM information_schema.views "
+                    "WHERE table_schema=%s ORDER BY table_name",
+                    (database,),
+                )
+                views = [_normalized_row(row) for row in cursor.fetchall()]
             if scoped_views is not None:
-                views = [
-                    row for row in views
-                    if row["table_name"] in scoped_views
-                ]
-            cursor.execute(
+                views = [row for row in views if row["table_name"] in scoped_views]
+            constraints = table_metadata(
                 "SELECT tc.table_name,tc.constraint_name,tc.constraint_type,"
                 "tc.enforced,cc.check_clause "
                 "FROM information_schema.table_constraints tc "
@@ -1422,49 +1424,22 @@ def _schema_snapshot(
                 "ON cc.constraint_schema=tc.constraint_schema "
                 "AND cc.constraint_name=tc.constraint_name "
                 "WHERE tc.constraint_schema=%s "
-                "ORDER BY tc.table_name,tc.constraint_name",
-                (database,),
+                "ORDER BY tc.table_name,tc.constraint_name"
             )
-            constraints = [
-                _normalized_row(row) for row in cursor.fetchall()
-            ]
-            if scoped_tables is not None:
-                constraints = [
-                    row for row in constraints
-                    if row["table_name"] in scoped_tables
-                ]
-            cursor.execute(
+            key_columns = table_metadata(
                 "SELECT table_name,constraint_name,column_name,"
                 "ordinal_position,referenced_table_name,"
                 "referenced_column_name "
                 "FROM information_schema.key_column_usage "
                 "WHERE constraint_schema=%s "
-                "ORDER BY table_name,constraint_name,ordinal_position",
-                (database,),
+                "ORDER BY table_name,constraint_name,ordinal_position"
             )
-            key_columns = [
-                _normalized_row(row) for row in cursor.fetchall()
-            ]
-            if scoped_tables is not None:
-                key_columns = [
-                    row for row in key_columns
-                    if row["table_name"] in scoped_tables
-                ]
-            cursor.execute(
+            foreign_keys = table_metadata(
                 "SELECT table_name,constraint_name,update_rule,delete_rule "
                 "FROM information_schema.referential_constraints "
                 "WHERE constraint_schema=%s "
-                "ORDER BY table_name,constraint_name",
-                (database,),
+                "ORDER BY table_name,constraint_name"
             )
-            foreign_keys = [
-                _normalized_row(row) for row in cursor.fetchall()
-            ]
-            if scoped_tables is not None:
-                foreign_keys = [
-                    row for row in foreign_keys
-                    if row["table_name"] in scoped_tables
-                ]
             owned_table_names = (
                 scoped_tables
                 if scoped_tables is not None
@@ -1518,22 +1493,24 @@ def _table_evidence(config: DatabaseConfig, database: str) -> dict[str, Any]:
                 _normalized_row(row)["table_name"]
                 for row in cursor.fetchall()
             ]
+            primary_columns: dict[str, list[str]] = {}
+            if names:
+                cursor.execute(
+                    "SELECT table_name,column_name FROM information_schema.key_column_usage "
+                    "WHERE table_schema=%s AND constraint_name='PRIMARY' "
+                    "ORDER BY table_name,ordinal_position",
+                    (database,),
+                )
+                for raw_row in cursor.fetchall():
+                    row = _normalized_row(raw_row)
+                    primary_columns.setdefault(row["table_name"], []).append(row["column_name"])
             for name in names:
                 cursor.execute(f"SELECT COUNT(*) AS n FROM `{name}`")
                 count = int(cursor.fetchone()["n"])
                 cursor.execute(f"CHECKSUM TABLE `{name}`")
                 checksum_row = _normalized_row(cursor.fetchone() or {})
                 checksum = checksum_row.get("checksum")
-                cursor.execute(
-                    "SELECT column_name FROM information_schema.key_column_usage "
-                    "WHERE table_schema=%s AND table_name=%s "
-                    "AND constraint_name='PRIMARY' ORDER BY ordinal_position",
-                    (database, name),
-                )
-                primary = [
-                    _normalized_row(row)["column_name"]
-                    for row in cursor.fetchall()
-                ]
+                primary = primary_columns.get(name, [])
                 pk_hash = None
                 if primary:
                     projection = ",".join(f"`{column}`" for column in primary)
