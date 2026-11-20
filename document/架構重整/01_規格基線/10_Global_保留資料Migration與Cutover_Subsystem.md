@@ -89,6 +89,7 @@
 - **月嫂暫停接案原因改為選填**。`labor_union_2026_11_13_staff_availability_optional_reason_v1.json`（`1076_staff_availability_optional_reason.sql`）將 `scheduling_staff_unavailability_blocks.chk_scheduling_staff_unavailability_reason` 放寬為僅檢查 `CHAR_LENGTH(TRIM(created_by)) > 0`，與既有 Domain／UI 選填備註契約一致，保留既有列與其餘約束；新建與保留資料升級採相同檢查條件。
 
 - **LINE 案件群組歷程刪除保護**。`labor_union_2026_11_15_line_order_group_history_delete_v1.json`（`1078_line_order_group_history_delete_guards.sql`）精確更新兩個群組事件刪除 trigger，保留既有案件刪除條件，並允許有同案、尚未完成的群組歷程刪除命令且目前無群組綁定時逐案刪除。升級本身不刪除任何既有資料。新建與保留資料升級採相同 trigger 契約。
+- **案件永久刪除支援已簽約案件**。`labor_union_2026_11_20_registry_case_deletion_signing_v1.json`（`1080_registry_case_deletion_signing_guards.sql`）移除 trigger 的簽回狀態判斷。更新包含 `1060` 的案件歷程 guard 及 `1078`、`1079` 後續覆蓋版本，保留 pending claim、資料歸屬、LINE 群組歷程及保留期清理條件。Fresh 與保留資料升級使用相同定義。升級只更新 schema，切換後須載入同版本 NAS 固定程序。
 
 ### 6.1 本機開發 DB 受控驗收（§9.1）
 

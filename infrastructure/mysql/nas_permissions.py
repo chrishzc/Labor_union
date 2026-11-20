@@ -11,7 +11,9 @@ import re
 
 import pymysql
 
-from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS, collated_signature
+from infrastructure.mysql.nas_mutations import (
+    CASE_DELETION_PROCEDURE, PROCEDURES, RELATIONS, case_deletion_body_state, collated_signature,
+)
 from infrastructure.mysql.registry_case_deletion import CASE_CYCLE_LINKS, case_deletion_statements
 
 
@@ -209,8 +211,11 @@ def permission_plan(connection, database: str) -> dict:
     for name, (signature, body, _) in PROCEDURES.items():
         current = existing.get(name)
         states[name] = "absent" if current is None else "exact"
+        if current is not None and name == CASE_DELETION_PROCEDURE:
+            states[name] = case_deletion_body_state(current["body"])
         if current is not None and (
-            current["body"] is None or current["body"].strip().replace("\r\n", "\n") != "BEGIN\n" + body.strip() + "\nEND"
+            (name != CASE_DELETION_PROCEDURE and (
+                current["body"] is None or current["body"].strip().replace("\r\n", "\n") != "BEGIN\n" + body.strip() + "\nEND"))
             or current["definer"] != names["definer"] + "@%"
             or current["security_type"] != "DEFINER" or current["sql_data_access"] != "MODIFIES SQL DATA"
             or parameters.get(name) != [part.strip().lower() for part in signature.split(",")]
@@ -223,7 +228,8 @@ def permission_plan(connection, database: str) -> dict:
         "lu_nas_replace_case_account_v2",
         "lu_nas_delete_order_group_history_v1",
     }
-    baseline_states = {state for name, state in states.items() if name not in additive_procedures}
+    baseline_states = {"exact" if state == "replace" else state
+                       for name, state in states.items() if name not in additive_procedures}
     if len(baseline_states) > 1 or (
         baseline_states == {"absent"} and "exact" in states.values()
     ):
@@ -322,7 +328,9 @@ def install_permissions(connection, database: str, passwords: dict[str, str]) ->
                 privileges.append("INSERT")
             cursor.execute(f"GRANT {','.join(privileges)} ON {schema}.{_identifier(table)} TO '{names['definer']}'@'%'")
         for name, state in plan["procedures"].items():
-            if state == "absent":
+            if state == "replace":
+                cursor.execute(f"DROP PROCEDURE {_identifier(name)}")
+            if state in {"absent", "replace"}:
                 cursor.execute(procedure_sql(name, names["definer"]))
             cursor.execute(f"GRANT EXECUTE ON PROCEDURE {schema}.{_identifier(name)} TO '{names['definer']}'@'%'")
         for profile in PROFILES:

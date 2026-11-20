@@ -1,5 +1,6 @@
 """Offline policy oracles; real MySQL grants/rollback require engine qualification."""
 import re
+from pathlib import Path
 import pytest
 
 from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS, call_mutation
@@ -128,8 +129,9 @@ def test_registry_delete_procedures_do_not_grant_runtime_direct_root_delete():
     _, body, profiles = PROCEDURES["lu_nas_delete_unsigned_case_v2"]
     assert profiles == ("management",)
     assert "registry_deletion_stale_version" in body
-    assert "registry_deletion_signed" in body
-    assert "signed_received" in body and "contract_completed" in body
+    assert "registry_deletion_signed" not in body
+    assert "FROM admin_command_receipts" in body
+    assert "signed_received" not in body and "contract_completed" not in body
 
 
 def test_account_namespace_is_database_specific_and_identifiers_cannot_escape():
@@ -248,21 +250,21 @@ def test_ensure_nas_procedures_creates_missing_and_respects_existing():
     missing_name = "lu_nas_replace_staff_banks_v1"
     existing_names = [n for n in all_names if n != missing_name]
 
-    cursor.fetchall.return_value = [{"routine_name": n} for n in existing_names]
+    cursor.fetchall.side_effect = [_routine_rows(existing_names), [], _case_parameters()]
     created = ensure_nas_procedures(connection)
 
     assert created == [missing_name]
-    assert cursor.execute.call_count == 3
-    create_sql = cursor.execute.call_args_list[2][0][0]
+    assert cursor.execute.call_count == 4
+    create_sql = cursor.execute.call_args_list[3][0][0]
     assert f"CREATE PROCEDURE `{missing_name}`" in create_sql
     assert "SQL SECURITY DEFINER" in create_sql
     assert "MODIFIES SQL DATA" in create_sql
 
     cursor.reset_mock()
-    cursor.fetchall.return_value = [{"routine_name": n} for n in all_names]
+    cursor.fetchall.side_effect = [_routine_rows(all_names), [], _case_parameters()]
     none_created = ensure_nas_procedures(connection)
     assert none_created == []
-    assert cursor.execute.call_count == 2
+    assert cursor.execute.call_count == 3
 
 def test_ensure_nas_procedures_rebuilds_procedures_with_stale_collation():
     from unittest.mock import MagicMock
@@ -273,13 +275,152 @@ def test_ensure_nas_procedures_rebuilds_procedures_with_stale_collation():
     connection.cursor.return_value.__enter__.return_value = cursor
     stale = "lu_nas_cancel_occupancy_v1"
     cursor.fetchall.side_effect = [
-        [{"routine_name": n} for n in sorted(PROCEDURES)],
+        _routine_rows(PROCEDURES),
         [{"name": stale}],
+        _case_parameters(),
     ]
 
     assert ensure_nas_procedures(connection) == [stale]
     create_sql = cursor.execute.call_args_list[-1][0][0]
     assert "p_case VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" in create_sql
+
+
+def _routine_rows(names=PROCEDURES, *, case_body=None):
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE
+    return [{"name": name, "body": case_body if name == CASE_DELETION_PROCEDURE and case_body is not None
+             else "BEGIN\n" + PROCEDURES[name][1].strip() + "\nEND",
+             "definer": account_names("lu_test_nas")["definer"] + "@%",
+             "security_type": "DEFINER", "sql_data_access": "MODIFIES SQL DATA"} for name in names]
+
+
+def _case_parameters():
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE
+    return [{"mode": part.strip().split()[0], "parameter": part.strip().split()[1],
+             "type": " ".join(part.strip().split()[2:])}
+            for part in PROCEDURES[CASE_DELETION_PROCEDURE][0].split(",")]
+
+
+def _predecessor_body():
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE
+    # The installer independently pins this complete historical body by SHA-256.
+    body = "BEGIN\n" + PROCEDURES[CASE_DELETION_PROCEDURE][1].strip() + "\nEND"
+    receipt = "\n        OR EXISTS(SELECT 1 FROM admin_command_receipts WHERE command_family='registry_delete/v1'\n        AND idempotency_key=p_command_key)"
+    body = body.replace(receipt, "")
+    signing = """      IF EXISTS(SELECT 1 FROM contract_signing_events WHERE case_no=p_case AND event_type='signed_received' FOR UPDATE)
+         OR EXISTS(SELECT 1 FROM order_contract_flow_events WHERE case_no=p_case AND event_type='contract_completed' FOR UPDATE) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='registry_deletion_signed'; END IF;
+"""
+    return body.replace("      IF NOT EXISTS(SELECT 1 FROM application_command_claims", signing + "      IF NOT EXISTS(SELECT 1 FROM application_command_claims")
+
+
+def _deployed_predecessor_body():
+    return (Path(__file__).parent / "fixtures" / "case_deletion_b0d487a.sql").read_text(encoding="utf-8").strip()
+
+
+def test_deployed_predecessor_fixture_has_the_exact_historical_body():
+    import hashlib
+    assert hashlib.sha256(_deployed_predecessor_body().encode("utf-8")).hexdigest() == "be4df02013ccf0c1d2d81643354fa2693b3843d44aff91b46cf7ef165889026c"
+
+
+@pytest.mark.parametrize("predecessor", [_predecessor_body, _deployed_predecessor_body])
+def test_ensure_upgrades_only_known_case_predecessor_and_preserves_definer_and_execute_grants(predecessor):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE, ensure_nas_procedures
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    definer = account_names("lu_test_nas")["definer"]
+    manager = account_names("lu_test_nas")["management"]
+    grants = [{"user": definer, "host": "%", "privileges": "Execute"},
+              {"user": manager, "host": "%", "privileges": "Execute,Alter Routine,Grant"}]
+    cursor.fetchall.side_effect = [_routine_rows(case_body=predecessor()), [], _case_parameters(), grants]
+    assert ensure_nas_procedures(connection) == [CASE_DELETION_PROCEDURE]
+    writes = [call for call in cursor.execute.call_args_list if not call.args[0].startswith("SELECT ")]
+    assert writes[0].args == (f"DROP PROCEDURE IF EXISTS `{CASE_DELETION_PROCEDURE}`",)
+    assert writes[1].args[0].startswith(f"CREATE DEFINER=%s@%s PROCEDURE `{CASE_DELETION_PROCEDURE}`")
+    assert writes[1].args[1] == (definer, "%")
+    assert "registry_deletion_signed" not in writes[1].args[0]
+    assert "FROM admin_command_receipts" in writes[1].args[0]
+    assert [call.args[1] for call in writes[2:]] == [(definer, "%"), (manager, "%"), (manager, "%")]
+    assert writes[2].args[0] == f"GRANT EXECUTE ON PROCEDURE `{CASE_DELETION_PROCEDURE}` TO %s@%s"
+    assert [call.args[0] for call in writes[3:]] == [
+        f"GRANT {privilege} ON PROCEDURE `{CASE_DELETION_PROCEDURE}` TO %s@%s WITH GRANT OPTION"
+        for privilege in ("EXECUTE", "ALTER ROUTINE")]
+    grant_query = cursor.execute.call_args_list[3]
+    assert "FROM mysql.procs_priv WHERE Db=DATABASE()" in grant_query.args[0]
+    assert grant_query.args[1] == (CASE_DELETION_PROCEDURE,)
+    connection.commit.assert_not_called()
+
+
+def test_ensure_refuses_unreadable_case_grants_before_any_ddl():
+    from unittest.mock import MagicMock
+    import pymysql
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.side_effect = [_routine_rows(case_body=_predecessor_body()), [], _case_parameters()]
+    cursor.execute.side_effect = [None, None, None, pymysql.OperationalError(1142, "SELECT denied")]
+    with pytest.raises(pymysql.OperationalError, match="SELECT denied"):
+        ensure_nas_procedures(connection)
+    assert all(call.args[0].startswith("SELECT ") for call in cursor.execute.call_args_list)
+
+
+@pytest.mark.parametrize("privileges", ["Execute,Unknown", "Grant", ""])
+def test_ensure_refuses_unknown_case_grants_before_any_ddl(privileges):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.side_effect = [_routine_rows(case_body=_predecessor_body()), [], _case_parameters(),
+                                  [{"user": "fixture", "host": "%", "privileges": privileges}]]
+    with pytest.raises(ValueError, match="procedure grants drift"):
+        ensure_nas_procedures(connection)
+    assert all(call.args[0].startswith("SELECT ") for call in cursor.execute.call_args_list)
+
+
+@pytest.mark.parametrize("force,stale", [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize("predecessor", [_predecessor_body, _deployed_predecessor_body])
+def test_ensure_refuses_unknown_case_body_before_any_ddl_even_with_force_or_stale_collation(force, stale, predecessor):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE, ensure_nas_procedures
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.side_effect = [_routine_rows(case_body=predecessor() + "\n-- unknown change"),
+                                  [{"name": CASE_DELETION_PROCEDURE}] if stale else []]
+    with pytest.raises(ValueError, match="procedure drift"):
+        ensure_nas_procedures(connection, force=force)
+    assert all(call.args[0].startswith("SELECT ") for call in cursor.execute.call_args_list)
+
+
+@pytest.mark.parametrize("body_kind", ["predecessor", "deployed", "current", "unknown"])
+def test_permission_plan_accepts_only_exact_case_bodies_without_writes(body_kind):
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import CASE_DELETION_PROCEDURE
+    from infrastructure.mysql.nas_permissions import DEFINER_UPDATE_COLUMNS, DELETE_TABLES, permission_plan
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [{"selected_database": "lu_test_nas"}, {"partial_revokes": 0}]
+    tables = DELETE_TABLES | DEFINER_UPDATE_COLUMNS.keys() | {"staff", "orders", "order_lifecycle_control_state", "scheduling_generations",
+        "staff_matching_preference_profiles", "staff_matching_preference_definitions", "admin_audit_log_archive",
+        "application_command_claims", "admin_command_receipts"}
+    body = _predecessor_body() if body_kind == "predecessor" else None
+    if body_kind == "deployed":
+        body = _deployed_predecessor_body()
+    if body_kind == "unknown":
+        body = _predecessor_body() + "\n-- drift"
+    params = [{"name": name, "mode": part.strip().split()[0], "parameter": part.strip().split()[1],
+               "type": " ".join(part.strip().split()[2:])}
+              for name, (signature, _, _) in PROCEDURES.items() for part in signature.split(",")]
+    cursor.fetchall.side_effect = [[{"name": table} for table in tables],
+        [{"name": name} for name in ("application_payload", "application_version", "approved_by_actor", "approved_at_utc")],
+        _routine_rows(case_body=body), [], params, []]
+    if body_kind == "unknown":
+        with pytest.raises(ValueError, match="procedure drift"):
+            permission_plan(connection, "lu_test_nas")
+    else:
+        plan = permission_plan(connection, "lu_test_nas")
+        assert plan["procedures"][CASE_DELETION_PROCEDURE] == ("replace" if body_kind in {"predecessor", "deployed"} else "exact")
+        assert {state for name, state in plan["procedures"].items() if name != CASE_DELETION_PROCEDURE} == {"exact"}
+    assert all(call.args[0].startswith(("SELECT ", "SHOW ")) for call in cursor.execute.call_args_list)
 
 
 def test_ensure_nas_procedures_cli_dry_run(capsys, monkeypatch):

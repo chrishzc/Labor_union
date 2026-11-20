@@ -6,8 +6,8 @@
 
 ## Responsibility
 UI 開啟詳情時借用既有 auth `/me` 回讀 root，明確顯示「刪除此案件」；權限查詢失敗可重試，不以舊快取授予／隱藏 mutation。
-僅 root 可刪除未簽約案件及 case-owned 關聯資料；任一相關月嫂／客戶曾簽回即阻擋。共用 Client、其他案件與月嫂保留。無通用 table selector，失敗 rollback，成功後可從去個資 receipt 重播。
-既有 append-only triggers 預設保留；例外必須符合本次 pending claim、unsigned case、row ownership 與未完成 receipt。connection context 在成功／失敗清除；明確 guard 拒絕為完整 rollback 的 typed 409。
+僅 root 可永久刪除案件及 case-owned 關聯資料，適用於未簽約與已簽約案件。共用 Client、其他案件與月嫂保留。失敗時 rollback，成功後可從去個資 receipt 重播。
+Append-only trigger 例外要求同案 pending claim 與 row ownership。connection context 在成功或失敗後清除。Guard 拒絕時完整 rollback 並返回 typed 409。
 
 ## Implementation
 - `subsystems/registry_deletion/coordinator.py`
@@ -20,7 +20,7 @@ UI 開啟詳情時借用既有 auth `/me` 回讀 root，明確顯示「刪除此
 - `ui_react/src/api/registry_deletion_client.ts`
 - `ui_react/src/components/RegistryDeletionPanel.tsx`
 - `ui_react/src/components/RegistryDeletionPanel.css`
-- `db/schema_parts/238_registry_case_deletion_guards.sql` — fresh guards permit only the active root unsigned-case command scope.
+- `db/schema_parts/1080_registry_case_deletion_signing_guards.sql` — fresh schema 與 preserve-data 升級使用同一版案件刪除 trigger。
 - `db/schema_parts/1060_registry_case_deletion_guards.sql` — preserve-data equivalent, retains ordinary append-only and signed-case protection.
 
 ## Dependencies

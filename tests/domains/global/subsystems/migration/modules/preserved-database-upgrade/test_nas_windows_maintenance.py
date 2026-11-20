@@ -576,8 +576,8 @@ def test_candidate_config_refuses_source_connection_and_keeps_tls(settings, monk
     assert calls[0]["ssl"]["check_hostname"] is True
 
 
-@pytest.mark.parametrize(("local_test", "verified"), [(False, False), (True, False), (True, True)])
-def test_upgrade_preserves_order_and_never_switches_when_verification_fails(
+@pytest.mark.parametrize(("local_test", "verified"), [(False, False), (True, False), (True, True), (False, True)])
+def test_upgrade_preserves_order_and_never_switches_when_validation_or_procedures_fail(
     settings, monkeypatch, tmp_path, local_test, verified,
 ):
     from scripts import update_local_database as updater
@@ -605,16 +605,31 @@ def test_upgrade_preserves_order_and_never_switches_when_verification_fails(
     monkeypatch.setattr(nas.migration, "verify_candidate", lambda *_: steps.append("verify") or {
         "status": "verified" if verified else "failed",
     })
-    monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: pytest.fail("failed validation must not grant"))
+    def prepare(*_args):
+        assert verified and not local_test
+        steps.append("prepare")
+    monkeypatch.setattr(nas, "prepare_runtime_access", prepare)
+    connection = SimpleNamespace(close=lambda: steps.append("close"))
+    monkeypatch.setattr(nas.migration.SeparateDatabaseConfig, "connect", lambda *_args: connection)
+    from infrastructure.mysql import nas_mutations
+    def install_procedures(actual):
+        assert actual is connection
+        steps.append("procedures")
+        raise ValueError("NAS security procedure drift; no changes applied")
+    monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", install_procedures)
     monkeypatch.setattr(nas.migration, "switch_environment", lambda *_args, **_kw: pytest.fail("failed validation must not switch"))
     before = settings["environment_file"].read_bytes()
-    if verified:
+    if verified and local_test:
         with pytest.raises(updater.LocalDatabaseUpdateError, match="release chain is not current"):
+            nas.upgrade(settings)
+    elif verified:
+        with pytest.raises(ValueError, match="NAS security procedure drift"):
             nas.upgrade(settings)
     else:
         with pytest.raises(nas.MaintenanceBlocked, match="驗證未通過"):
             nas.upgrade(settings)
-    assert steps == ["plan", "backup", "restore", "apply", "verify"] + (["startup_check"] if verified else [])
+    assert steps == ["plan", "backup", "restore", "apply", "verify"] + (
+        ["startup_check"] if verified and local_test else ["prepare", "procedures", "close"] if verified else [])
     assert settings["environment_file"].read_bytes() == before
 
 
@@ -862,7 +877,8 @@ def test_verify_restored_inventory_semantic_match_and_mismatches():
 
 
 @pytest.mark.parametrize("conversion_ok", [True, False])
-def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch, conversion_ok):
+@pytest.mark.parametrize("procedures_ok", [True, False])
+def test_restore_automatically_applies_pending_additive_migration(settings, monkeypatch, conversion_ok, procedures_ok):
     archive, _ = make_backup(settings, monkeypatch)
     executed_statements = []
     class DummyCursor:
@@ -896,6 +912,12 @@ def test_restore_automatically_applies_pending_additive_migration(settings, monk
     monkeypatch.setattr(nas, "protect_account_receipts", convert)
     monkeypatch.setattr(nas, "prepare_runtime_access", lambda *_: activation.append(("prepare", True)))
     monkeypatch.setattr(nas, "switch_runtime", lambda *args: activation.append(("switch", True)))
+    from infrastructure.mysql import nas_mutations
+    def install_procedures(connection):
+        activation.append(("procedures", True))
+        if not procedures_ok:
+            raise ValueError("NAS security procedure drift; no changes applied")
+    monkeypatch.setattr(nas_mutations, "ensure_nas_procedures", install_procedures)
 
     from scripts import update_local_database as updater
     previews = []
@@ -908,9 +930,13 @@ def test_restore_automatically_applies_pending_additive_migration(settings, monk
     monkeypatch.setattr(updater, "build_additive_preview", fake_preview)
     monkeypatch.setattr(updater, "require_current_database", lambda res: None)
 
-    if conversion_ok:
+    if conversion_ok and procedures_ok:
         nas.restore(settings, archive)
-        assert activation == [("protect", True), ("prepare", True), ("switch", True)]
+        assert activation == [("protect", True), ("prepare", True), ("procedures", True), ("switch", True)]
+    elif conversion_ok:
+        with pytest.raises(ValueError, match="NAS security procedure drift"):
+            nas.restore(settings, archive)
+        assert activation == [("protect", True), ("prepare", True), ("procedures", True)]
     else:
         with pytest.raises(nas.MaintenanceBlocked, match="fixture receipt conversion failed"):
             nas.restore(settings, archive)

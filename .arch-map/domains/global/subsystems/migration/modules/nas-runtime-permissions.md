@@ -16,7 +16,7 @@
 
 ## Contracts
 - REG-BOUNDARY／REDIS（2026-11-05）：公開LINE profile不再取得provisional申請／衝突表讀寫；內部management在核准交易才建立NULL payload最小parent及receipt。權限inventory變更需目標部署重新資格，不在程式實作階段套用既有NAS grants。
-- Spec 33 RD-1：registry 專用 unsigned-case 永久刪除程序只授予 management EXECUTE；case-owned graph 的 DELETE 僅授予 locked definer，不授予 staff DELETE。caller root gate／簽回鎖／receipt 與 outer UoW 由 Global registry-deletion 擁有，不允許 LINE 執行。
+- Spec 33 RD-1：案件永久刪除程序 `lu_nas_delete_unsigned_case_v2` 適用於未簽約與已簽約案件，只授予 management EXECUTE。Case-owned graph 的 DELETE 僅授予 locked definer，不授予 staff DELETE。Caller root gate、版本、同案 pending claim、receipt 與 outer UoW 由 Global registry-deletion 擁有，不允許 LINE 執行。安裝入口只受控替換精確匹配的前版程序，保留 definer 與程序權限，未知內容仍拒絕。NAS upgrade／restore 必須完成程序安裝才能切換。
 - `lu_nas_delete_order_group_history_v1` 只授予 management EXECUTE。固定清除指定未綁定案件的兩類群組事件及成員投影，核對未完成同案 claim 與綁定版本。刪除收據及版本遞增由 LINE 群組管理交易完成。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` NAS-DB-01/02/03。
 - schema 先由 canonical fresh／preserve-data upgrade 處理；plan 零寫入；未知／partial／foreign grants／procedure drift 拒絕，不 reset 業務資料。

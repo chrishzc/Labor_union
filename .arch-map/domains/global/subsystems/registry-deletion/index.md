@@ -4,7 +4,7 @@
 - domain: `global`
 
 ## Responsibility
-編排 root-only 的未簽約案件及 case-owned 關聯資料永久刪除，擁有單一 outer UoW、fresh signing guards 與去個資收據；任一方曾簽回即阻擋，保留月嫂、其他案件與共用來源，不呼叫 provider。
+編排 root-only 的案件及 case-owned 關聯資料永久刪除，包含已簽約案件。以單一 outer UoW 驗證目前版本、刪除資料並寫入去個資收據。保留月嫂、其他案件與共用來源。
 
 ## Modules
 - `registry-deletion` — typed eligibility、fresh-lock Apply、receipt replay 與管理端確認；path: `modules/registry-deletion.md`

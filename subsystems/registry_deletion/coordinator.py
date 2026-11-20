@@ -1,7 +1,7 @@
 """Bounded root-only registry deletion coordination (spec 33, RD-1).
 
 The API owns human authorization. This coordinator owns the sole outer commit;
-the adapter supplies fresh signing facts and removes case-owned relations without
+the adapter supplies fresh owner versions and removes case-owned relations without
 committing outside that transaction.
 """
 
@@ -21,10 +21,9 @@ class RegistryDeletionNotFound(LookupError):
 
 
 class RegistryDeletionConflict(ValueError):
-    def __init__(self, code: str, blockers: tuple[str, ...] = ()) -> None:
+    def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
-        self.blockers = blockers
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,8 +80,6 @@ class RegistryDeletionApplication:
             target = self._repository.load(kind, identity, for_update=True)
             if target.version != expected_version or target.client_version != expected_client_version:
                 raise RegistryDeletionConflict("registry_deletion_stale_version")
-            if target.blockers:
-                raise RegistryDeletionConflict("registry_deletion_signed", target.blockers)
             self._repository.delete(target)
             self._repository.save_receipt(key, digest, target, actor.actor_id)
             uow.commit()

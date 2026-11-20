@@ -389,6 +389,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_15_order_change_requests_v1.json",
     "labor_union_2026_11_15_line_order_group_history_delete_v1.json",
     "labor_union_2026_11_18_line_delivery_retention_v1.json",
+    "labor_union_2026_11_20_registry_case_deletion_signing_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2037,11 +2038,14 @@ def _owned_classification(
             result[part] = "partial"
     for artifact in RELEASE_MANIFEST.artifacts:
         name = str(artifact["name"])
+        if name == _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT:
+            _, result[name] = _registry_case_deletion_signing_snapshot(snapshot, name)
+            continue
         if name == _LINE_DELIVERY_RETENTION_ARTIFACT:
-            _, result[name] = _line_delivery_retention_guard_snapshot(snapshot, name)
+            _, result[name] = _registry_guard_snapshot(snapshot, name)
             continue
         if name == _LINE_GROUP_HISTORY_DELETE_ARTIFACT:
-            _, result[name] = _line_group_history_guard_snapshot(snapshot, name)
+            _, result[name] = _registry_guard_snapshot(snapshot, name)
             continue
         if name in result:
             continue
@@ -2567,6 +2571,7 @@ def _registry_guard_metadata():
 
 _LINE_GROUP_HISTORY_DELETE_ARTIFACT = "1078_line_order_group_history_delete_guards.sql"
 _LINE_DELIVERY_RETENTION_ARTIFACT = "1079_line_delivery_retention_guards.sql"
+_REGISTRY_CASE_DELETION_SIGNING_ARTIFACT = "1080_registry_case_deletion_signing_guards.sql"
 
 
 @lru_cache(maxsize=1)
@@ -2647,7 +2652,65 @@ def _line_group_history_guard_snapshot(snapshot, artifact):
     return {**snapshot, "triggers": triggers}, None
 
 
+@lru_cache(maxsize=1)
+def _registry_case_deletion_signing_metadata():
+    path = ROOT / "db/migration_releases/labor_union_2026_11_20_registry_case_deletion_signing_v1.descriptors.json"
+    successor = json.loads(path.read_text(encoding="utf-8"))["successor_triggers"]
+    registry = _registry_guard_metadata()
+    before = registry["successor_triggers"]
+    latest = {
+        **before,
+        **_line_group_history_guard_metadata()["successor_triggers"],
+        **_line_delivery_retention_guard_metadata()["successor_triggers"],
+    }
+    return successor, latest, before, registry["predecessor_triggers"]
+
+
+def _registry_case_deletion_signing_snapshot(snapshot, artifact):
+    successor, latest, before, original = _registry_case_deletion_signing_metadata()
+    upgraded = set()
+    states = {}
+    for row in snapshot.get("triggers", ()):
+        name = row["trigger_name"]
+        expected = successor.get(name)
+        if expected is None:
+            continue
+        if not set(expected) <= row.keys():
+            states[name] = "drift"
+            continue
+        actual = {key: row[key] for key in expected}
+        known = (expected, latest[name], before[name], original[name])
+        if actual["action_statement"] not in {contract["action_statement"] for contract in known}:
+            actual["action_statement"] = _registry_guard_action(actual["action_statement"])
+        if actual == expected:
+            upgraded.add(name)
+            states[name] = "successor"
+        elif actual in (latest[name], before[name], original[name]):
+            states[name] = "predecessor"
+        else:
+            states[name] = "drift"
+    if artifact == _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT:
+        if len(upgraded) == len(successor):
+            return snapshot, "exact"
+        if "drift" in states.values():
+            return snapshot, "drift"
+        if len(states) == len(successor) and not upgraded:
+            return snapshot, "absent"
+        return snapshot, "partial"
+    if not upgraded:
+        return snapshot, None
+    triggers = [
+        {**row, "action_statement": latest[row["trigger_name"]]["action_statement"]}
+        if row["trigger_name"] in upgraded else row
+        for row in snapshot["triggers"]
+    ]
+    return {**snapshot, "triggers": triggers}, None
+
+
 def _registry_guard_snapshot(snapshot, artifact):
+    snapshot, signing_state = _registry_case_deletion_signing_snapshot(snapshot, artifact)
+    if signing_state is not None:
+        return snapshot, signing_state
     snapshot, retention_state = _line_delivery_retention_guard_snapshot(snapshot, artifact)
     if retention_state is not None:
         return snapshot, retention_state
@@ -6120,7 +6183,7 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         r"`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+?)(?=;\s*(?:$|\n))",
         re.I | re.S,
     )
-    if part_name in {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT, _LINE_DELIVERY_RETENTION_ARTIFACT}:
+    if part_name in {"1060_registry_case_deletion_guards.sql", _LINE_GROUP_HISTORY_DELETE_ARTIFACT, _LINE_DELIVERY_RETENTION_ARTIFACT, _REGISTRY_CASE_DELETION_SIGNING_ARTIFACT}:
         complete_pattern = re.compile(r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+)", re.I | re.S)
         trigger_matches = [match for statement in split_sql(sql) if (match := complete_pattern.fullmatch(statement))]
     else:

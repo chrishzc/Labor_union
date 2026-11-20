@@ -22,7 +22,6 @@ def _raise_error(error: Exception, correlation: str) -> None:
         raise typed_http_error(404, "not_found", "registry_deletion_not_found", "資料已不存在，請重新整理名冊。", correlation) from error
     if isinstance(error, RegistryDeletionConflict):
         message = {
-            "registry_deletion_signed": "已有月嫂或客戶簽回，禁止永久刪除。" + "；".join(error.blockers),
             "registry_deletion_stale_version": "資料已變更，請重新檢查刪除資格。",
             "registry_deletion_idempotency_mismatch": "此操作識別已用於不同內容，請重新檢查刪除資格。",
         }.get(error.code, "案件綁定不完整，無法永久刪除。")
@@ -30,8 +29,6 @@ def _raise_error(error: Exception, correlation: str) -> None:
         raise typed_http_error(409, category, error.code, message, correlation) from error
     if isinstance(error, IntegrityError) and error.args[0] in (1451, 1452):
         raise typed_http_error(409, "conflict", "registry_deletion_integrity_conflict", "資料關聯已變更，請重新檢查刪除資格。", correlation) from error
-    if isinstance(error, OperationalError) and error.args[0] == 1644 and str(error.args[1]) == "registry_deletion_signed":
-        raise typed_http_error(409, "conflict", "registry_deletion_signed", "已有月嫂或客戶簽回，禁止永久刪除。", correlation) from error
     if isinstance(error, OperationalError) and error.args[0] == 1644 and str(error.args[1]) == "registry_deletion_stale_version":
         raise typed_http_error(409, "conflict", "registry_deletion_stale_version", "資料已變更，請重新檢查刪除資格。", correlation) from error
     if isinstance(error, OperationalError) and error.args[0] == 1644:

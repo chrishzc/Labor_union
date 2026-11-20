@@ -19,8 +19,8 @@ def snapshot(kind):
     return {'triggers':[{'trigger_name':NAME,**contract}]}
 
 def test_retention_guard_is_registered_and_preserve_fresh_share_one_artifact():
-    assert m._local_ordered_upgrade_entries()[-1]['artifact']['name']==ARTIFACT
-    assert load_schema_assembly().active_artifact_paths[-1].name==ARTIFACT
+    assert ARTIFACT in {entry['artifact']['name'] for entry in m._local_ordered_upgrade_entries()}
+    assert ARTIFACT in {path.name for path in load_schema_assembly().active_artifact_paths}
     released=load_migration_release_manifest(MANIFEST,m.ROOT).owned_object_descriptors(m.ROOT)[ARTIFACT]
     canonical=m._canonical_artifact_descriptor(ARTIFACT)
     assert released['triggers']==set(canonical['triggers'])

@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-line-delivery-retention-v1",
+  "release_id": "labor-union-validation-schema-registry-case-deletion-signing-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 202,
-    "ordered_digest_sha256": "95c4ed0c48c7364e630c359742408a8210ef03f7bb63f131e1d692bfae84a1f2",
-    "terminal_artifact": "1079_line_delivery_retention_guards.sql"
+    "expected_count": 203,
+    "ordered_digest_sha256": "245a98ca2eee9364426be36b78f1a2d3d20127bbd8e7b48b4c0d7c9441c8cbb0",
+    "terminal_artifact": "1080_registry_case_deletion_signing_guards.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "422eddd8d9e89c91a1970427588b376ccb45bb3648f7e323abd6ebbb3b7b6478"
+    "sha256": "07020f5951d74aa7a4111c322bdce6baebf0d4f4f6a7208272b2cc052b80945f"
   },
   "full_release": {
     "path": "scratch/validation-schema/labor_union_validation_schema.sql",

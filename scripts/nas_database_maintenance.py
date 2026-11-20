@@ -911,15 +911,12 @@ def upgrade(settings):
     if is_local_nas_test:
         updater.require_current_database(updater.build_additive_preview(write, candidate, directory))
     prepare_runtime_access(settings, candidate)
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    _candidate_conn = config.connect(candidate)
     try:
-        from infrastructure.mysql.nas_mutations import ensure_nas_procedures
-        _candidate_conn = config.connect(candidate)
-        try:
-            ensure_nas_procedures(_candidate_conn)
-        finally:
-            _candidate_conn.close()
-    except Exception:
-        pass
+        ensure_nas_procedures(_candidate_conn)
+    finally:
+        _candidate_conn.close()
     # Reuse the canonical fresh-read/data-fingerprint/config switch guard.
     require(digest(settings["environment_file"]) == original_env_digest, "連線設定已改變，未切換資料庫。")
     migration.switch_environment(settings["environment_file"], source, candidate, operation,
@@ -1033,15 +1030,12 @@ def restore(settings, archive):
     updater.require_current_database(current)
     protect_account_receipts(config, candidate, apply=True)
     prepare_runtime_access(settings, candidate)
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    _candidate_conn = config.connect(candidate)
     try:
-        from infrastructure.mysql.nas_mutations import ensure_nas_procedures
-        _candidate_conn = config.connect(candidate)
-        try:
-            ensure_nas_procedures(_candidate_conn)
-        finally:
-            _candidate_conn.close()
-    except Exception:
-        pass
+        ensure_nas_procedures(_candidate_conn)
+    finally:
+        _candidate_conn.close()
     switch_runtime(settings, candidate, original_env_digest, run)
     return run
 

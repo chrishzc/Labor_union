@@ -4,6 +4,7 @@ Description: 定義與調用受控 NAS 刪除與替換預存程序，並提供�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -326,20 +327,44 @@ def relation_snapshot(values, columns) -> str:
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+CASE_DELETION_PROCEDURE = "lu_nas_delete_unsigned_case_v2"
+# Exact bodies compiled from each historical revision's code and fresh schema.
+_CASE_DELETION_PREDECESSOR_SHA256 = frozenset({
+    # 0f5c10ad15fbbe28192f0f23dcaa778a1f7da37b
+    "53baa97fcab6e4fd24fd9aa71e301303c8ad9ad3c962ad7ea35a6b4e19b67192",
+    # b0d487a94de7d811fd42ef630260655ff1000e27
+    "be4df02013ccf0c1d2d81643354fa2693b3843d44aff91b46cf7ef165889026c",
+})
+
+
+def case_deletion_body_state(body: str | None) -> str:
+    """Recognize only the current body or an exact approved historical body."""
+    normalized = (body or "").strip().replace("\r\n", "\n")
+    if normalized == "BEGIN\n" + PROCEDURES[CASE_DELETION_PROCEDURE][1].strip() + "\nEND":
+        return "exact"
+    if hashlib.sha256(normalized.encode("utf-8")).hexdigest() in _CASE_DELETION_PREDECESSOR_SHA256:
+        return "replace"
+    raise ValueError("NAS security procedure drift; no changes applied")
+
+
 def ensure_nas_procedures(connection, *, force: bool = False) -> list[str]:
     """Ensure all declared NAS procedures exist in the current database.
 
     Creates any missing procedures with SQL SECURITY DEFINER and MODIFIES SQL DATA.
-    If force=True, recreates all declared procedures to match current definitions.
+    Upgrades the approved case-deletion predecessor, preserving its definer and grants.
+    Unknown case-deletion bodies are refused even with force=True.
+    If force=True, recreates the other declared procedures to match current definitions.
     Returns the list of procedure names that were created or updated.
     """
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT routine_name AS name FROM information_schema.routines "
+            "SELECT routine_name AS name,routine_definition AS body,definer AS definer,"
+            "security_type AS security_type,sql_data_access AS sql_data_access "
+            "FROM information_schema.routines "
             "WHERE routine_schema = DATABASE() AND routine_type = 'PROCEDURE'"
         )
         existing = {
-            row.get("name") or row.get("NAME") or row.get("routine_name") or row.get("ROUTINE_NAME")
+            (row.get("name") or row.get("NAME") or row.get("routine_name") or row.get("ROUTINE_NAME")): row
             for row in cursor.fetchall()
             if isinstance(row, dict)
         }
@@ -355,17 +380,60 @@ def ensure_nas_procedures(connection, *, force: bool = False) -> list[str]:
             for row in cursor.fetchall()
             if isinstance(row, dict)
         }
+        case_state = None
+        case_definer = None
+        case_grants = []
+        if CASE_DELETION_PROCEDURE in existing:
+            current = existing[CASE_DELETION_PROCEDURE]
+            case_state = case_deletion_body_state(current.get("body"))
+            cursor.execute(
+                "SELECT parameter_mode AS mode,parameter_name AS parameter,dtd_identifier AS type "
+                "FROM information_schema.parameters WHERE specific_schema=DATABASE() "
+                "AND specific_name=%s ORDER BY ordinal_position", (CASE_DELETION_PROCEDURE,))
+            parameters = [(row["mode"] + " " + row["parameter"] + " " + row["type"]).lower()
+                          for row in cursor.fetchall()]
+            signature = PROCEDURES[CASE_DELETION_PROCEDURE][0]
+            if (current.get("security_type") != "DEFINER"
+                    or current.get("sql_data_access") != "MODIFIES SQL DATA"
+                    or parameters != [part.strip().lower() for part in signature.split(",")]):
+                raise ValueError("NAS security procedure drift; no changes applied")
+            if case_state == "replace" or force or CASE_DELETION_PROCEDURE in stale_collation:
+                definer = current.get("definer", "")
+                if "@" not in definer:
+                    raise ValueError("NAS security procedure drift; no changes applied")
+                case_definer = tuple(definer.rsplit("@", 1))
+                cursor.execute(
+                    "SELECT User AS user,Host AS host,Proc_priv AS privileges "
+                    "FROM mysql.procs_priv WHERE Db=DATABASE() "
+                    "AND Routine_name=%s AND Routine_type='PROCEDURE'", (CASE_DELETION_PROCEDURE,))
+                for grant in cursor.fetchall():
+                    privileges = set(grant["privileges"].split(","))
+                    if (not isinstance(grant["user"], str) or not isinstance(grant["host"], str)
+                            or not privileges <= {"Execute", "Alter Routine", "Grant"}
+                            or not privileges & {"Execute", "Alter Routine"}):
+                        raise ValueError("NAS security procedure grants drift; no changes applied")
+                    for privilege in ("Execute", "Alter Routine"):
+                        if privilege in privileges:
+                            case_grants.append((privilege.upper(), grant["user"], grant["host"],
+                                                "YES" if "Grant" in privileges else "NO"))
         modified = []
         for name, (signature, body, _) in sorted(PROCEDURES.items()):
-            if force or name not in existing or name in stale_collation:
+            if force or name not in existing or name in stale_collation or (name == CASE_DELETION_PROCEDURE and case_state == "replace"):
                 if name in existing:
                     cursor.execute(f"DROP PROCEDURE IF EXISTS `{name}`")
+                create = "CREATE DEFINER=%s@%s PROCEDURE" if name == CASE_DELETION_PROCEDURE and case_definer else "CREATE PROCEDURE"
                 sql = (
-                    f"CREATE PROCEDURE `{name}`({collated_signature(signature)})\n"
+                    f"{create} `{name}`({collated_signature(signature)})\n"
                     f"SQL SECURITY DEFINER\n"
                     f"MODIFIES SQL DATA\n"
                     f"BEGIN\n{body.strip()}\nEND"
                 )
-                cursor.execute(sql)
+                if name == CASE_DELETION_PROCEDURE and case_definer:
+                    cursor.execute(sql, case_definer)
+                    for privilege, user, host, grantable in case_grants:
+                        option = " WITH GRANT OPTION" if grantable == "YES" else ""
+                        cursor.execute(f"GRANT {privilege} ON PROCEDURE `{name}` TO %s@%s{option}", (user, host))
+                else:
+                    cursor.execute(sql)
                 modified.append(name)
         return modified

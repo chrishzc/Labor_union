@@ -80,12 +80,12 @@ export function RegistryDeletionPanel({ kind, identity, label, disabled = false,
   };
   return <section ref={guardRef} aria-label="root 永久刪除" className="registry-deletion-panel">
     <h3>永久刪除</h3>
-    <p>永久刪除「{label}」後無法復原。未簽約案件的配對、排班、帳務及歷程會一併刪除；相關月嫂資料保留。任一月嫂或客戶已簽回時禁止刪除。</p>
+    <p>永久刪除「{label}」後無法復原。案件的配對、排班、帳務、簽約紀錄及其他所屬歷程會一併刪除。相關月嫂和共用客戶資料會保留。</p>
     {(phase === 'idle' || phase === 'error') && <button type="button" disabled={disabled} onClick={() => requestLeave(() => { void inspect(); })}>{deleteLabel}</button>}
-    {phase === 'checking' && <p role="status">正在檢查簽約狀態…</p>}
+    {phase === 'checking' && <p role="status">正在讀取案件資料…</p>}
     {phase === 'ready' && preview && <>
       {preview.blockers.length > 0 ? <><p role="alert">此筆資料不可刪除：</p><ul>{preview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></>
-        : <><p>月嫂與客戶均未簽回。要永久刪除「{label}」及其關聯資料嗎？</p><button type="button" disabled={disabled} onClick={() => requestLeave(() => { void apply(); })}>確認永久刪除</button></>}
+        : <><p>要永久刪除「{label}」及其關聯資料嗎？</p><button type="button" disabled={disabled} onClick={() => requestLeave(() => { void apply(); })}>確認永久刪除</button></>}
       <button type="button" disabled={disabled} onClick={() => { setPreview(null); setPhase('idle'); }}>取消</button>
     </>}
     {phase === 'pending' && <p role="status">正在確認刪除結果…</p>}

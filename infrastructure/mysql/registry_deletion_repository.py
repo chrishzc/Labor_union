@@ -1,4 +1,4 @@
-"""Root-only unsigned case deletion; all effects share the caller's transaction."""
+"""Root-only case deletion; all effects share the caller's transaction."""
 from __future__ import annotations
 
 import json
@@ -33,14 +33,9 @@ class MySqlRegistryDeletionRepository:
             if client is None:
                 raise RegistryDeletionConflict("registry_deletion_invalid_client_binding")
             self._client_id = int(client["id"])
-            blockers = set()
-            for table, event in (("contract_signing_events", "signed_received"), ("order_contract_flow_events", "contract_completed")):
-                cursor.execute(f"SELECT 1 FROM `{table}` WHERE case_no=%s AND event_type=%s LIMIT 1" + lock, (identity, event))
-                if cursor.fetchone() is not None:
-                    blockers.add("已有月嫂或客戶簽回，禁止刪除")
             cursor.execute("SELECT case_no FROM orders WHERE client_id=%s AND case_no<>%s" + lock, (self._client_id, identity))
             self._delete_client = not cursor.fetchall()
-        return RegistryDeletionPreview("case", identity, int(row["lifecycle_version"]), int(client["client_profile_version"]), tuple(sorted(blockers)))
+        return RegistryDeletionPreview("case", identity, int(row["lifecycle_version"]), int(client["client_profile_version"]), ())
 
     def claim(self, key: str, digest: str, kind: RegistryKind, identity: str, correlation: str) -> None:
         aggregate = f"{kind}:{identity}"

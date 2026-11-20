@@ -1,7 +1,6 @@
 """RD-A1..4: cross-owner authority, fresh guards, atomic deletion and replay."""
 
 from copy import deepcopy
-from dataclasses import replace
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -141,15 +140,6 @@ def test_preview_zero_writes_then_success_replays_after_root_is_gone():
     assert repo.locked_reads == reads
     with pytest.raises(RegistryDeletionConflict, match="idempotency_mismatch"):
         apply(app, version=9)
-
-
-def test_signature_after_preview_blocks_without_delete_or_receipt():
-    app, repo, uow = application()
-    app.preview("case", "CASE-7")
-    repo.target = replace(repo.target, blockers=("已有月嫂或客戶簽回，禁止刪除",))
-    with pytest.raises(RegistryDeletionConflict, match="signed"):
-        apply(app)
-    assert not repo.deleted and not repo.receipts and not repo.claims and uow.commits == 0
 
 
 @pytest.mark.parametrize("version", [0, 1, 3])

@@ -139,11 +139,10 @@ def nas_case_deletion_body() -> str:
                     AND client_id=p_client FOR UPDATE) OR
          NOT EXISTS(SELECT 1 FROM clients WHERE id=p_client AND client_profile_version=p_client_version FOR UPDATE) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='registry_deletion_stale_version'; END IF;
-      IF EXISTS(SELECT 1 FROM contract_signing_events WHERE case_no=p_case AND event_type='signed_received' FOR UPDATE)
-         OR EXISTS(SELECT 1 FROM order_contract_flow_events WHERE case_no=p_case AND event_type='contract_completed' FOR UPDATE) THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='registry_deletion_signed'; END IF;
       IF NOT EXISTS(SELECT 1 FROM application_command_claims WHERE idempotency_key=p_command_key
-        AND command_family='registry_delete/v1' AND aggregate_identity=CONCAT('case:',p_case)) THEN
+        AND command_family='registry_delete/v1' AND aggregate_identity=CONCAT('case:',p_case))
+        OR EXISTS(SELECT 1 FROM admin_command_receipts WHERE command_family='registry_delete/v1'
+        AND idempotency_key=p_command_key) THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='registry_deletion_context_required'; END IF;
       SET p_delete_client=NOT EXISTS(SELECT 1 FROM orders WHERE client_id=p_client AND case_no<>p_case FOR UPDATE);
     """ + "SELECT COALESCE(JSON_ARRAYAGG(t.id),JSON_ARRAY()) INTO p_task_ids FROM line_delivery_tasks t WHERE " + CASE_TASK_SCOPE + ";\nSET @registry_delete_key=p_command_key,@registry_delete_case=p_case,@registry_delete_client=p_client,@registry_delete_client_owned=p_delete_client,@registry_delete_tasks=p_task_ids;\n" + ";\n".join(sql for _, sql in case_deletion_statements()) + ";\nSET @registry_delete_key=NULL,@registry_delete_case=NULL,@registry_delete_client=NULL,@registry_delete_client_owned=NULL,@registry_delete_tasks=NULL;"

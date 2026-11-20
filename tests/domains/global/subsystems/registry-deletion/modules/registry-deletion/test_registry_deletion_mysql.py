@@ -20,7 +20,7 @@ from infrastructure.mysql.nas_mutations import PROCEDURES
 from infrastructure.mysql.registry_deletion_repository import MySqlRegistryDeletionRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.identities import ActorContext
-from subsystems.registry_deletion import RegistryDeletionApplication, RegistryDeletionConflict
+from subsystems.registry_deletion import RegistryDeletionApplication
 
 pytestmark = pytest.mark.skipif(os.getenv("REGISTRY_DELETION_MYSQL") != "1", reason="explicit localhost deletion-engine opt-in required")
 
@@ -33,7 +33,6 @@ def engine():
     print("owned_engine_fixture=" + name)
     config = dict(DB_CONFIG, database=None, cursorclass=pymysql.cursors.DictCursor, connect_timeout=5, read_timeout=10, write_timeout=10)
     con = pymysql.connect(**config)
-    ddl = Path("db/fresh_schema/labor_union_fresh_current.sql").read_text(encoding="utf-8")
     with con.cursor() as cursor:
         cursor.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name=%s", (name,))
         assert cursor.fetchone() is None
@@ -165,10 +164,14 @@ def test_unsigned_relations_deleted_while_other_case_and_staff_remain(connection
 
 @pytest.mark.parametrize("nas", [False, True])
 @pytest.mark.parametrize("scope", ["staff_segment", "client_contract", "order_completion"])
-def test_signed_return_or_completion_blocks_everything_including_old_plan(connection, monkeypatch, nas, scope):
+def test_signed_return_or_completion_can_be_deleted_including_old_plan(connection, monkeypatch, nas, scope):
     monkeypatch.setenv("DEPLOYMENT_PROFILE", "nas" if nas else "development")
     staff = seed_staff(connection)
     case, client = seed_case(connection)
+    other, _ = seed_case(connection)
+    with connection.cursor() as c:
+        c.execute("UPDATE orders SET client_id=%s WHERE case_no=%s", (client, other))
+    connection.commit()
     plan, segment = relations(connection, case, client, staff)
     if scope == "order_completion":
         with connection.cursor() as c:
@@ -179,17 +182,19 @@ def test_signed_return_or_completion_blocks_everything_including_old_plan(connec
         with connection.cursor() as c:
             c.execute("UPDATE caregiver_matching_plans SET is_active=NULL,status='superseded' WHERE id=%s", (plan,))
         connection.commit()
-    assert app(connection).preview("case", case).blockers
-    if nas:
-        with connection.cursor() as c:
-            with pytest.raises(pymysql.err.OperationalError, match="registry_deletion_signed"):
-                c.callproc("lu_nas_delete_unsigned_case_v2", (case, 0, client, 0, "blocked-fixture"))
-        connection.rollback()
-    with pytest.raises(RegistryDeletionConflict, match="signed"):
-        delete(app(connection), "case", case)
+    application = app(connection)
+    preview = application.preview("case", case)
+    assert not preview.blockers
+    key = uuid4().hex
+    assert delete(application, "case", case, key).deleted
+    assert application.apply("case", case, expected_version=preview.version, expected_client_version=preview.client_version,
+        key=key, actor=ActorContext("admin:1", ()), correlation="replay").replayed
     with connection.cursor() as c:
-        c.execute("SELECT 1 FROM orders WHERE case_no=%s", (case,)); assert c.fetchone() is not None
-        c.execute("SELECT 1 FROM client_obligations WHERE case_no=%s", (case,)); assert c.fetchone() is not None
+        for table in ("orders", "client_obligations", "contract_signing_events", "contract_document_versions", "order_contract_flow_events"):
+            c.execute(f"SELECT 1 FROM `{table}` WHERE case_no=%s", (case,)); assert c.fetchone() is None
+        c.execute("SELECT 1 FROM orders WHERE case_no=%s", (other,)); assert c.fetchone() is not None
+        c.execute("SELECT 1 FROM clients WHERE id=%s", (client,)); assert c.fetchone() is not None
+        c.execute("SELECT 1 FROM staff WHERE id=%s", (staff,)); assert c.fetchone() is not None
 
 
 @pytest.mark.parametrize("nas", [False, True])
@@ -224,7 +229,7 @@ def test_receipt_failure_rolls_back_all_relations_and_claim(connection, monkeypa
         c.execute("SELECT 1 FROM application_command_claims WHERE idempotency_key=%s", (key,)); assert c.fetchone() is None
 
 
-def test_signed_insert_cannot_race_locked_guard(connection, engine):
+def test_signing_event_insert_waits_for_locked_case(connection, engine):
     case, _ = seed_case(connection)
     started, finished = Event(), Event()
     outcome = []
@@ -248,22 +253,31 @@ def test_signed_insert_cannot_race_locked_guard(connection, engine):
         assert outcome == [1205]
 
 
-@pytest.mark.parametrize("mode", ["no_context", "fake_key", "wrong_case", "signed"])
-def test_full_database_guards_reject_outside_the_active_unsigned_case(connection, mode):
+@pytest.mark.parametrize("mode", ["no_context", "fake_key", "wrong_case", "completed", "other_row"])
+def test_database_guards_require_pending_claim_for_deleted_row(connection, mode):
     staff = seed_staff(connection)
     case, client = seed_case(connection)
     plan, segment = relations(connection, case, client, staff)
+    sign(connection, case, plan, segment, "staff_segment")
+    row_case = case
+    if mode == "other_row":
+        row_case, row_client = seed_case(connection)
+        relations(connection, row_case, row_client, staff)
     key = uuid4().hex
-    if mode == "signed": sign(connection, case, plan, segment, "staff_segment")
     with connection.cursor() as c:
-        if mode in ("wrong_case", "signed"):
+        if mode in ("wrong_case", "completed", "other_row"):
             c.execute("INSERT INTO application_command_claims(idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) VALUES (%s,'registry_delete/v1',%s,%s,'guard-probe')", (key, 'case:'+('OTHER' if mode=='wrong_case' else case), 'a'*64))
+        if mode == "completed":
+            c.execute("INSERT INTO admin_command_receipts(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) VALUES ('registry_delete/v1',%s,%s,%s,'fixture','fixture',JSON_OBJECT())", (key, 'a'*64, 'a'*64))
         if mode != "no_context":
             c.execute("SET @registry_delete_key=%s,@registry_delete_case=%s,@registry_delete_client=%s,@registry_delete_client_owned=1,@registry_delete_tasks='[]'", (key,case,client))
         with pytest.raises(pymysql.err.OperationalError) as caught:
-            c.execute("DELETE FROM client_obligation_events WHERE case_no=%s", (case,))
+            c.execute("DELETE FROM client_obligation_events WHERE case_no=%s", (row_case,))
         assert caught.value.args[0] == 1644
         c.execute("SET @registry_delete_key=NULL,@registry_delete_case=NULL,@registry_delete_client=NULL,@registry_delete_client_owned=NULL,@registry_delete_tasks=NULL")
+        if mode != "other_row":
+            with pytest.raises(pymysql.err.OperationalError, match="registry_deletion_context_required"):
+                c.callproc("lu_nas_delete_unsigned_case_v2", (case, 0, client, 0, key))
     connection.rollback()
 
 
@@ -296,7 +310,7 @@ def test_legacy_event_guard_reproduces_failure_and_scoped_guard_fixes_it(connect
     case, client = seed_case(connection)
     relations(connection, case, client, staff)
     name = "trg_client_obligation_events_before_update"
-    statement = next(s for s in split_sql(Path("db/schema_parts/1060_registry_case_deletion_guards.sql").read_text(encoding="utf-8")) if s.startswith("CREATE TRIGGER `" + name + "`"))
+    statement = next(s for s in split_sql(Path("db/schema_parts/1080_registry_case_deletion_signing_guards.sql").read_text(encoding="utf-8")) if s.startswith("CREATE TRIGGER `" + name + "`"))
     with connection.cursor() as c:
         c.execute("DROP TRIGGER `" + name + "`")
         c.execute("CREATE TRIGGER `" + name + "` BEFORE UPDATE ON client_obligation_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client_obligation_events records cannot be updated'")

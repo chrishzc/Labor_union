@@ -61,29 +61,30 @@ describe('root registry deletion', () => {
     expect(await screen.findByRole('button', { name: '刪除此案件' })).toBeInTheDocument();
   });
 
-  it('requires inspection and explicit confirmation, then reports success once', async () => {
+  it('explains signing history deletion and requires explicit confirmation', async () => {
     const { onDeleted } = mount();
     expect(registryDeletionClient.apply).not.toHaveBeenCalled();
     await inspect();
+    expect(screen.getByText(/簽約紀錄及其他所屬歷程會一併刪除/)).toBeInTheDocument();
     expect(registryDeletionClient.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '確認永久刪除' }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
   });
 
   it('shows blockers and never offers confirmation', async () => {
-    vi.mocked(registryDeletionClient.preview).mockResolvedValue({ ...preview, blockers: ['已有月嫂或客戶簽回，禁止刪除'] });
+    vi.mocked(registryDeletionClient.preview).mockResolvedValue({ ...preview, blockers: ['此資料目前無法刪除'] });
     mount();
     fireEvent.click(await screen.findByRole('button', { name: '刪除此案件' }));
-    expect(await screen.findByText('已有月嫂或客戶簽回，禁止刪除')).toBeInTheDocument();
+    expect(await screen.findByText('此資料目前無法刪除')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認永久刪除' })).not.toBeInTheDocument();
     expect(registryDeletionClient.apply).not.toHaveBeenCalled();
   });
 
-  it('keeps the record after a signature recorded after preview and requires new inspection', async () => {
-    vi.mocked(registryDeletionClient.apply).mockRejectedValue(new ApiHttpError(409, 'registry_deletion_signed', '已有月嫂或客戶簽回，禁止永久刪除。'));
+  it('keeps the record after a stale version conflict and requires new inspection', async () => {
+    vi.mocked(registryDeletionClient.apply).mockRejectedValue(new ApiHttpError(409, 'registry_deletion_stale_version', '資料已變更，請重新檢查刪除資格。'));
     const { onDeleted } = mount(); await inspect();
     fireEvent.click(screen.getByRole('button', { name: '確認永久刪除' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('已有月嫂或客戶簽回');
+    expect(await screen.findByRole('alert')).toHaveTextContent('資料已變更');
     expect(onDeleted).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '刪除此案件' })).toBeInTheDocument();
   });
