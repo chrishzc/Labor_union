@@ -26,7 +26,7 @@
 - 每日排程備份滾動保存：`scripts/nas_database_maintenance.py` 沿原 maintenance lock，在新備份完整驗證後，僅淘汰同目標且新版標記的 ZIP；14 日／8 週／12 月聯集保存，沿 `10A` §5.2。既有未標記、手動、升級前及 legacy 備份保留。
 - Windows NAS SQL maintenance (§9.5): `scripts/nas_database_maintenance.py`; `scripts/launchers/backup_nas_database.bat`, `scripts/launchers/initialize_nas_schema.bat`, `scripts/launchers/restore_nas_database.bat`; opt-in template `scripts/launchers/nas_database_maintenance.env.example`. Original Windows initializer name now routes candidate upgrade, never reset. Remote MySQL transport keeps TLS and separate read-only/read-write connections, allowing shared credentials including root. Existing full global administrators without partial revocations need no new grants; candidate access is still verified with original credentials. It backs up before upgrade, restores only to new schemas, preserves old schemas, and switches only DB_DATABASE. Native canonical runner remains schema/backfill/verification owner; its candidate/client adapter hooks do not change hash-bound release artifacts.
 - Account receipt protection: the Windows NAS maintenance adapter routes `protect-account-receipts` to the Access owner and converts restored fingerprints before activating a backup candidate. Preserve-data upgrade refuses a source or candidate with unconverted password-bearing receipts.
-- Windows 選項 6、7、8 的內部維護以指定 `.env` 的實際連線為準，不受選填固定目標檔、維護啟用旗標、部署名稱、庫名前綴、額外帳密或程序環境差異阻擋。備份位置可由 `NAS_BACKUP_DIR` 指定，亦可使用本機、映射磁碟或網路目錄並建立所需目錄；不再要求 UNC，升級及復原不另輸入停機確認。升級的備份完整性、原庫保留、資料驗證及原子切換不變。Loopback `lu_nas_*` 測試部署使用相同的保留資料副本預檢。待套用的來源遷移不要求原庫直連資格；本機副本仍須通過啟動版本檢查，已是現行版本的本機來源則不另建備份或副本。
+- Windows 管理器的呼叫方式與維護交接見 [Windows NAS 維護交接](#windows-nas-維護交接)；設定、備份位置與流程結果以 [NAS 維護規格 §5](../../../../../../document/架構重整/01_規格基線/10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) 為準。
 - `scripts/migrate_preserved_database_additive_schema.py:qualify_registry_signing_source_recovery` 只讀核對 1080 原始 journal／備份，以已驗證 dump 的原始 trigger 定義及 MySQL metadata 名稱順序重建基線完整 schema SHA，含已被 DROP 的名稱。歷史備份的完整性、身分及 journal 指紋仍核對；僅此副本恢復資格檢查不要求目前資料列等於歷史備份，改由目前來源的全新備份與副本資料驗證保護維護期間修正，一般直連升級及接續仍核對原備份資料列。已套用 trigger 以 canonical 契約比較，再使用現況原始定義及快照原順序核對前綴完整 SHA，避免 SQL 匯入排版及 Python 排序差異誤擋。`build_plan` 與 `apply_schema` 的 `source_recovery_root` 僅授權該次、該 guard family 的已證明 partial；Apply 重新驗證同一份原始證據，只有新副本執行修復 DDL，未知結構與結果未明仍拒絕。
 - `_schema_snapshot` 的 trigger-only 步驟不讀取投影必為空的其他 metadata，trigger 條件下推至參數化 SQL，保留排序、定義及原快照 SHA。`_table_evidence` 每次呼叫批次取得主鍵定義；各表 count、checksum、完整主鍵雜湊及切換前 fresh-read 仍保留，不跨階段快取，不改變原庫唯讀與副本升級邊界。
 - `scripts/nas_database_maintenance.py:source_answer_preflight` 在來源具備 1037 與綁定查詢前提時，於備份前以唯讀連線呼叫 Case Import `project_order_information` 檢查單一綁定問卷胎數。沿 owner 將已確認舊標籤 `雙胞胎(+150時薪)` 投影為 `雙胞胎`，保留原問卷、費率與標準回填規則；錯誤只回報筆數及原因碼。
@@ -172,6 +172,12 @@
   - `db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.json`
   - `db/migration_releases/labor_union_2026_09_29_client_zero_obligation_establishment_v1.descriptors.json`
   - `validation/receipts/PROV-ZERO-OBLIGATION-local-additive-qualification-20260929.json` — reusable synthetic-MySQL fresh／preserve qualification; machine-local source backup remains mandatory.
+
+### Windows NAS 維護交接
+
+- [Windows 管理器四種走法與前置檢查](../../local-runtime/modules/runtime-supervision.md#windows-管理器的資料庫維護入口) 由 Local Runtime 記載；本模組從 `scripts.nas_database_maintenance` 對應 mode 接手。
+- `scripts/launchers/initialize_nas_schema.bat` 名稱仍含初始化，但直接呼叫 `scripts.nas_database_maintenance upgrade` 並轉送參數，不經 Windows 管理器，也不走 fresh/reset。備份與備份復原用不同 mode。
+- 升級由維護協調器選路；不能從管理器包裝方式推定採原庫直連或副本升級。待套用的來源遷移不要求原庫直連資格；本機副本仍須通過啟動版本檢查。遠端、loopback 測試及中斷恢復的行為以 [NAS 維護規格 §5](../../../../../../document/架構重整/01_規格基線/10A_NAS_Fresh初始化與維護復原規格.md#windows-nas-maintenance) 為準。後續驗證由本頁 [Verification](#verification) 的 Windows 維護測試定位。
 
 ## Contracts
 
