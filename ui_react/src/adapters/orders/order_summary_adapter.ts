@@ -86,10 +86,10 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
   const employerSelfPayPayable = item.total_employer_self_pay_payable;
   const staffName = item.staff_name?.trim() || null;
   const historicalServiceInProgress = item.order_status === '歷史訂單－服務中';
-  const serviceInProgress = item.order_status === '服務中' || historicalServiceInProgress;
+  const scheduledStaffLabel = item.scheduled_staff_display_label?.trim() || null;
   const historicalStaffLabel =
     historicalServiceInProgress ||
-    (item.order_status === '歷史訂單－未服務' && !item.scheduled_staff_display_label)
+    item.order_status === '歷史訂單－未服務'
       ? item.staff_display_label
       : null;
   return {
@@ -115,7 +115,7 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
     depositSettledText: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶款項）`,
     assignedDoulaName: staffName,
     assignedDoulaDisplay:
-      (serviceInProgress ? item.scheduled_staff_display_label : null)
+      scheduledStaffLabel
       ?? item.recommended_staff_display_label
       ?? historicalStaffLabel
       ?? '尚無有效推薦方案',

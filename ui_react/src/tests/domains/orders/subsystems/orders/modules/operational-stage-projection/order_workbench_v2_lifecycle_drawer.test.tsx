@@ -3,7 +3,17 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 
-const mocks = vi.hoisted(() => ({ core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn(), substitute: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn(), substitute: vi.fn(),
+  previewAttribution: vi.fn(), applyAttribution: vi.fn(),
+}));
+vi.mock('../../../../../../../api/orders/official_service_date_correction_client', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../../../../../api/orders/official_service_date_correction_client')>();
+  return { ...original, officialServiceDateCorrectionClient: {
+    ...original.officialServiceDateCorrectionClient,
+    previewAttribution: mocks.previewAttribution, applyAttribution: mocks.applyAttribution,
+  } };
+});
 vi.mock('../../../../../../../api/scheduling/service_start_client', async (importOriginal) => {
   const { serviceStartClient } = await importOriginal<typeof import('../../../../../../../api/scheduling/service_start_client')>();
   return { serviceStartClient: { ...serviceStartClient, detail: mocks.substitute } };
@@ -110,6 +120,34 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '現行服務日期' })).toBe(title);
     expect(screen.getByRole('region', { name: '服務開始、延期與代班待辦' })).toBe(tasks);
+  });
+
+  it('訂單成立已有兩位正式排班時直接顯示各自月曆，返回後回讀不重新開啟', async () => {
+    const timeline = page();
+    timeline.items[0]!.lifecycle_status = '訂單成立';
+    mocks.core.mockResolvedValue(timeline);
+    mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [
+      { assignment_id: 17, staff_id: 7, official_service_dates: ['2099-09-01'] },
+      { assignment_id: 18, staff_id: 8, official_service_dates: ['2099-09-02'] },
+    ] });
+    render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
+
+    expect(await screen.findByRole('region', { name: '多月嫂排班' })).toBeVisible();
+    expect(screen.getAllByRole('group', { name: '服務日期月曆' })).toHaveLength(2);
+    expect(screen.queryByRole('heading', { name: '現行服務日期' })).not.toBeInTheDocument();
+    expect(mocks.previewAttribution).not.toHaveBeenCalled();
+    expect(mocks.applyAttribution).not.toHaveBeenCalled();
+
+    const back = screen.getByRole('button', { name: '返回服務安排' });
+    await waitFor(() => expect(back).toBeEnabled());
+    fireEvent.click(back);
+    fireEvent.click(screen.getByRole('button', { name: '更正開始日並重排' }));
+    fireEvent.click(screen.getByRole('button', { name: '模擬收據與正式回讀完成' }));
+
+    await waitFor(() => expect(mocks.assignment).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('heading', { name: '現行服務日期' })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('button', { name: '多月嫂排班' })).toBeEnabled());
+    expect(screen.queryByRole('region', { name: '多月嫂排班' })).not.toBeInTheDocument();
   });
 
   it.each([CASE, 'OTHER-CASE'])('只以服務端核對的待辦日期在原案件開啟多月嫂排班（%s）', async (taskCase) => {

@@ -385,6 +385,8 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     const scheduled = await screen.findByRole('button', { name: '服務日期 2026-10-02，已有排班、歷史／暫定' });
     expect(scheduled).toBeEnabled();
     const occupied = screen.getByRole('button', { name: '查看 2026-10-02 檔期明細' });
+    expect(scheduled.parentElement).toHaveClass('calendar-date-cell', 'selected');
+    expect(occupied.parentElement).toBe(scheduled.parentElement);
     expect(within(occupied).getByText('3筆')).toBeInTheDocument();
     expect(occupied).toHaveAttribute('aria-expanded', 'false');
     expect(within(occupied).getByText('OTHER-CASE')).toBeVisible();
@@ -411,9 +413,16 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(screen.getByRole('button', { name: '服務日期 2026-10-05，檔期保留' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-06，不可服務' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '服務日期 2026-10-07，服務檔期' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '查看 2026-10-07 檔期明細' }));
+    const disabledDateDetails = screen.getByRole('button', { name: '查看 2026-10-07 檔期明細' });
+    fireEvent.click(disabledDateDetails);
     expect(screen.getByText('案件 ADOPTED-CASE')).toBeVisible();
     expect(screen.getByText('服務時段待確認')).toBeVisible();
+    fireEvent.click(scheduled);
+    expect(scheduled).toHaveAttribute('aria-pressed', 'false');
+    expect(scheduled.parentElement).not.toHaveClass('selected');
+    expect(disabledDateDetails).toHaveAttribute('aria-expanded', 'true');
+    expect(mocks.applyServiceDates).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
     expect(mocks.queryStaffCalendar).toHaveBeenNthCalledWith(1,
       { staffId: 12, rangeStart: '2026-09-30', rangeEnd: '2026-10-31' }, { signal: expect.any(AbortSignal) });
 
@@ -464,12 +473,14 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     mocks.queryStaffCalendar.mockImplementation(async ({ staffId }) => ({ days: staffId === 13
       ? [{ calendar_date: '2026-10-02', entries: [{ occupancy_kind: 'official_workday', case_no: 'OTHER-CASE' }] }]
       : [] }));
-    render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart officeScheduleStaff={[
+    const view = render(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart />);
+    view.rerender(<OrderServiceDatesPanel caseNo={CASE} coordinatedStart officeScheduleStaff={[
       { staff_id: 12, staff_name: '王月嫂' }, { staff_id: 13, staff_name: '林月嫂' },
     ]} />);
-    fireEvent.click(await screen.findByRole('button', { name: '多月嫂排班' }));
+    expect(await screen.findAllByRole('group', { name: '服務日期月曆' })).toHaveLength(2);
+    expect(mocks.previewOfficeSchedule).not.toHaveBeenCalled();
+    expect(mocks.saveHistoricalSchedule).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('服務日期選擇')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('group', { name: '服務日期月曆' })).toHaveLength(2);
     const saveButton = screen.getByRole('button', { name: '儲存班表' });
     expect(screen.queryByRole('button', { name: '預覽班表及應付' })).not.toBeInTheDocument();
     expect(saveButton).toBeDisabled();

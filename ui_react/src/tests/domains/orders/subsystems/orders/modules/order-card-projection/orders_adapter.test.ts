@@ -105,6 +105,18 @@ describe('Orders card status text', () => {
 });
 
 describe('Orders summary adapter', () => {
+  it('shows the formal schedule before the recommendation on established orders', () => {
+    const order = {
+      ...mockSummaryItems[0],
+      order_status: '訂單成立',
+      scheduled_staff_display_label: '001 王月嫂、002 林月嫂',
+      recommended_staff_display_label: '001 王月嫂',
+    };
+    expect(adaptOrderSummaryItem(order).assignedDoulaDisplay).toBe('001 王月嫂、002 林月嫂');
+    expect(adaptOrderSummaryItem({ ...order, scheduled_staff_display_label: null }).assignedDoulaDisplay)
+      .toBe('001 王月嫂');
+  });
+
   it('keeps the raw server status and does not create a workflow stage', () => {
     const card = adaptOrderSummaryItem(mockSummaryItems[6]);
     expect(card.orderStatus).toBe('已結案');

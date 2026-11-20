@@ -190,7 +190,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
   const [editingCompletedDates, setEditingCompletedDates] = useState(false);
-  const [attributionCase, setAttributionCase] = useState<string | null>(() => openUpcomingStaffing ? caseNo : null);
+  const [attributionOpenOverride, setAttributionOpenOverride] = useState<boolean | null>(null);
   const [substitute, setSubstitute] = useState<ReadState<{ id: number; version: number; originalDates: string[] }>>(
     () => substituteRequestId === undefined ? { status: 'skipped' } : { status: 'loading' },
   );
@@ -208,13 +208,16 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         version: task.version,
         originalDates: task.leave_dates.map(day => day.original_date).sort(),
       } });
-      setAttributionCase(caseNo);
+      setAttributionOpenOverride(true);
     }).catch(error => {
       if (current) setSubstitute({ status: 'error', message: error instanceof Error ? error.message : '代班待辦載入失敗。' });
     });
     return () => { current = false; };
   }, [caseNo, substituteRequestId]);
-  useEffect(() => { setEditingCompletedDates(false); }, [caseNo]);
+  useEffect(() => {
+    setEditingCompletedDates(false);
+    setAttributionOpenOverride(null);
+  }, [caseNo]);
   const operationDialogRef = useRef<HTMLDialogElement>(null);
   const headerActionRef = useRef<HTMLButtonElement>(null);
   const caseOperation = operation === 'cancellation';
@@ -455,16 +458,21 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             : selectedStaff.status === 'error' ? '月嫂人選暫時無法取得' : '尚未選定月嫂'
       : assignmentPlan.data.assignments.map(segment => staffIdentity.label(segment.staff_id, detail.status === 'ready' && (detail.data.staff_id === segment.staff_id || assignmentPlan.data.assignments.length === 1) ? detail.data.staff_name : undefined)).join('、')
     : assignmentPlan.status === 'loading' ? '讀取服務指派中…' : '正式指派暫時無法取得';
-  const currentServiceSegments = assignmentPlan.status === 'ready'
+  const currentServiceSegments = assignmentPlan.status === 'ready' && assignmentPlan.data.case_no === caseNo
     ? assignmentPlan.data.assignments.filter(segment => segment.assignment_id !== null)
     : [];
-  const attributionPanel = attributionCase === caseNo && currentServiceSegments.length > 0
+  const autoOpenAttribution = substituteRequestId === undefined && timeline.status === 'ready'
+    && currentBranch === 'normal' && !terminalStatus && !completedService
+    && new Set(currentServiceSegments.filter(segment => segment.official_service_dates.length > 0)
+      .map(segment => segment.staff_id)).size > 1;
+  const attributionOpen = attributionOpenOverride ?? (openUpcomingStaffing || autoOpenAttribution);
+  const attributionPanel = attributionOpen && currentServiceSegments.length > 0
     && (substitute.status !== 'ready' || (!terminalStatus && !completedService))
     ? <OrderServiceAttributionPanel key={`${caseNo}:${substitute.status === 'ready' ? substitute.data.id : ''}`} caseNo={caseNo} segments={currentServiceSegments}
         completed={completedService} upcomingOnly={!completedService && (intakeOrderStatus === '訂單成立' || openUpcomingStaffing)}
         substitute={!completedService && substitute.status === 'ready' ? substitute.data : undefined}
         onBusyChange={onOperationBusyChange} onSaved={() => {
-          setAttributionCase(null);
+          setAttributionOpenOverride(false);
           setSubstitute({ status: 'skipped' });
           refreshFacts();
         }} />
@@ -475,13 +483,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         {historicalAccounting.data.accounting_pending?.includes('historical_attribution_actual_payout_evidence_missing') &&
           <p role="status">服務天數已更正，帳務待核對。請補齊原出款與核銷連結，再預覽帳務。</p>}
         <button type="button" disabled={navigationLocked || factsRefreshing}
-          onClick={() => setAttributionCase(attributionCase === caseNo ? null : caseNo)}>
-          {attributionCase === caseNo ? '返回歷史服務摘要' : historicalAccounting.data.assignments.length === 1
+          onClick={() => setAttributionOpenOverride(!attributionOpen)}>
+          {attributionOpen ? '返回歷史服務摘要' : historicalAccounting.data.assignments.length === 1
             ? '轉換為多月嫂' : '調整各月嫂服務天數'}
         </button>
-        {attributionCase === caseNo && <HistoricalServiceAttributionPanel key={caseNo}
+        {attributionOpen && <HistoricalServiceAttributionPanel key={caseNo}
           facts={historicalAccounting.data} onBusyChange={onOperationBusyChange}
-          onSaved={() => { setAttributionCase(null); refreshFacts(); }} />}
+          onSaved={() => { setAttributionOpenOverride(false); refreshFacts(); }} />}
       </div>
     : null;
 
@@ -698,7 +706,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             setEditingCompletedDates(current => !current);
           }}>{editingCompletedDates ? '返回完工摘要' : '更正完工服務日期'}</button>}
             {completedService && !editingCompletedDates && currentServiceSegments.length > 0 &&
-              <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setAttributionCase(attributionPanel ? null : caseNo)}>
+              <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setAttributionOpenOverride(!attributionPanel)}>
                 {attributionPanel ? '返回完工摘要' : '多月嫂排班'}
               </button>}
           </div>
@@ -746,7 +754,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <p role="alert">本案沒有可調整的正式服務日，請核對待辦與排班。</p>}
               <div className="order-case-action-row">
                 {currentBranch === 'normal' && !terminalStatus && hasOfficialSchedule &&
-                  <button type="button" disabled={navigationLocked || factsRefreshing || substitute.status === 'loading'} onClick={() => setAttributionCase(attributionPanel ? null : caseNo)}>
+                  <button type="button" disabled={navigationLocked || factsRefreshing || substitute.status === 'loading'} onClick={() => setAttributionOpenOverride(!attributionPanel)}>
                     {attributionPanel ? '返回服務安排' : '多月嫂排班'}
                   </button>}
                 {canChangeActualStart && operation !== 'actual-start' && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('actual-start')}>{actualStartActionLabel}</button>}

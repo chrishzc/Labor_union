@@ -102,16 +102,18 @@ export const OrderServiceDateCalendar: FC<Props> = ({ month, onMonthChange, sele
           const occupancy = visibleSchedule?.days?.get(date);
           const occupancyText = occupancy ? `，${[...new Set(occupancy.map(item => item.label))].join('、')}` : '';
           const label = dayLabel?.(date);
+          const occupied = occupancy && scheduleRequest;
+          const cellClass = `calendar-date-cell${selected ? ' selected' : ''}${selected && details?.laterSegment ? ' later-segment' : ''}`;
           const dateButton = <button key={date} data-control-id="orders.date.service-date-select" type="button" aria-label={`${label ?? `服務日期 ${date}`}${occupancyText}`} aria-pressed={selected}
             title={`${label ?? `${date}${holidayName ? ` ${holidayName}` : details?.rest ? ' 建議休假' : ''}${selected ? '（已選服務日）' : ''}`}${occupancyText}`}
-            className={`calendar-date-cell${selected ? ' selected' : ''}${selected && details?.laterSegment ? ' later-segment' : ''}`}
+            className={occupied ? 'service-date-select' : cellClass}
             disabled={isDateDisabled(date)} onClick={() => onToggle(date)}>
             <time dateTime={date} title={date}>{Number(date.slice(8))}</time>
             {holidayName && <small className="service-date-holiday" aria-label={holidayName} title={holidayName}>{holidayName}</small>}
             {!holidayName && details?.rest && !selected && <small>休</small>}
           </button>;
           if (!occupancy || !scheduleRequest) return dateButton;
-          return <div className="service-date-occupied-day" key={date}>
+          return <div className={`${cellClass} service-date-occupied-day`} key={date}>
             {dateButton}
             <button type="button" className="service-date-occupancy-toggle" aria-label={`查看 ${date} 檔期明細`}
               aria-expanded={detailDate === date} aria-controls={detailId}

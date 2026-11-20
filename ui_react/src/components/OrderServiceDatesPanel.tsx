@@ -110,10 +110,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const staffIdentity = useStaffIdentityLabels();
   const staffDirectory = useStaffIdentityDirectory();
   const [officeStaff, setOfficeStaff] = useState<typeof officeScheduleStaff | null>(null);
-  const [officeEditing, setOfficeEditing] = useState(false);
+  const [officeEditingOverride, setOfficeEditingOverride] = useState<boolean | null>(null);
   const [officeReasonRequired, setOfficeReasonRequired] = useState(false);
   useEffect(() => {
-    setOfficeEditing(false);
+    setOfficeEditingOverride(null);
     setOfficeStaff(null);
     setOfficeReasonRequired(false);
   }, [caseNo]);
@@ -654,6 +654,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const selectedOfficeStaff = officeStaff ?? officeScheduleStaff;
   const calendarStaff = officeSchedule ? selectedOfficeStaff : queryView?.bound_staff;
   const calendarStaffId = calendarStaff?.length === 1 ? calendarStaff[0].staff_id : undefined;
+  const officeEditing = officeEditingOverride ?? (new Set(officeScheduleStaff.map(person => person.staff_id)).size > 1);
   const multiCaregiverEditing = officeSchedule && officeEditing;
   const officeSegments = officeSchedule && selectedOfficeStaff.length > 1
     ? selectedOfficeStaff.map(person => ({
@@ -677,7 +678,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     reason: reason.trim(),
   } : null;
   const cancelOfficeEditing = () => {
-    setOfficeEditing(false);
+    setOfficeEditingOverride(false);
     setOfficeStaff(null);
     setOfficeReasonRequired(false);
     setAllocation({});
@@ -740,7 +741,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         order_version: observed.order_version, has_formal_assignments: true,
       } : value);
       setSuccess('班表已儲存並回讀正式排班。');
-      setOfficeEditing(false);
+      setOfficeEditingOverride(false);
       setOfficeStaff(null);
       setOfficeReasonRequired(false);
       onObserved?.();
@@ -822,7 +823,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       <div className="service-date-heading">
         {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
         {officeSchedule && <button type="button" disabled={working !== null || !!scheduleRecovery || isRecoveryActive || startUnresolved}
-          onClick={officeEditing ? cancelOfficeEditing : () => setOfficeEditing(true)}>
+          onClick={officeEditing ? cancelOfficeEditing : () => setOfficeEditingOverride(true)}>
           {officeEditing ? '取消多月嫂編輯' : '多月嫂排班'}
         </button>}
       </div>
