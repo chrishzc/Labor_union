@@ -36,10 +36,12 @@
 - 專供 NAS 容器離線維護手動執行（禁止排程自動切換）。`--update` 於鎖內串接「冷備份卷身分核對 → 還原副本卷 → network-none 啟動同版 MySQL 並委派 `scripts.update_local_database` 完成 preserve-data 升級與驗證 → 通過後方更新 Compose physical volume 與 `NAS_IMAGE` 並啟動服務」。
 - 原營運來源庫保持停機且 SQL 零連線；失敗時保留原卷與備份卷，不自動刪除或覆寫；Switch 前寫入 config before／after hash（保留 `.env` 其他設定、憑證與 MFA keys）。
 
+<a id="windows-nas-maintenance"></a>
+
 ## 5. Windows 三大維護入口與每日 NAS SQL 備份（`nas_database_maintenance.py`）
 
 - **系統架構定位**：Windows 工會電腦執行應用與管理腳本，NAS 執行 Docker MySQL 與共用檔案儲存。維護入口沿用設定中的 MySQL TLS 模式，不啟用 SSH 或遠端修改容器設定，保留 `.env` 的存取權限與切換一致性檢查。備份、升級及復原的備份位置均可使用本機磁碟、映射磁碟或網路共用。
-- **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7／8 偵測同一 installation 尚有受管 runtime 運作時即停止並要求先停止服務。
+- **入口收斂**：獨立批處理 `backup_nas_database.bat`、`initialize_nas_schema.bat`（安全升級，不提供清空重建）、`restore_nas_database.bat` 與根目錄 `Windows管理.bat`（選項 `6 備份`、`7 安全升級`、`8 復原備份`）統一委派 `scripts/nas_database_maintenance.py`；選項 7 的操作與受管服務檢查見[安全升級契約](#windows-管理器的安全升級契約)；選項 8 偵測同一安裝仍有受管服務時，立即停止並要求先停止服務。
 - `Windows管理.bat` 選項 `11 管理 root 帳號` 見 [Access Control 的 Windows 主機離線管理](17_External_Integration_LINE_Access正式規格.md#34-windows-主機離線管理-root-帳號)。
 - **設定邊界**：選項 6、7、8 為內部維護入口，以指定 `.env` 的實際主機、連接埠及資料庫為準，不限制維護啟用旗標、部署名稱、固定目標或庫名前綴，也不因程序環境變數與檔案不同而阻擋。程序中的連線覆寫不取代指定檔案。未另填維護帳密時沿用 `.env` 的原帳密；明確提供的維護帳密仍可使用。備份目的目錄優先使用 `.env` 的 `NAS_BACKUP_DIR`，其次使用選填維護設定檔的同名值；未指定時使用 `CONTROLLED_FILE_STORAGE_ROOT/05_資料庫冷備份 (db_backups)`，根目錄未設定則使用專案 `backups/05_資料庫冷備份 (db_backups)`。允許本機、映射磁碟或 UNC 路徑，寫入時可建立所需目錄，不要求預建 NAS 根目錄。升級及復原顯示停機提醒，不再要求額外輸入確認。`--dry-run` 零連線零寫入；路徑不得越界或經 symlink／junction，寫入前仍須通過可讀寫檢查。遠端升級持續使用備份與新副本流程，不使用原庫直連快速升級。
 - **Windows 本機 NAS 測試部署**：`.env` 指向 loopback 的 `lu_nas_*` 測試庫時，選項 7 與正式遠端 NAS 共用保留資料的副本預檢。預檢列出待套用的遷移檔案，再備份、建立副本並升級；直連升級回條僅用於直連升級。若來源已通過正常啟動使用的現行版本檢查，結束而不建立備份或副本。副本通過相同的啟動版本檢查後才可切換。此部署沿用該安裝的測試備份位置。
@@ -53,6 +55,14 @@
 | **安全資料升級（Upgrade）** | 顯示停機提醒，無額外輸入確認 → zero-write canonical plan → 完整備份 → 建立全新 `lu_nas_upgrade_*` schema 執行 `restore → schema／backfill → verify → switch`（已 exact 物件共用入場快照，最後完整 fresh-read 不省略）→ 僅等量授予原雙帳號 schema 權限並實測原 credential 登入 |
 | **備份復原（Restore）** | 由 NAS 專區或手動單選無 symlink `.zip`（或向下相容選取保留完整 `.sha256` 與 `_receipts/` 之既有 `.sql.gz` 備份組）檔案（非預設路徑可叫用 Windows 原生選檔窗），驗封裝結構、校驗碼、gzip CRC、解壓後 digest 與 current schema 相容性後，串流匯入全新 `lu_nas_restore_*`（含 SQL events 且全域開啟 `event_scheduler` 時停機隔離處理），通過逐表 CHECK 與帳號認證檢查後方原子切換 `.env` 唯一 `DB_DATABASE`（先複製原 `.env` ACL 規則至暫存檔，digest 變動即停止；SQL 不包含實體照片與 MFA keyring，須另作災難備份） |
 | **排程與管理端 UI** | 正式機可安裝每日預設臺灣時間 `18:00` 之工作排程（僅限 backup）；管理端「稽核與系統 → 資料庫備份」（[Global Entry Point Governance](19_Global_Entry_Point_Governance.md) 核准路由 `database-backup`）顯示設定時間、最近成功／失敗狀態並提供 CAS version 控制之安全修改（409 stale；不外洩帳號／設定／SQL 或提供檔案下載） |
+
+### Windows 管理器的安全升級契約
+
+| 情境（S） | 任務（T） | 操作（A） | 可觀察結果（R） |
+|---|---|---|---|
+| 維護人員已停止同一安裝的受管服務，且遠端來源有待套用遷移，或 loopback 的 `lu_nas_*` 測試庫未達現行版本。 | 執行保留資料的安全升級，不清空重建。 | 開啟 `Windows管理.bat`，選「7 安全升級資料庫」。 | 顯示停機提醒，不要求額外輸入確認；先做零寫入預檢，再依本節的安全升級流程備份、建立副本與驗證。驗證通過後才切換，可依 [§5.1](#51-切換後清理舊資料庫) 由 `switch.json` 核對新舊庫；驗證未通過不切換，原庫保留。 |
+| 同一安裝仍有受管服務運作。 | 避免在服務運作中開始升級。 | 從 Windows 管理器要求安全升級。 | 顯示先選「2 停止全部」的提示，這次不進入資料庫維護。不會代替維護人員停止服務。 |
+| Loopback 的 `lu_nas_*` 測試庫已通過正常啟動使用的現行版本檢查。 | 確認是否還需要升級。 | 從 Windows 管理器要求安全升級。 | 判定為現行版本後結束，不另建備份、不另建副本，也不切換資料庫。 |
 
 ### 5.1 切換後清理舊資料庫
 
